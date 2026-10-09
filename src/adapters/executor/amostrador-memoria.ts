@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
-import { availableParallelism } from "node:os";
-import type { LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
-import { cargaDoLoadavg, leituraDoTurno, nivelDaPressao, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
+import { statfs } from "node:fs/promises";
+import { availableParallelism, homedir } from "node:os";
+import { join } from "node:path";
+import type { LeituraDisco, LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
+import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoTurno, nivelDaPressao, nivelDoDisco, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -18,8 +20,9 @@ export type FonteMemoria = {
   /** A última leitura, com a linha deste turno quando ele tem grupo (null = turno sem processo próprio). */
   leitura(turnoId: string, grupo: number | null): LeituraMemoria;
   /**
-   * definido em 2026-10-08 (ADR-085): a leitura da máquina sem turno (o nível, o total dos grupos vivos e o processador),
-   * que vai no `puxar`: com ela o servidor sabe se o Mac está apertado antes de entregar trabalho novo.
+   * definido em 2026-10-08 (ADR-085): a leitura da máquina sem turno (o nível, o total dos grupos vivos e o processador;
+   * desde 2026-10-09, #219, também o disco), que vai no `puxar`: com ela o servidor sabe se o Mac está apertado antes de
+   * entregar trabalho novo.
    */
   daMaquina?(): LeituraMemoria | undefined;
   /** O turno acabou: o grupo dele sai da soma. */
@@ -45,21 +48,31 @@ const PRAZO_COMANDO_MS = 5_000;
 
 export type Executar = (bin: string, args: readonly string[]) => Promise<string>;
 
+/** O espaço do volume de um caminho (#219). Lança se o caminho não existe. */
+export type MedirDisco = (caminho: string) => Promise<LeituraDisco | null>;
+
+const medirDiscoPadrao: MedirDisco = async (caminho) => discoDoStatfs(await statfs(caminho));
+
 const executarPadrao: Executar = (bin, args) =>
   new Promise((resolver, rejeitar) => {
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; nucleos?: number; plataforma?: NodeJS.Platform }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
   // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
-  const daMaquinaLe = (o.plataforma ?? process.platform) === "darwin" || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR);
+  const daMaquinaLe = (o.plataforma ?? process.platform) === "darwin" || Boolean(o.env.NOD_SIMULAR_PRESSAO) || Boolean(o.env.NOD_SIMULAR_PROCESSADOR) || Boolean(o.env.NOD_SIMULAR_DISCO);
   const executar = o.executar ?? executarPadrao;
+  const medirDisco = o.medirDisco ?? medirDiscoPadrao;
+  // #219: o disco que importa é o das pastas dos bots (`~/nod`, ADR-052/065); antes de o primeiro bot criar a pasta, o da casa.
+  const casa = o.env.HOME ?? homedir();
   const intervaloMs = o.intervaloMs ?? INTERVALO_AMOSTRA_MEMORIA_MS;
   const grupos = new Map<string, number>();
   let nivel: NivelPressao = "verde";
   let rss = new Map<number, number>();
   let processador: LeituraProcessador | null = null;
+  let disco: LeituraDisco | null = null;
+  let nivelDisco: NivelPressao | null = null;
   let numeroDaAmostra = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
@@ -100,6 +113,21 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     }
   }
 
+  /**
+   * #219 (emenda à ADR-085): o espaço livre do volume de `~/nod` (`statfs`, sem processo novo). `NOD_SIMULAR_DISCO` (GB
+   * livres, ou "livres/total") força a leitura. Falha = sem leitura (null): nada espera por um disco que ninguém mediu.
+   */
+  async function lerDisco(): Promise<LeituraDisco | null> {
+    const simulado = discoSimulado(o.env.NOD_SIMULAR_DISCO);
+    if (simulado) return simulado;
+    try {
+      return await medirDisco(join(casa, "nod")).catch(() => medirDisco(casa));
+    } catch (erro) {
+      avisar("disco_sem_leitura", erro);
+      return null;
+    }
+  }
+
   async function lerGrupos(): Promise<Map<number, number>> {
     if (grupos.size === 0) return new Map();
     try {
@@ -113,11 +141,16 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   function amostrar(): Promise<void> {
     amostrando ??= (async () => {
       try {
-        const [n, r, p] = await Promise.all([lerNivel(), lerGrupos(), lerProcessador()]);
-        if (n !== nivel || p?.nivel !== processador?.nivel || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        const [n, r, p, d] = await Promise.all([lerNivel(), lerGrupos(), lerProcessador(), daMaquinaLe ? lerDisco() : Promise.resolve(null)]);
+        // #219: o disco muda a cada gravação; a amostra só sobe quando ele muda de nível (o que muda o portão).
+        // Revisão do #224: com a mesma histerese do servidor, para um disco parado perto do limite não mudar a amostra a cada 30 s.
+        const nd = nivelDoDisco(d, nivelDisco);
+        if (n !== nivel || p?.nivel !== processador?.nivel || nd !== nivelDisco || (d === null) !== (disco === null) || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        nivelDisco = nd;
         nivel = n;
         rss = r;
         processador = p;
+        disco = d;
       } finally {
         amostrando = null;
       }
@@ -140,12 +173,12 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       comecar();
       // Grupo novo: a próxima amostra já o mede, sem esperar a batida de 30 s.
       if (novo && !rss.has(grupo)) void amostrar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador, disco: daMaquinaLe ? disco : undefined });
     },
     daMaquina() {
       if (!daMaquinaLe) return undefined;
       comecar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);

@@ -1,5 +1,5 @@
 import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
-import type { LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
+import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
@@ -88,8 +88,21 @@ export function memoria(v: unknown): LeituraMemoria | undefined {
   // não a leitura toda — um campo novo com defeito não pode derrubar a renovação do turno.
   const p = o.processador !== null && typeof o.processador === "object" && !Array.isArray(o.processador) ? (o.processador as Record<string, unknown>) : null;
   const valido = p !== null && (p.nivel === "verde" || p.nivel === "amarela" || p.nivel === "vermelha") && typeof p.carga === "number" && Number.isFinite(p.carga) && p.carga >= 0 && p.carga <= 1000;
-  if (!valido) return { nivel: o.nivel, totalMb: o.totalMb, porTurno };
-  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, processador: { nivel: p.nivel as NivelPressao, carga: p.carga as number } };
+  // Revisão do #224: `null` é "o app mede, mas não conseguiu" (a tela diz "sem leitura"); fora do formato, como app anterior.
+  const disco = o.disco === null ? null : discoValido(o.disco);
+  return { nivel: o.nivel, totalMb: o.totalMb, porTurno, ...(valido ? { processador: { nivel: p.nivel as NivelPressao, carga: p.carga as number } } : {}), ...(disco !== undefined ? { disco } : {}) };
+}
+/** definido em 2026-10-09 (#219): 1 EB em MB, folga para qualquer volume; acima disso é defeito. */
+const TETO_DISCO_MB = 1_099_511_627_776;
+/**
+ * O disco do Mac (#219, emenda à ADR-085), opcional como o processador: fora do formato (números inteiros, livre até o
+ * total) é ignorado sozinho — "sem leitura", nada espera —, nunca derruba a leitura nem a renovação.
+ */
+function discoValido(v: unknown): LeituraDisco | undefined {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const d = v as Record<string, unknown>;
+  const mb = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= TETO_DISCO_MB;
+  return mb(d.livreMb) && mb(d.totalMb) && d.totalMb > 0 && d.livreMb <= d.totalMb ? { livreMb: d.livreMb, totalMb: d.totalMb } : undefined;
 }
 const NOME_FERRAMENTA = /^[A-Za-z0-9_.-]+$/;
 const nomeDeFerramenta = (v: unknown): v is string => texto(v, 200) && NOME_FERRAMENTA.test(v);

@@ -45,7 +45,8 @@ como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", 
 - Na delegação, a entrega espera a volta (`aguardando_volta`).
 - "Precisa de você" vence a volta (`aguardandoDespertar` depois da decisão).
 - A rotina com volta marcada segue aberta (a próxima janela é pulada).
-- A volta vencida segue as regras do Mac apertado (ADR-085).
+- A volta vencida segue as regras do Mac apertado (ADR-085). Revogado em 2026-10-09 (emenda da ADR-085, revisão do
+  #224): a volta é o próximo passo de uma task já começada, e só o disco crítico a segura.
 - A tela diz "amanhã às" quando a volta não é hoje.
 - A 0065 usa `lock_timeout`, e o ROLLBACK interrompe as voltas pendentes antes de tirar a coluna.
 

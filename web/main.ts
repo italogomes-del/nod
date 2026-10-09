@@ -2875,7 +2875,8 @@ function dadosMenuConta(): DadosMenuConta {
     avisos: situacaoCurtaAvisos(canalAvisos.estado()),
     modoDev: estado.modoDev.ligado,
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
-    esteMac: estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
+    // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
+    esteMac: estado.trabalhos?.motivoEspera === "disco" ? "Disco quase cheio" : estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
   };
 }
 
