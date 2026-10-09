@@ -50,6 +50,9 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
    `POST trabalhos/:id/depois {depoisDe}`, `POST trabalhos/:id/fazer-aqui`, `POST telemetria/linhas {eventos}`,
    `GET telemetria/linhas` (`TaxaDeAbertura[]`), e `faixaTrabalhosRecolhida` em `PUT preferencias`. Frames
    `trabalho.mudou` e `memoria.mudou`. A mensagem lida ganha `origemTurno`, `trabalhoId` e `fimDoTurno`.
+   Revisto em 2026-10-09 (pedido do Marlon): a faixa de Trabalhos nasce sempre recolhida na pílula e só fica aberta
+   enquanto a pessoa está na conversa (`faixaTrabalhosAberta` no estado da web); a web não lê nem grava mais
+   `faixaTrabalhosRecolhida`, que fica no contrato e no banco sem uso até uma migração a retirar.
 9. **Computador do bot (ADR-037):** continua um por bot. O segundo trabalho recebe "computador em uso por: <título>"
    e espera, em vez do 409 que o proxy tratava como conector fora do ar.
 

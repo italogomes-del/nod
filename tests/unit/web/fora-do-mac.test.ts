@@ -34,7 +34,7 @@ describe("fora do Mac (ADR-086)", () => {
     expect(voltaMarcada({ ...comVolta, turnoVivoId: "turno-2" })).toBeNull();
     expect(voltaMarcada({ ...comVolta, estado: "terminado" })).toBeNull();
     expect(situacaoDe(comVolta, [], false, AGORA)).toBe(`volta às ${hora(VOLTA)}`);
-    expect(pontoTrabalho(comVolta, "c-amber")).toContain("ponto-trabalho esperando");
+    expect(pontoTrabalho(comVolta, "c-amber")).toContain("ponto-trabalho fora-do-mac");
   });
 
   it("fora do Mac = esperando colega ou a volta marcada; quem tem processo vivo não", () => {
@@ -59,7 +59,7 @@ describe("fora do Mac (ADR-086)", () => {
     expect(colega).not.toContain("tk-pop-fora");
     const volta = renderTopoTrabalho(estadoCom([comVolta], { tempoTaskAberto: comVolta.id }), comVolta.id);
     expect(volta).toContain(`<div class="tk-pop-rodape"><span>fora do Mac · volta às ${hora(VOLTA)}</span></div>`);
-    expect(volta).toMatch(/class="tk-status esperando"[^>]*>volta às/);
+    expect(volta).toMatch(/class="tk-status fora-do-mac"[^>]*>volta às/);
   });
 
   it("revisão do #212: a volta de outro dia diz o dia — 'amanhã às 09:00' não lê como hoje", () => {

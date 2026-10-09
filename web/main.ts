@@ -72,7 +72,6 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
-import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
 /**
@@ -1116,10 +1115,6 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
     hidratarAvisosFechados(p.avisosFechados ?? []);
-    if (typeof p.faixaTrabalhosRecolhida === "boolean") {
-      guardarFaixaRecolhida(p.faixaTrabalhosRecolhida);
-      dispatch({ tipo: "faixa-trabalhos", recolhida: p.faixaTrabalhosRecolhida });
-    }
     if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
@@ -1152,8 +1147,6 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
 
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
-  // A faixa de Trabalhos nasce como a pessoa a deixou (cache local até as preferências chegarem).
-  dispatch({ tipo: "faixa-trabalhos", recolhida: lerFaixaRecolhida() });
   let ticks = 0;
   window.setInterval(() => {
     ticks += 1;
@@ -2104,12 +2097,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const id = el.dataset.id ?? null;
     dispatch({ tipo: "tempo-task", id: id && estado.tempoTaskAberto !== id ? id : null });
   },
-  // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
+  // A pílula abre a faixa e a faixa recolhe na pílula. revisto em 2026-10-09: a escolha vale só enquanto a pessoa está na
+  // conversa (o padrão ao entrar é a pílula; reducer.ts, `faixaAbertaAoNavegar`) — não vai mais para as preferências.
   "faixa-trabalhos": (el) => {
-    const recolhida = el.dataset.recolher === "1";
-    guardarFaixaRecolhida(recolhida);
-    dispatch({ tipo: "faixa-trabalhos", recolhida });
-    void api?.gravarPreferencias({ faixaTrabalhosRecolhida: recolhida }).catch(() => undefined);
+    const t = estado.tela;
+    dispatch({ tipo: "faixa-trabalhos", agenteId: el.dataset.recolher === "1" || t.tipo !== "conversa" ? null : t.agenteId });
   },
   "filtro-trabalhos": (el) => {
     const f = el.dataset.id;
