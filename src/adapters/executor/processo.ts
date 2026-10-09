@@ -159,6 +159,11 @@ export function iniciarProcesso(o: {
   env: Record<string, string>;
   cwd: string;
   aoLinha(linha: string): void;
+  /**
+   * Cada pedaço do stderr, quando chega (definido em 2026-10-09: o npm escreve o progresso no stderr, e a instalação
+   * pelo app mostra a última linha ao vivo). O stderr continua acumulado no `fim`, como sempre.
+   */
+  aoStderr?(pedaco: string): void;
   /** 'pipe' (default) para mandar o prompt; 'ignore' para a sonda com prompt como argumento. */
   stdin?: "pipe" | "ignore";
   /**
@@ -188,6 +193,7 @@ export function iniciarProcesso(o: {
   filho.stderr?.setEncoding("utf8");
   filho.stderr?.on("data", (pedaco: string) => {
     if (stderr.length < STDERR_MAX_CHARS) stderr += pedaco.slice(0, STDERR_MAX_CHARS - stderr.length);
+    o.aoStderr?.(pedaco);
   });
   filho.stdin?.on("error", () => {
     // EPIPE quando o filho morre antes de ler o prompt: o fim do processo já diz o que houve

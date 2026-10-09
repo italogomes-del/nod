@@ -18,7 +18,20 @@ export type CausaSemIa = (typeof CAUSAS_SEM_IA)[number];
  * `cli_antigo` (NOD-171): o CLI está instalado, mas abaixo do piso testado (`PISO_CLI`); só em `ausente`, com `versao` e
  * `minima`, para a frase dizer "Atualize", não "Instale".
  */
-export type CausaInventario = "sonda_lenta" | "cli_antigo";
+export type CausaInventario = "sonda_lenta" | "cli_antigo" | CausaDoMac;
+
+/**
+ * Causas que só o app do Mac distingue (definido em 2026-10-09, teste do Breno). O servidor de hoje não as conhece e,
+ * pela regra de `ponte-validacao.ts`, as reduz ao estado sem causa ("ausente" / "nao_autenticado"): acrescentar aqui
+ * não quebra o anúncio. A tela do Mac lê as duas pelo estado único da IA (src/contracts/estado-ia.ts).
+ *  - `sem_node`: o CLI é um script `#!/usr/bin/env node` e não há node no PATH (o "env: node: No such file" do
+ *    `--version`); antes aparecia como "Atualize o Codex";
+ *  - `config_invalida`: o CLI recusou a própria configuração (`~/.codex/config.toml` com erro ou chave desconhecida);
+ *    não é falta de login, e entrar de novo não resolve. Vai em `ausente` (o CLI não serve como está), nunca em
+ *    `nao_autenticado`, para não se confundir com "falta entrar".
+ */
+export const CAUSAS_DO_MAC = ["sem_node", "config_invalida"] as const;
+export type CausaDoMac = (typeof CAUSAS_DO_MAC)[number];
 
 /**
  * Snapshot da sonda (ADR-019): três estados, motivo escrito, versão do CLI e instante.

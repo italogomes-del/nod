@@ -1,4 +1,5 @@
-import type { CausaInventario, CausaSemIa } from "./inventario.ts";
+import type { EstadoIa, ResultadoColarCodigo } from "./estado-ia.ts";
+import type { CausaDoMac, CausaInventario, CausaSemIa } from "./inventario.ts";
 
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
@@ -51,10 +52,34 @@ export type ResultadoIaDesktop = { ok: true } | { ok: false; motivo: "nao_instal
  * `causa` só quando a IA está logada e mesmo assim não serviu. O Mac reanuncia o inventário ao servidor com o veredito.
  */
 /** `causa: "sonda_lenta"` (NOD-178): o CLI só demorou; não é veredito da conta, e a tela testa de novo. */
-export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa | CausaInventario; resposta?: string };
+export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa | Exclude<CausaInventario, CausaDoMac>; resposta?: string };
 export const RESPOSTA_TESTE_IA_MAX = 200;
 /** O nome que entra na pergunta do teste ("Diga oi para {nome}…"): só letras, espaço, ponto e hífen, até este tamanho. */
 export const NOME_TESTE_IA_MAX = 40;
+
+/**
+ * As IAs do Mac pela tela (definido em 2026-10-09, plano "IAs", PR 1): o estado único de cada uma
+ * (src/contracts/estado-ia.ts) e as ações de instalar e entrar DENTRO do app. Tudo devolve o estado novo da IA; o
+ * progresso (a linha da instalação, o link e o código do login, o fim do teste) chega por `aoMudar`.
+ *  - instalar: `npm install` do pacote oficial na pasta do nod (desktop/instalar-ia.ts); resolve quando termina;
+ *  - entrar: abre o login do CLI e resolve logo; o link e o código vêm em `login` pelo `aoMudar`;
+ *  - abrirLink: abre no navegador o link do login em curso — só o que o app leu do CLI e conferiu na lista oficial;
+ *    a página nunca passa um endereço;
+ *  - colarCodigo: o código da página do Claude vai ao stdin do CLI, só com a forma de um código;
+ *  - cancelar: encerra o login (e a instalação) em curso;
+ *  - verificar: confere agora (login em curso: o status do CLI; senão, uma sonda grátis).
+ */
+export type PonteIas = {
+  estados(): Promise<EstadoIa[]>;
+  instalar(ia: IaDesktop): Promise<EstadoIa>;
+  entrar(ia: IaDesktop): Promise<EstadoIa>;
+  abrirLink(ia: IaDesktop): Promise<boolean>;
+  colarCodigo(ia: IaDesktop, codigo: string): Promise<ResultadoColarCodigo>;
+  cancelar(ia: IaDesktop): Promise<EstadoIa>;
+  verificar(ia: IaDesktop): Promise<EstadoIa>;
+  /** Um ouvinte só (registrar de novo troca o anterior). */
+  aoMudar(fn: (estado: EstadoIa) => void): void;
+};
 
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
@@ -96,6 +121,11 @@ export type NodDesktop = {
    * 2026-10-05 não tem, e a web segue então com o que a sonda de login disse.
    */
   iaTestar?(pedido?: { nome?: string; ia?: IaDesktop }): Promise<TesteDeIa[]>;
+  /**
+   * O estado único e as ações das IAs dentro do app (definido em 2026-10-09). Opcional: o app instalado antes da rc.7
+   * não tem, e a web segue então com `iaEntrar`/`iaInstalar` (que continuam funcionando como antes).
+   */
+  ias?: PonteIas;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -114,6 +144,15 @@ export const CANAIS_DESKTOP = {
   iaEntrar: "nod:ia-entrar",
   iaInstalar: "nod:ia-instalar",
   iaTestar: "nod:ia-testar",
+  // definido em 2026-10-09 (PonteIas): o estado único e as ações dentro do app; `iaMudou` vai do processo principal à página.
+  iaEstados: "nod:ia-estados",
+  iaInstalarNoApp: "nod:ia-instalar-no-app",
+  iaEntrarNoApp: "nod:ia-entrar-no-app",
+  iaAbrirLink: "nod:ia-abrir-link",
+  iaColarCodigo: "nod:ia-colar-codigo",
+  iaCancelar: "nod:ia-cancelar",
+  iaVerificar: "nod:ia-verificar",
+  iaMudou: "nod:ia-mudou",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */
