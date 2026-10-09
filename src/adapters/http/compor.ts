@@ -72,6 +72,7 @@ import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -229,7 +230,7 @@ function numero(v: string | undefined, padrao: number): number {
   return Number.isFinite(n) && n > 0 ? n : padrao;
 }
 
-/** ADR-088: a versão do package.json deste servidor (a que o motor instalado por ele anuncia). */
+/** ADR-090: a versão do package.json deste servidor (a que o motor instalado por ele anuncia). */
 function versaoDoServidor(): string {
   try {
     return (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string }).version;
@@ -911,7 +912,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
-    // ADR-088: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
+    // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo: criarPareamentoDispositivo(relogio), maquinasVivas: compartilhado ? (escopo) => ponteHttp.maquinasDaPessoa(escopo) : undefined }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
@@ -970,7 +971,7 @@ export function comporApp(o: OpcoesCompor): App {
   // máquina vai em cada um); fora do macOS, sem NOD_SIMULAR_*, não lê nada e o puxar vai sem leitura.
   const memoriaDaMaquina = criarAmostradorMemoria({ env });
   // Pool elástico por pessoa (2026-09-24): um laço ocioso sempre puxando, mais um por turno rodando.
-  const iniciar: IniciarLaco = (p) =>
+  const iniciarLacoDaPessoa: IniciarLaco = (p) =>
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
       ponte,
@@ -986,6 +987,19 @@ export function comporApp(o: OpcoesCompor): App {
       aoIniciarTurno: (plano, adapter) => { interruptor.registrar(plano.turnoId, () => adapter.interromper()); planosVivos.set(plano.turnoId, plano); },
       aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
     }), p.ponte);
+  // definido em 2026-10-09 (ADR-088): no modo local o servidor É o executor do Mac, e a limpeza das pastas de task roda
+  // aqui, uma por pessoa ao lado do pool (as passadas entram numa fila só do processo, revisão do #225).
+  // `NOD_LIMPEZA_TASKS`: sem nada (ou `simular`) confere tudo e só registra; só `ligada` apaga; `desligada` desliga.
+  const homeDoExecutor = env.HOME ?? homedir();
+  const modoLimpeza = modoDaLimpeza(env);
+  // Segunda revisão do #225: o modo efetivo no boot — o padrão é `simular`, e quem lê o log sabe se algo foi apagado.
+  if (!compartilhado) log("info", "limpeza_modo", { modo: modoLimpeza, onde: "servidor_local" });
+  const pastaEmUso = (pasta: string) => [...planosVivos.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true);
+  const iniciar: IniciarLaco = (p) => {
+    const pool = iniciarLacoDaPessoa(p);
+    const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso });
+    return { ...pool, async parar() { limpeza?.parar(); await pool.parar(); } };
+  };
 
   return {
     services,

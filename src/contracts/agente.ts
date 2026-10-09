@@ -52,7 +52,7 @@ export type Agente = {
   esforco?: EsforcoAgente | null;
   /** ADR-059 (0040). Ausente = 'manual' (planos e fixtures anteriores ao modo). */
   modoAprovacao?: ModoAprovacao;
-  /** ADR-088 (0066): a máquina onde o bot trabalha — o id da chave da máquina. Ausente ou null = qualquer uma (o padrão da pessoa). */
+  /** ADR-090 (0066): a máquina onde o bot trabalha — o id da chave da máquina. Ausente ou null = qualquer uma (o padrão da pessoa). */
   maquinaId?: string | null;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;

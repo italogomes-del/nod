@@ -4,7 +4,7 @@ import type { Inventario } from "./inventario.ts";
 import type { PlataformaMaquina } from "./ponte.ts";
 
 /**
- * ADR-088: uma máquina da pessoa na tela "Máquinas" — a chave viva, com o que a máquina anunciou se está conectada agora
+ * ADR-090: uma máquina da pessoa na tela "Máquinas" — a chave viva, com o que a máquina anunciou se está conectada agora
  * (nome, plataforma, IAs e gh). `plataforma` null = não está conectada (o servidor só sabe pelo anúncio).
  */
 export type MaquinaDto = {

@@ -1,5 +1,5 @@
 /**
- * A instalação do motor numa máquina Linux da pessoa (ADR-088): `curl -fsSL https://<nod>/motor | sh`. O servidor serve
+ * A instalação do motor numa máquina Linux da pessoa (ADR-090): `curl -fsSL https://<nod>/motor | sh`. O servidor serve
  * este script com o próprio endereço e a própria versão, e os três arquivos do motor (dist/motor). Debian e Ubuntu,
  * x64 e arm64. Roda de novo para atualizar: troca os arquivos, mantém a conexão e o login das IAs.
  *
@@ -30,7 +30,7 @@ export function servidorParaScript(proto: string, host: string): string | null {
 export function scriptDeInstalacao(o: { servidor: string; versao: string }): string {
   if (!/^https?:\/\/[a-z0-9.:-]+$/.test(o.servidor) || !/^[0-9A-Za-z.+-]+$/.test(o.versao)) throw new Error("servidor_ou_versao_invalida");
   return `#!/bin/sh
-# Nod: instala ou atualiza o motor nesta máquina (ADR-088). Servido por ${o.servidor}/motor
+# Nod: instala ou atualiza o motor nesta máquina (ADR-090). Servido por ${o.servidor}/motor
 set -eu
 # Tudo roda dentro de principal(), chamada na última linha: se o curl cortar a conexão no meio, nada pela metade executa.
 # /usr/sbin e /sbin no PATH: runuser e useradd moram lá, e o root de "su" sem hífen (Debian) não os tem.
@@ -122,7 +122,7 @@ passo "motor $NOD_VERSAO"
 
 $SUDO tee /usr/local/bin/nod-motor >/dev/null <<'NODMOTOR'
 #!/bin/sh
-# Roda o motor do Nod como o usuário nod (ADR-088). Depois de parear ou entrar numa IA, o serviço recomeça.
+# Roda o motor do Nod como o usuário nod (ADR-090). Depois de parear ou entrar numa IA, o serviço recomeça.
 set -eu
 CASA=/home/nod
 CAMINHO="$CASA/.local/bin:/opt/nod-motor/node/bin:/usr/local/bin:/usr/bin:/bin"
@@ -148,7 +148,7 @@ $SUDO chmod 755 /usr/local/bin/nod-motor
 
 $SUDO tee /etc/systemd/system/nod-motor.service >/dev/null <<'NODSERVICO'
 [Unit]
-Description=Nod: o motor desta máquina (ADR-088)
+Description=Nod: o motor desta máquina (ADR-090)
 After=network-online.target
 Wants=network-online.target
 

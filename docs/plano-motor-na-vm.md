@@ -1,6 +1,6 @@
 # Plano: o motor do nod numa VM ("traga sua VM")
 
-> Proposto e implementado em 2026-10-09. Decisão em [ADR-088](adr/adr-088-o-motor-numa-maquina-linux-da-pessoa.md); como conectar e testar: [motor-na-vm.md](motor-na-vm.md). Aula com os
+> Proposto e implementado em 2026-10-09. Decisão em [ADR-090](adr/adr-090-o-motor-numa-maquina-linux-da-pessoa.md); como conectar e testar: [motor-na-vm.md](motor-na-vm.md). Aula com os
 > diagramas: https://claude.ai/artifact/9s7Evq2HLyixCeMncVSnaV. As costuras foram conferidas no `main` em 2f98ed6.
 
 ## Objetivo

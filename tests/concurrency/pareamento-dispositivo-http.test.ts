@@ -12,7 +12,7 @@ import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-te
 import { agenteComConversa } from "../helpers/fabricas.ts";
 
 /**
- * ADR-088: o pareamento por código de ponta a ponta, pelo app composto em porta 0. A máquina pede o código (rota pública,
+ * ADR-090: o pareamento por código de ponta a ponta, pelo app composto em porta 0. A máquina pede o código (rota pública,
  * sem navegador), a pessoa logada vê e aprova, e a máquina troca pela chave — que nasce no escopo de quem aprovou e
  * valida na ponte. Mora em tests/concurrency porque COMMITA a chave; ao fim, apaga a própria linha.
  */

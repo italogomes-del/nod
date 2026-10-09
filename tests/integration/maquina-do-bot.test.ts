@@ -8,7 +8,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 /**
- * ADR-088: onde o bot trabalha. O `reivindicar` só entrega o turno à máquina do bot (ou ao padrão da pessoa, ou à
+ * ADR-090: onde o bot trabalha. O `reivindicar` só entrega o turno à máquina do bot (ou ao padrão da pessoa, ou à
  * máquina "desta vez"), e uma chave que não vale mais (revogada, que nunca existiu) vale como "qualquer máquina": a fila
  * nunca prende um turno numa máquina que não pode aparecer.
  */
@@ -33,7 +33,7 @@ async function montar(trx: Tx) {
   return { ...base, repos, mac, vm, enfileirar, puxar };
 }
 
-describeIntegracao("onde o bot trabalha (ADR-088)", () => {
+describeIntegracao("onde o bot trabalha (ADR-090)", () => {
   it("bot preso à VM: o Mac não leva o turno, a VM leva", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

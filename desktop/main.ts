@@ -3,15 +3,18 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, p
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
-import { executarColetando } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { resolverBinario } from "../src/adapters/executor/caminho.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
@@ -60,6 +63,10 @@ let conectando = false;
 let encerrando = false;
 let falhando = false;
 let itensGithub: ReturnType<typeof setInterval> | null = null;
+/** ADR-088 (2026-10-09): a limpeza das pastas de task encerradas neste Mac (o servidor diz quais; o Mac apaga). */
+let limpezaDasTasks: LimpezaDasTasks | null = null;
+/** Revisão do #225: os turnos rodando neste Mac — a limpeza não mexe na pasta de nenhum deles. */
+const planosNoMac = new Map<string, PlanoTurno>();
 /**
  * A vigia das IAs da conexão atual (vigia-ias.ts; revisto em 2026-10-05): sem IA pronta ela olha de novo a cada 3 s
  * (ADR-077), guarda o veredito do teste de verdade e reanuncia o inventário ao servidor quando ele muda.
@@ -326,6 +333,8 @@ async function mostrarSetup() {
 async function parar() {
   if (itensGithub) clearInterval(itensGithub);
   itensGithub = null;
+  limpezaDasTasks?.parar();
+  limpezaDasTasks = null;
   vigiaIas?.parar();
   vigiaIas = null;
   const anterior = laco; laco = null;
@@ -351,7 +360,21 @@ function falha(codigo: FalhaPonte["codigo"]) {
   falhando = true;
   setTimeout(() => { void parar().then(mostrarSetup).finally(() => { falhando = false; }); }, 0);
 }
+/**
+ * ADR-089 (#217): os grupos dos turnos que a vida anterior do app deixou (Forçar Encerrar, queda, SIGKILL) morrem antes
+ * do primeiro turno desta — só os que ainda são os processos anotados. Uma vez por processo; `conectar` espera.
+ */
+let limpezaDeOrfaos: Promise<void> | null = null;
+function limparOrfaosUmaVez(): Promise<void> {
+  limpezaDeOrfaos ??= (async () => {
+    const arquivo = join(app.getPath("userData"), "executor", "grupos-vivos.json");
+    const r = await encerrarGruposOrfaos({ arquivo }).catch(() => ({ assumiu: true }));
+    if (r.assumiu) registrarGruposEm(arquivo);
+  })();
+  return limpezaDeOrfaos;
+}
 async function conectar(c: Config) {
+  await limparOrfaosUmaVez();
   await parar();
   const r = await fetch(`${c.url}/api/maquina/sessao`, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${c.chave}`, "x-nod-versao": app.getVersion(), "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15_000) });
   const minima = r.headers.get("x-nod-versao-minima");
@@ -384,10 +407,18 @@ async function conectar(c: Config) {
   if (cliente === ponteHttp) ghLogado = gh; // um parar() durante o await já zerou: não ressuscita o valor velho
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true } as const;
   if (gh) vigiarItensGithub(ponteHttp);
+  if (cliente === ponteHttp) {
+    // ADR-088: o PATH do shell de login (o mesmo dos drivers) — as ferramentas de onde a pessoa as instalou.
+    limpezaDasTasks?.parar();
+    const homeDoMac = cfg.env.HOME ?? homedir();
+    const modo = modoDaLimpeza(process.env);
+    log("info", "limpeza_modo", { modo, onde: "app_do_mac" });
+    limpezaDasTasks = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: homeDoMac, executar: criarExecutarComando(cfg.env, homeDoMac), simular: modo === "simular", emUso: (pasta) => [...planosNoMac.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
+  }
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); },
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.
@@ -508,11 +539,14 @@ else {
     if (w) capturarEstadoJanela(w);
     void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
   });
+  // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
+  app.on("will-quit", () => encerrarGruposVivos());
   void app.whenReady().then(async () => {
     // NOD-138: o log() do app passa a gravar em ~/Library/Logs/nod antes de qualquer outra coisa, e as quedas viram linha.
     definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
     log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
+    void limparOrfaosUmaVez();
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();

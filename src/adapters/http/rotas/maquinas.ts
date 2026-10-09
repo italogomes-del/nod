@@ -20,14 +20,14 @@ import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
  * que recusa navegador (Origin → 403) como as de máquina. A chave nasce na troca, dentro do escopo
  * da pessoa que confirmou.
  */
-/** ADR-088: o nome que a máquina manda no pareamento (o hostname, editável depois como o de qualquer chave). */
+/** ADR-090: o nome que a máquina manda no pareamento (o hostname, editável depois como o de qualquer chave). */
 function nomeDaMaquina(v: unknown): string {
   const nome = typeof v === "string" ? v.trim() : "";
   if (nome.length === 0 || nome.length > 60) throw new ErroDeDominio("entrada_invalida", { cause: "nome da máquina" });
   return nome;
 }
 
-/** ADR-088: a chave existe, é da pessoa do escopo e não foi revogada — só assim um bot pode ser preso a ela. */
+/** ADR-090: a chave existe, é da pessoa do escopo e não foi revogada — só assim um bot pode ser preso a ela. */
 async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
   if (typeof id !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "máquina" });
   const viva = (await d.repos.maquinaTokens.listar()).find((c) => c.id === id && c.revogadaEm === null);
@@ -87,7 +87,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         ctx.json(201, { chave: r.chave });
       },
     },
-    // ── ADR-088: pareamento por código (máquina sem navegador) ──────────────────────────────────────────────────────
+    // ── ADR-090: pareamento por código (máquina sem navegador) ──────────────────────────────────────────────────────
     {
       metodo: "POST",
       padrao: /^\/pareamento\/dispositivo$/,
@@ -136,7 +136,7 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         ctx.json(200, { ok: true });
       },
     },
-    // ── ADR-088: as máquinas da pessoa e onde cada bot trabalha ──────────────────────────────────────────────────────
+    // ── ADR-090: as máquinas da pessoa e onde cada bot trabalha ──────────────────────────────────────────────────────
     {
       metodo: "GET",
       padrao: /^\/maquinas$/,

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { scriptDeInstalacao, servidorParaScript } from "../../../src/adapters/http/motor-instalacao.ts";
 import { arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, lerConexao, pastaDoMotor } from "../../../motor/conexao.ts";
 
-describe("motor sem janela (ADR-088)", () => {
+describe("motor sem janela (ADR-090)", () => {
   it("lê os comandos do nod-motor", () => {
     expect(lerComando([])).toEqual({ tipo: "ajuda", erro: null });
     expect(lerComando(["rodar"])).toEqual({ tipo: "rodar" });

@@ -2,7 +2,7 @@ import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna, RespostaRenovar } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, Entrega, PastaParaLimpar, PedidoRenovar, PonteInterna, RelatoLimpeza, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { redigirECortar } from "../../domain/segredos.ts";
 import { log } from "../../obs/log.ts";
@@ -16,12 +16,13 @@ import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
+import { camposDoRelato, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
-import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
+import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
 import type { UsoDoMac } from "../../contracts/raio-x.ts";
 import { USO_DO_MAC_PADRAO } from "../../contracts/raio-x.ts";
-import { deveSegurar, ESPACO_FUNDO_MS } from "../../domain/memoria-mac.ts";
+import { ESPACO_FUNDO_MS, portaoDoMac } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -58,8 +59,8 @@ export type DepsPonte = {
   fezFerramenta?: (turnoId: string) => boolean;
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
-  /** ADR-085: a última leitura viva deste Mac (memória e processador); null = sem leitura, e então nada é segurado. */
-  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null } | null;
+  /** ADR-085: a última leitura viva deste Mac (memória, processador e, #219, disco); null = sem leitura, e nada é segurado. */
+  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null } | null;
   /** Revisão do #209: o evento da mudança de pressão não foi gravado (a tx desfez) — a próxima leitura refaz o frame. */
   desfazerMemoria?: (pessoaId: string, mudanca: MudancaDePressao) => void;
   /** Revisão do #209: o Mac desconectou — a leitura dele sai. */
@@ -133,8 +134,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
-  /** ADR-085 (revisão do #209): se cada Mac está segurando agora — o log sai só na mudança. */
-  const segurando = new Map<string, boolean>();
+  /** ADR-085 (revisão do #209): se cada Mac está segurando agora, e por quê (#219) — o log sai só na mudança. */
+  const segurando = new Map<string, string>();
   function esquecerVencidos(): void {
     const limite = agora() - LEASE_MS;
     for (const [turnoId, em] of vistos) {
@@ -222,11 +223,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
       const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
       const uso = pressao ? await usoDoMac(escopo) : "livre";
-      const segurarFundo = pressao !== null && deveSegurar(uso, pressao.memoria, pressao.processador);
+      // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
+      // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
+      const portao = portaoDoMac(uso, pressao);
+      const segurarFundo = portao.fundo !== null;
+      const segurarNovo = portao.tudoNovo !== null;
+      const fundoSemPrazo = portao.semPrazo;
       const espacarFundo = uso !== "livre" && agora() - (ultimoFundo.get(maquina.machineId) ?? -Infinity) < ESPACO_FUNDO_MS;
-      if ((segurando.get(maquina.machineId) ?? false) !== segurarFundo) {
-        segurando.set(maquina.machineId, segurarFundo);
-        log("info", segurarFundo ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null });
+      const situacao = segurarNovo ? `tudo:${portao.tudoNovo}` : segurarFundo ? `fundo:${portao.fundo}${fundoSemPrazo ? ":sem-prazo" : ""}` : "";
+      if ((segurando.get(maquina.machineId) ?? "") !== situacao) {
+        segurando.set(maquina.machineId, situacao);
+        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
       }
       const antes = agora();
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
@@ -241,7 +248,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
@@ -460,6 +467,21 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // NOD-200: a captura do turno sai só com o assentar confirmado; na falha fica, como o escopo, para a entrega repetida.
       deps.services.capturas?.esquecer(e.turnoId);
       deps.esquecerTurno?.(e.turnoId);
+    },
+
+    /** ADR-088: a regra de quem pode ser limpo lê o banco na tx escopada da pessoa; o Mac apaga. */
+    async pastasParaLimpar(pessoaId): Promise<PastaParaLimpar[]> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return [];
+      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo)));
+    },
+
+    /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
+    async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
+      const r = relatoValido(relato);
+      // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
+      // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
+      log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
     },
 
     emMemoria() {

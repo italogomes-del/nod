@@ -49,7 +49,7 @@ describe("fila da conversa: cada mensagem com seu Cancelar", () => {
   });
 });
 
-describe("fila da conversa com a máquina do bot fora do ar (ADR-088, protótipo 4c)", () => {
+describe("fila da conversa com a máquina do bot fora do ar (ADR-090, protótipo 4c)", () => {
   const emCurso = (id: string, mensagemId: string) => ({ id, estado: "pendente" as const, desde: AGORA, mensagemId });
   const maquina = (id: string, nome: string, conectada: boolean) => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32), conectada, plataforma: conectada ? ("darwin" as const) : null, ias: (conectada ? { "claude-cli": "pronto" } : {}) as MaquinaDto["ias"], gh: false });
   function com(maquinaIdDoBot: string | null, maquinas: ReturnType<typeof maquina>[], padraoId: string | null = null): Estado {

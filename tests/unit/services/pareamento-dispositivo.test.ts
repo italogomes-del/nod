@@ -10,7 +10,7 @@ function pedir(p: PareamentoDispositivo, nome = "vm-sp") {
   return pedido;
 }
 
-describe("pareamento por código (ADR-088)", () => {
+describe("pareamento por código (ADR-090)", () => {
   it("pede, a pessoa vê e aprova, e a troca devolve o escopo de quem aprovou uma vez só", () => {
     let agora = 1_000;
     const p = criarPareamentoDispositivo(() => agora);

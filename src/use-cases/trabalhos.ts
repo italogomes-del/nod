@@ -6,7 +6,7 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraMemoria, NivelPressao, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { deveSegurar, seguravelPeloMac } from "../domain/memoria-mac.ts";
+import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, nivelDoDisco, portaoDoMac, seguravelPeloMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { NovoTrabalho } from "../repositories/trabalhos.repo.ts";
@@ -69,13 +69,14 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
  * O evento `pressao_memoria` (#194): o nível que a pessoa vê mudou. Pelo outbox ele vira o frame `memoria.mudou {nivel}`
  * (despachar-outbox.ts); grava também o anterior e o total, só números (DadosEvento é escalar).
  */
-export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao; anterior: NivelPressao | null; processador?: NivelPressao | null }, leitura: Pick<LeituraMemoria, "totalMb">): RuntimeEvent {
+export function eventoPressao(deps: DepsTrabalho, mudanca: { nivel: NivelPressao; anterior: NivelPressao | null; processador?: NivelPressao | null; disco?: NivelPressao | null }, leitura: Pick<LeituraMemoria, "totalMb">): RuntimeEvent {
   return evento(deps.escopo, {
     kind: "pressao_memoria",
     autoria: autoriaPessoa(deps.escopo),
     agora: deps.agora(),
     // ADR-085: o processador vai junto (a mudança só dele também vira o frame, e a lista relê o `segurando`).
-    dados: { nivel: mudanca.nivel, anterior: mudanca.anterior, processador: mudanca.processador ?? null, totalMb: Math.round(leitura.totalMb) },
+    // #219: e o nível do pior disco (a mudança dele também vira o frame).
+    dados: { nivel: mudanca.nivel, anterior: mudanca.anterior, processador: mudanca.processador ?? null, disco: mudanca.disco ?? null, totalMb: Math.round(leitura.totalMb) },
   });
 }
 
@@ -192,8 +193,18 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const processador = memoria?.processador ?? null;
   // ADR-085: o puxar decide por Mac (a leitura daquele Mac); a tela junta os Macs da pessoa e mostra pelo pior deles —
   // com dois Macs, um apertado já diz "Seu Mac está ocupado", mesmo que o outro ainda entregue trabalho.
-  const segurando = memoria !== null && deveSegurar((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, memoria.nivel, processador);
-  return { data: { trabalhos: await trabalhosParaDto(deps, trabalhos), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando } };
+  // #219 (emenda à ADR-085): o portão inteiro e o motivo, que vai para cada trabalho segurado ("esperando espaço no
+  // disco") e para a pílula; o disco vai com o nível e os limites, que moram só no domínio.
+  const disco = memoria?.disco ?? null;
+  // Revisão do #224: o nível vem com a histerese (trabalhos-vivos.ts); sem ele (serviço de teste), o nível cru.
+  const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
+  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador, discoNivel: nivelDisco });
+  const agora = deps.agora();
+  const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
+    const motivo = esperaDoMac(t, portao, agora);
+    return motivo ? { ...t, esperaDoMac: motivo } : t;
+  });
+  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null } };
 };
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */

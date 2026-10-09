@@ -251,11 +251,14 @@ export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }
  * revisto em 2026-09-30 (ADR-063): com um pedido a colega ainda em aberto na cadeia, o aviso também espera — a
  * resposta do colega abre uma continuação que segue a tarefa e entrega; se ela também falhar, avisa então.
  */
-export const avisarFalhaDelegacao: CasoDeUso<{ turnoId: string; motivo: string }, SaidaEntregaPeer> = async (deps, input) => {
+export const avisarFalhaDelegacao: CasoDeUso<{ turnoId: string; motivo: string; semEsperar?: true }, SaidaEntregaPeer> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
-  const espera = await aindaNaoEntrega(deps, tarefa);
+  // definido em 2026-10-09 (#218): `semEsperar` — o varredor de pedidos parados já decidiu desistir (task parada, queda
+  // sem volta; src/domain/pedido-parado.ts): avisa sem esperar pessoa, colega ou volta. Se a pessoa retomar depois e
+  // sair um resultado, ele ainda chega a quem pediu (um resultado depois de um aviso sai normalmente, em `entregar`).
+  const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.motivo, falha: true });
 };

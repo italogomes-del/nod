@@ -14,7 +14,7 @@ import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
 /**
- * ADR-088 de ponta a ponta, com o PROCESSO do motor: o servidor composto em modo compartilhado (a ponte HTTP de
+ * ADR-090 de ponta a ponta, com o PROCESSO do motor: o servidor composto em modo compartilhado (a ponte HTTP de
  * verdade), o `nod-motor parear` pedindo o código, a pessoa aprovando pela API, e o `nod-motor rodar` conectando e
  * aparecendo em Máquinas como Linux. Sem IA de verdade (NOD_CLAUDE_BIN=/bin/false): nenhum turno roda, custo zero.
  * Mora em tests/concurrency porque COMMITA a chave; ao fim, apaga a própria linha.

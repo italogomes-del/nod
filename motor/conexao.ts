@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
- * O que o motor sem janela guarda (ADR-088): o endereço do servidor e a chave da máquina (ADR-031). No Mac isso fica
+ * O que o motor sem janela guarda (ADR-090): o endereço do servidor e a chave da máquina (ADR-031). No Mac isso fica
  * cifrado pelo Keychain (`safeStorage`); aqui fica num arquivo só do usuário `nod`, com permissão 0600, numa máquina que a
  * pessoa usa só para o Nod. A chave crua nunca vai para log.
  */
@@ -82,7 +82,7 @@ export function lerComando(args: readonly string[]): ComandoMotor {
   return { tipo: "ajuda", erro: cmd === "ajuda" || cmd === "--help" || cmd === "-h" ? null : `Comando desconhecido: ${cmd}` };
 }
 
-export const AJUDA = `nod-motor — o motor do Nod nesta máquina (ADR-088)
+export const AJUDA = `nod-motor — o motor do Nod nesta máquina (ADR-090)
 
   nod-motor parear <https://seu-nod> [--nome vm-sp]   conecta esta máquina à sua conta (mostra um código)
   nod-motor entrar claude | codex | github            entra na sua IA ou no GitHub, direto com o fornecedor

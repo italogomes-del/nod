@@ -142,6 +142,18 @@
 .mac-barra.nivel-vermelha i { background: var(--danger); }
 .mac-medidor > span:last-child { min-width: 92px; text-align: right; }
 .mac-sem-leitura { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+/* Emenda à ADR-085 (definido em 2026-10-09): memória e disco com o status curto à vista e o porquê atrás de um clique; o "›" à
+   direita gira ao abrir, como o de "Avançado" na conexão. A linha sem detalhe (processador) guarda o mesmo espaço, para os status alinharem. */
+.mac-det > summary { list-style: none; cursor: pointer; }
+.mac-det > summary::-webkit-details-marker { display: none; }
+.mac-det > summary::after { content: "›"; flex: none; width: 8px; font-size: 18px; line-height: 1; color: var(--ink-3); text-align: center; transition: transform .12s; }
+.mac-det[open] > summary::after { transform: rotate(90deg); }
+.mac-det > summary:hover, .mac-det > summary:focus-visible { background: var(--surface-raised); }
+/* Revisão do PR 224: o trilho da barra é da mesma cor do hover; sem isto a barra some ao passar o mouse na linha. */
+.mac-det > summary:hover .mac-barra, .mac-det > summary:focus-visible .mac-barra { background: var(--line); }
+div.mac-medidor { padding-right: 36px; }
+.mac-det-txt { margin: 0; padding: 0 18px 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) { .mac-det > summary::after { transition: none; } }
 .mac-grupo { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 14px 18px 6px; border-top: 1px solid var(--line);
   font-size: 12.5px; color: var(--ink-3); }
 .mac-grupo span:first-child { font-weight: 500; color: var(--ink); }
@@ -329,7 +341,7 @@
   .app.com-detalhes.detalhes-abertos .cab-acoes .toggle-detalhes { display: none; }
 }
 
-/* ADR-088: Seu espaço › Máquinas (protótipo "Nod — Motor na VM"). Só tokens (tests/unit/web/cores-por-token.test.ts). */
+/* ADR-090: Seu espaço › Máquinas (protótipo "Nod — Motor na VM"). Só tokens (tests/unit/web/cores-por-token.test.ts). */
 .maquinas .maq-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .maquinas .maq-topo .intro { margin: 0; max-width: 540px; }
 .maquinas .maq-topo .bt.pri { display: inline-flex; align-items: center; gap: 8px; flex: none; }

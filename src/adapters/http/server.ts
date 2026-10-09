@@ -1,5 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { log } from "../../obs/log.ts";
+import { arquivoDeGruposDoServidor, encerrarGruposOrfaos } from "../executor/grupos-orfaos.ts";
+import { homeDaPessoa } from "../executor/caminho.ts";
+import { registrarGruposEm } from "../executor/processo.ts";
+import { nodHome } from "../executor/registry.ts";
 import { boot } from "./boot.ts";
 
 /**
@@ -13,30 +17,40 @@ export { criarServidor, listen, type OpcoesServidor } from "./servidor.ts";
 const FECHAMENTO_MAX_MS = 30_000;
 
 /**
- * SIGINT/SIGTERM: o primeiro chama `encerrar` (a drenagem); o segundo, qualquer um dos dois, sai na hora com 130.
+ * definido em 2026-10-09 (ADR-089): o mesmo sinal repetido dentro desta janela é eco de quem o repassou, não um segundo
+ * pedido. O Ctrl+C no terminal chega ao mesmo tempo ao dev.mjs, ao npm e ao tsx, e cada um repassa ao servidor: sem a
+ * janela, o eco virava "segundo sinal" e pulava a drenagem. 3 s: sob a carga de 09/10 (load ~430) o repasse pode
+ * atrasar; quem aperta de novo para forçar uma drenagem travada já esperou mais que isso.
+ */
+const ECO_DE_SINAL_MS = 3_000;
+
+/**
+ * SIGINT/SIGTERM/SIGHUP: o primeiro chama `encerrar` (a drenagem); o segundo, qualquer um dos três, sai na hora com 130.
  * revisto em 2026-10-08 (revisão do épico #188, X7): antes os ouvintes saíam no primeiro sinal e o segundo caía no
  * padrão do Node, que mata o processo SEM o evento `exit` — e os grupos de processo `detached` dos turnos (processo.ts)
  * ficavam órfãos. `process.exit` roda o `exit`, que os leva. Devolve quem tira os ouvintes (os testes).
+ * revisto em 2026-10-09 (ADR-089, #217): o SIGHUP (terminal fechado, sessão que caiu) entra no mesmo caminho. Antes ele
+ * caía no padrão do Node e matava sem o `exit` — os religamentos de 08/10 sem `sinal_recebido` no log e os órfãos de
+ * 7h30 batem com isso. O mesmo sinal repetido em menos de ECO_DE_SINAL_MS é eco e não conta.
  */
-export function ouvirSinaisDeEncerramento(encerrar: (sinal: string) => void, sair: (codigo: number) => void = (codigo) => process.exit(codigo)): () => void {
-  let recebido = false;
+export function ouvirSinaisDeEncerramento(encerrar: (sinal: string) => void, sair: (codigo: number) => void = (codigo) => process.exit(codigo), agora: () => number = Date.now): () => void {
+  let primeiro: { sinal: string; em: number } | null = null;
   const ouvinte = (sinal: string) => () => {
-    if (recebido) {
+    if (primeiro) {
+      if (sinal === primeiro.sinal && agora() - primeiro.em < ECO_DE_SINAL_MS) return;
       log("aviso", "segundo_sinal", { sinal });
       sair(130);
       return;
     }
-    recebido = true;
+    primeiro = { sinal, em: agora() };
     log("info", "sinal_recebido", { sinal });
     encerrar(sinal);
   };
-  const aoSigint = ouvinte("SIGINT");
-  const aoSigterm = ouvinte("SIGTERM");
-  process.on("SIGINT", aoSigint);
-  process.on("SIGTERM", aoSigterm);
+  const sinais = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const ouvintes = sinais.map((sinal) => [sinal, ouvinte(sinal)] as const);
+  for (const [sinal, fn] of ouvintes) process.on(sinal, fn);
   return () => {
-    process.removeListener("SIGINT", aoSigint);
-    process.removeListener("SIGTERM", aoSigterm);
+    for (const [sinal, fn] of ouvintes) process.removeListener(sinal, fn);
   };
 }
 
@@ -46,7 +60,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch {
     // sem .env: variáveis vêm do ambiente
   }
-  const servidor = await boot();
+  // ADR-089: depois do listen e antes de qualquer turno, os grupos que a vida anterior desta instância deixou (SIGKILL,
+  // queda) morrem — só os provados nossos pela marca. A cópia duplicada não pega a porta e nem chega aqui.
+  const servidor = await boot({
+    aposEscutar: async () => {
+      const arquivoDeGrupos = arquivoDeGruposDoServidor(nodHome(process.env, homeDaPessoa(process.env)), process.env);
+      const limpeza = await encerrarGruposOrfaos({ arquivo: arquivoDeGrupos }).catch(() => ({ assumiu: true }));
+      if (limpeza.assumiu) registrarGruposEm(arquivoDeGrupos);
+    },
+  });
   // SIGTERM e depois Ctrl+C (ou o contrário) também é "segundo sinal".
   ouvirSinaisDeEncerramento(() => {
     // definido em 2026-10-04 (ADR-071), revisto em 2026-10-05 (NOD-175): drenagem — recusa ligação nova, a ponte para de

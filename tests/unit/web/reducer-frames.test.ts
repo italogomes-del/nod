@@ -148,7 +148,7 @@ describe("aplicarFrame por TipoFrame", () => {
   });
 
   it("inventario.mudou invalida inventário, frota e o interruptor de executor; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
-    // ADR-088: a máquina que conecta ou cai muda a tela Máquinas e a linha da fila na conversa.
+    // ADR-090: a máquina que conecta ou cai muda a tela Máquinas e a linha da fila na conversa.
     expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor", "maquinas"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1"]);

@@ -15,6 +15,7 @@ import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
 import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
+import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
 /**
  * `planos`: os turnos que esta máquina está rodando AGORA (definido em 2026-09-24). Com o pool de laços
@@ -23,7 +24,7 @@ import { versaoAceita } from "../../../domain/versao-app.ts";
  */
 type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina };
 
-/** ADR-088: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
+/** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
 export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
 
 /** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
@@ -95,7 +96,7 @@ export function criarPonteHttpServidor(d: {
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
       const id = ctx.params.chaveId!;
-      // ADR-088: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
+      // ADR-090: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
       const nome = b.nome.trim();
       const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
@@ -237,6 +238,21 @@ export function criarPonteHttpServidor(d: {
       reservas.delete(itemId);
       ctx.json(200, { ok: true });
     }),
+    /**
+     * ADR-088 (2026-10-09): o Mac PUXA as pastas de task encerradas que pode limpar (o servidor nunca disca, ADR-021) e
+     * relata o resumo. A pessoa é a da chave; o relato só vira log (relatoValido descarta o que não é número conhecido).
+     */
+    rota("limpeza", async (ctx) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId)) ?? [] });
+    }),
+    rota("limpeza/resultado", async (ctx, b) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato));
+      ctx.json(200, { ok: true });
+    }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);
       await c.ponte.desconectar(ctx.params.chaveId!);
@@ -290,13 +306,13 @@ export function criarPonteHttpServidor(d: {
   function ghDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
   }
-  /** ADR-088: nome e plataforma da máquina viva do turno, para o prompt nomeá-la. null = não conectada (ou de outra pessoa). */
+  /** ADR-090: nome e plataforma da máquina viva do turno, para o prompt nomeá-la. null = não conectada (ou de outra pessoa). */
   function maquina(escopo: Escopo, machineId: string): { nome: string; plataforma: PlataformaMaquina } | null {
     const c = conexoes.get(machineId);
     if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return null;
     return { nome: c.nome, plataforma: c.plataforma };
   }
-  /** ADR-088: as máquinas vivas da pessoa (último contato há menos de 60 s), para a tela "Máquinas". */
+  /** ADR-090: as máquinas vivas da pessoa (último contato há menos de 60 s), para a tela "Máquinas". */
   function maquinasDaPessoa(escopo: Escopo): MaquinaConectada[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
       if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];

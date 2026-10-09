@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
-import { hostname, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as esperar } from "node:timers/promises";
@@ -13,7 +13,10 @@ import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
-import { executarColetando } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver, Registry } from "../src/adapters/executor/spi.ts";
@@ -26,7 +29,7 @@ import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vi
 import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
- * O motor do Nod sem janela (ADR-088): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
+ * O motor do Nod sem janela (ADR-090): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
  * da pessoa, como serviço do systemd sob o usuário `nod`. O que muda em relação ao Electron:
  *   - a chave fica num arquivo 0600 (conexao.ts), não no Keychain;
  *   - o proxy MCP e o hook rodam com o node desta máquina (`electronComoNode: false`), dos bundles ao lado deste arquivo;
@@ -90,6 +93,9 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   let laco: PoolDeLacos | null = null;
   let vigia: VigiaDasIas | null = null;
   let itens: ReturnType<typeof setInterval> | null = null;
+  /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
+  let limpeza: LimpezaDasTasks | null = null;
+  const planosAqui = new Map<string, PlanoTurno>();
   let ultimoReanuncio = 0;
   let encerrado = false;
 
@@ -136,12 +142,20 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     }, INTERVALO_ITENS_GITHUB_MS);
   }
 
+  {
+    const casa = cfg.env.HOME ?? homedir();
+    const modo = modoDaLimpeza(process.env);
+    log("info", "limpeza_modo", { modo, onde: "motor" });
+    limpeza = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: casa, executar: criarExecutarComando(cfg.env, casa), simular: modo === "simular", emUso: (pasta) => [...planosAqui.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
+  }
+
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
     laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
       aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); },
-      aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
+      aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
+      aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); planosAqui.delete(p.turnoId); },
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
       aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
@@ -182,6 +196,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     if (encerrado) return;
     encerrado = true;
     if (itens) clearInterval(itens);
+    limpeza?.parar();
     vigia?.parar();
     ponteHttp.cancelar();
     const anterior = laco; laco = null;
@@ -206,6 +221,12 @@ async function rodar(): Promise<number> {
   const c = await carregarConexao(pasta);
   if (!c) { process.stderr.write("Esta máquina ainda não está conectada. Rode: nod-motor parear https://seu-nod\n"); return 2; }
   const versao = await versaoDoMotor();
+  // ADR-089 (#217): os grupos de turno que a vida anterior do motor deixou (queda, SIGKILL do systemd) morrem antes do
+  // primeiro turno desta; os novos ficam anotados, e saem junto com o processo.
+  const arquivoGrupos = join(pastaDoExecutor(process.env), "grupos-vivos.json");
+  const orfaos = await encerrarGruposOrfaos({ arquivo: arquivoGrupos }).catch(() => ({ assumiu: true }));
+  if (orfaos.assumiu) registrarGruposEm(arquivoGrupos);
+  process.once("exit", () => encerrarGruposVivos());
   let sessao: Sessao | null = null;
   // O SIGTERM pode chegar no meio do conectar ou da espera entre tentativas: a espera é abortável e, se a sessão nascer
   // depois do sinal, ela é parada na hora (revisão do PR: antes o sinal se perdia e o systemd matava só aos 30 s).
@@ -241,7 +262,7 @@ async function rodar(): Promise<number> {
   return 0;
 }
 
-/** Pareamento por código (ADR-088): pede o código, mostra, e pergunta ao servidor até a pessoa aprovar. */
+/** Pareamento por código (ADR-090): pede o código, mostra, e pergunta ao servidor até a pessoa aprovar. */
 async function parear(servidorBruto: string, nomeBruto: string | null): Promise<number> {
   let url: string;
   // http só em loopback (o próprio servidor nesta máquina, testes); qualquer outro endereço precisa de HTTPS.

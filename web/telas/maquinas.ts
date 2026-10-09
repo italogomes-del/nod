@@ -5,7 +5,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 
 /**
- * Seu espaço › Máquinas (ADR-088; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
+ * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
  * em que o motor roda), o que cada uma anunciou, onde cada bot trabalha e o "Conectar uma máquina" por código. A janela
  * continua no Mac ou no navegador; a máquina escolhida roda o Claude Code ou o Codex do bot.
  */

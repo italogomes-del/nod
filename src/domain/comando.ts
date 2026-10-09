@@ -38,7 +38,7 @@ const CREDENCIAL = /(^|[\s"'=/:~])(\.ssh|\.aws|\.gnupg|\.config\/gh|\.config\/no
 
 /**
  * O comando ou o caminho toca uma credencial da pessoa (chaves SSH, AWS, login do gh, Keychain)? revisto em 2026-10-09
- * (ADR-088): numa máquina Linux o login do Claude Code e do Codex é arquivo (~/.claude/.credentials.json, ~/.codex/auth.json),
+ * (ADR-090): numa máquina Linux o login do Claude Code e do Codex é arquivo (~/.claude/.credentials.json, ~/.codex/auth.json),
  * e a chave do motor fica em ~/.config/nod-motor/conexao.json — o bot não lê nenhum deles sem a pessoa.
  */
 export function tocaCredencial(texto: string): boolean {

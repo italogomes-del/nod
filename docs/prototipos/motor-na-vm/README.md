@@ -1,6 +1,6 @@
 # Protótipo: motor na VM
 
-Protótipo de alta fidelidade da [ADR-088](../../adr/adr-088-o-motor-numa-maquina-linux-da-pessoa.md) e do
+Protótipo de alta fidelidade da [ADR-090](../../adr/adr-090-o-motor-numa-maquina-linux-da-pessoa.md) e do
 [plano](../../plano-motor-na-vm.md), aprovado pelo Marlon em 2026-10-09. O canvas interativo é
 https://claude.ai/artifact/JUUCPV7Y7hjnUGzw6rbr3J (privado, na conta em que foi criado). Esta pasta é a cópia que não
 depende de acesso a ele.

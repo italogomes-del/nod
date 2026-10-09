@@ -1,6 +1,6 @@
 # Motor na VM: como conectar e testar
 
-Guia do teste real da [ADR-088](adr/adr-088-o-motor-numa-maquina-linux-da-pessoa.md). O servidor precisa estar com a
+Guia do teste real da [ADR-090](adr/adr-090-o-motor-numa-maquina-linux-da-pessoa.md). O servidor precisa estar com a
 versão que tem o motor (o deploy do `main` depois do merge desta feature).
 
 ## 1. A VM

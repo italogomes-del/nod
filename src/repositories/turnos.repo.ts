@@ -197,11 +197,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
      * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         /*
-         * ADR-088: a máquina-alvo do turno `t`, em ordem — o "desta vez" (ato da pessoa), a máquina do bot, o padrão da
+         * ADR-090: a máquina-alvo do turno `t`, em ordem — o "desta vez" (ato da pessoa), a máquina do bot, o padrão da
          * pessoa. Cada nível só vale se a chave está viva e é da dona do turno (não revogada, não vencida); um nível que não
          * vale passa a vez ao próximo, e sem nenhum o alvo é nulo: qualquer máquina. A fila nunca prende um turno numa
          * máquina que não pode mais aparecer.
@@ -218,12 +218,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
               -- ADR-086: a retomada marcada para mais tarde ("me chame às 16:00") só sai a partir da hora.
               and (t.acordar_em is null or t.acordar_em <= ${data(p.agora)})
-              -- ADR-088 (revisão do PR): a máquina que é o alvo do turno o pega mesmo sem a IA pronta; o despacho recusa nomeando a
+              -- ADR-090 (revisão do PR): a máquina que é o alvo do turno o pega mesmo sem a IA pronta; o despacho recusa nomeando a
               -- IA (NOD-171), em vez de o turno esperar em silêncio uma máquina que nunca vai pegá-lo.
               ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${p.harnessesProntos.length > 0}) or (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[])
                 ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
-              -- definido em 2026-10-09 (ADR-088): onde o bot trabalha (o alvo, abaixo). O turno só sai para o alvo; sem alvo, para
+              -- definido em 2026-10-09 (ADR-090): onde o bot trabalha (o alvo, abaixo). O turno só sai para o alvo; sem alvo, para
               -- qualquer máquina.
               -- A ligação não espera a máquina do bot: a pessoa está na linha, e o cérebro roda em qualquer máquina com voz.
               and (t.origem = 'ligacao' or coalesce(${alvo}, ${p.machineId}) = ${p.machineId})
@@ -248,10 +248,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   -- Mesma regra de seguravelPeloMac (domain/memoria-mac.ts).
                   ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id
                     and w.iniciado_em is null and w.origem in ('rotina', 'colega') and not w.pessoa_esperando
-                    ${p.espacarFundo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
-                  -- ADR-086 (revisão do #212): a volta marcada ("me chame às 16:00") também é processo novo no Mac sem
-                  -- ninguém esperando: segue as mesmas regras, contando a espera máxima a partir da hora marcada.
-                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
+                    ${p.espacarFundo === true || p.fundoSemPrazo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
+                  -- revisto em 2026-10-09 (revisão do #224, decisão do coordenador do #221): a volta marcada ("me chame às
+                  -- 16:00", ADR-086) é o próximo passo de uma task já começada — o segundo plano apertado e o espaço entre
+                  -- dois começos não a seguram mais (era a revisão do #212); só o disco crítico (segurarNovo, abaixo).
+                  -- definido em 2026-10-09 (#219, emenda à ADR-085): com a memória crítica (fundoSemPrazo) o segundo plano
+                  -- novo espera mesmo passado da espera máxima (a volta marcada, não: acima). Com o disco crítico (segurarNovo) NENHUM trabalho novo começa, de
+                  -- qualquer origem, mesmo com a pessoa esperando, nem a volta marcada. O que já começou segue (o turno
+                  -- seguinte de uma task em andamento não espera). Mesma regra de esperaDoMac (domain/memoria-mac.ts).
+                  ${p.segurarNovo !== true ? trx`` : trx`and t.acordar_em is null and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null)`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
             -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.
@@ -524,7 +529,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-088: "Rodar em <outra máquina> desta vez" — os turnos AINDA pendentes desta conversa vão para a máquina escolhida
+     * ADR-090: "Rodar em <outra máquina> desta vez" — os turnos AINDA pendentes desta conversa vão para a máquina escolhida
      * pela pessoa, uma vez; o que já foi reivindicado fica onde está. Quem chama já conferiu que a chave é dela.
      */
     async rodarDestaVez(conversaId: string, maquinaId: string): Promise<number> {

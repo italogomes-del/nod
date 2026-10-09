@@ -116,7 +116,8 @@ export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; 
  */
 /**
  * `faixaTrabalhosRecolhida` (definido em 2026-10-07, ADR-083): a faixa de Trabalhos em cima do campo fica recolhida
- * numa pílula. Reversível (diferente dos avisos fechados).
+ * numa pílula. Reversível (diferente dos avisos fechados). revisto em 2026-10-09: a web não lê nem grava mais — a faixa
+ * nasce sempre recolhida e abrir vale só enquanto a pessoa está na conversa (web/estado/reducer.ts, `faixaTrabalhosAberta`).
  */
 /**
  * `usoDoMac` (definido em 2026-10-08, ADR-085): quanto do Mac os bots podem usar antes de trabalho novo em segundo
@@ -125,5 +126,5 @@ export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; 
 export const USOS_DO_MAC = ["pouco", "equilibrado", "livre"] as const;
 export type UsoDoMac = (typeof USOS_DO_MAC)[number];
 export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
-/** `maquinaPadraoId` (ADR-088, 0066): onde trabalha o bot sem máquina escolhida; null = qualquer uma. */
+/** `maquinaPadraoId` (ADR-090, 0066): onde trabalha o bot sem máquina escolhida; null = qualquer uma. */
 export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null };

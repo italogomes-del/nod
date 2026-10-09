@@ -24,7 +24,7 @@ import type { Turno } from "../../src/contracts/turno.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
-import { ESPERA_MAXIMA_FUNDO_MS, seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
@@ -964,6 +964,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pedidosAColegaParados() {
         return [];
       },
+      // A limpeza (ADR-088) se prova no Postgres (tests/integration/limpeza-das-tasks.test.ts); a memória não a vê.
+      async candidatosALimpeza() {
+        return [];
+      },
     },
 
     turnos: {
@@ -1084,8 +1088,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
             // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
             if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
-            if (t.acordarEm && (p.espacarFundo === true || (p.segurarFundo === true && t.acordarEm > p.agora - ESPERA_MAXIMA_FUNDO_MS))) return false;
-            return !(dono && p.segurarFundo === true && seguravelPeloMac(dono, p.agora));
+            // #219: disco crítico — nenhum trabalho novo, nem a volta marcada (que só ele segura, revisão do #224);
+            // memória crítica — o segundo plano novo sem prazo.
+            if (p.segurarNovo === true && (t.acordarEm || (dono && dono.iniciadoEm === null))) return false;
+            return !(dono && p.segurarFundo === true && seguravelPeloMac(p.fundoSemPrazo === true ? { ...dono, criadoEm: p.agora } : dono, p.agora));
           })
           .sort((x, y) => Number(fimDaFila(x)) - Number(fimDaFila(y)) || x.criadoEm - y.criadoEm);
         const t = candidatos[0];
@@ -1193,7 +1199,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return absorvidos;
       },
-      // ADR-088: o fake não guarda nem aplica a máquina do turno (o reivindicar dele ignora onde o bot trabalha); a regra é
+      // ADR-090: o fake não guarda nem aplica a máquina do turno (o reivindicar dele ignora onde o bot trabalha); a regra é
       // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
       async rodarDestaVez(conversaId, maquinaId) {
         const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");

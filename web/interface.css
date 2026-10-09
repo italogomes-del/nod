@@ -1121,11 +1121,15 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .linha-acao-nota { font-size: 12px; color: var(--ink-3); }
 .etiqueta-origem { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 6px; background: var(--surface-raised); color: var(--ink-2); font-size: 11px; font-weight: 400; white-space: nowrap; }
 
-/* O ponto do trabalho: na cor do bot (classe c-*), azul quando espera a pessoa, vazado na fila. */
-.ponto-trabalho { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); }
+/* O ponto do trabalho: na cor do bot (classe c-*), azul quando espera a pessoa, vazado na fila, vazado âmbar fora do Mac.
+   revisto em 2026-10-09: o ✓, o ■ e o ! ganham caixa fixa de 14 px (antes `width: auto`, e a coluna do bot andava conforme
+   o glifo); nas linhas das listas o ponto de 8 px ganha 3 px de cada lado e ocupa os mesmos 14 px. */
+.ponto-trabalho { display: inline-block; flex: none; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); }
 .ponto-trabalho.precisa { background: var(--signal); }
-.ponto-trabalho.na-fila { background: transparent; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
-.ponto-trabalho.feito { width: auto; height: auto; border-radius: 0; background: none; color: var(--success); font-size: 12px; line-height: 1; }
+.ponto-trabalho.na-fila { background: transparent; border: 1.5px solid var(--line-strong); }
+.ponto-trabalho.fora-do-mac { background: transparent; border: 1.5px solid var(--warning); }
+.ponto-trabalho.feito { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 0; background: none; color: var(--success); font-size: 12px; line-height: 1; }
+:is(.ft-linha, .tt-linha, .tr-linha, .pilula-trab) > .ponto-trabalho:not(.feito) { margin: 0 3px; }
 .ponto-trabalho.feito.parado { color: var(--ink-3); font-size: 9px; }
 .ponto-trabalho.feito.falhou { color: var(--danger); font-weight: 700; }
 /* K8, variante 3: o ponto pisca de leve (opacidade, 1,6 s) enquanto há task rodando; sem animação para quem pediu menos movimento. */
@@ -1150,23 +1154,27 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
    faixa de Trabalhos ficava em cima dela, aberta embaixo, e o campo perdia os cantos de cima sem nada colado nele. */
 .lugar-faixa-trabalhos:has(+ .composer-wrap .faixa-pergunta) .faixa-trab { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 16px; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap:has(.faixa-pergunta) .composer .box { border-top-left-radius: 28px; border-top-right-radius: 28px; }
-.faixa-trab { margin-top: 8px; padding: 6px 4px 4px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface-side); }
-.ft-cab { display: flex; align-items: center; gap: 8px; padding: 2px 6px 4px 12px; font-size: 12px; color: var(--ink-3); }
-.ft-n { margin-right: auto; }
-.ft-recolher { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; }
-.ft-recolher:hover, .ft-recolher:focus-visible { background: var(--surface-raised); }
-.ft-linha { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; border: 0; border-radius: 10px; background: none; color: var(--ink);
+.faixa-trab { margin-top: 8px; padding: 4px 4px 4px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface-side); }
+.ft-cab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 12px; font-size: 12px; color: var(--ink-3); }
+.ft-n { margin-right: auto; font-variant-numeric: tabular-nums; }
+.ft-recolher { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ink-3); cursor: pointer; }
+.ft-recolher:hover, .ft-recolher:focus-visible { background: var(--surface-raised); color: var(--ink-2); }
+/* revisto em 2026-10-09 (pedido do Marlon, "dá uma caprichada"): toda linha com 36 px e as mesmas colunas — ponto (14 px),
+   título numa linha só, status curto discreto, seta. O título cede espaço antes do status; o detalhe só no hover/foco. */
+.ft-linha { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px 0 12px; border: 0; border-radius: 10px; background: none; color: var(--ink);
   font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .ft-linha:hover, .ft-linha:focus-visible { background: var(--surface-raised); }
-.ft-linha .etiqueta-origem { margin-left: 0; }
-.ft-titulo { font-weight: 500; white-space: nowrap; }
-.ft-passo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); }
-.ft-seta { display: grid; place-items: center; color: var(--ink-3); }
+.ft-titulo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ft-passo { flex: 0 0 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.ft-seta { display: grid; flex: none; place-items: center; color: var(--ink-3); opacity: .6; }
+.ft-linha:hover .ft-seta, .ft-linha:focus-visible .ft-seta { opacity: 1; }
 .faixa-trab-lugar { display: flex; justify-content: flex-end; padding: 6px 16px 2px; }
-.pilula-trab { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 16px;
+.pilula-trab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 9px; border: 1px solid var(--line); border-radius: 14px;
   background: var(--surface-side); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
 .pilula-trab:hover, .pilula-trab:focus-visible { background: var(--surface-raised); }
-.pilula-trab b { color: var(--ink); font-weight: 500; }
+.pilula-trab b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pilula-trab > svg { color: var(--ink-3); }
+.pt-precisa { color: var(--signal); }
 
 /* A pílula de memória (M1/M2/M3): amarela é aviso, vermelha é alerta; o "Ver" abre "Todos os trabalhos". */
 .pilula-memoria { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; border: 1px solid; border-radius: 15px; font: inherit; font-size: 12.5px; cursor: pointer; }
@@ -1192,11 +1200,10 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tk-espera { margin: 0; font-size: 12px; color: var(--warning); }
 /* Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): no topo, só o status curto; o tempo trabalhado e o de espera
    ficam no cartão que ele abre. Esperando colega = ponto vazado âmbar, sem pulsar. */
-.ponto-trabalho.esperando { background: transparent; border: 1.5px solid var(--warning); box-sizing: border-box; }
 .tk-status { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
   color: var(--ink-3); font: inherit; font-weight: 400; white-space: nowrap; cursor: pointer; }
 .tk-status:hover, .tk-status:focus-visible, .tk-status[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
-.tk-status.esperando { color: var(--warning); }
+.tk-status.fora-do-mac { color: var(--warning); }
 .tk-pop { display: flex; flex-direction: column; gap: 10px; width: 280px; max-width: 100%; margin-top: 4px; padding: 16px; border: 1px solid var(--line);
   border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-pop); text-align: left; font-size: 13px; }
 .tk-pop-linha { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
@@ -1211,8 +1218,7 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 /* revisto em 2026-10-08 (QA visual no diário): "Ver a task do Eng 2" quebrava em duas linhas dentro dos detalhes. */
 .tk-pop-link, .pf-link { flex: none; margin-left: auto; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 12px; white-space: nowrap; text-decoration: underline;
   text-underline-offset: 3px; cursor: pointer; }
-/* Na faixa, o tempo só no hover ou no foco do teclado. */
-.ft-passo.esperando { color: var(--warning); }
+/* Na faixa, a origem e o tempo só no hover ou no foco do teclado (a linha não muda de altura: o título cede). */
 .ft-tempo { display: none; flex: none; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .ft-linha:hover .ft-tempo, .ft-linha:focus-visible .ft-tempo { display: inline; }
 /* O colega que não terminou: uma linha centrada; motivo e atalho atrás de "detalhes". */
@@ -1247,22 +1253,27 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tt-filtro.ativo { border-color: var(--action); background: var(--action); color: var(--on-action); }
 .tt-grupo h2 { margin: 0 0 4px; padding: 0 14px; font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
 .tt-lista { display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 14px; }
-.tt-linha { display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 14px; border: 0; border-radius: 12px; background: none; color: var(--ink);
+/* revisto em 2026-10-09: toda linha com 44 px e as mesmas colunas (ponto de 14 px, bot, meio, fim) em todos os grupos. */
+.tt-linha { display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: none; color: var(--ink);
   font: inherit; text-align: left; cursor: pointer; }
 .tt-linha:hover, .tt-linha:focus-visible { background: var(--surface-raised); }
 .tt-bot { display: inline-flex; flex: none; align-items: center; gap: 6px; width: 120px; font-size: 13px; overflow: hidden; }
 .tt-bot .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tt-bot b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tt-meio { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
-.tt-meio .etiqueta-origem { margin-left: 0; }
-.tt-titulo { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tt-passo { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tt-fim { flex: none; font-size: 12px; color: var(--ink-3); }
+.tt-meio .etiqueta-origem { flex: none; margin-left: 0; }
+.tt-linha:hover .etiqueta-origem, .tt-linha:focus-visible .etiqueta-origem { background: var(--surface); }
+.tt-titulo { flex: 0 1 auto; min-width: 0; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-passo { flex: 0 0 auto; min-width: 0; max-width: 40%; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-fim { flex: none; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .tt-vazio { margin: 20px 0; text-align: center; color: var(--ink-3); }
 .tr-grupo .gv-linha-txt b { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; white-space: normal; }
 .tr-grupo .etiqueta-origem { margin-left: 0; }
+/* No celular (revisto em 2026-10-09): a coluna do bot continua fixa (mais estreita) para os títulos alinharem, e a etiqueta
+   sai junto do passo — ela espremia o título até sumir ("pedido do Chico" comia a linha do Dev 1). */
 @media (max-width: 760px) {
-  .tt-bot { width: auto; }
-  .tt-passo { display: none; }
+  .tt-bot { width: 88px; }
+  .tt-passo, .tt-meio .etiqueta-origem { display: none; }
   .lugar-faixa-trabalhos { padding: 0 12px; }
 }
 

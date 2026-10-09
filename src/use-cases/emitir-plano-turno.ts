@@ -54,7 +54,7 @@ export type EntradaEmitirPlano = {
   aFazer?: boolean;
   /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
   semFerramentasDoNod?: boolean;
-  /** ADR-088: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
+  /** ADR-090: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
 };
 

@@ -3,7 +3,7 @@ import { nivelDaMemoriaLinux } from "../../../src/domain/memoria-mac.ts";
 import { montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 import { criarAmostradorMemoria } from "../../../src/adapters/executor/amostrador-memoria.ts";
 
-/** ADR-088: o bot numa máquina Linux da pessoa ouve onde está e não ouve "Mac", "Finder" nem "clone que ela já tem". */
+/** ADR-090: o bot numa máquina Linux da pessoa ouve onde está e não ouve "Mac", "Finder" nem "clone que ela já tem". */
 const base = {
   agente: { nome: "Ze 1", titulo: "Dev", descricao: "", modoAprovacao: "total" as const },
   memorias: [],
@@ -14,7 +14,7 @@ const base = {
   pastaDoBot: "ze-1",
 };
 
-describe("prompt por máquina (ADR-088)", () => {
+describe("prompt por máquina (ADR-090)", () => {
   it("Linux: nomeia a máquina, diz que os arquivos ficam nela e manda clonar na pasta do bot", () => {
     const p = montarPromptSistema({ ...base, maquina: { nome: "vm-sp", plataforma: "linux" } });
     expect(p).toContain("Você trabalha na máquina vm-sp de Marlon, um Linux sempre ligado, e não no Mac dela.");
@@ -33,7 +33,7 @@ describe("prompt por máquina (ADR-088)", () => {
   });
 });
 
-describe("memória numa máquina Linux (ADR-088)", () => {
+describe("memória numa máquina Linux (ADR-090)", () => {
   const meminfo = (total: number, livre: number) => `MemTotal:       ${total} kB\nMemFree:          100 kB\nMemAvailable:   ${livre} kB\n`;
   it("pela fração de MemAvailable: verde, amarela abaixo de 20%, vermelha abaixo de 10%", () => {
     expect(nivelDaMemoriaLinux(meminfo(8_000_000, 4_000_000))).toBe("verde");

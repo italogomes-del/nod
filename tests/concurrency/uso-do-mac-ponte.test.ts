@@ -108,9 +108,10 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
   });
 
-  it("'O quanto precisar' não segura nada; 'Pouco' segura já no processador apertando", async () => {
+  it("'O quanto precisar' não segura nada (nem com a memória crítica); 'Pouco' segura já no processador apertando", async () => {
     const livre = await montar("livre");
     const r1 = await livre.tarefa("rotina", "Rotina A");
+    // #219: só o disco crítico segura em "O quanto precisar" (o teste do disco, abaixo).
     expect(await livre.puxar(leitura("vermelha", "vermelha"))).toBe(r1);
 
     const pouco = await montar("pouco");
@@ -166,5 +167,24 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     await m.ponte.desconectar(m.machineId);
     await m.ponte.conectar({ machineId: m.machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO } });
     expect(await m.puxar()).toBe(outra);
+  });
+  it("#219: disco crítico (< 3 GB) no puxar — nem a task da pessoa começa, até em 'O quanto precisar'; em alerta (< 10 GB), ela sai; o evento leva o nível", async () => {
+    const m = await montar("livre");
+    const daPessoa = await m.tarefa("pessoa", "Liberar espaço");
+    const critico: LeituraMemoria = { ...leitura("verde"), disco: { livreMb: 2 * 1024, totalMb: 500 * 1024 } };
+    expect(await m.puxar(critico)).toBeNull();
+    expect((await m.eventosDePressao()).at(-1)?.dados).toMatchObject({ nivel: "verde", disco: "vermelha" });
+    // O relógio do teste não anda: os dois eventos têm o mesmo instante, então a ordem não serve — conta os dois.
+    expect(await m.puxar({ ...critico, disco: { livreMb: 8 * 1024, totalMb: 500 * 1024 } })).toBe(daPessoa);
+    expect((await m.eventosDePressao()).map((e) => e.dados.disco).sort()).toEqual(["amarela", "vermelha"]);
+  });
+
+  it("#219: disco em alerta e memória crítica (em 'Equilibrado') seguram só o segundo plano; a task da pessoa sai; sem disco (app anterior), nada", async () => {
+    const m = await montar();
+    const rotina = await m.tarefa("rotina", "Verificar o Slack");
+    const daPessoa = await m.tarefa("pessoa", "Responder o e-mail");
+    expect(await m.puxar(leitura("verde", "vermelha"))).toBe(daPessoa);
+    expect(await m.puxar({ ...leitura("verde"), disco: { livreMb: 8 * 1024, totalMb: 500 * 1024 } })).toBeNull();
+    expect(await m.puxar(leitura("verde", "verde"))).toBe(rotina);
   });
 });

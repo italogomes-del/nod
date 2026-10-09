@@ -142,6 +142,16 @@ describe("desktop: fronteiras HTTP", () => {
     }
     expect(() => memoria({ nivel: "laranja", totalMb: 10, porTurno: [] })).toThrow();
   });
+  it("#219: a leitura aceita o disco (opcional); fora do formato ele é ignorado sozinho — sem medição, nada espera", () => {
+    const disco = { livreMb: 17_408, totalMb: 477_184 };
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], disco });
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "verde", carga: 0.2 }, disco })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "verde", carga: 0.2 }, disco });
+    // Revisão do #224: null passa como null (o app mede e não conseguiu).
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco: null })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], disco: null });
+    for (const ruim of [{ livreMb: 20, totalMb: 10 }, { livreMb: -1, totalMb: 10 }, { livreMb: 1.5, totalMb: 10 }, { livreMb: 0, totalMb: 0 }, { livreMb: 1 }, "cheio", [1, 2]]) {
+      expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco: ruim })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
+    }
+  });
 
   it("servidor: trecho fora do formato cai sozinho; acima do teto, nada passa", () => {
     expect(trechos([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }, { ferramenta: "rm -rf /" }, { texto: "a", ferramenta: "b" }, 3])).toEqual([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }]);
@@ -288,5 +298,50 @@ describe("NOD-167: Codex sem app-server no anúncio do Mac", () => {
     expect(maquinas.get("m1")?.capacidades).toBeUndefined();
     await conectar({ ...base, harnesses: { "claude-cli": pronto }, capacidades: ["claude-cli"] });
     expect(maquinas.get("m1")?.capacidades).toBeUndefined();
+  });
+});
+
+describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const pasta = { trabalhoId: "00000000-0000-4000-8000-000000000009", pasta: "Dev 1/fix-abc123", quando: "encerrada" } as const;
+
+  it("servidor: a pessoa é a da chave; o relato só leva números conhecidos", async () => {
+    const pastasParaLimpar = vi.fn<NonNullable<PonteInternaNod["pastasParaLimpar"]>>().mockResolvedValue([pasta]);
+    const relatarLimpeza = vi.fn<NonNullable<PonteInternaNod["relatarLimpeza"]>>().mockResolvedValue(undefined);
+    const ponte: PonteInternaNod = { conectar: async () => undefined, puxar: async () => null, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null, pastasParaLimpar, relatarLimpeza };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    const chamar = async (nome: string, corpo: unknown = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+    await chamar("conectar", { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } });
+    expect(await chamar("limpeza", { pessoaId: "outra" })).toEqual({ status: 200, body: { pastas: [pasta] } });
+    expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId);
+    await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
+    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
+    // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
+    await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }));
+    // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
+    await chamar("limpeza/resultado", { relato: { adiada: true } });
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
+  });
+
+  it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {
+    const antigo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 404 })) });
+    expect(await antigo.ponte.pastasParaLimpar!("p")).toEqual([]);
+    const corpo = { pastas: [pasta, { trabalhoId: "x", pasta: 3, quando: "encerrada" }, { trabalhoId: "y", pasta: "a/b", quando: "agora" }] };
+    const f = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify(corpo), { headers: { "x-nod-versao-minima": "0.1.0" } }));
+    const novo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    expect(await novo.ponte.pastasParaLimpar!("p")).toEqual([pasta]);
+    await novo.ponte.relatarLimpeza!("p", { pastas: 1, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 5 });
+    expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
   });
 });

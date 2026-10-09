@@ -3,7 +3,7 @@ import { PLATAFORMAS_MAQUINA, type PlataformaMaquina } from "../contracts/ponte.
 import type { Escopo } from "../shared/types.ts";
 
 /**
- * Pareamento por código, sem navegador na máquina (ADR-088, o fluxo de dispositivo da RFC 8628). Puro e SEM banco
+ * Pareamento por código, sem navegador na máquina (ADR-090, o fluxo de dispositivo da RFC 8628). Puro e SEM banco
  * (src/services), em memória como o pareamento do Mac (ADR-069): um pedido vive minutos, e um reinício do servidor só
  * obriga a pessoa a rodar o pareamento de novo.
  *

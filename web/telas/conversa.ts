@@ -257,7 +257,7 @@ function anexosDe(m: Mensagem, estado: Estado): string {
 }
 
 /**
- * `destaVez` (ADR-088, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
+ * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
  * a própria linha da fila oferece "Rodar em <outra> desta vez", sem faixa por cima da conversa.
  */
 type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string } } | { tipo: "cancelando" } | { tipo: "cancelada" };
@@ -279,7 +279,7 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   if (estado.turnosVivos[emCurso.id]?.estado !== "na_fila") return null;
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "o agente";
-  // ADR-088: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
+  // ADR-090: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
   const doBot = agente ? maquinaDoBot(estado, agente) : null;
   // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");

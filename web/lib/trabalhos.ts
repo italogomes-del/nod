@@ -1,4 +1,4 @@
-import type { EstadoTrabalho, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
+import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { duracaoCurta } from "./relogio.ts";
 import { esc, hora } from "./render.ts";
@@ -42,6 +42,17 @@ export function abertosDoBot(estado: Pick<Estado, "trabalhos" | "conversas" | "t
   return trabalhosConhecidos(estado, conversaId)
     .filter((t) => t.agenteId === agenteId && aberto(t))
     .sort((a, b) => a.criadoEm - b.criadoEm);
+}
+
+/**
+ * O título para as listas (definido em 2026-10-09, pedido do Marlon): sem o parêntese técnico que o bot copia do sistema
+ * de fora — "Orquestrar a etapa … no Linear (team 55113aca-122d-4…)" vira "Orquestrar a etapa … no Linear". Só sai o
+ * parêntese com um id (8+ caracteres hexadecimais com algum dígito, inteiro ou cortado em "…"); o título inteiro continua
+ * no `title` da linha e na tela da task.
+ */
+export function tituloCurto(titulo: string): string {
+  const limpo = titulo.replace(/\s*\((?=[^()]*?(?<![0-9a-z])(?=[a-z]*\d)[0-9a-f]{8,})[^()]*(?:\)|$)/gi, "").trim();
+  return limpo || titulo;
 }
 
 /** A etiqueta de origem ("de você", "rotina", "pedido do Chico"): a mesma na faixa, na gaveta e em "Todos os trabalhos". */
@@ -108,12 +119,14 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
   const volta = voltaMarcada(t);
-  if (volta) return `volta ${quandoVolta(volta, agora)}`;
+  // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
+  // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
+  if (volta) return segurando && t.esperaDoMac ? textoDaEspera(t.esperaDoMac) : `volta ${quandoVolta(volta, agora)}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
       if (antes) return `começa depois da ${antes.titulo}`;
-      return seguradoPeloMac(t, segurando) ? "esperando o Mac aliviar" : "na fila";
+      return seguradoPeloMac(t, segurando) ? textoDaEspera(t.esperaDoMac) : "na fila";
     }
     case "precisa_de_voce":
       return t.ultimoPasso ?? "precisa de você";
@@ -135,8 +148,18 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
  * que ainda não começou, sem ninguém esperando e dentro da espera máxima. O servidor decide (`seguravel`, a mesma regra
  * do `reivindicar`); a tela só junta com o `segurando`.
  */
-export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel">, segurando: boolean): boolean {
-  return segurando && t.estado === "na_fila" && t.seguravel === true;
+export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel" | "esperaDoMac">, segurando: boolean): boolean {
+  return segurando && t.estado === "na_fila" && (t.seguravel === true || (t.esperaDoMac ?? null) !== null);
+}
+
+/**
+ * A espera na linha da task (definido em 2026-10-09, #219, com a frase base "esperando…" do #208): pela memória ou pelo
+ * disco, o motivo; pelo processador (ou servidor anterior, sem motivo), "esperando o Mac aliviar".
+ */
+export function textoDaEspera(motivo: MotivoEsperaMac | null | undefined): string {
+  if (motivo === "memoria") return "esperando o Mac liberar memória";
+  if (motivo === "disco") return "esperando espaço no disco";
+  return "esperando o Mac aliviar";
 }
 
 /**
@@ -144,10 +167,13 @@ export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel">, se
  * segundo plano espera. Mesma forma da pílula de memória (#196), com o "Ver" levando a Este Mac. A de memória, quando
  * existe, já diz o mesmo: esta não entra junto.
  */
-export function pilulaMac(segurando: boolean, esperando: number, comVer = true): string {
+export function pilulaMac(segurando: boolean, esperando: number, comVer = true, motivo: MotivoEsperaMac | null = null): string {
   if (!segurando) return "";
-  const n = esperando > 0 ? `<span class="pm-detalhe">· ${esperando} ${esperando === 1 ? "trabalho espera" : "trabalhos esperam"} o Mac aliviar</span>` : '<span class="pm-detalhe">· trabalho novo espera o Mac aliviar</span>';
-  const miolo = `${ICONE_MEMORIA}<b>Seu Mac está ocupado</b>${n}`;
+  // #219: com o disco quase cheio, a pílula diz o disco (é o que pede a mão da pessoa; o "Ver" leva a Este Mac).
+  const disco = motivo === "disco";
+  const oQue = disco ? "espaço no disco" : "o Mac aliviar";
+  const n = esperando > 0 ? `<span class="pm-detalhe">· ${esperando} ${esperando === 1 ? "trabalho espera" : "trabalhos esperam"} ${oQue}</span>` : `<span class="pm-detalhe">· trabalho novo espera ${oQue}</span>`;
+  const miolo = `${ICONE_MEMORIA}<b>${disco ? "Pouco espaço no disco" : "Seu Mac está ocupado"}</b>${n}`;
   return comVer
     ? `<div class="linha-centro-wrap" role="status"><button type="button" class="pilula-memoria amarela" data-act="secao-espaco" data-secao="este-mac">${miolo}<span class="pm-ver">Ver ›</span></button></div>`
     : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;
@@ -219,7 +245,9 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "acordaEm">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
-  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho esperando" aria-hidden="true"></span>';
+  // revisto em 2026-10-09: a classe era `esperando`, que já é a caixa "Esperando você entrar no …" do cartão de acesso
+  // (interface.css, `.esperando` com padding e fundo) — o ponto de 8 px virava um anel de ~30 px e empurrava a linha.
+  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.
@@ -227,6 +255,19 @@ export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<Trab
   if (t.estado === "falhou") return '<span class="ponto-trabalho feito falhou" aria-hidden="true">!</span>';
   if (!aberto(t)) return '<span class="ponto-trabalho feito" aria-hidden="true">✓</span>';
   return `<span class="ponto-trabalho ${esc(cor ?? "")}${t.estado === "rodando" ? " pulso-trab" : ""}" aria-hidden="true"></span>`;
+}
+
+/**
+ * A pílula da faixa recolhida (revisto em 2026-10-09: ela é o padrão da conversa com task aberta). O ponto diz o estado
+ * que mais importa — precisa de você (azul) > trabalhando (cor do bot, pulsando) > esperando fora do Mac (vazado âmbar)
+ * > na fila (vazado) — e o texto conta: "3 trabalhando", "2 esperando", com "· 1 precisa de você" quando há.
+ */
+export function resumoDaPilula(lista: readonly TrabalhoDto[]): { ponto: "precisa" | "trabalhando" | "fora-do-mac" | "na-fila"; texto: string; precisa: number } {
+  const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").length;
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).length;
+  const fora = lista.filter((t) => foraDoMac(t)).length;
+  const ponto = precisa ? "precisa" : trabalhando ? "trabalhando" : fora ? "fora-do-mac" : "na-fila";
+  return { ponto, texto: trabalhando ? "trabalhando" : precisa === lista.length ? (precisa === 1 ? "precisa de você" : "precisam de você") : "esperando", precisa };
 }
 
 /** O chip de memória das pranchas M1–M3: traço na cor do texto da pílula (currentColor), sem cor própria. */

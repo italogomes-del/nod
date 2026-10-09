@@ -60,6 +60,11 @@ export type OpcoesBoot = {
   redeMs?: number;
   segredoSessao?: string;
   staticDir?: string;
+  /**
+   * ADR-089 (revisão do #223): roda logo depois do listen dar certo e antes de qualquer turno — a limpeza dos grupos
+   * órfãos. Uma segunda cópia da mesma instância não pega a porta e nunca chega aqui, então nunca mata os bots da primeira.
+   */
+  aposEscutar?: () => Promise<void>;
 };
 
 export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean };
@@ -156,6 +161,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
   });
   const url = `http://127.0.0.1:${srv.port}`;
+  await o.aposEscutar?.();
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
@@ -215,6 +221,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     relogio: agora,
     intervaloMs: iv.orquestradorMs,
     listarPessoas: o.listarPessoas,
+    // #218: a sonda do passo 4 vale para o primeiro anúncio (sem um segundo `auth status` segundos depois).
+    inventarioInicial: inventarios[app.idDriver],
   });
   const scheduler = iniciarScheduler(
     db,

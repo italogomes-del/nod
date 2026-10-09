@@ -113,7 +113,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       return paraPreferencias(l);
     },
 
-    /** ADR-088: a máquina onde bot sem escolha trabalha (id da chave; null = qualquer uma). Quem chama já conferiu a chave. */
+    /** ADR-090: a máquina onde bot sem escolha trabalha (id da chave; null = qualquer uma). Quem chama já conferiu a chave. */
     async definirMaquinaPadrao(maquinaId: string | null): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
         insert into preferencias (tenant_id, owner_id, maquina_padrao_id)

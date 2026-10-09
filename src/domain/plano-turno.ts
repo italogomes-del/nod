@@ -174,7 +174,7 @@ export type EntradaPlano = {
   /** ADR-046: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
   anexos?: readonly AnexoMeta[];
   pessoaNome: string;
-  /** ADR-088: a máquina que roda o turno (nome e plataforma, do anúncio); ausente = o texto do Mac de sempre. */
+  /** ADR-090: a máquina que roda o turno (nome e plataforma, do anúncio); ausente = o texto do Mac de sempre. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
   contextoConversa?: string;

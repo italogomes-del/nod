@@ -215,7 +215,7 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-088: onde o bot trabalha (o id da chave da máquina; null = qualquer uma). Só a dona muda, como o modo; quem chama
+     * ADR-090: onde o bot trabalha (o id da chave da máquina; null = qualquer uma). Só a dona muda, como o modo; quem chama
      * já conferiu que a chave é dela. Devolve os bots alterados (os que não são dela, não existem ou foram excluídos ficam de fora).
      */
     async definirMaquina(ids: readonly string[], maquinaId: string | null): Promise<Agente[]> {

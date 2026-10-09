@@ -73,7 +73,7 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
  * rascunho, gaveta). Gerenciar agentes, Relatos e Computadores deixaram de ser telas e viraram seções daqui.
  */
 /**
- * ADR-088: o "Conectar uma máquina" (protótipo "Nod — Motor na VM", prancha 2): o comando, o código, a confirmação
+ * ADR-090: o "Conectar uma máquina" (protótipo "Nod — Motor na VM", prancha 2): o comando, o código, a confirmação
  * ("Conectar vm-sp?"), o login das IAs e a escolha dos bots. `chavesAntes`: as chaves que já existiam, para achar a nova.
  */
 export type ConectarMaquina = {
@@ -210,9 +210,9 @@ export type Estado = {
   aFazerAberto: Record<string, boolean>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
-  /** ADR-088: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
+  /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
   maquinas: MaquinasDto | null;
-  /** ADR-088: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
+  /** ADR-090: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
   conectarMaquina: ConectarMaquina | null;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
@@ -257,8 +257,13 @@ export type Estado = {
   trabalhoDetalhe: Record<string, TrabalhoDetalheDto>;
   /** Pressão de memória do Mac (#194): do `GET trabalhos` e do frame `memoria.mudou`; null = nenhum Mac falou. */
   pressao: NivelPressao | null;
-  /** A faixa de Trabalhos em cima do campo recolhida numa pílula (preferência da pessoa, `PUT preferencias`). */
-  faixaTrabalhosRecolhida: boolean;
+  /**
+   * O bot cuja faixa de Trabalhos a pessoa abriu nesta visita à conversa; null = pílula. revisto em 2026-10-09 (pedido
+   * do Marlon: "o default na UI deve ser a pílula, ela é sempre muito mais sutil"): a faixa nasce recolhida sempre, abre
+   * só no clique e fica aberta enquanto a pessoa está na conversa (ida e volta pela tela da task inclusive) — antes era
+   * uma preferência guardada em `PUT preferencias`, e o padrão era aberta. Ver `faixaAbertaAoNavegar`.
+   */
+  faixaTrabalhosAberta: string | null;
   /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
   usoDoMac: UsoDoMac;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
@@ -317,7 +322,8 @@ export type Acao =
   | { tipo: "hidratar-trabalho"; detalhe: TrabalhoDetalheDto; agora: number }
   /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
   | { tipo: "trabalho-sumiu"; id: string }
-  | { tipo: "faixa-trabalhos"; recolhida: boolean }
+  /** Abre (o id do bot) ou recolhe (null) a faixa de Trabalhos da conversa. */
+  | { tipo: "faixa-trabalhos"; agenteId: string | null }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
   | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
@@ -374,7 +380,7 @@ export const estadoInicial: Estado = {
   trabalhos: null,
   trabalhoDetalhe: {},
   pressao: null,
-  faixaTrabalhosRecolhida: false,
+  faixaTrabalhosAberta: null,
   usoDoMac: "equilibrado",
   tempoTaskAberto: null,
 };
@@ -428,6 +434,19 @@ function semConversa(atividades: Estado["atividades"], conversaId: string): Esta
   const restantes = { ...atividades };
   delete restantes[conversaId];
   return restantes;
+}
+
+/**
+ * A faixa de Trabalhos aberta depois de navegar (revisto em 2026-10-09: o padrão ao entrar na conversa é a pílula). Fica
+ * aberta enquanto a pessoa continua na conversa do bot: na mesma conversa, na tela de uma task (ou de uma linha) e ao
+ * voltar dela. Entrar na conversa vindo de outro lugar (outro bot, "Todos os trabalhos", Seu espaço) recolhe.
+ */
+export function faixaAbertaAoNavegar(aberta: string | null, de: Tela, para: Tela): string | null {
+  if (!aberta) return null;
+  if (para.tipo === "trabalho" || para.tipo === "linha") return aberta;
+  if (para.tipo !== "conversa" || para.agenteId !== aberta) return null;
+  const continua = de.tipo === "trabalho" || de.tipo === "linha" || (de.tipo === "conversa" && de.agenteId === aberta);
+  return continua ? aberta : null;
 }
 
 /**
@@ -655,6 +674,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         chaveEmitida: null,
         // A linha "Novas" vale enquanto a pessoa está na conversa; saiu, ela some.
         novasDesde: {},
+        faixaTrabalhosAberta: faixaAbertaAoNavegar(estado.faixaTrabalhosAberta, estado.tela, acao.tela),
       });
       return acao.tela.tipo === "trabalho" ? invalidar(navegado, `trabalho:${acao.tela.id}`) : navegado;
     }
@@ -822,7 +842,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return resolverInicio({ ...estado, tela: t.voltar, invalidacoes: estado.invalidacoes.filter((q) => q !== `trabalho:${acao.id}`) });
     }
     case "faixa-trabalhos":
-      return estado.faixaTrabalhosRecolhida === acao.recolhida ? estado : { ...estado, faixaTrabalhosRecolhida: acao.recolhida };
+      return estado.faixaTrabalhosAberta === acao.agenteId ? estado : { ...estado, faixaTrabalhosAberta: acao.agenteId };
     case "uso-do-mac":
       return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
     case "tempo-task":
@@ -935,7 +955,7 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
-  // ADR-088: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
+  // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
   if (estado.sessao && !estado.maquinas && (secao === "maquinas" || t.tipo === "conversa")) faltas.push("maquinas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");

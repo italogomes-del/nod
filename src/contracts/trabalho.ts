@@ -85,6 +85,12 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    */
   seguravel?: boolean;
   /**
+   * definido em 2026-10-09 (#219, emenda à ADR-085): por que o Mac segura este trabalho agora, quando segura — só na
+   * lista de `GET trabalhos`, que conhece a leitura dos Macs e o "uso do Mac". A linha diz "esperando o Mac liberar
+   * memória", "esperando espaço no disco" ou "esperando o Mac aliviar". Ausente ou null: o Mac não segura.
+   */
+  esperaDoMac?: MotivoEsperaMac | null;
+  /**
    * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
    * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.
    */
@@ -107,7 +113,24 @@ export type NivelPressao = "verde" | "amarela" | "vermelha";
  * mandou; app anterior à 0.4.0-rc.6 não manda) e `segurando` diz que trabalho novo em segundo plano está esperando o
  * Mac aliviar, pelo "uso do Mac" que a pessoa escolheu.
  */
-export type TrabalhosDto = { trabalhos: TrabalhoDto[]; pressao: NivelPressao | null; memoriaTotalMb: number | null; processador?: NivelPressao | null; cargaProcessador?: number | null; segurando?: boolean };
+export type TrabalhosDto = {
+  trabalhos: TrabalhoDto[];
+  pressao: NivelPressao | null;
+  memoriaTotalMb: number | null;
+  processador?: NivelPressao | null;
+  cargaProcessador?: number | null;
+  segurando?: boolean;
+  /**
+   * #219 (emenda à ADR-085, definido em 2026-10-09): o motivo de `segurando` (null = nada segura) e o disco do pior Mac
+   * (null = nenhum Mac mandou; app anterior não manda), com o nível e os limites do servidor (a web só mostra).
+   * `seguraTudoNovo`: disco crítico — além do segundo plano, a task da pessoa e o "Executar agora" também esperam.
+   */
+  motivoEspera?: MotivoEsperaMac | null;
+  seguraTudoNovo?: boolean;
+  disco?: DiscoDoMac | null;
+  /** Revisão do #224: algum Mac vivo tem app que mede o disco (sem disco e sem isto, o app é anterior). */
+  discoSuportado?: boolean;
+};
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };
@@ -128,4 +151,17 @@ export type LeituraProcessador = { nivel: NivelPressao; carga: number };
  * Memória que o Mac manda na renovação (#194): o nível do macOS e a soma do RSS do grupo de processos de cada turno.
  * ADR-085: também no `puxar` (sem `porTurno`), para o servidor saber do Mac mesmo sem turno rodando, e com o processador.
  */
-export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[]; processador?: LeituraProcessador };
+export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[]; processador?: LeituraProcessador; disco?: LeituraDisco | null };
+
+/**
+ * Disco do Mac (definido em 2026-10-09, #219, emenda à ADR-085): o espaço livre e o total do volume de `~/nod`, em MB
+ * (`statfs`; o livre é o que um processo sem privilégio pode usar). Opcional: app anterior não manda a chave; o app que
+ * mede e não conseguiu (o `statfs` falhou) manda `null` (revisão do #224: a tela diz "sem leitura", não "atualize o app").
+ */
+export type LeituraDisco = { livreMb: number; totalMb: number };
+
+/** O disco como a tela o vê (#219): a leitura, o nível e os dois limites (domain/memoria-mac.ts, `DISCO_*_MB`). */
+export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number; criticoMb: number };
+
+/** Por que o Mac segura trabalho novo (#219): o processador cheio, a memória em alerta ou crítica, ou o disco quase cheio. */
+export type MotivoEsperaMac = "processador" | "memoria" | "disco";

@@ -14,14 +14,15 @@ ou remover esse volume sem um pedido explícito de perda total dos dados.
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
 npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0010) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
-npm run check               # lint → typecheck → fence:domain → fence:migrations → unit → integration → conformidade → concurrency
+npm run check               # lint → typecheck → fence:domain → fence:migrations → unit → integration → conformidade → concurrency → db:test:limpar
+npm run diario:prod         # Nod diário sem modo dev (#218): build da web + só a API, que serve a página em 127.0.0.1:8888 (docs/ambiente-local-persistente.md)
 npm run e2e:fumaca          # doze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
 npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
 npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito
-npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test)
+npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test); roda no fim do check
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
 npm start                   # node src/adapters/http/server.ts → boot.ts (partições, compor, listen, registry, laços); é o mesmo CMD do Dockerfile

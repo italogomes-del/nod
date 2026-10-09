@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { rotasMotor } from "../../../src/adapters/http/rotas/motor.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../../helpers/servidor-de-teste.ts";
 
-/** ADR-088: o servidor serve o script de instalação e os três arquivos do motor; `/motor` é o endereço curto. */
-describe("rotas do motor (ADR-088)", () => {
+/** ADR-090: o servidor serve o script de instalação e os três arquivos do motor; `/motor` é o endereço curto. */
+describe("rotas do motor (ADR-090)", () => {
   let srv: ServidorDeTeste;
   let comPublica: ServidorDeTeste;
   beforeAll(async () => {

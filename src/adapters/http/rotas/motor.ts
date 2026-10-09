@@ -4,7 +4,7 @@ import type { Rota } from "../roteador.ts";
 import { ARQUIVOS_DO_MOTOR, scriptDeInstalacao, servidorParaScript } from "../motor-instalacao.ts";
 
 /**
- * ADR-088: o servidor distribui o motor da própria versão. `GET /api/motor/instalar` (e `/motor`, que redireciona para
+ * ADR-090: o servidor distribui o motor da própria versão. `GET /api/motor/instalar` (e `/motor`, que redireciona para
  * cá) devolve o script com o endereço deste servidor; `GET /api/motor/arquivos/<nome>` devolve os três arquivos de
  * dist/motor. Públicas e sem segredo: o motor só vale depois do pareamento, que exige a pessoa logada aprovando o código.
  */

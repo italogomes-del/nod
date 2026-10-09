@@ -73,7 +73,6 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
-import { guardarFaixaRecolhida, lerFaixaRecolhida } from "./lib/faixa-trabalhos.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
 /**
@@ -430,7 +429,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     return detalhe ? { tipo: "hidratar-trabalho", detalhe, agora } : { tipo: "trabalho-sumiu", id };
   }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
-  // ADR-088: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
+  // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
   if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
@@ -1120,10 +1119,6 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
     hidratarAvisosFechados(p.avisosFechados ?? []);
-    if (typeof p.faixaTrabalhosRecolhida === "boolean") {
-      guardarFaixaRecolhida(p.faixaTrabalhosRecolhida);
-      dispatch({ tipo: "faixa-trabalhos", recolhida: p.faixaTrabalhosRecolhida });
-    }
     if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
@@ -1154,12 +1149,10 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   if (task) navegar(task);
 }
 
-/** ADR-088: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
+/** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
 const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
-  // A faixa de Trabalhos nasce como a pessoa a deixou (cache local até as preferências chegarem).
-  dispatch({ tipo: "faixa-trabalhos", recolhida: lerFaixaRecolhida() });
   let ticks = 0;
   window.setInterval(() => {
     ticks += 1;
@@ -1176,7 +1169,7 @@ async function boot(): Promise<void> {
     for (const k of PARAMETROS_DO_PEDIDO) url.searchParams.delete(k);
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
-  // ADR-088: o link que o motor mostra no terminal (`?parear-maquina=K7QM-4F2X`) abre Máquinas › Conectar com o código,
+  // ADR-090: o link que o motor mostra no terminal (`?parear-maquina=K7QM-4F2X`) abre Máquinas › Conectar com o código,
   // depois do login se preciso (fica na sessionStorage da aba até a sessão existir).
   const codigoMaquina = url.searchParams.get("parear-maquina");
   if (codigoMaquina !== null) {
@@ -2119,12 +2112,11 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const id = el.dataset.id ?? null;
     dispatch({ tipo: "tempo-task", id: id && estado.tempoTaskAberto !== id ? id : null });
   },
-  // A faixa recolhe numa pílula e a pílula abre a faixa; a escolha vai para as preferências da pessoa.
+  // A pílula abre a faixa e a faixa recolhe na pílula. revisto em 2026-10-09: a escolha vale só enquanto a pessoa está na
+  // conversa (o padrão ao entrar é a pílula; reducer.ts, `faixaAbertaAoNavegar`) — não vai mais para as preferências.
   "faixa-trabalhos": (el) => {
-    const recolhida = el.dataset.recolher === "1";
-    guardarFaixaRecolhida(recolhida);
-    dispatch({ tipo: "faixa-trabalhos", recolhida });
-    void api?.gravarPreferencias({ faixaTrabalhosRecolhida: recolhida }).catch(() => undefined);
+    const t = estado.tela;
+    dispatch({ tipo: "faixa-trabalhos", agenteId: el.dataset.recolher === "1" || t.tipo !== "conversa" ? null : t.agenteId });
   },
   "filtro-trabalhos": (el) => {
     const f = el.dataset.id;
@@ -2261,7 +2253,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves"] })));
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
-  // ADR-088: Seu espaço › Máquinas.
+  // ADR-090: Seu espaço › Máquinas.
   // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
   // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
   "conectar-maquina": () => agir(async () => {
@@ -2923,7 +2915,7 @@ document.addEventListener("drop", (ev) => {
 });
 document.addEventListener("dragend", () => encerrarArrasto());
 
-// ---- Máquinas (ADR-088): conectar uma VM por código e escolher onde cada bot trabalha --------------------------------------
+// ---- Máquinas (ADR-090): conectar uma VM por código e escolher onde cada bot trabalha --------------------------------------
 function abrirCodigoDeMaquinaGuardado(): void {
   let codigo: string | null = null;
   try { codigo = window.sessionStorage.getItem(CHAVE_CODIGO_MAQUINA); window.sessionStorage.removeItem(CHAVE_CODIGO_MAQUINA); } catch { /* sem storage */ }
@@ -2989,7 +2981,8 @@ function dadosMenuConta(): DadosMenuConta {
     avisos: situacaoCurtaAvisos(canalAvisos.estado()),
     modoDev: estado.modoDev.ligado,
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
-    esteMac: estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
+    // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
+    esteMac: estado.trabalhos?.motivoEspera === "disco" ? "Disco quase cheio" : estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
   };
 }
 

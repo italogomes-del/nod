@@ -3,7 +3,7 @@ import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import { estadoInicial, type ConectarMaquina, type Estado } from "../../../web/estado/reducer.ts";
 import { maquinaDoBot, maquinaNova, renderMaquinas } from "../../../web/telas/maquinas.ts";
 
-/** ADR-088: Seu espaço › Máquinas e o "Conectar uma máquina" (protótipo "Nod — Motor na VM"). */
+/** ADR-090: Seu espaço › Máquinas e o "Conectar uma máquina" (protótipo "Nod — Motor na VM"). */
 const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): MaquinaDto => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: null, conectada: true, plataforma: "linux", ias: { "claude-cli": "pronto" }, gh: false, ...o });
 const bot = (id: string, nome: string, maquinaId: string | null = null) => ({ id, nome, titulo: "Dev", ownerId: "p", cor: "c-red", forma: "shape-square", conversaId: `c-${id}`, maquinaId, excluidoEm: null });
 const conectar = (o: Partial<ConectarMaquina> = {}): ConectarMaquina => ({ passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes: [], marcados: [], ...o });
@@ -12,7 +12,7 @@ function com(maquinas: MaquinaDto[], o: { padraoId?: string | null; conectar?: C
   return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, maquinas: { maquinas, padraoId: o.padraoId ?? null }, conectarMaquina: o.conectar ?? null, frota: { agentes: o.bots ?? [bot("a", "Ze 1", "vm"), bot("b", "Clarice")] } as never };
 }
 
-describe("Seu espaço › Máquinas (ADR-088)", () => {
+describe("Seu espaço › Máquinas (ADR-090)", () => {
   it("lista as máquinas com o estado, as IAs e quem trabalha em cada uma; cada bot tem o seletor", () => {
     const html = renderMaquinas(com([maquina("vm", "vm-sp"), maquina("mac", "MacBook", { plataforma: "darwin" }), maquina("velha", "vm-velha", { conectada: false, plataforma: null, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32) })]));
     expect(html).toContain("vm-sp");

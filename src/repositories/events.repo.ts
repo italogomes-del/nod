@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import { avisarOutbox } from "../shared/sinal-outbox.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 
 /**
@@ -34,6 +35,8 @@ export function eventsRepo(conn: Conn, escopo: Escopo) {
           values (${escopo.tenantId}, ${ev.pessoaDestinoId}, ${linha.id}, ${ev.kind}, ${conn.json(ev.dados ?? {})})`;
         ids.push(linha.id);
       }
+      // #218: acorda o despachante deste processo (o passo ocioso dele é de até 5 s); a entrega continua na consulta dele.
+      if (ids.length > 0) avisarOutbox();
       return { ids };
     },
 
