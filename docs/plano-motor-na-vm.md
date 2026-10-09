@@ -201,3 +201,121 @@ menor mudança, e a pré-ADR-030 (cérebro e proxy juntos, mãos onde estiverem)
   existem no compartilhado). Conferir o diretório de trabalho do Codex na VM na etapa 1.
 - **Tabela `maquinas`.** Existe desde a 0001 e parece sem uso; a etapa 4 decide se vira o registro das máquinas ou se
   o id da chave basta.
+
+## Revisão de engenharia (2026-10-09, /plan-eng-review)
+
+Rodada em modo autônomo a pedido do Marlon ("plan-eng-review → implementar → review → PR e merge" durante a noite).
+As perguntas da revisão foram decididas pela recomendação e ficam registradas aqui.
+
+### Passo 0 — escopo
+
+O plano toca mais de 8 arquivos (motor, ponte, pareamento, despacho, migração, web, prompt, instalação). A meta de
+amanhã é o teste real numa VM, então o escopo mínimo é o caminho inteiro de ponta a ponta: motor sem janela,
+pareamento por código, instalação, onde cada bot trabalha e o texto do prompt por máquina. Cortes decididos:
+
+- **"Este Mac" continua como está.** A seção nova "Máquinas" lista as máquinas e onde cada bot trabalha; juntar os
+  medidores de memória e processador nela fica para depois (o protótipo os mostra, mas o teste de amanhã não depende
+  disso).
+- **Rotina com a máquina fora do ar** não ganha caminho novo: o turno fica pendente para a máquina dela e o vencimento
+  que já existe (ADR-011/045) cuida da janela.
+- **Atualização do motor** é manual (`nod-motor atualizar`, que roda a instalação de novo); o timer diário fica para
+  depois.
+- **Instalação**: Debian e Ubuntu, x64 e arm64.
+
+### 1. Arquitetura
+
+```
+ VM (usuário nod, systemd)                 servidor (GCP)                     navegador / app do Mac
+ ┌──────────────────────────┐   HTTPS   ┌──────────────────────────┐        ┌───────────────────────┐
+ │ nod-motor (motor/main.ts)│──────────▶│ /api/pareamento/dispositivo│◀───────│ Máquinas › Conectar   │
+ │  ├ ponte-http (puxar...) │  só sai   │ /api/maquina/* (ponte)    │        │  digita o código      │
+ │  ├ laço + pool + drivers │           │ reivindicar: máquina do   │        │ Onde cada bot trabalha│
+ │  ├ proxy.mjs / hook.mjs  │           │  bot ou "desta vez"       │◀───────│ "Rodar no X desta vez"│
+ │  └ claude / codex / gh   │           │ plano.maquina → prompt    │        └───────────────────────┘
+ └──────────────────────────┘           └──────────────────────────┘
+```
+
+1. **(P1, 9/10) A identidade da máquina é o id da chave** (`ponte.ts`: `machineId: ctx.params.chaveId`). Se a pessoa
+   revogar a chave ou parear de novo, a máquina vira outro id e os bots presos à antiga ficariam pendentes para sempre.
+   Decisão: a preferência só vale se a chave existe, é da dona do turno e não foi revogada; senão o turno vai para
+   qualquer máquina. A tela mostra "sem máquina" nesse caso.
+2. **(P1, 8/10) Distribuição do motor.** Sem pipeline, ninguém instala. Decisão: o build da imagem do servidor gera
+   `dist/motor/` (esbuild, como `scripts/desktop/build.mjs`, reusando `desktop/proxy.ts` e `desktop/hook-nativas.ts`)
+   e o próprio servidor serve `GET /motor` (o script) e `GET /motor/arquivos/<nome>`. A versão do motor é a do
+   servidor que o instalou, então ele nunca fica abaixo da versão mínima daquele servidor.
+3. **(P2, 8/10) Pareamento por código em memória**, como o da ADR-069 (uma instância do servidor). Limite de 5
+   tentativas por código, prazo de 10 min, uso único.
+4. **(P2, 7/10) Segurança da instalação.** O motor roda como o usuário `nod`, nunca root; a chave fica em
+   `~nod/.config/nod-motor/conexao.json` (0600). O script só aceita o servidor por HTTPS (loopback em dev).
+5. **(P2, 8/10) O bot precisa saber em que máquina está.** O plano de turno ganha `maquina: {nome, plataforma}`,
+   preenchido no despacho pelo anúncio da máquina; o prompt troca "Mac" e "Finder" pelo nome da máquina em Linux.
+
+Falha realista por caminho novo: a VM perde a rede no meio do turno → lease vence, ADR-045 vale igual (coberto pelos
+testes existentes de lease); a VM fica fora com conversa na fila → a mensagem mostra a máquina e o "Rodar em X desta
+vez" (novo, com teste).
+
+### 2. Qualidade de código
+
+1. **(P2, 8/10) DRY no motor.** O `conectar()` do Electron monta registry, ponte, vigia e pool. O motor sem janela
+   reusa os mesmos módulos (`src/adapters/executor/*`, `desktop/vigia-ias.ts`, `desktop/ia-mac.ts`, que não usam
+   Electron); a costura duplicada fica em `motor/main.ts`, documentada. Mexer no `desktop/main.ts` agora exigiria
+   uma release do app para testar, e o motor do Mac não muda.
+2. **(P2, 7/10) Comentários longos de decisão** seguem o padrão do repo (data + ADR) nos pontos novos do `reivindicar`.
+
+### 3. Testes
+
+```
+CÓDIGO                                            FLUXOS
+[+] src/domain/maquina-do-turno.ts                 [+] Conectar uma VM
+  ├─ preferência válida / revogada / alheia         ├─ código certo → chave no escopo [integração]
+  └─ "desta vez" ganha da preferência  [unit]       ├─ código errado 5x → bloqueado [unit]
+[+] services/pareamento-dispositivo.ts              ├─ código vencido / repetido [unit]
+  ├─ abrir, aprovar, trocar, prazo, tentativas      └─ Origin → 403 [integração]
+[+] turnos.repo reivindicar                        [+] Bot preso à VM
+  ├─ bot da VM não sai para o Mac   [concorrência]  ├─ Mac e VM puxando: só a VM leva
+  ├─ chave revogada → qualquer máquina              ├─ VM fora + "desta vez no Mac" → Mac leva
+  └─ "desta vez" vai para a escolhida               └─ padrão da pessoa vale para bot sem escolha
+[+] prompt-sistema por plataforma  [unit + refs]   [+] Motor sem janela [→E2E manual na VM amanhã]
+[+] amostrador no Linux (/proc/meminfo) [unit]
+[+] web: texto da fila com a máquina fora [unit]
+```
+
+Gaps conscientes: o motor rodando de verdade numa VM com Claude real fica para o teste do Marlon (custa assinatura e
+precisa da VM).
+
+### 4. Desempenho
+
+Sem achados. O `reivindicar` ganha um join com `preferencias` e uma busca por chave em `maquina_tokens`, pela
+chave primária, dentro da transação que já existe.
+
+### NÃO entra agora
+
+- Juntar "Este Mac" em "Máquinas" (medidores por máquina na tela nova).
+- Timer de atualização automática do motor.
+- Caminho B (criar a VM pela API do provedor) e computadores dos bots no motor.
+- Sincronizar arquivos entre VM e Mac (decisão do Marlon: os arquivos ficam onde o bot trabalha).
+
+### O que já existe e é reusado
+
+Laço, pool, drivers, sonda e ponte HTTP (`src/adapters/executor/*`); vigia das IAs e login (`desktop/vigia-ias.ts`,
+`desktop/ia-mac.ts`); `emitirChaveMaquina` (ADR-031); o padrão de pareamento em memória (`pareamento-maquina.ts`);
+os bundles de proxy e hook do desktop.
+
+### Paralelização
+
+Implementação sequencial: motor, ponte, despacho e prompt compartilham `src/contracts/ponte.ts` e
+`src/contracts/plano-turno.ts`.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 7 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | protótipo aprovado pelo Marlon |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **VERDICT:** ENG CLEARED — pronto para implementar (decisões tomadas pela recomendação, modo autônomo).
+
+NO UNRESOLVED DECISIONS
