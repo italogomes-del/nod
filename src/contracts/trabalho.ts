@@ -122,12 +122,12 @@ export type TrabalhosDto = {
   segurando?: boolean;
   /**
    * #219 (emenda à ADR-085, definido em 2026-10-09): o motivo de `segurando` (null = nada segura) e o disco do pior Mac
-   * (null = nenhum Mac mandou; app anterior não manda). `seguraTudoNovo`: memória crítica ou disco quase cheio — além do
-   * segundo plano, a task da pessoa e o "Executar agora" também esperam.
+   * (null = nenhum Mac mandou; app anterior não manda), com o nível e os limites do servidor (a web só mostra).
+   * `seguraTudoNovo`: disco crítico — além do segundo plano, a task da pessoa e o "Executar agora" também esperam.
    */
   motivoEspera?: MotivoEsperaMac | null;
   seguraTudoNovo?: boolean;
-  disco?: LeituraDisco | null;
+  disco?: DiscoDoMac | null;
 };
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
@@ -156,6 +156,9 @@ export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: {
  * (`statfs`; o livre é o que um processo sem privilégio pode usar). Opcional: app anterior não manda.
  */
 export type LeituraDisco = { livreMb: number; totalMb: number };
+
+/** O disco como a tela o vê (#219): a leitura, o nível e os dois limites (domain/memoria-mac.ts, `DISCO_*_MB`). */
+export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number; criticoMb: number };
 
 /** Por que o Mac segura trabalho novo (#219): o processador cheio, a memória em alerta ou crítica, ou o disco quase cheio. */
 export type MotivoEsperaMac = "processador" | "memoria" | "disco";

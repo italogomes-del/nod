@@ -242,8 +242,9 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const titulo = t?.titulo ?? p.titulo;
     const dono = t?.agenteId ?? donoDaConversa ?? "";
     // A pílula de memória entra embaixo da task que abriu sob pressão (#196): a mais recente que ainda está aberta. #219:
-    // com o disco quase cheio (nenhuma task nova começa), a do disco no lugar dela, com o "Ver" para Este Mac.
-    const disco = (): string => (estado.trabalhos?.motivoEspera === "disco" ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
+    // com o disco crítico (nenhuma task nova começa, nem a que a pessoa pediu), a do disco no lugar dela, com o "Ver" para
+    // Este Mac. Com o disco só em alerta a task da pessoa começa: o aviso fica em "Todos os trabalhos" e Este Mac.
+    const disco = (): string => (estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
     const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(estado.pressao, lista.filter(aberto).length) : "";
     planos.set(m.id, {
       tipo: "linha",

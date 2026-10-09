@@ -126,18 +126,19 @@ export function piorNivel(a: NivelPressao | null, b: NivelPressao | null): Nivel
 }
 
 /**
- * Disco (definido em 2026-10-09, #219, emenda à ADR-085): abaixo de 10 GB livres OU de 5% do volume, trabalho novo
- * espera. Em 09/10 o Mac do Marlon estava com 17 GB livres de 466 GB (3,6%), o swap cheio e o Mac inteiro lento; cada
- * task nova cria worktree, `node_modules` e banco de teste. Os 10 GB seguram o Mac pequeno (256 GB: 5% = 12,8 GB); os 5%,
- * o grande, onde 10 GB acabam numa tarde de bots.
+ * Disco (definido em 2026-10-09, #219, emenda à ADR-085; revisto no mesmo dia pelo coordenador do épico #221, na
+ * ausência do Marlon): dois limites absolutos de espaço livre, num lugar só. Abaixo de 10 GB é ALERTA — trabalho novo em
+ * segundo plano espera, como a memória em alerta; abaixo de 3 GB é CRÍTICO — nada novo começa, em qualquer uso (trava de
+ * segurança: commit, npm e Postgres falham no meio sem espaço). Sem regra percentual: 5% de 466 GB (23 GB) seguraria um
+ * disco grande com folga de sobra. Em 09/10 o Mac do Marlon tinha 17 GB livres de 466 GB: nenhum dos dois.
  */
-export const DISCO_LIVRE_MINIMO_MB = 10 * 1024;
-export const DISCO_LIVRE_MINIMO_FRACAO = 0.05;
+export const DISCO_ALERTA_MB = 10 * 1024;
+export const DISCO_CRITICO_MB = 3 * 1024;
 
-/** O disco está abaixo do mínimo? Sem leitura (ou leitura sem total), não: nada espera por um disco que ninguém mediu. */
-export function discoApertado(d: LeituraDisco | null | undefined): boolean {
-  if (!d || !(d.totalMb > 0) || !(d.livreMb >= 0)) return false;
-  return d.livreMb < DISCO_LIVRE_MINIMO_MB || d.livreMb / d.totalMb < DISCO_LIVRE_MINIMO_FRACAO;
+/** O nível do disco pelo espaço livre: amarela abaixo de 10 GB, vermelha abaixo de 3 GB. Sem leitura válida, null. */
+export function nivelDoDisco(d: LeituraDisco | null | undefined): NivelPressao | null {
+  if (!d || !(d.totalMb > 0) || !(d.livreMb >= 0)) return null;
+  return d.livreMb < DISCO_CRITICO_MB ? "vermelha" : d.livreMb < DISCO_ALERTA_MB ? "amarela" : "verde";
 }
 
 /**
@@ -162,30 +163,39 @@ export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigi
 }
 
 /**
- * O portão do Mac no `reivindicar` (definido em 2026-10-09, #219, emenda à ADR-085), pela leitura de UM Mac:
- * - `tudoNovo`: memória crítica (vermelha) ou disco abaixo do mínimo — nada novo começa, nem a task da pessoa, nem o
- *   "Executar agora", nem o que passou da espera máxima; vale em qualquer "uso do Mac", até em "O quanto precisar".
- * - `fundo`: o de antes (`deveSegurar`): só trabalho novo em segundo plano espera; memória em alerta ou processador.
- * O motivo vai para a linha da task. Disco antes de memória: é o que pede a mão da pessoa (a memória alivia sozinha).
- * Sem leitura, nada espera.
+ * O portão do Mac no `reivindicar` (definido em 2026-10-09, #219, emenda à ADR-085; revisto no mesmo dia pelo
+ * coordenador do épico #221), pela leitura de UM Mac:
+ * - `tudoNovo`: disco crítico (< 3 GB) — nada novo começa, nem a task da pessoa, nem o "Executar agora"; vale em
+ *   qualquer uso, até em "O quanto precisar".
+ * - `fundo`: só trabalho novo em segundo plano espera (rotina, pedido de colega, a volta marcada); o que a pessoa pediu
+ *   passa. Por memória crítica, disco em alerta, memória em alerta ou processador (`deveSegurar`), nunca em "livre".
+ * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h.
+ * O motivo vai para a linha da task, pela gravidade: disco crítico, memória crítica, disco em alerta, memória em alerta,
+ * processador. Sem leitura, nada espera.
  */
-export type PortaoDoMac = { fundo: MotivoEsperaMac | null; tudoNovo: MotivoEsperaMac | null };
+export type PortaoDoMac = { fundo: MotivoEsperaMac | null; tudoNovo: MotivoEsperaMac | null; semPrazo: boolean };
+
+const PORTAO_ABERTO: PortaoDoMac = { fundo: null, tudoNovo: null, semPrazo: false };
 
 export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; disco?: LeituraDisco | null } | null): PortaoDoMac {
-  if (!l) return { fundo: null, tudoNovo: null };
-  const tudoNovo: MotivoEsperaMac | null = discoApertado(l.disco) ? "disco" : l.memoria === "vermelha" ? "memoria" : null;
-  if (tudoNovo) return { fundo: tudoNovo, tudoNovo };
-  if (!deveSegurar(uso, l.memoria, l.processador)) return { fundo: null, tudoNovo: null };
-  return { fundo: peloMenos(l.memoria, "amarela") ? "memoria" : "processador", tudoNovo: null };
+  if (!l) return PORTAO_ABERTO;
+  const disco = nivelDoDisco(l.disco);
+  if (disco === "vermelha") return { fundo: "disco", tudoNovo: "disco", semPrazo: false };
+  if (uso === "livre") return PORTAO_ABERTO;
+  if (l.memoria === "vermelha") return { fundo: "memoria", tudoNovo: null, semPrazo: true };
+  if (disco === "amarela") return { fundo: "disco", tudoNovo: null, semPrazo: false };
+  if (!deveSegurar(uso, l.memoria, l.processador)) return PORTAO_ABERTO;
+  return { fundo: peloMenos(l.memoria, "amarela") ? "memoria" : "processador", tudoNovo: null, semPrazo: false };
 }
 
 /**
  * Por que o Mac segura este trabalho agora (null = não segura). É a regra do `reivindicar` (turnos.repo.ts): com
- * `tudoNovo`, todo trabalho que ainda não começou; com `fundo`, só o que `seguravelPeloMac` aceita.
+ * `tudoNovo`, todo trabalho que ainda não começou; com `fundo`, só o que `seguravelPeloMac` aceita (com `semPrazo`,
+ * também o que passou da espera máxima).
  */
 export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando">, portao: PortaoDoMac, agora: number): MotivoEsperaMac | null {
   if (t.estado !== "na_fila") return null;
   if (portao.tudoNovo && t.iniciadoEm === null) return portao.tudoNovo;
-  if (portao.fundo && seguravelPeloMac(t, agora)) return portao.fundo;
+  if (portao.fundo && seguravelPeloMac(portao.semPrazo ? { ...t, criadoEm: agora } : t, agora)) return portao.fundo;
   return null;
 }

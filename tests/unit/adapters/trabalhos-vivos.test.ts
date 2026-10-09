@@ -77,21 +77,22 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     expect(v.daMaquina("mac-a")).toBeNull();
   });
 
-  it("#219: o disco de cada Mac vai no daMaquina; a pessoa vê o pior (o abaixo do mínimo); cruzar o mínimo vira frame", () => {
+  it("#219: o disco de cada Mac vai no daMaquina; a pessoa vê o pior (o de menos espaço livre); mudar de nível vira frame", () => {
     const v = criarTrabalhosVivos(() => 0);
     const comDisco = (livreGb: number, totalGb = 500) => ({ ...leitura("verde"), disco: { livreMb: livreGb * 1024, totalMb: totalGb * 1024 } });
     expect(v.registrarMemoria("p", "mac-a", comDisco(200)).mudou).toBe(false);
     expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: null, disco: { livreMb: 200 * 1024, totalMb: 500 * 1024 } });
-    expect(v.registrarMemoria("p", "mac-b", comDisco(30, 1000)).mudou).toBe(true); // 3% de 1 TB: abaixo do mínimo
-    expect(v.memoria("p")?.disco).toEqual({ livreMb: 30 * 1024, totalMb: 1000 * 1024 });
-    expect(v.registrarMemoria("p", "mac-a", comDisco(190))).toMatchObject({ mudou: false, disco: true });
-    expect(v.registrarMemoria("p", "mac-b", comDisco(300, 1000))).toMatchObject({ mudou: true, disco: false });
-    // Os dois folgados: o de menor fração livre.
-    expect(v.memoria("p")?.disco).toEqual({ livreMb: 300 * 1024, totalMb: 1000 * 1024 });
+    expect(v.registrarMemoria("p", "mac-b", comDisco(8, 1000))).toMatchObject({ mudou: true, disco: "amarela" });
+    expect(v.memoria("p")?.disco).toEqual({ livreMb: 8 * 1024, totalMb: 1000 * 1024 });
+    expect(v.registrarMemoria("p", "mac-a", comDisco(190))).toMatchObject({ mudou: false, disco: "amarela" });
+    expect(v.registrarMemoria("p", "mac-b", comDisco(2, 1000))).toMatchObject({ mudou: true, disco: "vermelha" });
+    expect(v.registrarMemoria("p", "mac-b", comDisco(300, 1000))).toMatchObject({ mudou: true, disco: "verde" });
+    // Os dois folgados: o de menos espaço livre (os limites são absolutos).
+    expect(v.memoria("p")?.disco).toEqual({ livreMb: 190 * 1024, totalMb: 500 * 1024 });
     // Mac sem disco (app anterior) não apaga o dos outros nem segura nada.
     v.registrarMemoria("p", "mac-c", leitura("verde"));
     expect(v.daMaquina("mac-c")?.disco).toBeNull();
-    expect(v.memoria("p")?.disco).toEqual({ livreMb: 300 * 1024, totalMb: 1000 * 1024 });
+    expect(v.memoria("p")?.disco).toEqual({ livreMb: 190 * 1024, totalMb: 500 * 1024 });
   });
 
   it("a última ferramenta do turno vivo (o último passo da faixa) some quando o turno acaba", () => {

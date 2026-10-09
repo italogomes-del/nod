@@ -222,16 +222,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
       const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
       const uso = pressao ? await usoDoMac(escopo) : "livre";
-      // #219 (emenda à ADR-085): memória crítica ou disco quase cheio seguram TODO trabalho novo (`segurarNovo`), em
-      // qualquer uso; o resto do portão é o de antes (só o segundo plano, pelo uso).
+      // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
+      // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
       const portao = portaoDoMac(uso, pressao);
       const segurarFundo = portao.fundo !== null;
       const segurarNovo = portao.tudoNovo !== null;
+      const fundoSemPrazo = portao.semPrazo;
       const espacarFundo = uso !== "livre" && agora() - (ultimoFundo.get(maquina.machineId) ?? -Infinity) < ESPACO_FUNDO_MS;
-      const situacao = segurarNovo ? `tudo:${portao.tudoNovo}` : segurarFundo ? `fundo:${portao.fundo}` : "";
+      const situacao = segurarNovo ? `tudo:${portao.tudoNovo}` : segurarFundo ? `fundo:${portao.fundo}${fundoSemPrazo ? ":sem-prazo" : ""}` : "";
       if ((segurando.get(maquina.machineId) ?? "") !== situacao) {
         segurando.set(maquina.machineId, situacao);
-        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
+        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
       }
       const antes = agora();
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
@@ -246,7 +247,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());

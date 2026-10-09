@@ -1079,10 +1079,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
             // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
             if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
-            if (t.acordarEm && (p.espacarFundo === true || (p.segurarFundo === true && t.acordarEm > p.agora - ESPERA_MAXIMA_FUNDO_MS))) return false;
-            // #219: memória crítica ou disco quase cheio — nenhum trabalho novo, nem a volta marcada.
+            if (t.acordarEm && (p.espacarFundo === true || (p.segurarFundo === true && (p.fundoSemPrazo === true || t.acordarEm > p.agora - ESPERA_MAXIMA_FUNDO_MS)))) return false;
+            // #219: disco crítico — nenhum trabalho novo, nem a volta marcada; memória crítica — o segundo plano sem prazo.
             if (p.segurarNovo === true && (t.acordarEm || (dono && dono.iniciadoEm === null))) return false;
-            return !(dono && p.segurarFundo === true && seguravelPeloMac(dono, p.agora));
+            return !(dono && p.segurarFundo === true && seguravelPeloMac(p.fundoSemPrazo === true ? { ...dono, criadoEm: p.agora } : dono, p.agora));
           })
           .sort((x, y) => Number(fimDaFila(x)) - Number(fimDaFila(y)) || x.criadoEm - y.criadoEm);
         const t = candidatos[0];

@@ -3,7 +3,7 @@ import { statfs } from "node:fs/promises";
 import { availableParallelism, homedir } from "node:os";
 import { join } from "node:path";
 import type { LeituraDisco, LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
-import { cargaDoLoadavg, discoApertado, discoDoStatfs, discoSimulado, leituraDoTurno, nivelDaPressao, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
+import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoTurno, nivelDaPressao, nivelDoDisco, nivelDoProcessador, pressaoSimulada, somarPorGrupo } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -141,8 +141,8 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     amostrando ??= (async () => {
       try {
         const [n, r, p, d] = await Promise.all([lerNivel(), lerGrupos(), lerProcessador(), daMaquinaLe ? lerDisco() : Promise.resolve(null)]);
-        // #219: o disco muda a cada gravação; a amostra só sobe quando ele cruza o mínimo (o que muda o portão).
-        if (n !== nivel || p?.nivel !== processador?.nivel || discoApertado(d) !== discoApertado(disco) || (d === null) !== (disco === null) || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        // #219: o disco muda a cada gravação; a amostra só sobe quando ele muda de nível (o que muda o portão).
+        if (n !== nivel || p?.nivel !== processador?.nivel || nivelDoDisco(d) !== nivelDoDisco(disco) || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
         nivel = n;
         rss = r;
         processador = p;

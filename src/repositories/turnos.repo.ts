@@ -197,7 +197,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * fixado num harness que não está pronto em NENHUMA delas; o despacho o recusa nomeando o harness. Sem isso ele
      * ficava pendente sem aviso no app do Mac. O fixado que outra máquina tem pronto continua esperando por ela.
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         const [l] = await trx<Linha[]>`
@@ -231,14 +231,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   -- Mesma regra de seguravelPeloMac (domain/memoria-mac.ts).
                   ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id
                     and w.iniciado_em is null and w.origem in ('rotina', 'colega') and not w.pessoa_esperando
-                    ${p.espacarFundo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
+                    ${p.espacarFundo === true || p.fundoSemPrazo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
                   -- ADR-086 (revisão do #212): a volta marcada ("me chame às 16:00") também é processo novo no Mac sem
                   -- ninguém esperando: segue as mesmas regras, contando a espera máxima a partir da hora marcada.
-                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
-                  -- definido em 2026-10-09 (#219, emenda à ADR-085): memória crítica ou disco quase cheio — NENHUM trabalho
-                  -- novo começa, de qualquer origem, mesmo com a pessoa esperando ou passado da espera máxima, nem a volta
-                  -- marcada. O que já começou segue (o turno seguinte de uma task em andamento não espera). Mesma regra de
-                  -- esperaDoMac (domain/memoria-mac.ts).
+                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true || p.fundoSemPrazo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
+                  -- definido em 2026-10-09 (#219, emenda à ADR-085): com a memória crítica (fundoSemPrazo) o segundo plano
+                  -- espera mesmo passado da espera máxima. Com o disco crítico (segurarNovo) NENHUM trabalho novo começa, de
+                  -- qualquer origem, mesmo com a pessoa esperando, nem a volta marcada. O que já começou segue (o turno
+                  -- seguinte de uma task em andamento não espera). Mesma regra de esperaDoMac (domain/memoria-mac.ts).
                   ${p.segurarNovo !== true ? trx`` : trx`and t.acordar_em is null and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null)`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))

@@ -94,53 +94,75 @@ coordenador abre várias de uma vez. Separar "a pessoa pediu" de "o bot decidiu 
 ## Emenda de 2026-10-09 — memória crítica e disco no mesmo portão (#219, épico #221)
 
 Em 09/10 o Mac do Marlon (16 GB, 466 GB) ficou inutilizável com o Nod rodando: swap em 5,4 de 6 GB, disco do usuário
-em 97% (17 GB livres) e load ~430. O portão acima olha o processador e a memória em alerta, mas trata a memória crítica
-como a de alerta (só o segundo plano espera) e não olha o disco. Cada task nova cria worktree, `node_modules` e banco de
-teste; cada `claude -p` usa ~210–270 MB.
+em 97% (17 GB livres) e load ~430. O portão acima olha o processador e a memória em alerta, trata a memória crítica como
+a de alerta e não olha o disco. Cada task nova cria worktree, `node_modules` e banco de teste; cada `claude -p` usa
+~210–270 MB. Os limiares e o que cada nível segura foram decididos pelo coordenador do épico #221 em 09/10, na ausência
+do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
 
 1. **Disco na leitura.** O amostrador lê o espaço do volume de `~/nod` (o da casa, antes de a pasta existir) com
    `statfs`, sem processo novo, a cada 30 s: `LeituraMemoria.disco = { livreMb, totalMb }`, livre = `bavail`. Vai no
    `puxar` e na renovação, como o processador. É opcional: app anterior não manda, e leitura fora do formato é ignorada
    sozinha (`discoValido`, ponte-validacao.ts). Fora do macOS não há leitura da máquina (item 7), então nada é medido
    nem segurado. `NOD_SIMULAR_DISCO` ("8" = 8 GB livres de 500; "17/466") força a leitura em testes e UAT. O número da
-   amostra só sobe quando o disco cruza o mínimo, não a cada MB gravado.
-2. **O portão ganha um segundo degrau** (`portaoDoMac`, src/domain/memoria-mac.ts):
-   - **`tudoNovo`: memória crítica (vermelha) ou disco abaixo de 10 GB livres OU de 5% do volume**
-     (`DISCO_LIVRE_MINIMO_MB`, `DISCO_LIVRE_MINIMO_FRACAO`). Nenhum trabalho novo começa, de qualquer origem: nem a task
-     que a pessoa abriu, nem o "Executar agora", nem o que passou da espera máxima de 1 h, nem a volta marcada (ADR-086).
-     O `reivindicar` recebe `segurarNovo` e só entrega turno de trabalho com `iniciado_em` preenchido e sem `acordar_em`.
-     Conversa, ligação e o turno seguinte de uma task que já começou seguem. Nada que roda é morto ou pausado.
-   - **`fundo`: o de antes** (`deveSegurar`, itens 3 e 4): com a memória em alerta ou o processador, só trabalho novo em
-     segundo plano espera, e quem a pessoa espera passa.
-   - Os dois limiares valem juntos: os 10 GB seguram o Mac pequeno (256 GB: 5% = 12,8 GB); os 5%, o grande, onde 10 GB
-     acabam numa tarde de bots. O Mac do Marlon de 09/10 (3,6% livres) seguraria.
-3. **Vale em qualquer "uso do Mac", até em "O quanto precisar".** O uso diz quanto do processador e da memória a pessoa
-   cede aos bots; memória crítica (o macOS começa a fechar apps) e disco quase cheio (git, npm e Postgres falham no meio)
-   estragam o Mac e o próprio trabalho em qualquer escolha. É a mudança de comportamento desta emenda para quem usa
-   "O quanto precisar": antes nada esperava.
-4. **Sem espera máxima no degrau `tudoNovo`.** O item 4 rejeitou "segurar sem prazo" porque a espera não aparecia em lugar
+   amostra só sobe quando o disco muda de nível, não a cada MB gravado.
+2. **Dois limites absolutos de disco, num lugar só** (`DISCO_ALERTA_MB` = 10 GB, `DISCO_CRITICO_MB` = 3 GB,
+   `nivelDoDisco`, src/domain/memoria-mac.ts). Sem regra percentual: 5% de 466 GB (23 GB) seguraria um disco grande
+   com folga de sobra. A tela recebe o nível e os dois limites do servidor (`DiscoDoMac`), nunca os repete.
+3. **O que cada nível segura** (`portaoDoMac`), pela leitura de um Mac:
+
+   | Leitura | Pouco / Equilibrado | O quanto precisar |
+   |---|---|---|
+   | Disco crítico (< 3 GB) | nada novo começa | nada novo começa |
+   | Memória crítica | segundo plano, **sem** a espera máxima de 1 h | nada espera |
+   | Disco em alerta (< 10 GB) | segundo plano, com a espera máxima | nada espera |
+   | Memória em alerta / processador | como antes (`deveSegurar`) | nada espera |
+
+   - "Segundo plano" é o de antes (`seguravelPeloMac`): rotina, pedido de colega e a volta marcada (ADR-086). O pedido
+     explícito da pessoa ("Executar agora", task pedida na conversa) passa, inclusive com a memória crítica.
+   - "Nada novo começa" (`segurarNovo` no `reivindicar`) só entrega turno de trabalho com `iniciado_em` preenchido e sem
+     `acordar_em`. Vale para a task da pessoa, o "Executar agora", o que passou da espera máxima e a volta marcada. É a
+     única trava que vale em "O quanto precisar": sem espaço, commit, npm e Postgres falham no meio, em qualquer
+     escolha.
+   - "Sem a espera máxima" (`fundoSemPrazo`): com a memória crítica, o segundo plano que já espera há mais de 1 h
+     continua esperando, em vez de rodar mesmo assim.
+   - Conversa, ligação e o turno seguinte de uma task que já começou nunca esperam. Nada que roda é morto ou pausado.
+   - O Mac do Marlon de 09/10 (17 GB livres) não seguraria nada pelo disco.
+4. **Sem espera máxima no disco crítico.** O item 4 rejeitou "segurar sem prazo" porque a espera não aparecia em lugar
    nenhum; agora ela aparece na linha da task, na pílula e em Este Mac, com o motivo. Rotina não empilha enquanto espera
    (a execução seguinte é `pulada` com a anterior aberta, ADR-045).
-5. **Motivo visível** (frase base "esperando…" do #208). `GET trabalhos` ganha `motivoEspera` (`processador` | `memoria` |
-   `disco`), `seguraTudoNovo` e `disco` (o pior Mac: o abaixo do mínimo primeiro); cada trabalho segurado ganha
-   `esperaDoMac` (`esperaDoMac` do domínio, a mesma regra do `reivindicar`). A linha diz "esperando o Mac liberar
-   memória", "esperando espaço no disco" ou, pelo processador, "esperando o Mac aliviar". `segurando` continua (o pior
-   Mac segura algo). O disco cruzar o mínimo também vira o frame `memoria.mudou` (`discoApertado` no evento).
-6. **Uma pílula só, sem modal.** Com o disco abaixo do mínimo, a pílula "Pouco espaço no disco · N trabalhos esperam
-   espaço no disco · Ver ›" (para Este Mac) toma o lugar da de memória em "Todos os trabalhos" e embaixo da última task
-   aberta no chat; sem disco, fica a de memória (quando há) ou "Seu Mac está ocupado", como antes. O menu da conta diz
-   "Disco quase cheio" ao lado de Este Mac.
-7. **Este Mac** mostra memória, processador e disco em barras com o status curto à vista ("crítica", "17 GB livres") e o
-   porquê atrás de um clique (`<details>`): o que o macOS disse e o que espera por isso; o livre, o total e o mínimo do
-   disco, e onde ficam as pastas dos bots. O grupo de quem espera leva o motivo ("Esperando espaço no disco · 2").
-8. **Medir.** `fundo_segurado` / `fundo_solto` saem também na troca de motivo, com `motivo`, `tudo_novo` e
+5. **Motivo visível** (frase base "esperando…" do #208). `GET trabalhos` ganha `motivoEspera` (`processador`, `memoria`
+   ou `disco`, pela gravidade: disco crítico, memória crítica, disco em alerta, memória em alerta, processador),
+   `seguraTudoNovo` e `disco` (o pior Mac: o de menos espaço livre). Cada trabalho segurado ganha `esperaDoMac`
+   (`esperaDoMac` do domínio, a mesma regra do `reivindicar`). A linha diz "esperando o Mac liberar memória",
+   "esperando espaço no disco" ou, pelo processador, "esperando o Mac aliviar". `segurando` continua (o pior Mac segura
+   algo). O disco mudar de nível também vira o frame `memoria.mudou` (`disco` no evento).
+6. **Uma pílula só, sem modal.** Com o disco segurando, a pílula "Pouco espaço no disco · N trabalhos esperam espaço no
+   disco · Ver ›" (para Este Mac) toma o lugar da de memória em "Todos os trabalhos". No chat, embaixo da última task
+   aberta, ela só aparece com o disco crítico, quando a task da pessoa também espera. Sem disco segurando, fica a de
+   memória (quando há) ou "Seu Mac está ocupado", como antes. O menu da conta diz "Disco quase cheio" ao lado de Este
+   Mac.
+7. **Este Mac** mostra memória, processador e disco em barras, com o status curto à vista ("crítica", "8,4 GB livres") e
+   o porquê atrás de um clique (`<details>`): o que o macOS disse e o que espera por isso, pelo uso escolhido; o livre,
+   o total e os dois limites do disco, e onde ficam as pastas dos bots. O grupo de quem espera leva o motivo ("Esperando
+   espaço no disco · 2").
+8. **Medir.** `fundo_segurado` / `fundo_solto` saem também na troca de motivo, com `motivo`, `tudo_novo`, `sem_prazo` e
    `disco_livre_mb`. A espera de cada trabalho continua em `iniciado_em - criado_em`.
 
-Fora desta emenda: o swap em Este Mac (a issue cita; pede `vm.swapusage` a cada 30 s e mais um campo na leitura), a
-memória e o disco usados só pelos bots (o disco de `~/nod` pede `du`, caro em 254 GB — fica com a limpeza das tasks,
-#216) e um botão de limpeza em Este Mac.
+Fora desta emenda:
+- o swap em Este Mac (a issue cita; pede `vm.swapusage` a cada 30 s e mais um campo na leitura);
+- a memória e o disco usados só pelos bots (o disco de `~/nod` pede `du`, caro em 254 GB; fica com a limpeza das tasks,
+  #216);
+- um botão de limpeza em Este Mac.
 
-Gatilho de reversão: `fundo_segurado` com `tudo_novo` e motivo `disco` por mais de um dia seguido em Macs com a limpeza
-das tasks (#216) já no ar — rever os limiares (10 GB / 5%) ou o APFS (`bavail` não conta o espaço "purgável" que o
-Finder mostra como disponível). Pessoa em "O quanto precisar" reclamando de task segurada por memória crítica: tirar o
-degrau `tudoNovo` desse uso (uma linha em `portaoDoMac`).
+Como voltar atrás (as escolhas que o Marlon não viu), cada uma em `portaoDoMac` e nas constantes ao lado dele:
+- **Limites:** mudar `DISCO_ALERTA_MB` / `DISCO_CRITICO_MB`.
+- **Disco crítico também em "O quanto precisar":** mover a linha do disco vermelho para depois de `if (uso === "livre")`.
+- **Memória crítica:**
+  - segurar também o pedido da pessoa: devolver `tudoNovo: "memoria"`;
+  - manter a espera máxima: `semPrazo: false`.
+
+Gatilho de reversão:
+- `fundo_segurado` com `tudo_novo` por mais de um dia seguido em Macs com a limpeza das tasks (#216) já no ar: rever
+  `DISCO_CRITICO_MB` ou o APFS (`bavail` não conta o espaço "purgável" que o Finder mostra como disponível).
+- `fundo_comecou` de rotina com `espera_ms` acima de 1 h sob memória crítica mais de uma vez por semana: rever o
+  `semPrazo`.

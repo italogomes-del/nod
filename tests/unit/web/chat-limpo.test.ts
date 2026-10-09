@@ -193,13 +193,16 @@ describe("tasks na conversa (#195)", () => {
     const vermelha = cenario(c.mensagens, { ...e, pressao: "vermelha" });
     expect(itens(vermelha.c, vermelha.e)[1]!.html).toContain("Seu Mac está quase sem memória");
     expect(itens(vermelha.c, vermelha.e)[1]!.html).toContain("pode travar");
-    // #219: com o disco quase cheio (nenhuma task nova começa), a pílula do disco no lugar da de memória — uma só.
+    // #219: com o disco crítico (nenhuma task nova começa), a pílula do disco no lugar da de memória — uma só; com o
+    // disco só em alerta, a task da pessoa começa e fica a de memória.
     const segurada = { ...dois, esperaDoMac: "disco" as const };
     const disco = cenario(c.mensagens, { ...e, trabalhos: { trabalhos: [um, segurada], pressao: "amarela", memoriaTotalMb: null, segurando: true, motivoEspera: "disco", seguraTudoNovo: true } });
     const comDisco = itens(disco.c, disco.e)[1]!.html;
     expect(comDisco).toContain("Pouco espaço no disco");
     expect(comDisco).toContain("1 trabalho espera espaço no disco");
     expect(comDisco).not.toContain("Pouca memória no seu Mac");
+    const alerta = cenario(c.mensagens, { ...e, trabalhos: { trabalhos: [um, segurada], pressao: "amarela", memoriaTotalMb: null, segurando: true, motivoEspera: "disco", seguraTudoNovo: false } });
+    expect(itens(alerta.c, alerta.e)[1]!.html).toContain("Pouca memória no seu Mac");
   });
 
   it("o ao vivo de um turno de task não entra no chat (fica na tela da task)", () => {
