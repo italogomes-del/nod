@@ -117,15 +117,24 @@ export function lerSaidaDoClaude(saida: string): SaidaClaude | null {
 }
 
 /**
- * O código que a página da Anthropic mostra depois do login ("código#estado", ambos em base64url). Não foi medido
- * (exigiria completar um login): a forma aceita é a do OAuth com PKCE — letras, números e `-_.~`, com um `#` no
- * máximo. O que importa para a segurança: sem espaço nem quebra de linha, então o stdin recebe uma linha só.
+ * O código que a página da Anthropic mostra depois do login. NÃO MEDIDO (exigiria completar um login): o caminho do
+ * código colado precisa de teste humano antes da release (ADR-093). Por isso a forma aceita é larga (revisão do PR 1):
+ * uma linha só de ASCII imprimível sem espaço, de 8 a 2048 caracteres. O que importa para a segurança continua: sem
+ * espaço, controle nem quebra de linha, o stdin recebe exatamente `código + "\n"`.
  */
 export function codigoDoClaude(valor: unknown): string | null {
   if (typeof valor !== "string") return null;
   const c = valor.trim();
-  return /^[A-Za-z0-9_.~-]{8,512}(?:#[A-Za-z0-9_.~-]{8,512})?$/.test(c) ? c : null;
+  return /^[\x21-\x7E]{8,2048}$/.test(c) ? c : null;
 }
+
+/**
+ * O que o `codex login` imprime quando entrou (achado nas strings do binário 0.147.0 em 2026-10-09, sem completar
+ * login: "Successfully logged in."; a frase do MCP, "Successfully logged in to MCP server", não casa). Com a pessoa já
+ * logada (trocando de conta), o status do Codex não muda ("Logged in using ChatGPT") e o processo sai com 0 até no
+ * SIGTERM: só esta frase prova o login novo.
+ */
+export const SUCESSO_DO_CODEX = /^\s*Successfully logged in\.?\s*$/m;
 
 /** Troca por XXXX o que não pode ir ao log: códigos de dispositivo, parâmetros de URL e sequências longas de token. */
 export function redigir(texto: string): string {
@@ -204,6 +213,8 @@ export type LoginDasIas = {
 type Fluxo = {
   ia: IaDesktop;
   login: LoginDaIa;
+  /** A URL inteira, só no processo principal (a página recebe o host). */
+  url: string | null;
   processo: ProcessoDeLogin | null;
   saida: string;
   antes: StatusDoLogin;
@@ -282,18 +293,20 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
   function aoTexto(f: Fluxo, texto: string): void {
     if (f.login.fase !== "aguardando" || f.saida.length >= SAIDA_MAX) return;
     f.saida += texto.slice(0, SAIDA_MAX - f.saida.length);
-    if (f.login.url) return;
+    if (f.url) return;
     if (f.ia === "codex-cli") {
       const lido = lerSaidaDoCodex(f.saida);
       if (!lido) return;
       const expira = d.agora() + (lido.expiraEmMin ?? 15) * 60_000;
-      f.login = { ...f.login, url: lido.url, codigoDoDispositivo: lido.codigo, expiraEm: Math.min(expira, d.agora() + VIDA_LOGIN_MS) };
+      f.url = lido.url;
+      f.login = { ...f.login, host: new URL(lido.url).hostname, codigoDoDispositivo: lido.codigo, expiraEm: Math.min(expira, d.agora() + VIDA_LOGIN_MS) };
     } else {
       const lido = lerSaidaDoClaude(f.saida);
       if (!lido) return;
-      f.login = { ...f.login, url: lido.url, pedeCodigo: lido.pedeCodigo, expiraEm: d.agora() + VIDA_LOGIN_MS };
+      f.url = lido.url;
+      f.login = { ...f.login, host: new URL(lido.url).hostname, pedeCodigo: lido.pedeCodigo, expiraEm: d.agora() + VIDA_LOGIN_MS };
     }
-    const u = new URL(f.login.url!);
+    const u = new URL(f.url);
     d.registrar("ia_login_link", { ia: f.ia, host: u.hostname, caminho: u.pathname });
     emitir(f);
     abrirJanela(f);
@@ -304,13 +317,16 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
     if (atual?.login.fase === "aguardando") return { ...atual.login };
     const f: Fluxo = {
       ia,
-      login: { fase: "aguardando", url: null, codigoDoDispositivo: null, pedeCodigo: false, codigoEnviado: false, expiraEm: null, verificarDeNovo: false, mensagem: MENSAGEM_AGUARDANDO[ia] },
+      url: null,
+      login: { fase: "aguardando", host: null, codigoDoDispositivo: null, pedeCodigo: false, codigoEnviado: false, expiraEm: null, verificarDeNovo: false, mensagem: MENSAGEM_AGUARDANDO[ia] },
       processo: null, saida: "", antes: { logado: false, impressao: null }, timers: [], conferencia: null, janelaAte: 0, conferindo: false, encerrado: false,
     };
     fluxos.set(ia, f);
     emitir(f);
     d.registrar("ia_login_iniciado", { ia });
     f.antes = await d.status(ia).catch((): StatusDoLogin => ({ logado: false, impressao: null }));
+    // Cancelado (ou parado) enquanto o status respondia: o login nem abre.
+    if (f.login.fase !== "aguardando") return { ...f.login };
     const processo = await d.iniciar(ia).catch(() => null);
     if (f.login.fase !== "aguardando") {
       // Cancelado enquanto o processo nascia.
@@ -324,7 +340,7 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
     f.processo = processo;
     processo.aoSair((t) => aoTexto(f, t));
     f.timers.push(d.agendar(() => {
-      if (f.login.url || f.login.fase !== "aguardando") return;
+      if (f.url || f.login.fase !== "aguardando") return;
       const fora = hostsNaoOficiais(ia, f.saida);
       if (fora.length > 0) d.registrar("ia_login_link_recusado", { ia, hosts: fora.join(",") });
       void terminar(f, "falhou", fora.length > 0 ? "link_nao_oficial" : "sem_link");
@@ -334,9 +350,11 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
       if (f.encerrado || f.login.fase !== "aguardando") return;
       f.encerrado = true;
       if (r.stderr) f.saida = `${f.saida}\n${r.stderr}`.slice(0, SAIDA_MAX);
-      // O CLI saiu sozinho: o status decide (sair com 0 não prova nada — medido: o Codex sai com 0 no SIGTERM).
+      // O CLI saiu sozinho: o status decide. Sair com 0 não prova nada no Codex (medido: sai com 0 no SIGTERM), então
+      // com a pessoa já logada só a frase de sucesso do próprio CLI vale; no Claude, 0 é a troca do código que deu certo.
       const s = await d.status(ia).catch((): StatusDoLogin => ({ logado: false, impressao: null }));
-      if (s.logado && (r.codigo === 0 || entrouAgora(f, s))) await terminar(f, "sucesso");
+      const disseQueEntrou = ia === "codex-cli" ? SUCESSO_DO_CODEX.test(limpar(f.saida)) : r.codigo === 0;
+      if (s.logado && (entrouAgora(f, s) || disseQueEntrou)) await terminar(f, "sucesso");
       else if (/expired|expirou|timed out/i.test(limpar(f.saida))) await terminar(f, "expirou");
       else await terminar(f, "falhou", causaDaFalha(ia, f.saida));
     });
@@ -348,7 +366,7 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
 
     colarCodigo(ia, valor) {
       const f = fluxos.get(ia);
-      if (!f || f.login.fase !== "aguardando" || !f.processo || !f.login.url) return { ok: false, motivo: "sem_login_aberto" };
+      if (!f || f.login.fase !== "aguardando" || !f.processo || !f.url) return { ok: false, motivo: "sem_login_aberto" };
       if (!f.login.pedeCodigo) return { ok: false, motivo: "nao_pede_codigo" };
       if (f.login.codigoEnviado) return { ok: false, motivo: "ja_enviado" };
       const codigo = codigoDoClaude(valor);
@@ -367,7 +385,7 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
       if (!f) return null;
       if (f.login.fase === "aguardando") {
         await conferir(f);
-        if (f.login.fase === "aguardando" && f.login.url) {
+        if (f.login.fase === "aguardando" && f.url) {
           abrirJanela(f);
           emitir(f);
         }
@@ -384,7 +402,7 @@ export function criarLoginDasIas(d: DepsLogin): LoginDasIas {
 
     link(ia) {
       const f = fluxos.get(ia);
-      return f?.login.fase === "aguardando" && f.login.url ? linkOficial(ia, f.login.url) : null;
+      return f?.login.fase === "aguardando" && f.url ? linkOficial(ia, f.url) : null;
     },
 
     estado(ia) {

@@ -49,8 +49,12 @@ export type CausaFalhaLogin = (typeof CAUSAS_FALHA_LOGIN)[number];
 
 export type LoginDaIa = {
   fase: FaseLoginIa;
-  /** O endereço oficial onde a pessoa entra (host e caminho conferidos); null até o CLI imprimir. */
-  url: string | null;
+  /**
+   * O host do endereço oficial onde a pessoa entra ("auth.openai.com", "claude.com"); null até o CLI imprimir. Só o
+   * host vai à página (revisão do PR 1): a URL inteira leva o `state` do OAuth e fica no processo principal, que a abre
+   * pelo `abrirLink`.
+   */
+  host: string | null;
   /** Codex: o código de uso único que a pessoa digita na página da OpenAI (formato medido: "NP6Z-V3598"). */
   codigoDoDispositivo: string | null;
   /** Claude: a página da Anthropic pode mostrar um código para colar no app (colarCodigo). */

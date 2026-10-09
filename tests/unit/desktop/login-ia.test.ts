@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { LoginDaIa } from "../../../src/contracts/estado-ia.ts";
-import { causaDaFalha, codigoDoClaude, criarLoginDasIas, hostsNaoOficiais, INTERVALO_CONFERENCIA_MS, JANELA_CONFERENCIA_MS, lerSaidaDoClaude, lerSaidaDoCodex, linkOficial, PRAZO_DEPOIS_DO_CODIGO_MS, PRAZO_LINK_MS, redigir, VIDA_LOGIN_MS, type DepsLogin, type StatusDoLogin } from "../../../desktop/login-ia.ts";
+import { causaDaFalha, codigoDoClaude, SUCESSO_DO_CODEX, criarLoginDasIas, hostsNaoOficiais, INTERVALO_CONFERENCIA_MS, JANELA_CONFERENCIA_MS, lerSaidaDoClaude, lerSaidaDoCodex, linkOficial, PRAZO_DEPOIS_DO_CODIGO_MS, PRAZO_LINK_MS, redigir, VIDA_LOGIN_MS, type DepsLogin, type StatusDoLogin } from "../../../desktop/login-ia.ts";
 
 /** A saída real dos CLIs, capturada em 2026-10-09 com HOME temporário e morta antes de completar (códigos trocados por XXXX). */
 const fixture = (nome: string) => readFileSync(new URL(`../../fixtures/login-ia/${nome}`, import.meta.url), "utf8");
@@ -49,11 +49,20 @@ describe("login das IAs dentro do app (2026-10-09): o que se lê da saída", () 
     expect(hostsNaoOficiais("codex-cli", SAIDA_CODEX)).toEqual([]);
   });
 
-  it("o código do Claude só passa com forma de código: nada de espaço, quebra de linha ou outro tipo", () => {
+  it("o código do Claude (não medido: forma larga) é uma linha só de ASCII imprimível sem espaço, de 8 a 2048", () => {
     expect(codigoDoClaude("  abcDEF123_-xyz#STATE-abc_123  ")).toBe("abcDEF123_-xyz#STATE-abc_123");
-    expect(codigoDoClaude("abcdefgh")).toBe("abcdefgh");
-    for (const ruim of ["curto", "abc def ghij", "abcdefgh\nrm -rf ~", "abcdefgh;ls", "a#b#c-longo-demais", "", 123, null, "$(whoami)xx"]) expect(codigoDoClaude(ruim)).toBeNull();
-    expect(codigoDoClaude("x".repeat(513))).toBeNull();
+    // Revisão do PR 1: base64 comum (+ / =) e outros símbolos imprimíveis passam; o stdin recebe uma linha só do mesmo jeito.
+    expect(codigoDoClaude("ab+cd/ef==#gh")).toBe("ab+cd/ef==#gh");
+    expect(codigoDoClaude("abcdefgh;ls")).toBe("abcdefgh;ls");
+    expect(codigoDoClaude("x".repeat(2048))).toHaveLength(2048);
+    for (const ruim of ["curto", "abc def ghij", "abcdefgh\nrm -rf ~", "abcdefgh\tx", "abcdefgh\u0000", "códigoçãoxx", "", 123, null, "x".repeat(2049)]) expect(codigoDoClaude(ruim)).toBeNull();
+  });
+
+  it("a frase de sucesso do Codex é a do login, não a do MCP", () => {
+    expect(SUCESSO_DO_CODEX.test("Successfully logged in.\n")).toBe(true);
+    expect(SUCESSO_DO_CODEX.test("...\nSuccessfully logged in\n")).toBe(true);
+    expect(SUCESSO_DO_CODEX.test("Successfully logged in to MCP server 'x'")).toBe(false);
+    expect(SUCESSO_DO_CODEX.test("Logged in using ChatGPT")).toBe(false);
   });
 
   it("redigir tira do log o código de dispositivo, os parâmetros das URLs e qualquer sequência longa de token", () => {
@@ -132,9 +141,11 @@ describe("login das IAs dentro do app: a máquina de estados", () => {
   it("Codex: aguardando → link e código na tela → o status confirma em até 2 s → sucesso, processo encerrado, teste disparado", async () => {
     const { m, login, avancar, ultimo } = cenario();
     const inicio = await login.entrar("codex-cli");
-    expect(inicio).toMatchObject({ fase: "aguardando", url: null });
+    expect(inicio).toMatchObject({ fase: "aguardando", host: null });
     m.ouvinte!(SAIDA_CODEX);
-    expect(ultimo()).toMatchObject({ fase: "aguardando", url: "https://auth.openai.com/codex/device", codigoDoDispositivo: "XXXX-XXXXX", pedeCodigo: false, expiraEm: m.agora + 15 * 60_000 });
+    expect(ultimo()).toMatchObject({ fase: "aguardando", host: "auth.openai.com", codigoDoDispositivo: "XXXX-XXXXX", pedeCodigo: false, expiraEm: m.agora + 15 * 60_000 });
+    // Revisão do PR 1: a página recebe só o host; a URL inteira fica no processo principal (abrirLink).
+    expect(JSON.stringify(m.mudancas)).not.toContain("https://");
     expect(login.link("codex-cli")).toBe("https://auth.openai.com/codex/device");
     expect(m.eventos.find((e) => e.evento === "ia_login_link")?.campos).toEqual({ ia: "codex-cli", host: "auth.openai.com", caminho: "/codex/device" });
     await avancar(INTERVALO_CONFERENCIA_MS);
@@ -249,7 +260,7 @@ describe("login das IAs dentro do app: a máquina de estados", () => {
     b.m.ouvinte!(SAIDA_CODEX.replace("auth.openai.com", "auth.phishing.example"));
     expect(b.login.link("codex-cli")).toBeNull();
     await b.avancar(PRAZO_LINK_MS);
-    expect(b.ultimo()).toMatchObject({ fase: "falhou", causa: "link_nao_oficial", url: null });
+    expect(b.ultimo()).toMatchObject({ fase: "falhou", causa: "link_nao_oficial", host: null });
     expect(b.m.eventos.find((e) => e.evento === "ia_login_link_recusado")?.campos).toEqual({ ia: "codex-cli", hosts: "auth.phishing.example" });
   });
 
@@ -264,6 +275,48 @@ describe("login das IAs dentro do app: a máquina de estados", () => {
     await b.avancar(0);
     expect(b.ultimo()).toMatchObject({ fase: "falhou" });
     expect(b.m.sucessos).toEqual([]);
+  });
+
+  it("Codex já logado (trocando de conta): sair com 0 sem a frase de sucesso NÃO é sucesso; com a frase, é", async () => {
+    const a = cenario({ logadoAntes: { logado: true, impressao: null } });
+    await a.login.entrar("codex-cli");
+    a.m.ouvinte!(SAIDA_CODEX);
+    // O status do Codex não muda com a conta ("Logged in using ChatGPT"): a conferência nunca prova nada aqui.
+    await a.avancar(INTERVALO_CONFERENCIA_MS * 5);
+    expect(a.ultimo().fase).toBe("aguardando");
+    a.m.sair!({ codigo: 0, stderr: "" });
+    await a.avancar(0);
+    expect(a.ultimo().fase).toBe("falhou");
+    expect(a.m.sucessos).toEqual([]);
+
+    const b = cenario({ logadoAntes: { logado: true, impressao: null } });
+    await b.login.entrar("codex-cli");
+    b.m.ouvinte!(SAIDA_CODEX);
+    b.m.ouvinte!("Successfully logged in.\n");
+    b.m.sair!({ codigo: 0, stderr: "" });
+    await b.avancar(0);
+    expect(b.ultimo().fase).toBe("sucesso");
+    expect(b.m.sucessos).toEqual(["codex-cli"]);
+  });
+
+  it("cancelar enquanto o status inicial responde: o login nem abre", async () => {
+    let soltar!: (s: StatusDoLogin) => void;
+    let iniciou = false;
+    const lento = criarLoginDasIas({
+      iniciar: async () => { iniciou = true; return null; },
+      status: () => new Promise<StatusDoLogin>((r) => { soltar = r; }),
+      agora: () => 0,
+      agendar: () => ({ cancelar: () => {} }),
+      aoMudar: () => {},
+      aoSucesso: () => {},
+      registrar: () => {},
+    });
+    const entrando = lento.entrar("claude-cli");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await lento.cancelar("claude-cli")).toMatchObject({ fase: "cancelado" });
+    soltar({ logado: false, impressao: null });
+    expect(await entrando).toMatchObject({ fase: "cancelado" });
+    expect(iniciou).toBe(false);
   });
 
   it("entrar duas vezes devolve o mesmo login em curso (um processo só)", async () => {

@@ -6,7 +6,7 @@ import { configInvalida, faltaNode } from "../../../src/domain/saida-do-cli.ts";
 
 const T = 1_800_000_000_000;
 const de = (inventario: Inventario | null, extra: Partial<Parameters<typeof estadoDaIa>[0]> = {}) => estadoDaIa({ ia: "codex-cli", inventario, agora: T, ...extra });
-const LOGIN: LoginDaIa = { fase: "aguardando", url: "https://auth.openai.com/codex/device", codigoDoDispositivo: "ABCD-EFGHI", pedeCodigo: false, codigoEnviado: false, expiraEm: T + 900_000, verificarDeNovo: false, mensagem: "Abra o link" };
+const LOGIN: LoginDaIa = { fase: "aguardando", host: "auth.openai.com", codigoDoDispositivo: "ABCD-EFGHI", pedeCodigo: false, codigoEnviado: false, expiraEm: T + 900_000, verificarDeNovo: false, mensagem: "Abra o link" };
 const INSTALANDO: InstalacaoDaIa = { fase: "instalando", linha: "npm http fetch GET 200", tentativa: 1, mensagem: "Instalando o Codex…" };
 
 describe("estado único da IA (2026-10-09)", () => {
