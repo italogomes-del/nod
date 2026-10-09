@@ -71,7 +71,7 @@ import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
-import { aberto, abertosDoBot, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
+import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 
@@ -1178,7 +1178,8 @@ async function boot(): Promise<void> {
     if (ticks % TICKS_POR_RELEITURA === 0 && estado.sessao) estado = reduzir(estado, { tipo: "invalidar", quais: ["sua-vez"] });
     // ADR-091 (definido em 2026-10-09): o uso da CPU muda a cada leitura sem mudar de nível (e só a mudança de nível vira
     // frame) — com Este Mac aberta, os números são relidos a cada 30 s, a batida do amostrador.
-    if (ticks % 2 === 0 && estado.sessao && estado.espaco?.secao === "este-mac") estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos"] });
+    // Revisto em 2026-10-09: também com Máquinas aberta, que mostra a leitura de cada máquina.
+    if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
@@ -3002,7 +3003,8 @@ function dadosMenuConta(): DadosMenuConta {
     modoDev: estado.modoDev.ligado,
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
     // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
-    esteMac: estado.trabalhos?.motivoEspera === "disco" ? "Disco quase cheio" : estado.trabalhos?.segurando ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? ""),
+    // Revisto em 2026-10-09 (a tela fala por máquina): só a leitura do Mac — a VM ocupada não diz "Ocupado" em Este Mac.
+    esteMac: ((m) => (m.motivoEspera === "disco" ? "Disco quase cheio" : m.motivoEspera ? "Ocupado" : (USOS.find((u) => u.id === estado.usoDoMac)?.nome ?? "")))(leituraDoMac(estado.trabalhos)),
   };
 }
 

@@ -307,3 +307,27 @@ export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm"
   if (portao.fundo && seguravelPeloMac(portao.semPrazo ? { ...t, criadoEm: agora } : t, agora)) return portao.fundo;
   return null;
 }
+
+/**
+ * De qual máquina o trabalho espera, e por quê (definido em 2026-10-09, a tela fala por máquina). O `puxar` de cada
+ * máquina decide pela leitura DELA (ponte-interna.ts) e o `reivindicar` só lhe entrega o turno que tem ela como alvo; a
+ * tela seguia o pior entre todas e dizia "Seu Mac está ocupado" quando quem estava cheia era a VM.
+ * - Com máquina (o alvo do turno, ou o Mac do servidor no modo local): o portão dela; sem leitura dela, nada espera.
+ * - Sem máquina (modo compartilhado, bot sem escolha): qualquer uma pega, então ele só espera se TODAS as que mandaram
+ *   leitura o seguram; a máquina só é dita quando há uma só.
+ */
+export function esperaNaMaquina(
+  t: Parameters<typeof esperaDoMac>[0],
+  maquinaId: string | null,
+  portoes: ReadonlyMap<string, PortaoDoMac>,
+  agora: number,
+): { motivo: MotivoEsperaMac; maquinaId: string | null } | null {
+  if (maquinaId !== null) {
+    const portao = portoes.get(maquinaId);
+    const motivo = portao ? esperaDoMac(t, portao, agora) : null;
+    return motivo ? { motivo, maquinaId } : null;
+  }
+  const todas = [...portoes].map(([id, p]) => ({ id, motivo: esperaDoMac(t, p, agora) }));
+  if (todas.length === 0 || todas.some((x) => x.motivo === null)) return null;
+  return { motivo: todas[0]!.motivo!, maquinaId: todas.length === 1 ? todas[0]!.id : null };
+}

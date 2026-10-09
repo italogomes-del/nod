@@ -361,6 +361,17 @@ div.mac-medidor { padding-right: 36px; }
 .maq-ia i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; }
 .maq-ia.nao { color: var(--ink-3); }
 .maq-ia.nao i { background: var(--line-strong); }
+/* A tela fala por máquina (2026-10-09): a leitura da máquina no cartão, o status curto à vista e os números no clique. */
+.maq-leitura { border-top: 1px solid var(--line); }
+.maq-leitura > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 11px 18px; font-size: 13px; color: var(--ink-2); }
+.maq-leitura > summary::-webkit-details-marker { display: none; }
+.maq-leitura > summary::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; color: var(--ink-3); transition: transform .12s; }
+.maq-leitura[open] > summary::after { transform: rotate(90deg); }
+.maq-leitura > summary:hover, .maq-leitura > summary:focus-visible { background: var(--surface-raised); }
+.maq-nivel { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.maq-nivel.nivel-amarela { background: var(--warning); }
+.maq-nivel.nivel-vermelha { background: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .maq-leitura > summary::after { transition: none; } }
 .maq-quem { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
 .maq-avatares { display: flex; }
 .maq-avatares .icon { margin-right: -5px; }

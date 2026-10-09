@@ -53,7 +53,8 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
    sistema, "Sua vez", os avisos e as telas usam o nome e o tipo da máquina do turno, e deixam de afirmar "Mac" quando
    não é. O bot numa VM não ouve que tem Finder nem as credenciais do Mac da pessoa.
 9. **O uso da máquina vale fora do macOS** (estende a ADR-085). O amostrador lê memória e processador também no Linux,
-   para "segurar trabalho novo em segundo plano" valer na VM.
+   para "segurar trabalho novo em segundo plano" valer na VM. Em 2026-10-09 a tela passou a falar por máquina
+   (emenda da ADR-085): o trabalho da VM diz "esperando <VM> aliviar", e não "o Mac".
 10. **Computadores dos bots (ADR-037) ficam fora.** A feature não está em uso. As opções estão documentadas no plano,
     sem implementação.
 

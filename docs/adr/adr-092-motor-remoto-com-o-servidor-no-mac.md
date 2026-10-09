@@ -79,3 +79,10 @@ chave) e guardar a sessão por máquina antes de religar.
 - `web/telas/maquinas.ts` e `web/main.ts`: "Este Mac", o túnel no "Conectar" e o padrão intocado.
 - Teste: `tests/concurrency/ponte-http-modo-local.test.ts` (o bot sem escolha fica no Mac e a VM não o pega; o bot da
   VM sai só para ela, sem `--resume`, e a sessão dela não vira a da conversa; de volta a "Este Mac", roda no Mac).
+
+## Emenda de 2026-10-09 — a tela fala por máquina
+
+Com os bots na VM, a tela de "Trabalhos" juntava a leitura da VM com a do Mac e dizia "Seu Mac está ocupado" com a VM
+cheia. A emenda da ADR-085 do mesmo dia faz cada trabalho esperar pela máquina dele e dizer o nome dela. Aqui no modo
+local, o trabalho sem alvo é do Mac do servidor (item 2), e a lista usa a mesma regra do alvo que o `reivindicar`
+(`alvoDoTurno`).

@@ -1,13 +1,12 @@
-import type { Conector } from "./conector.ts";
+import type { CapacidadeConector, Conector } from "./conector.ts";
 import type { JeitoGithub } from "./github.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod.ts";
 import type { FrameSse, TipoFrame } from "./frame.ts";
-import type { CapacidadeConector } from "./conector.ts";
 import type { MotivoNegacao, MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
 import type { Rotina } from "./rotina.ts";
-import type { LeituraDisco, NivelPressao } from "./trabalho.ts";
+import type { LeituraDisco, NivelPressao, ServicoDasMaquinas } from "./trabalho.ts";
 
 /** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). */
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
@@ -67,6 +66,7 @@ export interface ServicesNod<Trx> {
     /** ADR-085: a pessoa trocou o "uso do Mac" (gravado) — o puxar relê na próxima vez em vez de esperar o cache. */
     trocouUsoDoMac?(pessoaId: string): void;
   };
+  /** A tela fala por máquina (2026-10-09): a leitura e o nome de cada máquina (trabalho.ts). Ausente = só a junta. */ maquinas?: ServicoDasMaquinas;
   relogio: () => number;
   tokenTurno: {
     /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */

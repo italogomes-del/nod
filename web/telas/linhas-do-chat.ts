@@ -3,7 +3,7 @@ import type { TipoLinha, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, abertosDoBot, juntar, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { usd } from "./modo-dev.ts";
 
 /**
@@ -244,8 +244,12 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     // A pílula de memória entra embaixo da task que abriu sob pressão (#196): a mais recente que ainda está aberta. #219:
     // com o disco crítico (nenhuma task nova começa, nem a que a pessoa pediu), a do disco no lugar dela, com o "Ver" para
     // Este Mac. Com o disco só em alerta a task da pessoa começa: o aviso fica em "Todos os trabalhos" e Este Mac.
-    const disco = (): string => (estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
-    const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(estado.pressao, lista.filter(aberto).length) : "";
+    // Revisto em 2026-10-09 (a tela fala por máquina): o disco crítico de qual máquina, e a memória só do Mac.
+    const maquinas = maquinasDe(estado.trabalhos);
+    const disco = (): string => maquinas
+      ? pilulaDasMaquinas(maquinas.filter((x) => x.motivoEspera === "disco" && x.seguraTudoNovo), lista)
+      : (estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
+    const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(maquinas ? leituraDoMac(estado.trabalhos).pressao : estado.pressao, lista.filter(aberto).length) : "";
     planos.set(m.id, {
       tipo: "linha",
       chave: `linha:${m.id}`,

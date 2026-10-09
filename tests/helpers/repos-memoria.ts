@@ -956,6 +956,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             esperandoColega: null,
             trabalhouMs: 0,
             acordaEm: turnos.filter((x) => x.estado === "pendente" && x.acordarEm).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
+            // O alvo pela chave viva (desta vez → bot → padrão) se prova no Postgres; aqui, só a máquina do bot.
+            maquinaVivaId: turnos.find((x) => x.estado === "despachando")?.machineId ?? null,
+            maquinaAlvoId: doTenant(b.agentes).find((a) => a.id === t.agenteId)?.maquinaId ?? null,
           });
         }
         return saida;
