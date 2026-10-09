@@ -42,6 +42,7 @@ import { criarInterruptor, type InterruptorNod } from "../../services/interrupto
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
 import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
 import { criarPareamentoMaquina } from "../../services/pareamento-maquina.ts";
+import { criarPareamentoDispositivo } from "../../services/pareamento-dispositivo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { JUNTAR_DELTAS_MS } from "../../shared/constantes.ts";
 import { servicoRotinas } from "../../use-cases/ativar-rotina.ts";
@@ -86,6 +87,9 @@ import { criarRotasTrabalhos } from "./rotas/trabalhos.ts";
 import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
+import { rotasMotor } from "./rotas/motor.ts";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { rotasConcessoes } from "./rotas/concessoes.ts";
 import { rotasMarketplace } from "./rotas/marketplace.ts";
 import { rotasConectores } from "./rotas/conectores.ts";
@@ -224,6 +228,15 @@ export function escopoDoContexto(): Escopo {
 function numero(v: string | undefined, padrao: number): number {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : padrao;
+}
+
+/** ADR-090: a versão do package.json deste servidor (a que o motor instalado por ele anuncia). */
+function versaoDoServidor(): string {
+  try {
+    return (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string }).version;
+  } catch {
+    return "0.0.0";
+  }
 }
 
 export function comporApp(o: OpcoesCompor): App {
@@ -372,7 +385,8 @@ export function comporApp(o: OpcoesCompor): App {
         const d = depsSobre(trx);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod });
+          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod,
+          maquina: compartilhado ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -898,7 +912,9 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMarketplace({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave), admins: (env.NOD_ADMINS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean), aoTrocarApp: (t) => cofreDoApp.esquecer(t) }),
     ...rotasConectores({ dentro, cifrar: (t) => cifrar(t, chave), decifrar: (t) => decifrar(t, chave) }),
     ...rotasTrilha({ dentro }),
-    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio) }),
+    // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
+    ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo: criarPareamentoDispositivo(relogio), maquinasVivas: compartilhado ? (escopo) => ponteHttp.maquinasDaPessoa(escopo) : undefined }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),

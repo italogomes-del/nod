@@ -1,4 +1,5 @@
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
+import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
@@ -71,7 +72,20 @@ export type FiltroTrabalhos = "todos" | "voce" | "rotinas" | "bots";
  * camada de tela cheia POR CIMA da tela atual, que continua montada embaixo — sair devolve a conversa exata (rolagem,
  * rascunho, gaveta). Gerenciar agentes, Relatos e Computadores deixaram de ser telas e viraram seções daqui.
  */
-export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "computadores" | "agentes" | "relatos";
+/**
+ * ADR-090: o "Conectar uma máquina" (protótipo "Nod — Motor na VM", prancha 2): o comando, o código, a confirmação
+ * ("Conectar vm-sp?"), o login das IAs e a escolha dos bots. `chavesAntes`: as chaves que já existiam, para achar a nova.
+ */
+export type ConectarMaquina = {
+  passo: "comando" | "codigo" | "confirmar" | "ias" | "bots";
+  codigo: string;
+  pedido: { nome: string; plataforma: string; pedidoHaS: number } | null;
+  erro: string | null;
+  chavesAntes: string[];
+  marcados: string[];
+};
+
+export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";
 
 /**
  * A gaveta do bot por níveis (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO dela,
@@ -114,7 +128,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -196,6 +210,10 @@ export type Estado = {
   aFazerAberto: Record<string, boolean>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
+  /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
+  maquinas: MaquinasDto | null;
+  /** ADR-090: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
+  conectarMaquina: ConectarMaquina | null;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
   /**
@@ -283,6 +301,8 @@ export type Acao =
   | { tipo: "a-fazer"; agenteId: string; aberto: boolean }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
+  | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
+  | { tipo: "conectar-maquina"; conectar: ConectarMaquina | null }
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
   | { tipo: "modo-dev"; ligado: boolean }
   | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
@@ -341,6 +361,8 @@ export const estadoInicial: Estado = {
   pendencias: {},
   aFazerAberto: {},
   chaves: null,
+  maquinas: null,
+  conectarMaquina: null,
   relatos: null,
   modoDev: { ligado: false, raioX: {} },
   chaveEmitida: null,
@@ -566,7 +588,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-24 (emenda da ADR-037): só a SAÚDE (entrou ou saiu do ar) muda a frota — a
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor"),
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "maquinas"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
@@ -623,7 +645,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
@@ -753,6 +775,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, novasDesde: { ...estado.novasDesde, [acao.conversaId]: { mensagemId: acao.mensagemId, em: acao.em, total: acao.total } } };
     case "hidratar-chaves":
       return { ...estado, chaves: acao.chaves };
+    case "hidratar-maquinas":
+      return { ...estado, maquinas: acao.maquinas };
+    case "conectar-maquina":
+      return { ...estado, conectarMaquina: acao.conectar };
     case "hidratar-relatos":
       return { ...estado, relatos: acao.relatos };
     // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.
@@ -929,6 +955,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
+  // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
+  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || t.tipo === "conversa")) faltas.push("maquinas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));

@@ -36,6 +36,7 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
+import { botsDaPessoa, maquinaNova } from "./telas/maquinas.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
@@ -428,6 +429,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     return detalhe ? { tipo: "hidratar-trabalho", detalhe, agora } : { tipo: "trabalho-sumiu", id };
   }
   if (q === "chaves") return { tipo: "hidratar-chaves", chaves: (await api.chaves()).chaves };
+  // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
+  if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
   if (q === "onboarding") return { tipo: "hidratar-onboarding", onboarding: await api.onboarding().catch(() => null) };
@@ -536,6 +539,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
+  if (q === "maquinas") return secao === "maquinas" || t.tipo === "conversa";
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -1145,6 +1149,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   if (task) navegar(task);
 }
 
+/** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
+const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
   let ticks = 0;
@@ -1163,6 +1169,14 @@ async function boot(): Promise<void> {
     for (const k of PARAMETROS_DO_PEDIDO) url.searchParams.delete(k);
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
+  // ADR-090: o link que o motor mostra no terminal (`?parear-maquina=K7QM-4F2X`) abre Máquinas › Conectar com o código,
+  // depois do login se preciso (fica na sessionStorage da aba até a sessão existir).
+  const codigoMaquina = url.searchParams.get("parear-maquina");
+  if (codigoMaquina !== null) {
+    try { window.sessionStorage.setItem(CHAVE_CODIGO_MAQUINA, codigoMaquina.slice(0, 16)); } catch { /* sem storage: a pessoa digita o código */ }
+    url.searchParams.delete("parear-maquina");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
   if (url.searchParams.get("entrar") === "recusado") {
     entrada = { ...entrada, recusado: true };
     url.searchParams.delete("entrar");
@@ -1170,6 +1184,7 @@ async function boot(): Promise<void> {
   }
   try {
     await iniciarSessao(await sessaoApi.atual());
+    abrirCodigoDeMaquinaGuardado();
   } catch (e) {
     if (e instanceof ErroApi && e.status === 401) {
       render();
@@ -2238,6 +2253,64 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves"] })));
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
+  // ADR-090: Seu espaço › Máquinas.
+  // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
+  // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
+  "conectar-maquina": () => agir(async () => {
+    const chavesAntes = await chavesAtuais();
+    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [] } });
+  }),
+  "fechar-conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: null }),
+  "passo-conectar-maquina": (el) => {
+    const passo = el.dataset.passo as NonNullable<typeof estado.conectarMaquina>["passo"];
+    // Na escolha dos bots, todos começam marcados: quem conecta uma VM quer tirar o trabalho do Mac.
+    const marcados = passo === "bots" && estado.conectarMaquina?.marcados.length === 0 ? botsDaPessoa(estado).map((a) => a.id) : undefined;
+    atualizarConectar({ passo, erro: null, ...(marcados ? { marcados } : {}) });
+  },
+  "ver-codigo-maquina": () => agir(async () => {
+    const codigo = document.querySelector<HTMLInputElement>("#codigo-maquina")?.value.trim() ?? "";
+    if (!codigo) { atualizarConectar({ erro: "Digite o código que apareceu na máquina." }); return; }
+    const pedido = await api!.verDispositivo(codigo).catch(() => null);
+    atualizarConectar(pedido ? { passo: "confirmar", codigo, pedido, erro: null } : { codigo, erro: "Esse código não existe ou venceu. Confira na máquina ou rode a instalação de novo." });
+  }),
+  "aprovar-maquina": () => agir(async () => {
+    const c = estado.conectarMaquina;
+    if (!c) return;
+    const ok = await api!.aprovarDispositivo(c.codigo).then(() => true, () => false);
+    if (!ok) { atualizarConectar({ passo: "codigo", erro: "O código venceu. Rode a instalação de novo para pegar outro." }); return; }
+    atualizarConectar({ passo: "ias", erro: null });
+    void esperarMaquinaNova();
+  }),
+  "marcar-bot-maquina": (el) => {
+    const c = estado.conectarMaquina;
+    const id = el.dataset.id ?? "";
+    if (c) atualizarConectar({ marcados: c.marcados.includes(id) ? c.marcados.filter((x) => x !== id) : [...c.marcados, id] });
+  },
+  "marcar-bots-maquina": (el) => atualizarConectar({ marcados: el.dataset.todos === "1" ? botsDaPessoa(estado).map((a) => a.id) : [] }),
+  "mover-bots-maquina": () => agir(async () => {
+    const c = estado.conectarMaquina;
+    const nova = c ? maquinaNova(estado, c) : null;
+    if (!c || !nova) return;
+    if (c.marcados.length > 0) {
+      await api!.moverBots(nova.id, c.marcados);
+      await api!.maquinaPadrao(nova.id);
+    }
+    dispatch({ tipo: "conectar-maquina", conectar: null });
+    dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });
+  }),
+  "maquina-do-bot": (el) => agir(async () => {
+    await api!.maquinaDoBot(el.dataset.id ?? "", el.dataset.maquina || null);
+    dispatch({ tipo: "invalidar", quais: ["frota", "maquinas"] });
+  }),
+  "maquina-padrao": (el) => agir(async () => {
+    await api!.maquinaPadrao(el.dataset.maquina || null);
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  }),
+  "rodar-desta-vez": (el) => agir(async () => {
+    const conversaId = el.dataset.conversa ?? "";
+    await api!.rodarDestaVez(conversaId, el.dataset.maquina ?? "");
+    dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
+  }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   dispensar: (el) => agir(async () => void (await api!.dispensar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // Em série: são poucas, e uma recusa no meio não deixa metade gravada sem a tela saber.
@@ -2841,6 +2914,39 @@ document.addEventListener("drop", (ev) => {
   else soltarBot(id, alvo.destino, alvo.indice);
 });
 document.addEventListener("dragend", () => encerrarArrasto());
+
+// ---- Máquinas (ADR-090): conectar uma VM por código e escolher onde cada bot trabalha --------------------------------------
+function abrirCodigoDeMaquinaGuardado(): void {
+  let codigo: string | null = null;
+  try { codigo = window.sessionStorage.getItem(CHAVE_CODIGO_MAQUINA); window.sessionStorage.removeItem(CHAVE_CODIGO_MAQUINA); } catch { /* sem storage */ }
+  if (!codigo || !estado.sessao) return;
+  abrirEspaco("maquinas");
+  const guardado = codigo;
+  void chavesAtuais().then((chavesAntes) => dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo: guardado, pedido: null, erro: null, chavesAntes, marcados: [] } }));
+}
+/** As chaves de máquina da pessoa agora (relê do servidor e hidrata a seção). */
+async function chavesAtuais(): Promise<string[]> {
+  const dados = await api!.maquinas().catch(() => estado.maquinas ?? { maquinas: [], padraoId: null });
+  dispatch({ tipo: "hidratar-maquinas", maquinas: dados });
+  return dados.maquinas.map((m) => m.id);
+}
+/** Depois do "Conectar", a chave nova aparece quando o motor troca o código (a cada 5 s): relê até ela aparecer, por 2 min. */
+async function esperarMaquinaNova(): Promise<void> {
+  for (let i = 0; i < 40; i++) {
+    const c = estado.conectarMaquina;
+    if (!c || !api) return;
+    const dados = await api.maquinas().catch(() => null);
+    if (dados) dispatch({ tipo: "hidratar-maquinas", maquinas: dados });
+    const nova = estado.conectarMaquina ? maquinaNova(estado, estado.conectarMaquina) : null;
+    // Na tela das IAs, continua relendo até o Claude Code ficar pronto (a pessoa está logando no terminal).
+    if (nova && (estado.conectarMaquina?.passo !== "ias" || nova.ias["claude-cli"] === "pronto")) return;
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+}
+function atualizarConectar(p: Partial<NonNullable<typeof estado.conectarMaquina>>): void {
+  const c = estado.conectarMaquina;
+  if (c) dispatch({ tipo: "conectar-maquina", conectar: { ...c, ...p } });
+}
 
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
 function abrirEspaco(secao: SecaoEspaco): void {

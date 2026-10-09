@@ -4,7 +4,7 @@ import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
-import type { VigiaVivo } from "../../../contracts/ponte.ts";
+import { PLATAFORMAS_MAQUINA, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
@@ -22,7 +22,10 @@ import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
  * o app roda um turno por agente em paralelo; antes era um `plano` só e a renovação do segundo turno
  * voltava {ativo:false}, matando a CLI. `recebidas` guarda a última entrega de cada turno (idempotência).
  */
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean };
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina };
+
+/** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
+export type MaquinaConectada = { machineId: string; nome: string; plataforma: PlataformaMaquina; ias: Partial<Record<IdHarness, Inventario["estado"]>>; gh: boolean };
 
 /** Um item aprovado que roda no Mac da dona (ADR-048): o que a máquina recebe ao puxar `itens-locais`. */
 export type ItemLocal = { itemId: string; capacidade: string; argumentos: Record<string, unknown> };
@@ -93,9 +96,12 @@ export function criarPonteHttpServidor(d: {
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
       const id = ctx.params.chaveId!;
+      // ADR-090: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
+      const nome = b.nome.trim();
+      const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
@@ -105,6 +111,8 @@ export function criarPonteHttpServidor(d: {
       c.inv = inventario(b.inventario, d.agora()); c.ultimo = d.agora();
       // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
       c.gh = objeto(b.github ?? {}).gh === true;
+      c.nome = nome;
+      c.plataforma = plataforma;
       const motores: Partial<Record<IdHarness, Inventario>> = {};
       if (b.harnesses !== undefined) {
         const anunciados = objeto(b.harnesses);
@@ -114,7 +122,7 @@ export function criarPonteHttpServidor(d: {
       const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
       // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
       const capacidades = capacidadesAnunciadas(b.capacidades);
-      await c.ponte.conectar({ machineId: id, nome: b.nome, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}), ...(capacidades ? { capacidades } : {}) });
+      await c.ponte.conectar({ machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: b.harnesses === undefined ? { "claude-cli": c.inv } : motores, ligacao: b.ligacao === true, ...(semLacoDeVoz.length > 0 ? { semLacoDeVoz } : {}), ...(capacidades ? { capacidades } : {}) });
       await persistir(c);
       // Melhor esforço: a conexão não pode falhar porque a repetição falhou.
       if (c.inv.estado === "pronto" && d.repetirBarrados) {
@@ -298,9 +306,23 @@ export function criarPonteHttpServidor(d: {
   function ghDaPessoa(pessoaId: string): boolean {
     return [...conexoes.entries()].some(([id, c]) => c.escopo.pessoaId === pessoaId && ghDaMaquina(c.escopo, id));
   }
+  /** ADR-090: nome e plataforma da máquina viva do turno, para o prompt nomeá-la. null = não conectada (ou de outra pessoa). */
+  function maquina(escopo: Escopo, machineId: string): { nome: string; plataforma: PlataformaMaquina } | null {
+    const c = conexoes.get(machineId);
+    if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return null;
+    return { nome: c.nome, plataforma: c.plataforma };
+  }
+  /** ADR-090: as máquinas vivas da pessoa (último contato há menos de 60 s), para a tela "Máquinas". */
+  function maquinasDaPessoa(escopo: Escopo): MaquinaConectada[] {
+    return [...conexoes.entries()].flatMap(([id, c]) => {
+      if (c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId || d.agora() - c.ultimo >= 60_000) return [];
+      const ias = Object.fromEntries(Object.entries(harnesses(c.escopo, id)).map(([h, inv]) => [h, inv?.estado])) as MaquinaConectada["ias"];
+      return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh }];
+    });
+  }
   /** NOD-175: a partir daqui o puxar volta `{plano:null}` na hora; renovar e entregar seguem aceitos. Não se desfaz. */
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, maquinasDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

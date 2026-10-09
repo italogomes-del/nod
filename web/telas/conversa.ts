@@ -8,6 +8,7 @@ import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
+import { maquinaDoBot } from "./maquinas.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
@@ -255,7 +256,11 @@ function anexosDe(m: Mensagem, estado: Estado): string {
   return renderAnexosDaMensagem(m.anexos, (id) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`);
 }
 
-type SituacaoFila = { tipo: "na_fila"; texto: string } | { tipo: "cancelando" } | { tipo: "cancelada" };
+/**
+ * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
+ * a própria linha da fila oferece "Rodar em <outra> desta vez", sem faixa por cima da conversa.
+ */
+type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string } } | { tipo: "cancelando" } | { tipo: "cancelada" };
 
 /**
  * Onde a mensagem da pessoa está na fila (definido em 2026-09-24): o turno que ela disparou ainda
@@ -274,6 +279,15 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   if (estado.turnosVivos[emCurso.id]?.estado !== "na_fila") return null;
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "o agente";
+  // ADR-090: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
+  const doBot = agente ? maquinaDoBot(estado, agente) : null;
+  // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
+  const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
+  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude)` };
+  if (doBot && !doBot.conectada) {
+    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
+    return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
+  }
   const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);
   if (outra) {
     const la = estado.frota?.agentes.find((a) => a.conversaId === outra.conversaId);
@@ -286,7 +300,8 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
 function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   if (s.tipo === "cancelada") return `<div class="fila-chip cancelada">Cancelada · não rodou</div>`;
   if (s.tipo === "cancelando") return `<div class="fila-chip">Cancelando…${botao("desfazer-cancelamento", "Desfazer", { classe: "link", id: turnoId })}</div>`;
-  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+  const destaVez = s.destaVez ? botao("rodar-desta-vez", `Rodar em ${esc(s.destaVez.nome)} desta vez`, { classe: "link", dados: { conversa: s.destaVez.conversaId, maquina: s.destaVez.maquinaId } }) : "";
+  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
 }
 
 /** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */

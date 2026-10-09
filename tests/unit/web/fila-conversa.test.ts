@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
@@ -45,5 +46,43 @@ describe("fila da conversa: cada mensagem com seu Cancelar", () => {
     const e = comConversa({});
     expect(situacaoNaFila(mensagem("m1"), e)).toBeNull();
     expect(renderMensagem(mensagem("m1"), e)).not.toContain("fila-chip");
+  });
+});
+
+describe("fila da conversa com a máquina do bot fora do ar (ADR-090, protótipo 4c)", () => {
+  const emCurso = (id: string, mensagemId: string) => ({ id, estado: "pendente" as const, desde: AGORA, mensagemId });
+  const maquina = (id: string, nome: string, conectada: boolean) => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: Date.UTC(2026, 9, 9, 14, 32), conectada, plataforma: conectada ? ("darwin" as const) : null, ias: (conectada ? { "claude-cli": "pronto" } : {}) as MaquinaDto["ias"], gh: false });
+  function com(maquinaIdDoBot: string | null, maquinas: ReturnType<typeof maquina>[], padraoId: string | null = null): Estado {
+    const e = comConversa({ turnosEmCurso: [emCurso("t2", "m2")] });
+    return { ...e, frota: { agentes: [{ id: "a", nome: "Ze 1", conversaId: C, maquinaId: maquinaIdDoBot }] } as never, maquinas: { maquinas, padraoId } };
+  }
+
+  it("a linha da fila diz que a máquina não responde e oferece rodar na outra conectada, desta vez", () => {
+    const e = com("vm", [maquina("vm", "vm-sp", false), maquina("mac", "MacBook", true)]);
+    const s = situacaoNaFila(mensagem("m2"), e);
+    expect(s).toMatchObject({ tipo: "na_fila", turnoId: "t2", destaVez: { conversaId: C, maquinaId: "mac", nome: "MacBook" } });
+    expect(s && s.tipo === "na_fila" ? s.texto : "").toMatch(/^Na fila · vm-sp não responde desde \d\d:\d\d$/);
+    const html = renderMensagem(mensagem("m2"), e);
+    expect(html).toContain('data-act="rodar-desta-vez"');
+    expect(html).toContain("Rodar em MacBook desta vez");
+    expect(html).toContain('data-act="cancelar-turno"');
+  });
+
+  it("vale também pelo padrão da pessoa; sem outra máquina conectada, só o texto e o Cancelar", () => {
+    const e = com(null, [maquina("vm", "vm-sp", false)], "vm");
+    const s = situacaoNaFila(mensagem("m2"), e);
+    expect(s).toMatchObject({ tipo: "na_fila", turnoId: "t2" });
+    expect(s && "destaVez" in s ? s.destaVez : undefined).toBeUndefined();
+    expect(renderMensagem(mensagem("m2"), e)).not.toContain("rodar-desta-vez");
+  });
+
+  it("máquina do bot conectada mas sem IA pronta: a linha diz o que falta", () => {
+    const e = com("vm", [{ ...maquina("vm", "vm-sp", true), ias: { "claude-cli": "nao_autenticado" as const } }]);
+    expect(situacaoNaFila(mensagem("m2"), e)).toMatchObject({ texto: expect.stringContaining("vm-sp está sem IA pronta") });
+  });
+
+  it("máquina do bot conectada: a fila de sempre", () => {
+    const e = com("vm", [maquina("vm", "vm-sp", true)]);
+    expect(situacaoNaFila(mensagem("m2"), e)).toEqual({ tipo: "na_fila", turnoId: "t2", texto: "Na fila · Ze 1 lê quando terminar o turno atual" });
   });
 });

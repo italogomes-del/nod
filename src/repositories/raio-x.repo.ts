@@ -90,12 +90,12 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean; uso_do_mac: UsoDoMac };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false, usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false, usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
-        select modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+        select modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac, maquina_padrao_id from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
       return paraPreferencias(l);
     },
 
@@ -109,7 +109,17 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
           faixa_trabalhos_recolhida = coalesce(${p.faixaTrabalhosRecolhida ?? null}::boolean, preferencias.faixa_trabalhos_recolhida),
           uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
           atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac`;
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac, maquina_padrao_id`;
+      return paraPreferencias(l);
+    },
+
+    /** ADR-090: a máquina onde bot sem escolha trabalha (id da chave; null = qualquer uma). Quem chama já conferiu a chave. */
+    async definirMaquinaPadrao(maquinaId: string | null): Promise<Preferencias> {
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, maquina_padrao_id)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${maquinaId})
+        on conflict (tenant_id, owner_id) do update set maquina_padrao_id = ${maquinaId}, atualizado_em = clock_timestamp()
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac, maquina_padrao_id`;
       return paraPreferencias(l);
     },
 
@@ -122,7 +132,7 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
           avisos_fechados = case when ${chave} = any(preferencias.avisos_fechados) then preferencias.avisos_fechados
             else array_append(preferencias.avisos_fechados, ${chave}) end,
           atualizado_em = clock_timestamp()
-        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac`;
+        returning modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac, maquina_padrao_id`;
       return paraPreferencias(l);
     },
   };

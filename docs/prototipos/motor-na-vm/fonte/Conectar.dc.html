@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Conectar uma máquina</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:140%;height:140%;flex-shrink:0;max-width:none;display:block}
+.cx-fundo{position:absolute;inset:0;background:var(--backdrop);display:grid;place-items:center}
+.cx{width:820px;min-height:560px;background:var(--surface);border-radius:16px;box-shadow:var(--shadow-pop);display:grid;grid-template-columns:240px minmax(0,1fr);overflow:hidden;font-family:var(--font-sans);color:var(--ink)}
+.cx-passos{background:var(--surface-side);border-right:1px solid var(--line);padding:24px 18px;display:flex;flex-direction:column;gap:4px}
+.cx-passos h2{margin:0 0 14px 8px;font-size:15px;font-weight:600}
+.cx-passo{display:flex;align-items:center;gap:10px;padding:8px;border-radius:9px;font-size:13.5px;color:var(--ink-3)}
+.cx-passo.agora{background:var(--surface-selected);color:var(--ink);font-weight:500}
+.cx-passo.feito{color:var(--ink-2)}
+.cx-n{width:22px;height:22px;border-radius:50%;border:1px solid var(--line-strong);display:grid;place-items:center;font:500 11px var(--font-mono);flex:none}
+.cx-passo.agora .cx-n{background:var(--action);color:var(--on-action);border-color:var(--action)}
+.cx-passo.feito .cx-n{background:var(--success-soft);color:var(--success);border-color:transparent}
+.cx-corpo{padding:32px 36px;display:flex;flex-direction:column;gap:16px;position:relative}
+.cx-fechar{position:absolute;top:14px;right:14px;width:32px;height:32px;border:0;background:transparent;border-radius:8px;color:var(--ink-3);display:grid;place-items:center}
+.cx-corpo h3{margin:0;font-size:21px;font-weight:600;letter-spacing:-.3px}
+.cx-corpo p{margin:0;font-size:14px;line-height:1.55;color:var(--ink-2);max-width:470px}
+.cx-tam{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.cx-tam div{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:3px}
+.cx-tam b{font-weight:500;font-size:14px}
+.cx-tam span{font-size:12.5px;color:var(--ink-3)}
+.cx-cmd{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:10px;background:var(--surface-raised);border:1px solid var(--line)}
+.cx-cmd code{flex:1;min-width:0;font:13px var(--font-mono);background:none;padding:0;white-space:nowrap;overflow-x:auto}
+.cx-codigo{display:flex;flex-direction:column;gap:6px}
+.cx-codigo label{font-size:13px;color:var(--ink-3)}
+.cx-codigo input{font:500 26px var(--font-mono);letter-spacing:.18em;text-transform:uppercase;padding:12px 16px;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface);color:var(--ink);width:300px;box-sizing:border-box}
+.cx-confirma{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px}
+.cx-confirma .maq-ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:var(--surface-raised)}
+.cx-confirma div{flex:1;display:flex;flex-direction:column;gap:2px}
+.cx-confirma b{font-weight:500;font-size:15px}
+.cx-confirma small{font-size:12.5px;color:var(--ink-3)}
+.cx-ia{display:flex;align-items:center;gap:12px;padding:12px 16px}
+.cx-ia+.cx-ia{border-top:1px solid var(--line)}
+.cx-ia-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.cx-ia-txt b{font-weight:500;font-size:14px}
+.cx-ia-txt code{font:12.5px var(--font-mono);color:var(--ink-2);background:var(--surface-raised);padding:2px 7px;border-radius:6px;width:fit-content}
+.cx-st{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+.cx-st i{width:7px;height:7px;border-radius:50%;border:1.5px solid var(--line-strong);box-sizing:border-box;display:inline-block}
+.cx-st.ok{color:var(--success)}
+.cx-st.ok i{background:var(--success);border-color:var(--success)}
+.cx-nota{font-size:12.5px;color:var(--ink-3);display:flex;gap:8px;align-items:flex-start}
+.cx-bots{display:flex;flex-direction:column}
+.cx-bot{display:flex;align-items:center;gap:12px;padding:9px 14px;font-size:14px}
+.cx-bot+.cx-bot{border-top:1px solid var(--line)}
+.cx-bot input{width:16px;height:16px;accent-color:var(--action)}
+.cx-bot .icon.mascote{width:26px;height:26px}
+.cx-bot label{flex:1;display:flex;align-items:center;gap:10px;cursor:pointer}
+.cx-bot small{color:var(--ink-3);font-size:12.5px}
+.cx-bots-cab{display:flex;align-items:center;gap:6px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink-3);background:var(--surface-side)}
+.cx-bots-cab span{flex:1}
+.cx-rodape{margin-top:auto;display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:8px}
+.cx-voltar{border:0;background:none;color:var(--ink-3);font-size:13px;padding:6px 0}
+.cx-pronto{display:flex;align-items:center;gap:10px;color:var(--success);font-size:14px;font-weight:500}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; background: var(--surface); overflow: hidden;">
+<div class="espaco" aria-hidden="true">
+  <nav class="espaco-nav">
+    <div class="espaco-volta"><span class="espaco-voltar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6l-6 6 6 6"></path></svg><span>Clarice</span></span></div>
+    <h1>Seu espaço</h1>
+    <div class="espaco-itens"><span class="espaco-item"><span>Conexão</span></span><span class="espaco-item"><span>Avisos</span></span><span class="espaco-item"><span>Preferências</span></span><span class="espaco-item" aria-current="page"><span>Máquinas</span></span><span class="espaco-item"><span>Computadores</span></span></div>
+  </nav>
+  <main class="espaco-conteudo"><section class="espaco-secao"><h2>Máquinas</h2><p class="intro">Onde seus bots trabalham.</p></section></main>
+</div>
+
+<div class="cx-fundo">
+<div class="cx" role="dialog" aria-modal="true" aria-labelledby="cx-titulo">
+  <aside class="cx-passos">
+    <h2 id="cx-titulo">Conectar uma máquina</h2>
+    <sc-for list="{{passos}}" as="p" hint-placeholder-count="5">
+      <div class="{{p.classe}}"><span class="cx-n">{{p.marca}}</span><span>{{p.nome}}</span></div>
+    </sc-for>
+  </aside>
+
+  <div class="cx-corpo">
+    <a class="cx-fechar" href="Main.dc.html" aria-label="Fechar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+
+    <sc-if value="{{p1}}" hint-placeholder-val="{{true}}">
+      <h3>Prepare uma máquina Linux</h3>
+      <p>Qualquer VM com Debian ou Ubuntu serve, em qualquer provedor. Ela não precisa de porta aberta: é a máquina que procura trabalho no Nod.</p>
+      <div class="cx-tam">
+        <div><b>Para começar</b><span>2 vCPU e 4 GB</span><span>até uns 3 bots ao mesmo tempo</span></div>
+        <div><b>Uso intenso</b><span>4 vCPU e 8 GB</span><span>vários bots rodando testes e builds</span></div>
+      </div>
+      <p class="cx-nota"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px;"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg><span>Use a máquina só para o Nod. Ela vai guardar o login das suas IAs, e os bots usam o terminal dela.</span></p>
+      <div class="cx-rodape"><span></span><button type="button" class="bt pri" onClick="{{avancar}}">Já tenho a máquina</button></div>
+    </sc-if>
+
+    <sc-if value="{{p2}}" hint-placeholder-val="{{false}}">
+      <h3>Rode este comando na máquina</h3>
+      <p>Entre na máquina pelo terminal e cole. Ele instala o Nod, cria o usuário nod e deixa o serviço ligado. No fim, mostra um código.</p>
+      <div class="cx-cmd"><code>curl -fsSL https://[seu-nod]/motor | sh</code><button type="button" class="bt sm">Copiar</button></div>
+      <p class="cx-nota"><span>Leva uns 2 minutos. O comando pede a senha de administrador uma vez.</span></p>
+      <div class="cx-rodape"><button type="button" class="cx-voltar" onClick="{{voltar}}">Voltar</button><button type="button" class="bt pri" onClick="{{avancar}}">Apareceu um código</button></div>
+    </sc-if>
+
+    <sc-if value="{{p3}}" hint-placeholder-val="{{false}}">
+      <h3>Digite o código da máquina</h3>
+      <p>Ele aparece no fim da instalação e vale por 10 minutos.</p>
+      <div class="cx-codigo"><label for="codigo">Código</label><input id="codigo" type="text" value="K7QM-4F2X" autocomplete="off" spellcheck="false"></div>
+      <div class="cx-confirma">
+        <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg></span>
+        <div><b>vm-sp</b><small>Linux · Debian 12 · 4 vCPU, 8 GB · pediu agora há pouco</small></div>
+      </div>
+      <p class="cx-nota"><span>Conecte só se foi você quem rodou o comando nessa máquina.</span></p>
+      <div class="cx-rodape"><button type="button" class="cx-voltar" onClick="{{voltar}}">Voltar</button><button type="button" class="bt pri" onClick="{{avancar}}">Conectar vm-sp</button></div>
+    </sc-if>
+
+    <sc-if value="{{p4}}" hint-placeholder-val="{{false}}">
+      <h3>Entre nas suas IAs na vm-sp</h3>
+      <p>Rode cada comando no terminal da máquina. O login é seu, direto com a Anthropic e a OpenAI: o Nod não vê sua senha nem sua chave. Esta tela percebe sozinha quando ficar pronto.</p>
+      <div class="espaco-cartao">
+        <div class="cx-ia">
+          <span class="cx-ia-txt"><b>Claude Code</b><code>nod-motor entrar claude</code></span>
+          <sc-if value="{{claudeOk}}" hint-placeholder-val="{{false}}"><span class="cx-st ok"><i aria-hidden="true"></i>pronto</span></sc-if>
+          <sc-if value="{{claudeEsperando}}" hint-placeholder-val="{{true}}"><button type="button" class="cx-st" onClick="{{simularClaude}}" style="border: 0; background: none; padding: 0;" title="Simular o login"><i aria-hidden="true"></i>aguardando o login</button></sc-if>
+        </div>
+        <div class="cx-ia">
+          <span class="cx-ia-txt"><b>Codex</b><code>nod-motor entrar codex</code></span>
+          <span class="cx-st">opcional</span>
+        </div>
+        <div class="cx-ia">
+          <span class="cx-ia-txt"><b>GitHub</b><code>nod-motor entrar github</code></span>
+          <span class="cx-st">opcional</span>
+        </div>
+      </div>
+      <div class="cx-rodape"><button type="button" class="cx-voltar" onClick="{{voltar}}">Voltar</button><button type="button" class="bt pri" disabled="{{semIa}}" onClick="{{avancar}}">Continuar</button></div>
+    </sc-if>
+
+    <sc-if value="{{p5}}" hint-placeholder-val="{{false}}">
+      <div class="cx-pronto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M8 12.5l2.5 2.5L16 9.5"></path></svg>vm-sp conectada, Claude Code pronto</div>
+      <h3>Quem passa a trabalhar na vm-sp?</h3>
+      <p>Eles saem do seu Mac a partir do próximo trabalho. O que está rodando agora termina onde começou.</p>
+      <div class="espaco-cartao cx-bots">
+        <div class="cx-bots-cab"><span>{{contagem}}</span><button type="button" class="bt link" onClick="{{marcarTodos}}" disabled="{{todosMarcados}}">Marcar todos</button><button type="button" class="bt link" onClick="{{marcarNenhum}}" disabled="{{nenhumMarcado}}">Nenhum</button></div>
+        <sc-for list="{{bots}}" as="b" hint-placeholder-count="5">
+          <div class="cx-bot"><label><input type="checkbox" checked="{{b.marcado}}" onChange="{{b.alternar}}"><span class="{{b.mascote}}"><img src="{{b.img}}" alt=""></span><span>{{b.nome}}</span><small>{{b.papel}}</small></label></div>
+        </sc-for>
+      </div>
+      <div class="cx-rodape"><a class="cx-voltar" href="Main.dc.html" style="text-decoration: none;">Agora não</a><a class="bt pri" href="Main.dc.html" style="text-decoration: none;">{{moverTexto}}</a></div>
+    </sc-if>
+  </div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { passo: 1, claude: false, marcados: { ze: true, elis: true, dev3: true, gil: true, clarice: false } };
+  }
+  renderVals() {
+    const s = this.state;
+    const NOMES = ['Preparar a máquina', 'Instalar', 'Digitar o código', 'Entrar nas IAs', 'Escolher os bots'];
+    const passos = NOMES.map((nome, i) => {
+      const n = i + 1;
+      const feito = n < s.passo;
+      return { nome, marca: feito ? '✓' : String(n), classe: 'cx-passo' + (n === s.passo ? ' agora' : feito ? ' feito' : '') };
+    });
+    const BOTS = [
+      ['ze', 'Ze 1', 'Dev Sr', '/_blob/2ca194a2a060ffa3b85984f5c5755935', 'c-red shape-square'],
+      ['elis', 'Elis', 'Tech Lead', '/_blob/b1dc3432217f8bfdbc1da8680db4bf64', 'c-red shape-square'],
+      ['dev3', 'Dev 3', 'Dev', '/_blob/133ba7987390dbb463273176296a44f7', 'c-green shape-cloud'],
+      ['gil', 'Gil', 'Rotinas do time', '/_blob/745cc89fdafb0b37b16ab169153a639b', 'c-cream shape-square'],
+      ['clarice', 'Clarice', 'Assistente pessoal', '/_blob/9404de870650100b6465d1bbcf4a1e00', 'c-red shape-circle'],
+    ];
+    const bots = BOTS.map(([id, nome, papel, img, cls]) => ({
+      nome, papel, img,
+      mascote: 'icon mascote ' + cls + ' sm',
+      marcado: !!s.marcados[id],
+      alternar: () => this.setState({ marcados: { ...s.marcados, [id]: !s.marcados[id] } }),
+    }));
+    const n = bots.filter((b) => b.marcado).length;
+    const todos = (v) => () => this.setState({ marcados: Object.fromEntries(BOTS.map(([id]) => [id, v])) });
+    return {
+      contagem: n + ' de ' + BOTS.length + ' bots',
+      todosMarcados: n === BOTS.length,
+      nenhumMarcado: n === 0,
+      marcarTodos: todos(true),
+      marcarNenhum: todos(false),
+      passos, bots,
+      p1: s.passo === 1, p2: s.passo === 2, p3: s.passo === 3, p4: s.passo === 4, p5: s.passo === 5,
+      claudeOk: s.claude, claudeEsperando: !s.claude, semIa: !s.claude,
+      moverTexto: n === 0 ? 'Concluir' : (n === 1 ? 'Mover 1 bot' : 'Mover ' + n + ' bots'),
+      avancar: () => this.setState({ passo: Math.min(5, s.passo + 1) }),
+      voltar: () => this.setState({ passo: Math.max(1, s.passo - 1) }),
+      simularClaude: () => this.setState({ claude: true }),
+    };
+  }
+}
+</script>
+</body>
+</html>
