@@ -12,7 +12,8 @@ import { executarColetando } from "../src/adapters/executor/processo.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
-import { criarExecutarComando, iniciarLimpezaDasTasks, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { resolverBinario } from "../src/adapters/executor/caminho.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
@@ -63,6 +64,8 @@ let falhando = false;
 let itensGithub: ReturnType<typeof setInterval> | null = null;
 /** ADR-088 (2026-10-09): a limpeza das pastas de task encerradas neste Mac (o servidor diz quais; o Mac apaga). */
 let limpezaDasTasks: LimpezaDasTasks | null = null;
+/** Revisão do #225: os turnos rodando neste Mac — a limpeza não mexe na pasta de nenhum deles. */
+const planosNoMac = new Map<string, PlanoTurno>();
 /**
  * A vigia das IAs da conexão atual (vigia-ias.ts; revisto em 2026-10-05): sem IA pronta ela olha de novo a cada 3 s
  * (ADR-077), guarda o veredito do teste de verdade e reanuncia o inventário ao servidor quando ele muda.
@@ -393,12 +396,13 @@ async function conectar(c: Config) {
     // ADR-088: o PATH do shell de login (o mesmo dos drivers) — as ferramentas de onde a pessoa as instalou.
     limpezaDasTasks?.parar();
     const homeDoMac = cfg.env.HOME ?? homedir();
-    limpezaDasTasks = iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: homeDoMac, executar: criarExecutarComando(cfg.env, homeDoMac) });
+    const modo = modoDaLimpeza(process.env);
+    limpezaDasTasks = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: homeDoMac, executar: criarExecutarComando(cfg.env, homeDoMac), simular: modo === "simular", emUso: (pasta) => [...planosNoMac.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
   }
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => cliente?.tarefas(turnoId, tarefas));
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoTerminarTurno: (p) => tarefasVivas.esquecer(p.turnoId),
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria: memoriaDoMac, aoDelta: (p, t) => cliente?.delta(p.turnoId, t), aoEvento: (p, ev) => { if (ev.tipo === "tool_use") cliente?.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); }, aoIniciarTurno: (p) => { planosNoMac.set(p.turnoId, p); }, aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); planosNoMac.delete(p.turnoId); },
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.

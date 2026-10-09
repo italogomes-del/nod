@@ -16,7 +16,7 @@ export async function pastasParaLimpar(deps: Deps): Promise<PastaParaLimpar[]> {
   });
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "compose_sem_docker", "pr_nao_mergeado", "clone", "fora_da_pasta", "erro"];
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "compose_sem_docker", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**
@@ -37,6 +37,7 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     orfas: inteiro(o.orfas),
     orfasParadas: inteiro(o.orfasParadas),
     duracaoMs: inteiro(o.duracaoMs),
+    ...(o.simulada === true ? { simulada: true, estimadoBytes: inteiro(o.estimadoBytes) } : {}),
   };
 }
 
@@ -51,6 +52,7 @@ export function camposDoRelato(r: RelatoLimpeza): Record<string, number> {
     orfas_paradas: r.orfasParadas,
     duracao_ms: r.duracaoMs,
   };
+  if (r.simulada) campos.estimado_mb = Math.round((r.estimadoBytes ?? 0) / 1_048_576);
   for (const [m, n] of Object.entries(r.puladas)) if (n) campos[`pulada_${m}`] = n;
   return campos;
 }

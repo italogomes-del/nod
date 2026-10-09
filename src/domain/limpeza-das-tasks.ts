@@ -73,8 +73,14 @@ export function quandoLimpar(f: FatosLimpeza, agora: number): PastaParaLimpar["q
   return null;
 }
 
-/** Normaliza um caminho absoluto (sem `.`, `..` e barras repetidas); o relativo volta null. */
+/**
+ * Normaliza um caminho absoluto para comparar (sem `.`, `..` e barras repetidas); o relativo volta null. revisto em
+ * 2026-10-09 (revisão do #225): NFC e sem caixa — o APFS do Mac não diferencia maiúsculas e guarda nomes em NFD, e a
+ * origem que o Docker relata pode vir com outra caixa ou outra forma do mesmo acento. Comparar texto puro deixava a
+ * montagem passar despercebida. Quem chama resolve os links (realpath) dos dois lados antes.
+ */
 function normalizar(caminho: string): string | null {
+  caminho = caminho.normalize("NFC").toLowerCase();
   if (!caminho.startsWith("/")) return null;
   const partes: string[] = [];
   for (const s of caminho.split("/")) {
@@ -98,6 +104,24 @@ export function protegidoPorMontagem(caminho: string, montagens: readonly string
     const fonte = normalizar(m);
     return fonte !== null && (fonte === alvo || fonte.startsWith(`${alvo}/`));
   });
+}
+
+/**
+ * definido em 2026-10-09 (revisão do #225): o que o `git worktree remove` apagaria junto sem perguntar (arquivo IGNORADO)
+ * e que se refaz sozinho — dependência, build, cache, log. Qualquer outro ignorado (`.env`, `backups/*.dump`, um banco
+ * local) segura a worktree com o motivo `ignorado_valioso`: o git não protege o que está no .gitignore, e é melhor
+ * recusar demais do que apagar algo que não volta.
+ */
+const PASTAS_REGENERAVEIS = new Set(["node_modules", "dist", "build", "out", "output", "coverage", ".vite", ".next", ".turbo", ".cache", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
+const ARQUIVOS_REGENERAVEIS = new Set([".DS_Store", "tsconfig.tsbuildinfo"]);
+
+/** O caminho ignorado (relativo à worktree, como o `git status --ignored` mostra) se refaz sozinho? */
+export function ignoradoRegeneravel(caminho: string): boolean {
+  const partes = caminho.replace(/\/+$/, "").split("/").filter((p) => p !== "");
+  if (partes.length === 0) return false;
+  if (partes.some((p) => PASTAS_REGENERAVEIS.has(p))) return true;
+  const nome = partes[partes.length - 1]!;
+  return ARQUIVOS_REGENERAVEIS.has(nome) || nome.endsWith(".log");
 }
 
 /** Os nomes de arquivo de compose que, sem a lista de montagens do Docker, seguram a worktree (fail-closed). */

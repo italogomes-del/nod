@@ -56,9 +56,11 @@ nos dois modos:
   `POST /api/maquina/limpeza` e relata em `limpeza/resultado`; o servidor nunca disca (ADR-021). Com servidor antigo
   (404), a lista vem vazia e nada acontece.
 
-A primeira passada roda 10 min depois de subir e as seguintes a cada 6 h, uma por vez e sem paralelismo, porque apagar
-`node_modules` gasta disco. `NOD_LIMPEZA_TASKS=desligada` desliga a limpeza no modo local. Para cada pasta oferecida, o
-Mac:
+A primeira passada roda 10 min depois de subir e as seguintes a cada 6 h, sem paralelismo, porque apagar `node_modules`
+gasta disco. É **uma passada por Mac de cada vez**: as limpezas do mesmo processo entram numa fila (no diário há uma por
+pessoa), e entre processos (o diário, um servidor de teste, o app) vale a trava `~/nod/.limpeza.lock`, com pid e hora.
+A trava de um pid morto, ou com mais de 24 h, é retomada. O modo vem de `NOD_LIMPEZA_TASKS` (§7). Para cada pasta
+oferecida, o Mac:
 
 1. Confere de novo o caminho: a forma `<bot>/<slug>`, que é uma pasta de verdade (não um link) e que o caminho real
    fica dentro de `~/nod`. Pasta que não existe neste Mac é pulada sem barulho: já foi limpa, ou a task rodou em
@@ -66,22 +68,49 @@ Mac:
 2. Acha as worktrees dentro da pasta, pelo `.git` arquivo, até 3 níveis. Não entra em `node_modules`, em pasta
    escondida, em link nem na própria worktree. Um clone inteiro (`.git` pasta) não é apagado: ele é contado como
    `clone`.
-3. Remove cada uma com `git worktree remove` **sem --force**. Se a worktree tem alteração não commitada ou arquivo
-   novo, o git recusa e ela fica, com o log `limpeza_worktree_pulada` e o motivo `suja`. O `node_modules` ignorado
-   não segura a remoção. A branch fica no clone, então o trabalho commitado não se perde.
-4. Apaga com `rmdir` as pastas que ficaram vazias, inclusive a da task (só um `.DS_Store` conta como vazio). O `rmdir`
-   nunca apaga conteúdo, nunca entra numa worktree que ficou e nunca apaga uma origem de montagem.
-5. Roda `git worktree prune` nos clones que perderam worktree.
+3. Pula a pasta inteira (`em_uso`) se um turno deste Mac roda nela. No diário a fonte são os planos vivos do processo;
+   no app, os turnos que o laço começou e não terminou.
+4. Confere cada worktree contra o que o `git worktree remove` sem --force **não** protege (§4). A primeira que falhar
+   na conferência fica, com o log `limpeza_worktree_pulada` e o motivo.
+5. Logo antes da primeira remoção da pasta, pergunta de novo ao servidor se ele ainda a oferece, e confere de novo se
+   não há turno vivo. Se não, a pasta fica (`nao_reconfirmada`).
+6. Remove com `git worktree remove` **sem --force**. Se algo mudou desde a conferência, o git ainda recusa a worktree
+   suja. A branch fica no clone, então o trabalho commitado não se perde.
+7. Apaga com `rmdir` as pastas que ficaram vazias, inclusive a da task (só um `.DS_Store` conta como vazio). O `rmdir`
+   nunca apaga conteúdo, nunca entra numa worktree que ficou e nunca apaga uma origem de montagem. Sem saber o que o
+   Docker monta (`null`), não roda.
 
-**4. A proteção das montagens.** O `nod-postgres` do diário monta `~/nod/Eng 1/nod-169/infra/postgres/init`. Antes de
-remover, o Mac lê as origens dos bind mounts de todos os containers, rodando ou parados (`docker ps -aq` e
-`docker inspect`). A worktree que contém uma origem de montagem fica, com o motivo `montagem`.
+Não há `git worktree prune`: o `remove` já apaga os metadados da worktree que tirou, e o prune varreria também
+worktrees de outros donos cuja pasta sumiu (num disco desmontado, por exemplo).
 
-- **Sem Docker instalado:** não há montagens.
-- **Docker que não respondeu** (o Docker Desktop trava quando o disco da VM enche): a worktree que tem arquivo
-  de compose fica, com o motivo `compose_sem_docker`.
+**4. O que o git não protege, conferido antes de remover** (revisão independente do #225, que reproduziu perdas de dado
+na primeira versão). O `git worktree remove` sem --force só olha os arquivos rastreados e os novos; ele apaga calado
+o que está ignorado, inclusive repositórios e worktrees dentro de pasta ignorada. Por isso a worktree **fica** quando:
 
-Fora isso, a pasta do caso concreto está na raiz do bot, e a raiz do bot nunca entra na limpeza.
+- **`montagem`:** contém a origem de um bind mount de algum container, rodando ou parado (`docker ps -aq` e
+  `docker inspect`). O `nod-postgres` do diário monta `~/nod/Eng 1/nod-169/infra/postgres/init`. A comparação usa o
+  caminho real (realpath) dos dois lados, em NFC e sem caixa, porque o APFS não diferencia maiúsculas e o acento pode
+  vir em NFD.
+- **`compose_sem_docker`:** não se sabe o que o Docker monta, e há arquivo de compose na worktree ou até 2 níveis abaixo
+  (`.devcontainer/`, `infra/`). "Não se sabe" é o Docker que não respondeu (o Docker Desktop trava quando o disco da VM
+  enche), ou o binário fora do PATH com o app em `/Applications/Docker.app` ou o socket presente. Sem nada disso, não
+  há montagens.
+- **`travada`:** o clone marca a worktree como travada (`git worktree lock`).
+- **`aninhado`:** o `git worktree list --porcelain` do clone tem outra worktree dentro dela, ou há `.git` (arquivo ou
+  pasta) abaixo dela fora de node_modules. O caso real é `.claude/worktrees/agent-1`, ignorada e suja. A busca vai até
+  8 níveis e 20 mil pastas; se passar disso, a worktree fica.
+- **`suja`:** o `git status` mostra alteração em arquivo rastreado ou arquivo novo.
+- **`ignorado_valioso`:** há arquivo ignorado fora do que se refaz sozinho (`.env`, `backups/*.dump`, um banco local).
+  O que se refaz sozinho: `node_modules`, `dist`, `build`, `out`, `output`, `coverage`, `.vite`, `.next`, `.turbo`,
+  `.cache`, `.parcel-cache`, `.pnpm-store`, `__pycache__`, `.pytest_cache`, `*.log`, `.DS_Store` e
+  `tsconfig.tsbuildinfo` (`ignoradoRegeneravel`).
+- **`head_solto`:** `git rev-list -n1 HEAD --not --branches --remotes --tags` não volta vazio. Esse commit só o HEAD
+  solto alcança, e se perderia com a worktree.
+- **`pr_nao_mergeado`:** no nível `so_com_pr_mergeado`, nenhum PR mergeado da branch tem o `headRefOid` igual ao HEAD
+  local. O nome da branch não basta: uma branch reaproveitada depois do merge tem commits novos.
+
+A regra é recusar demais em vez de apagar algo. Fora isso, a pasta do caso concreto está na raiz do bot, e a raiz do
+bot nunca entra na limpeza.
 
 **5. As worktrees órfãs da raiz do bot não são apagadas.** O nod não sabe de quem elas são. A passada só as conta
 (`orfas`, e `orfasParadas` as sem mexer há 2 dias, pelo HEAD e pelo índice no clone). Mostrar o espaço liberável em
@@ -92,9 +121,22 @@ motivo), com o id da task e só o nome da pasta do repositório. No servidor, o 
 pastas, removidas, pastas apagadas, `liberado_mb`, `pulada_<motivo>`, órfãs e duração. Nenhum caminho vai ao servidor,
 porque o slug vem do título da task.
 
+Na simulação (§7), o log do servidor é `limpeza_simulada`, com `estimado_mb` (o `du -sk` das worktrees que sairiam).
+No Mac, `limpeza_simulada_worktree` traz o caminho relativo a `~/nod`, porque é ele que se confere antes de ligar.
+
 O liberado é a diferença do espaço livre do volume (`statfs`) antes e depois de cada remoção, e não o `du`. Com os
 clones APFS do pnpm (gamefik, leapy), o `du` mostra mais do que apagar libera. A diferença é ruidosa quando outro
 processo grava ao mesmo tempo, então soma nunca negativo.
+
+**7. O modo, por `NOD_LIMPEZA_TASKS`** (no diário, no `.env` do servidor; no app, no ambiente do app):
+
+- **`ligada` (padrão):** apaga.
+- **`simular`:** faz a passada inteira, com todas as conferências e a reconfirmação, e não apaga nada. Conta o que
+  sairia (worktrees e pastas, os motivos das que ficam e o tamanho estimado).
+- **`desligada`:** não roda.
+
+**O diário do Marlon começa em `simular`**, até ele olhar os `limpeza_simulada` e os `limpeza_simulada_worktree`. O
+deploy precisa pôr `NOD_LIMPEZA_TASKS=simular` no `.env` dele antes de subir o código.
 
 ## Alternativas descartadas
 
@@ -111,13 +153,15 @@ processo grava ao mesmo tempo, então soma nunca negativo.
 
 ## Riscos aceitos
 
-- **Uma task reaberta no meio da passada.** A lista é lida antes e a remoção vem depois, segundos ou minutos. Se a
-  pessoa escrever numa task de 3 dias exatamente nesse intervalo, a worktree pode sumir debaixo do bot. A branch fica no
-  clone e o bot recria a worktree.
+- **Uma task reaberta no meio da passada.** A reconfirmação com o servidor e o turno vivo deste Mac, logo antes de cada
+  pasta, deixam a janela em segundos: entre a reconfirmação e o `remove`. Se o turno começar exatamente aí, a worktree
+  pode sumir debaixo do bot. A branch fica no clone e o bot recria a worktree.
 - **Um processo vivo rodando de dentro de uma worktree de task encerrada** (um servidor de dev esquecido) perde a pasta.
   Para isso a task precisa estar encerrada há 3 dias, ou ter o PR mergeado.
-- **O prazo de 10 min por remoção.** Se ele estourar no meio, a worktree fica pela metade. O `prune` arruma os
-  metadados, e o resto aparece como pasta com conteúdo.
+- **O prazo de 10 min por remoção.** Se ele estourar no meio, a worktree fica pela metade, com os metadados no clone.
+  O resto aparece como pasta com conteúdo, e o `git worktree prune` manual arruma os metadados.
+- **A lista do que se refaz sozinho é por nome.** Uma pasta `build/` ou `out/` ignorada com algo que não se refaz sai
+  junto. Ela entrou na lista porque é o nome convencional de saída de build; se um caso real aparecer, sai da lista.
 
 ## Não implementado (segue em PRs próprios)
 

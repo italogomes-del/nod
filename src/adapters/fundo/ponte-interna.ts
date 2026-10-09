@@ -472,7 +472,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
 
     /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
     async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
-      log("info", "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(relatoValido(relato)) });
+      const r = relatoValido(relato);
+      // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
+      log("info", r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
     },
 
     emMemoria() {

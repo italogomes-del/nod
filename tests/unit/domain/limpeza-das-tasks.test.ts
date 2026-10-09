@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ehArquivoDeCompose, LIMPAR_APOS_MS, motivoDaRecusa, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
+import { ehArquivoDeCompose, ignoradoRegeneravel, LIMPAR_APOS_MS, motivoDaRecusa, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
 
 const AGORA = Date.UTC(2026, 9, 9, 12);
 const DIA = 24 * 3_600_000;
@@ -43,6 +43,18 @@ describe("proteções do disco (ADR-088)", () => {
     expect(protegidoPorMontagem(wt, ["/Users/m/nod"])).toBe(false);
     expect(protegidoPorMontagem(wt, ["/Users/m/nod/Eng 1/nod-1690/init"])).toBe(false);
     expect(protegidoPorMontagem("relativo/x", [])).toBe(true);
+  });
+
+  it("revisão #225: a comparação das montagens é NFC e sem caixa (APFS)", () => {
+    const nfc = "/Users/m/nod/Cecília/task-abc123/nod";
+    const nfd = "/users/m/NOD/Cecília".normalize("NFD") + "/task-abc123/nod/infra/init";
+    expect(protegidoPorMontagem(nfc, [nfd])).toBe(true);
+    expect(protegidoPorMontagem(nfc.normalize("NFD").toUpperCase(), [`${nfc}/init`])).toBe(true);
+  });
+
+  it("revisão #225: só o ignorado que se refaz pode sair junto com a worktree", () => {
+    for (const c of ["node_modules/", "packages/web/node_modules/", "dist/", "apps/x/.next/", "coverage/", ".turbo/", "npm-debug.log", ".DS_Store", "tsconfig.tsbuildinfo", "a/__pycache__/"]) expect(ignoradoRegeneravel(c), c).toBe(true);
+    for (const c of [".env", ".env.local", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", ""]) expect(ignoradoRegeneravel(c), c).toBe(false);
   });
 
   it("arquivos de compose reconhecidos", () => {

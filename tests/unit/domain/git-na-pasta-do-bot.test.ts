@@ -57,6 +57,11 @@ describe("git que mexe na pasta de trabalho só dentro de ~/nod/<bot> (ADR-065)"
     expect(naRaiz).toContain("o nod apaga a worktree");
     expect(naTask(`git -C ${CLONE} worktree add ../outra -b x`)).toContain("/Users/m/code/acme/main-repos/outra");
     expect(naTask(`git -C ${CLONE} worktree add "$DESTINO" -b x`)).toContain("numa pasta que não deu para conferir");
+    // Revisão do #225: `worktree move` segue a regra do add; caixa e acento (NFD) não enganam a comparação.
+    expect(naTask(`git -C ${CLONE} worktree move "${TASK}/acme" "${PASTA}/acme"`)).toContain("fora da pasta desta task");
+    expect(naTask(`git -C ${CLONE} worktree move "${TASK}/acme" "${TASK}/acme-2"`)).toBeNull();
+    expect(naTask(`git -C ${CLONE} worktree add "/users/m/NOD/dev 4/fix-filtros-abc123/acme" -b x`)).toBeNull();
+    expect(gitForaDaPastaDoBot(`git -C ${CLONE} worktree add "/Users/m/nod/Cecília/t-1/acme" -b x`, { cwd: null, pastaDoBot: "/Users/m/nod/Cecília/t-1".normalize("NFD"), home: HOME, daTask: true })).toBeNull();
     // A mensagem do git que mexe fora da pasta também ensina a worktree dentro da task.
     expect(naTask("git switch main", CLONE)).toContain(`worktree add "${TASK}/<repo>"`);
   });

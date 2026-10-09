@@ -316,6 +316,9 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId);
     await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
     expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
+    // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
+    await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }));
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {

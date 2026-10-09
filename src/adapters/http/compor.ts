@@ -71,7 +71,7 @@ import { iniciarLaco } from "../executor/laco.ts";
 import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
-import { criarExecutarComando, iniciarLimpezaDasTasks } from "../executor/limpeza-das-tasks.ts";
+import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -972,11 +972,14 @@ export function comporApp(o: OpcoesCompor): App {
       aoTerminarTurno: (plano) => { interruptor.esquecer(plano.turnoId); tarefasVivas.esquecer(plano.turnoId); planosVivos.delete(plano.turnoId); },
     }), p.ponte);
   // definido em 2026-10-09 (ADR-088): no modo local o servidor É o executor do Mac, e a limpeza das pastas de task roda
-  // aqui, uma por pessoa ao lado do pool. `NOD_LIMPEZA_TASKS=desligada` desliga sem mudar código.
+  // aqui, uma por pessoa ao lado do pool (as passadas entram numa fila só do processo, revisão do #225).
+  // `NOD_LIMPEZA_TASKS=simular` confere tudo e só registra; `desligada` desliga.
   const homeDoExecutor = env.HOME ?? homedir();
+  const modoLimpeza = modoDaLimpeza(env);
+  const pastaEmUso = (pasta: string) => [...planosVivos.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true);
   const iniciar: IniciarLaco = (p) => {
     const pool = iniciarLacoDaPessoa(p);
-    const limpeza = env.NOD_LIMPEZA_TASKS === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor) });
+    const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso });
     return { ...pool, async parar() { limpeza?.parar(); await pool.parar(); } };
   };
 

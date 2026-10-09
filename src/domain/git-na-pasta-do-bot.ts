@@ -40,7 +40,16 @@ function resolver(caminho: string, base: string | null, home: string): string | 
   return `/${partes.join("/")}`;
 }
 
-const dentro = (alvo: string, pasta: string) => alvo === pasta || alvo.startsWith(`${pasta}/`);
+/**
+ * revisto em 2026-10-09 (revisão do #225): NFC e sem caixa — o APFS não diferencia maiúsculas e o mesmo acento chega em
+ * NFC ou NFD; `~/nod/dev 4/x` e `~/nod/Dev 4/x` são a mesma pasta no Mac.
+ */
+const comparavel = (c: string) => c.normalize("NFC").toLowerCase();
+const dentro = (alvo: string, pasta: string) => {
+  const a = comparavel(alvo);
+  const p = comparavel(pasta);
+  return a === p || a.startsWith(`${p}/`);
+};
 
 /**
  * As palavras do comando até a primeira substituição: o `git commit -m "$(cat <<'EOF' …)"` que o Claude Code
@@ -137,11 +146,13 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
       i += a === "--git-dir" || a === "-c" ? 2 : 1;
     }
     const sub = args[i];
-    if (sub === "worktree" && args[i + 1] === "add") {
-      const caminho = caminhoDoWorktreeAdd(args.slice(i + 2));
-      if (caminho === null) continue;
+    if (sub === "worktree" && (args[i + 1] === "add" || args[i + 1] === "move")) {
+      // revisão do #225: o `worktree move <worktree> <destino>` muda onde ela mora — vale a mesma regra do `add`.
+      const posicionais = args[i + 1] === "add" ? [caminhoDoWorktreeAdd(args.slice(i + 2))] : args.slice(i + 2).filter((a) => !a.startsWith("-"));
+      const caminho = args[i + 1] === "add" ? posicionais[0] : posicionais[1];
+      if (caminho === null || caminho === undefined) continue;
       const destino = resolver(caminho, alvo, ctx.home);
-      if (destino === null || !dentro(destino, ctx.pastaDoBot) || destino === ctx.pastaDoBot) return avisoWorktree(destino, ctx);
+      if (destino === null || !dentro(destino, ctx.pastaDoBot) || comparavel(destino) === comparavel(ctx.pastaDoBot)) return avisoWorktree(destino, ctx);
       continue;
     }
     if (!sub || !GIT_QUE_MEXE.has(sub)) continue;

@@ -1,18 +1,19 @@
 import { execFile } from "node:child_process";
-import { lstat, readdir, readFile, realpath, rmdir, stat, statfs, unlink } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { lstat, open, readdir, readFile, realpath, rmdir, stat, statfs, unlink } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
-import { ehArquivoDeCompose, motivoDaRecusa, ORFA_PARADA_MS, pastaDeTask, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import { ehArquivoDeCompose, ignoradoRegeneravel, motivoDaRecusa, ORFA_PARADA_MS, pastaDeTask, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
 
 /**
  * A limpeza das pastas de task no Mac (definido em 2026-10-09, ADR-088, issue #216). O servidor diz quais tasks
  * encerradas podem ser limpas (src/use-cases/limpeza-das-tasks.ts); aqui, onde os arquivos estão, cada worktree dentro
- * da pasta da task sai com `git worktree remove` SEM --force — o git recusa a que tem alteração não commitada ou
- * arquivo novo, e ela fica, registrada no log. Depois as pastas que ficaram vazias saem com `rmdir` (que nunca apaga
- * conteúdo) e o `git worktree prune` arruma os clones. Nada fora de `~/nod/<bot>/<slug>` é tocado: a raiz do bot, onde
- * moram as 198 worktrees antigas de dono desconhecido (medido em 09/10), só é contada.
+ * da pasta da task sai com `git worktree remove` SEM --force, e só depois de conferir o que o git NÃO protege: outra
+ * worktree ou repositório aninhado, arquivo ignorado que não se refaz, commit com HEAD solto, origem de montagem do
+ * Docker, turno vivo na pasta. Depois as pastas que ficaram vazias saem com `rmdir` (que nunca apaga conteúdo). Nada
+ * fora de `~/nod/<bot>/<slug>` é tocado: a raiz do bot, onde moram as 198 worktrees antigas de dono desconhecido
+ * (medido em 09/10), só é contada.
  *
  * Roda no executor: no modo local (o diário), no processo do servidor, que está no Mac; no modo compartilhado, no app
  * do Mac, que puxa a lista pela ponte (ADR-021). O servidor na nuvem nunca vê o disco.
@@ -22,23 +23,43 @@ export type ResultadoComando = { codigo: number; stdout: string; stderr: string 
 /** Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. */
 export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number }) => Promise<ResultadoComando>;
 
+/**
+ * Revisão do #225: `ligada` (padrão) apaga; `simular` faz a passada inteira, com todas as checagens, e só registra o que
+ * sairia (`limpeza_simulada`); `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`.
+ */
+export type ModoLimpeza = "ligada" | "simular" | "desligada";
+export function modoDaLimpeza(env: Readonly<Record<string, string | undefined>>): ModoLimpeza {
+  const v = env.NOD_LIMPEZA_TASKS?.trim().toLowerCase();
+  return v === "desligada" ? "desligada" : v === "simular" ? "simular" : "ligada";
+}
+
 /** definido em 2026-10-09: a primeira passada 10 min depois de subir (o boot já é pesado), e então a cada 6 h. */
 export const PRIMEIRA_LIMPEZA_MS = 10 * 60_000;
 export const INTERVALO_LIMPEZA_MS = 6 * 3_600_000;
 /**
  * definido em 2026-10-09: o `git worktree remove` apaga o node_modules junto (180 MB a 3,6 GB por worktree, medido na
- * #216) e o Mac pode estar carregado; 10 min só segura um disco travado. `docker` e `gh` respondem em segundos.
+ * #216) e o Mac pode estar carregado; 10 min só segura um disco travado. `docker` e `gh` respondem em segundos; o
+ * `git status --ignored` e o `du` de uma worktree grande ficam abaixo de 2 min.
  */
 const PRAZO_REMOVER_MS = 10 * 60_000;
+const PRAZO_MEDIO_MS = 2 * 60_000;
 const PRAZO_CURTO_MS = 30_000;
 /** Até onde se procura worktree dentro da pasta da task (`<slug>/<repo>` é 1; `<slug>/repos/<repo>` é 2). */
 const PROFUNDIDADE_MAXIMA = 3;
+/**
+ * Revisão do #225: a busca de `.git` aninhado dentro da worktree (fora de node_modules) vai até esta profundidade e este
+ * número de pastas; passou disso, a worktree fica (`aninhado`) — sem ter olhado tudo, não se apaga.
+ */
+const ANINHADO_PROFUNDIDADE = 8;
+const ANINHADO_MAX_PASTAS = 20_000;
+/** Revisão do #225: a trava de um processo que morreu, ou mais velha que isto, é retomada. */
+const TRAVA_VENCE_MS = 24 * 3_600_000;
 
 export function criarExecutarComando(env: Readonly<Record<string, string | undefined>>, home: string): ExecutarComando {
   const ambiente = { ...env, PATH: caminhoAumentado(env.PATH, home), GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1", GIT_OPTIONAL_LOCKS: "0" };
   return (bin, args, o) =>
     new Promise((resolver) => {
-      execFile(bin, [...args], { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 4 * 1024 * 1024 }, (erro, stdout, stderr) => {
+      execFile(bin, [...args], { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024 }, (erro, stdout, stderr) => {
         if (!erro) { resolver({ codigo: 0, stdout: String(stdout), stderr: String(stderr) }); return; }
         const e = erro as NodeJS.ErrnoException & { killed?: boolean; code?: unknown };
         const codigo = e.code === "ENOENT" ? -1 : e.killed ? -2 : typeof e.code === "number" ? e.code : 1;
@@ -47,14 +68,20 @@ export function criarExecutarComando(env: Readonly<Record<string, string | undef
     });
 }
 
+const existePadrao = (caminho: string): Promise<boolean> => lstat(caminho).then(() => true, () => false);
+
 /**
  * As origens dos bind mounts de todos os containers (rodando ou parados: o parado volta a montar ao subir). `[]` = sem
- * Docker instalado; `null` = o Docker não respondeu (o Docker Desktop trava quando o disco da VM enche) — aí a limpeza
- * segura toda worktree que tem arquivo de compose, em vez de apagar às cegas.
+ * Docker neste Mac; `null` = não se sabe — o Docker não respondeu (o Docker Desktop trava quando o disco da VM enche),
+ * ou o binário não está no PATH mas o Docker existe (o app em /Applications ou o socket). Com `null` a limpeza segura
+ * toda worktree que tem arquivo de compose e não apaga pasta vazia nenhuma.
  */
-export async function montagensDoDocker(executar: ExecutarComando): Promise<string[] | null> {
+export async function montagensDoDocker(executar: ExecutarComando, home: string, existe: (c: string) => Promise<boolean> = existePadrao): Promise<string[] | null> {
   const ps = await executar("docker", ["ps", "-aq"]);
-  if (ps.codigo === -1) return [];
+  if (ps.codigo === -1) {
+    for (const c of ["/Applications/Docker.app", join(home, ".docker", "run", "docker.sock"), "/var/run/docker.sock"]) if (await existe(c)) return null;
+    return [];
+  }
   if (ps.codigo !== 0) return null;
   const ids = ps.stdout.split("\n").map((l) => l.trim()).filter((l) => /^[0-9a-f]+$/i.test(l));
   if (ids.length === 0) return [];
@@ -80,6 +107,12 @@ export type OpcoesLimpeza = {
   montagens?: () => Promise<string[] | null>;
   /** Bytes livres no volume do caminho; padrão: `statfs`. */
   livre?: (caminho: string) => Promise<number>;
+  /** Revisão do #225: não apaga nada; só conta o que sairia. */
+  simular?: boolean;
+  /** Revisão do #225: um turno deste Mac roda nesta pasta (`<bot>/<slug>`) agora? */
+  emUso?: (pasta: string) => boolean;
+  /** Revisão do #225: o servidor ainda oferece esta pasta? Perguntado logo antes da primeira remoção de cada pasta. */
+  reconfirmar?: (p: PastaParaLimpar) => Promise<boolean>;
 };
 
 type Achados = { worktrees: string[]; clones: number };
@@ -99,19 +132,46 @@ async function procurar(dir: string, profundidade: number, achados: Achados): Pr
 }
 
 /**
- * Apaga as subpastas vazias e a própria pasta, se ficou vazia (só `.DS_Store` conta como vazio). Nunca apaga arquivo de
- * conteúdo, nunca entra numa worktree ou clone que ficou (a pasta vazia de dentro dela pode ser a origem de uma
- * montagem, como o `infra/postgres/init` do diário) e nunca apaga a pasta que é origem de montagem conhecida.
+ * Revisão do #225: há `.git` (arquivo ou pasta) ABAIXO da raiz da worktree, fora de node_modules? Entra em pasta
+ * escondida e ignorada (`.claude/worktrees/agent-1` é o caso real). `true` também quando a busca passou do limite.
  */
-async function apagarVazias(dir: string, profundidade: number, montagens: readonly string[]): Promise<boolean> {
+async function temGitAninhado(raiz: string): Promise<boolean> {
+  let vistas = 0;
+  async function descer(dir: string, profundidade: number): Promise<boolean> {
+    if (++vistas > ANINHADO_MAX_PASTAS) return true;
+    let entradas;
+    try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return true; }
+    for (const e of entradas) {
+      if (e.name === ".git") { if (dir !== raiz) return true; continue; }
+      if (!e.isDirectory() || e.name === "node_modules") continue;
+      if (profundidade >= ANINHADO_PROFUNDIDADE) return true;
+      if (await descer(join(dir, e.name), profundidade + 1)) return true;
+    }
+    return false;
+  }
+  return descer(raiz, 0);
+}
+
+/** Pastas vazias dentro de `dir` e ela mesma (só `.DS_Store` conta como vazio); `ausentes` contam como já removidas. */
+async function ficariaVazia(dir: string, profundidade: number, ausentes: ReadonlySet<string>, montagens: readonly string[], apagar: boolean): Promise<boolean> {
+  if (ausentes.has(dir)) return true;
   let entradas;
   try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return false; }
+  // Nunca entra numa worktree ou clone que ficou (a pasta vazia de dentro dela pode ser origem de montagem, como o
+  // `infra/postgres/init` do diário) nem mexe na pasta que é origem de montagem conhecida.
   if (entradas.some((e) => e.name === ".git") || protegidoPorMontagem(dir, montagens)) return false;
-  for (const e of entradas) if (e.isDirectory() && profundidade < PROFUNDIDADE_MAXIMA + 1) await apagarVazias(join(dir, e.name), profundidade + 1, montagens);
-  try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return false; }
-  if (!entradas.every((e) => e.name === ".DS_Store" && e.isFile())) return false;
+  let vazia = true;
+  for (const e of entradas) {
+    if (e.name === ".DS_Store" && e.isFile()) continue;
+    if (e.isDirectory() && profundidade < PROFUNDIDADE_MAXIMA + 1 && (await ficariaVazia(join(dir, e.name), profundidade + 1, ausentes, montagens, apagar))) continue;
+    vazia = false;
+  }
+  if (!vazia || !apagar) return vazia;
   try {
-    for (const e of entradas) await unlink(join(dir, e.name));
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      if (e.name !== ".DS_Store" || !e.isFile()) return false;
+      await unlink(join(dir, e.name));
+    }
     await rmdir(dir);
     return true;
   } catch {
@@ -119,8 +179,14 @@ async function apagarVazias(dir: string, profundidade: number, montagens: readon
   }
 }
 
-async function temCompose(dir: string): Promise<boolean> {
-  try { return (await readdir(dir)).some(ehArquivoDeCompose); } catch { return true; }
+/** Revisão do #225: arquivo de compose na worktree ou até 2 níveis abaixo (`.devcontainer/`, `infra/`), fora de node_modules. */
+async function temCompose(dir: string, profundidade = 0): Promise<boolean> {
+  let entradas;
+  try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return true; }
+  if (entradas.some((e) => !e.isDirectory() && ehArquivoDeCompose(e.name))) return true;
+  if (profundidade >= 2) return false;
+  for (const e of entradas) if (e.isDirectory() && e.name !== "node_modules" && e.name !== ".git" && (await temCompose(join(dir, e.name), profundidade + 1))) return true;
+  return false;
 }
 
 const livrePadrao = async (caminho: string): Promise<number> => {
@@ -128,23 +194,81 @@ const livrePadrao = async (caminho: string): Promise<number> => {
   return Number(s.bavail) * Number(s.bsize);
 };
 
-/** O PR da branch desta worktree já foi mergeado? Qualquer dúvida (gh fora, sem login, HEAD solto) = não. */
+/** O caminho real, ou ele mesmo quando não existe. */
+const real = (c: string) => realpath(c).catch(() => c);
+
+/**
+ * O PR desta worktree foi mergeado COM o HEAD que está aqui? revisto em 2026-10-09 (revisão do #225): o nome da branch
+ * não basta — uma branch reaproveitada depois do merge teria commits novos. Qualquer dúvida (gh fora, sem login, HEAD
+ * solto) = não.
+ */
 async function prMergeado(wt: string, executar: ExecutarComando): Promise<boolean> {
   const ramo = await executar("git", ["-C", wt, "symbolic-ref", "--quiet", "--short", "HEAD"]);
   const branch = ramo.stdout.trim();
-  if (ramo.codigo !== 0 || branch === "") return false;
-  const gh = await executar("gh", ["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--limit", "1"], { cwd: wt });
+  const head = (await executar("git", ["-C", wt, "rev-parse", "HEAD"])).stdout.trim();
+  if (ramo.codigo !== 0 || branch === "" || !/^[0-9a-f]{40,64}$/.test(head)) return false;
+  const gh = await executar("gh", ["pr", "list", "--head", branch, "--state", "merged", "--json", "number,headRefOid", "--limit", "20"], { cwd: wt });
   if (gh.codigo !== 0) return false;
   try {
     const lista = JSON.parse(gh.stdout) as unknown;
-    return Array.isArray(lista) && lista.length > 0;
+    return Array.isArray(lista) && lista.some((p) => typeof p === "object" && p !== null && (p as { headRefOid?: unknown }).headRefOid === head);
   } catch {
     return false;
   }
 }
 
-function relatoVazio(): RelatoLimpeza {
-  return { pastas: 0, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 0 };
+/** As worktrees que o clone conhece (`git worktree list --porcelain`): caminho e se está travada. */
+async function worktreesDoClone(dirComum: string, executar: ExecutarComando): Promise<{ caminho: string; travada: boolean }[] | null> {
+  const r = await executar("git", ["-C", dirComum, "worktree", "list", "--porcelain"]);
+  if (r.codigo !== 0) return null;
+  const lista: { caminho: string; travada: boolean }[] = [];
+  for (const linha of r.stdout.split("\n")) {
+    if (linha.startsWith("worktree ")) lista.push({ caminho: linha.slice("worktree ".length), travada: false });
+    else if (linha === "locked" || linha.startsWith("locked ")) { const u = lista[lista.length - 1]; if (u) u.travada = true; }
+  }
+  return lista;
+}
+
+const comparavel = (c: string) => c.normalize("NFC").toLowerCase().replace(/\/+$/, "");
+
+/**
+ * Tudo o que o `git worktree remove` sem --force não protege, conferido antes (revisão do #225). Devolve o motivo para
+ * pular, ou null se a worktree pode sair. A ordem vai do mais barato ao mais caro.
+ */
+async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string, montagens: readonly string[] | null, executar: ExecutarComando): Promise<MotivoPuladaLimpeza | null> {
+  const wtReal = await real(wt);
+  if (montagens !== null && (protegidoPorMontagem(wt, montagens) || protegidoPorMontagem(wtReal, montagens))) return "montagem";
+  if (montagens === null && (await temCompose(wt))) return "compose_sem_docker";
+  const conhecidas = await worktreesDoClone(dirComum, executar);
+  if (conhecidas === null) return "erro";
+  const alvo = comparavel(wtReal);
+  for (const w of conhecidas) {
+    const c = comparavel(await real(w.caminho));
+    if (c === alvo && w.travada) return "travada";
+    if (c.startsWith(`${alvo}/`)) return "aninhado";
+  }
+  if (await temGitAninhado(wt)) return "aninhado";
+  // Alteração em arquivo rastreado ou arquivo novo = suja (o remove recusaria; aqui vale também para a simulação).
+  // Ignorado que não se refaz = o remove apagaria calado.
+  const status = await executar("git", ["-C", wt, "status", "--porcelain", "-z", "--ignored=traditional", "--untracked-files=normal"], { prazoMs: PRAZO_MEDIO_MS });
+  if (status.codigo !== 0) return "erro";
+  let valioso = false;
+  for (const entrada of status.stdout.split("\0")) {
+    if (entrada === "") continue;
+    if (!entrada.startsWith("!! ")) return "suja";
+    if (!ignoradoRegeneravel(entrada.slice(3))) valioso = true;
+  }
+  if (valioso) return "ignorado_valioso";
+  // Commit que só o HEAD solto alcança se perderia com a worktree.
+  const solto = await executar("git", ["-C", wt, "rev-list", "-n1", "HEAD", "--not", "--branches", "--remotes", "--tags"]);
+  if (solto.codigo !== 0) return "erro";
+  if (solto.stdout.trim() !== "") return "head_solto";
+  if (p.quando === "so_com_pr_mergeado" && !(await prMergeado(wt, executar))) return "pr_nao_mergeado";
+  return null;
+}
+
+function relatoVazio(simular: boolean): RelatoLimpeza {
+  return { pastas: 0, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 0, ...(simular ? { simulada: true, estimadoBytes: 0 } : {}) };
 }
 
 /**
@@ -153,16 +277,19 @@ function relatoVazio(): RelatoLimpeza {
  * vários bots já disputam o disco.
  */
 export async function limparPastas(pastas: readonly PastaParaLimpar[], o: OpcoesLimpeza): Promise<RelatoLimpeza> {
-  const relato = relatoVazio();
+  const simular = o.simular === true;
+  const relato = relatoVazio(simular);
   const pular = (m: MotivoPuladaLimpeza) => { relato.puladas[m] = (relato.puladas[m] ?? 0) + 1; };
   const raiz = join(o.home, "nod");
   let raizReal: string;
   try { raizReal = await realpath(raiz); } catch { return relato; }
   const livre = o.livre ?? livrePadrao;
-  // Uma consulta ao Docker por passada, só quando há pasta para mexer.
+  // Uma consulta ao Docker por passada, só quando há pasta para mexer; cada origem entra também pelo caminho real.
   let montagensLidas: Promise<string[] | null> | null = null;
-  const lerMontagens = () => (montagensLidas ??= (o.montagens ?? (() => montagensDoDocker(o.executar)))());
-  const clones = new Set<string>();
+  const lerMontagens = () => (montagensLidas ??= (async () => {
+    const m = await (o.montagens ?? (() => montagensDoDocker(o.executar, o.home)))();
+    return m === null ? null : [...m, ...(await Promise.all(m.map(real)))];
+  })());
 
   for (const p of pastas) {
     const rel = pastaDeTask(`~/nod/${p.pasta}`);
@@ -176,56 +303,66 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       continue; // não existe neste Mac (já limpa, ou a task rodou em outro Mac)
     }
     relato.pastas++;
+    if (o.emUso?.(rel)) { pular("em_uso"); continue; }
     const achados: Achados = { worktrees: [], clones: 0 };
     await procurar(base, 0, achados);
     for (let i = 0; i < achados.clones; i++) pular("clone");
+    const montagens = await lerMontagens();
+    const saem = new Set<string>();
+    let confirmada: boolean | null = null;
 
     for (const wt of achados.worktrees) {
       const nome = basename(wt);
-      const montagens = await lerMontagens();
-      if (montagens !== null && protegidoPorMontagem(wt, montagens)) {
-        pular("montagem");
-        log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo: "montagem" });
-        continue;
-      }
-      if (montagens === null && (await temCompose(wt))) {
-        pular("compose_sem_docker");
-        log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo: "compose_sem_docker" });
-        continue;
-      }
-      if (p.quando === "so_com_pr_mergeado" && !(await prMergeado(wt, o.executar))) { pular("pr_nao_mergeado"); continue; }
       const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
       const dirComum = comum.stdout.trim();
-      if (comum.codigo !== 0 || !isAbsolute(dirComum)) {
-        pular("erro");
-        log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo: "erro", codigo: comum.codigo });
+      const motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, p, dirComum, montagens, o.executar);
+      if (motivo) {
+        pular(motivo);
+        if (motivo !== "pr_nao_mergeado") log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo });
+        continue;
+      }
+      // Logo antes da primeira remoção da pasta: o servidor ainda a oferece, e nenhum turno deste Mac começou nela.
+      if (confirmada === null) confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      if (!confirmada) { pular("nao_reconfirmada"); break; }
+      if (simular) {
+        const du = await o.executar("du", ["-sk", wt], { prazoMs: PRAZO_MEDIO_MS });
+        const kb = Number.parseInt(du.stdout.trim().split(/\s/)[0] ?? "", 10);
+        const bytes = du.codigo === 0 && Number.isFinite(kb) ? kb * 1024 : 0;
+        relato.removidas++;
+        relato.estimadoBytes = (relato.estimadoBytes ?? 0) + bytes;
+        saem.add(wt);
+        // No log do Mac pode ir o caminho (relativo a ~/nod): é ele que o Marlon confere antes de ligar.
+        log("info", "limpeza_simulada_worktree", { trabalho_id: p.trabalhoId, caminho: relative(raiz, wt), quando: p.quando, estimado_mb: Math.round(bytes / 1_048_576) });
         continue;
       }
       const antes = await livre(raiz).catch(() => null);
-      // SEM --force (ADR-088): alteração não commitada ou arquivo novo fazem o git recusar, e a worktree fica.
+      // SEM --force (ADR-088): se algo mudou desde a conferência, o git ainda recusa a worktree suja.
       const r = await o.executar("git", ["-C", dirComum, "worktree", "remove", wt], { prazoMs: PRAZO_REMOVER_MS });
       if (r.codigo !== 0) {
-        const motivo = motivoDaRecusa(r.stderr);
-        pular(motivo);
-        log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo, codigo: r.codigo });
+        const recusa = motivoDaRecusa(r.stderr);
+        pular(recusa);
+        log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo: recusa, codigo: r.codigo });
         continue;
       }
       const depois = await livre(raiz).catch(() => null);
       const liberado = antes !== null && depois !== null ? Math.max(0, depois - antes) : 0;
       relato.removidas++;
       relato.liberadoBytes += liberado;
-      clones.add(dirComum);
       log("info", "limpeza_worktree_removida", { trabalho_id: p.trabalhoId, pasta: nome, quando: p.quando, liberado_mb: Math.round(liberado / 1_048_576) });
     }
-    if (await apagarVazias(base, 0, (await lerMontagens()) ?? [])) relato.pastasApagadas++;
+    // Sem saber o que o Docker monta, nenhuma pasta vazia sai (pode ser a origem de uma montagem). Nem a da pasta que o
+    // servidor deixou de oferecer.
+    if (montagens === null || confirmada === false || o.emUso?.(rel)) continue;
+    if (await ficariaVazia(base, 0, saem, montagens, !simular)) relato.pastasApagadas++;
   }
-  for (const dirComum of clones) await o.executar("git", ["-C", dirComum, "worktree", "prune"]);
+  // Revisão do #225: sem `git worktree prune` — o `remove` já apaga os metadados da worktree que tirou, e o prune
+  // varreria também as worktrees de OUTROS donos cuja pasta sumiu (num disco desmontado, por exemplo).
   return relato;
 }
 
 /**
  * As worktrees na raiz das pastas dos bots (`~/nod/<bot>/<x>` com `.git` arquivo), fora de qualquer task: só contadas
- * (ADR-088 §3). "Parada" = nem a pasta nem o HEAD/índice dela no clone mudaram há ORFA_PARADA_MS.
+ * (ADR-088 §5). "Parada" = nem a pasta nem o HEAD/índice dela no clone mudaram há ORFA_PARADA_MS.
  */
 export async function contarOrfas(home: string, agora: number): Promise<{ orfas: number; paradas: number }> {
   const raiz = join(home, "nod");
@@ -259,29 +396,92 @@ export async function contarOrfas(home: string, agora: number): Promise<{ orfas:
   return { orfas, paradas };
 }
 
+/**
+ * Revisão do #225: uma passada por Mac de cada vez, também entre processos (o diário, um servidor de teste e o app do
+ * Mac podem rodar juntos). `~/nod/.limpeza.lock` guarda pid e hora; a trava de um pid morto, ou de mais de 24 h, é
+ * retomada. Devolve a função que solta, ou null se outro processo está limpando.
+ */
+export async function travarLimpeza(home: string, agora: number): Promise<(() => Promise<void>) | null> {
+  const arquivo = join(home, "nod", ".limpeza.lock");
+  const conteudo = JSON.stringify({ pid: process.pid, em: agora });
+  for (let tentativa = 0; tentativa < 2; tentativa++) {
+    try {
+      const f = await open(arquivo, "wx", 0o600);
+      await f.writeFile(conteudo);
+      await f.close();
+      return async () => {
+        if ((await readFile(arquivo, "utf8").catch(() => "")) === conteudo) await unlink(arquivo).catch(() => undefined);
+      };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      let dono: { pid?: unknown; em?: unknown } = {};
+      try { dono = JSON.parse(await readFile(arquivo, "utf8")) as typeof dono; } catch { /* trava ilegível: tratada como vencida */ }
+      const vivo = typeof dono.pid === "number" && processoVivo(dono.pid);
+      const recente = typeof dono.em === "number" && agora - dono.em < TRAVA_VENCE_MS;
+      if (vivo && recente) return null;
+      await unlink(arquivo).catch(() => undefined);
+    }
+  }
+  return null;
+}
+
+function processoVivo(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Revisão do #225: as passadas DESTE processo em fila — no diário há uma limpeza por pessoa, e elas disparavam juntas
+ * sobre o mesmo `~/nod`. A fila serializa; a trava em arquivo cuida dos outros processos.
+ */
+let filaDoProcesso: Promise<unknown> = Promise.resolve();
+function naFila<T>(fn: () => Promise<T>): Promise<T> {
+  const vez = filaDoProcesso.then(fn, fn);
+  filaDoProcesso = vez.catch(() => undefined);
+  return vez;
+}
+
 export type LimpezaDasTasks = { parar(): void; passada(): Promise<RelatoLimpeza | null> };
 
 /**
- * A limpeza periódica de uma pessoa neste Mac: pede a lista à ponte, limpa e relata. Uma passada por vez; erro vira
- * log e a próxima tenta de novo. Ponte sem `pastasParaLimpar` (servidor antigo) = nada a fazer.
+ * A limpeza periódica de uma pessoa neste Mac: pede a lista à ponte, limpa e relata. Uma passada por vez (fila do
+ * processo e trava em arquivo); erro vira log e a próxima tenta de novo. Ponte sem `pastasParaLimpar` (servidor antigo)
+ * = nada a fazer.
  */
 export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number }): LimpezaDasTasks {
   const agora = o.agora ?? Date.now;
   let rodando = false;
   let parado = false;
-  async function passada(): Promise<RelatoLimpeza | null> {
-    if (rodando || parado || !o.ponte.pastasParaLimpar) return null;
-    rodando = true;
+  async function umaPassada(): Promise<RelatoLimpeza | null> {
+    const pastasParaLimpar = o.ponte.pastasParaLimpar?.bind(o.ponte);
+    if (parado || !pastasParaLimpar) return null;
+    const soltar = await travarLimpeza(o.home, agora());
+    if (!soltar) { log("info", "limpeza_adiada", { pessoa_id: o.pessoaId, motivo: "outra_passada" }); return null; }
     const inicio = agora();
     try {
-      const pastas = await o.ponte.pastasParaLimpar(o.pessoaId);
-      const relato = await limparPastas(pastas, o);
+      const pastas = await pastasParaLimpar(o.pessoaId);
+      const reconfirmar = o.reconfirmar ?? (async (p: PastaParaLimpar) =>
+        (await pastasParaLimpar(o.pessoaId)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
+      const relato = await limparPastas(pastas, { ...o, reconfirmar });
       const { orfas, paradas } = await contarOrfas(o.home, agora());
       relato.orfas = orfas;
       relato.orfasParadas = paradas;
       relato.duracaoMs = Math.max(0, agora() - inicio);
       await o.ponte.relatarLimpeza?.(o.pessoaId, relato);
       return relato;
+    } finally {
+      await soltar();
+    }
+  }
+  async function passada(): Promise<RelatoLimpeza | null> {
+    if (rodando || parado) return null;
+    rodando = true;
+    try {
+      return await naFila(umaPassada);
     } catch (e) {
       log("aviso", "limpeza_falhou", { pessoa_id: o.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
       return null;

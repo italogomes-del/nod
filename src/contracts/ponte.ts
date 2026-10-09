@@ -121,8 +121,19 @@ export type RelatoLimpeza = {
   orfas: number;
   orfasParadas: number;
   duracaoMs: number;
+  /**
+   * Revisão do #225 (`NOD_LIMPEZA_TASKS=simular`): a passada fez todas as checagens e não apagou nada. `removidas` e
+   * `pastasApagadas` contam o que sairia; `estimadoBytes` é o `du` das worktrees que sairiam.
+   */
+  simulada?: boolean;
+  estimadoBytes?: number;
 };
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "compose_sem_docker" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "erro";
+/**
+ * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
+ * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
+ * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar).
+ */
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "compose_sem_docker" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro";
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
