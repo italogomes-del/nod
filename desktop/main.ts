@@ -8,7 +8,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
-import { executarColetando } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
@@ -359,7 +360,21 @@ function falha(codigo: FalhaPonte["codigo"]) {
   falhando = true;
   setTimeout(() => { void parar().then(mostrarSetup).finally(() => { falhando = false; }); }, 0);
 }
+/**
+ * ADR-089 (#217): os grupos dos turnos que a vida anterior do app deixou (Forçar Encerrar, queda, SIGKILL) morrem antes
+ * do primeiro turno desta — só os que ainda são os processos anotados. Uma vez por processo; `conectar` espera.
+ */
+let limpezaDeOrfaos: Promise<void> | null = null;
+function limparOrfaosUmaVez(): Promise<void> {
+  limpezaDeOrfaos ??= (async () => {
+    const arquivo = join(app.getPath("userData"), "executor", "grupos-vivos.json");
+    const r = await encerrarGruposOrfaos({ arquivo }).catch(() => ({ assumiu: true }));
+    if (r.assumiu) registrarGruposEm(arquivo);
+  })();
+  return limpezaDeOrfaos;
+}
 async function conectar(c: Config) {
+  await limparOrfaosUmaVez();
   await parar();
   const r = await fetch(`${c.url}/api/maquina/sessao`, { method: "POST", redirect: "error", headers: { authorization: `Bearer ${c.chave}`, "x-nod-versao": app.getVersion(), "content-type": "application/json" }, body: "{}", signal: AbortSignal.timeout(15_000) });
   const minima = r.headers.get("x-nod-versao-minima");
@@ -524,11 +539,14 @@ else {
     if (w) capturarEstadoJanela(w);
     void Promise.all([parar(), gravacaoJanela]).finally(() => app.quit());
   });
+  // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
+  app.on("will-quit", () => encerrarGruposVivos());
   void app.whenReady().then(async () => {
     // NOD-138: o log() do app passa a gravar em ~/Library/Logs/nod antes de qualquer outra coisa, e as quedas viram linha.
     definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
     log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
+    void limparOrfaosUmaVez();
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();

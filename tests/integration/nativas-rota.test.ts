@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { rotasInternas } from "../../src/adapters/http/rotas/interno.ts";
 import { FERRAMENTAS_NOD } from "../../src/contracts/ferramentas-nod.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
@@ -33,7 +33,7 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
   });
   afterAll(() => srv.close());
 
-  async function turno(nativas: readonly string[]) {
+  async function turno(nativas: readonly string[], o: { meChameAs?: boolean } = {}) {
     const repos = memoria.repos(MARLON);
     const agente = await repos.agentes.criar({ nome: "Ada", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     const agenteId = agente?.id ?? "";
@@ -51,6 +51,7 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
       catalogo: {
         ferramentas: [
           { nome: "pedir_aprovacao", nomeMcp: "mcp__nod__pedir_aprovacao", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.pedir_aprovacao },
+          ...(o.meChameAs ? [{ nome: "me_chame_as", nomeMcp: "mcp__nod__me_chame_as" as const, origem: "nod" as const, conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.me_chame_as }] : []),
           { nome: `${slug}__enviar`, nomeMcp: `mcp__nod__${slug}__enviar`, origem: "conector", conectorId: email?.id ?? "", readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } },
         ],
         servidores: [{ conectorId: email?.id ?? "", nome: slug, trust: "untrusted", transporte: "stdio" }],
@@ -106,6 +107,37 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     expect(trilha[0]?.regraVersao).toBe(2);
     const arriscado = await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "rm -rf dist" })).json() as { aguardar?: string };
     expect(typeof arriscado.aguardar).toBe("string");
+  });
+
+  it("ADR-089: o laço de espera com sleep é negado com a orientação do me_chame_as, em qualquer modo, sem card nem trilha; npm test segue", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL, { meChameAs: true });
+    // Nem o modo total aprova esperar assim.
+    await t.repos.agentes.definirModoAprovacao(t.agenteId, "total");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const r = await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "while :; do gh run list --limit 1; sleep 30; done" });
+    const linhas = log.mock.calls.map((c) => String(c[0]));
+    log.mockRestore();
+    expect(r.status).toBe(403);
+    const corpo = (await r.json()) as { mensagem: string };
+    expect(corpo.mensagem).toContain("me_chame_as");
+    expect(linhas.some((l) => l.includes('"evento":"espera_em_laco_negada"') && l.includes('"tipo":"laco_com_sleep"') && l.includes('"me_chame_as":true'))).toBe(true);
+    // O comando nunca vai ao log.
+    expect(linhas.some((l) => l.includes("gh run list"))).toBe(false);
+    // O Monitor roda comando como o Bash, e a espera longa sem laço também é negada.
+    expect((await t.interno("POST", "nativas", { ferramenta: "Monitor", comando: "sleep 600 && gh run list" })).status).toBe(403);
+    expect(await t.repos.trilha.doTurno(t.turnoId)).toEqual([]);
+    // Comando demorado de verdade continua livre, sem teto.
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "npm test" })).json()).toEqual({ ok: true });
+    expect(await (await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "sleep 2 && curl -s http://127.0.0.1:8888" })).json()).toEqual({ ok: true });
+  });
+
+  it("ADR-089: sem me_chame_as no catálogo do turno, a negação manda encerrar dizendo o que falta", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    const r = await t.interno("POST", "nativas", { ferramenta: "Bash", comando: "until gh pr checks 42; do sleep 15; done" });
+    expect(r.status).toBe(403);
+    const corpo = (await r.json()) as { mensagem: string };
+    expect(corpo.mensagem).not.toContain("me_chame_as");
+    expect(corpo.mensagem).toContain("encerre o turno dizendo o que falta");
   });
 
   it("ADR-066: Write/Edit/NotebookEdit com `arquivo` (fora de ~/nod/<bot>) passam pela decisão do terminal; sem `arquivo` (dentro da pasta), só a trilha", async () => {

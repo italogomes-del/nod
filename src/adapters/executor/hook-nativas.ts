@@ -50,15 +50,28 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
 
 /** Resposta do POST /api/interno/nativas: liberada, ou uma decisão aberta para esperar. */
 type RespostaNativa = { ok?: boolean; aguardar?: string; mensagem?: string };
-type RespostaAguardar = { estado?: string; itens?: { desfecho?: string | null }[] };
+/** `soltar` (ADR-083, #194): o servidor fechou a espera porque o Mac apertou — o turno encerra e volta quando a pessoa decidir. */
+type RespostaAguardar = { estado?: string; soltar?: boolean; itens?: { desfecho?: string | null }[] };
+
+/**
+ * definido em 2026-10-09 (ADR-089, #217): entre duas consultas da mesma espera passa ao menos isto. A rota segura cada
+ * consulta até LONGPOLL_APROVACAO_MS, mas responde na hora quando solta a espera ou quando uma retomada já ficou com a
+ * decisão; sem piso, o hook virava um laço apertado por até ESPERA_APROVACAO_NO_TURNO_MS justamente com o Mac apertado.
+ */
+export const PAUSA_MINIMA_ENTRE_CONSULTAS_MS = 1_000;
+
+const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Fala com o servidor. Bash que precisa de aprovação: espera a decisão em fatias até ESPERA_APROVACAO_NO_TURNO_MS
  * (era abaixo da isenção do vigia da ADR-040, que saiu na ADR-067); aprovada, confirma de novo — agora o servidor acha a aprovação, grava a
  * trilha e libera. Recusada, ou a espera acabou: nega com o motivo que o modelo precisa ler.
+ * revisto em 2026-10-09 (ADR-089, #217): `soltar: true` encerra a espera NA HORA com AINDA_ESPERANDO, como o proxy faz
+ * nas ferramentas MCP; antes o hook repetia a consulta em qualquer estado diferente de "decidida".
  */
-export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => number; fetch?: typeof fetch } = {}): Confirmar {
+export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => number; fetch?: typeof fetch; dormir?: (ms: number) => Promise<void> } = {}): Confirmar {
   const agora = opcoes.agora ?? Date.now;
+  const dormir = opcoes.dormir ?? dormirPadrao;
   const buscar = opcoes.fetch ?? fetch;
   const base = cfg.url.replace(/\/+$/, "");
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
@@ -79,10 +92,16 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
     if (typeof primeira.aguardar !== "string") return { permitir: false, motivo: "resposta inesperada do servidor do nod" };
     const inicio = agora();
     while (agora() - inicio < ESPERA_APROVACAO_NO_TURNO_MS) {
+      const consulta = agora();
       const r = await buscar(`${base}/api/interno/decisoes/${encodeURIComponent(primeira.aguardar)}/aguardar`, { headers, signal: AbortSignal.timeout(LONGPOLL_APROVACAO_MS + 10_000) });
       if (!r.ok) return { permitir: false, motivo: "a aprovação deste comando não foi encontrada" };
       const d = (await r.json()) as RespostaAguardar;
-      if (d.estado !== "decidida") continue;
+      if (d.soltar === true) return { permitir: false, motivo: AINDA_ESPERANDO };
+      if (d.estado !== "decidida") {
+        const passou = agora() - consulta;
+        if (passou < PAUSA_MINIMA_ENTRE_CONSULTAS_MS) await dormir(PAUSA_MINIMA_ENTRE_CONSULTAS_MS - passou);
+        continue;
+      }
       if (!(d.itens ?? []).some((i) => i.desfecho === "executado")) return { permitir: false, motivo: "a pessoa não aprovou este comando" };
       const segunda = await pedir();
       return "permitir" in segunda ? segunda : segunda.ok === true ? { permitir: true } : { permitir: false, motivo: "o servidor do nod não liberou o comando aprovado" };

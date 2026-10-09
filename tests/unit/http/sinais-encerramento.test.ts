@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ouvirSinaisDeEncerramento } from "../../../src/adapters/http/server.ts";
 
 /**
  * X7 (revisão do épico #188): o segundo sinal sai por `process.exit(130)`, que roda o `exit` — é ele que mata os
@@ -31,4 +32,37 @@ it("primeiro sinal drena; o segundo sai com 130 passando pelo gancho `exit`", { 
   filho.kill("SIGINT");
   expect(await fim).toEqual({ codigo: 130, sinal: null });
   expect(saida).toContain("exit 130");
+});
+
+/**
+ * ADR-089 (#217): o SIGHUP (terminal fechado) entra no mesmo caminho — antes ele matava sem o `exit` e os grupos dos bots
+ * ficavam órfãos. O mesmo sinal repetido em menos de 3 s é eco do repasse (dev.mjs → npm → tsx) e não pula a drenagem.
+ * Em processo: `process.emit` chama os ouvintes sem mandar sinal de verdade. Só o SIGHUP — o SIGINT/SIGTERM emitido aqui
+ * acordaria os ouvintes do próprio vitest; o segundo sinal DIFERENTE já está no teste com o filho de verdade, acima.
+ */
+describe("SIGHUP e eco do repasse (ADR-089)", () => {
+  const emitirSighup = () => (process.emit as (s: string, ...a: unknown[]) => boolean)("SIGHUP", "SIGHUP");
+
+  it("SIGHUP drena como o SIGTERM; o eco em menos de 3 s não conta; depois disso é o segundo sinal e sai com 130", () => {
+    let agora = 0;
+    const drenagens: string[] = [];
+    const saidas: number[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const tirar = ouvirSinaisDeEncerramento((s) => drenagens.push(s), (c) => saidas.push(c), () => agora);
+    try {
+      emitirSighup();
+      agora = 50;
+      emitirSighup();
+      agora = 2_900;
+      emitirSighup();
+      expect(drenagens).toEqual(["SIGHUP"]);
+      expect(saidas).toEqual([]);
+      agora = 3_500;
+      emitirSighup();
+      expect(saidas).toEqual([130]);
+    } finally {
+      tirar();
+      log.mockRestore();
+    }
+  });
 });
