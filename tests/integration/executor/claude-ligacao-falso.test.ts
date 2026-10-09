@@ -8,7 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { PEDIDO_DE_RESUMO, uuidDoEco } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
-import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { MsgCerebroCliente, MsgCerebroServidor } from "../../../src/contracts/voz.ts";
@@ -103,7 +103,7 @@ filho.on("exit", (code) => process.exit(code ?? 143));
   await chmod(bin, 0o755);
   const base = await configDosDrivers({ HOME: dir, PATH: process.env.PATH, NOD_HOME: join(dir, ".nod"), NOD_SESSAO_SEGREDO: "s", ...o.envDoMac }, { shellDeLogin: false, home: dir });
   const cfg: ConfigDriver = { ...base, bin };
-  const instance = await criarClaudeCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  const instance = await criarClaudeCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() }).create(cfg);
   const adapter = instance.adapter(o.plano ?? planoLigacao());
   const resultado = adapter.rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
   const canal = await cerebro;
@@ -114,7 +114,7 @@ filho.on("exit", (code) => process.exit(code ?? 143));
   return { adapter, resultado, canal, escritas, argv, envDoFilho };
 }
 
-describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () => {
+describe("laço de voz do Claude contra o CLI falso", { timeout: PRAZO_TESTE_FALSO_MS }, () => {
   it("NOD-164: --model e --effort vêm do plano, o thinking adaptativo sai pelo env do filho e a NOD_MODELO_LIGACAO_CLAUDE do Mac não muda nada", async () => {
     const plano = planoLigacao({ modelo: "claude-sonnet-4-6", esforco: "low", pensamentoAdaptativo: false });
     const { resultado, canal, argv, envDoFilho } = await iniciar(`${HELP_COM_ECO} --effort`, { plano, envDoMac: { NOD_MODELO_LIGACAO_CLAUDE: "claude-haiku-do-mac" } });
@@ -204,6 +204,22 @@ describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () =>
     expect((await resultado).desfecho).toBe("sucesso");
   });
 
+  // NOD-198: a ferramenta do falso termina por evento. Aqui a vez 3 já está na fila quando a volta da vez 2 chama a
+  // ferramenta (as duas chegam enquanto a vez 1 ainda fala "Pensando"): a espera olha a fila antes e não trava.
+  it("vez já na fila quando a ferramenta começa: entra na mesma volta sem esperar outra mensagem", async () => {
+    const { resultado, canal } = await iniciar();
+    canal.enviar({ t: "vez", n: 1, texto: "pode demorar" });
+    await canal.esperar((m) => m.t === "fala" && m.n === 1 && m.delta === "Pensando");
+    canal.enviar({ t: "vez", n: 2, texto: "anota isso [[ferramenta]]" });
+    canal.enviar({ t: "vez", n: 3, texto: "e a agenda?" });
+    await canal.esperar((m) => m.t === "fala-fim" && m.n === 3);
+    expect(falaDe(canal.recebidas, 2)).toBe("Vou anotar.");
+    expect(falaDe(canal.recebidas, 3)).toBe("Entendi: e a agenda?.");
+    expect(finsDe(canal.recebidas)).toEqual([1, 3]);
+    canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
+    expect((await resultado).desfecho).toBe("sucesso");
+  });
+
   it("o fim com a ferramenta rodando: o pedido de resumo entra na mesma volta e o laço fecha no `result` dela", async () => {
     const { resultado, canal } = await iniciar();
     canal.enviar({ t: "vez", n: 1, texto: "anota isso [[ferramenta]]" });
@@ -217,7 +233,7 @@ describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () =>
 
   it("interromper duro corta a volta; a vez seguinte responde com o número dela", async () => {
     const { resultado, canal } = await iniciar();
-    canal.enviar({ t: "vez", n: 1, texto: "pode demorar" });
+    canal.enviar({ t: "vez", n: 1, texto: "pode demorar [[ate-corte]]" }); // só o corte solta o "Pensando" (NOD-198)
     await canal.esperar((m) => m.t === "fala" && m.n === 1);
     canal.enviar({ t: "interromper", modo: "duro" });
     canal.enviar({ t: "vez", n: 2, texto: "outra coisa" });
@@ -230,7 +246,7 @@ describe("laço de voz do Claude contra o CLI falso", { timeout: 30_000 }, () =>
 
   it("mensagem na fila cancelada pelo interrupt (cancel_queued) nunca é lida; a vez escrita depois responde com o número dela", async () => {
     const { resultado, canal } = await iniciar();
-    canal.enviar({ t: "vez", n: 1, texto: "pode demorar" });
+    canal.enviar({ t: "vez", n: 1, texto: "pode demorar [[ate-corte]]" }); // só o corte solta o "Pensando" (NOD-198)
     await canal.esperar((m) => m.t === "fala" && m.n === 1);
     // A vez 2 fica na fila (o texto da 1 ainda está saindo) e é cancelada pelo interrupt.
     canal.enviar({ t: "vez", n: 2, texto: "esta não chega" });

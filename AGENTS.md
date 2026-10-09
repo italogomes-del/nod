@@ -150,6 +150,22 @@ esse prazo injeta o que o código já aceita (`fetchImpl`, `criarBackendGh({praz
 um `vi.mock` do arquivo de teste troca SÓ o prazo (`executarPorRest` em `github-gh`, `execFile` em `github-nativo`) e
 mantém o teste que mede o prazo com o valor explícito; ou deixa o falso mais barato. O código não muda.
 
+**Teste sob carga: fakes e workers** (NOD-198, 2026-10-08). O Mac roda a suíte de vários bots ao mesmo tempo
+(load 200–970) e o relógio de parede mede a fila, não o código. **Fake termina por evento, não por relógio**: a
+ferramenta "em curso" de um CLI falso (`tests/fixtures/*-falso.mjs`) termina com a próxima mensagem do stdin
+(olhando a fila ANTES de esperar), com o corte ou com o fim do stdin; quando a ordem depende do teste, o fake espera
+um portão que o teste abre (`TESTE_NOD_PORTAO` no `codex-falso`) depois de provar que o driver já tratou o que foi
+mandado (ping/pong no mesmo WebSocket), nunca `setTimeout(r, 50)` contra 300 ms do fake. Sem relógio de reserva: se
+ninguém manda o evento, o fake espera e o prazo do teste acusa. Todo `dormir`/`setTimeout` que sobra numa fixture
+tem comentário dizendo o que imita e por que não decide ordem (o revisor confere com `rg "dormir|setTimeout"
+tests/fixtures/*-falso.mjs`). Os testes `tests/integration/executor/*-falso` que sobem o CLI falso de verdade usam
+`PRAZO_TESTE_FALSO_MS` e `prazoSondaDoTeste()` de `tests/helpers/prazo-falso.ts` (medida lá), não um número local;
+o `testTimeout` dos projetos não muda. O `vitest.config.ts` limita `maxWorkers` a **8**, sem passar do padrão
+núcleos − 1 (medido em 2026-10-08, nota no arquivo; +18% sem carga; um 8 fixo subia o paralelismo no CI de poucos
+núcleos): no vitest 3.2.7 o limite só existe na raiz, então vale para os quatro projetos; com núcleos − 1 workers o
+processo principal do `test:unit` sob carga não respondia ao RPC a tempo e a suíte saía com exit 1 por
+`Timeout calling "onTaskUpdate"`, sem teste falho.
+
 ## Composição (L9)
 
 `src/adapters/http/compor.ts` é o único lugar que liga as lanes: `comporApp({db, env})` monta o

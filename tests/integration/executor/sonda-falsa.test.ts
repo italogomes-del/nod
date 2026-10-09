@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { lerVersao, prazoSondaDoEnv, sondar, sondarDetalhado } from "../../../src/adapters/executor/sonda.ts";
+import { lerVersao, sondar, sondarDetalhado } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 
 /**
  * Sonda ADR-019 contra o binário falso (tests/fixtures/claude-falso.mjs): `--version` + turno
@@ -36,8 +37,12 @@ const INIT = (apiKeySource: string) => JSON.stringify({ type: "system", subtype:
 const RESULT = JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "s", result: "OK", total_cost_usd: 0.003, num_turns: 1, permission_denials: [] });
 
 const MODELO = "claude-haiku-4-5-20251001";
-/** NOD-178: com o Mac carregado, `NOD_PRAZO_SONDA_MS=60000 npm run test:integration` dá folga aos `--version`/`--help`/`auth status`. */
-const PRAZO_SONDA_MS = prazoSondaDoEnv(process.env);
+/**
+ * NOD-198: o prazo da sonda vem de `prazoSondaDoTeste()` (NOD_PRAZO_SONDA_MS continua mandando, NOD-178). Antes, sem a
+ * variável, valia o padrão de 10 s do código e, sob carga, o `--version` do falso (um node) estourava: `ausente` com
+ * sonda_lenta em 9 testes por rodada. Nenhum teste deste arquivo mede o prazo da sonda (isso é a sonda-lenta).
+ */
+const PRAZO_SONDA_MS = prazoSondaDoTeste();
 
 /**
  * definido em 2026-09-16: 30 s por teste — cada um spawna 3–4 processos node (shim + binário falso +
@@ -45,7 +50,7 @@ const PRAZO_SONDA_MS = prazoSondaDoEnv(process.env);
  * integration inteiro. medido em 2026-09-16: até 6,4 s num teste do claude-cli-falso e 4,0 s num da
  * sonda-falsa com o projeto integration completo em paralelo (8 execuções); 1–3 s rodando só a lane.
  */
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = PRAZO_TESTE_FALSO_MS; // NOD-198: era 30 s; a medida sob carga está em prazo-falso.ts
 
 describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
@@ -127,28 +132,28 @@ describe("sonda (ADR-019) contra o binário falso", { timeout: TIMEOUT_MS }, () 
   it("a recusa da organização reprova a IA com a causa, venha num result 'de sucesso', num de erro ou só no texto do assistente", async () => {
     const esperado = { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "2.1.290", em: 9 };
     const comoSucesso = await shimProprio(dir, "claude-recusa-sucesso", `echo '${INIT("none")}'\necho '${resultCom(RECUSA)}'\nexit 0`);
-    const s = await sondarDetalhado(comoSucesso, env, MODELO, { relogio: () => 9 });
+    const s = await sondarDetalhado(comoSucesso, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 9 });
     expect(s.inventario).toEqual(esperado);
     expect(s.resposta).toBeNull();
 
     const comoErro = await shimProprio(dir, "claude-recusa-erro", `echo '${INIT("none")}'\necho '${resultCom(RECUSA, true)}'\nexit 1`);
-    expect(await sondar(comoErro, env, MODELO, { relogio: () => 9 })).toEqual(esperado);
+    expect(await sondar(comoErro, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 9 })).toEqual(esperado);
 
     const soNoTexto = await shimProprio(dir, "claude-recusa-texto", `echo '${INIT("none")}'\necho '${JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: RECUSA }] }, session_id: "s" })}'\nexit 1`);
-    expect(await sondar(soNoTexto, env, MODELO, { relogio: () => 9 })).toEqual(esperado);
+    expect(await sondar(soNoTexto, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 9 })).toEqual(esperado);
   });
 
   it("com o login já conferido, um turno que falha por outro motivo é 'teste_falhou' (não 'falta entrar'); sem isso, nenhuma causa", async () => {
     const quebrou = await shimProprio(dir, "claude-quebrou", 'echo "API Error: 529" >&2\nexit 1');
-    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10, loginConferido: true })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", causa: "teste_falhou", versao: "2.1.290", em: 10 });
-    expect(await sondar(quebrou, env, MODELO, { relogio: () => 10 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.290", em: 10 });
+    expect(await sondar(quebrou, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 10, loginConferido: true })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", causa: "teste_falhou", versao: "2.1.290", em: 10 });
+    expect(await sondar(quebrou, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 10 })).toEqual({ estado: "nao_autenticado", motivo: "turno_de_sonda_exit_1", versao: "2.1.290", em: 10 });
   });
 
   it("o teste do onboarding: a pergunta vai inteira num argumento só e a resposta volta pronta para a tela", async () => {
     const visto = join(dir, "pergunta-vista.txt");
     const bin = await shimProprio(dir, "claude-oi", `printf '%s' "$2" > ${JSON.stringify(visto)}\necho '${INIT("none")}'\necho '${resultCom("“Oi, Marcelo. Tudo pronto por aqui.”\\nsegunda linha")}'\nexit 0`);
     const pergunta = "Diga oi para Marcelo em uma frase curta, em português. Só a frase.";
-    const s = await sondarDetalhado(bin, env, MODELO, { relogio: () => 11, pergunta, loginConferido: true });
+    const s = await sondarDetalhado(bin, env, MODELO, { timeoutVersaoMs: PRAZO_SONDA_MS, relogio: () => 11, pergunta, loginConferido: true });
     expect(s.inventario).toEqual({ estado: "pronto", versao: "2.1.290", em: 11 });
     expect(s.resposta).toBe("Oi, Marcelo. Tudo pronto por aqui.");
     expect(await readFile(visto, "utf8")).toBe(pergunta);

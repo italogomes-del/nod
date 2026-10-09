@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ABRE_CONTEXTO_DO_TURNO, AVISO_SEM_TERMINAL, FECHA_CONTEXTO_DO_TURNO, criarClaudeCliDriver } from "../../../src/adapters/executor/drivers/claude-cli.ts";
-import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
 import type { ConfigDriver, Driver, Instance, SinksTurno } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
@@ -94,7 +94,7 @@ const valor = (args: string[], flag: string) => {
  * integration inteiro. medido em 2026-09-16: até 6,4 s num teste do claude-cli-falso e 4,0 s num da
  * sonda-falsa com o projeto integration completo em paralelo (8 execuções); 1–3 s rodando só a lane.
  */
-const TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = PRAZO_TESTE_FALSO_MS; // NOD-198: era 30 s; a medida sob carga está em prazo-falso.ts
 
 /**
  * definido em 2026-09-16: 300 ms de escalada SIGTERM→SIGKILL no teste s6 (produção usa
@@ -114,7 +114,7 @@ const LIMITE_EM_ESCALADAS = 10;
 describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-16)", { timeout: TIMEOUT_MS }, () => {
   let dir: string;
   let cfgBase: ConfigDriver;
-  const lig = { urlNod: "http://127.0.0.1:65000", proxyPath: "/app/src/adapters/mcp-proxy/proxy.ts", prazoSondaMs: prazoSondaDoEnv(process.env) };
+  const lig = { urlNod: "http://127.0.0.1:65000", proxyPath: "/app/src/adapters/mcp-proxy/proxy.ts", prazoSondaMs: prazoSondaDoTeste() };
 
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "nod-cli-falso-"));
@@ -562,9 +562,12 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
       const { instance } = await instanciar("sessao-viva", {}, { ...HELP, NOD_FALSO_FUNDO_MS: "60000" });
       const adapter = instance.adapter(planoDeTeste(dir));
       const falas: string[] = [];
-      const rodando = adapter.rodarTurno({ ...sinksEspiao({}).sinks, falaIntermediaria: (t) => falas.push(t), ocioso: async () => false });
-      const fim = Date.now() + 10_000;
-      while (falas.length === 0 && Date.now() < fim) await new Promise((r) => setTimeout(r, 20));
+      // NOD-198: espera a primeira fala (evento), não 10 s de relógio: sob carga (load 274, 2× integration) a fala
+      // chegou depois dos 10 s e o teste falhou com `expected []`. Quem corta um falso travado é o prazo do teste.
+      let falou!: () => void;
+      const primeiraFala = new Promise<void>((r) => { falou = r; });
+      const rodando = adapter.rodarTurno({ ...sinksEspiao({}).sinks, falaIntermediaria: (t) => { falas.push(t); falou(); }, ocioso: async () => false });
+      await Promise.race([primeiraFala, rodando]);
       expect(falas).toEqual(["Disparei os testes."]);
       await adapter.interromper();
       const resultado = await rodando;

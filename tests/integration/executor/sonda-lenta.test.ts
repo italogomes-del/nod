@@ -1,7 +1,8 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { existsSync, rmSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { criarClaudeCliDriver, FLAGS_DO_TURNO } from "../../../src/adapters/executor/drivers/claude-cli.ts";
 import { criarCodexCliDriver, FLAGS_CODEX } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { lerFlagsDoHelp, lerVersao, sondar, sondarDetalhado } from "../../../src/adapters/executor/sonda.ts";
@@ -18,19 +19,48 @@ const FRASE_CODEX = "O Codex demorou para responder; o Mac está carregado. Tent
 const MODELO = "claude-haiku-4-5-20251001";
 
 /**
- * medido em 2026-10-05: com load 280–380 em 12 núcleos, um sh que só faz `exit 2` passou de 500 ms, subir o node do
- * binário falso passou de 4 s e até o `--version` de sh chegou a 5 s. 15 s cobre os passos rápidos; o lento dorme 60 s.
+ * Prazo da sonda passado ao código. NOD-198: o relógio dos prazos é FALSO (`setTimeout` do vitest) e só anda quando o
+ * shim avisa que chegou ao passo lento (`venceNoPassoLento`). Antes era relógio real: 15 s para os passos rápidos,
+ * `sleep 60` no lento. medido em 2026-10-08 (load 914, 2× integration em paralelo): até um sh com `exit 2` passou de
+ * 15 s e o arquivo falhou 5 e 3 testes, com o código certo; sem carga ele gastava ~190 s esperando prazos de verdade.
+ * Agora passo rápido nunca vence o prazo, com qualquer carga, e o lento vence assim que chega lá.
  */
 const PRAZO_MS = 15_000;
 
-/** sh que demora no passo `quando` (padrão do `case`) enquanto `<dir>/lento` existir; o resto vai para `resto`. */
+/** O `setTimeout` real, guardado antes do relógio falso, só para o laço de espera abaixo. */
+const setTimeoutReal = globalThis.setTimeout;
+const esperarReal = (ms: number) => new Promise<void>((r) => { setTimeoutReal(r, ms); });
+
+/**
+ * sh que demora no passo `quando` (padrão do `case`) enquanto `<sh>.lento` existir; o resto vai para `resto`. Ao
+ * chegar no passo lento ele grava `<sh>.chegou` e dorme sem fim (`exec sleep 3600`, o processo morto pelo prazo é o
+ * próprio sleep): quem acaba com ele é o prazo do código, avançado por `venceNoPassoLento`, não o fim do sleep.
+ */
 async function shimLento(dir: string, nome: string, quando: string, resto: string): Promise<string> {
   const sh = join(dir, nome);
   const lento = join(dir, `${nome}.lento`);
   await writeFile(lento, "");
-  await writeFile(sh, `#!/bin/sh\ncase "$*" in\n  ${quando}) if [ -e ${JSON.stringify(lento)} ]; then exec sleep 60; fi;;\nesac\n${resto}\n`);
+  await writeFile(sh, `#!/bin/sh\ncase "$*" in\n  ${quando}) if [ -e ${JSON.stringify(lento)} ]; then : > ${JSON.stringify(`${sh}.chegou`)}; exec sleep 3600; fi;;\nesac\n${resto}\n`);
   await chmod(sh, 0o755);
   return sh;
+}
+
+/**
+ * Espera `p` terminar; cada vez que o shim avisa que chegou ao passo lento, dispara os prazos pendentes (o da sonda
+ * ou os 90 s da negociação do Codex). Passo rápido não tem aviso, então o prazo dele nunca anda.
+ */
+async function venceNoPassoLento<T>(sh: string, p: Promise<T>): Promise<T> {
+  let acabou = false;
+  const fim = p.finally(() => { acabou = true; });
+  fim.catch(() => {});
+  while (!acabou) {
+    if (existsSync(`${sh}.chegou`)) {
+      rmSync(`${sh}.chegou`);
+      vi.runOnlyPendingTimers();
+    }
+    await esperarReal(20); // laço de espera do teste: olha o aviso do shim, não mede prazo nenhum
+  }
+  return fim;
 }
 
 const desligarLentidao = (sh: string) => rm(`${sh}.lento`, { force: true });
@@ -49,7 +79,7 @@ const CODEX_SH = `case "$*" in
 esac
 exit 0`;
 
-describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
+describe("sonda lenta (NOD-178)", { timeout: 60_000 }, () => {
   let dir: string;
   let env: Record<string, string>;
   beforeAll(async () => {
@@ -57,20 +87,22 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
     env = { HOME: dir, PATH: process.env.PATH ?? "" };
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
 
   describe("sonda pura", () => {
     it("--version que estoura o prazo → ausente com causa sonda_lenta e a frase pt-BR, nunca version_exit_null", async () => {
       const bin = await shimLento(dir, "claude-versao-lenta", "--version", CLAUDE_SH);
-      expect(await lerVersao(bin, env, PRAZO_MS)).toEqual({ erro: "sonda_lenta" });
-      const s = await sondarDetalhado(bin, env, MODELO, { relogio: () => 7, timeoutVersaoMs: PRAZO_MS });
+      expect(await venceNoPassoLento(bin, lerVersao(bin, env, PRAZO_MS))).toEqual({ erro: "sonda_lenta" });
+      const s = await venceNoPassoLento(bin, sondarDetalhado(bin, env, MODELO, { relogio: () => 7, timeoutVersaoMs: PRAZO_MS }));
       expect(s.inventario).toEqual({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta", em: 7 });
       expect(s.binario).toBe(bin);
     });
 
     it("--help que estoura o prazo → ausente com causa sonda_lenta (não 'sem flags')", async () => {
       const bin = await shimLento(dir, "claude-help-lento", "--help", CLAUDE_SH);
-      expect(await lerFlagsDoHelp(bin, env, PRAZO_MS)).toEqual({ erro: "sonda_lenta" });
-      expect(await sondar(bin, env, MODELO, { relogio: () => 8, timeoutVersaoMs: PRAZO_MS })).toEqual({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta", em: 8 });
+      expect(await venceNoPassoLento(bin, lerFlagsDoHelp(bin, env, PRAZO_MS))).toEqual({ erro: "sonda_lenta" });
+      expect(await venceNoPassoLento(bin, sondar(bin, env, MODELO, { relogio: () => 8, timeoutVersaoMs: PRAZO_MS }))).toEqual({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta", em: 8 });
     });
 
     it("regressão: binário inexistente e --version com exit≠0 sem estourar continuam com o motivo de hoje e sem causa", async () => {
@@ -78,8 +110,8 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
       const quebrado = join(dir, "claude-quebrado");
       await writeFile(quebrado, "#!/bin/sh\nexit 2\n");
       await chmod(quebrado, 0o755);
-      expect(await sondar(quebrado, env, MODELO, { relogio: () => 2 })).toEqual({ estado: "ausente", motivo: "version_exit_2", em: 2 });
-      expect(await lerFlagsDoHelp(quebrado, env)).toEqual({ flags: null });
+      expect(await sondar(quebrado, env, MODELO, { relogio: () => 2, timeoutVersaoMs: PRAZO_MS })).toEqual({ estado: "ausente", motivo: "version_exit_2", em: 2 });
+      expect(await lerFlagsDoHelp(quebrado, env, PRAZO_MS)).toEqual({ flags: null });
     });
   });
 
@@ -90,7 +122,7 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
     it("auth status lento → nao_autenticado com causa e a frase de lentidão, não 'entre na sua conta'; depois responde e fica pronto", async () => {
       const bin = await shimLento(dir, "claude-auth-lento", '"auth status"', CLAUDE_SH);
       const instance = await criarClaudeCliDriver(lig).create(cfg(bin));
-      const inv = await instance.sondar();
+      const inv = await venceNoPassoLento(bin, instance.sondar());
       expect(inv).toMatchObject({ estado: "nao_autenticado", motivo: FRASE_CLAUDE, causa: "sonda_lenta", versao: "2.1.290" });
       expect(JSON.stringify(inv)).not.toContain("entre na sua conta");
       await desligarLentidao(bin);
@@ -100,7 +132,7 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
     it("--version lento → ausente com causa, nunca 'Instale ou atualize'; a versão não fica guardada", async () => {
       const bin = await shimLento(dir, "claude-versao-lenta-driver", "--version", CLAUDE_SH);
       const instance = await criarClaudeCliDriver(lig).create(cfg(bin));
-      const inv = await instance.sondar();
+      const inv = await venceNoPassoLento(bin, instance.sondar());
       expect(inv).toEqual({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta", em: expect.any(Number) });
       await desligarLentidao(bin);
       expect(await instance.sondar()).toMatchObject({ estado: "pronto", versao: "2.1.290" });
@@ -108,7 +140,7 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
 
     it("--help lento → ausente com causa, não 'Atualize o Claude Code'", async () => {
       const bin = await shimLento(dir, "claude-help-lento-driver", "--help", CLAUDE_SH);
-      const inv = await (await criarClaudeCliDriver(lig).create(cfg(bin))).sondar();
+      const inv = await venceNoPassoLento(bin, (await criarClaudeCliDriver(lig).create(cfg(bin))).sondar());
       expect(inv).toMatchObject({ estado: "ausente", motivo: FRASE_CLAUDE, causa: "sonda_lenta" });
     });
 
@@ -125,7 +157,7 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
     it("exec --help lento → ausente com causa e a frase do Codex, nunca 'Atualize o Codex'; não fica no cache de 5 min", async () => {
       const bin = await shimLento(dir, "codex-help-lento", '"exec --help"', CODEX_SH);
       const instance = await criarCodexCliDriver(lig).create(cfg(bin));
-      const inv = await instance.sondar();
+      const inv = await venceNoPassoLento(bin, instance.sondar());
       expect(inv).toEqual({ estado: "ausente", motivo: FRASE_CODEX, causa: "sonda_lenta", em: expect.any(Number) });
       expect(JSON.stringify(inv)).not.toContain("Atualize");
       await desligarLentidao(bin);
@@ -135,13 +167,13 @@ describe("sonda lenta (NOD-178)", { timeout: 180_000 }, () => {
 
     it("login status lento → nao_autenticado com causa, não 'entre na sua conta'", async () => {
       const bin = await shimLento(dir, "codex-login-lento", '"login status"', CODEX_SH);
-      const inv = await (await criarCodexCliDriver(lig).create(cfg(bin))).sondar();
+      const inv = await venceNoPassoLento(bin, (await criarCodexCliDriver(lig).create(cfg(bin))).sondar());
       expect(inv).toMatchObject({ estado: "nao_autenticado", motivo: FRASE_CODEX, causa: "sonda_lenta", versao: "codex-cli teste" });
     });
 
     it("rodada da negociação de config que estoura o prazo → lenta, nunca 'pronto' sem conferir", async () => {
       const bin = await shimLento(dir, "codex-negociacao-lenta", '"exec --help") ;; exec\\ *', CODEX_SH);
-      const inv = await (await criarCodexCliDriver(lig).create(cfg(bin))).sondar();
+      const inv = await venceNoPassoLento(bin, (await criarCodexCliDriver(lig).create(cfg(bin))).sondar());
       expect(inv).toMatchObject({ estado: "ausente", motivo: FRASE_CODEX, causa: "sonda_lenta" });
     });
   });

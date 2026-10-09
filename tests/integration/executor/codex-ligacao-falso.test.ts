@@ -10,13 +10,16 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
 import { PEDIDO_DE_RESUMO } from "../../../src/adapters/executor/drivers/claude-ligacao.ts";
 import { configDosDrivers } from "../../../src/adapters/executor/registry.ts";
-import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import { MODELO_LUNA_CODEX } from "../../../src/contracts/harness.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { EventoStream, SinaisTurno } from "../../../src/contracts/turno.ts";
 import type { MsgCerebroCliente, MsgCerebroServidor } from "../../../src/contracts/voz.ts";
 import { planoHarness } from "../../helpers/plano-harness.ts";
+
+// NOD-198: prazo por arquivo (sobe o CLI falso de verdade); a medida sob carga está em prazo-falso.ts.
+vi.setConfig({ testTimeout: PRAZO_TESTE_FALSO_MS });
 
 /**
  * O laço de voz do Codex (ADR-076) contra o app-server falso de tests/fixtures/codex-falso.mjs, com um servidor
@@ -68,7 +71,7 @@ beforeEach(async () => {
   // NOD-164: o cfg nasce como no boot (configDosDrivers, com a denylist): a NOD_MODELO_LIGACAO_CODEX do env do Mac não
   // chega ao driver, e o modelo da ligação é o do plano. Antes o env era montado à mão e mascarava o override morto.
   cfg = await configDosDrivers(
-    { HOME: dir, PATH: process.env.PATH ?? "", NOD_HOME: join(dir, "nod"), NOD_CODEX_BIN: bin, TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", NOD_MODELO_LIGACAO_CODEX: "gpt-6-do-mac" },
+    { HOME: dir, PATH: process.env.PATH ?? "", NOD_HOME: join(dir, "nod"), NOD_CODEX_BIN: bin, TESTE_NOD_REGISTRO: join(dir, "registro.json"), TESTE_NOD_PORTAO: join(dir, "portao"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", NOD_MODELO_LIGACAO_CODEX: "gpt-6-do-mac" },
     { home: dir, shellDeLogin: false },
   );
 });
@@ -88,10 +91,23 @@ function planoLigacao(): PlanoTurno {
   return plano;
 }
 
+/**
+ * NOD-198: abre o portão do `[[lento]]`/`[[conclui-antes]]` só depois de o driver ter tratado tudo o que o teste já
+ * mandou. O driver trata cada mensagem do cérebro na hora em que ela chega, e o WebSocket entrega em ordem: o pong de
+ * um ping enviado depois prova que o `interromper` já foi tratado. Sem relógio (antes, 50 ms contra 300 ms do fake).
+ */
+async function abrirPortaoDepoisDoQueFoiEnviado(canal: CanalFalso) {
+  await new Promise<void>((r) => {
+    canal.socket.once("pong", () => r());
+    canal.socket.ping();
+  });
+  await writeFile(join(dir, "portao"), "");
+}
+
 const falaDe = (msgs: MsgCerebroCliente[], n: number) => msgs.flatMap((m) => (m.t === "fala" && m.n === n ? [m.delta] : [])).join("");
 
 async function iniciar(plano = planoLigacao()) {
-  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() }).create(cfg);
   const sinais: (keyof SinaisTurno)[] = [];
   const eventos: EventoStream[] = [];
   const adapter = instance.adapter(plano);
@@ -205,8 +221,8 @@ it("NOD-167: turno mudo — o interromper duro do aviso de vez sem resposta vira
 it("NOD-167: o interromper duro com o turn/start ainda sem resposta interrompe o turno assim que ele abre", async () => {
   const { resultado, canal } = await iniciar();
   canal.enviar({ t: "vez", n: 1, texto: "[[lento]] [[mudo]] oi" });
-  await new Promise((r) => setTimeout(r, 50));
   canal.enviar({ t: "interromper", modo: "duro" });
+  await abrirPortaoDepoisDoQueFoiEnviado(canal);
   await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
   canal.enviar({ t: "fim", motivo: "pessoa_desligou" });
   expect((await resultado).desfecho).toBe("sucesso");
@@ -219,8 +235,8 @@ it("NOD-167: o interromper duro com o turn/start ainda sem resposta interrompe o
 it("NOD-167: o interrupt de um turno que concluiu antes de abrir não corta a vez seguinte", async () => {
   const { resultado, canal } = await iniciar();
   canal.enviar({ t: "vez", n: 1, texto: "[[conclui-antes]] oi" });
-  await new Promise((r) => setTimeout(r, 50));
   canal.enviar({ t: "interromper", modo: "duro" });
+  await abrirPortaoDepoisDoQueFoiEnviado(canal);
   await canal.esperar((m) => m.t === "fala-fim" && m.n === 1);
   canal.enviar({ t: "vez", n: 2, texto: "e amanhã" });
   await canal.esperar((m) => m.t === "fala-fim" && m.n === 2);
@@ -251,17 +267,19 @@ it("NOD-167: a notificação que o laço não conhece é logada só pelo nome, u
 
 it("NOD-167: Codex sem app-server — o Mac anuncia (lacoDeVoz false) e o turno da ligação cai com a causa própria", async () => {
   cfg = { ...cfg, env: { ...cfg.env, TESTE_NOD_SEM_APP_SERVER: "1" } };
-  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() }).create(cfg);
   expect(await instance.lacoDeVoz?.()).toBe(false);
   const adapter = instance.adapter(planoLigacao());
   await expect(adapter.rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} })).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "codex_sem_app_server" });
 });
 
 it("NOD-167: com o app-server, lacoDeVoz é true; a sonda --seco mede tudo contra o falso e acha o Luna no model/list", async () => {
-  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) }).create(cfg);
+  const instance = await criarCodexCliDriver({ urlNod, proxyPath, sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() }).create(cfg);
   expect(await instance.lacoDeVoz?.()).toBe(true);
   const saida = join(dir, "sonda.txt");
-  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../../scripts/sonda-codex-app-server.ts", import.meta.url)), "--seco", "--saida", saida], { encoding: "utf8", timeout: 60_000, env: { ...process.env, NOD_MODELO_LIGACAO_CODEX: "" } });
+  // NOD-198: era 60 s; a sonda sobe o falso e mede 6 passos, e sob carga o teste inteiro levou 73 s.
+  const prazoDaSonda = PRAZO_TESTE_FALSO_MS / 2;
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../../../scripts/sonda-codex-app-server.ts", import.meta.url)), "--seco", "--saida", saida], { encoding: "utf8", timeout: prazoDaSonda, env: { ...process.env, NOD_MODELO_LIGACAO_CODEX: "" } });
   expect(r.stderr).toBe("");
   expect(r.status).toBe(0);
   const texto = await readFile(saida, "utf8");

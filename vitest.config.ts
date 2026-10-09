@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 import { apontarParaBancoDaWorktree } from "./tests/setup/banco-por-worktree.ts";
 
@@ -36,8 +37,22 @@ const BANCO = {
   globalSetup: ["tests/setup/banco-por-worktree.ts"],
 };
 
+/**
+ * NOD-198: teto de workers. `maxWorkers` só existe na raiz no vitest 3.2.7 (o `poolOptions.forks.maxForks`
+ * por projeto foi ignorado: 13 filhos), então vale para os quatro projetos; quem pesa é o unit.
+ * medido em 2026-10-08 (Mac de 12 núcleos, load de outros bots 160–730): com o default (11 workers) dois
+ * `npm run test:unit` ao mesmo tempo terminavam com "Timeout calling onTaskUpdate" (Unhandled=2, exit 1)
+ * mesmo com 0 teste falho; com 8, as mesmas rodadas saem com exit 0 e 0 Unhandled. Sem carga extra, um
+ * test:unit sozinho: 11 workers mediana 112 s, 8 workers 132 s (+18%, dentro do teto de 20%); 6 dava +25%
+ * e 4 dava +71%. Gatilho de reversão: o erro voltar com 8, ou o tempo sem carga passar de +20%.
+ * É um TETO, nunca mais que o padrão do vitest (núcleos − 1): no runner do CI (poucos núcleos) um 8 fixo subiu o
+ * paralelismo e os testes de tempo do unit estouraram (run 37864813061).
+ */
+const MAX_WORKERS = Math.min(8, Math.max(1, availableParallelism() - 1));
+
 export default defineConfig({
   test: {
+    maxWorkers: MAX_WORKERS,
     projects: [
       { test: { ...raiz, name: "unit", include: ["tests/unit/**/*.test.ts"] } },
       { test: { ...raiz, ...BANCO, name: "integration", include: ["tests/integration/**/*.test.ts"] } },

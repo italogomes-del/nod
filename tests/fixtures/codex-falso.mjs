@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { setTimeout, clearTimeout } from "node:timers";
-import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { setTimeout } from "node:timers"; // usos comentados: `esperar` (20 s) e `dormirMs`
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
 const emit = (v) => process.stdout.write(`${JSON.stringify(v)}\n`);
 if (args.includes("app-server")) await appServer();
@@ -45,8 +45,10 @@ else {
   const child = spawn(process.execPath, [arquivo], { stdio: ["pipe", "pipe", "inherit"] });
   let resposta = "";
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(new Error("proxy_sem_resposta")); }, 3000);
-    child.stdout.on("data", (v) => { resposta += v; if (resposta.includes("\n")) { clearTimeout(timer); child.stdin.end(); resolve(); } });
+    // NOD-198: falha por EVENTO (o proxy saiu e fechou o stdout sem responder), não por relógio: o antigo prazo de 3 s estourava sob carga
+    // só pelo spawn do node. Proxy que trava sem sair cai no prazo do próprio teste.
+    child.on("close", () => { if (!resposta.includes("\n")) reject(new Error("proxy_sem_resposta")); }); // `close`: depois de drenar o stdout
+    child.stdout.on("data", (v) => { resposta += v; if (resposta.includes("\n")) { child.stdin.end(); resolve(); } });
     child.on("error", reject);
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "teste", version: "1" } } }) + "\n");
   });
@@ -54,6 +56,8 @@ else {
   const registro = { args, env: process.env, cwd: process.cwd(), arquivos: readdirSync(process.cwd()), proxy: readFileSync(arquivo, "utf8"), modo: statSync(arquivo).mode & 0o777 };
   if (process.env.TESTE_NOD_REGISTRO) writeFileSync(process.env.TESTE_NOD_REGISTRO, JSON.stringify(registro));
   emit({ type: "thread.started", thread_id: "sessao-codex" });
+  // "esperar" imita um turno que não acaba sozinho: o teste sempre o encerra por interromper()/SIGTERM. Os 20 s só
+  // garantem que o processo não fica órfão se o teste morrer antes; nenhuma asserção depende deles.
   if (prompt === "esperar") await new Promise((r) => setTimeout(r, 20_000));
   else if (prompt === "falhar") emit({ type: "turn.failed", error: { message: "segredo que não deve escapar" } });
   else if (prompt === "aviso-e-ferramenta-cancelada") {
@@ -94,13 +98,16 @@ else {
  * - "demorar": fala "Pensando" e espera turn/steer (responde a fala nova e conclui) ou turn/interrupt (conclui interrompido).
  * - O pedido de resumo do fim responde "Resumo da ligação: N turno(s)." (N = turnos antes do resumo).
  * - "[[mudo]]" no texto (NOD-167): abre o turno e não fala nada até o turn/interrupt (conclui interrompido).
- * - "[[lento]]" no texto (NOD-167): a resposta do turn/start demora 300 ms (o turno fica "iniciando" no laço).
- * - "[[conclui-antes]]" no texto (revisão NOD-167): depois de 300 ms o turno conclui sem fala e só então chega a
- *   resposta do turn/start (a ordem que o app-server real pode entregar num turno curto).
+ * - "[[lento]]" no texto (NOD-167): a resposta do turn/start só sai quando o teste abre o portão (o turno fica
+ *   "iniciando" no laço até lá).
+ * - "[[conclui-antes]]" no texto (revisão NOD-167): quando o teste abre o portão, o turno conclui sem fala e só então
+ *   chega a resposta do turn/start (a ordem que o app-server real pode entregar num turno curto).
+ * - Portão (NOD-198): o arquivo em TESTE_NOD_PORTAO. O fake espera ele EXISTIR (fs.watch na pasta, olhando antes),
+ *   sem relógio: antes eram 300 ms contra os 50 ms do teste, e sob carga o interromper chegava depois da resposta.
  * - model/list (NOD-167) devolve o Luna e um modelo de chat, com os esforços aceitos; uma notificação que o laço não
  *   conhece (`account/rateLimits/updated`) sai no primeiro turno.
- * - "[[chat-steer]]" no texto (chat do Codex, ADR-083 §6): fala "Começando.", chama `consultar` e espera um turn/steer;
- *   com ele, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
+ * - "[[chat-steer]]" no texto (chat do Codex, ADR-083 §6): fala "Começando.", chama `consultar`, que só termina com um
+ *   turn/steer (ou turn/interrupt); com o steer, fala "Recebi: <texto do steer>", chama `lembrar` e fecha com "Terminei.".
  * - TESTE_NOD_RECUSAR_TURNO=N (X2, revisão do épico #188): o N-ésimo turn/start responde erro (o turno não abre).
  * - stdin fechado: grava o registro (TESTE_NOD_REGISTRO) e sai 0.
  */
@@ -124,8 +131,9 @@ async function appServer() {
     const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "inherit"] });
     let resposta = "";
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill(); reject(new Error("proxy_sem_resposta")); }, 5000);
-      child.stdout.on("data", (v) => { resposta += v; if (resposta.includes("\n")) { clearTimeout(timer); child.stdin.end(); resolve(); } });
+      // NOD-198: como no `exec` acima, falha quando o proxy sai sem responder, sem o antigo prazo de 5 s.
+      child.on("close", () => { if (!resposta.includes("\n")) reject(new Error("proxy_sem_resposta")); }); // `close`: depois de drenar o stdout
+      child.stdout.on("data", (v) => { resposta += v; if (resposta.includes("\n")) { child.stdin.end(); resolve(); } });
       child.on("error", reject);
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "teste", version: "1" } } }) + "\n");
     });
@@ -137,20 +145,39 @@ async function appServer() {
   let turnosAntesDoResumo = 0;
   let pediuAprovacao = false;
   let aoAprovacao = null;
+  // Os `dormirMs(5)` abaixo só ESPAÇAM as notificações (deltas e item/started → item/completed), como o app-server real,
+  // que não as manda no mesmo pacote. Nenhum teste depende deles para ordem: o que o teste manda no meio de uma fala ou
+  // ferramenta é esperado por evento (demorar, [[mudo]], o `consultar` do [[chat-steer]], portão), não pelo relógio.
   const dormirMs = (ms) => new Promise((r) => setTimeout(r, ms));
+  const portao = process.env.TESTE_NOD_PORTAO;
+  /** Resolve quando o arquivo do portão existe. Olha antes de vigiar e de novo depois (o teste pode abrir no meio). */
+  const portaoAberto = () => new Promise((r, falhar) => {
+    if (!portao) return falhar(new Error("TESTE_NOD_PORTAO ausente: [[lento]]/[[conclui-antes]] precisam do portão"));
+    if (existsSync(portao)) return r();
+    const vigia = watch(dirname(portao), () => {
+      if (!existsSync(portao)) return;
+      vigia.close();
+      r();
+    });
+    if (existsSync(portao)) {
+      vigia.close();
+      r();
+    }
+  });
   const responder = (id, result) => emit({ jsonrpc: "2.0", id, result });
   const notificar = (method, params) => emit({ jsonrpc: "2.0", method, params });
   let mensagensFaladas = 0;
   const falar = async (threadId, turnId, partes) => {
     const itemId = `msg_${turnId}_${++mensagensFaladas}`;
     notificar("item/started", { threadId, turnId, item: { type: "agentMessage", id: itemId, text: "" } });
-    for (const delta of partes) { notificar("item/agentMessage/delta", { threadId, turnId, itemId, delta }); await dormirMs(5); }
+    for (const delta of partes) { notificar("item/agentMessage/delta", { threadId, turnId, itemId, delta }); await dormirMs(5); } // só espaça os deltas (ver acima)
     notificar("item/completed", { threadId, turnId, item: { type: "agentMessage", id: itemId, text: partes.join("") } });
   };
-  const ferramenta = async (threadId, turnId, tool) => {
+  /** `terminaCom`: o evento que fecha a ferramenta "em curso"; sem ele, só espaça started → completed (ver acima). */
+  const ferramenta = async (threadId, turnId, tool, terminaCom = null) => {
     const id = `mcp_${turnId}_${tool}`;
     notificar("item/started", { threadId, turnId, item: { type: "mcpToolCall", id, server: "nod", tool, status: "inProgress", arguments: {} } });
-    await dormirMs(5);
+    await (terminaCom ?? dormirMs(5)); // o relógio só espaça; quem decide ordem passa `terminaCom`
     notificar("item/completed", { threadId, turnId, item: { type: "mcpToolCall", id, server: "nod", tool, status: "completed", arguments: {} } });
   };
   const concluir = (threadId, turnId, status) => {
@@ -182,13 +209,17 @@ async function appServer() {
     }
     if (texto.includes("[[ferramenta]]")) {
       notificar("item/started", { threadId, turnId, item: { type: "mcpToolCall", id: `mcp_${turnId}`, server: "nod", tool: "lembrar", status: "inProgress", arguments: {} } });
-      await dormirMs(5);
+      await dormirMs(5); // só espaça started → completed; nenhum teste manda nada no meio (ver acima)
       notificar("item/completed", { threadId, turnId, item: { type: "mcpToolCall", id: `mcp_${turnId}`, server: "nod", tool: "lembrar", status: "completed", arguments: {} } });
     }
     if (texto.includes("[[chat-steer]]")) {
       const esperando = new Promise((r) => { ativo = { id: turnId, aoSteer: (t) => r({ steer: t }), aoInterromper: () => r({ interrompido: true }) }; });
       await falar(threadId, turnId, ["Começando."]);
-      await ferramenta(threadId, turnId, "consultar");
+      // Revisão NOD-198: o `consultar` em curso só termina com o steer (ou o interrupt), por EVENTO. Antes ele fechava
+      // depois de `dormirMs(5)` e o fake só então esperava o steer: sob carga a resposta do turn/steer chegava depois do
+      // fim do `consultar`, a fronteira seguinte era o próprio "Recebi:" e "Terminei." virava a resposta (X1 vermelho
+      // no CI do PR #214, run 37895620607, tentativa 1). Assim o steer é sempre aceito com o `consultar` aberto.
+      await ferramenta(threadId, turnId, "consultar", esperando);
       const desfecho = await esperando;
       if (desfecho.interrompido) return concluir(threadId, turnId, "interrupted");
       await falar(threadId, turnId, ["Recebi: ", desfecho.steer]);
@@ -227,7 +258,13 @@ async function appServer() {
         case "initialized": break;
         case "thread/start":
           registro.thread = m.params; gravar();
-          responder(m.id, { thread: { id: "thr_falso" }, model: m.params.model });
+          // NOD-198: a thread só abre depois da validação do launcher, como o app-server real, que sobe os servidores
+          // MCP antes. Antes o resultado só era gravado no fim do stdin, e sob carga o driver encerrava o processo
+          // antes do proxy responder: o teste lia `registro.launcher` vazio. Agora a ordem é por evento.
+          void validacao.then((v) => {
+            registro.launcher = v; gravar();
+            responder(m.id, { thread: { id: "thr_falso" }, model: m.params.model });
+          });
           break;
         case "model/list":
           registro.modelList = (registro.modelList ?? 0) + 1;
@@ -250,13 +287,13 @@ async function appServer() {
             fila = fila.then(() => rodarTurno(m.params.threadId, turnId, texto));
           };
           if (texto.includes("[[conclui-antes]]")) {
-            setTimeout(() => {
+            void portaoAberto().then(() => {
               notificar("turn/completed", { threadId: m.params.threadId, turn: { id: turnId, status: "completed", items: [] } });
               responder(m.id, { turn: { id: turnId, status: "inProgress", items: [] } });
-            }, 300);
+            });
             break;
           }
-          if (texto.includes("[[lento]]")) setTimeout(abrir, 300);
+          if (texto.includes("[[lento]]")) void portaoAberto().then(abrir);
           else abrir();
           break;
         }

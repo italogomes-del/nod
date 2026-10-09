@@ -2,9 +2,9 @@ import { fileURLToPath } from "node:url";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
-import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import type { Adapter, ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
 import { planoHarness } from "../../helpers/plano-harness.ts";
@@ -16,7 +16,10 @@ import { planoHarness } from "../../helpers/plano-harness.ts";
  */
 let dir: string;
 let cfg: ConfigDriver;
-const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) };
+// NOD-198: prazo por arquivo (sobe o CLI falso de verdade); a medida sob carga está em prazo-falso.ts.
+vi.setConfig({ testTimeout: PRAZO_TESTE_FALSO_MS });
+
+const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() };
 type Registro = { args: string[]; thread: Record<string, unknown> | null; turnos: { texto: string; effort?: string }[]; steers: string[]; aprovacao: unknown };
 const registro = async (): Promise<Registro> => JSON.parse(await readFile(join(dir, "registro.json"), "utf8")) as Registro;
 

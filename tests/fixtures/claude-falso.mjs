@@ -7,8 +7,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { setTimeout as agendar } from "node:timers";
-import { setTimeout as dormir } from "node:timers/promises";
+import { setTimeout as agendar } from "node:timers"; // só o fim do "em segundo plano" (comentado no uso)
+import { setTimeout as dormir } from "node:timers/promises"; // só o espaço entre linhas (`atrasoMs`, comentado no uso)
 import { fileURLToPath } from "node:url";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +60,24 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
   let fechada = false;
   let cortar = null;
   let ferramentas = 0;
+  // NOD-198: a ferramenta "em curso" termina por EVENTO, nunca por relógio: a próxima mensagem no stdin, o corte da volta
+  // ou o fim do stdin. Antes era `dormir(150)`, e sob carga a vez 2 (que o teste só manda depois de ver a `atividade`)
+  // chegava depois da ferramenta: a volta 1 fechava sozinha e o teste caía. Sem relógio de reserva: se ninguém mandar
+  // nada, o fake espera, e o vitest acusa o travamento.
+  let acordar = null;
+  const sinalizar = () => {
+    const a = acordar;
+    acordar = null;
+    a?.();
+  };
+  // Olha a fila ANTES de esperar: a vez 2 pode já ter chegado antes do `tool_use` sair.
+  const fimDaFerramenta = (volta) => (fila.length > 0 || volta.cortada || fechada ? Promise.resolve() : new Promise((r) => { acordar = r; }));
+  // Mesma espera para o "Pensando" do `demorar`; `soCorte` ignora mensagem nova e só solta no corte ou no fim do stdin.
+  const fimDoPensar = (volta, soCorte) =>
+    new Promise((r) => {
+      const ver = () => (volta.cortada || fechada || (!soCorte && fila.length > 0) ? r() : (acordar = ver));
+      ver();
+    });
   const delta = (t) => out({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: t } } });
   const ler = (m) => {
     if (eco) out({ type: "user", isReplay: true, uuid: m.uuid, session_id: sessaoVoz, message: m.message });
@@ -71,7 +89,10 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
     while (fila.length > 0) {
       let m = fila.shift();
       const volta = { cortada: false };
-      cortar = () => { volta.cortada = true; };
+      cortar = () => {
+        volta.cortada = true;
+        sinalizar();
+      };
       out({ type: "system", subtype: "init", session_id: sessaoVoz, tools: [], model: valor("--model"), claude_code_version: VERSAO, apiKeySource: "none", capabilities: ["interrupt_receipt_v1", "interrupt_cancel_queued_v1"] });
       ler(m);
       let ultimo = "";
@@ -91,7 +112,7 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
           delta("Vou anotar.");
           const id = `tu_${++ferramentas}`;
           out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name: "mcp__nod__lembrar", input: {} }] } });
-          await dormir(150);
+          await fimDaFerramenta(volta);
           if (volta.cortada) break;
           out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
           const noMeio = fila.shift();
@@ -103,7 +124,13 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
           ultimo = "Anotado.";
         } else if (texto.includes("demorar")) {
           delta("Pensando");
-          await dormir(200);
+          // Imita o modelo ainda gerando o texto. NOD-198: termina por EVENTO, como a ferramenta: a próxima mensagem no
+          // stdin (que vai para a fila e só é lida depois do `result` desta volta: "Pensando terminei." e fins [1, 2]),
+          // o corte da volta ou o fim do stdin. Com `[[ate-corte]]`, só o corte (ou o fim do stdin) solta: é o que os
+          // testes de interromper precisam, mesmo se a vez seguinte chegar antes do interrupt. Antes era `dormir(200)`,
+          // e sob carga o interrupt chegava depois: "Pensando terminei." em vez de "Pensando" (medido em 2026-10-08,
+          // fixture antiga, 1 em 20 rodadas de voz, load 894).
+          await fimDoPensar(volta, texto.includes("[[ate-corte]]"));
           if (volta.cortada) break;
           ultimo = " terminei.";
         } else ultimo = texto.includes("Escreva para o chat") ? "Resumo da ligação." : `Entendi: ${texto}.`;
@@ -138,11 +165,13 @@ if (process.env.NOD_FALSO_CENARIO === "ligacao-voz") {
         continue;
       }
       fila.push(m);
+      sinalizar();
       void rodar();
     }
   });
   process.stdin.on("end", () => {
     fechada = true;
+    sinalizar();
     if (!emVolta) process.exit(0);
   });
 } else
@@ -242,6 +271,9 @@ if (process.env.NOD_FALSO_CENARIO === "sessao-viva") {
           out({ type: "system", subtype: "task_started", task_id: "bg1", is_backgrounded: true });
           emFundo += 1;
         });
+        // O comando "em segundo plano" termina depois de um intervalo (NOD_FALSO_FUNDO_MS): ele só separa as duas voltas
+        // no tempo, e a ordem não depende dele, porque a volta 1 já foi escrita antes do agendar. Com 60000, o teste de
+        // Parar corta antes e nunca espera o relógio.
         agendar(() => {
           emFundo -= 1;
           out({ type: "system", subtype: "task_updated", task_id: "bg1", patch: { status: "completed" } });
@@ -325,6 +357,8 @@ process.on("SIGTERM", () => {
   process.exit(143);
 });
 
+// Espaço entre as linhas da fixture, como o streaming real. Não decide ordem: o s6 (40 ms) só precisa que o SIGTERM
+// caia no meio do stream, e quem dispara o SIGTERM é o 3º delta (evento), não o relógio.
 const atrasoMs = Number(process.env.NOD_FALSO_ATRASO_MS ?? "5");
 
 // Consome o prompt do stdin (o CLI real lê tudo antes de responder) sem bloquear se for /dev/null.

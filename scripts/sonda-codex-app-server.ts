@@ -242,7 +242,10 @@ async function main(): Promise<void> {
   const tSteer6 = Date.now();
   const rSteer6 = ferramenta6 ? await respostaDe(mandar((i) => pedidoTurnSteer(i, { threadId, texto: molduraMensagemNoMeio("qual é a capital da França?"), turnoEsperado: t6.turnId ?? "" })), tSteer6, 15_000) : null;
   const c6 = await concluido(t6.turnId, t6.t0);
-  const falasDepois = eventos.filter((x) => x.em >= tSteer6 && x.e.tipo === "item" && x.e.fase === "fim" && x.e.texto).map((x) => (x.e.tipo === "item" ? x.e.texto ?? "" : ""));
+  // NOD-198: "depois" é pela ORDEM dos eventos (os que vieram após o início da ferramenta), não pelo relógio: sob
+  // carga o "Começando." e o início da ferramenta chegam no mesmo pedaço do stdout, no mesmo milissegundo de tSteer6.
+  const depoisDaFerramenta = ferramenta6 ? eventos.slice(eventos.indexOf(ferramenta6) + 1) : [];
+  const falasDepois = depoisDaFerramenta.filter((x) => x.e.tipo === "item" && x.e.fase === "fim" && x.e.texto).map((x) => (x.e.tipo === "item" ? x.e.texto ?? "" : ""));
   escrever(`steer no chat: ferramenta ${ms(ferramenta6, t6.t0)} · steer ${rSteer6?.e.tipo === "resposta" ? `aceito em ${rSteer6.em - tSteer6} ms` : rSteer6 ? "recusado" : "não enviado"} · 1ª fala depois: "${(falasDepois[0] ?? "").slice(0, 80)}" · turno ${c6?.e.tipo === "turno_concluido" ? c6.e.status : "não concluiu"}`);
   if (!ferramenta6) falhas.push("steer no chat: nenhuma ferramenta para mandar a mensagem no meio");
   else if (rSteer6?.e.tipo !== "resposta") falhas.push("steer no chat não aceito com a ferramenta rodando");
