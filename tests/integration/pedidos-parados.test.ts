@@ -4,6 +4,7 @@ import type { Tx } from "../../src/shared/types.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
 import { MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
+import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { cuidarDosPedidosParados, REGRA_RETOMADA_AUTOMATICA } from "../../src/use-cases/pedidos-parados.ts";
 import { criarTrabalho, marcarParado, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
@@ -159,6 +160,27 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       const [volta] = await m.pecasDaAda();
       expect(volta?.texto).toBe("Revisado: dois comentários no PR 42.");
       expect(volta?.payload).not.toMatchObject({ falhou: true });
+    });
+  });
+
+  it("quem pediu foi excluído no meio: a resposta fica na conversa do colega, sem 404, e o varredor não volta ao pedido", async () => {
+    await withRollback(MARLON, async (trx) => {
+      // 2026-10-09, produção: a Elis foi excluída com a fatia 5 do Ze 1 em andamento na VM. O 404 "bot remetente" desfazia
+      // o assentamento, a VM desistia de entregar e o turno do Ze 1 caía como "seu Mac parou de responder".
+      const m = await montar(trx);
+      await m.repos.agentes.excluir(m.ada.agenteId, Date.now());
+      await m.entregar(m.tarefa.id, "Revisado: dois comentários no PR 42.");
+      expect(await m.repos.turnos.buscar(m.tarefa.id)).toMatchObject({ estado: "concluido" });
+
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: m.tarefa.id, texto: "Revisado: dois comentários no PR 42." })).data).toEqual({ ignorado: "remetente_excluido" });
+      expect((await avisarFalhaDelegacao(m.deps, { turnoId: m.tarefa.id, motivo: "terminou sem resposta", semEsperar: true })).data).toEqual({ ignorado: "remetente_excluido" });
+      expect(await m.pecasDaAda()).toEqual([]);
+      const falas = (await m.repos.mensagens.listarDaConversa(m.dev.conversaId, 500)).filter((x) => x.kind === "texto" && x.autoria.autor_id === m.dev.agenteId);
+      expect(falas.map((x) => x.texto)).toContain("Revisado: dois comentários no PR 42.");
+
+      await sincronizarTrabalho(m.deps, m.colegaId);
+      expect(await m.estado(m.colegaId)).toBe("terminado");
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
     });
   });
 

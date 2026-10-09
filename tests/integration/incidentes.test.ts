@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
@@ -91,6 +91,40 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
       expect((await listarSuaVez(deps, { marcarVista: false })).data.incidentes).toEqual([]);
       await expect(dispensarIncidente({ repos, agora: () => agora }, { incidenteId: randomUUID() })).rejects.toMatchObject({ codigo: "nao_encontrado" });
     });
+  });
+
+  it("2026-10-09: a queda da VM (motor Linux, 0067) nomeia a máquina na conversa e no aviso; o Mac, a chave sem sistema e o Mac sem chave ficam com \"seu Mac\"", async () => {
+    const chave = async (repos: ReturnType<typeof criarRepos>, nome: string, plataforma: "darwin" | "linux" | null) => {
+      const c = await repos.maquinaTokens.criar({ nome, prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) });
+      if (!c) throw new Error("chave");
+      if (plataforma) await repos.maquinaTokens.registrarPlataforma(c.id, plataforma);
+      return c.id;
+    };
+    const aviso = async (repos: ReturnType<typeof criarRepos>, conversaId: string) => (await repos.mensagens.listarDaConversa(conversaId, 50)).find((m) => m.kind === "sistema")?.texto;
+
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
+      const vm = await chave(repos, "nod-motor-teste", "linux");
+      await repos.maquinaTokens.registrarPlataforma(vm, "linux");
+      expect(await repos.maquinaTokens.identificar(vm)).toEqual({ nome: "nod-motor-teste", plataforma: "linux" });
+      const agora = T0 + 2 * H;
+      await interromperPorMaquina({ repos, escopo: MARLON, agora: () => agora }, { turnos: [await turnoRodando(trx, agenteId, conversaId, vm, T0)] });
+      expect(await aviso(repos, conversaId)).toBe("Turno interrompido: a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado). O que já saiu fica marcado como parcial; nada foi reenviado.");
+      const { data } = await listarSuaVez({ repos, escopo: MARLON, agora: () => agora, tx: (fn) => fn(trx) }, { marcarVista: false });
+      expect(data.incidentes).toMatchObject([{ maquina: "nod-motor-teste", conversas: 1, agentes: ["Ze 1"] }]);
+    });
+
+    for (const plataforma of ["darwin", null, "sem chave"] as const) {
+      await withRollback(MARLON, async (trx) => {
+        const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Taga" });
+        const maquina = plataforma === "sem chave" ? randomUUID() : await chave(repos, "MacBook de Marlon", plataforma);
+        const agora = T0 + 2 * H;
+        await interromperPorMaquina({ repos, escopo: MARLON, agora: () => agora }, { turnos: [await turnoRodando(trx, agenteId, conversaId, maquina, T0)] });
+        expect(await aviso(repos, conversaId), String(plataforma)).toContain("Turno interrompido: seu Mac parou de responder (repouso, sem rede ou nod fechado).");
+        const { data } = await listarSuaVez({ repos, escopo: MARLON, agora: () => agora, tx: (fn) => fn(trx) }, { marcarVista: false });
+        expect(data.incidentes[0], String(plataforma)).not.toHaveProperty("maquina");
+      });
+    }
   });
 
   it("0021: as retomar_turno ABERTAS de turnos de rotina (e das retomadas deles) fecham por regra:rotina_nao_retoma; a da conversa fica", async () => {

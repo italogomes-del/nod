@@ -8,7 +8,7 @@ import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
-export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "ja_entregue" };
+export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "ja_entregue" | "remetente_excluido" };
 
 /** Moldura do SERVIDOR: a resposta chega ao remetente marcada como não supervisionada e não confiável. */
 export function moldurarResposta(alvoNome: string, texto: string): string {
@@ -155,7 +155,12 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
   const delegada = tarefa.origem === "delegacao";
   const remetenteId = pergunta.autoria.autor_id;
   const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId), "nao_encontrado", "bot alvo");
-  const remetente = exigir(await deps.repos.agentes.buscar(remetenteId), "nao_encontrado", "bot remetente");
+  // definido em 2026-10-09: quem pediu foi excluído enquanto o colega trabalhava (a Elis, com a fatia 5 do Ze 1 na VM). O
+  // 404 desfazia o assentamento inteiro: a máquina tentava entregar de novo, desistia, e o turno do colega caía como
+  // "seu Mac parou de responder", com a resposta perdida. Agora a resposta fica na conversa de quem a escreveu e a
+  // entrega acaba aqui: não há a quem continuar.
+  const remetente = await deps.repos.agentes.buscar(remetenteId);
+  if (!remetente) return { data: { ignorado: "remetente_excluido" } };
   const origem = pergunta.payload?.kind === "peer_pedido" ? pergunta.payload : null;
   const conversaRemetente = exigir(origem ? await deps.repos.conversas.buscar(origem.conversaOrigemId) : await deps.repos.conversas.buscarPropriaDoAgente(remetente.id), "nao_encontrado", "conversa do remetente");
   if (delegada) {

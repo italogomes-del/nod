@@ -30,4 +30,8 @@ export type Incidente = {
 };
 
 /** O que "Sua vez" leva para a web desenhar o aviso: os nomes dos agentes já resolvidos. */
-export type IncidenteDto = Pick<Incidente, "id" | "tipo" | "comecouEm" | "voltouEm" | "rotinas" | "conversas"> & { agentes: string[] };
+/**
+ * `maquina` (definido em 2026-10-09): o nome da máquina Linux que parou (a VM do motor, ADR-090), para o aviso não dizer
+ * "Seu Mac". Ausente = o Mac (ou a chave que ainda não disse o sistema).
+ */
+export type IncidenteDto = Pick<Incidente, "id" | "tipo" | "comecouEm" | "voltouEm" | "rotinas" | "conversas"> & { agentes: string[]; maquina?: string };

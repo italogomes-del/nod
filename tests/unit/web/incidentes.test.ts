@@ -25,6 +25,12 @@ describe("aviso de queda do Mac (ADR-045): incidente não é decisão", () => {
     expect(fraseDoIncidente(incidente({ rotinas: 2, conversas: 1 }))).toContain("2 execuções de rotina e 1 resposta em conversa não concluíram (Ada, Taga); nada foi reenviado: as rotinas seguem agendadas e a conversa pode ser retomada.");
   });
 
+  it("2026-10-09: a queda da VM do motor nomeia a máquina; sem o campo, é o Mac", () => {
+    expect(fraseDoIncidente(incidente({ maquina: "nod-motor-teste", rotinas: 0, conversas: 2, agentes: ["Ze 1"] }))).toMatch(/^A máquina nod-motor-teste ficou sem contato entre \d{2}:\d{2} e \d{2}:\d{2}\. 2 respostas em conversa não concluíram \(Ze 1\);/);
+    expect(fraseDoIncidente(incidente({ maquina: "nod-motor-teste", voltouEm: null }))).toMatch(/^A máquina nod-motor-teste está sem contato desde \d{2}:\d{2}\. /);
+    expect(fraseDoIncidente(incidente())).not.toContain("máquina");
+  });
+
   it("um aviso por incidente, em estilo de status, com 'Entendi' — nunca um card de decisão", () => {
     const html = renderIncidentes(comAvisos([incidente(), incidente({ id: "i2", voltouEm: null })]));
     expect(html.match(/class="aviso-sistema"/g)).toHaveLength(2);

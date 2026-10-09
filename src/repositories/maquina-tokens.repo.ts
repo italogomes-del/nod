@@ -1,4 +1,5 @@
 import type { ChaveMaquinaDto } from "../contracts/api.ts";
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
@@ -50,6 +51,22 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
         select id, hash from maquina_tokens
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and hash = ${hash}
           and revogado_em is null and (expira_em is null or expira_em > ${data(agora)})`;
+      return l ?? null;
+    },
+
+    /** ADR-090 (0067): o sistema que a máquina anunciou ao se conectar. Só escreve quando muda. */
+    async registrarPlataforma(id: string, plataforma: PlataformaMaquina): Promise<void> {
+      await conn`update maquina_tokens set plataforma = ${plataforma}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and plataforma is distinct from ${plataforma}`;
+    },
+
+    /**
+     * Nome e sistema de uma chave, revogada ou não (o aviso de uma queda antiga ainda a nomeia). null = não é chave da
+     * pessoa — no modo local, o Mac que roda o servidor não tem chave.
+     */
+    async identificar(id: string): Promise<{ nome: string; plataforma: PlataformaMaquina | null } | null> {
+      const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null }[]>`
+        select nome, plataforma from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return l ?? null;
     },
 

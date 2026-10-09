@@ -1,4 +1,5 @@
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 
 export type ChaveRedacao =
   | "capacidade-desligada"
@@ -109,6 +110,18 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
 /** Aceita string: o banco guarda motivos que saíram do enum. Motivo legado sem tradução sai como está, sem quebrar. */
 export function motivoEmPortugues(motivo: string): string {
   return Object.hasOwn(MOTIVO_EM_PORTUGUES, motivo) ? MOTIVO_EM_PORTUGUES[motivo as keyof typeof MOTIVO_EM_PORTUGUES] : motivo;
+}
+
+/** A máquina de um turno caído, como a chave dela diz (maquina_tokens, 0067); null = sem chave (o Mac do modo local). */
+export type MaquinaDaQueda = { nome: string; plataforma: PlataformaMaquina | null };
+
+/**
+ * definido em 2026-10-09: o `maquina_sem_contato` de quem rodava na VM dizia "seu Mac parou de responder" (o Ze 1 no
+ * motor Linux, com o Mac aberto na mesa). A máquina Linux é nomeada, com as causas dela; o Mac, a chave que ainda não
+ * disse o sistema e o Mac sem chave do modo local ficam com a frase de sempre.
+ */
+export function motivoDaQuedaEmPortugues(maquina: MaquinaDaQueda | null): string {
+  return maquina?.plataforma === "linux" ? `a máquina ${maquina.nome} parou de responder (desligada, sem rede ou motor parado)` : MOTIVO_EM_PORTUGUES.maquina_sem_contato;
 }
 
 export function redigir(chave: ChaveRedacao, _agora: number, params: Readonly<Record<string, string>> = {}): string {

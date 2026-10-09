@@ -275,3 +275,29 @@ arquivos/720 testes, integration 78/286, conformidade 8/59, concurrency 22/70 (1
 **Não implementado.** A decisora designada que não é dona da conversa responde em "Sua vez" sem ver o
 fio (RLS de `mensagens`): a retomada leva o histórico, mas a tela dela mostra só a frase da rodada. Fio
 que começou antes desta migração não tem rodadas ligadas.
+
+## Emenda de 2026-10-09 — a queda nomeia a máquina Linux
+
+**Contexto.** Com o motor numa VM Linux (ADR-090/092), o turno que perdia o lease na VM aparecia como "Turno
+interrompido: seu Mac parou de responder", e o aviso dizia "Seu Mac ficou sem contato entre 15:32 e 15:36". O Mac estava
+aberto na mesa: quem tinha caído era a VM, ou o motor dela reiniciando. A conexão viva da ponte sabe a plataforma, mas
+some 90 s depois do último contato, antes de o varredor notar o lease vencido.
+
+**Decisão.** A chave da máquina guarda o sistema que ela anunciou no `conectar` (`maquina_tokens.plataforma`, migração
+0067, `'darwin'` ou `'linux'`, só escrita quando muda). Na queda (`maquina_sem_contato`), a máquina Linux é nomeada com
+as causas dela: "a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado)"
+(`motivoDaQuedaEmPortugues`, `src/domain/redacao.ts`). O aviso da queda leva `maquina` no `IncidenteDto` e começa com
+"A máquina nod-motor-teste ficou sem contato…". O Mac, a chave que ainda não se conectou depois da 0067 e o Mac sem
+chave do modo local continuam com "seu Mac". A frase vale nas duas portas da regra (varredor e entrega tardia), porque
+as duas passam por `aplicar`.
+
+**Alternativa descartada.** Lembrar a plataforma só em memória, numa lista que não esquece a máquina depois dos 90 s.
+Funcionaria enquanto o servidor não reinicia, mas cada deploy reinicia. A coluna tem o mesmo custo e sobrevive.
+
+**Não implementado.** Um aviso mescla quedas pela janela de tempo (`destinoDaQueda`), e não por máquina. Se o Mac e a VM
+caírem na mesma janela, o aviso nomeia a primeira. O histórico da rotina (`web/lib/execucao.ts`) e a leitura em voz da
+retomada (`leitura-aprovacao.ts`) ainda dizem "seu Mac".
+
+**Validação.** Integração `incidentes` (queda na chave Linux nomeia a VM na conversa e no aviso; `darwin`, chave sem
+sistema e Mac sem chave ficam com "seu Mac"), unit `ponte-http` (só o `conectar` grava a plataforma) e
+`web/incidentes` (a frase com e sem `maquina`). A migração passa pela ida e volta da conformidade.
