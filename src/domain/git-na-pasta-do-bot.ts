@@ -14,7 +14,11 @@ const GIT_QUE_MEXE = new Set(["checkout", "switch", "commit", "merge", "rebase",
 const STASH_QUE_SO_LE = new Set(["list", "show"]);
 const SEPARADORES = new Set(["&&", "||", ";", "|"]);
 
-export type ContextoDaPasta = { cwd: string | null; pastaDoBot: string; home: string };
+/**
+ * `daTask` (definido em 2026-10-09, ADR-088): `pastaDoBot` é a pasta da task (`~/nod/<bot>/<slug>`), não a raiz do
+ * bot. A worktree nasce ali dentro e a mensagem ensina `<pasta>/<repo>`; ausente = a raiz do bot, `<repo>-<task>`.
+ */
+export type ContextoDaPasta = { cwd: string | null; pastaDoBot: string; home: string; daTask?: boolean };
 
 /** Caminho absoluto e normalizado, ou null quando depende do shell (variável que não seja HOME). */
 function resolver(caminho: string, base: string | null, home: string): string | null {
@@ -52,9 +56,36 @@ function tokensAteSubstituicao(comando: string): { texto: string; operador: bool
   return aspa >= 0 ? tokenizar(prefixo.slice(0, aspa)) : null;
 }
 
-function aviso(acao: string, alvo: string | null, pastaDoBot: string): string {
+/** O caminho que a mensagem ensina: dentro da pasta da task, só o repositório; na raiz do bot, repositório e task. */
+const destinoDaWorktree = (ctx: ContextoDaPasta) => (ctx.daTask ? `${ctx.pastaDoBot}/<repo>` : `${ctx.pastaDoBot}/<repo>-<task>`);
+
+function aviso(acao: string, alvo: string | null, ctx: ContextoDaPasta): string {
   const onde = alvo ? `mexeria em ${alvo}, fora da sua pasta` : "roda numa pasta que não deu para conferir";
-  return `${acao} ${onde}. Cada task numa worktree sua: git -C <clone> fetch origin && git -C <clone> worktree add "${pastaDoBot}/<repo>-<task>" -b <branch> origin/main, e rode os comandos dentro dela. Os clones de fora da sua pasta não são mexidos por bots.`;
+  return `${acao} ${onde}. Cada task numa worktree sua: git -C <clone> fetch origin && git -C <clone> worktree add "${destinoDaWorktree(ctx)}" -b <branch> origin/main, e rode os comandos dentro dela. Os clones de fora da sua pasta não são mexidos por bots.`;
+}
+
+/**
+ * definido em 2026-10-09 (ADR-088, #216): a worktree nova nasce dentro da pasta deste turno — a da task, quando há task.
+ * Medido em 09/10: 198 das 261 worktrees em `~/nod` estavam na raiz do bot, fora de qualquer task, e o nod não sabia de
+ * quem eram nem quando apagar. O `worktree add` no clone da pessoa segue livre; o que muda é ONDE ela pode nascer.
+ */
+function avisoWorktree(alvo: string | null, ctx: ContextoDaPasta): string {
+  const onde = alvo ? `criaria a worktree em ${alvo}, fora da ${ctx.daTask ? "pasta desta task" : "sua pasta"}` : "cria a worktree numa pasta que não deu para conferir";
+  const limpeza = ctx.daTask ? " Quando a task acaba, o nod apaga a worktree que não tem alteração por commitar (a branch fica no clone)." : "";
+  return `git worktree add ${onde}. Crie dentro dela: git -C <clone> worktree add "${destinoDaWorktree(ctx)}" -b <branch> origin/main.${limpeza}`;
+}
+
+/** As opções do `git worktree add` que levam valor (o caminho é o primeiro argumento que não é opção nem valor). */
+const OPCOES_COM_VALOR_DO_WORKTREE_ADD = new Set(["-b", "-B", "--reason"]);
+function caminhoDoWorktreeAdd(args: readonly string[]): string | null {
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k]!;
+    if (a === "--") return args[k + 1] ?? null;
+    if (OPCOES_COM_VALOR_DO_WORKTREE_ADD.has(a)) { k++; continue; }
+    if (a.startsWith("-")) continue;
+    return a;
+  }
+  return null;
 }
 
 /**
@@ -77,7 +108,7 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
   if (!tokens) {
     // Fail-closed só para o que claramente mexe: o resto segue para o servidor decidir (autorizar-comando.ts).
     const mexe = /\bgit\s[^;&|\n]*\b(checkout|switch|commit|merge|rebase|reset|pull|cherry-pick|revert|restore|clean)\b/.exec(comando);
-    return mexe ? aviso(`git ${mexe[1]}`, null, ctx.pastaDoBot) : null;
+    return mexe ? aviso(`git ${mexe[1]}`, null, ctx) : null;
   }
   let dir = ctx.cwd === null ? null : resolver(ctx.cwd, null, ctx.home);
   let palavras: string[] = [];
@@ -93,7 +124,7 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
     const [programa, ...args] = inicio < 0 ? [] : s.slice(inicio);
     if (programa === "cd" || programa === "pushd") { dir = resolver(args[0] ?? "~", dir, ctx.home); continue; }
     if (programa === "gh" && args[0] === "pr" && args[1] === "checkout") {
-      if (dir === null || !dentro(dir, ctx.pastaDoBot)) return aviso("gh pr checkout", dir, ctx.pastaDoBot);
+      if (dir === null || !dentro(dir, ctx.pastaDoBot)) return aviso("gh pr checkout", dir, ctx);
       continue;
     }
     if (programa !== "git") continue;
@@ -106,9 +137,16 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
       i += a === "--git-dir" || a === "-c" ? 2 : 1;
     }
     const sub = args[i];
+    if (sub === "worktree" && args[i + 1] === "add") {
+      const caminho = caminhoDoWorktreeAdd(args.slice(i + 2));
+      if (caminho === null) continue;
+      const destino = resolver(caminho, alvo, ctx.home);
+      if (destino === null || !dentro(destino, ctx.pastaDoBot) || destino === ctx.pastaDoBot) return avisoWorktree(destino, ctx);
+      continue;
+    }
     if (!sub || !GIT_QUE_MEXE.has(sub)) continue;
     if (sub === "stash" && STASH_QUE_SO_LE.has(args[i + 1] ?? "")) continue;
-    if (alvo === null || !dentro(alvo, ctx.pastaDoBot)) return aviso(`git ${sub}`, alvo, ctx.pastaDoBot);
+    if (alvo === null || !dentro(alvo, ctx.pastaDoBot)) return aviso(`git ${sub}`, alvo, ctx);
   }
   return null;
 }

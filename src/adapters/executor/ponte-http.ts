@@ -1,4 +1,4 @@
-import type { AnuncioMaquina, PonteInterna, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
@@ -14,6 +14,13 @@ export function urlServidor(valor: unknown, desenvolvimento = false): string {
   const u = new URL(valor);
   if (u.username || u.password || u.search || u.hash || u.pathname !== "/" || (u.protocol !== "https:" && !(desenvolvimento && u.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname)))) throw new FalhaPonte("resposta_invalida");
   return u.origin;
+}
+
+/** ADR-088: o que veio do servidor tem a forma de `PastaParaLimpar` (o Mac ainda confere o caminho antes de apagar). */
+function pastaParaLimparValida(v: unknown): v is PastaParaLimpar {
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  return typeof p.trabalhoId === "string" && typeof p.pasta === "string" && (p.quando === "encerrada" || p.quando === "so_com_pr_mergeado");
 }
 
 export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void }) {
@@ -64,6 +71,16 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       }
     },
     async desconectar() { await chamar("desconectar", {}); },
+    /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */
+    async pastasParaLimpar() {
+      try {
+        const r = await chamar<{ pastas?: unknown }>("limpeza", {});
+        return Array.isArray(r.pastas) ? r.pastas.filter(pastaParaLimparValida) : [];
+      } catch {
+        return [];
+      }
+    },
+    async relatarLimpeza(_pessoaId, relato) { await chamar("limpeza/resultado", { relato }).catch(() => undefined); },
   };
   /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos do turno. */
   function aparar(turnoId: string) {

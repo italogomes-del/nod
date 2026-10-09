@@ -959,6 +959,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pedidosAColegaParados() {
         return [];
       },
+      // A limpeza (ADR-088) se prova no Postgres (tests/integration/limpeza-das-tasks.test.ts); a memória não a vê.
+      async candidatosALimpeza() {
+        return [];
+      },
     },
 
     turnos: {

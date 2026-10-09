@@ -290,3 +290,42 @@ describe("NOD-167: Codex sem app-server no anúncio do Mac", () => {
     expect(maquinas.get("m1")?.capacidades).toBeUndefined();
   });
 });
+
+describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const pasta = { trabalhoId: "00000000-0000-4000-8000-000000000009", pasta: "Dev 1/fix-abc123", quando: "encerrada" } as const;
+
+  it("servidor: a pessoa é a da chave; o relato só leva números conhecidos", async () => {
+    const pastasParaLimpar = vi.fn<NonNullable<PonteInternaNod["pastasParaLimpar"]>>().mockResolvedValue([pasta]);
+    const relatarLimpeza = vi.fn<NonNullable<PonteInternaNod["relatarLimpeza"]>>().mockResolvedValue(undefined);
+    const ponte: PonteInternaNod = { conectar: async () => undefined, puxar: async () => null, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null, pastasParaLimpar, relatarLimpeza };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    const chamar = async (nome: string, corpo: unknown = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+    await chamar("conectar", { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } });
+    expect(await chamar("limpeza", { pessoaId: "outra" })).toEqual({ status: 200, body: { pastas: [pasta] } });
+    expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId);
+    await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
+    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
+  });
+
+  it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {
+    const antigo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 404 })) });
+    expect(await antigo.ponte.pastasParaLimpar!("p")).toEqual([]);
+    const corpo = { pastas: [pasta, { trabalhoId: "x", pasta: 3, quando: "encerrada" }, { trabalhoId: "y", pasta: "a/b", quando: "agora" }] };
+    const f = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify(corpo), { headers: { "x-nod-versao-minima": "0.1.0" } }));
+    const novo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
+    expect(await novo.ponte.pastasParaLimpar!("p")).toEqual([pasta]);
+    await novo.ponte.relatarLimpeza!("p", { pastas: 1, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 5 });
+    expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
+  });
+});

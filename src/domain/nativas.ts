@@ -86,6 +86,14 @@ export function pastaDoBot(nome: string): string {
 }
 
 /**
+ * A pasta do turno (relativa a `~/nod`) é a de uma task? definido em 2026-10-09 (ADR-088): a do bot nunca tem barra
+ * (`pastaDoBot` troca a barra por hífen) e a da task é `<bot>/<slug>` (`pastaRelativa` de `trabalhos.pasta`).
+ */
+export function ehPastaDeTask(pastaRelativaANod: string): boolean {
+  return pastaRelativaANod.includes("/");
+}
+
+/**
  * `comando` = o Bash: quem decide é o SERVIDOR (autorizar-comando.ts), com o comando na mão — só lê roda direto,
  * o resto vira card. O hook nunca decide um comando sozinho.
  */

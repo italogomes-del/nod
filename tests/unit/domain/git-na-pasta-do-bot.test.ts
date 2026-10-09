@@ -41,6 +41,32 @@ describe("git que mexe na pasta de trabalho só dentro de ~/nod/<bot> (ADR-065)"
     ]) expect(naPasta(comando, CLONE), comando).toBeNull();
   });
 
+  it("ADR-088: na task, a worktree nova nasce dentro da pasta dela; fora (a raiz do bot, outro lugar) é negada com o caminho certo", () => {
+    const TASK = `${PASTA}/fix-filtros-abc123`;
+    const naTask = (comando: string, cwd: string | null = TASK) => gitForaDaPastaDoBot(comando, { cwd, pastaDoBot: TASK, home: HOME, daTask: true });
+    for (const comando of [
+      `git -C ${CLONE} worktree add "${TASK}/acme" -b feat/filtros origin/main`,
+      `git -C ${CLONE} worktree add -b feat/filtros ~/nod/"Dev 4"/fix-filtros-abc123/acme origin/main`,
+      `cd ${TASK} && git -C ${CLONE} worktree add --detach "${TASK}/acme"`,
+      `git worktree add acme -b feat/x`,
+      `git -C ${CLONE} worktree list`,
+    ]) expect(naTask(comando), comando).toBeNull();
+    const naRaiz = naTask(`git -C ${CLONE} worktree add "${PASTA}/acme-86akr9u9u" -b feat/filtros origin/main`);
+    expect(naRaiz).toContain(`criaria a worktree em ${PASTA}/acme-86akr9u9u, fora da pasta desta task`);
+    expect(naRaiz).toContain(`worktree add "${TASK}/<repo>" -b <branch> origin/main`);
+    expect(naRaiz).toContain("o nod apaga a worktree");
+    expect(naTask(`git -C ${CLONE} worktree add ../outra -b x`)).toContain("/Users/m/code/acme/main-repos/outra");
+    expect(naTask(`git -C ${CLONE} worktree add "$DESTINO" -b x`)).toContain("numa pasta que não deu para conferir");
+    // A mensagem do git que mexe fora da pasta também ensina a worktree dentro da task.
+    expect(naTask("git switch main", CLONE)).toContain(`worktree add "${TASK}/<repo>"`);
+  });
+
+  it("ADR-088: sem task, a worktree nasce dentro da pasta do bot, como antes", () => {
+    expect(naPasta(`git -C ${CLONE} worktree add /tmp/acme -b x`)).toContain("criaria a worktree em /tmp/acme, fora da sua pasta");
+    expect(naPasta(`git -C ${CLONE} worktree add "${PASTA}" -b x`)).toContain("fora da sua pasta");
+    expect(naPasta(`git -C ${CLONE} worktree add "${PASTA}/acme-86akr9u9u" -b x`)).toBeNull();
+  });
+
   it("pasta que depende do shell, ou cwd desconhecido, não passa quando o git mexe", () => {
     expect(naPasta("cd $REPO && git commit -m x")).toContain("roda numa pasta que não deu para conferir");
     expect(naPasta("git commit -m x", null)).toContain("não deu para conferir");
