@@ -21,7 +21,9 @@ import type { Deps } from "../../use-cases/tipos.ts";
 
 type Dentro = <T>(escopo: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
 /** `saude`: o computador entrou ou saiu do ar — a frota (lateral, cabeçalho, painel) precisa reler. */
-type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void; agora?: () => number };
+type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void; agora?: () => number;
+  /** NOD-200: guarda a última tela do turno para virar anexo da fala (NOD_CAPTURA_NO_TRANSCRIPT). Desligado, nada fica em memória. */
+  guardarTelas?: boolean };
 type Reserva = { computador: Computador; operacao: string; acao: AcaoComputador; registroId: string; turnoId?: string; aprovado: boolean };
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
@@ -86,6 +88,12 @@ function comoErroDeDominio(e: unknown): unknown {
 const OBSERVACAO_TTL_MS = 30 * 60_000;
 const OBSERVACOES_MAX = 500;
 const AVISO_TELA_IGUAL = "Tela igual à anterior; use computador_observar com forcar: true para vê-la de novo.";
+/**
+ * definido em 2026-10-08 (NOD-200): a última tela do turno, para anexar à fala do bot no assentar. Fica 2 h
+ * (turno longo com aprovação no meio) e no máximo 200 turnos (sai o mais antigo); o assentar a toma e esquece.
+ */
+const TELA_DO_TURNO_TTL_MS = 2 * 60 * 60_000;
+const TELAS_DO_TURNO_MAX = 200;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /** "O computador está fora do ar desde …" para o agente, sem tocar no Docker (falha rápida). */
@@ -120,6 +128,18 @@ export function criarComputadores(o: Opcoes) {
     observacoes.delete(chave);
     observacoes.set(chave, { ...hashes, em: agora() });
     for (const [k, v] of observacoes) if (observacoes.size > OBSERVACOES_MAX || agora() - v.em > OBSERVACAO_TTL_MS) observacoes.delete(k); else break;
+  }
+  /** NOD-200: base64 da última tela do turno (qualquer computador), antes da dedup. */
+  const telasDoTurno = new Map<string, { imagem: string; em: number }>();
+  function guardarTela(turnoId: string, imagem: string): void {
+    telasDoTurno.delete(turnoId);
+    telasDoTurno.set(turnoId, { imagem, em: agora() });
+    for (const [k, v] of telasDoTurno) if (telasDoTurno.size > TELAS_DO_TURNO_MAX || agora() - v.em > TELA_DO_TURNO_TTL_MS) telasDoTurno.delete(k); else break;
+  }
+  function ultimaTela(turnoId: string): string | null {
+    const v = telasDoTurno.get(turnoId);
+    if (v && agora() - v.em > TELA_DO_TURNO_TTL_MS) { telasDoTurno.delete(turnoId); return null; }
+    return v?.imagem ?? null;
   }
   function ultimaObservacao(chave: string): HashesObservacao | undefined {
     const v = observacoes.get(chave);
@@ -398,6 +418,8 @@ export function criarComputadores(o: Opcoes) {
         let imagem = r.tela?.imagem;
         let tela: Record<string, unknown> | undefined = r.tela ? { ...r.tela, imagem: undefined } : undefined;
         let aviso: string | undefined;
+        // NOD-200: a captura é a tela que o bot viu, inclusive a repetida que a dedup abaixo omite ao modelo.
+        if (o.guardarTelas && !isError && r.tela?.imagem && resultado.computador.controle === "bot") guardarTela(plano.turnoId, r.tela.imagem);
         // NOD-161: a tela igual à última entregue no turno sai sem imagem/texto. Resultado com erro não
         // conta como entregue e sai inteiro; quadro, url, título, abas e diálogo saem sempre.
         if (r.tela && !isError) {
@@ -413,6 +435,12 @@ export function criarComputadores(o: Opcoes) {
       } catch (e) {
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
+    },
+    /** NOD-200: a última tela guardada do turno (base64), sem esquecer; null se não há. */
+    ultimaTela,
+    /** NOD-200: a ponte chama depois do assentar confirmado (serviço `capturas.esquecer`). */
+    esquecerTurno(turnoId: string): void {
+      telasDoTurno.delete(turnoId);
     },
     /** ADR-083 (S5): quem segurava o computador quando este turno o pediu pela última vez; null = não espera. */
     esperandoPor(turnoId: string): string | null {

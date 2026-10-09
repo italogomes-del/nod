@@ -29,6 +29,7 @@ import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas } from "../../repositories/pessoas.repo.ts";
 import { criarBarramento, type Barramento } from "../../services/barramento.ts";
 import { criarConectoresVivos, type ConectoresVivos, type ConfigConectorVivo } from "../../services/conectores-vivos.ts";
+import { capturaLigada, criarCapturas } from "../../services/capturas.ts";
 import type { Conector } from "../../contracts/conector.ts";
 import { COMANDO_GITHUB_NATIVO } from "../../contracts/github.ts";
 import { executarGithubNaMaquina } from "../conectores-locais/github/maquina.ts";
@@ -390,11 +391,14 @@ export function comporApp(o: OpcoesCompor): App {
 
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
 
-  const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual,
+  // NOD-200: a chave liga o guardador e o serviço juntos; desligada, nada fica em memória e `tomar` é sempre null.
+  const capturaNoTranscript = capturaLigada(env);
+  const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
     cifrar: (s) => cifrar(s, chave), decifrar: (s) => decifrar(s, chave),
     // `saude` (emenda da ADR-037): o computador entrou ou saiu do ar — a web relê a frota só nesse caso.
     mudou: (escopo, agenteId, saude) => { barramento.publicar(escopo.pessoaId, "computador.mudou", { agenteId, ...(saude ? { saude: true } : {}) }); } });
   if (o.computador || env.NOD_COMPUTADORES === "docker") services.computadores = computadores;
+  services.capturas = criarCapturas({ ligado: capturaNoTranscript, fonte: computadores });
   // definido em 2026-09-18: login web remoto não autoriza o filesystem do host; stub só escuta loopback.
   const workspaces = compartilhado || env.NOD_LOGIN !== "stub" ? undefined : criarWorkspaces({ dentro, machineId, imagem: env.NOD_COMPUTADOR_IMAGEM, ...(env.NOD_BUSCA_BASE ? { baseBusca: env.NOD_BUSCA_BASE } : {}), raiz: join(expandirTil(env.NOD_HOME ?? "~/.nod", homedir()), "workspaces") });
   if (workspaces) services.workspaces = workspaces;

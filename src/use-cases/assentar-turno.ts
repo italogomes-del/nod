@@ -8,7 +8,8 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../domain/erro-fornecedor.ts";
+import { recusaDoArquivo } from "../domain/anexo.ts";
+import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
@@ -21,6 +22,7 @@ import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
+import { emSavepoint } from "./savepoint.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -43,6 +45,36 @@ export type SaidaAssentarTurno = {
   /** Turno já terminal (varredor/parar chegaram antes): a fala entra como anexo parcial, sem reabrir (ADR-010). */
   tardia: boolean;
 };
+
+/** Código do erro para o log (SQLSTATE ou nome); nunca a mensagem, que pode carregar dado. */
+function motivoDoErro(e: unknown): string {
+  const codigo = (e as { code?: unknown } | null)?.code;
+  if (typeof codigo === "string" && codigo !== "") return codigo;
+  return e instanceof Error ? e.name : "desconhecido";
+}
+
+/**
+ * definido em 2026-10-08 (NOD-200, ADR proposta): a última tela que o bot viu no turno vira anexo png da fala dele.
+ * Num SAVEPOINT: a falha (teto, RLS, banco) volta só o anexo, e a mensagem entra igual. O log leva o turno e o
+ * motivo, nunca os bytes.
+ */
+async function anexarCaptura(deps: Deps, p: { turnoId: string; conversaId: string; mensagemId: string; bytes: Uint8Array; agora: number }): Promise<void> {
+  const recusa = recusaDoArquivo("image/png", p.bytes.byteLength);
+  if (recusa) {
+    log("aviso", "captura_turno_falhou", { turno_id: p.turnoId, motivo: recusa === "tamanho" ? "acima_do_teto" : recusa });
+    return;
+  }
+  try {
+    await emSavepoint(deps, async () => {
+      const anexo = await deps.repos.anexos.criar({ conversaId: p.conversaId, nome: `tela-${horaMinuto(p.agora).replace(":", "")}.png`, mime: "image/png", conteudo: p.bytes });
+      if (!anexo) throw new ErroDeDominio("estado_invalido", { cause: "anexo_nao_criado" });
+      const presos = await deps.repos.anexos.prender([anexo.id], { conversaId: p.conversaId, mensagemId: p.mensagemId });
+      if (presos.length !== 1) throw new ErroDeDominio("estado_invalido", { cause: "anexo_nao_preso" });
+    });
+  } catch (e) {
+    log("aviso", "captura_turno_falhou", { turno_id: p.turnoId, motivo: motivoDoErro(e) });
+  }
+}
 
 type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null };
 
@@ -80,6 +112,8 @@ export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leas
 export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> = async (deps, entrega) => {
   const primeira = await deps.repos.turnos.registrarEntrega(entrega.turnoId, entrega.seqLocal);
   if (!primeira) return { data: { turno: null, mensagem: null, duplicada: true, tardia: false } };
+  // NOD-200: só lida aqui — a ponte a esquece depois do assentar confirmado, em todo ramo; a repetição por impasse acha a mesma.
+  const captura = deps.services.capturas?.ler(entrega.turnoId) ?? null;
   // Trava de linha: Parar (parar_solicitado_em) pode estar commitando em paralelo; a leitura espera por ele (ADR-009: quem decide o motivo é o servidor).
   const turno = await deps.repos.turnos.buscarTravado(entrega.turnoId);
   if (!turno) throw new ErroDeDominio("nao_encontrado");
@@ -121,6 +155,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-10-05: com `causaSemIa` não há fala — o que veio é a recusa do fornecedor, nunca texto do bot.
   const falaTexto = entrega.fala.tipo === "texto" && comandoDoTurno !== "compactar" && !resultado.causaSemIa ? traduzirSaidaDoComando(turno.entradaTexto, entrega.fala.texto, entrega.harness) : "";
   let mensagem: Mensagem | null = null;
+  /** NOD-200: a fala de texto do bot fora de sala, não silenciada nem tardia — só ela leva a captura. */
+  let falaDoBot = false;
   if (entrega.fala.tipo === "passe") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
     mensagem = await deps.repos.mensagens.criar({
@@ -152,7 +188,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
+    falaDoBot = !tardia;
   }
+  if (captura && falaDoBot && mensagem) await anexarCaptura(deps, { turnoId: turno.id, conversaId: turno.conversaId, mensagemId: mensagem.id, bytes: captura, agora });
   // /compactar não tem fala: a conversa ganha a linha com quanto o histórico ocupava e quanto sobrou.
   const compactacao = resultado.execucao?.compactacoes.at(-1);
   if (!mensagem && !tardia && comandoDoTurno === "compactar" && resultado.desfecho === "sucesso") {

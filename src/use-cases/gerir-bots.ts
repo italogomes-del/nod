@@ -19,6 +19,7 @@ import { mudarModoAprovacao } from "./mudar-modo-aprovacao.ts";
 import { appsDaPessoa, turnoDoNodComAPessoa } from "./nod.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
+import { emSavepoint } from "./savepoint.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -54,18 +55,6 @@ const VERBO: Record<AcaoLote["tipo"], string> = {
 export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | "app" | "nivel" | "modo">): string {
   const extra = a.tipo === "mover" ? ` para ${a.secao ? `"${a.secao}"` : "fora da seção"}` : a.tipo === "dar_acesso" ? ` ao ${a.app} (${a.nivel === "escrita" ? "ler e alterar" : "ler"})` : a.tipo === "mudar_modo" ? ` para ${a.modo}` : "";
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
-}
-
-/** Roda `fn` num SAVEPOINT da transação do caso de uso: se lança, só o que ela fez volta. */
-async function emSavepoint<T>(deps: Deps, fn: () => Promise<T>): Promise<T> {
-  return deps.tx(async (trx) => {
-    if (typeof (trx as { savepoint?: unknown }).savepoint !== "function") return fn();
-    const caixa: { valor?: T } = {};
-    await trx.savepoint(async () => {
-      caixa.valor = await fn();
-    });
-    return caixa.valor as T;
-  });
 }
 
 type Feito = { botId: string; nome: string; events: RuntimeEvent[] };

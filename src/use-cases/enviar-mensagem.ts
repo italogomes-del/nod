@@ -174,7 +174,8 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
     deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),
   ]);
-  const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id));
+  // NOD-200: a fala do bot também pode ter anexo (a captura de tela do turno), e não só a mensagem da pessoa.
+  const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa" || m.kind === "texto").map((m) => m.id));
   const mensagens = anexos.size === 0 ? lidas : lidas.map((m) => (anexos.has(m.id) ? { ...m, anexos: anexos.get(m.id) } : m));
   // Cancelado antes de rodar = interrompido pela pessoa sem nunca ter sido reivindicado (attempted
   // nasce false e só o reivindicar o liga). Um Parar no meio da execução não entra: aquele rodou.

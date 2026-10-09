@@ -88,7 +88,8 @@ export function fraseDoErroFornecedor(harness: IdHarness | null | undefined, err
  */
 export const FUSO_DA_FRASE_DO_LIMITE = "America/Sao_Paulo";
 
-function horaMinuto(instante: number): string {
+/** "14:30" no fuso das frases (também o nome da captura do turno, NOD-200). */
+export function horaMinuto(instante: number): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO_DA_FRASE_DO_LIMITE, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(instante));
 }
 function diaMes(instante: number): string {
