@@ -78,6 +78,12 @@ describe("quais grupos anotados são candidatos (puro)", () => {
     expect(candidatosDoRegistro([grupo(501)], ps, BOOT)).toEqual([{ pgid: 501, programa: "claude", marca: "ab12cd34-0011aa", membros: 2, lider: true, desdeMs: T0 + 300, verificar: [501] }]);
   });
 
+  it("CI do #223: no Linux o lstart é derivado do btime truncado e sai até 1 s antes — o líder e o resto continuam candidatos", () => {
+    // desdeMs = T0 + 300 → piso do segundo = T0; o procps pode mostrar T0 - 1 s.
+    expect(candidatosDoRegistro([grupo(501)], [proc(501, 501, T0 - 1_000, "claude -p")], BOOT)).toHaveLength(1);
+    expect(candidatosDoRegistro([grupo(501)], [proc(502, 501, T0 - 1_000, "node mcp-proxy")], BOOT)).toHaveLength(1);
+  });
+
   it("pid reaproveitado não é candidato: início fora do spawn, outro programa, ou não é mais líder do grupo", () => {
     expect(candidatosDoRegistro([grupo(501)], [proc(501, 501, T0 + 3_600_000, "node /Users/m/.local/bin/claude -p")], BOOT)).toEqual([]);
     expect(candidatosDoRegistro([grupo(501)], [proc(501, 501, T0, "/Applications/Safari.app/Contents/MacOS/Safari")], BOOT)).toEqual([]);

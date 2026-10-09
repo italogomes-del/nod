@@ -129,9 +129,21 @@ export function temAMarca(ambiente: string | undefined, marca: string): boolean 
   return ambiente.split(/\s+/).includes(alvo);
 }
 
-/** O líder nasceu durante o spawn anotado (o lstart é truncado no segundo, então o piso também é). */
+/**
+ * Folga da janela de início (revisto em 2026-10-09, CI do #223). No Mac o lstart é a hora do processo truncada no
+ * segundo. No Linux o procps a DERIVA: `btime` de /proc/stat (inteiro, truncado) + os ticks desde o boot — medido num
+ * container node:24 (btime 1791480389, boot real em …389,687): o lstart saiu 1 s ANTES do piso do relógio de antes do
+ * spawn em 13 de 20 spawns, e o teste de verdade piscava no runner do GitHub. 2 s cobrem a truncagem dupla com sobra; a
+ * prova forte continua sendo a marca, conferida depois.
+ */
+const FOLGA_INICIO_MS = 2_000;
+
+/** O piso do início que o `ps` pode mostrar para um processo nascido depois de `desdeMs`. */
+const pisoDoInicio = (desdeMs: number) => Math.floor(desdeMs / 1000) * 1000 - FOLGA_INICIO_MS;
+
+/** O líder nasceu durante o spawn anotado (com a folga do lstart truncado ou derivado). */
 function nasceuNoSpawn(inicioMs: number, g: GrupoRegistrado): boolean {
-  return inicioMs >= Math.floor(g.desdeMs / 1000) * 1000 && inicioMs <= g.ateMs + 1_000;
+  return inicioMs >= pisoDoInicio(g.desdeMs) && inicioMs <= g.ateMs + FOLGA_INICIO_MS;
 }
 
 /**
@@ -164,7 +176,7 @@ export function candidatosDoRegistro(grupos: readonly GrupoRegistrado[], process
       continue;
     }
     if (bootMs === null || membros.length === 0) continue;
-    if (membros.some((p) => p.inicioMs < Math.floor(g.desdeMs / 1000) * 1000)) continue;
+    if (membros.some((p) => p.inicioMs < pisoDoInicio(g.desdeMs))) continue;
     candidatos.push({ pgid: g.pid, programa: g.programa, marca: g.marca, membros: membros.length, lider: false, desdeMs: g.desdeMs, verificar: membros.map((p) => p.pid) });
   }
   return candidatos;
