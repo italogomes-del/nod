@@ -16,12 +16,18 @@ import { driverFalso } from "../../helpers/driver-falso.ts";
 const cfg: ConfigDriver = { env: {}, cwdBase: "/tmp/nao-usado" };
 
 /** claude-cli falso cuja sonda o teste controla (o mesmo padrão de interruptor-executor.test.ts). */
-function cliFalso(sonda: { inventario: Inventario }): Driver {
+function cliFalso(sonda: { inventario: Inventario; chamadas?: number }): Driver {
   const base = driverFalso();
   return {
     meta: { id: "claude-cli", locality: "local" },
     async create(c) {
-      return { ...(await base.create(c)), sondar: async () => sonda.inventario };
+      return {
+        ...(await base.create(c)),
+        sondar: async () => {
+          sonda.chamadas = (sonda.chamadas ?? 0) + 1;
+          return sonda.inventario;
+        },
+      };
     },
   };
 }
@@ -69,6 +75,8 @@ describe("orquestrador: o inventário anunciado é renovado, não congelado no b
       relogio: () => agora,
       intervaloMs: 1,
       validadeAnuncioMs: 50,
+      // #218: a sonda 'pronto' guardada vence antes do relógio pular para 100.
+      ttlSondaMs: 80,
       listarPessoas: semPessoas,
     });
 
@@ -107,5 +115,96 @@ describe("orquestrador: o inventário anunciado é renovado, não congelado no b
     await orq.parar();
 
     expect(anunciados).toHaveLength(1);
+  });
+});
+
+/** Espera o laço do orquestrador (intervalo de 1 ms) rodar alguns ticks com o relógio do teste. */
+const ticks = () => new Promise((r) => setTimeout(r, 30));
+
+describe("#218: o re-anúncio de 60 s reaproveita a sonda dentro do TTL de 5 min", () => {
+  async function montar(o: { inventario: Inventario; ttlSondaMs?: number; inventarioInicial?: Inventario }) {
+    const sonda: { inventario: Inventario; chamadas: number } = { inventario: o.inventario, chamadas: 0 };
+    const registry = registryVazio();
+    await registrarDriver(registry, cfg, cliFalso(sonda));
+    sonda.chamadas = 0; // o registrarDriver sonda uma vez (o boot); conta-se só o que o orquestrador pede
+    const anunciados: Inventario[] = [];
+    const relogio = { agora: 1_000 };
+    let ponteDoLaco: PonteInterna | null = null;
+    const orq = await iniciarOrquestrador({
+      // Com uma pessoa na lista, paraCadaPessoa abre a transação dela: um `begin` que nunca é chamado basta.
+      db: { begin: async () => undefined } as unknown as Db,
+      registry,
+      machineId: "m1",
+      ponte: ponteEspia(anunciados),
+      iniciarLaco: (p) => {
+        ponteDoLaco = p.ponte;
+        return { parar: () => undefined };
+      },
+      executor: "claude-cli",
+      relogio: () => relogio.agora,
+      intervaloMs: 1,
+      validadeAnuncioMs: 60_000,
+      ...(o.ttlSondaMs !== undefined ? { ttlSondaMs: o.ttlSondaMs } : {}),
+      ...(o.inventarioInicial ? { inventarioInicial: o.inventarioInicial } : {}),
+      listarPessoas: async () => [{ id: "00000000-0000-4000-8000-000000000001", tenantId: "00000000-0000-4000-8000-000000000002" }],
+    });
+    return { sonda, anunciados, relogio, orq, ponteDoLaco: () => ponteDoLaco! };
+  }
+
+  it("10 min ociosos com a IA pronta: 2 sondas (no início e quando o TTL vence), não 10", async () => {
+    const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
+    for (let minuto = 1; minuto <= 10; minuto++) {
+      m.relogio.agora = 1_000 + minuto * 60_000;
+      await ticks();
+    }
+    await m.orq.parar();
+    // Antes: uma sonda por anúncio, 11 em 10 min (a do início e uma por minuto). Agora a do início, aos 5 e aos 10 min.
+    expect(m.anunciados.length).toBeGreaterThanOrEqual(11);
+    expect(m.sonda.chamadas).toBe(3);
+  });
+
+  it("a sonda do boot vale para o primeiro anúncio: nenhum `auth status` a mais ao subir", async () => {
+    const pronto: Inventario = { estado: "pronto", versao: "2.1.278", em: 1_000 };
+    const m = await montar({ inventario: pronto, inventarioInicial: pronto });
+    await ticks();
+    await m.orq.parar();
+    expect(m.anunciados[0]?.estado).toBe("pronto");
+    expect(m.sonda.chamadas).toBe(0);
+  });
+
+  it("IA fora do ar não fica guardada: cada anúncio pergunta de novo (o login recém-feito aparece no minuto)", async () => {
+    const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
+    m.sonda.inventario = { estado: "nao_autenticado", motivo: "faça login", em: 2 };
+    m.relogio.agora += 300_000; // a sonda pronta do início venceu: esta encontra a IA deslogada
+    await ticks();
+    m.relogio.agora += 60_000;
+    await ticks();
+    m.sonda.inventario = { estado: "pronto", versao: "2.1.278", em: 3 };
+    m.relogio.agora += 60_000;
+    await ticks();
+    await m.orq.parar();
+    expect(m.sonda.chamadas).toBe(4);
+    expect(m.anunciados.at(-1)?.estado).toBe("pronto");
+  });
+
+  it("turno recusado pela IA derruba a sonda guardada: o próximo tick ressonda e anuncia, sem esperar o TTL", async () => {
+    const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
+    expect(m.sonda.chamadas).toBe(1);
+    m.sonda.inventario = { estado: "nao_autenticado", motivo: "faça login", em: 2 };
+    const resultado = { desfecho: "falha" as const, motivoFalha: "nao_autenticado" as const, texto: "", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    await m.ponteDoLaco().entregar({ turnoId: "t1", machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado } as Entrega);
+    await ticks();
+    await m.orq.parar();
+    expect(m.sonda.chamadas).toBe(2);
+    expect(m.anunciados.at(-1)).toMatchObject({ estado: "nao_autenticado" });
+  });
+
+  it("turno que só deu erro comum não ressonda", async () => {
+    const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
+    const resultado = { desfecho: "falha" as const, motivoFalha: "erro_execucao" as const, texto: "", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    await m.ponteDoLaco().entregar({ turnoId: "t1", machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado } as Entrega);
+    await ticks();
+    await m.orq.parar();
+    expect(m.sonda.chamadas).toBe(1);
   });
 });

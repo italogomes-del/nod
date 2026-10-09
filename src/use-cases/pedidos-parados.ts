@@ -17,6 +17,20 @@ export const JANELA_PEDIDOS_PARADOS_MS = PRAZO_DECISAO_PADRAO_MS;
 export type SaidaPedidosParados = { retomados: string[]; avisados: string[]; entregues: string[] };
 
 /**
+ * definido em 2026-10-09 (#218): um pedido que a entrega ou o aviso deixou de lado (`ignorado`: a cadeia ainda espera a
+ * pessoa, um colega ou uma volta marcada) não é olhado de novo por 5 min. Ele continua na consulta — nada foi gravado —
+ * e antes voltava a cada passada de 30 s: a tarefa cf7f39aa passou pelo aviso 1.013 vezes em 8,5 h no Nod diário.
+ * 5 min é o atraso máximo que isto acrescenta a uma espera que acabou sem outro caminho avisar.
+ */
+export const ADIAR_PEDIDO_IGNORADO_MS = 5 * 60_000;
+
+/**
+ * Memória de quem foi adiado (tarefaId → até quando), mantida pelo varredor entre as passadas. Fica em memória: um
+ * reinício só custa uma avaliação a mais por pedido.
+ */
+export type PedidosAdiados = Map<string, number>;
+
+/**
  * Retoma o último turno caído do colega (definido em 2026-10-08): o "Retomar" aberto fecha por regra, a retomada entra
  * na fila no mesmo trabalho (a mesma sessão, pelo --resume) e a conversa do colega ganha a linha de sistema. Quem pediu
  * segue esperando: a resposta, ou a próxima falha, volta pelo caminho de sempre.
@@ -59,27 +73,36 @@ async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPedidoPara
  * entrega do resultado que ficou para trás ou o aviso de falha a quem pediu — que é quem relê o trabalho dele
  * (entregar-resposta-peer.ts) e o tira do "rodando". Roda numa transação própria (varredor-expiracao.ts).
  */
-export async function cuidarDosPedidosParados(deps: Deps): Promise<{ data: SaidaPedidosParados; events: RuntimeEvent[] }> {
+export async function cuidarDosPedidosParados(deps: Deps, o: { adiados?: PedidosAdiados } = {}): Promise<{ data: SaidaPedidosParados; events: RuntimeEvent[] }> {
   const agora = deps.agora();
   const saida: SaidaPedidosParados = { retomados: [], avisados: [], entregues: [] };
   const events: RuntimeEvent[] = [];
+  if (o.adiados) for (const [id, ate] of o.adiados) if (ate <= agora) o.adiados.delete(id);
   for (const p of await deps.repos.trabalhos.pedidosAColegaParados(agora - JANELA_PEDIDOS_PARADOS_MS, agora)) {
+    if (o.adiados?.has(p.tarefaId)) continue;
     const acao = decidirPedidoParado(p, agora, motivoEmPortugues);
     if (acao.tipo === "esperar") continue;
+    let ignorado: string | null = null;
     if (acao.tipo === "retomar") {
       const r = await retomar(deps, p, acao);
       if (r.length > 0) saida.retomados.push(p.tarefaId);
+      else ignorado = "retomada_sem_efeito";
       events.push(...r);
     } else if (acao.tipo === "entregar_resultado") {
       const r = await entregarRespostaPeer(deps, { tarefaId: acao.turnoId, texto: acao.texto });
       if ("mensagem" in r.data) saida.entregues.push(p.tarefaId);
+      else ignorado = r.data.ignorado;
       events.push(...(r.events ?? []));
     } else {
-      const r = await avisarFalhaDelegacao(deps, { turnoId: p.tarefaId, motivo: acao.motivo });
+      // #218: `semEsperar` — a task do colega foi parada (a consulta nem olha os pedidos que ela fez a outros: esperar
+      // por eles era para sempre) ou a regra desistiu da queda com o "Retomar" aberto (pedido-parado.ts).
+      const r = await avisarFalhaDelegacao(deps, { turnoId: p.tarefaId, motivo: acao.motivo, ...(acao.semEsperar ? { semEsperar: true as const } : {}) });
       if ("mensagem" in r.data) saida.avisados.push(p.tarefaId);
+      else ignorado = r.data.ignorado;
       events.push(...(r.events ?? []));
     }
-    log("info", "pedido_parado_tratado", { tarefa_id: p.tarefaId, trabalho_id: p.trabalhoColegaId, acao: acao.tipo, estado_colega: p.estadoColega, quedas: p.quedas });
+    if (ignorado) o.adiados?.set(p.tarefaId, agora + ADIAR_PEDIDO_IGNORADO_MS);
+    log("info", "pedido_parado_tratado", { tarefa_id: p.tarefaId, trabalho_id: p.trabalhoColegaId, acao: acao.tipo, estado_colega: p.estadoColega, quedas: p.quedas, ignorado });
   }
   return { data: saida, events };
 }

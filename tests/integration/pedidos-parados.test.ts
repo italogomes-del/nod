@@ -6,7 +6,7 @@ import { MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { cuidarDosPedidosParados, REGRA_RETOMADA_AUTOMATICA } from "../../src/use-cases/pedidos-parados.ts";
-import { criarTrabalho, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
+import { criarTrabalho, marcarParado, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -61,7 +61,17 @@ async function montar(trx: Tx) {
   const estado = async (id: string) => (await repos.trabalhos.buscar(id))?.estado;
   const pecasDaAda = async () => (await repos.mensagens.listarDaConversa(ada.conversaId, 500)).filter((m) => m.payload?.kind === "peer_ask");
   const turnosDoColega = async () => (await repos.turnos.listarDaConversa(dev.conversaId, 500)).filter((x) => x.trabalhoId === colegaId);
-  return { ada, dev, deps, repos, w, tarefa, colegaId, cair, sinalDeVida, entregar, estado, pecasDaAda, turnosDoColega };
+  /**
+   * #218: o Dev, cumprindo a tarefa, pede à Eva e o turno dele termina esperando — a task dele fica com um pedido em
+   * aberto. É o desenho da tarefa cf7f39aa do Nod diário (a Elis pediu ao Zé 3 e a task dela foi parada).
+   */
+  const devPedeAEva = async () => {
+    await agenteComConversa(trx, MARLON, { nome: "Eva" }).then((e) => repos.agentes.atualizarPerfil(e.agenteId, { confirmado: true }));
+    const maquinaDev = await rodar(tarefa.id);
+    await pedirABot(deps, { turnoId: tarefa.id, agenteId: dev.agenteId, conversaId: dev.conversaId, agente: "Eva", pedido: "confira o CI do PR 42" });
+    await assentarTurno(deps, { turnoId: tarefa.id, machineId: maquinaDev, seqLocal: 1, fala: { tipo: "texto", texto: "Pedi à Eva." }, resultado: concluido("Pedi à Eva."), executor: "catcher" });
+  };
+  return { ada, dev, deps, repos, w, tarefa, colegaId, cair, sinalDeVida, entregar, estado, pecasDaAda, turnosDoColega, devPedeAEva };
 }
 
 describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
@@ -160,6 +170,44 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       expect((await cuidarDosPedidosParados({ ...m.deps, agora: () => depois })).data.avisados).toEqual([]);
 
       await varrerPessoa(MARLON, (fn) => fn(trx), { services: m.deps.services, useCases: m.deps.useCases, agora: () => Date.now() });
+      expect(await m.pecasDaAda()).toHaveLength(1);
+    });
+  });
+
+  it("#218: a task do colega foi parada com um pedido dele em aberto — avisa UMA vez, e a 2ª passada não volta a ela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.devPedeAEva();
+      const colega = await m.repos.trabalhos.buscar(m.colegaId);
+      await marcarParado(m.deps, colega!);
+      expect(await m.estado(m.colegaId)).toBe("parado");
+
+      // Antes: o aviso esperava a Eva ("aguardando_colega"), mas a task parada do Dev nunca continua — e o pedido dele à
+      // Eva nem entra na consulta (quem pediu foi parado). O pedido voltava a cada 30 s, para sempre.
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.avisados).toEqual([m.tarefa.id]);
+      const [aviso] = await m.pecasDaAda();
+      expect(aviso?.payload).toMatchObject({ kind: "peer_ask", tarefaId: m.tarefa.id, falhou: true });
+      expect(aviso?.texto).toContain("parada antes de terminar");
+
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+      expect(await m.pecasDaAda()).toHaveLength(1);
+    });
+  });
+
+  it("#218: a regra desiste da queda com o \"Retomar\" ainda aberto — avisa uma vez, sem esperar o card", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.cair(m.tarefa.id, "maquina_sem_contato");
+      await m.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: m.dev.agenteId, conversaId: m.dev.conversaId, turnoId: m.tarefa.id, prazoDecisaoEm: Date.now() + 86_400_000, frase: "O turno parou." });
+      await sincronizarTrabalho(m.deps, m.colegaId);
+      expect(await m.estado(m.colegaId)).toBe("precisa_de_voce");
+
+      // 31 min sem as máquinas voltarem: a regra desiste. Antes o card aberto virava "aguardando_pessoa" no aviso, que
+      // não gravava nada — e o pedido voltava a cada passada até o card vencer (24 h).
+      const depois = { ...m.deps, agora: () => Date.now() + 31 * 60_000 };
+      expect((await cuidarDosPedidosParados(depois)).data.avisados).toEqual([m.tarefa.id]);
+      expect((await cuidarDosPedidosParados(depois)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
       expect(await m.pecasDaAda()).toHaveLength(1);
     });
   });

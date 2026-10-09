@@ -2,7 +2,9 @@ import { hostname } from "node:os";
 import { HARNESSES, type CapacidadesHarness, type IdHarness } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { PonteInterna } from "../../contracts/ponte.ts";
+import type { ResultadoTurno } from "../../contracts/turno.ts";
 import { log } from "../../obs/log.ts";
+import { INVENTARIO_TTL_MS } from "../../services/inventario.ts";
 import type { Db, Relogio } from "../../shared/types.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
@@ -18,8 +20,21 @@ export const INTERVALO_ORQUESTRADOR_MS = 2_000;
  * driver anunciado em sombra seguia 'ausente' e recusava TODO turno mesmo depois de ficar pronto.
  * 60 s alinha com o TTL de 5 min da sonda compartilhada sem ressondar a cada tick de 2 s — a sonda do
  * boot é `claude auth status` (sem turno, sem custo de token), mas é processo filho.
+ * revisto em 2026-10-09 (#218): o re-anúncio de 60 s ressondava SEMPRE — ~1.440 `claude auth status` por dia, cada um
+ * subindo um binário de ~100 MB. Agora uma sonda 'pronto' vale o TTL da sonda (INVENTARIO_TTL_MS, 5 min) e o anúncio
+ * de 60 s repete o inventário dela; ressonda antes disso só um driver que não está pronto, a troca de executor ou um
+ * turno que voltou recusado pela IA (`sondaVencidaPeloTurno`).
  */
 export const VALIDADE_ANUNCIO_MS = 60_000;
+
+/**
+ * definido em 2026-10-09 (#218): o turno voltou dizendo que a IA não serve — sem login, conta sem acesso, driver fora.
+ * É o sinal que o re-anúncio espera para não confiar na sonda 'pronto' guardada até o fim do TTL. Lê só o desfecho
+ * tipado do resultado, nunca o nome do harness.
+ */
+export function sondaVencidaPeloTurno(r: ResultadoTurno): boolean {
+  return r.motivoFalha === "nao_autenticado" || r.motivoFalha === "motor_ausente" || r.motivoInterrupcao === "executor_indisponivel" || r.causaSemIa !== undefined;
+}
 
 /** Assinatura do laço da L4 (src/adapters/executor/laco.ts): injetada aqui, nunca importada — a L9 liga. */
 export type LacoAtivo = { parar(): Promise<void> | void };
@@ -41,6 +56,13 @@ export type OpcoesOrquestrador = {
   intervaloMs?: number;
   /** Validade do anúncio; default VALIDADE_ANUNCIO_MS (testes encurtam). */
   validadeAnuncioMs?: number;
+  /** #218: quanto uma sonda 'pronto' vale para os re-anúncios; default INVENTARIO_TTL_MS (5 min). */
+  ttlSondaMs?: number;
+  /**
+   * #218: a sonda que o boot acabou de fazer (criarRegistryDetalhado), do executor em uso. Pronta, o primeiro anúncio a
+   * reaproveita em vez de rodar o mesmo `auth status` de novo segundos depois.
+   */
+  inventarioInicial?: Inventario;
   nomeMaquina?: string;
   listarPessoas?: OpcoesLaco["listarPessoas"];
 };
@@ -77,17 +99,42 @@ export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orques
   const relogio = o.relogio ?? (() => Date.now());
   const nome = o.nomeMaquina ?? hostname();
   const lacos = new Map<string, LacoAtivo>();
+  const ttlSondaMs = o.ttlSondaMs ?? INVENTARIO_TTL_MS;
+  // #218: a última sonda 'pronto', por executor. Só 'pronto' fica guardada: o driver fora do ar segue sondado a cada
+  // anúncio (é assim que um login recém-feito aparece em até 60 s), e a sonda lenta nunca é 'pronto' (NOD-178).
+  let sondaGuardada: { executor: IdDriver; inventario: Inventario; em: number } | null =
+    o.inventarioInicial?.estado === "pronto" ? { executor: o.executor ?? "catcher", inventario: o.inventarioInicial, em: o.inventarioInicial.em } : null;
+  const sondar = async (executor: IdDriver): Promise<Inventario> => {
+    const agora = relogio();
+    const g = sondaGuardada;
+    if (g && g.executor === executor && agora - g.em < ttlSondaMs) return g.inventario;
+    const inventario = await inventarioDoRegistry(o.registry, executor, agora);
+    sondaGuardada = inventario.estado === "pronto" ? { executor, inventario, em: agora } : null;
+    return inventario;
+  };
   // `o.executor` é lido A CADA anúncio, nunca copiado (AGENTS.md §Composição): depois de uma troca
   // pelo interruptor o re-anúncio tem que sondar o driver NOVO.
   const anunciar = async (): Promise<Inventario> => {
     const executor = o.executor ?? "catcher";
-    const inventario = await inventarioDoRegistry(o.registry, executor, relogio());
+    const inventario = await sondar(executor);
     const capacidades = capacidadesDoRegistry(o.registry);
     await o.ponte.conectar({ machineId: o.machineId, nome, inventario, versaoContrato: 1, ligacao: true, ...(capacidades ? { capacidades } : {}) });
     anunciadoEm = relogio();
     return inventario;
   };
   let anunciadoEm = 0;
+  // #218: o laço entrega pela ponte daqui; um turno recusado pela IA derruba a sonda guardada e vence o anúncio, e o
+  // próximo tick (2 s) pergunta de novo ao CLI — sem esperar o TTL nem o minuto do anúncio.
+  const ponteDoLaco: PonteInterna = {
+    ...o.ponte,
+    entregar: async (e) => {
+      if (sondaVencidaPeloTurno(e.resultado) && sondaGuardada) {
+        sondaGuardada = null;
+        anunciadoEm = -Infinity;
+      }
+      return o.ponte.entregar(e);
+    },
+  };
   const inventario = await anunciar();
   log("info", "orquestrador_iniciado", { machine_id: o.machineId, executor: o.executor ?? "catcher", inventario: inventario.estado });
 
@@ -109,7 +156,7 @@ export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orques
         o.db,
         async (escopo) => {
           if (lacos.has(escopo.pessoaId)) return;
-          lacos.set(escopo.pessoaId, o.iniciarLaco({ ponte: o.ponte, registry: o.registry, pessoaId: escopo.pessoaId, machineId: o.machineId, relogio }));
+          lacos.set(escopo.pessoaId, o.iniciarLaco({ ponte: ponteDoLaco, registry: o.registry, pessoaId: escopo.pessoaId, machineId: o.machineId, relogio }));
         },
         { listarPessoas: o.listarPessoas },
       );
