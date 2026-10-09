@@ -101,19 +101,26 @@ do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
 
 1. **Disco na leitura.** O amostrador lê o espaço do volume de `~/nod` (o da casa, antes de a pasta existir) com
    `statfs`, sem processo novo, a cada 30 s: `LeituraMemoria.disco = { livreMb, totalMb }`, livre = `bavail`. Vai no
-   `puxar` e na renovação, como o processador. É opcional: app anterior não manda, e leitura fora do formato é ignorada
-   sozinha (`discoValido`, ponte-validacao.ts). Fora do macOS não há leitura da máquina (item 7), então nada é medido
+   `puxar` e na renovação, como o processador. É opcional: app anterior não manda a chave; o app novo que não conseguiu
+   medir manda `null` (Este Mac diz "sem leitura", e não "atualize o app"); leitura fora do formato é ignorada sozinha
+   (`discoValido`, ponte-validacao.ts). Fora do macOS não há leitura da máquina (item 7), então nada é medido
    nem segurado. `NOD_SIMULAR_DISCO` ("8" = 8 GB livres de 500; "17/466") força a leitura em testes e UAT. O número da
    amostra só sobe quando o disco muda de nível, não a cada MB gravado.
+   O número é o livre que o macOS informa aos apps (`statfs`). Ele pode ser um pouco menor que o do Finder, que soma o
+   espaço "purgável" que o sistema libera sozinho; Este Mac diz isso no detalhe.
 2. **Dois limites absolutos de disco, num lugar só** (`DISCO_ALERTA_MB` = 10 GB, `DISCO_CRITICO_MB` = 3 GB,
    `nivelDoDisco`, src/domain/memoria-mac.ts). Sem regra percentual: 5% de 466 GB (23 GB) seguraria um disco grande
    com folga de sobra. A tela recebe o nível e os dois limites do servidor (`DiscoDoMac`), nunca os repete.
+   **Histerese** (revisão do #224): o disco sai do crítico só acima de 3,5 GB (`DISCO_SAI_CRITICO_MB`) e do alerta só
+   acima de 11 GB (`DISCO_SAI_ALERTA_MB`). O servidor guarda o nível anterior de cada Mac (trabalhos-vivos.ts) e o
+   amostrador usa a mesma regra. Sem isso, um disco parado perto do limite trocaria de nível a cada 30 s, e a pílula e o
+   frame piscariam junto.
 3. **O que cada nível segura** (`portaoDoMac`), pela leitura de um Mac:
 
    | Leitura | Pouco / Equilibrado | O quanto precisar |
    |---|---|---|
    | Disco crítico (< 3 GB) | nada novo começa | nada novo começa |
-   | Memória crítica | segundo plano, **sem** a espera máxima de 1 h | nada espera |
+   | Memória crítica | segundo plano novo, **sem** a espera máxima de 1 h | nada espera |
    | Disco em alerta (< 10 GB) | segundo plano, com a espera máxima | nada espera |
    | Memória em alerta / processador | como antes (`deveSegurar`) | nada espera |
 
@@ -123,8 +130,13 @@ do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
      `acordar_em`. Vale para a task da pessoa, o "Executar agora", o que passou da espera máxima e a volta marcada. É a
      única trava que vale em "O quanto precisar": sem espaço, commit, npm e Postgres falham no meio, em qualquer
      escolha.
-   - "Sem a espera máxima" (`fundoSemPrazo`): com a memória crítica, o segundo plano que já espera há mais de 1 h
+   - "Sem a espera máxima" (`fundoSemPrazo`): com a memória crítica, o segundo plano novo que já espera há mais de 1 h
      continua esperando, em vez de rodar mesmo assim.
+   - **Volta marcada** (revisão do #224): a volta ("me chame às 16:00") de uma task já começada é o próximo passo de algo
+     que já começou. Com a memória crítica ela passa; só o disco crítico a segura. Com a memória em alerta, o disco em
+     alerta ou o processador, a regra de antes continua (ADR-086, revisão do #212: espera, até 1 h contada da hora
+     marcada). Quando algo segura a volta, `esperaDoMac` diz o motivo, e a linha diz "esperando…" em vez de "volta às
+     16:00" já passado.
    - Conversa, ligação e o turno seguinte de uma task que já começou nunca esperam. Nada que roda é morto ou pausado.
    - O Mac do Marlon de 09/10 (17 GB livres) não seguraria nada pelo disco.
 4. **Sem espera máxima no disco crítico.** O item 4 rejeitou "segurar sem prazo" porque a espera não aparecia em lugar
@@ -143,7 +155,8 @@ do Marlon, que autorizou merge e deploy (ver "Como voltar atrás").
    Mac.
 7. **Este Mac** mostra memória, processador e disco em barras, com o status curto à vista ("crítica", "8,4 GB livres") e
    o porquê atrás de um clique (`<details>`): o que o macOS disse e o que espera por isso, pelo uso escolhido; o livre,
-   o total e os dois limites do disco, e onde ficam as pastas dos bots. O grupo de quem espera leva o motivo ("Esperando
+   o total e os dois limites do disco, que o número pode ser um pouco menor que o do Finder, e onde ficam as pastas dos
+   bots. A barra não some no hover da linha. O grupo de quem espera leva o motivo ("Esperando
    espaço no disco · 2").
 8. **Medir.** `fundo_segurado` / `fundo_solto` saem também na troca de motivo, com `motivo`, `tudo_novo`, `sem_prazo` e
    `disco_livre_mb`. A espera de cada trabalho continua em `iniciado_em - criado_em`.
@@ -152,14 +165,18 @@ Fora desta emenda:
 - o swap em Este Mac (a issue cita; pede `vm.swapusage` a cada 30 s e mais um campo na leitura);
 - a memória e o disco usados só pelos bots (o disco de `~/nod` pede `du`, caro em 254 GB; fica com a limpeza das tasks,
   #216);
-- um botão de limpeza em Este Mac.
+- um botão de limpeza em Este Mac;
+- ler o livre "para uso importante" do macOS (`NSURLVolumeAvailableCapacityForImportantUsageKey`, que conta o purgável
+  como o Finder), em vez do `statfs`: pede código nativo no app (follow-up).
 
 Como voltar atrás (as escolhas que o Marlon não viu), cada uma em `portaoDoMac` e nas constantes ao lado dele:
-- **Limites:** mudar `DISCO_ALERTA_MB` / `DISCO_CRITICO_MB`.
+- **Limites:** mudar `DISCO_ALERTA_MB` / `DISCO_CRITICO_MB`, e a histerese em `DISCO_SAI_*_MB`.
 - **Disco crítico também em "O quanto precisar":** mover a linha do disco vermelho para depois de `if (uso === "livre")`.
 - **Memória crítica:**
   - segurar também o pedido da pessoa: devolver `tudoNovo: "memoria"`;
-  - manter a espera máxima: `semPrazo: false`.
+  - manter a espera máxima: `semPrazo: false`;
+  - segurar também a volta marcada: tirar o `p.fundoSemPrazo` da condição da volta no `reivindicar` e o
+    `!portao.semPrazo` em `esperaDoMac`.
 
 Gatilho de reversão:
 - `fundo_segurado` com `tudo_novo` por mais de um dia seguido em Macs com a limpeza das tasks (#216) já no ar: rever

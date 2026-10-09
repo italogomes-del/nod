@@ -53,7 +53,8 @@ export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMa
     totalMb: kibParaMb(totalKib),
     porTurno: doTurno !== undefined && p.turnoId !== null ? [{ turnoId: p.turnoId, mb: kibParaMb(doTurno) }] : [],
     ...(p.processador ? { processador: p.processador } : {}),
-    ...(p.disco ? { disco: p.disco } : {}),
+    // Revisão do #224: `null` vai junto (o app mede e não conseguiu); `undefined` (fora do macOS) não.
+    ...(p.disco !== undefined ? { disco: p.disco } : {}),
   };
 }
 
@@ -134,11 +135,23 @@ export function piorNivel(a: NivelPressao | null, b: NivelPressao | null): Nivel
  */
 export const DISCO_ALERTA_MB = 10 * 1024;
 export const DISCO_CRITICO_MB = 3 * 1024;
+/**
+ * Histerese (revisão do #224, definido em 2026-10-09): para sair de um nível o disco precisa passar um pouco do limite —
+ * do crítico só acima de 3,5 GB, do alerta só acima de 11 GB. Sem ela, um disco parado perto do limite trocaria de nível a
+ * cada leitura de 30 s, e a pílula e o frame `memoria.mudou` piscariam junto.
+ */
+export const DISCO_SAI_CRITICO_MB = 3.5 * 1024;
+export const DISCO_SAI_ALERTA_MB = 11 * 1024;
 
-/** O nível do disco pelo espaço livre: amarela abaixo de 10 GB, vermelha abaixo de 3 GB. Sem leitura válida, null. */
-export function nivelDoDisco(d: LeituraDisco | null | undefined): NivelPressao | null {
+/**
+ * O nível do disco pelo espaço livre: amarela abaixo de 10 GB, vermelha abaixo de 3 GB; com o nível `anterior` (o da
+ * leitura passada do mesmo Mac), a histerese acima. Sem leitura válida, null.
+ */
+export function nivelDoDisco(d: LeituraDisco | null | undefined, anterior: NivelPressao | null = null): NivelPressao | null {
   if (!d || !(d.totalMb > 0) || !(d.livreMb >= 0)) return null;
-  return d.livreMb < DISCO_CRITICO_MB ? "vermelha" : d.livreMb < DISCO_ALERTA_MB ? "amarela" : "verde";
+  if (d.livreMb < DISCO_CRITICO_MB || (anterior === "vermelha" && d.livreMb <= DISCO_SAI_CRITICO_MB)) return "vermelha";
+  if (d.livreMb < DISCO_ALERTA_MB || ((anterior === "vermelha" || anterior === "amarela") && d.livreMb <= DISCO_SAI_ALERTA_MB)) return "amarela";
+  return "verde";
 }
 
 /**
@@ -169,7 +182,8 @@ export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigi
  *   qualquer uso, até em "O quanto precisar".
  * - `fundo`: só trabalho novo em segundo plano espera (rotina, pedido de colega, a volta marcada); o que a pessoa pediu
  *   passa. Por memória crítica, disco em alerta, memória em alerta ou processador (`deveSegurar`), nunca em "livre".
- * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h.
+ * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h. A volta marcada de uma
+ *   task já começada passa (revisão do #224: é o próximo passo de algo que já começou); com o disco crítico ela espera.
  * O motivo vai para a linha da task, pela gravidade: disco crítico, memória crítica, disco em alerta, memória em alerta,
  * processador. Sem leitura, nada espera.
  */
@@ -177,9 +191,10 @@ export type PortaoDoMac = { fundo: MotivoEsperaMac | null; tudoNovo: MotivoEsper
 
 const PORTAO_ABERTO: PortaoDoMac = { fundo: null, tudoNovo: null, semPrazo: false };
 
-export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; disco?: LeituraDisco | null } | null): PortaoDoMac {
+export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; discoNivel?: NivelPressao | null } | null): PortaoDoMac {
   if (!l) return PORTAO_ABERTO;
-  const disco = nivelDoDisco(l.disco);
+  // O nível já vem com a histerese (trabalhos-vivos.ts guarda o anterior de cada Mac).
+  const disco = l.discoNivel ?? null;
   if (disco === "vermelha") return { fundo: "disco", tudoNovo: "disco", semPrazo: false };
   if (uso === "livre") return PORTAO_ABERTO;
   if (l.memoria === "vermelha") return { fundo: "memoria", tudoNovo: null, semPrazo: true };
@@ -191,9 +206,15 @@ export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; pr
 /**
  * Por que o Mac segura este trabalho agora (null = não segura). É a regra do `reivindicar` (turnos.repo.ts): com
  * `tudoNovo`, todo trabalho que ainda não começou; com `fundo`, só o que `seguravelPeloMac` aceita (com `semPrazo`,
- * também o que passou da espera máxima).
+ * também o que passou da espera máxima). Revisão do #224: a volta marcada vencida ("me chame às 16:00", ADR-086) de task
+ * sem turno vivo também — pelo disco crítico, ou pelo `fundo` sem `semPrazo` dentro da espera máxima contada da hora
+ * marcada —, para a linha dizer "esperando…" em vez de "volta às 16:00" já passado.
  */
-export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando">, portao: PortaoDoMac, agora: number): MotivoEsperaMac | null {
+export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando"> & { acordaEm?: number | null; turnoVivoId?: string | null }, portao: PortaoDoMac, agora: number): MotivoEsperaMac | null {
+  if (t.acordaEm != null && t.acordaEm <= agora && !t.turnoVivoId && (t.estado === "rodando" || t.estado === "na_fila")) {
+    if (portao.tudoNovo) return portao.tudoNovo;
+    if (portao.fundo && !portao.semPrazo && t.acordaEm > agora - ESPERA_MAXIMA_FUNDO_MS) return portao.fundo;
+  }
   if (t.estado !== "na_fila") return null;
   if (portao.tudoNovo && t.iniciadoEm === null) return portao.tudoNovo;
   if (portao.fundo && seguravelPeloMac(portao.semPrazo ? { ...t, criadoEm: agora } : t, agora)) return portao.fundo;

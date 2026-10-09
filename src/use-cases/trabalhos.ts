@@ -196,14 +196,15 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   // #219 (emenda à ADR-085): o portão inteiro e o motivo, que vai para cada trabalho segurado ("esperando espaço no
   // disco") e para a pílula; o disco vai com o nível e os limites, que moram só no domínio.
   const disco = memoria?.disco ?? null;
-  const nivelDisco = nivelDoDisco(disco);
-  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador, disco });
+  // Revisão do #224: o nível vem com a histerese (trabalhos-vivos.ts); sem ele (serviço de teste), o nível cru.
+  const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
+  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac((await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO, { memoria: memoria.nivel, processador, discoNivel: nivelDisco });
   const agora = deps.agora();
   const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
     const motivo = esperaDoMac(t, portao, agora);
     return motivo ? { ...t, esperaDoMac: motivo } : t;
   });
-  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null } };
+  return { data: { trabalhos: dtos, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null } };
 };
 
 /** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */

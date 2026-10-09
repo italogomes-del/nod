@@ -149,6 +149,8 @@
 .mac-det > summary::after { content: "›"; flex: none; width: 8px; font-size: 18px; line-height: 1; color: var(--ink-3); text-align: center; transition: transform .12s; }
 .mac-det[open] > summary::after { transform: rotate(90deg); }
 .mac-det > summary:hover, .mac-det > summary:focus-visible { background: var(--surface-raised); }
+/* Revisão do PR 224: o trilho da barra é da mesma cor do hover; sem isto a barra some ao passar o mouse na linha. */
+.mac-det > summary:hover .mac-barra, .mac-det > summary:focus-visible .mac-barra { background: var(--line); }
 div.mac-medidor { padding-right: 36px; }
 .mac-det-txt { margin: 0; padding: 0 18px 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 @media (prefers-reduced-motion: reduce) { .mac-det > summary::after { transition: none; } }

@@ -233,10 +233,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                     and w.iniciado_em is null and w.origem in ('rotina', 'colega') and not w.pessoa_esperando
                     ${p.espacarFundo === true || p.fundoSemPrazo === true ? trx`` : trx`and w.criado_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}`})`}
                   -- ADR-086 (revisão do #212): a volta marcada ("me chame às 16:00") também é processo novo no Mac sem
-                  -- ninguém esperando: segue as mesmas regras, contando a espera máxima a partir da hora marcada.
-                  ${p.espacarFundo !== true && p.segurarFundo !== true ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true || p.fundoSemPrazo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
+                  -- ninguém esperando: segue as mesmas regras, contando a espera máxima a partir da hora marcada. Revisão do
+                  -- #224: com a memória crítica (fundoSemPrazo) ela passa — é o próximo passo de uma task já começada; só o
+                  -- disco crítico (segurarNovo, abaixo) e o espaço entre dois começos a seguram.
+                  ${p.espacarFundo !== true && (p.segurarFundo !== true || p.fundoSemPrazo === true) ? trx`` : trx`and not (t.acordar_em is not null and (${p.espacarFundo === true} or t.acordar_em > ${data(p.agora - ESPERA_MAXIMA_FUNDO_MS)}))`}
                   -- definido em 2026-10-09 (#219, emenda à ADR-085): com a memória crítica (fundoSemPrazo) o segundo plano
-                  -- espera mesmo passado da espera máxima. Com o disco crítico (segurarNovo) NENHUM trabalho novo começa, de
+                  -- novo espera mesmo passado da espera máxima (a volta marcada, não: acima). Com o disco crítico (segurarNovo) NENHUM trabalho novo começa, de
                   -- qualquer origem, mesmo com a pessoa esperando, nem a volta marcada. O que já começou segue (o turno
                   -- seguinte de uma task em andamento não espera). Mesma regra de esperaDoMac (domain/memoria-mac.ts).
                   ${p.segurarNovo !== true ? trx`` : trx`and t.acordar_em is null and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null)`}

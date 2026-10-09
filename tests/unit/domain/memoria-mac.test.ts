@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, leituraDoTurno, nivelDoDisco, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
+import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, leituraDoTurno, nivelDoDisco, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo } from "../../../src/domain/memoria-mac.ts";
 import type { UsoDoMac } from "../../../src/contracts/raio-x.ts";
 
 /** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
@@ -121,6 +121,20 @@ describe("disco do Mac", () => {
     expect(nivelDoDisco({ livreMb: 3 * GB - 1, totalMb: 100 * GB })).toBe("vermelha");
   });
 
+  it("revisão do #224: histerese — sai do crítico só acima de 3,5 GB e do alerta só acima de 11 GB", () => {
+    expect([DISCO_SAI_CRITICO_MB, DISCO_SAI_ALERTA_MB]).toEqual([3.5 * GB, 11 * GB]);
+    const d = (gb: number) => ({ livreMb: gb * GB, totalMb: 500 * GB });
+    expect(nivelDoDisco(d(3.2), "vermelha")).toBe("vermelha");
+    expect(nivelDoDisco(d(3.5), "vermelha")).toBe("vermelha");
+    expect(nivelDoDisco(d(3.6), "vermelha")).toBe("amarela");
+    expect(nivelDoDisco(d(3.2), "amarela")).toBe("amarela"); // entrar no crítico continua abaixo de 3 GB
+    expect(nivelDoDisco(d(10.5), "amarela")).toBe("amarela");
+    expect(nivelDoDisco(d(11), "vermelha")).toBe("amarela");
+    expect(nivelDoDisco(d(11.1), "amarela")).toBe("verde");
+    expect(nivelDoDisco(d(10.5), "verde")).toBe("verde");
+    expect(nivelDoDisco(d(10.5), null)).toBe("verde");
+  });
+
   it("sem leitura, ou leitura sem total, não tem nível: nada espera por um disco que ninguém mediu", () => {
     expect(nivelDoDisco(null)).toBeNull();
     expect(nivelDoDisco(undefined)).toBeNull();
@@ -148,46 +162,47 @@ describe("disco do Mac", () => {
 });
 
 describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta/crítico", () => {
-  const folgado = { livreMb: 200 * GB, totalMb: 500 * GB };
-  const alerta = { livreMb: 8 * GB, totalMb: 500 * GB };
-  const critico = { livreMb: 2 * GB, totalMb: 500 * GB };
+  // O portão recebe o nível do disco já com a histerese (trabalhos-vivos.ts).
+  const folgado = "verde" as const;
+  const alerta = "amarela" as const;
+  const critico = "vermelha" as const;
   const ABERTO = { fundo: null, tudoNovo: null, semPrazo: false };
   const SEGURAM: UsoDoMac[] = ["pouco", "equilibrado"];
 
   it("memória normal e disco folgado: nada espera, em qualquer uso", () => {
-    for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "verde", processador: "verde", disco: folgado })).toEqual(ABERTO);
+    for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "verde", processador: "verde", discoNivel: folgado })).toEqual(ABERTO);
   });
 
   it("memória em alerta: só o segundo plano espera, com a espera máxima; 'O quanto precisar' não segura", () => {
-    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "amarela", processador: "verde", disco: folgado })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: false });
-    expect(portaoDoMac("livre", { memoria: "amarela", processador: "vermelha", disco: folgado })).toEqual(ABERTO);
+    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "amarela", processador: "verde", discoNivel: folgado })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("livre", { memoria: "amarela", processador: "vermelha", discoNivel: folgado })).toEqual(ABERTO);
   });
 
   it("memória crítica: o segundo plano espera SEM a espera máxima (o pedido da pessoa passa); 'O quanto precisar' não segura", () => {
-    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", disco: folgado })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: true });
-    expect(portaoDoMac("livre", { memoria: "vermelha", processador: "vermelha", disco: folgado })).toEqual(ABERTO);
+    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", discoNivel: folgado })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: true });
+    expect(portaoDoMac("livre", { memoria: "vermelha", processador: "vermelha", discoNivel: folgado })).toEqual(ABERTO);
   });
 
   it("disco em alerta (< 10 GB): como a memória em alerta — só o segundo plano, e nunca em 'O quanto precisar'", () => {
-    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "verde", processador: "verde", disco: alerta })).toEqual({ fundo: "disco", tudoNovo: null, semPrazo: false });
-    expect(portaoDoMac("livre", { memoria: "verde", processador: "verde", disco: alerta })).toEqual(ABERTO);
+    for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "verde", processador: "verde", discoNivel: alerta })).toEqual({ fundo: "disco", tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("livre", { memoria: "verde", processador: "verde", discoNivel: alerta })).toEqual(ABERTO);
     // A memória crítica pesa mais que o disco em alerta no motivo, e leva o "sem prazo".
-    expect(portaoDoMac("equilibrado", { memoria: "vermelha", processador: "verde", disco: alerta })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: true });
-    expect(portaoDoMac("equilibrado", { memoria: "amarela", processador: "vermelha", disco: alerta })).toEqual({ fundo: "disco", tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("equilibrado", { memoria: "vermelha", processador: "verde", discoNivel: alerta })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: true });
+    expect(portaoDoMac("equilibrado", { memoria: "amarela", processador: "vermelha", discoNivel: alerta })).toEqual({ fundo: "disco", tudoNovo: null, semPrazo: false });
   });
 
   it("disco crítico (< 3 GB): nada novo começa, em QUALQUER uso — a trava de segurança", () => {
-    for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", disco: critico })).toEqual({ fundo: "disco", tudoNovo: "disco", semPrazo: false });
+    for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", discoNivel: critico })).toEqual({ fundo: "disco", tudoNovo: "disco", semPrazo: false });
   });
 
   it("o processador continua como antes, com o motivo processador", () => {
-    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", disco: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
-    expect(portaoDoMac("pouco", { memoria: "verde", processador: "amarela", disco: null })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("pouco", { memoria: "verde", processador: "amarela", discoNivel: null })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
   });
 
   it("sem medição: sem leitura do Mac, ou sem disco (app anterior, fora do macOS), o disco não segura nada", () => {
     for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, null)).toEqual(ABERTO);
-    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: null, disco: null })).toEqual(ABERTO);
+    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: null, discoNivel: null })).toEqual(ABERTO);
     expect(portaoDoMac("equilibrado", { memoria: "verde", processador: null })).toEqual(ABERTO);
   });
 
@@ -214,5 +229,17 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     expect(esperaDoMac({ ...base, iniciadoEm: agora - 1 }, tudo, agora)).toBeNull();
     expect(esperaDoMac({ ...base, estado: "rodando" }, tudo, agora)).toBeNull();
     expect(esperaDoMac(base, { fundo: null, tudoNovo: null, semPrazo: false }, agora)).toBeNull();
+  });
+
+  it("revisão do #224: a volta marcada vencida da task já começada — o disco crítico e o segundo plano apertado a seguram; a memória crítica, não", () => {
+    const agora = 10 * ESPERA_MAXIMA_FUNDO_MS;
+    const volta = { estado: "rodando" as const, origem: "pessoa" as const, iniciadoEm: agora - 3_600_000, criadoEm: agora - 7_200_000, pessoaEsperando: false, acordaEm: agora - 60_000, turnoVivoId: null };
+    expect(esperaDoMac(volta, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBe("disco");
+    expect(esperaDoMac(volta, { fundo: "memoria", tudoNovo: null, semPrazo: true }, agora)).toBeNull();
+    expect(esperaDoMac(volta, { fundo: "disco", tudoNovo: null, semPrazo: false }, agora)).toBe("disco");
+    // Passada a espera máxima (contada da hora marcada), ou com turno vivo, ou ainda antes da hora: nada.
+    expect(esperaDoMac({ ...volta, acordaEm: agora - 2 * ESPERA_MAXIMA_FUNDO_MS }, { fundo: "disco", tudoNovo: null, semPrazo: false }, agora)).toBeNull();
+    expect(esperaDoMac({ ...volta, turnoVivoId: "t" }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
+    expect(esperaDoMac({ ...volta, acordaEm: agora + 60_000 }, { fundo: "disco", tudoNovo: "disco", semPrazo: false }, agora)).toBeNull();
   });
 });

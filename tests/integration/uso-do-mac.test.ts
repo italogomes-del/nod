@@ -181,7 +181,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
     });
   });
 
-  it("#219: memória crítica — o segundo plano espera mesmo passado da espera máxima (e a volta marcada); o pedido explícito da pessoa passa", async () => {
+  it("#219: memória crítica — o segundo plano novo espera mesmo passado da espera máxima; o pedido explícito da pessoa e a volta marcada da task já começada passam", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const antiga = await m.task("rotina", "Rotina das 9h");
@@ -195,8 +195,9 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const tPessoa = await m.turno(daPessoa.id);
       const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - ESPERA_MAXIMA_FUNDO_MS - 60_000 });
       const meus = new Set([tAntiga.id, tAgora.id, tPessoa.id, volta!.id]);
-      expect(new Set(await m.reivindicarTudo(true, meus, false, false, true))).toEqual(new Set([tAgora.id, tPessoa.id]));
-      expect(new Set(await m.reivindicarTudo(false, meus))).toEqual(new Set([tAntiga.id, volta!.id]));
+      // Revisão do #224: a volta é o próximo passo de uma task já começada — passa com a memória crítica.
+      expect(new Set(await m.reivindicarTudo(true, meus, false, false, true))).toEqual(new Set([tAgora.id, tPessoa.id, volta!.id]));
+      expect(new Set(await m.reivindicarTudo(false, meus))).toEqual(new Set([tAntiga.id]));
     });
   });
 
@@ -237,6 +238,17 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       r = await espera();
       expect(r.dto).toMatchObject({ segurando: true, motivoEspera: "disco", seguraTudoNovo: false });
       expect([r.rotina, r.pessoa]).toEqual(["disco", null]);
+
+      // Revisão do #224: a volta marcada vencida da task já começada, segurada pelo disco crítico, diz o motivo.
+      const comVolta = await m.task("pessoa", "Acompanhar o CI");
+      await m.repos.trabalhos.mudarEstado(comVolta.id, "rodando", Date.now());
+      await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - 60_000 });
+      const voltaDe = async () => (await listarTrabalhos(deps, {})).data.trabalhos.find((t) => t.id === comVolta.id)?.esperaDoMac ?? null;
+      leitura = { ...leitura, disco: { livreMb: 2 * 1024, totalMb: 466 * 1024 } };
+      expect(await voltaDe()).toBe("disco");
+      leitura = { ...leitura, nivel: "vermelha", disco: folgado };
+      expect(await voltaDe()).toBeNull();
+      leitura = { ...leitura, nivel: "verde" };
 
       // Sem medição do disco (app anterior) e memória normal: nada espera.
       leitura = { ...leitura, disco: null };

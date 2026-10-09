@@ -157,7 +157,7 @@ describe("espera por memória e disco", () => {
   it("Este Mac: o disco com o livre à vista e o porquê atrás do clique, com os limites do servidor; crítico, vermelho e quem espera", () => {
     const html = renderEsteMac(estadoCom([rodando, pessoaPorDisco], { segurando: true, motivoEspera: "disco", seguraTudoNovo: true, disco: critico }));
     expect(html).toContain('<details class="mac-det"><summary class="mac-medidor"><b>Disco</b><span class="mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 100%"></i></span><span>2 GB livres</span></summary>');
-    expect(html).toContain("2 GB livres de 466 GB. Com menos de 10 GB livres, rotinas e pedidos entre bots esperam; com menos de 3 GB, nenhuma task nova começa, em qualquer opção. As que já rodam continuam. As pastas dos bots ficam em ~/nod.");
+    expect(html).toContain("2 GB livres de 466 GB. Com menos de 10 GB livres, rotinas e pedidos entre bots esperam; com menos de 3 GB, nenhuma task nova começa, em qualquer opção. As que já rodam continuam. É o espaço livre que o macOS informa aos apps; pode ser um pouco menor que o do Finder. As pastas dos bots ficam em ~/nod.");
     expect(html).toContain("1 esperando espaço no disco");
     expect(html).toContain("Esperando espaço no disco · 1");
     expect(html).toContain("Pouco espaço no disco");
@@ -166,7 +166,10 @@ describe("espera por memória e disco", () => {
     const folgado = renderEsteMac(estadoCom([rodando], { disco: { livreMb: 200 * GB, totalMb: 500 * GB, nivel: "verde", ...limites } }));
     expect(folgado).toContain('<b>Disco</b><span class="mac-barra nivel-verde" aria-hidden="true"><i style="width: 60%"></i></span><span>200 GB livres</span>');
     expect(folgado).not.toContain("As pastas dos bots");
-    expect(renderEsteMac(estadoCom([rodando]))).toMatch(/<div class="mac-medidor"><b>Disco<\/b>.*sem leitura \(atualize o app\)/);
+    expect(folgado).toContain("pode ser um pouco menor que o do Finder");
+    // Revisão do #224: "atualize o app" só com app anterior; o app novo que não conseguiu medir diz só "sem leitura".
+    expect(renderEsteMac(estadoCom([rodando]))).toMatch(/<div class="mac-medidor"><b>Disco<\/b>.*<span>sem leitura \(atualize o app\)<\/span>/);
+    expect(renderEsteMac(estadoCom([rodando], { disco: null, discoSuportado: true }))).toMatch(/<div class="mac-medidor"><b>Disco<\/b>.*<span>sem leitura<\/span><\/div>/);
   });
 
   it("Este Mac: a memória com o status curto e o porquê atrás do clique, pelo nível e pelo uso", () => {
@@ -188,8 +191,16 @@ describe("espera por memória e disco", () => {
     expect(discoLegivel(17.4 * GB)).toBe("17 GB");
   });
 
-  it("o CSS do detalhe usa só tokens e some a seta nativa", () => {
+  it("revisão do #224: a volta marcada vencida que o Mac segura diz por quê, em vez de 'volta às …' já passado", () => {
+    const volta = trabalho("Acompanhar o CI", { estado: "rodando", acordaEm: AGORA - 60_000, esperaDoMac: "disco" });
+    expect(situacaoDe(volta, [], true, AGORA)).toBe("esperando espaço no disco");
+    expect(situacaoDe({ ...volta, esperaDoMac: null }, [], true, AGORA)).toMatch(/^volta /);
+    expect(situacaoDe(volta, [], false, AGORA)).toMatch(/^volta /);
+  });
+
+  it("o CSS do detalhe usa só tokens e some a seta nativa; a barra não some no hover da linha", () => {
     const css = readFileSync(new URL("../../../web/navegacao.css", import.meta.url), "utf8");
+    expect(css).toContain(".mac-det > summary:hover .mac-barra, .mac-det > summary:focus-visible .mac-barra { background: var(--line); }");
     expect(css).toContain(".mac-det > summary::-webkit-details-marker { display: none; }");
     expect(css).toContain(".mac-det[open] > summary::after { transform: rotate(90deg); }");
   });

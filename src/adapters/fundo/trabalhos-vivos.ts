@@ -24,13 +24,18 @@ type Visto = { nivel: NivelPressao; processador: NivelPressao | null; disco?: Ni
  */
 export type MudancaDePressao = { mudou: boolean; nivel: NivelPressao; anterior: NivelPressao | null; processador: NivelPressao | null; disco?: NivelPressao | null; vistoAntes: Visto | null };
 
-type LeituraGuardada = { pessoaId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null; em: number };
+/**
+ * #219: `discoNivel` é o nível com a histerese (revisão do #224), calculado com o da leitura anterior do mesmo Mac;
+ * `discoMedido` diz que o app desse Mac mede o disco (manda a chave, mesmo `null` quando o `statfs` falhou).
+ */
+type LeituraGuardada = { pessoaId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoMedido: boolean; em: number };
 
-/** #219: o pior disco entre os Macs: o de menos espaço livre (os limites são absolutos). */
-function piorDisco(a: LeituraDisco | null, b: LeituraDisco | null): LeituraDisco | null {
+/** #219: o pior disco entre os Macs: o de pior nível e, empatado, o de menos espaço livre (os limites são absolutos). */
+function piorDisco(a: LeituraGuardada | null, b: LeituraGuardada): LeituraGuardada | null {
+  if (b.disco === null || b.discoNivel === null) return a;
   if (a === null) return b;
-  if (b === null) return a;
-  return b.livreMb < a.livreMb ? b : a;
+  if (b.discoNivel !== a.discoNivel) return piorNivel(a.discoNivel, b.discoNivel) === b.discoNivel ? b : a;
+  return b.disco.livreMb < (a.disco?.livreMb ?? Infinity) ? b : a;
 }
 
 export function criarTrabalhosVivos(agora: () => number = Date.now) {
@@ -42,24 +47,27 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
 
   const viva = (m: LeituraGuardada) => agora() - m.em <= VALIDADE_LEITURA_MS;
 
-  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null } | null {
+  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoSuportado: boolean } | null {
     const vivas = [...maquinas.values()].filter((m) => m.pessoaId === pessoaId && viva(m));
     if (vivas.length === 0) return null;
     // ADR-085: o processador também pelo pior Mac; a carga é a maior por núcleo entre os que mandaram.
     const comCarga = vivas.filter((m) => m.carga !== null);
+    const pior = vivas.reduce<LeituraGuardada | null>(piorDisco, null);
     return {
       nivel: vivas.reduce<NivelPressao>((p, m) => piorNivel(p, m.nivel) ?? p, "verde"),
       totalMb: vivas.reduce((s, m) => s + m.totalMb, 0),
       processador: vivas.reduce<NivelPressao | null>((p, m) => piorNivel(p, m.processador), null),
       carga: comCarga.length ? Math.max(...comCarga.map((m) => m.carga ?? 0)) : null,
-      disco: vivas.reduce<LeituraDisco | null>((p, m) => piorDisco(p, m.disco), null),
+      disco: pior?.disco ?? null,
+      discoNivel: pior?.discoNivel ?? null,
+      discoSuportado: vivas.some((m) => m.discoMedido),
     };
   }
 
   /** ADR-085: a última leitura viva de UM Mac — o `puxar` dele decide se entrega trabalho novo pela leitura dele. */
-  function daMaquina(machineId: string): { memoria: NivelPressao; processador: NivelPressao | null; disco: LeituraDisco | null } | null {
+  function daMaquina(machineId: string): { memoria: NivelPressao; processador: NivelPressao | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null } | null {
     const m = maquinas.get(machineId);
-    return m && viva(m) ? { memoria: m.nivel, processador: m.processador, disco: m.disco } : null;
+    return m && viva(m) ? { memoria: m.nivel, processador: m.processador, disco: m.disco, discoNivel: m.discoNivel } : null;
   }
 
   /** Revisão do #209: leitura vencida sai do mapa (nenhum Mac que sumiu fica para sempre). */
@@ -82,10 +90,12 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
     /** Guarda a leitura do Mac e diz se o que a pessoa vê mudou (o pior entre os Macs vivos dela). */
     registrarMemoria(pessoaId: string, machineId: string, leitura: LeituraMemoria): MudancaDePressao {
       podar();
-      maquinas.set(machineId, { pessoaId, nivel: leitura.nivel, totalMb: leitura.totalMb, processador: leitura.processador?.nivel ?? null, carga: leitura.processador?.carga ?? null, disco: leitura.disco ?? null, em: agora() });
+      // Revisão do #224: a histerese parte do nível da leitura anterior viva deste Mac (podar já tirou a vencida).
+      const discoNivel = nivelDoDisco(leitura.disco, maquinas.get(machineId)?.discoNivel ?? null);
+      maquinas.set(machineId, { pessoaId, nivel: leitura.nivel, totalMb: leitura.totalMb, processador: leitura.processador?.nivel ?? null, carga: leitura.processador?.carga ?? null, disco: leitura.disco ?? null, discoNivel, discoMedido: leitura.disco !== undefined, em: agora() });
       const juntos = daPessoa(pessoaId);
       // #219: o disco mudar de nível também vira o frame (a lista relê o motivo da espera e Este Mac, o disco).
-      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null, disco: nivelDoDisco(juntos?.disco) };
+      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null, disco: juntos?.discoNivel ?? null };
       const antes = vistoPorPessoa.get(pessoaId) ?? null;
       vistoPorPessoa.set(pessoaId, atual);
       // O primeiro verde não vira frame: a tela já parte de "sem aviso".

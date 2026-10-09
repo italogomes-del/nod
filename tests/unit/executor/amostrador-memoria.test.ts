@@ -21,8 +21,8 @@ function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; 
 describe("amostrador de memória da máquina", () => {
   it("mapa 1/2/4 do sysctl e soma por grupo do ps; o turno vê a própria linha", async () => {
     const f = executorFalso({ nivel: "2", ps: " 4242 1048576\n 4242 1048576\n 5000 512000\n" });
-    // #219: no macOS o disco também entra; aqui sem leitura de disco, para a forma não depender de onde o teste roda.
-    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4 });
+    // #219: no macOS o disco também entra; aqui fora dele, para a forma não depender de onde o teste roda.
+    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "linux" });
     a.leitura("t1", 4242);
     a.leitura("t2", 5000);
     await a.amostrar();
@@ -46,7 +46,7 @@ describe("amostrador de memória da máquina", () => {
 
   it("sysctl falhou (ou fora do macOS) = verde; sem grupo nenhum, o ps nem roda", async () => {
     const f = executorFalso({ falhaSysctl: true });
-    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6 });
+    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, plataforma: "linux" });
     expect(a.leitura("t1", null)).toEqual({ nivel: "verde", totalMb: 0, porTurno: [] });
     await a.amostrar();
     // O processador também falhou: sem leitura, nunca um aviso que a máquina não deu.
@@ -111,10 +111,11 @@ describe("amostrador de memória da máquina", () => {
     let loadavg = "{ 1.00 0.9 0.8 }";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? loadavg : bin.endsWith("sysctl") ? "1" : "");
     const a = criarAmostradorMemoria({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
-    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [] });
+    // #219 (revisão do #224): no macOS o disco vai sempre; `null` = o app mede e não conseguiu.
+    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], disco: null });
     await a.amostrar();
     const primeira = a.amostra();
-    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], processador: { nivel: "verde", carga: 0.25 } });
+    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], processador: { nivel: "verde", carga: 0.25 }, disco: null });
     loadavg = "{ 5.00 3 2 }";
     await a.amostrar();
     expect(a.amostra()).toBe(primeira + 1);
@@ -162,14 +163,21 @@ describe("amostrador de memória da máquina", () => {
     livreMb = 8 * 1024;
     await a.amostrar();
     expect(a.amostra()).toBe(antes + 1);
+    // Revisão do #224: a mesma histerese do servidor — voltar a 10,5 GB não sai do alerta; a 11,5 GB, sai.
+    livreMb = 10.5 * 1024;
+    await a.amostrar();
+    expect(a.amostra()).toBe(antes + 1);
+    livreMb = 11.5 * 1024;
+    await a.amostrar();
+    expect(a.amostra()).toBe(antes + 2);
     a.parar();
   });
 
-  it("#219: o disco que não dá para medir fica fora da leitura (sem medição, nada espera)", async () => {
+  it("#219: o disco que não dá para medir vai como null — o app novo diz 'sem leitura', e nada espera", async () => {
     const a = criarAmostradorMemoria({ env: { HOME: "/x" }, executar: executorFalso().executar, medirDisco: async () => { throw new Error("EPERM"); }, intervaloMs: 10 ** 6, plataforma: "darwin" });
     a.daMaquina?.();
     await a.amostrar();
-    expect(a.daMaquina?.()).not.toHaveProperty("disco");
+    expect(a.daMaquina?.()?.disco).toBeNull();
     a.parar();
   });
 

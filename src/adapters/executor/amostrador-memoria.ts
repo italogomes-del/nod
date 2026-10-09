@@ -72,6 +72,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   let rss = new Map<number, number>();
   let processador: LeituraProcessador | null = null;
   let disco: LeituraDisco | null = null;
+  let nivelDisco: NivelPressao | null = null;
   let numeroDaAmostra = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
@@ -142,7 +143,10 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       try {
         const [n, r, p, d] = await Promise.all([lerNivel(), lerGrupos(), lerProcessador(), daMaquinaLe ? lerDisco() : Promise.resolve(null)]);
         // #219: o disco muda a cada gravação; a amostra só sobe quando ele muda de nível (o que muda o portão).
-        if (n !== nivel || p?.nivel !== processador?.nivel || nivelDoDisco(d) !== nivelDoDisco(disco) || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        // Revisão do #224: com a mesma histerese do servidor, para um disco parado perto do limite não mudar a amostra a cada 30 s.
+        const nd = nivelDoDisco(d, nivelDisco);
+        if (n !== nivel || p?.nivel !== processador?.nivel || nd !== nivelDisco || (d === null) !== (disco === null) || [...grupos.values()].some((g) => r.get(g) !== rss.get(g))) numeroDaAmostra += 1;
+        nivelDisco = nd;
         nivel = n;
         rss = r;
         processador = p;
@@ -169,12 +173,12 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
       comecar();
       // Grupo novo: a próxima amostra já o mede, sem esperar a batida de 30 s.
       if (novo && !rss.has(grupo)) void amostrar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador, disco });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId, grupo, processador, disco: daMaquinaLe ? disco : undefined });
     },
     daMaquina() {
       if (!daMaquinaLe) return undefined;
       comecar();
-      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco });
+      return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);

@@ -128,6 +128,8 @@ export type TrabalhosDto = {
   motivoEspera?: MotivoEsperaMac | null;
   seguraTudoNovo?: boolean;
   disco?: DiscoDoMac | null;
+  /** Revisão do #224: algum Mac vivo tem app que mede o disco (sem disco e sem isto, o app é anterior). */
+  discoSuportado?: boolean;
 };
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
@@ -149,11 +151,12 @@ export type LeituraProcessador = { nivel: NivelPressao; carga: number };
  * Memória que o Mac manda na renovação (#194): o nível do macOS e a soma do RSS do grupo de processos de cada turno.
  * ADR-085: também no `puxar` (sem `porTurno`), para o servidor saber do Mac mesmo sem turno rodando, e com o processador.
  */
-export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[]; processador?: LeituraProcessador; disco?: LeituraDisco };
+export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: { turnoId: string; mb: number }[]; processador?: LeituraProcessador; disco?: LeituraDisco | null };
 
 /**
  * Disco do Mac (definido em 2026-10-09, #219, emenda à ADR-085): o espaço livre e o total do volume de `~/nod`, em MB
- * (`statfs`; o livre é o que um processo sem privilégio pode usar). Opcional: app anterior não manda.
+ * (`statfs`; o livre é o que um processo sem privilégio pode usar). Opcional: app anterior não manda a chave; o app que
+ * mede e não conseguiu (o `statfs` falhou) manda `null` (revisão do #224: a tela diz "sem leitura", não "atualize o app").
  */
 export type LeituraDisco = { livreMb: number; totalMb: number };
 

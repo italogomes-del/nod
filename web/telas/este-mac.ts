@@ -50,7 +50,10 @@ function detalheDaMemoria(memoria: NivelPressao, uso: UsoDoMac, totalBots: numbe
 /** Os limites vêm do servidor (`DiscoDoMac`): a web só mostra, quem decide é o domínio. */
 function detalheDoDisco(d: DiscoDoMac): string {
   const base = `${discoLegivel(d.livreMb)} livres de ${discoLegivel(d.totalMb)}. Com menos de ${discoLegivel(d.alertaMb)} livres, rotinas e pedidos entre bots esperam; com menos de ${discoLegivel(d.criticoMb)}, nenhuma task nova começa, em qualquer opção. As que já rodam continuam.`;
-  return d.nivel === "verde" ? base : `${base} As pastas dos bots ficam em ~/nod.`;
+  // Revisão do #224: o número é o livre que o macOS informa aos apps (statfs); o Finder soma o espaço que o sistema libera
+  // sozinho (purgável) e pode mostrar um pouco mais.
+  const comoMede = " É o espaço livre que o macOS informa aos apps; pode ser um pouco menor que o do Finder.";
+  return d.nivel === "verde" ? base + comoMede : `${base}${comoMede} As pastas dos bots ficam em ~/nod.`;
 }
 
 function linhaBot(estado: Estado, t: TrabalhoDto, fim: string, segurando: boolean): string {
@@ -99,7 +102,8 @@ export function renderEsteMac(estado: Estado): string {
       // #219: o disco ocupado na barra, o livre no status; a cor pelo nível que o servidor mandou.
       + (disco
         ? medidor("Disco", 1 - disco.livreMb / disco.totalMb, `${discoLegivel(disco.livreMb)} livres`, disco.nivel, detalheDoDisco(disco))
-        : medidor("Disco", null, "sem leitura (atualize o app)", null));
+        // Revisão do #224: "atualize o app" só quando nenhum app manda o disco; o app novo que não conseguiu medir, "sem leitura".
+        : medidor("Disco", null, dto?.discoSuportado ? "sem leitura" : "sem leitura (atualize o app)", null));
   const grupos = grupo("Trabalhando", "os que mais usam memória primeiro", trabalhando.map((t) => linhaBot(estado, t, t.memoriaMb ? memoriaLegivel(t.memoriaMb) : tempoDe(t, estado.agora), segurando)))
     + grupo(esperandoO.charAt(0).toUpperCase() + esperandoO.slice(1), "começam sozinhos, na ordem da fila", esperandoVez.map((t) => linhaBot(estado, t, "", segurando)))
     + grupo("Fora do Mac", "esperando sem ocupar o Mac; voltam sozinhas", fora.map((t) => linhaBot(estado, t, "", segurando)));

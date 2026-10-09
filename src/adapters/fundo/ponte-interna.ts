@@ -59,7 +59,7 @@ export type DepsPonte = {
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
   registrarMemoria?: (pessoaId: string, machineId: string, leitura: LeituraMemoria) => MudancaDePressao;
   /** ADR-085: a última leitura viva deste Mac (memória, processador e, #219, disco); null = sem leitura, e nada é segurado. */
-  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null; disco?: LeituraDisco | null } | null;
+  pressaoDaMaquina?: (machineId: string) => { memoria: NivelPressao; processador: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null } | null;
   /** Revisão do #209: o evento da mudança de pressão não foi gravado (a tx desfez) — a próxima leitura refaz o frame. */
   desfazerMemoria?: (pessoaId: string, mudanca: MudancaDePressao) => void;
   /** Revisão do #209: o Mac desconectou — a leitura dele sai. */

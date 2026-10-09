@@ -119,7 +119,9 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
   const volta = voltaMarcada(t);
-  if (volta) return `volta ${quandoVolta(volta, agora)}`;
+  // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
+  // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
+  if (volta) return segurando && t.esperaDoMac ? textoDaEspera(t.esperaDoMac) : `volta ${quandoVolta(volta, agora)}`;
   switch (t.estado) {
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
