@@ -181,6 +181,10 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       const colega = await m.repos.trabalhos.buscar(m.colegaId);
       await marcarParado(m.deps, colega!);
       expect(await m.estado(m.colegaId)).toBe("parado");
+      // Os adiados pelo varredor saem já na consulta (o `limit 20` não pode ser gasto com eles).
+      const desde = Date.now() - 86_400_000;
+      expect((await m.repos.trabalhos.pedidosAColegaParados(desde, Date.now())).map((p) => p.tarefaId)).toEqual([m.tarefa.id]);
+      expect(await m.repos.trabalhos.pedidosAColegaParados(desde, Date.now(), [m.tarefa.id])).toEqual([]);
 
       // Antes: o aviso esperava a Eva ("aguardando_colega"), mas a task parada do Dev nunca continua — e o pedido dele à
       // Eva nem entra na consulta (quem pediu foi parado). O pedido voltava a cada 30 s, para sempre.

@@ -78,7 +78,9 @@ export async function cuidarDosPedidosParados(deps: Deps, o: { adiados?: Pedidos
   const saida: SaidaPedidosParados = { retomados: [], avisados: [], entregues: [] };
   const events: RuntimeEvent[] = [];
   if (o.adiados) for (const [id, ate] of o.adiados) if (ate <= agora) o.adiados.delete(id);
-  for (const p of await deps.repos.trabalhos.pedidosAColegaParados(agora - JANELA_PEDIDOS_PARADOS_MS, agora)) {
+  // Os adiados saem já na consulta: com o `limit 20` dela, pular depois deixaria pedidos novos sem avaliação.
+  const adiados = o.adiados ? [...o.adiados.keys()] : [];
+  for (const p of await deps.repos.trabalhos.pedidosAColegaParados(agora - JANELA_PEDIDOS_PARADOS_MS, agora, adiados)) {
     if (o.adiados?.has(p.tarefaId)) continue;
     const acao = decidirPedidoParado(p, agora, motivoEmPortugues);
     if (acao.tipo === "esperar") continue;

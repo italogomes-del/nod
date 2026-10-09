@@ -5,6 +5,8 @@ import { iniciarOrquestrador, type IniciarLaco } from "../../../src/adapters/fun
 import type { AnuncioMaquina, Entrega, PedidoRenovar, PonteInterna } from "../../../src/contracts/ponte.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
+import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
+import { classificarResultado } from "../../../src/domain/stream-json.ts";
 import type { Db } from "../../../src/shared/types.ts";
 import { driverFalso } from "../../helpers/driver-falso.ts";
 
@@ -187,24 +189,49 @@ describe("#218: o re-anúncio de 60 s reaproveita a sonda dentro do TTL de 5 min
     expect(m.anunciados.at(-1)?.estado).toBe("pronto");
   });
 
-  it("turno recusado pela IA derruba a sonda guardada: o próximo tick ressonda e anuncia, sem esperar o TTL", async () => {
+  it("turno que falhou (o CLI deslogado vira erro_execucao) joga fora a sonda guardada: o anúncio do minuto seguinte ressonda", async () => {
     const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
     expect(m.sonda.chamadas).toBe(1);
     m.sonda.inventario = { estado: "nao_autenticado", motivo: "faça login", em: 2 };
-    const resultado = { desfecho: "falha" as const, motivoFalha: "nao_autenticado" as const, texto: "", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
-    await m.ponteDoLaco().entregar({ turnoId: "t1", machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado } as Entrega);
+    await m.ponteDoLaco().entregar(entregaDe(resultadoDeslogado()));
+    expect(resultadoDeslogado()).toMatchObject({ desfecho: "falha", motivoFalha: "erro_execucao" });
+    // Não adianta o anúncio: o tick logo depois da falha não sonda (a reprovação da ponte não é sobrescrita em 2 s).
+    await ticks();
+    expect(m.sonda.chamadas).toBe(1);
+    m.relogio.agora += 60_000;
     await ticks();
     await m.orq.parar();
     expect(m.sonda.chamadas).toBe(2);
     expect(m.anunciados.at(-1)).toMatchObject({ estado: "nao_autenticado" });
   });
 
-  it("turno que só deu erro comum não ressonda", async () => {
+  it("falha que diz a própria causa (Parar, limite do plano, teto de rodadas) ou já reprovou a IA (causaSemIa) não descarta a sonda", async () => {
     const m = await montar({ inventario: { estado: "pronto", versao: "2.1.278", em: 1 } });
-    const resultado = { desfecho: "falha" as const, motivoFalha: "erro_execucao" as const, texto: "", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
-    await m.ponteDoLaco().entregar({ turnoId: "t1", machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado } as Entrega);
+    const base = resultadoDeslogado();
+    for (const r of [
+      { ...base, motivoFalha: "limite_do_plano" as const },
+      { ...base, motivoFalha: "erro_max_turns" as const },
+      { ...base, desfecho: "interrompido" as const, motivoFalha: undefined, motivoInterrupcao: "parado_pela_pessoa" as const },
+      { ...base, motivoFalha: "nao_autenticado" as const, causaSemIa: "conta_sem_acesso" as const },
+    ]) await m.ponteDoLaco().entregar(entregaDe(r));
+    m.relogio.agora += 60_000;
     await ticks();
     await m.orq.parar();
     expect(m.sonda.chamadas).toBe(1);
   });
 });
+
+/** O que o classificador do stream-json devolve quando o CLI deslogado fecha a rodada com erro (medido: "Not logged in"). */
+function resultadoDeslogado(): ResultadoTurno {
+  return classificarResultado({
+    eventos: [{ tipo: "result", sucesso: false, subtype: "success", sessaoCli: null, texto: "Not logged in · Please run /login", custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, numTurnos: 1, negacoesPermissao: [], erroCru: "Not logged in · Please run /login" }],
+    exitCode: 1,
+    signal: null,
+    stderr: "",
+    sinais: { attempted: true, promptSubmitted: true },
+  });
+}
+
+function entregaDe(resultado: ResultadoTurno): Entrega {
+  return { turnoId: "t1", machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado } as Entrega;
+}

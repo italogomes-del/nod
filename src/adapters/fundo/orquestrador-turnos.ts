@@ -22,18 +22,23 @@ export const INTERVALO_ORQUESTRADOR_MS = 2_000;
  * boot é `claude auth status` (sem turno, sem custo de token), mas é processo filho.
  * revisto em 2026-10-09 (#218): o re-anúncio de 60 s ressondava SEMPRE — ~1.440 `claude auth status` por dia, cada um
  * subindo um binário de ~100 MB. Agora uma sonda 'pronto' vale o TTL da sonda (INVENTARIO_TTL_MS, 5 min) e o anúncio
- * de 60 s repete o inventário dela; ressonda antes disso só um driver que não está pronto, a troca de executor ou um
- * turno que voltou recusado pela IA (`sondaVencidaPeloTurno`).
+ * de 60 s repete o inventário dela enquanto os turnos dão certo. Um turno que falhou (`descartaSondaGuardada`) joga a
+ * sonda fora e o anúncio seguinte, no minuto de sempre, pergunta de novo ao CLI: no caso ruim, a mesma janela de 60 s
+ * de antes; no caso bom, uma sonda a cada 5 min.
  */
 export const VALIDADE_ANUNCIO_MS = 60_000;
 
 /**
- * definido em 2026-10-09 (#218): o turno voltou dizendo que a IA não serve — sem login, conta sem acesso, driver fora.
- * É o sinal que o re-anúncio espera para não confiar na sonda 'pronto' guardada até o fim do TTL. Lê só o desfecho
- * tipado do resultado, nunca o nome do harness.
+ * definido em 2026-10-09 (#218, revisão do PR #226): o turno falhou e a falha pode ser a IA — o CLI deslogado chega
+ * como `erro_execucao` (domain/stream-json.ts), nunca como `nao_autenticado`. Fica de fora o que diz a própria causa e
+ * não é a IA: o Parar, o limite do plano e o teto de rodadas. E o `causaSemIa`: a ponte já tirou a IA do inventário
+ * (ponte-interna.ts, reprovarHarness) e uma sonda nova, que só confere o login, diria "pronto" por cima do veredito.
+ * Só desfecho tipado: nunca o nome do harness.
  */
-export function sondaVencidaPeloTurno(r: ResultadoTurno): boolean {
-  return r.motivoFalha === "nao_autenticado" || r.motivoFalha === "motor_ausente" || r.motivoInterrupcao === "executor_indisponivel" || r.causaSemIa !== undefined;
+export function descartaSondaGuardada(r: ResultadoTurno): boolean {
+  if (r.desfecho === "sucesso" || r.causaSemIa !== undefined) return false;
+  if (r.motivoInterrupcao === "parado_pela_pessoa") return false;
+  return r.motivoFalha !== "limite_do_plano" && r.motivoFalha !== "erro_max_turns";
 }
 
 /** Assinatura do laço da L4 (src/adapters/executor/laco.ts): injetada aqui, nunca importada — a L9 liga. */
@@ -123,15 +128,12 @@ export async function iniciarOrquestrador(o: OpcoesOrquestrador): Promise<Orques
     return inventario;
   };
   let anunciadoEm = 0;
-  // #218: o laço entrega pela ponte daqui; um turno recusado pela IA derruba a sonda guardada e vence o anúncio, e o
-  // próximo tick (2 s) pergunta de novo ao CLI — sem esperar o TTL nem o minuto do anúncio.
+  // #218: o laço entrega pela ponte daqui; um turno que falhou joga fora a sonda guardada. O anúncio NÃO é adiantado:
+  // o seguinte, no minuto de sempre, ressonda (adiantar sobrescreveria em 2 s a reprovação da ponte, revisão do #226).
   const ponteDoLaco: PonteInterna = {
     ...o.ponte,
     entregar: async (e) => {
-      if (sondaVencidaPeloTurno(e.resultado) && sondaGuardada) {
-        sondaGuardada = null;
-        anunciadoEm = -Infinity;
-      }
+      if (descartaSondaGuardada(e.resultado)) sondaGuardada = null;
       return o.ponte.entregar(e);
     },
   };
