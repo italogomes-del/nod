@@ -3,7 +3,7 @@ import type { TipoLinha, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, abertosDoBot, juntar, pilulaMemoria, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, juntar, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { usd } from "./modo-dev.ts";
 
 /**
@@ -241,8 +241,10 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const t = conhecidos.get(p.trabalhoId);
     const titulo = t?.titulo ?? p.titulo;
     const dono = t?.agenteId ?? donoDaConversa ?? "";
-    // A pílula de memória entra embaixo da task que abriu sob pressão (#196): a mais recente que ainda está aberta.
-    const memoria = m === ultimaAbertura ? pilulaMemoria(estado.pressao, lista.filter(aberto).length) : "";
+    // A pílula de memória entra embaixo da task que abriu sob pressão (#196): a mais recente que ainda está aberta. #219:
+    // com o disco quase cheio (nenhuma task nova começa), a do disco no lugar dela, com o "Ver" para Este Mac.
+    const disco = (): string => (estado.trabalhos?.motivoEspera === "disco" ? pilulaMac(true, lista.filter((x) => seguradoPeloMac(x, true)).length, true, "disco") : "");
+    const memoria = m === ultimaAbertura ? disco() || pilulaMemoria(estado.pressao, lista.filter(aberto).length) : "";
     planos.set(m.id, {
       tipo: "linha",
       chave: `linha:${m.id}`,

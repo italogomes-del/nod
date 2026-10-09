@@ -1,5 +1,5 @@
-import type { LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
-import { piorNivel } from "../../domain/memoria-mac.ts";
+import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
+import { discoApertado, piorNivel } from "../../domain/memoria-mac.ts";
 
 /**
  * O que só o processo sabe dos trabalhos (definido em 2026-10-07, ADR-083): a última ferramenta de cada turno vivo
@@ -11,17 +11,28 @@ import { piorNivel } from "../../domain/memoria-mac.ts";
 export const VALIDADE_LEITURA_MS = 120_000;
 const TURNOS_GUARDADOS = 1000;
 
-/** O que a pessoa via da última vez: o pior nível de memória e o pior de processador entre os Macs vivos dela. */
-type Visto = { nivel: NivelPressao; processador: NivelPressao | null };
+/**
+ * O que a pessoa via da última vez: o pior nível de memória e o pior de processador entre os Macs vivos dela, e (#219) se
+ * algum deles está com o disco abaixo do mínimo.
+ */
+type Visto = { nivel: NivelPressao; processador: NivelPressao | null; disco?: boolean };
 
 /**
  * `mudou`: o frame `memoria.mudou` sai (a pílula e a lista relêem). ADR-085: a mudança só do processador também conta
  * — a pílula "Seu Mac está ocupado" e Este Mac dependem dele. `vistoAntes` é o que `desfazer` repõe se o evento não foi
  * gravado (a tx do puxar desfez).
  */
-export type MudancaDePressao = { mudou: boolean; nivel: NivelPressao; anterior: NivelPressao | null; processador: NivelPressao | null; vistoAntes: Visto | null };
+export type MudancaDePressao = { mudou: boolean; nivel: NivelPressao; anterior: NivelPressao | null; processador: NivelPressao | null; disco?: boolean; vistoAntes: Visto | null };
 
-type LeituraGuardada = { pessoaId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; em: number };
+type LeituraGuardada = { pessoaId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null; em: number };
+
+/** #219: o pior disco entre os Macs: o abaixo do mínimo primeiro, depois o de menor fração livre. */
+function piorDisco(a: LeituraDisco | null, b: LeituraDisco | null): LeituraDisco | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  if (discoApertado(a) !== discoApertado(b)) return discoApertado(a) ? a : b;
+  return b.livreMb / b.totalMb < a.livreMb / a.totalMb ? b : a;
+}
 
 export function criarTrabalhosVivos(agora: () => number = Date.now) {
   const ferramentas = new Map<string, string>();
@@ -32,7 +43,7 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
 
   const viva = (m: LeituraGuardada) => agora() - m.em <= VALIDADE_LEITURA_MS;
 
-  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null } | null {
+  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; disco: LeituraDisco | null } | null {
     const vivas = [...maquinas.values()].filter((m) => m.pessoaId === pessoaId && viva(m));
     if (vivas.length === 0) return null;
     // ADR-085: o processador também pelo pior Mac; a carga é a maior por núcleo entre os que mandaram.
@@ -42,13 +53,14 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       totalMb: vivas.reduce((s, m) => s + m.totalMb, 0),
       processador: vivas.reduce<NivelPressao | null>((p, m) => piorNivel(p, m.processador), null),
       carga: comCarga.length ? Math.max(...comCarga.map((m) => m.carga ?? 0)) : null,
+      disco: vivas.reduce<LeituraDisco | null>((p, m) => piorDisco(p, m.disco), null),
     };
   }
 
   /** ADR-085: a última leitura viva de UM Mac — o `puxar` dele decide se entrega trabalho novo pela leitura dele. */
-  function daMaquina(machineId: string): { memoria: NivelPressao; processador: NivelPressao | null } | null {
+  function daMaquina(machineId: string): { memoria: NivelPressao; processador: NivelPressao | null; disco: LeituraDisco | null } | null {
     const m = maquinas.get(machineId);
-    return m && viva(m) ? { memoria: m.nivel, processador: m.processador } : null;
+    return m && viva(m) ? { memoria: m.nivel, processador: m.processador, disco: m.disco } : null;
   }
 
   /** Revisão do #209: leitura vencida sai do mapa (nenhum Mac que sumiu fica para sempre). */
@@ -71,15 +83,16 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
     /** Guarda a leitura do Mac e diz se o que a pessoa vê mudou (o pior entre os Macs vivos dela). */
     registrarMemoria(pessoaId: string, machineId: string, leitura: LeituraMemoria): MudancaDePressao {
       podar();
-      maquinas.set(machineId, { pessoaId, nivel: leitura.nivel, totalMb: leitura.totalMb, processador: leitura.processador?.nivel ?? null, carga: leitura.processador?.carga ?? null, em: agora() });
+      maquinas.set(machineId, { pessoaId, nivel: leitura.nivel, totalMb: leitura.totalMb, processador: leitura.processador?.nivel ?? null, carga: leitura.processador?.carga ?? null, disco: leitura.disco ?? null, em: agora() });
       const juntos = daPessoa(pessoaId);
-      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null };
+      // #219: o disco cruzar o mínimo também vira o frame (a lista relê o motivo da espera e Este Mac, o disco).
+      const atual: Visto = { nivel: juntos?.nivel ?? leitura.nivel, processador: juntos?.processador ?? null, disco: discoApertado(juntos?.disco) };
       const antes = vistoPorPessoa.get(pessoaId) ?? null;
       vistoPorPessoa.set(pessoaId, atual);
       // O primeiro verde não vira frame: a tela já parte de "sem aviso".
-      const nada = atual.nivel === "verde" && (atual.processador === null || atual.processador === "verde");
-      const mudou = antes === null ? !nada : antes.nivel !== atual.nivel || antes.processador !== atual.processador;
-      return { mudou, nivel: atual.nivel, anterior: antes?.nivel ?? null, processador: atual.processador, vistoAntes: antes };
+      const nada = atual.nivel === "verde" && (atual.processador === null || atual.processador === "verde") && !atual.disco;
+      const mudou = antes === null ? !nada : antes.nivel !== atual.nivel || antes.processador !== atual.processador || (antes.disco ?? false) !== atual.disco;
+      return { mudou, nivel: atual.nivel, anterior: antes?.nivel ?? null, processador: atual.processador, disco: atual.disco, vistoAntes: antes };
     },
     /** Revisão do #209: o evento da mudança não foi gravado — volta o "visto" para a próxima leitura refazer o frame. */
     desfazer(pessoaId: string, m: MudancaDePressao): void {

@@ -108,10 +108,11 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
   });
 
-  it("'O quanto precisar' não segura nada; 'Pouco' segura já no processador apertando", async () => {
+  it("'O quanto precisar' não segura pelo processador nem pela memória em alerta; 'Pouco' segura já no processador apertando", async () => {
     const livre = await montar("livre");
     const r1 = await livre.tarefa("rotina", "Rotina A");
-    expect(await livre.puxar(leitura("vermelha", "vermelha"))).toBe(r1);
+    // revisto em 2026-10-09 (#219): a memória CRÍTICA segura até em "O quanto precisar" (o teste abaixo, do disco e da memória).
+    expect(await livre.puxar(leitura("vermelha", "amarela"))).toBe(r1);
 
     const pouco = await montar("pouco");
     const r2 = await pouco.tarefa("rotina", "Rotina B");
@@ -166,5 +167,22 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     await m.ponte.desconectar(m.machineId);
     await m.ponte.conectar({ machineId: m.machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO } });
     expect(await m.puxar()).toBe(outra);
+  });
+  it("#219: disco quase cheio no puxar — nem a task da pessoa começa, em qualquer uso; com espaço, ela sai; o evento leva o disco", async () => {
+    const m = await montar("livre");
+    const daPessoa = await m.tarefa("pessoa", "Liberar espaço");
+    const cheio: LeituraMemoria = { ...leitura("verde"), disco: { livreMb: 8 * 1024, totalMb: 500 * 1024 } };
+    expect(await m.puxar(cheio)).toBeNull();
+    expect((await m.eventosDePressao()).at(-1)?.dados).toMatchObject({ nivel: "verde", discoApertado: true });
+    // O relógio do teste não anda: os dois eventos têm o mesmo instante, então a ordem não serve — conta os dois.
+    expect(await m.puxar({ ...cheio, disco: { livreMb: 120 * 1024, totalMb: 500 * 1024 } })).toBe(daPessoa);
+    expect((await m.eventosDePressao()).map((e) => e.dados.discoApertado).sort()).toEqual([false, true]);
+  });
+
+  it("#219: memória crítica no puxar — nada novo começa, nem em 'O quanto precisar'; leitura sem disco (app anterior) não segura", async () => {
+    const m = await montar("livre");
+    const daPessoa = await m.tarefa("pessoa", "Responder o e-mail");
+    expect(await m.puxar(leitura("verde", "vermelha"))).toBeNull();
+    expect(await m.puxar(leitura("verde", "verde"))).toBe(daPessoa);
   });
 });

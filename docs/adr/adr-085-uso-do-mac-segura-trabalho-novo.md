@@ -1,6 +1,6 @@
 # ADR-085 — Uso do Mac: o Mac apertado segura trabalho novo em segundo plano
 
-Status: aceito · Data: 2026-10-08 · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
+Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
 o limite é a máquina"). Decisão do Marlon em 2026-10-08: o caminho "sem teto, sem desperdício", aprovado no protótipo
 "Nod — Ritmo do Mac" (canvas VmT4WwEbgfZ14PbLy4En8d, pranchas 1–3).
 
@@ -90,3 +90,57 @@ coordenador abre várias de uma vez. Separar "a pessoa pediu" de "o bot decidiu 
 - `fundo_comecou` com `espera_ms` na espera máxima (1 h) mais de uma vez por semana, com o Mac em `equilibrado`: rever
   os limiares de carga (0,7 e 1,0) ou o que conta como "segundo plano".
 - Pressão vermelha de memória mais de um dia por semana em algum Mac, mesmo com o uso em `pouco`: reabrir o teto.
+
+## Emenda de 2026-10-09 — memória crítica e disco no mesmo portão (#219, épico #221)
+
+Em 09/10 o Mac do Marlon (16 GB, 466 GB) ficou inutilizável com o Nod rodando: swap em 5,4 de 6 GB, disco do usuário
+em 97% (17 GB livres) e load ~430. O portão acima olha o processador e a memória em alerta, mas trata a memória crítica
+como a de alerta (só o segundo plano espera) e não olha o disco. Cada task nova cria worktree, `node_modules` e banco de
+teste; cada `claude -p` usa ~210–270 MB.
+
+1. **Disco na leitura.** O amostrador lê o espaço do volume de `~/nod` (o da casa, antes de a pasta existir) com
+   `statfs`, sem processo novo, a cada 30 s: `LeituraMemoria.disco = { livreMb, totalMb }`, livre = `bavail`. Vai no
+   `puxar` e na renovação, como o processador. É opcional: app anterior não manda, e leitura fora do formato é ignorada
+   sozinha (`discoValido`, ponte-validacao.ts). Fora do macOS não há leitura da máquina (item 7), então nada é medido
+   nem segurado. `NOD_SIMULAR_DISCO` ("8" = 8 GB livres de 500; "17/466") força a leitura em testes e UAT. O número da
+   amostra só sobe quando o disco cruza o mínimo, não a cada MB gravado.
+2. **O portão ganha um segundo degrau** (`portaoDoMac`, src/domain/memoria-mac.ts):
+   - **`tudoNovo`: memória crítica (vermelha) ou disco abaixo de 10 GB livres OU de 5% do volume**
+     (`DISCO_LIVRE_MINIMO_MB`, `DISCO_LIVRE_MINIMO_FRACAO`). Nenhum trabalho novo começa, de qualquer origem: nem a task
+     que a pessoa abriu, nem o "Executar agora", nem o que passou da espera máxima de 1 h, nem a volta marcada (ADR-086).
+     O `reivindicar` recebe `segurarNovo` e só entrega turno de trabalho com `iniciado_em` preenchido e sem `acordar_em`.
+     Conversa, ligação e o turno seguinte de uma task que já começou seguem. Nada que roda é morto ou pausado.
+   - **`fundo`: o de antes** (`deveSegurar`, itens 3 e 4): com a memória em alerta ou o processador, só trabalho novo em
+     segundo plano espera, e quem a pessoa espera passa.
+   - Os dois limiares valem juntos: os 10 GB seguram o Mac pequeno (256 GB: 5% = 12,8 GB); os 5%, o grande, onde 10 GB
+     acabam numa tarde de bots. O Mac do Marlon de 09/10 (3,6% livres) seguraria.
+3. **Vale em qualquer "uso do Mac", até em "O quanto precisar".** O uso diz quanto do processador e da memória a pessoa
+   cede aos bots; memória crítica (o macOS começa a fechar apps) e disco quase cheio (git, npm e Postgres falham no meio)
+   estragam o Mac e o próprio trabalho em qualquer escolha. É a mudança de comportamento desta emenda para quem usa
+   "O quanto precisar": antes nada esperava.
+4. **Sem espera máxima no degrau `tudoNovo`.** O item 4 rejeitou "segurar sem prazo" porque a espera não aparecia em lugar
+   nenhum; agora ela aparece na linha da task, na pílula e em Este Mac, com o motivo. Rotina não empilha enquanto espera
+   (a execução seguinte é `pulada` com a anterior aberta, ADR-045).
+5. **Motivo visível** (frase base "esperando…" do #208). `GET trabalhos` ganha `motivoEspera` (`processador` | `memoria` |
+   `disco`), `seguraTudoNovo` e `disco` (o pior Mac: o abaixo do mínimo primeiro); cada trabalho segurado ganha
+   `esperaDoMac` (`esperaDoMac` do domínio, a mesma regra do `reivindicar`). A linha diz "esperando o Mac liberar
+   memória", "esperando espaço no disco" ou, pelo processador, "esperando o Mac aliviar". `segurando` continua (o pior
+   Mac segura algo). O disco cruzar o mínimo também vira o frame `memoria.mudou` (`discoApertado` no evento).
+6. **Uma pílula só, sem modal.** Com o disco abaixo do mínimo, a pílula "Pouco espaço no disco · N trabalhos esperam
+   espaço no disco · Ver ›" (para Este Mac) toma o lugar da de memória em "Todos os trabalhos" e embaixo da última task
+   aberta no chat; sem disco, fica a de memória (quando há) ou "Seu Mac está ocupado", como antes. O menu da conta diz
+   "Disco quase cheio" ao lado de Este Mac.
+7. **Este Mac** mostra memória, processador e disco em barras com o status curto à vista ("crítica", "17 GB livres") e o
+   porquê atrás de um clique (`<details>`): o que o macOS disse e o que espera por isso; o livre, o total e o mínimo do
+   disco, e onde ficam as pastas dos bots. O grupo de quem espera leva o motivo ("Esperando espaço no disco · 2").
+8. **Medir.** `fundo_segurado` / `fundo_solto` saem também na troca de motivo, com `motivo`, `tudo_novo` e
+   `disco_livre_mb`. A espera de cada trabalho continua em `iniciado_em - criado_em`.
+
+Fora desta emenda: o swap em Este Mac (a issue cita; pede `vm.swapusage` a cada 30 s e mais um campo na leitura), a
+memória e o disco usados só pelos bots (o disco de `~/nod` pede `du`, caro em 254 GB — fica com a limpeza das tasks,
+#216) e um botão de limpeza em Este Mac.
+
+Gatilho de reversão: `fundo_segurado` com `tudo_novo` e motivo `disco` por mais de um dia seguido em Macs com a limpeza
+das tasks (#216) já no ar — rever os limiares (10 GB / 5%) ou o APFS (`bavail` não conta o espaço "purgável" que o
+Finder mostra como disponível). Pessoa em "O quanto precisar" reclamando de task segurada por memória crítica: tirar o
+degrau `tudoNovo` desse uso (uma linha em `portaoDoMac`).

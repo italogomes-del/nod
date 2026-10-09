@@ -1,4 +1,4 @@
-import type { EstadoTrabalho, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
+import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { duracaoCurta } from "./relogio.ts";
 import { esc, hora } from "./render.ts";
@@ -113,7 +113,7 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
     case "na_fila": {
       const antes = t.depoisDeTrabalhoId ? todos.find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
       if (antes) return `começa depois da ${antes.titulo}`;
-      return seguradoPeloMac(t, segurando) ? "esperando o Mac aliviar" : "na fila";
+      return seguradoPeloMac(t, segurando) ? textoDaEspera(t.esperaDoMac) : "na fila";
     }
     case "precisa_de_voce":
       return t.ultimoPasso ?? "precisa de você";
@@ -135,8 +135,18 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
  * que ainda não começou, sem ninguém esperando e dentro da espera máxima. O servidor decide (`seguravel`, a mesma regra
  * do `reivindicar`); a tela só junta com o `segurando`.
  */
-export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel">, segurando: boolean): boolean {
-  return segurando && t.estado === "na_fila" && t.seguravel === true;
+export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel" | "esperaDoMac">, segurando: boolean): boolean {
+  return segurando && t.estado === "na_fila" && (t.seguravel === true || (t.esperaDoMac ?? null) !== null);
+}
+
+/**
+ * A espera na linha da task (definido em 2026-10-09, #219, com a frase base "esperando…" do #208): pela memória ou pelo
+ * disco, o motivo; pelo processador (ou servidor anterior, sem motivo), "esperando o Mac aliviar".
+ */
+export function textoDaEspera(motivo: MotivoEsperaMac | null | undefined): string {
+  if (motivo === "memoria") return "esperando o Mac liberar memória";
+  if (motivo === "disco") return "esperando espaço no disco";
+  return "esperando o Mac aliviar";
 }
 
 /**
@@ -144,10 +154,13 @@ export function seguradoPeloMac(t: Pick<TrabalhoDto, "estado" | "seguravel">, se
  * segundo plano espera. Mesma forma da pílula de memória (#196), com o "Ver" levando a Este Mac. A de memória, quando
  * existe, já diz o mesmo: esta não entra junto.
  */
-export function pilulaMac(segurando: boolean, esperando: number, comVer = true): string {
+export function pilulaMac(segurando: boolean, esperando: number, comVer = true, motivo: MotivoEsperaMac | null = null): string {
   if (!segurando) return "";
-  const n = esperando > 0 ? `<span class="pm-detalhe">· ${esperando} ${esperando === 1 ? "trabalho espera" : "trabalhos esperam"} o Mac aliviar</span>` : '<span class="pm-detalhe">· trabalho novo espera o Mac aliviar</span>';
-  const miolo = `${ICONE_MEMORIA}<b>Seu Mac está ocupado</b>${n}`;
+  // #219: com o disco quase cheio, a pílula diz o disco (é o que pede a mão da pessoa; o "Ver" leva a Este Mac).
+  const disco = motivo === "disco";
+  const oQue = disco ? "espaço no disco" : "o Mac aliviar";
+  const n = esperando > 0 ? `<span class="pm-detalhe">· ${esperando} ${esperando === 1 ? "trabalho espera" : "trabalhos esperam"} ${oQue}</span>` : `<span class="pm-detalhe">· trabalho novo espera ${oQue}</span>`;
+  const miolo = `${ICONE_MEMORIA}<b>${disco ? "Pouco espaço no disco" : "Seu Mac está ocupado"}</b>${n}`;
   return comVer
     ? `<div class="linha-centro-wrap" role="status"><button type="button" class="pilula-memoria amarela" data-act="secao-espaco" data-secao="este-mac">${miolo}<span class="pm-ver">Ver ›</span></button></div>`
     : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;

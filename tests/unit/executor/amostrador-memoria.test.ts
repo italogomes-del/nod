@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { criarAmostradorMemoria, type Executar } from "../../../src/adapters/executor/amostrador-memoria.ts";
+import { criarAmostradorMemoria, type Executar, type MedirDisco } from "../../../src/adapters/executor/amostrador-memoria.ts";
 
 /** #194 (ADR-083 §4, decisão S8): um amostrador por máquina; `sysctl` e `ps` injetados, nenhum comando real. */
 function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; falhaPs?: boolean; loadavg?: string } = {}) {
@@ -21,7 +21,8 @@ function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; 
 describe("amostrador de memória da máquina", () => {
   it("mapa 1/2/4 do sysctl e soma por grupo do ps; o turno vê a própria linha", async () => {
     const f = executorFalso({ nivel: "2", ps: " 4242 1048576\n 4242 1048576\n 5000 512000\n" });
-    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 4 });
+    // #219: no macOS o disco também entra; aqui sem leitura de disco, para a forma não depender de onde o teste roda.
+    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4 });
     a.leitura("t1", 4242);
     a.leitura("t2", 5000);
     await a.amostrar();
@@ -109,7 +110,7 @@ describe("amostrador de memória da máquina", () => {
   it("ADR-085: o processador entra na leitura, muda o número da amostra e vai na leitura da máquina (o puxar)", async () => {
     let loadavg = "{ 1.00 0.9 0.8 }";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? loadavg : bin.endsWith("sysctl") ? "1" : "");
-    const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
+    const a = criarAmostradorMemoria({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
     expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [] });
     await a.amostrar();
     const primeira = a.amostra();
@@ -138,5 +139,54 @@ describe("amostrador de memória da máquina", () => {
     await Promise.resolve();
     expect(f.chamadas).toEqual([]);
     a.parar();
+  });
+  it("#219: o disco do volume de ~/nod entra na leitura da máquina e na do turno; sem ~/nod, o da casa", async () => {
+    const pedidos: string[] = [];
+    let livreMb = 200 * 1024;
+    const medirDisco: MedirDisco = async (caminho) => {
+      pedidos.push(caminho);
+      if (caminho.endsWith("/nod")) throw new Error("ENOENT");
+      return { livreMb, totalMb: 500 * 1024 };
+    };
+    const a = criarAmostradorMemoria({ env: { HOME: "/Users/pessoa" }, executar: executorFalso().executar, medirDisco, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
+    a.daMaquina?.();
+    await a.amostrar();
+    expect(pedidos).toEqual(["/Users/pessoa/nod", "/Users/pessoa"]);
+    expect(a.daMaquina?.()?.disco).toEqual({ livreMb: 200 * 1024, totalMb: 500 * 1024 });
+    expect(a.leitura("t1", null).disco).toEqual({ livreMb: 200 * 1024, totalMb: 500 * 1024 });
+    // O número da amostra sobe quando o disco cruza o mínimo, não a cada MB gravado.
+    const antes = a.amostra();
+    livreMb -= 1024;
+    await a.amostrar();
+    expect(a.amostra()).toBe(antes);
+    livreMb = 8 * 1024;
+    await a.amostrar();
+    expect(a.amostra()).toBe(antes + 1);
+    a.parar();
+  });
+
+  it("#219: o disco que não dá para medir fica fora da leitura (sem medição, nada espera)", async () => {
+    const a = criarAmostradorMemoria({ env: { HOME: "/x" }, executar: executorFalso().executar, medirDisco: async () => { throw new Error("EPERM"); }, intervaloMs: 10 ** 6, plataforma: "darwin" });
+    a.daMaquina?.();
+    await a.amostrar();
+    expect(a.daMaquina?.()).not.toHaveProperty("disco");
+    a.parar();
+  });
+
+  it("#219: fora do macOS o disco não é medido; NOD_SIMULAR_DISCO força a leitura (e a da máquina passa a existir)", async () => {
+    let medidas = 0;
+    const medirDisco: MedirDisco = async () => { medidas += 1; return { livreMb: 1, totalMb: 2 }; };
+    const linux = criarAmostradorMemoria({ env: {}, executar: executorFalso().executar, medirDisco, intervaloMs: 10 ** 6, plataforma: "linux" });
+    linux.leitura("t1", null);
+    await linux.amostrar();
+    expect(linux.leitura("t1", null)).not.toHaveProperty("disco");
+    expect(medidas).toBe(0);
+    linux.parar();
+    const simulado = criarAmostradorMemoria({ env: { NOD_SIMULAR_DISCO: "8/466" }, executar: executorFalso().executar, medirDisco, intervaloMs: 10 ** 6, plataforma: "linux" });
+    simulado.daMaquina?.();
+    await simulado.amostrar();
+    expect(simulado.daMaquina?.()?.disco).toEqual({ livreMb: 8 * 1024, totalMb: 466 * 1024 });
+    expect(medidas).toBe(0);
+    simulado.parar();
   });
 });

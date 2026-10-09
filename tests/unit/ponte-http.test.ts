@@ -142,6 +142,14 @@ describe("desktop: fronteiras HTTP", () => {
     }
     expect(() => memoria({ nivel: "laranja", totalMb: 10, porTurno: [] })).toThrow();
   });
+  it("#219: a leitura aceita o disco (opcional); fora do formato ele é ignorado sozinho — sem medição, nada espera", () => {
+    const disco = { livreMb: 17_408, totalMb: 477_184 };
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], disco });
+    expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "verde", carga: 0.2 }, disco })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [], processador: { nivel: "verde", carga: 0.2 }, disco });
+    for (const ruim of [{ livreMb: 20, totalMb: 10 }, { livreMb: -1, totalMb: 10 }, { livreMb: 1.5, totalMb: 10 }, { livreMb: 0, totalMb: 0 }, { livreMb: 1 }, "cheio", null, [1, 2]]) {
+      expect(memoria({ nivel: "verde", totalMb: 10, porTurno: [], disco: ruim })).toEqual({ nivel: "verde", totalMb: 10, porTurno: [] });
+    }
+  });
 
   it("servidor: trecho fora do formato cai sozinho; acima do teto, nada passa", () => {
     expect(trechos([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }, { ferramenta: "rm -rf /" }, { texto: "a", ferramenta: "b" }, 3])).toEqual([{ texto: "oi" }, { ferramenta: "mcp__nod__x" }]);

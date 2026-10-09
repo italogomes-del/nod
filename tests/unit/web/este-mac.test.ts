@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { TrabalhoDto, TrabalhosDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { pilulaMac, seguradoPeloMac, situacaoDe } from "../../../web/lib/trabalhos.ts";
+import { pilulaMac, seguradoPeloMac, situacaoDe, textoDaEspera } from "../../../web/lib/trabalhos.ts";
 import { SECOES_ESPACO } from "../../../web/telas/espaco.ts";
-import { renderEsteMac, USOS } from "../../../web/telas/este-mac.ts";
+import { discoLegivel, renderEsteMac, USOS } from "../../../web/telas/este-mac.ts";
 import { htmlMenuConta } from "../../../web/telas/menu-conta.ts";
 import { renderTodosOsTrabalhos } from "../../../web/telas/trabalhos.ts";
 
@@ -108,5 +108,84 @@ describe("Seu espaço › Este Mac", () => {
     const bloco = css.slice(css.indexOf("Seu espaço › Este Mac"), css.indexOf("@media (max-width: 760px)", css.indexOf("Seu espaço › Este Mac")));
     expect(bloco).toContain(".mac-barra.nivel-vermelha i { background: var(--danger); }");
     expect(bloco).not.toMatch(/#[0-9a-f]{3,6}\b/i);
+  });
+});
+
+/** #219 (emenda à ADR-085, definido em 2026-10-09): o motivo da espera na linha, a pílula do disco e Este Mac com memória e disco. */
+describe("espera por memória e disco", () => {
+  const GB = 1024;
+  const cheio = { livreMb: 17 * GB, totalMb: 466 * GB };
+  // `esperaDoMac` vem do servidor (esperaDoMac, tests/unit/domain/memoria-mac.test.ts): com o disco, até a task da pessoa.
+  const pessoaPorDisco = { ...daPessoaNova, esperaDoMac: "disco" as const };
+  const rotinaPorMemoria = { ...rotinaNova, esperaDoMac: "memoria" as const };
+
+  it("a frase base 'esperando…' diz o motivo; sem motivo (processador, servidor anterior), 'o Mac aliviar'", () => {
+    expect(textoDaEspera("memoria")).toBe("esperando o Mac liberar memória");
+    expect(textoDaEspera("disco")).toBe("esperando espaço no disco");
+    expect(textoDaEspera("processador")).toBe("esperando o Mac aliviar");
+    expect(textoDaEspera(undefined)).toBe("esperando o Mac aliviar");
+    expect(situacaoDe(rotinaPorMemoria, [], true)).toBe("esperando o Mac liberar memória");
+    expect(situacaoDe(pessoaPorDisco, [], true)).toBe("esperando espaço no disco");
+    expect(seguradoPeloMac(pessoaPorDisco, true)).toBe(true);
+    expect(situacaoDe(pessoaPorDisco, [], false)).toBe("na fila");
+    // "começa depois da …" continua na frente (ela esperaria de qualquer jeito).
+    const antes = trabalho("Migrar", { estado: "rodando" });
+    expect(situacaoDe({ ...pessoaPorDisco, depoisDeTrabalhoId: antes.id }, [antes], true)).toBe("começa depois da Migrar");
+  });
+
+  it("a pílula do disco: 'Pouco espaço no disco', com o Ver para Este Mac; em Todos os trabalhos ela vem antes da de memória", () => {
+    const p = pilulaMac(true, 1, true, "disco");
+    expect(p).toContain("<b>Pouco espaço no disco</b>");
+    expect(p).toContain("1 trabalho espera espaço no disco");
+    expect(p).toContain('data-secao="este-mac"');
+    expect(pilulaMac(true, 0, false, "disco")).toContain("trabalho novo espera espaço no disco");
+    const todos = renderTodosOsTrabalhos(estadoCom([rodando, pessoaPorDisco], { segurando: true, motivoEspera: "disco", seguraTudoNovo: true, pressao: "amarela", disco: cheio }, { pressao: "amarela" }));
+    expect(todos).toContain("Pouco espaço no disco");
+    expect(todos).not.toContain("Pouca memória no seu Mac");
+    expect(todos).toContain("esperando espaço no disco");
+    expect(todos.match(/pilula-memoria/g)).toHaveLength(1);
+    // Memória crítica sem disco: a pílula de memória, que já existia, fica sozinha.
+    const critica = renderTodosOsTrabalhos(estadoCom([rodando, rotinaPorMemoria], { segurando: true, motivoEspera: "memoria", seguraTudoNovo: true, pressao: "vermelha" }, { pressao: "vermelha" }));
+    expect(critica).toContain("Seu Mac está quase sem memória");
+    expect(critica).not.toContain("Seu Mac está ocupado");
+    expect(critica).toContain("esperando o Mac liberar memória");
+  });
+
+  it("Este Mac: o disco com o livre à vista e o porquê atrás do clique; abaixo do mínimo, vermelho e quem espera", () => {
+    const html = renderEsteMac(estadoCom([rodando, pessoaPorDisco], { segurando: true, motivoEspera: "disco", seguraTudoNovo: true, disco: cheio }));
+    expect(html).toContain('<details class="mac-det"><summary class="mac-medidor"><b>Disco</b><span class="mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 96%"></i></span><span>17 GB livres</span></summary>');
+    expect(html).toContain("17 GB livres de 466 GB. Com menos de 23 GB livres, nenhuma task nova começa; as que já rodam continuam. As pastas dos bots ficam em ~/nod.");
+    expect(html).toContain("1 esperando espaço no disco");
+    expect(html).toContain("Esperando espaço no disco · 1");
+    expect(html).toContain("Pouco espaço no disco");
+    expect(html).toContain("Liberar espaço · esperando espaço no disco");
+    const folgado = renderEsteMac(estadoCom([rodando], { disco: { livreMb: 200 * GB, totalMb: 500 * GB } }));
+    expect(folgado).toContain('<b>Disco</b><span class="mac-barra nivel-verde" aria-hidden="true"><i style="width: 60%"></i></span><span>200 GB livres</span>');
+    expect(folgado).not.toContain("As pastas dos bots");
+    expect(renderEsteMac(estadoCom([rodando]))).toMatch(/<div class="mac-medidor"><b>Disco<\/b>.*sem leitura \(atualize o app\)/);
+  });
+
+  it("Este Mac: a memória com o status curto e o porquê atrás do clique, pelo nível e pelo uso", () => {
+    const critica = renderEsteMac(estadoCom([rodando, rotinaPorMemoria], { pressao: "vermelha", segurando: true, motivoEspera: "memoria", seguraTudoNovo: true }));
+    expect(critica).toMatch(/<details class="mac-det"><summary class="mac-medidor"><b>Memória<\/b>.*<span>crítica<\/span><\/summary>/);
+    expect(critica).toContain("Nenhuma task nova começa até ele liberar memória");
+    expect(critica).toContain("Esperando o Mac liberar memória · 1");
+    const alerta = renderEsteMac(estadoCom([rodando], { pressao: "amarela" }));
+    expect(alerta).toContain("Rotinas e pedidos entre bots que ainda não começaram esperam");
+    const alertaLivre = renderEsteMac(estadoCom([rodando], { pressao: "amarela" }, { usoDoMac: "livre" }));
+    expect(alertaLivre).toContain("nada espera por isso");
+    expect(renderEsteMac(estadoCom([rodando]))).toContain("Os bots usam 1,7 GB agora.");
+  });
+
+  it("o disco em números redondos", () => {
+    expect(discoLegivel(900)).toBe("900 MB");
+    expect(discoLegivel(8.4 * GB)).toBe("8,4 GB");
+    expect(discoLegivel(17.4 * GB)).toBe("17 GB");
+  });
+
+  it("o CSS do detalhe usa só tokens e some a seta nativa", () => {
+    const css = readFileSync(new URL("../../../web/navegacao.css", import.meta.url), "utf8");
+    expect(css).toContain(".mac-det > summary::-webkit-details-marker { display: none; }");
+    expect(css).toContain(".mac-det[open] > summary::after { transform: rotate(90deg); }");
   });
 });

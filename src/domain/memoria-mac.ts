@@ -1,5 +1,5 @@
 import type { UsoDoMac } from "../contracts/raio-x.ts";
-import type { LeituraMemoria, LeituraProcessador, NivelPressao, Trabalho } from "../contracts/trabalho.ts";
+import type { LeituraDisco, LeituraMemoria, LeituraProcessador, MotivoEsperaMac, NivelPressao, Trabalho } from "../contracts/trabalho.ts";
 
 /**
  * Memória do Mac (definido em 2026-10-07, ADR-083 §4, #194): o mapa do nível de pressão do macOS e a soma da memória
@@ -45,7 +45,7 @@ const kibParaMb = (kib: number) => Math.round(kib / 1024);
  * (só se ele tem grupo medido). Turno sem grupo (harness sem `processoProprio`) leva só o nível e o total.
  * ADR-085: `turnoId` null é a leitura da máquina (a do `puxar`), sem linha de turno; o processador vai junto.
  */
-export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null }): LeituraMemoria {
+export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMap<number, number>; gruposVivos: readonly number[]; turnoId: string | null; grupo: number | null; processador?: LeituraProcessador | null; disco?: LeituraDisco | null }): LeituraMemoria {
   const totalKib = [...new Set(p.gruposVivos)].reduce((t, g) => t + (p.rssPorGrupo.get(g) ?? 0), 0);
   const doTurno = p.grupo !== null ? p.rssPorGrupo.get(p.grupo) : undefined;
   return {
@@ -53,6 +53,7 @@ export function leituraDoTurno(p: { nivel: NivelPressao; rssPorGrupo: ReadonlyMa
     totalMb: kibParaMb(totalKib),
     porTurno: doTurno !== undefined && p.turnoId !== null ? [{ turnoId: p.turnoId, mb: kibParaMb(doTurno) }] : [],
     ...(p.processador ? { processador: p.processador } : {}),
+    ...(p.disco ? { disco: p.disco } : {}),
   };
 }
 
@@ -122,4 +123,69 @@ export function piorNivel(a: NivelPressao | null, b: NivelPressao | null): Nivel
   if (a === null) return b;
   if (b === null) return a;
   return GRAVIDADE[b] > GRAVIDADE[a] ? b : a;
+}
+
+/**
+ * Disco (definido em 2026-10-09, #219, emenda à ADR-085): abaixo de 10 GB livres OU de 5% do volume, trabalho novo
+ * espera. Em 09/10 o Mac do Marlon estava com 17 GB livres de 466 GB (3,6%), o swap cheio e o Mac inteiro lento; cada
+ * task nova cria worktree, `node_modules` e banco de teste. Os 10 GB seguram o Mac pequeno (256 GB: 5% = 12,8 GB); os 5%,
+ * o grande, onde 10 GB acabam numa tarde de bots.
+ */
+export const DISCO_LIVRE_MINIMO_MB = 10 * 1024;
+export const DISCO_LIVRE_MINIMO_FRACAO = 0.05;
+
+/** O disco está abaixo do mínimo? Sem leitura (ou leitura sem total), não: nada espera por um disco que ninguém mediu. */
+export function discoApertado(d: LeituraDisco | null | undefined): boolean {
+  if (!d || !(d.totalMb > 0) || !(d.livreMb >= 0)) return false;
+  return d.livreMb < DISCO_LIVRE_MINIMO_MB || d.livreMb / d.totalMb < DISCO_LIVRE_MINIMO_FRACAO;
+}
+
+/**
+ * `NOD_SIMULAR_DISCO` força a leitura do disco (testes e UAT), em GB: "8" = 8 GB livres de 500; "17/466" = 17 livres de
+ * 466. Outro valor ou ausente = ler do sistema.
+ */
+export function discoSimulado(valor: string | undefined): LeituraDisco | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?\s*$/.exec(valor ?? "");
+  if (!m) return null;
+  const livre = Number(m[1]);
+  const total = m[2] === undefined ? 500 : Number(m[2]);
+  return total > 0 && livre <= total ? { livreMb: Math.round(livre * 1024), totalMb: Math.round(total * 1024) } : null;
+}
+
+/** `statfs` → MB: o livre é `bavail` (o que um processo sem privilégio pode gravar), não `bfree`. */
+export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigint; bavail: number | bigint }): LeituraDisco | null {
+  const bsize = Number(s.bsize);
+  const total = Number(s.blocks) * bsize;
+  const livre = Number(s.bavail) * bsize;
+  if (!Number.isFinite(total) || !Number.isFinite(livre) || total <= 0 || livre < 0) return null;
+  return { livreMb: Math.floor(livre / 1048576), totalMb: Math.floor(total / 1048576) };
+}
+
+/**
+ * O portão do Mac no `reivindicar` (definido em 2026-10-09, #219, emenda à ADR-085), pela leitura de UM Mac:
+ * - `tudoNovo`: memória crítica (vermelha) ou disco abaixo do mínimo — nada novo começa, nem a task da pessoa, nem o
+ *   "Executar agora", nem o que passou da espera máxima; vale em qualquer "uso do Mac", até em "O quanto precisar".
+ * - `fundo`: o de antes (`deveSegurar`): só trabalho novo em segundo plano espera; memória em alerta ou processador.
+ * O motivo vai para a linha da task. Disco antes de memória: é o que pede a mão da pessoa (a memória alivia sozinha).
+ * Sem leitura, nada espera.
+ */
+export type PortaoDoMac = { fundo: MotivoEsperaMac | null; tudoNovo: MotivoEsperaMac | null };
+
+export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; disco?: LeituraDisco | null } | null): PortaoDoMac {
+  if (!l) return { fundo: null, tudoNovo: null };
+  const tudoNovo: MotivoEsperaMac | null = discoApertado(l.disco) ? "disco" : l.memoria === "vermelha" ? "memoria" : null;
+  if (tudoNovo) return { fundo: tudoNovo, tudoNovo };
+  if (!deveSegurar(uso, l.memoria, l.processador)) return { fundo: null, tudoNovo: null };
+  return { fundo: peloMenos(l.memoria, "amarela") ? "memoria" : "processador", tudoNovo: null };
+}
+
+/**
+ * Por que o Mac segura este trabalho agora (null = não segura). É a regra do `reivindicar` (turnos.repo.ts): com
+ * `tudoNovo`, todo trabalho que ainda não começou; com `fundo`, só o que `seguravelPeloMac` aceita.
+ */
+export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm" | "criadoEm" | "pessoaEsperando">, portao: PortaoDoMac, agora: number): MotivoEsperaMac | null {
+  if (t.estado !== "na_fila") return null;
+  if (portao.tudoNovo && t.iniciadoEm === null) return portao.tudoNovo;
+  if (portao.fundo && seguravelPeloMac(t, agora)) return portao.fundo;
+  return null;
 }

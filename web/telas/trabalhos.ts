@@ -164,7 +164,10 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   const abertos = todos.filter(aberto).length;
   // ADR-085: a pílula de memória já diz que o Mac está apertado; sem ela, a do Mac ocupado (pelo uso que a pessoa escolheu).
   const segurando = estado.trabalhos.segurando === true;
-  const pilula = pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, todos.filter((t) => seguradoPeloMac(t, segurando)).length);
+  // #219: uma pílula só; o disco quase cheio vai na frente da de memória (é o que pede a mão da pessoa).
+  const motivo = estado.trabalhos.motivoEspera ?? null;
+  const esperam = todos.filter((t) => seguradoPeloMac(t, segurando)).length;
+  const pilula = (motivo === "disco" ? pilulaMac(segurando, esperam, true, motivo) : "") || pilulaMemoria(estado.pressao, abertos, false) || pilulaMac(segurando, esperam, true, motivo);
   const linha = (t: TrabalhoDto): string => {
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";
