@@ -34,7 +34,8 @@ function medidor(nome: string, fracao: number | null, situacao: string, nivel: N
   const largura = fracao === null ? 0 : Math.round(Math.min(1, Math.max(0, fracao)) * 100);
   const miolo = `<b>${esc(nome)}</b><span class="mac-barra nivel-${nivel ?? "sem"}" aria-hidden="true"><i style="width: ${largura}%"></i></span><span>${esc(situacao)}</span>`;
   if (!detalhe) return `<div class="mac-medidor">${miolo}</div>`;
-  return `<details class="mac-det"><summary class="mac-medidor">${miolo}</summary><p class="mac-det-txt">${esc(detalhe)}</p></details>`;
+  // Revisão do #228: `data-disclosure` — a releitura de 30 s (ADR-091) regrava a seção, e main.ts reabre o que estava aberto.
+  return `<details class="mac-det" data-disclosure="mac-${esc(nome)}"><summary class="mac-medidor">${miolo}</summary><p class="mac-det-txt">${esc(detalhe)}</p></details>`;
 }
 
 /**

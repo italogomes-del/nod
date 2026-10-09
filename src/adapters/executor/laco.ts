@@ -151,7 +151,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         const aceita = aceitando && adapterAtual?.aceitaMensagens?.() === true;
         // A leitura é pedida sempre (registra o grupo do turno e acorda o amostrador); só VAI quando a amostra mudou ou
         // a cada 30 s — a renovação de 1 s do app levava a mesma leitura 30 vezes.
-        const leitura = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
+        const lida = o.memoria?.leitura(plano.turnoId, medirGrupo ? (adapterAtual?.grupoDeProcessos?.() ?? null) : null);
+        // Revisão do #228: a leitura inicial (antes da primeira amostra) não vai — o servidor a tomaria por real.
+        const leitura = o.memoria?.pronta?.() === false ? undefined : lida;
         const amostra = o.memoria?.amostra() ?? 0;
         const agora = o.relogio();
         const memoria = leitura && (memoriaEnviada === null || memoriaEnviada.amostra !== amostra || agora - memoriaEnviada.em >= INTERVALO_AMOSTRA_MEMORIA_MS) ? leitura : null;

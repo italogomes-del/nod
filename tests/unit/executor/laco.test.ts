@@ -649,5 +649,21 @@ describe("sessão viva no laço (ADR-067)", () => {
     await esperarAte(() => ponte.entregas.length === 1);
     await laco.parar();
   });
+
+  it("revisão do #228: antes da primeira amostra (pronta = false) a renovação não leva a leitura inicial; depois, leva", async () => {
+    let pronta = false;
+    const d = driverControlado({ capacidades: { ...SESSAO_VIVA, processoProprio: true }, grupo: 4242 });
+    const ponte = ponteDaSessao();
+    const memoria = { leitura: (turnoId: string): LeituraMemoria => ({ nivel: "amarela", totalMb: 100, porTurno: [{ turnoId, mb: 100 }] }), soltar: () => {}, amostra: () => (pronta ? 1 : 0), pronta: () => pronta };
+    const laco = await cenario(d, ponte, { memoria, renovacaoMs: 2 });
+    await esperarAte(() => ponte.renovacoes.length >= 3);
+    expect(ponte.renovacoes.every((r) => r.memoria === undefined)).toBe(true);
+    pronta = true;
+    await esperarAte(() => ponte.renovacoes.some((r) => r.memoria));
+    expect(ponte.renovacoes.find((r) => r.memoria)!.memoria?.nivel).toBe("amarela");
+    d.terminar("pronto");
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+  });
 });
 

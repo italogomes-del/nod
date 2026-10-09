@@ -33,6 +33,12 @@ export type FonteMemoria = {
    * 30 s); antes a mesma leitura ia em toda renovação.
    */
   amostra(): number;
+  /**
+   * Revisão do #228 (2026-10-09): a primeira amostra já terminou. Antes dela, a leitura é a inicial (verde, sem
+   * processador nem disco), que ninguém mediu: `daMaquina` não devolve nada e o laço não manda a da renovação. Com a
+   * primeira leitura virando frame (ADR-091), ela iria à tela e ao portão como se fosse real.
+   */
+  pronta?(): boolean;
 };
 
 export type AmostradorMemoria = FonteMemoria & {
@@ -99,6 +105,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   let timer: ReturnType<typeof setInterval> | null = null;
   let amostrando: Promise<void> | null = null;
   let parado = false;
+  let amostrou = false;
   // Um aviso por motivo e por processo: fora do macOS o `sysctl` falha a cada 30 s.
   const avisados = new Set<string>();
   const avisar = (evento: string, erro: unknown) => {
@@ -203,6 +210,7 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
         rss = r;
         processador = p;
         disco = d;
+        amostrou = true;
       } finally {
         amostrando = null;
       }
@@ -230,12 +238,14 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     daMaquina() {
       if (!daMaquinaLe) return undefined;
       comecar();
+      if (!amostrou) return undefined;
       return leituraDoTurno({ nivel, rssPorGrupo: rss, gruposVivos: [...grupos.values()], turnoId: null, grupo: null, processador, disco: daMaquinaLe ? disco : undefined });
     },
     soltar(turnoId) {
       grupos.delete(turnoId);
     },
     amostra: () => numeroDaAmostra,
+    pronta: () => amostrou,
     amostrar,
     parar() {
       parado = true;

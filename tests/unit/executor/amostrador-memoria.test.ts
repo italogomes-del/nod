@@ -125,9 +125,12 @@ describe("amostrador de memória da máquina", () => {
     let loadavg = "{ 1.00 0.9 0.8 }";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? loadavg : bin.endsWith("sysctl") ? "1" : "");
     const a = criarAmostradorMemoria({ env: {}, executar, medirDisco: async () => null, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "darwin" });
-    // #219 (revisão do #224): no macOS o disco vai sempre; `null` = o app mede e não conseguiu.
-    expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], disco: null });
+    // Revisão do #228: antes da primeira amostra não há leitura (a inicial ninguém mediu, e viraria frame).
+    expect(a.daMaquina?.()).toBeUndefined();
+    expect(a.pronta?.()).toBe(false);
     await a.amostrar();
+    expect(a.pronta?.()).toBe(true);
+    // #219 (revisão do #224): no macOS o disco vai sempre; `null` = o app mede e não conseguiu.
     const primeira = a.amostra();
     expect(a.daMaquina?.()).toEqual({ nivel: "verde", totalMb: 0, porTurno: [], processador: { nivel: "verde", carga: 0.25, uso: 0.25 }, disco: null });
     // ADR-091: 1,25 por núcleo com a CPU a 25% é fila andando — antes isso era "processador cheio".

@@ -174,7 +174,7 @@ describe("espera por memória e disco", () => {
 
   it("Este Mac: o disco com o livre à vista e o porquê atrás do clique, com os limites do servidor; crítico, vermelho e quem espera", () => {
     const html = renderEsteMac(estadoCom([rodando, pessoaPorDisco], { segurando: true, motivoEspera: "disco", seguraTudoNovo: true, disco: critico }));
-    expect(html).toContain('<details class="mac-det"><summary class="mac-medidor"><b>Disco</b><span class="mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 100%"></i></span><span>2 GB livres</span></summary>');
+    expect(html).toContain('<details class="mac-det" data-disclosure="mac-Disco"><summary class="mac-medidor"><b>Disco</b><span class="mac-barra nivel-vermelha" aria-hidden="true"><i style="width: 100%"></i></span><span>2 GB livres</span></summary>');
     expect(html).toContain("2 GB livres de 466 GB. Com menos de 10 GB livres, rotinas e pedidos entre bots esperam; com menos de 3 GB, nenhuma task nova começa, em qualquer opção. As que já rodam continuam. É o espaço livre que o macOS informa aos apps; pode ser um pouco menor que o do Finder. As pastas dos bots ficam em ~/nod.");
     expect(html).toContain("1 esperando espaço no disco");
     expect(html).toContain("Esperando espaço no disco · 1");
@@ -192,7 +192,7 @@ describe("espera por memória e disco", () => {
 
   it("Este Mac: a memória com o status curto e o porquê atrás do clique, pelo nível e pelo uso", () => {
     const critica = renderEsteMac(estadoCom([rodando, rotinaPorMemoria], { pressao: "vermelha", segurando: true, motivoEspera: "memoria" }));
-    expect(critica).toMatch(/<details class="mac-det"><summary class="mac-medidor"><b>Memória<\/b>.*<span>crítica<\/span><\/summary>/);
+    expect(critica).toMatch(/<details class="mac-det" data-disclosure="mac-Memória"><summary class="mac-medidor"><b>Memória<\/b>.*<span>crítica<\/span><\/summary>/);
     expect(critica).toContain("esperam até ele liberar memória, mesmo os que já esperam há mais de 1 hora; o que você pede começa");
     expect(renderEsteMac(estadoCom([rodando], { pressao: "vermelha" }, { usoDoMac: "livre" }))).toContain("nada espera por isso");
     expect(critica).toContain("Esperando o Mac liberar memória · 1");
