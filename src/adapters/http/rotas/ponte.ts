@@ -79,6 +79,11 @@ export function criarPonteHttpServidor(d: {
   concluirItemLocal?(escopo: Escopo, itemId: string, desfecho: DesfechoLocal): Promise<void>;
   /** definido em 2026-10-05: o Mac anunciou uma IA pronta — repete as falas que ficaram sem resposta por falta de IA. */
   repetirBarrados?(escopo: Escopo, prontos: readonly IdHarness[]): Promise<void>;
+  /**
+   * ADR-092: com o servidor no Mac (modo local), a sessão do CLI que a máquina remota devolve não é guardada. A conversa
+   * e o trabalho continuam com a sessão do Mac, que o próximo turno no Mac retoma; a sessão da VM não existe no Mac.
+   */
+  descartarSessao?: boolean;
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -227,7 +232,8 @@ export function criarPonteHttpServidor(d: {
       ctx.json(200, r);
     }),
     rota("entregar", async (ctx, b) => {
-      const c = conexao(ctx), e = entrega(b, ctx.params.chaveId!);
+      const c = conexao(ctx), lida = entrega(b, ctx.params.chaveId!);
+      const e = d.descartarSessao && lida.resultado.sessaoCli !== null ? { ...lida, resultado: { ...lida.resultado, sessaoCli: null } } : lida;
       if (c.recebidas.get(e.turnoId) === e.seqLocal) { ctx.json(200, { ok: true }); return; }
       if (!c.planos.has(e.turnoId)) throw new ErroDeDominio("nao_permitido");
       c.ultimo = d.agora();

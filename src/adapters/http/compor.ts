@@ -315,8 +315,14 @@ export function comporApp(o: OpcoesCompor): App {
     if (/^[0-9a-f-]{36}$/.test(dono)) return dono;
     return (await listarTodas(db)).find((p) => p.email?.toLowerCase() === dono)?.id ?? null;
   })());
+  /** ADR-092: a máquina é uma conexão da ponte HTTP desta pessoa (a VM), e não este processo. */
+  function maquinaDaPonte(escopo: Escopo, machineId: string): boolean {
+    return ponteHttp.maquina(escopo, machineId) !== null;
+  }
   async function ghDaPessoa(escopo: Escopo, machineId?: string): Promise<boolean> {
     if (compartilhado) return machineId ? ponteHttp.ghDaMaquina(escopo, machineId) : ponteHttp.ghDaPessoa(escopo.pessoaId);
+    // ADR-092: o turno de uma máquina da ponte (a VM) usa o gh dela, nunca o deste Mac.
+    if (machineId && maquinaDaPonte(escopo, machineId)) return ponteHttp.ghDaMaquina(escopo, machineId);
     if (!detectorGh || (await donoDaMaquinaLocal()) !== escopo.pessoaId) return false;
     return detectorGh.logado();
   }
@@ -383,10 +389,13 @@ export function comporApp(o: OpcoesCompor): App {
     planos: {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: executorAtual, permitirResume: !compartilhado, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
-          harnesses: compartilhado ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !compartilhado && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod,
-          maquina: compartilhado ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null });
+        // ADR-092: no modo local, o turno que uma máquina da ponte puxou (a VM) sai como no compartilhado — as IAs, o gh e
+        // o nome DELA, sem --resume (a sessão do Mac não existe lá) e sem as pastas do Mac. O resto roda neste Mac.
+        const daPonte = compartilhado || maquinaDaPonte(d.escopo, machineIdDoPlano);
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: !daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
+          harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
+          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod,
+          maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}) });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -483,9 +492,17 @@ export function comporApp(o: OpcoesCompor): App {
 
   const ponte = criarPonteInterna(db, depsPonte);
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
+  /**
+   * ADR-092: no modo local a ponte HTTP também fica de pé, para as máquinas Linux da pessoa (o motor da ADR-090) — o Mac
+   * continua rodando os bots neste processo. A máquina da ponte só pega o turno que tem ELA como alvo, roda sempre a IA
+   * real ('local') e não mexe no que é do Mac: o inventário persistido por pessoa (é o do Mac, que o gate pré-spawn lê), as
+   * falas barradas por falta de IA no Mac, os itens do gh (rodam aqui mesmo) e a sessão do CLI da conversa.
+   */
   const ponteHttp = criarPonteHttpServidor({
-    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }], harnessesDaPessoa: (pessoaId) => ponteHttp.harnessesDaPessoa(pessoaId) }),
-    persistir: (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }),
+    criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }], harnessesDaPessoa: (pessoaId) => ponteHttp.harnessesDaPessoa(pessoaId),
+      ...(compartilhado ? {} : { executor: "local" as const, soComoAlvo: true }) }),
+    persistir: compartilhado ? (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }) : async () => undefined,
+    ...(compartilhado ? {} : { descartarSessao: true }),
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
     seguro: env.NOD_LOGIN === "google",
@@ -496,13 +513,17 @@ export function comporApp(o: OpcoesCompor): App {
     fala: (plano) => publicarDoPlano(plano, "turno.fala", {}),
     vigia: (plano, aviso) => avisoDoVigia(plano, aviso),
     longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined,
-    // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata.
-    itensLocais: (escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
-    // definido em 2026-10-05: uma IA ficou pronta no Mac — as falas barradas por falta de IA são repetidas sozinhas.
-    repetirBarrados: (escopo, prontos) => dentro(escopo, async (d) => {
-      const r = await repetirBarradosPorIa(d, { executor: "local", prontos });
-      if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
-    }),
+    // ADR-048: itens aprovados que rodam no gh do Mac da dona — a máquina puxa, executa e relata. No modo local o item roda
+    // neste Mac na hora (executarNaMaquina) e nenhuma máquina da ponte o puxa (ADR-092).
+    // definido em 2026-10-05: uma IA ficou pronta no Mac — as falas barradas por falta de IA são repetidas sozinhas. No modo
+    // local quem barra é a IA deste Mac, não a da VM (ADR-092).
+    ...(compartilhado ? {
+      itensLocais: (escopo: Escopo) => dentro(escopo, (d) => itensParaAMaquina(d)),
+      repetirBarrados: (escopo: Escopo, prontos: readonly IdHarness[]) => dentro(escopo, async (d) => {
+        const r = await repetirBarradosPorIa(d, { executor: "local", prontos });
+        if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
+      }),
+    } : {}),
     concluirItemLocal: (escopo, itemId, desfecho) => dentro(escopo, async (d) => {
       const r = await concluirItemNaMaquina(d, { itemId, desfecho });
       if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
@@ -687,10 +708,11 @@ export function comporApp(o: OpcoesCompor): App {
     };
   }
 
-  const varredorMaquinas = compartilhado ? setInterval(() => {
+  // ADR-092: também no modo local, para as máquinas da ponte (a VM) saírem da lista quando param de falar.
+  const varredorMaquinas = setInterval(() => {
     void ponteHttp.varrer().catch(() => log("aviso", "presenca_maquinas_falhou", {}));
-  }, 15_000) : null;
-  varredorMaquinas?.unref();
+  }, 15_000);
+  varredorMaquinas.unref();
 
   // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas);
   // definido em 2026-09-18: descoberta consulta instalação/login sem prompt e persiste por pessoa.
@@ -856,8 +878,9 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasFrota(depsRotas),
     criarRotaInventario({ inventario }),
     criarRotaAmbiente(env),
+    // ADR-092: a ponte das máquinas também no modo local (a VM da pessoa); o seletor de IA continua sendo o deste Mac.
+    ...ponteHttp.rotas,
     ...(compartilhado ? [
-      ...ponteHttp.rotas,
       { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {
         const catalogo = catalogoHarness(ctx.escopo.pessoaId);
         ctx.json(200, { atual: iaAtualDoCatalogo(catalogo), opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo });
@@ -914,7 +937,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasTrilha({ dentro }),
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
-    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo: criarPareamentoDispositivo(relogio), maquinasVivas: compartilhado ? (escopo) => ponteHttp.maquinasDaPessoa(escopo) : undefined }),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo: criarPareamentoDispositivo(relogio), maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
@@ -1058,7 +1081,7 @@ export function comporApp(o: OpcoesCompor): App {
       leitor.fechar();
       await voz.fechar();
       await provedoresVoz.encerrar();
-      if (varredorMaquinas) clearInterval(varredorMaquinas);
+      clearInterval(varredorMaquinas);
       await conectoresVivos.fechar();
     },
   };

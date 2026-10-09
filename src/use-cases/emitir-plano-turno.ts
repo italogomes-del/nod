@@ -56,6 +56,11 @@ export type EntradaEmitirPlano = {
   semFerramentasDoNod?: boolean;
   /** ADR-090: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
+  /**
+   * ADR-092: o turno roda numa máquina da ponte enquanto o servidor está no Mac (modo local). Os projetos autorizados são
+   * pastas DO MAC e não existem lá: o plano sai sem workspace, como no modo compartilhado. Ausente = o turno roda no Mac.
+   */
+  maquinaRemota?: boolean;
 };
 
 /**
@@ -203,7 +208,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
-  const workspaceId = await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
+  const workspaceId = input.maquinaRemota ? null : await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
   // definido em 2026-09-24 (emenda da ADR-037): o computador que ainda não existe nasce ligado (as
   // ferramentas entram); o que existe só entra ligado e respondendo — desligado ou fora do ar, o plano

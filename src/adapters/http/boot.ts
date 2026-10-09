@@ -152,7 +152,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
     staticDir: o.staticDir ?? env.NOD_STATIC_DIR,
     autorizarTokenTurno: app.tokens.autorizar,
-    autorizarMaquina: app.compartilhado ? app.autorizarMaquina : undefined,
+    // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
+    autorizarMaquina: app.autorizarMaquina,
     sessao,
     verificarBanco: () => db`select 1`,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.

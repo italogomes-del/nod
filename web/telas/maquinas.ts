@@ -17,7 +17,10 @@ function nomePlataforma(m: MaquinaDto): string {
   return m.plataforma === "linux" ? "Linux" : "Mac";
 }
 
-/** A máquina de um bot: a dele, senão o padrão da pessoa; null = qualquer uma. Só conta chave que ainda existe. */
+/**
+ * A máquina de um bot: a dele, senão o padrão da pessoa; null = qualquer uma (com o servidor no Mac, ADR-092: este Mac).
+ * Só conta chave que ainda existe.
+ */
 export function maquinaDoBot(estado: Estado, bot: Pick<Agente, "maquinaId">): MaquinaDto | null {
   const lista = estado.maquinas?.maquinas ?? [];
   return lista.find((m) => m.id === bot.maquinaId) ?? lista.find((m) => m.id === estado.maquinas?.padraoId) ?? null;
@@ -51,8 +54,9 @@ function cartao(estado: Estado, m: MaquinaDto): string {
   </div>`;
 }
 
-function seletor(rotulo: string, act: string, dados: Record<string, string>, atual: string | null, maquinas: MaquinaDto[]): string {
-  const opcoes = [{ id: "", nome: "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.nome }))];
+function seletor(rotulo: string, act: string, dados: Record<string, string>, atual: string | null, maquinas: MaquinaDto[], noMac: boolean): string {
+  // ADR-092: com o servidor no Mac, a opção sem máquina é o próprio Mac — a VM só pega os bots escolhidos para ela.
+  const opcoes = [{ id: "", nome: noMac ? "Este Mac" : "Qualquer uma" }, ...maquinas.map((m) => ({ id: m.id, nome: m.nome }))];
   return `<div class="segmentado maq" role="group" aria-label="${esc(rotulo)}">${opcoes.map((o) => {
     const ativo = (atual ?? "") === o.id;
     return `<button type="button" class="seg${ativo ? " ativo" : ""}" aria-pressed="${ativo}" data-act="${esc(act)}" data-maquina="${esc(o.id)}"${Object.entries(dados).map(([k, v]) => ` data-${k}="${esc(v)}"`).join("")}>${esc(o.nome)}</button>`;
@@ -63,21 +67,24 @@ export function renderMaquinas(estado: Estado): string {
   const dados = estado.maquinas;
   const maquinas = dados?.maquinas ?? [];
   const bots = botsDaPessoa(estado);
+  const noMac = !!dados?.servidorNoMac;
   const conectar = estado.conectarMaquina ? renderConectar(estado, estado.conectarMaquina) : "";
   const lista = !dados ? `<p class="intro">Carregando…</p>`
-    : maquinas.length === 0 ? `<div class="espaco-cartao maq-vazio"><p>Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela.</p></div>`
+    : maquinas.length === 0 ? `<div class="espaco-cartao maq-vazio"><p>${noMac ? "Nenhuma máquina conectada ainda. Os bots rodam neste Mac; conecte uma VM Linux para mandar bots para ela." : "Nenhuma máquina conectada ainda. Conecte o app do Mac ou uma VM Linux para os bots trabalharem nela."}</p></div>`
     : maquinas.map((m) => cartao(estado, m)).join("");
-  const linhasBots = bots.map((b) => `<div class="bot-maq">${iconeAgente(b, "sm")}<span class="bot-maq-txt"><b>${esc(b.nome)}</b><span>${esc(b.titulo)}</span></span>${seletor(`Onde ${b.nome} trabalha`, "maquina-do-bot", { id: b.id }, b.maquinaId ?? null, maquinas)}</div>`).join("");
+  const linhasBots = bots.map((b) => `<div class="bot-maq">${iconeAgente(b, "sm")}<span class="bot-maq-txt"><b>${esc(b.nome)}</b><span>${esc(b.titulo)}</span></span>${seletor(`Onde ${b.nome} trabalha`, "maquina-do-bot", { id: b.id }, b.maquinaId ?? null, maquinas, noMac)}</div>`).join("");
   return `<section class="espaco-secao maquinas">
     <h2>Máquinas</h2>
     <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: "pri" })}</div>
     ${conectar}
     <div class="maq-lista">${lista}</div>
     ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
-    <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas)}` : ""}
+    <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas, noMac)}` : ""}
     <ul class="regras-maq">
-      <li>"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho.</li>
-      <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra máquina só daquela vez.</li>
+      ${noMac ? `<li>"Este Mac": o bot roda aqui, onde o Nod está aberto. Uma VM só pega o trabalho dos bots escolhidos para ela.</li>
+      <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela. Para o bot voltar a rodar aqui, escolha "Este Mac" para ele.</li>`
+    : `<li>"Qualquer uma": o primeiro computador conectado que estiver livre pega o trabalho.</li>
+      <li>Se a máquina de um bot ficar sem contato, a conversa espera por ela; na mensagem você pode rodar em outra máquina só daquela vez.</li>`}
       <li>Rotinas não mudam de máquina sozinhas. Os arquivos de cada bot ficam na máquina onde ele trabalha.</li>
     </ul>
   </section>`;
@@ -111,9 +118,17 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
   if (c.passo === "comando") {
     // O endereço deste Nod (a página é servida por ele); os testes de render rodam sem DOM.
     const origem = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";
-    const cmd = `curl -fsSL ${origem}/motor | sh`;
+    // ADR-092: com o servidor no Mac, a VM chega à API deste Mac por um túnel SSH aberto daqui (nada fica exposto na
+    // internet); o motor guarda o endereço da API, então o túnel e o comando usam a porta dela, não a desta página.
+    const noMac = estado.maquinas?.servidorNoMac ?? null;
+    const cmd = noMac ? `curl -fsSL ${noMac.api}/api/motor/instalar | sh` : `curl -fsSL ${origem}/motor | sh`;
+    const porta = noMac ? (/:(\d+)$/.exec(noMac.api)?.[1] ?? "8888") : "";
+    const tunel = `ssh -N -R ${porta}:127.0.0.1:${porta} voce@sua-vm`;
     corpo = `<h3>Rode este comando na sua máquina Linux</h3>
       <p>Debian ou Ubuntu, em qualquer provedor. Para começar, 2 vCPU e 4 GB; com vários bots rodando testes e builds, 4 vCPU e 8 GB. Ela não precisa de porta aberta: é a máquina que procura trabalho no Nod. Use a máquina só para o Nod.</p>
+      ${noMac ? `<p>Este Nod roda no seu Mac. Antes, abra no Mac um túnel SSH para a VM e deixe-o aberto: com ele a VM enxerga o Nod em ${esc(noMac.api)}, só ela e sem porta aberta na internet.</p>
+      <div class="cx-cmd"><code>${esc(tunel)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: tunel } })}</div>
+      <p>Depois, no terminal da VM:</p>` : ""}
       <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd } })}</div>
       <p class="cx-nota">Ele instala o motor, cria o usuário nod e, no fim, mostra um código.</p>
       <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Apareceu um código", { classe: "pri", dados: { passo: "codigo" } })}</div>`;
@@ -149,7 +164,7 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
       return `<button type="button" class="cx-bot" role="checkbox" aria-checked="${marcado}" data-act="marcar-bot-maquina" data-id="${esc(b.id)}"><span class="cx-check" aria-hidden="true">${marcado ? "✓" : ""}</span>${iconeAgente(b, "sm")}<span>${esc(b.nome)}</span><small>${esc(b.titulo)}</small></button>`;
     }).join("");
     corpo = `<h3>Quem passa a trabalhar na ${esc(nova?.nome ?? "máquina")}?</h3>
-      <p>Eles saem do seu Mac a partir do próximo trabalho. O que está rodando agora termina onde começou. Bot novo também passa a trabalhar nela.</p>
+      <p>Eles saem do seu Mac a partir do próximo trabalho. O que está rodando agora termina onde começou.${estado.maquinas?.servidorNoMac ? " Os outros, e bot novo, continuam neste Mac." : " Bot novo também passa a trabalhar nela."}</p>
       <div class="espaco-cartao cx-bots"><div class="cx-bots-cab"><span>${n} de ${bots.length} bots</span>${botao("marcar-bots-maquina", "Marcar todos", { classe: "link", dados: { todos: "1" }, desabilitado: n === bots.length })}${botao("marcar-bots-maquina", "Nenhum", { classe: "link", dados: { todos: "0" }, desabilitado: n === 0 })}</div>${linhas}</div>
       ${erro}
       <div class="cx-rodape">${botao("fechar-conectar-maquina", "Agora não", { classe: "link" })}${botao("mover-bots-maquina", n === 0 ? "Concluir" : n === 1 ? "Mover 1 bot" : `Mover ${n} bots`, { classe: "pri" })}</div>`;
