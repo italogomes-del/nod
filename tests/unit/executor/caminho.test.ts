@@ -155,6 +155,18 @@ describe("caminho do binário (ADR-014 invertido: PATH pelado do Finder)", () =>
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("caminhoDoShellDeLogin resolve no marcador do fim, mesmo com um job em segundo plano segurando o stdout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nod-shell-job-"));
+    const shell = join(dir, "sh-com-job");
+    // Como um .zshrc que sobe um agente em segundo plano: o `close` do stdout só viria em 30 s.
+    await writeFile(shell, "#!/bin/sh\n(sleep 30) &\nprintf '__NOD_PATH_INICIO__/do/shell:/usr/bin__NOD_PATH_FIM__'\nwait\n");
+    await chmod(shell, 0o755);
+    const inicio = Date.now();
+    expect(await caminhoDoShellDeLogin(shell, 20_000)).toBe("/do/shell:/usr/bin");
+    expect(Date.now() - inicio).toBeLessThan(5_000);
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("caminhoDoShellDeLogin lê o PATH de um shell real", async () => {
     const lido = await caminhoDoShellDeLogin("/bin/sh", 5_000);
     expect(lido === null || lido.includes("/")).toBe(true);

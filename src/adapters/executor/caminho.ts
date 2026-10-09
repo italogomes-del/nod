@@ -189,30 +189,38 @@ export function caminhoDoShellDeLogin(shell: string | undefined, timeoutMs = 10_
   return new Promise((resolve) => {
     let saida = "";
     let feito = false;
+    let filho: ReturnType<typeof spawn> | null = null;
+    /**
+     * revisto em 2026-10-09 (revisão do PR 1): resolve assim que o marcador do fim chega, sem esperar o `close` — um
+     * .zshrc que deixa um job em segundo plano segurando o stdout faria a leitura esperar o prazo inteiro. Depois o
+     * grupo do shell morre (o que o .zshrc deixou rodando vai junto).
+     */
+    const matar = () => {
+      try {
+        if (filho?.pid !== undefined) process.kill(-filho.pid, "SIGKILL");
+      } catch {
+        // já saiu
+      }
+    };
     const fim = (v: string | null) => {
       if (feito) return;
       feito = true;
       clearTimeout(relogio);
+      matar();
       resolve(v);
     };
-    let filho: ReturnType<typeof spawn>;
+    const relogio = setTimeout(() => fim(null), timeoutMs);
     try {
       filho = spawn(shell, ["-l", "-i", "-c", `printf '%s%s%s' '${MARCA_INICIO}' "$PATH" '${MARCA_FIM}'`], { stdio: ["ignore", "pipe", "ignore"], detached: true, env: { ...process.env, TERM: "dumb" } });
     } catch {
-      resolve(null);
+      fim(null);
       return;
     }
-    const relogio = setTimeout(() => {
-      try {
-        if (filho.pid !== undefined) process.kill(-filho.pid, "SIGKILL");
-      } catch {
-        // já saiu
-      }
-      fim(null);
-    }, timeoutMs);
     filho.stdout?.setEncoding("utf8");
     filho.stdout?.on("data", (d: string) => {
       if (saida.length < 65_536) saida += d;
+      const path = lerPathMarcado(saida);
+      if (path !== null) fim(path);
     });
     filho.on("error", () => fim(null));
     filho.on("close", () => fim(lerPathMarcado(saida)));
