@@ -19,12 +19,6 @@ export type OpcoesRegistry = {
   home?: string;
   /** Config já montada (o boot monta UMA vez e reaproveita no interruptor: consultar o shell de login custa tempo). */
   cfg?: ConfigDriver;
-  /**
-   * definido em 2026-10-09: pastas que entram ANTES do PATH (as ferramentas instaladas pelo app do Mac) e DEPOIS de
-   * tudo (o "node do nod", para o `#!/usr/bin/env node` de um CLI instalado por npm num Mac sem Node).
-   */
-  pastasAntes?: readonly string[];
-  pastasDepois?: readonly string[];
   /** Quanto esperar pelo PATH do shell real nesta chamada (lerPathDoShell); a leitura segue em segundo plano. */
   esperaShellMs?: number;
 };
@@ -47,7 +41,7 @@ export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {})
   // revisto em 2026-10-09: o PATH do shell não segura mais o boot — espera pouco e, se não veio, a próxima config o traz.
   const pathLogin = o.shellDeLogin === false ? null : await lerPathDoShell(env.SHELL, o.esperaShellMs);
   const limpo = montarAmbiente("local", env);
-  const camadas = camadasDoPath(env.PATH, home, pathLogin, { antes: o.pastasAntes, depois: o.pastasDepois });
+  const camadas = camadasDoPath(env.PATH, home, pathLogin);
   return {
     bin: env.NOD_CLAUDE_BIN ? expandirTil(env.NOD_CLAUDE_BIN, home) : undefined,
     bins: { "codex-cli": env.NOD_CODEX_BIN ? expandirTil(env.NOD_CODEX_BIN, home) : undefined },

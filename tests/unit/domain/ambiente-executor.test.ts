@@ -11,6 +11,7 @@ describe("montarAmbiente", () => {
     CLAUDE_CODE_SESSION_ID: "abc",
     CLAUDE_PID: "42",
     CLAUDE_EFFORT: "high",
+    ELECTRON_RUN_AS_NODE: "1",
     NOD_SESSAO_SEGREDO: "segredo",
     NOD_CREDENTIAL_KEY: "chave",
     EDITOR: "vim",
@@ -27,6 +28,8 @@ describe("montarAmbiente", () => {
     expect(r.CLAUDE_CODE_SESSION_ID).toBeUndefined();
     expect(r.CLAUDE_PID).toBeUndefined();
     expect(r.CLAUDE_EFFORT).toBeUndefined();
+    // revisão do PR 1 (ADR-093): um Electron que o bot abrisse não pode virar node.
+    expect(r.ELECTRON_RUN_AS_NODE).toBeUndefined();
     expect(r.NOD_SESSAO_SEGREDO).toBeUndefined();
     expect(r.NOD_CREDENTIAL_KEY).toBeUndefined();
   });

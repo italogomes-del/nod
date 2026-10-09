@@ -76,7 +76,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
     meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
-      const env = ambienteCodex(cfg.env);
+      const env = ambienteCodex({ ...cfg.env, ...(cfg.envPorDriver?.["codex-cli"] ?? {}) });
       let bin: string | null = null;
       let inv: Inventario | null = null;
       // As chaves de config que a versão instalada recusou (negociarConfigCodex); refeito a cada sonda.
