@@ -1,7 +1,7 @@
 import { build } from "esbuild";
 import { mkdir, readFile } from "node:fs/promises";
 /**
- * definido em 2026-10-09 (ADR-088): o motor sem janela vira três arquivos em dist/motor, servidos pelo próprio servidor
+ * definido em 2026-10-09 (ADR-090): o motor sem janela vira três arquivos em dist/motor, servidos pelo próprio servidor
  * (GET /motor e /motor/arquivos/<nome>): o laço (nod-motor.mjs), o proxy MCP e o hook do terminal — os mesmos fontes do
  * app do Mac. A versão embutida é a do package.json deste build: o servidor serve o motor da versão dele.
  */
