@@ -12,14 +12,19 @@ import { log } from "../../obs/log.ts";
  * DOIS processos na mesma pasta.
  *
  * Por isso cada grupo vivo fica anotado num arquivo da instância, e o boot seguinte mata o que sobrou — só depois de
- * conferir que o pid ainda é o processo anotado, para nunca matar um pid que o sistema já deu a outro programa.
+ * PROVAR que o grupo é nosso: cada processo de bot nasce com `NOD_GRUPO=<marca>` no ambiente (herdado pelos netos), e
+ * nada é morto sem ler essa marca num processo vivo do grupo. Não deu para ler o ambiente: não mata.
  */
+
+/** A variável de ambiente que marca os processos de um grupo do nod; o valor é a `marca` anotada. */
+export const VARIAVEL_DA_MARCA = "NOD_GRUPO";
 
 /**
  * Um grupo anotado. `desdeMs`/`ateMs` cercam o spawn (o relógio antes e depois dele): o início que o `ps` mostra para o
  * líder tem de cair entre os dois. `programa` é o nome do binário (claude, codex, node), conferido na linha de comando.
+ * `marca` é o valor de NOD_GRUPO dado a este grupo — única por spawn, com o prefixo da instância.
  */
-export type GrupoRegistrado = { pid: number; desdeMs: number; ateMs: number; programa: string };
+export type GrupoRegistrado = { pid: number; desdeMs: number; ateMs: number; programa: string; marca: string };
 
 /** O dono é o processo do nod que anotou: vivo, o arquivo é dele e ninguém mexe (duas cópias da mesma instância). */
 export type ArquivoDeGrupos = { dono: { pid: number; inicioMs: number } | null; grupos: GrupoRegistrado[] };
@@ -27,10 +32,20 @@ export type ArquivoDeGrupos = { dono: { pid: number; inicioMs: number } | null; 
 /** Uma linha do `ps`: início com resolução de 1 s (lstart). */
 export type ProcessoDoSistema = { pid: number; pgid: number; inicioMs: number; comando: string };
 
-export type Sobra = { pgid: number; programa: string; membros: number; lider: boolean; desdeMs: number };
+/**
+ * Um grupo anotado que ainda tem processo vivo e passou nas conferências do `ps`. `verificar` são os pids em que a marca
+ * precisa aparecer: o líder (vivo) ou os membros (líder morto). Só vira morte depois de ler a marca.
+ */
+export type Candidato = { pgid: number; programa: string; marca: string; membros: number; lider: boolean; desdeMs: number; verificar: number[] };
+export type Sobra = Omit<Candidato, "verificar">;
 
-/** definido em 2026-10-09: o início do dono vem do relógio do Node e o do `ps` é truncado no segundo; 2 s cobrem os dois. */
-const FOLGA_DONO_MS = 2_000;
+/**
+ * revisto em 2026-10-09 (revisão do #223): o início do dono vem do relógio do Node (`performance.timeOrigin`) e o do `ps`
+ * é truncado no segundo; sob carga a diferença mediu 763 ms e com swap pode passar de 2 s. 60 s não confunde um processo
+ * vivo com outro (um pid não volta em 60 s), e a limpeza agora roda depois do listen: a cópia que não pega a porta nem
+ * chega aqui.
+ */
+const FOLGA_DONO_MS = 60_000;
 /** definido em 2026-10-09: o `ps -A` sob a carga de 09/10 (load ~430) ainda responde em segundos; 30 s é o teto antes de desistir. */
 const PRAZO_PS_MS = 30_000;
 
@@ -52,14 +67,66 @@ export function lerSaidaDoPs(saida: string): ProcessoDoSistema[] {
   return processos;
 }
 
-/** Todos os processos da máquina numa chamada só; null quando o `ps` não existe ou falha (nada é morto sem conferir). */
-export function listarProcessosDoSistema(): Promise<ProcessoDoSistema[] | null> {
-  return new Promise((resolver) => {
-    // LC_ALL=C: no Mac em português o lstart sai "Sex  9 Out" e não daria para ler. -ww: a linha de comando inteira.
-    execFile("ps", ["-A", "-ww", "-o", "pid=,pgid=,lstart=,command="], { env: { ...process.env, LC_ALL: "C" }, timeout: PRAZO_PS_MS, maxBuffer: 64 * 1024 * 1024 }, (erro, saida) => {
-      resolver(erro ? null : lerSaidaDoPs(String(saida)));
-    });
+const executar = (bin: string, args: string[]) =>
+  new Promise<string | null>((resolver) => {
+    execFile(bin, args, { env: { ...process.env, LC_ALL: "C" }, timeout: PRAZO_PS_MS, maxBuffer: 64 * 1024 * 1024 }, (erro, saida) => resolver(erro ? null : String(saida)));
   });
+
+/** Todos os processos da máquina numa chamada só; null quando o `ps` não existe ou falha (nada é morto sem conferir). */
+export async function listarProcessosDoSistema(): Promise<ProcessoDoSistema[] | null> {
+  // LC_ALL=C: no Mac em português o lstart sai "Sex  9 Out" e não daria para ler. -ww: a linha de comando inteira.
+  const saida = await executar("ps", ["-A", "-ww", "-o", "pid=,pgid=,lstart=,command="]);
+  return saida === null ? null : lerSaidaDoPs(saida);
+}
+
+/**
+ * Quando a máquina ligou (revisão do #223): anotação de antes disso é de outra vida do sistema — os pids recomeçaram, e
+ * um grupo daquele número hoje é de outro programa. null quando não dá para saber (aí o ramo "líder morto" não roda).
+ */
+export async function bootDaMaquina(): Promise<number | null> {
+  if (process.platform === "linux") {
+    try {
+      const m = /^btime\s+(\d+)$/m.exec(readFileSync("/proc/stat", "utf8"));
+      return m ? Number(m[1]) * 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+  const saida = await executar("sysctl", ["-n", "kern.boottime"]);
+  const m = saida ? /sec\s*=\s*(\d+)/.exec(saida) : null;
+  return m ? Number(m[1]) * 1000 : null;
+}
+
+/**
+ * O ambiente de cada pid, como texto onde procurar a marca. No Mac, `ps -E` (o sistema não mostra o ambiente dos
+ * binários da Apple, como /bin/sleep e /bin/zsh: esses ficam sem texto e não provam nada). No Linux, /proc/<pid>/environ.
+ * Pid ausente do mapa = não deu para ler.
+ */
+export async function ambientesDosProcessos(pids: readonly number[]): Promise<Map<number, string>> {
+  const textos = new Map<number, string>();
+  if (pids.length === 0) return textos;
+  if (process.platform === "linux") {
+    for (const pid of pids) {
+      try {
+        textos.set(pid, readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").join(" "));
+      } catch {
+        // sem permissão ou já saiu
+      }
+    }
+    return textos;
+  }
+  const saida = await executar("ps", ["-E", "-ww", "-o", "pid=,command=", "-p", pids.join(",")]);
+  for (const linha of (saida ?? "").split("\n")) {
+    const m = /^\s*(\d+)\s(.*)$/.exec(linha);
+    if (m) textos.set(Number(m[1]), m[2]!);
+  }
+  return textos;
+}
+
+export function temAMarca(ambiente: string | undefined, marca: string): boolean {
+  if (!ambiente || marca === "") return false;
+  const alvo = `${VARIAVEL_DA_MARCA}=${marca}`;
+  return ambiente.split(/\s+/).includes(alvo);
 }
 
 /** O líder nasceu durante o spawn anotado (o lstart é truncado no segundo, então o piso também é). */
@@ -69,43 +136,45 @@ function nasceuNoSpawn(inicioMs: number, g: GrupoRegistrado): boolean {
 
 /**
  * O nome do binário aparece na linha de comando: `claude -p`, `node …/bin/claude`, `node …/@anthropic-ai/claude-code/cli.js`
- * (um wrapper que fez exec). Basta conter: quem separa um pid reaproveitado é o início, conferido antes; isto é a segunda
- * trava.
+ * (um wrapper que fez exec). Basta conter: o início e a marca são as travas fortes.
  */
 function rodaOPrograma(comando: string, programa: string): boolean {
   return programa !== "" && comando.includes(programa);
 }
 
 /**
- * Quais grupos anotados ainda estão vivos e são mesmo os nossos. Puro (os testes montam o `ps`).
+ * Quais grupos anotados ainda estão vivos e PODEM ser os nossos (puro; os testes montam o `ps`). A prova final é a marca,
+ * lida depois em `verificar`.
+ *  - Anotação sem marca (formato antigo) ou de antes do boot da máquina: descartada.
  *  - Líder vivo: só conta se ainda é líder do grupo, nasceu durante o spawn anotado e roda o programa anotado. Um pid
  *    reaproveitado falha no início (e quase sempre no programa) e não é tocado — nem ele, nem o grupo dele.
- *  - Líder morto com membros no grupo (o `claude` saiu e deixou o `while … sleep` do Bash): o sistema não dá um pid a
- *    processo novo enquanto existir grupo com esse número, então os membros são do grupo anotado. Ainda assim, todos têm
- *    de ter nascido depois do spawn; um membro mais velho que o grupo é sinal de leitura errada, e nada é tocado.
+ *  - Líder morto com membros no grupo (o `claude` saiu e deixou o `while … sleep` do Bash): só com o boot da máquina
+ *    conhecido, e todos os membros nascidos depois do spawn. A marca precisa aparecer em ao menos um deles.
  */
-export function sobrasDoRegistro(grupos: readonly GrupoRegistrado[], processos: readonly ProcessoDoSistema[]): Sobra[] {
-  const sobras: Sobra[] = [];
+export function candidatosDoRegistro(grupos: readonly GrupoRegistrado[], processos: readonly ProcessoDoSistema[], bootMs: number | null): Candidato[] {
+  const candidatos: Candidato[] = [];
   for (const g of grupos) {
+    if (!g.marca) continue;
+    if (bootMs !== null && g.desdeMs < bootMs) continue;
     const membros = processos.filter((p) => p.pgid === g.pid);
     const lider = processos.find((p) => p.pid === g.pid);
     if (lider) {
       if (lider.pgid !== g.pid || !nasceuNoSpawn(lider.inicioMs, g) || !rodaOPrograma(lider.comando, g.programa)) continue;
-      sobras.push({ pgid: g.pid, programa: g.programa, membros: membros.length, lider: true, desdeMs: g.desdeMs });
+      candidatos.push({ pgid: g.pid, programa: g.programa, marca: g.marca, membros: membros.length, lider: true, desdeMs: g.desdeMs, verificar: [g.pid] });
       continue;
     }
-    if (membros.length === 0) continue;
+    if (bootMs === null || membros.length === 0) continue;
     if (membros.some((p) => p.inicioMs < Math.floor(g.desdeMs / 1000) * 1000)) continue;
-    sobras.push({ pgid: g.pid, programa: g.programa, membros: membros.length, lider: false, desdeMs: g.desdeMs });
+    candidatos.push({ pgid: g.pid, programa: g.programa, marca: g.marca, membros: membros.length, lider: false, desdeMs: g.desdeMs, verificar: membros.map((p) => p.pid) });
   }
-  return sobras;
+  return candidatos;
 }
 
 export function lerArquivoDeGrupos(arquivo: string): ArquivoDeGrupos {
   try {
     const lido = JSON.parse(readFileSync(arquivo, "utf8")) as Partial<ArquivoDeGrupos>;
     const grupos = Array.isArray(lido.grupos)
-      ? lido.grupos.filter((g): g is GrupoRegistrado => typeof g?.pid === "number" && g.pid > 1 && typeof g.desdeMs === "number" && typeof g.ateMs === "number" && typeof g.programa === "string")
+      ? lido.grupos.filter((g): g is GrupoRegistrado => typeof g?.pid === "number" && g.pid > 1 && typeof g.desdeMs === "number" && typeof g.ateMs === "number" && typeof g.programa === "string" && typeof g.marca === "string")
       : [];
     const dono = lido.dono && typeof lido.dono.pid === "number" && typeof lido.dono.inicioMs === "number" ? lido.dono : null;
     return { dono, grupos };
@@ -132,6 +201,11 @@ export function arquivoDeGruposDoServidor(dirNod: string, env: { DATABASE_URL?: 
   return join(dirNod, "grupos-vivos", `servidor-${chave}.json`);
 }
 
+/** O prefixo das marcas de uma instância: o mesmo arquivo dá o mesmo prefixo. */
+export function prefixoDaMarca(arquivo: string): string {
+  return createHash("sha256").update(arquivo).digest("hex").slice(0, 8);
+}
+
 /** Quando este processo nasceu, no relógio de parede (o dono anotado no arquivo). */
 export function inicioDesteProcesso(): number {
   return Math.round(performance.timeOrigin);
@@ -140,13 +214,15 @@ export function inicioDesteProcesso(): number {
 export type ResultadoDaLimpeza = { assumiu: boolean; encerrados: Sobra[] };
 
 /**
- * O boot (servidor e app do Mac) chama ANTES de qualquer turno: mata com SIGKILL os grupos que sobraram da vida anterior
- * desta instância e diz se este processo pode assumir o arquivo. `assumiu: false` = o dono anotado ainda está vivo (outra
- * cópia da mesma instância, que o listen vai recusar): nada é morto e o arquivo fica com ele.
+ * O boot (servidor, depois do listen; app do Mac, antes do primeiro turno) chama: mata com SIGKILL os grupos que sobraram
+ * da vida anterior desta instância e diz se este processo pode assumir o arquivo. `assumiu: false` = o dono anotado ainda
+ * está vivo (outra cópia da mesma instância): nada é morto e o arquivo fica com ele.
  */
 export async function encerrarGruposOrfaos(o: {
   arquivo: string;
   listar?: () => Promise<ProcessoDoSistema[] | null>;
+  boot?: () => Promise<number | null>;
+  ambientes?: (pids: readonly number[]) => Promise<Map<number, string>>;
   matar?: (pgid: number) => void;
   agora?: () => number;
   pidAtual?: number;
@@ -164,14 +240,22 @@ export async function encerrarGruposOrfaos(o: {
     log("aviso", "grupos_de_outra_copia_viva", { dono_pid: donoAlheio.pid, grupos: anotado.grupos.length });
     return { assumiu: false, encerrados: [] };
   }
+  const candidatos = candidatosDoRegistro(anotado.grupos, processos, await (o.boot ?? bootDaMaquina)());
+  if (candidatos.length === 0) return { assumiu: true, encerrados: [] };
+  const ambientes = await (o.ambientes ?? ambientesDosProcessos)(candidatos.flatMap((c) => c.verificar));
   const matar = o.matar ?? ((pgid: number) => process.kill(-pgid, "SIGKILL"));
   const agora = (o.agora ?? Date.now)();
   const encerrados: Sobra[] = [];
-  for (const s of sobrasDoRegistro(anotado.grupos, processos)) {
+  for (const { verificar, ...c } of candidatos) {
+    // A marca num processo vivo do grupo é a prova: um número de grupo existe uma vez só, e a marca só nasce aqui.
+    if (!verificar.some((pid) => temAMarca(ambientes.get(pid), c.marca))) {
+      log("info", "orfao_sem_prova", { pgid: c.pgid, lider_vivo: c.lider, legiveis: verificar.filter((pid) => ambientes.has(pid)).length });
+      continue;
+    }
     try {
-      matar(s.pgid);
-      encerrados.push(s);
-      log("aviso", "orfao_encerrado", { pgid: s.pgid, programa: s.programa, membros: s.membros, lider_vivo: s.lider, idade_min: Math.round((agora - s.desdeMs) / 60_000) });
+      matar(c.pgid);
+      encerrados.push(c);
+      log("aviso", "orfao_encerrado", { pgid: c.pgid, programa: c.programa, membros: c.membros, lider_vivo: c.lider, idade_min: Math.round((agora - c.desdeMs) / 60_000) });
     } catch {
       // acabou entre o `ps` e o kill
     }

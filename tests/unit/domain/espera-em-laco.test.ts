@@ -1,26 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { esperaEmLaco, motivoDaEsperaNegada, SLEEP_MAXIMO_S } from "../../../src/domain/espera-em-laco.ts";
+import { esperaEmLaco, motivoDaEsperaNegada } from "../../../src/domain/espera-em-laco.ts";
 
 /**
- * ADR-089 (#217): o laço de espera com sleep e o sleep longo são negados; o comando demorado de verdade, nunca. Os dois
- * primeiros casos são os medidos no Mac do Marlon em 09/10 (Cecília e Ze).
+ * ADR-089 (#217): o laço de espera (sleep de 10 s ou mais dentro) e o sleep longo são negados; o comando demorado de
+ * verdade e o laço de sleep curto que espera algo local subir, nunca. Os primeiros casos são os medidos no Mac do Marlon
+ * em 09/10 (Cecília com 30 s, Ze com 10/15 s).
  */
 describe("espera em laço (ADR-089)", () => {
   it.each([
-    "while :; do gh run list --branch fix/x --limit 1; sleep 30; done",
-    "while true; do sleep 10; gh pr checks 42; done",
-    "until gh run view 123 --json status | grep -q completed; do sleep 15; done",
-    "while sleep 20; do gh run list; done",
-    "while :\ndo\n  gh run list\n  sleep 30\ndone",
-    "cd ~/nod/Ze && while :; do git fetch; sleep 15; done > /dev/null 2>&1 &",
-    "nohup bash -c 'while :; do curl -s https://x; sleep 60; done' &",
-    "timeout 3600 sh -c \"until curl -sf http://deploy; do sleep 30; done\"",
-    "while :; do echo $(sleep 5); done",
-    "gh pr list | while read -r pr; do gh pr checks \"$pr\"; sleep 5; done",
-    "while :; do for i in 1 2; do echo $i; done; sleep 30; done",
-    "bash <<EOF\nwhile :; do gh run list; sleep 30; done\nEOF",
-  ])("nega o laço: %s", (comando) => {
-    expect(esperaEmLaco(comando)).toEqual({ tipo: "laco_com_sleep" });
+    ["while :; do gh run list --branch fix/x --limit 1; sleep 30; done", 30],
+    ["while true; do sleep 10; gh pr checks 42; done", 10],
+    ["until gh run view 123 --json status | grep -q completed; do sleep 15; done", 15],
+    ["while sleep 20; do gh run list; done", 20],
+    ["while :\ndo\n  gh run list\n  sleep 30\ndone", 30],
+    ["cd ~/nod/Ze && while :; do git fetch; sleep 15; done > /dev/null 2>&1 &", 15],
+    ["nohup bash -c 'while :; do curl -s https://x; sleep 60; done' &", 60],
+    ["timeout 3600 sh -c \"until curl -sf http://deploy; do sleep 30; done\"", 30],
+    ["while :; do echo $(sleep 15); done", 15],
+    ["gh pr list | while read -r pr; do gh pr checks \"$pr\"; sleep 10; done", 10],
+    ["while :; do for i in 1 2; do echo $i; done; sleep 30; done", 30],
+    ["bash <<EOF\nwhile :; do gh run list; sleep 30; done\nEOF", 30],
+    ["for i in $(seq 100); do gh run list; sleep 60; done", 60],
+  ])("nega o laço: %s", (comando, segundos) => {
+    expect(esperaEmLaco(comando)).toEqual({ tipo: "laco_com_sleep", segundos });
   });
 
   it.each([
@@ -29,11 +31,9 @@ describe("espera em laço (ADR-089)", () => {
     ["sleep 1h && gh run list", 3_600],
     ["nohup sleep 90 &", 90],
     ["/bin/sleep 61", 61],
-    ["sleep 30 30", 60],
-  ])("sleep longo: %s", (comando, segundos) => {
-    const r = esperaEmLaco(comando);
-    if (segundos > SLEEP_MAXIMO_S) expect(r).toEqual({ tipo: "sleep_longo", segundos });
-    else expect(r).toBeNull();
+    ["sleep 30; gh run list; sleep 40", 70],
+  ])("sleep longo (somado no comando): %s", (comando, segundos) => {
+    expect(esperaEmLaco(comando)).toEqual({ tipo: "sleep_longo", segundos });
   });
 
   it("sleep sem fim é longo", () => {
@@ -48,8 +48,19 @@ describe("espera em laço (ADR-089)", () => {
     "npx vitest run tests/unit",
     "sleep 2 && curl -s http://127.0.0.1:8888/api/saude",
     "sleep 60; gh run list",
+    "sleep 30 30",
+    // revisão do #223: laço de sleep curto é esperar algo local subir, ou um lote respeitando limite de API.
+    "until pg_isready -h 127.0.0.1 -p 5447; do sleep 1; done",
+    "until docker compose ps | grep healthy; do sleep 2; done",
+    "while :; do sleep 5; done",
+    "for id in a b c; do gh api repos/x/issues/$id; sleep 1; done",
     "for i in $(seq 30); do curl -sf http://127.0.0.1:5274 && break; sleep 1; done",
+    // laço dentro de timeout de até 10 min tem fim garantido
+    "timeout 60 bash -c 'until curl -sf http://127.0.0.1:8897; do sleep 1; done'",
+    "timeout 600 bash -c 'while :; do gh run list; sleep 30; done'",
+    "timeout 5m sh -c 'sleep 200'",
     "while read -r linha; do echo \"$linha\"; done < lista.txt",
+    "tail -f /tmp/dev.log | grep --line-buffered ERRO",
     "grep -rn sleep src",
     "grep -rn \"while :; do sleep 30; done\" docs",
     "echo 'until pronto; do sleep 300; done'",
@@ -66,8 +77,9 @@ describe("espera em laço (ADR-089)", () => {
   });
 
   it("a mensagem aponta o me_chame_as quando ele existe e manda encerrar quando não existe", () => {
-    const com = motivoDaEsperaNegada({ tipo: "laco_com_sleep" }, true);
+    const com = motivoDaEsperaNegada({ tipo: "laco_com_sleep", segundos: 30 }, true);
     expect(com).toContain("me_chame_as");
+    expect(com).toContain("laço de espera com sleep de 30 s");
     expect(com).toContain("npm ci");
     const sem = motivoDaEsperaNegada({ tipo: "sleep_longo", segundos: 300 }, false);
     expect(sem).not.toContain("me_chame_as");

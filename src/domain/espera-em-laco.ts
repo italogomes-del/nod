@@ -6,10 +6,13 @@
  *
  * Nega só o desperdício, nunca o comando demorado de verdade (testes, build, `npm ci`, `docker compose up`): sem teto de
  * tempo, decisão do Marlon em 09/10 (ADR-067). Duas formas:
- *  - `while`/`until` com `sleep` dentro (no corpo ou na condição) — o laço de espera;
- *  - `sleep` acima de SLEEP_MAXIMO_S — a espera longa sem laço.
- * `sleep 2 && curl …` passa, e o `for` com fim também (`for i in $(seq 30); do …; sleep 1; done`, o jeito de esperar um
- * servidor local subir).
+ *  - laço (`while`, `until`, `for`, `select`) cujo maior `sleep` dentro chega a SLEEP_DE_ESPERA_S — o laço de espera;
+ *  - `sleep` fora de laço que, somado no mesmo comando, passa de SLEEP_MAXIMO_S — a espera longa sem laço.
+ * revisto em 2026-10-09 (revisão do #223, decisão do coordenador na ausência do Marlon): a primeira versão negava todo
+ * `while`/`until` com `sleep`, e com isso negava trabalho de verdade — `until pg_isready; do sleep 1; done`, o
+ * `docker compose ps | grep healthy` com `sleep 2`, um lote com `sleep 1` por limite de API, o uso normal do Monitor.
+ * Laço de `sleep` curto é esperar algo local subir; quem espera o CI dorme 10 s ou mais (medido: 30 s, 10 s, 15 s). E o
+ * laço dentro de `timeout N` com N até TIMEOUT_QUE_LIMITA_S passa inteiro: o próprio comando já tem fim.
  *
  * A leitura é de shell, não de texto: palavra entre aspas, comentário e corpo de heredoc são dados (a mensagem de commit
  * que fala em "sleep 90" passa). Entra no que o shell RODA: `$(…)`, crase, `bash -c '…'`, `eval '…'` e o heredoc dado a um
@@ -19,11 +22,22 @@
 
 /** definido em 2026-10-09 (#217, proposta da issue): um minuto. Acima disso a espera é de algo de fora, e a volta marcada é o caminho. */
 export const SLEEP_MAXIMO_S = 60;
+/**
+ * definido em 2026-10-09 (revisão do #223): o `sleep` dentro de um laço a partir do qual o laço é de espera. Os medidos em
+ * 09/10 dormiam 10, 15 e 30 s; o laço que espera algo local subir dorme 1–2 s. Para voltar atrás (negar todo laço com
+ * sleep), use 0.
+ */
+export const SLEEP_DE_ESPERA_S = 10;
+/** definido em 2026-10-09 (revisão do #223): `timeout N` até 10 min limita o comando; laço lá dentro tem fim garantido. */
+export const TIMEOUT_QUE_LIMITA_S = 600;
 
-export type EsperaEmLaco = { tipo: "laco_com_sleep" } | { tipo: "sleep_longo"; segundos: number };
+export type EsperaEmLaco = { tipo: "laco_com_sleep"; segundos: number } | { tipo: "sleep_longo"; segundos: number };
 
 type Palavra = { valor: string; literal: boolean };
-type Achado = { laco: boolean; maiorSleep: number };
+/** `laco`: algum laço fechou com sleep de espera. Vale para a análise inteira, inclusive dentro de `bash -c` e `$(…)`. */
+type Achado = { laco: boolean; maiorLaco: number };
+/** O que um pedaço de shell devolve a quem o contém: o maior sleep em qualquer lugar, e a soma dos que ficam fora de laço. */
+type Sono = { maior: number; soma: number };
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 /** Palavras reservadas que podem vir antes do comando de um segmento. */
@@ -75,11 +89,22 @@ function fimDaCrase(texto: string, inicio: number): number {
   return texto.length;
 }
 
-function analisar(texto: string, emLaco: boolean, profundidade: number, achado: Achado): void {
-  if (profundidade > PROFUNDIDADE_MAXIMA) return;
-  /** Pilha dos laços abertos: `while`/`until` contam; `for`/`select` só pareiam o `done`. */
-  const lacos: ("espera" | "outro")[] = [];
-  const dentroDeLaco = () => emLaco || lacos.includes("espera");
+function analisar(texto: string, profundidade: number, achado: Achado): Sono {
+  const sono: Sono = { maior: 0, soma: 0 };
+  if (profundidade > PROFUNDIDADE_MAXIMA) return sono;
+  /** Pilha dos laços abertos, cada um com o maior sleep visto dentro dele. */
+  const lacos: { maior: number }[] = [];
+  const dormiu = (segundos: number, foraDeLaco: number) => {
+    sono.maior = Math.max(sono.maior, segundos);
+    if (lacos.length === 0) sono.soma += foraDeLaco;
+    for (const l of lacos) l.maior = Math.max(l.maior, segundos);
+  };
+  const fecharLaco = (l: { maior: number } | undefined) => {
+    if (l && l.maior >= SLEEP_DE_ESPERA_S && l.maior > 0) {
+      achado.laco = true;
+      achado.maiorLaco = Math.max(achado.maiorLaco, l.maior);
+    }
+  };
   let segmento: Palavra[] = [];
   let redirecionados = new Set<number>();
   let atual = "";
@@ -88,7 +113,10 @@ function analisar(texto: string, emLaco: boolean, profundidade: number, achado: 
   let proximaERedirecionamento = false;
   const heredocs: { delimitador: string; tirarTabs: boolean; segmento: Palavra[] }[] = [];
 
-  const sub = (conteudo: string) => analisar(conteudo, dentroDeLaco(), profundidade + 1, achado);
+  const sub = (conteudo: string) => {
+    const r = analisar(conteudo, profundidade + 1, achado);
+    dormiu(r.maior, r.soma);
+  };
 
   const fecharPalavra = () => {
     if (!temAtual) return;
@@ -113,12 +141,12 @@ function analisar(texto: string, emLaco: boolean, profundidade: number, achado: 
     for (; i < palavras.length; i++) {
       const p = palavras[i]!;
       if (p.literal) break;
-      if (p.valor === "while" || p.valor === "until") { lacos.push("espera"); continue; }
+      if (p.valor === "while" || p.valor === "until") { lacos.push({ maior: 0 }); continue; }
       if (p.valor === "for" || p.valor === "select" || p.valor === "case") {
-        if (p.valor !== "case") lacos.push("outro");
+        if (p.valor !== "case") lacos.push({ maior: 0 });
         return; // o resto é o cabeçalho (`for x in a b`), não comando
       }
-      if (p.valor === "done") { lacos.pop(); continue; }
+      if (p.valor === "done") { fecharLaco(lacos.pop()); continue; }
       if (p.valor === "esac" || PREFIXOS.has(p.valor)) continue;
       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(p.valor)) continue;
       break;
@@ -138,8 +166,11 @@ function analisar(texto: string, emLaco: boolean, profundidade: number, achado: 
       }
       if (nome === "timeout" || nome === "gtimeout") {
         i++;
-        while (i < palavras.length && palavras[i]!.valor.startsWith("-")) i++;
-        i++; // a duração
+        while (i < palavras.length && palavras[i]!.valor.startsWith("-")) i += ["-s", "-k", "--signal", "--kill-after"].includes(palavras[i]!.valor) ? 2 : 1;
+        const duracao = segundosDoSleep(palavras[i]?.valor ?? "");
+        // Revisão do #223: com fim garantido em até 10 min, o que roda lá dentro não é espera sem fim.
+        if (duracao !== null && duracao <= TIMEOUT_QUE_LIMITA_S) return;
+        i++;
         continue;
       }
       break;
@@ -150,8 +181,7 @@ function analisar(texto: string, emLaco: boolean, profundidade: number, achado: 
     const args = palavras.slice(i + 1).map((p) => p.valor);
     if (nome === "sleep") {
       const segundos = args.map(segundosDoSleep).filter((s): s is number => s !== null).reduce((a, b) => a + b, 0);
-      if (dentroDeLaco()) achado.laco = true;
-      achado.maiorSleep = Math.max(achado.maiorSleep, segundos);
+      dormiu(segundos, segundos);
       return;
     }
     if (SHELLS.has(nome)) {
@@ -299,14 +329,17 @@ function analisar(texto: string, emLaco: boolean, profundidade: number, achado: 
     temAtual = true;
   }
   fecharSegmento();
+  // Laço sem `done` (comando cortado) conta como fechado.
+  while (lacos.length > 0) fecharLaco(lacos.pop());
+  return sono;
 }
 
 /** O laço ou a espera longa no comando, ou null. */
 export function esperaEmLaco(comando: string): EsperaEmLaco | null {
-  const achado: Achado = { laco: false, maiorSleep: 0 };
-  analisar(comando, false, 0, achado);
-  if (achado.laco) return { tipo: "laco_com_sleep" };
-  if (achado.maiorSleep > SLEEP_MAXIMO_S) return { tipo: "sleep_longo", segundos: achado.maiorSleep };
+  const achado: Achado = { laco: false, maiorLaco: 0 };
+  const sono = analisar(comando, 0, achado);
+  if (achado.laco) return { tipo: "laco_com_sleep", segundos: achado.maiorLaco };
+  if (sono.soma > SLEEP_MAXIMO_S) return { tipo: "sleep_longo", segundos: sono.soma };
   return null;
 }
 
@@ -315,10 +348,9 @@ export function esperaEmLaco(comando: string): EsperaEmLaco | null {
  * encerra dizendo o que falta. Nos dois casos fica dito o que continua livre, para o bot não largar o comando de verdade.
  */
 export function motivoDaEsperaNegada(espera: EsperaEmLaco, comMeChameAs: boolean): string {
-  const oQue = espera.tipo === "laco_com_sleep"
-    ? "laço de espera com sleep"
-    : `sleep de ${Number.isFinite(espera.segundos) ? `${Math.round(espera.segundos)} s` : "tempo sem fim"}`;
-  const local = "Para algo que você mesmo subiu neste Mac (um servidor local), confira com um sleep curto antes (sleep 5 && curl …) ou um for com fim. Comando demorado de verdade (testes, build, npm ci) roda normalmente.";
+  const tempo = Number.isFinite(espera.segundos) ? `${Math.round(espera.segundos)} s` : "tempo sem fim";
+  const oQue = espera.tipo === "laco_com_sleep" ? `laço de espera com sleep de ${tempo}` : `sleep de ${tempo}`;
+  const local = `Para algo que você mesmo subiu neste Mac (um servidor local, um banco), um laço com sleep curto (abaixo de ${SLEEP_DE_ESPERA_S} s) ou dentro de timeout de até ${TIMEOUT_QUE_LIMITA_S / 60} min roda normalmente, como todo comando demorado de verdade (testes, build, npm ci).`;
   if (comMeChameAs) {
     return `${oQue} segura este processo no Mac sem trabalho. Para esperar algo de fora (o CI, um deploy, a resposta de alguém), chame me_chame_as com em quantos minutos voltar e o que vai conferir, diga em uma frase o que está esperando e encerre o turno: você volta sozinho nesta mesma sessão. ${local}`;
   }

@@ -138,7 +138,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
               if (decisao.estado === "decidida" && itens.some((i) => i.selecionado && i.desfecho === null)) return { estado: "pendente" as const };
               // 0032: este turno é quem continua a decisão. Se uma retomada já ficou com ela, o turno encerra
               // (a retomada continua) — nunca os dois.
-              if (decisao.estado === "decidida" && (await d.repos.decisoes.reivindicarContinuacao(decisaoId, "turno", deps.agora())) === "retomada") return { estado: "pendente" as const };
+              if (decisao.estado === "decidida" && (await d.repos.decisoes.reivindicarContinuacao(decisaoId, "turno", deps.agora())) === "retomada") return { estado: "da_retomada" as const };
               return { estado: "decidida" as const, itens: itens.map((i) => ({ idx: i.idx, desfecho: i.desfecho, acaoId: i.destino.conector === "computador" && typeof i.destino.argumentos?.acaoId === "string" ? i.destino.argumentos.acaoId : null })) };
             }
             return { estado: "pendente" as const, desde: Date.parse(decisao.criadoEm) };
@@ -155,6 +155,12 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
               ctx.json(200, { estado: "pendente", soltar: true });
               return;
             }
+          }
+          // revisto em 2026-10-09 (ADR-089, revisão do #223): antes a rota devolvia "pendente" e o hook seguia vivo até
+          // 420 s junto com a retomada — duas cópias na mesma task. Agora solta na hora: o turno encerra.
+          if (olhada.estado === "da_retomada") {
+            ctx.json(200, { estado: "pendente", soltar: true });
+            return;
           }
           if (olhada.estado === "inexistente") {
             ctx.json(404, { codigo: "nao_encontrado", mensagem: "decisão não pertence a este turno" });
@@ -204,7 +210,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const espera = rodaComando ? esperaEmLaco(String(c?.comando)) : null;
         if (espera) {
           const comMeChameAs = plano.catalogo.ferramentas.some((f) => f.nome === "me_chame_as" && f.origem === "nod");
-          log("aviso", "espera_em_laco_negada", { turno_id: turnoId, ferramenta, tipo: espera.tipo, segundos: espera.tipo === "sleep_longo" && Number.isFinite(espera.segundos) ? espera.segundos : null, me_chame_as: comMeChameAs });
+          log("aviso", "espera_em_laco_negada", { turno_id: turnoId, ferramenta, tipo: espera.tipo, segundos: Number.isFinite(espera.segundos) ? espera.segundos : null, me_chame_as: comMeChameAs });
           ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs) });
           return;
         }

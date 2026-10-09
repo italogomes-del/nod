@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
-import { gravarArquivoDeGrupos, inicioDesteProcesso, type GrupoRegistrado } from "./grupos-orfaos.ts";
+import { randomBytes } from "node:crypto";
+import { gravarArquivoDeGrupos, inicioDesteProcesso, prefixoDaMarca, VARIAVEL_DA_MARCA, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
  * Processo filho do executor: spawn, linhas do stdout, stderr acumulado, e interrupção em dois
@@ -49,6 +50,8 @@ const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const gruposVivos = new Map<number, GrupoRegistrado>();
 let ganchoDeSaida = false;
 let arquivoDeGrupos: string | null = null;
+/** Com o registro ligado, cada spawn leva NOD_GRUPO=<prefixo da instância>-<aleatório>: a prova que o boot lê (revisão do #223). */
+let prefixoDeMarca: string | null = null;
 
 /** Anota a lista no arquivo da instância; uma falha de disco não pode derrubar o turno (o `exit` ainda mata). */
 function anotarGrupos(): void {
@@ -66,6 +69,7 @@ function anotarGrupos(): void {
  */
 export function registrarGruposEm(arquivo: string | null): void {
   arquivoDeGrupos = arquivo;
+  prefixoDeMarca = arquivo === null ? null : prefixoDaMarca(arquivo);
   anotarGrupos();
 }
 
@@ -166,11 +170,14 @@ export function iniciarProcesso(o: {
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
+  // ADR-089: a marca vai no ambiente do líder e é herdada pelos netos (o Bash do modelo, o servidor MCP).
+  const marca = prefixoDeMarca === null ? "" : `${prefixoDeMarca}-${randomBytes(6).toString("hex")}`;
+  const env = marca === "" ? o.env : { ...o.env, [VARIAVEL_DA_MARCA]: marca };
   const desdeMs = Date.now();
-  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
+  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
   const pid = filho.pid;
   // ADR-089: o relógio antes e depois do spawn cerca o início que o `ps` vai mostrar para este líder.
-  if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin) });
+  if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin), marca });
   let stderr = "";
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;

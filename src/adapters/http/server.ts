@@ -60,13 +60,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } catch {
     // sem .env: variáveis vêm do ambiente
   }
-  // ADR-089: antes de qualquer turno, os grupos que a vida anterior desta instância deixou (SIGKILL, queda) morrem — os
-  // que ainda são os processos anotados. Uma segunda cópia viva da mesma instância fica com o arquivo, e o listen
-  // desta vai recusar a porta.
-  const arquivoDeGrupos = arquivoDeGruposDoServidor(nodHome(process.env, homeDaPessoa(process.env)), process.env);
-  const limpeza = await encerrarGruposOrfaos({ arquivo: arquivoDeGrupos });
-  if (limpeza.assumiu) registrarGruposEm(arquivoDeGrupos);
-  const servidor = await boot();
+  // ADR-089: depois do listen e antes de qualquer turno, os grupos que a vida anterior desta instância deixou (SIGKILL,
+  // queda) morrem — só os provados nossos pela marca. A cópia duplicada não pega a porta e nem chega aqui.
+  const servidor = await boot({
+    aposEscutar: async () => {
+      const arquivoDeGrupos = arquivoDeGruposDoServidor(nodHome(process.env, homeDaPessoa(process.env)), process.env);
+      const limpeza = await encerrarGruposOrfaos({ arquivo: arquivoDeGrupos }).catch(() => ({ assumiu: true }));
+      if (limpeza.assumiu) registrarGruposEm(arquivoDeGrupos);
+    },
+  });
   // SIGTERM e depois Ctrl+C (ou o contrário) também é "segundo sinal".
   ouvirSinaisDeEncerramento(() => {
     // definido em 2026-10-04 (ADR-071), revisto em 2026-10-05 (NOD-175): drenagem — recusa ligação nova, a ponte para de
