@@ -20,7 +20,7 @@ O Marlon: "aqui não podemos errar; conferir o link, conferir que leva à págin
 
 1. **PATH em camadas** (`src/adapters/executor/caminho.ts`): PATH do processo › instaladores conhecidos
    (~/.local/bin, ~/.claude/local, Homebrew, volta, asdf, bun, mise) › TODAS as versões do nvm (a do `alias/default`
-   primeiro) › PATH do shell real (`$SHELL -l -i`, com marcador, em segundo plano, 10 s, com cache; resolve no marcador
+   primeiro) › PATH do shell de login (`$SHELL -l`, sem `-i`: o .zshrc não é mais preciso, com marcador, em segundo plano, 10 s, com cache; resolve no marcador
    do fim, mesmo com um job do .zshrc segurando o stdout). Todo filho de CLI recebe esse PATH. **Nada do nod entra
    nele** (revisão): nem as ferramentas instaladas, nem o node do nod. O ambiente dos drivers nunca leva
    `ELECTRON_RUN_AS_NODE` (denylist em `ambiente-executor.ts`).

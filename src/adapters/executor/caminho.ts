@@ -18,7 +18,7 @@ import type { OrigemDoBinario } from "../../contracts/estado-ia.ts";
  *  2. o PATH do processo;
  *  3. as pastas fixas dos instaladores conhecidos (DIRETORIOS_EXTRAS);
  *  4. TODAS as versões do nvm: a do `~/.nvm/alias/default` primeiro, depois da mais nova para a mais antiga;
- *  5. o PATH do shell real da pessoa (`$SHELL -l -i`, lido em segundo plano, ver lerPathDoShell);
+ *  5. o PATH do shell de login da pessoa (`$SHELL -l`, lido em segundo plano, ver lerPathDoShell);
  *  6. `depois`: o "node do nod" (o Electron como node), a última saída para o `#!/usr/bin/env node`.
  */
 
@@ -179,8 +179,9 @@ export function lerPathMarcado(saida: string): string | null {
 }
 
 /**
- * Lê o PATH do shell real da pessoa: `$SHELL -l -i -c` (definido em 2026-10-09: o `-i` faz o zsh ler o .zshrc, onde o
- * nvm costuma ser carregado; antes era só `-l`). Melhor esforço: qualquer falha ou demora devolve null. O shell roda
+ * Lê o PATH do shell de login da pessoa: `$SHELL -l -c`. revisto em 2026-10-09 (revisão do PR 1): sem `-i`. O nvm, o volta,
+ * o asdf, o mise e o bun são lidos do disco (camadas 3 e 4), então o .zshrc não é mais preciso; e o `-i` rodava o
+ * .zshrc inteiro a cada boot (auto-update do oh-my-zsh, ssh-agent) e atrasava o boot do servidor local. Melhor esforço: qualquer falha ou demora devolve null. O shell roda
  * sem terminal (stdin fechado), num grupo próprio que morre inteiro no prazo — um .zshrc que espera o teclado não
  * segura nada. definido em 2026-10-09: 10 s de teto, como o block/buzz; quem não pode esperar usa `lerPathDoShell`.
  */
@@ -211,7 +212,7 @@ export function caminhoDoShellDeLogin(shell: string | undefined, timeoutMs = 10_
     };
     const relogio = setTimeout(() => fim(null), timeoutMs);
     try {
-      filho = spawn(shell, ["-l", "-i", "-c", `printf '%s%s%s' '${MARCA_INICIO}' "$PATH" '${MARCA_FIM}'`], { stdio: ["ignore", "pipe", "ignore"], detached: true, env: { ...process.env, TERM: "dumb" } });
+      filho = spawn(shell, ["-l", "-c", `printf '%s%s%s' '${MARCA_INICIO}' "$PATH" '${MARCA_FIM}'`], { stdio: ["ignore", "pipe", "ignore"], detached: true, env: { ...process.env, TERM: "dumb" } });
     } catch {
       fim(null);
       return;
