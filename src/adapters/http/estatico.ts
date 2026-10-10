@@ -11,7 +11,26 @@ const TIPOS: Record<string, string> = {
   // definido em 2026-10-04 (ADR-070): as fontes da web (web/public/fontes) e a licença que vai junto.
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
+  // definido em 2026-10-10 (ADR-094): o app instalável no celular — manifesto e ícones.
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".png": "image/png",
 };
+
+/** Um ano: o nome dos arquivos de /assets/ leva o hash do conteúdo (Vite), então um deploy novo é outro nome. */
+const IMUTAVEL = "public, max-age=31536000, immutable";
+
+/**
+ * Cache de cada arquivo da web (definido em 2026-10-10, ADR-094). O HTML, o sw.js e o manifesto revalidam sempre: um
+ * deploy precisa chegar ao app instalado no celular na próxima abertura, e um sw.js preso no cache prenderia o worker
+ * velho. As fontes guardam uma semana (o nome não muda entre deploys) e os ícones um dia.
+ */
+export function cacheDoArquivo(arquivo: string): string {
+  if (arquivo.startsWith("/assets/")) return IMUTAVEL;
+  // A fonte não muda entre deploys do mesmo nome de arquivo: uma semana de cache poupa ~80 KB por abertura.
+  if (extname(arquivo) === ".woff2") return "public, max-age=604800";
+  if (arquivo.startsWith("/icons/") || arquivo.startsWith("/logos/")) return "public, max-age=86400";
+  return "no-cache";
+}
 
 /** Serve o bundle da web (NOD_STATIC_DIR) com fallback para index.html em rotas sem extensão. */
 export function criarEstatico(dir: string | undefined): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
@@ -22,16 +41,14 @@ export function criarEstatico(dir: string | undefined): (req: IncomingMessage, r
     if (arquivo.includes("..")) return false;
     try {
       const buf = await readFile(join(dir, arquivo));
-      // A fonte não muda entre deploys do mesmo nome de arquivo: uma semana de cache poupa ~80 KB por abertura.
-      const cache = extname(arquivo) === ".woff2" ? { "cache-control": "public, max-age=604800" } : {};
-      res.writeHead(200, { "content-type": TIPOS[extname(arquivo)] ?? "application/octet-stream", ...cache });
+      res.writeHead(200, { "content-type": TIPOS[extname(arquivo)] ?? "application/octet-stream", "cache-control": cacheDoArquivo(arquivo), "x-content-type-options": "nosniff" });
       res.end(buf);
       return true;
     } catch {
       if (extname(arquivo) !== "") return false;
       try {
         const buf = await readFile(join(dir, "index.html"));
-        res.writeHead(200, { "content-type": TIPOS[".html"] });
+        res.writeHead(200, { "content-type": TIPOS[".html"], "cache-control": "no-cache", "x-content-type-options": "nosniff" });
         res.end(buf);
         return true;
       } catch {
