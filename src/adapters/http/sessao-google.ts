@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { log } from "../../obs/log.ts";
 import type { Escopo } from "../../shared/types.ts";
 import type { Rota } from "./roteador.ts";
-import { assinar, cabecalhoCookieSessao, iguaisEmTempoConstante, lerAssinado } from "./sessao-cookie.ts";
+import { assinar, cabecalhoCookieSessao, iguaisEmTempoConstante, lerAssinado, PERMANENCIA_SESSAO_S } from "./sessao-cookie.ts";
 import { lerCookies } from "./util.ts";
 
 /**
@@ -23,7 +23,8 @@ import { lerCookies } from "./util.ts";
  *     ├─ sem pessoa: conta Workspace (`hd` = domínio do e-mail) de um    não → recusa
  *     │  domínio admitido vira pessoa (cfg.admitirPorDominio, emenda de
  *     │  2026-10-05 da ADR-030; quem decide o domínio é o banco)
- *     └─ 302 /  + Set-Cookie nod_sessao (Strict; Secure se o redirect for https)
+ *     └─ 200 página que segue para / (PAGINA_ENTROU) + Set-Cookie nod_sessao (Strict; Max-Age de 30 dias, ADR-094;
+ *        Secure se o redirect for https)
  *
  * TODA recusa é a MESMA resposta, byte a byte: 302 para /?entrar=recusado. Dizer "domínio errado"
  * num caso e "não cadastrado" no outro contaria a quem está de fora quem tem acesso ao nod. O motivo
@@ -65,6 +66,14 @@ export const STATE_VALIDADE_MS = 600_000;
 const TIMEOUT_TOKEN_MS = 5_000;
 const EMISSORES = new Set(["accounts.google.com", "https://accounts.google.com"]);
 export const DESTINO_RECUSA = "/?entrar=recusado";
+
+/**
+ * A volta do login bem-sucedido (definido em 2026-10-10, ADR-094): uma página da própria origem que segue para "/", no
+ * lugar do 302 direto. A volta do Google é navegação que começou em outro site, e o nod_sessao é SameSite=Strict: com o
+ * 302, a página do app nascia de uma navegação entre sites, e o Safari (iPhone e app instalado) pode segurar o cookie
+ * Strict até a próxima navegação — a pessoa voltaria à tela de entrada. Saindo daqui, a ida a "/" é do próprio site.
+ */
+export const PAGINA_ENTROU = '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0;url=/"><title>nod</title></head><body><p><a href="/">Entrando no Nod…</a></p><script>location.replace("/")</script></body></html>';
 
 export type MotivoRecusa = "cancelado" | "state" | "sem_code" | "troca" | "id_token" | "emissor" | "audiencia" | "expirado" | "dominio" | "email_nao_verificado" | "sem_pessoa";
 
@@ -225,8 +234,8 @@ export function rotasGoogle(segredo: string, cfg: ConfigGoogle): Rota[] {
         if (!escopo) return recusar("sem_pessoa");
 
         log("info", "login_google", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId });
-        ctx.res.writeHead(302, { location: "/", "set-cookie": [cabecalhoCookieSessao(escopo, segredo, seguro), apagarState], "cache-control": "no-store" });
-        ctx.res.end();
+        ctx.res.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": [cabecalhoCookieSessao(escopo, segredo, seguro, PERMANENCIA_SESSAO_S), apagarState], "cache-control": "no-store" });
+        ctx.res.end(PAGINA_ENTROU);
       },
     },
   ];

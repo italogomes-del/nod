@@ -961,3 +961,23 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
 }
+
+/**
+ * O que o stream perdido pode ter mudado (definido em 2026-10-10, ADR-094): quando o servidor não consegue retomar
+ * (`resumed:false` — o celular ficou muito tempo em segundo plano e o buffer foi podado), a web relê tudo o que já tinha
+ * carregado, não só a tela: os não lidos, "Sua vez", os trabalhos, toda conversa e todo "a fazer" já abertos. Só o que a
+ * tela olha é buscado na hora (`relevante` no main); o resto fica marcado até a tela abrir.
+ */
+export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
+  if (!estado.sessao) return [];
+  const t = estado.tela;
+  const todas: Invalidacao[] = [
+    "frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", "ligacao", "trabalhos",
+    ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
+    ...(A_FAZER_LIGADO ? Object.keys(estado.pendencias).map((id): Invalidacao => `pendencias:${id}`) : []),
+    ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),
+    ...(A_FAZER_LIGADO && t.tipo === "conversa" ? [`pendencias:${t.agenteId}` as Invalidacao] : []),
+    ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : []),
+  ];
+  return [...new Set(todas)];
+}

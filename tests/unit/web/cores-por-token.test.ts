@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
  * "cor-fixa: <motivo>" quando for de propósito igual nos dois temas.
  */
 const RAIZ = new URL("../../../web/", import.meta.url);
-const CSS = ["estilos.css", "interface.css", "navegacao.css", "ligacao.css", "onboarding.css"] as const;
+const CSS = ["estilos.css", "interface.css", "navegacao.css", "ligacao.css", "onboarding.css", "mobile.css"] as const;
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/;
 const ler = (nome: string): string => readFileSync(new URL(nome, RAIZ), "utf8");
 
@@ -29,7 +29,7 @@ describe("cores só por token", () => {
     const todos = CSS.map(ler).join("\n");
     const declarados = new Set([...`${tokens}\n${todos}`.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
     // Variáveis que o TS escreve no elemento (style="--x: …") ou que têm fallback no próprio var().
-    const doTs = new Set(["--nod-aviso", "--ms-segurar", "--x"]);
+    const doTs = new Set(["--nod-aviso", "--ms-segurar", "--x", "--altura-visivel", "--topo-visivel"]);
     const usados = [...todos.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]);
     const faltam = [...new Set(usados)].filter((v) => v !== undefined && !declarados.has(v) && !doTs.has(v));
     expect(faltam).toEqual([]);

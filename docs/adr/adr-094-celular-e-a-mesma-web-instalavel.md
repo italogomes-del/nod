@@ -1,0 +1,112 @@
+# ADR-094 — O Nod no celular é a mesma web, instalável, servida pelo mesmo servidor
+
+**Status** aceito · decidido e implementado em 2026-10-10 (o Marlon pediu o Nod no celular apontando para a produção,
+https://34-39-164-139.sslip.io; a versão do PR #99 só tinha funcionado servida pelo servidor local via ngrok)
+
+Substitui o PR #99 (`codex/nod-mobile`, que nunca entrou na main). Mantém a ADR-018 (a web só pede, nunca executa), a
+ADR-016 (SSE com `since` e reidratação por REST) e a ADR-030 (login Google com allowlist).
+
+## Contexto
+
+O #99 fez uma PWA para iPhone e Android, testada pelo Marlon num túnel ngrok para o servidor do Mac. Ela saiu da main de
+30/09, e a main reescreveu depois quase tudo o que ela tocava (barra, gaveta do bot, Tasks, rolagem, onboarding,
+ligação). A PWA nunca chegou à produção: aberto no celular, o endereço de produção mostrava a tela de computador, com a
+barra de bots ocupando metade da tela. "Só conectava no local" não era host fixo no cliente, que sempre usou caminhos
+relativos. Era o código mobile que só existia naquela branch.
+
+A revisão do #99 (2026-10-01) pediu para a refação: celular decidido pelo toque e não pela largura; reconectar só quando
+a conexão caiu de fato; reler não lidos e pendências na volta; `/assets/*` imutável; um cabeçalho só, sem anel de foco
+no toque, sem 🐞 fixo e sem •••.
+
+## Decisão
+
+1. **Uma web só, sem host fixo.** O celular abre a mesma página que o computador, servida pelo mesmo servidor
+   (`estatico.ts`). O manifesto (`web/public/manifest.webmanifest`) tem `id`, `start_url` e `scope` iguais a `/`. Quem
+   instala de `https://<servidor>` fala com aquele servidor, e um deploy da main chega ao app instalado na próxima
+   abertura. Não há app de loja, Capacitor nem push.
+2. **Celular = toque E tela de telefone.** A consulta é `CONSULTA_CELULAR` (`web/lib/celular.ts`): sem hover, ponteiro
+   grosso, e largura ≤ 600 px (em pé) ou altura ≤ 500 px (deitado). A mesma string está em `web/mobile.css`, e
+   `tests/unit/web/celular.test.ts` confere. Janela estreita no Mac continua desktop. O iPad continua com as colunas.
+3. **O layout do celular só reorganiza o que existe** (`web/mobile.css`, a última folha):
+   - a barra de bots vira gaveta pela esquerda. Ela abre pelo ☰, que entra no próprio cabeçalho da tela (um cabeçalho
+     só). Tela sem cabeçalho ganha uma faixa só com o ☰;
+   - a conversa ocupa a tela, e a gaveta do bot cobre a tela inteira com o próprio topo;
+   - a altura segue o `visualViewport`, então o campo fica colado no teclado do iPhone. No Android,
+     `interactive-widget=resizes-content` faz o mesmo;
+   - áreas seguras com `env(safe-area-inset-*)`, alvos de toque de 44 px e campos com 16 px de fonte, para o Safari não
+     dar zoom sozinho;
+   - Enter quebra a linha e a seta envia;
+   - o 🐞 "relatar" aparece só depois de um toque na mensagem;
+   - abrir uma conversa não abre o teclado;
+   - nenhum foco é movido pelo código ao abrir a gaveta, e o toque não deixa anel de foco.
+4. **O service worker guarda só o que é público** (`web/public/sw.js`): `/offline.html` e os ícones, num cache
+   versionado (`nod-publico-v1`). Ele só atende navegação da mesma origem fora de `/api`: vai à rede e, sem rede, mostra a
+   página "sem conexão". API, sessão, SSE, anexos e o HTML/JS do app nunca são copiados nem servidos do cache. Não há
+   fila de envio offline. Só o build registra o worker (`web/pwa.ts`), só em contexto seguro e nunca no app do Mac.
+5. **Cache HTTP** (`cacheDoArquivo` em `estatico.ts`):
+   - `/assets/*` (nome com hash do Vite): `public, max-age=31536000, immutable`;
+   - HTML, `sw.js` e manifesto: `no-cache`;
+   - ícones e logos: um dia;
+   - fontes: uma semana, como antes;
+   - tudo com `nosniff`.
+   Um `.js` que não existe continua 404 e nunca recebe o HTML do app.
+6. **Reconexão só quando caiu.** Voltar ao app (aba à frente, `online`, `pageshow`) chama `live.retomar()`. Com o stream
+   aberto, não faz nada. Caído e esperando o backoff, que chega a 30 s, reabre na hora com o `since`. Quando o servidor
+   não consegue retomar (`resumed:false`), a web relê tudo o que já tinha carregado (`invalidacoesAoRetomar`): não lidos,
+   Sua vez, trabalhos, todas as conversas e, com o "A fazer" ligado, as pendências.
+7. **Login no celular.** Continua o OAuth Google por navegação na mesma janela (`/api/sessao/google`), sem `window.open`.
+   Duas mudanças:
+   - a volta bem-sucedida responde com uma página da própria origem que segue para `/` (`PAGINA_ENTROU`), no lugar do
+     302. Assim o app nasce de uma navegação do próprio site, e o cookie `SameSite=Strict` vale nela também no Safari;
+   - o `nod_sessao` do login Google ganha `Max-Age` de 30 dias (`PERMANENCIA_SESSAO_S`). Sem isso, o iPhone apaga o
+     cookie quando o sistema fecha o app instalado em segundo plano. O cookie assinado continua sem validade no servidor,
+     antes e depois desta mudança. Isso só muda quanto o aparelho guarda o cookie.
+
+## Alternativas rejeitadas
+
+- **Rebase/merge do #99.** Conflita em sete arquivos centrais da web, e a main mudou o que ele adaptava. As ideias foram
+  portadas para o código de hoje.
+- **Celular pela largura (`max-width`).** Uma janela estreita no Mac viraria celular, e um celular deitado (844 px) não.
+- **Uma barra própria do celular em cima do cabeçalho da tela (#99).** Eram dois cabeçalhos empilhados.
+- **Service worker com cache do app (offline completo).** Guardaria conversa e sessão no aparelho e poderia prender um
+  build velho depois do deploy. O Nod sem rede não tem o que fazer além de avisar.
+- **Capacitor ou app de loja.** Assinatura, revisão da loja e uma segunda base de código, sem ganho para o uso de hoje.
+- **`SameSite=Lax` no cookie de sessão.** Também resolveria a volta do Google, mas mandaria o cookie em toda navegação
+  vinda de outro site. A página de volta resolve sem afrouxar.
+
+## Limites conhecidos
+
+- Os prints de verificação são do Chromium com toque emulado (iPhone 390×844 e Android 412×915), não do WebKit. O teclado
+  foi simulado encolhendo o viewport. O comportamento real do Safari (teclado, OAuth no app instalado, cookie) só se
+  confirma num aparelho.
+- No iPhone, o app instalado tem cookies separados do Safari: quem instala entra de novo, uma vez, dentro do app.
+- Sem push: o aviso de "Sua vez" com o app fechado não existe no celular.
+- Telas pouco usadas no celular (Raio-X, computador do bot, formulários longos) não ganharam desenho próprio. Elas cabem
+  na largura, mas não foram revistas uma a uma.
+
+## Gatilho de reversão
+
+Reverter se, em 14 dias de uso no celular, acontecer um destes:
+
+- o app instalado mostrar um build velho depois de um deploy, porque o service worker ou o cache seguraram o HTML ou o
+  JS. Tirar o registro do worker (`web/pwa.ts`) e publicar um `sw.js` que se desregistra;
+- o login no iPhone voltar à tela de entrada depois do Google. Voltar ao 302, testar `SameSite=Lax` e medir;
+- alguém no computador cair no layout do celular. A consulta está errada: estreitar `CONSULTA_CELULAR`.
+
+## Implementação (2026-10-10)
+
+- `web/lib/celular.ts` (consulta, área acima do teclado, Enter) e `web/lib/gaveta-bots.ts` (gaveta de bots, fundo,
+  `inert`, Esc, toque que mostra o "relatar", altura do `visualViewport`).
+- `web/mobile.css`, `web/index.html` (viewport, manifesto, ícones, metas do iOS), `web/pwa.ts`.
+- `web/public/manifest.webmanifest`, `web/public/sw.js`, `web/public/offline.html` e `web/public/icons/*`, gerados por
+  `node scripts/mobile/icones.mjs` a partir da marca do `favicon.svg`.
+- `web/main.ts`: ☰ no cabeçalho, gaveta fecha ao navegar, placeholder curto no celular, Enter, `retomar()` e
+  `invalidacoesAoRetomar`. `web/lib/live-events.ts`: `retomar()`. `web/estado/reducer.ts`: `invalidacoesAoRetomar`.
+- `src/adapters/http/estatico.ts`: tipos e cache. `src/adapters/http/sessao-google.ts` e `sessao-cookie.ts`: página de
+  volta e `Max-Age`.
+- Testes:
+  - `tests/unit/web/pwa.test.ts`: o worker num contexto isolado, o manifesto, os ícones e o `index.html`;
+  - `tests/unit/web/celular.test.ts`, `tests/unit/web/retomada.test.ts` e `tests/unit/web/live-events.test.ts`
+    (`retomar`);
+  - `tests/unit/http/estatico.test.ts`;
+  - `tests/integration/sessao-google.test.ts` e `tests/concurrency/admissao-por-dominio.test.ts`.
