@@ -2,9 +2,19 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- ADR-094 (celular): viewport-fit=cover para desenhar sob o entalhe com as margens de env(safe-area-inset-*); no Android
+         o teclado encolhe a página (interactive-widget), no iPhone a altura vem do visualViewport (web/lib/gaveta-bots.ts). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>nod</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131315" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Nod" />
     <!-- Tema escolhido em Preferências (web/lib/tema.ts, mesma chave): aplicado antes do primeiro quadro, senão o app pisca claro. -->
     <script>try { var t = localStorage.getItem("nod.tema"); if (t === "claro" || t === "escuro") document.documentElement.dataset.theme = t === "claro" ? "light" : "dark"; } catch (e) {}</script>
     <!-- A Geist pedida já com o HTML, sem esperar o tokens.css: menos tempo com a fonte do sistema e o texto mudando de largura. -->
@@ -15,6 +25,7 @@
     <link rel="stylesheet" href="/navegacao.css" />
     <link rel="stylesheet" href="/ligacao.css" />
     <link rel="stylesheet" href="/onboarding.css" />
+    <link rel="stylesheet" href="/mobile.css" />
   </head>
   <body>
     <!-- Regiões fixas (web/lib/render.ts): cada uma só é regravada quando o HTML muda; o composer nunca é regravado dentro da mesma conversa. -->
