@@ -14,7 +14,7 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     expect(v.registrarMemoria("p", "mac", leitura("amarela"))).toMatchObject({ mudou: true, nivel: "amarela", anterior: "verde" });
     expect(v.registrarMemoria("p", "mac", leitura("amarela")).mudou).toBe(false);
     expect(v.registrarMemoria("p", "mac", leitura("vermelha")).mudou).toBe(true);
-    expect(v.memoria("p")).toEqual({ nivel: "vermelha", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.memoria("p")).toEqual({ nivel: "vermelha", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false, discoAcabaEmMs: null });
     expect(v.memoria("outra")).toBeNull();
     agora += VALIDADE_LEITURA_MS + 1;
     expect(v.memoria("p")).toBeNull();
@@ -85,7 +85,7 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     v.registrarMemoria("p", "mac-a", leitura("verde", 400));
     expect(v.registrarMemoria("p", "mac-b", leitura("amarela", 600))).toMatchObject({ mudou: true, nivel: "amarela" });
     expect(v.registrarMemoria("p", "mac-a", leitura("verde", 400)).mudou).toBe(false);
-    expect(v.memoria("p")).toEqual({ nivel: "amarela", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.memoria("p")).toEqual({ nivel: "amarela", totalMb: 1000, processador: null, carga: null, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false, discoAcabaEmMs: null });
   });
 
   it("ADR-085: o processador de cada Mac — o pior para a pessoa, a leitura de um Mac para o puxar dele; leitura velha some", () => {
@@ -94,7 +94,7 @@ describe("trabalhos vivos: memória do Mac (#194)", () => {
     v.registrarMemoria("p", "mac-a", { ...leitura("verde", 400), processador: { nivel: "amarela", carga: 0.8 } });
     v.registrarMemoria("p", "mac-b", { ...leitura("verde", 300), processador: { nivel: "vermelha", carga: 1.6 } });
     v.registrarMemoria("p", "mac-c", leitura("verde", 100));
-    expect(v.memoria("p")).toEqual({ nivel: "verde", totalMb: 800, processador: "vermelha", carga: 1.6, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false });
+    expect(v.memoria("p")).toEqual({ nivel: "verde", totalMb: 800, processador: "vermelha", carga: 1.6, uso: null, fila: null, disco: null, discoNivel: null, discoSuportado: false, discoAcabaEmMs: null });
     expect(v.daMaquina("mac-a")).toEqual({ memoria: "verde", processador: "amarela", uso: null, carga: 0.8, disco: null, discoNivel: null });
     expect(v.daMaquina("mac-c")).toEqual({ memoria: "verde", processador: null, uso: null, carga: null, disco: null, discoNivel: null });
     expect(v.daMaquina("mac-x")).toBeNull();

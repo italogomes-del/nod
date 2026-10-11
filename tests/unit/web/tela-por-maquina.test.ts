@@ -3,7 +3,7 @@ import type { LeituraDeMaquinaDto } from "../../../src/contracts/maquina.ts";
 import type { TrabalhoDto, TrabalhosDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { leituraDoMac, memoriaDosBots, pilulaDasMaquinas, situacaoDe, textoDaEspera } from "../../../web/lib/trabalhos.ts";
-import { renderEsteMac } from "../../../web/telas/este-mac.ts";
+import { renderEsteMac, statusDoDisco, tempoAteAcabar } from "../../../web/telas/este-mac.ts";
 import { leituraNoCartao } from "../../../web/telas/maquinas.ts";
 import { renderTodosOsTrabalhos } from "../../../web/telas/trabalhos.ts";
 
@@ -128,5 +128,33 @@ describe("Máquinas: a leitura de cada uma no cartão", () => {
     const estado = estadoCom([], [leitura(VM)]);
     expect(leituraNoCartao(estado, VM.id)).toContain("Trabalho novo começa na hora");
     expect(leituraNoCartao(estado, "outra")).toBe("");
+  });
+});
+
+/** ADR-096 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem. */
+describe("a tendência do disco na tela", () => {
+  const disco = { livreMb: 14_642, totalMb: 30_000, nivel: "verde" as const, alertaMb: 10_240, criticoMb: 3_072 };
+
+  it("o tempo legível", () => {
+    expect(tempoAteAcabar(5 * 60_000)).toBe("menos de 10 min");
+    expect(tempoAteAcabar(42 * 60_000)).toBe("cerca de 40 min");
+    expect(tempoAteAcabar(6.2 * 3_600_000)).toBe("cerca de 6 h");
+    expect(statusDoDisco({ ...disco, acabaEmMs: 6 * 3_600_000 })).toBe("14 GB livres · acaba em cerca de 6 h");
+    expect(statusDoDisco({ ...disco, acabaEmMs: null })).toBe("14 GB livres");
+  });
+
+  it("no cartão da máquina folgada: o status curto avisa e fica amarelo; sem estimativa, como antes", () => {
+    const acabando = leitura(VM, { disco: { ...disco, acabaEmMs: 6 * 3_600_000 } });
+    const html = leituraNoCartao(estadoCom([], [acabando]), VM.id);
+    expect(html).toContain("Disco acaba em cerca de 6 h no ritmo atual");
+    expect(html).toContain("nivel-amarela");
+    expect(html).toContain("no ritmo atual, acaba em cerca de 6 h; o Nod limpa o que dá");
+    expect(leituraNoCartao(estadoCom([], [leitura(VM, { disco })]), VM.id)).toContain("Trabalho novo começa na hora");
+  });
+
+  it("em Este Mac: o status do disco com a estimativa e o detalhe com o que o Nod faz", () => {
+    const html = renderEsteMac(estadoCom([doMac], [leitura(MAC, { memoriaBotsMb: 400, disco: { ...disco, acabaEmMs: 3 * 3_600_000 } })]));
+    expect(html).toContain("acaba em cerca de 3 h");
+    expect(html).toContain("O Nod apaga sozinho o que dá");
   });
 });

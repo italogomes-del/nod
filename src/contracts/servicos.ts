@@ -62,7 +62,7 @@ export interface ServicesNod<Trx> {
      * ADR-085: com o pior processador e a maior carga por núcleo entre os Macs vivos dela (null = nenhum mandou). #219: e
      * o pior disco, com a histerese, e se algum app o mede. ADR-091: o maior uso da CPU e a pior fila (null = sem app novo).
      */
-    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador?: NivelPressao | null; carga?: number | null; uso?: number | null; fila?: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null; discoSuportado?: boolean } | null;
+    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador?: NivelPressao | null; carga?: number | null; uso?: number | null; fila?: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null; discoSuportado?: boolean; discoAcabaEmMs?: number | null } | null;
     /** ADR-085: a pessoa trocou o "uso do Mac" (gravado) — o puxar relê na próxima vez em vez de esperar o cache. */
     trocouUsoDoMac?(pessoaId: string): void;
   };

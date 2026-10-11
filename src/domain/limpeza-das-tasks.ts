@@ -1,4 +1,4 @@
-import type { EstadoTrabalho } from "../contracts/trabalho.ts";
+import type { EstadoTrabalho, NivelPressao } from "../contracts/trabalho.ts";
 import type { PastaParaLimpar } from "../contracts/ponte.ts";
 import { RETOMAR_ATE_MS } from "./pedido-parado.ts";
 import { pastaRelativa } from "./trabalho.ts";
@@ -62,14 +62,18 @@ export function pastaDeTask(pasta: string | null): string | null {
  * - nunca nas primeiras 2 h depois de encerrar (a retomada automática da ADR-084);
  * - `encerrada`: terminada ou falha há mais de 3 dias;
  * - `so_com_pr_mergeado`: encerrada há menos; o Mac só remove a worktree cujo PR já foi mergeado.
+ *
+ * ADR-096 (2026-10-11): com o disco da máquina `apertado` (amarelo ou vermelho), a task encerrada há mais de 2 h já vale
+ * como `encerrada`. A worktree limpa sai e a branch fica no clone: se o bot voltar à task, ele a recria. Esperar 3 dias
+ * com o disco no fim parava os bots (VM dos bots a 99% em 11/10).
  */
-export function quandoLimpar(f: FatosLimpeza, agora: number): PastaParaLimpar["quando"] | null {
+export function quandoLimpar(f: FatosLimpeza, agora: number, o: { apertado?: boolean } = {}): PastaParaLimpar["quando"] | null {
   if (f.estado !== "terminado" && f.estado !== "falhou") return null;
   if (f.terminadoEm === null || f.turnosVivos > 0 || f.decisaoPendente || f.pastaDividida) return null;
   if (pastaDeTask(f.pasta) === null) return null;
   const ha = agora - f.terminadoEm;
   if (ha >= LIMPAR_APOS_MS) return "encerrada";
-  if (ha >= RETOMADA_POSSIVEL_MS) return "so_com_pr_mergeado";
+  if (ha >= RETOMADA_POSSIVEL_MS) return o.apertado === true ? "encerrada" : "so_com_pr_mergeado";
   return null;
 }
 
@@ -117,6 +121,13 @@ export function protegidoPorMontagem(caminho: string, montagens: readonly string
 const PASTAS_REGENERAVEIS = new Set(["node_modules", "dist", "coverage", ".vite", ".next", ".turbo", ".cache", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
 
 /**
+ * ADR-096 (2026-10-11): o cache de UMA ferramenta conhecida, com nome que só ela usa, vale em qualquer nível. O monorepo
+ * tem um por pacote (`packages/auth/.turbo/`, `apps/mobile/.expo/`), e só o primeiro nome segurava 4 das 41 worktrees
+ * de task da VM dos bots em 11/10. `dist`, `coverage` e `.cache` continuam só no primeiro nível: são nomes genéricos.
+ */
+const CACHES_DE_FERRAMENTA = new Set([".turbo", ".expo", ".next", ".nuxt", ".svelte-kit", ".vite", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
+
+/**
  * O caminho ignorado (relativo à worktree, como o `git status --ignored=traditional` mostra: pasta inteira ignorada vem
  * com `/` no fim) se refaz sozinho?
  * - `valioso`: segura a worktree;
@@ -135,9 +146,75 @@ export function classificarIgnorado(caminho: string): "valioso" | "regeneravel" 
   const ultimo = partes[partes.length - 1]!;
   if (pasta && ultimo === "node_modules") return "regeneravel";
   if (!pasta && (ultimo === ".DS_Store" || ultimo.endsWith(".tsbuildinfo"))) return "regeneravel";
+  const cache = partes.findIndex((p) => CACHES_DE_FERRAMENTA.has(p));
+  if (cache > 0) return cache < partes.length - 1 ? "regeneravel" : pasta ? "conferir_env" : "valioso";
   if (PASTAS_REGENERAVEIS.has(partes[0]!)) return pasta && partes.length === 1 ? "conferir_env" : partes.length > 1 ? "regeneravel" : "valioso";
   if (!pasta && partes.length === 1 && ultimo.endsWith(".log")) return "regeneravel";
   return "valioso";
+}
+
+/**
+ * ADR-096 (definido em 2026-10-11): a limpeza não espera as 6 h quando o disco aperta. A cada 5 min a máquina lê o
+ * próprio disco (`statfs`, sem processo novo); amarelo ou vermelho (`nivelDoDisco`, os limites da ADR-085) dispara uma
+ * passada `apertada`, no máximo uma a cada 30 min, para uma passada que não liberou nada não virar um laço sobre o
+ * disco. Em 11/10 a VM dos bots ficou a 99% por horas com a limpeza esperando a próxima janela.
+ */
+export const VIGIA_DO_DISCO_MS = 5 * 60_000;
+export const ENTRE_PASSADAS_APERTADAS_MS = 30 * 60_000;
+/**
+ * ADR-096 §6 (definido em 2026-10-11): com o disco ainda verde, mas caindo no ritmo de acabar em 6 h (a tendência de
+ * `acabaEmMs`, medida na própria máquina), a passada apertada já roda: a VM perdeu 2 GB numa hora em 11/10, e 10 GB de
+ * folga duram pouco nesse ritmo.
+ */
+export const LIMPAR_ANTES_DE_ACABAR_MS = 6 * 3_600_000;
+
+/**
+ * O disco está apertado (amarelo ou vermelho) ou acaba em menos de 6 h, e a última passada apertada começou há 30 min
+ * ou mais (ou nunca houve)?
+ */
+export function passadaPorAperto(nivel: NivelPressao | null, ultimaApertadaEm: number | null, agora: number, acabaEm: number | null = null): boolean {
+  const aperto = nivel === "amarela" || nivel === "vermelha" || (acabaEm !== null && acabaEm <= LIMPAR_ANTES_DE_ACABAR_MS);
+  if (!aperto) return false;
+  return ultimaApertadaEm === null || agora - ultimaApertadaEm >= ENTRE_PASSADAS_APERTADAS_MS;
+}
+
+/**
+ * ADR-096 §4 (definido em 2026-10-11): o que a limpeza não pode apagar sem perder (worktree suja, ignorado valioso, HEAD
+ * solto, repositório dentro, as sobras da task fora de worktree) é GUARDADO compactado em `~/nod/.guardado/<bot>/`, sem
+ * o que se refaz, e só então a pasta sai. Na VM dos bots em 11/10 isso era ~3 GB de `pgdata`, logs e ferramentas, mais
+ * 5 worktrees com alterações por commitar, todos parados para sempre.
+ *
+ * - o guardado vence em 30 dias, ou em 7 com o disco apertado;
+ * - acima de 2 GB compactado, a pasta fica (`grande_demais`): guardar não pode encher o disco que se quer liberar;
+ * - a worktree órfã da raiz do bot (ADR-088 §5) sai parada há 30 dias, ou há 7 com o disco apertado, nunca com um turno
+ *   daquele bot rodando. Limpa, sai como a da task; com algo a guardar, é guardada antes.
+ */
+export const GUARDADO_VENCE_MS = 30 * 24 * 3_600_000;
+export const GUARDADO_VENCE_APERTADO_MS = 7 * 24 * 3_600_000;
+export const GUARDADO_MAX_BYTES = 2 * 1024 ** 3;
+export const ORFA_SAI_MS = 30 * 24 * 3_600_000;
+export const ORFA_SAI_APERTADO_MS = 7 * 24 * 3_600_000;
+
+/** O que nunca entra no guardado: dependência e cache de ferramenta, em qualquer nível (o nome basta para o `tar`). */
+export const FORA_DO_GUARDADO: readonly string[] = ["node_modules", ...CACHES_DE_FERRAMENTA];
+
+/** O guardado venceu? (pela hora da última mudança do arquivo) */
+export function guardadoVencido(mtime: number, agora: number, apertado: boolean): boolean {
+  return agora - mtime >= (apertado ? GUARDADO_VENCE_APERTADO_MS : GUARDADO_VENCE_MS);
+}
+
+/** A órfã parada há tempo bastante para sair? */
+export function orfaSai(ultimaMudanca: number, agora: number, apertado: boolean): boolean {
+  return agora - ultimaMudanca >= (apertado ? ORFA_SAI_APERTADO_MS : ORFA_SAI_MS);
+}
+
+/**
+ * Um nome seguro para uma referência git (`refs/nod/guardado/<rotulo>/<nome>`): só letras, números, `.`, `_` e `-`, sem
+ * começar por `.` nem terminar em `.lock`, nunca vazio.
+ */
+export function pedacoDeRef(nome: string): string {
+  const limpo = nome.normalize("NFKD").replace(/[^\w.-]+/g, "-").replace(/\.{2,}/g, ".").replace(/^[.-]+|[.-]+$/g, "").replace(/\.lock$/i, "-lock").slice(0, 80);
+  return limpo === "" ? "x" : limpo;
 }
 
 /** Por que o `git worktree remove` (sem --force) recusou, pela saída de erro dele. */

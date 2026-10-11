@@ -7,7 +7,7 @@ import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquin
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
+import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
@@ -203,7 +203,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const usoDoMac = memoria === null ? "livre" : (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO;
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
-  const topo = { pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  const topo = { pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
   const servico = deps.services.maquinas;
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
@@ -248,7 +248,8 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
       usoProcessador: l.uso,
       cargaProcessador: l.carga,
       fila: l.fila,
-      disco: l.disco && l.discoNivel ? { ...l.disco, nivel: l.discoNivel, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB } : null,
+      // ADR-096 §6: com a estimativa de quando o livre chega ao vermelho, só abaixo de 24 h (null = longe ou não cai).
+      disco: l.disco && l.discoNivel ? { ...l.disco, nivel: l.discoNivel, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(l.discoAcabaEmMs) } : null,
       discoSuportado: l.discoMedido,
       motivoEspera: portao.fundo,
       seguraTudoNovo: portao.tudoNovo !== null,

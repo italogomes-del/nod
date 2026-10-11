@@ -4,7 +4,7 @@ import type { ConectarMaquina, Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
-import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR } from "./este-mac.ts";
+import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
 
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
@@ -49,14 +49,16 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
   if (!l) return "";
   const esperam = (estado.trabalhos?.trabalhos ?? []).filter((t) => seguradoPeloMac(t, false) && t.maquina?.id === id).length;
   const oQue = l.motivoEspera === "disco" ? "espaço no disco" : l.motivoEspera === "memoria" ? "ela liberar memória" : "ela aliviar";
-  const curto = l.motivoEspera === null ? "Trabalho novo começa na hora"
+  // ADR-096 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem.
+  const acaba = typeof l.disco?.acabaEmMs === "number" ? l.disco.acabaEmMs : null;
+  const curto = l.motivoEspera === null ? (acaba !== null ? `Disco acaba em ${tempoAteAcabar(acaba)} no ritmo atual` : "Trabalho novo começa na hora")
     : `${l.motivoEspera === "disco" ? "Pouco espaço no disco" : l.motivoEspera === "memoria" ? "Pouca memória" : "Ocupada"} · ${esperam > 0 ? `${esperam} ${esperam === 1 ? "trabalho espera" : "trabalhos esperam"}` : "trabalho novo espera"} ${oQue}`;
-  const nivel = l.motivoEspera === null ? "verde" : l.seguraTudoNovo || l.pressao === "vermelha" ? "vermelha" : "amarela";
+  const nivel = l.motivoEspera === null ? (acaba !== null ? "amarela" : "verde") : l.seguraTudoNovo || l.pressao === "vermelha" ? "vermelha" : "amarela";
   const numeros = [
     `Memória ${NOME_MEMORIA[l.pressao]}`,
     l.processador ? `processador ${NOME_PROCESSADOR[l.processador]}${l.usoProcessador !== null ? ` (${Math.round(l.usoProcessador * 100)}% do tempo ocupado)` : ""}` : "processador sem leitura",
     l.fila && l.fila !== "verde" && l.cargaProcessador !== null ? `fila ${NOME_FILA[l.fila]} (${l.cargaProcessador.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} processos por núcleo)` : "",
-    l.disco ? `disco com ${discoLegivel(l.disco.livreMb)} livres de ${discoLegivel(l.disco.totalMb)}` : "disco sem leitura",
+    l.disco ? `disco com ${discoLegivel(l.disco.livreMb)} livres de ${discoLegivel(l.disco.totalMb)}${acaba !== null ? ` (no ritmo atual, acaba em ${tempoAteAcabar(acaba)}; o Nod limpa o que dá)` : ""}` : "disco sem leitura",
     l.memoriaBotsMb > 0 ? `os bots usam ${memoriaLegivel(l.memoriaBotsMb)}` : "",
   ].filter(Boolean).join(" · ");
   const porque = l.motivoEspera === null ? ""

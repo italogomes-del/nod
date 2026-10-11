@@ -6,17 +6,17 @@ import type { Deps } from "./tipos.ts";
  * As pastas de task que o Mac da pessoa pode limpar (definido em 2026-10-09, ADR-088). O servidor decide pelo banco
  * (src/domain/limpeza-das-tasks.ts); o Mac confere o disco e apaga só o que o git deixa apagar sem --force.
  */
-export async function pastasParaLimpar(deps: Deps): Promise<PastaParaLimpar[]> {
+export async function pastasParaLimpar(deps: Deps, o: { apertado?: boolean } = {}): Promise<PastaParaLimpar[]> {
   const agora = deps.agora();
   const candidatos = await deps.repos.trabalhos.candidatosALimpeza(agora - JANELA_DA_LIMPEZA_MS);
   return candidatos.flatMap((c) => {
-    const quando = quandoLimpar(c, agora);
+    const quando = quandoLimpar(c, agora, { apertado: o.apertado === true });
     const pasta = pastaDeTask(c.pasta);
     return quando && pasta ? [{ trabalhoId: c.id, pasta, quando }] : [];
   });
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro"];
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**
@@ -39,6 +39,11 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     duracaoMs: inteiro(o.duracaoMs),
     ...(o.simulada === true ? { simulada: true, estimadoBytes: inteiro(o.estimadoBytes) } : {}),
     ...(o.adiada === true ? { adiada: true } : {}),
+    ...(o.apertada === true ? { apertada: true, cachesBytes: inteiro(o.cachesBytes) } : {}),
+    // ADR-096 §4: só aparecem quando a máquina manda (máquina antiga não manda).
+    ...(inteiro(o.guardadas) > 0 ? { guardadas: inteiro(o.guardadas), guardadoBytes: inteiro(o.guardadoBytes) } : {}),
+    ...(inteiro(o.guardadosVencidos) > 0 ? { guardadosVencidos: inteiro(o.guardadosVencidos) } : {}),
+    ...(inteiro(o.orfasRemovidas) > 0 ? { orfasRemovidas: inteiro(o.orfasRemovidas) } : {}),
   };
 }
 
@@ -54,6 +59,10 @@ export function camposDoRelato(r: RelatoLimpeza): Record<string, number> {
     duracao_ms: r.duracaoMs,
   };
   if (r.simulada) campos.estimado_mb = Math.round((r.estimadoBytes ?? 0) / 1_048_576);
+  if (r.apertada) { campos.apertada = 1; campos.caches_mb = Math.round((r.cachesBytes ?? 0) / 1_048_576); }
+  if (r.guardadas) { campos.guardadas = r.guardadas; campos.guardado_mb = Math.round((r.guardadoBytes ?? 0) / 1_048_576); }
+  if (r.guardadosVencidos) campos.guardados_vencidos = r.guardadosVencidos;
+  if (r.orfasRemovidas) campos.orfas_removidas = r.orfasRemovidas;
   for (const [m, n] of Object.entries(r.puladas)) if (n) campos[`pulada_${m}`] = n;
   return campos;
 }

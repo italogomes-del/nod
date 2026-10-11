@@ -522,10 +522,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     },
 
     /** ADR-088: a regra de quem pode ser limpo lê o banco na tx escopada da pessoa; o Mac apaga. */
-    async pastasParaLimpar(pessoaId): Promise<PastaParaLimpar[]> {
+    async pastasParaLimpar(pessoaId, o): Promise<PastaParaLimpar[]> {
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return [];
-      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo)));
+      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true }));
     },
 
     /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
