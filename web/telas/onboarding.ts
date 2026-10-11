@@ -3,6 +3,7 @@ import type { IaDesktop, ResultadoIaDesktop, TesteDeIa } from "../../src/contrac
 import { botao, esc, iconeAgente } from "../lib/render.ts";
 import { COMANDO_ATUALIZAR_IA, desatualizado, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
+import { IAS_MAC, logoDaIa, renderCartaoIa, vistaDaIa, type ContextoCartao, type UiIas } from "./cartao-ia.ts";
 
 /**
  * O onboarding por ligação na web (definido em 2026-10-04, ADR-077; protótipo "HiFiMac" da Proposta 2, aprovado em
@@ -40,6 +41,11 @@ export type EstadoTelaOnboarding = {
   appConectando: boolean;
   /** Um clique de card em andamento (o botão fica ocupado). */
   ocupado: boolean;
+  /**
+   * As IAs do app do Mac (`nodDesktop.ias`, rc.7 em diante; web/telas/cartao-ia.ts). Com a ponte, a etapa "A IA dos seus
+   * bots" usa o mesmo cartão de Provedores de IA (tela 5 do plano das IAs); sem ela, as telas de 2026-10-05.
+   */
+  iasMac?: UiIas | null;
 };
 
 // ---- textos -------------------------------------------------------------------------------------------------------------
@@ -426,7 +432,7 @@ export function conexaoDepoisDoVeredito(c: ConexaoIa, v: TesteDeIa): ConexaoIa |
 }
 
 // ---- 2c. as telas da IA -----------------------------------------------------------------------------------------------------
-type TelaExecutor = Pick<EstadoTelaOnboarding, "dados" | "procurando" | "iaEntrando" | "notaIa" | "teste">;
+type TelaExecutor = Pick<EstadoTelaOnboarding, "dados" | "procurando" | "iaEntrando" | "notaIa" | "teste" | "iasMac">;
 
 /** A pergunta do nod e a resposta da IA (os três pontinhos enquanto ela não vem). */
 function htmlProva(nome: string | null, nomeIa: string, resposta: string | null): string {
@@ -524,6 +530,7 @@ function htmlConectada(e: TelaExecutor, t: TesteNaTela, ia: IaDesktop): string {
  */
 export function htmlExecutor(e: TelaExecutor): string {
   const t = e.teste;
+  if (t && e.iasMac?.noApp) return htmlExecutorNoApp(e, t, e.iasMac);
   if (t) {
     const tela = telaDaIa(t);
     const pronta = iaQueRespondeu(t.vereditos);
@@ -541,6 +548,39 @@ export function htmlExecutor(e: TelaExecutor): string {
   }).join("");
   const nota = e.notaIa ?? "Dá para trocar ou adicionar outra depois, em Ajustes.";
   return `<section class="ob-tela ob-executor" aria-label="A IA dos seus bots">${cabeca}<div class="ob-cards-ia">${cards}</div><p class="ob-nota" role="status">${esc(nota)}</p></section>`;
+}
+
+/**
+ * Tela 5 do plano das IAs (protótipo Onboarding, 2026-10-09): dentro do app do Mac com a ponte `ias`, a etapa é a lista
+ * de cartões de Provedores de IA. O app já procurou durante o "olá"; instalar, entrar e testar acontecem dentro do
+ * cartão, em até três passos com "Precisa de ajuda?"; a falha fica no passo, em âmbar, com "Tentar de novo". O teste de
+ * uma frase continua sendo o do onboarding (onboarding-teste.ts): é ele que diz quem respondeu e libera o Continuar.
+ */
+function htmlExecutorNoApp(e: TelaExecutor, t: TesteNaTela, ui: UiIas): string {
+  const vereditos = Object.fromEntries(Object.entries(t.vereditos).map(([ia, v]) => [ia, { estado: v.estado, ...(v.causa ? { causa: v.causa } : {}), ...(v.resposta ? { resposta: v.resposta } : {}) }]));
+  // O teste do "olá" ainda roda: a IA logada sem veredito está sendo testada.
+  const testando = IAS_MAC.filter((ia) => t.testando.includes(ia) || (t.rodando && !t.vereditos[ia] && ui.estados[ia]?.estado === "pronta"));
+  const c: ContextoCartao = { servidor: null, ui, agora: Date.now(), onde: "onboarding", vereditos, testandoNoOnboarding: testando };
+  const prontas = ORDEM_IAS.filter((ia) => t.vereditos[ia]?.estado === "pronto");
+  const procurando = IAS_MAC.every((ia) => !ui.estados[ia] || ui.estados[ia]?.estado === "procurando");
+  const titulo = prontas.length ? "Seus bots já têm uma IA" : "A IA dos seus bots";
+  const cabeca = cabecaIa(titulo, "Seus bots trabalham com a conta que você já assina, aqui neste Mac. O nod nunca vê sua senha.");
+  if (procurando) return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabeca}<div class="ob-procurando" role="status">${GIRA}Procurando o Claude e o ChatGPT neste Mac…</div><p class="ob-nota"></p></section>`;
+  const cards = ORDEM_IAS.map((ia) => {
+    const v = vistaDaIa(ia, c);
+    return `<div class="ob-card-ia${v.passos ? " aberto" : ""}${v.tom === "aviso" ? " aviso" : ""}">${renderCartaoIa(v, ui, { verificar: false })}</div>`;
+  }).join("");
+  const [primeira, segunda] = prontas;
+  const ordem = primeira && segunda
+    ? `<div class="ordem-final"><span>Seus bots usam</span>${logoDaIa(primeira)}<b>${esc(NOME_IA[primeira])}</b><span>e, se ele parar,</span>${logoDaIa(segunda)}<b>${esc(NOME_IA[segunda])}</b></div>`
+    : "";
+  const rotulo = prontas.length === 1 && primeira ? `Continuar com o ${NOME_IA[primeira]}` : "Continuar";
+  const nota = e.notaIa ?? (prontas.length === 0
+    ? "Conecte pelo menos uma IA para seus bots começarem."
+    : prontas.length === 1 ? "Dica: conecte as duas. Se uma chegar ao limite, a outra assume. Dá para fazer depois em Provedores de IA." : "Dá para mudar a ordem depois em Provedores de IA.");
+  const desab = prontas.length === 0 || t.seguindo;
+  return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabeca}<div class="ob-cards-ia largo">${cards}</div>
+    <div class="ob-seguir">${ordem}<button type="button" class="ob-pilula grande" data-act="onboarding-ia-continuar"${desab ? " disabled" : ""}>${t.seguindo ? GIRA : ""}${esc(rotulo)}</button><p class="ob-nota" role="status">${esc(nota)}</p></div></section>`;
 }
 
 /** A orientação quando o clique não chega a um app do Mac (navegador comum ou app antigo). */

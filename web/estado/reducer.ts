@@ -5,6 +5,7 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { IasDaPessoa } from "../../src/contracts/inteligencia.ts";
 import type { DisponibilidadeLigacao } from "../../src/contracts/ligacao.ts";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
@@ -23,6 +24,8 @@ import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
+import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
+import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
 
 /**
  * Estado da web (ADR-020: a web decide, nunca executa; ADR-029: todo fail-closed vira estado
@@ -128,7 +131,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -140,6 +143,17 @@ export type Estado = {
   inventario: Inventario | null;
   /** Interruptor de executor da máquina (catcher ⇄ claude-cli): estado escrito de cada opção e a última recusa. */
   executor: EstadoExecutor | null;
+  /**
+   * As IAs da pessoa (`GET /ias`, definido em 2026-10-10, plano das IAs): a ordem do Automático, o estado de cada uma com
+   * o limite e os modelos. undefined = ainda não lido; null = o servidor não tem a rota (versão anterior).
+   */
+  ias?: IasDaPessoa | null;
+  /** As IAs do app do Mac (`nodDesktop.ias`) e o que é só da tela nos cartões (web/telas/cartao-ia.ts). */
+  iasMac: UiIas;
+  /** O rascunho do nível Inteligência da gaveta (2B) até Salvar; null = nenhum. */
+  rascunhoIa: RascunhoInteligencia | null;
+  /** O bot cujo menu de Inteligência (2A) está aberto na gaveta; null = fechado. */
+  menuIa: string | null;
   conversas: Record<string, ConversaEstado>;
   /**
    * O turno vivo de cada conversa carregada (turno.delta, turno.atividade, turno.tarefas), por conversaId e
@@ -286,6 +300,13 @@ export type Acao =
   | { tipo: "hidratar-frota"; frota: FrotaDto }
   | { tipo: "hidratar-inventario"; inventario: Inventario }
   | { tipo: "hidratar-executor"; executor: EstadoExecutor }
+  | { tipo: "hidratar-ias"; ias: IasDaPessoa | null }
+  /** Mudou algo das IAs do Mac ou da tela dos cartões (só os campos que vieram). */
+  | { tipo: "ias-mac"; mudanca: Partial<UiIas> }
+  /** A ordem arrastada em Provedores de IA, já na tela antes do servidor responder. */
+  | { tipo: "ordem-ias"; ordem: IasDaPessoa["ordem"] }
+  | { tipo: "rascunho-ia"; rascunho: RascunhoInteligencia | null }
+  | { tipo: "menu-ia"; agenteId: string | null }
   | { tipo: "hidratar-conversa"; conversa: ConversaDto; agora: number }
   | { tipo: "hidratar-sua-vez"; suaVez: SuaVezDto }
   | { tipo: "hidratar-nao-lidos"; naoLidos: NaoLidosDto }
@@ -335,6 +356,9 @@ export const estadoInicial: Estado = {
   frota: null,
   inventario: null,
   executor: null,
+  iasMac: UI_IAS_INICIAL,
+  rascunhoIa: null,
+  menuIa: null,
   conversas: {},
   atividades: {},
   turnosVivos: {},
@@ -384,6 +408,9 @@ export const estadoInicial: Estado = {
   usoDoMac: "equilibrado",
   tempoTaskAberto: null,
 };
+
+/** A posição de uma IA na ordem nova (as que não estão nela vão para o fim, na ordem de antes). */
+const posicao = (ordem: readonly string[], id: string): number => (ordem.includes(id) ? ordem.indexOf(id) : ordem.length);
 
 /** A lista de tarefas de um frame: item fora do formato fica de fora (a web nunca confia no formato do frame). */
 const ESTADOS_TAREFA: Record<EstadoDaTarefa, true> = { pendente: true, andamento: true, feita: true };
@@ -588,7 +615,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-24 (emenda da ADR-037): só a SAÚDE (entrou ou saiu do ar) muda a frota — a
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "maquinas"),
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", "maquinas"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
@@ -625,7 +652,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (nivel !== "verde" && nivel !== "amarela" && nivel !== "vermelha") return e;
     return invalidar(e.pressao === nivel ? e : { ...e, pressao: nivel }, "trabalhos");
   },
-  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
 /** Frames que trazem fala nova (ou o fim de um turno) para a conversa do bot: a tela da task aberta relê as mensagens dela. */
@@ -707,6 +734,19 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, inventario: acao.inventario };
     case "hidratar-executor":
       return { ...estado, executor: acao.executor };
+    case "hidratar-ias":
+      return { ...estado, ias: acao.ias };
+    case "ias-mac":
+      return { ...estado, iasMac: { ...estado.iasMac, ...acao.mudanca } };
+    case "ordem-ias": {
+      if (!estado.ias) return estado;
+      const ias = [...estado.ias.ias].sort((a, b) => posicao(acao.ordem, a.id) - posicao(acao.ordem, b.id));
+      return { ...estado, ias: { ...estado.ias, ordem: acao.ordem, ordemPadrao: false, ias } };
+    }
+    case "rascunho-ia":
+      return { ...estado, rascunhoIa: acao.rascunho };
+    case "menu-ia":
+      return { ...estado, menuIa: acao.agenteId };
     case "hidratar-conversa": {
       const conversaId = acao.conversa.conversa.id;
       // Turno aberto que a web não viu nascer (página recarregada no meio dele): o REST o devolve e ele
@@ -748,7 +788,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, conectando, avisoConexao: acao.valor ? null : estado.avisoConexao };
     }
     case "gaveta":
-      return { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null };
+      // O rascunho da Inteligência (2B) e o menu rápido (2A) não sobrevivem à troca de nível.
+      return { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null };
     case "lista-de-pasta":
       return { ...estado, listaDePasta: { ...estado.listaDePasta, [acao.propostaId]: acao.lista } };
     case "aviso-conexao":
@@ -923,6 +964,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const secao = estado.espaco?.secao;
   if (secao === "agentes" && !estado.gestao) faltas.push("gestao");
   if (!estado.frota) faltas.push("frota");
+  // Plano das IAs (2026-10-10): Provedores de IA, a gaveta (2A/2B) e as linhas de troca de IA no chat leem `GET /ias`.
+  if (estado.sessao && estado.ias === undefined && (secao === "conexao" || t.tipo === "conversa")) faltas.push("ias");
   // ADR-077: o onboarding é lido uma vez por sessão (a falha vira null e o app abre normal).
   if (estado.sessao && estado.onboarding === undefined) faltas.push("onboarding");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
@@ -972,7 +1015,7 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
   if (!estado.sessao) return [];
   const t = estado.tela;
   const todas: Invalidacao[] = [
-    "frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", "ligacao", "trabalhos",
+    "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "salas", "rotinas", "ligacao", "trabalhos",
     ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
     ...(A_FAZER_LIGADO ? Object.keys(estado.pendencias).map((id): Invalidacao => `pendencias:${id}`) : []),
     ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),

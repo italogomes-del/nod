@@ -1,16 +1,13 @@
 import type { Estado, SecaoEspaco } from "../estado/reducer.ts";
 import type { EstadoAvisos } from "../lib/avisos.ts";
 import { ICONE } from "../lib/icones.ts";
-import { botao, esc, hora } from "../lib/render.ts";
-import { haQuanto } from "../lib/relogio.ts";
+import { esc } from "../lib/render.ts";
 import type { Volta } from "../lib/volta.ts";
-import { inventarioEmUso, renderExecutor, situacaoMotorFora, textoInventario } from "./frota.ts";
+import { pilhaDeAvatares } from "./cartao-ia.ts";
 import { renderChaves } from "./chaves.ts";
 import { renderGestao } from "./gestao.ts";
-import { desatualizado, ehIa, linhaAtualizarIa } from "./ia-fora.ts";
-import { logoApp } from "./marketplace.ts";
-import { renderNegacoes, textoMotivo } from "./negacao.ts";
 import { renderPreferenciaModoDev } from "./modo-dev.ts";
+import { renderProvedores } from "./provedores.ts";
 import { renderEsteMac } from "./este-mac.ts";
 import { renderMaquinas } from "./maquinas.ts";
 import { renderRelatos } from "./relatos.ts";
@@ -22,7 +19,8 @@ import { renderRelatos } from "./relatos.ts";
  * veio>" (mais o Esc), que diz para onde a pessoa volta. Sem ×: os dois fariam a mesma coisa.
  */
 export const SECOES_ESPACO: readonly { id: SecaoEspaco; nome: string; icone: string }[] = [
-  { id: "conexao", nome: "Conexão", icone: ICONE.plug },
+  // definido em 2026-10-10 (plano das IAs, protótipo Main): "Conexão" vira "Provedores de IA", com os logos das IAs.
+  { id: "conexao", nome: "Provedores de IA", icone: pilhaDeAvatares(true) },
   { id: "avisos", nome: "Avisos", icone: ICONE.sino },
   { id: "preferencias", nome: "Preferências", icone: ICONE.codigo },
   { id: "este-mac", nome: "Este Mac", icone: ICONE.medidor },
@@ -58,7 +56,7 @@ export function renderEspaco(estado: Estado, ambiente: Ambiente, avisos: EstadoA
 function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos): string {
   switch (secao) {
     case "conexao":
-      return renderConexao(estado);
+      return renderProvedores(estado);
     case "avisos":
       return renderAvisos(avisos);
     case "preferencias":
@@ -74,41 +72,6 @@ function conteudo(estado: Estado, secao: SecaoEspaco, avisos: EstadoAvisos): str
     case "relatos":
       return renderRelatos(estado);
   }
-}
-
-/**
- * Conexão: quem executa o trabalho dos bots, escrito (ADR-029), e os conectores fora do ar — um por linha, com o app,
- * o motivo e desde quando, e "Tentar de novo" (a mesma sonda do marketplace).
- */
-function renderConexao(estado: Estado): string {
-  const inv = inventarioEmUso(estado);
-  const pronto = inv?.estado === "pronto";
-  const simulacao = estado.executor?.atual === "catcher";
-  const titulo = !inv ? "Verificando conexão…" : inv.estado !== "pronto" ? situacaoMotorFora(inv, estado.executor?.atual) : simulacao ? "Modo de simulação" : "Sua IA está conectada";
-  const atual = estado.executor?.atual;
-  // NOD-171: o CLI abaixo do piso ganha o comando que atualiza, com "Copiar" e, no app do Mac, "Atualizar".
-  const atualizar = desatualizado(inv) && ehIa(atual) ? linhaAtualizarIa(atual, "nodDesktop" in globalThis) : "";
-  const negacoes = [...(estado.frota?.negacoes ?? []), ...estado.negacoes.filter((n) => n.classe !== "conector_indisponivel")];
-  const fora = negacoes.filter((n) => n.classe === "conector_indisponivel");
-  const outras = negacoes.filter((n) => n.classe !== "conector_indisponivel");
-  const linhaFora = (n: (typeof fora)[number]) => {
-    const c = estado.conectores.find((x) => x.slug === n.nome || x.nome === n.nome);
-    const nome = c?.nome ?? n.nome;
-    const tentar = c ? botao("sondar-conector", "Tentar de novo", { classe: "sm", id: c.id }) : "";
-    const motivo = textoMotivo(n.motivo);
-    return `<div class="espaco-fora" role="status">${logoApp(estado, c?.slug ?? n.nome, nome)}<div><b>${esc(nome)}</b>${motivo ? ` <span>· ${esc(motivo)}</span>` : ""}<small>desde ${esc(hora(n.desde))} (${esc(haQuanto(estado.agora - n.desde))})</small></div>${tentar}</div>`;
-  };
-  return `<section class="espaco-secao">
-      <h2>Conexão</h2>
-      <p class="intro">Quem executa o trabalho dos seus bots: a sua conta de IA ou a simulação sem custo.</p>
-      <div class="espaco-cartao">
-        <div class="espaco-ia"><span class="espaco-ponto ${pronto ? "ok" : "falha"}" aria-hidden="true"></span><div role="status"><b>${esc(titulo)}</b><small>${esc(textoInventario(inv, estado.agora))}</small></div>${botao("sondar-inventario", "Verificar de novo", { classe: "sm", titulo: "Verifica a conexão com sua conta" })}</div>
-        ${atualizar}
-        ${renderExecutor(estado)}
-      </div>
-      ${fora.length ? `<h3 class="espaco-subtitulo">Fora do ar</h3>${fora.map(linhaFora).join("")}` : ""}
-      ${renderNegacoes(outras, estado.agora)}
-    </section>`;
 }
 
 const SITUACAO: Record<EstadoAvisos["onde"], Record<EstadoAvisos["situacao"], string>> = {

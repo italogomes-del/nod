@@ -6,6 +6,8 @@ import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { formatoData } from "../lib/formato-data.ts";
 import { botao, esc, hora, paragrafos } from "../lib/render.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
+import { estadoNaTela, type UiIas } from "./cartao-ia.ts";
+import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 
 /**
  * A conversa quando a conta da IA não serve (definido em 2026-10-05; protótipo "Nod — primeira sessão sem tropeços",
@@ -154,35 +156,76 @@ export function avisoModeloRecusado(m: Mensagem, p: { nomeDoBot: string | null; 
   });
 }
 
+/**
+ * Tela 4 do plano das IAs (protótipo SemOutra, aprovado em 2026-10-09; antes NOD-171 era um cartão âmbar grande): o turno
+ * parou no limite da assinatura e NÃO havia outra IA pronta para assumir. Uma linha centralizada, com acento âmbar
+ * discreto, que diz até quando e traz o passo que resolve, pelo estado da OUTRA IA: "Continuar pelo ChatGPT" (instalada,
+ * falta entrar), "Instalar o ChatGPT", o código do login enquanto ela entra. A linha acompanha o login ela mesma
+ * (`data-fica`); o Claude, que pede o código colado, termina em Provedores de IA. Passado o limite (ou uma hora sem prazo),
+ * vira um registro sem cor. null quando a mensagem não é desse aviso.
+ */
+export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean }): string | null {
+  const l = m.payload;
+  if (l?.kind !== "limite_do_plano") return null;
+  const ia = ehIa(l.harness) ? l.harness : null;
+  const nome = ia ? PROVEDOR_DA_IA[ia].nome : "Sua IA";
+  const vigente = l.voltaEm !== null ? l.voltaEm > p.agora : p.agora - m.criadoEm < 60 * 60_000;
+  if (!vigente) {
+    const quando = l.voltaEm !== null ? `até ${hora(l.voltaEm)}` : `às ${hora(m.criadoEm)}`;
+    return `<div class="linha-centro-wrap linha-limite-passou"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(nome)} esteve no limite ${esc(quando)}</span></span></div>`;
+  }
+  const limite = l.voltaEm !== null ? `${nome} no limite até ${quandoVolta(l.voltaEm, p.agora).replace(/^às /, "")}` : `${nome} chegou ao limite`;
+  const acao = ia ? acaoSemOutra(ia, p) : null;
+  const corpo = acao?.substitui ? acao.html : `<span>${esc(limite)}</span>${acao ? `<span aria-hidden="true">·</span>${acao.html}` : ""}`;
+  return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span>${corpo}</span></div>`;
+}
+
+const ICONE_RELOGIO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';
+const GIRA_LINHA = '<span class="ob-gira" aria-hidden="true"></span>';
+
+/** O passo da linha do limite, pelo estado da outra IA (no app, o do Mac; fora dele, o do servidor). */
+function acaoSemOutra(ia: IdIa, p: { agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean; nomeDoBot: string | null }): { html: string; substitui?: true } | null {
+  const outra = OUTRA[ia];
+  const { nome, cli } = PROVEDOR_DA_IA[outra];
+  const e = estadoNaTela(outra, p.ias?.find((x) => x.id === outra), p.ui, p.agora);
+  const link = (act: string, rotulo: string, dados = "") => `<button type="button" class="linha-link" data-act="${act}" data-ia="${outra}"${dados}>${esc(rotulo)}</button>`;
+  const provedores = (rotulo: string) => `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">${esc(rotulo)}</button>`;
+  const noApp = p.ui.noApp;
+  switch (e.estado) {
+    case "pronta":
+      if (p.fixa && p.agenteId) return { html: `<button type="button" class="linha-link" data-act="inteligencia" data-id="${esc(p.agenteId)}">Usar o ${esc(nome)}</button>` };
+      return { html: `<span>${esc(nome)} conectado · mande a mensagem de novo</span>`, substitui: true };
+    case "falta_entrar":
+    case "sem_acesso":
+      return { html: noApp ? link("ia-entrar", `Continuar pelo ${nome}`) : provedores(`Conectar o ${nome}`) };
+    case "nao_instalada":
+    case "sem_node":
+    case "desatualizada":
+      return { html: noApp ? link("ia-instalar", `Instalar o ${nome}`) : provedores(`Conectar o ${nome}`) };
+    case "instalando":
+      return { html: `<span>Instalando o ${esc(cli)}…</span>${GIRA_LINHA}`, substitui: true };
+    case "entrando": {
+      const login = e.mac?.login;
+      if (outra === "codex-cli" && login?.codigoDoDispositivo) {
+        return { html: `<span>Digite</span><code class="linha-codigo">${esc(login.codigoDoDispositivo)}</code><span>na página da OpenAI</span><span aria-hidden="true">·</span>${link("ia-abrir-link", "Abrir")}${GIRA_LINHA}`, substitui: true };
+      }
+      return { html: `<span>Entre no ${esc(nome)}</span><span aria-hidden="true">·</span>${provedores("Terminar em Provedores de IA")}`, substitui: true };
+    }
+    case "testando":
+      return { html: `<span>${esc(nome)} conectado · testando</span>${GIRA_LINHA}`, substitui: true };
+    case "no_limite":
+      return { html: `<span>${esc(nome)} também está no limite</span>`, substitui: true };
+    case "procurando":
+    case "lenta":
+    case "config_invalida":
+      return { html: provedores("Ver Provedores de IA") };
+  }
+}
+
 /** "às 17:00" no mesmo dia; "em 09/10 às 17:00" noutro — na hora LOCAL de quem lê (o texto gravado é de São Paulo). */
 function quandoVolta(voltaEm: number, agora: number): string {
   const dia = (t: number) => formatoData("pt-BR", { day: "2-digit", month: "2-digit" }).format(new Date(t));
   return dia(voltaEm) === dia(agora) ? `às ${hora(voltaEm)}` : `em ${dia(voltaEm)} às ${hora(voltaEm)}`;
-}
-
-/**
- * NOD-171 (protótipo do Gil, estado 3): o turno parou no limite do plano. No Claude Code o protocolo diz quando volta;
- * no Codex só o texto do erro, então o card "parece" e manda conferir o plano no ChatGPT. O nod não tenta de novo
- * sozinho; "Trocar a IA" leva à Inteligência do bot. null quando a mensagem não é desse aviso.
- */
-export function avisoLimiteDoPlano(m: Mensagem, p: { nomeDoBot: string | null; agenteId: string | null; agora: number }): string | null {
-  const l = m.payload;
-  if (l?.kind !== "limite_do_plano") return null;
-  const bot = p.nomeDoBot ?? "O bot";
-  const codex = l.harness === "codex-cli";
-  const provedor = ehIa(l.harness) ? PROVEDOR_DA_IA[l.harness].nome : null;
-  const titulo = codex ? "Seu plano do ChatGPT parece ter atingido o limite de uso." : `Seu plano ${provedor ? `do ${provedor}` : "da sua IA"} atingiu o limite de uso.`;
-  const quando = l.voltaEm !== null && l.voltaEm > p.agora ? `Volta a funcionar ${quandoVolta(l.voltaEm, p.agora)}.` : codex ? "O Codex recusou o pedido. Confira o uso do seu plano no ChatGPT e tente de novo quando ele liberar." : "Espere o uso renovar e tente de novo.";
-  const trocar = p.agenteId ? botao("inteligencia", p.nomeDoBot ? `Trocar a IA de ${esc(p.nomeDoBot)}` : "Trocar a IA", { classe: "sm", id: p.agenteId }) : undefined;
-  const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="limite-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
-  return avisoDeEstado({
-    tom: "alerta",
-    titulo,
-    texto: `${quando} ${bot} parou no meio, e o que já fez está acima. O nod não tenta de novo sozinho.`,
-    extra: detalhes,
-    acao: trocar,
-    classe: "aviso-limite-plano",
-  });
 }
 
 /** NOD-171: o comando que atualiza a IA, com "Copiar"; no app do Mac, "Atualizar" abre a página oficial. */
@@ -192,13 +235,22 @@ export function linhaAtualizarIa(ia: IdIa, noApp: boolean): string {
   return `<div class="ia-atualizar"><p>No Terminal deste Mac, rode:</p><div class="ia-comando"><code>${esc(comando)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: comando } })}</div><p class="mudo">O nod percebe sozinho quando a versão nova estiver instalada.</p>${abrir}</div>`;
 }
 
-/** A linha "Respondendo pelo ChatGPT…": dita uma vez, quando o bot em automático troca de IA. */
-export function linhaIaTrocada(m: Mensagem): string | null {
+/**
+ * Tela 3 do plano das IAs (protótipo Troca, aprovado em 2026-10-09): o bot em automático passou a responder por outra IA.
+ * Uma linha centralizada e discreta — "O Claude chegou ao limite · respondendo pelo ChatGPT" —, dita uma vez por troca;
+ * o porquê, até quando e "Ver em Provedores de IA" ficam atrás do clique. `modelo` = o modelo do bot na IA que assumiu.
+ */
+export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null } = {}): string | null {
   const p = m.payload;
   if (p?.kind !== "ia_trocada" || !ehIa(p.de) || !ehIa(p.para)) return null;
   const de = PROVEDOR_DA_IA[p.de];
   const para = PROVEDOR_DA_IA[p.para];
-  // revisto em 2026-10-10 (emenda da ADR-036): a troca pelo limite da assinatura; a linha discreta da tela nova é o PR da web.
-  const motivo = p.causa === "limite" ? `O ${de.nome} chegou ao limite da assinatura.` : p.causa === "conta_sem_acesso" ? `A conta do ${de.nome} deste Mac está sem acesso ao ${de.cli}.` : `O ${de.cli} deste Mac não respondeu.`;
-  return `<div class="aviso-estado tom-info aviso-compacto aviso-ia-trocada">${logo(p.para)}<div class="aviso-estado-txt">Respondendo pelo ${esc(para.nome)}. ${esc(motivo)}</div>${botao("secao-espaco", "Ver opções", { classe: "sm", dados: { secao: "conexao" } })}</div>`;
+  const comModelo = extra.modelo ? `o ${para.nome} (${extra.modelo})` : `o ${para.nome}`;
+  const [motivo, detalhe] = p.causa === "limite"
+    ? [`O ${de.nome} chegou ao limite`, `A assinatura do ${de.nome} chegou ao limite${p.renovaEm ? ` e renova ${quandoVolta(p.renovaEm, m.criadoEm)}` : ""}. Até lá, seus bots em automático usam ${comModelo}. Depois, voltam sozinhos para o ${de.nome}.`]
+    : p.causa === "conta_sem_acesso"
+      ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} deste Mac entrou, mas não tem acesso ao ${de.cli} pela assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
+      : [`O ${de.nome} não respondeu`, `O ${de.cli} deste Mac não respondeu. Seus bots em automático usam ${comModelo} até ele voltar.`];
+  const ver = `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA</button>`;
+  return `<div class="linha-centro-wrap linha-ia"><details class="linha-ia-troca" data-disclosure="ia-trocada-${esc(m.id)}"><summary class="linha-centro">${logo(p.para)}<span>${esc(motivo)} ·</span><b>respondendo pelo ${esc(para.nome)}</b></summary><p class="linha-ia-detalhe">${esc(detalhe)} ${ver}</p></details></div>`;
 }

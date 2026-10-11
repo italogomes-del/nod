@@ -6,7 +6,8 @@ import { esc } from "../lib/render.ts";
 import { dialogo } from "./gestao-agentes.ts";
 import { TEXTO_CONSENTIMENTO } from "./ligacao.ts";
 import { criarTesteDeIas } from "./onboarding-teste.ts";
-import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
+import type { UiIas } from "./cartao-ia.ts";
+import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, ORDEM_IAS, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
 
 /**
  * O controlador do onboarding por ligação (definido em 2026-10-04, ADR-077): a abertura, a sondagem da IA do Mac, o
@@ -50,6 +51,8 @@ export type DepsOnboarding = {
   invalidar: () => void;
   erro: (e: unknown) => void;
   aoMudar: () => void;
+  /** As IAs do app do Mac (web/telas/cartao-ia.ts): com a ponte `ias`, a etapa da IA usa o cartão de Provedores de IA. */
+  iasMac?: () => UiIas;
 };
 
 export type TelaOnboarding = ReturnType<typeof criarTelaOnboarding>;
@@ -149,6 +152,7 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
       emLigacao: deps.ligacao.ativa() !== null,
       appConectando: deps.conectando(d.modelo.app.slug),
       ocupado,
+      iasMac: deps.iasMac?.() ?? null,
     };
   }
 
@@ -180,10 +184,18 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     teste.iniciar(d);
     const destino = destinoAoFimDoOla(teste.naTela());
     if (destino === "como_antes") { await seguirPeloLogin(d, true); return; }
-    if (destino === "ligar") { await teste.seguir(); return; }
+    // Tela 5 do plano das IAs (2026-10-10): no app com a ponte `ias`, uma IA pronta e a outra não, a tela para nos cartões
+    // com "Continuar com o …" e a dica de conectar a segunda (se uma chegar ao limite, a outra assume).
+    if (destino === "ligar" && !sugerirSegunda()) { await teste.seguir(); return; }
     // O teste ainda roda, ou nenhuma IA respondeu: a etapa "A IA dos seus bots" (a tela sai de `telaDaIa`).
     deps.aoMudar();
     if (d.etapa !== "executor") await mudarEtapa("executor").catch(() => undefined);
+  }
+
+  /** Com a ponte `ias` e uma IA que ainda não respondeu: a etapa da IA mostra os cartões antes de ligar. */
+  function sugerirSegunda(): boolean {
+    const t = teste.naTela();
+    return Boolean(deps.iasMac?.().noApp && t && ORDEM_IAS.some((ia) => t.vereditos[ia]?.estado !== "pronto"));
   }
 
   /** O caminho de 2026-10-04, sem teste: o que o servidor diz do login decide entre a ligação e os cards de IA. */

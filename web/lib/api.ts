@@ -14,6 +14,8 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { IasDaPessoa, InteligenciaBot, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
+import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
@@ -139,6 +141,11 @@ export function criarApi(escopo: Escopo) {
     ambiente: () => get<AmbienteBancoDto>("ambiente"),
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
+    // Plano das IAs (2026-10-10): a ordem do Automático da pessoa, o estado com o limite e os modelos; e a escolha do bot.
+    ias: () => get<IasDaPessoa>("ias"),
+    gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
+    gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
+    inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
     /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
     enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string) =>
