@@ -179,7 +179,7 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
     // a que já existia (a conta reprovada voltaria a "pronto" só porque o Mac estava carregado).
     if (sondaFoiLenta(t.inventario)) return t;
     if (t.inventario.estado === "pronto") { vereditos.delete(ia); retestes.delete(ia); }
-    else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa && t.inventario.causa !== "sonda_lenta") vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
+    else if (t.inventario.estado === "nao_autenticado" && t.inventario.causa && t.inventario.causa !== "sonda_lenta" && t.inventario.causa !== "limite") vereditos.set(ia, { ia, causa: t.inventario.causa, impressao: await d.impressao(ia).catch(() => null), em: d.agora() });
     else vereditos.delete(ia);
     // Quem chama grava o arquivo uma vez no fim: dois testes rodam ao mesmo tempo e não podem disputar a escrita.
     return t;
@@ -366,7 +366,8 @@ export function criarVigiaDasIas(d: DepsVigia): VigiaDasIas {
           const resposta = respostas.get(ia);
           // NOD-178: teste lento sai como "não respondeu ainda" com a causa; como 'ausente' a tela pediria "Instalar".
           if (i && sondaFoiLenta(i)) return { ia, estado: "nao_autenticado", causa: "sonda_lenta" };
-          return { ia, estado: i?.estado ?? "ausente", ...(i?.estado === "nao_autenticado" && i.causa ? { causa: i.causa } : {}), ...(resposta ? { resposta } : {}) };
+          // O limite (0068) só existe no servidor: aqui nunca aparece, e não vira causa do teste.
+          return { ia, estado: i?.estado ?? "ausente", ...(i?.estado === "nao_autenticado" && i.causa && i.causa !== "limite" ? { causa: i.causa } : {}), ...(resposta ? { resposta } : {}) };
         });
       });
       testeEmCurso = rodando;

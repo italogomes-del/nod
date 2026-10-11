@@ -45,8 +45,8 @@ it("com app-server, o chat abre uma thread efêmera (X8), nega a aprovação ped
   expect(reg.args).toContain('sandbox_mode="read-only"');
   // X8: sem `thread/resume` medido, nada fica em ~/.codex/sessions.
   expect(reg.thread).toMatchObject({ ephemeral: true, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
-  // O `max` do Claude não existe no Codex: vai o maior que existe.
-  expect(reg.turnos).toEqual([{ texto: "olá", effort: "xhigh" }]);
+  // revisto em 2026-10-10: o `max` existe no Codex (model/list do 0.147, Sol e Luna) e vai como `max`.
+  expect(reg.turnos).toEqual([{ texto: "olá", effort: "max" }]);
   expect(reg.aprovacao).toEqual({ decision: "decline" });
   // O launcher (com o token) sumiu com o diretório do turno; só fica a pasta estável do bot.
   expect(await readdir(cfg.cwdBase)).toEqual(["texto-a"]);

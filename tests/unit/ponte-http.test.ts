@@ -46,6 +46,14 @@ describe("desktop: fronteiras HTTP", () => {
     expect(inventario({ estado: "nao_autenticado", em: 1, causa: "cli_antigo", versao: "2.1.1", minima: "2.1.290" }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
     expect(() => entrega({ resultado: { desfecho: "inventado" }, fala: {}, seqLocal: -1 }, "x")).toThrow();
   });
+  it("revisto em 2026-10-10: as causas do app novo (sem Node, configuração quebrada) atravessam, com a frase do servidor", () => {
+    expect(inventario({ estado: "ausente", em: 1, motivo: "env: node: No such file", causa: "sem_node" }, 100, "Codex")).toEqual({ estado: "ausente", em: 100, causa: "sem_node", motivo: "Codex precisa do Node, e este computador não tem o Node instalado." });
+    expect(inventario({ estado: "ausente", em: 1, motivo: "config.toml: chave", causa: "config_invalida" }, 100, "Codex")).toEqual({ estado: "ausente", em: 100, causa: "config_invalida", motivo: "A configuração do Codex neste computador tem um erro; entrar de novo não resolve." });
+    // Só em `ausente` (o CLI não serve como está); em `nao_autenticado` não é "falta entrar" com outra causa.
+    expect(inventario({ estado: "nao_autenticado", em: 1, causa: "config_invalida" }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
+    // O limite é do servidor: o Mac não o anuncia.
+    expect(inventario({ estado: "nao_autenticado", em: 1, causa: "limite", renovaEm: 999 }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
+  });
   it("conta sem acesso (2026-10-05): a causa é código fechado, a frase é do servidor, e o erro cru atravessa só até o teto", () => {
     expect(inventario({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "texto do Mac", versao: "9" }, 7)).toEqual({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "A conta entrou, mas está sem acesso: a organização dela desativou o uso por assinatura.", em: 7 });
     // App antigo (sem o campo) ou valor inventado: sem causa, com a frase de sempre.

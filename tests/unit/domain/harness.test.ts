@@ -5,8 +5,9 @@ import { causaHarnessIndisponivel, harnessFixado, iaAtualDoCatalogo, inventarioH
 
 describe("escolha de inteligência", () => {
   it("escolhe uma conta conectada sem configurar harness ou modelo", () => {
-    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli"] })).toEqual({ harness: "codex-cli", modelo: "gpt-5.6-sol" });
-    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "sonnet" });
+    // revisto em 2026-10-10 (emenda da ADR-036): o Recomendado é Opus no Claude e GPT-5.6 Sol no Codex, raciocínio médio.
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli"] })).toEqual({ harness: "codex-cli", modelo: "gpt-5.6-sol", raciocinio: "medium" });
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "opus", raciocinio: "medium" });
   });
   it("respeita a preferência da máquina apenas quando disponível", () => {
     expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"], preferido: "codex-cli" }).harness).toBe("codex-cli");
@@ -40,8 +41,8 @@ describe("escolha de inteligência", () => {
       expect(causaDe(() => resolverHarness({ modelo: "gpt-zz", prontos: ["claude-cli"] }))).toEqual({ harness: "claude-cli", modelo: "gpt-zz", motivo: "modelo_invalido" });
     });
     it("modelo gravado antes continua resolvendo", () => {
-      expect(resolverHarness({ modelo: "haiku", prontos: ["claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "haiku" });
-      expect(resolverHarness({ harness: "codex-cli", modelo: "gpt-5.6-luna", prontos: ["codex-cli"] })).toEqual({ harness: "codex-cli", modelo: "gpt-5.6-luna" });
+      expect(resolverHarness({ modelo: "haiku", prontos: ["claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "haiku", raciocinio: "medium" });
+      expect(resolverHarness({ harness: "codex-cli", modelo: "gpt-5.6-luna", prontos: ["codex-cli"] })).toEqual({ harness: "codex-cli", modelo: "gpt-5.6-luna", raciocinio: "medium" });
     });
     it("harnessFixado: auto/auto não fixa; modelo do Claude fixa no Claude", () => {
       expect(harnessFixado("auto", "auto")).toBeNull();

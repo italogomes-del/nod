@@ -72,11 +72,13 @@ describe("instalar a IA com um clique (2026-10-09): as partes puras", () => {
       await chmod(falso, 0o755);
       const shim = join(dir, "node");
       await writeFile(shim, scriptNodeDoNod(falso), { mode: 0o755 });
-      expect(execFileSync(shim, ["script.js", "--version"], { encoding: "utf8" }).trim()).toBe("RUN_AS_NODE=1 args=script.js --version");
+      expect(execFileSync(shim, ["script.js", "--version"], { encoding: "utf8", timeout: 20_000 }).trim()).toBe("RUN_AS_NODE=1 args=script.js --version");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+    // Sobe dois processos de verdade (o shim e o "Electron"): medido em 2026-10-10, passou dos 5 s do projeto `unit` com o
+    // Mac em load 229 no `check`. O prazo cobre o `timeout` do execFileSync (AGENTS.md, teste sob carga).
+  }, 30_000);
 
   it("a linha de progresso é a última linha não vazia, sem cor e cortada em 160", () => {
     expect(linhaDoProgresso("npm http fetch GET 200 https://registry.npmjs.org/@openai%2fcodex 545ms\n\n")).toBe("npm http fetch GET 200 https://registry.npmjs.org/@openai%2fcodex 545ms");

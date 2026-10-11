@@ -9,11 +9,12 @@ import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from ".
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
-import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto } from "../domain/erro-fornecedor.ts";
+import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
@@ -36,7 +37,11 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * `bifurcou` (definido em 2026-10-08, revisão do épico, S15): o plano deste turno pediu a cópia da sessão (`bifurcar`).
  * Quem sabe é a ponte, que guardou o plano puxado.
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean };
+/**
+ * `prontosDaPessoa` (definido em 2026-10-10, emenda da ADR-036): as IAs prontas em alguma máquina viva da pessoa (quem
+ * sabe é a ponte). No limite da assinatura, o turno do Automático é repetido na próxima delas pela ordem (aposLimite).
+ */
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; prontosDaPessoa?: readonly IdHarness[] };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -44,6 +49,8 @@ export type SaidaAssentarTurno = {
   duplicada: boolean;
   /** Turno já terminal (varredor/parar chegaram antes): a fala entra como anexo parcial, sem reabrir (ADR-010). */
   tardia: boolean;
+  /** 0068: a IA do turno entrou no limite ou saiu dele — a ponte esquece o que leu dos limites e avisa a tela. */
+  limiteMudou?: boolean;
 };
 
 /** Código do erro para o log (SQLSTATE ou nome); nunca a mensagem, que pode carregar dado. */
@@ -289,6 +296,23 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   });
   if (!assentado) throw new ErroDeDominio("estado_invalido", { cause: "turno mudou de estado durante a entrega" });
 
+  // 0068 (emenda da ADR-036): o limite da assinatura, pelo protocolo do Claude Code ou pela classe do texto do Codex, vale
+  // para a ordem de todos os bots até `renovaEm`; um turno que dá certo na IA a tira do limite antes do prazo.
+  const ehLimite = desfecho.estado === "interrompido" && !quedaDaMaquina && !resultado.causaSemIa
+    && (desfecho.motivoFalha === "limite_do_plano" || (desfecho.motivoFalha !== null && classificarErroFornecedor(resultado.erroCru) === "limite_de_uso"));
+  let limite: { ia: IdHarness; renovaEm: number } | null = null;
+  let limiteMudou = false;
+  let trocou: RuntimeEvent[] | null = null;
+  if (ehLimite && entrega.harness) {
+    const renovaEm = prazoDoLimite(desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm : null, agora);
+    await deps.repos.preferencias.registrarLimite(entrega.harness, { renovaEm, desde: agora });
+    limite = { ia: entrega.harness, renovaEm };
+    limiteMudou = true;
+    log("aviso", "ia_no_limite", { turno_id: turno.id, harness: entrega.harness, renova_em: renovaEm, do_fornecedor: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm === renovaEm });
+  } else if (desfecho.estado === "concluido" && entrega.harness) {
+    limiteMudou = await deps.repos.preferencias.limparLimite(entrega.harness);
+  }
+
   if (turno.origem === "ligacao") {
     // ADR-072: o turno-cérebro não ganha aviso de interrupção nem card "Retomar" — quem conta como a ligação acabou é a
     // linha "Chat de voz" (e o resumo, quando houve). O evento sai para a tela soltar o turno.
@@ -305,6 +329,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...q.events);
   } else if (resultado.causaSemIa) {
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
+  } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
@@ -341,8 +367,64 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
-  return { data: { turno: assentado, mensagem, duplicada: false, tardia: false }, events };
+  return { data: { turno: assentado, mensagem, duplicada: false, tardia: false, ...(limiteMudou ? { limiteMudou } : {}) }, events };
 };
+
+/**
+ * O turno parou no LIMITE da assinatura (definido em 2026-10-10, emenda da ADR-036; teste do Breno em 09/10: a ligação
+ * bateu no limite do Claude e nada trocava de IA sozinho). A fala da pessoa a um bot no Automático é repetida na próxima
+ * IA da ordem dele (a própria ou a da pessoa) que esteja pronta em alguma máquina viva e fora do limite, e a conversa
+ * ganha a linha "O Claude chegou ao limite · respondendo pelo ChatGPT" (payload `ia_trocada`, causa `limite`). A fila
+ * já não entrega o turno novo à IA parada (iasParaOAutomatico) e o plano o resolve na próxima (o limite acabou de ser
+ * gravado). null = não repete: bot em "Uma IA só", rotina, sala, pedido entre bots (mesmos motivos de aposContaSemAcesso)
+ * ou nenhuma outra IA disponível — então vale o aviso do limite de sempre, com a hora.
+ */
+async function aposLimite(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; prontos: readonly IdHarness[]; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora } = p;
+  if (turno.origem !== "conversa" || turno.harness !== "auto" || turno.modelo !== "auto") return null;
+  const [agente, preferencias] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar()]);
+  if (!agente) return null;
+  const ordem = ordemEfetiva({ doBot: inteligenciaDoAgente(agente).ordem, daPessoa: preferencias.ordemIas ?? null });
+  const para = proximaIaNoLimite({ ordem, prontos: p.prontos, noLimite: iasNoLimite(preferencias.iasNoLimite, agora), atual: p.ia });
+  if (!para) return null;
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, custo_usd: p.custoUsd } }),
+  ];
+  const linha = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    texto: redigir("ia-trocada-limite", agora, { de: nomeDaIa(p.ia), para: nomeDaIa(para), quando: quandoDaFrase(p.renovaEm, agora) }),
+    payload: { kind: "ia_trocada", de: p.ia, para, causa: "limite", renovaEm: p.renovaEm },
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  const novo = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "conversa",
+    prazoEm: turno.prazoEm,
+    profundidade: turno.profundidade,
+    entradaTexto: turno.entradaTexto,
+    mensagemOrigemId: turno.mensagemOrigemId,
+    entradaAnexos: turno.entradaAnexos,
+    entradaConfianca: turno.entradaConfianca,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    reenvios: turno.reenvios + 1,
+    executor: p.executor,
+    trabalhoId: turno.trabalhoId ?? null,
+  });
+  if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
+  // Só códigos e ids (o Marlon lê `ia_trocada` no log de produção depois do deploy).
+  log("info", "ia_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, de: p.ia, para, causa: "limite", renova_em: p.renovaEm });
+  return events;
+}
 
 /**
  * O turno falhou porque a CONTA da IA não serve (definido em 2026-10-05; medido em produção nesse dia: conta do Claude

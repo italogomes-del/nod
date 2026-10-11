@@ -13,7 +13,9 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Conversa } from "../contracts/conversa.ts";
-import type { Agente } from "../contracts/agente.ts";
+import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
+import type { EscolhasIa } from "../contracts/inteligencia.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../domain/inteligencia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
@@ -127,7 +129,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   const inventarioCli = await deps.repos.inventario.buscar(MOTOR_CLI);
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
-  const escolha = executor !== "catcher" && input.harnesses ? escolherHarness(turno, input.harnesses, input.harnessPreferido) : null;
+  // 0068 (emenda da ADR-036): a ordem do bot (ou da pessoa), as IAs no limite e o modelo/raciocínio escolhidos por IA.
+  const preferencias = await deps.repos.preferencias.buscar();
+  const inteligencia = inteligenciaDoAgente(agente);
+  const escolha = executor !== "catcher" && input.harnesses
+    ? escolherHarness(turno, input.harnesses, {
+      ordem: ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
+      noLimite: iasNoLimite(preferencias.iasNoLimite, agora),
+      escolhas: inteligencia.escolhas,
+    })
+    : null;
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
@@ -235,7 +246,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-10-04: a guia no "auto" roda no mais potente do harness (MODELO_MAIS_POTENTE) no chat; um modelo
   // escolhido no perfil dela vale como em qualquer bot. revisto em 2026-10-05 (NOD-164): na ligação, não — ver abaixo.
   // revisto em 2026-10-07 (ADR-081): o Nod é a guia — ele no "auto" roda no mais potente, com ou sem onboarding.
-  const guiaNoMaisPotente = (ehNod(agente) || onb.guiaId === agente.id) && turno.modelo === "auto";
+  // revisto em 2026-10-10 (0068): o modelo escolhido para a IA na inteligência do Nod também vale (é escolha, não o padrão).
+  const guiaNoMaisPotente = (ehNod(agente) || onb.guiaId === agente.id) && turno.modelo === "auto" && !(escolha && inteligencia.escolhas[escolha.harness]?.modelo);
   const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
@@ -244,6 +256,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     computadorFora,
     turno: { ...turno, sobProcuracaoDe, ...(modeloEscolhido ? { modelo: modeloEscolhido } : {}) },
     agente,
+    ...(escolha?.raciocinio ? { raciocinio: escolha.raciocinio } : {}),
     memorias,
     concessoes,
     conectores,
@@ -326,7 +339,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
-  const { modoDev } = await deps.repos.preferencias.buscar();
+  const { modoDev } = preferencias;
   await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev }));
 
   const evento: RuntimeEvent = {
@@ -357,9 +370,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 };
 
 /** NOD-171: a recusa leva o inventário do harness que faltou, para a negação falar dele e não do motor. */
-function escolherHarness(turno: Turno, harnesses: Partial<Record<IdHarness, Inventario>>, preferido: IdHarness | null | undefined): { harness: IdHarness; modelo: string } {
+function escolherHarness(turno: Turno, harnesses: Partial<Record<IdHarness, Inventario>>, ia: { ordem: IdHarness[]; noLimite: IdHarness[]; escolhas: EscolhasIa }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
   try {
-    return resolverHarness({ harness: turno.harness, modelo: turno.modelo, prontos: (Object.keys(harnesses) as IdHarness[]).filter((id) => harnesses[id]?.estado === "pronto"), preferido });
+    return resolverHarness({ harness: turno.harness, modelo: turno.modelo, prontos: (Object.keys(harnesses) as IdHarness[]).filter((id) => harnesses[id]?.estado === "pronto"), ...ia });
   } catch (e) {
     const causa = causaHarnessIndisponivel(e);
     const inventario = causa ? harnesses[causa.harness] : undefined;

@@ -1,6 +1,8 @@
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
+import type { LimitesIa } from "../../contracts/inteligencia.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
+import { iasNoLimite } from "../../domain/inteligencia.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PastaParaLimpar, PedidoRenovar, PonteInterna, RelatoLimpeza, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -67,6 +69,13 @@ export type DepsPonte = {
   esquecerMaquina?: (machineId: string) => void;
   /** ADR-085: quando a pessoa trocou o "uso do Mac" (gravado); o que foi lido antes não vale mais. Ausente = 0. */
   usoTrocadoEm?: (pessoaId: string) => number;
+  /**
+   * 0068 (emenda da ADR-036): quando o limite de alguma IA da pessoa mudou (gravado), em QUALQUER ponte — no modo
+   * compartilhado há uma por Mac, e o limite que uma grava vale para a fila das outras. Ausente = 0.
+   */
+  limitesTrocadosEm?: (pessoaId: string) => number;
+  /** 0068: esta ponte gravou (ou tirou) um limite: as outras releem, e a tela da pessoa é avisada. */
+  limiteMudou?: (pessoaId: string) => void;
   /** Só o e2e (definido em 2026-10-08): a rede de 2 min com outro prazo, para não esperar 120 s. Ausente = REDE_MS. */
   redeMs?: number;
   /**
@@ -90,6 +99,11 @@ const TENTATIVAS_DO_ASSENTAR = 3;
  * 30 s só cobrem quem mudou por fora da rota (direto no banco).
  */
 export const USO_VALE_MS = 30_000;
+/**
+ * 0068: os limites das IAs lidos valem 30 s no puxar, como o "uso do Mac" — um limite gravado por qualquer ponte vale na
+ * hora (`limitesTrocadosEm`); os 30 s só cobrem o prazo que vence sozinho (que já é comparado com o relógio, não lido).
+ */
+export const LIMITES_VALEM_MS = 30_000;
 
 /** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
 function ehConflitoTransitorio(err: unknown): boolean {
@@ -137,6 +151,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
    */
   const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
+  /** 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). */
+  const limitesLidos = new Map<string, { limites: LimitesIa; ate: number; lidoEm: number }>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
   /**
@@ -205,6 +221,21 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     }
   }
 
+  /** 0068: as IAs da pessoa no limite agora. Sem leitura (erro do banco), a última que deu certo, ou nenhuma. */
+  async function noLimiteDe(escopo: Escopo): Promise<IdHarness[]> {
+    const guardado = limitesLidos.get(escopo.pessoaId);
+    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return iasNoLimite(guardado.limites, agora());
+    try {
+      const lidoEm = agora();
+      const limites = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).iasNoLimite ?? {};
+      limitesLidos.set(escopo.pessoaId, { limites, ate: lidoEm + LIMITES_VALEM_MS, lidoEm });
+      return iasNoLimite(limites, agora());
+    } catch (e) {
+      log("aviso", "limites_ia_sem_leitura", { pessoa_id: escopo.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
+      return iasNoLimite(guardado?.limites, agora());
+    }
+  }
+
   function depsDe(trx: Tx, escopo: Escopo): Deps {
     return { repos: criarRepos(trx, escopo), services: deps.services, useCases: deps.useCases, tx: (fn) => fn(trx), escopo, agora };
   }
@@ -232,6 +263,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
       const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
       const uso = pressao ? await usoDoMac(escopo) : "livre";
+      // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite.
+      const noLimite = maquina.harnesses ? await noLimiteDe(escopo) : [];
       // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
       // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
       const portao = portaoDoMac(uso, pressao);
@@ -258,7 +291,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
@@ -406,13 +439,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       }
       const harnessDoTurno = harnesses.get(e.turnoId) ?? null;
       const outraIa = e.resultado.causaSemIa && harnessDoTurno ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
+      // 0068: as IAs prontas da pessoa (todas as máquinas vivas), para o limite repetir o turno na próxima da ordem.
+      const prontosDaPessoa = (Object.entries(harnessesDaPessoa(escopo.pessoaId)) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id);
+      let limiteMudou = false;
       // Revisão do épico (S20, 2026-10-08): o assentar é repetido quando o Postgres o escolhe como vítima de um impasse
       // (40P01) ou de serialização (40001) — a transação inteira volta, inclusive o registro da entrega (idempotência
       // por seq_local), então repetir é seguro. E os mapas só saem depois do assentar com sucesso: antes o `finally`
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
+        limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
         // minutos depois não alcança a causa crua nem os nomes das ferramentas (só a contagem).
@@ -465,6 +502,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         deps.services.tokenTurno.revogar(e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
         throw err;
+      }
+      // 0068: o limite gravado (ou tirado) já está no banco — esta ponte relê, as outras também, e a tela da pessoa sabe.
+      if (limiteMudou) {
+        limitesLidos.delete(escopo.pessoaId);
+        deps.limiteMudou?.(escopo.pessoaId);
       }
       escopos.delete(e.turnoId);
       executores.delete(e.turnoId);

@@ -45,4 +45,10 @@ describe("seletor de executor (NOD-160)", () => {
     expect(botoes(html)).toEqual(["claude-cli", "codex-cli"]);
     expect(html).toContain("usar Claude Code");
   });
+
+  it("revisto em 2026-10-10 (teste do Breno): no servidor compartilhado (`trocavel: false`) nenhum botão de troca", () => {
+    const html = renderExecutor({ ...estadoInicial, executor: { ...executor("claude-cli", pronto("2.1.0")), trocavel: false } });
+    expect(botoes(html)).toEqual([]);
+    expect(html).toContain("Claude Code");
+  });
 });

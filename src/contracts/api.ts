@@ -32,10 +32,9 @@ export type ErroDto = { codigo: string; mensagem: string; correlation_id?: strin
 
 export type FrotaDto = {
   /**
-   * `computadorForaDoAr` (definido em 2026-09-24, emenda da ADR-037): o computador do bot deixou de
-   * responder — a barra lateral, o cabeçalho e o painel dizem isso sem abrir o computador.
-   * `ultimaMensagem` (definido em 2026-09-24, sidebar no estilo do Grok): a prévia de uma linha da
-   * última mensagem da conversa própria, para a linha do agente; null sem conversa ou sem texto.
+   * `computadorForaDoAr` (definido em 2026-09-24, emenda da ADR-037): o computador do bot deixou de responder — a barra
+   * lateral, o cabeçalho e o painel dizem isso sem abrir o computador. `ultimaMensagem` (mesma data, sidebar no estilo
+   * do Grok): a prévia de uma linha da última mensagem da conversa própria; null sem conversa ou sem texto.
    */
   agentes: (Agente & { conversaId: string; descricaoEstado: string; computadorForaDoAr: { desde: EpochMs; motivo: MotivoFalhaComputador } | null; ultimaMensagem: { previa: string; em: EpochMs } | null })[];
   inventario: Inventario;
@@ -51,9 +50,8 @@ export type FrotaDto = {
 export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conversaId: string };
 
 /**
- * Turno aberto da conversa (definido em 2026-09-24): a web recria o "trabalhando" ao recarregar a
- * página no meio de um turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não
- * se repete, e o cartão de atividade sumia até o turno acabar.
+ * Turno aberto da conversa (definido em 2026-09-24): a web recria o "trabalhando" ao recarregar a página no meio de um
+ * turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não se repete, e o cartão sumia até o fim.
  */
 export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null };
 
@@ -76,8 +74,7 @@ export type SuaVezDto = {
    * `proposta`: a de MESMO id da decisão (acesso, perfil, rotina…), para a web tirar dela os rótulos; null nos outros tipos.
    * `fio` (definido em 2026-09-24): o fio e a rodada dos três tipos de pedir_a_pessoa; null nos outros.
    * `rotinaParada` (mesma data, emenda da ADR-044): o pedido de acesso aberto que veio de uma rotina — desde quando e o que não rodou.
-   * `nuncaPermanente` (definido em 2026-09-24, ADR-047): ids dos itens de aprovação que não podem virar
-   * "Sempre permitir" (aprovar PR, merge). A lista mora no domínio; a web só importa tipos, então lê daqui.
+   * `nuncaPermanente` (2026-09-24, ADR-047): itens que não viram "Sempre permitir" (PR, merge); a lista é do domínio.
    */
   itens: (ItemFila & { itensAprovacao: ItemAprovacao[]; proposta: Proposta | null; fio: FioDoItem | null; rotinaParada: ParadaDaRotina | null; nuncaPermanente?: string[] })[];
   /** Avisos de infraestrutura (ADR-045): um por queda do Mac, nunca um card por turno. Não são decisões. */
@@ -115,13 +112,16 @@ export const ROTAS = [
   { metodo: "POST", caminho: "agentes/:id/restaurar", lane: "L6" },
   { metodo: "GET", caminho: "inventario", lane: "L9" },
   { metodo: "GET", caminho: "ambiente", lane: "L9" },
-  /** Interruptor de executor (definido em 2026-09-16): estado escrito da máquina e troca catcher ⇄ claude-cli em tempo de execução. */
+  /** Interruptor de executor (2026-09-16); o POST só no modo local (2026-10-10: o compartilhado diz `trocavel: false`). */
   { metodo: "GET", caminho: "executor", lane: "L9" },
   { metodo: "POST", caminho: "executor", lane: "L9" },
+  { metodo: "GET", caminho: "ias", lane: "L9" }, // 0068: ordem, estado (com o limite) e modelos das IAs da pessoa
   { metodo: "POST", caminho: "agentes", lane: "L6" },
   { metodo: "PATCH", caminho: "agentes/:id", lane: "L6" },
   /** definido em 2026-09-29 (ADR-059): o modo de aprovação do bot, pelo chip do campo; só a dona. */
   { metodo: "POST", caminho: "agentes/:id/modo-aprovacao", lane: "L6" },
+  { metodo: "GET", caminho: "agentes/:id/inteligencia", lane: "L6" },
+  { metodo: "PUT", caminho: "agentes/:id/inteligencia", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/fixar", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/ocultar", lane: "L6" },
   { metodo: "POST", caminho: "agentes/:id/duplicar", lane: "L6" },
