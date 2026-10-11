@@ -514,6 +514,8 @@ export function comporApp(o: OpcoesCompor): App {
       ...(compartilhado ? {} : { executor: "local" as const, soComoAlvo: true }) }),
     persistir: compartilhado ? (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }) : async () => undefined,
     ...(compartilhado ? {} : { descartarSessao: true }),
+    // ADR-090 (0067): nos dois modos — no local, a VM também cai, e o aviso a nomeia.
+    registrarPlataforma: (escopo, chaveId, plataforma) => dentro(escopo, (d) => d.repos.maquinaTokens.registrarPlataforma(chaveId, plataforma)),
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
     seguro: env.NOD_LOGIN === "google",

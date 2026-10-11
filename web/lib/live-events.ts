@@ -23,6 +23,11 @@ export type LiveEvents = {
   disconnect: () => void;
   subscribe: (fn: (ev: EventoLive) => void) => () => void;
   send: (cmd: unknown) => void;
+  /**
+   * A página voltou (aba à frente, rede de volta, app reaberto no celular). Só reabre se a conexão caiu de fato e
+   * está esperando o backoff; aberta (ou abrindo), não faz nada: trocar de aba não derruba o stream nem relê nada.
+   */
+  retomar: () => void;
 };
 
 /** O que usamos do EventSource (o nativo do navegador satisfaz; o teste injeta um falso). */
@@ -194,6 +199,14 @@ export function criarLiveEvents(url: string, opcoes: OpcoesLiveEvents = {}): Liv
       return () => {
         ouvintes.delete(fn);
       };
+    },
+    retomar() {
+      // definido em 2026-10-10 (ADR-094): no celular o sistema derruba o socket com o app em segundo plano e o backoff
+      // chega a 30 s depois de várias tentativas sem rede; quem voltou não espera a próxima tentativa.
+      if (!ativo || fonte || timer === null) return;
+      cancelar(timer);
+      timer = null;
+      abrir();
     },
     send() {
       throw new Error("live-events é só servidor→navegador (ADR-016): comandos vão por REST em web/lib/api.ts");

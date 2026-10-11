@@ -571,13 +571,15 @@ const plural = (n: number, um: string, varios: string): string => `${n} ${n === 
  * segue sozinho. Rotina interrompida não se retoma (a próxima janela roda); conversa tem o seu Retomar.
  */
 export function fraseDoIncidente(i: SuaVezDto["incidentes"][number]): string {
-  const quando = i.voltouEm === null ? `Seu Mac está sem contato desde ${hora(i.comecouEm)}.` : `Seu Mac ficou sem contato entre ${hora(i.comecouEm)} e ${hora(i.voltouEm)}.`;
+  // definido em 2026-10-09: a queda da VM do motor (ADR-090) nomeia a máquina; "Seu Mac" é só do Mac.
+  const quem = i.maquina ? `A máquina ${i.maquina}` : "Seu Mac";
+  const quando = i.voltouEm === null ? `${quem} está sem contato desde ${hora(i.comecouEm)}.` : `${quem} ficou sem contato entre ${hora(i.comecouEm)} e ${hora(i.voltouEm)}.`;
   const partes = [i.rotinas > 0 ? plural(i.rotinas, "execução de rotina", "execuções de rotina") : "", i.conversas > 0 ? plural(i.conversas, "resposta em conversa", "respostas em conversa") : ""].filter(Boolean);
   if (partes.length === 0) return quando;
   const verbo = i.rotinas + i.conversas === 1 ? "não concluiu" : "não concluíram";
-  const quem = i.agentes.length ? ` (${i.agentes.join(", ")})` : "";
+  const deQuem = i.agentes.length ? ` (${i.agentes.join(", ")})` : "";
   const segue = i.rotinas === 0 ? " e dá para retomar pela conversa" : i.conversas === 0 ? " e as próximas seguem agendadas" : ": as rotinas seguem agendadas e a conversa pode ser retomada";
-  return `${quando} ${partes.join(" e ")} ${verbo}${quem}; nada foi reenviado${segue}.`;
+  return `${quando} ${partes.join(" e ")} ${verbo}${deQuem}; nada foi reenviado${segue}.`;
 }
 
 /**

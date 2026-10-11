@@ -132,6 +132,38 @@ describe("live-events: interface de 4 campos sobre EventSource (ADR-016)", () =>
     expect(() => m.live.send({})).toThrow(/REST/);
   });
 
+  it("retomar (ADR-094): com a conexão aberta não faz nada; caída, reabre na hora sem esperar o backoff", () => {
+    const m = montar();
+    m.live.connect();
+    m.fontes[0]?.disparar("open");
+    m.fontes[0]?.frame(frame(4));
+    // Trocar de aba / voltar ao app com o stream vivo: nenhuma fonte nova, nenhum timer, nenhuma reidratação.
+    m.live.retomar();
+    m.live.retomar();
+    expect(m.fontes).toHaveLength(1);
+    expect(m.fontes[0]?.fechada).toBe(false);
+    expect(m.timers).toHaveLength(0);
+    // Abrindo (antes do open) também não: o navegador avisa com error se não conseguir.
+    m.fontes[0]?.disparar("error");
+    for (let i = 0; i < 5; i++) {
+      m.timers.at(-1)?.fn();
+      m.fontes.at(-1)?.disparar("error");
+    }
+    const esperando = m.timers.at(-1);
+    expect(esperando?.ms).toBe(30000);
+    const antes = m.fontes.length;
+    m.live.retomar();
+    expect(esperando?.cancelado).toBe(true);
+    expect(m.fontes).toHaveLength(antes + 1);
+    expect(m.fontes.at(-1)?.url).toBe("/api/t/t1/eventos?since=s1%3A4");
+    m.live.retomar();
+    expect(m.fontes).toHaveLength(antes + 1);
+    // Desligado (sem sessão), retomar não reabre.
+    m.live.disconnect();
+    m.live.retomar();
+    expect(m.fontes).toHaveLength(antes + 1);
+  });
+
   it("backoff: 1s → 30s com jitter ±30%", () => {
     expect(calcularBackoffMs(1, () => 0.5)).toBe(1000);
     expect(calcularBackoffMs(2, () => 0.5)).toBe(2000);

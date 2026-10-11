@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { listen } from "../../src/adapters/http/server.ts";
 import { lerCookieSessao } from "../../src/adapters/http/sessao.ts";
 import type { Escopo } from "../../src/shared/types.ts";
-import { COOKIE_STATE, DESTINO_RECUSA } from "../../src/adapters/http/sessao-google.ts";
+import { COOKIE_STATE, DESTINO_RECUSA, PAGINA_ENTROU } from "../../src/adapters/http/sessao-google.ts";
 import { CLIENT_ID, claimsBoas, googleFalso, respostaComIdToken } from "../helpers/google-falso.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 
@@ -76,11 +76,14 @@ describe("login Google: servidor real, Google falso", () => {
     resposta = () => respostaComIdToken(claimsBoas(Date.now()));
     const { state, cookie } = await iniciar();
     const r = await voltar(`code=codigo-do-google&state=${encodeURIComponent(state)}`, cookie);
-    expect(r.status).toBe(302);
-    expect(r.headers.get("location")).toBe("/");
+    // ADR-094: a volta é uma página da própria origem que segue para "/" (o Strict do cookie e o Safari).
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe(PAGINA_ENTROU);
     const cookies = r.headers.getSetCookie();
     const sessao = cookies.find((c) => c.startsWith("nod_sessao="));
     expect(sessao).toContain("SameSite=Strict");
+    // ADR-094: o app instalado no iPhone perde cookie sem Max-Age quando o sistema o fecha em segundo plano.
+    expect(sessao).toContain("Max-Age=2592000");
     expect(cookies.some((c) => c.startsWith("nod_oauth=;") && c.includes("Max-Age=0"))).toBe(true);
     expect(lerCookieSessao(sessao?.split(";")[0]?.slice("nod_sessao=".length), SEGREDO)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON });
 
@@ -207,7 +210,7 @@ describe("login Google: conta nova de domínio admitido", () => {
     const saida = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const r = await entrarCom({ hd: "admitido.com.br", email: "marcelo.silva@admitido.com.br" });
-      expect(r.headers.get("location")).toBe("/");
+      expect(await r.text()).toBe(PAGINA_ENTROU);
       expect(sessaoDe(r)).toEqual({ tenantId: TENANT_PADRAO, pessoaId: PESSOA_NOVA });
       expect(consultas).toEqual(["marcelo.silva@admitido.com.br"]);
       const linhas = saida.mock.calls.map((c) => JSON.parse(String(c[0])) as { evento: string; pessoa_id?: string; dominio?: string });

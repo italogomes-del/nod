@@ -14,7 +14,7 @@ import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { tabelaComo } from "./lib/texto-formatado.ts";
 import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
@@ -22,6 +22,9 @@ import { abrirPareamento } from "./telas/parear-mac.ts";
 import { criarAvisador } from "./lib/avisador.ts";
 import { criarCanalAvisos } from "./lib/canal-avisos.ts";
 import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
+import { enterEnvia } from "./lib/celular.ts";
+import { criarCelular } from "./lib/gaveta-bots.ts";
+import "./pwa.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema } from "./lib/tema.ts";
@@ -148,10 +151,13 @@ const CHAVE_PAINEL_ABERTO = "nod.painelAberto";
 let painelAberto = ((): boolean => { try { return localStorage.getItem(CHAVE_PAINEL_ABERTO) === "1"; } catch { return false; } })();
 /** Aberta para mostrar um nível (abrirNivel), sem virar preferência: fecha de novo ao trocar de conversa. */
 let painelAbertoNaHora = false;
+// ADR-094 (definido em 2026-10-10): no celular a barra de bots vira gaveta, aberta pelo ☰ do cabeçalho.
+const celular = criarCelular();
 // A busca da sidebar fica fechada até ser pedida (ícone ou ⌘K); aberta, fecha no Esc ou ao perder o foco vazia.
 let buscaAberta = false;
 const termoBusca = (): string => (document.getElementById("busca-bots") as HTMLInputElement | null)?.value ?? "";
 function abrirBusca(): void {
+  celular.abrirBots();
   buscaAberta = true;
   render();
   document.getElementById("busca-bots")?.focus();
@@ -682,6 +688,13 @@ function renderSidebar(estado: Estado): string {
     </div>`;
 }
 
+const MENU = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+
+/** O ☰ que abre a gaveta de bots no celular (ADR-094). No computador o CSS o esconde. */
+function botaoAbrirBots(): string {
+  return `<button type="button" class="abrir-bots" data-act="abrir-bots" aria-label="Bots e conversas" aria-controls="sidebar" aria-expanded="${celular.botsAbertos()}">${MENU}</button>`;
+}
+
 function renderPrincipal(): void {
   const t = estado.tela;
   // NOD-174: a pessoa lê a frase do servidor; o código fechado fica só no <details>, para quem depura.
@@ -746,7 +759,10 @@ function renderPrincipal(): void {
   if (gavetaSuja !== chaveDaGaveta()) regiao("detalhes", lembrar("detalhes", estado, [], renderDetalhes));
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
-  regiao("cabecalho", cabecalho);
+  // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
+  // ganha uma faixa só com ele (`so-menu`, que no computador não aparece).
+  regiao("cabecalho", botaoAbrirBots() + cabecalho);
+  document.getElementById("cabecalho")?.classList.toggle("so-menu", cabecalho === "");
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   regiao("erro", erro);
   // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
@@ -771,7 +787,8 @@ function renderPrincipal(): void {
       ajustarAltura(ta);
       ta.setSelectionRange(rascunho.length, rascunho.length);
     }
-    ta?.focus();
+    // No celular o foco abriria o teclado a cada conversa aberta: o campo espera o toque.
+    if (!celular.ativo()) ta?.focus();
     redesenharAnexos();
   }
   atualizarComposer();
@@ -905,8 +922,14 @@ function atualizarComposer(): void {
   const a = aparenciaDoComposer(modoDoComposer(estado, alvo.conversaId), estado, { placeholder: placeholderPadrao(), nota: nota?.dataset.padrao ?? "" }, alvo.conversaId);
   regiao("composer-pergunta", a.topo);
   caixa.classList.toggle("modo-resposta", a.resposta);
-  if (ta.placeholder !== a.placeholder) ta.placeholder = a.placeholder;
+  // ADR-094: no celular o texto de ajuda inteiro quebrava em duas linhas dentro do campo; lá fica o curto, e o leitor de
+  // tela continua ouvindo o completo.
+  const placeholder = celular.ativo() ? (a.resposta ? "Sua resposta" : "Mensagem") : a.placeholder;
+  if (ta.placeholder !== placeholder) ta.placeholder = placeholder;
+  if (ta.getAttribute("aria-label") !== a.placeholder) ta.setAttribute("aria-label", a.placeholder);
   if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
+  // A dica de sempre ("Enter envia · Shift+Enter…") é de teclado de computador; o celular a esconde (web/mobile.css).
+  nota?.classList.toggle("nota-padrao", a.nota === (nota.dataset.padrao ?? ""));
   const clipe = caixa.querySelector<HTMLButtonElement>('[data-act="anexar"]');
   if (clipe) {
     clipe.disabled = a.anexoBloqueado !== null;
@@ -1134,7 +1157,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   }, () => undefined);
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "inventario", "executor", "salas", "rotinas", "ligacao", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
+    aoReidratar: () => dispatch({ tipo: "invalidar", quais: invalidacoesAoRetomar(estado) }),
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") receberFrame(ev.frame);
@@ -1271,6 +1294,7 @@ function propostaDoEstado(id: string): Proposta | null {
 
 function navegar(tela: Tela): void {
   const antes = estado.tela;
+  celular.fecharBots();
   // A gaveta aberta só para um nível (ou a sobreposta, na janela estreita) fecha quando a conversa muda.
   if (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId) {
     painelAbertoNaHora = false;
@@ -2001,6 +2025,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   anexar: () => document.getElementById("composer-arquivos")?.click(),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
+  "abrir-bots": () => celular.alternarBots(),
   // O botão some ao ser usado: o foco vai para o campo, e não para o <body>.
   "rolar-para-novas": () => {
     rolagem.irParaNovas();
@@ -2596,7 +2621,7 @@ document.addEventListener("keydown", (ev) => {
     }
     return;
   }
-  if (ev.key === "Enter" && !ev.shiftKey) {
+  if (enterEnvia(ev, celular.ativo())) {
     ev.preventDefault();
     void enviarComposer();
   }
@@ -2667,6 +2692,14 @@ function aoVoltarParaFrente(): void {
 }
 window.addEventListener("focus", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", aoVoltarParaFrente);
+// ADR-094: voltar ao app (celular desbloqueado, aba à frente, rede de volta) só reabre o stream se ele caiu de fato; o
+// que se perdeu chega pelo replay do `since` ou, sem replay possível, pela releitura do aoReidratar.
+function retomarStream(): void {
+  if (document.visibilityState === "visible" && navigator.onLine) live?.retomar();
+}
+document.addEventListener("visibilitychange", retomarStream);
+window.addEventListener("online", retomarStream);
+window.addEventListener("pageshow", retomarStream);
 // Outra aba recolheu ou abriu uma seção: esta acompanha (definido em 2026-10-04).
 window.addEventListener("storage", (ev) => {
   if (ev.key !== CHAVE_SECOES_RECOLHIDAS) return;
@@ -2971,6 +3004,7 @@ function atualizarConectar(p: Partial<NonNullable<typeof estado.conectarMaquina>
 
 // ---- Seu espaço e o menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta") -----------------------------
 function abrirEspaco(secao: SecaoEspaco): void {
+  celular.fecharBots();
   // O menu "Avisos no Mac" muda a preferência sem passar por aqui: a seção relê ao abrir.
   if (secao === "avisos") void canalAvisos.reler();
   const jaAberto = !!estado.espaco;

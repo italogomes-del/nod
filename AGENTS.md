@@ -421,3 +421,24 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
   `prepararLeitura` e o áudio é do `leitura-voz.ts` (teto diário em memória `NOD_VOZ_LEITURA_CARACTERES_DIA`, padrão
   100000; janela à frente `NOD_VOZ_LEITURA_ADIANTE_MS`, padrão 15000; prioridade `previa`; uma leitura por pessoa). Log
   `voz_leitura` só com contagens e desfecho. Nos testes, a voz falsa entra pela opção `voz` do `servidorCompleto`.
+
+## Celular (ADR-094, 2026-10-10)
+
+O celular abre a mesma web, servida pelo mesmo servidor e instalável (PWA). Não há app de loja nem host fixo:
+o manifesto usa `/`, e quem instala de `https://<servidor>` fala com aquele servidor.
+
+- **Celular = toque E tela de telefone.** A consulta é `CONSULTA_CELULAR`, em `web/lib/celular.ts`, e é a mesma string do
+  `@media` de `web/mobile.css`. O teste confere. Regra de layout de celular entra nesse bloco, nunca num `max-width` solto.
+- **O service worker (`web/public/sw.js`) guarda só `/offline.html` e os ícones.** Nunca ponha API, HTML do app nem
+  resposta da rede no cache dele. Mudou a lista: suba a versão de `CACHE`. `tests/unit/web/pwa.test.ts` roda o worker
+  num contexto isolado.
+- **`estatico.ts`:** `/assets/*` é imutável e HTML, `sw.js` e manifesto são `no-cache`. O cache do HTML é o que faz um
+  deploy chegar ao app instalado.
+- **Ícones:** `node scripts/mobile/icones.mjs` gera os PNGs a partir da marca do `favicon.svg` num Chrome headless.
+  Passe `CHROME=<binário>` se o do cache do Playwright não existir.
+- **Sem comando próprio de teste mobile.** O que roda no `check` são os unitários acima, mais `celular`, `retomada`,
+  `estatico` e `live-events`. Para ver a tela, suba o servidor com `NOD_STATIC_DIR=dist/web` depois do build: o worker só
+  registra no build. Fotografe com o `chrome-headless-shell` via CDP, com toque emulado
+  (`Emulation.setTouchEmulationEnabled`), 390×844 e 412×915. O teclado é simulado encolhendo a altura.
+  Toque de verdade (`Input.dispatchTouchEvent`), não `el.click()`: o clique sintético acende o anel de foco, e o dedo
+  não acende.

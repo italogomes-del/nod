@@ -43,8 +43,16 @@ export function lerCookieSessao(valor: string | undefined, segredo: string): Esc
   }
 }
 
-/** Cabeçalho Set-Cookie da sessão. `seguro` = só HTTPS (modo google com redirect https). */
-export function cabecalhoCookieSessao(escopo: Escopo, segredo: string, seguro: boolean): string {
-  return `${COOKIE_SESSAO}=${cunharCookie(escopo, segredo)}; HttpOnly; SameSite=Strict; Path=/${seguro ? "; Secure" : ""}`;
+/**
+ * Quanto o aparelho guarda o cookie do login Google (definido em 2026-10-10, ADR-094). Sem Max-Age ele é cookie de sessão
+ * do navegador, e o iPhone apaga esse tipo quando o sistema fecha o app instalado em segundo plano: a pessoa voltava ao
+ * Nod e caía no login do Google de novo. Isto só muda quanto o APARELHO guarda; o cookie assinado não tem validade
+ * própria no servidor, nem antes nem depois.
+ */
+export const PERMANENCIA_SESSAO_S = 30 * 24 * 60 * 60;
+
+/** Cabeçalho Set-Cookie da sessão. `seguro` = só HTTPS (modo google com redirect https); `maxAgeS` = guardar no aparelho. */
+export function cabecalhoCookieSessao(escopo: Escopo, segredo: string, seguro: boolean, maxAgeS?: number): string {
+  return `${COOKIE_SESSAO}=${cunharCookie(escopo, segredo)}; HttpOnly; SameSite=Strict; Path=/${maxAgeS ? `; Max-Age=${maxAgeS}` : ""}${seguro ? "; Secure" : ""}`;
 }
 

@@ -84,6 +84,8 @@ export function criarPonteHttpServidor(d: {
    * e o trabalho continuam com a sessão do Mac, que o próximo turno no Mac retoma; a sessão da VM não existe no Mac.
    */
   descartarSessao?: boolean;
+  /** ADR-090 (0067): grava na chave o sistema que a máquina anunciou — o aviso de queda nomeia a VM depois que a conexão some. */
+  registrarPlataforma?(escopo: Escopo, chaveId: string, plataforma: PlataformaMaquina): Promise<void>;
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -147,6 +149,7 @@ export function criarPonteHttpServidor(d: {
       c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
+      await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
       await repetirBarrados(c);
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),

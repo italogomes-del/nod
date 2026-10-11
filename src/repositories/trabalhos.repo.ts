@@ -392,7 +392,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     /**
      * Pedidos a colega que pararam sem voltar (definido em 2026-10-08, src/domain/pedido-parado.ts): handoff com tarefa,
      * feito desde `desde`, sem peer_ask da mesma tarefa na conversa de quem pediu, com a task do colega acabada ou
-     * esperando a pessoa — e quem pediu não está numa task parada. Até 20 por vez, os mais antigos primeiro.
+     * esperando a pessoa — e quem pediu não está numa task parada nem foi excluído (não há a quem entregar). Até 20 por vez,
+     * os mais antigos primeiro.
      */
     /** `adiados` (#218): tarefas que o varredor deixou para depois — fora do `limit 20`, para não segurar os pedidos novos. */
     async pedidosAColegaParados(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
@@ -433,6 +434,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           and h.payload->>'tarefaId' is not null and h.criado_em >= ${data(desde)}
           and c.estado in ('terminado', 'parado', 'falhou', 'precisa_de_voce')
           and coalesce(rp.estado, '') <> 'parado'
+          and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)
           and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = h.payload->>'tarefaId')
           and not (h.payload->>'tarefaId' = any(${[...adiados]}::text[]))
