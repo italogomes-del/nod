@@ -106,7 +106,7 @@ describe("linha: o bot em automático passou a responder por outra IA", () => {
     const html = renderMensagem(sistema, com({ claude: SEM_ACESSO, codex: PRONTO }));
     expect(html).toContain("linha-centro-wrap linha-ia");
     expect(html).toMatch(/<summary class="linha-centro">.*A conta do Claude está sem acesso ·<\/span><b>respondendo pelo ChatGPT<\/b><\/summary>/);
-    expect(html).toContain("A conta do Claude deste Mac está sem acesso ao Claude Code");
+    expect(html).toContain("A conta do Claude deste Mac entrou, mas não tem acesso ao Claude Code pela assinatura");
     expect(html.match(/class="ia-logo"/g)).toHaveLength(1);
     expect(html).toContain('data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA');
     expect(html).not.toContain("aviso-estado");

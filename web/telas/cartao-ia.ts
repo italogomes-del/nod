@@ -262,7 +262,7 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
   const tituloTestar = "Testar a resposta";
   if (reprovada) {
     lista.push(passo("testar", tituloTestar, reprovada === "conta_sem_acesso"
-      ? { marca: "erro", texto: `A organização desta conta desativou o ${cli} por assinatura. Entre com uma conta pessoal ou peça ao administrador para liberar.`, acoes: [{ act: "ia-entrar", rotulo: "Entrar com outra conta", contorno: true }] }
+      ? { marca: "erro", texto: `A conta entrou, mas não tem acesso ao ${cli} pela assinatura. Entre com outra conta ou, se for conta da empresa, peça ao administrador: o acesso depende do assento ou do papel que ele definiu para você.`, acoes: [{ act: "ia-entrar", rotulo: "Entrar com outra conta", contorno: true }] }
       : { marca: "erro", texto: "A conta entrou, mas não respondeu ao teste.", acoes: [{ act: "ia-testar", rotulo: "Testar de novo", contorno: true }] }));
   } else if (testando && lista.every((p) => p.marca === "feito")) lista.push(passo("testar", tituloTestar, { marca: "girando", texto: `Mandando uma frase de teste para o ${nome}…` }));
   else lista.push(passo("testar", tituloTestar));
@@ -321,7 +321,7 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       return vista("Encontrado · testando a resposta", "mudo", { girando: true, podeVerificar: false });
     case "sem_acesso":
       return e.causa === "conta_sem_acesso"
-        ? vista(`Conta sem acesso ao ${cli}`, "aviso", { ...(noApp ? { botao: b("ia-entrar", "Entrar com outra conta") } : {}), explica: `A organização desta conta desativou o ${cli} por assinatura. Entre com uma conta pessoal ou peça ao administrador para liberar.` })
+        ? vista(`Conta sem acesso ao ${cli}`, "aviso", { ...(noApp ? { botao: b("ia-entrar", "Entrar com outra conta") } : {}), explica: `A conta entrou, mas não tem acesso ao ${cli} pela assinatura. Entre com outra conta ou, se for conta da empresa, peça ao administrador: o acesso depende do assento ou do papel que ele definiu para você.` })
         : vista("Não respondeu ao teste", "aviso", noApp ? { botao: b("ia-testar", "Testar de novo") } : {});
     case "no_limite": {
       const ate = e.ate ? ` · volta ${quandoRenova(e.ate, c.agora)}` : "";
@@ -331,7 +331,7 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       if (c.onde === "onboarding" && teste === "testando") return vista("Encontrado · testando a resposta", "mudo", { girando: true, podeVerificar: false });
       if (teste && typeof teste === "object" && "causa" in teste) {
         return teste.causa === "conta_sem_acesso"
-          ? vista(`Conta sem acesso ao ${cli}`, "aviso", { ...(noApp ? { botao: b("ia-entrar", "Entrar com outra conta") } : {}), explica: `A organização desta conta desativou o ${cli} por assinatura. Entre com uma conta pessoal ou peça ao administrador para liberar.` })
+          ? vista(`Conta sem acesso ao ${cli}`, "aviso", { ...(noApp ? { botao: b("ia-entrar", "Entrar com outra conta") } : {}), explica: `A conta entrou, mas não tem acesso ao ${cli} pela assinatura. Entre com outra conta ou, se for conta da empresa, peça ao administrador: o acesso depende do assento ou do papel que ele definiu para você.` })
           : vista("Não respondeu ao teste", "aviso", noApp ? { botao: b("ia-testar", "Testar de novo") } : {});
       }
       const respondeu = teste !== null && typeof teste === "object" && "resposta" in teste;
@@ -353,7 +353,7 @@ const legivel = (v: string): string => v.replace(/^(\d+\.\d+)\.0$/, "$1");
  * do plano). O link abre fora do nod (`target=_blank`, `rel=noopener`): na janela do app, o processo principal só deixa
  * sair para o navegador.
  */
-export type AjudaDoPasso = { textos: readonly string[]; link: { rotulo: string; url: string } | null };
+export type AjudaDoPasso = { textos: readonly string[]; links: readonly { rotulo: string; url: string }[] };
 
 /**
  * Conferidos em 2026-10-11 (WebFetch, uma página por vez; a frase que prova o assunto está no PR do plano). Os endereços
@@ -363,39 +363,41 @@ export type AjudaDoPasso = { textos: readonly string[]; link: { rotulo: string; 
 export const LINKS_AJUDA = {
   codex: "https://learn.chatgpt.com/docs/codex/cli",
   codexEntrar: "https://learn.chatgpt.com/docs/auth",
+  codexAdmin: "https://learn.chatgpt.com/docs/enterprise/admin-setup",
   codexPlanos: "https://learn.chatgpt.com/docs/pricing",
   claudeCode: "https://code.claude.com/docs/en/setup",
   claudeEntrar: "https://code.claude.com/docs/en/authentication",
-  claudePlanos: "https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan",
+  claudePlanos: "https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan",
+  claudeEquipe: "https://support.claude.com/en/articles/11845131-use-claude-code-with-your-team-or-enterprise-plan",
 } as const;
 
 export const AJUDA_IA: Record<IaMac, Record<IdPasso, AjudaDoPasso>> = {
   "codex-cli": {
     instalar: {
       textos: ["O nod instala o Codex, o programa oficial da OpenAI que liga o ChatGPT aos seus bots. Ele fica numa pasta do nod e não mexe no resto do Mac.", "Leva menos de um minuto e precisa de internet."],
-      link: { rotulo: "O Codex no site da OpenAI", url: LINKS_AJUDA.codex },
+      links: [{ rotulo: "O Codex no site da OpenAI", url: LINKS_AJUDA.codex }],
     },
     entrar: {
-      textos: ["Na página da OpenAI, entre com a conta do seu ChatGPT e digite o código acima. Depois volte aqui: o nod percebe sozinho.", "A página não aceitou o código? O login por código precisa estar ligado: na conta pessoal, nas configurações de segurança do ChatGPT; na conta da empresa, o administrador do workspace libera."],
-      link: { rotulo: "Como entrar no Codex com o ChatGPT", url: LINKS_AJUDA.codexEntrar },
+      textos: ["Na página da OpenAI, entre com a conta do seu ChatGPT e digite o código acima. Depois volte aqui: o nod percebe sozinho.", "A página não aceitou o código? O login por código precisa estar ligado: na conta pessoal, nas configurações de segurança do ChatGPT; na conta da empresa, nas permissões do workspace, pelo administrador."],
+      links: [{ rotulo: "Como entrar no Codex com o ChatGPT", url: LINKS_AJUDA.codexEntrar }, { rotulo: "O que o administrador libera", url: LINKS_AJUDA.codexAdmin }],
     },
     testar: {
-      textos: ["O nod manda uma frase curta para o ChatGPT para ter certeza de que a sua conta responde. Gasta uma resposta curta da assinatura.", "Se não responder, confira se o seu plano do ChatGPT inclui o Codex."],
-      link: { rotulo: "Planos do ChatGPT que incluem o Codex", url: LINKS_AJUDA.codexPlanos },
+      textos: ["O nod manda uma frase curta para o ChatGPT para ter certeza de que a sua conta responde. Gasta uma resposta curta da assinatura.", "Se não responder, confira se o seu plano do ChatGPT inclui o Codex. Na conta da empresa, o administrador precisa permitir o Codex no computador."],
+      links: [{ rotulo: "Planos do ChatGPT que incluem o Codex", url: LINKS_AJUDA.codexPlanos }, { rotulo: "O que o administrador libera", url: LINKS_AJUDA.codexAdmin }],
     },
   },
   "claude-cli": {
     instalar: {
       textos: ["O nod instala o Claude Code, o programa oficial da Anthropic que liga o Claude aos seus bots. Ele fica numa pasta do nod e não mexe no resto do Mac.", "Leva menos de um minuto e precisa de internet."],
-      link: { rotulo: "O Claude Code no site da Anthropic", url: LINKS_AJUDA.claudeCode },
+      links: [{ rotulo: "O Claude Code no site da Anthropic", url: LINKS_AJUDA.claudeCode }],
     },
     entrar: {
-      textos: ["Na página da Anthropic, entre com a conta do seu plano do Claude (Pro, Max, Team ou Enterprise) e autorize.", "Se a página mostrar um código, copie e cole no campo acima.", "Conta da empresa (Team ou Enterprise)? Entre com a conta para a qual o administrador te convidou."],
-      link: { rotulo: "Como entrar no Claude Code", url: LINKS_AJUDA.claudeEntrar },
+      textos: ["Na página da Anthropic, entre com a conta do seu plano do Claude (Pro, Max, Team ou Enterprise) e autorize.", "Se a página mostrar um código, copie e cole no campo acima.", "Conta da empresa? Entre com a conta para a qual o administrador te convidou. No Enterprise, o acesso ao Claude Code depende do assento ou do papel que ele definiu."],
+      links: [{ rotulo: "Como entrar no Claude Code", url: LINKS_AJUDA.claudeEntrar }, { rotulo: "Claude Code nos planos Team e Enterprise", url: LINKS_AJUDA.claudeEquipe }],
     },
     testar: {
-      textos: ["O nod manda uma frase curta para o Claude para ter certeza de que a sua conta responde. Gasta uma resposta curta da assinatura.", "O plano gratuito do Claude não inclui o Claude Code. Se aparecer que a organização desativou o acesso, entre com uma conta pessoal ou peça ao administrador."],
-      link: { rotulo: "Claude Code com o plano Pro ou Max", url: LINKS_AJUDA.claudePlanos },
+      textos: ["O nod manda uma frase curta para o Claude para ter certeza de que a sua conta responde. Gasta uma resposta curta da assinatura.", "O plano gratuito do Claude não inclui o Claude Code. No Enterprise, o acesso depende do assento ou do papel definido pelo administrador."],
+      links: [{ rotulo: "Claude Code com o plano Pro ou Max", url: LINKS_AJUDA.claudePlanos }, { rotulo: "Claude Code nos planos Team e Enterprise", url: LINKS_AJUDA.claudeEquipe }],
     },
   },
 };
@@ -449,7 +451,7 @@ function htmlPasso(v: VistaIa, p: PassoIa, n: number, ui: UiIas): string {
     const ajuda = AJUDA_IA[v.ia][p.id];
     partes.push(`<button type="button" class="ia-ajuda-link" data-act="ia-ajuda" data-ia="${v.ia}" data-passo="${p.id}" aria-expanded="${aberta}">Precisa de ajuda?</button>`);
     if (aberta) {
-      const link = ajuda.link ? `<a class="ob-link" href="${esc(ajuda.link.url)}" target="_blank" rel="noopener noreferrer">${esc(ajuda.link.rotulo)}${ICONE_IA.abrir}</a>` : "";
+      const link = ajuda.links.length ? `<span class="ia-ajuda-links">${ajuda.links.map((l) => `<a class="ob-link" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.rotulo)}${ICONE_IA.abrir}</a>`).join("")}</span>` : "";
       partes.push(`<div class="ia-ajuda">${ajuda.textos.map((t) => `<p>${esc(t)}</p>`).join("")}${link}</div>`);
     }
   }

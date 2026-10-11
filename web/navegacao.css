@@ -594,3 +594,4 @@ div.mac-medidor { padding-right: 36px; }
 .int-fora button { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-decoration: underline; cursor: pointer; white-space: nowrap; }
 .int-fora button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
 .ia-log.ia-detalhe { white-space: normal; overflow-wrap: anywhere; }
+.ia-ajuda-links { display: flex; flex-wrap: wrap; gap: 4px 16px; }

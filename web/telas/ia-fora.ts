@@ -249,7 +249,7 @@ export function linhaIaTrocada(m: Mensagem, extra: { modelo?: string | null } = 
   const [motivo, detalhe] = p.causa === "limite"
     ? [`O ${de.nome} chegou ao limite`, `A assinatura do ${de.nome} chegou ao limite${p.renovaEm ? ` e renova ${quandoVolta(p.renovaEm, m.criadoEm)}` : ""}. Até lá, seus bots em automático usam ${comModelo}. Depois, voltam sozinhos para o ${de.nome}.`]
     : p.causa === "conta_sem_acesso"
-      ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} deste Mac está sem acesso ao ${de.cli}: a organização dela desativou o uso por assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
+      ? [`A conta do ${de.nome} está sem acesso`, `A conta do ${de.nome} deste Mac entrou, mas não tem acesso ao ${de.cli} pela assinatura. Seus bots em automático usam ${comModelo} até ela voltar.`]
       : [`O ${de.nome} não respondeu`, `O ${de.cli} deste Mac não respondeu. Seus bots em automático usam ${comModelo} até ele voltar.`];
   const ver = `<button type="button" class="linha-link" data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA</button>`;
   return `<div class="linha-centro-wrap linha-ia"><details class="linha-ia-troca" data-disclosure="ia-trocada-${esc(m.id)}"><summary class="linha-centro">${logo(p.para)}<span>${esc(motivo)} ·</span><b>respondendo pelo ${esc(para.nome)}</b></summary><p class="linha-ia-detalhe">${esc(detalhe)} ${ver}</p></details></div>`;

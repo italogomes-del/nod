@@ -75,7 +75,8 @@ describe("tela 1: cada estado do cartão, com um botão só", () => {
     expect(vistaDaIa("codex-cli", ctx({ ui: ui(mac("codex-cli", "falta_entrar")) })).botao?.rotulo).toBe("Entrar");
     const sem = vistaDaIa("codex-cli", ctx({ ui: ui(mac("codex-cli", "sem_acesso", { causa: "conta_sem_acesso" })) }));
     expect(sem.botao?.rotulo).toBe("Entrar com outra conta");
-    expect(sem.explica).toContain("desativou o Codex por assinatura");
+    expect(sem.explica).toContain("o acesso depende do assento ou do papel que ele definiu");
+    expect(sem.explica).not.toContain("desativou");
   });
 
   it("sem nenhuma IA pronta, o botão é cheio (a ação que falta); com uma pronta, é contorno", () => {
@@ -185,13 +186,16 @@ describe("instalar → entrar → testar dentro do cartão", () => {
     const html = renderCartaoIa(vistaDaIa("codex-cli", c), c.ui);
     expect(html).toContain('data-act="ia-ajuda" data-ia="codex-cli" data-passo="entrar" aria-expanded="true">Precisa de ajuda?');
     expect(html).toContain(`href="${LINKS_AJUDA.codexEntrar}" target="_blank" rel="noopener noreferrer"`);
-    expect(html).toContain("o administrador do workspace libera");
+    expect(html).toContain("nas permissões do workspace, pelo administrador");
+    expect(html).toContain(`href="${LINKS_AJUDA.codexAdmin}"`);
   });
 
   it("os links de ajuda são todos https em domínios oficiais da OpenAI e da Anthropic", () => {
     const oficiais = /^https:\/\/(learn\.chatgpt\.com|developers\.openai\.com|help\.openai\.com|openai\.com|chatgpt\.com|docs\.claude\.com|code\.claude\.com|docs\.anthropic\.com|support\.claude\.com|support\.anthropic\.com|claude\.com|claude\.ai|www\.anthropic\.com)\//;
     for (const url of Object.values(LINKS_AJUDA)) expect(url).toMatch(oficiais);
-    for (const passos of Object.values(AJUDA_IA)) for (const p of Object.values(passos)) if (p.link) expect(Object.values(LINKS_AJUDA)).toContain(p.link.url);
+    for (const passos of Object.values(AJUDA_IA)) for (const p of Object.values(passos)) for (const l of p.links) expect(Object.values(LINKS_AJUDA)).toContain(l.url);
+    // help.openai.com responde 403 a quem confere: fica fora até dar para abrir.
+    for (const url of Object.values(LINKS_AJUDA)) expect(url).not.toContain("help.openai.com");
   });
 });
 
