@@ -301,7 +301,7 @@ export function blocosAoVivoDaTask(estado: Estado, id: string): BlocoDaTimeline[
   const feitos = (a?.etapas ?? []).map((e) => `<div class="passo"><span class="passo-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span></div>`).join("");
   const agora = t.estado === "rodando" && a
     ? a.atual.trim() && a.ferramentas === 0
-      ? `<article class="message bot streaming ao-vivo">${bot ? iconeAgente(bot, "md", "trabalhando") : ""}<div class="bubble-wrap"><div class="bubble">${textoFormatado(a.atual, { chave: `task:${t.id}` })}<span class="cursor">▍</span></div></div></article>`
+      ? `<article class="message bot streaming ao-vivo">${bot ? iconeAgente(bot, "md", "trabalhando") : ""}<div class="bubble-wrap"><div class="bubble">${textoFormatado(a.atual, { chave: `task:${t.id}`, aoVivo: true })}<span class="cursor">▍</span></div></div></article>`
       : `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(linhaAtual(a))}</span></div>`
     : t.estado === "rodando"
       ? `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(t.ultimoPasso ?? "trabalhando…")}</span></div>`

@@ -571,7 +571,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   if (atividade?.atual) {
     // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
     // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave }))}</div></div></article>${linhaMuda}` }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
   }
   return [{ chave, html: linhaDoTurnoVivo(t, c, estado) + linhaMuda }];
 }
