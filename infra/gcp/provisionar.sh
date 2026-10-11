@@ -114,3 +114,38 @@ gc iam service-accounts add-iam-policy-binding "$SA_DEPLOY" --role=roles/iam.wor
   --member="principalSet://iam.googleapis.com/projects/$NUMERO/locations/global/workloadIdentityPools/github/attribute.repository/$GITHUB_REPO" >/dev/null
 echo "Provider WIF: projects/$NUMERO/locations/global/workloadIdentityPools/github/providers/github"
 echo "Conta de deploy: $SA_DEPLOY"
+
+passo "Ensaio de restauração pelo GitHub Actions (NOD-205, conta própria, sem escrita na produção)"
+# A nod-ensaio clona o nod-pg numa cópia nod-pg-ensaio-*, entra na VM pelo IAP para comparar e apaga a cópia.
+# Nenhum papel de escrita em Secret Manager, Artifact Registry ou Compute: a senha do banco é lida pela conta
+# da VM, na VM. Dois papéis customizados para que ela não consiga desligar a proteção contra exclusão nem
+# apagar o nod-pg: update/delete só valem para nomes com o prefixo (condição IAM), e o script repete a regra.
+SA_ENSAIO="nod-ensaio@$PROJETO.iam.gserviceaccount.com"
+gc iam service-accounts describe "$SA_ENSAIO" >/dev/null 2>&1 ||
+  gc iam service-accounts create nod-ensaio --display-name="nod: ensaio de restauração do GitHub"
+papel_customizado() { # id, título, permissões (create na primeira vez; update iguala a lista nas seguintes)
+  if gc iam roles describe "$1" >/dev/null 2>&1; then
+    gc iam roles update "$1" --title="$2" --permissions="$3" --stage=GA >/dev/null
+  else
+    gc iam roles create "$1" --title="$2" --permissions="$3" --stage=GA >/dev/null
+  fi
+}
+# O clone é checado na instância de origem (instances/nod-pg/clone): fica no papel sem condição. O Cloud SQL
+# não tem família de permissões de operações: `gcloud sql operations list/wait` pedem cloudsql.instances.get/list
+# (docs do Cloud SQL, "IAM permissions", 2026-10-09).
+papel_customizado nodEnsaioLeitura "nod: ensaio de restauração (clonar e ler)" \
+  cloudsql.instances.get,cloudsql.instances.list,cloudsql.instances.clone,cloudsql.instances.create
+papel_customizado nodEnsaioApagar "nod: ensaio de restauração (apagar a cópia)" \
+  cloudsql.instances.update,cloudsql.instances.delete
+gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_ENSAIO" \
+  --role="projects/$PROJETO/roles/nodEnsaioLeitura" --condition=None >/dev/null
+gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_ENSAIO" \
+  --role="projects/$PROJETO/roles/nodEnsaioApagar" \
+  --condition="expression=resource.name.startsWith(\"projects/$PROJETO/instances/nod-pg-ensaio-\"),title=so-copias-de-ensaio,description=Só instâncias nod-pg-ensaio-* (NOD-205)" >/dev/null
+for papel in roles/compute.viewer roles/compute.osAdminLogin roles/iap.tunnelResourceAccessor; do
+  gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_ENSAIO" --role="$papel" --condition=None >/dev/null
+done
+gc iam service-accounts add-iam-policy-binding "$SA_VM" --member="serviceAccount:$SA_ENSAIO" --role=roles/iam.serviceAccountUser >/dev/null
+gc iam service-accounts add-iam-policy-binding "$SA_ENSAIO" --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$NUMERO/locations/global/workloadIdentityPools/github/attribute.repository/$GITHUB_REPO" >/dev/null
+echo "Conta do ensaio: $SA_ENSAIO (grave na variável GCP_ENSAIO_SA do repositório)"

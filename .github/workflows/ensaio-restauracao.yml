@@ -1,0 +1,64 @@
+# Ensaio de restauração do banco de produção (NOD-205, runbook em docs/runbook-producao.md): clona o
+# nod-pg por PITR numa cópia nod-pg-ensaio-<run_id>, compara produção e cópia na nod-vm pelo túnel IAP e
+# SEMPRE apaga a cópia, inclusive com falha ou cancelamento. Só roda à mão (Actions → ensaio-restauracao →
+# Run workflow, na branch main: o WIF só aceita refs/heads/main).
+# Conta própria, nod-ensaio (infra/gcp/provisionar.sh), não a nod-deploy: o deploy roda a cada push e
+# não deve conseguir apagar instância. A nod-ensaio só apaga nomes com o prefixo nod-pg-ensaio- (condição IAM).
+# Actions pinadas pelos mesmos SHAs do deploy.yml (verificados em 2026-10-02 na API do GitHub):
+#   actions/checkout v4.2.2                    = 11bd71901bbe5b1630ceea73d27597364c9af683
+#   google-github-actions/auth v3.0.0          = 7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+#   google-github-actions/setup-gcloud v3.0.1  = aa5489c8933f4cc7a4f7d45035b3b1440c9c10db
+name: ensaio-restauracao
+on:
+  workflow_dispatch:
+    inputs:
+      instante:
+        description: "Instante a restaurar, ISO 8601 em UTC (ex.: 2026-10-09T12:00:00Z). Vazio = estado mais recente."
+        required: false
+        default: ""
+        type: string
+
+# Um ensaio por vez e nunca cancelado por outro: o cancelamento no meio do clone deixaria a cópia para o
+# passo de apagar resolver.
+concurrency:
+  group: ensaio-restauracao
+  cancel-in-progress: false
+
+jobs:
+  ensaio:
+    # Runner próprio (infra/gcp/runner/), como o deploy.
+    runs-on: [self-hosted, linux, nod-ci]
+    environment: producao
+    # A soma dos prazos dos passos (40 + 15) fica abaixo do prazo do job, para o passo de apagar ainda caber.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Determinístico: o passo de apagar sabe o nome mesmo se o cancelamento chegar no meio do clone.
+      COPIA: nod-pg-ensaio-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_ENSAIO_SA }}
+
+      - id: gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Clonar e comparar
+        timeout-minutes: 40
+        env:
+          # Pela env, nunca interpolado no script; o ensaiar-restauracao.sh valida o formato.
+          INSTANTE: ${{ inputs.instante }}
+        run: infra/gcp/ensaiar-restauracao.sh ensaiar --copia "$COPIA" --instante "$INSTANTE"
+
+      - name: Apagar a cópia
+        # always(): roda também com falha ou cancelamento. Sem gcloud autenticado não há o que apagar
+        # (a cópia só nasce depois deste ponto).
+        if: always() && steps.gcloud.outcome == 'success'
+        timeout-minutes: 15
+        run: infra/gcp/ensaiar-restauracao.sh apagar --copia "$COPIA"

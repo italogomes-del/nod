@@ -16,8 +16,10 @@ estão em [`infra/gcp/`](../infra/gcp/) e a configuração não secreta em
 | Rede | VPC `nod-vpc`; 80/443 abertas; SSH só pelo IAP | A VM não aceita SSH da internet |
 | Deploy | `.github/workflows/deploy.yml` | Depois do `ci` verde num push ao `main`; autenticação por Workload Identity Federation |
 
-Contas de serviço: `nod-vm` (lê segredos e imagens, escreve logs) e `nod-deploy` (publica imagens e
-entra na VM pelo IAP; só o repositório `gamefik/nod`, na branch `main`, pode usá-la).
+Contas de serviço: `nod-vm` (lê segredos e imagens, escreve logs), `nod-deploy` (publica imagens e
+entra na VM pelo IAP) e `nod-ensaio` (clona o banco e apaga só as cópias `nod-pg-ensaio-*`, para o
+[ensaio de restauração](runbook-producao.md#5-como-rodar-o-ensaio)). Só o repositório `gamefik/nod`,
+na branch `main`, pode usar as duas últimas.
 
 ## Como um deploy acontece
 
@@ -93,8 +95,8 @@ cd infra/gcp
 ./levar-dados.sh        # opcional, UMA vez: recusa banco não vazio
 ```
 
-No GitHub, as variáveis do repositório `GCP_WIF_PROVIDER` e `GCP_DEPLOY_SA` recebem o que o
-`provisionar.sh` imprime no final.
+No GitHub, as variáveis do repositório `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA` e `GCP_ENSAIO_SA` recebem
+o que o `provisionar.sh` imprime no final.
 
 ### Cliente OAuth do Google (manual)
 
@@ -158,9 +160,9 @@ sudo docker compose -f /opt/nod/compose.yml logs -f nod
 sudo bash -c 'cd /opt/nod && export NOD_DOMINIO=34-39-164-139.sslip.io \
   NOD_IMAGEM="$(docker ps --filter label=com.docker.compose.service=nod --format "{{.Image}}")" &&
   docker compose run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com nod node scripts/seed.ts'
-# Restaurar o banco num ponto do tempo (cria outra instância; nunca sobrescreve a atual)
-gcloud sql instances clone nod-pg nod-pg-restaurada --point-in-time='2026-10-02T12:00:00Z' --project=nod-producao
 ```
+
+Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md).
 
 O monitor de disponibilidade fica fora da GCP (ADR-017): cadastre `https://<domínio>/api/saude`
 num serviço externo (Better Stack, UptimeRobot).
