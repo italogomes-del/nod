@@ -323,7 +323,6 @@ div.mac-medidor { padding-right: 36px; }
 .gv-detalhes summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
 .gv-detalhes[open] summary { margin-bottom: 12px; }
 .gv-detalhes .gv-campo + .gv-campo { margin-top: 12px; }
-.gv-form .inteligencia-card { margin: 0; }
 .gv-anotar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "texto texto" "tipo botao"; gap: 8px; }
 .gv-anotar input { grid-area: texto; }
 .gv-anotar select { grid-area: tipo; }
@@ -423,3 +422,175 @@ div.mac-medidor { padding-right: 36px; }
 .cx-check { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; font-size: 11px; flex: none; }
 .cx-bot[aria-checked="true"] .cx-check { background: var(--action); border-color: var(--action); color: var(--on-action); }
 .cx-rodape { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
+
+/* =====================================================================================================================
+   Provedores de IA, o cartão de IA e a Inteligência do bot (definido em 2026-10-10, plano "IAs: conexão, troca e escolha
+   de modelo", PR 3; protótipos Main, Gaveta, Inteligencia2 e Onboarding, aprovados). O cartão é o mesmo em Provedores de
+   IA e no onboarding (web/telas/cartao-ia.ts): logo redondo, estado curto, um botão, o verificar no hover e, quando há,
+   os passos de instalar, entrar e testar.
+   ===================================================================================================================== */
+.prov-titulo { display: flex; align-items: center; gap: 12px; }
+.prov-pilha { display: inline-flex; flex: none; }
+.prov-av { width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 0 0 2px var(--surface); display: grid; place-items: center; color: var(--ink); }
+.prov-av + .prov-av { margin-left: -9px; }
+.prov-av svg { width: 16px; height: 16px; display: block; }
+.prov-mini .prov-av { width: 18px; height: 18px; }
+.prov-mini .prov-av + .prov-av { margin-left: -7px; }
+.prov-mini .prov-av svg { width: 10px; height: 10px; }
+.prov-ordem { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 2px 8px; font-size: 12.5px; color: var(--ink-3); }
+.prov-ordem span:first-child { font-weight: 600; color: var(--ink-2); }
+.prov-linha { transition: box-shadow .12s, opacity .12s; }
+.prov-linha + .prov-linha { border-top: 1px solid var(--line); }
+.prov-linha.arrastando, .int-ia.arrastando { opacity: .45; }
+.prov-linha.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
+.prov-alca, .int-alca { flex: none; width: 22px; height: 32px; margin: 0 -4px; padding: 0; border: 0; border-radius: 6px; background: none;
+  display: grid; place-items: center; color: var(--ink-3); cursor: grab; touch-action: none; }
+.prov-alca:hover, .int-alca:hover { color: var(--ink); background: var(--surface-raised); }
+.prov-alca:focus-visible, .int-alca:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.prov-pos { flex: none; width: 12px; font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.provedores .ia-nota { margin: 12px 2px 0; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+.provedores .ia-nota b { font-weight: 500; color: var(--ink-2); }
+.provedores .prov-avancado { margin-top: 18px; }
+
+.ia-linha { display: flex; align-items: center; gap: 14px; padding: 16px 18px; }
+.ia-linha .ob-logo { width: 40px; height: 40px; border-radius: 50%; }
+.ia-linha .ob-logo svg { width: 22px; height: 22px; display: block; }
+.ia-linha .ob-ia-txt b { font-size: 15px; }
+.ia-linha .ob-pilula { flex: none; }
+.ob-card-ia .ia-linha { padding: 0; gap: 16px; }
+.ob-card-ia .ia-linha .ob-logo { width: 44px; height: 44px; }
+.ob-card-ia.aberto { gap: 10px; }
+.ia-verificar { flex: none; width: 32px; height: 32px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none;
+  color: var(--ink-3); cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; }
+.ia-linha:hover .ia-verificar, .ia-verificar:focus-visible, .ia-verificar.girando { opacity: 1; }
+.ia-verificar:hover { background: var(--surface-raised); color: var(--ink); }
+.ia-verificar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ia-verificar.girando svg { animation: ob-gira .9s linear infinite; }
+/* O balão fica à esquerda do ícone: em cima, o `overflow: hidden` do cartão cortava o da primeira linha. */
+.ia-dica { position: relative; flex: none; }
+.ia-dica .ia-balao { position: absolute; right: calc(100% + 6px); top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 6px 9px;
+  border-radius: 8px; background: var(--ink); color: var(--surface); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .12s; }
+.ia-dica:hover .ia-balao, .ia-dica:focus-within .ia-balao { opacity: 1; }
+.ia-explica { margin: 0 18px 16px 126px; padding: 10px 12px; border-radius: 10px; background: var(--warning-soft); font-size: 13px; line-height: 1.45; color: var(--ink); }
+.ia-explica p { margin: 0; }
+.ia-aviso-nota { margin: 0 18px 14px 126px; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.ob-card-ia .ia-explica, .ob-card-ia .ia-aviso-nota { margin: 0 0 0 60px; }
+
+/* Os passos dentro do cartão: instalar, entrar, testar. */
+.ia-fluxo { display: flex; flex-direction: column; margin: -6px 18px 14px 126px; padding: 0; list-style: none; }
+.ob-card-ia .ia-fluxo { margin: 2px 0 0 60px; }
+.ia-passo { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; }
+.ia-passo-marca { width: 22px; height: 22px; box-sizing: border-box; flex: none; border-radius: 50%; border: 1px solid var(--line-strong);
+  color: var(--ink-3); display: grid; place-items: center; font-size: 11.5px; font-weight: 600; }
+.ia-passo-marca.feito { border: 0; background: var(--success); color: var(--on-status); }
+.ia-passo-marca.feito svg { width: 12px; height: 12px; }
+.ia-passo-marca.falha { border: 0; background: var(--warning); color: var(--on-status); }
+.ia-passo-marca.ativo { border-color: var(--ink); color: var(--ink); }
+.ia-passo-marca:has(.ob-gira) { border: 0; }
+.ia-passo-marca .ob-gira { width: 16px; height: 16px; border-color: var(--line); border-top-color: var(--ink); opacity: 1; }
+.ia-passo-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.ia-passo-txt b { font-size: 14px; font-weight: 500; color: var(--ink); }
+.ia-passo.depois .ia-passo-txt b { color: var(--ink-3); }
+.ia-erro-txt { color: var(--ink-2); }
+.ia-log { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ia-codigo { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.ia-codigo code { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: .08em; color: var(--ink); padding: 6px 12px;
+  border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line); user-select: all; }
+.ia-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 4px; }
+.ia-acoes .ob-link svg { margin-left: 3px; vertical-align: -1px; }
+.ia-esperando { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.ia-esperando .ob-gira { width: 11px; height: 11px; }
+.ia-colar { display: flex; gap: 8px; margin: 4px 0 0; }
+.ia-colar input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 13px; }
+.ia-colar input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ia-ajuda-link { align-self: flex-start; border: 0; background: none; padding: 0; margin-top: 2px; font: inherit; font-size: 12.5px; color: var(--ink-3);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ia-ajuda-link:hover { color: var(--ink); }
+.ia-ajuda-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.ia-ajuda { margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.ia-ajuda p { margin: 0 0 6px; }
+.ia-ajuda .ob-link { font-size: 12.5px; }
+.ia-ajuda .ob-link svg { margin-left: 3px; vertical-align: -1px; }
+.ordem-final { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 10px; font-size: 13px; color: var(--ink-2); }
+.ordem-final .ob-logo { width: 22px; height: 22px; border-radius: 50%; }
+.ordem-final .ob-logo svg { width: 12px; height: 12px; }
+.ordem-final b { font-weight: 500; color: var(--ink); }
+
+/* 2A: a linha Inteligência da gaveta abre o menu dentro do cartão. */
+.ia-linha-wrap { position: relative; }
+.ia-atual { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.ia-av { width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  display: inline-grid; place-items: center; flex: none; }
+.ia-av svg { width: 10px; height: 10px; display: block; }
+.ia-seta { flex: none; color: var(--ink-3); }
+.gv-linha[aria-expanded="true"] .ia-seta { transform: rotate(180deg); }
+.ia-menu { margin: 0 8px 8px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-side); }
+.ia-op { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 0; border-radius: 9px; background: none;
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.ia-op:hover, .ia-op:focus-visible { background: var(--surface); }
+.ia-op:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ia-op:disabled { cursor: default; opacity: .5; }
+.ia-op:disabled:hover { background: none; }
+.ia-op-txt { flex: 1; min-width: 0; }
+.ia-op-txt b { display: block; font-size: 13px; font-weight: 500; }
+.ia-op-txt small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); }
+.ia-op-modelo { padding-left: 34px; }
+.ia-grupo { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px 2px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+.ia-grupo-estado { color: var(--ink-3); }
+.ia-grupo-link { margin-left: auto; border: 0; background: none; padding: 0; font: inherit; font-size: 11.5px; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.ia-mais { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 9px 10px 4px; border: 0; border-top: 1px solid var(--line); background: none;
+  font: inherit; font-size: 12.5px; color: var(--ink-2); text-align: left; cursor: pointer; }
+.ia-mais:hover { color: var(--ink); }
+.ia-mais:focus-visible, .ia-grupo-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+
+/* 2B: os dois modos com rádio, a lista arrastável e a pílula "Modelo · Raciocínio". */
+.gv-form .modo { display: flex; flex-direction: column; gap: 8px; }
+.modo-op { display: flex; align-items: flex-start; gap: 12px; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.modo-op:hover { border-color: var(--line-strong); }
+.modo-op[aria-checked="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.modo-op:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.modo-op b { display: block; font-size: 14px; font-weight: 600; }
+.modo-op span.sub { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.int-radio { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
+.int-radio.on { border: 5px solid var(--action); }
+.int-titulo { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; padding: 0 4px; font-size: 12px; color: var(--ink-3); }
+.int-titulo b { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.int-lista { display: flex; flex-direction: column; gap: 8px; }
+.int-ia { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; transition: box-shadow .12s, opacity .12s; }
+.int-ia.alvo { box-shadow: 0 -3px 0 0 var(--action); }
+.int-ia.apagada .int-linha { opacity: .6; }
+.int-linha { display: flex; align-items: center; gap: 10px; padding: 8px; }
+.int-linha .int-radio { border-width: 1.5px; padding: 0; background: none; cursor: pointer; margin: 0 2px 0 4px; }
+.int-linha .int-radio.on { border-width: 5px; }
+.int-linha .int-radio:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.int-ia .ia-logo { width: 26px; height: 26px; border-radius: 50%; }
+.int-ia .ia-logo svg { width: 14px; height: 14px; }
+.int-nome { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 13.5px; }
+.int-uso { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.int-escolha { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); font: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.int-escolha:hover { border-color: var(--line-strong); color: var(--ink); }
+.int-escolha:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.int-escolha[aria-expanded="true"] svg { transform: rotate(180deg); }
+.int-painel { padding: 4px 12px 12px; border-top: 1px solid var(--line); background: var(--surface-side); }
+.int-rotulo { margin: 10px 0 6px; font-size: 11.5px; color: var(--ink-3); }
+.int-modelos { display: flex; flex-direction: column; }
+.int-mod { display: flex; align-items: flex-start; gap: 10px; padding: 6px 2px; border: 0; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.int-mod:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 6px; }
+.int-mod b { display: block; font-size: 13px; font-weight: 500; }
+.int-mod small { display: block; font-size: 11.5px; color: var(--ink-3); }
+.int-mod .int-radio { width: 14px; height: 14px; margin-top: 2px; }
+.int-mod .int-radio.on { border-width: 4px; }
+.int-niveis { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-raised); width: fit-content; }
+.int-nivel { height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.int-nivel.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-knob), inset 0 0 0 1px var(--line); }
+.int-nivel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.int-nivel-desc { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.int-fora { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 0 4px; font-size: 12.5px; color: var(--ink-3); }
+.int-fora button { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.int-fora button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.ia-log.ia-detalhe { white-space: normal; overflow-wrap: anywhere; }

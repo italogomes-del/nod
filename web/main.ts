@@ -5,7 +5,10 @@ import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/ca
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
-import { renderInteligencia, escolhaInteligencia } from "./telas/inteligencia.ts";
+import { iasDaTela, mudarRascunho, ordemDaPessoa, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
+import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
+import { criarIasDoMac } from "./lib/ias-do-mac.ts";
+import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo, avisoFechado, fecharAviso, hidratarAvisosFechados } from "./lib/menu-modo.ts";
@@ -36,7 +39,7 @@ import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
+import { contextoInteligencia, nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova } from "./telas/maquinas.ts";
@@ -234,6 +237,7 @@ const telaLigacao = criarTelaLigacao({
  */
 const telaOnboarding = criarTelaOnboarding({
   api: () => api,
+  iasMac: () => estado.iasMac,
   dados: () => estado.onboarding,
   aberto: () => estado.onboardingAberto,
   hidratar: (o) => dispatch({ tipo: "hidratar-onboarding", onboarding: o }),
@@ -415,6 +419,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "frota") return { tipo: "hidratar-frota", frota: await api.frota() };
   if (q === "inventario") return { tipo: "hidratar-inventario", inventario: await api.inventario() };
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
+  // Plano das IAs (2026-10-10): servidor sem a rota (404, versão anterior) fica sem `ias`; a tela usa o catálogo do executor.
+  if (q === "ias") return { tipo: "hidratar-ias", ias: await api.ias().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
   if (q === "sua-vez") {
     // definido em 2026-09-24 ("aviso no Mac"): atrás, a leitura serve ao Dock e ao aviso, e não conta como vista.
     const ver = naFrente();
@@ -537,7 +543,7 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos") return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = estado.espaco?.secao;
@@ -1026,6 +1032,7 @@ function render(): void {
   const gavetaDoApp = gavetaPrendeFoco(estado.tela);
   if (gavetaDoApp && !gavetaMontada) origemDaGaveta = origemDoFoco();
   if (!arrastandoBot) redesenharSidebar();
+  const codigo = codigoComFoco();
   // Seu espaço é uma camada por cima: a tela de baixo continua montada e fica inerte (nem foco, nem clique) enquanto ela está aberta.
   regiaoReabrindo("espaco", estado.espaco ? renderEspaco(estado, ambienteBanco, canalAvisos.estado(), voltaDaTela(estado, estado.tela)) : "");
   document.getElementById("espaco")?.toggleAttribute("hidden", !estado.espaco);
@@ -1046,6 +1053,24 @@ function render(): void {
   }
   renderPrincipal();
   prenderFocoNaGaveta(gavetaDoApp);
+  codigo?.();
+}
+
+/**
+ * O campo do código do Claude (cartão de IA) com o foco: o cartão é regravado quando o app do Mac manda um estado novo
+ * ou a cada tecla (o valor mora no estado), e o foco voltaria ao corpo. Devolve o foco e o cursor ao campo novo.
+ */
+function codigoComFoco(): (() => void) | null {
+  const ativo = document.activeElement;
+  if (!(ativo instanceof HTMLInputElement) || !ativo.dataset.iaCodigo) return null;
+  const { iaCodigo } = ativo.dataset;
+  const [inicio, fim] = [ativo.selectionStart, ativo.selectionEnd];
+  return () => {
+    if (document.activeElement instanceof HTMLInputElement && document.activeElement.dataset.iaCodigo === iaCodigo) return;
+    const novo = document.querySelector<HTMLInputElement>(`input[data-ia-codigo="${iaCodigo}"]`);
+    novo?.focus();
+    if (novo && inicio !== null && fim !== null) novo.setSelectionRange(inicio, fim);
+  };
 }
 
 /**
@@ -1758,14 +1783,73 @@ function filtrarApps(texto: string): void {
   if (vazio) vazio.hidden = cards.some((el) => !el.hidden);
 }
 
-/** A escolha de modelo e esforço de um bot da pessoa (o menu da gestão e o /modelo do campo). */
+/**
+ * A Inteligência de um bot da pessoa (o menu da gestão, o /modelo do campo, "Trocar a IA" nos avisos). revisto em
+ * 2026-10-10 (plano das IAs): abre sempre no nível da gaveta (2B), indo à conversa do bot se for outra; o diálogo com o
+ * select de antes saiu.
+ */
 function abrirInteligencia(agenteId: string | undefined): void {
   const a = botGerido(agenteId);
   if (!a || a.ownerId !== estado.sessao?.pessoaId) return;
-  // definido em 2026-09-30: com a conversa do bot na tela, a escolha abre na gaveta dele; fora dela, no diálogo.
-  if (estado.tela.tipo === "conversa" && estado.tela.agenteId === a.id) { abrirNivel(a.id, { tipo: "inteligencia" }); return; }
-  pedirGestao(`Inteligência de ${a.nome}`, renderInteligencia(a, estado.executor?.harnesses, true), "Salvar escolha", async (d) => mudarGestao(() => api!.editarPerfil(a.id, escolhaInteligencia(d))));
+  abrirNivel(a.id, { tipo: "inteligencia" });
 }
+
+// ---- as IAs do Mac nos cartões (Provedores de IA, onboarding, chat) — plano das IAs, 2026-10-10 ---------------------------
+const iasDoMac = criarIasDoMac({
+  mac: () => window.nodDesktop,
+  ui: () => estado.iasMac,
+  mudar: (mudanca: Partial<UiIas>) => dispatch({ tipo: "ias-mac", mudanca }),
+  // O onboarding testa a IA pelo teste dele (onboarding-teste.ts); fora dele, o fim do fluxo testa aqui.
+  testeAqui: () => !telaOnboarding.cobre(),
+  aoMudarNoMac: () => { if (estado.sessao) dispatch({ tipo: "invalidar", quais: ["ias", "inventario", "executor"] }); },
+  verificarNoServidor: async () => {
+    dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) });
+    dispatch({ tipo: "invalidar", quais: ["ias", "executor"] });
+  },
+  copiar: (texto) => navigator.clipboard.writeText(texto),
+  agendar: (fn, ms) => { window.setTimeout(fn, ms); },
+});
+void iasDoMac.iniciar();
+
+/**
+ * O clique de IA que veio de fora de um cartão (um aviso no chat, o menu da conta) abre Provedores de IA, onde o cartão
+ * mostra o andamento: o código do login, o campo de colar, o erro. A linha do chat que acompanha o login ela mesma
+ * (`data-fica`) não sai do lugar.
+ */
+function verCartaoDaIa(el: HTMLElement): void {
+  if (el.closest("#espaco, #onboarding, [data-fica]")) return;
+  abrirEspaco("conexao");
+}
+
+/** Muda o rascunho da Inteligência (2B) e marca a gaveta como "com mudança não salva". */
+function mudarInteligencia(agenteId: string | undefined, m: (r: RascunhoInteligencia) => MudancaRascunho | null): void {
+  const a = estado.frota?.agentes.find((b) => b.id === (agenteId ?? estado.gaveta?.agenteId));
+  if (!a) return;
+  const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
+  const mudanca = m(r);
+  if (!mudanca) return;
+  dispatch({ tipo: "rascunho-ia", rascunho: mudarRascunho(r, mudanca, contextoInteligencia(estado)) });
+  gavetaSuja = chaveDaGaveta();
+}
+const iaDaTela = (id: string | undefined) => iasDaTela(estado).find((i) => i.id === id);
+
+/** A ordem arrastada: a da pessoa (Provedores de IA) grava na hora; a do bot (2B) vai para o rascunho. */
+instalarOrdemArrastavel(document, (lista, ordem) => {
+  const ids = ordem.filter(ehIaMac);
+  if (lista === "pessoa") {
+    const completa = [...ids, ...(estado.ias?.ordem ?? []).filter((id) => !ids.includes(id as never))];
+    dispatch({ tipo: "ordem-ias", ordem: completa });
+    void agir(async () => {
+      await api!.gravarOrdemIas(completa);
+      dispatch({ tipo: "invalidar", quais: ["ias"] });
+    });
+    return;
+  }
+  if (lista === "bot") mudarInteligencia(undefined, (r) => {
+    const atual = r.ordem ?? ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem);
+    return { tipo: "ordem", ordem: [...ids, ...atual.filter((id) => !ids.includes(id as never))] };
+  });
+});
 
 function filtrarBots(texto: string, raiz = "#sidebar"): void {
   const termo = texto.trim().toLowerCase();
@@ -1868,13 +1952,46 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
   // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
-  "ia-entrar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void window.nodDesktop?.iaEntrar?.(ia).catch(() => undefined); },
+  // revisto em 2026-10-10 (plano das IAs, teste do Breno: "clicava em Codex e nada acontecia"): todo clique termina no
+  // estado do cartão ou numa nota escrita (web/lib/ias-do-mac.ts); fora de Provedores de IA, abre a seção para a pessoa
+  // ver o cartão andar (o código do login, o campo de colar, o erro).
+  "ia-entrar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) { verCartaoDaIa(el); void iasDoMac.entrar(ia); } },
   "ia-conectar": (el) => {
     const ia = el.dataset.ia;
     if (!ehIa(ia)) return;
-    const mac = window.nodDesktop;
-    void (pedeInstalar(inventarioDaIa(estado, ia)) ? mac?.iaInstalar?.(ia) : mac?.iaEntrar?.(ia))?.catch(() => undefined);
+    verCartaoDaIa(el);
+    void (pedeInstalar(inventarioDaIa(estado, ia)) ? iasDoMac.instalar(ia) : iasDoMac.entrar(ia));
   },
+  "ia-instalar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) { verCartaoDaIa(el); void iasDoMac.instalar(ia); } },
+  "ia-cancelar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.cancelar(ia); },
+  "ia-verificar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.verificar(ia); },
+  // No onboarding, o teste é o dele (onboarding-teste.ts): é o veredito dele que libera o Continuar.
+  "ia-testar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void (el.closest("#onboarding") ? telaOnboarding.acoes["onboarding-ia-testar"]?.(el) : iasDoMac.testar(ia)); },
+  "ia-abrir-link": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.abrirLink(ia); },
+  "ia-copiar-codigo": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.copiarCodigo(ia, el.dataset.texto ?? ""); },
+  "ia-ajuda": (el) => iasDoMac.alternarAjuda(`${el.dataset.ia ?? ""}:${el.dataset.passo ?? ""}`),
+  "ia-detalhe": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) iasDoMac.alternarDetalhe(ia); },
+  // 2A: o menu de Inteligência dentro do cartão da gaveta; um clique grava (Automático, ou Uma IA só naquele modelo).
+  "menu-inteligencia": (el) => dispatch({ tipo: "menu-ia", agenteId: estado.menuIa === el.dataset.id ? null : el.dataset.id ?? null }),
+  "inteligencia-escolher": (el) => {
+    const a = estado.frota?.agentes.find((b) => b.id === el.dataset.id);
+    const ia = el.dataset.ia;
+    if (!a) return;
+    const pedido = el.dataset.modo === "auto" ? pedidoDoMenu(a, { modo: "auto" }) : ehIaMac(ia) && el.dataset.modelo ? pedidoDoMenu(a, { ia, modelo: el.dataset.modelo }) : null;
+    if (!pedido) return;
+    dispatch({ tipo: "menu-ia", agenteId: null });
+    void agir(async () => {
+      await api!.gravarInteligencia(a.id, pedido);
+      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+    });
+  },
+  // 2B: o rascunho muda a cada clique; Salvar é o submit do formulário da gaveta.
+  "int-modo": (el) => mudarInteligencia(undefined, () => ({ tipo: "modo", modo: el.dataset.modo === "fixa" ? "fixa" : "auto" })),
+  "int-fixa": (el) => mudarInteligencia(undefined, () => (ehIaMac(el.dataset.ia) ? { tipo: "fixa", ia: el.dataset.ia } : null)),
+  "int-pilula": (el) => mudarInteligencia(undefined, () => (ehIaMac(el.dataset.ia) ? { tipo: "pilula", ia: el.dataset.ia } : null)),
+  "int-modelo": (el) => mudarInteligencia(undefined, () => { const ia = iaDaTela(el.dataset.ia); return ia && el.dataset.modelo ? { tipo: "modelo", ia, modelo: el.dataset.modelo } : null; }),
+  "int-raciocinio": (el) => mudarInteligencia(undefined, () => { const ia = iaDaTela(el.dataset.ia); const r = el.dataset.raciocinio; return ia && (r === "low" || r === "medium" || r === "high" || r === "xhigh" || r === "max") ? { tipo: "raciocinio", ia, raciocinio: r } : null; }),
+  "int-ordem-pessoa": () => mudarInteligencia(undefined, () => ({ tipo: "ordem-da-pessoa" })),
   // NOD-171: "Atualizar" do CLI abaixo do piso. No app do Mac abre a página oficial (o mesmo `iaInstalar`; quem atualiza é a
   // pessoa, no Terminal); fora dele, a seção Conexão, que mostra o comando.
   "ia-atualizar": (el) => {
@@ -2403,7 +2520,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "editar-perfil": (form) => {
     const d = new FormData(form);
     return agir(async () => {
-      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), ...(d.has("inteligencia") ? escolhaInteligencia(d) : {}), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
+      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
       // ADR-071: a voz nas ligações mora em rota própria (vale na próxima frase de uma ligação em curso).
       const voz = VOZES.find((v) => v.id === d.get("voz"))?.id;
       const vozVelocidade = VELOCIDADES.find((v) => String(v) === d.get("vozVelocidade"));
@@ -2413,11 +2530,20 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     });
   },
   inteligencia: (form) => {
-    const d = new FormData(form);
+    const a = estado.frota?.agentes.find((b) => b.id === form.dataset.id);
+    if (!a) return Promise.resolve();
+    const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
     return agir(async () => {
-      await mudarGestao(() => api!.editarPerfil(form.dataset.id ?? "", escolhaInteligencia(d)));
+      await api!.gravarInteligencia(a.id, pedidoDoRascunho(r));
+      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
       fecharNivel();
     });
+  },
+  // Tela 1/5: o código que a página da Anthropic mostrou vai ao login do Claude Code aberto no app (só a forma de um código).
+  "ia-colar-codigo": (form) => {
+    const ia = form.dataset.ia;
+    const codigo = String(new FormData(form).get("codigo") ?? "");
+    return ehIa(ia) && codigo.trim() ? iasDoMac.colarCodigo(ia, codigo) : Promise.resolve();
   },
   "criar-memoria": (form) =>
     agir(async () => {
@@ -2506,12 +2632,6 @@ document.addEventListener("change", (ev) => {
   if (cb.id === "composer-arquivos") {
     adicionarArquivos([...(cb.files ?? [])]);
     cb.value = "";
-    return;
-  }
-  if (cb.matches('select[name="inteligencia"]')) {
-    const select = ev.target as HTMLSelectElement;
-    const chip = select.closest(".inteligencia-card")?.querySelector(".inteligencia-chip");
-    if (chip) chip.textContent = select.selectedOptions[0]?.textContent?.split(" · ")[0] ?? "Automático";
     return;
   }
   if (cb.matches('select[name="frequencia"]')) {
@@ -2629,6 +2749,9 @@ document.addEventListener("keydown", (ev) => {
 
 document.addEventListener("input", (ev) => {
   const ta = ev.target as HTMLTextAreaElement;
+  // O código do Claude atravessa o redesenho do cartão (o foco volta pelo `manterFocoDoCodigo`).
+  const iaDoCodigo = (ta as HTMLElement).dataset?.iaCodigo;
+  if (ehIa(iaDoCodigo)) { dispatch({ tipo: "ias-mac", mudanca: { codigo: { ...estado.iasMac.codigo, [iaDoCodigo]: ta.value } } }); return; }
   if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
   if (ta.matches("[data-customiza-mascote]")) {
     const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');

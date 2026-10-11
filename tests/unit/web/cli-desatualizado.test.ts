@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FrotaDto } from "../../../src/contracts/api.ts";
-import { HARNESSES, type CatalogoHarness } from "../../../src/contracts/harness.ts";
+import { HARNESSES } from "../../../src/contracts/harness.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { IaNoMac } from "../../../src/contracts/onboarding.ts";
@@ -9,7 +9,8 @@ import { hora } from "../../../web/lib/render.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
 import { situacaoMotorFora, textoInventario } from "../../../web/telas/frota.ts";
 import { COMANDO_ATUALIZAR_IA, desatualizado, fraseDesatualizado, pedeInstalar, versaoLegivel } from "../../../web/telas/ia-fora.ts";
-import { motivoDoInventario, renderInteligencia } from "../../../web/telas/inteligencia.ts";
+import { motivoDoInventario, renderLinhaInteligencia } from "../../../web/telas/inteligencia.ts";
+import { UI_IAS_INICIAL } from "../../../web/telas/cartao-ia.ts";
 import { estadoDoCardIa, situacaoDaIa } from "../../../web/telas/onboarding.ts";
 
 /**
@@ -192,45 +193,58 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
   });
 });
 
-describe("conversa: o limite do plano", () => {
-  const limite = (harness: "claude-cli" | "codex-cli", voltaEm: number | null): Mensagem => ({ ...negacao("x"), kind: "sistema", texto: "Turno interrompido: seu plano do Claude Code atingiu o limite de uso; volta a funcionar às 14:00. O que já saiu fica marcado como parcial; nada foi reenviado.", payload: { kind: "limite_do_plano", harness, voltaEm } });
+describe("conversa: o limite do plano sem outra IA (tela 4 do plano das IAs)", () => {
+  const limite = (harness: "claude-cli" | "codex-cli", voltaEm: number | null, criadoEm = 0): Mensagem => ({ ...negacao("x"), kind: "sistema", criadoEm, texto: "Turno interrompido: seu plano do Claude Code atingiu o limite de uso; volta a funcionar às 14:00. O que já saiu fica marcado como parcial; nada foi reenviado.", payload: { kind: "limite_do_plano", harness, voltaEm } });
 
-  it("Claude: diz quando volta, na hora local, que o bot parou no meio e que o nod não tenta sozinho", () => {
-    const estado = com({ claude: PRONTO, codex: PRONTO });
+  it("uma linha centralizada com acento âmbar, não um cartão: diz até quando, na hora local", () => {
+    const estado = com({ claude: PRONTO, codex: AUSENTE });
     const voltaEm = estado.agora + 5 * 3_600_000;
     const html = renderMensagem(limite("claude-cli", voltaEm), estado);
-    expect(html).toContain("tom-alerta");
-    expect(html).toContain("Seu plano do Claude atingiu o limite de uso.");
-    expect(html).toContain(`Volta a funcionar às ${hora(voltaEm)}.`);
-    expect(html).toContain("Gil parou no meio, e o que já fez está acima. O nod não tenta de novo sozinho.");
-    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
-    expect(html).toContain("<summary>Detalhes técnicos</summary>");
+    expect(html).toContain("linha-centro-wrap linha-espera");
+    expect(html).toContain(`Claude no limite até ${hora(voltaEm)}`);
+    expect(html).not.toContain("tom-alerta");
+    expect(html).not.toContain("aviso-estado");
   });
 
-  it("Codex: o fornecedor não diz quando volta; o card 'parece' e manda conferir o plano no ChatGPT", () => {
-    const html = renderMensagem(limite("codex-cli", null), com({ claude: PRONTO, codex: PRONTO }));
-    expect(html).toContain("Seu plano do ChatGPT parece ter atingido o limite de uso.");
-    expect(html).toContain("Confira o uso do seu plano no ChatGPT");
-    expect(html).not.toContain("Volta a funcionar");
+  it("fora do app do Mac, o passo é conectar a outra IA em Provedores de IA", () => {
+    const estado = com({ claude: PRONTO, codex: SEM_LOGIN });
+    const html = renderMensagem(limite("claude-cli", estado.agora + 3_600_000), estado);
+    expect(html).toMatch(/data-act="secao-espaco" data-secao="conexao">Conectar o ChatGPT</);
   });
 
-  it("uma hora que já passou não aparece", () => {
+  it("no app do Mac: a outra instalada sem login vira 'Continuar pelo ChatGPT'; ausente, 'Instalar o ChatGPT'", () => {
+    const base = com({ claude: PRONTO, codex: SEM_LOGIN });
+    const mac = (estadoCodex: "falta_entrar" | "nao_instalada"): Estado => ({ ...base, iasMac: { ...base.iasMac, noApp: true, estados: { "codex-cli": { ia: "codex-cli", estado: estadoCodex, mensagem: "", em: 0 } } } });
+    const voltaEm = base.agora + 3_600_000;
+    expect(renderMensagem(limite("claude-cli", voltaEm), mac("falta_entrar"))).toMatch(/data-act="ia-entrar" data-ia="codex-cli">Continuar pelo ChatGPT</);
+    expect(renderMensagem(limite("claude-cli", voltaEm), mac("nao_instalada"))).toMatch(/data-act="ia-instalar" data-ia="codex-cli">Instalar o ChatGPT</);
+  });
+
+  it("o Codex no limite sem hora: 'chegou ao limite'; passada uma hora, vira registro sem cor", () => {
+    const estado = com({ claude: AUSENTE, codex: PRONTO });
+    expect(renderMensagem(limite("codex-cli", null, estado.agora - 60_000), estado)).toContain("ChatGPT chegou ao limite");
+    const antigo = renderMensagem(limite("codex-cli", null, estado.agora - 2 * 3_600_000), estado);
+    expect(antigo).toContain("ChatGPT esteve no limite");
+    expect(antigo).not.toContain("linha-espera");
+  });
+
+  it("uma hora que já passou não fica âmbar", () => {
     const estado = com({ claude: PRONTO, codex: PRONTO });
     const html = renderMensagem(limite("claude-cli", estado.agora - 60_000), estado);
-    expect(html).not.toContain("Volta a funcionar");
-    expect(html).toContain("Espere o uso renovar e tente de novo.");
+    expect(html).toContain("Claude esteve no limite até");
+    expect(html).not.toContain("linha-espera");
   });
 });
 
-describe("seletor de Inteligência", () => {
-  const catalogo: CatalogoHarness = { padrao: "claude-cli", simulacao: false, opcoes: HARNESSES.map((h) => ({ ...h, integrado: h.id === "claude-cli" || h.id === "codex-cli" ? true : h.integrado, inventario: h.id === "codex-cli" ? ANTIGO : PRONTO })) };
+describe("Inteligência (2A): a IA desatualizada", () => {
+  const ias = HARNESSES.map((h) => ({ id: h.id, nome: h.nome, integrado: h.integrado, inventario: h.id === "codex-cli" ? ANTIGO : PRONTO, limite: null, recomendado: "recomendado" in h ? h.recomendado : null, modelos: h.modelos.map((m) => ({ ...m, recomendado: "recomendado" in h && m.id === h.recomendado.modelo })) }));
+  const ctx = { ias, ui: UI_IAS_INICIAL, agora: 0 };
 
-  it("o grupo da IA desatualizada diz 'desatualizado', com as opções desabilitadas e a ajuda", () => {
-    const html = renderInteligencia({ modelo: "auto", harness: "auto" }, catalogo);
-    expect(html).toContain('<optgroup label="Codex · desatualizado">');
-    expect(html).toMatch(/value="codex-cli:auto" disabled/);
-    expect(html).toContain("Os modelos do Codex voltam quando ele for atualizado neste Mac.");
-    expect(html).toContain("Desatualizado");
+  it("o grupo da IA desatualizada diz 'não conectado', com as opções desabilitadas e o 'Conectar'", () => {
+    const html = renderLinhaInteligencia({ id: "gil", nome: "Gil", modelo: "auto", harness: "auto" }, ctx, true);
+    expect(html).toContain("· não conectado");
+    expect(html).toMatch(/data-ia="codex-cli" data-modelo="gpt-5.6-sol" disabled/);
+    expect(html).toContain('data-act="secao-espaco" data-secao="conexao">Conectar ›');
   });
 
   it("o motivo diz 'Atualize', nunca 'Instale'", () => {
@@ -239,14 +253,10 @@ describe("seletor de Inteligência", () => {
     expect(motivo).not.toContain("Instale");
   });
 
-  it("o modelo gravado que saiu da lista continua selecionado, com 'fora da lista'", () => {
-    const html = renderInteligencia({ modelo: "gpt-antigo", harness: "codex-cli" }, catalogo);
-    expect(html).toContain('<option selected value="codex-cli:gpt-antigo">gpt-antigo · configuração atual · fora da lista</option>');
-  });
-
-  it("revisão: sem o catálogo ainda, o modelo gravado não é chamado de 'fora da lista'", () => {
-    const html = renderInteligencia({ modelo: "gpt-5.6-sol", harness: "codex-cli" });
-    expect(html).toContain("configuração atual</option>");
-    expect(html).not.toContain("fora da lista");
+  it("o modelo gravado que saiu da lista continua escolhido (o nome é o id)", () => {
+    const ctxPronto = { ...ctx, ias: ias.map((i) => ({ ...i, inventario: PRONTO })) };
+    const html = renderLinhaInteligencia({ id: "gil", nome: "Gil", modelo: "gpt-antigo", harness: "codex-cli" }, ctxPronto, true);
+    expect(html).toContain('<span class="ia-atual">');
+    expect(html).toContain("gpt-antigo");
   });
 });
