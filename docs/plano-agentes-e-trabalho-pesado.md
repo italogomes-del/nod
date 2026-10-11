@@ -37,6 +37,19 @@ certo é deixar os garçons trabalharem e fazer fila só no forno.
 7. **Falar com o usuário.** "Trabalhando" separado de "esperando a vez"; recomendação de máquina a partir do tempo de
    fila medido.
 
+## No Mac e em várias máquinas
+
+| | VM | Mac (Este Mac) | Várias máquinas |
+|---|---|---|---|
+| De quem é a máquina | só dos bots | da pessoa, que usa outros apps | cada uma conforme o seu tipo |
+| Memória que os bots usam | toda, menos a do sistema | o que "O quanto os bots podem usar" libera | por máquina |
+| Limite por task | grupo por task (cgroup) | não existe; fila com mais folga e prioridade baixa | por máquina |
+| Fila do forno | uma | uma, mais conservadora | uma por máquina |
+| "Ver como acelerar" | máquina maior, espalhar rotinas | deixar usar mais, conectar uma VM, espalhar rotinas | mandar a task nova para a máquina folgada |
+
+A distribuição entre máquinas fica para o Marlon escolher (ADR-097). A recomendada: o bot em "qualquer máquina" começa
+cada task nova na máquina com folga em que está pronto, e a task em andamento não muda de máquina.
+
 ## Responsabilidade do usuário
 
 1. **Tamanho da máquina e orçamento.** Define quantos comandos pesados rodam por vez. O nod recomenda (item 7).
@@ -79,3 +92,5 @@ Os números de "depois" são estimativas a partir de uma amostra de 11/10. A fas
 - Janela da régua sustentada (3 a 5 min?).
 - Ordem da fila: chegada ou prioridade.
 - Fila para o Codex, que não tem o hook do Claude Code.
+- Distribuição entre máquinas: o nod escolhe ou o usuário move. Para o nod escolher, o bot precisa estar pronto em
+  cada máquina (login das IAs, GitHub, repositórios clonados).

@@ -198,6 +198,29 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
   </section>
 
   <section>
+    <h2>No Mac e em várias máquinas</h2>
+    <div class="table-box">
+      <table>
+        <thead><tr><th></th><th>VM</th><th>Mac (Este Mac)</th><th>Várias máquinas</th></tr></thead>
+        <tbody>
+          <tr><td>De quem é</td><td>só dos bots</td><td>da pessoa, que usa outros apps</td><td>cada uma conforme o tipo</td></tr>
+          <tr><td>Memória dos bots</td><td>toda, menos a do sistema</td><td>o que "O quanto os bots podem usar" libera</td><td>por máquina</td></tr>
+          <tr><td>Limite por task</td><td>grupo por task</td><td>não existe; fila com mais folga e prioridade baixa</td><td>por máquina</td></tr>
+          <tr><td>Fila do forno</td><td>uma</td><td>uma, mais conservadora</td><td>uma por máquina</td></tr>
+          <tr><td>Ver como acelerar</td><td>máquina maior, espalhar rotinas</td><td>deixar usar mais, conectar uma VM, espalhar rotinas</td><td>task nova vai para a máquina folgada</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Distribuição entre máquinas, para você escolher: o Nod escolhe (recomendada: o bot em "qualquer máquina" começa cada task nova onde há folga e ele está pronto; a task em andamento não muda) ou o usuário move (bot fixo, o card sugere mover).</p>
+    <div class="shots" style="margin-top:18px">
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/14-mac-apertado-como-acelerar.png" alt="Card Este Mac apertado pelos apps da pessoa, com as três saídas" loading="lazy"><figcaption>Mac apertado pelos seus apps: deixar os bots usarem mais, conectar uma VM ou espalhar as rotinas.</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/15-varias-trabalhos-por-maquina.png" alt="Trabalhos com 14 trabalhando em 2 máquinas e o resumo por máquina aberto" loading="lazy"><figcaption>Duas VMs: o total no topo e o resumo por máquina num clique; as linhas continuam limpas.</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/17-v3a-qualquer-maquina.png" alt="Onde cada bot trabalha, com a opção Qualquer máquina" loading="lazy"><figcaption>Variante recomendada: "Qualquer máquina", e o Nod escolhe a mais folgada para cada task nova.</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/20-v3b-sugere-mover.png" alt="Card da vm-1 sugerindo mover o Eng 1 para a vm-2" loading="lazy"><figcaption>Variante alternativa: o bot fica fixo e o card sugere mover.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
     <h2>Ordem de entrega</h2>
     <div class="phases">
       <div class="phase"><div class="n">Fase 0</div><h3>Medir e arrumar</h3><p>Medição por task, swap na VM, encerrar o que a task abriu. Pequeno, sem risco, dá os números.</p></div>
@@ -225,7 +248,7 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 
   <section>
     <h2>Como fica na tela</h2>
-    <p class="prose">Protótipo com o CSS real do Nod. O canvas completo, com 11 telas e notas: <a href="https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG">abrir o canvas</a>.</p>
+    <p class="prose">Protótipo com o CSS real do Nod. O canvas completo, com 20 telas e notas: <a href="https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG">abrir o canvas</a>.</p>
     <div class="shots">
       <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png" alt="Trabalhos com 10 bots trabalhando, dois esperando a vez dos testes" loading="lazy"><figcaption>Trabalhos: 10 trabalhando; Eng 1 e Dev 1 esperando a vez, com o anel vazado.</figcaption></figure>
       <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png" alt="Task do Eng 1 esperando a vez de rodar a suíte completa" loading="lazy"><figcaption>A task: "esperando a vez dos testes · começa sozinho"; o consumo fica no cartão que abre.</figcaption></figure>
@@ -242,6 +265,8 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
       <li>A ordem da fila: chegada ou prioridade.</li>
       <li>Fila para o Codex, que não tem o hook do Claude Code. Até lá ele fica protegido só pelo grupo da task.</li>
       <li>Nas telas: o anel vazado na cor do bot ou cinza (para não confundir com o âmbar de "esperando colega"); se o MB por task faz falta na lista; depois de quantos minutos de fila no dia aparece "Ver como acelerar" (o protótipo usa 30).</li>
+      <li>Várias máquinas: o Nod escolhe ou o usuário move; se o Mac entra em "Qualquer máquina"; se o Nod prepara a máquina nova antes (clona quando ela está ociosa) ou a primeira task paga esse tempo.</li>
+      <li>No Mac: quantos comandos pesados por vez, conforme "O quanto os bots podem usar" (o protótipo usa 1 num Mac de 16 GB).</li>
     </ul>
   </section>
 

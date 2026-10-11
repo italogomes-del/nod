@@ -31,6 +31,18 @@ depende de acesso a ele.
 | `09-maquinas-apertada.png` | Apertada, com o aviso discreto "Hoje seus bots esperaram 40 min na fila · Ver como acelerar" |
 | `10-maquinas-como-acelerar.png` | O que abre: esta máquina × 32 GB de memória, a saída sem gastar (espalhar rotinas) e "Como trocar a máquina", sem preço |
 | `11-descartada-medidor-de-vagas.png` | **Descartada:** medidores fixos de vagas no topo de Trabalhos. Pede atenção o tempo todo e repete o que a linha de cada task já diz |
+| `12-mac-trabalhos.png` | Este Mac: Trabalhos com "6 trabalhando · Este Mac"; 1 comando pesado por vez, o Dev 1 espera a vez do typecheck |
+| `13-mac-maquinas-detalhe.png` | Este Mac em Máquinas: "Folgada · 6 bots trabalhando, 1 comando pesado por vez"; atrás do chevron a memória dividida em seus apps, bots e comandos pesados, a prioridade baixa e "O quanto os bots podem usar" |
+| `14-mac-apertado-como-acelerar.png` | Mac apertado pelos apps da pessoa ("Seus apps estão usando quase toda a memória · os testes esperam") e as saídas do Mac: deixar os bots usarem mais, conectar uma VM para os bots pesados, espalhar as rotinas |
+| `15-varias-trabalhos-por-maquina.png` | Várias máquinas: "14 trabalhando · 2 máquinas" com o resumo por máquina aberto (vm-1 apertada, vm-2 folgada); as linhas sem nome de máquina, que aparece no hover ("na vm-2") |
+| `16-varias-maquinas.png` | Máquinas com vm-1, vm-2 e o Mac, uma frase por máquina: a vm-1 apertada, a vm-2 folgada |
+| `17-v3a-qualquer-maquina.png` | **V3a (recomendada), o Nod escolhe:** "Onde cada bot trabalha" com "Qualquer máquina", onde cada bot está agora, e o padrão "o Nod escolhe a mais folgada" |
+| `18-v3a-task-comecou-na-vm-2.png` | V3a na task: "começou na vm-2 · a vm-1 estava cheia", e o clone da primeira vez do bot naquela máquina |
+| `19-v3a-vm-2-sem-login.png` | V3a quando falta algo: "vm-2 sem login do Claude · Ze 1 não pode ir para lá", com "Entrar no Claude na vm-2" |
+| `20-v3b-sugere-mover.png` | **V3b, você move:** o card da vm-1 sugere "Ze 1 e Eng 1 esperaram 40 min · a vm-2 está folgada · Mover Eng 1 para a vm-2" |
+
+Os prós e contras de V3a e V3b estão nas notas do canvas, ao lado da última fileira. No Mac, os 16 GB e a divisão da
+memória são exemplo.
 
 ![Trabalhos](telas/01-trabalhos.png)
 

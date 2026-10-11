@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Máquinas · vm-2 sem login do Claude</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:100%;height:100%;display:block}
+.maq-falta{display:flex;align-items:center;gap:10px;padding:11px 18px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.maq-falta svg{flex:none;color:var(--warning)}
+.maq-falta span{flex:1;min-width:0}
+.maq-falta b{font-weight:500;color:var(--ink)}
+</style>
+</helmet>
+<div style="position: relative; height: 1000px; background: var(--surface);">
+<div class="espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
+  <nav class="espaco-nav" aria-label="Seções de Seu espaço">
+    <div class="espaco-volta"><button type="button" class="espaco-voltar" title="Voltar para Clarice (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"></path></svg><span class="icon mascote c-red shape-circle sm"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span><span>Clarice</span></button><kbd>esc</kbd></div>
+    <h1 id="espaco-titulo">Seu espaço</h1>
+    <div class="espaco-itens">
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"></path></svg><span>Provedores de IA</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 7.5-2.5 8.5h17c0-1-2.5-2-2.5-8.5M10 20.5h4"></path></svg><span>Avisos</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"></path></svg><span>Preferências</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5a8 8 0 1 1 15 0"></path><path d="M12 12.5l3.5-3.5"></path></svg><span>Este Mac</span></button>
+      <button type="button" class="espaco-item" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg><span>Máquinas</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"></rect><path d="M8.5 20h7M12 16.5V20"></path></svg><span>Computadores</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"></rect></svg><span>Gerenciar agentes</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"></path></svg><span>Relatos</span></button>
+    </div>
+  </nav>
+  <main class="espaco-conteudo"><section class="espaco-secao maquinas">
+    <h2>Máquinas</h2>
+    <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p><button type="button" class="bt pri"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Conectar uma máquina</button></div>
+
+    <div class="maq-lista">
+      <div class="espaco-cartao maq-cartao">
+        <div class="maq-cab">
+          <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg></span>
+          <span class="maq-id"><b>vm-1</b><small>Linux · 8 GB de memória</small></span>
+          <span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectada</span>
+        </div>
+        <div class="maq-ias"><span class="maq-ia"><i aria-hidden="true"></i>Claude Code pronto</span><span class="maq-ia"><i aria-hidden="true"></i>Codex pronto</span><span class="maq-ia"><i aria-hidden="true"></i>GitHub</span></div>
+        <details class="maq-leitura"><summary><span class="maq-nivel nivel-amarela" aria-hidden="true"></span><span>Apertada · 12 bots trabalhando, 5 comandos esperam a vez</span></summary></details>
+        <div class="maq-quem"><span class="maq-avatares"><span class="icon mascote c-red shape-square sm"><img src="/_blob/29d20d2fee6bd83243b75f770a562c3a" alt=""></span><span class="icon mascote c-gray shape-triangle sm"><img src="/_blob/40f336377f66d61f86c51898b4b00c85" alt=""></span><span class="icon mascote c-green shape-cloud sm"><img src="/_blob/698e127b8f94d07c584f88d11905cf48" alt=""></span><span class="icon mascote c-brown shape-square sm"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><span class="icon mascote c-pink shape-circle sm"><img src="/_blob/996ad093882a12026fccb7773b5e40f2" alt=""></span><span class="icon mascote c-orange shape-square sm"><img src="/_blob/e473d72a730feb1fca9c08839c776a35" alt=""></span></span><span>12 bots trabalham aqui agora</span></div>
+      </div>
+
+      <div class="espaco-cartao maq-cartao">
+        <div class="maq-cab">
+          <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg></span>
+          <span class="maq-id"><b>vm-2</b><small>Linux · 8 GB de memória</small></span>
+          <span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectada</span>
+        </div>
+        <div class="maq-ias"><span class="maq-ia nao"><i aria-hidden="true"></i>Claude Code sem login</span><span class="maq-ia"><i aria-hidden="true"></i>Codex pronto</span><span class="maq-ia"><i aria-hidden="true"></i>GitHub</span></div>
+        <details class="maq-leitura"><summary><span class="maq-nivel" aria-hidden="true"></span><span>Folgada · 2 bots trabalhando</span></summary></details>
+        <div class="maq-falta"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5v5M12 16h.01"></path></svg><span><b>vm-2 sem login do Claude</b> · Ze 1 não pode ir para lá, nem os outros 6 bots que usam o Claude</span><button type="button" class="bt sm">Entrar no Claude na vm-2</button></div>
+        <div class="maq-quem"><span class="maq-avatares"><span class="icon mascote c-orange shape-pebble sm"><img src="/_blob/b9bc8d0254c2dc78d07fe2a9250063dd" alt=""></span><span class="icon mascote c-black shape-drop sm"><img src="/_blob/6cf8e7d4cc35a7d32a326738cbf2eefa" alt=""></span></span><span>2 bots trabalham aqui agora: Ada e Milton, que usam o Codex</span></div>
+      </div>
+
+      <div class="espaco-cartao maq-cartao">
+        <div class="maq-cab">
+          <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="10.5" rx="1.6"></rect><path d="M2.5 18.5h19"></path></svg></span>
+          <span class="maq-id"><b>Este Mac</b><small>MacBook do Marlon · 16 GB de memória</small></span>
+          <span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectado</span>
+        </div>
+        <details class="maq-leitura"><summary><span class="maq-nivel" aria-hidden="true"></span><span>Folgada · 1 bot trabalhando</span></summary></details>
+      </div>
+    </div>
+    <ul class="regras-maq">
+      <li>"Qualquer máquina" só escolhe entre as máquinas que têm o que o bot precisa: o login da IA dele, o GitHub e acesso aos repositórios.</li>
+    </ul>
+  </section></main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

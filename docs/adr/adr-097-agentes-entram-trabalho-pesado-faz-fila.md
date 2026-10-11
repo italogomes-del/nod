@@ -65,6 +65,24 @@ Separar o agente do trabalho pesado que ele dispara. **Agentes entram pela memó
    Com o tempo de fila medido, o nod recomenda máquina ("hoje seus bots esperaram 40 min na fila; com 32 GB caberiam
    ~8 comandos por vez").
 
+### No Mac, numa VM e em várias máquinas
+
+- **VM:** a máquina é só dos bots. Vale tudo o que está acima: grupo por task, swap, fila do forno com a memória
+  inteira, menos a do sistema.
+- **Mac (Este Mac):** a máquina é da pessoa, que usa outros apps ao mesmo tempo. A memória tem uma fatia "seus apps",
+  e os bots usam só o que a opção "O quanto os bots podem usar" libera. Sem cgroup, o nod não limita a memória de cada
+  task. Por isso a fila do forno deixa mais folga, e os comandos de fundo rodam com prioridade baixa para o Mac não
+  ficar lento. Quando quem aperta são os apps da pessoa, a tela diz isso. O "Ver como acelerar" do Mac oferece deixar os
+  bots usarem mais, conectar uma VM para os bots pesados ou espalhar as rotinas.
+- **Várias máquinas:** cada máquina tem o seu forno, e a fila é por máquina. Trabalhos mostra o total, com o resumo
+  por máquina atrás de um clique; a máquina de cada task aparece no detalhe dela. Para a distribuição há duas
+  variantes, e o Marlon escolhe:
+  - **o nod escolhe (recomendada):** o bot marcado para "qualquer máquina" começa cada task nova na máquina com folga
+    em que ele está pronto (login das IAs, GitHub, repositórios). A task em andamento não muda de máquina, porque os
+    arquivos dela estão lá. Não pede nada do usuário e escala para milhares.
+  - **o usuário move:** o bot fica fixo numa máquina, como na ADR-092 hoje, e o card da máquina cheia sugere mover um
+    bot para a que está folgada.
+
 ### O que é do nod e o que é do usuário
 
 É do nod tudo que exige conhecimento técnico ou se repetiria igual para cada usuário: medir, dividir a máquina,
