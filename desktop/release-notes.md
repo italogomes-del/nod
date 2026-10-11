@@ -2,7 +2,7 @@
 
 Integração do desktop macOS com a main atual, Sonnet como padrão dos agentes, decisões e permissões diretamente no chat e cooperação iniciada pelo agente acordado por rotina. Preserva gestão/exclusão recuperável, geração de execução e isolamento de sessões. O app aceita versões candidatas `-rc.N` na checagem de compatibilidade.
 
-- Guia desta versão: https://github.com/marlonwlv/nod/blob/desktop-v0.2.0-rc.1/docs/release-desktop.md
+- Guia desta versão: https://github.com/gamefik/nod/blob/desktop-v0.2.0-rc.1/docs/release-desktop.md
 - Servidor: mesma tag, protocolo 1, migrações 0001–0012; URL HTTPS de produção pendente. Versão mínima do app permanece 0.1.0.
 - Sonnet é um alias do Claude Code. Sondas usam Haiku. Agentes existentes são atualizados pela API da pessoa, sem sobrescrever instruções ou acessos.
 - UATs reais validaram consultas e cooperação de um salto; criação autônoma de tarefas ClickUp pelo destinatário continua pendente.
