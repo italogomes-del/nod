@@ -76,6 +76,86 @@ cada task nova na máquina com folga em que está pronto, e a task em andamento 
 
 Os números de "depois" são estimativas a partir de uma amostra de 11/10. A fase 0 serve para confirmá-los.
 
+## As telas
+
+Protótipo com o CSS real do nod. O canvas interativo (20 telas, com notas) é
+https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG; a cópia completa, com as fontes, está em
+[prototipos/agentes-e-trabalho-pesado](prototipos/agentes-e-trabalho-pesado/README.md).
+
+### Numa VM
+
+**Trabalhos com 10 bots.** Os que esperam o forno têm o anel vazado e "esperando a vez dos testes".
+
+![Trabalhos](prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png)
+
+**O consumo da máquina**, atrás do clique no nome dela.
+
+![Consumo da máquina](prototipos/agentes-e-trabalho-pesado/telas/02-trabalhos-consumo-da-maquina.png)
+
+**Máquina apertada.** Os comandos esperam a vez, e os bots novos ficam "na fila · começa quando liberar memória".
+
+![Máquina apertada](prototipos/agentes-e-trabalho-pesado/telas/03-trabalhos-maquina-apertada.png)
+
+**A task esperando a vez.** O tempo, o que ela usa e quem está na frente ficam no cartão do status.
+
+![Task esperando a vez](prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png)
+
+**Na conversa**, a linha centralizada antes e depois.
+
+![Conversa: espera a vez](prototipos/agentes-e-trabalho-pesado/telas/05-conversa-espera-a-vez.png)
+
+![Conversa: rodou os testes](prototipos/agentes-e-trabalho-pesado/telas/06-conversa-rodou-os-testes.png)
+
+**Máquinas.** Uma frase por máquina, o detalhe atrás da setinha, o aviso do dia apertado e o "Ver como acelerar".
+
+![Máquinas](prototipos/agentes-e-trabalho-pesado/telas/07-maquinas.png)
+
+![Máquinas: detalhe](prototipos/agentes-e-trabalho-pesado/telas/08-maquinas-detalhe.png)
+
+![Máquinas: apertada](prototipos/agentes-e-trabalho-pesado/telas/09-maquinas-apertada.png)
+
+![Como acelerar](prototipos/agentes-e-trabalho-pesado/telas/10-maquinas-como-acelerar.png)
+
+**Descartada:** medidores fixos de vagas no topo de Trabalhos.
+
+![Descartada: medidor de vagas](prototipos/agentes-e-trabalho-pesado/telas/11-descartada-medidor-de-vagas.png)
+
+### No Mac
+
+**Trabalhos no Mac**, com 1 comando pesado por vez.
+
+![Mac: Trabalhos](prototipos/agentes-e-trabalho-pesado/telas/12-mac-trabalhos.png)
+
+**O card do Mac**, com a memória dividida entre seus apps e os bots.
+
+![Mac: detalhe](prototipos/agentes-e-trabalho-pesado/telas/13-mac-maquinas-detalhe.png)
+
+**Mac apertado pelos apps da pessoa**, e as saídas do Mac.
+
+![Mac apertado](prototipos/agentes-e-trabalho-pesado/telas/14-mac-apertado-como-acelerar.png)
+
+### Em várias máquinas
+
+**Trabalhos em 2 máquinas**, com o resumo por máquina aberto.
+
+![Várias: Trabalhos](prototipos/agentes-e-trabalho-pesado/telas/15-varias-trabalhos-por-maquina.png)
+
+**Máquinas**: vm-1 apertada, vm-2 folgada.
+
+![Várias: Máquinas](prototipos/agentes-e-trabalho-pesado/telas/16-varias-maquinas.png)
+
+**V3a, o Nod escolhe (recomendada)**: "Qualquer máquina", a task que começou na vm-2 e a vm-2 sem login.
+
+![V3a: qualquer máquina](prototipos/agentes-e-trabalho-pesado/telas/17-v3a-qualquer-maquina.png)
+
+![V3a: começou na vm-2](prototipos/agentes-e-trabalho-pesado/telas/18-v3a-task-comecou-na-vm-2.png)
+
+![V3a: vm-2 sem login](prototipos/agentes-e-trabalho-pesado/telas/19-v3a-vm-2-sem-login.png)
+
+**V3b, o usuário move**: o card sugere mover.
+
+![V3b: sugere mover](prototipos/agentes-e-trabalho-pesado/telas/20-v3b-sugere-mover.png)
+
 ## Medições de 11/10 (base)
 
 - VM `nod-motor-teste`, e2-highcpu-8 (8 vCPU, 8 GB), sem swap, 3 agentes Claude (Ze 1, Eng 1, Tarsila).

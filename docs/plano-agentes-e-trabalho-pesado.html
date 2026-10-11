@@ -87,6 +87,7 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 .shots figure { margin: 0; min-width: 0; }
 .shots img { display: block; width: 100%; border: 1px solid var(--line); border-radius: 8px; }
 .shots figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+h3.group { font: 500 12px/1.3 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 12px; }
 /* diagrama */
 .d-text { fill: var(--fg); font: 500 13px var(--font-body); }
 .d-muted { fill: var(--muted); font: 400 12px var(--font-mono); }
@@ -212,12 +213,6 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
       </table>
     </div>
     <p class="caption">Distribuição entre máquinas, para você escolher: o Nod escolhe (recomendada: o bot em "qualquer máquina" começa cada task nova onde há folga e ele está pronto; a task em andamento não muda) ou o usuário move (bot fixo, o card sugere mover).</p>
-    <div class="shots" style="margin-top:18px">
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/14-mac-apertado-como-acelerar.png" alt="Card Este Mac apertado pelos apps da pessoa, com as três saídas" loading="lazy"><figcaption>Mac apertado pelos seus apps: deixar os bots usarem mais, conectar uma VM ou espalhar as rotinas.</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/15-varias-trabalhos-por-maquina.png" alt="Trabalhos com 14 trabalhando em 2 máquinas e o resumo por máquina aberto" loading="lazy"><figcaption>Duas VMs: o total no topo e o resumo por máquina num clique; as linhas continuam limpas.</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/17-v3a-qualquer-maquina.png" alt="Onde cada bot trabalha, com a opção Qualquer máquina" loading="lazy"><figcaption>Variante recomendada: "Qualquer máquina", e o Nod escolhe a mais folgada para cada task nova.</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/20-v3b-sugere-mover.png" alt="Card da vm-1 sugerindo mover o Eng 1 para a vm-2" loading="lazy"><figcaption>Variante alternativa: o bot fica fixo e o card sugere mover.</figcaption></figure>
-    </div>
   </section>
 
   <section>
@@ -248,12 +243,35 @@ a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 
   <section>
     <h2>Como fica na tela</h2>
-    <p class="prose">Protótipo com o CSS real do Nod. O canvas completo, com 20 telas e notas: <a href="https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG">abrir o canvas</a>.</p>
+    <p class="prose">Protótipo com o CSS real do Nod. O canvas interativo, com notas: <a href="https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG">abrir o canvas</a>. Clique numa tela para vê-la inteira.</p>
+    <h3 class="group">Numa VM</h3>
     <div class="shots">
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png" alt="Trabalhos com 10 bots trabalhando, dois esperando a vez dos testes" loading="lazy"><figcaption>Trabalhos: 10 trabalhando; Eng 1 e Dev 1 esperando a vez, com o anel vazado.</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png" alt="Task do Eng 1 esperando a vez de rodar a suíte completa" loading="lazy"><figcaption>A task: "esperando a vez dos testes · começa sozinho"; o consumo fica no cartão que abre.</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/05-conversa-espera-a-vez.png" alt="Linha centralizada na conversa: Ze 1 espera a vez de rodar os testes" loading="lazy"><figcaption>Na conversa, uma linha centralizada, que vira "rodou os testes · 2 min".</figcaption></figure>
-      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/09-maquinas-apertada.png" alt="Card da máquina com o aviso de 40 minutos de fila e Ver como acelerar" loading="lazy"><figcaption>A máquina numa frase; quando a fila pesa no dia, "Ver como acelerar".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png" alt="Trabalhos com 10 bots, dois esperando a vez dos testes" loading="lazy"></a><figcaption>Trabalhos: 10 trabalhando; os que esperam o forno têm o anel vazado.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/02-trabalhos-consumo-da-maquina.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/02-trabalhos-consumo-da-maquina.png" alt="Consumo da máquina aberto no topo de Trabalhos" loading="lazy"></a><figcaption>O consumo da máquina, atrás do clique no nome dela.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/03-trabalhos-maquina-apertada.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/03-trabalhos-maquina-apertada.png" alt="Trabalhos com a máquina apertada" loading="lazy"></a><figcaption>Apertada: comandos esperam a vez; bots novos começam quando liberar memória.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png" alt="Task esperando a vez de rodar a suíte completa" loading="lazy"></a><figcaption>A task: "esperando a vez dos testes · começa sozinho".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/05-conversa-espera-a-vez.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/05-conversa-espera-a-vez.png" alt="Linha centralizada: Ze 1 espera a vez de rodar os testes" loading="lazy"></a><figcaption>Na conversa: "Ze 1 espera a vez de rodar os testes".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/06-conversa-rodou-os-testes.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/06-conversa-rodou-os-testes.png" alt="Linha centralizada: Ze 1 rodou os testes em 2 min" loading="lazy"></a><figcaption>Depois: "rodou os testes · 2 min".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/07-maquinas.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/07-maquinas.png" alt="Máquinas com uma frase por máquina" loading="lazy"></a><figcaption>Máquinas: uma frase por máquina.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/08-maquinas-detalhe.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/08-maquinas-detalhe.png" alt="Detalhe da máquina: memória, comandos pesados, processador e disco" loading="lazy"></a><figcaption>O detalhe atrás da setinha.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/09-maquinas-apertada.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/09-maquinas-apertada.png" alt="Máquina apertada com o aviso de 40 min de fila" loading="lazy"></a><figcaption>Dia apertado: "esperaram 40 min na fila · Ver como acelerar".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/10-maquinas-como-acelerar.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/10-maquinas-como-acelerar.png" alt="Como acelerar: esta máquina comparada com 32 GB" loading="lazy"></a><figcaption>Como acelerar: comparação com 32 GB e espalhar as rotinas.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/11-descartada-medidor-de-vagas.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/11-descartada-medidor-de-vagas.png" alt="Variante descartada com medidores de vagas" loading="lazy"></a><figcaption>Descartada: medidores fixos de vagas no topo.</figcaption></figure>
+    </div>
+    <h3 class="group">No Mac</h3>
+    <div class="shots">
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/12-mac-trabalhos.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/12-mac-trabalhos.png" alt="Trabalhos no Mac com 6 trabalhando" loading="lazy"></a><figcaption>Trabalhos no Mac: 1 comando pesado por vez.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/13-mac-maquinas-detalhe.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/13-mac-maquinas-detalhe.png" alt="Card Este Mac com a memória dividida" loading="lazy"></a><figcaption>O card do Mac: seus apps, bots, comandos pesados e livre.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/14-mac-apertado-como-acelerar.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/14-mac-apertado-como-acelerar.png" alt="Mac apertado pelos apps da pessoa, com as três saídas" loading="lazy"></a><figcaption>Apertado pelos seus apps: usar mais o Mac, conectar uma VM, espalhar rotinas.</figcaption></figure>
+    </div>
+    <h3 class="group">Em várias máquinas</h3>
+    <div class="shots">
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/15-varias-trabalhos-por-maquina.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/15-varias-trabalhos-por-maquina.png" alt="Trabalhos com 14 trabalhando em 2 máquinas" loading="lazy"></a><figcaption>14 trabalhando em 2 máquinas, com o resumo por máquina aberto.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/16-varias-maquinas.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/16-varias-maquinas.png" alt="Máquinas: vm-1 apertada, vm-2 folgada, Mac folgado" loading="lazy"></a><figcaption>Máquinas: vm-1 apertada, vm-2 folgada.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/17-v3a-qualquer-maquina.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/17-v3a-qualquer-maquina.png" alt="Onde cada bot trabalha, com Qualquer máquina" loading="lazy"></a><figcaption>Recomendada (V3a): "Qualquer máquina", o Nod escolhe.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/18-v3a-task-comecou-na-vm-2.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/18-v3a-task-comecou-na-vm-2.png" alt="Task que começou na vm-2 porque a vm-1 estava cheia" loading="lazy"></a><figcaption>V3a na task: "começou na vm-2 · a vm-1 estava cheia".</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/19-v3a-vm-2-sem-login.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/19-v3a-vm-2-sem-login.png" alt="vm-2 sem login do Claude" loading="lazy"></a><figcaption>V3a quando falta o login: a vm-2 fica fora da escolha.</figcaption></figure>
+      <figure><a href="prototipos/agentes-e-trabalho-pesado/telas/20-v3b-sugere-mover.png"><img src="prototipos/agentes-e-trabalho-pesado/telas/20-v3b-sugere-mover.png" alt="Card da vm-1 sugerindo mover o Eng 1" loading="lazy"></a><figcaption>Alternativa (V3b): bot fixo, o card sugere mover.</figcaption></figure>
     </div>
   </section>
 
