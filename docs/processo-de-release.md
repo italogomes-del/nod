@@ -23,13 +23,10 @@ O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assina
 - Tenha acesso Apple Developer e certificado **Developer ID Application** com chave privada. Configure os secrets abaixo no GitHub; não inclua certificados, senhas, chaves de máquina ou dados locais nos commits e artefatos.
 - Disponibilize um Mac Intel e um Mac com chip M para aceite, com Claude Code instalado e autenticado. Confirme os requisitos de macOS do Electron usado; não trate apenas `minimumSystemVersion` como prova de compatibilidade.
 
-| Secret no GitHub | Uso no build |
-| --- | --- |
-| `APPLE_CERTIFICATE_P12` | Certificado e chave privada exportados em P12/base64; vira `CSC_LINK` |
-| `APPLE_CERTIFICATE_PASSWORD` | Senha do P12; vira `CSC_KEY_PASSWORD` |
-| `APPLE_ID` | Conta de notarização |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app |
-| `APPLE_TEAM_ID` | Time Apple Developer |
+Os cinco secrets (`APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`,
+`APPLE_TEAM_ID`) e a variável de repositório `NOD_SERVIDOR_PADRAO`, com onde cadastrar cada um e a lista do que o CI
+confere no pacote, estão em [release-desktop.md › Secrets e variável da release assinada](release-desktop.md#secrets-e-variável-da-release-assinada-nod-203).
+Sem algum deles, o job `mac` falha no preflight citando o nome a cadastrar.
 
 O workflow exige assinatura (`forceCodeSigning=true`), hardened runtime e notarização. Não desligue esses controles para publicar uma versão estável. Veja a [configuração macOS do electron-builder usado na preview](https://www.electron.build/v26/docs/mac/).
 

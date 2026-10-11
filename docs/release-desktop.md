@@ -134,15 +134,51 @@ Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada
 
 O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
 
-Configure estes secrets do GitHub, sem colocá-los no repositório:
+### Secrets e variável da release assinada (NOD-203)
 
-| Secret | Conteúdo |
-| --- | --- |
-| `APPLE_CERTIFICATE_P12` | Exportação Developer ID Application em P12, codificada em base64 |
-| `APPLE_CERTIFICATE_PASSWORD` | Senha da exportação P12 |
-| `APPLE_ID` | Conta Apple usada na notarização |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app dessa conta |
-| `APPLE_TEAM_ID` | Identificador do time Apple Developer |
+Cadastre em **Settings › Secrets and variables › Actions** do repositório, sem colocá-los no repositório. O nome é o
+que o preflight (`scripts/desktop/release-preflight.mjs`) cita quando falta: ele roda antes do `npm ci` e lista
+**tudo** o que falta numa execução só. String vazia conta como ausente.
+
+| Nome no GitHub | Tipo | Onde cadastrar | Chega ao job como | Conteúdo |
+| --- | --- | --- | --- | --- |
+| `APPLE_CERTIFICATE_P12` | secret | Actions › Secrets | `CSC_LINK` | Exportação Developer ID Application em P12, codificada em base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | Actions › Secrets | `CSC_KEY_PASSWORD` | Senha da exportação P12 |
+| `APPLE_ID` | secret | Actions › Secrets | `APPLE_ID` | Conta Apple usada na notarização |
+| `APPLE_APP_SPECIFIC_PASSWORD` | secret | Actions › Secrets | `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app dessa conta |
+| `APPLE_TEAM_ID` | secret | Actions › Secrets | `APPLE_TEAM_ID` | Identificador do time Apple Developer |
+| `NOD_SERVIDOR_PADRAO` | **variável** de repositório | Actions › Variables | `NOD_SERVIDOR_PADRAO` | Endereço do servidor embutido no app, `https://host` (porta opcional), sem caminho nem barra final |
+
+`NOD_SERVIDOR_PADRAO` é variável, e não secret, porque o endereço aparece no app. Ela é obrigatória em toda execução
+do `desktop-release`, de tag ou manual: um DMG oficial sem servidor embutido pediria o endereço na primeira abertura.
+A regra do formato é a mesma do `scripts/desktop/build.mjs` (`scripts/desktop/servidor-padrao.mjs`); o build local
+continua aceitando vazio.
+
+### O que o CI confere no job `mac`
+
+Ordem dos passos: preflight → `npm ci` → `desktop:build` → smoke da janela → `electron-builder` (assina e notariza o
+`.app`) → **Notarizar e grampear o DMG** → **Verificar assinatura e notarização** → SHA-256 → upload. O SHA-256 vem
+depois do grampo, porque o hash publicado tem que ser o do DMG final.
+
+- **Notarização do DMG:** `xcrun notarytool submit --wait --output-format json`; o status precisa ser `Accepted` (o
+  `--wait` sai com 0 mesmo com `Invalid`). Se não for, o passo imprime o `notarytool log` e falha. Depois,
+  `xcrun stapler staple` no DMG.
+- **Verificação** (`scripts/desktop/verificar-pacote-mac.mjs`), que junta todas as falhas e diz, em pt-BR, o que
+  esperava e o que veio:
+  - `smoke-proxy.mjs` com o binário empacotado;
+  - `codesign --verify --deep --strict` do `.app`;
+  - `Authority=Developer ID Application: …` e `TeamIdentifier` igual a `APPLE_TEAM_ID`;
+  - hardened runtime (`flags` com `runtime`);
+  - entitlements do `.app` e de cada `nod Helper*.app` iguais, exatamente, às de `desktop/entitlements.mac.plist`
+    (`com.apple.security.cs.allow-jit` e `com.apple.security.device.audio-input`); nenhum helper encontrado reprova;
+  - `NSMicrophoneUsageDescription` do `Info.plist` igual ao texto do `electron-builder.yml`;
+  - `lipo -archs` do binário igual à arquitetura do job (`arm64` ou `x86_64`), sem a outra;
+  - `stapler validate` do `.app` e do DMG;
+  - `spctl --assess` do `.app` (`--type execute`) e do DMG (`--type open --context context:primary-signature`) com
+    `accepted` e `source=Notarized Developer ID`.
+
+As funções que interpretam essas saídas são testadas no Linux com saídas de exemplo
+(`tests/unit/desktop/verificar-pacote-mac.test.ts`). A prova com os secrets reais é critério da NOD-133.
 
 `npm run desktop:mac` exige as variáveis equivalentes `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` e assinatura válida. Não publica automaticamente. Confirme instalação, conexão ao servidor e um turno real em um Mac Intel e outro com chip M antes de publicar o rascunho. A assinatura/notarização e esse aceite não foram realizados neste ambiente.
 
