@@ -81,6 +81,7 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,
     harness: turno.harness,
+    executor: turno.executor,
     acordarEm: pedido.em,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada da volta marcada não criada" });

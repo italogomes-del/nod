@@ -34,12 +34,12 @@ function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }, e
 async function cenario(trx: Trx) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "abra o PR", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "abra o PR", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano = planoDe({ turnoId: turno.id, agenteId, conversaId });
   const autorizar = (comando: string, p: PlanoTurno = plano) => autorizarComando(deps, { plano: p, comando });
   const retomada = async (de: string) => {
-    const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: de });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: de });
     if (!t) throw new Error("retomada");
     return planoDe({ turnoId: t.id, agenteId, conversaId });
   };
@@ -105,7 +105,7 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       expect((await c.autorizar("git push", await c.retomada(c.turno.id))).data).toEqual({ permitir: true, porque: "liberado_na_tarefa" });
       // Liberar o terminal não libera o computador do bot.
       expect(await c.repos.turnos.computadorLiberado(c.turno.id)).toBe(false);
-      const outraTarefa = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra", entradaConfianca: "confiavel", modelo: "m" });
+      const outraTarefa = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra", entradaConfianca: "confiavel", modelo: "m" });
       expect("aguardar" in (await c.autorizar("git push", planoDe({ turnoId: outraTarefa?.id ?? "", agenteId: c.agenteId, conversaId: c.conversaId }))).data).toBe(true);
       // ADR-066: não há gate de rotina para vencer — o que segura a liberação é a marca de conteúdo de fora: depois
       // da web, no manual, o comando volta a pedir a pessoa.

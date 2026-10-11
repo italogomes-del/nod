@@ -14,6 +14,7 @@ const base = (conversaId: string, agenteId: string, extra: Partial<Parameters<Re
   conversaId,
   agenteId,
   origem: "conversa" as const,
+  executor: "catcher" as const,
   prazoEm: Date.now() + 60_000,
   profundidade: 0 as const,
   entradaTexto: "oi",

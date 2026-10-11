@@ -77,7 +77,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       const turnoId = r.data.turno.id;
       const gate = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId, prazoDecisaoEm: AGORA - 60_000, frase: "1 e-mail para enviar" });
       // Uma aprovação de um turno comum, vencida no mesmo tick, não é gate de rotina.
-      const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const comum = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const outra = await repos.decisoes.criar({ tipo: "aprovacao", agenteId, conversaId, turnoId: comum?.id ?? null, prazoDecisaoEm: AGORA - 60_000, frase: "2 e-mails" });
       expect((await registrarDesfechoRotina(deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
 
@@ -129,7 +129,7 @@ describeIntegracao("gate de rotina (E7.3, E7.5): passou_em_branco ≠ falhou, ze
       // também. ADR-064: as pendências não, desde 2026-10-06 ("A fazer" desligado). ADR-066: ver_colegas também (leitura que não incomoda ninguém).
       expect(plano.catalogo.ferramentas.map((f) => f.nome).sort()).toEqual(["abrir_task", "lembrar", "ler_artefato", "me_chame_as", "pedir_a_bot", "pedir_a_pessoa", "pedir_acesso", "pedir_aprovacao", "publicar_artefato", "sem_novidade", "ver_colegas"]);
       // turno de conversa comum não liga a flag
-      const comum = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const comum = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       expect(await rotinaDoTurno(repos, comum?.id ?? "")).toBeNull();
     });
   });

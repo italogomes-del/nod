@@ -19,7 +19,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
 async function nodComTurno(d: Deps, opcoes: { modo?: ModoAprovacao; origem?: OrigemTurno } = {}) {
   const { nod } = (await executar(d, garantirNod, {})).data;
   if (opcoes.modo) await d.repos.agentes.definirModoAprovacao(nod.id, opcoes.modo);
-  const turno = await d.repos.turnos.enfileirar({ conversaId: nod.conversaId, agenteId: nod.id, origem: opcoes.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "pedido", entradaConfianca: "confiavel", modelo: "auto" });
+  const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: nod.conversaId, agenteId: nod.id, origem: opcoes.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "pedido", entradaConfianca: "confiavel", modelo: "auto" });
   if (!turno) throw new Error("turno");
   return { ctx: { turnoId: turno.id, agenteId: nod.id, conversaId: nod.conversaId }, nod };
 }
@@ -147,7 +147,7 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
       expect((await registrarRelatoDoNod(d, { ...daRotina.ctx, tipo: "bug", titulo: "x", texto: "y" })).data).toMatchObject({ ok: false, erro: "fora_da_conversa" });
       // Um bot comum, na conversa dele: também não.
       const vera = (await executar(d, criarAgente, { dono: "pessoa", nome: "Vera", descricao: "Agenda." })).data;
-      const turno = await d.repos.turnos.enfileirar({ conversaId: vera.conversa.id, agenteId: vera.agente.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "auto" });
+      const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: vera.conversa.id, agenteId: vera.agente.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "auto" });
       expect((await gerirBots(d, { turnoId: turno?.id ?? "", agenteId: vera.agente.id, conversaId: vera.conversa.id, resumo: "x", acoes: [{ tipo: "criar", nome: "A", descricao: "a." }] })).data).toMatchObject({ ok: false, erro: "fora_da_conversa" });
       expect((await doMarlon(d)).some((a) => a.nome === "A")).toBe(false);
     });

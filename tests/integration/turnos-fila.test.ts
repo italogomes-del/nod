@@ -88,7 +88,7 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
       await deps.repos.conversas.atualizarSessaoCli(criado.conversa.id, "sessao-interativa", "local");
       for (const origem of ["rotina", "peer"] as const) {
-        const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "teste", entradaConfianca: "nao_confiavel", modelo: criado.agente.modelo });
+        const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "teste", entradaConfianca: "nao_confiavel", modelo: criado.agente.modelo });
         const maquina = randomUUID();
         const plano = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano;
         expect(plano?.turnoId).toBe(turno?.id);

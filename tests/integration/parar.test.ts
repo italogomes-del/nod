@@ -45,7 +45,7 @@ describeIntegracao("parar (E5.4/E8) no Postgres: estado persistido, faixa e bloq
       expect((await deps.repos.mensagens.ultimaDaConversa(a.conversa.id))).toMatchObject({ kind: "parada", texto: "Nada estava rodando. Nenhum turno foi interrompido.", payload: { kind: "parada", interrompidas: 0, nadaRodando: true } });
 
       // turno de rotina em A nasce depois da parada: fica bloqueado; B despacha normalmente
-      await deps.repos.turnos.enfileirar({ conversaId: a.conversa.id, agenteId: a.agente.id, origem: "rotina", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
+      await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: a.conversa.id, agenteId: a.agente.id, origem: "rotina", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
       const emB = (await executar(deps, enviarMensagem, { conversaId: b.conversa.id, texto: "oi b", inventario: PRONTO })).data.turno;
       expect((await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId).toBe(emB.id);
       const bloqueado = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data;

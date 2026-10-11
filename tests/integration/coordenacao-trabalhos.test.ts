@@ -26,7 +26,7 @@ async function montar(trx: Trx, agora = () => Date.now()) {
   await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
   const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
   const turno = (extra: { trabalhoId?: string | null; origem?: "conversa" | "rotina" } = {}) =>
-    base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: extra.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o dashboard de churn", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: extra.trabalhoId ?? null });
+    base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: extra.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o dashboard de churn", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: extra.trabalhoId ?? null });
   const ctx = (turnoId: string) => ({ turnoId, agenteId: base.agenteId, conversaId: base.conversaId });
   const plano = async (turnoId: string) => (await emitirPlanoTurno(deps, { turnoId, machineId: randomUUID(), executor: "local", harnesses })).data;
   return { ...base, deps, turno, ctx, plano };

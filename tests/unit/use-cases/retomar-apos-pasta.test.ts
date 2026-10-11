@@ -13,7 +13,7 @@ async function preparar(candidatas: PayloadPropostaPasta["candidatas"], comTurno
   const { deps, banco } = depsEmMemoria();
   const { data: bot } = await criarAgente(deps, { dono: "pessoa", interativo: true });
   const turno = comTurno
-    ? await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "mostra a árvore do PR #466", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" })
+    ? await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "mostra a árvore do PR #466", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" })
     : null;
   const proposta = await deps.repos.propostas.criar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, payload: { kind: "pasta", ...(turno ? { turnoId: turno.id } : {}), candidatas, motivo: "Para montar a árvore", buscaTermo: "acme" } });
   if (!proposta) throw new Error("proposta");

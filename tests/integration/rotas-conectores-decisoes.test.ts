@@ -116,7 +116,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
   it("internas: Origin → 403; GET plano pelo token; tools/call despachado; pedir_aprovacao → aguardar → long-poll pendente/decidida; negação local registrada", async () => {
     const turnoId = randomUUID();
     const repos = memoria.repos(MARLON);
-    await repos.turnos.enfileirar({ id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const token = tokens.cunhar(turnoId, { ...MARLON, agenteId });
     const plano = planoDeTeste({
       turnoId,

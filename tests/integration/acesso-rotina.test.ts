@@ -182,7 +182,7 @@ describeIntegracao("acesso em um clique também na rotina (ADR-044)", () => {
       expect(chamadas.conectores.map((c) => c.tool)).toEqual(["LER_NOTAS"]);
 
       // Dois saltos de retomada continuam ligados à rotina.
-      const deNovo = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "retomada", retomaTurnoId: retomada?.id, prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
+      const deNovo = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "retomada", retomaTurnoId: retomada?.id, prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
       const segundo = await emitirPlanoTurno(deps, { turnoId: deNovo?.id ?? "", machineId: randomUUID(), executor: "catcher" });
       expect(segundo.events?.[0]?.dados.modo).toBe("rotina");
       expect(segundo.data.politicaExecucao).not.toHaveProperty("efeitoExternoSoPorAprovacao");

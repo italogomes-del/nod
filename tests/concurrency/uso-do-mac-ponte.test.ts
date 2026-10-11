@@ -86,7 +86,7 @@ async function montar(uso?: UsoDoMac) {
   const tarefa = (origem: OrigemTrabalho, titulo: string) => escopado(async (trx) => {
     const d = depsSobreTrx(trx, PESSOA, { services });
     const { trabalho } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem });
-    const t = await d.repos.turnos.enfileirar({ conversaId, agenteId, origem: origem === "rotina" ? "rotina" : "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: origem === "rotina" ? "rotina" : "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
     return t!.id;
   });
   const puxar = async (l?: LeituraMemoria) => (await ponte.puxar(PESSOA.pessoaId, l))?.turnoId ?? null;

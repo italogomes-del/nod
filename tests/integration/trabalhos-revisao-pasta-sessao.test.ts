@@ -27,7 +27,7 @@ describeIntegracao("revisão #188 — pasta e sessão das tasks", () => {
       const base = await agenteComConversa(trx, MARLON, { nome: "Ada" });
       await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
       const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora: () => relogio, tokens: criarTokenTurno({ agora: () => relogio }) }), agora: () => relogio, trx });
-      const turno = async (trabalhoId: string | null = null) => (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: relogio + 600_000, profundidade: 0, entradaTexto: "monte o relatório", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId }))!;
+      const turno = async (trabalhoId: string | null = null) => (await base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: relogio + 600_000, profundidade: 0, entradaTexto: "monte o relatório", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId }))!;
       const vivo = await turno();
       await base.repos.turnos.reivindicar({ machineId: randomUUID(), agora: relogio });
       const em = relogio;
@@ -50,7 +50,7 @@ describeIntegracao("revisão #188 — pasta e sessão das tasks", () => {
       const agora = () => Date.now();
       const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
       const w = (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo: "Login", origem: "pessoa" })).trabalho;
-      const turno = async () => (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id }))!;
+      const turno = async () => (await base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id }))!;
       const t1 = await turno();
       const maquina = randomUUID();
       await base.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() });
@@ -73,7 +73,7 @@ describeIntegracao("revisão #188 — a sessão do turno promovido (S16)", () =>
     await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
     const agora = () => Date.now();
     const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
-    const vivo = (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+    const vivo = (await base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
     const maquina = randomUUID();
     await base.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() });
     // O turno bifurcou (ou começou sessão nova): a promoção não sabe a sessão dele.

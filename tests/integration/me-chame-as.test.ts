@@ -26,7 +26,7 @@ async function montar(trx: Tx, o: { semTrabalho?: boolean } = {}) {
   const base = await agenteComConversa(trx, MARLON, { nome: "Ada" });
   const { deps, repos } = depsSobre(trx, MARLON);
   const trabalho = o.semTrabalho ? null : (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo: "Acompanhar o CI do PR", origem: "pessoa" })).trabalho;
-  const enfileirado = await repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: trabalho?.id ?? null });
+  const enfileirado = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: trabalho?.id ?? null });
   if (!enfileirado) throw new Error("turno");
   const machineId = randomUUID();
   const turno = await repos.turnos.reivindicar({ machineId, agora: Date.now() });
@@ -109,7 +109,7 @@ describeIntegracao("me chame às (ADR-086)", () => {
       expect(nova?.retomaTurnoId).toBe(m.turno.id);
 
       for (let i = (await m.repos.turnos.voltasMarcadas(m.turno.id)); i < VOLTAS_SEGUIDAS_MAX; i++) {
-        await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: m.turno.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", acordarEm: Date.now() + 86_400_000 });
+        await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: m.turno.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", acordarEm: Date.now() + 86_400_000 });
       }
       const terceira = await m.repos.turnos.reivindicar({ machineId: m.machineId, agora: nova!.acordarEm! + 1 });
       expect((await meChameAs(m.deps, { ...m.ctx, turnoId: terceira!.id, em_minutos: 5, motivo: "mais uma" })).data).toMatchObject({ ok: false, erro: "voltas_demais" });

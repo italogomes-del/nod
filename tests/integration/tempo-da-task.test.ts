@@ -22,7 +22,7 @@ describeIntegracao("tempo da task (2026-10-08)", () => {
       const { deps, repos } = depsSobre(trx, MARLON);
       for (const a of [ada, dev]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
       const w = (await criarTrabalho(deps, { agenteId: ada.agenteId, conversaId: ada.conversaId, titulo: "Resumo do time", origem: "pessoa" })).trabalho;
-      const t = await repos.turnos.enfileirar({ conversaId: ada.conversaId, agenteId: ada.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
+      const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: ada.conversaId, agenteId: ada.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
       if (!t) throw new Error("turno");
       await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
       const { data } = await pedirABot(deps, { turnoId: t.id, agenteId: ada.agenteId, conversaId: ada.conversaId, agente: "Dev", pedido: "revise o PR 42" });

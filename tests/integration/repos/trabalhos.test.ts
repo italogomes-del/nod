@@ -11,7 +11,7 @@ const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const MAQUINA = randomUUID();
 const turno = (conversaId: string, agenteId: string, trabalhoId: string | null) => ({
-  conversaId, agenteId, origem: "conversa" as const, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", trabalhoId,
+  conversaId, agenteId, origem: "conversa" as const, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", trabalhoId, executor: "catcher" as const,
 });
 
 describeIntegracao("trabalhos (0060, ADR-083)", () => {

@@ -129,6 +129,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   const inventarioCli = await deps.repos.inventario.buscar(MOTOR_CLI);
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
+  // NOD-206 (#200): o executor real só é decidido aqui. Quem enfileira grava um palpite (o pedido de colega e a retomada
+  // nasciam `catcher` por padrão) e a retomada da cadeia compara com ele para decidir o --resume: grava o que vale.
+  if (turno.executor !== executor) await deps.repos.turnos.registrarExecutor(turno.id, executor);
   // 0068 (emenda da ADR-036): a ordem do bot (ou da pessoa), as IAs no limite e o modelo/raciocínio escolhidos por IA.
   const preferencias = await deps.repos.preferencias.buscar();
   const inteligencia = inteligenciaDoAgente(agente);

@@ -27,8 +27,8 @@ describeIntegracao("trilha de negações com filtro dia/agente/conector", () => 
       const conector = await repos.conectores.criar({ nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
       const conectorId = conector?.id ?? "";
       await repos.conectores.registrarSonda(conectorId, { ok: true, catalogo: [{ nome: "enviar", descricao: "", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
-      const turnoA = await repos.turnos.enfileirar({ conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
-      const turnoB = await repos.turnos.enfileirar({ conversaId: b.conversaId, agenteId: b.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turnoA = await repos.turnos.enfileirar({ executor: "catcher", conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turnoB = await repos.turnos.enfileirar({ executor: "catcher", conversaId: b.conversaId, agenteId: b.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const deps = depsSobre(repos, MARLON, { services: servicosDeTeste(), trx });
       const enviar: FerramentaPlano = { nome: "exemplo__enviar", nomeMcp: "mcp__nod__exemplo__enviar", origem: "conector", conectorId, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } };
       const lembrar: FerramentaPlano = { nome: "lembrar", nomeMcp: "mcp__nod__lembrar", origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: FERRAMENTAS_NOD.lembrar };

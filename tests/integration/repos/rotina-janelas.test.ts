@@ -19,7 +19,7 @@ describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante 
       expect(await repos.rotinaJanelas.reivindicar({ rotinaId: r?.id ?? "", instanteAgendado: instante, machineId: randomUUID(), executor: "local" })).toBe(false);
       expect(await repos.rotinaJanelas.reivindicar({ rotinaId: r?.id ?? "", instanteAgendado: instante + 60_000, machineId: m1, executor: "catcher" })).toBe(true);
 
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "i", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "i", entradaConfianca: "confiavel", modelo: "m" });
       expect(await repos.rotinaJanelas.vincularTurno({ rotinaId: r?.id ?? "", instanteAgendado: instante, turnoId: turno?.id ?? "" })).toBe(true);
       const janelas = await repos.rotinaJanelas.listar(r?.id ?? "");
       expect(janelas.map((j) => [j.instanteAgendado, j.machineId, j.executor, j.turnoId])).toEqual([

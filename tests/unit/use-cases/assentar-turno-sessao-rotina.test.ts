@@ -29,7 +29,7 @@ it("retomada ligada a uma rotina não troca a sessão da conversa; retomada da c
     await executar(deps, assentarTurno, { turnoId, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: { ...RESULTADO, sessaoCli } });
   };
   const retomar = async (retomaTurnoId: string, origem: OrigemTurno = "retomada") => {
-    const t = await deps.repos.turnos.enfileirar({ conversaId, agenteId: bot.agente.id, origem, retomaTurnoId, prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
+    const t = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId: bot.agente.id, origem, retomaTurnoId, prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
     if (!t) throw new Error("turno");
     return t.id;
   };
@@ -40,7 +40,7 @@ it("retomada ligada a uma rotina não troca a sessão da conversa; retomada da c
   await rodarAteOFim(await retomar(disparo.data.turno.id), "sessao-da-retomada-da-rotina");
   expect((await deps.repos.conversas.buscar(conversaId))?.sessaoCli).toBe("sessao-da-conversa");
 
-  const daConversa = await deps.repos.turnos.enfileirar({ conversaId, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet" });
+  const daConversa = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet" });
   await rodarAteOFim(daConversa?.id ?? "", null);
   await rodarAteOFim(await retomar(daConversa?.id ?? ""), "sessao-nova-da-conversa");
   expect((await deps.repos.conversas.buscar(conversaId))?.sessaoCli).toBe("sessao-nova-da-conversa");
@@ -51,7 +51,7 @@ it("assentar grava o harness e o instante junto com a sessão da conversa", asyn
   const { deps } = depsEmMemoria();
   const { data: bot } = await criarAgente(deps, { dono: "pessoa", nome: "Ada" });
   const conversaId = bot.conversa.id;
-  const turno = await deps.repos.turnos.enfileirar({ conversaId, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
   const machineId = randomUUID();
   expect((await deps.repos.turnos.reivindicar({ machineId, agora: deps.agora() }))?.id).toBe(turno?.id);
   await executar(deps, assentarTurno, { turnoId: turno?.id ?? "", machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: { ...RESULTADO, sessaoCli: "sessao-do-claude" }, executor: "local", harness: "claude-cli" });

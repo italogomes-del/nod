@@ -19,7 +19,7 @@ async function cenario() {
 }
 
 async function turno(d: D, agenteId: string, conversaId: string, o: { origem?: OrigemTurno; estado?: "pendente" | "despachando" | "concluido" | "interrompido"; texto?: string; daPessoa?: boolean; anexos?: string[]; sobProcuracaoDe?: string; retomaTurnoId?: string; trabalhoId?: string } = {}) {
-  const t = await d.deps.repos.turnos.enfileirar({
+  const t = await d.deps.repos.turnos.enfileirar({ executor: "catcher",
     conversaId, agenteId, origem: o.origem ?? "conversa", prazoEm: AGORA + 60_000, profundidade: o.origem === "delegacao" ? 1 : 0,
     entradaTexto: o.texto ?? "trabalho", entradaConfianca: "confiavel", modelo: "m",
     ...(o.daPessoa !== false ? { mensagemOrigemId: randomUUID() } : {}),

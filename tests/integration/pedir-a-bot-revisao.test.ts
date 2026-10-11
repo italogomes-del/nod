@@ -99,7 +99,7 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
       await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
       const primeira = await entregarRespostaPeer(deps, { tarefaId: data.tarefa_id, texto: "Revisei." });
       expect("mensagem" in primeira.data).toBe(true);
-      const retomada = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "aprovação decidida", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      const retomada = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "aprovação decidida", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
       await repos.turnos.assentar(retomada?.id ?? "", { estado: "concluido" });
       expect((await entregarRespostaPeer(deps, { tarefaId: retomada?.id ?? "", texto: "Revisei de novo." })).data).toEqual({ ignorado: "ja_entregue" });
       expect((await repos.mensagens.listarDaConversa(taga.conversaId)).filter((m) => m.kind === "peer_ask")).toHaveLength(1);
@@ -112,7 +112,7 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
       const { data } = await delegar();
       await pedirAcesso(deps, { turnoId: data.tarefa_id, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver"], nivel: "leitura", nao_pedido: [] });
       await repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
-      const irma = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      const irma = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
       await repos.turnos.assentar(irma?.id ?? "", { estado: "concluido" });
       expect((await entregarRespostaPeer(deps, { tarefaId: irma?.id ?? "", texto: "Parcial" })).data).toEqual({ ignorado: "aguardando_pessoa" });
     });
@@ -125,7 +125,7 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
       const { data } = await delegar();
       let anterior = data.tarefa_id;
       for (let i = 0; i < 12; i++) {
-        const t = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "de novo", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: anterior, sobProcuracaoDe: PESSOA_MARLON });
+        const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "de novo", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: anterior, sobProcuracaoDe: PESSOA_MARLON });
         await repos.turnos.assentar(t?.id ?? "", { estado: "concluido" });
         anterior = t?.id ?? "";
       }
@@ -158,7 +158,7 @@ describeIntegracao("pedir_a_bot — revisão independente (ADR-047, revista na A
       expect((await avisarFalhaDelegacao(deps, { turnoId: data.tarefa_id, motivo: "você pediu para parar" })).data).toEqual({ ignorado: "ja_entregue" });
       expect(await avisos()).toHaveLength(1);
       // A pessoa retoma e a tarefa conclui: o resultado sai mesmo depois do aviso.
-      const retomada = await repos.turnos.enfileirar({ conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "retome", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
+      const retomada = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "retome", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: data.tarefa_id, sobProcuracaoDe: PESSOA_MARLON });
       await repos.turnos.assentar(retomada?.id ?? "", { estado: "concluido" });
       expect("mensagem" in (await entregarRespostaPeer(deps, { tarefaId: retomada?.id ?? "", texto: "Revisei." })).data).toBe(true);
     });

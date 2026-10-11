@@ -48,7 +48,7 @@ describe("dispensar: quem pode sair pelo × / 'Dispensar'", () => {
     const d = depsMemoria({ agora: () => AGORA });
     const agente = await d.deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
     const conversa = await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
-    const turno = await d.deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 10_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
+    const turno = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 10_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
     const retomar = await d.deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", turnoId: turno?.id ?? null, prazoDecisaoEm: AGORA + DIA, frase: "Turno interrompido: seu Mac parou de responder." });
     const aprovacao = await d.deps.repos.decisoes.criar({ tipo: "aprovacao", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", prazoDecisaoEm: AGORA + DIA, frase: "enviar" });
 

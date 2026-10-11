@@ -94,6 +94,8 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     sobProcuracaoDe: pessoaId,
     modelo: alvo.modelo,
     harness: alvo.harness,
+    // NOD-206 (#200): o do turno de quem pede (o bot local delega na mesma máquina); o plano grava o real.
+    executor: turnoRemetente.executor,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do pedido não criado" });
   if (turnoRemetente.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turnoRemetente.id))) await deps.repos.turnos.contaminar(turno.id, agora);

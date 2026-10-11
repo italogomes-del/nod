@@ -38,7 +38,7 @@ async function conversaComTurnos(quantos: number, agenteId = randomUUID()): Prom
     }
     await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
     for (const id of turnos) {
-      await repos.turnos.enfileirar({ id, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.turnos.enfileirar({ executor: "catcher", id, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     }
   });
   criados.conversas.push(conversaId);
@@ -110,9 +110,9 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
       const colega = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Pedido do Chico", origem: "colega", pedidoPorAgenteId: colegaId });
       const pessoa = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Dashboard de churn", origem: "pessoa" });
       const base = { conversaId, agenteId, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
-      await repos.turnos.enfileirar({ ...base, id: turnos.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
-      await repos.turnos.enfileirar({ ...base, id: turnos.colega, origem: "delegacao", trabalhoId: colega?.id ?? null });
-      await repos.turnos.enfileirar({ ...base, id: turnos.pessoa, origem: "conversa", trabalhoId: pessoa?.id ?? null });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: turnos.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: turnos.colega, origem: "delegacao", trabalhoId: colega?.id ?? null });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: turnos.pessoa, origem: "conversa", trabalhoId: pessoa?.id ?? null });
     });
     criados.agentes.push(agenteId, colegaId);
     criados.conversas.push(conversaId);
@@ -120,7 +120,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     const lado = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
     const tres = (await Promise.all([lado(), lado(), lado()])).map((t) => t?.id ?? null);
     expect(new Set(tres), `os três trabalhos: ${JSON.stringify(tres)}`).toEqual(new Set([turnos.rotina, turnos.colega, turnos.pessoa]));
-    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.enfileirar({ id: turnos.conversa, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "e aí?", entradaConfianca: "confiavel", modelo: "m" }));
+    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.enfileirar({ executor: "catcher", id: turnos.conversa, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "e aí?", entradaConfianca: "confiavel", modelo: "m" }));
     criados.turnos.push(turnos.conversa);
     expect((await lado())?.id).toBe(turnos.conversa);
     const vivos = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.vivosDaConversa(conversaId));
@@ -138,9 +138,9 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
       const rotina = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Triagem", origem: "rotina" });
       const colega = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Pedido", origem: "colega" });
       const base = { conversaId, agenteId, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
-      await repos.turnos.enfileirar({ ...base, id: ids.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
-      await repos.turnos.enfileirar({ ...base, id: ids.colega, origem: "retomada", trabalhoId: colega?.id ?? null });
-      await repos.turnos.enfileirar({ ...base, id: ids.conversa, origem: "conversa" });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: ids.rotina, origem: "rotina", trabalhoId: rotina?.id ?? null });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: ids.colega, origem: "retomada", trabalhoId: colega?.id ?? null });
+      await repos.turnos.enfileirar({ executor: "catcher", ...base, id: ids.conversa, origem: "conversa" });
     });
     criados.agentes.push(agenteId);
     criados.conversas.push(conversaId);
@@ -161,7 +161,7 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
       const primeiro = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Primeiro", origem: "pessoa", estado: "rodando" });
       primeiroId = primeiro?.id ?? "";
       const depois = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Depois", origem: "pessoa", depoisDeTrabalhoId: primeiroId });
-      await repos.turnos.enfileirar({ id: turnoDepois, conversaId, agenteId, origem: "conversa", trabalhoId: depois?.id ?? null, prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.turnos.enfileirar({ executor: "catcher", id: turnoDepois, conversaId, agenteId, origem: "conversa", trabalhoId: depois?.id ?? null, prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     });
     criados.agentes.push(agenteId);
     criados.conversas.push(conversaId);

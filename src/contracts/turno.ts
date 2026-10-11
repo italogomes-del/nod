@@ -1,3 +1,4 @@
+import type { Executor } from "./evento.ts";
 import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaSemIa } from "./inventario.ts";
@@ -66,6 +67,7 @@ export type Turno = {
   custoUsd: number | null;
   modelo: string;
   harness?: PreferenciaHarness;
+  executor: Executor; // NOD-206: onde roda. Nasce com o palpite de quem enfileirou; o plano grava o real (registrarExecutor)
   criadoEm: EpochMs;
   /** Fala da pessoa que disparou o turno (0024). Não é `mensagens.turno_id`, que é a fala que o turno produziu. */
   mensagemOrigemId?: string | null;

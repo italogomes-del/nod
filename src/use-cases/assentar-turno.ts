@@ -127,7 +127,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (turno.machineId !== null && turno.machineId !== entrega.machineId) throw new ErroDeDominio("nao_permitido", { cause: "entrega de outra máquina" });
 
   const agora = deps.agora();
-  const executor = entrega.executor ?? "catcher";
+  // NOD-206: a ponte sempre manda o executor do plano; sem ele, o que o plano gravou no turno (nunca um padrão fixo).
+  const executor = entrega.executor ?? turno.executor;
   const resultado = entrega.resultado;
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
   // Revisão do épico (S19, 2026-10-08): mensagens que o CLI recebeu e cuja confirmação não chegou numa renovação (a
@@ -181,7 +182,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
     const conversa = await deps.repos.conversas.buscar(turno.conversaId);
     if (!conversa?.salaId) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala sem sala" });
-    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
+    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, executor, eRotina: false });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
   } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida) {

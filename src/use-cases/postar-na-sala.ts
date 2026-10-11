@@ -1,5 +1,5 @@
 import type { Agente } from "../contracts/agente.ts";
-import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
+import type { Autoria, Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Confianca, Mensagem } from "../contracts/mensagem.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { EstadoOrcamento, Sala } from "../contracts/sala.ts";
@@ -19,6 +19,8 @@ export type EntradaPost = {
   autoria?: Autoria;
   confianca?: Confianca;
   turnoId?: string | null;
+  /** NOD-206: o executor do turno que postou (o dos bots respondentes). A fala da pessoa não o traz. */
+  executor?: Executor;
   /** Post originado de turno de rotina é isento do orçamento (E5.5, E12.3). */
   eRotina?: boolean;
   /**
@@ -164,7 +166,9 @@ export const postarNaSala: CasoDeUso<EntradaPost, SaidaPost> = async (deps, inpu
       entradaTexto: texto,
       entradaConfianca: mensagem.confianca,
       modelo: agente.modelo,
-    harness: agente.harness,
+      harness: agente.harness,
+      // NOD-206: o do turno que postou; a fala da pessoa não traz executor — palpite, o plano grava o real.
+      executor: input.executor ?? "catcher",
     });
     if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala não criado" });
     turnos.push(turno);

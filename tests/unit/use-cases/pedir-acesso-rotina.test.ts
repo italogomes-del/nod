@@ -88,8 +88,8 @@ describe("pedir_acesso num turno de rotina (ADR-044)", () => {
   it("a retomada de um turno de rotina continua sendo da rotina: o pedido dela é o mesmo pedido", async () => {
     const c = await cenario();
     const primeiro = await pedirAcesso(c.deps, { ...c.ctx, conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] });
-    const retomada = await c.deps.repos.turnos.enfileirar({ conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: c.turno.id, prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
-    const deNovo = await c.deps.repos.turnos.enfileirar({ conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: retomada?.id ?? "", prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
+    const retomada = await c.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: c.turno.id, prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
+    const deNovo = await c.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: retomada?.id ?? "", prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
     const segundo = await pedirAcesso(c.deps, { ...c.ctx, turnoId: deNovo?.id ?? "", conector: "gmail", capacidades: [], nivel: "leitura", nao_pedido: [] });
     expect(segundo.data.proposta_id).toBe(primeiro.data.proposta_id);
     // ADR-066: na cadeia a escrita também pode ser pedida, e cai no MESMO card aberto da rotina (UM por app).

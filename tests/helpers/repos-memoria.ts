@@ -1043,6 +1043,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async sessaoDoTurno() {
         return null;
       },
+      async registrarExecutor(id, executor) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (t) t.executor = executor;
+      },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,
@@ -1069,6 +1073,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           custoUsd: null,
           modelo: t.modelo,
           harness: t.harness ?? "auto",
+          executor: t.executor,
           criadoEm: agora() + b.turnos.length / 1000,
           mensagemOrigemId: t.mensagemOrigemId ?? null,
           absorvidoPor: null,

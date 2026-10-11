@@ -67,7 +67,7 @@ async function aprovacaoPendente(trx: Trx) {
   await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
   const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
   await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: consentimento?.id ?? "" });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "manda o e-mail", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "manda o e-mail", entradaConfianca: "confiavel", modelo: "m" });
   await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
   const texto = "Ana, o relatório segue em anexo.";

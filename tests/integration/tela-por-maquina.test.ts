@@ -31,7 +31,7 @@ async function montar(trx: Tx) {
   await repos.agentes.definirMaquina([ada.agenteId], vm);
   const rotina = async (b: { agenteId: string; conversaId: string }, titulo: string) => {
     const w = (await criarTrabalho(deps, { agenteId: b.agenteId, conversaId: b.conversaId, titulo, origem: "rotina" })).trabalho;
-    const t = await repos.turnos.enfileirar({ conversaId: b.conversaId, agenteId: b.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: b.conversaId, agenteId: b.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
     if (!t) throw new Error("turno");
     return { trabalho: w, turno: t };
   };

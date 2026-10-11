@@ -18,7 +18,7 @@ const HTML = '<ul><li><label><input type="checkbox" data-id="a"> Responder o Jon
 /** O agente da Ada, a conversa dele e um turno em curso de Marlon (a mensagem do artefato aponta para o turno). */
 async function cenario(trx: Tx, escopo: Escopo = MARLON) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo, { nome: "Ada" });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "minha checklist", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "minha checklist", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno não criado");
   const deps = depsSobreTrx(trx, escopo);
   const publicar = async (titulo: string, html: string, artefatoId?: string) => {

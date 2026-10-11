@@ -27,7 +27,7 @@ describeIntegracao("harness por agente", () => {
       expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "codex-cli", modelo: "gpt-6-astra" });
       const copia = await duplicarAgente(deps, { agenteId });
       expect(copia.data.agente).toMatchObject({ harness: "codex-cli", modelo: "gpt-6-astra" });
-      const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "gpt-6-astra", harness: "codex-cli" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "gpt-6-astra", harness: "codex-cli" });
       await editarPerfil(deps, { agenteId, harness: "claude-cli", modelo: "haiku" });
       await repos.conversas.atualizarSessaoCli(conversaId, randomUUID(), "local");
       const plano = (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses: { "codex-cli": pronto, "claude-cli": pronto } })).data;
@@ -42,7 +42,7 @@ describeIntegracao("harness por agente", () => {
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
       const entrada = async (harness: "auto" | "codex-cli" | "claude-cli", harnesses: Parameters<typeof emitirPlanoTurno>[1]["harnesses"]) => {
-        const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "/uso", entradaConfianca: "confiavel", modelo: "auto", harness });
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "/uso", entradaConfianca: "confiavel", modelo: "auto", harness });
         const plano = (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses })).data;
         return { harness: plano.harness, texto: plano.entrada.texto };
       };
@@ -63,7 +63,7 @@ describeIntegracao("harness por agente", () => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
-      const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
       const p = (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses: { "codex-cli": pronto } })).data;
       expect(p).toMatchObject({ harness: "codex-cli", entrada: { modelo: "gpt-5.6-sol" } });
     });
@@ -79,7 +79,7 @@ describeIntegracao("harness por agente", () => {
       await repos.onboarding.definirGuia(agenteId);
       const plano = async (id: string, modelo: string, harnesses: Parameters<typeof emitirPlanoTurno>[1]["harnesses"]) => {
         const conversa = id === agenteId ? conversaId : outro.conversaId;
-        const turno = await repos.turnos.enfileirar({ agenteId: id, conversaId: conversa, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo, harness: "auto" });
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId: id, conversaId: conversa, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo, harness: "auto" });
         return (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses })).data;
       };
       expect((await plano(agenteId, "auto", { "claude-cli": pronto })).entrada.modelo).toBe("fable");
@@ -139,7 +139,7 @@ describeIntegracao("roteamento por capacidade do computador", () => {
 it("fila não deixa um computador com Claude reivindicar um turno fixado no Codex", async () => {
   await withRollback(escopo, async (trx) => {
     const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
-    const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: Date.now() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: Date.now() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
     expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["claude-cli"] })).toBeNull();
     expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["codex-cli"] })).toMatchObject({ id: turno!.id, harness: "codex-cli" });
   });
@@ -147,7 +147,7 @@ it("fila não deixa um computador com Claude reivindicar um turno fixado no Code
 it("NOD-171: com os prontos da pessoa, o computador com Claude reivindica o fixado no Codex só quando nenhuma máquina tem o Codex", async () => {
   await withRollback(escopo, async (trx) => {
     const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
-    const turno = await repos.turnos.enfileirar({ agenteId, conversaId, origem: "conversa", prazoEm: Date.now() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: Date.now() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
     expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["claude-cli"], harnessesProntosPessoa: ["claude-cli", "codex-cli"] })).toBeNull();
     expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), harnessesProntos: ["claude-cli"], harnessesProntosPessoa: ["claude-cli"] })).toMatchObject({ id: turno!.id });
   });
@@ -172,7 +172,7 @@ describeIntegracao("NOD-171: harness fixado e indisponível", () => {
     return { ...base, deps, emitidos, agora };
   };
   const enfileirar = (b: Awaited<ReturnType<typeof montar>>, harness: "auto" | "codex-cli" | "claude-cli", modelo: string) =>
-    b.repos.turnos.enfileirar({ agenteId: b.agenteId, conversaId: b.conversaId, origem: "conversa", prazoEm: b.agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo, harness });
+    b.repos.turnos.enfileirar({ executor: "catcher", agenteId: b.agenteId, conversaId: b.conversaId, origem: "conversa", prazoEm: b.agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo, harness });
   const puxar = (b: Awaited<ReturnType<typeof montar>>, extra: Partial<Parameters<typeof despacharTurno>[1]> = {}) =>
     despacharTurno(b.deps, { machineId: randomUUID(), executor: "local", inventario: pronto, ...extra });
 

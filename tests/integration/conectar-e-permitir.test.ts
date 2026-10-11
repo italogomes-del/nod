@@ -24,7 +24,7 @@ describeIntegracao("conectar e permitir no mesmo lugar (ADR-049)", () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Milton" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "cria a tarefa", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "cria a tarefa", entradaConfianca: "confiavel", modelo: "m" });
       if (!turno) throw new Error("turno");
       const pedido = await pedirAcesso(deps, { agenteId, conversaId, turnoId: turno.id, conector: "clickup", capacidades: [], nivel: "escrita", nao_pedido: [], para: "Criar a tarefa do contrato" });
       expect((await repos.propostas.conexoesPendentes("clickup")).map((p) => p.id)).toEqual([pedido.data.proposta_id]);

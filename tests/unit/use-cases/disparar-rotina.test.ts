@@ -110,7 +110,7 @@ describe("dispararRotina", () => {
     if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
     const t = primeira.data.turno;
     await d.deps.repos.turnos.assentar(t.id, { estado: "concluido" });
-    await d.deps.repos.turnos.enfileirar({ conversaId: t.conversaId, agenteId: t.agenteId, origem: "retomada", retomaTurnoId: t.id, prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: t.modelo, acordarEm: AGORA + 600_000 });
+    await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: t.conversaId, agenteId: t.agenteId, origem: "retomada", retomaTurnoId: t.id, prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: t.modelo, acordarEm: AGORA + 600_000 });
     const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
     expect((await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toMatchObject({ pulada: true, turnoAbertoId: t.id });
   });
@@ -200,7 +200,7 @@ describe("dispararRotina", () => {
     expect(d.banco.execucoes.filter((e) => e.rotinaId === rotina.id)).toHaveLength(EXECUCOES_GUARDADAS);
 
     // turno que não é de rotina → ignorado, sem execução
-    const alheio = await d.deps.repos.turnos.enfileirar({ conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    const alheio = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     expect((await registrarDesfechoRotina(d.deps, { turnoId: alheio?.id ?? randomUUID(), desfecho: "executou" })).data).toEqual({ ignorado: "nao_e_rotina" });
   });
 
@@ -225,7 +225,7 @@ describe("dispararRotina", () => {
     const gate = await d.deps.repos.decisoes.criar({ tipo: "gate_rotina", agenteId: rotina.agenteId, conversaId: rotina.conversaId, turnoId, prazoDecisaoEm: AGORA + 60_000, frase: "gate" });
     expect((await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
     await d.deps.repos.decisoes.decidir(gate?.id ?? "", { por: "p", agora: AGORA });
-    const retomada = await d.deps.repos.turnos.enfileirar({ conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "retomada", retomaTurnoId: turnoId, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    const retomada = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "retomada", retomaTurnoId: turnoId, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const ok = await registrarDesfechoRotina(d.deps, { turnoId: retomada?.id ?? "", desfecho: "executou" });
     expect("execucao" in ok.data && ok.data.execucao.turnoId).toBe(turnoId);
   });

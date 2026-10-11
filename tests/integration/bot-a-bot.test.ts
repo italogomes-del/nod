@@ -20,7 +20,7 @@ describeIntegracao("bot-a-bot (ADR-058/062; E12.4, ADR-025): pedir_a_bot, contin
       const vera = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const tuca = await agenteComConversa(trx, MARLON, { nome: "Tuca" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turnoVera = await repos.turnos.enfileirar({ conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "pergunte ao Tuca o status do PR 42", entradaConfianca: "confiavel", modelo: "m" });
+      const turnoVera = await repos.turnos.enfileirar({ executor: "catcher", conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "pergunte ao Tuca o status do PR 42", entradaConfianca: "confiavel", modelo: "m" });
 
       const r = await pedirABot(deps, { ...contexto(vera.agenteId, vera.conversaId, turnoVera?.id), agente: "Tuca", pedido: "qual o status do PR 42?" });
       const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
@@ -57,7 +57,7 @@ describeIntegracao("bot-a-bot (ADR-058/062; E12.4, ADR-025): pedir_a_bot, contin
       const tuca = await agenteComConversa(trx, ANA, { nome: "Tuca", dono: "empresa" });
       await vincularEscopo(trx, MARLON);
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const original = await repos.turnos.enfileirar({ conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "conversa", prazoEm: AGORA + 1000, profundidade: 0, entradaTexto: "consulte Tuca", entradaConfianca: "confiavel", modelo: "m" });
+      const original = await repos.turnos.enfileirar({ executor: "catcher", conversaId: vera.conversaId, agenteId: vera.agenteId, origem: "conversa", prazoEm: AGORA + 1000, profundidade: 0, entradaTexto: "consulte Tuca", entradaConfianca: "confiavel", modelo: "m" });
       await expect(pedirABot(deps, { ...contexto(vera.agenteId, vera.conversaId, original!.id), agente: "Tuca", pedido: "oi" })).rejects.toMatchObject({ codigo: "nao_permitido" });
       expect((await repos.turnos.listarDaConversa(vera.conversaId)).map((t) => t.id)).toEqual([original!.id]);
 

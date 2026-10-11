@@ -51,7 +51,7 @@ describeIntegracao("revisão da rotina pela rota de decidir (NOD-159): commit pr
     const { deps, repos } = depsSobre(trx, MARLON);
     const a = rotinaValida();
     const { data } = await criarRotinaPelaPessoa(deps, { agenteId, cron: a.cron, fusoIana: a.fuso_iana, instrucao: a.instrucao, fonte: a.fonte, entregavel: a.entregavel, limitesAprovacao: a.limites_aprovacao, politicaSemDado: a.politica_sem_dado });
-    const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
     return { deps, repos, ctx: contexto(agenteId, conversaId, turno?.id), rotina: data.rotina };
   }
 

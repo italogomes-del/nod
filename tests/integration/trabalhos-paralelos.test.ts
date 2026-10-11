@@ -25,13 +25,13 @@ describeIntegracao("trabalhos em paralelo pelos casos de uso de verdade (#192, c
       const disparo = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
       if (!("turno" in disparo.data)) throw new Error("rotina sem turno");
 
-      const turnoChico = await repos.turnos.enfileirar({ conversaId: chico.conversaId, agenteId: chico.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "peça ao Dev", entradaConfianca: "confiavel", modelo: "m" });
+      const turnoChico = await repos.turnos.enfileirar({ executor: "catcher", conversaId: chico.conversaId, agenteId: chico.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "peça ao Dev", entradaConfianca: "confiavel", modelo: "m" });
       // O turno do Chico já rodou (é dele o pedido); só a fila do Dev interessa aqui.
       await repos.turnos.assentar(turnoChico!.id, { estado: "concluido" });
       const pedido = await pedirABot(deps, { ...contexto(chico.agenteId, chico.conversaId, turnoChico?.id), agente: "Dev", pedido: "Revise o PR 481" });
 
       const daPessoa = (await criarTrabalho(deps, { agenteId: dev.agenteId, conversaId: dev.conversaId, titulo: "Dashboard de churn", origem: "pessoa" })).trabalho;
-      await repos.turnos.enfileirar({ conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", trabalhoId: daPessoa.id, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "monte o dashboard", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", trabalhoId: daPessoa.id, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "monte o dashboard", entradaConfianca: "confiavel", modelo: "m" });
 
       const tres = [];
       for (let i = 0; i < 3; i++) tres.push(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA }));
@@ -40,7 +40,7 @@ describeIntegracao("trabalhos em paralelo pelos casos de uso de verdade (#192, c
       const origens = await Promise.all(tres.map(async (t) => (await repos.trabalhos.buscar(t?.trabalhoId ?? ""))?.origem));
       expect(new Set(origens)).toEqual(new Set(["rotina", "colega", "pessoa"]));
 
-      const fala = await repos.turnos.enfileirar({ conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "e aí, como vai?", entradaConfianca: "confiavel", modelo: "m" });
+      const fala = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "e aí, como vai?", entradaConfianca: "confiavel", modelo: "m" });
       expect((await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA }))?.id).toBe(fala?.id);
 
       // Quem pediu recebe a resposta numa continuação que segue no trabalho DELE (aqui, a conversa: null) e a entrega
