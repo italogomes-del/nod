@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { randomBytes } from "node:crypto";
+import { encerrarFugitivosDoTurno } from "./fugitivos.ts";
 import { gravarArquivoDeGrupos, inicioDesteProcesso, prefixoDaMarca, VARIAVEL_DA_MARCA, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
@@ -172,6 +173,11 @@ export function iniciarProcesso(o: {
    * mesmo 5 s é corrida, não asserção (a suíte piscava com 'expected 5020 to be less than 5000').
    */
   sigtermParaSigkillMs?: number;
+  /**
+   * ADR-097 (fase 0): no fim, também encerra o que saiu do grupo com a marca deste spawn (fugitivos.ts). Padrão true;
+   * `executarColetando` (sonda, `--version`) passa false: comando curto não abre servidor, e não vale um `ps` por sonda.
+   */
+  encerrarFugitivos?: boolean;
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
@@ -187,6 +193,11 @@ export function iniciarProcesso(o: {
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
   let interrompido = false;
+  // ADR-097: o que abriu sessão própria (o Postgres de teste) não sai com o grupo; vai pela marca, sem segurar o fim.
+  const levarFugitivos = () => {
+    if (pid === undefined || marca === "" || o.encerrarFugitivos === false) return;
+    void encerrarFugitivosDoTurno({ pgid: pid, desdeMs, marca }, [...gruposVivos.keys()]);
+  };
 
   filho.stdout?.setEncoding("utf8");
   filho.stdout?.on("data", (pedaco: string) => linhas.empurrar(pedaco));
@@ -227,6 +238,7 @@ export function iniciarProcesso(o: {
       } catch {
         // o grupo já acabou junto com o líder
       }
+      levarFugitivos();
     }
     return r;
   });
@@ -252,7 +264,10 @@ export function iniciarProcesso(o: {
       if (terminou) {
         // O líder já saiu; um neto do grupo pode estar vivo (Bash do modelo). Leva o grupo, sem esperar — só se ele
         // ainda é nosso (fora da lista, o pid pode já ser de outro).
-        if (soltarGrupo(pid)) sinalizarGrupo(pid, "SIGKILL", () => undefined);
+        if (soltarGrupo(pid)) {
+          sinalizarGrupo(pid, "SIGKILL", () => undefined);
+          levarFugitivos();
+        }
         return;
       }
       // #194: SIGTERM no GRUPO (o CLI e o que ele abriu), com o mesmo 5 s até o SIGKILL.
@@ -266,7 +281,7 @@ export function iniciarProcesso(o: {
       }
       // Quem saiu no SIGTERM pode ter deixado neto no grupo: o SIGKILL final não custa nada se não houver.
       sinalizarGrupo(pid, "SIGKILL", () => undefined);
-      soltarGrupo(pid);
+      if (soltarGrupo(pid)) levarFugitivos();
     },
     fim,
   };
@@ -281,7 +296,7 @@ export async function executarColetando(o: {
   timeoutMs: number;
 }): Promise<FimProcesso & { stdout: string; estourouTempo: boolean }> {
   const linhas: string[] = [];
-  const proc = iniciarProcesso({ ...o, stdin: "ignore", aoLinha: (l) => linhas.push(l) });
+  const proc = iniciarProcesso({ ...o, stdin: "ignore", encerrarFugitivos: false, aoLinha: (l) => linhas.push(l) });
   let estourouTempo = false;
   const relogio = setTimeout(() => {
     estourouTempo = true;

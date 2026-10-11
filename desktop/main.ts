@@ -11,6 +11,7 @@ import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cl
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { encerrarGruposVivos, executarColetando, iniciarProcesso, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
@@ -379,7 +380,10 @@ function limparOrfaosUmaVez(): Promise<void> {
   limpezaDeOrfaos ??= (async () => {
     const arquivo = join(app.getPath("userData"), "executor", "grupos-vivos.json");
     const r = await encerrarGruposOrfaos({ arquivo }).catch(() => ({ assumiu: true }));
-    if (r.assumiu) registrarGruposEm(arquivo);
+    if (!r.assumiu) return;
+    // ADR-097: o que saiu dos grupos com a marca do app (o Postgres de teste de uma task) e ficou de outra vida.
+    await encerrarFugitivosDaInstancia(arquivo);
+    registrarGruposEm(arquivo);
   })();
   return limpezaDeOrfaos;
 }

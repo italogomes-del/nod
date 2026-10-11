@@ -15,6 +15,7 @@ import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/p
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
@@ -227,7 +228,11 @@ async function rodar(): Promise<number> {
   // primeiro turno desta; os novos ficam anotados, e saem junto com o processo.
   const arquivoGrupos = join(pastaDoExecutor(process.env), "grupos-vivos.json");
   const orfaos = await encerrarGruposOrfaos({ arquivo: arquivoGrupos }).catch(() => ({ assumiu: true }));
-  if (orfaos.assumiu) registrarGruposEm(arquivoGrupos);
+  if (orfaos.assumiu) {
+    // ADR-097: o que saiu dos grupos com a marca do motor (os Postgres de teste das tasks) e ficou de outra vida.
+    await encerrarFugitivosDaInstancia(arquivoGrupos);
+    registrarGruposEm(arquivoGrupos);
+  }
   process.once("exit", () => encerrarGruposVivos());
   let sessao: Sessao | null = null;
   // O SIGTERM pode chegar no meio do conectar ou da espera entre tentativas: a espera é abortável e, se a sessão nascer
