@@ -476,6 +476,23 @@
 .composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
 .composer .clipe:disabled:hover { background: transparent; color: var(--ink-2); }
 
+/* ---- ditado no campo (ADR-095, 2026-10-11; referência do Grok em docs/referencias/ditado-grok/) ----
+   O 🎤 fica antes do enviar, num círculo cinza. Gravando, ele dá lugar à pílula "■ 0:08 ||||" e o campo diz "Ouvindo…";
+   o enviar continua no lugar (↑ = para e envia). No celular (web/mobile.css) a linha inteira vira três pílulas. */
+.composer .mic { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--surface-raised); color: var(--ink-2); display: grid; place-items: center; flex: none; cursor: pointer; }
+.composer .mic:hover, .composer .mic:focus-visible { background: var(--surface-selected); color: var(--ink); }
+.composer .mic[hidden], .composer .ditado[hidden], .composer .box.gravando .mic { display: none; }
+.composer .ditado { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 5px; border-radius: 18px; background: var(--surface-raised); flex: none; }
+.ditado-parar { width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); display: grid; place-items: center; flex: none; cursor: pointer; }
+.ditado-parar:hover, .ditado-parar:focus-visible { background: var(--surface-selected); }
+.ditado-ouvindo { display: flex; align-items: center; gap: 8px; }
+.ditado-tempo { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink); min-width: 30px; }
+.ditado-nivel { display: flex; align-items: center; gap: 2px; height: 16px; }
+.ditado-nivel i { --nivel-ditado: 0; width: 2px; height: calc(3px + var(--nivel-ditado) * 13px); border-radius: 1px; background: var(--ink-3); transition: height 80ms linear; }
+.composer .box.gravando textarea { cursor: default; }
+.composer .box.transcrevendo .ditado-parar, .composer .box.transcrevendo .send { opacity: .45; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .ditado-nivel i { transition: none; } }
+
 /* Fio da pergunta (2026-09-24): aberto, um trilho fino junta as mensagens do fio sob "Pergunta
    aberta · N mensagens · Xª rodada"; enquanto o agente lê, a faixa acima do campo fica neutra, sem ações;
    resolvido, o fio recolhe num <details> verde e a linha "{agente} seguiu com a sua resposta" fica embaixo. */

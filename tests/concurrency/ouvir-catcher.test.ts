@@ -1,3 +1,4 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -46,7 +47,7 @@ const logs: string[] = [];
 async function subir(env: Record<string, string>, v?: ProvedoresVoz): Promise<ServidorCompleto> {
   const s = await servidorCompleto({ env: { NOD_LIGACAO: "todas", ...env }, voz: v });
   criados.set(s, { agentes: [], conversas: [] });
-  await s.json("POST", "voz/consentimento", { versao: 1 });
+  await s.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
   return s;
 }
 

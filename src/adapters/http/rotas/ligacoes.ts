@@ -17,6 +17,7 @@ import {
   reabrirCerebroDaLigacao,
   type ContextoLigacao,
 } from "../../../use-cases/ligacoes.ts";
+import { disponibilidadeDitado, type ContextoDitado } from "../../../use-cases/ditado.ts";
 import { prepararLeitura, type ContextoLeitura, type LeituraPreparada } from "../../../use-cases/ouvir-mensagem.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, type DepsRotas } from "./executar-caso.ts";
@@ -41,13 +42,15 @@ export type DepsRotasLigacoes = DepsRotas & {
   contextoLeitura(escopo: Escopo): Promise<ContextoLeitura>;
   /** NOD-180: toca a leitura no `res` (leitura-voz.ts). Lança antes do 1º byte; depois, nunca. */
   ouvir(escopo: Escopo, p: { mensagemId: string; leitura: LeituraPreparada; res: ServerResponse }): Promise<void>;
+  /** ADR-095: NOD_DITADO e a voz no ar, para o microfone do campo de mensagem. */
+  contextoDitado(escopo: Escopo): Promise<ContextoDitado>;
   maxS: number;
 };
 
 /**
  * Rotas da ligação por voz (definido em 2026-10-04, ADR-072/075). O áudio não passa por aqui: vai pelo WebSocket de
  * mídia (src/adapters/voz/ws.ts). Aqui ficam disponibilidade, ligar, desligar, continuar com outra IA (a rede de
- * segurança de 2026-10-05), a transcrição, a avaliação, o consentimento e a voz do bot.
+ * segurança de 2026-10-05), a transcrição, a avaliação, o consentimento, a voz do bot e a disponibilidade do ditado.
  */
 export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
   const executar = criarExecutor(d);
@@ -140,6 +143,14 @@ export function criarRotasLigacoes(d: DepsRotasLigacoes): Rota[] {
       padrao: /^\/voz\/consentimento$/,
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, consentirVoz, { versao: corpoObjeto(await ctx.corpo()).versao }));
+      },
+    },
+    {
+      // Ditado no campo (definido em 2026-10-11, ADR-095): o microfone aparece? O áudio vai pelo canal voz/v1/ditado.
+      metodo: "GET",
+      padrao: /^\/voz\/ditado\/disponibilidade$/,
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, disponibilidadeDitado, { contexto: await d.contextoDitado(ctx.escopo) }));
       },
     },
     {

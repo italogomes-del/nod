@@ -29,7 +29,7 @@ mac:
   minimumSystemVersion: '12.0'
   # Modo ligação (2026-10-04, ADR-071): o texto que o macOS mostra ao pedir o microfone.
   extendInfo:
-    NSMicrophoneUsageDescription: O nod usa o microfone só durante as ligações com os seus bots.
+    NSMicrophoneUsageDescription: O nod usa o microfone quando você dita uma mensagem ou liga para um bot.
 dmg:
   sign: true
 win:

@@ -4,7 +4,7 @@ import type { CamposEntrevista, EstadoOnboarding, EtapaOnboarding } from "../../
 import type { Api } from "../lib/api.ts";
 import { esc } from "../lib/render.ts";
 import { dialogo } from "./gestao-agentes.ts";
-import { TEXTO_CONSENTIMENTO } from "./ligacao.ts";
+import { TEXTO_CONSENTIMENTO, VERSAO_CONSENTIMENTO } from "./ligacao.ts";
 import { criarTesteDeIas } from "./onboarding-teste.ts";
 import { destinoAoFimDoOla, htmlCamada, htmlGuia, notaForaDoApp, textoComoLiberar, type EstadoTelaOnboarding, type FaseTela } from "./onboarding.ts";
 
@@ -25,7 +25,6 @@ export const OLA_MS = 3_300;
 export const PROCURANDO_MS = 2_000;
 export const SONDA_MS = 3_000;
 const PRONTO_ATE_TOCAR_MS = 1_600;
-const VERSAO_CONSENTIMENTO = 1;
 
 export type DepsOnboarding = {
   api: () => Api | null;

@@ -1,3 +1,4 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
@@ -125,7 +126,7 @@ it("o Nod (a guia, ADR-081) liga, entrevista, encolhe, propõe o bot aprovado po
   expect(await antes.fechado).toBe(4403);
   // O Atender sem consentimento gravado é recusado.
   expect((await srv.chamar("POST", "onboarding/etapa", { etapa: "entrevista" })).status).toBe(409);
-  await srv.json("POST", "voz/consentimento", { versao: 1 });
+  await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
   const atendida = await srv.json<EstadoOnboarding>("POST", "onboarding/etapa", { etapa: "entrevista" });
   expect(atendida.etapa).toBe("entrevista");
 

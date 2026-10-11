@@ -30,6 +30,7 @@ import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoLimiteDoPlano, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada } from "./ia-fora.ts";
+import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
 import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
@@ -861,6 +862,9 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe a faixa, os modos e a citação
  * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
  * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
+ *
+ * definido em 2026-10-11 (ADR-095): o 🎤 do ditado e a pílula da gravação entram em todo composer, escondidos; quem os
+ * mostra é web/telas/ditado.ts, quando o servidor diz que o ditado está disponível.
  */
 export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
@@ -878,6 +882,6 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   // ADR-059: o chip do modo de aprovação (só na conversa própria) e o aviso acima do campo; main.ts troca o miolo.
   const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
-  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${htmlPilulaDitado()}${htmlBotaoDitado()}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
 }

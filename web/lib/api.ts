@@ -1,6 +1,7 @@
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
+import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
@@ -228,6 +229,8 @@ export function criarApi(escopo: Escopo) {
     // Modo ligação (definido em 2026-10-04, ADR-071/075): disponibilidade é 200 com o motivo, nunca erro.
     disponibilidadeLigacao: (agenteId: string) => get<DisponibilidadeLigacao>(`ligacoes/disponibilidade?agenteId=${encodeURIComponent(agenteId)}`),
     consentirVoz: (versao: number) => post<RespostaMutacao>("voz/consentimento", { versao }),
+    // ADR-095: o microfone do campo de mensagem aparece? 200 com o motivo, nunca erro.
+    disponibilidadeDitado: () => get<DisponibilidadeDitado>("voz/ditado/disponibilidade"),
     criarLigacao: (agenteId: string) => post<LigacaoCriada>("ligacoes", { agenteId }),
     ligacaoViva: () => get<{ ligacao: Ligacao | null }>("ligacoes/viva"),
     encerrarLigacao: (id: string) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/encerrar`),

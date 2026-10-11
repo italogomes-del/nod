@@ -1,3 +1,4 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -210,7 +211,7 @@ describeIntegracao("NOD-175: modo local", () => {
     const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados.agentes.push(agente.id);
     criados.conversas.push(conversa.id);
-    await srv.json("POST", "voz/consentimento", { versao: 1 });
+    await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
 
     const host = new URL(srv.url).host;
@@ -259,7 +260,7 @@ describeIntegracao("NOD-168: ligação que passa do prazo da drenagem", () => {
     const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados.agentes.push(agente.id);
     criados.conversas.push(conversa.id);
-    await srv.json("POST", "voz/consentimento", { versao: 1 });
+    await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
 
     const host = new URL(srv.url).host;

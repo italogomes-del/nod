@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
 import { criarRotasOnboarding } from "../../src/adapters/http/rotas/onboarding.ts";
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -132,7 +133,7 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       const d = depsSobreTrx(trx, MARLON);
       const consentimento = (await d.repos.ligacoes.consentimento()).versao ?? 0;
       if (consentimento < 1) expect((await post("onboarding/etapa", { etapa: "entrevista" })).status).toBe(409);
-      await d.repos.ligacoes.consentir(1, Date.now());
+      await d.repos.ligacoes.consentir(VERSAO_CONSENTIMENTO_VOZ, Date.now());
       const atendida = (await (await post("onboarding/etapa", { etapa: "entrevista" })).json()) as EstadoOnboarding;
       expect(atendida.etapa).toBe("entrevista");
       expect(liberadas).toContain(chamando.ligacao?.id);

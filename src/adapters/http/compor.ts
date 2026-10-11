@@ -137,7 +137,9 @@ import type { ProvedoresVoz } from "../voz/spi.ts";
 import { concatenar, montarWav } from "../voz/audio.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../../contracts/vozes.ts";
 import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
-import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
+import { anexarCanaisVoz, type CanaisVoz, type CanalVoz } from "../voz/ws.ts";
+import { criarServicoDitado } from "../voz/ditado.ts";
+import { autorizarDitado, type ContextoDitado } from "../../use-cases/ditado.ts";
 import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
 import type { IncomingMessage, Server } from "node:http";
 
@@ -675,6 +677,27 @@ export function comporApp(o: OpcoesCompor): App {
       vozDisponivel: vozConfigurada,
     };
   }
+  // Ditado no campo de mensagem (definido em 2026-10-11, ADR-095): NOD_DITADO desligado | admins | todos, padrão todos
+  // (custa centavos por minuto e não toca o Mac). Usa o STT das ligações; a voz mal configurada tira o microfone do
+  // campo, e o provedor `falso` em produção também (ele inventaria o texto).
+  const modoDitado = env.NOD_DITADO ?? "todos";
+  const ditado = criarServicoDitado({ transcritor: provedoresVoz.stt, relogio });
+  async function contextoDitado(escopo: Escopo): Promise<ContextoDitado> {
+    return {
+      habilitado: modoDitado !== "desligado",
+      permitido: modoDitado === "todos" || (modoDitado === "admins" && (await ehAdminVoz(escopo))),
+      vozDisponivel: vozConfigurada && !(env.NODE_ENV === "production" && provedoresVoz.stt.id === "falso"),
+    };
+  }
+  function anexarDitado(escopo: Escopo, canal: CanalVoz): void {
+    contextoDitado(escopo)
+      .then((contexto) => dentro(escopo, (d) => autorizarDitado(d, { contexto })))
+      .then(({ data: r }) => (r.ok ? ditado.abrir({ pessoaId: escopo.pessoaId, canal, vocabulario: r.vocabulario }) : ditado.recusar(canal, r.codigo)))
+      .catch((e: unknown) => {
+        log("aviso", "voz_ditado_autorizar_falhou", { erro: e instanceof Error ? e.name : "desconhecido" });
+        ditado.recusar(canal, "falhou");
+      });
+  }
   async function ehAdminVoz(escopo: Escopo): Promise<boolean> {
     if (adminsVoz.length === 0) return false;
     if (adminsVoz.includes(escopo.pessoaId.toLowerCase())) return true;
@@ -926,6 +949,7 @@ export function comporApp(o: OpcoesCompor): App {
       amostra: amostraDeVoz,
       contextoLeitura,
       ouvir: (escopo, p) => leitor.ler({ escopo, ...p }),
+      contextoDitado,
     }),
     ...criarRotasOnboarding({
       ...depsRotas,
@@ -1088,10 +1112,12 @@ export function comporApp(o: OpcoesCompor): App {
         ligacaoDoTurno: (turnoId) => tokens.planoDe(turnoId)?.ligacaoVoz?.ligacaoId ?? null,
         anexarMidia: ({ escopo, ligacaoId, retomar, canal }) => voz.anexarMidia({ pessoaId: escopo.pessoaId, ligacaoId, retomar, canal }),
         anexarCerebro: ({ identidade, ligacaoId, canal }) => voz.anexarCerebro({ turnoId: identidade.turnoId, ligacaoId, canal }),
+        anexarDitado: ({ escopo, canal }) => anexarDitado(escopo, canal),
       });
     },
     async fechar() {
       leitor.fechar();
+      await ditado.fechar();
       await voz.fechar();
       await provedoresVoz.encerrar();
       clearInterval(varredorMaquinas);
