@@ -1,6 +1,6 @@
 # Como publicar cada versão do nod
 
-Este roteiro é para quem mantém o projeto. Para instalar a versão já publicada, use o [guia da primeira pré-release](https://github.com/marlonwlv/nod/blob/desktop-v0.1.0-preview.1/docs/release-desktop.md).
+Este roteiro é para quem mantém o projeto. Para instalar a versão já publicada, use o [guia da primeira pré-release](https://github.com/gamefik/nod/blob/desktop-v0.1.0-preview.1/docs/release-desktop.md).
 
 ## Ponto de partida e pendências
 
@@ -78,7 +78,7 @@ A execução manual (`workflow_dispatch`) desse workflow guarda artefatos, mas n
 
 ## 3. Completar e conferir o rascunho
 
-Use o guia do mesmo commit da tag. Anexe-o ao rascunho como `guia-instalacao-nod.md`, sem copiar silenciosamente uma documentação mais recente. Inclua nas notas um link permanente `https://github.com/marlonwlv/nod/blob/TAG/docs/release-desktop.md`, substituindo `TAG`, além do endereço do servidor e requisitos de acesso ao repositório.
+Use o guia do mesmo commit da tag. Anexe-o ao rascunho como `guia-instalacao-nod.md`, sem copiar silenciosamente uma documentação mais recente. Inclua nas notas um link permanente `https://github.com/gamefik/nod/blob/TAG/docs/release-desktop.md`, substituindo `TAG`, além do endereço do servidor e requisitos de acesso ao repositório.
 
 Baixe os artefatos do rascunho em diretório vazio e confira os hashes dos bytes efetivamente hospedados. O workflow de referência escreve caminhos `release/` nos arquivos SHA; normalize para nomes de arquivo ao preparar o manifesto para distribuição, ou preserve essa subpasta ao verificar. Exemplo para produzir um manifesto portátil na pasta dos DMGs:
 

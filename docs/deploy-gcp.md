@@ -17,7 +17,7 @@ estão em [`infra/gcp/`](../infra/gcp/) e a configuração não secreta em
 | Deploy | `.github/workflows/deploy.yml` | Depois do `ci` verde num push ao `main`; autenticação por Workload Identity Federation |
 
 Contas de serviço: `nod-vm` (lê segredos e imagens, escreve logs) e `nod-deploy` (publica imagens e
-entra na VM pelo IAP; só o repositório `marlonwlv/nod`, na branch `main`, pode usá-la).
+entra na VM pelo IAP; só o repositório `gamefik/nod`, na branch `main`, pode usá-la).
 
 ## Como um deploy acontece
 
