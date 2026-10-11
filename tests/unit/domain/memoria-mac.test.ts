@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { acabaEmMs, acabaLogo, AVISO_DA_TENDENCIA_MS, comPonto, TENDENCIA_JANELA_MS, TENDENCIA_PASSO_MS, type PontoDoDisco } from "../../../src/domain/memoria-mac.ts";
 import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, FILA_AMARELA, FILA_VERMELHA, leituraDoProcessador, leituraDoTurno, niveisDoProcessador, nivelDaFila, nivelDoDisco, nivelDoUsoCpu, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo, temposDaCpu, USO_CPU_AMARELO, USO_CPU_VERMELHO, usoDaCpu } from "../../../src/domain/memoria-mac.ts";
 import type { UsoDoMac } from "../../../src/contracts/raio-x.ts";
 
@@ -283,5 +284,51 @@ describe("ADR-091: processador pelo uso da CPU, fila pela carga por núcleo", ()
     expect(niveisDoProcessador({ nivel: "vermelha", carga: 0.5, uso: 0.87 }, "vermelha")).toEqual({ processador: "vermelha", fila: "verde", portao: "vermelha" });
     expect(niveisDoProcessador({ nivel: "vermelha", carga: 1.2 }, null)).toEqual({ processador: "vermelha", fila: null, portao: "vermelha" });
     expect(niveisDoProcessador(undefined, null)).toEqual({ processador: null, fila: null, portao: null });
+  });
+});
+
+/** ADR-095 §6 (definido em 2026-10-11): a VM perdeu 2 GB numa hora em 11/10 sem ninguém saber antes de os bots pararem. */
+describe("a tendência do disco", () => {
+  const MIN = 60_000;
+  /** Uma leitura a cada 5 min, perdendo `porHora` MB por hora a partir de `inicio` MB livres. */
+  const caindo = (inicio: number, porHora: number, pontos: number): PontoDoDisco[] =>
+    Array.from({ length: pontos }, (_, i) => ({ em: i * 5 * MIN, livreMb: inicio - (porHora * i * 5) / 60 }));
+
+  it("o histórico guarda um ponto a cada 5 min e só as últimas 3 h", () => {
+    let h: PontoDoDisco[] = [];
+    for (let t = 0; t <= 4 * 60 * MIN; t += MIN) h = comPonto(h, { em: t, livreMb: 1000 });
+    expect(h.every((p, i) => i === 0 || p.em - h[i - 1]!.em >= TENDENCIA_PASSO_MS)).toBe(true);
+    expect(h[h.length - 1]!.em - h[0]!.em).toBeLessThanOrEqual(TENDENCIA_JANELA_MS);
+    expect(h).toHaveLength(37);
+  });
+
+  it("2 GB por hora com 20 GB livres: chega aos 3 GB em cerca de 8,5 h", () => {
+    const h = caindo(22 * 1024, 2048, 13); // 1 h de leituras
+    const ms = acabaEmMs(h, h[h.length - 1]!.em)!;
+    expect(ms / 3_600_000).toBeCloseTo((20 * 1024 - 3 * 1024) / 2048, 1);
+  });
+
+  it("disco estável, que ganhou espaço, com menos de 30 min ou menos de 3 pontos: sem estimativa; abaixo do vermelho: 0", () => {
+    expect(acabaEmMs(caindo(20_000, 0, 13), 60 * MIN)).toBeNull();
+    expect(acabaEmMs(caindo(20_000, -500, 13), 60 * MIN)).toBeNull();
+    expect(acabaEmMs(caindo(20_000, 2048, 5), 20 * MIN)).toBeNull();
+    expect(acabaEmMs([{ em: 0, livreMb: 9000 }, { em: 60 * MIN, livreMb: 8000 }], 60 * MIN)).toBeNull();
+    expect(acabaEmMs(caindo(3000, 600, 13), 60 * MIN)).toBe(0);
+  });
+
+  it("a limpeza que devolve espaço no meio puxa a reta para cima (a estimativa fica mais longa ou some)", () => {
+    const h = caindo(15_000, 2048, 13);
+    const antes = acabaEmMs(h, 60 * MIN)!;
+    const comLimpeza = [...h.slice(0, -1), { em: 60 * MIN, livreMb: 20_000 }];
+    const depois = acabaEmMs(comLimpeza, 60 * MIN);
+    expect(depois === null || depois > antes).toBe(true);
+  });
+
+  it("a tela só recebe a estimativa abaixo de 24 h", () => {
+    expect(acabaLogo(AVISO_DA_TENDENCIA_MS)).toBe(AVISO_DA_TENDENCIA_MS);
+    expect(acabaLogo(AVISO_DA_TENDENCIA_MS + 1)).toBeNull();
+    expect(acabaLogo(null)).toBeNull();
+    expect(acabaLogo(undefined)).toBeNull();
+    expect(acabaLogo(0)).toBe(0);
   });
 });

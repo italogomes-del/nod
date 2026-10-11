@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +60,11 @@ async function worktree(rel: string, branch: string): Promise<string> {
   return destino;
 }
 
+/** ADR-095 §4: o que está no guardado de `<bot>/<slug>` (`tar -tzf`) e o conteúdo de um arquivo dele (`tar -xzOf`). */
+const arquivoGuardado = (bot: string, slug: string) => join(home, "nod", ".guardado", bot, `${slug}.tar.gz`);
+const noGuardado = (bot: string, slug: string) => execFileSync("tar", ["-tzf", arquivoGuardado(bot, slug)]).toString().split("\n").filter(Boolean);
+const lerDoGuardado = (bot: string, slug: string, caminho: string) => execFileSync("tar", ["-xzOf", arquivoGuardado(bot, slug), `${slug}/${caminho}`]).toString();
+
 const listaDoClone = () => git(clone, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
 beforeEach(async () => {
@@ -101,20 +106,38 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(git(clone, "branch", "--list", "feat/filtros")).toContain("feat/filtros");
   });
 
-  it("worktree suja (arquivo alterado ou novo) não sai, e nenhuma chamada usa --force nem prune", async () => {
+  it("worktree suja (arquivo alterado ou novo) não sai pelo remove sem --force; ADR-095: na encerrada é guardada antes, e só então sai", async () => {
     const alterada = await worktree("Dev 1/task-a-aaaaaa/acme", "feat/a");
     await writeFile(join(alterada, "README.md"), "mudou\n");
     const nova = await worktree("Dev 1/task-b-bbbbbb/acme", "feat/b");
     await writeFile(join(nova, "rascunho.txt"), "não commitado\n");
     const { executar, chamadas } = executor();
     const r = await limparPastas([encerrada("Dev 1/task-a-aaaaaa", "t-a"), encerrada("Dev 1/task-b-bbbbbb", "t-b")], opcoes({ executar }));
-    expect(r).toMatchObject({ removidas: 0, pastasApagadas: 0, puladas: { suja: 2 } });
-    expect(existsSync(join(alterada, "README.md"))).toBe(true);
-    expect(existsSync(join(nova, "rascunho.txt"))).toBe(true);
-    expect(chamadas.some((c) => c.includes("--force") || / -f( |$)/.test(c) || c.includes("prune"))).toBe(false);
+    expect(r).toMatchObject({ removidas: 0, pastasApagadas: 2, guardadas: 2, puladas: { suja: 2 } });
+    expect(lerDoGuardado("Dev 1", "task-a-aaaaaa", "acme/README.md")).toBe("mudou\n");
+    expect(lerDoGuardado("Dev 1", "task-b-bbbbbb", "acme/rascunho.txt")).toBe("não commitado\n");
+    // O node_modules não vai no guardado: ele se refaz.
+    expect(noGuardado("Dev 1", "task-b-bbbbbb").some((c) => c.includes("node_modules"))).toBe(false);
+    expect(existsSync(alterada)).toBe(false);
+    expect(existsSync(join(home, "nod", "Dev 1", "task-a-aaaaaa"))).toBe(false);
+    expect(listaDoClone()).toBe(1);
+    // O --force só depois do guardado conferido (`tar -tzf`), e nunca o prune.
+    const guardou = chamadas.findIndex((c) => c.includes("tar -tzf"));
+    expect(chamadas.findIndex((c) => c.includes("worktree remove --force"))).toBeGreaterThan(guardou);
+    expect(chamadas.some((c) => c.includes("prune"))).toBe(false);
   });
 
-  it("revisão #225 (1): worktree com outra worktree suja ou clone aninhados em pasta IGNORADA não sai", async () => {
+  it("ADR-095: na task de menos de 3 dias (`so_com_pr_mergeado`) a worktree suja fica como estava, sem guardado", async () => {
+    const wt = await worktree("Dev 1/recente-acacac/acme", "feat/recente");
+    await writeFile(join(wt, "rascunho.txt"), "ainda trabalhando\n");
+    const r = await limparPastas([{ trabalhoId: "t", pasta: "Dev 1/recente-acacac", quando: "so_com_pr_mergeado" }], opcoes(executor()));
+    expect(r).toMatchObject({ removidas: 0, pastasApagadas: 0, puladas: { suja: 1 } });
+    expect(r.guardadas).toBeUndefined();
+    expect(existsSync(join(wt, "rascunho.txt"))).toBe(true);
+    expect(existsSync(arquivoGuardado("Dev 1", "recente-acacac"))).toBe(false);
+  });
+
+  it("revisão #225 (1): worktree com outra worktree suja ou clone aninhados em pasta IGNORADA não sai sem guardar; ADR-095: os dois vão no guardado", async () => {
     const comWorktree = await worktree("Eng 1/agentes-cccccc/acme", "feat/agentes");
     const agente = join(comWorktree, ".claude", "worktrees", "agent-1");
     await mkdir(join(agente, ".."), { recursive: true });
@@ -124,12 +147,18 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     git(home, "clone", "-q", clone, join(comClone, ".claude", "clone"));
     await writeFile(join(comClone, ".claude", "clone", "nota.txt"), "só aqui\n");
     const r = await limparPastas([encerrada("Eng 1/agentes-cccccc", "t-c"), encerrada("Eng 1/clone-dddddd", "t-d")], opcoes(executor()));
-    expect(r).toMatchObject({ removidas: 0, pastasApagadas: 0, puladas: { aninhado: 2 } });
-    expect(await readFile(join(agente, "README.md"), "utf8")).toContain("não commitado");
-    expect(await readFile(join(comClone, ".claude", "clone", "nota.txt"), "utf8")).toBe("só aqui\n");
+    expect(r).toMatchObject({ removidas: 0, guardadas: 2, puladas: { aninhado: 2 } });
+    expect(lerDoGuardado("Eng 1", "agentes-cccccc", "acme/.claude/worktrees/agent-1/README.md")).toContain("não commitado");
+    expect(lerDoGuardado("Eng 1", "clone-dddddd", "acme/.claude/clone/nota.txt")).toBe("só aqui\n");
+    // O clone aninhado vai inteiro, com o .git: o histórico dele também.
+    expect(noGuardado("Eng 1", "clone-dddddd").some((c) => c.startsWith("clone-dddddd/acme/.claude/clone/.git/"))).toBe(true);
+    // A worktree aninhada saiu pelo git: o clone a esquece, e o commit dela ganhou referência.
+    expect(listaDoClone()).toBe(1);
+    expect(git(clone, "for-each-ref", "--format=%(refname)", "refs/nod/guardado/t-c")).toContain("refs/nod/guardado/t-c/acme-.claude-worktrees-agent-1");
+    expect(existsSync(agente)).toBe(false);
   });
 
-  it("revisão #225 (1 e 2ª revisão): arquivo ignorado que não se refaz (backup, .env, output/, .env dentro de dist/) segura a worktree", async () => {
+  it("revisão #225 (1 e 2ª revisão): arquivo ignorado que não se refaz (backup, .env, output/, .env dentro de dist/) segura a worktree; ADR-095: vai no guardado", async () => {
     const comBackup = await worktree("Dev 2/backup-eeeeee/acme", "feat/backup");
     await mkdir(join(comBackup, "backups", "local"), { recursive: true });
     await writeFile(join(comBackup, "backups", "local", "nod.dump"), "dados");
@@ -146,14 +175,15 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
       [encerrada("Dev 2/backup-eeeeee", "t-e"), encerrada("Dev 2/env-ffffff", "t-f"), encerrada("Dev 2/output-121212", "t-o"), encerrada("Dev 2/dist-env-131313", "t-d")],
       opcoes(executor()),
     );
-    expect(r).toMatchObject({ removidas: 0, puladas: { ignorado_valioso: 4 } });
-    expect(existsSync(join(comBackup, "backups", "local", "nod.dump"))).toBe(true);
-    expect(existsSync(join(comEnv, ".env"))).toBe(true);
-    expect(existsSync(join(comOutput, "output", "relatorio.csv"))).toBe(true);
-    expect(existsSync(join(comEnvNoDist, "dist", ".env.production"))).toBe(true);
+    expect(r).toMatchObject({ removidas: 0, guardadas: 4, puladas: { ignorado_valioso: 4 } });
+    expect(lerDoGuardado("Dev 2", "backup-eeeeee", "acme/backups/local/nod.dump")).toBe("dados");
+    expect(lerDoGuardado("Dev 2", "env-ffffff", "acme/.env")).toBe("SEGREDO=1\n");
+    expect(lerDoGuardado("Dev 2", "output-121212", "acme/output/relatorio.csv")).toBe("a,b\n");
+    expect(lerDoGuardado("Dev 2", "dist-env-131313", "acme/dist/.env.production")).toBe("SEGREDO=2\n");
+    expect(existsSync(comEnv)).toBe(false);
   });
 
-  it("revisão #225 (2): commit com HEAD solto (fora de branch, remoto ou tag) segura a worktree", async () => {
+  it("revisão #225 (2): commit com HEAD solto (fora de branch, remoto ou tag) segura a worktree; ADR-095: ganha uma referência no clone antes de sair", async () => {
     const wt = await worktree("Dev 3/solto-111111/acme", "feat/solto");
     git(wt, "checkout", "-q", "--detach");
     await writeFile(join(wt, "novo.txt"), "commit sem branch\n");
@@ -161,8 +191,11 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     git(wt, "commit", "-q", "-m", "solto");
     const sha = git(wt, "rev-parse", "HEAD").trim();
     const r = await limparPastas([encerrada("Dev 3/solto-111111")], opcoes(executor()));
-    expect(r).toMatchObject({ removidas: 0, puladas: { head_solto: 1 } });
-    expect(git(wt, "rev-parse", "HEAD").trim()).toBe(sha);
+    expect(r).toMatchObject({ removidas: 0, guardadas: 1, puladas: { head_solto: 1 } });
+    expect(existsSync(wt)).toBe(false);
+    // O commit que só o HEAD solto alcançava continua no clone, pela referência.
+    expect(git(clone, "rev-parse", "refs/nod/guardado/t-1/acme").trim()).toBe(sha);
+    expect(git(clone, "show", `${sha}:novo.txt`)).toBe("commit sem branch\n");
   });
 
   it("encerrada há menos de 3 dias: só sai a worktree cujo PR foi mergeado com o HEAD que está aqui", async () => {
@@ -183,15 +216,17 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(reaproveitada)).toBe(true);
   });
 
-  it("pasta vazia de task encerrada sai; pasta com arquivo que não é worktree fica", async () => {
+  it("pasta vazia de task encerrada sai; ADR-095: a pasta com arquivo que não é worktree é guardada e sai", async () => {
     await mkdir(join(home, "nod", "Elis", "vazia-eeeeee", "sub"), { recursive: true });
     await writeFile(join(home, "nod", "Elis", "vazia-eeeeee", ".DS_Store"), "");
     await mkdir(join(home, "nod", "Elis", "com-relatorio-ffffff"), { recursive: true });
     await writeFile(join(home, "nod", "Elis", "com-relatorio-ffffff", "relatorio.md"), "resultado\n");
     const r = await limparPastas([encerrada("Elis/vazia-eeeeee", "t-e"), encerrada("Elis/com-relatorio-ffffff", "t-f")], opcoes(executor()));
-    expect(r).toMatchObject({ pastas: 2, removidas: 0, pastasApagadas: 1 });
+    expect(r).toMatchObject({ pastas: 2, removidas: 0, pastasApagadas: 2, guardadas: 1 });
     expect(existsSync(join(home, "nod", "Elis", "vazia-eeeeee"))).toBe(false);
-    expect(existsSync(join(home, "nod", "Elis", "com-relatorio-ffffff", "relatorio.md"))).toBe(true);
+    expect(existsSync(arquivoGuardado("Elis", "vazia-eeeeee"))).toBe(false);
+    expect(existsSync(join(home, "nod", "Elis", "com-relatorio-ffffff"))).toBe(false);
+    expect(lerDoGuardado("Elis", "com-relatorio-ffffff", "relatorio.md")).toBe("resultado\n");
   });
 
   it("bind mount de container dentro da worktree a protege (o init do nod-postgres do diário)", async () => {
@@ -277,7 +312,10 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     await mkdir(join(home, "nod", "Dev 4", "vazia-999999"), { recursive: true });
     const { executar, chamadas } = executor();
     const r = await limparPastas([encerrada("Dev 4/limpa-777777", "t-1"), encerrada("Dev 4/suja-888888", "t-2"), encerrada("Dev 4/vazia-999999", "t-3")], opcoes({ executar, simular: true }));
-    expect(r).toMatchObject({ simulada: true, removidas: 1, pastasApagadas: 2, puladas: { suja: 1 } });
+    // ADR-095: a suja seria guardada e sairia; na simulação nem o guardado nasce.
+    expect(r).toMatchObject({ simulada: true, removidas: 1, pastasApagadas: 3, guardadas: 1, puladas: { suja: 1 } });
+    expect(existsSync(suja)).toBe(true);
+    expect(existsSync(join(home, "nod", ".guardado"))).toBe(false);
     expect(r.estimadoBytes).toBeGreaterThan(0);
     expect(existsSync(limpa)).toBe(true);
     expect(existsSync(join(home, "nod", "Dev 4", "vazia-999999"))).toBe(true);
@@ -304,13 +342,16 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(await readdir(fora)).toEqual(["importante.txt"]);
   });
 
-  it("clone inteiro (pasta .git) dentro da task não é apagado: só worktree sai", async () => {
+  it("clone inteiro (pasta .git) dentro da task não sai pelo remove; ADR-095: vai inteiro no guardado, com o histórico", async () => {
     const dentro = join(home, "nod", "Dev 3", "clonou-666666", "acme");
     await mkdir(join(dentro, ".."), { recursive: true });
     git(home, "clone", "-q", clone, dentro);
+    await writeFile(join(dentro, "local.txt"), "só no clone\n");
     const r = await limparPastas([encerrada("Dev 3/clonou-666666")], opcoes(executor()));
-    expect(r).toMatchObject({ removidas: 0, pastasApagadas: 0, puladas: { clone: 1 } });
-    expect(existsSync(join(dentro, ".git"))).toBe(true);
+    expect(r).toMatchObject({ removidas: 0, guardadas: 1, puladas: { clone: 1 } });
+    expect(existsSync(dentro)).toBe(false);
+    expect(lerDoGuardado("Dev 3", "clonou-666666", "acme/local.txt")).toBe("só no clone\n");
+    expect(noGuardado("Dev 3", "clonou-666666")).toContain("clonou-666666/acme/.git/HEAD");
   });
 
   it("as worktrees na raiz do bot são só contadas, nunca removidas", async () => {
@@ -352,14 +393,14 @@ describe("ADR-095: o disco que se cuida", () => {
     expect(existsSync(wt)).toBe(false);
   });
 
-  it("um repositório de verdade muito fundo, em pasta ignorada, ainda segura a worktree", async () => {
+  it("um repositório de verdade muito fundo, em pasta ignorada, ainda é `aninhado` (e vai no guardado antes de sair)", async () => {
     const wt = await worktree("Ze 1/fundo-com-git-111111/acme", "feat/fundo-git");
     const escondido = join(wt, ".claude", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "repo");
     await mkdir(join(escondido, ".."), { recursive: true });
     git(home, "clone", "-q", clone, escondido);
     const r = await limparPastas([encerrada("Ze 1/fundo-com-git-111111")], opcoes(executor()));
-    expect(r).toMatchObject({ removidas: 0, puladas: { aninhado: 1 } });
-    expect(existsSync(join(escondido, ".git"))).toBe(true);
+    expect(r).toMatchObject({ removidas: 0, guardadas: 1, puladas: { aninhado: 1 } });
+    expect(noGuardado("Ze 1", "fundo-com-git-111111")).toContain("fundo-com-git-111111/acme/.claude/a/b/c/d/e/f/g/h/i/j/repo/.git/HEAD");
   });
 
   it("o cache de ferramenta dentro de um pacote do monorepo (`packages/x/.turbo/`) sai junto com a worktree", async () => {
@@ -435,6 +476,26 @@ describe("ADR-095: o disco que se cuida", () => {
     expect(chamadas).toContain("[fundo] pnpm store prune");
     // As worktrees saem antes do prune do pnpm (ele só tira do store o que nenhum projeto usa).
     expect(chamadas.findIndex((c) => c.includes("worktree remove"))).toBeLessThan(chamadas.indexOf("[fundo] pnpm store prune"));
+  });
+
+  it("ADR-095 §6: disco ainda verde, mas caindo no ritmo de acabar em menos de 6 h, já dispara a passada apertada", async () => {
+    await mkdir(join(home, "nod"), { recursive: true });
+    const relatos: RelatoLimpeza[] = [];
+    const ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza"> = { pastasParaLimpar: async () => [], relatarLimpeza: async (_p, r) => { relatos.push(r); } };
+    // Cada leitura é 5 min depois da outra, perdendo 4 GB por hora a partir de 20 GB livres (verde até 10 GB).
+    let relogio = 0;
+    let livreMb = 20 * 1024;
+    const disco = async () => {
+      relogio += 5 * 60_000;
+      livreMb -= (4 * 1024) / 12;
+      return { livreMb, totalMb: 100 * 1024 };
+    };
+    const limpeza = iniciarLimpezaDasTasks({ ...opcoes(executor()), ponte, pessoaId: "p", primeiraMs: 10 ** 9, vigiaDoDiscoMs: 10, disco, agora: () => relogio });
+    await vi.waitFor(() => expect(relatos).toHaveLength(1), { timeout: 20_000 });
+    limpeza.parar();
+    expect(relatos[0]).toMatchObject({ apertada: true });
+    // Disparou com o disco ainda verde (acima de 10 GB livres).
+    expect(livreMb).toBeGreaterThan(10 * 1024);
   });
 
   it("a passada apertada não se repete antes de 30 min, mesmo com o disco ainda amarelo", async () => {

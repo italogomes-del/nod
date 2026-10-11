@@ -453,6 +453,11 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     // ADR-095: a passada apertada atravessa marcada, com o que os caches liberaram.
     await chamar("limpeza/resultado", { relato: { apertada: true, cachesBytes: 4096, removidas: 2 } });
     expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }));
+    // ADR-095 §4: os guardados, os vencidos, as órfãs e os motivos novos atravessam; número inválido some.
+    await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1 } } });
+    const ultimo = relatarLimpeza.mock.lastCall?.[1];
+    expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1 } });
+    expect(ultimo).not.toHaveProperty("orfasRemovidas");
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {

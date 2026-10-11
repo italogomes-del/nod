@@ -265,6 +265,53 @@ export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigi
 }
 
 /**
+ * ADR-095 §6 (definido em 2026-10-11): a tendência do disco. Em 11/10 a VM dos bots perdeu 2 GB numa hora de trabalho, e
+ * ninguém soube antes de os bots pararem. O servidor guarda o espaço livre de cada máquina (um ponto a cada 5 min, as
+ * últimas 3 h), estima pela reta dos mínimos quadrados quando ele chega ao vermelho (3 GB) e avisa abaixo de 24 h. Menos
+ * de 30 min de leituras ou de 3 pontos não dizem nada; disco estável ou que ganhou espaço também não.
+ */
+export type PontoDoDisco = { em: number; livreMb: number };
+export const TENDENCIA_PASSO_MS = 5 * 60_000;
+export const TENDENCIA_JANELA_MS = 3 * 3_600_000;
+export const TENDENCIA_MINIMA_MS = 30 * 60_000;
+export const AVISO_DA_TENDENCIA_MS = 24 * 3_600_000;
+
+/** O histórico com o ponto novo (só se 5 min passaram desde o último), sem o que saiu da janela de 3 h. */
+export function comPonto(historico: readonly PontoDoDisco[], ponto: PontoDoDisco): PontoDoDisco[] {
+  const ultimo = historico[historico.length - 1];
+  const lista = ultimo && ponto.em - ultimo.em < TENDENCIA_PASSO_MS ? [...historico] : [...historico, ponto];
+  return lista.filter((p) => ponto.em - p.em <= TENDENCIA_JANELA_MS);
+}
+
+/** O que a tela recebe: a estimativa só quando o livre acaba em menos de 24 h (a web só mostra; quem decide é aqui). */
+export function acabaLogo(ms: number | null | undefined): number | null {
+  return ms !== null && ms !== undefined && ms <= AVISO_DA_TENDENCIA_MS ? ms : null;
+}
+
+/** Em quanto tempo o espaço livre chega ao vermelho no ritmo das últimas horas (0 = já chegou), ou null se não cai. */
+export function acabaEmMs(historico: readonly PontoDoDisco[], agora: number): number | null {
+  const pontos = historico.filter((p) => agora - p.em <= TENDENCIA_JANELA_MS);
+  if (pontos.length < 3) return null;
+  const primeiro = pontos[0]!;
+  const ultimo = pontos[pontos.length - 1]!;
+  if (ultimo.em - primeiro.em < TENDENCIA_MINIMA_MS) return null;
+  const n = pontos.length;
+  const mx = pontos.reduce((s, p) => s + (p.em - primeiro.em), 0) / n;
+  const my = pontos.reduce((s, p) => s + p.livreMb, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const p of pontos) {
+    const dx = p.em - primeiro.em - mx;
+    num += dx * (p.livreMb - my);
+    den += dx * dx;
+  }
+  const inclinacao = den > 0 ? num / den : 0; // MB por ms; negativa = o disco enche
+  if (!(inclinacao < 0)) return null;
+  if (ultimo.livreMb <= DISCO_CRITICO_MB) return 0;
+  return Math.round((ultimo.livreMb - DISCO_CRITICO_MB) / -inclinacao);
+}
+
+/**
  * O portão do Mac no `reivindicar` (definido em 2026-10-09, #219, emenda à ADR-085; revisto no mesmo dia pelo
  * coordenador do épico #221), pela leitura de UM Mac:
  * - `tudoNovo`: disco crítico (< 3 GB) — nada novo começa, nem a task da pessoa, nem o "Executar agora"; vale em

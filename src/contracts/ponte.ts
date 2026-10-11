@@ -142,13 +142,22 @@ export type RelatoLimpeza = {
   apertada?: boolean;
   /** ADR-095: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
   cachesBytes?: number;
+  /**
+   * ADR-095 §4: pastas (de task ou órfãs) guardadas compactadas em `~/nod/.guardado` e apagadas, o tamanho dos guardados,
+   * os guardados vencidos apagados e as órfãs da raiz que saíram (limpas, sem guardar).
+   */
+  guardadas?: number;
+  guardadoBytes?: number;
+  guardadosVencidos?: number;
+  orfasRemovidas?: number;
 };
 /**
  * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
  * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
- * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar).
+ * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar). ADR-095 §4: `processo_vivo` (um `*.pid`
+ * da pasta aponta para um processo vivo, como um Postgres de teste) e `grande_demais` (o guardado passaria de 2 GB).
  */
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro";
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais";
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
