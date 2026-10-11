@@ -1,0 +1,251 @@
+<title>Agentes e trabalho pesado</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: uma coluna de leitura (~68ch) com blocos largos para tabelas e o diagrama do forno. */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --fg: #1b2230;
+  --muted: #5b6577;
+  --line: #dde1e8;
+  --ember: #b4461b;
+  --ember-soft: #f6e4da;
+  --ok: #2f6b4f;
+  --ok-soft: #e1efe7;
+  --wait: #8a6514;
+  --wait-soft: #f5ecd6;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --surface: #1a2029; --fg: #e6e9ef; --muted: #98a2b3; --line: #2b3340;
+    --ember: #f08a5d; --ember-soft: #3a2219; --ok: #7fc4a0; --ok-soft: #1c3027;
+    --wait: #e2b65a; --wait-soft: #352b15; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --fg: #e6e9ef; --muted: #98a2b3; --line: #2b3340;
+  --ember: #f08a5d; --ember-soft: #3a2219; --ok: #7fc4a0; --ok-soft: #1c3027;
+  --wait: #e2b65a; --wait-soft: #352b15; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--font-body); padding-inline: 16px; padding-block: 0 64px; }
+.wrap { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px; }
+.prose { max-width: 68ch; }
+header { padding-top: 48px; display: flex; flex-direction: column; gap: 12px; }
+.meta { font: 500 12px/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.meta .status { color: var(--wait); }
+h1 { font: 600 clamp(34px, 6vw, 52px)/1.05 var(--font-display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+.lede { font-size: 19px; color: var(--muted); margin: 0; max-width: 60ch; }
+h2 { font: 600 26px/1.2 var(--font-display); margin: 0 0 14px; text-wrap: balance; }
+h3 { font: 600 16px/1.3 var(--font-body); margin: 0 0 6px; }
+p { margin: 0 0 12px; }
+section { display: flex; flex-direction: column; }
+code, .mono { font-family: var(--font-mono); font-size: .88em; }
+.principle { font: 500 clamp(20px, 3vw, 26px)/1.35 var(--font-display); border-left: 3px solid var(--ember); padding: 4px 0 4px 18px; margin: 4px 0 18px; max-width: 46ch; }
+.table-box { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 12px/1.3 var(--font-mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; overflow-x: auto; }
+.figure svg { display: block; width: 100%; min-width: 600px; height: auto; }
+.caption { font-size: 14px; color: var(--muted); margin-top: 10px; }
+.split { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; }
+@media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+.col { min-width: 0; }
+.col-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.tag { font: 500 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; padding: 5px 8px; border-radius: 999px; }
+.tag.nod { background: var(--ember-soft); color: var(--ember); }
+.tag.user { background: var(--ok-soft); color: var(--ok); }
+ol.items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; counter-reset: it; }
+ol.items li { counter-increment: it; display: grid; grid-template-columns: 28px 1fr; gap: 0 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+ol.items li::before { content: counter(it); font: 500 13px/1.6 var(--font-mono); color: var(--muted); }
+ol.items li p { margin: 0; font-size: 15px; color: var(--muted); grid-column: 2; }
+ol.items li h3 { grid-column: 2; }
+.phases { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 760px) { .phases { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 440px) { .phases { grid-template-columns: 1fr; } }
+.phase { border-top: 3px solid var(--line); padding-top: 12px; }
+.phase.key { border-top-color: var(--ember); }
+.phase .n { font: 500 12px/1 var(--font-mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.phase h3 { margin-top: 8px; }
+.phase p { font-size: 14px; color: var(--muted); }
+ul.plain { margin: 0; padding-left: 20px; }
+ul.plain li { margin-bottom: 6px; }
+.links { font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; }
+.links code { color: var(--fg); }
+a { color: var(--ember); }
+a:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 640px) { .shots { grid-template-columns: 1fr; } }
+.shots figure { margin: 0; min-width: 0; }
+.shots img { display: block; width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+.shots figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+/* diagrama */
+.d-text { fill: var(--fg); font: 500 13px var(--font-body); }
+.d-muted { fill: var(--muted); font: 400 12px var(--font-mono); }
+.d-agent { fill: var(--ok); }
+.d-agent-wait { fill: var(--wait); }
+.d-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.d-oven { fill: var(--ember-soft); stroke: var(--ember); stroke-width: 1.5; }
+.d-slot { fill: var(--ember); }
+.d-slot-free { fill: none; stroke: var(--ember); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.d-arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.d-head { fill: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="meta"><span class="status">Proposta</span><span>11/10/2026</span><span>ADR-097</span><span>nod-motor-teste</span></div>
+    <h1>Agentes entram, trabalho pesado faz fila</h1>
+    <p class="lede">Por que a VM de 8 núcleos mostrou 91% de processador com só 3 bots, e o plano para ela rodar uma dezena de agentes ao mesmo tempo, em qualquer tipo de task.</p>
+  </header>
+
+  <section class="prose">
+    <h2>O que aconteceu</h2>
+    <p>A <code>nod-motor-teste</code> (e2-highcpu-8: 8 vCPU, 8 GB, sem swap) marcou "processador cheio" com Ze 1, Eng 1 e Tarsila trabalhando. Medimos cada processo por 30 segundos, agrupado pela pasta da task. Os agentes quase não pesavam; o peso era o que eles rodavam.</p>
+  </section>
+
+  <section>
+    <div class="table-box">
+      <table>
+        <thead><tr><th>O que rodava</th><th>Processador</th><th>Memória</th></tr></thead>
+        <tbody>
+          <tr><td>Cada agente (<code>claude -p</code>)</td><td class="num">3–6% de um núcleo</td><td class="num">290–340 MB</td></tr>
+          <tr><td>Typecheck da Tarsila (<code>tsc --noEmit</code>)</td><td class="num">1,6 núcleo</td><td class="num">976 MB</td></tr>
+          <tr><td>Postgres de teste do gamefik (Ze 1)</td><td class="num">96% de um núcleo</td><td class="num">300 MB</td></tr>
+          <tr><td>Testes do nod (Eng 1, vitest)</td><td class="num">1 processo por núcleo</td><td class="num">~50 MB cada</td></tr>
+          <tr><td>Máquina inteira</td><td class="num">picos de 90–98%</td><td class="num">5,4 GB usados · 2,5 GB livres</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">A tela dizia "os bots usam 925 MB" porque conta só o processo do Claude. No dia, a VM ficou quase o tempo todo perto de 0%, com rajadas às 01:07, 02:37 e 10:23–10:38 (Brasília). Nessas rajadas o portão segurou trabalho novo de 30 s a 2,5 min por vez.</p>
+  </section>
+
+  <section class="prose">
+    <h2>O princípio</h2>
+    <p class="principle">Agentes custam pouco e entram à vontade. Comando pesado faz fila. O usuário decide dinheiro, prioridade e o próprio projeto.</p>
+    <p>Um agente passa quase todo o tempo esperando o modelo responder. Quem pesa é o comando que ele dispara: testes, typecheck, um Postgres, um vídeo. Esses comandos usam todos os núcleos que encontram, por isso uma máquina maior não baixa o pico; só o encurta.</p>
+    <p>Hoje o nod fecha a porta do restaurante quando o forno enche. O certo é deixar os garçons trabalharem e fazer fila só no forno.</p>
+  </section>
+
+  <section>
+    <div class="figure">
+      <svg viewBox="0 0 800 250" role="img" aria-label="Doze agentes entram pela memória; três comandos pesados usam o forno e dois esperam na fila">
+        <rect class="d-box" x="10" y="20" width="270" height="200" rx="10"/>
+        <text class="d-text" x="28" y="48">Agentes · entram pela memória</text>
+        <text class="d-muted" x="28" y="68">~300 MB e 3–6% de núcleo cada</text>
+        <g>
+          <circle class="d-agent" cx="45" cy="105" r="13"/><circle class="d-agent" cx="85" cy="105" r="13"/><circle class="d-agent" cx="125" cy="105" r="13"/><circle class="d-agent" cx="165" cy="105" r="13"/><circle class="d-agent" cx="205" cy="105" r="13"/><circle class="d-agent" cx="245" cy="105" r="13"/>
+          <circle class="d-agent" cx="45" cy="148" r="13"/><circle class="d-agent" cx="85" cy="148" r="13"/><circle class="d-agent" cx="125" cy="148" r="13"/><circle class="d-agent" cx="165" cy="148" r="13"/>
+          <circle class="d-agent-wait" cx="205" cy="148" r="13"/><circle class="d-agent-wait" cx="245" cy="148" r="13"/>
+        </g>
+        <text class="d-muted" x="28" y="200">10–12 numa VM de 8 GB</text>
+
+        <path class="d-arrow" d="M286 120 H352"/><path class="d-head" d="M352 114 L362 120 L352 126 Z"/>
+
+        <rect class="d-box" x="368" y="70" width="170" height="100" rx="10"/>
+        <text class="d-text" x="384" y="98">Fila do forno</text>
+        <text class="d-muted" x="384" y="118">pede vaga antes</text>
+        <text class="d-muted" x="384" y="134">de cada comando</text>
+        <circle class="d-agent-wait" cx="398" cy="153" r="7"/><circle class="d-agent-wait" cx="418" cy="153" r="7"/>
+        <text class="d-muted" x="434" y="157">2 esperando</text>
+
+        <path class="d-arrow" d="M544 120 H602"/><path class="d-head" d="M602 114 L612 120 L602 126 Z"/>
+
+        <rect class="d-oven" x="618" y="40" width="172" height="160" rx="10"/>
+        <text class="d-text" x="634" y="68">Forno · comandos pesados</text>
+        <rect class="d-slot" x="634" y="86" width="140" height="22" rx="5"/>
+        <rect class="d-slot" x="634" y="116" width="140" height="22" rx="5"/>
+        <rect class="d-slot-free" x="634" y="146" width="140" height="22" rx="5"/>
+        <text class="d-muted" x="634" y="190">2–3 por vez em 8 GB · ~8 em 32 GB</text>
+      </svg>
+    </div>
+    <p class="caption">O processador cheio deixa os comandos mais lentos, mas não barra mais a entrada de agentes. Memória e disco continuam segurando.</p>
+  </section>
+
+  <section>
+    <h2>Quem cuida do quê</h2>
+    <div class="split">
+      <div class="col">
+        <div class="col-head"><span class="tag nod">Nod</span><span class="caption" style="margin:0">exige conhecimento técnico ou se repete para cada usuário</span></div>
+        <ol class="items">
+          <li><h3>Medir certo</h3><p>Consumo da task inteira (agente + o que abriu). A régua do processador olha uso sustentado e deixa de barrar a entrada. As telas leem a mesma leitura.</p></li>
+          <li><h3>Deixar entrar pela memória</h3><p>Cabe mais um agente se sobram ~400 MB além da reserva dos comandos pesados.</p></li>
+          <li><h3>Fila do forno</h3><p>O hook que já roda antes de cada comando do bot pede vaga. "Pesado" é o pico de memória medido daquele comando; o resto não espera.</p></li>
+          <li><h3>Repartir a máquina</h3><p>Na VM, cada task no seu grupo, com peso de processador e limite de memória; swap comprimido no instalador. No Mac, prioridade baixa para comando de fundo.</p></li>
+          <li><h3>Bots econômicos</h3><p>Durante o trabalho, só os testes do que mexeu. A suíte completa, uma vez antes do PR.</p></li>
+          <li><h3>Limpar o que abriu</h3><p>Task terminada encerra tudo que abriu, como os Postgres esquecidos do Eng 1.</p></li>
+          <li><h3>Falar em linguagem simples</h3><p>"Trabalhando" separado de "esperando a vez". Recomendação de máquina a partir do tempo de fila medido.</p></li>
+        </ol>
+      </div>
+      <div class="col">
+        <div class="col-head"><span class="tag user">Usuário</span><span class="caption" style="margin:0">dinheiro, prioridade, o próprio projeto</span></div>
+        <ol class="items">
+          <li><h3>Tamanho da máquina</h3><p>Define quantos comandos pesados rodam por vez. O nod recomenda.</p></li>
+          <li><h3>Quanto dá para os bots</h3><p>A opção que já existe em Seu espaço.</p></li>
+          <li><h3>O peso do projeto</h3><p>Como os testes do gamefik com um Postgres por arquivo. O nod aponta; o usuário pede a otimização se quiser.</p></li>
+          <li><h3>Prioridades</h3><p>Quais bots e rotinas ficam na mesma máquina. O que ele pede na conversa sempre passa na frente.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ordem de entrega</h2>
+    <div class="phases">
+      <div class="phase"><div class="n">Fase 0</div><h3>Medir e arrumar</h3><p>Medição por task, swap na VM, encerrar o que a task abriu. Pequeno, sem risco, dá os números.</p></div>
+      <div class="phase key"><div class="n">Fase 1</div><h3>A dezena de agentes</h3><p>Entrar pela memória, fila do forno, bots econômicos.</p></div>
+      <div class="phase"><div class="n">Fase 2</div><h3>Estável com muita gente</h3><p>Grupo por task na VM, prioridade no Mac.</p></div>
+      <div class="phase"><div class="n">Fase 3</div><h3>Explicar e recomendar</h3><p>Tela de espera e recomendação de máquina com os dados das fases anteriores.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Hoje e depois da fase 1</h2>
+    <div class="table-box">
+      <table>
+        <thead><tr><th></th><th>Hoje</th><th>Depois da fase 1</th></tr></thead>
+        <tbody>
+          <tr><td>Agentes ao mesmo tempo</td><td>~3 a 4: o portão para no primeiro pico de teste</td><td>10 a 12</td></tr>
+          <tr><td>Comandos pesados</td><td>todos juntos, brigando pela máquina</td><td>2 a 3 por vez, os outros em fila</td></tr>
+          <tr><td>Pico de processador</td><td>segura a porta</td><td>só deixa os comandos mais lentos</td></tr>
+          <tr><td>Falta de memória</td><td>trava a VM inteira</td><td>segura o próximo comando pesado; se estourar, cai só a task culpada</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Estimativas a partir de uma amostra de 11/10. A fase 0 serve para confirmá-las.</p>
+  </section>
+
+  <section>
+    <h2>Como fica na tela</h2>
+    <p class="prose">Protótipo com o CSS real do Nod. O canvas completo, com 11 telas e notas: <a href="https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG">abrir o canvas</a>.</p>
+    <div class="shots">
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/01-trabalhos.png" alt="Trabalhos com 10 bots trabalhando, dois esperando a vez dos testes" loading="lazy"><figcaption>Trabalhos: 10 trabalhando; Eng 1 e Dev 1 esperando a vez, com o anel vazado.</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/04-task-esperando-a-vez.png" alt="Task do Eng 1 esperando a vez de rodar a suíte completa" loading="lazy"><figcaption>A task: "esperando a vez dos testes · começa sozinho"; o consumo fica no cartão que abre.</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/05-conversa-espera-a-vez.png" alt="Linha centralizada na conversa: Ze 1 espera a vez de rodar os testes" loading="lazy"><figcaption>Na conversa, uma linha centralizada, que vira "rodou os testes · 2 min".</figcaption></figure>
+      <figure><img src="prototipos/agentes-e-trabalho-pesado/telas/09-maquinas-apertada.png" alt="Card da máquina com o aviso de 40 minutos de fila e Ver como acelerar" loading="lazy"><figcaption>A máquina numa frase; quando a fila pesa no dia, "Ver como acelerar".</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="prose">
+    <h2>Em aberto</h2>
+    <ul class="plain">
+      <li>A reserva por agente (~400 MB) e o quanto guardar para comandos pesados.</li>
+      <li>A janela da régua sustentada: 3 ou 5 minutos.</li>
+      <li>A ordem da fila: chegada ou prioridade.</li>
+      <li>Fila para o Codex, que não tem o hook do Claude Code. Até lá ele fica protegido só pelo grupo da task.</li>
+      <li>Nas telas: o anel vazado na cor do bot ou cinza (para não confundir com o âmbar de "esperando colega"); se o MB por task faz falta na lista; depois de quantos minutos de fila no dia aparece "Ver como acelerar" (o protótipo usa 30).</li>
+    </ul>
+  </section>
+
+  <section class="links">
+    <p>No repositório (branch <code>docs/agentes-e-trabalho-pesado</code>): <code>docs/adr/adr-097-agentes-entram-trabalho-pesado-faz-fila.md</code>, <code>docs/plano-agentes-e-trabalho-pesado.md</code> e as telas em <code>docs/prototipos/agentes-e-trabalho-pesado/</code>.</p>
+  </section>
+</div>
