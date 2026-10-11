@@ -224,7 +224,7 @@ Para trocar a versão: `GSTACK_REF=<sha-ou-tag> bash scripts/cloud/install-gstac
 ## Executor e custo
 
 Dev local não exige CLI nem chave: `NOD_EXECUTOR=catcher` é o padrão. Qualquer `claude -p` real
-usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--strict-mcp-config --tools ""` e ambiente limpo
+usa o modelo do agente (no Automático, o Recomendado: Opus desde 2026-10-10; `NOD_MODELO` fixa um para os bots novos), `--strict-mcp-config --tools ""` e ambiente limpo
 (denylist `^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_.*)$`) — sem isso o custo
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
 
@@ -287,6 +287,14 @@ Novos agentes usam `harness=auto, modelo=auto`; perfis anteriores preservam seus
 0013 adiciona a preferência a agentes e turnos. Todo novo caminho de enfileiramento deve copiar
 **harness e modelo** do agente (ou do turno original em retomadas). O plano resolve a escolha uma vez;
 quem executa usa `plano.harness`, nunca o padrão global copiado no boot.
+
+Revisto em 2026-10-10 (0068, emenda da ADR-036): a inteligência do bot é `inteligencia_modo` (auto | fixa), `ordem_ias`
+(nula = a da pessoa, `preferencias.ordem_ias`) e `escolhas_ia` (modelo e raciocínio por IA); `harness`/`modelo`/`esforco`
+são DERIVADOS (`derivadosDa` em `src/domain/inteligencia.ts`) e o repositório grava os quatro juntos — nunca escreva
+`harness` ou `modelo` de agente direto (`atualizarPerfil` só aceita `inteligencia`). O Automático usa a primeira IA pronta
+da ordem fora do limite (`preferencias.ias_no_limite`, gravado pelo turno que volta no limite); o Recomendado é Opus /
+GPT-5.6 Sol, raciocínio médio. Níveis de raciocínio por modelo: `HARNESSES[].modelos[].raciocinios` (o do Codex vem do
+`model/list` do app-server, que não precisa de login: mede com HOME vazio e `tests/fixtures/codex-model-list-0.147.json`).
 
 Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas indisponíveis no catálogo.
 `NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.
