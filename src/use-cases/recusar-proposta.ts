@@ -34,8 +34,10 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
   // definido em 2026-10-07 (NOD-197): recusada pela conversa, a decisão de mesmo id em "Sua vez" fecha nesta tx, na
   // ordem proposta → decisão (a de "Sua vez" desde a NOD-197). Sem isso o card ficava pendente para sempre: o clique
   // em "Sua vez" acha a proposta já recusada e devolve 409 sem fechar nada. Quando a recusa vem de "Sua vez", a rota
-  // já fechou a decisão e aqui volta null. O card de acesso fica de fora: decidir-acesso.ts trava a decisão antes da
-  // proposta, e fechá-la daqui poria a ordem inversa.
+  // já fechou a decisão e aqui volta null. O card de acesso fica de fora (NOD-202): a ordem dele é concessão → decisão →
+  // proposta (decidir-acesso.ts, o varredor e as gêmeas), e fechá-la daqui poria a ordem inversa. A recusa do acesso
+  // pela conversa com a decisão aberta vai por recusarPropostaPelaConversa (decidir-acesso.ts), que fecha a decisão na
+  // ordem dele; aqui chegam só os pedidos sem decisão aberta, e decidirAcesso chama este caso já com a decisão fechada.
   // Revisão (Eng 1): fechada aqui, a decisão também solta a task do turno que propôs (sincronizarDasDecisoes, S2 da
   // main 8e6fe03) — sem isso ela ficava `precisa_de_voce` para sempre. Fechada pela rota de "Sua vez", quem sincroniza
   // é a rota (aqui `decidir` volta null).
