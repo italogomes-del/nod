@@ -128,7 +128,7 @@ servidor nem entra no relato.
 
 ## Gerar e publicar
 
-Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada é `desktop-v0.4.0-rc.6`; a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
+Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada é `desktop-v0.4.0-rc.7`; a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
 
 `npm ci` usa as versões exatas de Electron e electron-builder do lockfile. `npm run desktop:build` compila app, preload e proxy e recusa dependências de servidor no bundle desktop. `npm run desktop:dev` permite HTTP somente em loopback para desenvolvimento; o app empacotado aceita só HTTPS.
 
