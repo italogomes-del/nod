@@ -1,8 +1,11 @@
+import type { EsforcoAgente } from "../contracts/agente.ts";
 import { CAPACIDADES_HARNESS, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
 import type { CapacidadesHarness, CatalogoHarness, IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
+import { iaDoAutomatico, modeloERaciocinio, ordemEfetiva } from "./inteligencia.ts";
 
 export function validarInteligencia(harness: unknown, modelo: unknown): asserts harness is PreferenciaHarness {
   if (typeof modelo !== "string" || !modelo.trim() || modelo.length > 160 || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(modelo)) throw new ErroDeDominio("entrada_invalida");
@@ -38,7 +41,14 @@ export function harnessFixado(harness: string | undefined, modelo: string): IdHa
   return pedido !== "auto" ? (pedido as IdHarness) : modelo !== "auto" ? "claude-cli" : null;
 }
 
-export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: string; prontos: readonly IdHarness[]; preferido?: IdHarness | null }): { harness: IdHarness; modelo: string } {
+/**
+ * A IA, o modelo e o raciocínio do turno (revisto em 2026-10-10, emenda da ADR-036). Fixado (o bot em "Uma IA só", ou o
+ * `auto` antigo com modelo do Claude): aquela IA, pronta ou nada. Automático: a primeira PRONTA da `ordem` (a do bot, a
+ * da pessoa ou a padrão) fora do limite (`noLimite`); todas no limite = a primeira pronta (iaDoAutomatico). Sem `ordem`,
+ * vale a padrão com o `preferido` na frente. O modelo `auto` vira a escolha do bot para a IA, senão o recomendado
+ * (Opus / GPT-5.6 Sol); o raciocínio vem da escolha, senão o médio, sempre um nível que o modelo aceita.
+ */
+export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: string; prontos: readonly IdHarness[]; preferido?: IdHarness | null; ordem?: readonly IdHarness[]; noLimite?: readonly IdHarness[]; escolhas?: EscolhasIa }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
   const pedido = p.harness ?? "auto";
   const fixo = harnessFixado(pedido, p.modelo);
   try {
@@ -49,9 +59,9 @@ export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: strin
     }
     throw e;
   }
-  const escolhido = fixo ?? (p.preferido && p.prontos.includes(p.preferido) ? p.preferido : HARNESSES.find((h) => p.prontos.includes(h.id))?.id);
+  const escolhido = fixo ?? iaDoAutomatico({ ordem: p.ordem ?? ordemEfetiva({ preferido: p.preferido }), prontos: p.prontos, noLimite: p.noLimite });
   if (!escolhido || !p.prontos.includes(escolhido)) throw new ErroDeDominio("executor_indisponivel", { cause: escolhido ? ({ harness: escolhido } satisfies CausaHarnessIndisponivel) : undefined });
-  return { harness: escolhido, modelo: p.modelo === "auto" ? (escolhido === "claude-cli" ? "sonnet" : "gpt-5.6-sol") : p.modelo };
+  return { harness: escolhido, ...modeloERaciocinio(escolhido, p.escolhas, p.modelo) };
 }
 
 /** O modelo mais potente do harness (MODELO_MAIS_POTENTE); null para harness ainda sem catálogo. */
@@ -76,8 +86,10 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
   if (modeloInvalido !== undefined) return `${nome}: o modelo ${modeloInvalido} não é aceito; escolha outro modelo no agente`;
   if (inventario.estado === "pronto") return `${nome} indisponível`;
   if (inventario.estado === "ausente" && inventario.motivo === SEM_SONDA_DO_HARNESS) return `${nome} ${SEM_SONDA_DO_HARNESS}`;
-  const estado = inventario.estado === "nao_autenticado" ? "sem conta conectada"
+  const estado = inventario.estado === "nao_autenticado" ? (inventario.causa === "limite" ? "no limite da assinatura" : "sem conta conectada")
     : inventario.causa === "cli_antigo" ? "desatualizado"
+    : inventario.causa === "sem_node" ? "sem o Node"
+    : inventario.causa === "config_invalida" ? "com a configuração quebrada"
     : inventario.causa === "sonda_lenta" ? "sem resposta"
     : "não instalado";
   return `${nome} ${estado}: ${inventario.motivo}`;

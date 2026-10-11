@@ -25,6 +25,7 @@ import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
@@ -362,6 +363,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return a;
       },
       async criar(a) {
+        // 0068: como o SQL — a inteligência inteira e os derivados gravados juntos.
+        const inteligencia = a.inteligencia ?? inteligenciaDoLegado(INTELIGENCIA_PADRAO, { harness: a.harness ?? "auto", modelo: a.modelo });
+        const d = derivadosDa(inteligencia);
         const agente: Agente = {
           tenantId: escopo.tenantId,
           id: a.id ?? randomUUID(),
@@ -376,7 +380,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           fixado: false,
           oculto: false,
           confirmado: a.confirmado ?? false,
-          modelo: a.modelo,
+          modelo: d.modelo,
+          harness: d.harness,
+          esforco: d.esforco,
+          inteligencia,
           duplicadoDe: a.duplicadoDe ?? null,
           criadoEm: agora(),
         };
@@ -406,11 +413,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           titulo: perfil.titulo ?? a.titulo,
           descricao: perfil.descricao ?? a.descricao,
           confirmado: perfil.confirmado ?? a.confirmado,
-          modelo: perfil.modelo ?? a.modelo,
           forma: perfil.forma ?? a.forma,
           cor: perfil.cor ?? a.cor,
-          // 0037: null volta ao padrão do modelo; ausente não mexe (o coalesce não serve aqui).
-          esforco: perfil.esforco === undefined ? a.esforco ?? null : perfil.esforco,
+          // 0068: a inteligência grava os derivados junto (harness, modelo e o esforço do Claude).
+          ...(perfil.inteligencia ? { inteligencia: perfil.inteligencia, ...derivadosDa(perfil.inteligencia) } : {}),
         });
         return a;
       },
@@ -2184,15 +2190,28 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
-      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado", maquinaPadraoId: null };
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} };
       return {
         async buscar() {
           return atual();
         },
         async gravar(p) {
-          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}) };
+          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}), ...(p.ordemIas !== undefined ? { ordemIas: p.ordemIas } : {}) };
           b.preferencias.set(chave, nova);
           return nova;
+        },
+        async registrarLimite(ia, limite) {
+          const nova = { ...atual(), iasNoLimite: { ...atual().iasNoLimite, [ia]: limite } };
+          b.preferencias.set(chave, nova);
+          return nova.iasNoLimite;
+        },
+        async limparLimite(ia) {
+          const a = atual();
+          if (!a.iasNoLimite?.[ia]) return false;
+          const limites = { ...a.iasNoLimite };
+          delete limites[ia];
+          b.preferencias.set(chave, { ...a, iasNoLimite: limites });
+          return true;
         },
         async definirMaquinaPadrao(maquinaId) {
           const nova = { ...atual(), maquinaPadraoId: maquinaId };

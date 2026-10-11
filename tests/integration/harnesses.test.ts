@@ -85,7 +85,8 @@ describeIntegracao("harness por agente", () => {
       expect((await plano(agenteId, "auto", { "claude-cli": pronto })).entrada.modelo).toBe("fable");
       expect((await plano(agenteId, "auto", { "codex-cli": pronto })).entrada.modelo).toBe("gpt-6-astra");
       expect((await plano(agenteId, "haiku", { "claude-cli": pronto })).entrada.modelo).toBe("haiku");
-      expect((await plano(outro.agenteId, "auto", { "claude-cli": pronto })).entrada.modelo).toBe("sonnet");
+      // revisto em 2026-10-10 (emenda da ADR-036): o Recomendado do Claude é o Opus.
+      expect((await plano(outro.agenteId, "auto", { "claude-cli": pronto })).entrada.modelo).toBe("opus");
 
       const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;

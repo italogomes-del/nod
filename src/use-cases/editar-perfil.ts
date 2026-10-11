@@ -1,5 +1,6 @@
 import type { PreferenciaHarness } from "../contracts/harness.ts";
 import { validarInteligencia } from "../domain/harness.ts";
+import { inteligenciaDoAgente, inteligenciaDoLegado } from "../domain/inteligencia.ts";
 import { CORES_AGENTE, ESFORCOS_AGENTE, FORMAS_AGENTE, type Agente, type EsforcoAgente, type FormaAgente, type CorAgente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod, nomeReservadoAoNod } from "../domain/nod.ts";
@@ -62,7 +63,12 @@ export const editarPerfil: CasoDeUso<EntradaEditarPerfil, { agente: Agente }> = 
   }
   if (perfil.harness !== undefined || perfil.modelo !== undefined) validarInteligencia(perfil.harness ?? existente.harness ?? "auto", perfil.modelo ?? existente.modelo);
   const modeloMudou = perfil.harness !== undefined && perfil.harness !== existente.harness || perfil.modelo !== undefined && perfil.modelo !== existente.modelo;
-  const agente = await deps.repos.agentes.atualizarPerfil(input.agenteId, { ...perfil, ...(perfil.descricao !== undefined || perfil.titulo !== undefined ? { confirmado: true } : {}) });
+  // 0068 (emenda da ADR-036): o pedido antigo {harness, modelo, esforco} vira a inteligência do bot, que grava os derivados.
+  const mexeNaIa = perfil.harness !== undefined || perfil.modelo !== undefined || perfil.esforco !== undefined;
+  const inteligencia = mexeNaIa
+    ? inteligenciaDoLegado(inteligenciaDoAgente(existente), { harness: perfil.harness ?? existente.harness ?? "auto", modelo: perfil.modelo ?? existente.modelo, ...(perfil.esforco !== undefined ? { esforco: perfil.esforco } : {}) })
+    : undefined;
+  const agente = await deps.repos.agentes.atualizarPerfil(input.agenteId, { nome: perfil.nome, titulo: perfil.titulo, descricao: perfil.descricao, forma: perfil.forma, cor: perfil.cor, ...(inteligencia ? { inteligencia } : {}), ...(perfil.descricao !== undefined || perfil.titulo !== undefined ? { confirmado: true } : {}) });
   // Visível (equipe) mas de outra pessoa: o repositório devolve null em vez de 42501.
   if (!agente) throw new ErroDeDominio("nao_permitido");
 

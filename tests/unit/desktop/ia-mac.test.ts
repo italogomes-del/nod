@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IAS_DESKTOP } from "../../../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, INTERVALO_SONDA_IA_MS, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, INTERVALO_SONDA_IA_MS, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "../../../desktop/ia-mac.ts";
 
 /**
  * Os cards de IA do onboarding no Mac (definido em 2026-10-04, ADR-077): a página remota só escolhe UMA das IAs
@@ -60,4 +60,21 @@ describe("impressão da conta logada (2026-10-05)", () => {
 
 it("sonda a cada 3 s", () => {
   expect(INTERVALO_SONDA_IA_MS).toBe(3_000);
+});
+
+describe("login dentro do app (2026-10-09)", () => {
+  it("Codex por código de dispositivo; Claude pela assinatura, nunca a Console paga por API", () => {
+    expect(comandoDeLoginNoApp("codex-cli")).toEqual({ nome: "codex", args: ["login", "--device-auth"] });
+    expect(comandoDeLoginNoApp("claude-cli")).toEqual({ nome: "claude", args: ["auth", "login", "--claudeai"] });
+  });
+
+  it("o status: o JSON do Claude e a frase do Codex; saída diferente de 0 nunca é login", () => {
+    expect(logadoPeloStatus("claude-cli", 0, JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), "")).toBe(true);
+    // Medido em 2026-10-09 com HOME temporário: sai com 1 e loggedIn false.
+    expect(logadoPeloStatus("claude-cli", 1, JSON.stringify({ loggedIn: false, authMethod: "none" }), "")).toBe(false);
+    expect(logadoPeloStatus("claude-cli", 0, "não é json", "")).toBe(false);
+    expect(logadoPeloStatus("codex-cli", 0, "Logged in using ChatGPT", "")).toBe(true);
+    expect(logadoPeloStatus("codex-cli", 1, "Not logged in", "")).toBe(false);
+    expect(logadoPeloStatus("codex-cli", 0, "Not logged in", "")).toBe(false);
+  });
 });

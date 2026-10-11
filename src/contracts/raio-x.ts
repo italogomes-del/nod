@@ -1,3 +1,5 @@
+import type { IdHarness } from "./harness.ts";
+import type { LimitesIa } from "./inteligencia.ts";
 import type { ModoTurno } from "./plano-turno.ts";
 
 /**
@@ -127,4 +129,8 @@ export const USOS_DO_MAC = ["pouco", "equilibrado", "livre"] as const;
 export type UsoDoMac = (typeof USOS_DO_MAC)[number];
 export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
 /** `maquinaPadraoId` (ADR-090, 0066): onde trabalha o bot sem máquina escolhida; null = qualquer uma. */
-export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null };
+/**
+ * `ordemIas` (0068, emenda da ADR-036): a ordem das IAs do Automático da pessoa; null = a padrão (ORDEM_IAS_PADRAO).
+ * `iasNoLimite`: as IAs que o servidor viu chegar ao limite da assinatura, com o prazo (vencidas podem continuar aqui).
+ */
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa };

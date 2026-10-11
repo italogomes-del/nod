@@ -29,7 +29,8 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, avisoHarnessFora, avisoLimiteDoPlano, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaIaTrocada, linhaLimiteSemOutra } from "./ia-fora.ts";
+import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
 import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
@@ -172,7 +173,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
-  if (m.kind === "sistema") return linhaIaTrocada(m) ?? avisoLimiteDoPlano(m, { nomeDoBot: m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome ?? null : null, agenteId: m.autoria.autor_tipo === "agente" ? m.autoria.autor_id : null, agora: estado.agora }) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -203,6 +204,22 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
+}
+
+/**
+ * As linhas de IA do plano das IAs (2026-10-10): a troca de IA (tela 3) e o limite sem outra IA pronta (tela 4). Leem o
+ * bot que falou (o modelo dele na IA que assumiu; se está em "Uma IA só") e o estado das IAs (do Mac ou do servidor).
+ */
+function linhaDeIa(m: Mensagem, estado: Estado): string | null {
+  const p = m.payload;
+  if (p?.kind !== "ia_trocada" && p?.kind !== "limite_do_plano") return null;
+  const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
+  const ias = iasDaTela(estado);
+  if (p.kind === "ia_trocada") {
+    const ia = ias.find((i) => i.id === p.para);
+    return linhaIaTrocada(m, { modelo: ia && bot ? ia.modelos.find((x) => x.id === escolhaEfetiva(ia, inteligenciaDoBot(bot).escolhas).modelo)?.nome ?? null : null });
+  }
+  return linhaLimiteSemOutra(m, { nomeDoBot: bot?.nome ?? null, agenteId: bot?.id ?? null, agora: estado.agora, ui: estado.iasMac, ias, fixa: bot ? inteligenciaDoBot(bot).modo === "fixa" : false });
 }
 
 /**

@@ -22,7 +22,7 @@ O que é o nod (para explicar com palavras simples):
 Onde fica cada coisa na tela:
 - Barra lateral: no topo, a grade de fixados; embaixo, os bots por seção. Você fica no topo dos fixados; desafixado, você vira o botão com os olhos e o nome "Nod" na barra de cima da lateral, ao lado da lupa (é o modo discreto). Para voltar ao topo: menu do seu nome > Voltar ao topo.
 - Menu de um bot (clique direito ou os três pontos): fixar, mover para uma seção, renomear, editar perfil, duplicar, ocultar, excluir. Excluído pode ser restaurado em Gerenciar agentes.
-- Menu da conta (o avatar no rodapé da lateral): Conexão (a IA do Mac), Avisos, Modo dev, Computadores, Gerenciar agentes, Relatos e "Ver o onboarding de novo".
+- Menu da conta (o avatar no rodapé da lateral): Provedores de IA (as IAs do Mac e a ordem do Automático), Avisos, Modo dev, Computadores, Gerenciar agentes, Relatos e "Ver o onboarding de novo".
 - Marketplace (rodapé da lateral): conectar apps.
 - Painel do bot (a gaveta à direita da conversa): perfil, modelo, acessos, rotinas, memória e pendências daquele bot.
 - Relatos (menu da conta): bugs, melhorias e dúvidas que a pessoa contou, pelo botão de uma mensagem ou a você.

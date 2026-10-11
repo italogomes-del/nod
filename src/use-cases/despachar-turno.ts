@@ -6,6 +6,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
+import { iasParaOAutomatico } from "../domain/inteligencia.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
@@ -34,6 +35,11 @@ export type EntradaDespacharTurno = {
   fundoSemPrazo?: boolean;
   /** ADR-092: a máquina da ponte com o servidor no Mac (modo local) — só pega o turno que tem ela como alvo. */
   soComoAlvo?: boolean;
+  /**
+   * 0068 (emenda da ADR-036): as IAs da pessoa no limite da assinatura agora. Um turno do Automático não vai para uma
+   * máquina que só tem IA no limite enquanto outra máquina viva da pessoa tiver uma fora dele (iasParaOAutomatico).
+   */
+  noLimite?: readonly string[];
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -57,7 +63,10 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}) });
+  const harnessesAuto = input.harnessesProntos && input.noLimite?.length
+    ? iasParaOAutomatico({ prontosMaquina: input.harnessesProntos, prontosPessoa: [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa ?? {}).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)])], noLimite: input.noLimite })
+    : undefined;
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

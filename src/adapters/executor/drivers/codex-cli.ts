@@ -9,6 +9,7 @@ import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { respostaDoTeste } from "../../../domain/conta-da-ia.ts";
+import { configInvalida, faltaNode, motivoConfigInvalida, motivoSemNode } from "../../../domain/saida-do-cli.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
@@ -75,7 +76,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
     meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
-      const env = ambienteCodex(cfg.env);
+      const env = ambienteCodex({ ...cfg.env, ...(cfg.envPorDriver?.["codex-cli"] ?? {}) });
       let bin: string | null = null;
       let inv: Inventario | null = null;
       // As chaves de config que a versão instalada recusou (negociarConfigCodex); refeito a cada sonda.
@@ -92,6 +93,11 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         // NOD-171: a versão vem antes do help, para um Codex abaixo do piso ouvir "Atualize para a x.y.z", com as versões.
         const lida = await executar(["--version"]);
         if (lida.estourouTempo) return inv = lenta();
+        // revisto em 2026-10-09 (teste do Breno): o `codex` do npm é `#!/usr/bin/env node`; sem node no PATH o
+        // `--version` sai com 127 e a sonda seguia até o `exec --help` e dizia "Atualize o Codex". Agora diz o que falta.
+        const saidaVersao = `${lida.stdout}\n${lida.stderr}`;
+        if (lida.exitCode !== 0 && faltaNode(saidaVersao)) return inv = { estado: "ausente", motivo: motivoSemNode("Codex"), causa: "sem_node", em };
+        if (lida.exitCode !== 0 && configInvalida(saidaVersao)) return inv = { estado: "ausente", motivo: motivoConfigInvalida("Codex", "~/.codex/config.toml"), causa: "config_invalida", em };
         const lidaLimpa = extrairVersao(lida.stdout);
         const versao = lidaLimpa ?? lida.stdout.trim().slice(0, 100);
         const antigo = inventarioAbaixoDoPiso("codex-cli", lidaLimpa ?? "", "Codex", em);
@@ -101,6 +107,9 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         if (help.exitCode !== 0 || FLAGS_CODEX.some((f) => !help.stdout.includes(f))) return inv = { estado: "ausente", motivo: "Atualize o Codex: esta versão ainda não oferece o isolamento exigido pelo nod.", em };
         const login = await executar(["login", "status"]);
         if (login.estourouTempo) return inv = { estado: "nao_autenticado", motivo: motivoSondaLenta("Codex"), versao, causa: "sonda_lenta", em };
+        // definido em 2026-10-09: config.toml quebrado faz o `login status` sair com 1 — não é falta de login, e "Entrar"
+        // não resolveria (o próprio login lê a mesma config).
+        if (login.exitCode !== 0 && configInvalida(`${login.stdout}\n${login.stderr}`)) return inv = { estado: "ausente", motivo: motivoConfigInvalida("Codex", "~/.codex/config.toml"), causa: "config_invalida", em };
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
         // definido em 2026-10-05: a config do turno é validada aqui, de graça (stdin vazio, nenhum modelo), com um plano
         // de prova. O que a versão não conhece cai; o que não pode cair deixa o Codex indisponível com o motivo dito.

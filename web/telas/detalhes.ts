@@ -9,7 +9,8 @@ import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { VELOCIDADES, VOZES } from "./ligacao.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { interpolar } from "../lib/relogio.ts";
-import { nomeInteligencia, renderInteligencia } from "./inteligencia.ts";
+import { iasDaTela, ordemDaPessoa, rascunhoDe, renderInteligencia, renderLinhaInteligencia, type ContextoInteligencia } from "./inteligencia.ts";
+import { UI_IAS_INICIAL } from "./cartao-ia.ts";
 import { MODOS } from "./aprovacoes.ts";
 import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type NivelAtual } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
@@ -119,7 +120,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     ? `<div class="gv-cartao">
         ${linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`)}
         ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${a.harness !== "codex-cli" ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
-        ${linha(`${ICONE.estrela}<span class="gv-linha-txt">Inteligência</span><span class="gv-meta">${esc(nomeInteligencia(a, estado.executor?.harnesses))}</span>`, irPara("inteligencia"), ICONE.seta)}
+        ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
@@ -149,18 +150,26 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       return nivelPerfil(a);
     case "memoria":
       return { titulo: "Memória", corpo: renderMemoriaNaGaveta(estado, a.id) };
-    case "inteligencia":
+    case "inteligencia": {
+      // 2B (protótipo Inteligencia2): o rascunho vive no reducer até Salvar; sem rascunho deste bot, o gravado.
+      const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
       return {
         titulo: "Inteligência",
-        corpo: renderInteligencia(a, estado.executor?.harnesses, true),
-        rodape: rodapeDeFormulario("Salvar escolha"),
+        corpo: renderInteligencia(r, a.nome, contextoInteligencia(estado), ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem)),
+        rodape: rodapeDeFormulario("Salvar"),
         form: `data-form="inteligencia" data-id="${esc(a.id)}"`,
       };
+    }
     case "nova-rotina":
       return { titulo: "Nova rotina", corpo: renderNovaRotinaNaGaveta(a), rodape: rodapeDeFormulario("Criar rotina"), form: 'data-form="criar-rotina"' };
     case "trabalhos":
       return { titulo: `Trabalhos de ${a.nome}`, corpo: renderGavetaTrabalhos(estado, a.id) };
   }
+}
+
+/** O que a 2A e a 2B leem das IAs: as do servidor (ou o catálogo), o estado do Mac e o relógio. */
+export function contextoInteligencia(estado: Estado): ContextoInteligencia {
+  return { ias: iasDaTela(estado), ui: estado.iasMac ?? UI_IAS_INICIAL, agora: estado.agora };
 }
 
 const rodapeDeFormulario = (salvar: string) => `<button type="button" class="gv-bt" data-act="gaveta-voltar">Cancelar</button><button type="submit" class="gv-bt pri">${esc(salvar)}</button>`;

@@ -5,9 +5,13 @@ import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
 const emit = (v) => process.stdout.write(`${JSON.stringify(v)}\n`);
 if (args.includes("app-server")) await appServer();
+// definido em 2026-10-09: TESTE_NOD_SEM_NODE imita o `#!/usr/bin/env node` do npm num PATH sem node (medido no macOS).
+else if (args.includes("--version") && process.env.TESTE_NOD_SEM_NODE) { process.stderr.write("env: node: No such file or directory\n"); process.exit(127); }
 // NOD-171: TESTE_NOD_VERSAO simula uma versão (acima ou abaixo do piso); sem ela, uma saída sem x.y.z.
 else if (args.includes("--version")) process.stdout.write(process.env.TESTE_NOD_VERSAO ? `codex-cli ${process.env.TESTE_NOD_VERSAO}\n` : "codex-cli teste\n");
 else if (args.includes("--help")) process.stdout.write("--json --ephemeral --ignore-user-config --ignore-rules --strict-config --sandbox --skip-git-repo-check\n");
+// definido em 2026-10-09: TESTE_NOD_CONFIG_QUEBRADA imita o config.toml quebrado (medido com o Codex 0.147.0).
+else if (args[0] === "login" && process.env.TESTE_NOD_CONFIG_QUEBRADA) { process.stderr.write("Error loading configuration: /casa/.codex/config.toml:1:9: string values must be quoted, expected literal string\n"); process.exit(1); }
 else if (args[0] === "login") process.exitCode = process.env.TESTE_NOD_SEM_LOGIN ? 1 : 0;
 else {
   // Como o Codex real (medido em 2026-10-05 com o 0.147.0): a config é validada ANTES de o prompt ser lido. Uma chave

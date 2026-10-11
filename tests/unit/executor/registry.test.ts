@@ -63,6 +63,13 @@ describe("registry (ADR-012 sombra, ADR-019 gate pré-spawn)", () => {
     expect(nodHome({}, "/h")).toBe("/h/.nod");
   });
 
+  it("revisão do PR 1 (ADR-093): o ambiente dos drivers nunca leva ELECTRON_RUN_AS_NODE nem o node do nod no PATH", async () => {
+    const cfg = await configDosDrivers({ HOME: home, PATH: "/usr/bin", ELECTRON_RUN_AS_NODE: "1" }, { shellDeLogin: false, home });
+    expect(cfg.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    expect(cfg.env.PATH).not.toContain("node-do-nod");
+    expect(cfg.camadas?.some((c) => c.origem === "node_do_nod" || c.origem === "nod")).toBe(false);
+  });
+
   describe("executorPadrao", () => {
     const registry: Registry = {
       "claude-cli": { estado: "sombra", motivo: "ausente: binario_nao_encontrado" },

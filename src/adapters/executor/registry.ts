@@ -1,8 +1,8 @@
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { log } from "../../obs/log.ts";
-import { caminhoAumentado, caminhoDoShellDeLogin, expandirTil, homeDaPessoa } from "./caminho.ts";
+import { camadasDoPath, expandirTil, homeDaPessoa, lerPathDoShell } from "./caminho.ts";
 import type { ConfigDriver, Driver, IdDriver, Instance, Registry } from "./spi.ts";
 
 /**
@@ -19,6 +19,8 @@ export type OpcoesRegistry = {
   home?: string;
   /** Config já montada (o boot monta UMA vez e reaproveita no interruptor: consultar o shell de login custa tempo). */
   cfg?: ConfigDriver;
+  /** Quanto esperar pelo PATH do shell real nesta chamada (lerPathDoShell); a leitura segue em segundo plano. */
+  esperaShellMs?: number;
 };
 
 export type RegistryDetalhado = {
@@ -36,12 +38,15 @@ export function nodHome(env: EnvRegistry, home: string): string {
 /** Config comum aos drivers a partir do env do processo: ambiente limpo + PATH aumentado + cwdBase. */
 export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {}): Promise<ConfigDriver> {
   const home = o.home ?? homeDaPessoa(env);
-  const pathLogin = o.shellDeLogin === false ? null : await caminhoDoShellDeLogin(env.SHELL);
+  // revisto em 2026-10-09: o PATH do shell não segura mais o boot — espera pouco e, se não veio, a próxima config o traz.
+  const pathLogin = o.shellDeLogin === false ? null : await lerPathDoShell(env.SHELL, o.esperaShellMs);
   const limpo = montarAmbiente("local", env);
+  const camadas = camadasDoPath(env.PATH, home, pathLogin);
   return {
     bin: env.NOD_CLAUDE_BIN ? expandirTil(env.NOD_CLAUDE_BIN, home) : undefined,
     bins: { "codex-cli": env.NOD_CODEX_BIN ? expandirTil(env.NOD_CODEX_BIN, home) : undefined },
-    env: { ...limpo, PATH: caminhoAumentado(env.PATH, home, pathLogin), HOME: limpo.HOME ?? home },
+    env: { ...limpo, PATH: camadas.map((c) => c.dir).join(delimiter), HOME: limpo.HOME ?? home },
+    camadas,
     cwdBase: join(nodHome(env, home), "turnos"),
   };
 }

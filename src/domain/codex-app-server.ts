@@ -15,8 +15,11 @@ const ERRO_CRU_APP_SERVER_MAX_CHARS = 500;
 
 export type IdRpc = number | string;
 
-/** Esforço de raciocínio aceito pelo protocolo (depende do modelo; `model/list` diz quais o modelo aceita). */
-export type EsforcoCodex = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+/**
+ * Esforço de raciocínio aceito pelo protocolo (depende do modelo; `model/list` diz quais o modelo aceita). revisto em
+ * 2026-10-10: `max` medido no `model/list` do 0.147 (GPT-5.6 Sol e Luna; o Sol também diz `ultra`, que o nod não usa).
+ */
+export type EsforcoCodex = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * definido em 2026-10-04: "low" no laço de voz. `model/list` (supportedReasoningEfforts) diria o menor esforço que o

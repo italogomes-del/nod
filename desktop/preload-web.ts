@@ -1,12 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type NodDesktop, type TemaDesktop } from "../src/contracts/desktop.ts";
+import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type NodDesktop, type PonteIas, type TemaDesktop } from "../src/contracts/desktop.ts";
+import type { EstadoIa } from "../src/contracts/estado-ia.ts";
 
 /**
  * Preload da JANELA WEB (definido em 2026-09-24, "aviso no Mac"): a página é remota, então a ponte é a
- * menor possível — doze funções em `window.nodDesktop`, nenhum `ipcRenderer`, nenhum canal genérico.
+ * menor possível — funções nomeadas em `window.nodDesktop`, nenhum `ipcRenderer`, nenhum canal genérico.
  * A ponte da tela de conexão (preload.ts, `window.nod`) entrega `conectar` e a chave da máquina e nunca
  * chega aqui; a web usa `window.nod` para outra coisa. O processo principal valida remetente e argumentos.
  */
+/** definido em 2026-10-09: as IAs dentro do app (PonteIas); cada argumento é validado de novo no processo principal. */
+const ias: PonteIas = {
+  estados: () => ipcRenderer.invoke(CANAIS_DESKTOP.iaEstados),
+  instalar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaInstalarNoApp, ia),
+  entrar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaEntrarNoApp, ia),
+  abrirLink: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaAbrirLink, ia),
+  colarCodigo: (ia: IaDesktop, codigo: string) => ipcRenderer.invoke(CANAIS_DESKTOP.iaColarCodigo, ia, codigo),
+  cancelar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaCancelar, ia),
+  verificar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaVerificar, ia),
+  aoMudar: (fn: (estado: EstadoIa) => void) => {
+    ipcRenderer.removeAllListeners(CANAIS_DESKTOP.iaMudou);
+    ipcRenderer.on(CANAIS_DESKTOP.iaMudou, (_evento, estado: EstadoIa) => fn(estado));
+  },
+};
 const ponte: NodDesktop = {
   avisar: (aviso: AvisoDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.avisar, aviso),
   contador: (n: number) => ipcRenderer.invoke(CANAIS_DESKTOP.contador, n),
@@ -23,6 +38,7 @@ const ponte: NodDesktop = {
   iaInstalar: (ia: IaDesktop) => ipcRenderer.invoke(CANAIS_DESKTOP.iaInstalar, ia),
   // definido em 2026-10-05: o teste de verdade das IAs (um turno de uma frase); o processo principal valida o pedido.
   iaTestar: (pedido?: { nome?: string; ia?: IaDesktop }) => ipcRenderer.invoke(CANAIS_DESKTOP.iaTestar, pedido),
+  ias,
   aoAbrir: (fn: (alvo: AlvoAviso) => void) => {
     // Um ouvinte só (a página registra uma vez; recarregar recria o preload). O evento do IPC não vai à página.
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.abrir);

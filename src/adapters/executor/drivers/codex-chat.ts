@@ -35,10 +35,12 @@ const PRAZO_HANDSHAKE_MS = 30_000;
 const SAIDA_APOS_FIM_MS = 2_000;
 
 /**
- * definido em 2026-10-07: o esforço do bot no vocabulário do Codex. O `max` do Claude não existe lá; vira o maior
- * (`xhigh`). Sem esforço escolhido, o campo não vai e vale o padrão do modelo (o `codex exec` nunca o mandou).
+ * definido em 2026-10-07: o esforço do bot no vocabulário do Codex. Sem esforço escolhido, o campo não vai e vale o
+ * padrão do modelo (o `codex exec` nunca o mandou). revisto em 2026-10-10: o `model/list` do 0.147 mostrou `max` no
+ * GPT-5.6 Sol e no Luna (medido sem turno); o servidor só manda um nível que o modelo do catálogo aceita
+ * (raciocinioValido), então o `max` vai como `max`.
  */
-const ESFORCO_CODEX: Record<EsforcoAgente, EsforcoCodex> = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
+const ESFORCO_CODEX: Record<EsforcoAgente, EsforcoCodex> = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
 
 /**
  * Onde o Codex passa a ler um steer já aceito (definido em 2026-10-08, revisão do épico #188, X1): o texto entra na

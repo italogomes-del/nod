@@ -11,4 +11,9 @@ export type OpcaoExecutor = { id: IdExecutor; custo: "zero" | "real"; inventario
  * Estado do interruptor de executor (definido em 2026-09-16): é da MÁQUINA (um processo, um registry),
  * não da pessoa. `recusa` é o motivo escrito quando a última troca pedida não pôde acontecer.
  */
-export type EstadoExecutor = { atual: IdExecutor; opcoes: OpcaoExecutor[]; recusa: string | null; harnesses?: CatalogoHarness };
+/**
+ * `trocavel` (definido em 2026-10-10, teste do Breno): false no modo compartilhado, onde não existe `POST /executor` —
+ * a IA de cada bot é escolhida na Inteligência dele (e o Automático segue a ordem da pessoa). O botão "usar Codex"
+ * chamava a rota e recebia 404. Ausente = true (o interruptor do modo local).
+ */
+export type EstadoExecutor = { atual: IdExecutor; opcoes: OpcaoExecutor[]; recusa: string | null; harnesses?: CatalogoHarness; trocavel?: boolean };

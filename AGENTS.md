@@ -224,7 +224,7 @@ Para trocar a versão: `GSTACK_REF=<sha-ou-tag> bash scripts/cloud/install-gstac
 ## Executor e custo
 
 Dev local não exige CLI nem chave: `NOD_EXECUTOR=catcher` é o padrão. Qualquer `claude -p` real
-usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--strict-mcp-config --tools ""` e ambiente limpo
+usa o modelo do agente (no Automático, o Recomendado: Opus desde 2026-10-10; `NOD_MODELO` fixa um para os bots novos), `--strict-mcp-config --tools ""` e ambiente limpo
 (denylist `^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_.*)$`) — sem isso o custo
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
 
@@ -269,6 +269,17 @@ principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz d
 renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
+Definido em 2026-10-09 (ADR-093): o app acha, instala e entra nas IAs sozinho. O PATH vem em camadas
+(`caminho.ts`: processo, instaladores, todas as versões do nvm, `$SHELL -l` em segundo plano) e nunca leva nada do
+nod nem `ELECTRON_RUN_AS_NODE`. Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, com
+configuração só do nod, em `<userData>/ferramentas/<ia>/v-…` trocado atomicamente para `atual`; o binário do nod
+(o nativo, no Codex) só é usado quando é igual ou mais novo que o de fora (`desktop/ferramentas.ts`).
+Login = `codex login --device-auth` / `claude auth login --claudeai` por pipe (`desktop/login-ia.ts`): só links da lista
+`LINKS_OFICIAIS` (host e caminho medidos), e o único texto da página que chega a um processo é o código colado, pelo
+stdin. Para medir a saída de um CLI novo, rode-o com `HOME`, `CODEX_HOME`/`CLAUDE_CONFIG_DIR` temporários e um `open`
+falso no PATH, só até o link aparecer — nunca complete login nem rode logout com o HOME real. As fixtures ficam em
+`tests/fixtures/login-ia/` com os códigos trocados por X.
+
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
 `harness` identifica o driver; `executor` continua indicando `local`/`catcher` nos eventos existentes.
@@ -276,6 +287,14 @@ Novos agentes usam `harness=auto, modelo=auto`; perfis anteriores preservam seus
 0013 adiciona a preferência a agentes e turnos. Todo novo caminho de enfileiramento deve copiar
 **harness e modelo** do agente (ou do turno original em retomadas). O plano resolve a escolha uma vez;
 quem executa usa `plano.harness`, nunca o padrão global copiado no boot.
+
+Revisto em 2026-10-10 (0068, emenda da ADR-036): a inteligência do bot é `inteligencia_modo` (auto | fixa), `ordem_ias`
+(nula = a da pessoa, `preferencias.ordem_ias`) e `escolhas_ia` (modelo e raciocínio por IA); `harness`/`modelo`/`esforco`
+são DERIVADOS (`derivadosDa` em `src/domain/inteligencia.ts`) e o repositório grava os quatro juntos — nunca escreva
+`harness` ou `modelo` de agente direto (`atualizarPerfil` só aceita `inteligencia`). O Automático usa a primeira IA pronta
+da ordem fora do limite (`preferencias.ias_no_limite`, gravado pelo turno que volta no limite); o Recomendado é Opus /
+GPT-5.6 Sol, raciocínio médio. Níveis de raciocínio por modelo: `HARNESSES[].modelos[].raciocinios` (o do Codex vem do
+`model/list` do app-server, que não precisa de login: mede com HOME vazio e `tests/fixtures/codex-model-list-0.147.json`).
 
 Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas indisponíveis no catálogo.
 `NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.

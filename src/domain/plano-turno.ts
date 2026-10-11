@@ -1,7 +1,7 @@
 import type { AnexoMeta } from "../contracts/anexo.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { traduzirParaOCli } from "./comandos.ts";
-import type { Agente } from "../contracts/agente.ts";
+import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
 import type { Autoria, Executor } from "../contracts/evento.ts";
@@ -197,6 +197,11 @@ export type EntradaPlano = {
   terminal?: boolean;
   /** A IA que roda o turno; ausente ou null = Claude Code (catcher, legado). Decide a tradução dos comandos da conversa. */
   harness?: IdHarness | null;
+  /**
+   * definido em 2026-10-10 (emenda da ADR-036): o raciocínio resolvido para a IA do turno (resolverHarness: a escolha do
+   * bot ou o médio). Ausente (catcher, sem IA escolhida) = o `esforco` do agente, como antes.
+   */
+  raciocinio?: EsforcoAgente;
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
   /**
@@ -219,6 +224,7 @@ export type EntradaPlano = {
  * quando a localidade recusa (inventário não 'pronto'). tokenDeTurno e machineId são do servidor.
  */
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
+  const esforco = entrada.raciocinio ?? entrada.agente.esforco ?? undefined;
   const tocaDadoPessoal = entrada.conectores.some((c) => c.habilitado && conectorTocaDadoPessoal(c));
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaDadoPessoal, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
@@ -295,7 +301,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
     ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}) }),
-    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
+    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,

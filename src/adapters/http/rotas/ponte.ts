@@ -86,6 +86,12 @@ export function criarPonteHttpServidor(d: {
   descartarSessao?: boolean;
   /** ADR-090 (0067): grava na chave o sistema que a máquina anunciou — o aviso de queda nomeia a VM depois que a conexão some. */
   registrarPlataforma?(escopo: Escopo, chaveId: string, plataforma: PlataformaMaquina): Promise<void>;
+  /**
+   * definido em 2026-10-10 (plano das IAs, PR 2): o que as máquinas da pessoa dizem das IAs mudou num `conectar` ou num
+   * reanúncio — a composição publica `inventario.mudou` e a tela relê sem recarregar (antes só a troca do interruptor
+   * local avisava).
+   */
+  inventarioMudou?(escopo: Escopo): void;
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -110,6 +116,13 @@ export function criarPonteHttpServidor(d: {
     const prontos = Object.entries(harnessesDaPessoa(c.escopo.pessoaId)).filter(([, i]) => i?.estado === "pronto").map(([h]) => h as IdHarness);
     await d.repetirBarrados(c.escopo, prontos).catch(() => log("aviso", "repetir_barrados_falhou", {}));
   }
+  /** O que a tela mostra das IAs da pessoa (estado, causa e versão por IA): só a mudança disso vira `inventario.mudou`. */
+  function assinaturaDasIas(pessoaId: string): string {
+    return JSON.stringify(Object.entries(harnessesDaPessoa(pessoaId)).sort(([a], [b]) => a.localeCompare(b)).map(([h, i]) => [h, i?.estado, i && "causa" in i ? i.causa ?? null : null, i?.versao ?? null]));
+  }
+  function avisarSeMudou(escopo: Escopo, antes: string): void {
+    if (assinaturaDasIas(escopo.pessoaId) !== antes) d.inventarioMudou?.(escopo);
+  }
   function conexao(ctx: Ctx): Conexao {
     const c = conexoes.get(ctx.params.chaveId ?? "");
     if (!c || c.escopo.pessoaId !== ctx.escopo.pessoaId || c.escopo.tenantId !== ctx.escopo.tenantId) throw new ErroDeDominio("estado_invalido");
@@ -130,6 +143,7 @@ export function criarPonteHttpServidor(d: {
     rota("conectar", async (ctx, b) => {
       exigir(b.versaoContrato === 1 && texto(b.nome, 100) && b.nome.trim());
       const id = ctx.params.chaveId!;
+      const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       // ADR-090: o nome e o sistema da máquina (o motor sem janela manda "linux"). Ausente ou desconhecido = app do Mac.
       const nome = b.nome.trim();
       const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
@@ -151,6 +165,7 @@ export function criarPonteHttpServidor(d: {
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
       await repetirBarrados(c);
+      avisarSeMudou(ctx.escopo, antes);
       ctx.json(200, { machineId: id, escopo: ctx.escopo });
     }),
     /**
@@ -163,6 +178,7 @@ export function criarPonteHttpServidor(d: {
     rota("inventario", async (ctx, b) => {
       const c = conexao(ctx);
       exigir(b.versaoContrato === 1);
+      const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       const a = lerAnuncio(b, d.agora());
       c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
@@ -173,6 +189,7 @@ export function criarPonteHttpServidor(d: {
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await repetirBarrados(c);
+      avisarSeMudou(ctx.escopo, antes);
       ctx.json(200, { ok: true });
     }),
     rota("puxar", async (ctx, b) => {
@@ -300,9 +317,11 @@ export function criarPonteHttpServidor(d: {
     }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);
+      const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       await c.ponte.desconectar(ctx.params.chaveId!);
       conexoes.delete(ctx.params.chaveId!);
       await persistir(c);
+      avisarSeMudou(ctx.escopo, antes);
       ctx.json(200, { ok: true });
     }),
   ];

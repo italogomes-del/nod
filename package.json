@@ -1,6 +1,6 @@
 {
   "name": "nod",
-  "version": "0.4.0-rc.6",
+  "version": "0.4.0-rc.7",
   "private": true,
   "description": "Um lugar onde agentes preparam decisões e uma pessoa decide.",
   "type": "module",
@@ -77,6 +77,7 @@
     "esbuild": "0.25.12",
     "eslint": "^9.15.0",
     "lint-staged": "^17.5.1",
+    "npm": "11.17.0",
     "simple-git-hooks": "^2.14.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

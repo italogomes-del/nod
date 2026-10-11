@@ -48,7 +48,8 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       expect(plano.promptSistemaPartes).toBeUndefined();
       expect(plano.ligacaoVoz).toMatchObject({ ligacaoId: ligacao.id, modelo: MODELOS_LIGACAO_PADRAO["codex-cli"].modelo });
       // A preferência do bot é da pessoa: continuar a ligação com outra IA não a troca.
-      expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "auto", modelo: "haiku" });
+      // (0068: o `auto` com modelo do Claude é gravado como o Claude fixo, que é como ele já rodava.)
+      expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "claude-cli", modelo: "haiku", inteligencia: { modo: "fixa", fixa: "claude-cli" } });
       // A linha "Chat de voz" é uma só.
       expect((await repos.mensagens.listarDaConversa(conversaId, 20)).filter((m) => m.payload?.kind === "ligacao")).toHaveLength(1);
     });
@@ -90,6 +91,10 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const { repos, agenteId } = await agenteComConversa(trx, escopo);
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      // A trava da fila da pessoa ANTES da ligação (definido em 2026-10-10): `ligar` ocupa o índice "uma ligação viva por
+      // pessoa" e `reivindicar` pede a trava da pessoa. Outro teste de ligação em paralelo, na mesma pessoa, faz na ordem
+      // contrária, e as duas transações se travavam (deadlock medido no `check` de 2026-10-10, também sem este PR).
+      await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const machineId = randomUUID();
       expect((await repos.turnos.reivindicar({ machineId, agora: agora(), aceitaLigacao: true }))?.id).toBe(turno.id);
@@ -116,6 +121,10 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const { repos, agenteId } = await agenteComConversa(trx, escopo);
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      // A trava da fila da pessoa ANTES da ligação (definido em 2026-10-10): `ligar` ocupa o índice "uma ligação viva por
+      // pessoa" e `reivindicar` pede a trava da pessoa. Outro teste de ligação em paralelo, na mesma pessoa, faz na ordem
+      // contrária, e as duas transações se travavam (deadlock medido no `check` de 2026-10-10, também sem este PR).
+      await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const machineId = randomUUID();
       await repos.turnos.reivindicar({ machineId, agora: agora(), aceitaLigacao: true });

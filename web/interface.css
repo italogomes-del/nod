@@ -235,31 +235,7 @@
 .icon.mascote>svg{width:140%;height:140%;flex-shrink:0;max-width:none}
 .mascote-catalogo .icon.mascote>svg{width:100%;height:100%}
 
-/* definido em 2026-09-18: escolha automática em primeiro plano, detalhes técnicos sob demanda. */
-.inteligencia-card { border: 1px solid var(--line); border-radius: 18px; padding: 22px; background: var(--surface); margin: 10px 0 22px; color: var(--ink); }
-.inteligencia-topo { display: flex; align-items: center; gap: 12px; }
-.inteligencia-topo h3 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
-.inteligencia-topo p { margin: 0; color: var(--ink-3); font-size: 13px; }
-.inteligencia-simbolo { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--surface-raised); color: var(--ink-2); font-size: 22px; flex-shrink: 0; }
-.inteligencia-chip { margin-left: auto; border-radius: 20px; background: var(--surface-raised); color: var(--ink-2); padding: 6px 10px; font-size: 11px; font-weight: 600; }
-.inteligencia-contexto, .inteligencia-ajuda { color: var(--ink-3); line-height: 1.65; font-size: 12px; margin: 15px 0 0; }
-.inteligencia-personalizar { margin-top: 17px; border-top: 1px solid var(--line); padding-top: 15px; }
-.inteligencia-personalizar summary { cursor: pointer; font-size: 13px; font-weight: 600; }
-.inteligencia-personalizar summary span { margin-left: 8px; color: var(--ink-3); font-size: 11px; font-weight: 400; }
-.inteligencia-label { display: block; font-size: 12px; color: var(--ink-2); margin-top: 17px; }
-.inteligencia-label select { display: block; width: 100%; min-height: 47px; margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; padding: 10px 12px; cursor: pointer; }
-.inteligencia-card :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.inteligencia-avancado { margin-top: 17px; color: var(--ink-3); }
-.inteligencia-avancado summary { font-size: 12px; font-weight: 400; }
-.inteligencia-avancado p { font-size: 12px; line-height: 1.6; }
-.inteligencia-avancado ul { list-style: none; padding: 0; margin: 12px 0 0; }
-.inteligencia-avancado li { padding: 13px 0; border-top: 1px solid var(--line); }
-.inteligencia-avancado li div { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; }
-.inteligencia-avancado small { display: block; margin-top: 6px; line-height: 1.5; font-size: 11px; }
-.harness-status { color: var(--ink-3); font-size: 10px; }
-.harness-status.pronto { color: var(--success); }
-.bt.inteligencia-atalho { border-color: var(--line-strong); color: var(--ink); font-size: 12px; border-radius: 20px; background: var(--surface); }
-@media (max-width: 620px) { .inteligencia-card { padding: 16px; } .inteligencia-topo { flex-wrap: wrap; } .inteligencia-chip { margin-left: 50px; } }
+/* definido em 2026-09-18: detalhes técnicos sob demanda ("Configurar conexão", só no modo local). */
 .conexao-avancada { margin-top: 10px; }
 .conexao-avancada > summary { cursor: pointer; color: var(--ink-3); font-size: 12px; }
 .conexao-avancada[open] > summary { margin-bottom: 12px; }
@@ -1313,3 +1289,21 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
   [aria-current="true"]:not(:focus-visible), [aria-current="page"]:not(:focus-visible), [aria-selected="true"]:not(:focus-visible),
   [aria-pressed="true"]:not(:focus-visible), .app-card.selected { outline: 2px solid CanvasText; outline-offset: -2px; }
 }
+
+/* As linhas de IA no chat (definido em 2026-10-10, plano das IAs, telas 3 e 4): centralizadas e discretas, como as outras
+   linhas que não são balão. A troca de IA abre o porquê num clique; o limite sem outra IA ganha só um acento âmbar. */
+.linha-ia .ia-logo { width: 20px; height: 20px; border-radius: 6px; }
+.linha-ia .ia-logo svg { width: 12px; height: 12px; }
+.linha-ia-troca { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.linha-ia-troca > summary { list-style: none; }
+.linha-ia-troca > summary::-webkit-details-marker { display: none; }
+.linha-ia-troca > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.linha-ia-detalhe { margin: 0; max-width: 440px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.linha-link { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.linha-ia-detalhe .linha-link { color: var(--ink-2); font-weight: 400; }
+.linha-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.linha-espera .linha-centro { flex-wrap: wrap; color: var(--ink-2); background: var(--warning-soft); box-shadow: inset 0 0 0 1px var(--warning-line); }
+.linha-espera .linha-centro.estatica:hover { background: var(--warning-soft); color: var(--ink-2); }
+.linha-espera .linha-ic { color: var(--warning); }
+.linha-espera .ob-gira { width: 11px; height: 11px; }
+.linha-codigo { font-family: var(--font-mono); font-weight: 600; letter-spacing: .06em; color: var(--ink); user-select: all; }

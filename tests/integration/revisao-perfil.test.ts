@@ -108,7 +108,7 @@ describeIntegracao("revisão do perfil no card de perfil (NOD-190)", () => {
       const c = await cenario(trx);
       const card = await c.propor();
       await editarPerfil(c.deps, { agenteId: c.agenteId, forma: "shape-circle", cor: "c-green" });
-      await c.repos.agentes.atualizarPerfil(c.agenteId, { modelo: "claude-sonnet-4-5" });
+      await editarPerfil(c.deps, { agenteId: c.agenteId, modelo: "claude-sonnet-4-5" });
 
       const r = await confirmarProposta(c.deps, { propostaId: card.id });
       expect(r.data.obsoleta).toBeUndefined();
