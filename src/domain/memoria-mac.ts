@@ -54,6 +54,39 @@ export function somarPorGrupo(saidaPs: string): Map<number, number> {
   return soma;
 }
 
+/** Uma linha de `ps -A -o pid=,pgid=,rss=` (rss em KiB). */
+export type LinhaDoPs = { pid: number; pgid: number; rssKib: number };
+
+export function lerLinhasDoPs(saidaPs: string): LinhaDoPs[] {
+  const linhas: LinhaDoPs[] = [];
+  for (const linha of saidaPs.split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(linha);
+    if (m) linhas.push({ pid: Number(m[1]), pgid: Number(m[2]), rssKib: Number(m[3]) });
+  }
+  return linhas;
+}
+
+/**
+ * A memória de cada grupo, com os fugitivos (definido em 2026-10-11, ADR-097, fase 0c). O Postgres de teste abre sessão
+ * própria e sai do grupo do turno: medido na nod-motor-teste em 11/10, a tela dizia "925 MB" com 5,4 GB em uso. Um
+ * processo fora dos grupos dos turnos que `grupoDoFugitivo` reconhece (pela marca NOD_GRUPO do turno) soma no grupo
+ * dele. Os outros somam no próprio grupo, como antes.
+ */
+export function somarComFugitivos(linhas: readonly LinhaDoPs[], gruposDosTurnos: ReadonlySet<number>, grupoDoFugitivo: (pid: number) => number | undefined): Map<number, number> {
+  const soma = new Map<number, number>();
+  for (const l of linhas) {
+    const dono = gruposDosTurnos.has(l.pgid) ? l.pgid : (grupoDoFugitivo(l.pid) ?? l.pgid);
+    soma.set(dono, (soma.get(dono) ?? 0) + l.rssKib);
+  }
+  return soma;
+}
+
+/** O valor de NOD_GRUPO num ambiente lido (`/proc/<pid>/environ` ou `ps -E`), ou null. */
+export function marcaNoAmbiente(ambiente: string | undefined): string | null {
+  for (const t of (ambiente ?? "").split(/\s+/)) if (t.startsWith("NOD_GRUPO=") && t.length > "NOD_GRUPO=".length) return t.slice("NOD_GRUPO=".length);
+  return null;
+}
+
 const kibParaMb = (kib: number) => Math.round(kib / 1024);
 
 /**

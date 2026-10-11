@@ -34,7 +34,7 @@ function executorFalso(o: { nivel?: string; ps?: string; falhaSysctl?: boolean; 
 
 describe("amostrador de memória da máquina", () => {
   it("mapa 1/2/4 do sysctl e soma por grupo do ps; o turno vê a própria linha", async () => {
-    const f = executorFalso({ nivel: "2", ps: " 4242 1048576\n 4242 1048576\n 5000 512000\n" });
+    const f = executorFalso({ nivel: "2", ps: " 4242 4242 1048576\n 4243 4242 1048576\n 5000 5000 512000\n" });
     // #219: no macOS o disco também entra; aqui fora dele, para a forma não depender de onde o teste roda.
     const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, nucleos: 4, plataforma: "linux" });
     a.leitura("t1", 4242);
@@ -44,6 +44,28 @@ describe("amostrador de memória da máquina", () => {
     a.soltar("t2");
     await a.amostrar();
     expect(a.leitura("t1", 4242).totalMb).toBe(2048);
+    a.parar();
+  });
+
+  it("ADR-097 (fase 0c): o que saiu do grupo com a marca do turno soma nele; o ambiente é lido uma vez por pid", async () => {
+    // 4242 é o grupo do turno (marca aa-1); 7000 é um Postgres de teste em sessão própria com a mesma marca; 8000 é de
+    // outra marca (turno que não é desta máquina) e 9000 não tem marca.
+    const f = executorFalso({ ps: " 4242 4242 102400\n 7000 7000 307200\n 7001 7000 102400\n 8000 8000 204800\n 9000 9000 50000\n" });
+    const lidos: number[][] = [];
+    const ambientes = async (pids: readonly number[]) => {
+      lidos.push([...pids]);
+      const env: Record<number, string> = { 7000: "PATH=/x NOD_GRUPO=aa-1", 7001: "NOD_GRUPO=aa-1 HOME=/y", 8000: "NOD_GRUPO=bb-2", 9000: "PATH=/x" };
+      return new Map(pids.filter((p) => env[p] !== undefined).map((p) => [p, env[p]!]));
+    };
+    const a = criarAmostradorMemoria({ env: {}, executar: f.executar, intervaloMs: 10 ** 6, plataforma: "linux", marcas: () => new Map([["aa-1", 4242]]), ambientes });
+    a.leitura("t1", 4242);
+    await a.amostrar();
+    // 100 MB do grupo + 300 + 100 do Postgres fugitivo; o de outra marca e o sem marca não entram.
+    expect(a.leitura("t1", 4242).porTurno).toEqual([{ turnoId: "t1", mb: 500 }]);
+    expect(a.leitura("t1", 4242).totalMb).toBe(500);
+    await a.amostrar();
+    // A segunda amostra não relê ninguém: o ambiente não muda depois do exec.
+    expect(lidos).toEqual([[7000, 7001, 8000, 9000]]);
     a.parar();
   });
 
@@ -76,7 +98,7 @@ describe("amostrador de memória da máquina", () => {
     const executar: Executar = async (bin) => {
       if (bin.endsWith("sysctl")) return "1";
       if (falhar) throw new Error("ps");
-      return " 77 2048\n";
+      return " 77 77 2048\n";
     };
     const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6 });
     a.leitura("t1", 77);
@@ -89,7 +111,7 @@ describe("amostrador de memória da máquina", () => {
 
   it("X5: o número da amostra só sobe quando o nível ou a memória de um grupo vivo mudou", async () => {
     let nivel = "1";
-    let ps = " 4242 1024\n 9999 1\n";
+    let ps = " 4242 4242 1024\n 9999 9999 1\n";
     const executar: Executar = async (bin, args) => (args.includes("vm.loadavg") ? "{ 0.5 0.4 0.3 }" : bin.endsWith("sysctl") ? nivel : ps);
     const a = criarAmostradorMemoria({ env: {}, executar, intervaloMs: 10 ** 6, nucleos: 4 });
     a.leitura("t1", 4242);
@@ -98,10 +120,10 @@ describe("amostrador de memória da máquina", () => {
     await a.amostrar();
     expect(a.amostra()).toBe(primeira);
     // Grupo que não é de turno nenhum não conta.
-    ps = " 4242 1024\n 9999 2\n";
+    ps = " 4242 4242 1024\n 9999 9999 2\n";
     await a.amostrar();
     expect(a.amostra()).toBe(primeira);
-    ps = " 4242 4096\n";
+    ps = " 4242 4242 4096\n";
     await a.amostrar();
     expect(a.amostra()).toBe(primeira + 1);
     nivel = "4";
