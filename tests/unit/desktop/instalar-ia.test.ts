@@ -39,7 +39,9 @@ describe("instalar a IA com um clique (2026-10-09): as partes puras", () => {
       const pastas = pastasFerramentas(join(casa, "ferramentas"));
       await mkdir(pastas.base, { recursive: true });
       const env = { HOME: casa, PATH: process.env.PATH ?? "" };
-      const ler = (flags: string[]) => execFileSync(process.execPath, [npm, "config", "get", "registry", "ignore-scripts", "omit", "include", "before", "min-release-age", ...flags], { encoding: "utf8", env, cwd: casa });
+      // `--global` como na instalação de verdade (argsNpm): sem ele o npm lê o .npmrc da pasta atual como "project" — no
+      // CI (cwd = casa) era o próprio arquivo hostil, e o `before` passava. Com `--global` o npm não lê config de projeto.
+      const ler = (flags: string[]) => execFileSync(process.execPath, [npm, "config", "get", "registry", "ignore-scripts", "omit", "include", "before", "min-release-age", "--global", ...flags], { encoding: "utf8", env, cwd: casa });
       // O teste morde: sem as flags do nod, o npm obedece ao arquivo da pessoa.
       expect(ler([])).toContain("registry=https://registro.malicioso.example/");
       const lido = ler(configuracaoDoNpm(pastas, { idadeMinima: true }));
