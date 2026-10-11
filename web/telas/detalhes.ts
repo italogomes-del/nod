@@ -8,6 +8,7 @@ import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../li
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { VELOCIDADES, VOZES } from "./ligacao.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
+import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { iasDaTela, ordemDaPessoa, rascunhoDe, renderInteligencia, renderLinhaInteligencia, type ContextoInteligencia } from "./inteligencia.ts";
 import { UI_IAS_INICIAL } from "./cartao-ia.ts";
@@ -119,7 +120,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   const ambiente = dona
     ? `<div class="gv-cartao">
         ${linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`)}
-        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${a.harness !== "codex-cli" ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
+        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`

@@ -22,6 +22,7 @@ import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
+import type { TipoAnexo } from "../../../contracts/anexo.ts";
 import { HARNESSES, SEM_CAPACIDADES, type CapacidadesHarness, type IdHarness } from "../../../contracts/harness.ts";
 
 export function exigir(condicao: unknown): asserts condicao {
@@ -141,14 +142,15 @@ function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
   return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
+const TIPOS_ANEXO: readonly TipoAnexo[] = ["imagem", "pdf", "texto"];
 /**
  * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente
  * = app antigo (undefined, e a absorção segue como antes); fora do formato, a renovação é recusada e o app reenvia.
  */
 /**
  * definido em 2026-10-08 (revisão do épico, S15): as capacidades que a máquina anuncia por harness no conectar. Só ids
- * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true`; o resto é ignorado (o anúncio é
- * extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
+ * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true` (`anexos`: só os tipos conhecidos);
+ * o resto é ignorado (o anúncio é extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
  */
 export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
@@ -158,7 +160,9 @@ export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, Cap
     const c = anunciadas[h.id];
     if (!h.integrado || typeof c !== "object" || c === null || Array.isArray(c)) continue;
     const bruto = c as Record<string, unknown>;
-    saida[h.id] = Object.fromEntries(Object.keys(SEM_CAPACIDADES).map((k) => [k, bruto[k] === true])) as CapacidadesHarness;
+    // NOD-207: `anexos` é uma lista; fica só o que é tipo de anexo conhecido.
+    const anexos = Array.isArray(bruto.anexos) ? TIPOS_ANEXO.filter((t) => (bruto.anexos as unknown[]).includes(t)) : [];
+    saida[h.id] = { ...SEM_CAPACIDADES, ...Object.fromEntries(Object.entries(SEM_CAPACIDADES).filter(([, v]) => typeof v === "boolean").map(([k]) => [k, bruto[k] === true])), anexos };
   }
   return Object.keys(saida).length > 0 ? saida : undefined;
 }

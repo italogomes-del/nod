@@ -11,7 +11,7 @@ function executor(atual: EstadoExecutor["atual"], claude: Inventario): EstadoExe
   return {
     atual,
     recusa: null,
-    harnesses: { simulacao: atual === "catcher", padrao: null, opcoes: [] },
+    harnesses: { simulacao: atual === "catcher", padrao: null, legado: "claude-cli", opcoes: [] },
     opcoes: [
       { id: "catcher", custo: "zero", inventario: pronto("catcher") },
       { id: "claude-cli", custo: "real", inventario: claude },

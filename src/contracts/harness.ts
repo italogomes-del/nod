@@ -1,4 +1,5 @@
 import type { EsforcoAgente } from "./agente.ts";
+import type { TipoAnexo } from "./anexo.ts";
 import type { Inventario } from "./inventario.ts";
 
 export type IdHarness = "claude-cli" | "codex-cli" | "cursor-cli" | "hermes";
@@ -16,9 +17,19 @@ export type OpcaoHarness = {
   modelos: readonly ModeloHarness[];
   /** O "Recomendado" da IA (definido em 2026-10-10, decisão do Marlon): o modelo e o raciocínio de quem não escolheu. */
   recomendado?: { modelo: string; raciocinio: EsforcoAgente };
+  /** O que o harness sabe fazer (CAPACIDADES_HARNESS): a web decide anexo e pasta por aqui, nunca pelo id (ADR-083). */
+  capacidades: CapacidadesHarness;
   inventario: Inventario;
 };
-export type CatalogoHarness = { padrao: IdHarness | null; simulacao: boolean; opcoes: OpcaoHarness[] };
+/** `legado`: o harness do bot `auto` (ou sem harness) quando a pergunta é "o que ele sabe fazer" (HARNESS_LEGADO). */
+export type CatalogoHarness = { padrao: IdHarness | null; simulacao: boolean; legado: IdHarness; opcoes: OpcaoHarness[] };
+
+/**
+ * definido em 2026-09-18 (ADR-083, NOD-207 em 2026-10-11): o harness dos campos anteriores à escolha de IA. O `auto` com
+ * um modelo do Claude fica nele, o bot `auto`/sem harness lê anexo e traduz comando como ele, e a fila trata o `auto`
+ * fixado como ele. Um lugar só: o domínio, a fila (SQL do reivindicar) e o catálogo da web leem daqui.
+ */
+export const HARNESS_LEGADO = "claude-cli" satisfies IdHarness;
 
 /**
  * O que um harness sabe fazer (definido em 2026-10-07, ADR-083). Toda diferença de comportamento entre harnesses passa
@@ -30,6 +41,14 @@ export type CatalogoHarness = { padrao: IdHarness | null; simulacao: boolean; op
  * - `bifurcaSessao`: copia uma sessão e segue nas duas (`--fork-session`). Sem isto a rede de 2 min não promove.
  * - `processoProprio`: o driver sobe um processo local cujo grupo dá para medir (memória) e encerrar.
  * - `terminal`: o kit de terminal do nod (hook das nativas, ADR-055/065) vale para este harness.
+ * - `anexos`: os tipos de anexo que o modelo lê como conteúdo (ADR-046). Claude: imagem e PDF viram blocos da mensagem
+ *   (medido em 2026-09-24 com `claude -p --input-format stream-json`: leu PNG e PDF certo); Codex: `codex exec --image` só aceita
+ *   imagem, PDF fica de fora; texto vira texto da mensagem nos dois. Vazio = o servidor recusa e o composer não oferece.
+ * - `comandosDoCli`: os comandos da conversa viram os do CLI (/uso → /cost, NOD-179). Sem isto, /uso responde a frase
+ *   fixa do nod (USO_FORA_DO_CLAUDE) e o modelo não inventa um uso.
+ * - `pastaDeTrabalho`: o turno usa a pasta do bot no Mac (`~/nod/<bot>`, o cwd do kit do terminal, ADR-052) e a gaveta
+ *   mostra o caminho. Sem isto a gaveta mostra só a linha "Pasta de trabalho", sem o caminho (desde 2026-09-28 o Codex
+ *   continua só com as ferramentas do proxy, ADR-052).
  */
 export type CapacidadesHarness = {
   mensagemNoMeio: boolean;
@@ -37,18 +56,21 @@ export type CapacidadesHarness = {
   bifurcaSessao: boolean;
   processoProprio: boolean;
   terminal: boolean;
+  anexos: readonly TipoAnexo[];
+  comandosDoCli: boolean;
+  pastaDeTrabalho: boolean;
 };
 
 /** Harness desconhecido ou em preparação: nenhuma capacidade, todo caminho cai no "sem a capacidade". */
-export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: false, processoProprio: false, terminal: false };
+export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, retomaSessao: false, bifurcaSessao: false, processoProprio: false, terminal: false, anexos: [], comandosDoCli: false, pastaDeTrabalho: false };
 
 /**
  * definido em 2026-10-07 (ADR-083): o Codex do chat roda no app-server quando a sonda o acha (`turn/steer`), mas
  * `thread/resume` e fork não foram medidos — continua recebendo o histórico recente. Mudou uma medição: troque aqui.
  */
 export const CAPACIDADES_HARNESS: Record<IdHarness, CapacidadesHarness> = {
-  "claude-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true },
-  "codex-cli": { mensagemNoMeio: true, retomaSessao: false, bifurcaSessao: false, processoProprio: true, terminal: false },
+  "claude-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "pdf", "texto"], comandosDoCli: true, pastaDeTrabalho: true },
+  "codex-cli": { mensagemNoMeio: true, retomaSessao: false, bifurcaSessao: false, processoProprio: true, terminal: false, anexos: ["imagem", "texto"], comandosDoCli: false, pastaDeTrabalho: false },
   "cursor-cli": SEM_CAPACIDADES,
   hermes: SEM_CAPACIDADES,
 };
@@ -88,4 +110,4 @@ export const HARNESSES = [
       { id: "gpt-6.1-sol", nome: "GPT-6.1 Sol", descricao: "Dia a dia, geração mais nova", raciocinios: RACIOCINIOS_SEM_MAX }, { id: "gpt-6-sol", nome: "GPT-6 Sol", descricao: "Dia a dia, geração 6", raciocinios: RACIOCINIOS_SEM_MAX }, { id: "gpt-6-luna", nome: "GPT-6 Luna", descricao: "Rápido, geração 6", raciocinios: RACIOCINIOS_SEM_MAX }] },
   { id: "cursor-cli", nome: "Cursor", descricao: "Integração em preparação.", integrado: false, modelos: [] },
   { id: "hermes", nome: "Hermes", descricao: "Integração em preparação; poderá oferecer modelos de diferentes provedores, como Grok.", integrado: false, modelos: [] },
-] as const satisfies readonly Omit<OpcaoHarness, "inventario">[];
+] as const satisfies readonly Omit<OpcaoHarness, "inventario" | "capacidades">[];

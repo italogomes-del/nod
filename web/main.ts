@@ -77,6 +77,7 @@ import { comportamentoDaRolagem, movimentoReduzido } from "./lib/movimento.ts";
 import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
+import { aceitaDoBot } from "./lib/capacidades.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
@@ -1681,10 +1682,9 @@ async function enviarComposer(): Promise<void> {
 // para o rascunho de anexos sobreviver a ir e voltar entre conversas como o texto sobrevive.
 const anexosPendentes = new Map<string, ItemAnexo[]>();
 
+/** NOD-207: o que o composer oferece vem das capacidades do catálogo (web/lib/capacidades.ts), nunca do id do harness. */
 function aceitaDo(harness: string | undefined): Aceita | undefined {
-  if (harness === "codex-cli") return "sem_pdf";
-  if (harness === undefined || harness === "auto" || harness === "claude-cli") return "tudo";
-  return undefined;
+  return aceitaDoBot(estado.executor?.harnesses, harness);
 }
 
 function redesenharAnexos(): void {

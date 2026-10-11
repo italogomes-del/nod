@@ -1,4 +1,5 @@
 import { delimiter, join } from "node:path";
+import { HARNESS_LEGADO, HARNESSES } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { log } from "../../obs/log.ts";
@@ -140,13 +141,14 @@ export function motivoNodExecutorDesconhecido(valor: string): string {
 /**
  * NOD_EXECUTOR escolhe; sem variável, catcher fora de produção e claude-cli em produção
  * (NODE_ENV=production). Só devolve um driver PRONTO; caso contrário diz por quê. Valor desconhecido → sem executor.
+ * No automático vale o primeiro harness integrado e pronto na ordem do catálogo (HARNESSES); nenhum = o do legado.
  */
 export function executorPadrao(env: EnvRegistry, registry: Registry): ExecutorPadrao {
   const lido = lerNodExecutor(env);
   if ("desconhecido" in lido) return { id: null, motivo: motivoNodExecutorDesconhecido(lido.desconhecido) };
   const { pedido } = lido;
   const automatico = pedido === "auto" || (!pedido && env.NODE_ENV === "production");
-  const disponivel: IdDriver = registry["claude-cli"].estado === "pronto" ? "claude-cli" : registry["codex-cli"]?.estado === "pronto" ? "codex-cli" : "claude-cli";
+  const disponivel: IdDriver = HARNESSES.find((h) => h.integrado && registry[h.id]?.estado === "pronto")?.id ?? HARNESS_LEGADO;
   const escolhido: IdDriver = automatico ? disponivel : pedido ?? "catcher";
   const registro = registry[escolhido];
   if (registro?.estado === "pronto") return { id: escolhido };

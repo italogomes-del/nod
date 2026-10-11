@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { expandirTil } from "../executor/caminho.ts";
 import { criarWorkspaces } from "../fundo/workspaces.ts";
 import { rotasWorkspaces } from "./rotas/workspaces.ts";
-import { HARNESSES } from "../../contracts/harness.ts";
+import { HARNESS_LEGADO, HARNESSES } from "../../contracts/harness.ts";
 import type { CatalogoHarness, IdHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
@@ -19,7 +19,7 @@ import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
-import { iaAtualDoCatalogo } from "../../domain/harness.ts";
+import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
 import { iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../../domain/inteligencia.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
@@ -859,8 +859,9 @@ export function comporApp(o: OpcoesCompor): App {
   /** `recusa` é da RESPOSTA da troca pedida, nunca guardada: quem só consulta (GET, outras telas) não vê a recusa de outra pessoa. */
   function catalogoHarness(pessoaId?: string): CatalogoHarness {
     const remotos = compartilhado && pessoaId ? ponteHttp.harnessesDaPessoa(pessoaId) : null;
-    const opcoes = HARNESSES.map((h) => ({ ...h, inventario: remotos ? remotos[h.id] ?? { estado: "ausente" as const, motivo: "Não conectado neste computador", em: relogio() } : inventarioDe(h.id) }));
-    return { simulacao: !compartilhado && executorAtual === "catcher", padrao: opcoes.find((h) => h.id === driverPreferido && h.inventario.estado === "pronto")?.id ?? opcoes.find((h) => h.inventario.estado === "pronto")?.id ?? null, opcoes };
+    // NOD-207: as capacidades vêm do contrato nos dois modos (a ponte só diz o inventário de cada máquina).
+    const opcoes = opcoesDoCatalogo((id) => remotos ? remotos[id] ?? { estado: "ausente" as const, motivo: "Não conectado neste computador", em: relogio() } : inventarioDe(id));
+    return { simulacao: !compartilhado && executorAtual === "catcher", legado: HARNESS_LEGADO, padrao: opcoes.find((h) => h.id === driverPreferido && h.inventario.estado === "pronto")?.id ?? opcoes.find((h) => h.inventario.estado === "pronto")?.id ?? null, opcoes };
   }
   function estadoExecutor(recusa: string | null = null): EstadoExecutor {
     return { atual: idDriverAtual(), opcoes: IDS_DRIVER.map((id) => ({ id, custo: id === "catcher" ? "zero" : "real", inventario: inventarioDe(id) })), recusa, harnesses: catalogoHarness() };

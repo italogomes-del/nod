@@ -6,7 +6,8 @@ import {
   type ComandoDaConversa,
   type ComandoDoMac,
 } from "../contracts/comandos.ts";
-import type { IdHarness } from "../contracts/harness.ts";
+import { HARNESS_LEGADO, type IdHarness } from "../contracts/harness.ts";
+import { capacidadesDe } from "./harness.ts";
 
 /**
  * Os comandos da conversa (definido em 2026-09-28, canvas "Comandos /"). Nomes em português, e o nome do terminal como
@@ -38,9 +39,12 @@ export function comandoDaConversa(texto: string): { comando: ComandoDaConversa; 
  */
 export const USO_FORA_DO_CLAUDE = "O uso do plano está em Seu espaço › Conexão.";
 
-/** O comando da conversa só vira o do Claude Code quando é ele que roda o turno; sem harness (catcher, legado), é. */
+/**
+ * O comando da conversa só vira o do CLI quando o harness do turno tem `comandosDoCli` (ADR-083); sem harness (catcher,
+ * legado), vale o do legado (HARNESS_LEGADO).
+ */
 function ehClaudeCode(harness: IdHarness | null | undefined): boolean {
-  return !harness || harness === "claude-cli";
+  return capacidadesDe(harness ?? HARNESS_LEGADO).comandosDoCli;
 }
 
 /**
