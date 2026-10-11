@@ -47,7 +47,7 @@ async function worktree(rel: string, branch: string): Promise<string> {
   return destino;
 }
 
-describe("ADR-095 §4: guardar antes de apagar", () => {
+describe("ADR-096 §4: guardar antes de apagar", () => {
   it("um `*.pid` de processo vivo segura a pasta (o Postgres de teste do bot); o de processo morto não", async () => {
     const pasta = join(raiz, "Ze 1", "qa-pg-aaaaaa");
     await mkdir(join(pasta, "pgdata"), { recursive: true });
@@ -131,7 +131,7 @@ describe("ADR-095 §4: guardar antes de apagar", () => {
   });
 });
 
-describe("ADR-095 §4: as órfãs da raiz do bot", () => {
+describe("ADR-096 §4: as órfãs da raiz do bot", () => {
   const o = (extra: Partial<Parameters<typeof limparOrfas>[0]> = {}) => ({ home, executar: executarReal(), montagens: async () => [], livre: async () => 0, ...extra });
 
   it("parada há 30 dias: a limpa sai pelo git (a branch fica); a suja é guardada antes; a recente fica", async () => {

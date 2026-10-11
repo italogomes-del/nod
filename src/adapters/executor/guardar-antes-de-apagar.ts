@@ -6,7 +6,7 @@ import { log } from "../../obs/log.ts";
 import type { ExecutarComando } from "./limpeza-das-tasks.ts";
 
 /**
- * Guardar antes de apagar (ADR-095 §4, definido em 2026-10-11). A limpeza da ADR-088 só tirava a worktree que o git
+ * Guardar antes de apagar (ADR-096 §4, definido em 2026-10-11). A limpeza da ADR-088 só tirava a worktree que o git
  * deixa tirar sem --force; o resto (worktree suja, `.env`, HEAD solto, `pgdata`, logs) segurava a pasta para sempre. Aqui
  * a pasta inteira vira um `.tar.gz` em `~/nod/.guardado/<bot>/`, sem dependências e caches; o HEAD de cada worktree ganha
  * uma referência no clone (`refs/nod/guardado/<rotulo>/<nome>`), para nenhum commit se perder; e só depois do guardado

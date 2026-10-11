@@ -248,7 +248,7 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
       usoProcessador: l.uso,
       cargaProcessador: l.carga,
       fila: l.fila,
-      // ADR-095 §6: com a estimativa de quando o livre chega ao vermelho, só abaixo de 24 h (null = longe ou não cai).
+      // ADR-096 §6: com a estimativa de quando o livre chega ao vermelho, só abaixo de 24 h (null = longe ou não cai).
       disco: l.disco && l.discoNivel ? { ...l.disco, nivel: l.discoNivel, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(l.discoAcabaEmMs) } : null,
       discoSuportado: l.discoMedido,
       motivoEspera: portao.fundo,

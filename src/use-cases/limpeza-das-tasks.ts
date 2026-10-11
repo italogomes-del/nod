@@ -40,7 +40,7 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     ...(o.simulada === true ? { simulada: true, estimadoBytes: inteiro(o.estimadoBytes) } : {}),
     ...(o.adiada === true ? { adiada: true } : {}),
     ...(o.apertada === true ? { apertada: true, cachesBytes: inteiro(o.cachesBytes) } : {}),
-    // ADR-095 §4: só aparecem quando a máquina manda (máquina antiga não manda).
+    // ADR-096 §4: só aparecem quando a máquina manda (máquina antiga não manda).
     ...(inteiro(o.guardadas) > 0 ? { guardadas: inteiro(o.guardadas), guardadoBytes: inteiro(o.guardadoBytes) } : {}),
     ...(inteiro(o.guardadosVencidos) > 0 ? { guardadosVencidos: inteiro(o.guardadosVencidos) } : {}),
     ...(inteiro(o.orfasRemovidas) > 0 ? { orfasRemovidas: inteiro(o.orfasRemovidas) } : {}),

@@ -138,12 +138,12 @@ export type RelatoLimpeza = {
   estimadoBytes?: number;
   /** Segunda revisão do #225: o Docker está instalado e não respondeu — a passada não mexeu em nada. */
   adiada?: boolean;
-  /** ADR-095: a passada foi disparada pelo disco apertado (fora das 6 h). */
+  /** ADR-096: a passada foi disparada pelo disco apertado (fora das 6 h). */
   apertada?: boolean;
-  /** ADR-095: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
+  /** ADR-096: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
   cachesBytes?: number;
   /**
-   * ADR-095 §4: pastas (de task ou órfãs) guardadas compactadas em `~/nod/.guardado` e apagadas, o tamanho dos guardados,
+   * ADR-096 §4: pastas (de task ou órfãs) guardadas compactadas em `~/nod/.guardado` e apagadas, o tamanho dos guardados,
    * os guardados vencidos apagados e as órfãs da raiz que saíram (limpas, sem guardar).
    */
   guardadas?: number;
@@ -154,7 +154,7 @@ export type RelatoLimpeza = {
 /**
  * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
  * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
- * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar). ADR-095 §4: `processo_vivo` (um `*.pid`
+ * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar). ADR-096 §4: `processo_vivo` (um `*.pid`
  * da pasta aponta para um processo vivo, como um Postgres de teste) e `grande_demais` (o guardado passaria de 2 GB).
  */
 export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais";
@@ -177,7 +177,7 @@ export interface PonteInterna {
   desconectar(machineId: string): Promise<void>;
   /**
    * ADR-088 (2026-10-09): as pastas de task encerradas que este Mac pode limpar. A regra (quem pode) é do servidor, que
-   * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda. ADR-095: `apertado` = o
+   * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda. ADR-096: `apertado` = o
    * disco da máquina está amarelo ou vermelho, e a task encerrada há mais de 2 h já vale como `encerrada`.
    */
   pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean }): Promise<PastaParaLimpar[]>;

@@ -437,7 +437,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     await chamar("conectar", { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } });
     expect(await chamar("limpeza", { pessoaId: "outra" })).toEqual({ status: 200, body: { pastas: [pasta] } });
     expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId, { apertado: false });
-    // ADR-095: o disco apertado atravessa; só o booleano `true` conta.
+    // ADR-096: o disco apertado atravessa; só o booleano `true` conta.
     await chamar("limpeza", { apertado: true });
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: true });
     await chamar("limpeza", { apertado: "sim" });
@@ -450,10 +450,10 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
     await chamar("limpeza/resultado", { relato: { adiada: true } });
     expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
-    // ADR-095: a passada apertada atravessa marcada, com o que os caches liberaram.
+    // ADR-096: a passada apertada atravessa marcada, com o que os caches liberaram.
     await chamar("limpeza/resultado", { relato: { apertada: true, cachesBytes: 4096, removidas: 2 } });
     expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }));
-    // ADR-095 §4: os guardados, os vencidos, as órfãs e os motivos novos atravessam; número inválido some.
+    // ADR-096 §4: os guardados, os vencidos, as órfãs e os motivos novos atravessam; número inválido some.
     await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1 } } });
     const ultimo = relatarLimpeza.mock.lastCall?.[1];
     expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1 } });

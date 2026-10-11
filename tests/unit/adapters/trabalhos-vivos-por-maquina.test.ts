@@ -29,7 +29,7 @@ describe("trabalhos vivos por máquina", () => {
   });
 });
 
-/** ADR-095 §6: o histórico do livre por máquina vira a estimativa de quando ele acaba, e o aviso vira frame. */
+/** ADR-096 §6: o histórico do livre por máquina vira a estimativa de quando ele acaba, e o aviso vira frame. */
 describe("a tendência do disco por máquina", () => {
   const comDisco = (livreMb: number) => ({ nivel: "verde" as const, totalMb: 500, porTurno: [], disco: { livreMb, totalMb: 100 * 1024 } });
 

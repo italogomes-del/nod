@@ -265,7 +265,7 @@ export function discoDoStatfs(s: { bsize: number | bigint; blocks: number | bigi
 }
 
 /**
- * ADR-095 §6 (definido em 2026-10-11): a tendência do disco. Em 11/10 a VM dos bots perdeu 2 GB numa hora de trabalho, e
+ * ADR-096 §6 (definido em 2026-10-11): a tendência do disco. Em 11/10 a VM dos bots perdeu 2 GB numa hora de trabalho, e
  * ninguém soube antes de os bots pararem. O servidor guarda o espaço livre de cada máquina (um ponto a cada 5 min, as
  * últimas 3 h), estima pela reta dos mínimos quadrados quando ele chega ao vermelho (3 GB) e avisa abaixo de 24 h. Menos
  * de 30 min de leituras ou de 3 pontos não dizem nada; disco estável ou que ganhou espaço também não.

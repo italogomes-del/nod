@@ -69,7 +69,7 @@ function detalheDaMemoria(memoria: NivelPressao, uso: UsoDoMac, totalBots: numbe
 }
 
 /**
- * ADR-095 §6: "cerca de 6 h", "cerca de 40 min", "menos de 10 min". O servidor só manda a estimativa abaixo de 24 h.
+ * ADR-096 §6: "cerca de 6 h", "cerca de 40 min", "menos de 10 min". O servidor só manda a estimativa abaixo de 24 h.
  */
 export function tempoAteAcabar(ms: number): string {
   const min = Math.round(ms / 60_000);
@@ -78,7 +78,7 @@ export function tempoAteAcabar(ms: number): string {
   return `cerca de ${Math.round(min / 60)} h`;
 }
 
-/** ADR-095 §6: o status curto do disco, com a tendência quando ela vem ("12 GB livres · acaba em cerca de 6 h"). */
+/** ADR-096 §6: o status curto do disco, com a tendência quando ela vem ("12 GB livres · acaba em cerca de 6 h"). */
 export function statusDoDisco(d: DiscoDoMac): string {
   const livres = `${discoLegivel(d.livreMb)} livres`;
   return typeof d.acabaEmMs === "number" ? `${livres} · acaba em ${tempoAteAcabar(d.acabaEmMs)}` : livres;
@@ -86,7 +86,7 @@ export function statusDoDisco(d: DiscoDoMac): string {
 
 /** Os limites vêm do servidor (`DiscoDoMac`): a web só mostra, quem decide é o domínio. */
 function detalheDoDisco(d: DiscoDoMac): string {
-  // ADR-095 §6: no ritmo das últimas horas, quando o livre chega ao limite; a limpeza já age sozinha.
+  // ADR-096 §6: no ritmo das últimas horas, quando o livre chega ao limite; a limpeza já age sozinha.
   const tendencia = typeof d.acabaEmMs === "number"
     ? ` No ritmo das últimas horas, o espaço livre chega a ${discoLegivel(d.criticoMb)} em ${tempoAteAcabar(d.acabaEmMs)}. O Nod apaga sozinho o que dá quando o espaço aperta ou está para acabar: tasks encerradas, cópias paradas e caches. O que não se refaz é guardado compactado antes.`
     : "";

@@ -60,7 +60,7 @@ async function worktree(rel: string, branch: string): Promise<string> {
   return destino;
 }
 
-/** ADR-095 §4: o que está no guardado de `<bot>/<slug>` (`tar -tzf`) e o conteúdo de um arquivo dele (`tar -xzOf`). */
+/** ADR-096 §4: o que está no guardado de `<bot>/<slug>` (`tar -tzf`) e o conteúdo de um arquivo dele (`tar -xzOf`). */
 const arquivoGuardado = (bot: string, slug: string) => join(home, "nod", ".guardado", bot, `${slug}.tar.gz`);
 const noGuardado = (bot: string, slug: string) => execFileSync("tar", ["-tzf", arquivoGuardado(bot, slug)]).toString().split("\n").filter(Boolean);
 const lerDoGuardado = (bot: string, slug: string, caminho: string) => execFileSync("tar", ["-xzOf", arquivoGuardado(bot, slug), `${slug}/${caminho}`]).toString();
@@ -106,7 +106,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(git(clone, "branch", "--list", "feat/filtros")).toContain("feat/filtros");
   });
 
-  it("worktree suja (arquivo alterado ou novo) não sai pelo remove sem --force; ADR-095: na encerrada é guardada antes, e só então sai", async () => {
+  it("worktree suja (arquivo alterado ou novo) não sai pelo remove sem --force; ADR-096: na encerrada é guardada antes, e só então sai", async () => {
     const alterada = await worktree("Dev 1/task-a-aaaaaa/acme", "feat/a");
     await writeFile(join(alterada, "README.md"), "mudou\n");
     const nova = await worktree("Dev 1/task-b-bbbbbb/acme", "feat/b");
@@ -127,7 +127,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(chamadas.some((c) => c.includes("prune"))).toBe(false);
   });
 
-  it("ADR-095: na task de menos de 3 dias (`so_com_pr_mergeado`) a worktree suja fica como estava, sem guardado", async () => {
+  it("ADR-096: na task de menos de 3 dias (`so_com_pr_mergeado`) a worktree suja fica como estava, sem guardado", async () => {
     const wt = await worktree("Dev 1/recente-acacac/acme", "feat/recente");
     await writeFile(join(wt, "rascunho.txt"), "ainda trabalhando\n");
     const r = await limparPastas([{ trabalhoId: "t", pasta: "Dev 1/recente-acacac", quando: "so_com_pr_mergeado" }], opcoes(executor()));
@@ -137,7 +137,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(arquivoGuardado("Dev 1", "recente-acacac"))).toBe(false);
   });
 
-  it("revisão #225 (1): worktree com outra worktree suja ou clone aninhados em pasta IGNORADA não sai sem guardar; ADR-095: os dois vão no guardado", async () => {
+  it("revisão #225 (1): worktree com outra worktree suja ou clone aninhados em pasta IGNORADA não sai sem guardar; ADR-096: os dois vão no guardado", async () => {
     const comWorktree = await worktree("Eng 1/agentes-cccccc/acme", "feat/agentes");
     const agente = join(comWorktree, ".claude", "worktrees", "agent-1");
     await mkdir(join(agente, ".."), { recursive: true });
@@ -158,7 +158,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(agente)).toBe(false);
   });
 
-  it("revisão #225 (1 e 2ª revisão): arquivo ignorado que não se refaz (backup, .env, output/, .env dentro de dist/) segura a worktree; ADR-095: vai no guardado", async () => {
+  it("revisão #225 (1 e 2ª revisão): arquivo ignorado que não se refaz (backup, .env, output/, .env dentro de dist/) segura a worktree; ADR-096: vai no guardado", async () => {
     const comBackup = await worktree("Dev 2/backup-eeeeee/acme", "feat/backup");
     await mkdir(join(comBackup, "backups", "local"), { recursive: true });
     await writeFile(join(comBackup, "backups", "local", "nod.dump"), "dados");
@@ -183,7 +183,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(comEnv)).toBe(false);
   });
 
-  it("revisão #225 (2): commit com HEAD solto (fora de branch, remoto ou tag) segura a worktree; ADR-095: ganha uma referência no clone antes de sair", async () => {
+  it("revisão #225 (2): commit com HEAD solto (fora de branch, remoto ou tag) segura a worktree; ADR-096: ganha uma referência no clone antes de sair", async () => {
     const wt = await worktree("Dev 3/solto-111111/acme", "feat/solto");
     git(wt, "checkout", "-q", "--detach");
     await writeFile(join(wt, "novo.txt"), "commit sem branch\n");
@@ -216,7 +216,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(existsSync(reaproveitada)).toBe(true);
   });
 
-  it("pasta vazia de task encerrada sai; ADR-095: a pasta com arquivo que não é worktree é guardada e sai", async () => {
+  it("pasta vazia de task encerrada sai; ADR-096: a pasta com arquivo que não é worktree é guardada e sai", async () => {
     await mkdir(join(home, "nod", "Elis", "vazia-eeeeee", "sub"), { recursive: true });
     await writeFile(join(home, "nod", "Elis", "vazia-eeeeee", ".DS_Store"), "");
     await mkdir(join(home, "nod", "Elis", "com-relatorio-ffffff"), { recursive: true });
@@ -312,7 +312,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     await mkdir(join(home, "nod", "Dev 4", "vazia-999999"), { recursive: true });
     const { executar, chamadas } = executor();
     const r = await limparPastas([encerrada("Dev 4/limpa-777777", "t-1"), encerrada("Dev 4/suja-888888", "t-2"), encerrada("Dev 4/vazia-999999", "t-3")], opcoes({ executar, simular: true }));
-    // ADR-095: a suja seria guardada e sairia; na simulação nem o guardado nasce.
+    // ADR-096: a suja seria guardada e sairia; na simulação nem o guardado nasce.
     expect(r).toMatchObject({ simulada: true, removidas: 1, pastasApagadas: 3, guardadas: 1, puladas: { suja: 1 } });
     expect(existsSync(suja)).toBe(true);
     expect(existsSync(join(home, "nod", ".guardado"))).toBe(false);
@@ -322,7 +322,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(chamadas.some((c) => c.includes("worktree remove"))).toBe(false);
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "simular" })).toBe("simular");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "desligada" })).toBe("desligada");
-    // ADR-095: o padrão, sem nada no ambiente, é apagar; `simular` e `desligada` só valem escritos por extenso.
+    // ADR-096: o padrão, sem nada no ambiente, é apagar; `simular` e `desligada` só valem escritos por extenso.
     expect(modoDaLimpeza({})).toBe("ligada");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "qualquer" })).toBe("ligada");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: " Simular " })).toBe("simular");
@@ -342,7 +342,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(await readdir(fora)).toEqual(["importante.txt"]);
   });
 
-  it("clone inteiro (pasta .git) dentro da task não sai pelo remove; ADR-095: vai inteiro no guardado, com o histórico", async () => {
+  it("clone inteiro (pasta .git) dentro da task não sai pelo remove; ADR-096: vai inteiro no guardado, com o histórico", async () => {
     const dentro = join(home, "nod", "Dev 3", "clonou-666666", "acme");
     await mkdir(join(dentro, ".."), { recursive: true });
     git(home, "clone", "-q", clone, dentro);
@@ -380,7 +380,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
   });
 });
 
-describe("ADR-095: o disco que se cuida", () => {
+describe("ADR-096: o disco que se cuida", () => {
   it("código com mais de 8 níveis de pasta não é mais `aninhado`: a worktree sai (o caso da VM dos bots em 11/10)", async () => {
     const wt = await worktree("Ze 1/gfk-1923-fatia-5-998a48/acme", "feat/fundo");
     const fundo = join(wt, "packages", "mundo-vivo", "tools", "provas", "vereditos", "mundo", "rondas", "r14-mundo-vivo", "palcos", "um");
@@ -478,7 +478,7 @@ describe("ADR-095: o disco que se cuida", () => {
     expect(chamadas.findIndex((c) => c.includes("worktree remove"))).toBeLessThan(chamadas.indexOf("[fundo] pnpm store prune"));
   });
 
-  it("ADR-095 §6: disco ainda verde, mas caindo no ritmo de acabar em menos de 6 h, já dispara a passada apertada", async () => {
+  it("ADR-096 §6: disco ainda verde, mas caindo no ritmo de acabar em menos de 6 h, já dispara a passada apertada", async () => {
     await mkdir(join(home, "nod"), { recursive: true });
     const relatos: RelatoLimpeza[] = [];
     const ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza"> = { pastasParaLimpar: async () => [], relatarLimpeza: async (_p, r) => { relatos.push(r); } };

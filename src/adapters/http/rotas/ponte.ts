@@ -286,7 +286,7 @@ export function criarPonteHttpServidor(d: {
     /**
      * ADR-088 (2026-10-09): o Mac PUXA as pastas de task encerradas que pode limpar (o servidor nunca disca, ADR-021) e
      * relata o resumo. A pessoa é a da chave; o relato só vira log (relatoValido descarta o que não é número conhecido).
-     * ADR-095: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho.
+     * ADR-096: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho.
      */
     rota("limpeza", async (ctx, b) => {
       const c = conexao(ctx);

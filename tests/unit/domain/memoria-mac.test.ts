@@ -287,7 +287,7 @@ describe("ADR-091: processador pelo uso da CPU, fila pela carga por núcleo", ()
   });
 });
 
-/** ADR-095 §6 (definido em 2026-10-11): a VM perdeu 2 GB numa hora em 11/10 sem ninguém saber antes de os bots pararem. */
+/** ADR-096 §6 (definido em 2026-10-11): a VM perdeu 2 GB numa hora em 11/10 sem ninguém saber antes de os bots pararem. */
 describe("a tendência do disco", () => {
   const MIN = 60_000;
   /** Uma leitura a cada 5 min, perdendo `porHora` MB por hora a partir de `inicio` MB livres. */

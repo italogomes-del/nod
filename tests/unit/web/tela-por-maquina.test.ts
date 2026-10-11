@@ -131,7 +131,7 @@ describe("Máquinas: a leitura de cada uma no cartão", () => {
   });
 });
 
-/** ADR-095 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem. */
+/** ADR-096 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem. */
 describe("a tendência do disco na tela", () => {
   const disco = { livreMb: 14_642, totalMb: 30_000, nivel: "verde" as const, alertaMb: 10_240, criticoMb: 3_072 };
 

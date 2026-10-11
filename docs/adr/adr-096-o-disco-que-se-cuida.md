@@ -1,4 +1,4 @@
-# ADR-095 — O disco que se cuida: a máquina dos bots não enche sem ninguém olhar
+# ADR-096 — O disco que se cuida: a máquina dos bots não enche sem ninguém olhar
 
 Status: aceito · Data: 2026-10-11 · Emenda a [ADR-088](adr-088-limpeza-das-pastas-de-task.md) (a limpeza das tasks) e
 usa os limites de disco da [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md) (#219).

@@ -26,13 +26,13 @@ import { guardarEApagar, vencerGuardados } from "./guardar-antes-de-apagar.ts";
 
 export type ResultadoComando = { codigo: number; stdout: string; stderr: string };
 /**
- * Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. `fundo` (ADR-095) =
+ * Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. `fundo` (ADR-096) =
  * comando pesado da limpeza: roda com prioridade baixa de CPU e de disco (`prefixoDeFundo`).
  */
 export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number; fundo?: boolean }) => Promise<ResultadoComando>;
 
 /**
- * ADR-095 (definido em 2026-10-11): o que a limpeza roda de pesado (`git status` numa worktree grande, `git worktree
+ * ADR-096 (definido em 2026-10-11): o que a limpeza roda de pesado (`git status` numa worktree grande, `git worktree
  * remove` apagando node_modules, `du`, a limpeza dos caches) cede a CPU e o disco aos bots. Em 11/10, três `du` em
  * `/home` da VM dos bots (1,8 milhão de inodes), ao lado dos turnos, deixaram a máquina sem responder nem ao SSH até um
  * reset: ~170 MB/s de leitura com 20% de CPU no Cloud Monitoring. Prioridade baixa, mas nunca a ociosa: com a ociosa
@@ -53,7 +53,7 @@ export function prefixoDeFundo(plataforma: NodeJS.Platform, existe: (caminho: st
 /**
  * Revisão do #225: `simular` faz a passada inteira, com todas as checagens, e só registra o que sairia
  * (`limpeza_simulada`); `ligada` apaga; `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`. revisto em 2026-10-11
- * (ADR-095, decisão do Marlon): o padrão é `ligada` em todo modo. Em `simular` nada saía, e a VM dos bots chegou a 99%
+ * (ADR-096, decisão do Marlon): o padrão é `ligada` em todo modo. Em `simular` nada saía, e a VM dos bots chegou a 99%
  * com a limpeza só contando; quem usa o nod não deveria precisar saber desta variável. `simular` e `desligada` só valem
  * escritos por extenso; valor desconhecido liga.
  */
@@ -78,7 +78,7 @@ const PRAZO_CURTO_MS = 30_000;
 const PROFUNDIDADE_MAXIMA = 3;
 /**
  * Revisão do #225: a busca de `.git` aninhado dentro da worktree (fora de node_modules) olha até este número de pastas;
- * passou disso, a worktree fica (`aninhado`) — sem ter olhado tudo, não se apaga. revisto em 2026-10-11 (ADR-095): saiu
+ * passou disso, a worktree fica (`aninhado`) — sem ter olhado tudo, não se apaga. revisto em 2026-10-11 (ADR-096): saiu
  * o teto de 8 níveis. Ele segurava como `aninhado` 74 das 97 worktrees puladas na VM dos bots, sem `.git` nenhum dentro:
  * código com 9 níveis (`packages/mundo-vivo/tools/provas/vereditos/mundo/rondas/r14-mundo-vivo/palcos`) bastava. A
  * worktree do gamefik tem 1.193 pastas fora de node_modules (medido em 2026-10-11 com `find`). Link não é seguido
@@ -156,11 +156,11 @@ export type OpcoesLimpeza = {
   emUso?: (pasta: string) => boolean;
   /** Revisão do #225: o servidor ainda oferece esta pasta? Perguntado logo antes da primeira remoção de cada pasta. */
   reconfirmar?: (p: PastaParaLimpar) => Promise<boolean>;
-  /** ADR-095 §4: o relógio do nome do guardado (injetável nos testes). */
+  /** ADR-096 §4: o relógio do nome do guardado (injetável nos testes). */
   agora?: () => number;
 };
 
-/** ADR-095 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). */
+/** ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). */
 const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado"]);
 
 type Achados = { worktrees: string[]; clones: number };
@@ -373,7 +373,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     const montagens = (await lerMontagens()) ?? [];
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
-    // ADR-095 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
+    // ADR-096 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
     let segura = false;
 
     for (const wt of achados.worktrees) {
@@ -419,7 +419,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     // Nem a pasta que o servidor deixou de oferecer, nem a que ganhou turno vivo.
     if (confirmada === false || o.emUso?.(rel)) continue;
     if (await ficariaVazia(base, 0, saem, montagens, !simular)) { relato.pastasApagadas++; continue; }
-    // ADR-095 §4: na task encerrada (3 dias, ou 2 h com o disco apertado), o que ficou é guardado e a pasta sai. Na de
+    // ADR-096 §4: na task encerrada (3 dias, ou 2 h com o disco apertado), o que ficou é guardado e a pasta sai. Na de
     // menos tempo (`so_com_pr_mergeado`) a pasta fica: o bot ainda pode voltar a ela.
     if (p.quando !== "encerrada" || segura) continue;
     if (confirmada === null) {
@@ -485,7 +485,7 @@ export async function contarOrfas(home: string, agora: number): Promise<{ orfas:
 export type RelatoOrfas = { removidas: number; guardadas: number; guardadoBytes: number; liberadoBytes: number; puladas: Partial<Record<MotivoPuladaLimpeza, number>> };
 
 /**
- * ADR-095 §4: as worktrees órfãs da raiz do bot (`~/nod/<bot>/<x>`, ADR-088 §5) paradas há 30 dias, ou há 7 com o disco
+ * ADR-096 §4: as worktrees órfãs da raiz do bot (`~/nod/<bot>/<x>`, ADR-088 §5) paradas há 30 dias, ou há 7 com o disco
  * apertado, saem. Nunca com um turno daquele bot rodando (o turno sem task usa a raiz do bot). A limpa sai como a da
  * task (`git worktree remove` sem --force, as mesmas conferências); a suja, com ignorado valioso, HEAD solto ou
  * repositório dentro é guardada antes. Montagem, travada e erro seguram. Sem saber o que o Docker monta, nada sai.
@@ -622,7 +622,7 @@ function naFila<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * ADR-095 (definido em 2026-10-11): na passada apertada, os caches de pacote também saem — o que se baixa de novo na
+ * ADR-096 (definido em 2026-10-11): na passada apertada, os caches de pacote também saem — o que se baixa de novo na
  * próxima instalação. Pelas ferramentas, nunca por `rm`: `npm cache clean --force` e `pnpm store prune` (este só tira do
  * store o que nenhum projeto da máquina usa; por isso roda DEPOIS das worktrees). Medido em 11/10 na VM dos bots: 1,4 GB
  * em `~/.npm` e 4 GB no store do pnpm. Programa ausente é pulado. O liberado é a diferença do `statfs`, nunca negativa.
@@ -646,7 +646,7 @@ export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean 
  * processo e trava em arquivo); erro vira log e a próxima tenta de novo. Ponte sem `pastasParaLimpar` (servidor antigo)
  * = nada a fazer.
  *
- * ADR-095: além das passadas de 6 h, o vigia do disco lê `~/nod` a cada 5 min e, amarelo ou vermelho, dispara uma
+ * ADR-096: além das passadas de 6 h, o vigia do disco lê `~/nod` a cada 5 min e, amarelo ou vermelho, dispara uma
  * passada apertada (no máximo uma a cada 30 min): o servidor oferece também as tasks encerradas há mais de 2 h, e os
  * caches de pacote saem no fim. `disco` é injetável nos testes.
  */
@@ -667,7 +667,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
         (await pastasParaLimpar(o.pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
       const relato = await limparPastas(pastas, { ...o, reconfirmar, agora });
       if (!relato.adiada) {
-        // ADR-095 §4: as órfãs paradas e os guardados vencidos.
+        // ADR-096 §4: as órfãs paradas e os guardados vencidos.
         const orfas = await limparOrfas(o, agora(), apertado);
         relato.orfasRemovidas = orfas.removidas;
         relato.guardadas = (relato.guardadas ?? 0) + orfas.guardadas;
@@ -702,7 +702,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       rodando = false;
     }
   }
-  // ADR-095: o vigia do disco. O nível guarda a histerese da ADR-085 (sai do amarelo só acima de 11 GB).
+  // ADR-096: o vigia do disco. O nível guarda a histerese da ADR-085 (sai do amarelo só acima de 11 GB).
   let nivel: NivelPressao | null = null;
   let ultimaApertada: number | null = null;
   let historico: PontoDoDisco[] = [];
@@ -711,7 +711,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
     if (parado || rodando) return;
     const leitura = await medir(join(o.home, "nod")).catch(() => medir(o.home)).catch(() => null);
     nivel = nivelDoDisco(leitura, nivel);
-    // ADR-095 §6: a tendência da própria máquina (a do servidor é a da tela); disco que acaba em 6 h já aperta.
+    // ADR-096 §6: a tendência da própria máquina (a do servidor é a da tela); disco que acaba em 6 h já aperta.
     if (leitura) historico = comPonto(historico, { em: agora(), livreMb: leitura.livreMb });
     const acaba = acabaEmMs(historico, agora());
     if (!passadaPorAperto(nivel, ultimaApertada, agora(), acaba)) return;

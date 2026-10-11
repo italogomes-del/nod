@@ -49,7 +49,7 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
   if (!l) return "";
   const esperam = (estado.trabalhos?.trabalhos ?? []).filter((t) => seguradoPeloMac(t, false) && t.maquina?.id === id).length;
   const oQue = l.motivoEspera === "disco" ? "espaço no disco" : l.motivoEspera === "memoria" ? "ela liberar memória" : "ela aliviar";
-  // ADR-095 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem.
+  // ADR-096 §6: o disco que acaba em menos de 24 h aparece antes de os bots pararem.
   const acaba = typeof l.disco?.acabaEmMs === "number" ? l.disco.acabaEmMs : null;
   const curto = l.motivoEspera === null ? (acaba !== null ? `Disco acaba em ${tempoAteAcabar(acaba)} no ritmo atual` : "Trabalho novo começa na hora")
     : `${l.motivoEspera === "disco" ? "Pouco espaço no disco" : l.motivoEspera === "memoria" ? "Pouca memória" : "Ocupada"} · ${esperam > 0 ? `${esperam} ${esperam === 1 ? "trabalho espera" : "trabalhos esperam"}` : "trabalho novo espera"} ${oQue}`;
