@@ -48,8 +48,9 @@ Marque o horário de início e de fim de cada bloco: é o intervalo do relatóri
 ### 1. Permissão do microfone
 
 1. Com a permissão zerada, abra o app e toque em **Ligar**.
-2. O macOS pede o microfone com o texto de `electron-builder.yml:32`: *"O nod usa o microfone só durante as ligações
-   com os seus bots."* Confira o texto exato.
+2. O macOS pede o microfone com o texto de `NSMicrophoneUsageDescription` em `electron-builder.yml` (hoje: *"O nod
+   usa o microfone quando você dita uma mensagem ou liga para um bot."*, desde o ditado, ADR-095). Confira o texto
+   exato contra o yml do commit da tag.
 3. **Negue.** A ligação mostra o estado de microfone negado (`microfone-negado`), sem travar e sem `microfone-indisponivel`.
 4. Libere em Ajustes do Sistema › Privacidade › Microfone, volte e ligue de novo: a ligação abre e ouve.
 5. Desligue e ligue de novo: **a segunda ligação não pede permissão** (`desktop/permissoes-midia.ts`: só áudio, só a

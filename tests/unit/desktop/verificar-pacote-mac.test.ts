@@ -75,7 +75,27 @@ const falhasCom = (mudanca: Partial<SaidasPacote>, outro: Partial<EsperadoPacote
 describe("verificar-pacote-mac.mjs (NOD-203)", () => {
   it("as esperadas saem da fonte: as 2 entitlements do plist e o texto do yml", () => {
     expect(ESPERADAS).toEqual(["com.apple.security.cs.allow-jit", "com.apple.security.device.audio-input"]);
-    expect(MICROFONE).toBe("O nod usa o microfone só durante as ligações com os seus bots.");
+    // O texto é microcopy e muda com o produto (o ditado, ADR-095, trocou a frase); o teste confere que ele
+    // saiu da linha do yml, não a frase em si — fixar a frase aqui deixou a main vermelha no merge do #247.
+    const linha = readFileSync("electron-builder.yml", "utf8")
+      .split("\n")
+      .find((l) => l.trim().startsWith("NSMicrophoneUsageDescription:"));
+    expect(linha).toBeDefined();
+    expect(MICROFONE.length).toBeGreaterThan(0);
+    expect(linha?.trim()).toBe(`NSMicrophoneUsageDescription: ${MICROFONE}`);
+    expect(MICROFONE).toMatch(/microfone/);
+  });
+
+  it("o texto do microfone muda no yml e a esperada acompanha (regressão: frase fixa no teste)", () => {
+    const yml = (texto: string) => `mac:\n  extendInfo:\n    NSMicrophoneUsageDescription: ${texto}\n`;
+    const antigo = "O nod usa o microfone só durante as ligações com os seus bots.";
+    const novo = "O nod usa o microfone quando você dita uma mensagem ou liga para um bot.";
+    for (const texto of [antigo, novo]) {
+      const veio = lerTextoMicrofone(yml(texto));
+      expect(veio).toBe(texto);
+      const r = conferirPacote({ ...saidasCertas(), microfone: { codigo: 0, saida: `${texto}\n` } }, { ...esperado, microfone: veio });
+      expect(formatarFalhas(r)).toEqual([]);
+    }
   });
 
   it("o caso todo certo aprova", () => {
