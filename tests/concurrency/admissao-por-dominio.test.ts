@@ -88,6 +88,8 @@ describeIntegracao("concorrência: admissão por domínio com nod_app de verdade
           NOD_MACHINE_ID: randomUUID(),
           NOD_VOZ_STT: "falso",
           NOD_VOZ_TTS: "falso",
+          // ADR-095: o servidor de teste nunca limpa o ~/nod de quem roda a suíte.
+          NOD_LIMPEZA_TASKS: "desligada",
         },
         db,
         dbDono,

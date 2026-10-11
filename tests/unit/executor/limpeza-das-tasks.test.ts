@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../../src/contracts/ponte.ts";
-import { contarOrfas, criarExecutarComando, iniciarLimpezaDasTasks, limparPastas, modoDaLimpeza, montagensDoDocker, travarLimpeza, type ExecutarComando, type OpcoesLimpeza } from "../../../src/adapters/executor/limpeza-das-tasks.ts";
+import { contarOrfas, criarExecutarComando, iniciarLimpezaDasTasks, limparPastas, modoDaLimpeza, montagensDoDocker, prefixoDeFundo, travarLimpeza, type ExecutarComando, type OpcoesLimpeza } from "../../../src/adapters/executor/limpeza-das-tasks.ts";
 
 // Cada teste cria repositórios git de verdade e roda `git worktree add/remove` (vários processos por teste). medido em
 // 2026-10-09: 0,3–1,1 s por teste com load ~195 (uptime); o padrão de 5 s do projeto unit fica perto demais sob carga maior.
@@ -19,21 +19,23 @@ let home: string;
 let clone: string;
 
 /**
- * `gh` e `docker` falsos (nunca os do Mac); o git e o du são os de verdade. `merged`: branch → o HEAD com que o PR foi
+ * `gh`, `docker`, `npm` e `pnpm` falsos (nunca os do Mac); o git e o du são os de verdade. `merged`: branch → o HEAD com que o PR foi
  * mergeado (`"atual"` = o HEAD de agora da branch); `montagens`: a saída do Docker (null = não respondeu; undefined = sem
  * Docker instalado).
  */
 function executor(o: { merged?: Record<string, string>; montagens?: string[] | null } = {}): { executar: ExecutarComando; chamadas: string[] } {
-  const real = criarExecutarComando(ENV_GIT, home);
+  // Sem o prefixo de prioridade baixa: o teste é da lógica, não do escalonador da máquina (o prefixo tem testes próprios).
+  const real = criarExecutarComando(ENV_GIT, home, []);
   const chamadas: string[] = [];
   const executar: ExecutarComando = async (bin, args, op) => {
-    chamadas.push([bin, ...args].join(" "));
+    chamadas.push([op?.fundo ? "[fundo]" : "", bin, ...args].filter(Boolean).join(" "));
     if (bin === "gh") {
       const branch = args[args.indexOf("--head") + 1]!;
       const oid = o.merged?.[branch];
       const head = oid === "atual" ? git(clone, "rev-parse", branch).trim() : oid;
       return { codigo: 0, stdout: JSON.stringify(head ? [{ number: 1, headRefOid: head }] : []), stderr: "" };
     }
+    if (bin === "npm" || bin === "pnpm") return { codigo: 0, stdout: "", stderr: "" };
     if (bin === "docker") {
       if (o.montagens === undefined) return { codigo: -1, stdout: "", stderr: "" };
       if (o.montagens === null) return { codigo: -2, stdout: "", stderr: "" };
@@ -275,7 +277,6 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     await mkdir(join(home, "nod", "Dev 4", "vazia-999999"), { recursive: true });
     const { executar, chamadas } = executor();
     const r = await limparPastas([encerrada("Dev 4/limpa-777777", "t-1"), encerrada("Dev 4/suja-888888", "t-2"), encerrada("Dev 4/vazia-999999", "t-3")], opcoes({ executar, simular: true }));
-    // 2ª revisão: o padrão, sem nada no ambiente, é simular; só `ligada` escrito apaga.
     expect(r).toMatchObject({ simulada: true, removidas: 1, pastasApagadas: 2, puladas: { suja: 1 } });
     expect(r.estimadoBytes).toBeGreaterThan(0);
     expect(existsSync(limpa)).toBe(true);
@@ -283,8 +284,10 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(chamadas.some((c) => c.includes("worktree remove"))).toBe(false);
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "simular" })).toBe("simular");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "desligada" })).toBe("desligada");
-    expect(modoDaLimpeza({})).toBe("simular");
-    expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "qualquer" })).toBe("simular");
+    // ADR-095: o padrão, sem nada no ambiente, é apagar; `simular` e `desligada` só valem escritos por extenso.
+    expect(modoDaLimpeza({})).toBe("ligada");
+    expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "qualquer" })).toBe("ligada");
+    expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: " Simular " })).toBe("simular");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "ligada" })).toBe("ligada");
   });
 
@@ -333,5 +336,115 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     const antiga = iniciarLimpezaDasTasks({ ...opcoes(executor()), ponte: {}, pessoaId: "p", primeiraMs: 10 ** 9 });
     expect(await antiga.passada()).toBeNull();
     antiga.parar();
+  });
+});
+
+describe("ADR-095: o disco que se cuida", () => {
+  it("código com mais de 8 níveis de pasta não é mais `aninhado`: a worktree sai (o caso da VM dos bots em 11/10)", async () => {
+    const wt = await worktree("Ze 1/gfk-1923-fatia-5-998a48/acme", "feat/fundo");
+    const fundo = join(wt, "packages", "mundo-vivo", "tools", "provas", "vereditos", "mundo", "rondas", "r14-mundo-vivo", "palcos", "um");
+    await mkdir(fundo, { recursive: true });
+    await writeFile(join(fundo, "palco.json"), "{}\n");
+    git(wt, "add", ".");
+    git(wt, "commit", "-q", "-m", "fundo");
+    const r = await limparPastas([encerrada("Ze 1/gfk-1923-fatia-5-998a48")], opcoes(executor()));
+    expect(r).toMatchObject({ removidas: 1, puladas: {} });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it("um repositório de verdade muito fundo, em pasta ignorada, ainda segura a worktree", async () => {
+    const wt = await worktree("Ze 1/fundo-com-git-111111/acme", "feat/fundo-git");
+    const escondido = join(wt, ".claude", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "repo");
+    await mkdir(join(escondido, ".."), { recursive: true });
+    git(home, "clone", "-q", clone, escondido);
+    const r = await limparPastas([encerrada("Ze 1/fundo-com-git-111111")], opcoes(executor()));
+    expect(r).toMatchObject({ removidas: 0, puladas: { aninhado: 1 } });
+    expect(existsSync(join(escondido, ".git"))).toBe(true);
+  });
+
+  it("o cache de ferramenta dentro de um pacote do monorepo (`packages/x/.turbo/`) sai junto com a worktree", async () => {
+    await writeFile(join(clone, ".gitignore"), "node_modules/\n.turbo/\n.expo/\n");
+    git(clone, "commit", "-q", "-am", "ignora caches");
+    const wt = await worktree("Ze 1/turbo-222222/acme", "feat/turbo");
+    for (const pacote of ["packages/auth", "apps/mobile"]) {
+      await mkdir(join(wt, pacote), { recursive: true });
+      await writeFile(join(wt, pacote, "package.json"), "{}\n");
+    }
+    git(wt, "add", ".");
+    git(wt, "commit", "-q", "-m", "pacotes");
+    await mkdir(join(wt, "packages", "auth", ".turbo", "cache"), { recursive: true });
+    await writeFile(join(wt, "packages", "auth", ".turbo", "cache", "a.tar"), "x");
+    await mkdir(join(wt, "apps", "mobile", ".expo"), { recursive: true });
+    await writeFile(join(wt, "apps", "mobile", ".expo", "settings.json"), "{}");
+    const r = await limparPastas([encerrada("Ze 1/turbo-222222")], opcoes(executor()));
+    expect(r).toMatchObject({ removidas: 1, puladas: {} });
+  });
+
+  it("os comandos pesados da limpeza pedem prioridade baixa; os leves não", async () => {
+    await worktree("Dev 1/fundo-333333/acme", "feat/prioridade");
+    const { executar, chamadas } = executor();
+    await limparPastas([encerrada("Dev 1/fundo-333333")], opcoes({ executar }));
+    expect(chamadas.find((c) => c.includes(" status "))).toMatch(/^\[fundo\] git /);
+    expect(chamadas.find((c) => c.includes("worktree remove"))).toMatch(/^\[fundo\] git /);
+    expect(chamadas.find((c) => c.includes("worktree list"))).toMatch(/^git /);
+  });
+
+  it("prioridade baixa: ionice + nice no Linux, taskpolicy no macOS, nada sem as ferramentas", () => {
+    const tem = (...c: string[]) => (x: string) => c.includes(x);
+    // Nunca a classe ociosa (`ionice -c3`, `taskpolicy -b`): com a máquina cheia ela não deixa a limpeza andar.
+    expect(prefixoDeFundo("linux", tem("/usr/bin/nice", "/usr/bin/ionice"))).toEqual(["/usr/bin/ionice", "-c", "2", "-n", "7", "/usr/bin/nice", "-n", "10"]);
+    expect(prefixoDeFundo("linux", tem("/bin/nice"))).toEqual(["/bin/nice", "-n", "10"]);
+    expect(prefixoDeFundo("linux", tem())).toEqual([]);
+    expect(prefixoDeFundo("darwin", tem("/usr/sbin/taskpolicy"))).toEqual(["/usr/sbin/taskpolicy", "-c", "utility"]);
+    expect(prefixoDeFundo("darwin", tem())).toEqual([]);
+    expect(prefixoDeFundo("win32", tem("/usr/bin/nice"))).toEqual([]);
+  });
+
+  it("o prefixo de fundo roda o comando de verdade, e o programa ausente atrás dele ainda é `não achou` (-1)", async () => {
+    const executar = criarExecutarComando(ENV_GIT, home, ["/usr/bin/env"]);
+    const r = await executar("git", ["--version"], { fundo: true });
+    expect(r.codigo).toBe(0);
+    expect(r.stdout).toContain("git version");
+    expect((await executar("programa-que-nao-existe-nod", [], { fundo: true })).codigo).toBe(-1);
+    expect((await executar("programa-que-nao-existe-nod", [])).codigo).toBe(-1);
+    // O prefixo de verdade desta máquina (taskpolicy no macOS, nice/ionice no Linux) também.
+    const daMaquina = criarExecutarComando(ENV_GIT, home);
+    expect((await daMaquina("git", ["--version"], { fundo: true })).codigo).toBe(0);
+    expect((await daMaquina("programa-que-nao-existe-nod", [], { fundo: true })).codigo).toBe(-1);
+  });
+
+  it("disco amarelo dispara a passada apertada: pede com `apertado`, limpa os caches com prioridade baixa e relata; verde não dispara", async () => {
+    await worktree("Dev 1/apertada-444444/acme", "feat/apertada");
+    const relatos: RelatoLimpeza[] = [];
+    const pedidos: unknown[] = [];
+    const ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza"> = {
+      pastasParaLimpar: async (_p, o) => { pedidos.push(o); return [encerrada("Dev 1/apertada-444444")]; },
+      relatarLimpeza: async (_p, r) => { relatos.push(r); },
+    };
+    const { executar, chamadas } = executor();
+    let livreMb = 50 * 1024;
+    const limpeza = iniciarLimpezaDasTasks({ ...opcoes({ executar }), ponte, pessoaId: "p", primeiraMs: 10 ** 9, vigiaDoDiscoMs: 10, disco: async () => ({ livreMb, totalMb: 100 * 1024 }) });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(relatos).toHaveLength(0);
+    livreMb = 8 * 1024;
+    await vi.waitFor(() => expect(relatos).toHaveLength(1), { timeout: 20_000 });
+    limpeza.parar();
+    expect(pedidos[0]).toEqual({ apertado: true });
+    expect(relatos[0]).toMatchObject({ apertada: true, removidas: 1 });
+    expect(chamadas).toContain("[fundo] npm cache clean --force");
+    expect(chamadas).toContain("[fundo] pnpm store prune");
+    // As worktrees saem antes do prune do pnpm (ele só tira do store o que nenhum projeto usa).
+    expect(chamadas.findIndex((c) => c.includes("worktree remove"))).toBeLessThan(chamadas.indexOf("[fundo] pnpm store prune"));
+  });
+
+  it("a passada apertada não se repete antes de 30 min, mesmo com o disco ainda amarelo", async () => {
+    await mkdir(join(home, "nod"), { recursive: true }); // a trava da passada mora em ~/nod
+    let relatos = 0;
+    const ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza"> = { pastasParaLimpar: async () => [], relatarLimpeza: async () => { relatos++; } };
+    const limpeza = iniciarLimpezaDasTasks({ ...opcoes(executor()), ponte, pessoaId: "p", primeiraMs: 10 ** 9, vigiaDoDiscoMs: 10, disco: async () => ({ livreMb: 1024, totalMb: 100 * 1024 }) });
+    await vi.waitFor(() => expect(relatos).toBe(1), { timeout: 20_000 });
+    await new Promise((r) => setTimeout(r, 100));
+    limpeza.parar();
+    expect(relatos).toBe(1);
   });
 });

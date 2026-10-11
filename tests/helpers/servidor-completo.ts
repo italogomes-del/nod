@@ -74,6 +74,9 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     // ADR-071: voz falsa (sem whisper nem say) — custo zero e determinística.
     NOD_VOZ_STT: "falso",
     NOD_VOZ_TTS: "falso",
+    // ADR-095: a limpeza das tasks liga por padrão e lê o disco a cada 5 min. O servidor de teste roda no modo local, com o
+    // HOME de quem roda a suíte: ligada, ela mexeria no ~/nod e nos caches dessa pessoa. O teste que precisa dela liga.
+    NOD_LIMPEZA_TASKS: "desligada",
     ...(o.env ?? {}),
   };
   const servidor = await boot({

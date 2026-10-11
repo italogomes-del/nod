@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
-import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, pastaDeTask, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
+import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
+import { discoDoStatfs, nivelDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
 
@@ -21,19 +24,42 @@ import { caminhoAumentado } from "./caminho.ts";
  */
 
 export type ResultadoComando = { codigo: number; stdout: string; stderr: string };
-/** Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. */
-export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number }) => Promise<ResultadoComando>;
+/**
+ * Roda um programa sem shell. `codigo` -1 = não achou o programa (ENOENT); -2 = estourou o prazo. `fundo` (ADR-095) =
+ * comando pesado da limpeza: roda com prioridade baixa de CPU e de disco (`prefixoDeFundo`).
+ */
+export type ExecutarComando = (bin: string, args: readonly string[], o?: { cwd?: string; prazoMs?: number; fundo?: boolean }) => Promise<ResultadoComando>;
+
+/**
+ * ADR-095 (definido em 2026-10-11): o que a limpeza roda de pesado (`git status` numa worktree grande, `git worktree
+ * remove` apagando node_modules, `du`, a limpeza dos caches) cede a CPU e o disco aos bots. Em 11/10, três `du` em
+ * `/home` da VM dos bots (1,8 milhão de inodes), ao lado dos turnos, deixaram a máquina sem responder nem ao SSH até um
+ * reset: ~170 MB/s de leitura com 20% de CPU no Cloud Monitoring. Prioridade baixa, mas nunca a ociosa: com a ociosa
+ * (`taskpolicy -b`, `ionice -c3`) o `git` da limpeza quase não rodava com a máquina cheia — 3 testes da limpeza passaram
+ * dos 60 s com load 114 (medido em 2026-10-11) —, e máquina cheia é justamente quando o disco enche. No Linux,
+ * `ionice -c2 -n7` (melhor esforço, a menor prioridade) e `nice -n10`; no macOS, `taskpolicy -c utility` (a classe de
+ * serviço "utility", abaixo do que a pessoa e os bots pedem). Sem as ferramentas, roda direto.
+ */
+export function prefixoDeFundo(plataforma: NodeJS.Platform, existe: (caminho: string) => boolean): string[] {
+  if (plataforma === "darwin") return existe("/usr/sbin/taskpolicy") ? ["/usr/sbin/taskpolicy", "-c", "utility"] : [];
+  if (plataforma !== "linux") return [];
+  const nice = ["/usr/bin/nice", "/bin/nice"].find(existe);
+  const ionice = ["/usr/bin/ionice", "/bin/ionice"].find(existe);
+  if (!nice) return [];
+  return ionice ? [ionice, "-c", "2", "-n", "7", nice, "-n", "10"] : [nice, "-n", "10"];
+}
 
 /**
  * Revisão do #225: `simular` faz a passada inteira, com todas as checagens, e só registra o que sairia
- * (`limpeza_simulada`); `ligada` apaga; `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`. revisto na segunda revisão
- * do #225: o padrão é `simular` em todo modo (diário e app) até o Marlon validar os logs — só apaga com `ligada`
- * escrito. O gatilho para mudar o padrão está na ADR-088 §7.
+ * (`limpeza_simulada`); `ligada` apaga; `desligada` não roda. Lido de `NOD_LIMPEZA_TASKS`. revisto em 2026-10-11
+ * (ADR-095, decisão do Marlon): o padrão é `ligada` em todo modo. Em `simular` nada saía, e a VM dos bots chegou a 99%
+ * com a limpeza só contando; quem usa o nod não deveria precisar saber desta variável. `simular` e `desligada` só valem
+ * escritos por extenso; valor desconhecido liga.
  */
 export type ModoLimpeza = "ligada" | "simular" | "desligada";
 export function modoDaLimpeza(env: Readonly<Record<string, string | undefined>>): ModoLimpeza {
   const v = env.NOD_LIMPEZA_TASKS?.trim().toLowerCase();
-  return v === "desligada" ? "desligada" : v === "ligada" ? "ligada" : "simular";
+  return v === "desligada" ? "desligada" : v === "simular" ? "simular" : "ligada";
 }
 
 /** definido em 2026-10-09: a primeira passada 10 min depois de subir (o boot já é pesado), e então a cada 6 h. */
@@ -50,10 +76,13 @@ const PRAZO_CURTO_MS = 30_000;
 /** Até onde se procura worktree dentro da pasta da task (`<slug>/<repo>` é 1; `<slug>/repos/<repo>` é 2). */
 const PROFUNDIDADE_MAXIMA = 3;
 /**
- * Revisão do #225: a busca de `.git` aninhado dentro da worktree (fora de node_modules) vai até esta profundidade e este
- * número de pastas; passou disso, a worktree fica (`aninhado`) — sem ter olhado tudo, não se apaga.
+ * Revisão do #225: a busca de `.git` aninhado dentro da worktree (fora de node_modules) olha até este número de pastas;
+ * passou disso, a worktree fica (`aninhado`) — sem ter olhado tudo, não se apaga. revisto em 2026-10-11 (ADR-095): saiu
+ * o teto de 8 níveis. Ele segurava como `aninhado` 74 das 97 worktrees puladas na VM dos bots, sem `.git` nenhum dentro:
+ * código com 9 níveis (`packages/mundo-vivo/tools/provas/vereditos/mundo/rondas/r14-mundo-vivo/palcos`) bastava. A
+ * worktree do gamefik tem 1.193 pastas fora de node_modules (medido em 2026-10-11 com `find`). Link não é seguido
+ * (`Dirent.isDirectory()` é falso para ele), então a busca sem teto de nível não entra em laço.
  */
-const ANINHADO_PROFUNDIDADE = 8;
 const ANINHADO_MAX_PASTAS = 20_000;
 /** Revisão do #225: a trava de um processo que morreu, ou mais velha que isto, é retomada. */
 const TRAVA_VENCE_MS = 24 * 3_600_000;
@@ -62,14 +91,20 @@ const TRAVA_ILEGIVEL_VIVA_MS = 30_000;
 /** Segunda revisão do #225: a busca de `.env*` dentro de uma pasta regenerável inteira (`dist/`) para aqui e recusa. */
 const ENV_MAX_PASTAS = 5_000;
 
-export function criarExecutarComando(env: Readonly<Record<string, string | undefined>>, home: string): ExecutarComando {
+export function criarExecutarComando(env: Readonly<Record<string, string | undefined>>, home: string, fundo: readonly string[] = prefixoDeFundo(process.platform, existsSync)): ExecutarComando {
   const ambiente = { ...env, PATH: caminhoAumentado(env.PATH, home), GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1", GIT_OPTIONAL_LOCKS: "0" };
   return (bin, args, o) =>
     new Promise((resolver) => {
-      execFile(bin, [...args], { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024 }, (erro, stdout, stderr) => {
+      const prefixo = o?.fundo === true ? fundo : [];
+      const [programa, ...resto] = [...prefixo, bin, ...args];
+      execFile(programa!, resto, { cwd: o?.cwd, env: ambiente, timeout: o?.prazoMs ?? PRAZO_CURTO_MS, maxBuffer: 16 * 1024 * 1024 }, (erro, stdout, stderr) => {
         if (!erro) { resolver({ codigo: 0, stdout: String(stdout), stderr: String(stderr) }); return; }
         const e = erro as NodeJS.ErrnoException & { killed?: boolean; code?: unknown };
-        const codigo = e.code === "ENOENT" ? -1 : e.killed ? -2 : typeof e.code === "number" ? e.code : 1;
+        // O prefixo que não acha o programa é o mesmo "não achou" do ENOENT: `nice`/`ionice` saem com 127 e o `taskpolicy`
+        // com 66 (medido em 2026-10-11 no macOS 14: "taskpolicy: posix_spawn: No such file or directory"), os dois com o
+        // texto do errno no stderr.
+        const naoAchou = prefixo.length > 0 && ((e.code as unknown) === 127 || (e.code as unknown) === 66) && /No such file or directory/.test(String(stderr ?? ""));
+        const codigo = e.code === "ENOENT" || naoAchou ? -1 : e.killed ? -2 : typeof e.code === "number" ? e.code : 1;
         resolver({ codigo, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
       });
     });
@@ -144,19 +179,18 @@ async function procurar(dir: string, profundidade: number, achados: Achados): Pr
  */
 async function temGitAninhado(raiz: string): Promise<boolean> {
   let vistas = 0;
-  async function descer(dir: string, profundidade: number): Promise<boolean> {
+  async function descer(dir: string): Promise<boolean> {
     if (++vistas > ANINHADO_MAX_PASTAS) return true;
     let entradas;
     try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return true; }
     for (const e of entradas) {
       if (e.name === ".git") { if (dir !== raiz) return true; continue; }
       if (!e.isDirectory() || e.name === "node_modules") continue;
-      if (profundidade >= ANINHADO_PROFUNDIDADE) return true;
-      if (await descer(join(dir, e.name), profundidade + 1)) return true;
+      if (await descer(join(dir, e.name))) return true;
     }
     return false;
   }
-  return descer(raiz, 0);
+  return descer(raiz);
 }
 
 /** Pastas vazias dentro de `dir` e ela mesma (só `.DS_Store` conta como vazio); `ausentes` contam como já removidas. */
@@ -265,7 +299,7 @@ async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string,
   if (await temGitAninhado(wt)) return "aninhado";
   // Alteração em arquivo rastreado ou arquivo novo = suja (o remove recusaria; aqui vale também para a simulação).
   // Ignorado que não se refaz = o remove apagaria calado.
-  const status = await executar("git", ["-C", wt, "status", "--porcelain", "-z", "--ignored=traditional", "--untracked-files=normal"], { prazoMs: PRAZO_MEDIO_MS });
+  const status = await executar("git", ["-C", wt, "status", "--porcelain", "-z", "--ignored=traditional", "--untracked-files=normal"], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
   if (status.codigo !== 0) return "erro";
   let valioso = false;
   for (const entrada of status.stdout.split("\0")) {
@@ -348,7 +382,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       if (confirmada === null) confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
       if (!confirmada) { pular("nao_reconfirmada"); break; }
       if (simular) {
-        const du = await o.executar("du", ["-sk", wt], { prazoMs: PRAZO_MEDIO_MS });
+        const du = await o.executar("du", ["-sk", wt], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
         const kb = Number.parseInt(du.stdout.trim().split(/\s/)[0] ?? "", 10);
         const bytes = du.codigo === 0 && Number.isFinite(kb) ? kb * 1024 : 0;
         relato.removidas++;
@@ -360,7 +394,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       }
       const antes = await livre(raiz).catch(() => null);
       // SEM --force (ADR-088): se algo mudou desde a conferência, o git ainda recusa a worktree suja.
-      const r = await o.executar("git", ["-C", dirComum, "worktree", "remove", wt], { prazoMs: PRAZO_REMOVER_MS });
+      const r = await o.executar("git", ["-C", dirComum, "worktree", "remove", wt], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
       if (r.codigo !== 0) {
         const recusa = motivoDaRecusa(r.stderr);
         pular(recusa);
@@ -499,28 +533,55 @@ function naFila<T>(fn: () => Promise<T>): Promise<T> {
   return vez;
 }
 
-export type LimpezaDasTasks = { parar(): void; passada(): Promise<RelatoLimpeza | null> };
+/**
+ * ADR-095 (definido em 2026-10-11): na passada apertada, os caches de pacote também saem — o que se baixa de novo na
+ * próxima instalação. Pelas ferramentas, nunca por `rm`: `npm cache clean --force` e `pnpm store prune` (este só tira do
+ * store o que nenhum projeto da máquina usa; por isso roda DEPOIS das worktrees). Medido em 11/10 na VM dos bots: 1,4 GB
+ * em `~/.npm` e 4 GB no store do pnpm. Programa ausente é pulado. O liberado é a diferença do `statfs`, nunca negativa.
+ */
+export async function limparCachesDePacote(executar: ExecutarComando, caminho: string, livre: (caminho: string) => Promise<number> = livrePadrao): Promise<number> {
+  const antes = await livre(caminho).catch(() => null);
+  for (const [bin, args] of [["npm", ["cache", "clean", "--force"]], ["pnpm", ["store", "prune"]]] as const) {
+    const r = await executar(bin, args, { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    if (r.codigo !== 0 && r.codigo !== -1) log("aviso", "limpeza_cache_falhou", { programa: bin, codigo: r.codigo });
+  }
+  const depois = await livre(caminho).catch(() => null);
+  return antes !== null && depois !== null ? Math.max(0, depois - antes) : 0;
+}
+
+const discoPadrao = async (caminho: string): Promise<LeituraDisco | null> => discoDoStatfs(await statfs(caminho));
+
+export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean }): Promise<RelatoLimpeza | null> };
 
 /**
  * A limpeza periódica de uma pessoa neste Mac: pede a lista à ponte, limpa e relata. Uma passada por vez (fila do
  * processo e trava em arquivo); erro vira log e a próxima tenta de novo. Ponte sem `pastasParaLimpar` (servidor antigo)
  * = nada a fazer.
+ *
+ * ADR-095: além das passadas de 6 h, o vigia do disco lê `~/nod` a cada 5 min e, amarelo ou vermelho, dispara uma
+ * passada apertada (no máximo uma a cada 30 min): o servidor oferece também as tasks encerradas há mais de 2 h, e os
+ * caches de pacote saem no fim. `disco` é injetável nos testes.
  */
-export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number }): LimpezaDasTasks {
+export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number; disco?: (caminho: string) => Promise<LeituraDisco | null>; vigiaDoDiscoMs?: number }): LimpezaDasTasks {
   const agora = o.agora ?? Date.now;
   let rodando = false;
   let parado = false;
-  async function umaPassada(): Promise<RelatoLimpeza | null> {
+  async function umaPassada(apertado: boolean): Promise<RelatoLimpeza | null> {
     const pastasParaLimpar = o.ponte.pastasParaLimpar?.bind(o.ponte);
     if (parado || !pastasParaLimpar) return null;
     const soltar = await travarLimpeza(o.home, agora());
     if (!soltar) { log("info", "limpeza_adiada", { pessoa_id: o.pessoaId, motivo: "outra_passada" }); return null; }
     const inicio = agora();
+    const pedido = apertado ? { apertado: true } : undefined;
     try {
-      const pastas = await pastasParaLimpar(o.pessoaId);
+      const pastas = await pastasParaLimpar(o.pessoaId, pedido);
       const reconfirmar = o.reconfirmar ?? (async (p: PastaParaLimpar) =>
-        (await pastasParaLimpar(o.pessoaId)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
+        (await pastasParaLimpar(o.pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
       const relato = await limparPastas(pastas, { ...o, reconfirmar });
+      if (apertado) {
+        relato.apertada = true;
+        relato.cachesBytes = o.simular === true || relato.adiada ? 0 : await limparCachesDePacote(o.executar, join(o.home, "nod"), o.livre);
+      }
       const { orfas, paradas } = await contarOrfas(o.home, agora());
       relato.orfas = orfas;
       relato.orfasParadas = paradas;
@@ -531,11 +592,11 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       await soltar();
     }
   }
-  async function passada(): Promise<RelatoLimpeza | null> {
+  async function passada(op?: { apertado?: boolean }): Promise<RelatoLimpeza | null> {
     if (rodando || parado) return null;
     rodando = true;
     try {
-      return await naFila(umaPassada);
+      return await naFila(() => umaPassada(op?.apertado === true));
     } catch (e) {
       log("aviso", "limpeza_falhou", { pessoa_id: o.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
       return null;
@@ -543,6 +604,21 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       rodando = false;
     }
   }
+  // ADR-095: o vigia do disco. O nível guarda a histerese da ADR-085 (sai do amarelo só acima de 11 GB).
+  let nivel: NivelPressao | null = null;
+  let ultimaApertada: number | null = null;
+  const medir = o.disco ?? discoPadrao;
+  async function vigiarDisco(): Promise<void> {
+    if (parado || rodando) return;
+    const leitura = await medir(join(o.home, "nod")).catch(() => medir(o.home)).catch(() => null);
+    nivel = nivelDoDisco(leitura, nivel);
+    if (!passadaPorAperto(nivel, ultimaApertada, agora())) return;
+    ultimaApertada = agora();
+    log("info", "limpeza_disco_apertado", { pessoa_id: o.pessoaId, nivel, livre_mb: leitura?.livreMb ?? null });
+    await passada({ apertado: true });
+  }
+  const vigia = setInterval(() => void vigiarDisco().catch(() => undefined), o.vigiaDoDiscoMs ?? VIGIA_DO_DISCO_MS);
+  vigia.unref?.();
   let intervalo: ReturnType<typeof setInterval> | null = null;
   const primeira = setTimeout(() => {
     void passada();
@@ -554,6 +630,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
     parar() {
       parado = true;
       clearTimeout(primeira);
+      clearInterval(vigia);
       if (intervalo) clearInterval(intervalo);
     },
     passada,
