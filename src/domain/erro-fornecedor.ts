@@ -113,6 +113,10 @@ export function fraseDoLimiteDoPlano(harness: IdHarness | null | undefined, volt
   const nome = HARNESSES.find((h) => h.id === harness)?.nome;
   const base = `seu plano ${nome ? `do ${nome}` : "da sua IA"} atingiu o limite de uso`;
   if (voltaEm === null || voltaEm === undefined || voltaEm <= agora) return `${base}; espere o uso renovar e tente de novo`;
-  const quando = diaMes(voltaEm) === diaMes(agora) ? `às ${horaDaFrase(voltaEm, agora)}` : `em ${horaDaFrase(voltaEm, agora)}`;
-  return `${base}; volta a funcionar ${quando}`;
+  return `${base}; volta a funcionar ${quandoDaFrase(voltaEm, agora)}`;
+}
+
+/** "às 14:30" no dia de `agora`, "em 09/10 às 14:30" em outro (a hora da volta de uma IA, nas frases gravadas). */
+export function quandoDaFrase(instante: number, agora: number): string {
+  return diaMes(instante) === diaMes(agora) ? `às ${horaDaFrase(instante, agora)}` : `em ${horaDaFrase(instante, agora)}`;
 }

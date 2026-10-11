@@ -20,6 +20,7 @@ import { abrirTxEscopada } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iaAtualDoCatalogo } from "../../domain/harness.ts";
+import { iaDoAutomatico, iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../../domain/inteligencia.ts";
 import { rotuloFerramenta } from "../../domain/rotulo-ferramenta.ts";
 import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
@@ -101,6 +102,7 @@ import { criarRotaDev } from "./rotas/dev.ts";
 import { criarRotaEventos } from "./rotas/eventos.ts";
 import type { DepsRotas } from "./rotas/executar-caso.ts";
 import { criarRotasExecutor } from "./rotas/executor.ts";
+import { criarRotasIas } from "./rotas/ias.ts";
 import { criarRotasFrota } from "./rotas/frota.ts";
 import { rotasInternas } from "./rotas/interno.ts";
 import { criarRotaInventario } from "./rotas/inventario.ts";
@@ -128,7 +130,7 @@ import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboa
 import type { IaNoMac } from "../../contracts/onboarding.ts";
 import { criarRotasOnboarding } from "./rotas/onboarding.ts";
 import { criarServicoVoz, type PersistenciaVoz, type RefLigacao, type ServicoVoz } from "../voz/orquestrador.ts";
-import type { EstadoIaDaLigacao } from "../../contracts/voz.ts";
+import type { EstadoIaDaLigacao, IaDaLigacao } from "../../contracts/voz.ts";
 import { ehIaDaLigacao, estadoIaDaLigacao } from "../../domain/ligacao-sem-ia.ts";
 import { criarProvedoresVoz } from "../voz/fabrica.ts";
 import { ADIANTE_MS_PADRAO, CARACTERES_DIA_PADRAO, criarLeitorDeVoz, lerInteiroDaLeitura } from "./leitura-voz.ts";
@@ -138,7 +140,8 @@ import { concatenar, montarWav } from "../voz/audio.ts";
 import { VELOCIDADES_VOZ, VOZES_NOD } from "../../contracts/vozes.ts";
 import { criarCacheDeFalas } from "../voz/falas-de-espera.ts";
 import { anexarCanaisVoz, type CanaisVoz } from "../voz/ws.ts";
-import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
+import { atenderLigacao, encerrarLigacao, gravarFalaLigacao, leituraDaDecisao, mandarNoChatDaLigacao, reabrirCerebroDaLigacao, resultadoDaTarefaDaLigacao, type ContextoLigacao } from "../../use-cases/ligacoes.ts";
+import { cancelarTurno } from "../../use-cases/cancelar-turno.ts";
 import type { IncomingMessage, Server } from "node:http";
 
 /**
@@ -453,6 +456,11 @@ export function comporApp(o: OpcoesCompor): App {
   };
 
   // Depois de assentar (mesma tx): rotina registra desfecho (L7), peer entrega a resposta (L7).
+  /**
+   * 0068 (emenda da ADR-036): quando o limite de uma IA de cada pessoa mudou — compartilhado entre todas as pontes (uma
+   * por Mac no modo compartilhado), para a fila de todas ler o limite novo na hora; a tela recebe `inventario.mudou`.
+   */
+  const limitesTrocados = new Map<string, number>();
   const depsPonte: Parameters<typeof criarPonteInterna>[1] = {
     services,
     useCases,
@@ -470,6 +478,11 @@ export function comporApp(o: OpcoesCompor): App {
     desfazerMemoria: (pessoaId, mudanca) => trabalhosVivos.desfazer(pessoaId, mudanca),
     esquecerMaquina: (machineId) => trabalhosVivos.esquecerMaquina(machineId),
     usoTrocadoEm: (pessoaId) => trabalhosVivos.usoTrocadoEm(pessoaId),
+    limitesTrocadosEm: (pessoaId) => limitesTrocados.get(pessoaId) ?? 0,
+    limiteMudou: (pessoaId) => {
+      limitesTrocados.set(pessoaId, relogio());
+      barramento.publicar(pessoaId, "inventario.mudou", { motivo: "limite" });
+    },
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
@@ -516,6 +529,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...(compartilhado ? {} : { descartarSessao: true }),
     // ADR-090 (0067): nos dois modos — no local, a VM também cai, e o aviso a nomeia.
     registrarPlataforma: (escopo, chaveId, plataforma) => dentro(escopo, (d) => d.repos.maquinaTokens.registrarPlataforma(chaveId, plataforma)),
+    inventarioMudou: (escopo) => { barramento.publicar(escopo.pessoaId, "inventario.mudou", { motivo: "anuncio" }); },
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
     seguro: env.NOD_LOGIN === "google",
@@ -586,7 +600,20 @@ export function comporApp(o: OpcoesCompor): App {
   // Com NOD_LIGACAO_CODEX=0 o Codex não atende ligação neste servidor: fica fora da lista, e o aviso não o oferece.
   const iasDoMacParaVoz = (pessoaId: string): EstadoIaDaLigacao[] =>
     catalogoHarness(pessoaId).opcoes.flatMap((h) => (ehIaDaLigacao(h.id) && !(h.id === "codex-cli" && env.NOD_LIGACAO_CODEX === "0") ? [estadoIaDaLigacao(h.id, h.inventario)] : []));
-  const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio, iasDoMac: (ref) => iasDoMacParaVoz(ref.pessoaId) });
+  /**
+   * definido em 2026-10-10 (emenda da ADR-078): no limite da assinatura, a ligação continua sozinha pela outra IA pronta —
+   * o mesmo caminho do `POST ligacoes/:id/continuar` (rotas/ligacoes.ts): um turno-cérebro novo e o `reabrirCerebro`.
+   */
+  async function continuarLigacaoCom(ref: RefLigacao, ia: IaDaLigacao): Promise<boolean> {
+    const escopo = escopoDaRef(ref);
+    const iasProntas = !compartilhado && executorAtual === "catcher" ? null : iasDoMacParaVoz(ref.pessoaId).filter((i) => i.estado === "pronto").map((i) => i.id);
+    const r = await rodarCaso(escopo, reabrirCerebroDaLigacao, { ligacaoId: ref.ligacaoId, ia, iasProntas, executor: executorAtual });
+    if (voz.reabrirCerebro({ pessoaId: ref.pessoaId, ligacaoId: ref.ligacaoId, turnoId: r.turno.id, ia })) return true;
+    // A ligação acabou entre a conferência e o commit: o turno recém-criado sai da fila em vez de ficar órfão.
+    await rodarCaso(escopo, cancelarTurno, { turnoId: r.turno.id }).catch(() => undefined);
+    return false;
+  }
+  const voz = criarServicoVoz({ provedores: provedoresVoz, persistencia: persistenciaVoz, esperas: esperasVoz, relogio, iasDoMac: (ref) => iasDoMacParaVoz(ref.pessoaId), continuarCom: continuarLigacaoCom });
   // ADR-074: os cards da conversa da ligação viram leitura + janela de aprovação por voz. O orquestrador não lê banco:
   // a composição escuta os frames da pessoa e monta a leitura (leituraDaDecisao) numa tx dela.
   const inscricoesVoz = new Map<string, () => void>();
@@ -692,9 +719,18 @@ export function comporApp(o: OpcoesCompor): App {
     return maquinas.length > 0 && maquinas.every((m) => m.semLacoDeVoz?.includes(harness) === true);
   }
   async function contextoLigacao(escopo: Escopo, agenteId: string, onboarding = false): Promise<ContextoLigacao> {
-    const agente = await dentro(escopo, (d) => d.repos.agentes.buscar(agenteId));
-    const harness = agente?.harness && agente.harness !== "auto" ? agente.harness : driverPreferido;
+    const [agente, preferencias] = await dentro(escopo, (d) => Promise.all([d.repos.agentes.buscar(agenteId), d.repos.preferencias.buscar()]));
     const prontos = compartilhado ? ponteHttp.harnessesDaPessoa(escopo.pessoaId) : null;
+    // revisto em 2026-10-10 (emenda da ADR-036): o bot no Automático liga pela IA que o turno usaria — a primeira pronta da
+    // ordem dele (ou da pessoa) fora do limite —, não pelo harness padrão do servidor (o Codex pronto e o Claude não
+    // diziam "IA fora" no caso do Breno).
+    const doAutomatico = (): IdHarness | null => {
+      if (!agente) return null;
+      const i = inteligenciaDoAgente(agente);
+      const pronta = (h: IdHarness) => (compartilhado ? prontos?.[h]?.estado : inventarioPorDriver[h as IdDriver]?.estado) === "pronto";
+      return iaDoAutomatico({ ordem: ordemEfetiva({ doBot: i.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: compartilhado ? null : driverPreferido === "catcher" ? null : driverPreferido }), prontos: HARNESSES.map((h) => h.id).filter(pronta), noLimite: iasNoLimite(preferencias.iasNoLimite, relogio()) });
+    };
+    const harness = agente?.harness && agente.harness !== "auto" ? agente.harness : doAutomatico() ?? driverPreferido;
     const iaPronta = executorAtual === "catcher" ? true : compartilhado ? prontos?.[harness as IdDriver & keyof typeof prontos]?.estado === "pronto" : inventarioPorDriver[harness as IdDriver]?.estado === "pronto";
     return {
       habilitada: modoLigacao !== "desligada",
@@ -870,9 +906,10 @@ export function comporApp(o: OpcoesCompor): App {
 
   /**
    * definido em 2026-10-09: as causas que só a tela do Mac distingue (sem_node, config_invalida) não vão aos cards do
-   * onboarding, como no anúncio de um Mac (ponte-validacao.ts): ali o card mostra o estado sem causa.
+   * onboarding: ali o card mostra o estado sem causa. O limite (0068) também não: é do servidor, e este catálogo não o
+   * sobrepõe.
    */
-  const ehCausaDoMac = (c: string): c is CausaDoMac => (CAUSAS_DO_MAC as readonly string[]).includes(c);
+  const ehCausaDoMac = (c: string): c is CausaDoMac | "limite" => c === "limite" || (CAUSAS_DO_MAC as readonly string[]).includes(c);
   /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
   function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
     const catalogo = catalogoHarness(pessoaId);
@@ -901,9 +938,12 @@ export function comporApp(o: OpcoesCompor): App {
     ...(compartilhado ? [
       { metodo: "GET", padrao: /^\/executor$/, async handler(ctx) {
         const catalogo = catalogoHarness(ctx.escopo.pessoaId);
-        ctx.json(200, { atual: iaAtualDoCatalogo(catalogo), opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo });
+        // revisto em 2026-10-10 (teste do Breno): aqui não existe `POST /executor` — o "usar Codex" dava 404. `trocavel: false`
+        // tira o botão; a IA de cada bot é escolhida na Inteligência dele, e o Automático segue a ordem da pessoa (GET /ias).
+        ctx.json(200, { atual: iaAtualDoCatalogo(catalogo), opcoes: catalogo.opcoes.filter((h) => h.integrado).map((h) => ({ id: h.id, custo: "real", inventario: h.inventario })), recusa: null, harnesses: catalogo, trocavel: false });
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
+    ...criarRotasIas({ ...depsRotas, inventarios: (escopo) => Object.fromEntries(catalogoHarness(escopo.pessoaId).opcoes.map((h) => [h.id, h.inventario])) }),
     ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
     ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),

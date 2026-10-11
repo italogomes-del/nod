@@ -1,4 +1,4 @@
-import { CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
+import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
@@ -184,6 +184,10 @@ export function inventario(v: unknown, agora: number, nome = "harness"): Inventa
   if (i.estado === "ausente" && i.causa === "cli_antigo" && versaoSemver(i.versao) && versaoSemver(i.minima)) {
     return { estado: "ausente", motivo: motivoCliAntigo(nome, i.versao, i.minima), causa: "cli_antigo", versao: i.versao, minima: i.minima, em: agora };
   }
+  // revisto em 2026-10-10 (PR 2 do plano das IAs): as causas do app novo (sem Node, configuração quebrada) atravessam, com
+  // a frase do servidor; antes viravam "não encontrado" e a tela pedia "Instalar".
+  const doMac = CAUSAS_DO_MAC.find((c) => c === i.causa);
+  if (i.estado === "ausente" && doMac) return { estado: "ausente", motivo: MOTIVO_DA_CAUSA_DO_MAC[doMac].replace("{nome}", nome), causa: doMac, em: agora };
   if (i.estado === "ausente") return { estado: "ausente", motivo: "Harness não encontrado neste computador", em: agora };
   // definido em 2026-10-05: a causa é código fechado e a frase é do servidor — texto do Mac nunca vira motivo.
   const causa = causaSemIa(i.causa);

@@ -2,7 +2,7 @@ import type { AnexoMeta } from "./anexo.ts";
 import type { PayloadLinhaLigacao } from "./ligacao.ts";
 import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
-import type { CausaSemIa } from "./inventario.ts";
+import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { OrigemTrabalho } from "./trabalho.ts";
 import type { OrigemTurno } from "./turno.ts";
@@ -55,8 +55,11 @@ export type PayloadMensagem =
   /**
    * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
    * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.
+   * revisto em 2026-10-10 (emenda da ADR-036): `causa: "limite"` = a primeira chegou ao limite da assinatura; `renovaEm`
+   * diz quando ela volta a valer na ordem (a tela mostra a linha discreta "O Claude chegou ao limite · respondendo pelo
+   * ChatGPT"). Nas outras causas, `renovaEm` não vem.
    */
-  | { kind: "ia_trocada"; de: IdHarness; para: IdHarness; causa: CausaSemIa }
+  | { kind: "ia_trocada"; de: IdHarness; para: IdHarness; causa: CausaSemIa | typeof CAUSA_LIMITE; renovaEm?: EpochMs }
   /**
    * NOD-171: o turno parou porque o plano da IA atingiu o limite de uso (motivo `limite_do_plano` do protocolo do Claude
    * Code, ou a classe `limite_de_uso` do texto do Codex). Vai no aviso "Turno interrompido" para a tela desenhar o card

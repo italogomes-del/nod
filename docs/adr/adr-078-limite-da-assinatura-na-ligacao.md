@@ -59,3 +59,16 @@ responder" e ofereceria "Tentar de novo" como se fosse uma falha passageira.
 
 - A NOD-171 mostrar o CLI real mandando o teto com outro `status` (ou sem `rate_limit_event`).
 - O Codex passar a expor o limite num campo estruturado: entra no mesmo sinal.
+
+## Emenda (2026-10-10): com outra IA pronta, a ligação continua sozinha
+
+Decisão do Marlon no plano das IAs (PR 2), depois do teste do Breno em 09/10: no limite, com outra IA pronta, a ligação
+não espera a pessoa escolher na tela. O orquestrador fala "Sua assinatura de IA chegou ao limite. Vou continuar com o
+ChatGPT." (ou "o Claude"), entra no "sem IA" com causa `limite` e chama `continuarCom` (injetado pela composição), que faz
+o mesmo que o `POST ligacoes/:id/continuar`: abre outro turno-cérebro para a mesma ligação e o religa com
+`reabrirCerebro`. Se isso falhar (o turno novo não nasceu, a ligação acabou no meio), fica a escolha na tela, como antes;
+o log `ligacao_continuar_sozinha_falhou` diz por quê, só com códigos. Sem outra IA pronta, nada muda: encerra com
+`limite_da_assinatura`. Teste: `tests/unit/voz/orquestrador-sem-ia.test.ts` (segue sozinha; falha e fica a escolha).
+
+**Gatilho de reversão.** Se trocar de voz/IA no meio da ligação sem perguntar confundir mais que a pausa, volte a frase
+antiga (`FALA_LIMITE_COM_OUTRA`) tirando o `continuarCom` da composição — o caminho da escolha continua inteiro.

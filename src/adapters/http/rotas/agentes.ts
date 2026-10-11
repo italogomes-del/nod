@@ -10,6 +10,7 @@ import { editarPerfil } from "../../../use-cases/editar-perfil.ts";
 import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-agente.ts";
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
 import { mudarModoAprovacao } from "../../../use-cases/mudar-modo-aprovacao.ts";
+import { definirInteligenciaDoBot, lerInteligenciaDoBot } from "../../../use-cases/inteligencia.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, textoOpcional, type DepsRotas } from "./executar-caso.ts";
 
@@ -64,6 +65,23 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
           dono: corpo.dono,
         });
         ctx.json(200, r);
+      },
+    },
+    {
+      // definido em 2026-10-10 (0068, emenda da ADR-036): a inteligência do bot — modo, IA fixa, ordem própria e o modelo e
+      // o raciocínio de cada IA (contrato em src/contracts/inteligencia.ts). Campo ausente não muda; `ordem: null` volta à
+      // ordem da pessoa. O PATCH acima continua aceitando o par antigo {harness, modelo, esforco}.
+      metodo: "GET",
+      padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, lerInteligenciaDoBot, { agenteId: ctx.params.id ?? "" }));
+      },
+    },
+    {
+      metodo: "PUT",
+      padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, definirInteligenciaDoBot, { agenteId: ctx.params.id ?? "", pedido: await ctx.corpo() }));
       },
     },
     {

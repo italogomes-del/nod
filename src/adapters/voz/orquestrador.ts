@@ -86,6 +86,13 @@ export type DepsVoz = {
    * (`catalogoHarness` na composição). Síncrono e em memória; ausente = o aviso sai sem "continuar com outra IA".
    */
   iasDoMac?: (ref: RefLigacao) => EstadoIaDaLigacao[];
+  /**
+   * definido em 2026-10-10 (emenda da ADR-078, decisão do Marlon): no limite da assinatura, com outra IA pronta, a
+   * ligação continua SOZINHA por ela — o mesmo "continuar" que a tela pede (`POST ligacoes/:id/continuar`): abre outro
+   * turno-cérebro e chama `reabrirCerebro`. false (ou erro) = fica o aviso com a escolha na tela, como antes. Ausente = só
+   * a escolha.
+   */
+  continuarCom?: (ref: RefLigacao, ia: IaDaLigacao) => Promise<boolean>;
   relogio?: () => number;
   aleatorio?: () => number;
   /** Prazos (testes encurtam). */
@@ -250,6 +257,9 @@ export const NOTA_CONEXAO_VOLTOU = "[nod] A conexão voltou. Siga a conversa de 
 /** NOD-168 (ADR-078): o aviso escrito e o falado do limite da assinatura (a fala é sintetizada na hora, não é clipe). */
 export const AVISO_LIMITE = "Sua assinatura de IA chegou ao limite.";
 const FALA_LIMITE_COM_OUTRA = "Sua assinatura de IA chegou ao limite. Dá para continuar com a outra IA deste Mac: escolha na tela.";
+/** definido em 2026-10-10: a ligação segue sozinha pela outra IA (continuarCom). */
+const NOME_FALADO_DA_IA: Record<IaDaLigacao, string> = { "claude-cli": "o Claude", "codex-cli": "o ChatGPT" };
+const falaLimiteContinua = (ia: IaDaLigacao): string => `Sua assinatura de IA chegou ao limite. Vou continuar com ${NOME_FALADO_DA_IA[ia]}.`;
 const FALA_LIMITE_SEM_OUTRA = "Sua assinatura de IA chegou ao limite, então vou encerrar a ligação.";
 const FALA_VOZ_FORA = FALAS_DE_ESPERA.find((f) => f.categoria === "voz_fora") ?? null;
 /** definido em 2026-10-05 (NOD-168): frases seguidas com falha do TTS até a ligação seguir só com a legenda. */
@@ -1849,11 +1859,18 @@ export function criarServicoVoz(deps: DepsVoz): ServicoVoz {
       limitada = true;
       const ia = iaDoCerebro;
       const outra = iaQuePodeAssumir(ia, iasAgora());
-      log("aviso", "ligacao_limite_da_assinatura", { ligacao_id: r.ligacaoId, harness: ia, outra_pronta: outra !== null });
+      log("aviso", "ligacao_limite_da_assinatura", { ligacao_id: r.ligacaoId, harness: ia, outra_pronta: outra !== null, continua_sozinha: outra !== null && deps.continuarCom !== undefined });
       if (outra !== null) {
         paraMidia({ t: "aviso", texto: AVISO_LIMITE });
-        falarAviso(FALA_LIMITE_COM_OUTRA);
+        falarAviso(deps.continuarCom ? falaLimiteContinua(outra) : FALA_LIMITE_COM_OUTRA);
         entrarSemIa("limite", ia, true);
+        // revisto em 2026-10-10: continua sozinha pela outra IA; se não der, a escolha na tela segue valendo.
+        if (deps.continuarCom) {
+          const seguir = deps.continuarCom;
+          void seguir({ ...ref }, outra)
+            .then((ok) => { if (!ok) log("aviso", "ligacao_continuar_sozinha_falhou", { ligacao_id: r.ligacaoId, harness: outra, motivo: "recusado" }); })
+            .catch((e: unknown) => log("aviso", "ligacao_continuar_sozinha_falhou", { ligacao_id: r.ligacaoId, harness: outra, motivo: e instanceof Error ? e.name : "desconhecido" }));
+        }
         return;
       }
       // Nada do que o cérebro ainda mandar é falado: a próxima fala é a do aviso. `soltarAVez` zera `desligando`, então

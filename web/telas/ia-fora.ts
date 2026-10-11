@@ -198,6 +198,7 @@ export function linhaIaTrocada(m: Mensagem): string | null {
   if (p?.kind !== "ia_trocada" || !ehIa(p.de) || !ehIa(p.para)) return null;
   const de = PROVEDOR_DA_IA[p.de];
   const para = PROVEDOR_DA_IA[p.para];
-  const motivo = p.causa === "conta_sem_acesso" ? `A conta do ${de.nome} deste Mac está sem acesso ao ${de.cli}.` : `O ${de.cli} deste Mac não respondeu.`;
+  // revisto em 2026-10-10 (emenda da ADR-036): a troca pelo limite da assinatura; a linha discreta da tela nova é o PR da web.
+  const motivo = p.causa === "limite" ? `O ${de.nome} chegou ao limite da assinatura.` : p.causa === "conta_sem_acesso" ? `A conta do ${de.nome} deste Mac está sem acesso ao ${de.cli}.` : `O ${de.cli} deste Mac não respondeu.`;
   return `<div class="aviso-estado tom-info aviso-compacto aviso-ia-trocada">${logo(p.para)}<div class="aviso-estado-txt">Respondendo pelo ${esc(para.nome)}. ${esc(motivo)}</div>${botao("secao-espaco", "Ver opções", { classe: "sm", dados: { secao: "conexao" } })}</div>`;
 }

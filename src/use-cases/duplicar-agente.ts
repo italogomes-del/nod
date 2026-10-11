@@ -39,6 +39,8 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     cor: original.cor,
     modelo: original.modelo,
     harness: original.harness,
+    // 0068: o modo, a ordem própria e o modelo e o raciocínio de cada IA vão junto.
+    ...(original.inteligencia ? { inteligencia: original.inteligencia } : {}),
     duplicadoDe: original.id,
     confirmado: original.confirmado,
   });
