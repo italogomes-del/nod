@@ -1257,7 +1257,9 @@ async function boot(): Promise<void> {
     // ADR-091 (definido em 2026-10-09): o uso da CPU muda a cada leitura sem mudar de nível (e só a mudança de nível vira
     // frame) — com Este Mac aberta, os números são relidos a cada 30 s, a batida do amostrador.
     // Revisto em 2026-10-09: também com Máquinas aberta, que mostra a leitura de cada máquina.
-    if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: ["trabalhos"] });
+    // Revisto em 2026-10-11: com Máquinas aberta, a lista também. Máquina que cai ou volta não vira `inventario.mudou` (só a
+    // mudança das IAs da pessoa vira), e o cartão ficava em "sem contato" com a VM já de volta e os bots trabalhando nela.
+    if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: estado.espaco?.secao === "maquinas" ? ["trabalhos", "maquinas"] : ["trabalhos"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
