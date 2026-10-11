@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classificarIgnorado, ENTRE_PASSADAS_APERTADAS_MS, LIMPAR_APOS_MS, motivoDaRecusa, passadaPorAperto, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, ENTRE_PASSADAS_APERTADAS_MS, LIMPAR_ANTES_DE_ACABAR_MS, LIMPAR_APOS_MS, motivoDaRecusa, passadaPorAperto, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
 
 const AGORA = Date.UTC(2026, 9, 9, 12);
 const DIA = 24 * 3_600_000;
@@ -44,6 +44,10 @@ describe("quem pode ser limpo (ADR-088)", () => {
     expect(passadaPorAperto("amarela", null, AGORA)).toBe(true);
     expect(passadaPorAperto("vermelha", AGORA - ENTRE_PASSADAS_APERTADAS_MS, AGORA)).toBe(true);
     expect(passadaPorAperto("vermelha", AGORA - ENTRE_PASSADAS_APERTADAS_MS + 1, AGORA)).toBe(false);
+    // ADR-096 §6: verde, mas acabando em 6 h ou menos, já aperta.
+    expect(passadaPorAperto("verde", null, AGORA, LIMPAR_ANTES_DE_ACABAR_MS)).toBe(true);
+    expect(passadaPorAperto("verde", null, AGORA, LIMPAR_ANTES_DE_ACABAR_MS + 1)).toBe(false);
+    expect(passadaPorAperto("verde", AGORA - 1, AGORA, 0)).toBe(false);
   });
 
   it("só pasta de task (~/nod/<bot>/<slug>): a raiz do bot, caminho fora de ~/nod e com .. ficam de fora", () => {

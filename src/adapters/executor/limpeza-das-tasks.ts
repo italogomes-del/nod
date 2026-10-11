@@ -5,10 +5,11 @@ import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, 
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
 import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
-import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
-import { discoDoStatfs, nivelDoDisco } from "../../domain/memoria-mac.ts";
+import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, orfaSai, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
+import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
+import { guardarEApagar, vencerGuardados } from "./guardar-antes-de-apagar.ts";
 
 /**
  * A limpeza das pastas de task no Mac (definido em 2026-10-09, ADR-088, issue #216). O servidor diz quais tasks
@@ -155,7 +156,12 @@ export type OpcoesLimpeza = {
   emUso?: (pasta: string) => boolean;
   /** Revisão do #225: o servidor ainda oferece esta pasta? Perguntado logo antes da primeira remoção de cada pasta. */
   reconfirmar?: (p: PastaParaLimpar) => Promise<boolean>;
+  /** ADR-096 §4: o relógio do nome do guardado (injetável nos testes). */
+  agora?: () => number;
 };
+
+/** ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). */
+const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado"]);
 
 type Achados = { worktrees: string[]; clones: number };
 
@@ -367,6 +373,8 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     const montagens = (await lerMontagens()) ?? [];
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
+    // ADR-096 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
+    let segura = false;
 
     for (const wt of achados.worktrees) {
       const nome = basename(wt);
@@ -376,6 +384,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       if (motivo) {
         pular(motivo);
         if (motivo !== "pr_nao_mergeado") log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo });
+        if (!SAI_GUARDANDO.has(motivo)) segura = true;
         continue;
       }
       // Logo antes da primeira remoção da pasta: o servidor ainda a oferece, e nenhum turno deste Mac começou nela.
@@ -409,7 +418,24 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     }
     // Nem a pasta que o servidor deixou de oferecer, nem a que ganhou turno vivo.
     if (confirmada === false || o.emUso?.(rel)) continue;
-    if (await ficariaVazia(base, 0, saem, montagens, !simular)) relato.pastasApagadas++;
+    if (await ficariaVazia(base, 0, saem, montagens, !simular)) { relato.pastasApagadas++; continue; }
+    // ADR-096 §4: na task encerrada (3 dias, ou 2 h com o disco apertado), o que ficou é guardado e a pasta sai. Na de
+    // menos tempo (`so_com_pr_mergeado`) a pasta fica: o bot ainda pode voltar a ela.
+    if (p.quando !== "encerrada" || segura) continue;
+    if (confirmada === null) {
+      confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      if (!confirmada) { pular("nao_reconfirmada"); continue; }
+    }
+    const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now });
+    if (g.motivo) {
+      pular(g.motivo);
+      log("aviso", "limpeza_pasta_pulada", { trabalho_id: p.trabalhoId, motivo: g.motivo });
+      continue;
+    }
+    relato.guardadas = (relato.guardadas ?? 0) + 1;
+    relato.guardadoBytes = (relato.guardadoBytes ?? 0) + g.guardadoBytes;
+    relato.liberadoBytes += g.liberadoBytes;
+    relato.pastasApagadas++;
   }
   // Revisão do #225: sem `git worktree prune` — o `remove` já apaga os metadados da worktree que tirou, e o prune
   // varreria também as worktrees de OUTROS donos cuja pasta sumiu (num disco desmontado, por exemplo).
@@ -420,6 +446,16 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
  * As worktrees na raiz das pastas dos bots (`~/nod/<bot>/<x>` com `.git` arquivo), fora de qualquer task: só contadas
  * (ADR-088 §5). "Parada" = nem a pasta nem o HEAD/índice dela no clone mudaram há ORFA_PARADA_MS.
  */
+async function ultimaMudanca(dir: string): Promise<number> {
+  let ultima = (await stat(dir)).mtimeMs;
+  const m = /^gitdir:\s*(.+)$/m.exec(await readFile(join(dir, ".git"), "utf8"));
+  if (m) {
+    const gitdir = resolve(dir, m[1]!.trim());
+    for (const f of ["HEAD", "index"]) ultima = Math.max(ultima, await stat(join(gitdir, f)).then((s) => s.mtimeMs, () => 0));
+  }
+  return ultima;
+}
+
 export async function contarOrfas(home: string, agora: number): Promise<{ orfas: number; paradas: number }> {
   const raiz = join(home, "nod");
   let orfas = 0;
@@ -437,19 +473,71 @@ export async function contarOrfas(home: string, agora: number): Promise<{ orfas:
         const git = await lstat(join(dir, ".git"));
         if (!git.isFile()) continue;
         orfas++;
-        let ultima = (await stat(dir)).mtimeMs;
-        const m = /^gitdir:\s*(.+)$/m.exec(await readFile(join(dir, ".git"), "utf8"));
-        if (m) {
-          const gitdir = resolve(dir, m[1]!.trim());
-          for (const f of ["HEAD", "index"]) ultima = Math.max(ultima, await stat(join(gitdir, f)).then((s) => s.mtimeMs, () => 0));
-        }
-        if (agora - ultima >= ORFA_PARADA_MS) paradas++;
+        if (agora - (await ultimaMudanca(dir)) >= ORFA_PARADA_MS) paradas++;
       } catch {
         // sem .git: pasta de task ou pasta comum
       }
     }
   }
   return { orfas, paradas };
+}
+
+export type RelatoOrfas = { removidas: number; guardadas: number; guardadoBytes: number; liberadoBytes: number; puladas: Partial<Record<MotivoPuladaLimpeza, number>> };
+
+/**
+ * ADR-096 §4: as worktrees órfãs da raiz do bot (`~/nod/<bot>/<x>`, ADR-088 §5) paradas há 30 dias, ou há 7 com o disco
+ * apertado, saem. Nunca com um turno daquele bot rodando (o turno sem task usa a raiz do bot). A limpa sai como a da
+ * task (`git worktree remove` sem --force, as mesmas conferências); a suja, com ignorado valioso, HEAD solto ou
+ * repositório dentro é guardada antes. Montagem, travada e erro seguram. Sem saber o que o Docker monta, nada sai.
+ */
+export async function limparOrfas(o: OpcoesLimpeza, agora: number, apertado: boolean): Promise<RelatoOrfas> {
+  const relato: RelatoOrfas = { removidas: 0, guardadas: 0, guardadoBytes: 0, liberadoBytes: 0, puladas: {} };
+  const pular = (m: MotivoPuladaLimpeza) => { relato.puladas[m] = (relato.puladas[m] ?? 0) + 1; };
+  const raiz = join(o.home, "nod");
+  const livre = o.livre ?? livrePadrao;
+  let montagens: string[] | null | undefined;
+  let bots;
+  try { bots = await readdir(raiz, { withFileTypes: true }); } catch { return relato; }
+  for (const b of bots) {
+    if (!b.isDirectory() || b.name.startsWith(".") || o.emUso?.(b.name)) continue;
+    let itens;
+    try { itens = await readdir(join(raiz, b.name), { withFileTypes: true }); } catch { continue; }
+    for (const i of itens) {
+      if (!i.isDirectory() || i.name.startsWith(".")) continue;
+      const wt = join(raiz, b.name, i.name);
+      const ehWorktree = await lstat(join(wt, ".git")).then((s) => s.isFile(), () => false);
+      if (!ehWorktree || !orfaSai(await ultimaMudanca(wt).catch(() => agora), agora, apertado)) continue;
+      if (montagens === undefined) {
+        const m = await (o.montagens ?? (() => montagensDoDocker(o.executar, o.home)))();
+        montagens = m === null ? null : [...m, ...(await Promise.all(m.map(real)))];
+      }
+      if (montagens === null) return relato; // Docker mudo: nada sai (ADR-088, segunda revisão do #225)
+      if (o.emUso?.(b.name)) break; // um turno do bot começou no meio
+      const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+      const dirComum = comum.stdout.trim();
+      const pasta = { trabalhoId: "orfa", pasta: `${b.name}/${i.name}`, quando: "encerrada" } as const;
+      const motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, pasta, dirComum, montagens, o.executar);
+      if (motivo !== null && !SAI_GUARDANDO.has(motivo)) { pular(motivo); continue; }
+      if (motivo === null) {
+        if (o.simular) { relato.removidas++; log("info", "limpeza_simulada_orfa", { caminho: relative(raiz, wt) }); continue; }
+        const antes = await livre(raiz).catch(() => null);
+        const r = await o.executar("git", ["-C", dirComum, "worktree", "remove", wt], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+        if (r.codigo !== 0) { pular(motivoDaRecusa(r.stderr)); continue; }
+        const depois = await livre(raiz).catch(() => null);
+        const liberado = antes !== null && depois !== null ? Math.max(0, depois - antes) : 0;
+        relato.removidas++;
+        relato.liberadoBytes += liberado;
+        log("info", "limpeza_orfa_removida", { caminho: relative(raiz, wt), liberado_mb: Math.round(liberado / 1_048_576) });
+        continue;
+      }
+      const g = await guardarEApagar(wt, "orfa", { raiz, executar: o.executar, montagens, simular: o.simular, livre, agora: () => agora });
+      if (g.motivo) { pular(g.motivo); continue; }
+      relato.guardadas++;
+      relato.guardadoBytes += g.guardadoBytes;
+      relato.liberadoBytes += g.liberadoBytes;
+    }
+  }
+  return relato;
 }
 
 /**
@@ -577,7 +665,17 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       const pastas = await pastasParaLimpar(o.pessoaId, pedido);
       const reconfirmar = o.reconfirmar ?? (async (p: PastaParaLimpar) =>
         (await pastasParaLimpar(o.pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
-      const relato = await limparPastas(pastas, { ...o, reconfirmar });
+      const relato = await limparPastas(pastas, { ...o, reconfirmar, agora });
+      if (!relato.adiada) {
+        // ADR-096 §4: as órfãs paradas e os guardados vencidos.
+        const orfas = await limparOrfas(o, agora(), apertado);
+        relato.orfasRemovidas = orfas.removidas;
+        relato.guardadas = (relato.guardadas ?? 0) + orfas.guardadas;
+        relato.guardadoBytes = (relato.guardadoBytes ?? 0) + orfas.guardadoBytes;
+        relato.liberadoBytes += orfas.liberadoBytes;
+        for (const [m, n] of Object.entries(orfas.puladas) as [MotivoPuladaLimpeza, number][]) relato.puladas[m] = (relato.puladas[m] ?? 0) + n;
+        if (o.simular !== true) relato.guardadosVencidos = await vencerGuardados(join(o.home, "nod"), agora(), apertado);
+      }
       if (apertado) {
         relato.apertada = true;
         relato.cachesBytes = o.simular === true || relato.adiada ? 0 : await limparCachesDePacote(o.executar, join(o.home, "nod"), o.livre);
@@ -607,14 +705,18 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
   // ADR-096: o vigia do disco. O nível guarda a histerese da ADR-085 (sai do amarelo só acima de 11 GB).
   let nivel: NivelPressao | null = null;
   let ultimaApertada: number | null = null;
+  let historico: PontoDoDisco[] = [];
   const medir = o.disco ?? discoPadrao;
   async function vigiarDisco(): Promise<void> {
     if (parado || rodando) return;
     const leitura = await medir(join(o.home, "nod")).catch(() => medir(o.home)).catch(() => null);
     nivel = nivelDoDisco(leitura, nivel);
-    if (!passadaPorAperto(nivel, ultimaApertada, agora())) return;
+    // ADR-096 §6: a tendência da própria máquina (a do servidor é a da tela); disco que acaba em 6 h já aperta.
+    if (leitura) historico = comPonto(historico, { em: agora(), livreMb: leitura.livreMb });
+    const acaba = acabaEmMs(historico, agora());
+    if (!passadaPorAperto(nivel, ultimaApertada, agora(), acaba)) return;
     ultimaApertada = agora();
-    log("info", "limpeza_disco_apertado", { pessoa_id: o.pessoaId, nivel, livre_mb: leitura?.livreMb ?? null });
+    log("info", "limpeza_disco_apertado", { pessoa_id: o.pessoaId, nivel, livre_mb: leitura?.livreMb ?? null, acaba_em_min: acaba === null ? null : Math.round(acaba / 60_000) });
     await passada({ apertado: true });
   }
   const vigia = setInterval(() => void vigiarDisco().catch(() => undefined), o.vigiaDoDiscoMs ?? VIGIA_DO_DISCO_MS);

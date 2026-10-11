@@ -28,3 +28,26 @@ describe("trabalhos vivos por máquina", () => {
     expect(v.memoria("p")?.nivel).toBe("vermelha");
   });
 });
+
+/** ADR-096 §6: o histórico do livre por máquina vira a estimativa de quando ele acaba, e o aviso vira frame. */
+describe("a tendência do disco por máquina", () => {
+  const comDisco = (livreMb: number) => ({ nivel: "verde" as const, totalMb: 500, porTurno: [], disco: { livreMb, totalMb: 100 * 1024 } });
+
+  it("a VM perdendo 2 GB por hora: a leitura dela traz a estimativa, e a do Mac parado não", () => {
+    let agora = 0;
+    const v = criarTrabalhosVivos(() => agora);
+    let mudou = false;
+    for (let i = 0; i <= 12; i++) {
+      agora = i * 5 * 60_000;
+      v.registrarMemoria("p", "mac", comDisco(200 * 1024));
+      mudou = v.registrarMemoria("p", "vm", comDisco(14 * 1024 - i * 170)).mudou || mudou;
+    }
+    const [mac, vm] = v.porMaquina("p");
+    expect(mac!.discoAcabaEmMs).toBeNull();
+    expect(vm!.discoAcabaEmMs! / 3_600_000).toBeGreaterThan(4);
+    expect(vm!.discoAcabaEmMs! / 3_600_000).toBeLessThan(6);
+    expect(v.memoria("p")?.discoAcabaEmMs).toBe(vm!.discoAcabaEmMs);
+    // A primeira vez que a VM passa a acabar em menos de 24 h, o frame sai (a linha dela muda).
+    expect(mudou).toBe(true);
+  });
+});

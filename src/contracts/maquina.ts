@@ -51,4 +51,4 @@ export type LeituraDeMaquinaDto = MaquinaDoTrabalho & {
  * A leitura viva de UMA máquina, como o processo a guarda (2026-10-09, trabalhos-vivos.ts): `portao` é o nível do
  * processador que o portão usa (o pior entre a CPU e a fila, ADR-091); `totalMb`, a memória dos processos dos bots nela.
  */
-export type LeituraDaMaquinaViva = { machineId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; fila: NivelPressao | null; portao: NivelPressao | null; uso: number | null; carga: number | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoMedido: boolean };
+export type LeituraDaMaquinaViva = { machineId: string; nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; fila: NivelPressao | null; portao: NivelPressao | null; uso: number | null; carga: number | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoMedido: boolean; discoAcabaEmMs?: number | null };

@@ -190,7 +190,8 @@ export type LeituraMemoria = { nivel: NivelPressao; totalMb: number; porTurno: {
 export type LeituraDisco = { livreMb: number; totalMb: number };
 
 /** O disco como a tela o vê (#219): a leitura, o nível e os dois limites (domain/memoria-mac.ts, `DISCO_*_MB`). */
-export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number; criticoMb: number };
+/** ADR-096 §6: `acabaEmMs` = em quanto tempo o livre chega ao vermelho no ritmo das últimas horas, só abaixo de 24 h. */
+export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number; criticoMb: number; acabaEmMs?: number | null };
 
 /** Por que o Mac segura trabalho novo (#219): o processador cheio, a memória em alerta ou crítica, ou o disco quase cheio. */
 export type MotivoEsperaMac = "processador" | "memoria" | "disco";

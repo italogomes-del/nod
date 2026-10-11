@@ -1,6 +1,6 @@
 import type { LeituraDaMaquinaViva } from "../../contracts/maquina.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
-import { niveisDoProcessador, nivelDoDisco, piorNivel } from "../../domain/memoria-mac.ts";
+import { acabaEmMs, AVISO_DA_TENDENCIA_MS, comPonto, TENDENCIA_JANELA_MS, niveisDoProcessador, nivelDoDisco, piorNivel, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 
 /**
@@ -13,6 +13,8 @@ import { log } from "../../obs/log.ts";
 export const VALIDADE_LEITURA_MS = 120_000;
 /** definido em 2026-10-09 (ADR-091): o log `mac_leitura` (os números crus, para calibrar as réguas) sai a cada 5 min por Mac. */
 export const LOG_LEITURA_MS = 5 * 60_000;
+/** ADR-096 §6 (definido em 2026-10-11): o aviso de disco acabando vai ao log no máximo uma vez por hora por máquina. */
+const AVISO_NO_LOG_MS = 3_600_000;
 const TURNOS_GUARDADOS = 1000;
 
 /**
@@ -58,6 +60,10 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
   const usoTrocadoEm = new Map<string, number>();
 
   const logadoEm = new Map<string, number>();
+  /** ADR-096 §6: quando cada máquina teve o aviso `disco_acaba_logo` no log (no máximo um por hora). */
+  const avisadoEm = new Map<string, number>();
+  /** ADR-096 §6: o espaço livre de cada máquina nas últimas 3 h (sai quando o último ponto passa da janela). */
+  const historicos = new Map<string, PontoDoDisco[]>();
 
   const viva = (m: LeituraGuardada) => agora() - m.em <= VALIDADE_LEITURA_MS;
   /** A pessoa mandou leitura deste Mac nos últimos 2 min (o mesmo prazo da leitura). */
@@ -65,7 +71,7 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
 
   /** As máquinas vivas que a pessoa usa, cada uma com a própria leitura (a ordem é a de chegada da primeira leitura). */
   function porMaquina(pessoaId: string): LeituraDaMaquinaViva[] {
-    return [...maquinas.entries()].filter(([, m]) => viva(m) && usa(m, pessoaId)).map(([machineId, m]) => ({ machineId, nivel: m.nivel, totalMb: m.totalMb, processador: m.processador, fila: m.fila, portao: m.portao, uso: m.uso, carga: m.carga, disco: m.disco, discoNivel: m.discoNivel, discoMedido: m.discoMedido }));
+    return [...maquinas.entries()].filter(([, m]) => viva(m) && usa(m, pessoaId)).map(([machineId, m]) => ({ machineId, nivel: m.nivel, totalMb: m.totalMb, processador: m.processador, fila: m.fila, portao: m.portao, uso: m.uso, carga: m.carga, disco: m.disco, discoNivel: m.discoNivel, discoMedido: m.discoMedido, discoAcabaEmMs: acabaEmMs(historicos.get(machineId) ?? [], agora()) }));
   }
 
   /**
@@ -73,10 +79,12 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
    * o Mac já apertado, mas a pílula e a linha da VM mudam: sem isto o frame não sairia.
    */
   function assinatura(pessoaId: string): string {
-    return porMaquina(pessoaId).map((m) => `${m.machineId}:${m.nivel}/${m.portao ?? "-"}/${m.discoNivel ?? "-"}`).sort().join(" ");
+    // ADR-096 §6: o disco que passa a acabar em menos de 24 h também muda o que a tela mostra.
+    const logo = (ms: number | null | undefined) => (ms !== null && ms !== undefined && ms <= AVISO_DA_TENDENCIA_MS ? "logo" : "-");
+    return porMaquina(pessoaId).map((m) => `${m.machineId}:${m.nivel}/${m.portao ?? "-"}/${m.discoNivel ?? "-"}/${logo(m.discoAcabaEmMs)}`).sort().join(" ");
   }
 
-  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; uso: number | null; fila: NivelPressao | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoSuportado: boolean } | null {
+  function daPessoa(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador: NivelPressao | null; carga: number | null; uso: number | null; fila: NivelPressao | null; disco: LeituraDisco | null; discoNivel: NivelPressao | null; discoSuportado: boolean; discoAcabaEmMs: number | null } | null {
     const vivas = [...maquinas.values()].filter((m) => viva(m) && usa(m, pessoaId));
     if (vivas.length === 0) return null;
     // ADR-085: o processador também pelo pior Mac; a carga é a maior por núcleo entre os que mandaram. ADR-091: o uso
@@ -96,6 +104,8 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       disco: pior?.disco ?? null,
       discoNivel: pior?.discoNivel ?? null,
       discoSuportado: vivas.some((m) => m.discoMedido),
+      // ADR-096 §6: o disco que acaba primeiro entre os da pessoa.
+      discoAcabaEmMs: porMaquina(pessoaId).map((m) => m.discoAcabaEmMs ?? null).filter((x): x is number => x !== null).reduce<number | null>((a, b) => (a === null ? b : Math.min(a, b)), null),
     };
   }
 
@@ -122,6 +132,10 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       for (const [p] of m.pessoas) if (!usa(m, p)) m.pessoas.delete(p);
     }
     for (const p of vistoPorPessoa.keys()) if (daPessoa(p) === null) vistoPorPessoa.delete(p);
+    // ADR-096 §6: o histórico do disco vive mais que a leitura (3 h), e sai quando o último ponto passa da janela.
+    for (const [id, h] of historicos) {
+      if (agora() - (h[h.length - 1]?.em ?? -Infinity) > TENDENCIA_JANELA_MS) { historicos.delete(id); avisadoEm.delete(id); }
+    }
   }
 
   return {
@@ -148,6 +162,15 @@ export function criarTrabalhosVivos(agora: () => number = Date.now) {
       pessoas.set(pessoaId, agora());
       const guardada: LeituraGuardada = { nivel: leitura.nivel, totalMb: leitura.totalMb, processador: cpu.processador, fila: cpu.fila, portao: cpu.portao, uso: leitura.processador?.uso ?? null, carga: leitura.processador?.carga ?? null, disco: leitura.disco ?? null, discoNivel, discoMedido: leitura.disco !== undefined, em: agora(), pessoas };
       maquinas.set(machineId, guardada);
+      // ADR-096 §6: o histórico do livre para a tendência (um ponto a cada 5 min, 3 h), fora da leitura viva: a máquina
+      // que some por alguns minutos não perde a tendência.
+      const historico = leitura.disco ? comPonto(historicos.get(machineId) ?? [], { em: agora(), livreMb: leitura.disco.livreMb }) : (historicos.get(machineId) ?? []);
+      if (historico.length > 0) historicos.set(machineId, historico);
+      const acaba = acabaEmMs(historico, agora());
+      if (acaba !== null && acaba <= AVISO_DA_TENDENCIA_MS && agora() - (avisadoEm.get(machineId) ?? -Infinity) >= AVISO_NO_LOG_MS) {
+        avisadoEm.set(machineId, agora());
+        log("aviso", "disco_acaba_logo", { machine_id: machineId, livre_mb: leitura.disco?.livreMb ?? null, acaba_em_min: Math.round(acaba / 60_000) });
+      }
       if (agora() - (logadoEm.get(machineId) ?? -Infinity) >= LOG_LEITURA_MS) {
         logadoEm.set(machineId, agora());
         log("info", "mac_leitura", { machine_id: machineId, memoria: guardada.nivel, processador: guardada.processador, uso: guardada.uso, fila: guardada.fila, carga: guardada.carga, disco_livre_mb: guardada.disco?.livreMb ?? null });
