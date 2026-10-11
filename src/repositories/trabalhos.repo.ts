@@ -213,11 +213,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
-    /** #194: a última leitura de memória do grupo de processos de cada turno lido, no trabalho dele. */
+    /**
+     * #194: a última leitura de memória do grupo de processos de cada turno lido, no trabalho dele. ADR-097 (fase 0c):
+     * também o pico, que é o que calibra a reserva por agente e a fila do trabalho pesado.
+     */
     async atualizarMemoria(porTurno: readonly { turnoId: string; mb: number }[]): Promise<number> {
       if (porTurno.length === 0) return 0;
       const r = await conn`
-        update trabalhos w set memoria_mb = l.mb
+        update trabalhos w set memoria_mb = l.mb, memoria_pico_mb = greatest(coalesce(w.memoria_pico_mb, 0), l.mb)
         from (select unnest(${porTurno.map((p) => p.turnoId)}::uuid[]) as turno_id, unnest(${porTurno.map((p) => Math.max(0, Math.round(p.mb)))}::int[]) as mb) l
         join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = l.turno_id
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id

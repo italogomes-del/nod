@@ -3,8 +3,10 @@ import { readFile, statfs } from "node:fs/promises";
 import { availableParallelism, cpus, homedir, loadavg } from "node:os";
 import { join } from "node:path";
 import type { LeituraDisco, LeituraMemoria, LeituraProcessador, NivelPressao } from "../../contracts/trabalho.ts";
-import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoProcessador, leituraDoTurno, nivelDaMemoriaLinux, nivelDaPressao, nivelDoDisco, pressaoSimulada, somarPorGrupo, temposDaCpu, usoDaCpu, type TemposCpu } from "../../domain/memoria-mac.ts";
+import { cargaDoLoadavg, discoDoStatfs, discoSimulado, leituraDoProcessador, leituraDoTurno, lerLinhasDoPs, marcaNoAmbiente, nivelDaMemoriaLinux, nivelDaPressao, nivelDoDisco, pressaoSimulada, somarComFugitivos, temposDaCpu, usoDaCpu, type LinhaDoPs, type TemposCpu } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
+import { ambientesDosProcessos } from "./grupos-orfaos.ts";
+import { marcasDosGruposVivos } from "./processo.ts";
 
 /**
  * Amostrador de memória da máquina (definido em 2026-10-07, ADR-083 §4, #194; decisão S8 da revisão de engenharia):
@@ -75,7 +77,7 @@ const executarPadrao: Executar = (bin, args) =>
     execFile(bin, [...args], { timeout: PRAZO_COMANDO_MS, maxBuffer: 8 * 1024 * 1024 }, (erro, stdout) => (erro ? rejeitar(erro) : resolver(String(stdout))));
   });
 
-export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number; temposCpu?: () => TemposCpu; esperar?: (ms: number) => Promise<void>; agora?: () => number }): AmostradorMemoria {
+export function criarAmostradorMemoria(o: { env: Record<string, string | undefined>; intervaloMs?: number; executar?: Executar; medirDisco?: MedirDisco; nucleos?: number; plataforma?: NodeJS.Platform; lerNoLinux?: boolean; lerArquivo?: (caminho: string) => Promise<string>; cargaLinux?: () => number; temposCpu?: () => TemposCpu; esperar?: (ms: number) => Promise<void>; agora?: () => number; marcas?: () => ReadonlyMap<string, number>; ambientes?: (pids: readonly number[]) => Promise<Map<number, string>> }): AmostradorMemoria {
   const nucleos = o.nucleos ?? availableParallelism();
   // ADR-085: a leitura da máquina só existe no macOS (ou simulada); fora dele seria um "verde" que ninguém mediu.
   // ADR-090: o motor numa máquina Linux também lê (memória pelo /proc/meminfo, processador pelo os.loadavg). Só quando
@@ -87,6 +89,8 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
   const esperar = o.esperar ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref?.()));
   const lerArquivo = o.lerArquivo ?? ((caminho: string) => readFile(caminho, "utf8"));
   const executar = o.executar ?? executarPadrao;
+  const lerMarcas = o.marcas ?? marcasDosGruposVivos;
+  const lerAmbientes = o.ambientes ?? ambientesDosProcessos;
   const medirDisco = o.medirDisco ?? medirDiscoPadrao;
   // #219: o disco que importa é o das pastas dos bots (`~/nod`, ADR-052/065); antes de o primeiro bot criar a pasta, o da casa.
   const casa = o.env.HOME ?? homedir();
@@ -187,10 +191,34 @@ export function criarAmostradorMemoria(o: { env: Record<string, string | undefin
     }
   }
 
+  /**
+   * ADR-097 (fase 0c): a marca de cada processo fora dos grupos dos turnos, lida uma vez por pid (o ambiente de um
+   * processo não muda depois do exec). Sai do cache quando o pid some do `ps`.
+   */
+  const marcaDoPid = new Map<number, string | null>();
+
+  async function grupoDosFugitivos(linhas: readonly LinhaDoPs[], dosTurnos: ReadonlySet<number>): Promise<(pid: number) => number | undefined> {
+    const marcas = lerMarcas();
+    if (marcas.size === 0) return () => undefined;
+    const vivos = new Set(linhas.map((l) => l.pid));
+    for (const pid of marcaDoPid.keys()) if (!vivos.has(pid)) marcaDoPid.delete(pid);
+    const novos = linhas.filter((l) => l.pid > 1 && !dosTurnos.has(l.pgid) && !marcaDoPid.has(l.pid)).map((l) => l.pid);
+    if (novos.length > 0) {
+      const ambientes = await lerAmbientes(novos).catch(() => new Map<number, string>());
+      for (const pid of novos) marcaDoPid.set(pid, marcaNoAmbiente(ambientes.get(pid)));
+    }
+    return (pid) => {
+      const marca = marcaDoPid.get(pid);
+      return marca ? marcas.get(marca) : undefined;
+    };
+  }
+
   async function lerGrupos(): Promise<Map<number, number>> {
     if (grupos.size === 0) return new Map();
     try {
-      return somarPorGrupo(await executar("/bin/ps", ["-A", "-o", "pgid=,rss="]));
+      const linhas = lerLinhasDoPs(await executar("/bin/ps", ["-A", "-o", "pid=,pgid=,rss="]));
+      const dosTurnos = new Set(grupos.values());
+      return somarComFugitivos(linhas, dosTurnos, await grupoDosFugitivos(linhas, dosTurnos));
     } catch (erro) {
       avisar("memoria_ps_sem_leitura", erro);
       return rss;

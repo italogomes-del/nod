@@ -123,6 +123,16 @@ export function gruposDeProcessoVivos(): number[] {
 }
 
 /**
+ * ADR-097 (fase 0c): a marca NOD_GRUPO de cada grupo vivo, pela qual o amostrador soma no turno o que saiu do grupo dele
+ * (o Postgres de teste). Vazio com o registro desligado (sem marca).
+ */
+export function marcasDosGruposVivos(): Map<string, number> {
+  const marcas = new Map<string, number>();
+  for (const g of gruposVivos.values()) if (g.marca !== "") marcas.set(g.marca, g.pid);
+  return marcas;
+}
+
+/**
  * Divide o stdout em linhas procurando o "\n" só no pedaço que acabou de chegar; os pedaços da linha ainda aberta são
  * colados uma vez, quando ela fecha. medido em 2026-09-30 (bancada em Node, pedaços de 64 KiB): com
  * `resto += pedaco; resto.indexOf("\n")` cada pedaço relia a linha acumulada inteira — uma linha de 2 MB custava
