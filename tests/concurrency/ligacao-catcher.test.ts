@@ -1,3 +1,4 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { criarCatcherDriver } from "../../src/adapters/executor/drivers/catcher.ts";
@@ -112,7 +113,7 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   expect(antes).toMatchObject({ disponivel: true, consentimentoNecessario: true });
   // Sem consentimento a ligação é recusada.
   expect((await srv.chamar("POST", "ligacoes", { agenteId: agente.id })).status).toBe(409);
-  await srv.json("POST", "voz/consentimento", { versao: 1 });
+  await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
 
   const { ligacao } = await srv.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
   expect(ligacao.estado).toBe("chamando");
@@ -278,7 +279,7 @@ describe("o cérebro cai no meio da ligação", () => {
     const { agente, conversa } = await srv2.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados2.agentes.push(agente.id);
     criados2.conversas.push(conversa.id);
-    await srv2.json("POST", "voz/consentimento", { versao: 1 });
+    await srv2.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv2.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
 
     const cli = await abrirMidia(ligacao.id, `http://${new URL(srv2.url).host}`, srv2);
@@ -397,7 +398,7 @@ describe("a rede cai com o card na tela (NOD-168)", () => {
     const { agente, conversa } = await srv3.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados3.agentes.push(agente.id);
     criados3.conversas.push(conversa.id);
-    await srv3.json("POST", "voz/consentimento", { versao: 1 });
+    await srv3.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv3.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
     const cli = await abrirMidia(ligacao.id, `http://${new URL(srv3.url).host}`, srv3);
     await cli.esperarMsg((m) => m.t === "cerebro" && m.online, "cérebro online", 10_000);

@@ -81,7 +81,11 @@ export type LigacaoCriada = { ligacao: Ligacao; maxS: number };
 /** Payload da mensagem `sistema` que vira a linha "Chat de voz · mm:ss" na conversa. */
 export type PayloadLinhaLigacao = { kind: "ligacao"; ligacaoId: string; duracaoMs: number | null; estado: EstadoLigacao };
 
-/** definido em 2026-10-04 (ADR-075): sobe quando muda o provedor ou o suboperador do áudio. */
-export const VERSAO_CONSENTIMENTO_VOZ = 1;
+/**
+ * definido em 2026-10-04 (ADR-075): sobe quando muda o provedor ou o suboperador do áudio.
+ * revisto em 2026-10-11 (ADR-095): 2 — o ditado no campo de mensagem também manda a fala ao Google; quem aceitou o
+ * aviso da ligação (v1) vê o texto novo uma vez, no próximo ditado ou na próxima ligação.
+ */
+export const VERSAO_CONSENTIMENTO_VOZ = 2;
 export const TEXTO_CONSENTIMENTO_VOZ =
-  "Na ligação, sua fala é transcrita pelo Google (nos EUA) e a voz do bot também é gerada lá. Nada é gravado: fica só a transcrição em texto, que você pode apagar.";
+  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA); na ligação, a voz do bot também é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";

@@ -164,7 +164,7 @@ const AMOSTRAS_POR_PEDACO = 2400;
 const FATOR_ABUSO = 1.2;
 
 /** Preço de lista por provedor (definido em 2026-10-04, docs/plano-modo-ligacao.md "Custos"). */
-const PRECOS: Record<string, { sttPorSegundo: number; ttsPorCaractere: number }> = {
+export const PRECOS: Record<string, { sttPorSegundo: number; ttsPorCaractere: number }> = {
   google: { sttPorSegundo: 0.0089 / 60, ttsPorCaractere: 30 / 1_000_000 },
 };
 

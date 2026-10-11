@@ -70,6 +70,8 @@ import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
+import { criarControleDitado } from "./telas/ditado-controle.ts";
+import { juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
 import { comportamentoDaRolagem, movimentoReduzido } from "./lib/movimento.ts";
 import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
@@ -231,6 +233,30 @@ const telaLigacao = criarTelaLigacao({
   // Rede de segurança da ligação (2026-10-05): o "Configurar sem voz" do aviso é o mesmo do onboarding.
   configurarSemVoz: () => telaOnboarding.acoes["onboarding-sem-voz"]?.(document.body),
 });
+/**
+ * Ditado no campo de mensagem (definido em 2026-10-11, ADR-095): o 🎤 do composer. Como a ligação, mora fora do
+ * reducer (o microfone e o canal mudam muitas vezes por segundo); o texto entra no campo pelo caminho do rascunho.
+ */
+const ditado = criarControleDitado({
+  tenantId: () => estado.sessao?.tenantId ?? null,
+  disponibilidade: () => (api ? api.disponibilidadeDitado() : Promise.resolve(null)),
+  consentir: (versao) => (api ? api.consentirVoz(versao) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
+  aoTexto: (texto, destino) => {
+    const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+    if (!ta) return;
+    ta.value = juntarAoCampo(ta.value, texto);
+    ajustarAltura(ta);
+    if (composerDe) rascunhos.guardar(composerDe, ta.value);
+    if (destino === "enviar") return void enviarComposer();
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  },
+  avisar: (texto) => dispatch({ tipo: "erro", erro: { codigo: "ditado", mensagem: texto } }),
+  noApp: () => window.nodDesktop !== undefined,
+});
+function avisarDitado(f: Parameters<typeof textoDaFalha>[0]): void {
+  dispatch({ tipo: "erro", erro: { codigo: "ditado", mensagem: textoDaFalha(f, window.nodDesktop !== undefined) } });
+}
 /**
  * Onboarding por ligação (definido em 2026-10-04, ADR-077): a camada `#onboarding` (olá, a IA do Mac, "está te
  * ligando", o painel da entrevista) e os cards guiados na conversa da guia. O que vem do servidor mora no reducer.
@@ -779,6 +805,8 @@ function renderPrincipal(): void {
   if (historicoMuda || aoVivoMuda) regravarTimeline(corpo, partes, { cascaMuda, historicoMuda, aoVivoMuda });
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
+    // ADR-095: a gravação é do campo que sai; o texto dela nunca cai no campo de outra conversa.
+    ditado.descartar();
     const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
     composerDe = composer?.chave ?? null;
@@ -798,6 +826,7 @@ function renderPrincipal(): void {
     redesenharAnexos();
   }
   atualizarComposer();
+  ditado.atualizar();
   // O Parar da task some quando ela termina; o campo continua (escrever retoma a task do mesmo ponto).
   if (t.tipo === "trabalho") {
     const tr = trabalhoPorId(estado, t.id);
@@ -1598,6 +1627,8 @@ async function enviarParaTrabalho(id: string): Promise<void> {
 }
 
 async function enviarComposer(): Promise<void> {
+  // ADR-095: com o ditado gravando, o ↑ (e o Enter) param a gravação e enviam o texto direto, sem prévia.
+  if (ditado.ativo()) return ditado.concluir("enviar");
   const tela = estado.tela;
   if (tela.tipo === "trabalho") return enviarParaTrabalho(tela.id);
   const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
@@ -2140,6 +2171,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     alvo?.focus({ preventScroll: true });
   },
   anexar: () => document.getElementById("composer-arquivos")?.click(),
+  ditar: () => ditado.comecar(),
+  "ditado-parar": () => ditado.concluir("campo"),
   "remover-anexo": (el) => removerAnexo(el.dataset.id ?? ""),
   "abrir-busca": () => abrirBusca(),
   "abrir-bots": () => celular.alternarBots(),
@@ -2711,6 +2744,8 @@ document.addEventListener("keydown", (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); abrirBusca(); return; }
   if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "d" && estado.sessao) { ev.preventDefault(); void agir(alternarModoDev); return; }
   if (ev.key === "Escape" && (ev.target as HTMLElement).id === "busca-bots") { fecharBusca(); return; }
+  // ADR-095: Esc com o ditado aberto joga a gravação fora (no campo fica o que já estava escrito).
+  if (ev.key === "Escape" && ditado.ativo() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); ditado.descartar(); return; }
   // Esc na ligação em tela cheia encolhe para a pílula; nunca desliga (definido em 2026-10-04).
   if (ev.key === "Escape" && telaLigacao.cheia() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); telaLigacao.encolher(); return; }
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
@@ -2821,6 +2856,12 @@ function retomarStream(): void {
   if (document.visibilityState === "visible" && navigator.onLine) live?.retomar();
 }
 document.addEventListener("visibilitychange", retomarStream);
+// ADR-095: tela bloqueada ou app no fundo: o iPhone corta o microfone; a gravação é descartada e a pessoa sabe por quê.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden" || !ditado.ativo()) return;
+  ditado.descartar();
+  avisarDitado("tela-bloqueou");
+});
 window.addEventListener("online", retomarStream);
 window.addEventListener("pageshow", retomarStream);
 // Outra aba recolheu ou abriu uma seção: esta acompanha (definido em 2026-10-04).

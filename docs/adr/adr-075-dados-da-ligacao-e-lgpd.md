@@ -32,3 +32,13 @@ além do texto que a própria pessoa controla.
   na ligação.
 - O log `voz_leitura` leva ids e contagens, nunca o texto lido.
 
+## Emenda 2026-10-11 — o ditado no campo de mensagem (ADR-095)
+
+- O ditado manda a fala da pessoa ao mesmo STT da ligação (o Google, nos EUA). Ele exige o **mesmo consentimento
+  versionado**: sem ele, o canal `voz/v1/ditado` recusa com `sem_consentimento` antes de abrir o STT.
+- O texto do aviso não cobria o ditado, porque falava só da ligação. Por isso a versão **sobe para 2**, e o texto novo
+  fala dos dois. Quem aceitou a versão 1 vê o aviso uma vez, no próximo ditado, na próxima ligação ou no próximo
+  "ouvir". O onboarding grava a versão pelo espelho da web (`VERSAO_CONSENTIMENTO`), não mais por um `1` fixo.
+- **Nenhum áudio é gravado**, e o ditado não cria tabela nem linha: o texto vira a mensagem que a própria pessoa envia
+  ou edita. O log `voz_ditado_encerrado` leva contagens e tempos, nunca o texto.
+

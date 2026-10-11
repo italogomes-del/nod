@@ -1,6 +1,6 @@
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { SuaVezDto } from "../../src/contracts/api.ts";
-import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao, PayloadLinhaLigacao, TEXTO_CONSENTIMENTO_VOZ as TextoConsentimento } from "../../src/contracts/ligacao.ts";
+import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao, PayloadLinhaLigacao, TEXTO_CONSENTIMENTO_VOZ as TextoConsentimento, VERSAO_CONSENTIMENTO_VOZ as VersaoConsentimento } from "../../src/contracts/ligacao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { FaseLigacao, MotivoFimLigacao } from "../../src/contracts/voz.ts";
 import type { IdVozNod, VelocidadeVoz, VOZES_NOD as VozesNod, VELOCIDADES_VOZ as VelocidadesVoz } from "../../src/contracts/vozes.ts";
@@ -35,8 +35,10 @@ export const VOZES: typeof VozesNod = [
   { id: "rui", nome: "Rui", genero: "masculina", descricao: "experiente" },
 ];
 export const VELOCIDADES: typeof VelocidadesVoz = [1, 1.25, 1.5];
+/** Espelho de `VERSAO_CONSENTIMENTO_VOZ` com o tipo da origem: subir lá sem subir aqui não compila. */
+export const VERSAO_CONSENTIMENTO: typeof VersaoConsentimento = 2;
 export const TEXTO_CONSENTIMENTO: typeof TextoConsentimento =
-  "Na ligação, sua fala é transcrita pelo Google (nos EUA) e a voz do bot também é gerada lá. Nada é gravado: fica só a transcrição em texto, que você pode apagar.";
+  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA); na ligação, a voz do bot também é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";
 
 export type AgenteDaLigacao = Pick<Agente, "id" | "nome" | "cor" | "forma">;
 export type LinhaLegenda = { chave: string; autor: "pessoa" | "bot"; texto: string; final: boolean; espera: boolean };
