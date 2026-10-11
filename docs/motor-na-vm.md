@@ -19,6 +19,11 @@ curl -fsSL https://<seu-nod>/motor | sh
 curl -fsSL https://<seu-nod>/motor | NOD_COM_CODEX=1 sh
 ```
 
+Sem nenhum swap na máquina, o instalador liga um swap comprimido em memória (zram: metade da memória, até 8 GB). Se o
+kernel não tiver zram, ele usa um arquivo de swap de 4 GB no disco. O serviço vem com `OOMPolicy=continue`: quando a
+memória acaba, cai só o processo que o Linux escolher, não o motor inteiro (ADR-097, fase 0b). Para atualizar uma VM
+que já tem o motor, rode o mesmo `curl`.
+
 No fim ele mostra um código (ex.: `K7QM-4F2X`) e um link. Abra o Nod (no Mac ou no navegador) em **Seu espaço ›
 Máquinas › Conectar uma máquina**, digite o código e confirme. O terminal diz "Conectada como <nome>".
 
