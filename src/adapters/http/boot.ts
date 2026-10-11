@@ -172,7 +172,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   if ("desconhecido" in lido) log("aviso", "nod_executor_desconhecido", { valor: lido.desconhecido, validos: VALIDOS_NOD_EXECUTOR.join(", ") });
   const sondaIas = "pedido" in lido && (lido.pedido === "claude-cli" || lido.pedido === "codex-cli" || lido.pedido === "auto" || (lido.pedido === null && env.NODE_ENV === "production"));
   const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || sondaIas);
-  const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
+  // revisto em 2026-10-09: o boot do servidor local espera o shell como antes (até 3 s); o app do Mac espera menos.
+  const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado, esperaShellMs: 3_000 });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
   // O inventário e o seletor leem o motivo do registro do driver em uso: com o valor desconhecido, ele diz a causa em vez de

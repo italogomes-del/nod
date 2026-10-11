@@ -24,6 +24,7 @@ import { compararVersoes, conferirFloors, conferirPisoCli, FLAG_FLOORS, inventar
 import { escreverMcpConfig } from "../mcp-config.ts";
 import { iniciarProcesso, executarColetando, type Processo } from "../processo.ts";
 import { lerFlagsDoHelp, lerVersao, PRAZO_SONDA_PADRAO_MS, sondarDetalhado } from "../sonda.ts";
+import { motivoSemNode } from "../../../domain/saida-do-cli.ts";
 import type { Adapter, ConfigDriver, Driver, Instance, SinksTurno } from "../spi.ts";
 import { MARCADOR_PARTE_DINAMICA } from "../../../domain/marcador-prompt.ts";
 import { ehPastaDeTask, NATIVAS_DE_ARQUIVO, NATIVAS_DO_TERMINAL } from "../../../domain/nativas.ts";
@@ -378,6 +379,7 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
               return r.exitCode === 0 && autenticado ? { estado: "pronto", versao: v.versao, em: Date.now() } : { estado: "nao_autenticado", motivo: "Abra o Claude Code e entre na sua conta.", versao: v.versao, em: Date.now() };
             } catch (erro) {
               if (ehErroDeDominio(erro) && erro.cause === "sonda_lenta") return { estado: "ausente", motivo: motivoSondaLenta("Claude"), causa: "sonda_lenta", em: Date.now() };
+              if (ehErroDeDominio(erro) && erro.cause === "sem_node") return { estado: "ausente", motivo: motivoSemNode("Claude Code"), causa: "sem_node", em: Date.now() };
               return { estado: "ausente", motivo: "Instale ou atualize o Claude Code neste computador.", em: Date.now() };
             }
           }

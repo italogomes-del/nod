@@ -10,17 +10,27 @@ const isolada = { sandbox: true, contextIsolation: true, nodeIntegration: false 
  * definido em 2026-09-24 ("aviso no Mac"): a janela web recebe SÓ `nodDesktop` (as doze de `desktop/preload-web.ts`,
  * com o microfone, o aviso de ligação aberta e as ações da IA do Mac), sem
  * `require`, `process` nem a ponte da tela de conexão (`window.nod`, que entrega `conectar`); a chamada
- * chega ao processo principal e o clique no aviso volta pela `aoAbrir`.
+ * chega ao processo principal e o clique no aviso volta pela `aoAbrir`. revisto em 2026-10-09 (ADR-093): mais o objeto
+ * `ias` (estado único, instalar, entrar, link, código, cancelar, verificar e o evento `aoMudar`).
  */
 async function janelaWeb() {
   const recebidos = [];
   ipcMain.handle("nod:contador", (_e, n) => { recebidos.push(n); });
+  ipcMain.handle("nod:ia-estados", () => [{ ia: "codex-cli", estado: "procurando" }]);
   const w = new BrowserWindow({ show: false, webPreferences: { preload: resolve("dist/desktop/preload-web.cjs"), partition: "nod-web-smoke", ...isolada } });
   try {
     await w.loadURL("data:text/html;charset=utf-8,<!doctype html><title>nod</title><body>web</body>");
-    const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
-    const esperado = "aoAbrir,avisar,contador,definirAvisos,definirSom,definirTema,emLigacao,iaEntrar,iaInstalar,iaTestar,microfone,preferencias";
-    if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado) throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
+    const estado = await w.webContents.executeJavaScript(`({ node: typeof require, processo: typeof process, nod: typeof window.nod, ponte: Object.keys(window.nodDesktop ?? {}).sort().join(","), ias: Object.keys(window.nodDesktop?.ias ?? {}).sort().join(","), ipc: typeof window.ipcRenderer })`);
+    const esperado = "aoAbrir,avisar,contador,definirAvisos,definirSom,definirTema,emLigacao,iaEntrar,iaInstalar,iaTestar,ias,microfone,preferencias";
+    const esperadoIas = "abrirLink,aoMudar,cancelar,colarCodigo,entrar,estados,instalar,verificar";
+    if (estado.node !== "undefined" || estado.processo !== "undefined" || estado.nod !== "undefined" || estado.ipc !== "undefined" || estado.ponte !== esperado || estado.ias !== esperadoIas) throw new Error(`Janela web expõe mais que nodDesktop: ${JSON.stringify(estado)}`);
+    // O evento do processo principal chega à página pelo `aoMudar`, e o pedido de estados volta do processo principal.
+    await w.webContents.executeJavaScript(`window.nodDesktop.ias.aoMudar((e) => { window.iaMudou = e; })`);
+    w.webContents.send("nod:ia-mudou", { ia: "claude-cli", estado: "entrando" });
+    const estados = await w.webContents.executeJavaScript("window.nodDesktop.ias.estados()");
+    await esperar(100);
+    const mudou = await w.webContents.executeJavaScript("window.iaMudou ?? null");
+    if (estados?.[0]?.estado !== "procurando" || mudou?.estado !== "entrando") throw new Error(`Ponte das IAs não funcionou: ${JSON.stringify({ estados, mudou })}`);
     await w.webContents.executeJavaScript(`window.nodDesktop.aoAbrir((alvo) => { window.alvoAberto = alvo; }); window.nodDesktop.contador(3)`);
     w.webContents.send("nod:abrir", { tipo: "sua-vez" });
     await esperar(200);

@@ -11,7 +11,7 @@ import { HARNESSES } from "../../contracts/harness.ts";
 import type { CatalogoHarness, IdHarness } from "../../contracts/harness.ts";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { EstadoExecutor, IdExecutor } from "../../contracts/executor.ts";
-import type { Inventario } from "../../contracts/inventario.ts";
+import { CAUSAS_DO_MAC, type CausaDoMac, type Inventario } from "../../contracts/inventario.ts";
 import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
@@ -868,10 +868,15 @@ export function comporApp(o: OpcoesCompor): App {
     return p;
   }
 
+  /**
+   * definido em 2026-10-09: as causas que só a tela do Mac distingue (sem_node, config_invalida) não vão aos cards do
+   * onboarding, como no anúncio de um Mac (ponte-validacao.ts): ali o card mostra o estado sem causa.
+   */
+  const ehCausaDoMac = (c: string): c is CausaDoMac => (CAUSAS_DO_MAC as readonly string[]).includes(c);
   /** ADR-077: a IA dos bots no Mac da pessoa, para os cards de IA do onboarding (o catcher conta como pronto). */
   function executorDoMac(pessoaId: string): { pronto: boolean; ias: IaNoMac[] } {
     const catalogo = catalogoHarness(pessoaId);
-    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado !== "pronto" && h.inventario.causa ? { causa: h.inventario.causa } : {}), ...(h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo" && h.inventario.versao && h.inventario.minima ? { versao: h.inventario.versao, minima: h.inventario.minima } : {}) }));
+    const ias: IaNoMac[] = catalogo.opcoes.filter((h): h is typeof h & { id: IaNoMac["id"] } => h.id === "claude-cli" || h.id === "codex-cli").map((h) => ({ id: h.id, estado: h.inventario.estado, ...(h.inventario.estado !== "pronto" && "motivo" in h.inventario && h.inventario.motivo ? { motivo: h.inventario.motivo } : {}), ...(h.inventario.estado !== "pronto" && h.inventario.causa && !ehCausaDoMac(h.inventario.causa) ? { causa: h.inventario.causa } : {}), ...(h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo" && h.inventario.versao && h.inventario.minima ? { versao: h.inventario.versao, minima: h.inventario.minima } : {}) }));
     return { pronto: (!compartilhado && executorAtual === "catcher") || ias.some((i) => i.estado === "pronto"), ias };
   }
 

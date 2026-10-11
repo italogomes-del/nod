@@ -1,14 +1,15 @@
 import { criarCodexCliDriver } from "../src/adapters/executor/drivers/codex-cli.ts";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, type IpcMainInvokeEvent } from "electron";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { createWriteStream, existsSync } from "node:fs";
+import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cli.ts";
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
-import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
+import { encerrarGruposVivos, executarColetando, iniciarProcesso, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
@@ -16,14 +17,20 @@ import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memo
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
-import { resolverBinario } from "../src/adapters/executor/caminho.ts";
+import { lerPathDoShell, resolverBinario, resolverBinarioDetalhado } from "../src/adapters/executor/caminho.ts";
+import { extrairVersao } from "../src/adapters/executor/flag-floors.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
 import type { ConfigDriver, Driver } from "../src/adapters/executor/spi.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, lerIaDesktop, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
+import type { EstadoIa, ResultadoColarCodigo } from "../src/contracts/estado-ia.ts";
+import { estadoDaIa } from "../src/domain/estado-ia.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "./login-ia.ts";
+import { ambienteDoNpm, criarInstaladorDeIas, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
+import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "./vigia-ias.ts";
 import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "./avisos-mac.ts";
 import { abreNoNavegador } from "./links-externos.ts";
@@ -344,6 +351,9 @@ async function parar() {
   if (cliente) await cliente.ponte.desconectar("").catch(() => undefined);
   registry = null; cliente = null;
   inventariosAtuais = null; maquinaIdAtual = null; ghLogado = null;
+  // definido em 2026-10-09: um login aberto pelo app morre com a conexão (a janela que mostrava o código fechou).
+  await loginIas.parar().catch(() => undefined);
+  inventariosDaVigia = null; testandoAgora = [];
 }
 /** definido em 2026-10-05: entre dois reanúncios depois de um 409 (o laço puxa a cada segundo e cada um falharia igual). */
 const ESPERA_REANUNCIO_MS = 10_000;
@@ -392,7 +402,7 @@ async function conectar(c: Config) {
   const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), hookPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "hook-nativas.mjs") : join(dir, "hook-nativas.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env) };
   const envExecutor = { ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") };
   const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
-  const cfg = await configDosDrivers(envExecutor);
+  const cfg = await montarCfg(envExecutor);
   cfgExecutor = cfg;
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
   // Um objeto só, atualizado no lugar a cada sondagem: o laço lê `registry[driver]` a cada turno, então uma IA que
@@ -433,8 +443,16 @@ async function conectar(c: Config) {
   // NOD-199: o anúncio vai pela rota só de inventário — não recusa nem limpa um turno que roda. O primeiro anúncio e o
   // que segue um 409 (`reconectar`) vão pelo `conectar`; quem decide é o cliente da ponte (`anunciarInventario`).
   const vigia = criarVigiaDasIas({
-    sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
-    impressao: (ia) => impressaoDoLogin(ia, cfg),
+    // revisto em 2026-10-09: a config é montada de novo a cada passada — o PATH do shell que chegou depois, a IA que o app
+    // acabou de instalar e uma versão nova do nvm entram sem reabrir o app. Com `ias`, só essas são sondadas.
+    sondar: async (ias) => {
+      const novo = await montarCfg(envExecutor);
+      if (cliente === ponteHttp) cfgExecutor = novo;
+      return criarRegistryDetalhado(envExecutor, ias ? drivers.filter((d) => ias.some((ia) => ia === d.meta.id)) : drivers, { cfg: novo });
+    },
+    impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
+    aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); },
+    aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
     anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades }); },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
@@ -482,14 +500,14 @@ async function conectar(c: Config) {
  * (ia-mac.ts). Ele abre o navegador; o nod nunca lê o token — a sonda de 3 s percebe quando ficou pronto.
  */
 async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
-  const cfg = cfgExecutor ?? await configDosDrivers({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") });
+  const cfg = await cfgAtual();
   const home = cfg.env.HOME ?? "";
   const { nome, args } = comandoDeLogin(ia);
   const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
   if (!bin) return { ok: false, motivo: "nao_instalado" };
   return new Promise((resolver) => {
     try {
-      const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDoLogin(cfg.env), detached: true, stdio: "ignore", shell: false });
+      const filho = spawn(bin, args, { cwd: home || undefined, env: ambienteDaIa(ia, cfg), detached: true, stdio: "ignore", shell: false });
       filho.once("spawn", () => { filho.unref(); resolver({ ok: true }); });
       // definido em 2026-10-05: o login terminou bem — se esta IA estava reprovada, a conta nova é testada agora.
       filho.once("exit", (codigo) => { if (codigo === 0) void vigiaIas?.contaMudou(ia).catch(() => undefined); });
@@ -506,9 +524,220 @@ async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<strin
   const { nome, args } = comandoDeEstadoDoLogin(ia);
   const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
   if (!bin) return null;
-  const r = await executarColetando({ bin, args, env: ambienteDoLogin(cfg.env), cwd: home || tmpdir(), timeoutMs: 10_000 });
+  const r = await executarColetando({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), timeoutMs: 10_000 });
   return r.exitCode === 0 ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null;
 }
+
+// ---- As IAs dentro do app (definido em 2026-10-09, plano "IAs", PR 1) ------------------------------------------------
+// Instalar com um clique (instalar-ia.ts), entrar sem sair do app (login-ia.ts) e o estado único de cada IA
+// (src/domain/estado-ia.ts), que vai à janela web por `nod:ia-mudou`. revisto em 2026-10-09 (revisão do PR 1, ADR-093):
+// nada do nod entra no PATH dos bots. O binário que o nod instalou (userData/ferramentas/<ia>/atual) disputa com o
+// primeiro achado fora pela versão (ferramentas.ts) e, quando ganha, vai ao driver pelo caminho (cfg.bin / cfg.bins);
+// o node do nod (o Electron como node) só serve ao npm.
+const pastasDoNod = pastasFerramentas(join(app.getPath("userData"), "ferramentas"));
+/** A config dos drivers com o binário escolhido de cada IA. */
+async function montarCfg(env: Record<string, string | undefined>): Promise<ConfigDriver> {
+  return escolherBinarios(await configDosDrivers(env));
+}
+/** A config dos drivers da conexão atual; sem conexão, uma nova. */
+async function cfgAtual(): Promise<ConfigDriver> {
+  return cfgExecutor ?? await montarCfg({ ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") });
+}
+const binConfigurado = (ia: IaDesktop, cfg: ConfigDriver) => (ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"]);
+/** O ambiente dos processos de login e status de uma IA: o dos drivers, mais o que só ela recebe (o Codex do nod). */
+const ambienteDaIa = (ia: IaDesktop, cfg: ConfigDriver) => ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) });
+/** O "node do nod" (instalar-ia.ts): reescrito a cada abertura, porque o caminho do app muda quando ele é movido. */
+async function garantirNodeDoNod(): Promise<void> {
+  const arquivo = join(pastasDoNod.nodeDoNod, "node");
+  const conteudo = scriptNodeDoNod(process.execPath);
+  if ((await readFile(arquivo, "utf8").catch(() => null)) === conteudo) return;
+  await mkdir(pastasDoNod.nodeDoNod, { recursive: true });
+  await writeFile(`${arquivo}.tmp`, conteudo, { mode: 0o755 });
+  await rename(`${arquivo}.tmp`, arquivo);
+}
+/** O npm que o app leva (Contents/Resources/npm; em desenvolvimento, o node_modules do repositório). */
+function npmDoApp(): string {
+  return app.isPackaged ? join(process.resourcesPath, "npm", "bin", "npm-cli.js") : join(app.getAppPath(), "node_modules", "npm", "bin", "npm-cli.js");
+}
+const comTil = (caminho: string) => { const h = homedir(); return caminho === h || caminho.startsWith(`${h}/`) ? `~${caminho.slice(h.length)}` : caminho; };
+/** O primeiro caminho que existe e é executável. */
+async function primeiroExecutavel(caminhos: readonly string[]): Promise<string | null> {
+  for (const c of caminhos) if (await resolverBinario(c, "", homedir())) return c;
+  return null;
+}
+/** `--version` de um binário, guardado por caminho, tamanho e data (um `claude update` muda a chave). Lento não fica. */
+const versoesEmCache = new Map<string, string | null>();
+async function versaoDe(caminho: string, env: Record<string, string>): Promise<string | null> {
+  const st = await stat(caminho).catch(() => null);
+  if (!st) return null;
+  const chave = `${caminho}:${st.size}:${st.mtimeMs}`;
+  if (versoesEmCache.has(chave)) return versoesEmCache.get(chave) ?? null;
+  const r = await executarColetando({ bin: caminho, args: ["--version"], env, cwd: tmpdir(), timeoutMs: 15_000 }).catch(() => null);
+  const versao = r && r.exitCode === 0 ? extrairVersao(r.stdout) : null;
+  if (r && !r.estourouTempo) versoesEmCache.set(chave, versao);
+  return versao;
+}
+
+let inventariosDaVigia: Partial<Record<IdDriver, Inventario>> | null = null;
+let testandoAgora: IaDesktop[] = [];
+/** A escolha de cada IA (o binário usado e o que perdeu), para o log e o "detalhe" do suporte. */
+const escolhaDasIas = new Map<IaDesktop, { escolhido: Candidato | null; alternativa: Candidato | null }>();
+/**
+ * Para cada IA sem caminho configurado (NOD_CLAUDE_BIN / NOD_CODEX_BIN): o do nod contra o primeiro achado fora, pela
+ * versão. Ganhando o do nod, o caminho e o ambiente dele vão na config; ganhando o de fora, o PATH já o acha primeiro.
+ */
+async function escolherBinarios(cfg: ConfigDriver): Promise<ConfigDriver> {
+  const home = cfg.env.HOME ?? homedir();
+  const saida: ConfigDriver = { ...cfg, bins: { ...cfg.bins }, envPorDriver: { ...cfg.envPorDriver } };
+  let mudou = false;
+  for (const ia of IAS_DESKTOP) {
+    const configurado = binConfigurado(ia, cfg);
+    let escolhido: Candidato | null = null;
+    let alternativa: Candidato | null = null;
+    if (configurado) {
+      const r = await resolverBinarioDetalhado(configurado, "", home);
+      escolhido = r ? { caminho: r.caminho, origem: "configurado", versao: null } : null;
+    } else {
+      const fora = await resolverBinarioDetalhado(undefined, cfg.env.PATH ?? "", home, comandoDeLogin(ia).nome, cfg.camadas ?? []).catch(() => null);
+      const deFora: Candidato | null = fora ? { ...fora, versao: await versaoDe(fora.caminho, ambienteDoLogin(cfg.env)) } : null;
+      const prefixo = prefixoAtivo(pastasDoNod.base, ia);
+      const envNod = ambienteDoBinarioDoNod(ia, prefixo);
+      const caminhoNod = await primeiroExecutavel(candidatosDoNod(ia, prefixo, process.platform, process.arch));
+      const doNod: Candidato | null = caminhoNod ? { caminho: caminhoNod, origem: "nod", versao: await versaoDe(caminhoNod, ambienteDoLogin({ ...cfg.env, ...envNod })) } : null;
+      escolhido = escolherBinario(doNod, deFora);
+      alternativa = escolhido === doNod ? deFora : doNod;
+      if (escolhido && escolhido === doNod) {
+        if (ia === "claude-cli") saida.bin = escolhido.caminho;
+        else saida.bins = { ...saida.bins, "codex-cli": escolhido.caminho };
+        if (Object.keys(envNod).length > 0) saida.envPorDriver = { ...saida.envPorDriver, [ia]: envNod };
+      }
+    }
+    const antes = escolhaDasIas.get(ia)?.escolhido;
+    if (antes?.caminho !== escolhido?.caminho || antes?.versao !== escolhido?.versao || !escolhaDasIas.has(ia)) {
+      log("info", "ia_binario", { ia, caminho: escolhido ? comTil(escolhido.caminho) : null, origem: escolhido?.origem ?? null, versao: escolhido?.versao ?? null, alternativa: alternativa ? `${alternativa.origem} ${alternativa.versao ?? "?"}` : null });
+      mudou = true;
+    }
+    escolhaDasIas.set(ia, { escolhido, alternativa });
+  }
+  if (mudou) emitirEstados();
+  return saida;
+}
+function estadoAtual(ia: IaDesktop): EstadoIa {
+  const b = escolhaDasIas.get(ia)?.escolhido;
+  return estadoDaIa({ ia, inventario: inventariosDaVigia?.[ia] ?? null, instalacao: instalador.estado(ia), login: loginIas.estado(ia), testando: testandoAgora.includes(ia), binario: b ? { caminho: comTil(b.caminho), origem: b.origem } : null, agora: Date.now() });
+}
+const ultimosEstados = new Map<IaDesktop, string>();
+/** Manda à janela web o estado de cada IA que mudou (o instante da montagem não conta como mudança). */
+function emitirEstados(): void {
+  const w = janelaWeb();
+  for (const ia of IAS_DESKTOP) {
+    const e = estadoAtual(ia);
+    const chave = JSON.stringify({ ...e, em: 0 });
+    if (ultimosEstados.get(ia) === chave) continue;
+    ultimosEstados.set(ia, chave);
+    w?.webContents.send(CANAIS_DESKTOP.iaMudou, e);
+  }
+}
+const agendarTimer = (fn: () => void, ms: number) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; };
+
+/**
+ * O processo do login: o stdout (por linha) e o stderr chegam a quem ouvir; o que veio antes do ouvinte fica guardado.
+ * O stderr importa: o "Successfully logged in." do Codex pode sair por ele.
+ */
+async function iniciarLogin(ia: IaDesktop): Promise<ProcessoDeLogin | null> {
+  const cfg = await cfgAtual();
+  const home = cfg.env.HOME ?? "";
+  const { nome, args } = comandoDeLoginNoApp(ia);
+  const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, nome);
+  if (!bin) return null;
+  const pendentes: string[] = [];
+  let ouvinte: ((t: string) => void) | null = null;
+  const entregar = (t: string) => { if (ouvinte) ouvinte(t); else pendentes.push(t); };
+  const p = iniciarProcesso({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), stdin: ia === "claude-cli" ? "pipe" : "ignore", aoLinha: (l) => entregar(`${l}\n`), aoStderr: entregar });
+  return {
+    aoSair: (fn) => { ouvinte = fn; for (const t of pendentes.splice(0)) fn(t); },
+    escrever: (t) => p.escrever(t),
+    fim: p.fim.then((r) => ({ codigo: r.exitCode, stderr: "" })),
+    matar: () => p.interromper(),
+  };
+}
+async function statusDoLogin(ia: IaDesktop): Promise<StatusDoLogin> {
+  const cfg = await cfgAtual();
+  const home = cfg.env.HOME ?? "";
+  const { nome, args } = comandoDeEstadoDoLogin(ia);
+  const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, nome);
+  if (!bin) return { logado: false, impressao: null };
+  const r = await executarColetando({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), timeoutMs: 10_000 });
+  const logado = !r.estourouTempo && logadoPeloStatus(ia, r.exitCode, r.stdout, r.stderr);
+  return { logado, impressao: logado ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null };
+}
+const loginIas = criarLoginDasIas({
+  iniciar: iniciarLogin,
+  status: statusDoLogin,
+  agora: Date.now,
+  agendar: agendarTimer,
+  aoMudar: () => emitirEstados(),
+  // O login terminou bem: a conta nova é testada se estava reprovada (regra da vigia) e a IA é anunciada.
+  aoSucesso: (ia) => { void vigiaIas?.contaMudou(ia).catch(() => undefined); },
+  registrar: (evento, campos) => log("info", evento, campos),
+});
+
+/** O npm rodando com o Node do Electron; sem o npm do app, o `npm` do Mac (que precisa de um node no PATH). */
+async function rodarNpm(args: string[]): Promise<ProcessoNpm | null> {
+  const cfg = await cfgAtual();
+  // O node do nod vem PRIMEIRO, e só aqui: os scripts de instalação rodam no Node que o app conhece (o do Electron).
+  const path = `${pastasDoNod.nodeDoNod}:${cfg.env.PATH ?? ""}`;
+  const npmCli = npmDoApp();
+  let bin: string;
+  let argv: string[];
+  if (existsSync(npmCli)) { bin = process.execPath; argv = [npmCli, ...args]; }
+  else {
+    const doMac = await resolverBinario(undefined, cfg.env.PATH ?? "", cfg.env.HOME ?? homedir(), "npm");
+    if (!doMac) return null;
+    log("aviso", "ia_instalacao_npm_do_mac", { caminho: comTil(doMac) });
+    bin = doMac; argv = args;
+  }
+  await mkdir(pastasDoNod.base, { recursive: true });
+  const pendentes: string[] = [];
+  let ouvinte: ((t: string) => void) | null = null;
+  const entregar = (t: string) => { if (ouvinte) ouvinte(t); else pendentes.push(t); };
+  const p = iniciarProcesso({ bin, args: argv, env: ambienteDoNpm(ambienteDoLogin(cfg.env), path), cwd: pastasDoNod.base, stdin: "ignore", aoLinha: (l) => entregar(`${l}\n`), aoStderr: entregar });
+  return {
+    aoSair: (fn) => { ouvinte = fn; for (const t of pendentes.splice(0)) fn(t); },
+    fim: p.fim.then((r) => ({ codigo: r.erroSpawn ? null : r.exitCode })),
+    matar: () => p.interromper(),
+  };
+}
+const instalador = criarInstaladorDeIas({
+  rodarNpm,
+  pastas: pastasDoNod,
+  novoPrefixo: (ia) => prepararPrefixoNovo(pastasDoNod, ia, nomeDaVersao(Date.now(), randomBytes(3).toString("hex"))),
+  binarioInstalado: async (ia, prefixo) => {
+    const caminho = await primeiroExecutavel(candidatosDoNod(ia, prefixo, process.platform, process.arch));
+    return caminho ? { caminho, env: ambienteDoBinarioDoNod(ia, prefixo) } : null;
+  },
+  // Sem o node do nod no PATH: o binário instalado tem de responder sozinho, como vai rodar nos bots.
+  versao: async (binario, env) => {
+    const cfg = await cfgAtual();
+    const r = await executarColetando({ bin: binario, args: ["--version"], env: ambienteDoLogin({ ...cfg.env, ...env }), cwd: cfg.env.HOME || tmpdir(), timeoutMs: 30_000 });
+    return { codigo: r.erroSpawn ? null : r.exitCode, saida: `${r.stdout}\n${r.stderr}` };
+  },
+  ativar: (ia, prefixo) => ativarPrefixo(pastasDoNod, ia, prefixo),
+  descartar: (ia, prefixo) => descartarPrefixo(pastasDoNod, ia, prefixo),
+  abrirRegistro: async (ia) => {
+    const pasta = app.getPath("logs");
+    await mkdir(pasta, { recursive: true });
+    const nome = `instalar-${ia}-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
+    const s = createWriteStream(join(pasta, nome), { flags: "a", mode: 0o600 });
+    s.on("error", () => undefined);
+    return { nome, escrever: (t) => { s.write(t); }, fechar: () => new Promise<void>((r) => s.end(() => r())) };
+  },
+  aoMudar: () => emitirEstados(),
+  aoInstalar: () => { void vigiaIas?.sondarAgora().catch(() => undefined); },
+  esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
+  agora: Date.now,
+  registrar: (evento, campos) => log("info", evento, campos),
+});
 function validarRemetente(event: IpcMainInvokeEvent) {
   if (event.senderFrame?.url !== setupUrl || event.sender !== janela?.webContents) throw new Error("origem_invalida");
 }
@@ -549,6 +778,10 @@ else {
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
     log("info", "app_iniciado", { versao: app.getVersion(), empacotado: app.isPackaged, arquitetura: process.arch });
     void limparOrfaosUmaVez();
+    // definido em 2026-10-09: o PATH do shell real começa a ser lido já (em segundo plano, até 10 s), e o "node do nod"
+    // é reescrito com o caminho atual do app, antes da primeira sonda.
+    void lerPathDoShell(process.env.SHELL, 0);
+    await garantirNodeDoNod().catch((erro: unknown) => log("aviso", "node_do_nod_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" }));
     await carregarPreferencias();
     await carregarEstadoJanela();
     aplicarTemaNativo();
@@ -604,6 +837,43 @@ else {
     ipcMain.handle(CANAIS_DESKTOP.iaTestar, (e, pedido: unknown): Promise<TesteDeIa[]> => {
       validarRemetenteWeb(e);
       return vigiaIas ? vigiaIas.testar(pedido) : Promise.resolve([]);
+    });
+    // definido em 2026-10-09 (PonteIas): as IAs dentro do app. A página só escolhe QUAL IA (lerIaDesktop); o que roda,
+    // com que argumentos e qual link abre é decidido aqui. O único texto da página que chega a um processo é o código
+    // colado, pelo stdin, e só com a forma de um código (login-ia.ts).
+    const iaDoPedido = (e: IpcMainInvokeEvent, ia: unknown): IaDesktop => {
+      validarRemetenteWeb(e);
+      const lida = lerIaDesktop(ia);
+      if (!lida) throw new Error("entrada_invalida");
+      return lida;
+    };
+    ipcMain.handle(CANAIS_DESKTOP.iaEstados, (e): EstadoIa[] => { validarRemetenteWeb(e); return IAS_DESKTOP.map(estadoAtual); });
+    ipcMain.handle(CANAIS_DESKTOP.iaInstalarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {
+      const lida = iaDoPedido(e, ia);
+      await instalador.instalar(lida);
+      return estadoAtual(lida);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaEntrarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {
+      const lida = iaDoPedido(e, ia);
+      await loginIas.entrar(lida);
+      return estadoAtual(lida);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaAbrirLink, async (e, ia: unknown): Promise<boolean> => {
+      const url = loginIas.link(iaDoPedido(e, ia));
+      if (!url) return false;
+      try { await shell.openExternal(url); return true; } catch { return false; }
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaColarCodigo, (e, ia: unknown, codigo: unknown): ResultadoColarCodigo => loginIas.colarCodigo(iaDoPedido(e, ia), codigo));
+    ipcMain.handle(CANAIS_DESKTOP.iaCancelar, async (e, ia: unknown): Promise<EstadoIa> => {
+      const lida = iaDoPedido(e, ia);
+      await Promise.all([loginIas.cancelar(lida), instalador.cancelar(lida)]);
+      return estadoAtual(lida);
+    });
+    ipcMain.handle(CANAIS_DESKTOP.iaVerificar, async (e, ia: unknown): Promise<EstadoIa> => {
+      const lida = iaDoPedido(e, ia);
+      if (loginIas.estado(lida)?.fase === "aguardando") await loginIas.verificar(lida);
+      else await vigiaIas?.sondarAgora().catch(() => undefined);
+      return estadoAtual(lida);
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).

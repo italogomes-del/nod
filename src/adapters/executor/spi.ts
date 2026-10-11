@@ -2,6 +2,7 @@ import type { CapacidadesHarness } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno } from "../../contracts/turno.ts";
+import type { CamadaDoPath } from "./caminho.ts";
 
 /**
  * SPI de três camadas (ADR-012): UM Driver com campo `locality`, nunca duas implementações.
@@ -22,6 +23,13 @@ export type ConfigDriver = {
   cwdBase: string;
   /** Roteiro do catcher (marcadores → sequência de eventos); ignorado pelo claude-cli. */
   roteiro?: unknown;
+  /** definido em 2026-10-09: de onde veio cada pasta de `env.PATH` (caminho.ts), para dizer qual binário rodou. */
+  camadas?: readonly CamadaDoPath[];
+  /**
+   * definido em 2026-10-09 (revisão do PR 1, ADR-093): variáveis só de um driver. O Codex instalado pelo app roda o
+   * binário nativo direto e recebe o que o `codex.js` daria a ele (CODEX_MANAGED_BY_NPM, CODEX_MANAGED_PACKAGE_ROOT).
+   */
+  envPorDriver?: Partial<Record<IdDriver, Record<string, string>>>;
 };
 
 /**

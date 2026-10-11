@@ -14,6 +14,20 @@ asar: true
 asarUnpack:
   - dist/desktop/proxy.mjs
   - dist/desktop/hook-nativas.mjs
+# definido em 2026-10-09 (plano "IAs", PR 1): o npm que instala o Claude Code e o Codex com o Node do próprio app
+# (desktop/instalar-ia.ts). Vai fora do asar, em Contents/Resources/npm: o Electron o roda como script
+# (ELECTRON_RUN_AS_NODE) e ele lê os próprios arquivos e os de node_modules/npm/node_modules. Medido no
+# electron-builder 26.16.1: a pasta `node_modules` logo abaixo do `from` é sempre descartada (util/filter.js),
+# então as dependências do npm vão numa segunda entrada, com o próprio node_modules como `from`.
+extraResources:
+  - from: node_modules/npm
+    to: npm
+    filter:
+      - '**/*'
+  - from: node_modules/npm/node_modules
+    to: npm/node_modules
+    filter:
+      - '**/*'
 npmRebuild: false
 artifactName: nod-${version}-${os}-${arch}.${ext}
 mac:

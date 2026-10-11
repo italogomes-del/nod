@@ -30,6 +30,35 @@ export function comandoDeLogin(ia: IaDesktop): { nome: "claude" | "codex"; args:
 }
 
 /**
+ * O login DENTRO do app (definido em 2026-10-09, desktop/login-ia.ts): o app lê a saída e mostra o link e o código.
+ * Codex: o login por código de dispositivo (existe na 0.147.0, conferido no `codex login --help`). Claude: a
+ * assinatura (`--claudeai`, o padrão da 2.1.296, dito explicitamente para nunca cair no login da Console paga por API).
+ */
+export function comandoDeLoginNoApp(ia: IaDesktop): { nome: "claude" | "codex"; args: string[] } {
+  return ia === "claude-cli" ? { nome: "claude", args: ["auth", "login", "--claudeai"] } : { nome: "codex", args: ["login", "--device-auth"] };
+}
+
+/**
+ * O status do CLI diz que há login? Medido em 2026-10-09 com HOME temporário: `claude auth status` devolve JSON com
+ * `"loggedIn": false` e sai com 1; `codex login status` imprime "Not logged in" e sai com 1. Logado (medido em 2026-10-05,
+ * ver comandoDeEstadoDoLogin): o Claude traz
+ * `"loggedIn": true` (sai com 0) e o Codex "Logged in using ChatGPT" (sai com 0).
+ */
+export function logadoPeloStatus(ia: IaDesktop, codigo: number | null, stdout: string, stderr: string): boolean {
+  if (codigo !== 0) return false;
+  if (ia === "claude-cli") {
+    try {
+      const d = JSON.parse(stdout) as { loggedIn?: unknown };
+      return d.loggedIn === true;
+    } catch {
+      return false;
+    }
+  }
+  const texto = `${stdout}\n${stderr}`;
+  return /\blogged in\b/i.test(texto) && !/\bnot logged in\b/i.test(texto);
+}
+
+/**
  * O comando que diz QUAL conta está logada (definido em 2026-10-05): o app faz um hash da saída e o guarda com o
  * veredito do teste da IA (vigia-ias.ts); a saída em si nunca é guardada nem enviada. Medido em 2026-10-05: o
  * `claude auth status` devolve um JSON com a conta e a organização, então o hash muda quando a pessoa troca de conta;

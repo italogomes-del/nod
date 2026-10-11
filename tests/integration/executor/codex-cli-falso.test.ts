@@ -157,3 +157,14 @@ it("NOD-171: o pré-release do piso fica abaixo dele (semver), e o piso exato pa
   cfg.env.TESTE_NOD_VERSAO = "0.159.0";
   expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toEqual({ estado: "pronto", versao: "0.159.0", em: expect.any(Number) });
 });
+it("2026-10-09 (teste do Breno): sem node no PATH, o Codex do npm é 'sem_node', não 'Atualize o Codex'", async () => {
+  cfg.env.TESTE_NOD_SEM_NODE = "1";
+  const inv = await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar());
+  expect(inv).toMatchObject({ estado: "ausente", causa: "sem_node" });
+  expect("motivo" in inv ? inv.motivo : "").not.toContain("Atualize");
+});
+it("2026-10-09: config.toml quebrado é 'config_invalida' (ausente), não 'falta entrar'", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.162.1";
+  cfg.env.TESTE_NOD_CONFIG_QUEBRADA = "1";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toMatchObject({ estado: "ausente", causa: "config_invalida" });
+});
