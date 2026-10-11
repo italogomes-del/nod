@@ -444,7 +444,12 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     };
     await chamar("conectar", { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } });
     expect(await chamar("limpeza", { pessoaId: "outra" })).toEqual({ status: 200, body: { pastas: [pasta] } });
-    expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId);
+    expect(pastasParaLimpar).toHaveBeenCalledWith(escopo.pessoaId, { apertado: false });
+    // ADR-096: o disco apertado atravessa; só o booleano `true` conta.
+    await chamar("limpeza", { apertado: true });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: true });
+    await chamar("limpeza", { apertado: "sim" });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
     await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
     expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
     // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
@@ -453,6 +458,9 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
     await chamar("limpeza/resultado", { relato: { adiada: true } });
     expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
+    // ADR-096: a passada apertada atravessa marcada, com o que os caches liberaram.
+    await chamar("limpeza/resultado", { relato: { apertada: true, cachesBytes: 4096, removidas: 2 } });
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }));
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {
@@ -462,6 +470,9 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     const f = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify(corpo), { headers: { "x-nod-versao-minima": "0.1.0" } }));
     const novo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });
     expect(await novo.ponte.pastasParaLimpar!("p")).toEqual([pasta]);
+    expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({});
+    await novo.ponte.pastasParaLimpar!("p", { apertado: true });
+    expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ apertado: true });
     await novo.ponte.relatarLimpeza!("p", { pastas: 1, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 5 });
     expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
   });

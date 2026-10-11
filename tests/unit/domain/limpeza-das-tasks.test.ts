@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classificarIgnorado, LIMPAR_APOS_MS, motivoDaRecusa, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, ENTRE_PASSADAS_APERTADAS_MS, LIMPAR_APOS_MS, motivoDaRecusa, passadaPorAperto, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
 
 const AGORA = Date.UTC(2026, 9, 9, 12);
 const DIA = 24 * 3_600_000;
@@ -26,6 +26,24 @@ describe("quem pode ser limpo (ADR-088)", () => {
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS + 1 }), AGORA)).toBeNull();
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA)).toBe("so_com_pr_mergeado");
     expect(quandoLimpar(base({ terminadoEm: AGORA - LIMPAR_APOS_MS + 1 }), AGORA)).toBe("so_com_pr_mergeado");
+  });
+
+  it("ADR-096: com o disco apertado, a task encerrada há mais de 2 h já vale como encerrada; as travas de sempre continuam", () => {
+    const apertado = { apertado: true };
+    expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, apertado)).toBe("encerrada");
+    expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS + 1 }), AGORA, apertado)).toBeNull();
+    expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS, turnosVivos: 1 }), AGORA, apertado)).toBeNull();
+    expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS, decisaoPendente: true }), AGORA, apertado)).toBeNull();
+    expect(quandoLimpar(base({ estado: "parado", terminadoEm: AGORA - 10 * DIA }), AGORA, apertado)).toBeNull();
+    expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, { apertado: false })).toBe("so_com_pr_mergeado");
+  });
+
+  it("ADR-096: o disco amarelo ou vermelho dispara uma passada apertada, no máximo uma a cada 30 min", () => {
+    expect(passadaPorAperto("verde", null, AGORA)).toBe(false);
+    expect(passadaPorAperto(null, null, AGORA)).toBe(false);
+    expect(passadaPorAperto("amarela", null, AGORA)).toBe(true);
+    expect(passadaPorAperto("vermelha", AGORA - ENTRE_PASSADAS_APERTADAS_MS, AGORA)).toBe(true);
+    expect(passadaPorAperto("vermelha", AGORA - ENTRE_PASSADAS_APERTADAS_MS + 1, AGORA)).toBe(false);
   });
 
   it("só pasta de task (~/nod/<bot>/<slug>): a raiz do bot, caminho fora de ~/nod e com .. ficam de fora", () => {
@@ -57,7 +75,13 @@ describe("proteções do disco (ADR-088)", () => {
     // Pasta regenerável inteira: sai só se não houver `.env*` dentro (o Mac confere).
     for (const c of ["dist/", ".next/", "coverage/", "__pycache__/"]) expect(classificarIgnorado(c), c).toBe("conferir_env");
     // Segunda revisão: build/out/output saíram da lista; o nome no meio do caminho não conta; `.env*` nunca, em nível nenhum.
-    for (const c of [".env", ".env.local", "dist/.env.production", "node_modules/.env", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", "build/", "out/", "output/", "output/relatorio.csv", "apps/x/.next/", "a/__pycache__/", "logs/app.log", "dist", ""]) expect(classificarIgnorado(c), c).toBe("valioso");
+    for (const c of [".env", ".env.local", "dist/.env.production", "node_modules/.env", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", "build/", "out/", "output/", "output/relatorio.csv", "logs/app.log", "dist", "", "packages/x/dist/", "a/coverage/", "a/.cache/", "apps/web/.env.local", "packages/x/.turbo/.env", "packages/x/.turbo"]) expect(classificarIgnorado(c), c).toBe("valioso");
+  });
+
+  it("ADR-096: cache de uma ferramenta conhecida vale em qualquer nível (o monorepo tem um por pacote)", () => {
+    // O que segurava 4 das 41 worktrees de task da VM dos bots em 11/10.
+    for (const c of ["packages/auth/.turbo/", "apps/mobile/.expo/", "apps/x/.next/", "a/__pycache__/", "apps/web/.svelte-kit/"]) expect(classificarIgnorado(c), c).toBe("conferir_env");
+    for (const c of ["packages/auth/.turbo/cache/a", "apps/mobile/.expo/settings.json", "a/b/__pycache__/m.pyc"]) expect(classificarIgnorado(c), c).toBe("regeneravel");
   });
 
   it("a recusa do git vira motivo", () => {

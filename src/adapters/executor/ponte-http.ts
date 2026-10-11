@@ -109,9 +109,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     async desconectar() { await chamar("desconectar", {}); },
     /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */
-    async pastasParaLimpar() {
+    async pastasParaLimpar(_pessoaId, op) {
       try {
-        const r = await chamar<{ pastas?: unknown }>("limpeza", {});
+        const r = await chamar<{ pastas?: unknown }>("limpeza", op?.apertado === true ? { apertado: true } : {});
         return Array.isArray(r.pastas) ? r.pastas.filter(pastaParaLimparValida) : [];
       } catch {
         return [];

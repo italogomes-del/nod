@@ -2,7 +2,9 @@
 
 Status: aceito · Data: 2026-10-09 · Emenda a [ADR-065](adr-065-o-bot-sabe-o-que-tem-e-cada-task-na-sua-pasta.md) (a
 worktree por task) e usa a ponte da [ADR-021](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md).
-Parte do épico de performance no Mac do usuário (#221), issue #216.
+Parte do épico de performance no Mac do usuário (#221), issue #216. **Emendada pela
+[ADR-096](adr-096-o-disco-que-se-cuida.md) (2026-10-11):** a limpeza apaga por padrão, o `aninhado` não tem mais teto
+de nível, o cache de ferramenta vale em qualquer nível e o disco apertado dispara uma passada na hora.
 
 ## Contexto
 
@@ -93,7 +95,8 @@ o que está ignorado, inclusive repositórios e worktrees dentro de pasta ignora
 - **`travada`:** o clone marca a worktree como travada (`git worktree lock`).
 - **`aninhado`:** o `git worktree list --porcelain` do clone tem outra worktree dentro dela, ou há `.git` (arquivo ou
   pasta) abaixo dela fora de node_modules. O caso real é `.claude/worktrees/agent-1`, ignorada e suja. A busca vai até
-  8 níveis e 20 mil pastas; se passar disso, a worktree fica.
+  20 mil pastas; se passar disso, a worktree fica. (O teto de 8 níveis saiu na ADR-096: ele tornava `aninhado` toda
+  worktree com código fundo.)
 - **`suja`:** o `git status` mostra alteração em arquivo rastreado ou arquivo novo.
 - **`ignorado_valioso`:** há arquivo ignorado fora do que se refaz sozinho (`.env`, `backups/*.dump`, um banco local,
   `output/relatorio.csv`). A regra é `classificarIgnorado` e vale pelo caminho que o `git status --ignored` mostra:
@@ -140,10 +143,12 @@ processo grava ao mesmo tempo, então soma nunca negativo.
 
 **7. O modo, por `NOD_LIMPEZA_TASKS`** (no diário, no `.env` do servidor; no app, no ambiente do app):
 
-- **`simular` (padrão, em todo modo):** faz a passada inteira, com todas as conferências e a reconfirmação, e não apaga
+Revisto pela ADR-096 (2026-10-11): o padrão passou a ser `ligada`; `simular` e `desligada` só valem escritos.
+
+- **`simular`:** faz a passada inteira, com todas as conferências e a reconfirmação, e não apaga
   nada. Conta o que sairia: worktrees e pastas, os motivos das que ficam e o tamanho estimado. Qualquer valor que não
-  seja `ligada` ou `desligada` também simula.
-- **`ligada`:** apaga. Só vale escrito por extenso.
+  seja `ligada` ou `desligada` também simulava (até a ADR-096).
+- **`ligada`:** apaga.
 - **`desligada`:** não roda.
 
 O boot registra o modo efetivo (`limpeza_modo`, com `onde`: servidor local ou app do Mac).
