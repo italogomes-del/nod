@@ -28,7 +28,7 @@ describe("quem pode ser limpo (ADR-088)", () => {
     expect(quandoLimpar(base({ terminadoEm: AGORA - LIMPAR_APOS_MS + 1 }), AGORA)).toBe("so_com_pr_mergeado");
   });
 
-  it("ADR-095: com o disco apertado, a task encerrada há mais de 2 h já vale como encerrada; as travas de sempre continuam", () => {
+  it("ADR-096: com o disco apertado, a task encerrada há mais de 2 h já vale como encerrada; as travas de sempre continuam", () => {
     const apertado = { apertado: true };
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, apertado)).toBe("encerrada");
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS + 1 }), AGORA, apertado)).toBeNull();
@@ -38,7 +38,7 @@ describe("quem pode ser limpo (ADR-088)", () => {
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, { apertado: false })).toBe("so_com_pr_mergeado");
   });
 
-  it("ADR-095: o disco amarelo ou vermelho dispara uma passada apertada, no máximo uma a cada 30 min", () => {
+  it("ADR-096: o disco amarelo ou vermelho dispara uma passada apertada, no máximo uma a cada 30 min", () => {
     expect(passadaPorAperto("verde", null, AGORA)).toBe(false);
     expect(passadaPorAperto(null, null, AGORA)).toBe(false);
     expect(passadaPorAperto("amarela", null, AGORA)).toBe(true);
@@ -78,7 +78,7 @@ describe("proteções do disco (ADR-088)", () => {
     for (const c of [".env", ".env.local", "dist/.env.production", "node_modules/.env", "backups/", "backups/local/nod.dump", ".claude/", "dados.sqlite", "build/", "out/", "output/", "output/relatorio.csv", "logs/app.log", "dist", "", "packages/x/dist/", "a/coverage/", "a/.cache/", "apps/web/.env.local", "packages/x/.turbo/.env", "packages/x/.turbo"]) expect(classificarIgnorado(c), c).toBe("valioso");
   });
 
-  it("ADR-095: cache de uma ferramenta conhecida vale em qualquer nível (o monorepo tem um por pacote)", () => {
+  it("ADR-096: cache de uma ferramenta conhecida vale em qualquer nível (o monorepo tem um por pacote)", () => {
     // O que segurava 4 das 41 worktrees de task da VM dos bots em 11/10.
     for (const c of ["packages/auth/.turbo/", "apps/mobile/.expo/", "apps/x/.next/", "a/__pycache__/", "apps/web/.svelte-kit/"]) expect(classificarIgnorado(c), c).toBe("conferir_env");
     for (const c of ["packages/auth/.turbo/cache/a", "apps/mobile/.expo/settings.json", "a/b/__pycache__/m.pyc"]) expect(classificarIgnorado(c), c).toBe("regeneravel");

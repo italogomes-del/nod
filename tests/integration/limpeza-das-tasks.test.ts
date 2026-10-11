@@ -58,7 +58,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
         { trabalhoId: falhaRecente, pasta: "Vera/falha-bbbbbb", quando: "so_com_pr_mergeado" },
       ]);
 
-      // ADR-095: com o disco apertado, a encerrada há mais de 2 h já vale como encerrada.
+      // ADR-096: com o disco apertado, a encerrada há mais de 2 h já vale como encerrada.
       expect(await pastasParaLimpar(deps, { apertado: true })).toEqual([
         { trabalhoId: antiga, pasta: "Vera/antiga-aaaaaa", quando: "encerrada" },
         { trabalhoId: falhaRecente, pasta: "Vera/falha-bbbbbb", quando: "encerrada" },

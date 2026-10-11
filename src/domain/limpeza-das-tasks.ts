@@ -63,7 +63,7 @@ export function pastaDeTask(pasta: string | null): string | null {
  * - `encerrada`: terminada ou falha há mais de 3 dias;
  * - `so_com_pr_mergeado`: encerrada há menos; o Mac só remove a worktree cujo PR já foi mergeado.
  *
- * ADR-095 (2026-10-11): com o disco da máquina `apertado` (amarelo ou vermelho), a task encerrada há mais de 2 h já vale
+ * ADR-096 (2026-10-11): com o disco da máquina `apertado` (amarelo ou vermelho), a task encerrada há mais de 2 h já vale
  * como `encerrada`. A worktree limpa sai e a branch fica no clone: se o bot voltar à task, ele a recria. Esperar 3 dias
  * com o disco no fim parava os bots (VM dos bots a 99% em 11/10).
  */
@@ -121,7 +121,7 @@ export function protegidoPorMontagem(caminho: string, montagens: readonly string
 const PASTAS_REGENERAVEIS = new Set(["node_modules", "dist", "coverage", ".vite", ".next", ".turbo", ".cache", ".parcel-cache", ".pnpm-store", "__pycache__", ".pytest_cache"]);
 
 /**
- * ADR-095 (2026-10-11): o cache de UMA ferramenta conhecida, com nome que só ela usa, vale em qualquer nível. O monorepo
+ * ADR-096 (2026-10-11): o cache de UMA ferramenta conhecida, com nome que só ela usa, vale em qualquer nível. O monorepo
  * tem um por pacote (`packages/auth/.turbo/`, `apps/mobile/.expo/`), e só o primeiro nome segurava 4 das 41 worktrees
  * de task da VM dos bots em 11/10. `dist`, `coverage` e `.cache` continuam só no primeiro nível: são nomes genéricos.
  */
@@ -154,7 +154,7 @@ export function classificarIgnorado(caminho: string): "valioso" | "regeneravel" 
 }
 
 /**
- * ADR-095 (definido em 2026-10-11): a limpeza não espera as 6 h quando o disco aperta. A cada 5 min a máquina lê o
+ * ADR-096 (definido em 2026-10-11): a limpeza não espera as 6 h quando o disco aperta. A cada 5 min a máquina lê o
  * próprio disco (`statfs`, sem processo novo); amarelo ou vermelho (`nivelDoDisco`, os limites da ADR-085) dispara uma
  * passada `apertada`, no máximo uma a cada 30 min, para uma passada que não liberou nada não virar um laço sobre o
  * disco. Em 11/10 a VM dos bots ficou a 99% por horas com a limpeza esperando a próxima janela.

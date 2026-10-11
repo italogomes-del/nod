@@ -284,7 +284,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
     expect(chamadas.some((c) => c.includes("worktree remove"))).toBe(false);
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "simular" })).toBe("simular");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "desligada" })).toBe("desligada");
-    // ADR-095: o padrão, sem nada no ambiente, é apagar; `simular` e `desligada` só valem escritos por extenso.
+    // ADR-096: o padrão, sem nada no ambiente, é apagar; `simular` e `desligada` só valem escritos por extenso.
     expect(modoDaLimpeza({})).toBe("ligada");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: "qualquer" })).toBe("ligada");
     expect(modoDaLimpeza({ NOD_LIMPEZA_TASKS: " Simular " })).toBe("simular");
@@ -339,7 +339,7 @@ describe("limpeza das pastas de task no Mac (ADR-088)", () => {
   });
 });
 
-describe("ADR-095: o disco que se cuida", () => {
+describe("ADR-096: o disco que se cuida", () => {
   it("código com mais de 8 níveis de pasta não é mais `aninhado`: a worktree sai (o caso da VM dos bots em 11/10)", async () => {
     const wt = await worktree("Ze 1/gfk-1923-fatia-5-998a48/acme", "feat/fundo");
     const fundo = join(wt, "packages", "mundo-vivo", "tools", "provas", "vereditos", "mundo", "rondas", "r14-mundo-vivo", "palcos", "um");

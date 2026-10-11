@@ -138,9 +138,9 @@ export type RelatoLimpeza = {
   estimadoBytes?: number;
   /** Segunda revisão do #225: o Docker está instalado e não respondeu — a passada não mexeu em nada. */
   adiada?: boolean;
-  /** ADR-095: a passada foi disparada pelo disco apertado (fora das 6 h). */
+  /** ADR-096: a passada foi disparada pelo disco apertado (fora das 6 h). */
   apertada?: boolean;
-  /** ADR-095: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
+  /** ADR-096: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
   cachesBytes?: number;
 };
 /**
@@ -168,7 +168,7 @@ export interface PonteInterna {
   desconectar(machineId: string): Promise<void>;
   /**
    * ADR-088 (2026-10-09): as pastas de task encerradas que este Mac pode limpar. A regra (quem pode) é do servidor, que
-   * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda. ADR-095: `apertado` = o
+   * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda. ADR-096: `apertado` = o
    * disco da máquina está amarelo ou vermelho, e a task encerrada há mais de 2 h já vale como `encerrada`.
    */
   pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean }): Promise<PastaParaLimpar[]>;
