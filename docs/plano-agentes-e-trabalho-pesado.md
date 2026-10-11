@@ -28,12 +28,16 @@ certo é deixar os garçons trabalharem e fazer fila só no forno.
    processador olha uso sustentado e deixa de barrar a entrada; as telas leem a mesma leitura.
 2. **Deixar entrar pela memória.** Cabe mais um agente se sobram ~400 MB além da reserva dos comandos pesados. Na VM
    de 8 GB, 10 a 12 agentes.
-3. **Fila do forno.** O hook antes de cada comando do bot pede vaga. Pesado = o pico de memória medido daquele comando
-   naquela task e repositório. Sem folga, espera; o resto segue. VM de 8 GB: 2 a 3 por vez.
-4. **Repartir a máquina.** VM: grupo por task (cgroup v2) com peso de processador e limite de memória, agente com
-   peso maior que os comandos, swap comprimido no instalador. Mac: prioridade baixa para comando de fundo.
+3. **Fila do forno.** O hook reescreve o comando para `nod-vaga -- <comando>`, e a espera acontece dentro do terminal
+   do bot, que não tem prazo, como a ficha do jobserver do GNU make. Pesado = o maior pico de memória das últimas 5
+   execuções daquele comando, naquela task e repositório, mais 15%, aumentando depois de faltar memória. Sem folga,
+   espera; o resto segue. Nada espera para sempre: sem pesado rodando, o próximo roda. Quantos por vez é o que cabe.
+4. **Repartir a máquina.** VM: grupo por task (cgroup v2) com peso de processador (sem teto) e teto duro de memória
+   alto (a máquina menos a reserva), agente com peso maior que os comandos. Unidade do motor com `Delegate=yes` e
+   `OOMPolicy=continue`; swap comprimido (zram) no instalador. Mac: prioridade baixa para comando de fundo.
 5. **Bots econômicos.** Testes do que mexeu durante o trabalho; suíte completa uma vez antes do PR.
-6. **Limpar o que abriu.** Task terminada encerra o grupo inteiro. O disco já se cuida (ADR-096).
+6. **Limpar o que abriu.** Task terminada encerra o que abriu, inclusive o que saiu do grupo (o Postgres de teste),
+   pela marca `NOD_GRUPO` (PR #254). O disco já se cuida (ADR-096).
 7. **Falar com o usuário.** "Trabalhando" separado de "esperando a vez"; recomendação de máquina a partir do tempo de
    fila medido.
 
@@ -62,9 +66,9 @@ cada task nova na máquina com folga em que está pronto, e a task em andamento 
 
 | Fase | O quê | Por quê |
 |---|---|---|
-| 0 | Medição por task (1), swap na VM (4), encerrar o que a task abriu (6) | Pequeno, sem risco, dá os números para calibrar o resto |
-| 1 | Entrar pela memória (2), fila do forno (3), bots econômicos (5) | É o que libera a dezena de agentes |
-| 2 | Grupo por task na VM e prioridade no Mac (4) | Deixa a máquina estável com muita gente |
+| 0 | **0a** encerrar o que a task abriu (6, PR #254) · **0b** motor que não cai inteiro: `OOMPolicy=continue` e swap comprimido no instalador (4) · **0c** medição por task (1) | Pequeno, sem risco: para a VM de travar como em 11/10 e dá os números para calibrar o resto |
+| 1 | Entrar pela memória (2), fila do forno com `nod-vaga` (3), bots econômicos (5) | É o que libera a dezena de agentes |
+| 2 | Grupo por task na VM (`Delegate=yes`, peso e teto duro) e prioridade no Mac (4) | Deixa a máquina estável com muita gente |
 | 3 | Tela e recomendação de máquina (7) | Usa os dados das fases anteriores |
 
 | | Hoje | Depois da fase 1 |
@@ -165,12 +169,33 @@ https://claude.ai/artifact/XaXtFMENn3e4T3VZowjDkG; a cópia completa, com as fon
 - `mac_leitura`: quase o dia todo perto de 0%; rajadas às 04:07, 05:37 e 13:23–13:38 UTC. `fundo_segurado` por
   processador de 30 s a 2,5 min por vez.
 - Dois Postgres de tasks antigas do Eng 1 (nod-205, nod-206) de pé, com o init como pai.
+- 14:35 UTC: sem memória (~4 GB em node, 3,4 GB em ~17 Postgres de teste). O OOM matou um processo e o systemd, com
+  `OOMPolicy=stop`, derrubou o motor inteiro; a VM travou ~20 min sem swap e 6 turnos foram interrompidos. Às 16:20
+  UTC a VM virou e2-standard-8 (32 GB), ainda sem swap.
 
-## Em aberto
+## Padrões de mercado
 
-- Reserva por agente (~400 MB) e o quanto guardar para comandos pesados.
-- Janela da régua sustentada (3 a 5 min?).
-- Ordem da fila: chegada ou prioridade.
-- Fila para o Codex, que não tem o hook do Claude Code.
+Pesquisa de 11/10, detalhada na ADR-097. Cada peça vem de um padrão conhecido:
+
+- processador × memória: o Kubernetes;
+- entrada pela memória: o escalonador do Kubernetes;
+- fila: o Bazel;
+- estimativa medida: o Autopilot do Google e o VPA;
+- espera no comando: o jobserver do make;
+- swap comprimido: o Fedora.
+
+A única parte sem padrão pronto é a fila de comandos dentro do agente. As ferramentas locais de agentes em paralelo
+não cuidam de recursos, e quem as usa relata um teto de 4 a 8 agentes por máquina.
+
+## Valores padrão (calibrar com a fase 0, sem decidir antes)
+
+- Reserva por agente: ~400 MB.
+- Janela da régua sustentada: 3 min.
+- Ordem da fila: o que a pessoa pediu na conversa primeiro, depois a ordem de chegada.
+
+## Para depois
+
+- Fila para o Codex, que não tem o hook do Claude Code (até lá, só o grupo da task o protege).
 - Distribuição entre máquinas: o nod escolhe ou o usuário move. Para o nod escolher, o bot precisa estar pronto em
   cada máquina (login das IAs, GitHub, repositórios clonados).
+- Detalhes das telas (fase 3).

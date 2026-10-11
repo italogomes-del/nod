@@ -27,6 +27,12 @@ UTC. A régua da ADR-091 lê ~30 s, e o portão (`fundo_segurado`, motivo proces
 2,5 min por vez nessas rajadas. A memória piscou amarela às 13:37 e fez a tela de Trabalhos mostrar "pouca memória",
 enquanto o cartão da máquina dizia "memória folgada".
 
+No mesmo dia, às 14:35 UTC, a memória acabou: ~4 GB em 29 processos node (vitest, tsc) e 3,4 GB em ~17 Postgres
+embutidos de teste. O OOM killer matou um node de 500 MB, e o systemd, com `OOMPolicy=stop` (o padrão), derrubou o
+`nod-motor.service` inteiro, com todos os `claude -p` e Postgres. Depois a VM ficou ~20 min travada trocando páginas, sem
+swap, e 6 turnos viraram "turno interrompido". Às 16:20 UTC a VM passou para e2-standard-8 (8 vCPU, 32 GB), ainda sem
+swap e sem nenhuma das proteções abaixo.
+
 O problema não é o tamanho da máquina. O portão trata o agente e o trabalho pesado como a mesma coisa: barra a entrada
 de um agente novo, que custaria 5% de um núcleo, porque um comando de outro agente encheu o processador por um
 minuto. E numa máquina maior a porcentagem de pico não cai, porque os testes abrem um processo por núcleo; só dura menos.
@@ -45,22 +51,38 @@ Separar o agente do trabalho pesado que ele dispara. **Agentes entram pela memó
 3. **Agente entra se cabe na memória.** Cabe mais um agente se, tirando ~400 MB para ele, sobra a reserva dos comandos
    pesados. Na VM de 8 GB isso dá 10 a 12 agentes ao mesmo tempo. O que a pessoa pede na conversa continua começando
    sempre (ADR-085).
-4. **Fila do forno para comandos pesados.** O hook que o nod já põe antes de cada comando de terminal do bot
-   (`PreToolUse`, `claude-cli.ts`) passa a pedir uma vaga à máquina. Sem folga, o comando espera em ordem e o resto
-   segue: os outros agentes conversam, chamam ferramentas e esperam o modelo normalmente. O nod não adivinha o que é
-   pesado pelo nome do comando: mede o pico de memória de cada comando por task e repositório e reserva esse tanto da
-   próxima vez; o que nunca passou de pouco (git, ls, leitura de arquivo) não espera. Na VM de 8 GB cabem 2 a 3
-   comandos pesados por vez; com 32 GB, uns 8.
-5. **Repartir a máquina entre as tasks.** Na VM (Linux), cada task roda no seu grupo de controle (cgroup v2, por
-   `systemd-run --scope` do motor) com peso de processador e limite de memória: quatro suítes ao mesmo tempo ficam mais
-   lentas, nenhuma derruba as outras, e a task que estoura cai sozinha. O processo do agente tem peso maior que os
-   comandos dele, para a conversa seguir respondendo. No Mac, que não tem cgroup, os comandos de fundo rodam com
-   prioridade baixa (`taskpolicy -c utility`, como a limpeza da ADR-096). O instalador do motor liga swap comprimido
-   (zram) na VM, para um pico de memória ficar lento em vez de travar.
+4. **Fila do forno para comandos pesados.** Os outros agentes seguem enquanto um comando espera: conversam, chamam
+   ferramentas e esperam o modelo normalmente.
+   - **Onde espera:** dentro do próprio comando, não no hook. O hook do Claude Code tem prazo (`TETO_HOOK_S`), e uma
+     suíte na fila pode esperar mais que isso. O hook que o nod já põe antes de cada comando de terminal (`PreToolUse`,
+     `claude-cli.ts`) só reescreve `npm run check` para `nod-vaga -- npm run check`. O `nod-vaga` pede a vaga à máquina,
+     espera e roda o comando, como a ficha do jobserver do GNU make ou o `sem` do GNU parallel. O terminal do bot não
+     tem prazo (ADR-067). A reescrita pelo hook ainda precisa ser confirmada na versão do CLI em uso.
+   - **O que é pesado:** o nod não adivinha pelo nome; mede. Cada comando, por task e repositório, tem o pico de memória
+     anotado (o comando e tudo o que ele abriu). A reserva da próxima vez é o maior pico das últimas 5 execuções mais
+     15%, e sobe se o comando morrer por falta de memória. É a regra do VPA do Kubernetes, sem aprendizado de máquina.
+     O que nunca passou de pouco (git, ls, leitura de arquivo) não espera. Comando nunca visto roda se há folga e passa
+     a ser medido.
+   - **Nada espera para sempre:** sem nenhum comando pesado rodando, o próximo roda mesmo que a estimativa passe da folga.
+   - **Quantos por vez** não é número fixo: é o que cabe na memória livre. Com os números de 11/10, 2 a 3 em 8 GB.
+5. **Repartir a máquina entre as tasks.** Na VM (Linux), cada task roda no seu grupo de controle (cgroup v2):
+   - **Processador:** peso (`cpu.weight`), sem teto. Sozinha, a task usa todos os núcleos; com disputa, cada uma tem a
+     sua fatia. O agente tem peso maior que os comandos dele, para a conversa seguir respondendo.
+   - **Memória:** teto duro alto (`memory.max` = a máquina menos a reserva do sistema e dos agentes), não cota fixa. Uma
+     task pesada sozinha usa quase tudo; o teto só impede que ela tome a memória que as outras já usam. Se estourar, o
+     Linux mata um processo dessa task, não o motor nem as outras. O teto brando (`memory.high`) só entra junto com
+     quem age sobre ele (systemd-oomd), porque sozinho ele só trava a task.
+   - **Permissão e queda:** a unidade do motor ganha `Delegate=yes` (o motor cria os grupos das tasks sem ser root) e
+     `OOMPolicy=continue` (um OOM mata o processo, não o serviço inteiro, como em 11/10).
+   - **Swap:** o instalador liga swap comprimido em memória (zram), o padrão do Fedora desde a versão 33 (50% da memória,
+     até 8 GB). Um pico de memória fica lento em vez de travar a VM.
+   - **Mac:** sem cgroup. Os comandos de fundo rodam com prioridade baixa (`taskpolicy -c utility`, como a limpeza da
+     ADR-096).
 6. **Bots econômicos.** As instruções do nod pedem ao bot que, durante o trabalho, rode só os testes do que mexeu, e a
    suíte completa uma vez antes do PR. Vale para todo usuário e diminui a fila do item 4.
-7. **Task terminada encerra o que abriu.** O motor encerra o grupo inteiro da task (Postgres, servidores de teste,
-   observadores) quando o turno acaba e ela não pediu para manter nada de pé.
+7. **Task terminada encerra o que abriu.** Inclusive o que saiu do grupo do turno: o Postgres de teste abre sessão
+   própria e escapava do SIGKILL no grupo. Ele sai pela marca `NOD_GRUPO` no fim do turno e pelo prefixo da instância
+   no boot (PR #254, `executor/fugitivos.ts`).
 8. **Falar com o usuário em linguagem simples.** A tela separa "trabalhando" de "esperando a vez de rodar os testes".
    Com o tempo de fila medido, o nod recomenda máquina ("hoje seus bots esperaram 40 min na fila; com 32 GB caberiam
    ~8 comandos por vez").
@@ -91,6 +113,25 @@ próprio projeto: o tamanho da máquina, o quanto dela dá para os bots (opção
 na mesma máquina, e o peso do próprio projeto (como os testes do gamefik com um Postgres por arquivo). O nod aponta; o
 usuário decide e, se quiser, pede a um bot para otimizar.
 
+### Padrões de mercado (pesquisa de 11/10)
+
+| Peça | De onde vem |
+|---|---|
+| Processador não barra, memória barra | Kubernetes: processador "comprime" (falta só deixa lento), memória não; consenso de não pôr teto de processador |
+| Agente entra se cabe na memória | O escalonador do Kubernetes, que põe o pod onde a reserva de memória cabe |
+| Fila do forno | O gerenciador de recursos do Bazel: cada ação pede recursos ao rodar e espera se não há |
+| Pesado aprendido medindo | Autopilot (Google, EuroSys 2020) e VPA do Kubernetes: histórico de picos com margem, aumento depois de OOM. O Bazel com estimativa fixa errou 160 vezes (50 MB para 8 GB) |
+| Espera dentro do comando | Jobserver do GNU make e `sem` do GNU parallel |
+| Teto duro alto, peso no processador | cgroup v2 / systemd; `memory.high` sozinho trava sem monitor (documentação do kernel) |
+| Swap comprimido | Fedora 33+: zram com systemd-oomd |
+| O nod escolhe a máquina | Escolha de nó do Kubernetes; bot fixo = afinidade de nó |
+| A régua de 30 s de hoje | É o `make -l` (carga média), cujo atraso é problema conhecido; esta ADR sai dele |
+
+Quem roda muitos agentes resolve de dois jeitos. As plataformas na nuvem (OpenHands, Devin, Cursor) dão um contêiner ou
+uma VM por sessão. As ferramentas locais (Conductor, Claude Squad) não cuidam de recursos, e quem as usa relata um teto
+de 4 a 8 agentes por máquina. A fila de comandos pesados dentro do agente não tem um padrão pronto: é a parte nova
+desta ADR, e por isso usa o mecanismo conhecido mais próximo (o jobserver).
+
 ## Consequências
 
 - O número de agentes ao mesmo tempo passa a ser limitado pela memória, não pelo primeiro pico de teste. Na VM de
@@ -99,5 +140,7 @@ usuário decide e, se quiser, pede a um bot para otimizar.
 - A fila do item 4 cobre o Claude Code, que tem o hook. O Codex fica protegido pelo grupo da task (item 5), sem fila,
   até ter um ponto equivalente.
 - Mais estado no motor: grupo por task, histórico de pico por comando, swap. No Mac só a prioridade baixa e a medição.
-- Pontos a validar com o Marlon: a reserva por agente (~400 MB), o quanto guardar para comandos pesados, a janela da
-  régua sustentada e se a fila respeita a ordem de chegada ou a prioridade (o que a pessoa pediu passa na frente).
+- Os valores ficam com padrões e são calibrados com a medição da fase 0, sem decisão prévia: reserva por agente
+  (~400 MB), janela da régua sustentada (3 min) e ordem da fila (o que a pessoa pediu na conversa primeiro, depois a
+  ordem de chegada). A distribuição entre máquinas (o nod escolhe ou o usuário move) se decide quando chegar a vez dela.
+- Ficam para depois: a fila do Codex e os detalhes das telas (fase 3).
