@@ -139,7 +139,7 @@ export function temAMarca(ambiente: string | undefined, marca: string): boolean 
 const FOLGA_INICIO_MS = 2_000;
 
 /** O piso do início que o `ps` pode mostrar para um processo nascido depois de `desdeMs`. */
-const pisoDoInicio = (desdeMs: number) => Math.floor(desdeMs / 1000) * 1000 - FOLGA_INICIO_MS;
+export const pisoDoInicio = (desdeMs: number) => Math.floor(desdeMs / 1000) * 1000 - FOLGA_INICIO_MS;
 
 /** O líder nasceu durante o spawn anotado (com a folga do lstart truncado ou derivado). */
 function nasceuNoSpawn(inicioMs: number, g: GrupoRegistrado): boolean {
