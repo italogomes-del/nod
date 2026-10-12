@@ -80,7 +80,13 @@ export async function cuidarDosPedidosParados(deps: Deps, o: { adiados?: Pedidos
   if (o.adiados) for (const [id, ate] of o.adiados) if (ate <= agora) o.adiados.delete(id);
   // Os adiados saem já na consulta: com o `limit 20` dela, pular depois deixaria pedidos novos sem avaliação.
   const adiados = o.adiados ? [...o.adiados.keys()] : [];
-  for (const p of await deps.repos.trabalhos.pedidosAColegaParados(agora - JANELA_PEDIDOS_PARADOS_MS, agora, adiados)) {
+  // revisto em 2026-10-12 (ADR-099, I7 revista): o pedido de antes é uma task de colega; o novo entra pela triagem do dono
+  // (um turno sem trabalho) e, se a máquina cair no meio dele, passa pela mesma regra — retoma sozinho ou avisa.
+  const parados = [
+    ...(await deps.repos.trabalhos.pedidosAColegaParados(agora - JANELA_PEDIDOS_PARADOS_MS, agora, adiados)),
+    ...(await deps.repos.pedidosDeColega.triagensParadas(agora - JANELA_PEDIDOS_PARADOS_MS, agora, adiados)),
+  ];
+  for (const p of parados) {
     if (o.adiados?.has(p.tarefaId)) continue;
     const acao = decidirPedidoParado(p, agora, motivoEmPortugues);
     if (acao.tipo === "esperar") continue;

@@ -81,7 +81,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     passar: async () => ({ data: { ok: true } }),
     encaminhar: async () => ({ data: { ok: true } }),
     semNovidade: async () => ({ data: { ok: true } }),
-    pedirABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    pedirABot: async () => ({ data: { ok: true as const, tarefa_id: "tarefa-falsa", instrucao: "pedido entregue", livres: [] } }),
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,

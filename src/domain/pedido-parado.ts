@@ -29,7 +29,8 @@ export const RETOMAR_ATE_MS = 2 * 3_600_000;
 export type PedidoParado = {
   /** O turno de delegação que o handoff aponta (payload.tarefaId): a raiz do pedido. */
   tarefaId: string;
-  trabalhoColegaId: string;
+  /** null = o pedido entrou pela triagem do dono (ADR-099) e não virou task. */
+  trabalhoColegaId: string | null;
   estadoColega: EstadoTrabalho;
   /** O último turno assentado do trabalho do colega (concluído ou interrompido; o absorvido não conta). */
   ultimoTurnoId: string | null;

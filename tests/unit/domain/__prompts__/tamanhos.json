@@ -46,5 +46,13 @@
   "task-filha-de-rotina": {
     "estavel": 5197,
     "volatil": 1083
+  },
+  "triagem-de-colega": {
+    "estavel": 7267,
+    "volatil": 1233
+  },
+  "triagem-de-rotina": {
+    "estavel": 6137,
+    "volatil": 403
   }
 }

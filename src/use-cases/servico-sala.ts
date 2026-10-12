@@ -34,6 +34,8 @@ export function servicoSala(depsSobre: (trx: Tx) => Deps, aoGravar?: (trx: Tx, e
     async pedir(trx, p) {
       const deps = depsSobre(trx);
       const r = await pedirABot(deps, { ...(await contexto(deps, p.turnoId)), agente: p.agente, pedido: p.pedido, ...(p.contexto ? { contexto: p.contexto } : {}) });
+      // ADR-099 (I7 revista): a espera circular volta como recusa tipada para o bot; aqui, sem modelo para ler, é erro.
+      if (!r.data.ok) throw new ErroDeDominio("nao_permitido", { cause: r.data.erro });
       if (aoGravar && r.events?.length) await aoGravar(trx, r.events);
       return { tarefaId: r.data.tarefa_id };
     },

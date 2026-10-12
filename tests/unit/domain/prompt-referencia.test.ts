@@ -168,6 +168,31 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     trabalho: { titulo: "Login no Safari", origem: "pessoa", trabalhoMaeId: null, forma: "frente" },
     contextoConversa: '{"historico":[{"autor":"Vera","texto":"Reproduzi o erro no Safari.","confianca":"confiavel"}]}',
   },
+  // ADR-099 (I7 revista): a triagem na entrada — o pedido de colega e o de rotina são um turno curto do dono, sem trabalho.
+  "triagem-de-colega": {
+    agente: { ...agente, modoAprovacao: "automatico" },
+    ferramentas: [f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("lembrar"), f("abrir_frentes"), f("mandar_para_frente"), f("me_chame_as")],
+    pessoaNome: "Pessoa Exemplo",
+    modo: "delegacao",
+    delegacao: { pessoaNome: "Pessoa Exemplo", remetenteNome: "Tuca" },
+    profundidade: 1,
+    colegas,
+    conectores: [conectorTarefas],
+    memorias: turno1.memorias,
+    trabalhosAbertos: turno1.trabalhosAbertos,
+    contextoConversa: turno1.contextoConversa,
+  },
+  "triagem-de-rotina": {
+    agente,
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_frentes"), f("mandar_para_frente"), f("me_chame_as")],
+    pessoaNome: "Pessoa Exemplo",
+    modo: "rotina",
+    colegas,
+    conectores: [conectorTarefas],
+    rotinas,
+    memorias: turno1.memorias,
+    trabalhosAbertos: turno1.trabalhosAbertos,
+  },
   // 7. O Nod, o bot fixo (ADR-081/082): o manual do produto na parte estável e as ferramentas dele.
   nod: {
     agente: { nome: "Nod", titulo: "Ajudante", descricao: "Seu bot fixo no Nod. Tira dúvidas sobre o produto, cria e ajusta seus bots e anota bugs e ideias para o time do Nod.", modoAprovacao: "manual" },

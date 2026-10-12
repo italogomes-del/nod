@@ -13,6 +13,7 @@ import { ehPastaDeTask, type MotivoSemTerminal } from "./nativas.ts";
 import { pendenciaNoPrompt } from "./pendencia.ts";
 import { podeRepassar, PROFUNDIDADE_MAXIMA, proximaProfundidade } from "./profundidade.ts";
 import { redigir } from "./redacao.ts";
+import { emTriagem, linhaDaTriagem } from "./triagem.ts";
 
 /** definido em 2026-09-16: memória limitada e ordenada para o --append-system-prompt ser ESTÁVEL por agente (cache ephemeral_1h, mapa-cli). */
 export const MEMORIAS_NO_PROMPT = 40;
@@ -327,7 +328,11 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   // prometeu repassar no texto, e nada guardou a promessa. A regra fica na parte ESTÁVEL do prompt; a lista, na dinâmica.
   // definido em 2026-10-07 (ADR-083 §7): a conversa coordena. A regra fica na parte ESTÁVEL; a lista, na volátil.
   // revisto em 2026-10-12 (ADR-099, I2): um pedido, um lote de frentes (abrir_frentes), no lugar de uma task por chamada.
-  if (entrada.ferramentas.some((f) => f.nome === "abrir_frentes")) {
+  // revisto em 2026-10-12 (ADR-099 item 1a, I7 revista): o pedido de colega ou de rotina, fora de trabalho, é a triagem.
+  const abreFrentes = entrada.ferramentas.some((f) => f.nome === "abrir_frentes");
+  if (emTriagem({ modo: entrada.modo, trabalho: entrada.trabalho, abreFrentes }) && (entrada.modo === "delegacao" || entrada.modo === "rotina")) {
+    linhas.push(linhaDaTriagem(entrada.modo, entrada.modo === "delegacao" ? entrada.delegacao?.remetenteNome ?? null : null));
+  } else if (abreFrentes) {
     linhas.push(entrada.ferramentas.some((f) => f.nome === "mandar_para_frente")
       ? "Frentes: trabalho que leva mais que alguns minutos ou mexe em arquivos e código vai para frentes — chame abrir_frentes uma vez por pedido, com uma frente para cada parte independente (título curto e pedido autocontido: a frente não vê esta conversa), diga em uma frase o que começou e siga com a pessoa; a conversa fica livre e o resultado e as perguntas das frentes chegam aqui. Pergunta rápida e o que dá para responder já você faz aqui mesmo. A pessoa pode desfazer uma frente (Fazer aqui). Para repassar algo a uma frente aberta, use mandar_para_frente com o id dela; não abra outra frente para o mesmo trabalho."
       : "Frentes: se esta execução tiver trabalhos longos e independentes entre si, abra-os com abrir_frentes numa chamada só (uma frente por trabalho, título curto e pedido autocontido) e encerre com o que abriu; as frentes rodam à parte e não abrem outras.");
@@ -422,7 +427,7 @@ const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]]
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:", "Quem receber um pedido seu", "Colegas no nod"]],
   ["rotinas", ["Quando a pessoa pedir uma tarefa recorrente", "Rotinas deste agente:", "Inventário de rotinas", "Pausar interrompe", "Pausar e reativar"]],
   ["apps", ["Apps que você pode pedir", "Apps do marketplace:", "Conector habilitado não é acesso", "Se a pessoa disser que já conectou", "Conexões cadastradas", "Apps conectados"]],
-  ["ferramentas", ["Artefatos:", "Tasks:", "Frentes:", "Frente:", "Pendências:", "As únicas ferramentas", "Terminal:", "Skills:", "Capacidades:", "Forma de trabalho:", "Progresso:"]],
+  ["ferramentas", ["Artefatos:", "Tasks:", "Frentes:", "Frente:", "Triagem:", "Pendências:", "As únicas ferramentas", "Terminal:", "Skills:", "Capacidades:", "Forma de trabalho:", "Progresso:"]],
   ["memoria", ["Memória (", "- ["]],
   ["contexto", ["Suas pendências abertas", "Task atual:", "Frente atual:", "Trabalhos em andamento", "Contexto recente da conversa"]],
 ];
