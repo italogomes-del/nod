@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Tx } from "../../src/shared/types.ts";
-import { abrirTask, absorverNoTrabalho, fazerAqui, fazerDepois, mandarParaTask, mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { absorverNoTrabalho, fazerAqui, fazerDepois, mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirTask, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { criarTrabalho, pararTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";

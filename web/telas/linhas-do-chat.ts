@@ -70,6 +70,8 @@ function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<stri
   const unidades = new Map<string, Unidade>();
   const origens = new Map<string, string>();
   for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") origens.set(m.payload.trabalhoId, m.payload.origem);
+  // ADR-099 (I2): o lote de frentes abre várias numa linha só.
+  for (const m of mensagens) if (m.payload?.kind === "frentes_abertas") for (const f of m.payload.frentes) origens.set(f.trabalhoId, m.payload.origem);
   for (const t of conhecidos.values()) origens.set(t.id, t.origem);
   for (const m of mensagens) {
     if (!marcada(m) || falaDaPessoaNoChat(m, origens)) continue;
@@ -151,6 +153,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   // O título de cada trabalho também vem da linha "Abriu a task": o trabalho que já terminou pode não estar na lista.
   const titulos = new Map<string, string>();
   for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") titulos.set(m.payload.trabalhoId, m.payload.titulo);
+  for (const m of mensagens) if (m.payload?.kind === "frentes_abertas") for (const f of m.payload.frentes) titulos.set(f.trabalhoId, f.titulo);
   const tituloDe = (u: Unidade): string => u.trabalho?.titulo ?? (u.trabalhoId ? titulos.get(u.trabalhoId) : undefined) ?? "sem título";
   const unidades = unidadesDe(mensagens, conhecidos);
   const unidadeDe = new Map<string, Unidade>();
@@ -255,6 +258,29 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
       chave: `linha:${m.id}`,
       html: htmlLinha({ tipo: "task", chave: `task:${p.trabalhoId}`, agenteId: dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Abriu a task</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) + memoria,
     });
+  }
+
+  // ---- "Começou N frentes" e o recado a uma frente (ADR-099, I2) -------------------------------------------------------
+  // Uma linha por lote. Com uma frente só, ela é a "Abriu a task" de antes (clique abre a frente, com Fazer aqui/depois);
+  // com várias, a linha diz quantas e cada título vira um botão que abre a frente (até a Parte 5, na tela da task).
+  for (const m of mensagens) {
+    if (planos.has(m.id)) continue;
+    const p = m.payload;
+    if (p?.kind === "frentes_abertas") {
+      const dono = donoDaConversa ?? conhecidos.get(p.frentes[0]?.trabalhoId ?? "")?.agenteId ?? "";
+      const [unica] = p.frentes;
+      if (p.frentes.length === 1 && unica) {
+        const t = conhecidos.get(unica.trabalhoId);
+        const titulo = t?.titulo ?? unica.titulo;
+        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `task:${unica.trabalhoId}`, agenteId: t?.agenteId ?? dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Começou a frente</span><b>${esc(titulo)}</b>`, trabalhoId: unica.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) });
+      } else {
+        const botoes = p.frentes.map((f) => botao("abrir-trabalho", esc(conhecidos.get(f.trabalhoId)?.titulo ?? f.titulo), { classe: "sm", id: f.trabalhoId })).join("");
+        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><div class="linha-centro linha-task estatica"><span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Começou ${p.frentes.length} frentes</span></div><div class="linha-acoes">${botoes}</div></div>` });
+      }
+    } else if (p?.kind === "recado_a_frente") {
+      const titulo = conhecidos.get(p.trabalhoId)?.titulo ?? titulos.get(p.trabalhoId) ?? p.titulo;
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `recado:${m.id}`, agenteId: conhecidos.get(p.trabalhoId)?.agenteId ?? donoDaConversa ?? "", conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Repassou um recado à frente</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo }) });
+    }
   }
 
   // ---- execuções seguidas da mesma rotina numa linha só ---------------------------------------------------------------

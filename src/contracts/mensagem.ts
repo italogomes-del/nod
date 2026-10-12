@@ -103,7 +103,14 @@ export type PayloadMensagem =
    * definido em 2026-10-07 (ADR-083): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
    * `sistema`; a web abre a tela do trabalho ao clicar.
    */
-  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho };
+  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho }
+  /**
+   * definido em 2026-10-12 (ADR-099, I2): a linha única "Começou N frentes: …" do lote que o dono abriu (abrir_frentes),
+   * no lugar de uma "Abriu a task" por frente. Até a Parte 5 a web abre cada frente como task.
+   */
+  | { kind: "frentes_abertas"; loteId: string; origem: OrigemTrabalho; frentes: { trabalhoId: string; titulo: string }[] }
+  /** definido em 2026-10-12 (ADR-099, I2): a cópia, na conversa do dono, do recado que ele repassou a uma frente. */
+  | { kind: "recado_a_frente"; trabalhoId: string; titulo: string };
 
 export type Mensagem = {
   tenantId: TenantId;

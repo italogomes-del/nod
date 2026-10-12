@@ -152,10 +152,10 @@ export interface UseCasesNod<Deps> {
   anotarEntrevista: CasoNod<Deps, "anotar_entrevista">;
   concluirEntrevista: CasoNod<Deps, "concluir_entrevista">;
   proporBot: CasoNod<Deps, "propor_bot">;
-  abrirTask: CasoNod<Deps, "abrir_task">;
-  mandarParaTask: CasoNod<Deps, "mandar_para_task">;
-  meChameAs: CasoNod<Deps, "me_chame_as">;
+  // ADR-099 (I2): abrir_task e mandar_para_task ficam como sinônimos de abrir_frentes e mandar_para_frente.
+  abrirTask: CasoNod<Deps, "abrir_task">; mandarParaTask: CasoNod<Deps, "mandar_para_task">; meChameAs: CasoNod<Deps, "me_chame_as">;
   esperarComando: CasoNod<Deps, "esperar_comando">;
+  abrirFrentes: CasoNod<Deps, "abrir_frentes">; mandarParaFrente: CasoNod<Deps, "mandar_para_frente">; devolverResumo: CasoNod<Deps, "devolver_resumo">;
   gerirBots: CasoNod<Deps, "gerir_bots">;
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
@@ -189,10 +189,8 @@ export const USE_CASE_POR_FERRAMENTA = {
   anotar_entrevista: "anotarEntrevista",
   concluir_entrevista: "concluirEntrevista",
   propor_bot: "proporBot",
-  abrir_task: "abrirTask",
-  mandar_para_task: "mandarParaTask",
-  me_chame_as: "meChameAs",
-  esperar_comando: "esperarComando",
+  abrir_task: "abrirTask", mandar_para_task: "mandarParaTask", me_chame_as: "meChameAs", esperar_comando: "esperarComando",
+  abrir_frentes: "abrirFrentes", mandar_para_frente: "mandarParaFrente", devolver_resumo: "devolverResumo",
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",
