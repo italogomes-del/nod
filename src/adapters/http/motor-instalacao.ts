@@ -10,8 +10,9 @@
  * O motor roda como o usuário `nod`, nunca root. A chave fica em ~nod/.config/nod-motor (0600). O login das IAs é feito
  * pela pessoa, no terminal (`nod-motor entrar claude`): o script não pede nem guarda credencial nenhuma.
  */
-export const ARQUIVOS_DO_MOTOR = ["nod-motor.mjs", "proxy.mjs", "hook-nativas.mjs"] as const;
-export type ArquivoDoMotor = (typeof ARQUIVOS_DO_MOTOR)[number];
+import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
+
+export { ARQUIVOS_DO_MOTOR, type ArquivoDoMotor } from "../../domain/atualizacao-do-motor.ts";
 
 /** O Node que o motor usa (o mesmo do .mise.toml e do Dockerfile). */
 export const NODE_DO_MOTOR = "24.19.0";
@@ -205,7 +206,79 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 NODSERVICO
+
+# ADR-100: o motor se atualiza sozinho. Ele (usuário nod) só decide QUANDO: num momento sem turno, grava um pedido. Quem
+# troca os arquivos é o root, deste servidor (gravado aqui, fora do alcance do nod) e só se o sha256 de cada arquivo bate
+# com o manifesto. Os arquivos continuam do root: um bot, que roda como nod, não reescreve o hook que o vigia.
+$SUDO mkdir -p /etc/nod-motor
+echo "$NOD_SERVIDOR" | $SUDO tee /etc/nod-motor/servidor >/dev/null
+$SUDO tee /usr/local/sbin/nod-motor-atualizar >/dev/null <<'NODATUALIZAR'
+#!/bin/sh
+# Nod: troca os arquivos do motor pelos do servidor desta instalação (ADR-100). Roda como root, pelo
+# nod-motor-atualizar.service, quando o motor pede (~nod/.config/nod-motor/atualizar) num momento sem turno.
+set -eu
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PEDIDO=/home/nod/.config/nod-motor/atualizar
+APP=/opt/nod-motor/app
+NODE=/opt/nod-motor/node/bin/node
+TMP=$(mktemp -d)
+# O pedido sai sempre, com sucesso ou não: senão o .path dispararia de novo em seguida. O motor que não reiniciou
+# volta a puxar trabalho e tenta mais tarde.
+trap 'rm -rf "$TMP" "$APP.novo"; rm -f "$PEDIDO"' EXIT
+SERVIDOR=$(head -n 1 /etc/nod-motor/servidor)
+case "$SERVIDOR" in
+  https://*|http://127.0.0.1:*|http://localhost:*) ;;
+  *) echo "servidor inválido em /etc/nod-motor/servidor" >&2; exit 1 ;;
+esac
+curl -fsS --max-time 60 "$SERVIDOR/api/motor/manifesto" -o "$TMP/manifesto.json"
+for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
+  curl -fsS --max-time 300 "$SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "$TMP/$ARQUIVO"
+done
+VERSAO=$("$NODE" -e 'const fs=require("fs"),c=require("crypto");const d=process.argv[1];const m=JSON.parse(fs.readFileSync(d+"/manifesto.json","utf8"));for(const n of process.argv.slice(2)){const h=c.createHash("sha256").update(fs.readFileSync(d+"/"+n)).digest("hex");if(!m.arquivos||m.arquivos[n]!==h){console.error("o arquivo "+n+" não bate com o manifesto");process.exit(1)}}process.stdout.write(String(m.versao||"?"))' "$TMP" ${ARQUIVOS_DO_MOTOR.join(" ")})
+rm -rf "$APP.novo"
+mkdir -p "$APP.novo"
+for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
+  install -o root -g root -m 644 "$TMP/$ARQUIVO" "$APP.novo/$ARQUIVO"
+done
+# A versão anterior fica ao lado (app.anterior) para voltar à mão, se precisar.
+rm -rf "$APP.anterior"
+mv "$APP" "$APP.anterior"
+# Se a segunda troca falhar, a anterior volta: a máquina nunca fica sem motor.
+mv "$APP.novo" "$APP" || { mv "$APP.anterior" "$APP"; exit 1; }
+systemctl restart nod-motor
+echo "motor atualizado: $VERSAO"
+NODATUALIZAR
+$SUDO chmod 755 /usr/local/sbin/nod-motor-atualizar
+$SUDO tee /etc/systemd/system/nod-motor-atualizar.service >/dev/null <<'NODATUALIZARSERVICO'
+[Unit]
+Description=Nod: troca os arquivos do motor pelos do servidor (ADR-100)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nod-motor-atualizar
+TimeoutStartSec=15min
+NODATUALIZARSERVICO
+$SUDO tee /etc/systemd/system/nod-motor-atualizar.path >/dev/null <<'NODATUALIZARPATH'
+[Unit]
+Description=Nod: o motor pediu para se atualizar (ADR-100)
+
+[Path]
+PathExists=/home/nod/.config/nod-motor/atualizar
+Unit=nod-motor-atualizar.service
+
+[Install]
+WantedBy=multi-user.target
+NODATUALIZARPATH
 $SUDO systemctl daemon-reload
+if [ "\${NOD_ATUALIZAR_SOZINHO:-1}" = "0" ]; then
+  $SUDO rm -f /etc/nod-motor/atualizar-sozinho
+  $SUDO systemctl disable --now nod-motor-atualizar.path >/dev/null 2>&1 || true
+  passo "atualização automática desligada (NOD_ATUALIZAR_SOZINHO=0)"
+else
+  $SUDO touch /etc/nod-motor/atualizar-sozinho
+  $SUDO systemctl enable --now nod-motor-atualizar.path >/dev/null 2>&1
+  passo "atualização automática (num momento sem turno, sem interromper nenhum)"
+fi
 $SUDO systemctl enable nod-motor >/dev/null 2>&1
 passo "serviço nod-motor (volta sozinho se a máquina reiniciar)"
 

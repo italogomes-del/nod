@@ -27,6 +27,7 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
+import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
 import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
@@ -99,6 +100,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const planosAqui = new Map<string, PlanoTurno>();
   let ultimoReanuncio = 0;
   let encerrado = false;
+  /** ADR-100: o pedido de atualização ao root, quando o motor ficar diferente do servidor (só com a instalação nova). */
+  let atualizador: Atualizador | null = null;
 
   const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
   // A pasta do executor (sessões e turnos do CLI) fica fora da pasta da chave (pastaDoExecutor): um turno não está a um `../` dela.
@@ -160,6 +163,12 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
       aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
+    if (import.meta.url.endsWith(".mjs")) {
+      void atualizacaoLigada({ url: c.url }).then((ligada) => {
+        if (!ligada || encerrado || atualizador) return;
+        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => laco?.turnosAtuais().length ?? 0, drenar: (sim) => laco?.drenar(sim) });
+      });
+    }
   };
 
   let lacoNoAr = false;
@@ -198,6 +207,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   async function parar() {
     if (encerrado) return;
     encerrado = true;
+    atualizador?.parar();
     if (itens) clearInterval(itens);
     limpeza?.parar();
     vigia?.parar();
@@ -216,6 +226,19 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
 function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number {
   log("erro", `motor_${codigo}`, {});
   process.stderr.write(codigo === "chave_invalida" ? "A chave desta máquina não vale mais (cancelada?). Rode: nod-motor parear <servidor>\n" : `O servidor pede um motor mais novo. Rode de novo: curl -fsSL ${url}/motor | sh\n`);
+  return 2;
+}
+
+/**
+ * ADR-100: o servidor pede um motor mais novo (426). Com a atualização automática, o motor grava o pedido e sai com o
+ * código 2: o systemd não o reinicia sozinho, mas o atualizador troca os arquivos e o reinicia. Nenhum turno roda aqui:
+ * a sessão já foi recusada.
+ */
+async function sairPorVersao(url: string, pasta: string): Promise<number> {
+  if (!import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada({ url }))) return sairPor("atualize_app", url);
+  await writeFile(arquivoDoPedido(pasta), `${JSON.stringify({ versao: null, em: Date.now(), motivo: "atualize_app" })}\n`, { mode: 0o600 }).catch(() => undefined);
+  log("info", "motor_atualizacao", { motivo: "atualize_app" });
+  process.stderr.write("O servidor pede um motor mais novo: a atualização automática foi pedida.\n");
   return 2;
 }
 
@@ -250,14 +273,14 @@ async function rodar(): Promise<number> {
       tentativa = 0;
       recusas = 0;
       const motivo = await sessao.terminou;
-      if (motivo === "atualize_app") return sairPor(motivo, c.url);
+      if (motivo === "atualize_app") return sairPorVersao(c.url, pasta);
       // Um 401/403 de passagem (proxy, deploy) não desliga a máquina de vez: só a terceira recusa seguida sai com o código 2.
       if (motivo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(motivo, c.url);
       if (motivo === "chave_invalida") { await esperar(ESPERA_RECUSA_MS, undefined, { signal: saida.signal }).catch(() => undefined); continue; }
       if (motivo === "parado") return 0;
     } catch (e) {
       const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
-      if (codigo === "atualize_app") return sairPor(codigo, c.url);
+      if (codigo === "atualize_app") return sairPorVersao(c.url, pasta);
       if (codigo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(codigo, c.url);
       if (saida.signal.aborted) return 0;
       const ms = ESPERAS_RECONEXAO_MS[Math.min(tentativa, ESPERAS_RECONEXAO_MS.length - 1)]!;
@@ -317,6 +340,11 @@ async function estado(): Promise<number> {
   const c = await carregarConexao(pasta);
   process.stdout.write(`Motor ${await versaoDoMotor()} · ${hostname()}\n`);
   process.stdout.write(c ? `Conectado a ${c.url}\n` : "Ainda não conectado: nod-motor parear https://seu-nod\n");
+  const marca = await atualizacaoLigada();
+  const mesmoServidor = !c || await atualizacaoLigada({ url: c.url });
+  process.stdout.write(!marca ? `Atualização automática: desligada (sem ${MARCA_DA_ATUALIZACAO})\n`
+    : !mesmoServidor ? `Atualização automática: parada (a instalação é de outro servidor; rode de novo: curl -fsSL ${c?.url}/motor | sh)\n`
+      : "Atualização automática: ligada (espera um momento sem turno)\n");
   const lig = { urlNod: c?.url ?? "https://127.0.0.1", proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), sondaSemTurno: true, electronComoNode: false };
   const envExecutor = { ...process.env, NOD_HOME: pastaDoExecutor(process.env) };
   const cfg = await configDosDrivers(envExecutor);
