@@ -136,6 +136,10 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
       await m.repos.turnos.assentar(vivoA!.id, { estado: "concluido" });
       await sincronizarTrabalho(m.deps, idA);
       expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(turnosB[1]!.id);
+      // ADR-099 (I3): a frente A acabou e o lote dela volta ao dono (a retomada do turno da conversa). Ela sai da fila aqui.
+      const retornoA = (await m.repos.turnos.listarDaConversa(m.conversaId, 100)).filter((t) => t.origem === "retomada" && t.retomaTurnoId === conversa!.id);
+      expect(retornoA).toHaveLength(1);
+      await m.repos.turnos.assentar(retornoA[0]!.id, { estado: "concluido" });
 
       // Sem a outra aberta (ou numa task de rotina), "Fazer depois" só grava: nada para.
       const c = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Outra", pedido: "outra" });

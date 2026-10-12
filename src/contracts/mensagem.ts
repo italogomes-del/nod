@@ -5,7 +5,7 @@ import type { IdHarness } from "./harness.ts";
 import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaNativa } from "./negacao.ts";
-import type { OrigemTrabalho } from "./trabalho.ts";
+import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
 import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
@@ -110,7 +110,17 @@ export type PayloadMensagem =
    */
   | { kind: "frentes_abertas"; loteId: string; origem: OrigemTrabalho; frentes: { trabalhoId: string; titulo: string }[] }
   /** definido em 2026-10-12 (ADR-099, I2): a cópia, na conversa do dono, do recado que ele repassou a uma frente. */
-  | { kind: "recado_a_frente"; trabalhoId: string; titulo: string };
+  | { kind: "recado_a_frente"; trabalhoId: string; titulo: string }
+  /**
+   * definido em 2026-10-12 (ADR-099, I3): a linha "3 frentes terminaram" (ou "A frente X terminou", com
+   * `avisar_a_cada_uma`) na conversa do dono, quando o lote volta a ele.
+   */
+  | { kind: "frentes_terminadas"; loteId: string; frentes: { trabalhoId: string; titulo: string; estado: EstadoTrabalho }[] }
+  /**
+   * definido em 2026-10-12 (ADR-099, I3, decisão 7): o lote de um pedido de colega voltou direto a quem pediu — na
+   * conversa do dono fica só a linha "Respondi ao pedido de X" (não confiável: o nome vem de outro bot).
+   */
+  | { kind: "pedido_respondido"; loteId: string; agenteId: string; nome: string };
 
 export type Mensagem = {
   tenantId: TenantId;

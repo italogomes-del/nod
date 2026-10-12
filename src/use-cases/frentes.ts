@@ -16,7 +16,8 @@ import { criarTrabalho } from "./trabalhos.ts";
 /**
  * As frentes (definido em 2026-10-12, ADR-099, partes 3/4, issue I2): o dono abre um lote por pedido, com N frentes que
  * rodam à parte (sessão e pasta próprias, como as tasks de hoje), repassa recados a elas e cada uma devolve um resumo
- * curto. O retorno do lote ao dono é a I3: até lá os resultados aparecem como hoje (o balão da task).
+ * curto. O retorno do lote ao dono (uma retomada quando a última frente termina, ou a resposta direto ao colega que
+ * pediu) mora em fechar-lote.ts (I3).
  */
 
 type Recusa = { ok: false; erro: "nao_abre" | "sem_frentes" | "teto_de_tasks" | "depois_de_invalido"; instrucao: string };

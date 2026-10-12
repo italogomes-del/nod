@@ -2449,7 +2449,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         },
         async frentesDoLote(loteId: string) {
           return doTenant(b.trabalhos).filter((t) => t.loteId === loteId).sort((x, y) => x.criadoEm - y.criadoEm)
-            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega" }));
+            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivo: null }));
+        },
+        async lotesAbertosPor(ids: readonly string[]) {
+          return doTenant(b.lotes).filter((l) => ids.includes(l.abertoPorTurnoId)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoLote);
         },
         async marcarDevolvido(loteId: string, retornoTurnoId: string | null, em: number) {
           const l = meus().find((x) => x.id === loteId && x.devolvidoEm === null);
