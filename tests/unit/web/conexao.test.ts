@@ -172,3 +172,79 @@ describe("'Tentar de novo' depois de FALHA_APP sonda a sessão existente antes d
     expect(m.ordem.slice(antes, antes + 2)).toEqual(["abrir", "conectar"]);
   });
 });
+
+// Revisão do PR #264 (NOD-208): na re-sonda a janela abre FORA do clique, e o navegador costuma bloqueá-la.
+describe("re-sonda: janela bloqueada, Cancelar e troca de sessão com a sonda em voo", () => {
+  function comVerificarPendente(janelaNoLogin: JanelaLogin | null) {
+    const mudancas: [string, ConexaoApp | null][] = [];
+    const conectados: string[] = [];
+    const ordem: string[] = [];
+    let soltar: ((v: { conectado: boolean; falhou?: boolean }) => void) | null = null;
+    let primeira = true;
+    const deps: DepsConexao = {
+      conectar: async () => { ordem.push("conectar"); return { url: "https://login.exemplo/x" }; },
+      verificar: () => {
+        ordem.push("verificar");
+        // 1ª tentativa: FALHA_APP na hora; 2ª (a re-sonda): fica pendente até o teste soltar; depois, conectado.
+        if (primeira) { primeira = false; return Promise.resolve({ conectado: false, falhou: true }); }
+        if (soltar === null) return new Promise((r) => { soltar = r; });
+        return Promise.resolve({ conectado: true });
+      },
+      mudou: (slug, valor) => void mudancas.push([slug, valor]),
+      conectado: (slug) => void conectados.push(slug),
+      abrirJanela: () => { ordem.push("abrir"); return ordem.filter((o) => o === "abrir").length === 1 ? { closed: false, location: { href: "" }, close() {} } : janelaNoLogin; },
+      esperar: async () => undefined,
+      agora: () => 0,
+    };
+    const soltarResonda = (v: { conectado: boolean; falhou?: boolean }) => { const f = soltar; soltar = () => undefined; f?.(v); };
+    return { conexoes: criarConexoes(deps), mudancas, conectados, ordem, soltarResonda };
+  }
+
+  it("re-sonda falha e o navegador bloqueia a janela: o estado marca semJanela com a URL e a espera segue", async () => {
+    const m = comVerificarPendente(null);
+    await m.conexoes.iniciar("slack"); // FALHA_APP
+    const tentativa = m.conexoes.iniciar("slack");
+    await Promise.resolve();
+    m.soltarResonda({ conectado: false, falhou: true });
+    await tentativa;
+    expect(m.mudancas).toContainEqual(["slack", { url: "https://login.exemplo/x", falhou: null, semJanela: true }]);
+    expect(m.conectados).toEqual(["slack"]);
+  });
+
+  it("janela aberta no clique não marca semJanela", async () => {
+    const m = montar({ verificacoes: [true] });
+    await m.conexoes.iniciar("clickup");
+    expect(m.mudancas.some(([, v]) => v?.semJanela)).toBe(false);
+  });
+
+  it("Cancelar com a re-sonda em voo: nada abre, nada conclui, e o próximo clique abre o login no gesto", async () => {
+    const m = comVerificarPendente(null);
+    await m.conexoes.iniciar("slack");
+    const tentativa = m.conexoes.iniciar("slack");
+    await Promise.resolve();
+    m.conexoes.cancelar("slack");
+    m.soltarResonda({ conectado: true });
+    await tentativa;
+    expect(m.conectados).toEqual([]);
+    expect(m.conexoes.esperando("slack")).toBe(false);
+    expect(m.mudancas.at(-1)).toEqual(["slack", null]);
+    expect(m.ordem.filter((o) => o === "abrir" || o === "conectar")).toEqual(["abrir", "conectar"]);
+    const antes = m.ordem.length;
+    void m.conexoes.iniciar("slack");
+    expect(m.ordem.slice(antes, antes + 1)).toEqual(["abrir"]);
+    m.conexoes.cancelar("slack");
+  });
+
+  it("troca de sessão com a re-sonda em voo: a resposta da sessão anterior não conclui nem abre login", async () => {
+    const m = comVerificarPendente(null);
+    await m.conexoes.iniciar("slack");
+    const tentativa = m.conexoes.iniciar("slack");
+    await Promise.resolve();
+    m.conexoes.cancelarTodas();
+    m.soltarResonda({ conectado: false, falhou: true });
+    await tentativa;
+    expect(m.conectados).toEqual([]);
+    expect(m.conexoes.esperando("slack")).toBe(false);
+    expect(m.ordem.filter((o) => o === "conectar")).toHaveLength(1);
+  });
+});

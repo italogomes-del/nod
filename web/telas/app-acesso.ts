@@ -127,8 +127,18 @@ export function passos(app: string, bot: string, ativo: 1 | 2): string {
 }
 
 /** O bloco "esperando você entrar" (card do chat, gaveta e cartão do marketplace). */
-export function blocoEsperando(nome: string, url: string | null, curto = false): string {
-  const link = url ? `<a class="link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Abrir o login de novo ${SETA_EXTERNA}</a>` : "";
+/**
+ * `semJanela` (revisão do PR #264, NOD-208): a janela não abriu. Sem o link, o card curto ficava girando até o
+ * prazo de 10 min sem caminho para entrar — o caso comum do "Tentar de novo" depois da re-sonda.
+ */
+export function blocoEsperando(nome: string, url: string | null, curto = false, semJanela = false): string {
+  const abrir = (texto: string) => `<a class="link" href="${esc(url ?? "")}" target="_blank" rel="noopener noreferrer">${texto} ${SETA_EXTERNA}</a>`;
+  if (semJanela && url) {
+    return curto
+      ? `<div class="esperando esperando-curto">${GIRO}<span>Esperando você entrar no ${esc(nome)}…</span></div>${abrir("Abrir o login")}`
+      : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>O navegador não abriu a janela de login. Abra pelo link; quando terminar, isto continua sozinho.</p>${abrir("Abrir o login")}</div></div>`;
+  }
+  const link = url ? abrir("Abrir o login de novo") : "";
   return curto
     ? `<div class="esperando esperando-curto">${GIRO}<span>Esperando você entrar no ${esc(nome)}…</span></div>`
     : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>A janela de login está aberta. Quando terminar, isto continua sozinho.</p>${link}</div></div>`;

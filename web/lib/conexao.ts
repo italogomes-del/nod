@@ -158,7 +158,8 @@ export function criarConexoes(deps: DepsConexao) {
       } catch {
         // janela de outra origem: segue pelo link do card
       }
-      deps.mudou(slug, { url: r.url, falhou: null });
+      // Sem janela viva (bloqueada, sobretudo a aberta fora do clique depois da re-sonda): o card mostra o link.
+      deps.mudou(slug, { url: r.url, falhou: null, ...(janela && !janela.closed ? {} : { semJanela: true }) });
       await esperarLogin(slug, id, r.url);
     },
     cancelar(slug: string): void {

@@ -1,3 +1,4 @@
+import { FALHA_APP } from "../../../web/lib/conexao.ts";
 import { describe, expect, it } from "vitest";
 import type { Conector } from "../../../src/contracts/conector.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
@@ -59,6 +60,20 @@ describe("marketplace (revisto em 2026-09-25)", () => {
     const html = renderConectores({ ...base, conectando: { clickup: { url: "https://login/x", falhou: null } } });
     expect(html).toMatch(/id="app-clickup">[\s\S]*?Conectando[\s\S]*?Esperando você entrar no ClickUp/);
     expect(html).toContain('data-act="cancelar-conexao" data-id="clickup"');
+  });
+
+  it("NOD-208 (critério 5): sonda falhou em todas → o cartão segue com a frase e 'Tentar de novo'", () => {
+    const html = renderConectores({ ...base, conectando: { clickup: { url: "https://login/x", falhou: FALHA_APP } } });
+    expect(html).toMatch(/id="app-clickup">[\s\S]*?O login deu certo, mas o app não respondeu\.[\s\S]*?data-act="conectar-app" data-id="clickup">Tentar de novo/);
+  });
+
+  it("conectando sem janela (pop-up bloqueado, re-sonda da NOD-208): o cartão e a gaveta mostram 'Abrir o login'", () => {
+    const sem = { clickup: { url: "https://login/x", falhou: null, semJanela: true } };
+    const cartao = renderConectores({ ...base, conectando: sem });
+    expect(cartao).toMatch(/id="app-clickup">[\s\S]*?Esperando você entrar no ClickUp[\s\S]*?<a class="link" href="https:\/\/login\/x" target="_blank" rel="noopener noreferrer">Abrir o login /);
+    const gaveta = renderConectores({ ...base, conectando: sem, tela: { tipo: "conectores", gaveta: { slug: "clickup", passo: "detalhes" } } });
+    expect(gaveta).toContain("O navegador não abriu a janela de login.");
+    expect(gaveta).not.toContain("A janela de login está aberta.");
   });
 
   it("login feito: a gaveta abre em 'Quem pode usar' com Nenhum / Ler / Ler e alterar por bot, o nível atual marcado", () => {
