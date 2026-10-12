@@ -104,7 +104,9 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
   it("espera circular: B pede a A enquanto A espera B — recusado com instrução; em qualquer profundidade também; o mesmo sentido passa", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const [nChico, nDev, nLivre] = await Promise.all([m.chico, m.dev, m.livre].map((b) => m.nome(b.agenteId)));
+      const nChico = await m.nome(m.chico.agenteId);
+      const nDev = await m.nome(m.dev.agenteId);
+      const nLivre = await m.nome(m.livre.agenteId);
       const t1 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev)).data);
       // Na triagem do pedido, o Dev pede ao Chico: o Chico já espera o Dev.
       const volta = await m.pedir(m.dev, t1, nChico, "qual repositório?");

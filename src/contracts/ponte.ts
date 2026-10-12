@@ -1,3 +1,4 @@
+import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "./espera.ts";
 import type { CapacidadesHarness, IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { Inventario } from "./inventario.ts";
@@ -183,4 +184,12 @@ export interface PonteInterna {
   pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean }): Promise<PastaParaLimpar[]>;
   /** ADR-088: o resumo da passada, para o log `limpeza_feita` do servidor. */
   relatarLimpeza?(pessoaId: string, relato: RelatoLimpeza): Promise<void>;
+  /**
+   * definido em 2026-10-12 (ADR-099, parte 2): as esperas de comando que esta máquina deve estar rodando agora (o puxar, a
+   * cada 5 s, também é a notícia que o varredor confere). `machineId` só vale na ponte in-process: na HTTP a máquina é a
+   * da chave. null = sem resposta (servidor fora, ou antigo): a máquina não mata nem começa nada por isso.
+   */
+  esperas?(pessoaId: string, machineId: string): Promise<EsperaParaRodar[] | null>;
+  /** ADR-099: o relato de uma espera (começou, terminou, não deu). null = sem resposta: a máquina guarda e manda de novo. */
+  relatarEspera?(pessoaId: string, machineId: string, relato: RelatoEspera): Promise<RespostaRelatoEspera | null>;
 }

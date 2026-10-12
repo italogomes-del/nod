@@ -89,6 +89,9 @@ async function aindaNaoEntrega(deps: Deps, tarefa: Turno): Promise<"aguardando_p
   // ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta ("vou esperar o CI"). Essa frase não é o resultado:
   // sem esta espera ela saía como entrega final e o resultado de verdade, na volta, era descartado como ja_entregue.
   if (cadeia.some((t) => t.estado === "pendente" && t.acordarEm != null)) return "aguardando_volta";
+  // definido em 2026-10-12 (ADR-099, I7 revista): ou deixou um comando esperando (esperar_comando, parte 2) — a volta vem
+  // quando ele acabar.
+  if ((await deps.repos.pedidosDeColega.esperasRodandoDosTurnos(cadeia.map((t) => t.id))) > 0) return "aguardando_volta";
   // definido em 2026-10-12 (ADR-099, I7 revista): na triagem o dono abriu frentes para o pedido. A fala dele ("comecei")
   // não é o resultado: o resultado é o do lote, que a I3 entrega a quem pediu quando as frentes acabam (marcando o lote
   // devolvido antes, o que o tira desta conta).

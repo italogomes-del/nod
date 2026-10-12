@@ -2,6 +2,7 @@ import { desligar, iniciarTarefa } from "../../../src/use-cases/ferramentas-liga
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../../src/use-cases/onboarding.ts";
 import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../../src/use-cases/frentes.ts";
 import { meChameAs } from "../../../src/use-cases/me-chame-as.ts";
+import { esperarComando } from "../../../src/use-cases/esperar-comando.ts";
 import { gerirBots } from "../../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../../src/use-cases/nod.ts";
 import type { Conector } from "../../../src/contracts/conector.ts";
@@ -99,6 +100,7 @@ export function depsFalsos(opcoes: OpcoesDepsFalsos = {}): { deps: Deps; banco: 
     abrirFrentes,
     mandarParaFrente,
     devolverResumo,
+    esperarComando,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

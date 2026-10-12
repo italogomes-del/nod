@@ -179,6 +179,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       esperandoColega: e?.esperandoColega ?? null,
       trabalhouMs: e?.trabalhouMs ?? 0,
       acordaEm: e?.acordaEm ?? null,
+      esperandoComando: e?.esperandoComando ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   }).map((dto) => (alemDisso ? { ...dto, ...alemDisso(dto, extras.get(dto.id)) } : dto));
@@ -307,6 +308,8 @@ export async function fecharPorMemoria(deps: DepsTrabalho, turnoId: string): Pro
 export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<RuntimeEvent[]> {
   if (trabalhoFinal(t.estado)) return [];
   const events = await fecharDecisoesDoTrabalho(deps, t.id);
+  // ADR-099 (parte 2): o comando que a task deixou esperando para junto (o motor mata o grupo no próximo puxar).
+  await deps.repos.esperas.cancelarRodando({ trabalhoId: t.id }, "parada pela pessoa", deps.agora());
   const parado = await deps.repos.trabalhos.mudarEstado(t.id, "parado", deps.agora());
   if (parado) {
     await resumoSeFaltar(deps, parado);

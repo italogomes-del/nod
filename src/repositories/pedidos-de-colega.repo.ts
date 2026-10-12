@@ -73,6 +73,17 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * Quantas esperas de comando (0070, ADR-099 parte 2) estes turnos deixaram rodando. A triagem que espera uma dependência
+     * por `esperar_comando` não entregou o resultado: ele sai na retomada, quando o comando acaba (aguardando_volta).
+     */
+    async esperasRodandoDosTurnos(turnoIds: readonly string[]): Promise<number> {
+      if (turnoIds.length === 0) return 0;
+      const [l] = await conn<{ n: number }[]>`
+        select count(*)::int as n from esperas where tenant_id = ${escopo.tenantId} and turno_id = any(${[...turnoIds]}::uuid[]) and estado = 'rodando'`;
+      return l?.n ?? 0;
+    },
+
+    /**
      * Pedidos que entraram pela triagem do dono e caíram (definido em 2026-10-12, ADR-099 item 8 e emenda à ADR-084): o
      * mesmo formato de `trabalhos.pedidosAColegaParados`, para a mesma regra (src/domain/pedido-parado.ts). Handoff sem
      * `trabalhoId` (o pedido não virou task), feito desde `desde`, sem `peer_ask` da tarefa, com quem pediu ainda no ar; a

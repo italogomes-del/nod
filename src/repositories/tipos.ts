@@ -35,6 +35,7 @@ import type { turnosRepo } from "./turnos.repo.ts";
 import type { trabalhosRepo } from "./trabalhos.repo.ts";
 import type { frentesRepo } from "./frentes.repo.ts";
 import type { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
+import type { esperasRepo } from "./esperas.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
@@ -75,6 +76,8 @@ export interface Repos {
   frentes: ReturnType<typeof frentesRepo>;
   /** ADR-099 (I7 revista): os pedidos entre bots vistos pela triagem do dono — espera circular, livres, quedas. */
   pedidosDeColega: ReturnType<typeof pedidosDeColegaRepo>;
+  /** 0070 (ADR-099, parte 2): as esperas de comando. */
+  esperas: ReturnType<typeof esperasRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;
   rotinas: ReturnType<typeof rotinasRepo>;

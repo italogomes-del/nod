@@ -110,6 +110,8 @@ export type ExtrasTrabalho = {
   trabalhouMs: number;
   /** ADR-086: a volta marcada ("me chame às 16:00") ainda por vir — a mais próxima; null = nenhuma. */
   acordaEm: number | null;
+  /** ADR-099 (parte 2): o comando que o trabalho deixou esperando e ainda roda — o motivo e desde quando; null = nenhum. */
+  esperandoComando: { motivo: string; desde: number } | null;
   /**
    * definido em 2026-10-09 (a tela fala por máquina): a máquina do turno que roda agora (`turnos.machine_id`) e o alvo do
    * turno pendente mais antigo (alvo-da-maquina.ts, a regra do `reivindicar`). null = sem turno vivo / sem alvo (qualquer
@@ -294,13 +296,15 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
           -- ADR-086 (revisão do #212): a volta marcada para mais tarde não é fila — conta à parte, abaixo da decisão.
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and (t.acordar_em is null or t.acordar_em <= now())) as pendentes,
           exists (select 1 from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and t.acordar_em > now()) as despertar,
+          -- ADR-099 (parte 2): o comando que o trabalho deixou esperando; o fim dele acorda o trabalho.
+          exists (select 1 from esperas e where e.tenant_id = ${escopo.tenantId} and e.trabalho_id = ${id} and e.estado = 'rodando') as comando,
           exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
@@ -322,7 +326,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
@@ -332,6 +336,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
         maquina_viva_id: string | null; maquina_alvo_id: string | null;
         colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
+        espera_motivo: string | null; espera_desde: Date | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
@@ -343,7 +348,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = w.tenant_id and t.trabalho_id = w.id) as trabalhou_ms,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
-          ab.abertos, ab.acorda_em
+          ab.abertos, ab.acorda_em, es.motivo as espera_motivo, es.criado_em as espera_desde
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -371,6 +376,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           select array_agg(t.id order by t.criado_em) as abertos, min(t.acordar_em) filter (where t.estado = 'pendente') as acorda_em
           from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')
         ) ab on true
+        -- ADR-099 (parte 2): o comando esperando (o índice esperas_rodando_por_trabalho).
+        left join lateral (
+          select e.motivo, e.criado_em from esperas e
+          where e.tenant_id = w.tenant_id and e.trabalho_id = w.id and e.estado = 'rodando' order by e.criado_em limit 1
+        ) es on true
         left join lateral (
           -- O pedido a colega em aberto mais antigo, pela regra de fatos.colega (sem peer_ask da tarefa, task do colega não final).
           select g.nome, h.criado_em as desde, h.payload->>'trabalhoId' as trabalho_id
@@ -397,6 +407,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id } : null,
             trabalhouMs: Math.max(0, Math.round(Number(l.trabalhou_ms ?? 0))),
             acordaEm: l.acorda_em ? ms(l.acorda_em) : null,
+            esperandoComando: l.espera_motivo !== null && l.espera_desde ? { motivo: l.espera_motivo, desde: ms(l.espera_desde) } : null,
             maquinaVivaId: l.maquina_viva_id,
             maquinaAlvoId: l.maquina_alvo_id,
           },

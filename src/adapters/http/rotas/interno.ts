@@ -210,8 +210,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const espera = rodaComando ? esperaEmLaco(String(c?.comando)) : null;
         if (espera) {
           const comMeChameAs = plano.catalogo.ferramentas.some((f) => f.nome === "me_chame_as" && f.origem === "nod");
-          log("aviso", "espera_em_laco_negada", { turno_id: turnoId, ferramenta, tipo: espera.tipo, segundos: Number.isFinite(espera.segundos) ? espera.segundos : null, me_chame_as: comMeChameAs });
-          ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs) });
+          const comEsperarComando = plano.catalogo.ferramentas.some((f) => f.nome === "esperar_comando" && f.origem === "nod");
+          log("aviso", "espera_em_laco_negada", { turno_id: turnoId, ferramenta, tipo: espera.tipo, segundos: Number.isFinite(espera.segundos) ? espera.segundos : null, me_chame_as: comMeChameAs, esperar_comando: comEsperarComando });
+          ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs, comEsperarComando) });
           return;
         }
         const aguardar = await deps.dentro(ctx.escopo, async (d) => {

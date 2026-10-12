@@ -67,7 +67,8 @@ const GH: Record<string, readonly string[]> = {
   pr: ["list", "view", "diff", "checks", "status"],
   issue: ["list", "view", "status"],
   repo: ["view", "list"],
-  run: ["list", "view"],
+  // definido em 2026-10-12 (ADR-099, parte 2): `gh run watch` só acompanha a execução até o fim — é o comando do esperar_comando.
+  run: ["list", "view", "watch"],
   release: ["list", "view"],
   workflow: ["list", "view"],
   label: ["list"],
