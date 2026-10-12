@@ -57,7 +57,7 @@ const rotinas = [
 /** O kit de um bot de conversa completo: colegas, rotinas, apps, computador, pasta, artefato e pendência. */
 const kitConversa = [
   f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"),
-  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_task"), f("mandar_para_task"),
+  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"),
   daOrigem("computador_observar", "computador"), daOrigem("workspace_propor_pasta", "workspace"),
   doConector(conectorTarefas, "TAREFAS_LISTAR"),
 ];
@@ -121,7 +121,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 4. Rotina acordada, com inventário de rotinas.
   "rotina-com-inventario": {
     agente,
-    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_task")],
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_frentes")],
     trabalho: { titulo: "Triagem de exemplo", origem: "rotina", trabalhoMaeId: null },
     pessoaNome: "Pessoa Exemplo",
     modo: "rotina",
@@ -153,6 +153,20 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     memorias: turno1.memorias,
     trabalho: { titulo: "Responder o chamado de exemplo", origem: "rotina", trabalhoMaeId: "trab-mae" },
     semTerminal: "rotina",
+  },
+  // 9. Uma frente do dono (ADR-099, I2): devolver_resumo no catálogo, sem me_chame_as, e a linha "Frente atual".
+  "frente-do-dono": {
+    agente,
+    ferramentas: [f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"), f("publicar_artefato"), f("pedir_acesso"), f("devolver_resumo")],
+    nativas: ["Read", "Edit", "Write", "Bash", "Skill", "Agent"],
+    pastaDoBot: "Vera/login-no-safari-abc123",
+    pessoaNome: "Pessoa Exemplo",
+    modo: "conversa",
+    colegas,
+    conectores: [conectorTarefas],
+    memorias: turno1.memorias,
+    trabalho: { titulo: "Login no Safari", origem: "pessoa", trabalhoMaeId: null, forma: "frente" },
+    contextoConversa: '{"historico":[{"autor":"Vera","texto":"Reproduzi o erro no Safari.","confianca":"confiavel"}]}',
   },
   // 7. O Nod, o bot fixo (ADR-081/082): o manual do produto na parte estável e as ferramentas dele.
   nod: {

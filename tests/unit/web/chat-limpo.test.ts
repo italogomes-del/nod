@@ -361,3 +361,34 @@ describe("QA do épico (2026-10-08): a linha do meio do turno desce para depois 
     expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "an", "linha:ab", "p2", "fp", "linha:hp"]);
   });
 });
+
+describe("ADR-099 (I2): o lote de frentes vira uma linha só, e o recado a uma frente também", () => {
+  const lote = (id: string, frentes: { trabalhoId: string; titulo: string }[], criadoEm: number) =>
+    msg(id, criadoEm, { kind: "sistema", texto: "Começou", turnoId: "tc", origemTurno: "conversa", payload: { kind: "frentes_abertas", loteId: `l-${id}`, origem: "pessoa", frentes } });
+
+  it("várias frentes: uma linha \"Começou N frentes\" com um botão por frente; uma só: a linha de abrir, clicável", () => {
+    const tres = lote("l3", [{ trabalhoId: "f-a", titulo: "Login" }, { trabalhoId: "f-b", titulo: "CI <vermelha>" }, { trabalhoId: "f-c", titulo: "Notas" }], t0 + MIN);
+    const uma = lote("l1", [{ trabalhoId: "f-d", titulo: "Deploy" }], t0 + 3 * MIN);
+    const anuncio = msg("an", t0 + 2 * MIN, { turnoId: "tc", origemTurno: "conversa", fimDoTurno: true, texto: "Comecei três frentes." });
+    const { e, c } = cenario([daPessoa("p1", t0), tres, anuncio, uma]);
+    const planos = planejarLinhas(c.mensagens, e);
+    const htmlTres = (planos.get("l3") as { html: string }).html;
+    expect(htmlTres).toContain("Começou 3 frentes");
+    for (const id of ["f-a", "f-b", "f-c"]) expect(htmlTres).toContain(`data-act="abrir-trabalho" data-id="${id}"`);
+    expect(htmlTres).toContain("CI &lt;vermelha&gt;");
+    const htmlUma = (planos.get("l1") as { html: string }).html;
+    expect(htmlUma).toContain("Começou a frente");
+    expect(htmlUma).toContain('data-trabalho="f-d"');
+    // A linha do turno desce para depois da fala que a anunciou, como a "Abriu a task".
+    expect(itens(c, e).map((b) => b.chave)).toEqual(["p1", "an", "linha:l3", "linha:l1"]);
+    for (const b of itens(c, e)) expect(ehBalao(b.html) || ehLinha(b.html), b.chave).toBe(true);
+  });
+
+  it("o recado a uma frente é uma linha que abre a frente", () => {
+    const copia = msg("rc", t0 + MIN, { kind: "sistema", texto: "Recado para a frente Login: teste no iPhone", confianca: "nao_confiavel", turnoId: "tc", origemTurno: "conversa", payload: { kind: "recado_a_frente", trabalhoId: "f-a", titulo: "Login" } });
+    const { e, c } = cenario([daPessoa("p1", t0), copia]);
+    const html = (planejarLinhas(c.mensagens, e).get("rc") as { html: string }).html;
+    expect(html).toContain("Repassou um recado à frente");
+    expect(html).toContain('data-trabalho="f-a"');
+  });
+});

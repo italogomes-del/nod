@@ -12,6 +12,7 @@ import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -63,7 +64,10 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   const novo = estadoDoTrabalho({ ...fatos, estadoAtual: atual.estado, iniciado: atual.iniciadoEm !== null });
   if (novo === atual.estado) return [];
   const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora());
-  return mudou ? [eventoTrabalhoMudou(deps, mudou)] : [];
+  if (!mudou) return [];
+  // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
+  await resumoSeFaltar(deps, mudou);
+  return [eventoTrabalhoMudou(deps, mudou)];
 }
 
 /**
@@ -304,7 +308,10 @@ export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<Run
   if (trabalhoFinal(t.estado)) return [];
   const events = await fecharDecisoesDoTrabalho(deps, t.id);
   const parado = await deps.repos.trabalhos.mudarEstado(t.id, "parado", deps.agora());
-  if (parado) events.push(eventoTrabalhoMudou(deps, parado));
+  if (parado) {
+    await resumoSeFaltar(deps, parado);
+    events.push(eventoTrabalhoMudou(deps, parado));
+  }
   return events;
 }
 

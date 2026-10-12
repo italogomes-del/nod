@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { TETO_TASKS_POR_EXECUCAO_DE_ROTINA } from "../../src/domain/trabalho.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { abrirTask } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirTask } from "../../src/use-cases/frentes.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";

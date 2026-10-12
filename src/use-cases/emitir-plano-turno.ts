@@ -2,6 +2,7 @@ import type { IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { esperaDoTrabalho, pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
+import { ehFrente } from "../domain/frente.ts";
 import { trabalhosParaDto } from "./trabalhos.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
@@ -189,7 +190,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
   // /nova-sessao (0038): o bot começa do zero — o histórico do prompt só leva o que veio depois do recomeço.
   const recomeco = conversa?.recomecoEm ?? null;
-  const historico = !sessaoCli ? mensagens.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  // definido em 2026-10-12 (ADR-099, I2): a frente sem sessão recebe o histórico DELA (as falas dos turnos dela e os
+  // recados), nunca o da conversa do dono — no Codex a frente via a conversa com a pessoa. A task de antes segue igual.
+  const doHistorico = !sessaoCli && ehFrente(trabalho) ? await deps.repos.mensagens.doTrabalho(trabalho!.id, MENSAGENS_DO_PLANO) : mensagens;
+  const historico = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
@@ -296,7 +300,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
     // ADR-083: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
-    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId } : null,
+    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: trabalho.forma ?? "task" } : null,
     trabalhosAbertos,
     harness: escolha?.harness ?? null,
     agora,

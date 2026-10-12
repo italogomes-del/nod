@@ -1,21 +1,22 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { CasoNod } from "../contracts/servicos.ts";
 import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { podeAbrirTask, promoveNaRede, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
+import { molduraDaFrente } from "../domain/frente.ts";
+import { promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { criarTrabalho, linhaTrabalhoAberto, marcarParado, sincronizarTrabalho, trabalhosParaDto, travarTrabalhoComTurnos } from "./trabalhos.ts";
 
 /**
- * A conversa coordena (definido em 2026-10-07, ADR-083 §7, issue #193): abrir uma task, repassar um recado, "Fazer
- * depois da …", "Fazer aqui" e a rede de 2 min. O estado do trabalho continua saindo de `sincronizarTrabalho`.
+ * A conversa coordena (definido em 2026-10-07, ADR-083 §7, issue #193): repassar um recado, "Fazer depois da …", "Fazer
+ * aqui" e a rede de 2 min. O estado do trabalho continua saindo de `sincronizarTrabalho`. Abrir e repassar pelo bot
+ * moram em frentes.ts desde 2026-10-12 (ADR-099, I2).
  */
 
-/** A moldura do pedido que abre a task: a task não vê a conversa, então o pedido vai inteiro e com quem pediu. */
+/** A moldura do pedido da task de antes das frentes (ADR-099, I2): o "Fazer aqui" de uma task antiga ainda a tira. */
 function entradaDaTask(titulo: string, pedido: string, deRotina: boolean): string {
   return deRotina
     ? `[nod] Task "${titulo}", aberta pela sua rotina. Faça o trabalho até o fim e entregue o resultado.\n${pedido}`
@@ -29,14 +30,16 @@ function entradaDaTask(titulo: string, pedido: string, deRotina: boolean): strin
  */
 function pedidoSemMoldura(titulo: string, entrada: string): string {
   for (const deRotina of [false, true]) {
-    const moldura = entradaDaTask(titulo, "", deRotina);
-    if (entrada.startsWith(moldura)) return entrada.slice(moldura.length);
+    // revisto em 2026-10-12 (ADR-099, I2): a frente nasce com a moldura dela (molduraDaFrente); a task de antes, com esta.
+    for (const moldura of [entradaDaTask(titulo, "", deRotina), molduraDaFrente(titulo, deRotina)]) {
+      if (entrada.startsWith(moldura)) return entrada.slice(moldura.length);
+    }
   }
   return entrada;
 }
 
 /** A conversa própria do bot: é ali que a linha "Abriu a task …" e o resultado aparecem. */
-async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
+export async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
   const conversa = await deps.repos.conversas.buscar(turno.conversaId);
   if (conversa?.tipo === "propria") return conversa.id;
   const propria = await deps.repos.conversas.buscarPropriaDoAgente(turno.agenteId);
@@ -45,70 +48,12 @@ async function conversaDoBot(deps: Deps, turno: Turno): Promise<string> {
 }
 
 /**
- * Ferramenta `abrir_task`: cria o trabalho (`pessoa`; da task de rotina, `rotina` com mãe), grava a linha "Abriu a
- * task …" na conversa e enfileira o primeiro turno dele com o pedido. A task de uma task com mãe, de colega, da pessoa
- * ou da rede não abre outra: a recusa volta escrita para o bot (o catálogo já tira a ferramenta; isto é a 2ª camada).
- */
-export const abrirTask: CasoNod<Deps, "abrir_task"> = async (deps, input) => {
-  const turno = await deps.repos.turnos.buscar(input.turnoId);
-  if (!turno || turno.agenteId !== input.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
-  const atual = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
-  if (!podeAbrirTask(atual)) return { data: { ok: false, erro: "nao_abre_task", instrucao: "Você já está numa task, e uma task não abre outra (só a rotina abre, um nível). Faça este trabalho aqui mesmo." } };
-  // Revisão do épico (S8, 2026-10-08): o id vem do modelo; fora de uuid ele chegava cru ao Postgres (22P02) e a chamada
-  // inteira caía num 400 genérico. Agora é só "não achei".
-  const depoisDe = input.depois_de && ehUuid(input.depois_de) ? await deps.repos.trabalhos.buscar(input.depois_de) : null;
-  if (input.depois_de && (!depoisDe || depoisDe.agenteId !== turno.agenteId || !trabalhoAberto(depoisDe.estado))) {
-    return { data: { ok: false, erro: "depois_de_invalido", instrucao: "depois_de precisa ser o id de uma task sua ainda aberta, como veio em \"Trabalhos em andamento\". Abra sem depois_de ou corrija o id." } };
-  }
-  const deRotina = atual?.origem === "rotina";
-  // Revisão do épico (S12, 2026-10-08): a execução da rotina abre até TETO_TASKS_POR_EXECUCAO_DE_ROTINA tasks.
-  if (deRotina && (await deps.repos.trabalhos.filhos(atual.id)).length >= TETO_TASKS_POR_EXECUCAO_DE_ROTINA) {
-    return { data: { ok: false, erro: "teto_de_tasks", instrucao: `Esta execução da rotina já abriu ${TETO_TASKS_POR_EXECUCAO_DE_ROTINA} tasks, o máximo. Não abra outras: faça o que faltar aqui mesmo, ou deixe para a próxima execução e diga isso no resultado.` } };
-  }
-  const agente = await deps.repos.agentes.buscar(turno.agenteId);
-  const conversaId = await conversaDoBot(deps, turno);
-  const { trabalho, events } = await criarTrabalho(deps, {
-    agenteId: turno.agenteId,
-    conversaId,
-    titulo: input.titulo,
-    origem: deRotina ? "rotina" : "pessoa",
-    rotinaId: atual?.rotinaId ?? null,
-    trabalhoMaeId: deRotina ? atual.id : null,
-    depoisDeTrabalhoId: depoisDe?.id ?? null,
-  });
-  events.push(...(await linhaTrabalhoAberto(deps, trabalho, turno.id)));
-  const agora = deps.agora();
-  const novo = await deps.repos.turnos.enfileirar({
-    conversaId,
-    agenteId: turno.agenteId,
-    origem: deRotina ? "rotina" : "conversa",
-    trabalhoId: trabalho.id,
-    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
-    profundidade: turno.profundidade,
-    entradaTexto: entradaDaTask(trabalho.titulo, input.pedido.trim(), deRotina),
-    entradaConfianca: turno.entradaConfianca,
-    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
-    modelo: agente?.modelo ?? turno.modelo,
-    harness: agente?.harness ?? turno.harness,
-    // NOD-206: a task roda onde roda quem a abriu; o plano grava o executor real.
-    executor: turno.executor,
-  });
-  if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da task não criado" });
-  // A marca de quem leu algo de fora (ADR-062) atravessa para a task, como no pedido a colega.
-  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(novo.id, agora);
-  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
-  events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId, turnoId: novo.id, dados: { origem: novo.origem, agente_id: turno.agenteId, trabalhoId: trabalho.id } }));
-  const espera = depoisDe ? ` Ela começa quando "${depoisDe.titulo}" terminar.` : "";
-  return { data: { ok: true, trabalho_id: trabalho.id, instrucao: `Abriu a task "${trabalho.titulo}".${espera} Diga em uma frase que abriu e siga com a pessoa; o resultado e as perguntas da task chegam aqui.` }, events };
-};
-
-/**
  * Põe um recado na faixa do trabalho: a fala (da pessoa, ou do bot que repassa) é gravada sem turno e abre um turno
  * do trabalho com `mensagem_origem_id` — a leitura da conversa a marca com o `trabalhoId`, e a tela a mostra na task.
  * O turno é a RETOMADA do último turno dele, para seguir no modo e na procuração dele (rotina, colega ou conversa).
  * Rodando, a renovação o absorve no meio (absorverNoTrabalho); senão ele roda quando a faixa estiver livre.
  */
-async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string; entrada: string; deQuem: "pessoa" | { agenteId: string; turno: Turno } }): Promise<{ turno: Turno; events: RuntimeEvent[] }> {
+export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string; entrada: string; deQuem: "pessoa" | { agenteId: string; turno: Turno } }): Promise<{ turno: Turno; events: RuntimeEvent[] }> {
   const agora = deps.agora();
   // Revisão do épico (S10, 2026-10-08): a pessoa falou de novo — a parada da conversa do trabalho se encerra, como a
   // mensagem na conversa faz (enviar-mensagem.ts). Sem isto o turno do recado morria `parado_pela_pessoa` no despacho.
@@ -148,24 +93,6 @@ async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string;
   ];
   return { turno, events };
 }
-
-/** Ferramenta `mandar_para_task`: só a conversa coordenadora repassa (a task não manda recado a outra task). */
-export const mandarParaTask: CasoNod<Deps, "mandar_para_task"> = async (deps, input) => {
-  const turno = await deps.repos.turnos.buscar(input.turnoId);
-  if (!turno || turno.agenteId !== input.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
-  if (turno.trabalhoId) return { data: { ok: false, erro: "nao_repassa", instrucao: "Uma task não manda recado a outra. Termine a sua e diga o que falta no resultado." } };
-  const t = ehUuid(input.trabalho_id) ? await deps.repos.trabalhos.buscar(input.trabalho_id) : null;
-  if (!t || t.agenteId !== turno.agenteId) return { data: { ok: false, erro: "task_nao_encontrada", instrucao: "Esse id não é de uma task sua. Use o id de \"Trabalhos em andamento\"." } };
-  // Revisão do épico (S7, 2026-10-08): o recado não reabre a task que a pessoa parou ou que já acabou.
-  if (!trabalhoAberto(t.estado)) return { data: { ok: false, erro: "task_fechada", instrucao: `A task "${t.titulo}" já ${t.estado === "parado" ? "foi parada pela pessoa" : "acabou"}: o recado não entra nela. Se precisa continuar, abra outra task com abrir_task ou faça aqui.` } };
-  const rodando = (await deps.repos.turnos.doTrabalho(t.id)).some((x) => x.estado === "despachando");
-  const texto = input.texto.trim();
-  const r = await enfileirarNoTrabalho(deps, t, { texto, entrada: `[nod] Recado da conversa com a pessoa, repassado por você: ${texto}`, deQuem: { agenteId: turno.agenteId, turno } });
-  return {
-    data: { ok: true, entrou: rodando ? "no_meio" : "na_fila", instrucao: rodando ? "O recado entra na task no meio do trabalho dela." : "O recado vira o próximo passo da task." },
-    events: r.events,
-  };
-};
 
 /** POST trabalhos/:id/mensagens: a pessoa escreve na tela da task. */
 export const mensagemParaTrabalho: CasoDeUso<{ trabalhoId: string; texto: string }, { trabalho: TrabalhoDto; mensagemTurnoId: string }> = async (deps, input) => {

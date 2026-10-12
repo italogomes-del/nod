@@ -23,7 +23,9 @@ import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
 import { FERRAMENTAS_PENDENCIA } from "./pendencia.ts";
 import { podeAbrirTask, podeMandarParaTask } from "./trabalho.ts";
+import { ehFrente, FERRAMENTA_DA_FRENTE, FERRAMENTAS_FORA_DA_FRENTE } from "./frente.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
+import type { FormaTrabalho } from "../contracts/frente.ts";
 import { MANUAL_DO_NOD } from "./manual-do-nod.ts";
 import { ehNod } from "./nod.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
@@ -85,12 +87,16 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * Tasks (definido em 2026-10-07, ADR-083 §7): abrir_task e mandar_para_task são da conversa coordenadora; a rotina abre
  * tasks (profundidade 1). Quem decide no turno é `podeAbrirTask`/`podeMandarParaTask` pelo trabalho dele: o turno de uma
  * task da pessoa, de colega, da rede ou filha de rotina não abre nem repassa (montarPlano filtra).
+ *
+ * Frentes (definido em 2026-10-12, ADR-099, I2): abrir_frentes e mandar_para_frente entram no lugar de abrir_task e
+ * mandar_para_task (que seguem atendidos como sinônimos, fora do catálogo). O turno de uma frente perde me_chame_as e
+ * esperar_comando (ela devolve o fato e termina; quem espera é o dono) e ganha devolver_resumo (montarPlano).
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_task", "mandar_para_task", "me_chame_as"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_task", "mandar_para_task", "me_chame_as"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "anotar_pendencia"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_task", "me_chame_as"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "me_chame_as"],
   peer: ["lembrar"],
   delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia", "me_chame_as"],
   // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
@@ -209,8 +215,11 @@ export type EntradaPlano = {
    * `pastaDoBot` do plano: o driver a cria e a usa como diretório, e a cerca do git vale para ela. Ausente = a do bot.
    */
   pastaTrabalho?: string | null;
-  /** ADR-083: o trabalho deste turno (null = turno da conversa). Decide abrir_task/mandar_para_task e a linha da task. */
-  trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null } | null;
+  /**
+   * ADR-083: o trabalho deste turno (null = turno da conversa). Decide abrir_frentes/mandar_para_frente e a linha da task.
+   * ADR-099 (I2): `forma` = `frente` muda o catálogo (devolver_resumo; sem me_chame_as nem esperar_comando) e o prompt.
+   */
+  trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null; forma?: FormaTrabalho } | null;
   /** ADR-083: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
   /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
@@ -234,9 +243,12 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
   const doNod = ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semFerramentasDoNod ? FERRAMENTAS_DO_NOD : [];
+  const frente = ehFrente(entrada.trabalho);
   const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod]
     .filter((n) => entrada.aFazer === true || !FERRAMENTAS_PENDENCIA.includes(n))
-    .filter((n) => (n !== "abrir_task" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_task" || podeMandarParaTask(entrada.trabalho ?? null)))
+    .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
+    .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
+    .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])
     .map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.

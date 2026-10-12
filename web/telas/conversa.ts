@@ -661,7 +661,7 @@ function linhaDepoisDaFala(linhas: readonly LinhaDaConversa[], mensagens: readon
   const destino = new Map<number, number>();
   mensagens.forEach((m, i) => {
     const k = m.payload?.kind;
-    if (!m.turnoId || planos.get(m.id)?.tipo !== "linha" || (k !== "trabalho_aberto" && k !== "handoff")) return;
+    if (!m.turnoId || planos.get(m.id)?.tipo !== "linha" || (k !== "trabalho_aberto" && k !== "frentes_abertas" && k !== "recado_a_frente" && k !== "handoff")) return;
     let alvo = -1;
     for (let j = i + 1; j < mensagens.length; j++) {
       const x = mensagens[j];

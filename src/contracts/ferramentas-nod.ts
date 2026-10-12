@@ -6,6 +6,7 @@ import { FERRAMENTAS_ARTEFATO, type ContratoFerramentasArtefato } from "./ferram
 import { FERRAMENTAS_PENDENCIA, type ContratoFerramentasPendencia } from "./ferramentas-pendencia.ts";
 import { FERRAMENTAS_LIGACAO, type ContratoFerramentasLigacao } from "./ferramentas-ligacao.ts";
 import { FERRAMENTAS_TRABALHO, type ContratoFerramentasTrabalho } from "./ferramentas-trabalho.ts";
+import { FERRAMENTAS_FRENTE, type ContratoFerramentasFrente } from "./ferramentas-frente.ts";
 import { FERRAMENTAS_DO_NOD, type ContratoFerramentasDoNod } from "./ferramentas-do-nod.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
@@ -36,6 +37,7 @@ export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_PENDENCIA,
   ...FERRAMENTAS_LIGACAO,
   ...FERRAMENTAS_TRABALHO,
+  ...FERRAMENTAS_FRENTE,
   ...FERRAMENTAS_DO_NOD,
   lembrar: {
     type: "object",
@@ -149,7 +151,7 @@ export const NOMES_FERRAMENTAS_NOD = [
   "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot", "abrir_task", "mandar_para_task",
-  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as",
+  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as", "abrir_frentes", "mandar_para_frente", "devolver_resumo",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -177,7 +179,7 @@ export type ResultadoOk = { ok: true };
 export type ResultadoPedirABot = { tarefa_id: string };
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
-export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasDoNod & {
+export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };
