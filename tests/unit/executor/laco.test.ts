@@ -124,6 +124,31 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(dormidas[0]).toBe(1_150);
   });
 
+  // QA do NOD-211 (2026-10-12): a troca de conta no limite espera o registry novo antes da entrega — o laço aguarda o
+  // aoResultado assíncrono e entrega o resultado anotado, uma vez, com o turno ainda renovando.
+  it("aoResultado assíncrono: a entrega espera por ele e leva o resultado anotado", async () => {
+    const ponte = ponteFalsa([planoDeTeste("t-conta", "[[texto: pronto]]")]);
+    const registry = await registryCom(driverFalso());
+    let soltar: () => void = () => undefined;
+    const portao = new Promise<void>((ok) => { soltar = ok; });
+    let chamado = false;
+    const laco = iniciarLaco({
+      ponte, registry, pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 5, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      aoResultado: async (_p, r) => { chamado = true; await portao; return { ...r, texto: "anotado" }; },
+    });
+    await esperarAte(() => chamado);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(ponte.entregas, "nada sai antes do aoResultado terminar").toHaveLength(0);
+    const renovacoesNaEspera = ponte.renovacoes.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(ponte.renovacoes.length, "o turno segue renovando enquanto espera").toBeGreaterThan(renovacoesNaEspera);
+    soltar();
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(ponte.entregas).toHaveLength(1);
+    expect(ponte.entregas[0]?.resultado.texto).toBe("anotado");
+  });
+
   it("renovar devolvendo {ativo:false} chama interromper() no adapter: turno termina 'interrompido' e é entregue uma vez", async () => {
     const muitosDeltas = Array.from({ length: 200 }, (_, i) => `[[delta: ${i}]]`).join(" ");
     const ponte = ponteFalsa([planoDeTeste("t2", muitosDeltas)], (p) => p.sinais.producedOutput !== true);

@@ -1,4 +1,4 @@
-import type { IaDesktop } from "../../src/contracts/desktop.ts";
+import type { ContasNaTela, IaDesktop } from "../../src/contracts/desktop.ts";
 import type { ContaDaIa, EstadoDaIa, EstadoIa } from "../../src/contracts/estado-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 import type { CausaSemIa } from "../../src/contracts/inventario.ts";
@@ -60,9 +60,13 @@ export type UiIas = {
   codigo: Partial<Record<IaMac, string>>;
   /** NOD-209: a troca de conta de cada IA (a em curso ou a última). */
   troca: Partial<Record<IaMac, TrocaDeConta>>;
+  /** ADR-101 (NOD-211): as várias contas de cada IA, como o app do Mac as manda (só no app; nunca vão ao servidor). */
+  contas: Partial<Record<IaMac, ContasNaTela>>;
+  /** "+ Adicionar outra conta" aberto: o apelido digitado até agora. */
+  contaNova: Partial<Record<IaMac, string>>;
 };
 
-export const UI_IAS_INICIAL: UiIas = { noApp: false, estados: {}, fluxo: {}, teste: {}, ajuda: null, detalhe: null, verificando: null, nota: {}, copiado: null, codigo: {}, troca: {} };
+export const UI_IAS_INICIAL: UiIas = { noApp: false, estados: {}, fluxo: {}, teste: {}, ajuda: null, detalhe: null, verificando: null, nota: {}, copiado: null, codigo: {}, troca: {}, contas: {}, contaNova: {} };
 
 /** A linha da conta no cartão: "e-mail · organização · plano" (o que faltar, sai). */
 export const textoDaConta = (c: ContaDaIa): string => [c.email, c.organizacao, c.plano].filter(Boolean).join(" · ");

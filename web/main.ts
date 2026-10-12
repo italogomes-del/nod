@@ -7,6 +7,8 @@ import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
 import { iasDaTela, mudarRascunho, ordemDaPessoa, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
+import { abrirAvisoDosTermos } from "./telas/aviso-termos-dialogo.ts";
+import { criarContasDoMac } from "./lib/contas-do-mac.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
@@ -1875,6 +1877,15 @@ const iasDoMac = criarIasDoMac({
   aoFimDaTroca: (ia, trocou) => { if (telaOnboarding.cobre()) telaOnboarding.fimDaTroca(ia, trocou); },
 });
 void iasDoMac.iniciar();
+// ADR-101 (NOD-211): as várias contas de cada IA, só no app do Mac (web/lib/contas-do-mac.ts).
+const contasDoMac = criarContasDoMac({
+  mac: () => window.nodDesktop,
+  ui: () => estado.iasMac,
+  mudar: (mudanca: Partial<UiIas>) => dispatch({ tipo: "ias-mac", mudanca }),
+  confirmar: (texto) => window.confirm(texto),
+  avisarTermos: abrirAvisoDosTermos,
+});
+void contasDoMac.iniciar();
 
 /**
  * O clique de IA que veio de fora de um cartão (um aviso no chat, o menu da conta) abre Provedores de IA, onde o cartão
@@ -2031,6 +2042,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "ia-instalar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) { verCartaoDaIa(el); void iasDoMac.instalar(ia); } },
   "ia-cancelar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.cancelar(ia); },
+  // ADR-101 (NOD-211): as contas da IA (Provedores de IA) e o "Seguir com a conta N" do limite na conversa.
+  "conta-usar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDoMac.usar(ia, Number(el.dataset.posicao)); },
+  "conta-mover": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDoMac.mover(ia, Number(el.dataset.posicao), Number(el.dataset.para)); },
+  "conta-remover": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDoMac.remover(ia, Number(el.dataset.posicao)); },
+  "conta-form-abrir": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) contasDoMac.abrirForm(ia); },
+  "conta-form-fechar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) contasDoMac.fecharForm(ia); },
+  // QA do NOD-211: o erro da adição — de novo com o mesmo apelido, ou fecha.
+  "conta-tentar-de-novo": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDoMac.adicionar(ia, el.dataset.apelido ?? ""); },
+  "conta-falha-fechar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDoMac.fecharFalha(ia); },
   "ia-verificar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void iasDoMac.verificar(ia); },
   // No onboarding, o teste é o dele (onboarding-teste.ts): é o veredito dele que libera o Continuar.
   "ia-testar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void (el.closest("#onboarding") ? telaOnboarding.acoes["onboarding-ia-testar"]?.(el) : iasDoMac.testar(ia)); },
@@ -2568,6 +2588,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  "conta-nova": async (form) => {
+    const ia = form.dataset.ia;
+    if (ehIa(ia)) await contasDoMac.adicionar(ia, String(new FormData(form).get("apelido") ?? ""));
+  },
   "onboarding-bot": async (form) => { await telaOnboarding.forms["onboarding-bot"]?.(form); },
   // O teclado da ligação: o texto entra como uma vez da pessoa, sem passar pelo STT.
   "ligacao-texto": async (form) => {
@@ -2722,6 +2746,22 @@ document.addEventListener("change", (ev) => {
     const horario = cb.closest("form")?.querySelector<HTMLInputElement>('input[name="horario"]');
     const intervalo = cb.value.startsWith("intervalo:") || cb.value === "hora";
     if (horario) { horario.disabled = intervalo; horario.required = !intervalo; horario.closest("label")!.hidden = intervalo; }
+    return;
+  }
+  // ADR-101 (NOD-211): o opt-in da conta corporativa, o modo no limite e o apelido da conta nova.
+  if (cb.matches("[data-conta-optin]")) {
+    const ia = cb.dataset.contaOptin;
+    if (ehIa(ia)) void contasDoMac.definirTroca(ia, Number(cb.dataset.posicao), cb.checked);
+    return;
+  }
+  if (cb.matches("[data-conta-modo]")) {
+    const ia = cb.dataset.contaModo;
+    if (ehIa(ia) && (cb.value === "perguntar" || cb.value === "automatico")) void contasDoMac.definirModo(ia, cb.value);
+    return;
+  }
+  if (cb.matches("[data-conta-apelido]")) {
+    const ia = cb.dataset.contaApelido;
+    if (ehIa(ia)) contasDoMac.digitarApelido(ia, cb.value);
     return;
   }
   if (cb.matches("[data-liberar-app], [data-liberar-nivel]")) {

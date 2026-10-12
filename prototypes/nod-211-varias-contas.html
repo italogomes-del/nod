@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOD-211 — Várias contas por IA (protótipo v4)</title>
+<style>
+  :root{
+    --surface:#fff;--surface-side:#f7f7f8;--surface-raised:#f0f0f2;--line:#e5e5e9;--line-strong:#8e8e96;
+    --ink:#18181b;--ink-2:#52525b;--ink-3:#71717a;--action:#18181b;--on-action:#fff;
+    --signal:#1866c0;--signal-soft:#e6f0fb;--warning:#7a4e08;--warning-soft:#fdf5e6;--warning-line:#efd6a6;
+    --danger:#c42b1c;--danger-soft:#fdecea;--success:#177040;--success-soft:#e8f5ee;
+    --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:400 14px/1.45 var(--font);color:var(--ink);background:var(--surface-side)}
+  button{font:inherit;color:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
+  .barra{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:2}
+  .barra b{margin-right:8px}
+  .barra .grupo{display:flex;gap:4px;align-items:center;margin-right:12px}
+  .barra .grupo span{color:var(--ink-3);font-size:12px;margin-right:2px}
+  .chip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 10px;font-size:12px}
+  .chip[aria-pressed=true]{background:var(--action);color:var(--on-action);border-color:var(--action)}
+  main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:24px;padding:24px;max-width:1200px;margin:0 auto}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:15px;margin:0}
+  .sub{color:var(--ink-3);margin:0 0 16px}
+  .cartao{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .cab{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .logo{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:700;color:#fff}
+  .cab .dica{margin-left:auto;color:var(--ink-3);font-size:12px}
+  ol.contas{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  ol.contas li{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+  ol.contas li:first-child{border-top:0}
+  .pos{color:var(--ink-3);font-variant-numeric:tabular-nums;text-align:center}
+  .nome{font-weight:600}
+  .ident{color:var(--ink-3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .estado{font-size:12px;border-radius:999px;padding:2px 8px;white-space:nowrap;border:1px solid transparent}
+  .e-uso{background:var(--success-soft);color:var(--success)}
+  .e-disp{background:var(--surface-raised);color:var(--ink-2)}
+  .e-limite{background:var(--warning-soft);color:var(--warning);border-color:var(--warning-line)}
+  .e-sem{background:var(--danger-soft);color:var(--danger)}
+  .acoes{display:flex;gap:2px}
+  .ic{border:1px solid transparent;background:none;border-radius:6px;width:28px;height:28px;color:var(--ink-2)}
+  .ic:hover{background:var(--surface-raised)}
+  .ic:disabled{opacity:.3;cursor:default;background:none}
+  .rodape{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 12px}
+  .btn.prim{background:var(--action);color:var(--on-action);border-color:var(--action)}
+  .btn.perigo{color:var(--danger)}
+  .modo{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .modo label{display:flex;gap:8px;align-items:flex-start;margin:6px 0}
+  .modo small{display:block;color:var(--ink-3)}
+  .login{margin-top:12px;border:1px dashed var(--line-strong);border-radius:10px;padding:12px;background:var(--surface-side)}
+  .login input{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin:6px 0}
+  .passo{display:flex;gap:8px;align-items:center;color:var(--ink-2);font-size:13px;margin:4px 0}
+  .ok{color:var(--success)}
+  .conversa{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .msg{margin:10px 0;max-width:90%}
+  .msg.pessoa{margin-left:auto;background:var(--surface-raised);border-radius:12px;padding:8px 12px}
+  .msg.bot b{display:block;font-size:12px;color:var(--ink-3)}
+  .nota{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--ink-2);background:var(--surface-side);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:12px 0}
+  .nota.alerta{background:var(--warning-soft);border-color:var(--warning-line);color:var(--warning)}
+  .nota .acs{display:flex;gap:6px;margin-top:6px}
+  .privado{font-size:12px;color:var(--ink-3);margin-top:8px}
+  dialog{border:1px solid var(--line);border-radius:12px;max-width:380px}
+  .selos{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+  .selo{font-size:11px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--ink-2);background:var(--surface-side);white-space:nowrap}
+  .optin{display:flex;gap:6px;align-items:flex-start;margin-top:6px;font-size:12px;color:var(--ink-2)}
+  .optin small{display:block;color:var(--ink-3)}
+  dialog p{color:var(--ink-2)}
+</style>
+</head>
+<body>
+<div class="barra" role="toolbar" aria-label="Cenário do protótipo">
+  <b>NOD-211 · protótipo v4</b>
+  <div class="grupo"><span>Cenário:</span>
+    <button class="chip" data-cen="normal" aria-pressed="true">Tudo disponível</button>
+    <button class="chip" data-cen="limite" aria-pressed="false">Conta 1 no limite</button>
+    <button class="chip" data-cen="naocorp" aria-pressed="false">Não corporativas no limite</button>
+    <button class="chip" data-cen="todas" aria-pressed="false">Todas no limite</button>
+    <button class="chip" data-cen="volta" aria-pressed="false">Preferida renovou</button>
+  </div>
+  <div class="grupo"><span>Claude no limite:</span>
+    <button class="chip" data-modo="perguntar" aria-pressed="true">Perguntar antes</button>
+    <button class="chip" data-modo="auto" aria-pressed="false">Trocar sozinho</button>
+  </div>
+  <div class="grupo"><span>Codex:</span>
+    <button class="chip" data-codex="1" aria-pressed="true">Pronto</button>
+    <button class="chip" data-codex="0" aria-pressed="false">Desconectado</button>
+  </div>
+</div>
+
+<main>
+  <section aria-labelledby="t-prov">
+    <h1 id="t-prov">Seu espaço › Provedores de IA</h1>
+    <p class="sub">O nod usa a primeira conta disponível da lista. Arraste ou use ▲▼ para mudar a ordem.</p>
+    <div id="cartoes"></div>
+  </section>
+
+  <section aria-labelledby="t-conv">
+    <h1 id="t-conv">Conversa com Dev 1</h1>
+    <p class="sub">Como a troca aparece para quem está conversando. A conversa passa pelo servidor, então cita a conta só pela posição.</p>
+    <div class="conversa" id="conversa" aria-live="polite"></div>
+  </section>
+</main>
+
+<dialog id="dlg-remover">
+  <h2>Remover a conta <span id="rm-nome"></span>?</h2>
+  <p>O nod sai só desta conta (logout) e apaga a pasta dela neste Mac. As outras contas continuam conectadas.</p>
+  <div class="rodape"><button class="btn" onclick="this.closest('dialog').close()">Cancelar</button><button class="btn perigo" id="rm-ok">Remover</button></div>
+</dialog>
+
+<dialog id="dlg-termos" aria-labelledby="tm-tit">
+  <h2 id="tm-tit">Trocar de conta sozinho no <span id="tm-ia"></span>?</h2>
+  <p id="tm-txt"></p>
+  <p>Contas corporativas só entram na troca se você marcar isso nelas.</p>
+  <p id="tm-links"></p>
+  <div class="rodape"><button class="btn" id="tm-ok">Ligar mesmo assim</button><button class="btn prim" id="tm-nao" autofocus>Cancelar</button></div>
+</dialog>
+
+<script>
+// v3 (2026-10-12): opção 2 do Marlon — troca automática por provedor, desligada por padrão;
+// conta corporativa só entra na troca automática se a pessoa marcar nela.
+// v4 (2026-10-12, revisão do Gil): a regra vale em qualquer posição (a 1 inclusive); sem o selo "Fora da troca
+// automática" e a caixa só aparece com "Trocar sozinho"; o botão do Codex só aparece com o Codex livre e é o primário;
+// o aviso cita cada frase na fonte certa, com links, e Cancelar é o primário com foco.
+const PLANOS_CORPORATIVOS = ["Team","Enterprise","Business"];
+const estado = {
+  cen:"normal", adicionando:null, codexPronto:true,
+  ias:{
+    claude:{nome:"Claude Code",forn:"Anthropic",cor:"#d97757",letra:"C",auto:false,contas:[
+      {id:"c1",apelido:"Pessoal",email:"marlon@…",org:"Pessoal",plano:"Max",rotacao:true},
+      {id:"c2",apelido:"Leapy",email:"marlon@leapy…",org:"Leapy",plano:"Team",rotacao:false},
+      {id:"c3",apelido:"Reserva",email:"marlon.r@…",org:"Pessoal",plano:"Pro",rotacao:true},
+    ]},
+    codex:{nome:"Codex (ChatGPT)",forn:"OpenAI",cor:"#10a37f",letra:"O",auto:false,contas:[
+      {id:"o1",apelido:"",email:"marlon@…",org:"Pessoal",plano:"Plus",rotacao:true},
+      {id:"o2",apelido:"Leapy",email:"marlon@leapy…",org:"Leapy",plano:"Business",rotacao:false},
+    ]},
+  }
+};
+const TERMOS = {
+  claude:{texto:"A Anthropic diz que os limites dos planos Pro e Max supõem uso individual comum do Claude Code, e os Termos de Consumo proíbem burlar os sistemas e as proteções dela. Trocar sozinho de conta no limite pode ser visto assim. Se você ligar, a responsabilidade é sua.",
+    links:[["Página legal do Claude Code","https://code.claude.com/docs/en/legal-and-compliance"],["Termos de Consumo da Anthropic","https://www.anthropic.com/legal/consumer-terms"]]},
+  codex:{texto:"Os Termos de Uso da OpenAI proíbem contornar limites de uso ou restrições. Trocar sozinho de conta no limite pode ser visto assim. Se você ligar, a responsabilidade é sua.",
+    links:[["Termos de Uso da OpenAI","https://openai.com/policies/terms-of-use/"]]},
+};
+const corporativa = (c)=>PLANOS_CORPORATIVOS.includes(c.plano);
+// Pessoal entra; corporativa só marcada, em qualquer posição (v4: a conta 1 corporativa também fica de fora).
+const entraNaTroca = (c)=>!corporativa(c)||c.rotacao;
+// Limites por cenário (só o Claude muda no protótipo).
+function limiteDe(ia,c){
+  if(ia!=="claude") return null;
+  const s=estado.cen;
+  const h={c1:"14:00",c2:"16:30",c3:"15:10"}[c.id]||"17:00";
+  if(s==="limite") return c.id==="c1"?h:null;
+  if(s==="naocorp") return corporativa(c)?null:h;
+  if(s==="todas") return h;
+  return null;
+}
+// Conta em uso: no "perguntar", só a 1ª se livre; no "trocar sozinho", a 1ª livre e elegível.
+function emUso(ia){
+  const d=estado.ias[ia];
+  const livres=d.contas.map((c,i)=>({c,i})).filter(({c})=>!limiteDe(ia,c));
+  if(!d.auto) return livres.find(({i})=>i===0)?.i ?? -1;
+  const alvo=livres.find(({c})=>entraNaTroca(c));
+  // A conta 1 livre segue em uso mesmo corporativa: é onde a pessoa escolheu começar, não uma troca.
+  return livres.find(({i})=>i===0)?.i ?? alvo?.i ?? -1;
+}
+function estadoDa(ia,c,i){
+  const l=limiteDe(ia,c);
+  if(l) return {k:"limite",t:`No limite até ${l}`};
+  return i===emUso(ia)?{k:"uso",t:"Em uso"}:{k:"disp",t:"Disponível"};
+}
+function cls(k){return {uso:"e-uso",disp:"e-disp",limite:"e-limite",sem:"e-sem"}[k]}
+function rotulo(c){return c.apelido||c.org}
+function render(){
+  const raiz=document.getElementById("cartoes"); raiz.innerHTML="";
+  for(const [chave,ia] of Object.entries(estado.ias)){
+    const el=document.createElement("article"); el.className="cartao";
+    el.innerHTML=`<div class="cab"><div class="logo" style="background:${ia.cor}" aria-hidden="true">${ia.letra}</div><h2>${ia.nome}</h2><span class="dica">${ia.contas.length} ${ia.contas.length>1?"contas":"conta"}</span></div>`;
+    const ol=document.createElement("ol"); ol.className="contas"; ol.setAttribute("aria-label",`Contas do ${ia.nome}, em ordem de uso`);
+    ia.contas.forEach((c,i)=>{
+      const e=estadoDa(chave,c,i);
+      const corp=corporativa(c);
+      const li=document.createElement("li"); li.draggable=true; li.dataset.i=i;
+      li.innerHTML=`<span class="pos" aria-hidden="true">${i+1}</span>
+        <div><div class="nome">${rotulo(c)}</div><div class="ident">${c.email} · ${c.org} · ${c.plano}</div>
+          ${corp?`<div class="selos"><span class="selo">Corporativa</span></div>
+          ${ia.auto?`<label class="optin"><input type="checkbox" data-rot ${c.rotacao?"checked":""}><span>Pode entrar na troca automática<small>Desmarcada, o nod nunca troca sozinho para esta conta; ela só é usada quando você escolhe. Confira a política da empresa antes de marcar.</small></span></label>`:""}`:""}
+        </div>
+        <span class="estado ${cls(e.k)}">${e.t}</span>
+        <div class="acoes">
+          <button class="ic" aria-label="Subir ${rotulo(c)}" ${i===0?"disabled":""} data-mv="-1">▲</button>
+          <button class="ic" aria-label="Descer ${rotulo(c)}" ${i===ia.contas.length-1?"disabled":""} data-mv="1">▼</button>
+          <button class="ic" aria-label="Remover ${rotulo(c)}" data-rm>✕</button>
+        </div>`;
+      li.querySelectorAll("[data-mv]").forEach(b=>b.onclick=()=>mover(chave,i,i+Number(b.dataset.mv)));
+      li.querySelector("[data-rm]").onclick=()=>pedirRemover(chave,i);
+      const rot=li.querySelector("[data-rot]"); if(rot) rot.onchange=()=>{c.rotacao=rot.checked;render()};
+      li.ondragstart=(ev)=>ev.dataTransfer.setData("text/plain",`${chave}:${i}`);
+      li.ondragover=(ev)=>ev.preventDefault();
+      li.ondrop=(ev)=>{ev.preventDefault();const [ch,de]=ev.dataTransfer.getData("text/plain").split(":");if(ch===chave)mover(chave,Number(de),i)};
+      ol.appendChild(li);
+    });
+    el.appendChild(ol);
+    const rod=document.createElement("div"); rod.className="rodape";
+    rod.innerHTML=`<button class="btn" data-add>+ Adicionar outra conta</button>`;
+    rod.querySelector("[data-add]").onclick=()=>{estado.adicionando={ia:chave,passo:0};render()};
+    el.appendChild(rod);
+    if(estado.adicionando?.ia===chave) el.appendChild(blocoLogin(chave));
+    const m=document.createElement("div"); m.className="modo";
+    m.innerHTML=`<b>Quando uma conta do ${ia.nome} bate no limite</b>
+      <label><input type="radio" name="modo-${chave}" value="perguntar" ${!ia.auto?"checked":""}><span>Perguntar antes de trocar (padrão)<small>O nod para e pergunta na conversa. Você troca com um clique.</small></span></label>
+      <label><input type="radio" name="modo-${chave}" value="auto" ${ia.auto?"checked":""}><span>Trocar sozinho para a próxima<small>O turno que falhou é refeito na próxima conta da lista. Contas corporativas não marcadas ficam de fora. Quando a primeira renovar, o nod volta para ela.</small></span></label>`;
+    m.querySelectorAll("input").forEach(r=>r.onchange=()=>setModo(chave,r.value));
+    el.appendChild(m);
+    const p=document.createElement("p"); p.className="privado";
+    p.textContent="E-mail, organização, plano e apelido ficam só neste Mac. O servidor do nod não os recebe.";
+    el.appendChild(p);
+    raiz.appendChild(el);
+  }
+  document.querySelectorAll("[data-modo]").forEach(b=>b.setAttribute("aria-pressed",(b.dataset.modo==="auto")===estado.ias.claude.auto));
+  renderConversa();
+}
+function blocoLogin(ia){
+  const d=document.createElement("div"); d.className="login"; const p=estado.adicionando.passo;
+  const st=estado.adicionando.st||"";
+  const ap=estado.adicionando.apelido||"";
+  const msgCarregando=p===0?"Aguardando o login no navegador…":"Rodando o teste nesta conta…";
+  const msgErro=p===0?"O login não terminou (janela fechada ou tempo esgotado). Nada foi salvo.":`O teste falhou nesta conta (sem acesso ao ${estado.ias[ia].nome} ou no limite). As outras contas não mudaram.`;
+  d.innerHTML=`<b>Nova conta do ${estado.ias[ia].nome}</b>
+    <label>Apelido (opcional, fica só neste Mac)<input id="apelido" placeholder="ex.: Leapy, Pessoal" value="${ap}"></label>
+    <div class="passo">${p>=1?'<span class="ok">✓</span>':'1.'} Entrar no navegador. As outras contas continuam conectadas.</div>
+    <div class="passo">${p>=2?'<span class="ok">✓</span>':'2.'} Teste de uma frase, só nesta conta.</div>
+    ${st==="carregando"?`<div class="passo" role="status" aria-live="polite"><span aria-hidden="true">⏳</span> ${msgCarregando}</div>`:""}
+    ${st==="erro"?`<div class="passo e-limite" role="alert"><span aria-hidden="true">⚠</span> ${msgErro}</div>`:""}
+    ${p>=2?'<div class="passo ok">Conectada: novo@… · Leapy · Team (corporativa, fora da troca automática até você marcar)</div>':""}
+    <div class="rodape">${p<2?`<button class="btn prim" id="avancar" ${st==="carregando"?"disabled":""}>${st==="erro"?"Tentar de novo":(p===0?"Entrar":"Rodar o teste")}</button>${st===""?`<button class="btn" id="simerro" title="Só no protótipo">Simular erro</button>`:""}`:`<button class="btn prim" id="concluir">Concluir</button>`}<button class="btn" id="cancelar">Cancelar</button></div>`;
+  setTimeout(()=>{
+    const guardar=()=>{const i=document.getElementById("apelido");if(i)estado.adicionando.apelido=i.value.trim()};
+    const rodar=(falha)=>{guardar();estado.adicionando.st="carregando";render();setTimeout(()=>{if(!estado.adicionando)return;if(falha){estado.adicionando.st="erro"}else{estado.adicionando.st="";estado.adicionando.passo++}render()},900)};
+    d.querySelector("#avancar")?.addEventListener("click",()=>rodar(false));
+    d.querySelector("#simerro")?.addEventListener("click",()=>rodar(true));
+    d.querySelector("#concluir")?.addEventListener("click",()=>{const a=document.getElementById("apelido").value.trim();estado.ias[ia].contas.push({id:"n"+Date.now(),apelido:a,email:"novo@…",org:"Leapy",plano:"Team",rotacao:false});estado.adicionando=null;render()});
+    d.querySelector("#cancelar").addEventListener("click",()=>{estado.adicionando=null;render()});
+  });
+  return d;
+}
+function mover(ia,de,para){const l=estado.ias[ia].contas;if(para<0||para>=l.length||de===para)return;const [x]=l.splice(de,1);l.splice(para,0,x);render()}
+function pedirRemover(ia,i){
+  const dlg=document.getElementById("dlg-remover");document.getElementById("rm-nome").textContent=rotulo(estado.ias[ia].contas[i]);
+  document.getElementById("rm-ok").onclick=()=>{estado.ias[ia].contas.splice(i,1);dlg.close();render()};dlg.showModal();
+}
+// Ligar a troca automática pede o aviso dos termos; desligar é direto.
+function setModo(ia,m){
+  const d=estado.ias[ia];
+  if(m!=="auto"){d.auto=false;render();return}
+  if(d.auto){render();return}
+  const dlg=document.getElementById("dlg-termos");
+  document.getElementById("tm-ia").textContent=d.nome;
+  document.getElementById("tm-txt").textContent=TERMOS[ia].texto;
+  document.getElementById("tm-links").innerHTML=TERMOS[ia].links.map(([r,u])=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${r} ↗</a>`).join(" · ");
+  document.getElementById("tm-ok").onclick=()=>{d.auto=true;dlg.close();render()};
+  document.getElementById("tm-nao").onclick=()=>{dlg.close();render()};
+  dlg.oncancel=()=>render();
+  dlg.showModal();
+  document.getElementById("tm-nao").focus();
+}
+const lista=(ns)=>ns.length===1?`Conta ${ns[0]}`:`Contas ${ns.slice(0,-1).join(", ")} e ${ns.at(-1)}`;
+function renderConversa(){
+  const el=document.getElementById("conversa"); const s=estado.cen; const d=estado.ias.claude;
+  const resposta=`<div class="msg bot"><b>Dev 1</b>Li o diff. Duas coisas antes do merge: …</div>`;
+  let h=`<div class="msg pessoa">Revisa o PR #285 e me diz se dá pra mergear.</div>`;
+  if(s==="normal"){el.innerHTML=h+resposta;return}
+  if(s==="volta"){el.innerHTML=h+`<div class="nota"><span aria-hidden="true">↻</span><div>Conta 1 do Claude Code renovou. Voltando para ela.</div></div>`+resposta;return}
+  const contas=d.contas.map((c,i)=>({c,i,n:i+1,lim:limiteDe("claude",c)}));
+  const noLimite=contas.filter(x=>x.lim), livres=contas.filter(x=>!x.lim);
+  const primeiro=noLimite[0];
+  const so=noLimite.length===1;
+  const volta=primeiro&&!so?` A conta ${primeiro.n} volta às ${primeiro.lim}.`:"";
+  const quem=so?`Conta ${primeiro.n} do Claude Code no limite até ${primeiro.lim}.`:`${lista(noLimite.map(x=>x.n))} do Claude Code no limite.`;
+  const esperar=`<button class="btn">Esperar até ${primeiro?.lim??""}</button>`;
+  // v4: o Codex só é oferecido se está pronto e tem conta livre; quando é, ele é o primário (a corporativa vem depois).
+  const codexPronto=estado.codexPronto&&estado.ias.codex.contas.some(c=>!limiteDe("codex",c));
+  const codex=(prim)=>codexPronto?`<button class="btn ${prim?"prim":""}">Seguir com o Codex</button>`:"";
+  if(!livres.length){
+    h+=`<div class="nota alerta"><span aria-hidden="true">⏸</span><div>Todas as contas do Claude Code estão no limite.${primeiro?` A conta ${primeiro.n} volta às ${primeiro.lim}.`:""}${codexPronto?" O Codex (ChatGPT) está disponível.":""}<div class="acs">${codex(true)}${esperar.replace('class="btn"',codexPronto?'class="btn"':'class="btn prim"')}</div></div></div>`;
+    el.innerHTML=h;return;
+  }
+  if(d.auto){
+    const prox=livres.find(x=>entraNaTroca(x.c));
+    if(prox){
+      const pulou=livres.filter(x=>x.i<prox.i&&!entraNaTroca(x.c)).map(x=>x.n);
+      const nota=pulou.length?` (${lista(pulou).toLowerCase()} fora da troca automática)`:"";
+      h+=`<div class="nota"><span aria-hidden="true">↻</span><div>${quem} Seguindo com a conta ${prox.n}${nota}.</div></div>`+resposta;
+      el.innerHTML=h;return;
+    }
+    // Só sobraram contas corporativas não marcadas: o nod não troca sozinho, pergunta.
+    const fora=livres.map(x=>x.n);
+    h+=`<div class="nota alerta"><span aria-hidden="true">⏸</span><div>${quem} ${fora.length>1?"As c":"A c"}${lista(fora).slice(1)} ${fora.length>1?"estão":"está"} fora da troca automática, então o nod não troca sozinho.${volta} Seguir com a conta ${fora[0]}?<div class="acs">${codex(true)}${fora.map((n,k)=>`<button class="btn ${k===0&&!codexPronto?"prim":""}">Seguir com a conta ${n}</button>`).join("")}${esperar}</div></div></div>`;
+    el.innerHTML=h;return;
+  }
+  // Perguntar antes: oferece todas as contas livres, corporativas inclusive.
+  h+=`<div class="nota alerta"><span aria-hidden="true">⏸</span><div>${quem}${volta} Seguir com a conta ${livres[0].n}?<div class="acs">${livres.map((x,k)=>`<button class="btn ${k===0?"prim":""}">Seguir com a conta ${x.n}</button>`).join("")}${esperar}</div></div></div>`;
+  el.innerHTML=h;
+}
+document.querySelectorAll("[data-cen]").forEach(b=>b.onclick=()=>{estado.cen=b.dataset.cen;document.querySelectorAll("[data-cen]").forEach(x=>x.setAttribute("aria-pressed",x===b));render()});
+document.querySelectorAll("[data-modo]").forEach(b=>b.onclick=()=>setModo("claude",b.dataset.modo));
+document.querySelectorAll("[data-codex]").forEach(b=>b.onclick=()=>{estado.codexPronto=b.dataset.codex==="1";document.querySelectorAll("[data-codex]").forEach(x=>x.setAttribute("aria-pressed",x===b));render()});
+render();
+</script>
+</body>
+</html>

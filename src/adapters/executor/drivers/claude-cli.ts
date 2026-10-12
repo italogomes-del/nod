@@ -350,7 +350,10 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
   const capacidadesDoDriver = capacidadesDe("claude-cli");
   return {
     meta: { id: "claude-cli", locality: "local", capacidades: capacidadesDoDriver },
-    async create(cfg: ConfigDriver): Promise<Instance> {
+    async create(cfgRecebida: ConfigDriver): Promise<Instance> {
+      // definido em 2026-10-12 (ADR-101): o Claude também recebe as variáveis só dele — a conta em uso vai como
+      // CLAUDE_CONFIG_DIR (desktop/contas-mac.ts). Sonda, turno e terminal usam o mesmo env, então a mesma conta.
+      const cfg: ConfigDriver = { ...cfgRecebida, env: { ...cfgRecebida.env, ...(cfgRecebida.envPorDriver?.["claude-cli"] ?? {}) } };
       const home = cfg.env.HOME ?? homedir();
       const path = caminhoAumentado(cfg.env.PATH, home);
       const envBase = { ...cfg.env, PATH: path, HOME: home };

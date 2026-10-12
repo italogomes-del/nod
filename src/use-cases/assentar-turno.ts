@@ -4,7 +4,7 @@ import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../contracts/
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Entrega } from "../contracts/ponte.ts";
-import type { Turno } from "../contracts/turno.ts";
+import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -20,7 +20,8 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
+import { entradaDaTrocaDeConta, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
+import { fraseDaDecisao } from "../domain/contas-da-ia.ts";
 import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -317,7 +318,13 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   let limite: { ia: IdHarness; renovaEm: number } | null = null;
   let limiteMudou = false;
   let trocou: RuntimeEvent[] | null = null;
-  if (ehLimite && entrega.harness) {
+  // ADR-101 (2026-10-12): com outra conta livre na mesma IA, a IA NÃO fica no limite — o Mac trocou de conta ou a pessoa
+  // escolhe com quem seguir. Só a conta em uso parou (o Mac guarda isso; o servidor só vê posições).
+  const contas = ehLimite ? resultado.contaNoLimite : undefined;
+  const contaLivre = contas !== undefined && contas.tipo !== "todas_no_limite";
+  if (ehLimite && entrega.harness && contaLivre) {
+    log("aviso", "conta_no_limite", { turno_id: turno.id, harness: entrega.harness, tipo: contas.tipo, de: contas.de, para: contas.tipo === "trocou" ? contas.para : null });
+  } else if (ehLimite && entrega.harness) {
     const renovaEm = prazoDoLimite(desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm : null, agora);
     await deps.repos.preferencias.registrarLimite(entrega.harness, { renovaEm, desde: agora });
     limite = { ia: entrega.harness, renovaEm };
@@ -343,6 +350,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...q.events);
   } else if (resultado.causaSemIa) {
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
+  } else if (contas?.tipo === "trocou" && entrega.harness && (trocou = await aposTrocaDeConta(deps, { turno, executor, ia: entrega.harness, troca: contas, autoria, agora, custoUsd, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha }))) {
+    events.push(...trocou);
+  } else if (contaLivre && entrega.harness && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ia: entrega.harness, renovaEm: contas.tipo === "trocou" ? agora : prazoDoLimite(contas.voltaEm, agora), conta: contas, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    // QA do NOD-211 (2026-10-12): a task (frente) cuja conta parou com outra livre não pode cair no aviso de sempre e
+    // virar "falhou" (ADR-099 §7). "trocou": segue já, na conta nova; "perguntar": nada troca sozinho, espera a conta voltar.
+    events.push(...trocou);
   } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
   } else if (limite && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ...limite, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
@@ -354,7 +367,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // Mac…"); o motivo gravado continua o do protocolo (ADR-009). O cru fica só no diagnóstico (ADR-041).
     // NOD-171: o limite do plano veio do protocolo e diz quando volta; a frase leva a hora.
     const fraseFornecedor =
-      desfecho.motivoFalha === "limite_do_plano"
+      contas && entrega.harness
+        ? fraseDaDecisao(contas, { ia: nomeDaIa(entrega.harness), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) })
+        : desfecho.motivoFalha === "limite_do_plano"
         ? fraseDoLimiteDoPlano(entrega.harness ?? null, resultado.limiteVoltaEm, agora)
         : desfecho.motivoFalha
           ? fraseDoErroFornecedor(entrega.harness ?? null, resultado.erroCru)
@@ -366,8 +381,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       turnoId: turno.id,
       autoria,
       kind: "sistema",
-      texto: redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
-      ...(limite ? { payload: { kind: "limite_do_plano" as const, harness: entrega.harness ?? null, voltaEm: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm && resultado.limiteVoltaEm > agora ? resultado.limiteVoltaEm : null } } : {}),
+      // ADR-101: a frase das contas já é uma frase inteira ("Conta 1 do Claude Code no limite até 14:00. Seguir com a conta 2?").
+      texto: contas && entrega.harness && fraseFornecedor ? fraseFornecedor : redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
+      ...(limite ? { payload: { kind: "limite_do_plano" as const, harness: entrega.harness ?? null, voltaEm: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm && resultado.limiteVoltaEm > agora ? resultado.limiteVoltaEm : null, ...(contas ? { conta: contas } : {}) } } : {}),
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
@@ -446,6 +462,53 @@ async function aposLimite(
 }
 
 /**
+ * A conta em uso da IA bateu no limite e o Mac já trocou para outra conta logada (definido em 2026-10-12, ADR-101,
+ * "Trocar sozinho" ligado). O turno da conversa é repetido na MESMA IA e no mesmo modelo — quem roda já está na conta
+ * nova, guardada no Mac —, com uma linha discreta que diz só posições ("conta 1", "conta 3"; o apelido mora no app).
+ * null = não é turno da conversa ou a pessoa pediu Parar: fica o aviso de sempre, com a frase das contas.
+ */
+async function aposTrocaDeConta(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; troca: Extract<ContaNoLimite, { tipo: "trocou" }>; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora, troca } = p;
+  if (turno.origem !== "conversa" || turno.pararSolicitadoEm !== null) return null;
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_de: troca.de, conta_para: troca.para, custo_usd: p.custoUsd } }),
+  ];
+  const linha = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    texto: fraseDaDecisao(troca, { ia: nomeDaIa(p.ia), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) }),
+    payload: { kind: "conta_trocada", harness: p.ia, de: troca.de, para: troca.para, voltaEm: troca.voltaEm, foraDaTroca: troca.foraDaTroca },
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  const novo = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "conversa",
+    prazoEm: turno.prazoEm,
+    profundidade: turno.profundidade,
+    entradaTexto: turno.entradaTexto,
+    mensagemOrigemId: turno.mensagemOrigemId,
+    entradaAnexos: turno.entradaAnexos,
+    entradaConfianca: turno.entradaConfianca,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    reenvios: turno.reenvios + 1,
+    executor: p.executor,
+    trabalhoId: turno.trabalhoId ?? null,
+  });
+  if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
+  log("info", "conta_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, harness: p.ia, de: troca.de, para: troca.para });
+  return events;
+}
+
+/**
  * A task (frente) bateu no LIMITE da assinatura e não trocou de IA (definido em 2026-10-12, ADR-099 §7: "nenhuma frente
  * falha por limite: espera e volta"). Em vez do aviso de interrupção e da task em "não terminou", nasce a retomada do
  * mesmo trabalho com `acordar_em` na renovação (o prazo do limite, prazoDoLimite: o horário do fornecedor ou 1 h), e a
@@ -455,9 +518,9 @@ async function aposLimite(
  */
 async function aposLimiteNoFundo(
   deps: Deps,
-  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; conta?: Exclude<ContaNoLimite, { tipo: "todas_no_limite" }>; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
 ): Promise<RuntimeEvent[] | null> {
-  const { turno, autoria, agora } = p;
+  const { turno, autoria, agora, conta } = p;
   if (!turno.trabalhoId || turno.origem === "ligacao" || turno.pararSolicitadoEm !== null) return null;
   const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
   if (!trabalho || !trabalhoAberto(trabalho.estado)) return null;
@@ -472,7 +535,7 @@ async function aposLimiteNoFundo(
     trabalhoId: turno.trabalhoId,
     prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
     profundidade: turno.profundidade,
-    entradaTexto: entradaDaVoltaDaCota(nomeDaIa(p.ia)),
+    entradaTexto: conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : entradaDaVoltaDaCota(nomeDaIa(p.ia)),
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,
@@ -492,12 +555,15 @@ async function aposLimiteNoFundo(
     turnoId: turno.id,
     autoria,
     kind: "sistema",
-    texto: redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }),
+    // ADR-101: com outra conta, a linha diz só posições — "Seguindo com a conta 2" (troca) ou "A conta 1 … espera" (perguntar).
+    ...(conta?.tipo === "trocou"
+      ? { texto: fraseDaDecisao(conta, { ia: nomeDaIa(p.ia), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) }), payload: { kind: "conta_trocada" as const, harness: p.ia, de: conta.de, para: conta.para, voltaEm: conta.voltaEm, foraDaTroca: conta.foraDaTroca } }
+      : { texto: conta ? redigir("conta-no-limite-espera", agora, { de: String(conta.de), ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) : redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) }),
     confianca: "confiavel",
   });
   if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   // Só códigos e ids: para medir o "pronto quando" da parte 7 (nenhuma frente falha por limite).
-  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId, harness: p.ia, renova_em: p.renovaEm });
+  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId, harness: p.ia, renova_em: p.renovaEm, ...(conta ? { conta_tipo: conta.tipo, conta_de: conta.de } : {}) });
   return events;
 }
 

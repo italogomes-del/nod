@@ -6,7 +6,7 @@ import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaNativa } from "./negacao.ts";
 import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
-import type { OrigemTurno } from "./turno.ts";
+import type { ContaNoLimite, OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -67,7 +67,12 @@ export type PayloadMensagem =
    * Code, ou a classe `limite_de_uso` do texto do Codex). Vai no aviso "Turno interrompido" para a tela desenhar o card
    * com a hora LOCAL de `voltaEm` (o texto gravado traz a de São Paulo). `voltaEm` null: o fornecedor não disse quando.
    */
-  | { kind: "limite_do_plano"; harness: IdHarness | null; voltaEm: EpochMs | null }
+  | { kind: "limite_do_plano"; harness: IdHarness | null; voltaEm: EpochMs | null; conta?: ContaNoLimite }
+  /**
+   * definido em 2026-10-12 (ADR-101 item 6): a conta em uso bateu no limite, "Trocar sozinho" estava ligado e o turno foi
+   * refeito na conta `para`. Só posições; `foraDaTroca` são as contas livres que a troca pulou (corporativas não marcadas).
+   */
+  | { kind: "conta_trocada"; harness: IdHarness; de: number; para: number; voltaEm: EpochMs | null; foraDaTroca: number[] }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não

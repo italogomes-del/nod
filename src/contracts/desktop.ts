@@ -1,5 +1,6 @@
 import type { EstadoIa, ResultadoColarCodigo } from "./estado-ia.ts";
 import type { CausaDoMac, CausaInventario, CausaSemIa } from "./inventario.ts";
+import type { PonteContas } from "./contas-desktop.ts";
 
 /**
  * Ponte da JANELA WEB do app desktop (definido em 2026-09-24, "aviso no Mac"): o que o preload dela
@@ -81,6 +82,9 @@ export type PonteIas = {
   aoMudar(fn: (estado: EstadoIa) => void): void;
 };
 
+// ADR-101: as várias contas ficam em contas-desktop.ts (o teto de 200 linhas por contrato).
+export type { ContaNaTela, ContasNaTela, PonteContas } from "./contas-desktop.ts";
+
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
   avisar(aviso: AvisoDesktop): Promise<boolean>;
@@ -126,6 +130,8 @@ export type NodDesktop = {
    * não tem, e a web segue então com `iaEntrar`/`iaInstalar` (que continuam funcionando como antes).
    */
   ias?: PonteIas;
+  /** ADR-101: as várias contas de cada IA. Opcional: o app instalado antes de 2026-10-12 não tem. */
+  contas?: PonteContas;
   /** Chamado quando a pessoa clica num aviso: a web abre o alvo. */
   aoAbrir(fn: (alvo: AlvoAviso) => void): void;
 };
@@ -153,6 +159,17 @@ export const CANAIS_DESKTOP = {
   iaCancelar: "nod:ia-cancelar",
   iaVerificar: "nod:ia-verificar",
   iaMudou: "nod:ia-mudou",
+  // definido em 2026-10-12 (ADR-101): as várias contas; `contasMudaram` vai do processo principal à página.
+  contasListar: "nod:contas-listar",
+  contasUsar: "nod:contas-usar",
+  contasAdicionar: "nod:contas-adicionar",
+  contasRemover: "nod:contas-remover",
+  contasFecharFalha: "nod:contas-fechar-falha",
+  contasMover: "nod:contas-mover",
+  contasRenomear: "nod:contas-renomear",
+  contasDefinirModo: "nod:contas-definir-modo",
+  contasDefinirTroca: "nod:contas-definir-troca",
+  contasMudaram: "nod:contas-mudaram",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

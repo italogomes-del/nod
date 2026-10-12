@@ -28,6 +28,7 @@ export type ConfigDriver = {
   /**
    * definido em 2026-10-09 (revisão do PR 1, ADR-093): variáveis só de um driver. O Codex instalado pelo app roda o
    * binário nativo direto e recebe o que o `codex.js` daria a ele (CODEX_MANAGED_BY_NPM, CODEX_MANAGED_PACKAGE_ROOT).
+   * revisto em 2026-10-12 (ADR-101): é também por onde vai a conta em uso — CLAUDE_CONFIG_DIR ou CODEX_HOME.
    */
   envPorDriver?: Partial<Record<IdDriver, Record<string, string>>>;
 };

@@ -165,3 +165,12 @@ export const ENTRADA_DA_VOLTA_DA_COTA = "[nod] A cota do ";
 export function entradaDaVoltaDaCota(nomeDaIa: string): string {
   return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite no meio deste trabalho e o nod esperou ela renovar. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
 }
+
+/**
+ * definido em 2026-10-12 (ADR-101, QA do NOD-211): a entrada da volta da task cuja conta parou e o Mac já seguiu com outra
+ * conta da mesma IA ("Trocar sozinho"). Começa com ENTRADA_DA_VOLTA_DA_COTA, para contar como a volta da cota (e não como
+ * volta sem novidade). Só posições (ADR-019): o apelido mora no Mac.
+ */
+export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number): string {
+  return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de} no meio deste trabalho e o nod seguiu com a conta ${para}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+}

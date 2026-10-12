@@ -71,6 +71,14 @@ export function comandoDeEstadoDoLogin(ia: IaDesktop): { nome: "claude" | "codex
   return ia === "claude-cli" ? { nome: "claude", args: ["auth", "status"] } : { nome: "codex", args: ["login", "status"] };
 }
 
+/**
+ * O logout do CLI (definido em 2026-10-12, ADR-101): roda com a variável da conta que sai (CLAUDE_CONFIG_DIR/CODEX_HOME),
+ * então apaga só a credencial DELA. É o único jeito de o nod tirar uma credencial: ele nunca a lê nem apaga direto.
+ */
+export function comandoDeLogout(ia: IaDesktop): { nome: "claude" | "codex"; args: string[] } {
+  return ia === "claude-cli" ? { nome: "claude", args: ["auth", "logout"] } : { nome: "codex", args: ["logout"] };
+}
+
 /** Os campos do `claude auth status` que dizem QUAL conta está logada (medido em 2026-10-05, Claude Code 2.1.289). */
 const CAMPOS_DA_CONTA_CLAUDE = ["loggedIn", "authMethod", "apiProvider", "email", "orgId", "subscriptionType"] as const;
 

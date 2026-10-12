@@ -121,6 +121,17 @@ describe("desktop: fronteiras HTTP", () => {
     }
     expect("limiteVoltaEm" in entrega({ ...base, resultado: { ...resultado, motivoFalha: "erro_execucao", limiteVoltaEm: voltaEm } }, "maq", agora).resultado).toBe(false);
   });
+  it("ADR-101: a decisão das contas no limite atravessa só em turno falho e no formato; fora disso some", () => {
+    const agora = Date.UTC(2026, 9, 12, 12);
+    const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "" } };
+    const resultado = { desfecho: "falha", motivoFalha: "limite_do_plano", texto: "", sessaoCli: null, custoUsd: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    const conta = { tipo: "perguntar", de: 1, livres: [2], foraDaTroca: [2], voltaEm: agora + 3_600_000 };
+    expect(entrega({ ...base, resultado: { ...resultado, contaNoLimite: conta } }, "maq", agora).resultado.contaNoLimite).toEqual(conta);
+    expect("contaNoLimite" in entrega({ ...base, resultado: { ...resultado, contaNoLimite: { ...conta, livres: [9] } } }, "maq", agora).resultado).toBe(false);
+    // o limite do Codex chega como erro_execucao: a decisão atravessa; o servidor só a usa se ele mesmo vir limite
+    expect(entrega({ ...base, resultado: { ...resultado, motivoFalha: "erro_execucao", contaNoLimite: conta } }, "maq", agora).resultado.contaNoLimite).toEqual(conta);
+    expect("contaNoLimite" in entrega({ ...base, resultado: { ...resultado, desfecho: "sucesso", motivoFalha: undefined, contaNoLimite: conta } }, "maq", agora).resultado).toBe(false);
+  });
   it("renovação leva texto e ferramentas NA ORDEM, juntando texto seguido, esvazia a fila e não mistura turnos", async () => {
     const f = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ativo: true, versaoMinimaApp: "0.1.0" })));
     const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f });

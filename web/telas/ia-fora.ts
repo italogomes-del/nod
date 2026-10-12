@@ -174,10 +174,57 @@ export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; 
     const quando = l.voltaEm !== null ? `até ${hora(l.voltaEm)}` : `às ${hora(m.criadoEm)}`;
     return `<div class="linha-centro-wrap linha-limite-passou"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(nome)} esteve no limite ${esc(quando)}</span></span></div>`;
   }
-  const limite = l.voltaEm !== null ? `${nome} no limite até ${quandoVolta(l.voltaEm, p.agora).replace(/^às /, "")}` : `${nome} chegou ao limite`;
+  if (l.conta?.tipo === "perguntar" && ia) return linhaSeguirComConta(ia, l.conta, m.texto, p);
+  // ADR-101: todas as contas da IA no limite — a frase do servidor diz quando a primeira volta; o passo segue o de sempre.
+  const limite = l.conta?.tipo === "todas_no_limite" ? m.texto : l.voltaEm !== null ? `${nome} no limite até ${quandoVolta(l.voltaEm, p.agora).replace(/^às /, "")}` : `${nome} chegou ao limite`;
   const acao = ia ? acaoSemOutra(ia, p) : null;
   const corpo = acao?.substitui ? acao.html : `<span>${esc(limite)}</span>${acao ? `<span aria-hidden="true">·</span>${acao.html}` : ""}`;
   return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span>${corpo}</span></div>`;
+}
+
+/**
+ * ADR-101 (2026-10-12, NOD-211): a conta em uso bateu no limite e há outra livre, em "Perguntar antes de trocar" (o
+ * padrão). A frase do servidor ("Conta 1 do Claude Code no limite até 14:00. Seguir com a conta 2 ou 3?") e um botão por
+ * conta livre. No app do Mac o clique troca a conta (nodDesktop.contas); a pessoa manda a mensagem de novo. Fora do app,
+ * a escolha é no Mac (o servidor não sabe das contas). Escolhida, a linha diz com qual seguiu.
+ */
+function linhaSeguirComConta(
+  ia: IdIa,
+  conta: { livres: readonly number[]; foraDaTroca: readonly number[]; voltaEm: number | null },
+  frase: string,
+  p: { nomeDoBot: string | null; agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null },
+): string {
+  const { livres } = conta;
+  const { ui } = p;
+  const emUso = ui.contas[ia]?.contas.find((c) => c.emUso)?.posicao;
+  const escolhida = emUso !== undefined && livres.includes(emUso) ? emUso : null;
+  const sep = '<span aria-hidden="true">·</span>';
+  // QA do NOD-211 (2026-10-12, protótipo, tela "só sobrou a corporativa"): em Trocar sozinho com as livres todas fora da
+  // troca, a pergunta também oferece a outra IA e a espera — antes só havia os botões das contas. Só o passo que age
+  // (a outra IA pronta, a entrar ou a instalar); o que só informa ("também no limite") fica de fora.
+  const outra = conta.foraDaTroca.length > 0 ? acaoSemOutra(ia, { ...p, fixa: true }) : null;
+  const extras = [
+    ...(outra && !outra.substitui ? [outra.html] : []),
+    ...(conta.voltaEm !== null ? [`<span>ou esperar a conta voltar ${esc(quandoVolta(conta.voltaEm, p.agora))}</span>`] : []),
+  ];
+  const fim = escolhida !== null
+    ? `<span>Seguindo com a conta ${escolhida} · mande a mensagem de novo</span>`
+    : [
+      ui.noApp && ui.contas[ia]
+        ? livres.map((n) => `<button type="button" class="linha-link" data-act="conta-usar" data-ia="${ia}" data-posicao="${n}">Seguir com a conta ${n}</button>`).join(sep)
+        : "<span>Escolha a conta no app do nod no Mac</span>",
+      ...extras,
+    ].join(sep);
+  return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(frase)}</span><span aria-hidden="true">·</span>${fim}</span></div>`;
+}
+
+/**
+ * ADR-101: em "Trocar sozinho", o nod seguiu com a próxima conta da mesma IA e repetiu o turno. Uma linha discreta, só
+ * com posições ("Conta 1 do Claude Code no limite até 14:00. Seguindo com a conta 3."); o apelido fica no Mac.
+ */
+export function linhaContaTrocada(m: Mensagem): string | null {
+  if (m.payload?.kind !== "conta_trocada") return null;
+  return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
 }
 
 const ICONE_RELOGIO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg>';

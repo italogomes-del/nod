@@ -23,6 +23,7 @@ export type ChaveRedacao =
   | "ia-trocada"
   | "ia-trocada-limite"
   | "cota-no-limite-espera"
+  | "conta-no-limite-espera"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
@@ -65,6 +66,9 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "ia-trocada-limite": "O {de} chegou ao limite da assinatura · respondendo pelo {para}. Ele volta a ser usado {quando}.",
   // definido em 2026-10-12 (ADR-099 §7): a task bateu no limite e espera a cota renovar, em vez de falhar (aposLimiteNoFundo).
   "cota-no-limite-espera": "A cota do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
+  // definido em 2026-10-12 (ADR-101, QA do NOD-211): a conta em uso parou, há outra livre, mas o modo é "Perguntar antes"
+  // (nada troca sozinho) e a task não tem ninguém para perguntar: espera a conta voltar. Só a posição, nunca o apelido.
+  "conta-no-limite-espera": "A conta {de} do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",

@@ -2,6 +2,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao } from "./cartao-ia.ts";
+import { renderContasDaIa } from "./contas-ia.ts";
 import { renderExecutor } from "./frota.ts";
 import { logoApp } from "./marketplace.ts";
 import { renderNegacoes, textoMotivo } from "./negacao.ts";
@@ -22,7 +23,9 @@ export function renderProvedores(estado: Estado): string {
   const c: ContextoCartao = { servidor, ui, agora: estado.agora, onde: "provedores" };
   const linhas = ordemDasIas(servidor).map((ia, i) => {
     const v = vistaDaIa(ia, c);
-    return `<div class="prov-linha" data-ordem-item="${ia}">${renderCartaoIa(v, ui, { arrastar: { pos: i + 1 } })}</div>`;
+    // ADR-101 (NOD-211): as várias contas da IA, embaixo do cartão, só no app do Mac.
+    const contas = renderContasDaIa(ia, ui, estado.agora, Boolean(ui.estados[ia]?.conta));
+    return `<div class="prov-linha" data-ordem-item="${ia}">${renderCartaoIa(v, ui, { arrastar: { pos: i + 1 } })}${contas}</div>`;
   }).join("");
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
   return `<section class="espaco-secao provedores">

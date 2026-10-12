@@ -1,3 +1,4 @@
+import { contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
@@ -303,6 +304,10 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const erroCru = typeof r.erroCru === "string" && r.erroCru.length <= ERRO_CRU_MAX_CHARS ? r.erroCru : null;
   // NOD-171: extra como o uso do plano. Só com o limite e até 31 dias à frente; fora disso some (a frase fica sem hora).
   const voltaEm = r.motivoFalha === "limite_do_plano" && Number.isSafeInteger(r.limiteVoltaEm) && Number(r.limiteVoltaEm) > 0 && Number(r.limiteVoltaEm) <= agora + 31 * 86_400_000 ? Number(r.limiteVoltaEm) : null;
+  // ADR-101 (2026-10-12): a decisão do Mac sobre as contas no limite, só num turno falho; fora do formato some. Não só
+  // com `limite_do_plano`: o limite do Codex chega como `erro_execucao` com o texto do fornecedor, e o servidor só a usa
+  // quando ele mesmo classifica o turno como limite (assentar-turno).
+  const contaNoLimite = typeof r.motivoFalha === "string" ? contaNoLimiteValida(r.contaNoLimite, agora) : undefined;
   // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
   const entregues = idsDeMensagens(e.mensagensEntregues);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
@@ -317,6 +322,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(doNod ? { negacoesDoNod: doNod } : {}),
     ...(uso ? { usoDoPlano: uso } : {}),
     ...(voltaEm !== null ? { limiteVoltaEm: voltaEm } : {}),
+    ...(contaNoLimite ? { contaNoLimite } : {}),
   } };
 }
 

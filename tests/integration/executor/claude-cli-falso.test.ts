@@ -218,6 +218,21 @@ describe("driver claude-cli contra o binário falso (contrato empírico 2026-09-
     expect(r.env.MCP_TOOL_TIMEOUT).toBe("60000");
   });
 
+  it("ADR-101: a conta em uso vai pelo envPorDriver do Claude — o filho recebe o CLAUDE_CONFIG_DIR dela", async () => {
+    const driver = criarClaudeCliDriver(lig);
+    const sessoes = join(dir, `sessoes-conta-${Math.random().toString(36).slice(2, 8)}`);
+    const bin = await shim(dir, `claude-conta-${Math.random().toString(36).slice(2, 6)}`, { NOD_FALSO_CENARIO: "s3-mcp-ok", NOD_FALSO_SESSOES: sessoes });
+    const registro = join(dir, `registro-conta-${Math.random().toString(36).slice(2, 8)}.json`);
+    const pasta = join(dir, "contas", "claude-cli", "c-1234abcd");
+    const cfg: ConfigDriver = { ...cfgBase, bin, env: { ...cfgBase.env, TESTE_NOD_REGISTRO: registro }, envPorDriver: { "claude-cli": { CLAUDE_CONFIG_DIR: pasta }, "codex-cli": { CODEX_HOME: "/nao/vai" } } };
+    const instance = await driver.create(cfg);
+    const r1 = await instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks);
+    expect(r1.desfecho).toBe("sucesso");
+    const r = JSON.parse(await readFile(registro, "utf8")) as Registro;
+    expect(r.env.CLAUDE_CONFIG_DIR).toBe(pasta);
+    expect(r.env.CODEX_HOME).toBeUndefined();
+  });
+
   it("2º turno com sessaoCli do 1º: --resume o MESMO uuid, sem --session-id, e o binário falso aceita", async () => {
     const { instance, registro } = await instanciar("s3-mcp-ok");
     const primeiro = await instance.adapter(planoDeTeste(dir)).rodarTurno(sinksEspiao().sinks);

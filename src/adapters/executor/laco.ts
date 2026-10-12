@@ -51,8 +51,12 @@ export type OpcoesLaco = {
   aoVigia?: (plano: PlanoTurno, aviso: VigiaVivo) => void;
   /** De quanto em quanto o vigia é avaliado (injetável no teste; o relógio é sempre `relogio`). */
   vigiaMs?: number;
-  /** definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`). */
-  aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => void;
+  /**
+   * definido em 2026-10-05: o resultado que o driver devolveu, antes da entrega (o app do Mac lê `causaSemIa`).
+   * revisto em 2026-10-12 (ADR-101): pode devolver o resultado anotado (o Mac põe `contaNoLimite` quando a conta em uso
+   * bateu no limite); undefined = entrega o mesmo resultado.
+   */
+  aoResultado?: (plano: PlanoTurno, resultado: ResultadoTurno) => ResultadoTurno | undefined | void | Promise<ResultadoTurno | undefined | void>;
   /**
    * definido em 2026-10-07 (ADR-083 §4, #194): a memória da máquina (um amostrador só, compartilhado pelos laços). Cada
    * renovação leva a última leitura; o grupo do turno entra na soma só com driver de `processoProprio`.
@@ -324,8 +328,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           return false;
         },
       });
-      o.aoResultado?.(plano, resultado);
-      await entregar({ ...resultado, sinais: { ...resultado.sinais, ...sinais } });
+      // QA do NOD-211: pode ser assíncrono (a troca de conta espera o registry novo); o batimento segue até o finally.
+      const anotado = (await o.aoResultado?.(plano, resultado)) ?? resultado;
+      await entregar({ ...anotado, sinais: { ...anotado.sinais, ...sinais } });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
       await entregar(resultadoDeExcecao(erro, sinais));

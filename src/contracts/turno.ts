@@ -121,7 +121,23 @@ export type ResultadoTurno = {
   usoDoPlano?: UsoDoPlano;
   /** NOD-171: com `motivoFalha` `limite_do_plano`, quando o plano volta a funcionar (epoch ms); `null` se o CLI não disse. */
   limiteVoltaEm?: number | null;
+  /**
+   * definido em 2026-10-12 (ADR-101): com `limite_do_plano`, o que o Mac decidiu sobre as CONTAS da IA. Só posições
+   * ("conta 1", "conta 2"); apelido, e-mail e plano ficam no Mac (ADR-019). Ausente = a IA tem uma conta só no nod.
+   */
+  contaNoLimite?: ContaNoLimite;
 };
+
+/**
+ * definido em 2026-10-12 (ADR-101 item 6): `trocou` = "Trocar sozinho" ligado e o turno deve ser refeito na conta `para`;
+ * `perguntar` = há conta livre e a pessoa escolhe; `todas_no_limite` = nenhuma livre. `foraDaTroca`: as livres que a troca
+ * sozinha pulou (corporativas não marcadas). `voltaEm`: na troca e na pergunta, quando a conta `de` volta; em todas, a
+ * primeira que volta.
+ */
+export type ContaNoLimite =
+  | { tipo: "trocou"; de: number; para: number; voltaEm: number | null; foraDaTroca: number[] }
+  | { tipo: "perguntar"; de: number; livres: number[]; foraDaTroca: number[]; voltaEm: number | null }
+  | { tipo: "todas_no_limite"; noLimite: number[]; voltaEm: number | null };
 
 /** Lista de tarefas do bot (TaskCreate/TaskUpdate do Claude Code), no cartão de atividade (domain/tarefas-do-bot.ts). */
 export const ESTADOS_DA_TAREFA = ["pendente", "andamento", "feita"] as const;

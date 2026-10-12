@@ -26,11 +26,13 @@ import type { ConfigDriver, Driver } from "../src/adapters/executor/spi.ts";
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
+import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type ContasNaTela, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
 import type { ContaDaIa, EstadoIa, LoginDaIa, ResultadoColarCodigo } from "../src/contracts/estado-ia.ts";
 import { contaDoCodex } from "./conta-codex.ts";
+import { ambienteNaConta, diretorioPadrao, gravarContasDoMac, iaDasContas, lerContasDoMac, prepararPastaDaConta, removerPastaDaConta } from "./contas-mac.ts";
+import { criarContasDoApp } from "./contas-no-app.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, comandoDeLogout, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "./login-ia.ts";
 import { ambienteDoNpm, criarInstaladorDeIas, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
@@ -415,6 +417,7 @@ async function conectar(c: Config) {
   const cfg = await montarCfg(envExecutor);
   cfgExecutor = cfg;
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
+  contasDoApp.registryRefeito(IAS_DESKTOP);
   // Um objeto só, atualizado no lugar a cada sondagem: o laço lê `registry[driver]` a cada turno, então uma IA que
   // fica pronta depois (ou um driver recriado) passa a valer sem reiniciar o laço.
   const registryDoLaco: Registry = criado.registry;
@@ -446,7 +449,14 @@ async function conectar(c: Config) {
       // NOD-73: o vigia do turno só avisa — o aviso vai como trecho vivo, só nome e números (os argumentos ficam no Mac).
       aoVigia: (p, aviso) => cliente?.vigia(p.turnoId, aviso),
       // definido em 2026-10-05: o turno disse que a conta desta IA não serve — o veredito fica guardado e o Mac reanuncia.
-      aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigia.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
+      aoResultado: (p, r) => {
+        const ia = lerIaDesktop(driverDoPlano(p));
+        if (ia && r.causaSemIa) void vigia.reprovar(ia, r.causaSemIa).catch(() => undefined);
+        // ADR-101 (2026-10-12): no limite, com mais de uma conta, o Mac decide qual segue e anota só as posições.
+        const anotado = ia && !r.causaSemIa ? contasDoApp.aoResultado(ia, r) : undefined;
+        // QA do NOD-211: o turno repetido só pode sair depois que o registry já roda na conta nova.
+        return ia && anotado?.contaNoLimite?.tipo === "trocou" ? contasDoApp.esperarTroca(ia).then(() => anotado) : anotado;
+      } }), ponteHttp.ponte);
   };
   // definido em 2026-10-04 (ADR-077) e revisto em 2026-10-05: sem IA pronta a janela abre do mesmo jeito — a web mostra
   // os cards de IA — e a vigia olha de novo a cada 3 s, com um registry novo a cada volta (os drivers recriados não
@@ -462,7 +472,10 @@ async function conectar(c: Config) {
     sondar: async (ias) => {
       const novo = await montarCfg(envExecutor);
       if (cliente === ponteHttp) cfgExecutor = novo;
-      return criarRegistryDetalhado(envExecutor, ias ? drivers.filter((d) => ias.some((ia) => ia === d.meta.id)) : drivers, { cfg: novo });
+      const refeito = await criarRegistryDetalhado(envExecutor, ias ? drivers.filter((d) => ias.some((ia) => ia === d.meta.id)) : drivers, { cfg: novo });
+      // QA do NOD-211: só as IAs sondadas ganharam driver com o ambiente da conta em uso.
+      if (cliente === ponteHttp) contasDoApp.registryRefeito(ias ?? IAS_DESKTOP);
+      return refeito;
     },
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
     aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); },
@@ -573,6 +586,11 @@ async function cfgAtual(): Promise<ConfigDriver> {
 const binConfigurado = (ia: IaDesktop, cfg: ConfigDriver) => (ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"]);
 /** O ambiente dos processos de login e status de uma IA: o dos drivers, mais o que só ela recebe (o Codex do nod). */
 const ambienteDaIa = (ia: IaDesktop, cfg: ConfigDriver) => ambienteDoLogin({ ...cfg.env, ...(cfg.envPorDriver?.[ia] ?? {}) });
+/**
+ * ADR-101: o login, o status do login e a leitura da conta rodam na conta que está entrando — a nova, enquanto ela é
+ * adicionada; a em uso, no resto. Os turnos e a sonda seguem em `ambienteDaIa` (a conta em uso, pelo envPorDriver).
+ */
+const ambienteDoLoginDaIa = (ia: IaDesktop, cfg: ConfigDriver) => ambienteNaConta(ia, process.env, ambienteDaIa(ia, cfg), contasDoApp.ambienteDoLogin(ia));
 /** O "node do nod" (instalar-ia.ts): reescrito a cada abertura, porque o caminho do app muda quando ele é movido. */
 async function garantirNodeDoNod(): Promise<void> {
   const arquivo = join(pastasDoNod.nodeDoNod, "node");
@@ -647,6 +665,11 @@ async function escolherBinarios(cfg: ConfigDriver): Promise<ConfigDriver> {
     escolhaDasIas.set(ia, { escolhido, alternativa });
   }
   if (mudou) emitirEstados();
+  // ADR-101 (2026-10-12): a conta em uso de cada IA vai aos drivers pela variável dela (nada para a conta 1).
+  for (const ia of IAS_DESKTOP) {
+    const daConta = contasDoApp.ambienteDoTurno(ia);
+    if (Object.keys(daConta).length > 0) saida.envPorDriver = { ...saida.envPorDriver, [ia]: { ...(saida.envPorDriver?.[ia] ?? {}), ...daConta } };
+  }
   return saida;
 }
 function estadoAtual(ia: IaDesktop): EstadoIa {
@@ -680,7 +703,7 @@ async function iniciarLogin(ia: IaDesktop): Promise<ProcessoDeLogin | null> {
   const pendentes: string[] = [];
   let ouvinte: ((t: string) => void) | null = null;
   const entregar = (t: string) => { if (ouvinte) ouvinte(t); else pendentes.push(t); };
-  const p = iniciarProcesso({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), stdin: ia === "claude-cli" ? "pipe" : "ignore", aoLinha: (l) => entregar(`${l}\n`), aoStderr: entregar });
+  const p = iniciarProcesso({ bin, args, env: ambienteDoLoginDaIa(ia, cfg), cwd: home || tmpdir(), stdin: ia === "claude-cli" ? "pipe" : "ignore", aoLinha: (l) => entregar(`${l}\n`), aoStderr: entregar });
   return {
     aoSair: (fn) => { ouvinte = fn; for (const t of pendentes.splice(0)) fn(t); },
     escrever: (t) => p.escrever(t),
@@ -694,7 +717,7 @@ async function statusDoLogin(ia: IaDesktop): Promise<StatusDoLogin> {
   const { nome, args } = comandoDeEstadoDoLogin(ia);
   const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, nome);
   if (!bin) return { logado: false, impressao: null };
-  const r = await executarColetando({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), timeoutMs: 10_000 });
+  const r = await executarColetando({ bin, args, env: ambienteDoLoginDaIa(ia, cfg), cwd: home || tmpdir(), timeoutMs: 10_000 });
   const logado = !r.estourouTempo && logadoPeloStatus(ia, r.exitCode, r.stdout, r.stderr);
   return { logado, impressao: logado ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null };
 }
@@ -715,19 +738,24 @@ function guardarConta(ia: IaDesktop, conta: ContaDaIa | null): void {
   if (conta) contasDasIas.set(ia, conta);
   else contasDasIas.delete(ia);
 }
-/** A conta que o CLI diz agora: null = sem conta; undefined = não deu para saber (CLI lento ou sem resposta). */
-async function lerConta(ia: IaDesktop): Promise<ContaDaIa | null | undefined> {
+/**
+ * A conta que o CLI diz agora: null = sem conta; undefined = não deu para saber (CLI lento ou sem resposta). Lê a conta em
+ * uso; `naContaNova` lê a que está sendo adicionada (QA do NOD-211: a releitura de 10 min no meio de uma adição lia a
+ * pasta nova, ainda sem login, e a conta 1 sumia do cartão).
+ */
+async function lerConta(ia: IaDesktop, o: { naContaNova?: boolean } = {}): Promise<ContaDaIa | null | undefined> {
   const cfg = await cfgAtual();
+  const env = o.naContaNova ? ambienteDoLoginDaIa(ia, cfg) : ambienteNaConta(ia, process.env, ambienteDaIa(ia, cfg), contasDoApp.ambienteDaContaEmUso(ia));
   const home = cfg.env.HOME ?? "";
   const cwd = home || tmpdir();
   const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, comandoDeLogin(ia).nome);
   if (!bin) return null;
   if (ia === "claude-cli") {
-    const r = await executarColetando({ bin, args: comandoDeEstadoDoLogin(ia).args, env: ambienteDaIa(ia, cfg), cwd, timeoutMs: 10_000 }).catch(() => null);
+    const r = await executarColetando({ bin, args: comandoDeEstadoDoLogin(ia).args, env, cwd, timeoutMs: 10_000 }).catch(() => null);
     if (!r || r.estourouTempo) return undefined;
     return contaPeloStatusClaude(r.stdout);
   }
-  return contaDoCodex({ bin, env: ambienteDaIa(ia, cfg), cwd, versao: app.getVersion() });
+  return contaDoCodex({ bin, env, cwd, versao: app.getVersion() });
 }
 /**
  * Lê a conta e manda o estado. `depoisDoLogin`: a pessoa acabou de entrar (talvez com outra conta) — uma leitura já em
@@ -767,12 +795,60 @@ function conferirContas(inventarios: Partial<Record<IdDriver, Inventario>>): voi
 }
 /** O login mudou: no sucesso, a conta (talvez outra) é lida antes de voltar ao cartão. */
 function aoMudarLogin(ia: IaDesktop, login: LoginDaIa): void {
-  if (login.fase === "sucesso") {
+  if (login.fase === "sucesso" && contasDoApp.adicionando(ia)) {
+    // ADR-101: a conta nova entrou — lida NA pasta dela, entra no fim da lista; depois o cartão volta à conta em uso.
+    contaPendente.add(ia);
+    void (async () => {
+      const conta = await lerConta(ia, { naContaNova: true }).catch(() => undefined);
+      await contasDoApp.concluirAdicao(ia, conta ?? null);
+      contaLidaEm.delete(ia);
+      await atualizarConta(ia, true);
+    })();
+  } else if (login.fase === "sucesso") {
     contaPendente.add(ia);
     void atualizarConta(ia, true);
+  } else if ((login.fase === "falhou" || login.fase === "expirou" || login.fase === "cancelado") && contasDoApp.adicionando(ia)) {
+    // QA do NOD-211: falhou ou expirou fica na tela com "Tentar de novo"; cancelado pela pessoa, não.
+    void contasDoApp.cancelarAdicao(ia, { falhou: login.fase !== "cancelado" }).then(() => atualizarConta(ia, true));
   }
   emitirEstados();
 }
+
+// ---- As várias contas de cada IA (definido em 2026-10-12, ADR-101, NOD-211) -----------------------------------------
+const pastaDasContas = join(app.getPath("userData"), "contas");
+const arquivoDasContas = join(app.getPath("userData"), "contas.json");
+/** O logout do CLI com a variável da conta (apaga só a credencial dela); 15 s e desiste. */
+async function logoutDaConta(ia: IaDesktop, envDaConta: Record<string, string>): Promise<boolean> {
+  const cfg = await cfgAtual();
+  const home = cfg.env.HOME ?? "";
+  const { nome, args } = comandoDeLogout(ia);
+  const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, nome);
+  if (!bin) return false;
+  const r = await executarColetando({ bin, args, env: { ...ambienteDaIa(ia, cfg), ...envDaConta }, cwd: home || tmpdir(), timeoutMs: 15_000 }).catch(() => null);
+  return r !== null && !r.estourouTempo && r.exitCode === 0;
+}
+function emitirContas(): void {
+  janelaWeb()?.webContents.send(CANAIS_DESKTOP.contasMudaram, contasDoApp.listar() satisfies ContasNaTela[]);
+}
+const contasDoApp = criarContasDoApp({
+  base: pastaDasContas,
+  padrao: (ia) => diretorioPadrao(ia, process.env, homedir()),
+  ler: () => lerContasDoMac(arquivoDasContas),
+  gravar: (c) => gravarContasDoMac(arquivoDasContas, c),
+  preparar: async (ia, id) => { await prepararPastaDaConta({ base: pastaDasContas, ia, id, padrao: diretorioPadrao(ia, process.env, homedir()) }); },
+  remover: (ia, id) => removerPastaDaConta({ base: pastaDasContas, ia, id, logout: (env) => logoutDaConta(ia, env) }),
+  // A conta em uso mudou: a vigia sonda de novo (refaz o registry com o ambiente dela) e o cartão relê a conta.
+  aoMudarConta: (ia) => {
+    log("info", "conta_em_uso_mudou", { ia });
+    contaLidaEm.delete(ia);
+    void atualizarConta(ia, true);
+    return vigiaIas?.contaMudou(ia).catch(() => undefined);
+  },
+  aoMudar: emitirContas,
+  agora: Date.now,
+  // A conta 1 renovou: volta a ela sem esperar outra sondagem (QA do NOD-211).
+  agendar: agendarTimer,
+});
 
 const loginIas = criarLoginDasIas({
   iniciar: iniciarLogin,
@@ -876,6 +952,8 @@ else {
   // ADR-089: o `exit` do Node também leva os grupos, mas o will-quit é o fim garantido do app (Cmd+Q, SIGTERM, SIGHUP).
   app.on("will-quit", () => encerrarGruposVivos());
   void app.whenReady().then(async () => {
+    // ADR-101: o contas.json antes de qualquer config dos drivers (a conta em uso vai no ambiente deles).
+    await contasDoApp.iniciar().catch((erro: unknown) => log("erro", "contas_ler_falhou", { erro: erro instanceof Error ? erro.name : "desconhecido" }));
     // NOD-138: o log() do app passa a gravar em ~/Library/Logs/nod antes de qualquer outra coisa, e as quedas viram linha.
     definirDestinoDoLog(criarArquivoDeLog({ dir: app.getPath("logs"), maxBytes: MAX_BYTES_LOG }));
     instalarOuvintesDeQueda({ app, processo: process, registrar: (campos) => log("erro", "app_processo_caiu", campos), encerrando: () => encerrando, ehJanelaPrincipal: (conteudo) => !!janela && !janela.isDestroyed() && conteudo === janela.webContents });
@@ -987,6 +1065,29 @@ else {
       }
       return estadoAtual(lida);
     });
+    // definido em 2026-10-12 (ADR-101): as várias contas. A página escolhe a IA e a posição; o resto é validado aqui.
+    ipcMain.handle(CANAIS_DESKTOP.contasListar, (e): ContasNaTela[] => { validarRemetenteWeb(e); return contasDoApp.listar(); });
+    const iaDasContasDoPedido = (e: IpcMainInvokeEvent, ia: unknown): IaDesktop => {
+      validarRemetenteWeb(e);
+      const lida = iaDasContas(ia);
+      if (!lida || !contasDoApp.carregadas()) throw new Error("entrada_invalida");
+      return lida;
+    };
+    ipcMain.handle(CANAIS_DESKTOP.contasUsar, (e, ia: unknown, posicao: unknown) => contasDoApp.usar(iaDasContasDoPedido(e, ia), posicao));
+    ipcMain.handle(CANAIS_DESKTOP.contasAdicionar, async (e, ia: unknown, apelido: unknown): Promise<boolean> => {
+      const lida = iaDasContasDoPedido(e, ia);
+      if (loginIas.estado(lida)?.fase === "aguardando") return false;
+      if (!(await contasDoApp.comecarAdicao(lida, apelido))) return false;
+      contaPendente.add(lida);
+      await loginIas.entrar(lida);
+      return true;
+    });
+    ipcMain.handle(CANAIS_DESKTOP.contasRemover, (e, ia: unknown, posicao: unknown) => contasDoApp.remover(iaDasContasDoPedido(e, ia), posicao));
+    ipcMain.handle(CANAIS_DESKTOP.contasFecharFalha, (e, ia: unknown) => contasDoApp.fecharFalha(iaDasContasDoPedido(e, ia)));
+    ipcMain.handle(CANAIS_DESKTOP.contasMover, (e, ia: unknown, de: unknown, para: unknown) => contasDoApp.mover(iaDasContasDoPedido(e, ia), de, para));
+    ipcMain.handle(CANAIS_DESKTOP.contasRenomear, (e, ia: unknown, posicao: unknown, apelido: unknown) => contasDoApp.renomear(iaDasContasDoPedido(e, ia), posicao, apelido));
+    ipcMain.handle(CANAIS_DESKTOP.contasDefinirModo, (e, ia: unknown, modo: unknown) => contasDoApp.definirModo(iaDasContasDoPedido(e, ia), modo));
+    ipcMain.handle(CANAIS_DESKTOP.contasDefinirTroca, (e, ia: unknown, posicao: unknown, ligado: unknown) => contasDoApp.definirTrocaAutomatica(iaDasContasDoPedido(e, ia), posicao, ligado));
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });
     // ADR-069: entrar pelo navegador e voltar com a chave, sem copiar nada. A invocação dura até a pessoa confirmar (ou o prazo vencer).
     ipcMain.handle("nod:parear", async (e, valor: unknown) => {
