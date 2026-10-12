@@ -6,6 +6,7 @@ import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidad
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
+import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
@@ -362,6 +363,22 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<{ n: number }[]>`
         select count(*)::int as n from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId} and acordar_em is not null`;
       return l?.n ?? 0;
+    },
+
+    /**
+     * ADR-099 §5 (parte 1, definido em 2026-10-12): as últimas voltas marcadas que retomam este turno, da mais nova para a
+     * mais antiga, com o que a regra de "nada novo" lê (src/domain/voltas-sem-novidade.ts): se a volta marcou outra, se
+     * abriu decisão e se pediu algo a um colega (mensagem `handoff` dela).
+     */
+    async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
+      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
+        select t.estado, t.despertar_em is not null as marcou_volta,
+          exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
+          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
+        from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
+        order by t.criado_em desc, t.id desc limit ${limite}`;
+      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega }));
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */

@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ESTADOS_ABERTOS_TRABALHO, type TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import type { FrameSse } from "../../../src/contracts/frame.ts";
+import { esperaDoTrabalho } from "../../../src/domain/trabalho.ts";
 import { aplicarFrame, conversaIdNaTela, estadoInicial, faixaAbertaAoNavegar, invalidacoesDaTela, reduzir, type Estado, type Tela } from "../../../web/estado/reducer.ts";
 import { ESPERA_TELEMETRIA_MS, LOTE_TELEMETRIA, criarTelemetria } from "../../../web/lib/telemetria-linhas.ts";
-import { ESTADOS_ABERTOS, agrupar, filtrar, listaPararTasks, memoriaLegivel, pilulaMemoria, pontoTrabalho, resumoDaPilula, telaAoFechar, telaDaTask, textoPararTasks, tituloCurto } from "../../../web/lib/trabalhos.ts";
+import { ESTADOS_ABERTOS, agrupar, filtrar, foraDoMac, listaPararTasks, memoriaLegivel, pilulaMemoria, pontoTrabalho, resumoDaPilula, telaAoFechar, telaDaTask, textoPararTasks, tituloCurto } from "../../../web/lib/trabalhos.ts";
 import { comFerramenta, comTexto, ATIVIDADE_VAZIA } from "../../../web/lib/atividade.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { renderTaxasLinhas } from "../../../web/telas/modo-dev.ts";
@@ -279,6 +280,18 @@ describe("barra lateral (#196, K8 variante 3)", () => {
     expect(chipTrabalhosDoBot(estadoCom([trabalho("b", { estado: "na_fila" })]), { id: "leo", cor: "c-purple", conversaId: "c-leo" })).not.toContain("pulso-trab");
   });
 
+  it("ADR-099 (parte 1): só esperando (volta marcada ou colega), o ponto vazado da espera, sem piscar; com um trabalhando, pisca", () => {
+    const leo = { id: "leo", cor: "c-purple" as const, conversaId: "c-leo" };
+    const volta = trabalho("volta", { acordaEm: AGORA + 20 * MIN });
+    const colega = trabalho("colega", { esperandoColega: { nome: "Ze 1", desde: AGORA - 10 * MIN, trabalhoId: null } });
+    expect(chipTrabalhosDoBot(estadoCom([volta, colega]), leo)).toBe('<span class="chip-trab" title="2 trabalhos abertos · 2 esperando"><span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>2</span>');
+    const comUm = chipTrabalhosDoBot(estadoCom([volta, colega, trabalho("vivo", { turnoVivoId: "t1" })]), leo);
+    expect(comUm).toContain("ponto-trabalho c-purple pulso-trab");
+    expect(comUm).toContain('title="3 trabalhos abertos · 2 esperando"');
+    // Precisa de você junto com a espera: o ponto do bot, sem piscar (o azul por bot fica para a parte 5 da ADR-099).
+    expect(chipTrabalhosDoBot(estadoCom([volta, trabalho("p", { estado: "precisa_de_voce" })]), leo)).toContain('class="ponto-trabalho c-purple"');
+  });
+
   it("CSS: opacidade em 1,6 s e nenhuma animação com prefers-reduced-motion", () => {
     expect(css).toMatch(/@keyframes pulsa-trab \{ 0%, 100% \{ opacity: 1; \} 50% \{ opacity: \.3; \} \}/);
     expect(css).toMatch(/\.pulso-trab \{ animation: pulsa-trab 1\.6s ease-in-out infinite; \}/);
@@ -330,7 +343,7 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
   it("'Todos os trabalhos': todos os bots, o resumo, a memória de cada um e os filtros De você / Rotinas / Entre bots", () => {
     const e = estadoCom(lista, { tela: { tipo: "trabalhos" }, trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: 3174 } });
     const html = renderTodosOsTrabalhos(e);
-    expect(html).toContain("3 rodando · 1 na fila · 1 precisa de você · os bots usam 3,1 GB do seu Mac");
+    expect(html).toContain("3 trabalhando · 1 na fila · 1 precisa de você · os bots usam 3,1 GB do seu Mac");
     // QA (2026-10-08): com 0 MB (nenhum harness com processo próprio) a frase da memória some, em vez de "0 MB".
     expect(renderTodosOsTrabalhos({ ...e, trabalhos: { trabalhos: lista, pressao: null, memoriaTotalMb: 0 } })).not.toContain("os bots usam");
     expect(html.indexOf("Login do app")).toBeLessThan(html.indexOf("Revisar dados"));
@@ -344,6 +357,55 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
     expect(filtrar(lista, "rotinas").map((t) => t.id)).toEqual(["vendas"]);
     expect(filtrar(lista, "voce").map((t) => t.id)).toEqual(["churn", "migrar", "nps", "velho"]);
     expect(memoriaLegivel(620)).toBe("620 MB");
+  });
+});
+
+describe("esperar não é trabalhar (ADR-099, parte 1)", () => {
+  // O dia 11/10: um trabalhando de fato, onze voltas marcadas do Ze 1 e duas tasks do Leonardo esperando o Ze 1.
+  const vivo = trabalho("vivo", { titulo: "Corrigir o teste", turnoVivoId: "turno-vivo", memoriaMb: 300 });
+  const voltas = Array.from({ length: 11 }, (_, i) => trabalho(`volta-${i}`, { agenteId: "dev1", titulo: `PR ${i}`, acordaEm: AGORA + (11 - i) * MIN }));
+  const colegas = [0, 1].map((i) => trabalho(`colega-${i}`, { titulo: `Orquestrar ${i}`, esperandoColega: { nome: "Dev 1", desde: AGORA - (i + 1) * 10 * MIN, trabalhoId: null } }));
+  const fila = trabalho("fila", { titulo: "Relatório de NPS", estado: "na_fila" });
+  const dia = [vivo, ...voltas, ...colegas, fila];
+
+  it("agrupar: Trabalhando só com turno vivo; quem espera a volta ou um colega vai para Esperando (a volta mais cedo primeiro)", () => {
+    const g = agrupar(dia, AGORA);
+    expect(g.trabalhando.map((t) => t.id)).toEqual(["vivo"]);
+    expect(g.esperando).toHaveLength(13);
+    expect(g.esperando.slice(0, 2).map((t) => t.id)).toEqual(["volta-10", "volta-9"]);
+    expect(g.esperando.slice(-2).map((t) => t.id)).toEqual(["colega-1", "colega-0"]);
+    expect(g.fila.map((t) => t.id)).toEqual(["fila"]);
+    // A volta já vencida que ninguém pegou ainda (o Mac fora, ou segurado) também não trabalha.
+    expect(agrupar([trabalho("vencida", { acordaEm: AGORA - MIN })], AGORA).esperando.map((t) => t.id)).toEqual(["vencida"]);
+    // Com o turno vivo, a volta já acordou: trabalha.
+    expect(agrupar([trabalho("acordou", { acordaEm: AGORA - MIN, turnoVivoId: "t" })], AGORA).trabalhando.map((t) => t.id)).toEqual(["acordou"]);
+  });
+
+  it("'Todos os trabalhos': '1 trabalhando · 13 esperando · 1 na fila' e o grupo Esperando entre Trabalhando e Na fila", () => {
+    const e = estadoCom(dia, { tela: { tipo: "trabalhos" }, trabalhos: { trabalhos: dia, pressao: null, memoriaTotalMb: 300 } });
+    const html = renderTodosOsTrabalhos(e);
+    expect(html).toContain("1 trabalhando · 13 esperando · 1 na fila · os bots usam 300 MB do seu Mac");
+    const ordem = ["Trabalhando · 1", "Esperando · 13", "Na fila · 1"].map((t) => html.indexOf(t));
+    expect(ordem.every((i) => i >= 0)).toBe(true);
+    expect([...ordem].sort((a, b) => a - b)).toEqual(ordem);
+    expect(html).toContain('data-grupo="esperando"');
+    expect(html).toContain("esperando Dev 1");
+    expect(html).not.toContain("Trabalhando · 14");
+  });
+
+  it("a gaveta do bot: Esperando separado de Trabalhando", () => {
+    const html = renderGavetaTrabalhos(estadoCom(dia), "leo");
+    expect(html).toContain("Trabalhando · 1");
+    expect(html).toContain("Esperando · 2");
+    const ze = renderGavetaTrabalhos(estadoCom(dia), "dev1");
+    expect(ze).toContain("Esperando · 11");
+    expect(ze).not.toContain("Trabalhando ·");
+  });
+
+  it("a web repete a regra do domínio (esperaDoTrabalho) em foraDoMac", () => {
+    for (const t of [...dia, trabalho("x", { estado: "precisa_de_voce", acordaEm: AGORA + MIN }), trabalho("vencida", { acordaEm: AGORA - MIN })]) {
+      expect(foraDoMac(t)).toBe(esperaDoTrabalho(t) !== null);
+    }
   });
 });
 

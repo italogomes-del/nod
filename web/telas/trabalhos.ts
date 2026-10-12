@@ -100,16 +100,23 @@ export function renderFaixaTrabalhos(estado: Estado, agenteId: string): string {
 
 /**
  * O chip ao lado do nome do bot com trabalho aberto: o número e um ponto na cor do bot, piscando de leve enquanto algum
- * roda (a animação some com `prefers-reduced-motion`). Sem trabalho, nada — um sinal por bot, sem empilhar badges.
+ * trabalha de fato (a animação some com `prefers-reduced-motion`); só esperando, o ponto vazado da espera. Sem trabalho,
+ * nada — um sinal por bot, sem empilhar badges.
  */
 export function chipTrabalhosDoBot(estado: Estado, a: Pick<Agente, "id" | "cor" | "conversaId">): string {
   // Só a lista de `GET trabalhos`: a barra é lembrada pelo que lê (web/lib/lembrar.ts), e ler `conversas` a redesenharia a
   // cada mensagem de qualquer bot (medido em 2026-09-30, ADR-061: redesenho por frame travava a tela).
   const lista = abertosDoBot({ trabalhos: estado.trabalhos, conversas: {}, trabalhoDetalhe: {} }, a.id);
   if (lista.length === 0) return "";
-  const rodando = lista.some((t) => t.estado === "rodando");
+  // definido em 2026-10-12 (ADR-099, parte 1): só pisca com algo trabalhando de fato; com o bot só esperando (a volta
+  // marcada ou um colega), o ponto vazado da espera — o mesmo da linha da task (`pontoTrabalho`).
+  const trabalhando = lista.some((t) => t.estado === "rodando" && !foraDoMac(t));
+  const esperando = lista.filter((t) => foraDoMac(t)).length;
+  const soEspera = !trabalhando && esperando > 0 && !lista.some((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso");
   const n = lista.length;
-  return `<span class="chip-trab" title="${n} ${n === 1 ? "trabalho aberto" : "trabalhos abertos"}"><span class="ponto-trabalho ${esc(a.cor)}${rodando ? " pulso-trab" : ""}" aria-hidden="true"></span>${n}</span>`;
+  const titulo = `${n} ${n === 1 ? "trabalho aberto" : "trabalhos abertos"}${esperando > 0 ? ` · ${esperando} esperando` : ""}`;
+  const ponto = soEspera ? "fora-do-mac" : `${esc(a.cor)}${trabalhando ? " pulso-trab" : ""}`;
+  return `<span class="chip-trab" title="${titulo}"><span class="ponto-trabalho ${ponto}" aria-hidden="true"></span>${n}</span>`;
 }
 
 const ICONE_TRABALHOS = '<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="14" height="11" rx="2.2"/><path d="M7.5 5.5V4.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2v1.3"/><path d="M3 10h14"/></svg>';
@@ -127,6 +134,8 @@ export function renderIconeTrabalhos(estado: Estado): string {
 const GRUPOS: { chave: keyof GruposTrabalhos; titulo: string }[] = [
   { chave: "precisa", titulo: "Precisa de você" },
   { chave: "trabalhando", titulo: "Trabalhando" },
+  // definido em 2026-10-12 (ADR-099, parte 1): quem só espera a volta marcada ou um colega, abaixo de quem trabalha.
+  { chave: "esperando", titulo: "Esperando" },
   { chave: "fila", titulo: "Na fila" },
   { chave: "terminados", titulo: "Terminados hoje" },
 ];
@@ -136,7 +145,7 @@ function detalheDaLinha(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: nu
   return progresso(t, todos, agora, undefined, segurando);
 }
 
-/** O nível "Trabalhos" da gaveta do bot: os quatro grupos, só os que têm algo. */
+/** O nível "Trabalhos" da gaveta do bot: os grupos de `GRUPOS`, só os que têm algo. */
 export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string {
   const bot = agente(estado, agenteId);
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
@@ -150,12 +159,15 @@ export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string 
 }
 
 /**
- * Contagem do topo de "Todos os trabalhos": "6 rodando · 1 na fila · 2 precisam de você · os bots usam 3,1 GB do seu Mac".
- * Revisto em 2026-10-09 (a tela fala por máquina): a memória por máquina ("0,4 GB do seu Mac e 0,7 GB na nod-motor-teste").
+ * Contagem do topo de "Todos os trabalhos": "1 trabalhando · 11 esperando · 1 na fila · 2 precisam de você · os bots usam
+ * 3,1 GB do seu Mac". Revisto em 2026-10-09 (a tela fala por máquina): a memória por máquina ("0,4 GB do seu Mac e 0,7 GB
+ * na nod-motor-teste"). Revisto em 2026-10-12 (ADR-099, parte 1): "trabalhando" no lugar de "rodando", e quem só espera
+ * conta à parte.
  */
 function resumoDosTrabalhos(g: GruposTrabalhos, memoria: string): string {
   const partes = [
-    `${g.trabalhando.length} rodando`,
+    `${g.trabalhando.length} trabalhando`,
+    g.esperando.length ? `${g.esperando.length} esperando` : "",
     g.fila.length ? `${g.fila.length} na fila` : "",
     g.precisa.length ? `${g.precisa.length} ${g.precisa.length === 1 ? "precisa" : "precisam"} de você` : "",
     // definido em 2026-10-08 (QA): sem leitura útil (0 MB, harness sem processo próprio) a frase some em vez de dizer "0 MB".

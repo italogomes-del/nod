@@ -1,7 +1,7 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
-import { pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
+import { esperaDoTrabalho, pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
 import { trabalhosParaDto } from "./trabalhos.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
@@ -219,7 +219,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
   // revisto em 2026-10-08 (revisão do épico, S12): a task de rotina que pode abrir outras também (a mãe, nunca a filha).
-  const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
+  // revisto em 2026-10-12 (ADR-099, parte 1): a task que só espera (volta marcada, colega) vai como "esperando", não
+  // "rodando" — em 11/10 o orquestrador via 13 tasks rodando com uma trabalhando e empilhava mais.
+  const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = input.maquinaRemota ? null : await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
