@@ -1,6 +1,6 @@
 # Plano: um dono por bot
 
-Entrega da [ADR-098](adr/adr-098-um-dono-por-bot.md) em seis partes. Cada parte vai para produção sozinha e já melhora o
+Entrega da [ADR-099](adr/adr-099-um-dono-por-bot.md) em seis partes. Cada parte vai para produção sozinha e já melhora o
 que se viu em 11/10; a ordem põe primeiro o que tira a confusão e o desperdício, depois a mudança de forma.
 
 Como medir: os números de referência são os de 11/10, lidos na produção (`trabalhos` e `turnos` por bot e por dia:

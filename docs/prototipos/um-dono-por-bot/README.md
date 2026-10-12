@@ -1,6 +1,6 @@
 # Protótipo: um dono por bot
 
-Protótipo da [ADR-098](../../adr/adr-098-um-dono-por-bot.md) e do [plano](../../plano-um-dono-por-bot.md), feito em
+Protótipo da [ADR-099](../../adr/adr-099-um-dono-por-bot.md) e do [plano](../../plano-um-dono-por-bot.md), feito em
 2026-10-11 para o Marlon aprovar. O canvas interativo é a página "Um dono por bot" de
 https://claude.ai/artifact/5G1k3LayQRehZoP4ZmuWyQ (privado, na conta em que foi criado). Esta pasta é a cópia que não
 depende de acesso a ele.

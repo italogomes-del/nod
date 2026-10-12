@@ -1,4 +1,4 @@
-# ADR-098 — Um dono por bot: a conversa coordena, as frentes trabalham por baixo
+# ADR-099 — Um dono por bot: a conversa coordena, as frentes trabalham por baixo
 
 Status: proposta · Data: 2026-10-11 · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) (tasks
 paralelas), [ADR-084](adr-084-pedido-a-colega-parado-avisa-ou-retoma.md) (pedido a colega parado),
