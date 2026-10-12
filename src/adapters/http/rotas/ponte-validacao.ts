@@ -22,6 +22,7 @@ import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
+import type { TipoAnexo } from "../../../contracts/anexo.ts";
 import { HARNESSES, SEM_CAPACIDADES, type CapacidadesHarness, type IdHarness } from "../../../contracts/harness.ts";
 
 export function exigir(condicao: unknown): asserts condicao {
@@ -141,14 +142,15 @@ function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
   return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
+const TIPOS_ANEXO: readonly TipoAnexo[] = ["imagem", "pdf", "texto"];
 /**
  * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente
  * = app antigo (undefined, e a absorção segue como antes); fora do formato, a renovação é recusada e o app reenvia.
  */
 /**
  * definido em 2026-10-08 (revisão do épico, S15): as capacidades que a máquina anuncia por harness no conectar. Só ids
- * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true`; o resto é ignorado (o anúncio é
- * extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
+ * integrados e só as chaves de CapacidadesHarness, cada uma `true` só se veio `true` (`anexos`: só os tipos conhecidos);
+ * o resto é ignorado (o anúncio é extra: app antigo não manda, e nada que dependa dele acontece). Nunca recusa o conectar.
  */
 export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
@@ -158,7 +160,9 @@ export function capacidadesAnunciadas(v: unknown): Partial<Record<IdHarness, Cap
     const c = anunciadas[h.id];
     if (!h.integrado || typeof c !== "object" || c === null || Array.isArray(c)) continue;
     const bruto = c as Record<string, unknown>;
-    saida[h.id] = Object.fromEntries(Object.keys(SEM_CAPACIDADES).map((k) => [k, bruto[k] === true])) as CapacidadesHarness;
+    // NOD-207: `anexos` é uma lista; fica só o que é tipo de anexo conhecido.
+    const anexos = Array.isArray(bruto.anexos) ? TIPOS_ANEXO.filter((t) => (bruto.anexos as unknown[]).includes(t)) : [];
+    saida[h.id] = { ...SEM_CAPACIDADES, ...Object.fromEntries(Object.entries(SEM_CAPACIDADES).filter(([, v]) => typeof v === "boolean").map(([k]) => [k, bruto[k] === true])), anexos };
   }
   return Object.keys(saida).length > 0 ? saida : undefined;
 }
@@ -259,6 +263,19 @@ export function comandos(v: unknown): CatalogoDeComandos | undefined {
   return { comandos: lista, soDoTerminal: c.soDoTerminal as string[], versaoCli: c.versaoCli as string | null };
 }
 
+/**
+ * definido em 2026-10-11: o motivo de cada negação do hook do nod. Extra como o uso do plano: fora do formato, some e a
+ * pílula fica com o texto de antes; nunca recusa a entrega.
+ */
+function negacoesDoNod(v: unknown): { nome: string; motivo: string }[] | undefined {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 1000) return undefined;
+  const ok = v.every((x) => {
+    const o = typeof x === "object" && x !== null ? (x as Record<string, unknown>) : null;
+    return o !== null && typeof o.nome === "string" && o.nome.length <= 200 && typeof o.motivo === "string" && o.motivo.length <= 1000;
+  });
+  return ok ? (v as { nome: string; motivo: string }[]).map(({ nome, motivo }) => ({ nome, motivo })) : undefined;
+}
+
 export function entrega(v: unknown, machineId: string, agora: number = Date.now()): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -274,6 +291,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const raioX = execucao(r.execucao);
   const catalogo = comandos(r.comandos);
   const causa = causaSemIa(r.causaSemIa);
+  const doNod = negacoesDoNod(r.negacoesDoNod);
   // NOD-179: o uso do plano também é extra; fora do formato ou com número absurdo, some e a entrega segue.
   const uso = r.usoDoPlano === undefined ? undefined : usoDoPlanoValido(r.usoDoPlano, agora);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
@@ -294,6 +312,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(catalogo ? { comandos: catalogo } : {}),
     ...(erroCru ? { erroCru } : {}),
     ...(causa ? { causaSemIa: causa } : {}),
+    ...(doNod ? { negacoesDoNod: doNod } : {}),
     ...(uso ? { usoDoPlano: uso } : {}),
     ...(voltaEm !== null ? { limiteVoltaEm: voltaEm } : {}),
   } };

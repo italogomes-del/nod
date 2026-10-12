@@ -120,6 +120,36 @@ done
 rm -rf "$BAIXADOS"
 passo "motor $NOD_VERSAO"
 
+# ADR-097 (fase 0b): sem swap, um pico de memória trava a máquina por minutos (medido na VM dos bots em 11/10: ~20 min
+# trocando páginas). Swap comprimido em memória (zram), o padrão do Fedora: metade da memória, até 8 GB. Sem o módulo
+# zram no kernel, um arquivo de swap de 4 GB no disco, se sobra espaço. Só quando não há swap nenhum: quem já tem o seu
+# fica com o dele. Falhar aqui não para a instalação.
+ligar_swap() {
+  MEM_MB=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+  ZRAM_MB=$((MEM_MB / 2))
+  if [ "$ZRAM_MB" -gt 8192 ]; then ZRAM_MB=8192; fi
+  if $SUDO modprobe zram 2>/dev/null; then
+    $SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq zram-tools >/dev/null || return 1
+    printf 'ALGO=zstd\\nSIZE=%s\\nPRIORITY=100\\n' "$ZRAM_MB" | $SUDO tee /etc/default/zramswap >/dev/null || return 1
+    $SUDO systemctl enable zramswap >/dev/null 2>&1 || true
+    $SUDO systemctl restart zramswap || return 1
+    SWAP_LIGADO="memória extra comprimida (zram, $ZRAM_MB MB)"
+  elif [ "$(df -Pm / | awk 'NR == 2 { print $4 }')" -gt 20480 ]; then
+    $SUDO fallocate -l 4G /swapfile-nod 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile-nod bs=1M count=4096 status=none || return 1
+    $SUDO chmod 600 /swapfile-nod && $SUDO mkswap /swapfile-nod >/dev/null && $SUDO swapon /swapfile-nod || return 1
+    grep -q '^/swapfile-nod ' /etc/fstab || echo '/swapfile-nod none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
+    SWAP_LIGADO="memória extra no disco (arquivo de swap de 4 GB)"
+  else
+    return 1
+  fi
+}
+if [ -z "$(swapon --noheadings 2>/dev/null)" ]; then
+  SWAP_LIGADO=""
+  ligar_swap || true
+  if [ -n "$(swapon --noheadings 2>/dev/null)" ] && [ -n "$SWAP_LIGADO" ]; then passo "$SWAP_LIGADO"
+  else printf 'Aviso: não deu para ligar memória extra (swap). Com a memória cheia, a máquina pode travar por alguns minutos.\\n'; fi
+fi
+
 $SUDO tee /usr/local/bin/nod-motor >/dev/null <<'NODMOTOR'
 #!/bin/sh
 # Roda o motor do Nod como o usuário nod (ADR-090). Depois de parear ou entrar numa IA, o serviço recomeça.
@@ -166,6 +196,9 @@ RestartSec=5
 RestartPreventExitStatus=2
 KillMode=mixed
 TimeoutStopSec=30
+# ADR-097 (fase 0b): sem memória, o Linux mata um processo (um teste, um typecheck) e o motor segue. O padrão (stop)
+# derrubava o serviço inteiro, com todos os bots e turnos da máquina (11/10, 14:35 UTC).
+OOMPolicy=continue
 NoNewPrivileges=true
 PrivateTmp=true
 

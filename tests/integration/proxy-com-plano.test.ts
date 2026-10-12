@@ -45,7 +45,7 @@ describe("proxy com plano: tools/list do plano, tools/call despachado ao servido
     await repos.conectores.registrarSonda("k1", { ok: true, agora: agora(), catalogo: [{ nome: "somar", descricao: "soma", schema: ESQUEMA_SOMAR, readOnlyHint: true }, { nome: "gravar", descricao: "grava", schema: { type: "object" }, readOnlyHint: false }] });
     const consentimento = await repos.mensagens.criar({ conversaId: conversa?.id ?? "", autoria: { autor_tipo: "pessoa", autor_id: PESSOA_MARLON, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "consentimento", texto: "ok", confianca: "confiavel" });
     await repos.concessoes.conceder({ agenteId, conectorId: "k1", capacidade: "somar", mensagemId: consentimento?.id ?? "" });
-    await repos.turnos.enfileirar({ id: turnoId, conversaId: conversa?.id ?? "", agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId: conversa?.id ?? "", agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     await repos.turnos.reivindicar({ machineId: "m1", agora: agora() });
 
     srv = await servidorDeTeste(rotasInternas({ dentro: memoria.dentro, tokens, agora }), { autorizarTokenTurno: tokens.autorizar });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, SEM_CAPACIDADES } from "../../../src/contracts/harness.ts";
-import { estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
+import { esperaDoTrabalho, estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
 
 const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null };
 
@@ -79,5 +79,21 @@ describe("promoveNaRede (rede de 2 min)", () => {
     expect(promoveNaRede({ ...ok, despachadoHaMs: 2_999, redeMs: 3_000 })).toBe(false);
     expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000, capacidades: SEM_CAPACIDADES })).toBe(false);
     expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000 })).toBe(false);
+  });
+});
+
+describe("esperaDoTrabalho (ADR-099, parte 1: esperar não é trabalhar)", () => {
+  const rodando = { estado: "rodando" as const, turnoVivoId: null };
+  const colega = { nome: "Ze 1", desde: 1, trabalhoId: null };
+  it.each([
+    ["volta marcada, sem turno vivo", { ...rodando, acordaEm: 2_000 }, "volta"],
+    ["esperando colega, sem turno vivo", { ...rodando, esperandoColega: colega }, "colega"],
+    ["colega e volta juntos: o colega", { ...rodando, esperandoColega: colega, acordaEm: 2_000 }, "colega"],
+    ["com turno vivo trabalha, mesmo com a volta ou o colega", { ...rodando, turnoVivoId: "t", esperandoColega: colega, acordaEm: 2_000 }, null],
+    ["rodando sem nada a esperar (retomada na fila)", rodando, null],
+    ["precisa de você não é espera", { ...rodando, estado: "precisa_de_voce" as const, acordaEm: 2_000 }, null],
+    ["na fila não é espera", { ...rodando, estado: "na_fila" as const, esperandoColega: colega }, null],
+  ])("%s", (_nome, t, esperado) => {
+    expect(esperaDoTrabalho(t)).toBe(esperado);
   });
 });

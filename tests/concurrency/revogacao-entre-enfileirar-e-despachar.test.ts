@@ -64,7 +64,7 @@ describeIntegracao("concorrência: revogação entre enfileirar e PUXAR", () => 
       await repos.conectores.registrarSonda(conectorId, { ok: true, catalogo: [{ nome: "listar", descricao: "", schema: { type: "object" }, readOnlyHint: true }], agora: Date.now() });
       await repos.mensagens.criar({ id: mensagemId, conversaId, autoria: autoriaPessoa(PESSOA.pessoaId), kind: "consentimento", texto: "ok", confianca: "confiavel" });
       await repos.concessoes.conceder({ id: concessaoId, agenteId, conectorId, capacidade: "listar", mensagemId });
-      await repos.turnos.enfileirar({ id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     });
 
     // Controle positivo (conexão 1, antes da revogação): a ferramenta ENTRA.

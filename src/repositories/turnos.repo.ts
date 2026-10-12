@@ -1,10 +1,12 @@
-import type { PreferenciaHarness } from "../contracts/harness.ts";
+import { HARNESS_LEGADO, type PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
+import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
+import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
@@ -38,6 +40,7 @@ interface Linha {
   custo_usd: string | null;
   modelo: string;
   harness?: PreferenciaHarness;
+  executor: Executor;
   criado_em: Date;
   mensagem_origem_id: string | null;
   absorvido_por: string | null;
@@ -48,7 +51,7 @@ interface Linha {
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -76,6 +79,7 @@ function paraTurno(l: Linha): Turno {
     custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
     modelo: l.modelo,
     harness: l.harness ?? "auto",
+    executor: l.executor,
     criadoEm: ms(l.criado_em),
     mensagemOrigemId: l.mensagem_origem_id,
     absorvidoPor: l.absorvido_por,
@@ -105,7 +109,11 @@ export type NovoTurno = {
   harness?: PreferenciaHarness;
   retomaTurnoId?: string | null;
   reenvios?: number;
-  executor?: "local" | "catcher";
+  /**
+   * NOD-206: obrigatório — sem padrão silencioso. É o melhor palpite de quem enfileira; o plano grava o executor real
+   * (`registrarExecutor`), porque é lá que ele é decidido.
+   */
+  executor: Executor;
   localityReason?: MotivoLocalidade;
   decididoPor?: string;
   /** Turno que já nasce interrompido (executor indisponível, E9.3): nunca entra na fila. */
@@ -148,7 +156,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
-          ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor ?? "catcher"}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
+          ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
           ${dataOuNull(t.acordarEm)})
@@ -214,8 +222,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               and (t.acordar_em is null or t.acordar_em <= ${data(p.agora)})
               -- ADR-090 (revisão do PR): a máquina que é o alvo do turno o pega mesmo sem a IA pronta; o despacho recusa nomeando a
               -- IA (NOD-171), em vez de o turno esperar em silêncio uma máquina que nunca vai pegá-lo.
-              ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) = any(${[...p.harnessesProntos]}::text[]))
-                ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then 'claude-cli' else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
+              ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end) = any(${[...p.harnessesProntos]}::text[]))
+                ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
               -- definido em 2026-10-09 (ADR-090): onde o bot trabalha (o alvo, abaixo). O turno só sai para o alvo; sem alvo, para
               -- qualquer máquina.
@@ -357,6 +365,22 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.n ?? 0;
     },
 
+    /**
+     * ADR-099 §5 (parte 1, definido em 2026-10-12): as últimas voltas marcadas que retomam este turno, da mais nova para a
+     * mais antiga, com o que a regra de "nada novo" lê (src/domain/voltas-sem-novidade.ts): se a volta marcou outra, se
+     * abriu decisão e se pediu algo a um colega (mensagem `handoff` dela).
+     */
+    async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
+      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
+        select t.estado, t.despertar_em is not null as marcou_volta,
+          exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
+          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
+        from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
+        order by t.criado_em desc, t.id desc limit ${limite}`;
+      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega }));
+    },
+
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
     async juntarEntrada(id: string, texto: string): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
@@ -389,6 +413,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async contaminado(id: string): Promise<boolean> {
       const [l] = await conn<{ sim: boolean }[]>`select contaminado_em is not null as sim from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l?.sim === true;
+    },
+
+    /**
+     * NOD-206: o executor em que o turno de fato roda só é decidido ao emitir o plano; grava-o aqui para a retomada
+     * (sessaoDoTurno) e os relatórios. Só a coluna executor — nunca o estado (tests/conformidade/sem-requeue.test.ts).
+     */
+    async registrarExecutor(id: string, executor: Executor): Promise<void> {
+      await conn`update turnos set executor = ${executor} where tenant_id = ${escopo.tenantId} and id = ${id}`;
     },
 
     /** ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela. */

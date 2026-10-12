@@ -49,7 +49,7 @@ describeIntegracao("computador do bot fora do ar: três falhas, um aviso, plano 
   }, 30000);
 
   const plano = (): Promise<PlanoTurno> => srv.app.dentro(srv.pessoa, async (d) => {
-    const t = await d.repos.turnos.enfileirar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    const t = await d.repos.turnos.enfileirar({ executor: "catcher", agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
     return (await emitirPlanoTurno(d, { turnoId: t!.id, machineId: randomUUID(), executor: "catcher" })).data;
   });
   async function observar(p: PlanoTurno): Promise<{ erro?: string; instrucao?: string }> {

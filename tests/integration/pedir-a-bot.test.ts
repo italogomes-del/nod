@@ -60,7 +60,7 @@ async function githubDoDev1(repos: Repos, dev1: { agenteId: string; conversaId: 
  */
 async function turnoDeRotina(repos: Repos, de: { agenteId: string; conversaId: string }, exigeAprovacao: boolean, o: { leuDeFora?: boolean } = {}) {
   const rotina = await repos.rotinas.criar({ agenteId: de.agenteId, conversaId: de.conversaId, cron: "*/10 * * * *", fusoIana: "UTC", instrucao: "Ler o Slack", fonte: "Slack", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, exigeAprovacao });
-  const turno = await repos.turnos.enfileirar({ conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "confiavel", modelo: "m" });
   await repos.rotinaJanelas.reivindicar({ rotinaId: rotina!.id, instanteAgendado: AGORA, machineId: randomUUID(), executor: "catcher" });
   await repos.rotinaJanelas.vincularTurno({ rotinaId: rotina!.id, instanteAgendado: AGORA, turnoId: turno!.id });
   if (o.leuDeFora) await repos.turnos.contaminar(turno!.id, AGORA);
@@ -162,12 +162,12 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
       const base = { conversaId: taga.conversaId, agenteId: taga.agenteId, prazoEm: AGORA + 60_000, entradaTexto: "x", modelo: "m" };
       const aceitos = [
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 0, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
-        await repos.turnos.enfileirar({ ...base, origem: "conversa", profundidade: 0, entradaConfianca: "nao_confiavel" }),
-        await repos.turnos.enfileirar({ ...base, origem: "conversa", profundidade: 0, entradaConfianca: "confiavel" }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 0, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", profundidade: 0, entradaConfianca: "nao_confiavel" }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", profundidade: 0, entradaConfianca: "confiavel" }),
         // ADR-063: quem cumpre um pedido, ou a continuação de quem pediu, ainda pede até o limite da corrente.
-        await repos.turnos.enfileirar({ ...base, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
       for (const t of aceitos) {
         const tarefa = await repos.turnos.buscar((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data.tarefa_id);
@@ -176,8 +176,8 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       }
 
       const noLimite = [
-        await repos.turnos.enfileirar({ ...base, origem: "delegacao", profundidade: 3, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 3, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "delegacao", profundidade: 3, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 3, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
       for (const t of noLimite) await expect(pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).rejects.toMatchObject({ codigo: "nao_permitido" });
       await expect(pedir(deps, { turnoId: turnoTaga.id, agenteId: dev1.agenteId, conversaId: dev1.conversaId }, "Taga")).rejects.toMatchObject({ codigo: "nao_permitido" });
@@ -192,7 +192,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const dev2 = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
       for (const a of [chico, dev2]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
       const base = { conversaId: taga.conversaId, agenteId: taga.agenteId, origem: "conversa" as const, prazoEm: AGORA + 60_000, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
-      expect((await repos.turnos.enfileirar({ ...base, profundidade: 3 }))?.profundidade).toBe(3);
+      expect((await repos.turnos.enfileirar({ executor: "catcher", ...base, profundidade: 3 }))?.profundidade).toBe(3);
       await expectRejected(trx, () => trx`insert into turnos (tenant_id, owner_id, conversa_id, agente_id, origem, prazo_em, profundidade, entrada_texto, entrada_confianca, modelo)
         values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${taga.conversaId}, ${taga.agenteId}, 'conversa', now(), 4, 'x', 'confiavel', 'm')`, "23514");
 

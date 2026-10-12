@@ -1,5 +1,5 @@
 import type { EsforcoAgente } from "./agente.ts";
-import { MODELO_LUNA_CODEX } from "./harness.ts";
+import { MODELO_LUNA_CODEX, type IdHarness } from "./harness.ts";
 
 /**
  * definido em 2026-09-17: agentes usam o alias Sonnet do CLI. NOD-164 (2026-10-05): as sondas saem do Haiku 4.5
@@ -30,6 +30,7 @@ export const MODELOS_LIGACAO_PADRAO: ModelosLigacao = {
  * 2026-10-05, NOD-164: na ligação ela usa o modelo de voz das outras, MODELOS_LIGACAO_PADRAO/config).
  * No Claude é o alias `fable` (Claude Code 2.1.289: resolve para claude-fable-5-1), que acompanha o Fable mais novo sem
  * release; medido no mesmo dia, `--model fable` com MAX_THINKING_TOKENS=0 respondeu em 1,8 s, como o Haiku. No Codex é
- * o topo do catálogo editorial.
+ * o topo do catálogo editorial. Harness fora da tabela (ainda sem catálogo) não tem mais potente: a guia fica no modelo
+ * escolhido (NOD-207: a tabela decide, não o id).
  */
-export const MODELO_MAIS_POTENTE = { "claude-cli": "fable", "codex-cli": "gpt-6-astra" } as const;
+export const MODELO_MAIS_POTENTE: Partial<Record<IdHarness, string>> = { "claude-cli": "fable", "codex-cli": "gpt-6-astra" };

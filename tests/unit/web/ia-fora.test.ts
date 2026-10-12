@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { HARNESSES } from "../../../src/contracts/harness.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
 import { inventarioDaIa, linhaIaTrocada, pedeInstalar } from "../../../web/telas/ia-fora.ts";
@@ -19,9 +20,9 @@ const PRONTO: Inventario = { estado: "pronto", versao: "1", em: 0 };
 const AUSENTE: Inventario = { estado: "ausente", motivo: "x", em: 0 };
 
 function com(p: { claude: Inventario; codex: Inventario }): Estado {
-  const opcoes = HARNESSES.map((h) => ({ ...h, inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
+  const opcoes = HARNESSES.map((h) => ({ ...h, capacidades: capacidadesDe(h.id), inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
   const emUso = p.claude.estado === "pronto" ? p.claude : p.codex.estado === "pronto" ? p.codex : p.claude;
-  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marcelo" }, inventario: emUso, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, opcoes } } };
+  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marcelo" }, inventario: emUso, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, legado: "claude-cli", opcoes } } };
 }
 const noApp = (sim: boolean) => { if (sim) (globalThis as Record<string, unknown>).nodDesktop = {}; else delete (globalThis as Record<string, unknown>).nodDesktop; };
 afterEach(() => noApp(false));

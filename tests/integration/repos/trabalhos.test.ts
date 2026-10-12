@@ -11,7 +11,7 @@ const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
 const MAQUINA = randomUUID();
 const turno = (conversaId: string, agenteId: string, trabalhoId: string | null) => ({
-  conversaId, agenteId, origem: "conversa" as const, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", trabalhoId,
+  conversaId, agenteId, origem: "conversa" as const, prazoEm: Date.now() + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", trabalhoId, executor: "catcher" as const,
 });
 
 describeIntegracao("trabalhos (0060, ADR-083)", () => {
@@ -39,6 +39,10 @@ describeIntegracao("trabalhos (0060, ADR-083)", () => {
       // Revisão do épico (S22): a mesma leitura de novo não reescreve a linha.
       expect(await repos.trabalhos.atualizarMemoria([{ turnoId: t!.id, mb: 413 }])).toBe(0);
       expect(await repos.trabalhos.buscar(a!.id)).toMatchObject({ sessaoCli: "sessao-1", sessaoHarness: "claude-cli", custoUsd: 0.75, memoriaMb: 413, pasta: "~/nod/Vera/login-do-app-abc123" });
+      // ADR-097 (fase 0c): a leitura que cai muda a última, e o pico fica no maior que o servidor viu.
+      expect(await repos.trabalhos.atualizarMemoria([{ turnoId: t!.id, mb: 300 }])).toBe(1);
+      const [linha] = await trx<{ memoria_mb: number; memoria_pico_mb: number }[]>`select memoria_mb, memoria_pico_mb from trabalhos where id = ${a!.id}`;
+      expect(linha).toEqual({ memoria_mb: 300, memoria_pico_mb: 413 });
       expect((await repos.trabalhos.redeComSessao(conversaId, "sessao-1"))).toBeNull();
     });
   });

@@ -53,7 +53,7 @@ describeIntegracao("liberar app conectado: Permitir e Agora não do cartão da c
     await withRollback(MARLON, async (trx) => {
       const d = depsSobreTrx(trx, MARLON);
       const { bot, gmail, slack } = await preparar(d);
-      const turno = await d.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: d.agora() + 60_000, profundidade: 0, entradaTexto: "já liberei", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: d.agora() + 60_000, profundidade: 0, entradaTexto: "já liberei", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
       if (!turno) throw new Error("turno");
 
       const r = await rota(d, "liberar", bot.agente.id)<Mutacao>({ apps: [{ conectorId: gmail.id, nivel: "leitura" }, { conectorId: slack.id, nivel: "escrita" }] });
@@ -91,7 +91,7 @@ describeIntegracao("liberar app conectado: Permitir e Agora não do cartão da c
       expect((await rota(d, "liberar", bot.agente.id)<Mutacao>({ apps: [{ conectorId: gmail.id, nivel: "leitura" }] })).ids).toEqual({ concedidas: "2", apps: "1" });
 
       // O turno nasce com o relógio do banco (agora de verdade); um dia e um minuto depois ele já não é retomado.
-      await d.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: agora + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: agora + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
       agora += JANELA_RETOMADA_APOS_LIBERAR_MS + 60_000;
       expect((await rota(d, "liberar", bot.agente.id)<Mutacao>({ apps: [{ conectorId: slack.id, nivel: "leitura" }] })).ids).toEqual({ concedidas: "1", apps: "1" });
       expect((await d.repos.turnos.listarDaConversa(bot.conversa.id)).map((t) => t.origem)).toEqual(["conversa"]);

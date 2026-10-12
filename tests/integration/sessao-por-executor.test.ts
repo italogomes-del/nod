@@ -18,7 +18,7 @@ const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
  */
 describeIntegracao("sessão do CLI pertence ao executor (0005)", () => {
   async function planoPara(trx: Parameters<Parameters<typeof withRollback>[1]>[0], executor: "local" | "catcher", conversaId: string, agenteId: string, repos: Awaited<ReturnType<typeof agenteComConversa>>["repos"]) {
-    const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
     const agora = () => Date.now();
     const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
     const r = await emitirPlanoTurno(deps, { turnoId: turno?.id ?? "", machineId: randomUUID(), executor });

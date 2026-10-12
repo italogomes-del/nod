@@ -50,6 +50,9 @@ export function criarConexoes(deps: DepsConexao) {
   // ou falhar o descarta. Guardado por app, ele sobrevivia ao Cancelar e criava a rotina (concedendo o acesso
   // dela) na próxima vez que o app conectasse por qualquer caminho, sem o clique que dizia isso.
   const vivas = new Map<string, { id: number; janela: JanelaLogin | null; depois: Depois | null }>();
+  // definido em 2026-10-12 (NOD-208): apps cuja última tentativa terminou em FALHA_APP — o login deu certo e só a
+  // sonda falhou. O próximo "Tentar de novo" sonda a sessão que já existe antes de abrir um login novo.
+  const comFalhaDoApp = new Set<string>();
   let proximoId = 0;
 
   async function esperarLogin(slug: string, id: number, url: string | null): Promise<void> {
@@ -94,16 +97,40 @@ export function criarConexoes(deps: DepsConexao) {
     // Janela aberta depois de desistir: terminar o login ali não viraria card nenhum (revisão do PR #68).
     try { viva.janela?.close(); } catch { /* já fechada */ }
     vivas.delete(slug);
+    if (frase === FALHA_APP) comFalhaDoApp.add(slug);
     deps.mudou(slug, { url, falhou: frase });
+  }
+
+  /**
+   * NOD-208: depois de FALHA_APP, pergunta UMA vez ao servidor (que sonda de novo, com as próprias tentativas)
+   * antes de refazer o login. true = conectou e a tentativa já foi concluída. Erro ou `falhou` seguem para o login.
+   */
+  async function sondarDeNovo(slug: string, id: number): Promise<boolean> {
+    try {
+      const r = await deps.verificar(slug);
+      if (vivas.get(slug)?.id !== id) return true;
+      if (r.conectado) { await concluir(slug, id); return true; }
+    } catch {
+      // servidor ou sessão indisponível: o login novo resolve
+    }
+    return vivas.get(slug)?.id !== id;
   }
 
   return {
     /** Chamar DENTRO do clique: a janela só abre sem bloqueio quando nasce no gesto da pessoa. */
     async iniciar(slug: string, depois: Depois | null = null): Promise<void> {
       const id = ++proximoId;
-      const janela = deps.abrirJanela(`nod-login-${slug}`);
-      vivas.set(slug, { id, janela, depois });
+      const reSondar = comFalhaDoApp.delete(slug);
+      // Re-sonda primeiro: a janela de login só abre se ela não resolver (senão ficaria em branco durante a sonda).
+      let janela = reSondar ? null : deps.abrirJanela(`nod-login-${slug}`);
+      const viva = { id, janela, depois };
+      vivas.set(slug, viva);
       deps.mudou(slug, { url: null, falhou: null });
+      if (reSondar) {
+        if (await sondarDeNovo(slug, id)) return;
+        // Fora do gesto o navegador pode bloquear a janela: sem ela, o card mostra "Abrir o login" como link.
+        janela = viva.janela = deps.abrirJanela(`nod-login-${slug}`);
+      }
       let r: RespostaConectar;
       try {
         r = await deps.conectar(slug);
@@ -131,18 +158,23 @@ export function criarConexoes(deps: DepsConexao) {
       } catch {
         // janela de outra origem: segue pelo link do card
       }
-      deps.mudou(slug, { url: r.url, falhou: null });
+      // Sem janela (bloqueada, sobretudo a aberta fora do clique depois da re-sonda): o card mostra o link. Janela
+      // que existiu e a pessoa fechou não conta: a espera desiste por ela com FALHA_JANELA_FECHADA.
+      deps.mudou(slug, { url: r.url, falhou: null, ...(janela ? {} : { semJanela: true }) });
       await esperarLogin(slug, id, r.url);
     },
     cancelar(slug: string): void {
       const viva = vivas.get(slug);
       vivas.delete(slug);
+      comFalhaDoApp.delete(slug);
       try { viva?.janela?.close(); } catch { /* já fechada */ }
       deps.mudou(slug, null);
     },
     /** Sessão trocada ou encerrada: nenhuma espera continua perguntando em nome de outra pessoa. */
     cancelarTodas(): void {
       for (const slug of [...vivas.keys()]) this.cancelar(slug);
+      // A FALHA_APP da sessão anterior não vale para a próxima: sem isso, o clique dela sondaria antes do login.
+      comFalhaDoApp.clear();
     },
     esperando(slug: string): boolean {
       return vivas.has(slug);

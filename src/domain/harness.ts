@@ -1,6 +1,6 @@
 import type { EsforcoAgente } from "../contracts/agente.ts";
-import { CAPACIDADES_HARNESS, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
-import type { CapacidadesHarness, CatalogoHarness, IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import { CAPACIDADES_HARNESS, HARNESS_LEGADO, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
+import type { CapacidadesHarness, CatalogoHarness, IdHarness, OpcaoHarness, PreferenciaHarness } from "../contracts/harness.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
@@ -38,7 +38,7 @@ export function causaHarnessIndisponivel(e: unknown): CausaHarnessIndisponivel |
 /** O harness em que o turno está fixado; null = `auto`/`auto`, que vai para qualquer harness pronto. */
 export function harnessFixado(harness: string | undefined, modelo: string): IdHarness | null {
   const pedido = harness ?? "auto";
-  return pedido !== "auto" ? (pedido as IdHarness) : modelo !== "auto" ? "claude-cli" : null;
+  return pedido !== "auto" ? (pedido as IdHarness) : modelo !== "auto" ? HARNESS_LEGADO : null;
 }
 
 /**
@@ -55,7 +55,7 @@ export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: strin
     validarInteligencia(pedido, p.modelo);
   } catch (e) {
     if (e instanceof ErroDeDominio && e.codigo === "entrada_invalida") {
-      throw new ErroDeDominio("executor_indisponivel", { cause: { harness: fixo ?? "claude-cli", modelo: p.modelo, motivo: "modelo_invalido" } satisfies CausaHarnessIndisponivel });
+      throw new ErroDeDominio("executor_indisponivel", { cause: { harness: fixo ?? HARNESS_LEGADO, modelo: p.modelo, motivo: "modelo_invalido" } satisfies CausaHarnessIndisponivel });
     }
     throw e;
   }
@@ -66,7 +66,7 @@ export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: strin
 
 /** O modelo mais potente do harness (MODELO_MAIS_POTENTE); null para harness ainda sem catálogo. */
 export function modeloMaisPotente(harness: IdHarness): string | null {
-  return harness === "claude-cli" || harness === "codex-cli" ? MODELO_MAIS_POTENTE[harness] : null;
+  return MODELO_MAIS_POTENTE[harness] ?? null;
 }
 
 const SEM_SONDA_DO_HARNESS = "não está pronto em nenhum computador conectado";
@@ -102,7 +102,7 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
  */
 export function iaAtualDoCatalogo(catalogo: CatalogoHarness): IdHarness {
   const noMac = catalogo.opcoes.find((h) => h.integrado && ((h.inventario.estado === "ausente" && h.inventario.causa === "cli_antigo") || h.inventario.estado === "nao_autenticado"));
-  return catalogo.padrao ?? noMac?.id ?? "claude-cli";
+  return catalogo.padrao ?? noMac?.id ?? HARNESS_LEGADO;
 }
 
 /**
@@ -112,4 +112,12 @@ export function iaAtualDoCatalogo(catalogo: CatalogoHarness): IdHarness {
 export function capacidadesDe(harness: string | null | undefined): CapacidadesHarness {
   if (!harness || !Object.hasOwn(CAPACIDADES_HARNESS, harness)) return SEM_CAPACIDADES;
   return CAPACIDADES_HARNESS[harness as IdHarness];
+}
+
+/**
+ * As opções do catálogo (`catalogoHarness` na composição): cada harness com as capacidades do contrato e o inventário de
+ * quem chama (o registry local ou as máquinas da pessoa, no compartilhado). A web decide anexo e pasta por `capacidades`.
+ */
+export function opcoesDoCatalogo(inventarioDe: (id: IdHarness) => Inventario): OpcaoHarness[] {
+  return HARNESSES.map((h) => ({ ...h, capacidades: capacidadesDe(h.id), inventario: inventarioDe(h.id) }));
 }

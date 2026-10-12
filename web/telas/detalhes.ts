@@ -8,6 +8,7 @@ import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../li
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { VELOCIDADES, VOZES } from "./ligacao.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
+import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
 import { iasDaTela, ordemDaPessoa, rascunhoDe, renderInteligencia, renderLinhaInteligencia, type ContextoInteligencia } from "./inteligencia.ts";
 import { UI_IAS_INICIAL } from "./cartao-ia.ts";
@@ -119,7 +120,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   const ambiente = dona
     ? `<div class="gv-cartao">
         ${linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`)}
-        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${a.harness !== "codex-cli" ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
+        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`
@@ -278,7 +279,7 @@ function darAcesso(estado: Estado, agenteId: string, nomeBot: string): string {
   });
   const faltam = estado.marketplace.filter((app) => situacaoDoApp(estado, app.slug) !== "conectado").slice(0, 6).map((app) => {
     const login = estado.conectando[app.slug];
-    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
+    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true, login.semJanela === true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
     return `<div class="da-linha">${logoApp(estado, app.slug, app.nome)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
   });
   return `<div class="dar-acesso gv-dar-acesso" aria-label="${esc(`Dar a ${nomeBot} acesso a um app`)}">

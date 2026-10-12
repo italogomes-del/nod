@@ -24,7 +24,7 @@ async function bot(d: D, nome: string, deps = d.deps) {
 
 /** O turno de quem pede: é dele que o pedido parte (profundidade, confiança, rotina). */
 async function turno(d: D, agenteId: string, conversaId: string, origem: OrigemTurno = "conversa", extra: { profundidade?: Profundidade; confianca?: "confiavel" | "nao_confiavel" } = {}) {
-  const t = await d.deps.repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: AGORA + 60_000, profundidade: extra.profundidade ?? 0, entradaTexto: "trabalho", entradaConfianca: extra.confianca ?? "confiavel", modelo: "haiku" });
+  const t = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, prazoEm: AGORA + 60_000, profundidade: extra.profundidade ?? 0, entradaTexto: "trabalho", entradaConfianca: extra.confianca ?? "confiavel", modelo: "haiku" });
   if (!t) throw new Error("turno não criado");
   return t;
 }
@@ -275,7 +275,7 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     const t0 = await turno(d, clarice.id, clarice.conversaId);
     const d1 = (await pedir(d, clarice, t0.id, "Chico", "veja se o CI do PR 212 passa")).data.tarefa_id;
     const tarefa = d.banco.turnos.find((x) => x.id === d1)!;
-    const volta = await d.deps.repos.turnos.enfileirar({ conversaId: tarefa.conversaId, agenteId: tarefa.agenteId, origem: "retomada", retomaTurnoId: d1, prazoEm: AGORA + 600_000, profundidade: tarefa.profundidade, entradaTexto: "[nod] Você marcou para voltar", entradaConfianca: "confiavel", modelo: "haiku", acordarEm: AGORA + 600_000 });
+    const volta = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: tarefa.conversaId, agenteId: tarefa.agenteId, origem: "retomada", retomaTurnoId: d1, prazoEm: AGORA + 600_000, profundidade: tarefa.profundidade, entradaTexto: "[nod] Você marcou para voltar", entradaConfianca: "confiavel", modelo: "haiku", acordarEm: AGORA + 600_000 });
     expect((await entregarRespostaPeer(d.deps, { tarefaId: d1, texto: "Vou esperar o CI." })).data).toEqual({ ignorado: "aguardando_volta" });
     await d.deps.repos.turnos.assentar(volta!.id, { estado: "concluido" });
     const r = await entregarRespostaPeer(d.deps, { tarefaId: volta!.id, texto: "CI verde: pode mergear." });

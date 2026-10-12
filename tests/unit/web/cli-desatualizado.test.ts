@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FrotaDto } from "../../../src/contracts/api.ts";
 import { HARNESSES } from "../../../src/contracts/harness.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { IaNoMac } from "../../../src/contracts/onboarding.ts";
@@ -99,14 +100,14 @@ const negacao = (nome: string): Mensagem => ({ tenantId: "t", id: "m1", conversa
 const gil = (harness: string) => ({ id: "gil", nome: "Gil", harness, modelo: "auto", conversaId: "c1", ownerId: "marcelo", excluidoEm: null }) as unknown as FrotaDto["agentes"][number];
 
 function com(p: { claude: Inventario; codex: Inventario; harnessDoGil?: string }): Estado {
-  const opcoes = HARNESSES.map((h) => ({ ...h, inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
+  const opcoes = HARNESSES.map((h) => ({ ...h, capacidades: capacidadesDe(h.id), inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
   return {
     ...estadoInicial,
     agora: Date.UTC(2026, 9, 6, 12, 0),
     sessao: { tenantId: "t", pessoaId: "marcelo" },
     inventario: p.claude,
     frota: { agentes: [gil(p.harnessDoGil ?? "codex-cli")], negacoes: [] } as unknown as Estado["frota"],
-    executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, opcoes } },
+    executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, legado: "claude-cli", opcoes } },
   };
 }
 const noApp = (sim: boolean) => { if (sim) (globalThis as Record<string, unknown>).nodDesktop = {}; else delete (globalThis as Record<string, unknown>).nodDesktop; };

@@ -28,7 +28,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       await repos.agentes.ocultar(oculto.agenteId, true);
       await agenteComConversa(trx, MARLON, { nome: "RascunhoSemPerfil" });
       const agora = () => Date.now();
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: agora() + 60_000, profundidade: 0, entradaTexto: "Quem pode ajudar?", entradaConfianca: "confiavel", modelo: "haiku" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora() + 60_000, profundidade: 0, entradaTexto: "Quem pode ajudar?", entradaConfianca: "confiavel", modelo: "haiku" });
       const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
       const { data } = await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID() });
       expect(data.promptSistema).toContain("EspecialistaVisivel");
@@ -47,7 +47,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       await repos.concessoes.conceder({ agenteId, conectorId: conector?.id ?? "", capacidade: "listar_contatos", mensagemId: consentimento?.id ?? "" });
       await repos.concessoes.conceder({ agenteId, conectorId: outro?.id ?? "", capacidade: "qualquer", mensagemId: consentimento?.id ?? "" });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "revisa PRs" });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
 
       const agora = () => Date.now();
       const tokens = criarTokenTurno({ agora });
@@ -90,7 +90,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const sessao = randomUUID();
       await repos.conversas.atualizarSessaoCli(conversaId, sessao, "catcher");
       for (const origem of ["conversa", "rotina", "peer"] as const) {
-        const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: agora() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "verificar", entradaConfianca: "confiavel", modelo: "m" });
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, prazoEm: agora() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "verificar", entradaConfianca: "confiavel", modelo: "m" });
         const plano = (await emitirPlanoTurno(deps, { turnoId: turno?.id ?? "", machineId: "m", executor: "catcher" })).data;
         expect(plano.entrada.sessaoCli).toBe(origem === "conversa" ? sessao : null);
       }
@@ -102,7 +102,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const agora = () => Date.now();
       const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
-      const peer = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "peer", prazoEm: agora() + 600_000, profundidade: 1, entradaTexto: "pergunta", entradaConfianca: "nao_confiavel", modelo: "m" });
+      const peer = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "peer", prazoEm: agora() + 600_000, profundidade: 1, entradaTexto: "pergunta", entradaConfianca: "nao_confiavel", modelo: "m" });
       const planoPeer = (await emitirPlanoTurno(deps, { turnoId: peer?.id ?? "", machineId: "m" })).data;
       const nomesPeer = planoPeer.catalogo.ferramentas.map((f) => f.nome);
       expect(nomesPeer).not.toContain("pedir_a_bot");
@@ -111,7 +111,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       expect(planoPeer.profundidade).toBe(1);
       expect(planoPeer.confiancaEntrada).toBe("nao_confiavel");
 
-      const rotina = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "rotina", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
+      const rotina = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "rotina", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       // ADR-066: antes, rotina sem janela identificável ligava o gate (fail-closed). Agora não há gate a ligar.
       expect(Object.keys(planoRotina.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
@@ -153,7 +153,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const agora = () => Date.now();
       const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora }), agora, trx });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       await expect(emitirPlanoTurno(deps, { turnoId: turno?.id ?? "", machineId: "m", executor: "local" })).rejects.toMatchObject({ codigo: "executor_indisponivel" });
       await repos.inventario.registrar("claude-cli", { estado: "pronto", versao: "2.1.272", em: agora() });
       const local = (await emitirPlanoTurno(deps, { turnoId: turno?.id ?? "", machineId: "m" })).data;

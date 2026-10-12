@@ -11,6 +11,7 @@ import { criarClaudeCliDriver } from "../src/adapters/executor/drivers/claude-cl
 import { driverDoPlano, iniciarLaco } from "../src/adapters/executor/laco.ts";
 import { encerrarGruposVivos, executarColetando, iniciarProcesso, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
@@ -25,9 +26,10 @@ import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executo
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
-import type { EstadoIa, ResultadoColarCodigo } from "../src/contracts/estado-ia.ts";
+import type { ContaDaIa, EstadoIa, LoginDaIa, ResultadoColarCodigo } from "../src/contracts/estado-ia.ts";
+import { contaDoCodex } from "./conta-codex.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
-import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, lerIaDesktop, logadoPeloStatus, textoDaImpressao, URL_INSTALAR_IA } from "./ia-mac.ts";
+import { ambienteDoLogin, comandoDeEstadoDoLogin, comandoDeLogin, comandoDeLoginNoApp, contaPeloStatusClaude, lerIaDesktop, logadoPeloStatus, textoDaImpressao, textoDaImpressaoComConta, URL_INSTALAR_IA } from "./ia-mac.ts";
 import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "./login-ia.ts";
 import { ambienteDoNpm, criarInstaladorDeIas, scriptNodeDoNod, type ProcessoNpm } from "./instalar-ia.ts";
 import { ambienteDoBinarioDoNod, ativarPrefixo, candidatosDoNod, descartarPrefixo, escolherBinario, nomeDaVersao, pastasFerramentas, prefixoAtivo, prepararPrefixoNovo, type Candidato } from "./ferramentas.ts";
@@ -379,7 +381,10 @@ function limparOrfaosUmaVez(): Promise<void> {
   limpezaDeOrfaos ??= (async () => {
     const arquivo = join(app.getPath("userData"), "executor", "grupos-vivos.json");
     const r = await encerrarGruposOrfaos({ arquivo }).catch(() => ({ assumiu: true }));
-    if (r.assumiu) registrarGruposEm(arquivo);
+    if (!r.assumiu) return;
+    // ADR-097: o que saiu dos grupos com a marca do app (o Postgres de teste de uma task) e ficou de outra vida.
+    await encerrarFugitivosDaInstancia(arquivo);
+    registrarGruposEm(arquivo);
   })();
   return limpezaDeOrfaos;
 }
@@ -399,7 +404,7 @@ async function conectar(c: Config) {
   await web.cookies.set({ url: c.url, name: "nod_sessao", value: cookie, path: "/", httpOnly: true, secure: c.url.startsWith("https:"), sameSite: "strict" });
   await guardar(c); configuracao = c;
   // ADR-052: o hook do nod vai empacotado ao lado do proxy; sem ele o kit do terminal não liga.
-  const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), hookPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "hook-nativas.mjs") : join(dir, "hook-nativas.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env) };
+  const lig = { urlNod: c.url, proxyPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "proxy.mjs") : join(dir, "proxy.mjs"), hookPath: app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked", "dist", "desktop", "hook-nativas.mjs") : join(dir, "hook-nativas.mjs"), nodePath: process.execPath, electronComoNode: true, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
   const envExecutor = { ...process.env, NOD_HOME: join(app.getPath("userData"), "executor") };
   const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
   const cfg = await montarCfg(envExecutor);
@@ -451,7 +456,7 @@ async function conectar(c: Config) {
       return criarRegistryDetalhado(envExecutor, ias ? drivers.filter((d) => ias.some((ia) => ia === d.meta.id)) : drivers, { cfg: novo });
     },
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
-    aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); },
+    aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
     anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades }); },
     aoRegistry: (novo, algumaPronta) => {
@@ -517,7 +522,10 @@ async function entrarNaIa(ia: IaDesktop): Promise<ResultadoIaDesktop> {
 }
 /**
  * A impressão da conta logada numa IA (definido em 2026-10-05): o hash do que o CLI diz sobre o login. Fica só neste
- * Mac, junto do veredito do teste (vigia-ias.ts); null quando o CLI não responde.
+ * Mac, junto do veredito do teste (vigia-ias.ts); null quando o CLI não responde. revisto em 2026-10-12 (NOD-209): no
+ * Codex, o `login status` não diz a conta, então o e-mail e o plano do `account/read` entram no texto — a troca de conta
+ * no Codex agora muda a impressão (a lacuna da ADR-019). Se o app-server não responder, vale a última conta lida
+ * (textoDaImpressaoComConta): uma falha passageira não muda a impressão nem gasta um reteste.
  */
 async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<string | null> {
   const home = cfg.env.HOME ?? "";
@@ -525,7 +533,17 @@ async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<strin
   const bin = await resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome);
   if (!bin) return null;
   const r = await executarColetando({ bin, args, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), timeoutMs: 10_000 });
-  return r.exitCode === 0 ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null;
+  if (r.exitCode !== 0) return null;
+  const texto = textoDaImpressao(ia, r.stdout, r.stderr);
+  if (ia === "claude-cli") {
+    const conta = contaPeloStatusClaude(r.stdout);
+    if (conta) guardarConta(ia, conta);
+    return createHash("sha256").update(texto).digest("hex");
+  }
+  const conta = await contaDoCodex({ bin, env: ambienteDaIa(ia, cfg), cwd: home || tmpdir(), versao: app.getVersion() });
+  if (conta !== undefined) guardarConta(ia, conta);
+  return createHash("sha256").update(textoDaImpressaoComConta(texto, conta, contasDasIas.get(ia) ?? null)).digest("hex");
+  return createHash("sha256").update(texto).digest("hex");
 }
 
 // ---- As IAs dentro do app (definido em 2026-10-09, plano "IAs", PR 1) ------------------------------------------------
@@ -624,7 +642,7 @@ async function escolherBinarios(cfg: ConfigDriver): Promise<ConfigDriver> {
 }
 function estadoAtual(ia: IaDesktop): EstadoIa {
   const b = escolhaDasIas.get(ia)?.escolhido;
-  return estadoDaIa({ ia, inventario: inventariosDaVigia?.[ia] ?? null, instalacao: instalador.estado(ia), login: loginIas.estado(ia), testando: testandoAgora.includes(ia), binario: b ? { caminho: comTil(b.caminho), origem: b.origem } : null, agora: Date.now() });
+  return estadoDaIa({ ia, inventario: inventariosDaVigia?.[ia] ?? null, instalacao: instalador.estado(ia), login: loginIas.estado(ia), testando: testandoAgora.includes(ia), binario: b ? { caminho: comTil(b.caminho), origem: b.origem } : null, conta: contaPendente.has(ia) ? null : contasDasIas.get(ia) ?? null, agora: Date.now() });
 }
 const ultimosEstados = new Map<IaDesktop, string>();
 /** Manda à janela web o estado de cada IA que mudou (o instante da montagem não conta como mudança). */
@@ -671,12 +689,88 @@ async function statusDoLogin(ia: IaDesktop): Promise<StatusDoLogin> {
   const logado = !r.estourouTempo && logadoPeloStatus(ia, r.exitCode, r.stdout, r.stderr);
   return { logado, impressao: logado ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null };
 }
+
+// ---- A conta logada em cada IA (definido em 2026-10-12, NOD-209) ----------------------------------------------------
+// O cartão mostra QUAL conta está logada (e-mail · organização · plano), como o CLI diz: `claude auth status` e o
+// `account/read` de um `codex app-server` curto. Nada de arquivo de credencial nem turno pago. ADR-019: a conta fica só
+// neste Mac e na página do app — nunca vai ao log, ao inventário nem ao servidor.
+/** definido em 2026-10-12: a conta é lida de novo depois de 10 min (pega a troca feita no terminal, fora do nod). */
+const VALIDADE_CONTA_MS = 10 * 60_000;
+const contasDasIas = new Map<IaDesktop, ContaDaIa>();
+const contaLidaEm = new Map<IaDesktop, number>();
+const lendoConta = new Map<IaDesktop, Promise<void>>();
+/** O login acabou de dar certo e a conta nova ainda não foi lida: o estado vai sem conta (a tela não mostra a antiga). */
+const contaPendente = new Set<IaDesktop>();
+function guardarConta(ia: IaDesktop, conta: ContaDaIa | null): void {
+  contaLidaEm.set(ia, Date.now());
+  if (conta) contasDasIas.set(ia, conta);
+  else contasDasIas.delete(ia);
+}
+/** A conta que o CLI diz agora: null = sem conta; undefined = não deu para saber (CLI lento ou sem resposta). */
+async function lerConta(ia: IaDesktop): Promise<ContaDaIa | null | undefined> {
+  const cfg = await cfgAtual();
+  const home = cfg.env.HOME ?? "";
+  const cwd = home || tmpdir();
+  const bin = await resolverBinario(binConfigurado(ia, cfg), cfg.env.PATH ?? "", home, comandoDeLogin(ia).nome);
+  if (!bin) return null;
+  if (ia === "claude-cli") {
+    const r = await executarColetando({ bin, args: comandoDeEstadoDoLogin(ia).args, env: ambienteDaIa(ia, cfg), cwd, timeoutMs: 10_000 }).catch(() => null);
+    if (!r || r.estourouTempo) return undefined;
+    return contaPeloStatusClaude(r.stdout);
+  }
+  return contaDoCodex({ bin, env: ambienteDaIa(ia, cfg), cwd, versao: app.getVersion() });
+}
+/**
+ * Lê a conta e manda o estado. `depoisDoLogin`: a pessoa acabou de entrar (talvez com outra conta) — uma leitura já em
+ * curso pode ser da conta antiga, então espera ela e lê de novo; sem resposta, a conta antiga não fica no cartão.
+ */
+function atualizarConta(ia: IaDesktop, depoisDoLogin = false): Promise<void> {
+  const emCurso = lendoConta.get(ia);
+  if (emCurso) return depoisDoLogin ? emCurso.then(() => atualizarConta(ia, true)) : emCurso;
+  const leitura = (async () => {
+    try {
+      const conta = await lerConta(ia).catch(() => undefined);
+      if (conta !== undefined) guardarConta(ia, conta);
+      else if (depoisDoLogin) {
+        // revisto em 2026-10-12 (revisão do PR #266): sem resposta depois do login, a próxima sondagem tenta de novo —
+        // antes a troca ficava sem conta e sem nota até a validade de 10 min vencer.
+        contasDasIas.delete(ia);
+        contaLidaEm.delete(ia);
+      }
+    } finally {
+      lendoConta.delete(ia);
+      if (depoisDoLogin) contaPendente.delete(ia);
+      emitirEstados();
+    }
+  })();
+  lendoConta.set(ia, leitura);
+  return leitura;
+}
+/** A cada sondagem: IA logada com a conta velha (ou nunca lida) é lida; IA sem login perde a conta. */
+function conferirContas(inventarios: Partial<Record<IdDriver, Inventario>>): void {
+  for (const ia of IAS_DESKTOP) {
+    const inv = inventarios[ia];
+    if (!inv || (inv.estado === "nao_autenticado" && inv.causa === "sonda_lenta")) continue;
+    const logada = inv.estado === "pronto" || (inv.estado === "nao_autenticado" && inv.causa !== undefined);
+    if (!logada) { if (contasDasIas.delete(ia)) emitirEstados(); continue; }
+    if (Date.now() - (contaLidaEm.get(ia) ?? 0) > VALIDADE_CONTA_MS) void atualizarConta(ia);
+  }
+}
+/** O login mudou: no sucesso, a conta (talvez outra) é lida antes de voltar ao cartão. */
+function aoMudarLogin(ia: IaDesktop, login: LoginDaIa): void {
+  if (login.fase === "sucesso") {
+    contaPendente.add(ia);
+    void atualizarConta(ia, true);
+  }
+  emitirEstados();
+}
+
 const loginIas = criarLoginDasIas({
   iniciar: iniciarLogin,
   status: statusDoLogin,
   agora: Date.now,
   agendar: agendarTimer,
-  aoMudar: () => emitirEstados(),
+  aoMudar: aoMudarLogin,
   // O login terminou bem: a conta nova é testada se estava reprovada (regra da vigia) e a IA é anunciada.
   aoSucesso: (ia) => { void vigiaIas?.contaMudou(ia).catch(() => undefined); },
   registrar: (evento, campos) => log("info", evento, campos),
@@ -847,7 +941,13 @@ else {
       if (!lida) throw new Error("entrada_invalida");
       return lida;
     };
-    ipcMain.handle(CANAIS_DESKTOP.iaEstados, (e): EstadoIa[] => { validarRemetenteWeb(e); return IAS_DESKTOP.map(estadoAtual); });
+    ipcMain.handle(CANAIS_DESKTOP.iaEstados, (e): EstadoIa[] => {
+      validarRemetenteWeb(e);
+      // A página abriu (ou recarregou): a conta é conferida de novo, para mostrar uma troca feita no terminal.
+      if (inventariosDaVigia) for (const ia of IAS_DESKTOP) contaLidaEm.delete(ia);
+      if (inventariosDaVigia) conferirContas(inventariosDaVigia);
+      return IAS_DESKTOP.map(estadoAtual);
+    });
     ipcMain.handle(CANAIS_DESKTOP.iaInstalarNoApp, async (e, ia: unknown): Promise<EstadoIa> => {
       const lida = iaDoPedido(e, ia);
       await instalador.instalar(lida);
@@ -872,7 +972,10 @@ else {
     ipcMain.handle(CANAIS_DESKTOP.iaVerificar, async (e, ia: unknown): Promise<EstadoIa> => {
       const lida = iaDoPedido(e, ia);
       if (loginIas.estado(lida)?.fase === "aguardando") await loginIas.verificar(lida);
-      else await vigiaIas?.sondarAgora().catch(() => undefined);
+      else {
+        contaLidaEm.delete(lida);
+        await vigiaIas?.sondarAgora().catch(() => undefined);
+      }
       return estadoAtual(lida);
     });
     ipcMain.handle("nod:estado", (e) => { validarRemetente(e); return { url: configuracao?.url ?? SERVIDOR_PADRAO, mensagem }; });

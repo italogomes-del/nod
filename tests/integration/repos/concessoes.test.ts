@@ -51,7 +51,7 @@ describeIntegracao("concessoesRepo: por agente e capacidade, presa à mensagem d
       const [cols] = await trx<{ n: number }[]>`select count(*)::int as n from information_schema.columns where table_name = 'inventario_motores' and column_name ilike '%email%'`;
       expect(cols?.n).toBe(0);
 
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: em + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: em + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 18, tokensSaida: 90, custoUsd: 0.0207631, modelo: "claude-haiku-4-5-20251001", em });
       await repos.gastos.registrar({ turnoId: turno?.id ?? "", executor: "local", tokensEntrada: 5, tokensSaida: 10, custoUsd: 0.0032996, modelo: "claude-haiku-4-5-20251001", em });
       expect((await repos.gastos.doTurno(turno?.id ?? "")).map((g) => g.custoUsd)).toEqual([0.0207631, 0.0032996]);
@@ -92,7 +92,7 @@ describeIntegracao("concessoesRepo: por agente e capacidade, presa à mensagem d
   it("catcher_registros nasce 'equipe' e é lido por turno e por recência", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       await repos.catcher.registrar({ turnoId: turno?.id ?? "", tipo: "plano_recebido", dados: { ferramentas: ["mcp__nod__lembrar"] } });
       await repos.catcher.registrar({ turnoId: turno?.id ?? "", tipo: "tool_use", dados: { nome: "lembrar", input: { tipo: "fato", texto: "x" } } });
       expect((await repos.catcher.listar(turno?.id ?? "")).map((r) => r.tipo)).toEqual(["plano_recebido", "tool_use"]);

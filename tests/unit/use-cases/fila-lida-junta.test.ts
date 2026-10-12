@@ -47,7 +47,7 @@ describe("fila lida junta: cada mensagem cancela sozinha, o agente lê as restan
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     const so = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "só esta", inventario: PRONTO });
-    const rotina = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "rotina das 18h", entradaConfianca: "confiavel", modelo: criado.agente.modelo });
+    const rotina = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "rotina das 18h", entradaConfianca: "confiavel", modelo: criado.agente.modelo });
     const d = await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO });
     expect(d.data.turno?.id).toBe(so.data.turno.id);
     expect(d.data.plano?.entrada.texto).toBe("só esta");

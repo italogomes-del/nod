@@ -21,7 +21,7 @@ async function rotinaAtiva(trx: Parameters<Parameters<typeof withRollback>[1]>[0
   const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
   const a = rotinaValida();
   const { data } = await criarRotinaPelaPessoa(deps, { agenteId, cron: a.cron, fusoIana: a.fuso_iana, instrucao: a.instrucao, fonte: a.fonte, entregavel: a.entregavel, limitesAprovacao: a.limites_aprovacao, politicaSemDado: a.politica_sem_dado });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
   const ctx = contexto(agenteId, conversaId, turno?.id);
   return { agenteId, conversaId, deps, repos, ctx, rotinaId: data.rotina.id, rotinaConversaId: data.rotina.conversaId };
 }

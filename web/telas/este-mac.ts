@@ -13,7 +13,7 @@ import { agente } from "./trabalhos.ts";
 
 export const USOS: readonly { id: UsoDoMac; nome: string; explicacao: string }[] = [
   { id: "pouco", nome: "Pouco", explicacao: "Trabalho novo em segundo plano espera assim que o processador ou a fila começam a apertar, ou a memória entra em alerta. Bom para quando você está numa chamada ou precisa do Mac para outra coisa pesada." },
-  { id: "equilibrado", nome: "Equilibrado", explicacao: "Trabalho novo em segundo plano espera quando o Mac fica apertado: memória em alerta, processador cheio ou fila engarrafada. Volta sozinho quando o Mac aliviar." },
+  { id: "equilibrado", nome: "Equilibrado", explicacao: "Trabalho novo em segundo plano espera quando a memória entra em alerta. Processador cheio só deixa tudo mais lento: nada espera por ele. Volta sozinho quando o Mac aliviar." },
   { id: "livre", nome: "O quanto precisar", explicacao: "Nada espera, nem com a memória crítica. Só o disco quase sem espaço segura trabalho novo, em qualquer opção." },
 ];
 
@@ -45,12 +45,12 @@ function detalheDoProcessador(nivel: NivelPressao, uso: number | null, usoDoMac:
   const quanto = uso === null ? "" : ` Os núcleos passaram ${Math.round(uso * 100)}% do tempo ocupados no último meio minuto.`;
   const espera = usoDoMac === "livre" ? " Com \"O quanto precisar\", nada espera por isso." : " Rotinas e pedidos entre bots que ainda não começaram esperam; o que você pede começa.";
   if (nivel === "verde") return `O processador tem folga.${quanto}`;
-  return `${nivel === "vermelha" ? "O processador está cheio." : "O processador está apertando."}${quanto}${nivel === "vermelha" || usoDoMac === "pouco" ? espera : ""}`;
+  return `${nivel === "vermelha" ? "O processador está cheio." : "O processador está apertando."}${quanto}${usoDoMac === "equilibrado" ? " Deixa tudo mais lento, mas nada espera por isso: no Equilibrado, só a memória e o disco seguram trabalho novo." : nivel === "vermelha" || usoDoMac === "pouco" ? espera : ""}`;
 }
 
 function detalheDaFila(nivel: NivelPressao, carga: number | null, usoDoMac: UsoDoMac): string {
   const quantos = carga === null ? "" : ` Há ${carga.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} processos por núcleo querendo a vez.`;
-  const espera = usoDoMac === "livre" ? " Com \"O quanto precisar\", nada espera por isso." : nivel === "vermelha" || usoDoMac === "pouco" ? " Rotinas e pedidos entre bots que ainda não começaram esperam a fila baixar; o que você pede começa." : "";
+  const espera = usoDoMac === "livre" ? " Com \"O quanto precisar\", nada espera por isso." : usoDoMac === "pouco" ? " Rotinas e pedidos entre bots que ainda não começaram esperam a fila baixar; o que você pede começa." : "";
   return `Mais processos esperando a vez do que núcleos para atendê-los — quase sempre esperando o disco, mesmo com o processador folgado.${quantos}${espera}`;
 }
 

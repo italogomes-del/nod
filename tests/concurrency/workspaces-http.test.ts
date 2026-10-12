@@ -36,7 +36,7 @@ describeIntegracao("pastas locais pela conversa", () => {
   }, 30000);
   async function plano(harness: "claude-cli" | "codex-cli" = "claude-cli") {
     return srv.app.dentro(srv.pessoa, async d => {
-      const t = await d.repos.turnos.enfileirar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Prepare o relatório", entradaConfianca: "confiavel", modelo: "auto", harness });
+      const t = await d.repos.turnos.enfileirar({ executor: "catcher", agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Prepare o relatório", entradaConfianca: "confiavel", modelo: "auto", harness });
       // definido em 2026-09-18: o teste dirige o adapter; impedir que o catcher consuma o mesmo turno.
       await d.tx(async trx => { await trx`update turnos set estado = 'despachando', machine_id = ${srv.app.machineId}, lease_ate = ${new Date(Date.now() + 600000)} where id = ${t!.id}`; });
       return (await emitirPlanoTurno(d, { turnoId: t!.id, machineId: srv.app.machineId, executor: "local", harnesses: { [harness]: { estado: "pronto", em: Date.now() } } })).data;

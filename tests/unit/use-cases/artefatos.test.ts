@@ -17,7 +17,7 @@ async function cenario(confianca: "confiavel" | "nao_confiavel" = "confiavel") {
   const ada = await deps.repos.agentes.criar({ nome: "Ada", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
   const outro = await deps.repos.agentes.criar({ nome: "Dev 1", dono: "pessoa", forma: "shape-hex", cor: "c-red", modelo: "m" });
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: ada?.id ?? "" });
-  const turno = await deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: ada?.id ?? "", origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "minha checklist", entradaConfianca: confianca, modelo: "m" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: ada?.id ?? "", origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "minha checklist", entradaConfianca: confianca, modelo: "m" });
   const ctx = { turnoId: turno?.id ?? "", agenteId: ada?.id ?? "", conversaId: conversa?.id ?? "" };
   const plano = planoDeTeste({ ...ctx, expiraEm: AGORA + 60_000, confiancaEntrada: confianca, catalogo: { ferramentas: [nod("publicar_artefato"), nod("ler_artefato")], servidores: [] } });
   const chamar = (nome: string, argumentos: unknown) => chamarFerramenta(deps as Deps, { turnoId: ctx.turnoId, agenteId: ctx.agenteId, nome, argumentos, plano });

@@ -28,7 +28,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
         return t!.id;
       };
       const turnoDo = (trabalhoId: string, acordarEm: number | null = null) =>
-        repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId, acordarEm });
+        repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId, acordarEm });
 
       const antiga = await criar("antiga-aaaaaa", "terminado", 4 * DIA);
       const falhaRecente = await criar("falha-bbbbbb", "falhou", DIA);

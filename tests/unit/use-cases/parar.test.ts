@@ -75,7 +75,7 @@ describe("parar (E5.4/E8.1/E8.2/E8.3): estado persistido, faixa honesta, nunca c
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     await executar(deps, parar, { conversaId: null });
-    await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "rotina", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
+    await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "rotina", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "m" });
     const bloqueado = await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO });
     expect(bloqueado.data).toMatchObject({ plano: null, motivo: "parada_ativa" });
     expect((await deps.repos.turnos.pendentesDaPessoa()).map((t) => t.estado)).toEqual(["pendente"]);

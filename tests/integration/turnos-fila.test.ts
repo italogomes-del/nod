@@ -88,7 +88,7 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
       await deps.repos.conversas.atualizarSessaoCli(criado.conversa.id, "sessao-interativa", "local");
       for (const origem of ["rotina", "peer"] as const) {
-        const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "teste", entradaConfianca: "nao_confiavel", modelo: criado.agente.modelo });
+        const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "peer" ? 1 : 0, entradaTexto: "teste", entradaConfianca: "nao_confiavel", modelo: criado.agente.modelo });
         const maquina = randomUUID();
         const plano = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano;
         expect(plano?.turnoId).toBe(turno?.id);
@@ -170,6 +170,25 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       expect(negacao).toMatchObject({ payload: { kind: "negacao", classe: "ferramenta_negada", nome: "mcp__nod__somar", motivo: "fora_do_catalogo", terminal: false } });
       expect(negacao?.texto).toContain("ferramenta mcp__nod__somar negada");
       expect(events.map((e) => e.kind)).toEqual(["mensagem_criada", "negacao", "turno_encerrado"]);
+    });
+  });
+
+  it("definido em 2026-10-11: com os motivos do hook, uma pílula por causa, com as vezes, no lugar de 'peça aprovação'", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const maquina = randomUUID();
+      const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const cerca = "git worktree add cria a worktree numa pasta que não deu para conferir. Crie dentro dela: …";
+      const negacoesDoNod = [{ nome: "Bash", motivo: cerca }, { nome: "Bash", motivo: "a pessoa não aprovou este comando" }, { nome: "Bash", motivo: cerca }];
+      await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: sucesso("feito", { negacoesPermissao: ["Bash"], negacoesDoNod }) });
+      const pilulas = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.kind === "negacao");
+      expect(pilulas.map((m) => m.texto)).toEqual([
+        "ferramenta Bash negada: git fora da pasta da task; o bot recebeu o caminho certo (2 vezes)",
+        "ferramenta Bash negada: você não aprovou o comando",
+      ]);
+      expect(pilulas[0]?.payload).toMatchObject({ motivo: "alcance_insuficiente", causaNativa: "git_fora_da_pasta", vezes: 2 });
     });
   });
 

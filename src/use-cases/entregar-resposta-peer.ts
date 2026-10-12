@@ -200,6 +200,8 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
     harness: remetente.harness,
     // ADR-083: a continuação de quem pediu segue no trabalho dele (null = a conversa dele).
     trabalhoId: pediu?.trabalhoId ?? null,
+    // NOD-206: o do turno que pediu; sem ele (pedido legado), o da tarefa do colega, na mesma máquina.
+    executor: pediu?.executor ?? tarefa.executor,
   });
   if (!continuacao) throw new ErroDeDominio("estado_invalido", { cause: "turno de continuação não criado" });
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a resposta traz o que o colega leu. Se a tarefa dele

@@ -58,7 +58,7 @@ async function cenario(trx: Tx) {
   // Um bot ainda sem perfil não é colega de ninguém.
   await agenteComConversa(trx, MARLON, { nome: "Rascunho" });
   const tarsila = await agenteComConversa(trx, MARLON, { nome: "Tarsila" });
-  const turno = await repos.turnos.enfileirar({ conversaId: tarsila.conversaId, agenteId: tarsila.agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "vire minha assistente pessoal e pegue o que a Ada e a Nina fazem", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: tarsila.conversaId, agenteId: tarsila.agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "vire minha assistente pessoal e pegue o que a Ada e a Nina fazem", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   await repos.turnos.assentar(turno.id, { estado: "concluido" });
   const ctx = { agenteId: tarsila.agenteId, conversaId: tarsila.conversaId, turnoId: turno.id };

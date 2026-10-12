@@ -259,6 +259,32 @@ describe("cerca partida só ao vivo (NOD-204)", () => {
     }
   });
 
+  // QA da NOD-204: a cerca dentro de item de lista vem indentada ("1. Instale:\n   ```bash") e a crase aparecia por
+  // um quadro ("<li>Instale: `</li>") antes da terceira chegar.
+  it.each([
+    ["lista numerada, 3 espaços", "1. Instale:\n   ```bash\nnpm i\n   ```\n2. Rode."],
+    ["lista com hífen, 2 espaços", "- Passo:\n  ```sh\nmake\n  ```\nFim."],
+    ["1 espaço", "Segue:\n ```ts\nconst a = 1;\n```\nPronto."],
+  ])("cerca indentada (%s), ao vivo: nenhum quadro tem crase e o código de cada quadro é prefixo do final", (_nome, final) => {
+    const codigoDe = (html: string): string | undefined => /<pre><code>([\s\S]*?)<\/code><\/pre>/.exec(html)?.[1];
+    const htmlFinal = vivo(final);
+    expect(htmlFinal).not.toContain("`");
+    expect(htmlFinal).toBe(textoFormatado(final));
+    const doFinal = codigoDe(htmlFinal) ?? "";
+    for (let i = 1; i <= final.length; i++) {
+      const quadro = final.slice(0, i);
+      const html = vivo(quadro);
+      expect(html, JSON.stringify(quadro)).not.toContain("`");
+      const codigo = codigoDe(html);
+      if (codigo !== undefined) expect(doFinal.startsWith(codigo), JSON.stringify(quadro)).toBe(true);
+    }
+  });
+
+  it("cerca indentada partida, sem aoVivo: as crases continuam aparecendo (só o streaming esconde)", () => {
+    expect(textoFormatado("1. Instale:\n   `")).toContain("`");
+    expect(textoFormatado("- Passo:\n  ``")).toContain("``");
+  });
+
   it("cache: mesma chave e mesmo texto, com e sem aoVivo, cada chamada devolve o próprio HTML (nas duas ordens)", () => {
     const texto = "Segue:\n`";
     expect(textoFormatado(texto, { chave: "nod-204:a", aoVivo: true })).toBe("Segue:<br>");

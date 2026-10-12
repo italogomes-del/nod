@@ -90,6 +90,8 @@ export const abrirTask: CasoNod<Deps, "abrir_task"> = async (deps, input) => {
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: agente?.modelo ?? turno.modelo,
     harness: agente?.harness ?? turno.harness,
+    // NOD-206: a task roda onde roda quem a abriu; o plano grava o executor real.
+    executor: turno.executor,
   });
   if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da task não criado" });
   // A marca de quem leu algo de fora (ADR-062) atravessa para a task, como no pedido a colega.
@@ -130,6 +132,8 @@ async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: string;
     sobProcuracaoDe: ultimo?.sobProcuracaoDe ?? null,
     modelo: ultimo?.modelo ?? agente?.modelo ?? "auto",
     harness: ultimo?.harness ?? agente?.harness,
+    // NOD-206: o do último turno da task; sem ele, o do bot que repassa (o da pessoa é só palpite — o plano corrige).
+    executor: ultimo?.executor ?? (p.deQuem === "pessoa" ? "catcher" : p.deQuem.turno.executor),
     mensagemOrigemId: mensagem.id,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do recado não criado" });
@@ -222,6 +226,7 @@ async function voltarParaAFila(deps: Deps, t: Trabalho): Promise<RuntimeEvent[]>
       sobProcuracaoDe: v.sobProcuracaoDe ?? null,
       modelo: v.modelo,
       harness: v.harness,
+      executor: v.executor,
     });
     if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da task não voltou à fila" });
     if (await deps.repos.turnos.contaminado(v.id)) await deps.repos.turnos.contaminar(novo.id, agora);
@@ -303,6 +308,8 @@ export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDt
     entradaConfianca: primeiro?.entradaConfianca ?? "confiavel",
     modelo: agente?.modelo ?? primeiro?.modelo ?? "auto",
     harness: agente?.harness ?? primeiro?.harness,
+    // NOD-206: o da task desfeita; sem turno nela, palpite — o plano grava o real.
+    executor: primeiro?.executor ?? "catcher",
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno da conversa não criado" });
   events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { origem: "conversa", agente_id: t.agenteId, fez_aqui: t.id } }));

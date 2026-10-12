@@ -1,3 +1,5 @@
+import type { ContaDaIa } from "../contracts/estado-ia.ts";
+import { emailDaConta, planoLegivel } from "./estado-ia.ts";
 import { redigirECortar } from "./segredos.ts";
 
 /**
@@ -141,6 +143,24 @@ export function respostaNegando(id: IdRpc, metodo: string): string {
 /** NOD-167: a lista de modelos da conta (a sonda do app-server confere que o id do Luna está nela). */
 export function pedidoModelList(id: IdRpc): string {
   return pedido(id, "model/list", {});
+}
+
+/**
+ * NOD-209: QUAL conta está logada no Codex, sem chamar modelo nem ler `~/.codex/auth.json`. Medido em 2026-10-12 no
+ * Codex 0.162.1: depois do initialize/initialized, `account/read` devolve
+ * `{account: {type: "chatgpt", email, planType: "pro"}, requiresOpenaiAuth: true, …}`.
+ */
+export function pedidoAccountRead(id: IdRpc): string {
+  return pedido(id, "account/read", {});
+}
+
+/** `account/read` → a conta; null sem conta, com chave de API (não tem e-mail) ou num formato que não é o medido. */
+export function contaDoAccountRead(resultado: Obj): ContaDaIa | null {
+  const conta = resultado.account;
+  if (!ehObj(conta)) return null;
+  const email = emailDaConta(conta.email);
+  if (!email) return null;
+  return { email, organizacao: null, plano: planoLegivel(conta.planType) };
 }
 
 export type ModeloAppServer = { id: string; padrao: boolean; esforcos: string[]; esforcoPadrao: string | null };

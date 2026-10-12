@@ -1004,6 +1004,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async voltasMarcadas(retomaTurnoId: string) {
         return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null).length;
       },
+      async ultimasVoltas(retomaTurnoId: string, limite: number) {
+        return doTenant(b.turnos)
+          .filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null)
+          .sort((x, y) => y.criadoEm - x.criadoEm)
+          .slice(0, limite)
+          .map((t) => ({
+            estado: t.estado,
+            marcouVolta: despertares.has(t.id),
+            perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
+            pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
+          }));
+      },
       async juntarEntrada(id: string, texto: string) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
         if (!t) return null;
@@ -1043,6 +1055,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async sessaoDoTurno() {
         return null;
       },
+      async registrarExecutor(id, executor) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (t) t.executor = executor;
+      },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,
@@ -1069,6 +1085,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           custoUsd: null,
           modelo: t.modelo,
           harness: t.harness ?? "auto",
+          executor: t.executor,
           criadoEm: agora() + b.turnos.length / 1000,
           mensagemOrigemId: t.mensagemOrigemId ?? null,
           absorvidoPor: null,

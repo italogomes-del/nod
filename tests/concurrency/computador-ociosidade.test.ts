@@ -182,7 +182,7 @@ describeIntegracao("computador ocioso desliga sozinho; o teto do host é neutro 
     await srv.app.dentro(srv.pessoa, (d) => d.tx(async (trx) => { await trx`update computadores set falhas_seguidas = 1, falha_motivo = 'sem_resposta' where id = ${c.id}`; }));
     teto = true;
     const plano = await srv.app.dentro(srv.pessoa, async (d) => {
-      const t = await d.repos.turnos.enfileirar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+      const t = await d.repos.turnos.enfileirar({ executor: "catcher", agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
       return (await emitirPlanoTurno(d, { turnoId: t!.id, machineId: randomUUID(), executor: "catcher" })).data;
     });
     const r = await fetch(`${srv.url}/api/interno/ferramentas/computador_observar`, { method: "POST", headers: { authorization: `Bearer ${plano.tokenDeTurno}`, "content-type": "application/json" }, body: JSON.stringify({ argumentos: {} }) });

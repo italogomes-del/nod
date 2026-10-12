@@ -100,7 +100,7 @@ async function montar(nome = "Ada") {
     await d.repos.agentes.atualizarPerfil(c.agente.id, { confirmado: true });
     const tarefa = async (titulo: string) => {
       const w = (await criarTrabalho(d, { agenteId: c.agente.id, conversaId: c.conversa.id, titulo, origem: "pessoa" })).trabalho;
-      const t = (await d.repos.turnos.enfileirar({ conversaId: c.conversa.id, agenteId: c.agente.id, origem: "conversa", trabalhoId: w.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!;
+      const t = (await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversa.id, agenteId: c.agente.id, origem: "conversa", trabalhoId: w.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!;
       return { w, t };
     };
     const { w, t } = await tarefa("Relatório");

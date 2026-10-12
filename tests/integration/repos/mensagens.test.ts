@@ -50,7 +50,7 @@ describeIntegracao("mensagensRepo: autoria composta, payload tipado e confiança
   it("turno interrompido no meio: as falas do agente naquele turno ficam parciais, as da pessoa não", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const daPessoa = await repos.mensagens.criar({ conversaId, turnoId: turno?.id, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "pergunta", confianca: "confiavel" });
       const doAgente = await repos.mensagens.criar({ conversaId, turnoId: turno?.id, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: "texto", texto: "resp", confianca: "confiavel" });
       expect(await repos.mensagens.marcarParciaisDoTurno(turno?.id ?? "")).toBe(1);

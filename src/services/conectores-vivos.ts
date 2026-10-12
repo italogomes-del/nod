@@ -150,12 +150,12 @@ export function criarConectoresVivos(opcoes: OpcoesConectoresVivos): ConectoresV
       }
     },
 
-    async sondar(conector: Conector): Promise<ResultadoSonda> {
+    async sondar(conector: Conector, o?: { orcamentoMs?: number }): Promise<ResultadoSonda> {
       // A sonda usa o env DECIFRADO via carregar; o `conector` recebido só traz placeholders (ConectorGuardado).
       await descartar(conector.id);
       if (conector.comando === COMANDO_GITHUB_NATIVO) return (await opcoes.sondarNativo?.(conector)) ?? { ok: false, motivo: "conector_indisponivel" };
       const cfg = (await opcoes.carregar(conector.id, { rotina: false })) ?? { nome: conector.slug, transporte: conector.transporte, comando: conector.comando, args: conector.args, url: conector.url, env: {} };
-      return sondarConector(cfg, { ambiente: opcoes.ambiente, fetchImpl: opcoes.fetchImpl });
+      return sondarConector(cfg, { ambiente: opcoes.ambiente, fetchImpl: opcoes.fetchImpl, ...(o?.orcamentoMs !== undefined ? { orcamentoMs: o.orcamentoMs } : {}) });
     },
 
     async fechar() {

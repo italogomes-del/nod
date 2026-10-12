@@ -46,7 +46,7 @@ describe("pedirAPessoa grava a fala ligada à decisão", () => {
     const { deps, banco } = depsEmMemoria();
     banco.pessoas.push({ tenantId: MARLON.tenantId, id: MARLON.pessoaId, nome: "Marlon", iniciais: "M", email: null });
     const { data: bot } = await criarAgente(deps, { dono: "pessoa", nome: "Nina" });
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "faça o resumo de vendas", entradaConfianca: "confiavel", modelo: "sonnet" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "faça o resumo de vendas", entradaConfianca: "confiavel", modelo: "sonnet" });
     if (!turno) throw new Error("turno");
     return { deps, banco, bot, turno };
   }

@@ -51,7 +51,7 @@ it("a retomada de um disparo (cadeia de retomaTurnoId) conta como a mesma rotina
   const c = await cenario();
   const t = await c.disparo();
   const primeiro = await c.perguntar(t);
-  const retomada = await c.deps.repos.turnos.enfileirar({ conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: t, prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
+  const retomada = await c.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "retomada", retomaTurnoId: t, prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet" });
   expect((await c.perguntar(retomada?.id ?? "")).data.decisao_id).toBe(primeiro.data.decisao_id);
 });
 
@@ -61,7 +61,7 @@ it("outro tipo, outra rotina, pergunta já respondida ou turno de conversa abrem
   expect((await c.perguntar(await c.disparo(), "pergunta")).data.decisao_id).not.toBe(primeiro.data.decisao_id);
   const outraRotina = await c.criarRotina("Resumo do estoque");
   expect((await c.perguntar(await c.disparo(outraRotina))).data.decisao_id).not.toBe(primeiro.data.decisao_id);
-  const conversa = await c.deps.repos.turnos.enfileirar({ conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "conversa", prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "cadê a planilha?", entradaConfianca: "confiavel", modelo: "sonnet" });
+  const conversa = await c.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.bot.conversa.id, agenteId: c.bot.agente.id, origem: "conversa", prazoEm: c.deps.agora() + 60_000, profundidade: 0, entradaTexto: "cadê a planilha?", entradaConfianca: "confiavel", modelo: "sonnet" });
   expect((await c.perguntar(conversa?.id ?? "")).data.decisao_id).not.toBe(primeiro.data.decisao_id);
   await c.deps.repos.decisoes.decidir(primeiro.data.decisao_id, { por: c.deps.escopo.pessoaId, agora: c.deps.agora() });
   expect((await c.perguntar(await c.disparo())).data.decisao_id).not.toBe(primeiro.data.decisao_id);

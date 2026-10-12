@@ -68,3 +68,24 @@ como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", 
 
 - Turnos com `acordar_em` que voltam e chamam `me_chame_as` de novo mais de 10 vezes seguidas: o bot está usando a volta
   como laço. Rever a orientação ou pôr um teto por trabalho.
+
+## Emenda em 2026-10-12 (ADR-099, parte 1)
+
+Em 11/10 a tela Trabalhos dizia "Trabalhando · 13" com um trabalhando de fato (onze voltas marcadas do Ze 1 e duas tasks
+esperando colega), e uma task voltou 12 vezes seguidas sem nada novo, acima das 10 do gatilho acima, sem aviso. A
+[ADR-099](adr-099-um-dono-por-bot.md) "um dono por bot" (PR #265, ainda proposta; §5 e §10, "esperar não é trabalhar")
+muda duas coisas daqui:
+
+- **A volta marcada não conta como trabalhando** (substitui o item 3 na tela). O estado gravado continua `rodando` (sem
+  migração), mas a leitura deriva a espera (`esperaDoTrabalho`, src/domain/trabalho.ts; `foraDoMac` na web): `rodando`,
+  sem turno vivo, com volta marcada ou colega por responder. Trabalhos e a gaveta do bot ganham o grupo **Esperando**
+  entre Trabalhando e Na fila; o topo diz "1 trabalhando · 11 esperando · …"; o chip da barra só pisca com algo
+  trabalhando e, só com espera, mostra o ponto vazado. A conversa coordenadora recebe a task como `"estado":"esperando"`.
+- **O gatilho de reversão vira regra** (`VOLTAS_SEM_NOVIDADE = 3`, src/contracts/ferramentas-trabalho.ts). No
+  assentamento, antes de nascer a volta, se as três últimas voltas da mesma cadeia (as que retomam a mesma origem)
+  terminaram sem nada novo, a quarta não nasce: o turno ganha uma decisão `pergunta` da dona com a frase "voltou 3 vezes
+  sem novidade esperando: <motivo>" e o balão com "Pode seguir esperando" / "Pode parar de esperar" (autoria
+  `regra:voltas_sem_novidade`). A task vai para "Precisa de você"; a resposta retoma o turno pela rota da pergunta, e a
+  volta seguinte começa outra cadeia. "Nada novo" = a volta concluiu e só marcou outra, sem abrir decisão e sem pedir
+  algo a colega (src/domain/voltas-sem-novidade.ts); a fala final não conta, porque toda volta deixa uma. O teto de 24
+  voltas fica como rede.

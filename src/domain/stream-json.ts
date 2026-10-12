@@ -1,4 +1,5 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
+import { motivoDoHookDoNod } from "./negacao-nativa.ts";
 import { redigirECortar } from "./segredos.ts";
 
 /** Os blocos de resposta a mensagens do meio (criarFalaDoMeio em mensagem-no-meio.ts), pelo próprio objeto do evento. */
@@ -305,8 +306,16 @@ export function classificarResultado(entrada: {
   const jaFaladas: string[] = [];
   const jaFaladasCruas: string[] = [];
   let ultimaFerramenta = -1;
+  // definido em 2026-10-11: o motivo de cada negação do hook do nod, pelo nome da ferramenta que o tool_use pediu.
+  const nomePorId = new Map<string, string>();
+  const negacoesDoNod: { nome: string; motivo: string }[] = [];
   for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
+    if (ev.tipo === "tool_use") nomePorId.set(ev.id, ev.nome);
+    if (ev.tipo === "tool_result" && ev.isError) {
+      const motivo = motivoDoHookDoNod(ev.texto);
+      if (motivo !== null) negacoesDoNod.push({ nome: nomePorId.get(ev.toolUseId) ?? "", motivo: motivo.slice(0, 1000) });
+    }
     if (ev.tipo === "init") init = ev;
     else if (ev.tipo === "rate_limit") rateLimit = ev;
     else if (ev.tipo === "result") {
@@ -353,6 +362,7 @@ export function classificarResultado(entrada: {
       tokens: result.tokens,
       ferramentasChamadas,
       negacoesPermissao: result.negacoesPermissao,
+      ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}),
     };
     if (result.sucesso) return { desfecho: "sucesso", ...base };
     // NOD-171: o CLI barrou pelo plano (`rejected`) e a rodada fechou com erro. Pelo estado, nunca pelo texto do result.
@@ -364,7 +374,7 @@ export function classificarResultado(entrada: {
   }
 
   const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
-  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
+  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };
@@ -437,7 +447,7 @@ export function classificarSessao(entrada: Parameters<typeof classificarResultad
   if (cortado) {
     const init = entrada.eventos.find((e) => e.tipo === "init");
     const interrompido = classificarResultado({ ...entrada, eventos: init ? [init, ...aberta] : aberta, interrompidoPeloDriver: true });
-    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao };
+    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao, ...(geral.negacoesDoNod ? { negacoesDoNod: geral.negacoesDoNod } : {}) };
   }
   return { ...geral, texto, tokens, negacoesPermissao };
 }

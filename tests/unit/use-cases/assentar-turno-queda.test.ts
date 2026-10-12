@@ -31,7 +31,7 @@ async function cenario(tipo: "rotina" | "conversa") {
     turnoId = r.data.turno.id;
     rotinaId = rotina!.id;
   } else {
-    const t = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "resume meus e-mails", entradaConfianca: "confiavel", modelo: "m" });
+    const t = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "resume meus e-mails", entradaConfianca: "confiavel", modelo: "m" });
     turnoId = t!.id;
   }
   const maquina = randomUUID();

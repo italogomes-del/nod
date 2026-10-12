@@ -43,7 +43,7 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     await repos.conectores.habilitar(email?.id ?? "", true);
     for (const capacidade of ["ler", "enviar"]) await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade, mensagemId: randomUUID() });
     const turnoId = randomUUID();
-    await repos.turnos.enfileirar({ id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const token = tokens.cunhar(turnoId, { ...MARLON, agenteId });
     const slug = email?.slug ?? "";
     tokens.guardarPlano(planoDeTeste({

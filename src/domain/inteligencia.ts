@@ -1,5 +1,5 @@
 import { ESFORCOS_AGENTE, type Agente, type EsforcoAgente } from "../contracts/agente.ts";
-import { HARNESSES, type IdHarness, type PreferenciaHarness } from "../contracts/harness.ts";
+import { HARNESS_LEGADO, HARNESSES, type IdHarness, type PreferenciaHarness } from "../contracts/harness.ts";
 import { MODOS_INTELIGENCIA, RACIOCINIOS, type EscolhaDaIa, type EscolhasIa, type IaDaPessoa, type IasDaPessoa, type InteligenciaBot, type LimiteDaIa, type LimitesIa } from "../contracts/inteligencia.ts";
 import { CAUSA_LIMITE, type Inventario } from "../contracts/inventario.ts";
 import { ErroDeDominio } from "./erro.ts";
@@ -10,8 +10,6 @@ import { ErroDeDominio } from "./erro.ts";
  * ordem e os limites que vêm daqui; a fila usa `iasParaOAutomatico`; o limite usa `proximaIaNoLimite` e `prazoDoLimite`.
  */
 
-/** definido em 2026-10-10: Claude primeiro, depois o Codex — a ordem de quem nunca arrastou (como era o catálogo). */
-export const ORDEM_IAS_PADRAO: readonly IdHarness[] = ["claude-cli", "codex-cli"];
 /** definido em 2026-10-10 (decisão do Marlon): o raciocínio do "Recomendado" nas duas IAs. */
 export const RACIOCINIO_RECOMENDADO: EsforcoAgente = "medium";
 /**
@@ -24,6 +22,11 @@ export const PRAZO_LIMITE_SEM_HORARIO_MS = 60 * 60_000;
 const PRAZO_LIMITE_MAXIMO_MS = 8 * 24 * 60 * 60_000;
 
 const INTEGRADAS: readonly IdHarness[] = HARNESSES.filter((h) => h.integrado).map((h) => h.id);
+/**
+ * definido em 2026-10-10: Claude primeiro, depois o Codex — a ordem de quem nunca arrastou, que é a do catálogo
+ * (HARNESSES; NOD-207: lida dele, sem repetir os ids).
+ */
+export const ORDEM_IAS_PADRAO: readonly IdHarness[] = INTEGRADAS;
 const ehIntegrada = (v: unknown): v is IdHarness => typeof v === "string" && (INTEGRADAS as readonly string[]).includes(v);
 
 /** O "Recomendado" da IA (Opus / GPT-5.6 Sol, raciocínio médio); null para IA sem catálogo. */
@@ -119,7 +122,7 @@ export const INTELIGENCIA_PADRAO: InteligenciaBot = { modo: "auto", fixa: null, 
 
 /** O que o repositório grava em harness/modelo/esforco: é o que o turno copia e o que o código anterior lê. */
 export function derivadosDa(i: InteligenciaBot): { harness: PreferenciaHarness; modelo: string; esforco: EsforcoAgente | null } {
-  const esforco = i.escolhas["claude-cli"]?.raciocinio ?? null;
+  const esforco = i.escolhas[HARNESS_LEGADO]?.raciocinio ?? null;
   if (i.modo === "auto" || !i.fixa) return { harness: "auto", modelo: "auto", esforco };
   return { harness: i.fixa, modelo: i.escolhas[i.fixa]?.modelo ?? "auto", esforco };
 }
@@ -156,10 +159,10 @@ export function inteligenciaDoLegado(atual: InteligenciaBot, p: { harness: Prefe
   // "Automático" na tela antiga era "nenhum modelo escolhido": os modelos saem; os raciocínios e a ordem ficam.
   if (p.harness === "auto" && p.modelo === "auto") i = { ...atual, modo: "auto", fixa: null, escolhas: semModelos(atual.escolhas) };
   else {
-    const fixa: IdHarness = p.harness === "auto" ? "claude-cli" : p.harness;
+    const fixa: IdHarness = p.harness === "auto" ? HARNESS_LEGADO : p.harness;
     i = { ...atual, modo: "fixa", fixa, escolhas: comEscolha(atual.escolhas, fixa, (e) => ({ ...e, modelo: p.modelo === "auto" ? undefined : p.modelo })) };
   }
-  if (p.esforco !== undefined) i = { ...i, escolhas: comEscolha(i.escolhas, "claude-cli", (e) => ({ ...e, raciocinio: p.esforco ?? undefined })) };
+  if (p.esforco !== undefined) i = { ...i, escolhas: comEscolha(i.escolhas, HARNESS_LEGADO, (e) => ({ ...e, raciocinio: p.esforco ?? undefined })) };
   return i;
 }
 

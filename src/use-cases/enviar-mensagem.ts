@@ -3,7 +3,6 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
-import type { IdHarness } from "../contracts/harness.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
@@ -79,8 +78,10 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   // Prende só o que é solto, desta conversa e da dona; qualquer id que sobrar derruba a tx inteira.
   const anexos = await deps.repos.anexos.prender(anexoIds, { conversaId: conversa.id, mensagemId: criada.id });
   if (anexos.length !== anexoIds.length) throw new ErroDeDominio("entrada_invalida", { cause: "anexo de outra conversa, já enviado ou inexistente" });
-  // PDF para um agente cujo motor declarado não lê PDF: recusa escrita em vez de o modelo não ver o arquivo.
-  const naoLido = agente.harness && agente.harness !== "auto" ? anexos.find((a) => !motorLe(agente.harness as IdHarness, tipoDoAnexo(a.mime))) : undefined;
+  // PDF para um agente cujo motor declarado não lê PDF: recusa escrita em vez de o modelo não ver o arquivo. O bot `auto`
+  // (ou sem harness) não é conferido aqui: a IA só se decide no despacho (NOD-207 manteve assim).
+  const fixo = agente.harness && agente.harness !== "auto" ? agente.harness : null;
+  const naoLido = fixo ? anexos.find((a) => !motorLe(fixo, tipoDoAnexo(a.mime))) : undefined;
   if (naoLido) throw new ErroDeDominio("entrada_invalida", { cause: `${agente.harness} não lê ${tipoDoAnexo(naoLido.mime)}` });
   const mensagem: Mensagem = anexos.length > 0 ? { ...criada, anexos } : criada;
 

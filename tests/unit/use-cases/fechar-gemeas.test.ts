@@ -22,7 +22,7 @@ async function acessoTresVezes() {
   conector.catalogo = [{ nome: "GMAIL_FETCH_EMAILS", descricao: "Lê e-mails", schema: { type: "object" }, readOnlyHint: true }];
   const ids: string[] = [];
   for (const texto of ["veja meus e-mails", "e agora?", "e os de ontem?"]) {
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: texto, entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: texto, entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
     if (!turno) throw new Error("turno");
     ids.push((await pedirAcesso(deps, { turnoId: turno.id, conversaId: bot.conversa.id, agenteId: bot.agente.id, conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", nao_pedido: [] })).data.proposta_id);
   }
@@ -35,7 +35,7 @@ async function retomarTresVezes() {
   const { data: bot } = await criarAgente(deps, { dono: "pessoa", interativo: true });
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: `pedido ${i}`, entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: `pedido ${i}`, entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
     const d = await deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: bot.agente.id, conversaId: bot.conversa.id, turnoId: turno?.id ?? null, prazoDecisaoEm: deps.agora() + DIA, frase: FRASE_QUEDA });
     ids.push(d?.id ?? "");
   }

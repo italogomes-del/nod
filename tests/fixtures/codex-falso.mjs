@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { setTimeout } from "node:timers"; // usos comentados: `esperar` (20 s) e `dormirMs`
+import { setInterval, setTimeout } from "node:timers"; // usos comentados: `esperar` (20 s), `dormirMs` e o app-server calado
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
@@ -125,6 +125,7 @@ async function appServer() {
     process.stdout.write("[experimental] Run the app server or related tooling.\n  --listen <URL>\n  --ignore-user-config\n");
     return;
   }
+  if (process.env.TESTE_NOD_PID) writeFileSync(process.env.TESTE_NOD_PID, String(process.pid)); // NOD-209: ver account/read
   const registro = { args, env: process.env, cwd: process.cwd(), thread: null, turnos: [], steers: [], interrupcoes: 0, aprovacao: null };
   const gravar = () => { if (process.env.TESTE_NOD_REGISTRO) writeFileSync(process.env.TESTE_NOD_REGISTRO, JSON.stringify(registro)); };
   const indiceMcp = args.findIndex((a) => a.startsWith("mcp_servers="));
@@ -307,6 +308,17 @@ async function appServer() {
           responder(m.id, { turnId: ativo.id });
           ativo.aoSteer(m.params.input?.[0]?.text ?? "");
           break;
+        // NOD-209 (revisão do PR #266): a conta, como o Codex 0.162.1 responde. TESTE_NOD_CONTA_CODEX: um e-mail (a conta
+        // ChatGPT), "chave" (login por chave de API, sem e-mail), "calado" (não responde nem sai) ou "erro" (responde erro).
+        // TESTE_NOD_PID grava o pid, para o teste conferir que o processo morreu.
+        case "account/read": {
+          const conta = process.env.TESTE_NOD_CONTA_CODEX ?? "pessoa@exemplo.com";
+          // Calado: nem o stdin fechado o tira do ar (um app-server travado); só o sinal de quem chamou.
+          if (conta === "calado") { setInterval(() => undefined, 60_000); break; }
+          if (conta === "erro") { emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "falhou" } }); break; }
+          responder(m.id, { account: conta === "chave" ? { type: "apiKey" } : { type: "chatgpt", email: conta, planType: "pro" }, requiresOpenaiAuth: true });
+          break;
+        }
         case "turn/interrupt":
           registro.interrupcoes++; gravar();
           responder(m.id, {});

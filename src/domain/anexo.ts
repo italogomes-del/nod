@@ -1,5 +1,5 @@
 import { ANEXOS_POR_MENSAGEM, MIME_PDF, MIMES_ANEXO, MIMES_IMAGEM, TAMANHO_MAX_ANEXO, type MimeAnexo, type TipoAnexo } from "../contracts/anexo.ts";
-import type { IdHarness } from "../contracts/harness.ts";
+import { capacidadesDe } from "./harness.ts";
 
 export function ehMimeAnexo(mime: string): mime is MimeAnexo {
   return (MIMES_ANEXO as readonly string[]).includes(mime);
@@ -11,19 +11,9 @@ export function tipoDoAnexo(mime: MimeAnexo): TipoAnexo {
   return "texto";
 }
 
-/**
- * O que cada motor lê como conteúdo (definido em 2026-09-24). Claude: imagem e PDF viram blocos da
- * mensagem (medido no dia com `claude -p --input-format stream-json`: leu PNG e PDF certo). Codex:
- * `codex exec --image` só aceita imagem; PDF fica de fora. Texto vira texto da mensagem nos dois.
- * Motor fora da lista não lê anexo nenhum.
- */
-const LE: Partial<Record<IdHarness, readonly TipoAnexo[]>> = {
-  "claude-cli": ["imagem", "pdf", "texto"],
-  "codex-cli": ["imagem", "texto"],
-};
-
-export function motorLe(harness: IdHarness, tipo: TipoAnexo): boolean {
-  return LE[harness]?.includes(tipo) ?? false;
+/** O motor lê este tipo como conteúdo? Quem diz é a capacidade `anexos` do harness (CAPACIDADES_HARNESS, ADR-083). */
+export function motorLe(harness: string, tipo: TipoAnexo): boolean {
+  return capacidadesDe(harness).anexos.includes(tipo);
 }
 
 /** Nome vindo do navegador: sem caminho, sem controle, curto. Vazio vira "arquivo". */

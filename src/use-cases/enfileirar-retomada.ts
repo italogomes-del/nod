@@ -1,3 +1,4 @@
+import type { Executor } from "../contracts/evento.ts";
 import type { Turno } from "../contracts/turno.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -7,8 +8,8 @@ export type NovaRetomada = {
   entradaTexto: string;
   prazoEm: number;
   reenvios?: number;
-  /** Executor que já se sabe (resposta a pedido): vai para o turno novo como antes. */
-  executor?: "local" | "catcher";
+  /** Executor que já se sabe (resposta a pedido). Sem ele, o do turno que a retomada continua (NOD-206). */
+  executor?: Executor;
 };
 
 /**
@@ -43,7 +44,7 @@ export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{
     // ADR-083: a retomada continua no trabalho do turno que retoma (a mesma faixa, a mesma sessão).
     trabalhoId: r.original.trabalhoId ?? null,
     ...(r.reenvios !== undefined ? { reenvios: r.reenvios } : {}),
-    ...(r.executor ? { executor: r.executor } : {}),
+    executor: r.executor ?? r.original.executor,
   });
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a marca da web (0033) também não se lava. Ela mora na
   // linha do turno, e a retomada nascia limpa, embora retome a MESMA sessão pelo --resume, com a página ainda no

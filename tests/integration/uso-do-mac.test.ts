@@ -23,7 +23,7 @@ async function montar(trx: Tx) {
   const base = await agenteComConversa(trx, MARLON, { nome: "Ada" });
   const { deps, repos } = depsSobre(trx, MARLON);
   const turno = async (trabalhoId: string | null, origem: "conversa" | "rotina" = "conversa") => {
-    const t = await repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
     if (!t) throw new Error("turno");
     return t;
   };
@@ -92,7 +92,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const m = await montar(trx);
       const daPessoa = await m.task("pessoa", "Acompanhar o CI");
       await m.repos.trabalhos.mudarEstado(daPessoa.id, "rodando", Date.now());
-      const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: daPessoa.id, acordarEm: Date.now() - 1_000 });
+      const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: daPessoa.id, acordarEm: Date.now() - 1_000 });
       const meus = new Set([volta!.id]);
       expect(await m.reivindicarTudo(true, meus, true, true)).toEqual([]);
       expect(await m.reivindicarTudo(true, meus, true)).toEqual([volta!.id]);
@@ -137,6 +137,9 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const deps = { ...m.deps, services: { ...m.deps.services, trabalhosVivos: { ultimaFerramenta: () => null, memoria: () => leitura } } };
 
       const rotina = await m.task("rotina", "Verificar o Slack");
+      // ADR-097: no equilibrado (o padrão) o processador cheio não segura; no "pouco", segura.
+      expect((await listarTrabalhos(deps, {})).data.segurando).toBe(false);
+      await gravarPreferencias(m.deps, { usoDoMac: "pouco" });
       const dto = (await listarTrabalhos(deps, {})).data;
       expect(dto.trabalhos.find((t) => t.id === parada.id)?.memoriaMb).toBeNull();
       // A linha diz "esperando o Mac aliviar" pela marca do servidor (a mesma regra do reivindicar).
@@ -169,7 +172,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       // A volta marcada ("me chame às 16:00") de outra task já começada: processo novo, ninguém esperando — também espera.
       const comVolta = await m.task("pessoa", "Acompanhar o CI");
       await m.repos.trabalhos.mudarEstado(comVolta.id, "rodando", Date.now());
-      const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - 1_000 });
+      const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - 1_000 });
       const meus = new Set([tConversa.id, tRotina.id, tPessoa.id, tAgora.id, tAntiga.id, tIniciada.id, volta!.id]);
 
       // O portão inteiro (o `puxar` manda os dois juntos): só a conversa e a task que já rodava.
@@ -192,7 +195,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const tAntiga = await m.turno(antiga.id, "rotina");
       const tAgora = await m.turno(agora.id, "rotina");
       const tPessoa = await m.turno(daPessoa.id);
-      const volta = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - ESPERA_MAXIMA_FUNDO_MS - 60_000 });
+      const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - ESPERA_MAXIMA_FUNDO_MS - 60_000 });
       const meus = new Set([tAntiga.id, tAgora.id, tPessoa.id, volta!.id]);
       // Revisão do #224: a volta é o próximo passo de uma task já começada — passa com a memória crítica.
       expect(new Set(await m.reivindicarTudo(true, meus, false, false, true))).toEqual(new Set([tAgora.id, tPessoa.id, volta!.id]));
@@ -241,7 +244,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       // Revisão do #224: a volta marcada vencida da task já começada, segurada pelo disco crítico, diz o motivo.
       const comVolta = await m.task("pessoa", "Acompanhar o CI");
       await m.repos.trabalhos.mudarEstado(comVolta.id, "rodando", Date.now());
-      await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - 60_000 });
+      await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: comVolta.id, acordarEm: Date.now() - 60_000 });
       const voltaDe = async () => (await listarTrabalhos(deps, {})).data.trabalhos.find((t) => t.id === comVolta.id)?.esperaDoMac ?? null;
       leitura = { ...leitura, disco: { livreMb: 2 * 1024, totalMb: 466 * 1024 } };
       expect(await voltaDe()).toBe("disco");

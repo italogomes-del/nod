@@ -23,7 +23,7 @@ const RESUMO_DA_MANHA = { cron: "0 8 * * 1-5", fuso_iana: "America/Sao_Paulo", i
 async function cenario(trx: Tx) {
   const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
   const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "vire minha revisora", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "vire minha revisora", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   await repos.turnos.assentar(turno.id, { estado: "concluido" });
   const ctx = { agenteId, conversaId, turnoId: turno.id };

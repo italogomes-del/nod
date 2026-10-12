@@ -114,6 +114,12 @@ describe("registry (ADR-012 sombra, ADR-019 gate pré-spawn)", () => {
       expect(executorPadrao({ NOD_EXECUTOR: "auto" }, { ...registry, "codex-cli": registry.catcher })).toEqual({ id: "codex-cli" });
     });
 
+    it("NOD-207: auto sem nenhum harness pronto cai no legado (claude-cli) e diz o motivo, como antes", () => {
+      expect(executorPadrao({ NOD_EXECUTOR: "auto" }, registry)).toEqual({ id: null, motivo: "claude-cli em sombra: ausente: binario_nao_encontrado" });
+      const semCodex: Registry = { ...registry, "codex-cli": { estado: "sombra", motivo: "ausente" } };
+      expect(executorPadrao({ NOD_EXECUTOR: "auto" }, semCodex)).toEqual({ id: null, motivo: "claude-cli em sombra: ausente: binario_nao_encontrado" });
+    });
+
     // NOD-160 critério 2: valor desconhecido falha fechado, com o motivo escrito, nos dois ambientes; não cai em outro driver.
     it.each(["claude", "Claude-CLI", "codex", "box"])("NOD_EXECUTOR=%j → { id: null } com o motivo, dentro e fora de produção", (valor) => {
       const motivo = `NOD_EXECUTOR desconhecido: "${valor}" (válidos: auto, claude-cli, codex-cli, catcher)`;

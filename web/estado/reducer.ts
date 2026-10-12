@@ -11,7 +11,7 @@ import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
-import type { Negacao } from "../../src/contracts/negacao.ts";
+import type { CausaNativa, Negacao } from "../../src/contracts/negacao.ts";
 import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
@@ -106,7 +106,11 @@ export type NivelGaveta =
   /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
   | { tipo: "trabalhos" };
 
-export type ConexaoApp = { url: string | null; falhou: string | null };
+/**
+ * `semJanela` (revisão do PR #264, NOD-208): a janela de login não abriu (bloqueador de pop-up, app desktop ou
+ * a re-sonda do "Tentar de novo", que a abre fora do clique). O bloco de espera mostra "Abrir o login" como link.
+ */
+export type ConexaoApp = { url: string | null; falhou: string | null; semJanela?: boolean };
 
 /**
  * A ligação viva da pessoa (definido em 2026-10-04, ADR-071): `local` = aberta NESTA página (a tela da ligação);
@@ -608,7 +612,10 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const nome = texto(f.dados.nome) ?? texto(f.dados.ferramenta) ?? "(sem nome)";
     const valida = (classe === "ferramenta_negada" || classe === "conector_indisponivel" || classe === "plano_ausente") && typeof motivo === "string";
     if (!valida) return invalidar(e, conv(f));
-    const vista: NegacaoVista = { classe, nome, motivo: motivo as Negacao["motivo"], desde: typeof f.dados.desde === "number" ? f.dados.desde : agora, terminal: f.dados.terminal === true, conversaId: texto(f.dados.conversaId), vistaEm: agora };
+    // definido em 2026-10-11: a causa que o hook do nod deu e quantas vezes no turno (causa desconhecida: a tela cai no motivo).
+    const causaNativa = typeof f.dados.causa_nativa === "string" ? (f.dados.causa_nativa as CausaNativa) : null;
+    const vezes = typeof f.dados.vezes === "number" && f.dados.vezes > 1 ? f.dados.vezes : null;
+    const vista: NegacaoVista = { classe, nome, motivo: motivo as Negacao["motivo"], desde: typeof f.dados.desde === "number" ? f.dados.desde : agora, terminal: f.dados.terminal === true, conversaId: texto(f.dados.conversaId), vistaEm: agora, ...(causaNativa ? { causa: causaNativa } : {}), ...(vezes ? { vezes } : {}) };
     // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
     return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
   },

@@ -1,10 +1,12 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import { ACORDAR_MAX_MINUTOS, ACORDAR_MIN_MINUTOS, MOTIVO_MAX_DESPERTAR, VOLTAS_SEGUIDAS_MAX } from "../contracts/ferramentas-trabalho.ts";
+import { ACORDAR_MAX_MINUTOS, ACORDAR_MIN_MINUTOS, MOTIVO_MAX_DESPERTAR, VOLTAS_SEGUIDAS_MAX, VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
+import { alarmeDeVoltas, fraseDoAlarme, perguntaDoAlarme } from "../domain/voltas-sem-novidade.ts";
+import { log } from "../obs/log.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -67,6 +69,11 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
   const agora = deps.agora();
   const retomaTurnoId = origemDaVolta(turno);
   await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+  // ADR-099 §5 (parte 1): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa. Só o turno que é ele mesmo
+  // uma volta pode fechar a conta (a primeira chamada da cadeia ainda não voltou nenhuma vez).
+  if (turno.acordarEm != null && alarmeDeVoltas(await deps.repos.turnos.ultimasVoltas(retomaTurnoId, VOLTAS_SEM_NOVIDADE))) {
+    return perguntarSemNovidade(deps, turno, pedido.motivo, agora);
+  }
   const volta = await deps.repos.turnos.enfileirar({
     conversaId: turno.conversaId,
     agenteId: turno.agenteId,
@@ -81,6 +88,7 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,
     harness: turno.harness,
+    executor: turno.executor,
     acordarEm: pedido.em,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada da volta marcada não criada" });
@@ -88,4 +96,28 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
   if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
   return [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: volta.trabalhoId ?? null, acordar_em: pedido.em } })];
+}
+
+/** A regra que fala no lugar do bot quando as voltas param (a autoria do evento e da mensagem diz que foi ela). */
+export const REGRA_VOLTAS_SEM_NOVIDADE = "regra:voltas_sem_novidade" as const;
+
+/**
+ * ADR-099 §5 (parte 1, definido em 2026-10-12): no lugar da quarta volta, uma pergunta à pessoa — a mesma forma do
+ * `pedir_a_pessoa` (decisão `pergunta` da dona no turno que voltou, balão com as respostas prontas). A task vai para
+ * "Precisa de você" pela regra de sempre (decisão pendente, `estadoDoTrabalho`), a delegação segura a entrega
+ * (`aguardando_pessoa`) e a resposta retoma o turno pela rota da pergunta (`retomarComResposta`). Se a resposta mandar
+ * seguir esperando, a próxima volta começa outra cadeia (a origem passa a ser a retomada da resposta) e a conta zera.
+ */
+async function perguntarSemNovidade(deps: Deps, turno: Turno, motivo: string, agora: number): Promise<RuntimeEvent[]> {
+  const decisao = await deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + PRAZO_DECISAO_PADRAO_MS, frase: fraseDoAlarme(VOLTAS_SEM_NOVIDADE, motivo) });
+  if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "pergunta das voltas sem novidade não criada" });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: REGRA_VOLTAS_SEM_NOVIDADE });
+  const { texto, opcoes } = perguntaDoAlarme(VOLTAS_SEM_NOVIDADE, motivo);
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto, payload: { kind: "pedido_a_pessoa", decisaoId: decisao.id, opcoes }, confianca: "confiavel" });
+  // Para medir o gatilho de reversão da ADR-099 (esperas acordando sem fato novo).
+  log("info", "voltas_sem_novidade", { turno_id: turno.id, trabalho_id: turno.trabalhoId ?? null, decisao_id: decisao.id, voltas: VOLTAS_SEM_NOVIDADE });
+  return [
+    evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: "pergunta", decisor_id: decisao.decisorId, prazo_decisao_em: decisao.prazoDecisaoEm, regra: REGRA_VOLTAS_SEM_NOVIDADE } }),
+    ...(mensagem ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: decisao.id } })] : []),
+  ];
 }

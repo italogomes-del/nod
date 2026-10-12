@@ -108,7 +108,7 @@ async function montar(o: { capacidades?: boolean; depoisDeAssentar?: DepsPonte["
     const d = depsSobreTrx(trx, PESSOA, { services: base });
     const { trabalho, events } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem: "pessoa" });
     await d.repos.events.gravarComOutbox(events);
-    const t = await d.repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
     return { trabalhoId: trabalho.id, turnoId: t!.id };
   });
   const recado = (trabalhoId: string, texto: string) => escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services: base }), mensagemParaTrabalho, { trabalhoId, texto })).data.mensagemTurnoId);
