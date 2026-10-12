@@ -78,3 +78,6 @@ export type FrenteNaLinhaAberta = {
 
 /** O que o `TrabalhosDto` ganha (ADR-099, I10): o dono de cada bot pedido (todos os da pessoa, ou o `agenteId`). */
 export type DonosNosTrabalhos = { donos?: DonoDto[] };
+
+/** O que o `ConversaDto` ganha (ADR-099, I10): o dono do bot da conversa própria — o estado da linha, as esperas e a fila. */
+export type DonoNaConversa = { dono?: DonoDto | null };

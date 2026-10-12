@@ -1,6 +1,6 @@
 import type { Executor } from "./evento.ts";
 import type { DonosNosTrabalhos, FrenteNaLinhaAberta } from "./dono.ts";
-export type { DonoDto } from "./dono.ts";
+export type { DonoDto, DonoNaConversa } from "./dono.ts";
 import type { CamposDeFrente } from "./frente.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
