@@ -59,17 +59,21 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 2. **Frente.** Uma unidade de trabalho do bot, com sessão e pasta próprias, filha do dono e **que não aparece como task**.
    - É uma linha de `trabalhos` (reaproveita pasta da ADR-065/088, limpeza da ADR-096, custo, memória e `sessaoExecutor`).
      Não usa o subagente do harness: só o Claude tem, e o Nod não o enxerga (motivo da ADR-083).
-   - Devolve ao dono um resumo curto com fatos (o que fez, PR e SHA, o que falta). **O lote volta junto:** o dono é
-     acordado uma vez, quando a última frente do lote termina, e responde numa mensagem só. Ao abrir o lote, o dono pode
-     pedir "avise a cada uma" quando as frentes são independentes e muito diferentes em duração (ex.: revisar 5 PRs).
-     Uma frente que precisa da pessoa pergunta na hora, sem esperar as outras.
+   - Devolve ao dono um resumo curto com fatos (o que fez, PR e SHA, o que falta).
+   - **Cada pedido tem o seu lote.** As frentes abertas juntas para o mesmo pedido voltam juntas: o dono é acordado uma
+     vez, quando a última termina, e responde numa mensagem só. Ao abrir o lote, o dono pode pedir "avise a cada uma"
+     quando as frentes são independentes e muito diferentes em duração (ex.: revisar 5 PRs).
+   - **Um pedido nunca espera frentes de outro pedido.** O pedido de um colega, ou um pedido novo da pessoa, é o seu
+     próprio lote: o resultado sai assim que a frente dele termina, mesmo com outras frentes do bot ainda rodando.
+   - Uma frente que precisa da pessoa pergunta na hora, sem esperar as outras.
    - Se alguma frente do lote leu conteúdo de fora, o turno de retorno do dono nasce marcado (ADR-047); o próximo turno
      da pessoa nasce limpo.
    - Frente não abre frente (`podeAbrirTask`). Não há teto fixo de frentes (ADR-083/085); a máquina decide (item 7).
 3. **O dono fica leve.** O turno do dono dispara frentes, responde em poucas linhas e encerra; o trabalho pesado vai para
    frente. A rede de 2 min (ADR-083) passa a promover o turno a frente, e sem `bifurcaSessao` promove com o histórico.
 4. **Esperar algo de fora é um comando, e o fim dele acorda o dono.**
-   - Ferramenta do Nod `esperar_comando({ comando, motivo })`, pelo proxy, em qualquer harness. O pedido fica no banco
+   - Ferramenta do Nod `esperar_comando({ comando, motivo })`, pelo proxy, em qualquer harness em que o bot tem terminal
+     (sem terminal, rodar comando por essa porta seria um atalho de permissão). O pedido fica no banco
      (comando, pasta, máquina, turno de origem); o motor roda o comando **fora do CLI**, com as regras do terminal do bot
      (ADR-052, ADR-089: sem laço com sleep); o turno do dono encerra na hora.
    - Quando o comando termina, o Nod enfileira a retomada do dono com o código de saída e as últimas linhas, pelo caminho
