@@ -1,9 +1,10 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
+import type { ModoTurno } from "../contracts/plano-turno.ts";
 import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { molduraDaFrente } from "../domain/frente.ts";
+import { molduraDaFrente, seguimentoNaRede } from "../domain/frente.ts";
 import { promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -282,22 +283,31 @@ export async function contaminarSeAbsorveuDeFora(deps: Pick<Deps, "repos" | "ago
 }
 
 /**
- * A rede de 2 min (ADR-083 §2, #193): na renovação, o turno de conversa que passou de 2 min trabalhando (e já chamou
- * ferramenta) vira o trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho, e a próxima
- * mensagem da conversa sai com `bifurcar` (emitir-plano-turno). Só com harness que `bifurcaSessao`.
+ * A rede de 2 min (ADR-083 §2, #193): na renovação, o turno do dono que passou de 2 min trabalhando (e já chamou
+ * ferramenta) vira trabalho `rede`. O processo segue intocado; a sessão dele passa a ser do trabalho.
+ * revisto em 2026-10-12 (ADR-099, I8): o turno promovido vira FRENTE (`forma='frente'`, num lote de uma frente aberto
+ * pelo próprio turno), também a retomada do dono em modo conversa, e sem exigir que o harness bifurque. Como o dono
+ * segue sai de `seguimentoNaRede`: bifurcando (a próxima fala sai com `bifurcar`, emitir-plano-turno), largando a sessão
+ * da conversa (ela foi com a frente; o próximo turno do dono recebe o histórico) ou já sem sessão (Codex).
  */
-export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null; sessaoExecutor?: Executor | null; maquinaBifurca?: boolean; redeMs?: number }, { trabalho: Trabalho | null }> = async (deps, input) => {
+export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; fezFerramenta: boolean; harness: string | null; sessaoCli: string | null; sessaoExecutor?: Executor | null; maquinaBifurca?: boolean; modo?: ModoTurno | null; redeMs?: number }, { trabalho: Trabalho | null }> = async (deps, input) => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
-  if (!turno) return { data: { trabalho: null } };
-  // Revisão do épico (S15, 2026-10-08): a capacidade estática do harness E o anúncio da máquina do turno (ausente = não).
-  const estaticas = capacidadesDe(input.harness);
-  const capacidades = { ...estaticas, bifurcaSessao: estaticas.bifurcaSessao && input.maquinaBifurca === true };
-  if (!promoveNaRede({ origem: turno.origem, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades, redeMs: input.redeMs })) return { data: { trabalho: null } };
+  // Sem harness no plano (catcher puro), não há capacidade declarada para decidir: não promove.
+  if (!turno || !input.harness) return { data: { trabalho: null } };
+  const capacidades = capacidadesDe(input.harness);
+  if (!promoveNaRede({ origem: turno.origem, modo: input.modo, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades, redeMs: input.redeMs })) return { data: { trabalho: null } };
+  const segue = seguimentoNaRede(capacidades, input.maquinaBifurca === true);
+  // A retomada (uma decisão respondida, a resposta de um colega) tem entrada do nod: o título vem do que a pessoa pediu.
+  const titulo = turno.origem === "retomada" ? ((await deps.repos.turnos.raizDaCadeia(turno.id))?.entradaTexto ?? turno.entradaTexto) : turno.entradaTexto;
+  const lote = await deps.repos.frentes.criarLote({ agenteId: turno.agenteId, abertoPorTurnoId: turno.id, trabalhoId: null, avisarACadaUma: false });
+  if (!lote) throw new ErroDeDominio("estado_invalido", { cause: "lote da rede não criado" });
   const { trabalho, events } = await criarTrabalho(deps, {
     agenteId: turno.agenteId,
     conversaId: turno.conversaId,
-    titulo: turno.entradaTexto,
+    titulo,
     origem: "rede",
+    forma: "frente",
+    loteId: lote.id,
     estado: "rodando",
     iniciadoEm: deps.agora(),
     sessaoCli: input.sessaoCli,
@@ -310,6 +320,9 @@ export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; 
   // Quem chama roda isto numa transação própria, fora da renovação: a corrida com a entrega desfaz só a promoção.
   const vinculado = await deps.repos.turnos.vincularTrabalho(turno.id, trabalho.id);
   if (!vinculado) throw new ErroDeDominio("estado_invalido", { cause: "turno saiu do despachando durante a promoção" });
+  // ADR-099 (I8): a sessão foi com a frente e a máquina não bifurca — a conversa do dono a larga, senão o próximo turno
+  // dele a retomaria junto com a frente (dois CLIs na mesma sessão). O dono volta com o histórico recente.
+  if (segue === "largar_sessao") await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, null);
   events.push(...(await linhaTrabalhoAberto(deps, trabalho, turno.id)));
   return { data: { trabalho }, events };
 };

@@ -206,7 +206,7 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
     });
   });
 
-  it("rede de 2 min: o turno de conversa com ferramenta vira task `rede` e a próxima mensagem sai com bifurcar; sem bifurcaSessao, não promove", async () => {
+  it("rede de 2 min: o turno de conversa com ferramenta vira frente `rede` e a próxima mensagem sai com bifurcar", async () => {
     await withRollback(MARLON, async (trx) => {
       let relogio = Date.now();
       const m = await montar(trx, () => relogio);
@@ -219,12 +219,11 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
       expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
       relogio += 1_000;
       expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: false, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "codex-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
-      // Revisão do épico (S15): sem a máquina anunciar que bifurca, não promove (app antigo).
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s })).data.trabalho).toBeNull();
+      // revisto em 2026-10-12 (ADR-099, I8): sem bifurcar (Codex, ou a máquina que não anuncia) também promove, com o
+      // histórico — em tests/integration/frentes-rede.test.ts.
       const r = await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true });
       // Revisão do épico (S13): a task da rede ganha pasta própria (os turnos seguintes rodam nela).
-      expect(r.data.trabalho).toMatchObject({ origem: "rede", estado: "rodando", sessaoCli: s, pasta: expect.stringMatching(/^~\/nod\/Ada\//) });
+      expect(r.data.trabalho).toMatchObject({ origem: "rede", forma: "frente", estado: "rodando", sessaoCli: s, pasta: expect.stringMatching(/^~\/nod\/Ada\//) });
       expect((await m.repos.turnos.buscar(vivo!.id))?.trabalhoId).toBe(r.data.trabalho?.id);
       expect((r.events ?? []).map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada"]);
 

@@ -30,8 +30,9 @@ export type AnuncioMaquina = {
   semLacoDeVoz?: IdHarness[];
   /**
    * definido em 2026-10-08 (ADR-083, revisão do épico): as capacidades que os drivers DESTA máquina declaram, já com os
-   * pisos do CLI instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). O servidor só promove pela rede de
-   * 2 min quando a máquina do turno anunciou `bifurcaSessao`. Ausente = app antigo: nada que dependa disso acontece.
+   * pisos do CLI instalado (ex.: `bifurcaSessao` só com `--fork-session` no help). Na rede de 2 min, a máquina do turno
+   * que anunciou `bifurcaSessao` faz o dono seguir numa cópia da sessão; sem o anúncio (app antigo), a sessão vai com a
+   * frente e o dono segue com o histórico (revisto em 2026-10-12, ADR-099, I8).
    */
   capacidades?: Partial<Record<IdHarness, CapacidadesHarness>>;
   /**

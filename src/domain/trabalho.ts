@@ -1,5 +1,6 @@
 import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
+import type { ModoTurno } from "../contracts/plano-turno.ts";
 import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho, type TrabalhoDto } from "../contracts/trabalho.ts";
 import type { EstadoTurno, OrigemTurno } from "../contracts/turno.ts";
 
@@ -169,16 +170,19 @@ export function soltarPorMemoria(p: { nivel: "verde" | "amarela" | "vermelha" | 
 export const REDE_MS = 120_000;
 
 /**
- * A rede de 2 min (#193): só o turno de CONVERSA da pessoa (nada de sala, ligação, rotina, colega ou retomada), sem
- * trabalho, rodando há REDE_MS, que já chamou ao menos uma ferramenta, e só com harness que bifurca sessão — sem
- * isso a próxima mensagem não teria como seguir a conversa sem atropelar a sessão do trabalho promovido.
- * `redeMs` existe só para o e2e (definido em 2026-10-08): ausente, vale REDE_MS.
+ * A rede de 2 min (#193): só o turno do dono com a pessoa (nada de sala, ligação, rotina ou colega), sem trabalho,
+ * rodando há REDE_MS, que já chamou ao menos uma ferramenta. `redeMs` existe só para o e2e (ausente, vale REDE_MS).
+ * revisto em 2026-10-12 (ADR-099, I8): também a retomada do dono em modo conversa, e com harness que bifurca OU que nem
+ * retoma sessão (o dono segue com o histórico). As capacidades são as declaradas do harness; quem escolhe entre bifurcar
+ * e largar a sessão é a máquina (`seguimentoNaRede`, domain/frente.ts).
  */
-export function promoveNaRede(p: { origem: OrigemTurno; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness; redeMs?: number }): boolean {
-  return p.origem === "conversa" && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= (p.redeMs ?? REDE_MS) && p.fezFerramenta && p.capacidades.bifurcaSessao;
+export function promoveNaRede(p: { origem: OrigemTurno; modo?: ModoTurno | null; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness; redeMs?: number }): boolean {
+  const doDono = p.origem === "conversa" || (p.origem === "retomada" && p.modo === "conversa");
+  return doDono && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= (p.redeMs ?? REDE_MS) && p.fezFerramenta && (p.capacidades.bifurcaSessao || !p.capacidades.retomaSessao);
 }
 
 /** O que a linha "Abriu a task …" diz por origem (texto da mensagem `sistema`; a web desenha pelo payload). */
 export function textoTrabalhoAberto(titulo: string, origem: OrigemTrabalho): string {
-  return origem === "rede" ? `Virou a task ${titulo}` : `Abriu a task ${titulo}`;
+  // revisto em 2026-10-12 (ADR-099, I8): a rede promove a frente, não mais a task.
+  return origem === "rede" ? `Virou a frente ${titulo}` : `Abriu a task ${titulo}`;
 }
