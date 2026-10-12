@@ -4,6 +4,7 @@ import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts
 import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { interromperPorMaquina, registrarVoltaDasMaquinas, type SaidaQuedaDaMaquina } from "../../use-cases/interromper-por-maquina.ts";
+import { varrerEsperasSemNoticia } from "../../use-cases/esperar-comando.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: um sexto do lease (90 s) — um turno órfão fica no máximo 15 s a mais como 'despachando' (ADR-010). */
@@ -22,7 +23,7 @@ export type OpcoesVarredura = {
   ultimoContato?: (machineId: string) => number | null;
 };
 export type OpcoesVarredor = OpcoesLaco & OpcoesVarredura;
-export type ResultadoVarredura = { interrompidos: string[]; decisoes: string[]; incidenteId?: string | null; voltaram?: string[] };
+export type ResultadoVarredura = { interrompidos: string[]; decisoes: string[]; incidenteId?: string | null; voltaram?: string[]; esperasCaidas?: string[] };
 
 /**
  * Lease vencido (ADR-010/021, E9.4): o turno vira 'interrompido' — transição terminal e idempotente
@@ -39,9 +40,12 @@ export async function varrerPessoa(tx: Transacao, escopo: Escopo, agora: number,
     const r = vencidos.length ? await interromperPorMaquina(deps, { turnos: vencidos, prazoMs: opcoes.prazoDecisaoMs, inicioDoProcesso: opcoes.inicioDoProcesso ?? null, maquinaPresente: presente }) : null;
     if (r?.events.length) await repos.events.gravarComOutbox(r.events);
     if (r) contarPerdidos(opcoes.metricas ?? registroPadrao, escopo, r.data);
+    // ADR-099 (parte 2): a espera de comando cuja máquina sumiu cai e acorda o dono (depois dos turnos: a volta lê o turno).
+    const esperas = await varrerEsperasSemNoticia(deps);
+    if (esperas.events.length) await repos.events.gravarComOutbox(esperas.events);
     // Por ÚLTIMO: fechar o aviso em curso trava o incidente, e a ordem é turnos → trava por pessoa → incidente.
     const voltaram = presente ? await registrarVoltaDasMaquinas(deps, presente) : [];
-    return { interrompidos: r?.data.interrompidos ?? [], decisoes: r?.data.decisoes ?? [], ...(r ? { incidenteId: r.data.incidenteId } : {}), ...(voltaram.length ? { voltaram } : {}) };
+    return { interrompidos: r?.data.interrompidos ?? [], decisoes: r?.data.decisoes ?? [], ...(r ? { incidenteId: r.data.incidenteId } : {}), ...(voltaram.length ? { voltaram } : {}), ...(esperas.caidas.length ? { esperasCaidas: esperas.caidas } : {}) };
   });
 }
 
@@ -58,7 +62,7 @@ export async function varrer(db: Db, agora: number, opcoes: OpcoesVarredor = {})
     db,
     async (escopo, tx) => {
       const r = await varrerPessoa(tx, escopo, agora, opcoes);
-      if (r.interrompidos.length || r.voltaram?.length) {
+      if (r.interrompidos.length || r.voltaram?.length || r.esperasCaidas?.length) {
         saida[escopo.pessoaId] = r;
         log("aviso", "lease_vencido", { pessoa_id: escopo.pessoaId, interrompidos: r.interrompidos.length, decisoes: r.decisoes.length, incidente_id: r.incidenteId ?? null, voltaram: r.voltaram?.length ?? 0 });
       }

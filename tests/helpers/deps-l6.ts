@@ -13,6 +13,7 @@ import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
 import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { meChameAs } from "../../src/use-cases/me-chame-as.ts";
+import { esperarComando } from "../../src/use-cases/esperar-comando.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { atualizarPerfil } from "../../src/use-cases/atualizar-perfil.ts";
@@ -152,6 +153,7 @@ export function useCasesDeTeste(): UseCasesNod {
     abrirFrentes,
     mandarParaFrente,
     devolverResumo,
+    esperarComando,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

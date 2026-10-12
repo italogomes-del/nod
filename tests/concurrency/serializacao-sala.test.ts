@@ -34,6 +34,7 @@ afterEach(async () => {
     await trx`delete from events where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from mensagens where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from turno_raio_x where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
+    await trx`delete from esperas where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from turno_entregas where turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from lotes_de_frentes where aberto_por_turno_id in (select id from turnos where conversa_id in ${trx(criados.conversas)})`;
     await trx`delete from turnos where conversa_id in ${trx(criados.conversas)}`;
