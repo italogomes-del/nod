@@ -2469,7 +2469,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         },
         async frentesDoLote(loteId: string) {
           return doTenant(b.trabalhos).filter((t) => t.loteId === loteId).sort((x, y) => x.criadoEm - y.criadoEm)
-            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivo: null }));
+            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivo: null, quedas: 0 }));
+        },
+        // ADR-099 (I9): a consulta das frentes caídas se prova no Postgres (tests/integration/frentes-caidas.test.ts).
+        async frentesCaidas() {
+          return [];
         },
         async lotesAbertosPor(ids: readonly string[]) {
           return doTenant(b.lotes).filter((l) => ids.includes(l.abertoPorTurnoId)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoLote);

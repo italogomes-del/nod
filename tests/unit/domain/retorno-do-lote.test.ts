@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decidirFecho, destinoDoLote, entradaDoRetorno, INSTRUCAO_DO_RETORNO, motivoDaFrente, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../../../src/domain/retorno-do-lote.ts";
+import { caiuDeVez, decidirFecho, destinoDoLote, entradaDoRetorno, INSTRUCAO_DO_RETORNO, motivoDaFrente, PERGUNTA_DA_QUEDA, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../../../src/domain/retorno-do-lote.ts";
 
 const frente = (id: string, extra: Partial<FrenteNoFecho> = {}): FrenteNoFecho => ({ id, titulo: `Frente ${id}`, estado: "terminado", resumo: { feito: `fiz ${id}` }, deFora: false, motivo: null, ...extra });
 
@@ -91,5 +91,36 @@ describe("retorno do lote (ADR-099, I3): os textos", () => {
     expect(textoPedidoRespondido("Ada")).toBe("Respondi ao pedido de Ada");
     expect(respostaAoColega([frente("a", { resumo: { feito: "Fiz.", pr: 7, branch: "frente/a", sha: "abcdef12345", falta: "deploy" } })])).toBe("Fiz. PR #7. Branch frente/a (abcdef1). Falta: deploy");
     expect(respostaAoColega([frente("a"), frente("b", { estado: "parado" })])).toBe("- Frente a: fiz a\n- Frente b: (não concluída: parada pela pessoa) fiz b");
+  });
+});
+
+describe("retorno do lote (ADR-099, I9): a frente que caiu de vez", () => {
+  const base = { destino: "dono" as const, avisarACadaUma: false, devolvido: false, donoParado: false };
+  const caida = (id: string, quedas = 3) => frente(id, { estado: "falhou", motivo: "maquina_sem_contato", quedas, resumo: null });
+
+  it("caiu de vez = falhou por um motivo de queda; outra falha não é queda", () => {
+    expect(caiuDeVez(caida("a"))).toBe(true);
+    expect(caiuDeVez(frente("a", { estado: "falhou", motivo: "erro_execucao" }))).toBe(false);
+    expect(caiuDeVez(frente("a", { estado: "precisa_de_voce", motivo: "maquina_sem_contato" }))).toBe(false);
+  });
+
+  it("com outras frentes ainda rodando, volta sozinha e na hora (pergunta na hora); sendo a última, volta com todas", () => {
+    const meio = [caida("a"), frente("b", { estado: "rodando" })];
+    expect(decidirFecho({ ...base, frentes: meio, fechou: "a" })).toEqual({ acao: "dono", frentes: [meio[0]], fechaLote: false, cuidado: false, faltam: 1 });
+    const prontas = [frente("a"), caida("b")];
+    expect(decidirFecho({ ...base, frentes: prontas, fechou: "b" })).toEqual({ acao: "dono", frentes: prontas, fechaLote: true, cuidado: false, faltam: 0 });
+    // Lote de colega: continua uma entrega só, quando todas acabaram.
+    expect(decidirFecho({ ...base, destino: "colega", frentes: meio, fechou: "a" })).toEqual({ acao: "nada" });
+  });
+
+  it("o retorno diz que caiu, quantas vezes, e manda perguntar à pessoa com opções", () => {
+    expect(motivoDaFrente(caida("a"))).toMatch(/ \(caiu 3 vezes\)$/);
+    expect(motivoDaFrente(caida("a", 1))).not.toContain("caiu");
+    const e = entradaDoRetorno({ frentes: [caida("a")], faltam: 1, total: 2 });
+    expect(e).toContain('A frente "Frente a" deste pedido caiu; falta 1.');
+    expect(e).toContain(PERGUNTA_DA_QUEDA);
+    expect(PERGUNTA_DA_QUEDA).toContain("pedir_a_pessoa");
+    expect(entradaDoRetorno({ frentes: [frente("a")], faltam: 0, total: 1 })).not.toContain(PERGUNTA_DA_QUEDA);
+    expect(respostaAoColega([caida("a")])).toMatch(/^\(não concluída: .+ \(caiu 3 vezes\)\)/);
   });
 });

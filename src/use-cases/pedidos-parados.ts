@@ -35,7 +35,7 @@ export type PedidosAdiados = Map<string, number>;
  * na fila no mesmo trabalho (a mesma sessão, pelo --resume) e a conversa do colega ganha a linha de sistema. Quem pediu
  * segue esperando: a resposta, ou a próxima falha, volta pelo caminho de sempre.
  */
-async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPedidoParado, { tipo: "retomar" }>): Promise<RuntimeEvent[]> {
+export async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPedidoParado, { tipo: "retomar" }>, frente: { titulo: string } | null = null): Promise<RuntimeEvent[]> {
   const original = await deps.repos.turnos.buscar(acao.turnoId);
   if (!original || original.estado !== "interrompido") return [];
   const agora = deps.agora();
@@ -49,7 +49,10 @@ async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPedidoPara
   const { turno, nova } = await enfileirarRetomada(deps, {
     original,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
-    entradaTexto: `Este pedido foi interrompido no meio (${motivo}). Continue de onde parou, sem refazer o que já foi feito, e termine com a resposta para quem pediu.`,
+    // ADR-099 (I9): a frente retomada termina devolvendo o resumo ao dono, não com a resposta a quem pediu.
+    entradaTexto: frente
+      ? `Esta frente foi interrompida no meio (${motivo}). Continue de onde parou, sem refazer o que já foi feito, e termine devolvendo o resumo com devolver_resumo.`
+      : `Este pedido foi interrompido no meio (${motivo}). Continue de onde parou, sem refazer o que já foi feito, e termine com a resposta para quem pediu.`,
     reenvios: original.reenvios + 1,
   });
   if (!turno) return events;
@@ -59,7 +62,9 @@ async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPedidoPara
     turnoId: turno.id,
     autoria,
     kind: "sistema",
-    texto: redigir("retomada-automatica", agora, { motivo, tentativa: String(acao.tentativa), maximo: String(MAX_QUEDAS_POR_PEDIDO) }),
+    texto: frente
+      ? redigir("frente-retomada-automatica", agora, { titulo: frente.titulo, motivo, tentativa: String(acao.tentativa), maximo: String(MAX_QUEDAS_POR_PEDIDO) })
+      : redigir("retomada-automatica", agora, { motivo, tentativa: String(acao.tentativa), maximo: String(MAX_QUEDAS_POR_PEDIDO) }),
     confianca: "confiavel",
   });
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: original.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
