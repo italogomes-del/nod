@@ -92,12 +92,15 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // O dono encerra a triagem com "comecei": não vai a quem pediu.
       await m.repos.turnos.assentar(triagem, { estado: "concluido" });
       expect((await entregarRespostaPeer(m.deps, { tarefaId: triagem, texto: "Comecei a revisão numa frente." })).data).toEqual({ ignorado: "aguardando_frentes" });
-      // A frente terminou e a I3 marcou o lote devolvido: o resultado sai, uma vez, para quem pediu.
+      // A frente terminou e a I3 fechou o lote (fecharLoteSePronto, no sincronizarTrabalho): o resultado sai, uma vez,
+      // direto para quem pediu, e a fala seguinte do dono já não entrega de novo.
       await m.repos.turnos.assentar(turnoDaFrente!.id, { estado: "concluido" });
       await sincronizarTrabalho(m.deps, frente!.trabalho_id);
-      await m.repos.frentes.marcarDevolvido(r.data.lote_id, null, Date.now());
-      const entrega = await entregarRespostaPeer(m.deps, { tarefaId: triagem, texto: "PR 42 revisado." });
-      expect("mensagem" in entrega.data && entrega.data.mensagem).toMatchObject({ conversaId: m.chico.conversaId, kind: "peer_ask", payload: { tarefaId: triagem } });
+      expect(await m.repos.frentes.buscarLote(r.data.lote_id)).toMatchObject({ devolvidoEm: expect.any(Number) });
+      const respostas = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId, 500)).filter((x) => x.kind === "peer_ask");
+      expect(respostas).toHaveLength(1);
+      expect(respostas[0]).toMatchObject({ conversaId: m.chico.conversaId, kind: "peer_ask", payload: { tarefaId: triagem } });
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: triagem, texto: "PR 42 revisado." })).data).toEqual({ ignorado: "ja_entregue" });
     });
   });
 
