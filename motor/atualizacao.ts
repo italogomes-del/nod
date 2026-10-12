@@ -30,8 +30,19 @@ export async function shaDosArquivos(dir: string): Promise<Record<string, string
   return r;
 }
 
-export async function atualizacaoLigada(marca = MARCA_DA_ATUALIZACAO): Promise<boolean> {
-  return access(marca).then(() => true, () => false);
+/** O servidor de onde o root baixa (gravado na instalação). */
+export const SERVIDOR_DA_INSTALACAO = "/etc/nod-motor/servidor";
+
+/**
+ * Ligada = a instalação criou a marca. Com `url`, também exige que o root baixe do MESMO servidor a que o motor está
+ * conectado: a máquina pareada de novo com outro servidor (`nod-motor parear`) compararia com um e baixaria do outro,
+ * drenando à toa a cada hora. Reinstalar pelo servidor novo acerta os dois.
+ */
+export async function atualizacaoLigada(o: { url?: string; marca?: string; servidor?: string } = {}): Promise<boolean> {
+  if (!(await access(o.marca ?? MARCA_DA_ATUALIZACAO).then(() => true, () => false))) return false;
+  if (o.url === undefined) return true;
+  const doRoot = await readFile(o.servidor ?? SERVIDOR_DA_INSTALACAO, "utf8").then((t) => t.split("\n")[0]?.trim() ?? "", () => "");
+  return doRoot === o.url;
 }
 
 export type Atualizador = { parar(): void; agora(): Promise<void> };

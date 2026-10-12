@@ -243,7 +243,8 @@ done
 # A versão anterior fica ao lado (app.anterior) para voltar à mão, se precisar.
 rm -rf "$APP.anterior"
 mv "$APP" "$APP.anterior"
-mv "$APP.novo" "$APP"
+# Se a segunda troca falhar, a anterior volta: a máquina nunca fica sem motor.
+mv "$APP.novo" "$APP" || { mv "$APP.anterior" "$APP"; exit 1; }
 systemctl restart nod-motor
 echo "motor atualizado: $VERSAO"
 NODATUALIZAR

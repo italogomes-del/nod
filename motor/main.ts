@@ -164,7 +164,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
     if (import.meta.url.endsWith(".mjs")) {
-      void atualizacaoLigada().then((ligada) => {
+      void atualizacaoLigada({ url: c.url }).then((ligada) => {
         if (!ligada || encerrado || atualizador) return;
         atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => laco?.turnosAtuais().length ?? 0, drenar: (sim) => laco?.drenar(sim) });
       });
@@ -235,7 +235,7 @@ function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number
  * a sessão já foi recusada.
  */
 async function sairPorVersao(url: string, pasta: string): Promise<number> {
-  if (!import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada())) return sairPor("atualize_app", url);
+  if (!import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada({ url }))) return sairPor("atualize_app", url);
   await writeFile(arquivoDoPedido(pasta), `${JSON.stringify({ versao: null, em: Date.now(), motivo: "atualize_app" })}\n`, { mode: 0o600 }).catch(() => undefined);
   log("info", "motor_atualizacao", { motivo: "atualize_app" });
   process.stderr.write("O servidor pede um motor mais novo: a atualização automática foi pedida.\n");
@@ -340,7 +340,11 @@ async function estado(): Promise<number> {
   const c = await carregarConexao(pasta);
   process.stdout.write(`Motor ${await versaoDoMotor()} · ${hostname()}\n`);
   process.stdout.write(c ? `Conectado a ${c.url}\n` : "Ainda não conectado: nod-motor parear https://seu-nod\n");
-  process.stdout.write(await atualizacaoLigada() ? "Atualização automática: ligada (espera um momento sem turno)\n" : `Atualização automática: desligada (sem ${MARCA_DA_ATUALIZACAO})\n`);
+  const marca = await atualizacaoLigada();
+  const mesmoServidor = !c || await atualizacaoLigada({ url: c.url });
+  process.stdout.write(!marca ? `Atualização automática: desligada (sem ${MARCA_DA_ATUALIZACAO})\n`
+    : !mesmoServidor ? `Atualização automática: parada (a instalação é de outro servidor; rode de novo: curl -fsSL ${c?.url}/motor | sh)\n`
+      : "Atualização automática: ligada (espera um momento sem turno)\n");
   const lig = { urlNod: c?.url ?? "https://127.0.0.1", proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), sondaSemTurno: true, electronComoNode: false };
   const envExecutor = { ...process.env, NOD_HOME: pastaDoExecutor(process.env) };
   const cfg = await configDosDrivers(envExecutor);

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scriptDeInstalacao } from "../../../src/adapters/http/motor-instalacao.ts";
 import { ATUALIZACAO_PARADA, ESPERA_DEPOIS_DE_FALHAR_MS, ESPERA_DO_PEDIDO_MS, JANELA_OCIOSA_MS, motorDiferente, proximoPasso } from "../../../src/domain/atualizacao-do-motor.ts";
-import { arquivoDoPedido, iniciarAtualizacao, shaDosArquivos } from "../../../motor/atualizacao.ts";
+import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, shaDosArquivos } from "../../../motor/atualizacao.ts";
 
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 const MIN = 60_000;
@@ -57,6 +57,18 @@ describe("o motor se atualiza sozinho (ADR-100): no motor", () => {
     const buscar = (async () => new Response(JSON.stringify({ versao: "0.5.0", arquivos }), { status: 200 })) as typeof fetch;
     return { dir, pasta, buscar };
   }
+
+  it("ligada só com a marca da instalação e, com a url, só se o root baixa do mesmo servidor", async () => {
+    const etc = await mkdtemp(join(tmpdir(), "nod-etc-"));
+    const marca = join(etc, "atualizar-sozinho");
+    const servidor = join(etc, "servidor");
+    expect(await atualizacaoLigada({ marca, servidor })).toBe(false);
+    await writeFile(marca, "");
+    await writeFile(servidor, "https://nod.exemplo.com\n");
+    expect(await atualizacaoLigada({ marca, servidor })).toBe(true);
+    expect(await atualizacaoLigada({ marca, servidor, url: "https://nod.exemplo.com" })).toBe(true);
+    expect(await atualizacaoLigada({ marca, servidor, url: "https://outro.exemplo.com" })).toBe(false);
+  });
 
   it("lê o sha256 dos três arquivos daqui (o que falta vem null)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "nod-motor-app-"));
