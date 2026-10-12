@@ -5,7 +5,8 @@ import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, 
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
 import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
-import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, orfaSai, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
+import { orfaSai } from "../../domain/guardado.ts";
+import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
 import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
@@ -323,6 +324,35 @@ async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string,
   return null;
 }
 
+/**
+ * ADR-099 item 9 (definido em 2026-10-12, I5): a pasta da frente que terminou (`sem_trabalho`) sai na hora só com prova
+ * AFIRMATIVA de que não há trabalho nela — a regra do Hermes ("na dúvida, guarda"). Tudo conferido antes de apagar
+ * qualquer coisa:
+ * - nenhum clone e nada na pasta além das worktrees (só pastas vazias e `.DS_Store`, como em `ficariaVazia`);
+ * - cada worktree passa nas conferências de sempre (`motivoParaFicar`: montagem, travada, aninhado, suja, ignorado que
+ *   não se refaz, HEAD solto);
+ * - e `git rev-list HEAD --not --remotes` vazio: nenhum commit que não esteja num remoto.
+ * Devolve o dir comum de cada worktree provada, ou o porquê da dúvida (só para o log). Na dúvida nada sai: a pasta fica
+ * para o caminho da ADR-088/096 (vira `encerrada` em 3 dias, ou em 2 h com o disco apertado, e é guardada antes).
+ */
+async function provarSemTrabalho(base: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string> } | { duvida: string }> {
+  if (achados.clones > 0) return { duvida: "clone" };
+  if (!(await ficariaVazia(base, 0, new Set(achados.worktrees), montagens, false))) return { duvida: "sobras" };
+  const provadas = new Map<string, string>();
+  for (const wt of achados.worktrees) {
+    const comum = await executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    const dirComum = comum.stdout.trim();
+    if (comum.codigo !== 0 || !isAbsolute(dirComum)) return { duvida: "erro" };
+    const motivo = await motivoParaFicar(wt, p, dirComum, montagens, executar);
+    if (motivo) return { duvida: motivo };
+    const fora = await executar("git", ["-C", wt, "rev-list", "-n1", "HEAD", "--not", "--remotes"]);
+    if (fora.codigo !== 0) return { duvida: "erro" };
+    if (fora.stdout.trim() !== "") return { duvida: "nao_enviado" };
+    provadas.set(wt, dirComum);
+  }
+  return { provadas };
+}
+
 function relatoVazio(simular: boolean): RelatoLimpeza {
   return { pastas: 0, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 0, ...(simular ? { simulada: true, estimadoBytes: 0 } : {}) };
 }
@@ -369,8 +399,20 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     if (o.emUso?.(rel)) { pular("em_uso"); continue; }
     const achados: Achados = { worktrees: [], clones: 0 };
     await procurar(base, 0, achados);
-    for (let i = 0; i < achados.clones; i++) pular("clone");
     const montagens = (await lerMontagens()) ?? [];
+    // ADR-099 (I5): a frente sem trabalho só passa daqui com a prova inteira; a dúvida conta uma vez, como `sem_prova`.
+    let provadas: Map<string, string> | null = null;
+    if (p.quando === "sem_trabalho") {
+      const prova = await provarSemTrabalho(base, p, achados, montagens, o.executar);
+      if ("duvida" in prova) {
+        pular("sem_prova");
+        log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: "fica", motivo: prova.duvida });
+        continue;
+      }
+      provadas = prova.provadas;
+      log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: simular ? "simulada" : "apaga", worktrees: provadas.size });
+    }
+    for (let i = 0; i < achados.clones; i++) pular("clone");
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
     // ADR-096 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
@@ -378,9 +420,14 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
 
     for (const wt of achados.worktrees) {
       const nome = basename(wt);
-      const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
-      const dirComum = comum.stdout.trim();
-      const motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, p, dirComum, montagens, o.executar);
+      // A worktree provada sem trabalho (ADR-099, I5) já passou pelas conferências: não se repete o `git status`.
+      let dirComum = provadas?.get(wt) ?? "";
+      let motivo: MotivoPuladaLimpeza | null = null;
+      if (!provadas) {
+        const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+        dirComum = comum.stdout.trim();
+        motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, p, dirComum, montagens, o.executar);
+      }
       if (motivo) {
         pular(motivo);
         if (motivo !== "pr_nao_mergeado") log("aviso", "limpeza_worktree_pulada", { trabalho_id: p.trabalhoId, pasta: nome, motivo });
@@ -639,7 +686,16 @@ export async function limparCachesDePacote(executar: ExecutarComando, caminho: s
 
 const discoPadrao = async (caminho: string): Promise<LeituraDisco | null> => discoDoStatfs(await statfs(caminho));
 
-export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean }): Promise<RelatoLimpeza | null> };
+/**
+ * `limparAgora` (ADR-099 item 9, definido em 2026-10-12, I5): uma passada só com as pastas `sem_trabalho` que o servidor
+ * mandou na resposta do `entregar` (a frente acabou de terminar). Mesma fila e mesma trava das outras passadas; outro
+ * processo limpando = desiste, e a passada de 6 h pega a pasta.
+ */
+export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean }): Promise<RelatoLimpeza | null>; limparAgora(pastas: readonly PastaParaLimpar[]): Promise<RelatoLimpeza | null> };
+
+/** Revisão do #225: logo antes de apagar, o servidor ainda oferece a pasta (a mesma, ou já como `encerrada`). */
+const reconfirmarPela = (pastasParaLimpar: NonNullable<PonteInterna["pastasParaLimpar"]>, pessoaId: string, pedido?: { apertado?: boolean }) => async (p: PastaParaLimpar) =>
+  (await pastasParaLimpar(pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando));
 
 /**
  * A limpeza periódica de uma pessoa neste Mac: pede a lista à ponte, limpa e relata. Uma passada por vez (fila do
@@ -663,8 +719,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
     const pedido = apertado ? { apertado: true } : undefined;
     try {
       const pastas = await pastasParaLimpar(o.pessoaId, pedido);
-      const reconfirmar = o.reconfirmar ?? (async (p: PastaParaLimpar) =>
-        (await pastasParaLimpar(o.pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando)));
+      const reconfirmar = o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId, pedido);
       const relato = await limparPastas(pastas, { ...o, reconfirmar, agora });
       if (!relato.adiada) {
         // ADR-096 §4: as órfãs paradas e os guardados vencidos.
@@ -688,6 +743,31 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       return relato;
     } finally {
       await soltar();
+    }
+  }
+  async function limparAgora(pastas: readonly PastaParaLimpar[]): Promise<RelatoLimpeza | null> {
+    const so = pastas.filter((p) => p.quando === "sem_trabalho");
+    const pastasParaLimpar = o.ponte.pastasParaLimpar?.bind(o.ponte);
+    if (parado || so.length === 0 || !pastasParaLimpar) return null;
+    try {
+      return await naFila(async () => {
+        if (parado) return null;
+        const soltar = await travarLimpeza(o.home, agora());
+        if (!soltar) { log("info", "limpeza_adiada", { pessoa_id: o.pessoaId, motivo: "outra_passada", imediata: true }); return null; }
+        try {
+          const inicio = agora();
+          const relato = await limparPastas(so, { ...o, reconfirmar: o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId), agora });
+          relato.imediata = true;
+          relato.duracaoMs = Math.max(0, agora() - inicio);
+          await o.ponte.relatarLimpeza?.(o.pessoaId, relato);
+          return relato;
+        } finally {
+          await soltar();
+        }
+      });
+    } catch (e) {
+      log("aviso", "limpeza_falhou", { pessoa_id: o.pessoaId, imediata: true, erro: e instanceof Error ? e.name : "desconhecido" });
+      return null;
     }
   }
   async function passada(op?: { apertado?: boolean }): Promise<RelatoLimpeza | null> {
@@ -736,5 +816,6 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       if (intervalo) clearInterval(intervalo);
     },
     passada,
+    limparAgora,
   };
 }

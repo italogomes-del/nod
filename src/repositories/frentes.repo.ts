@@ -44,12 +44,14 @@ export type FrenteDoLote = {
   terminadoEm: number | null;
   /** Um turno da frente leu conteúdo de fora ou nasceu não confiável: o retorno do lote nasce marcado. */
   deFora: boolean;
+  /** definido em 2026-10-12 (I3): o motivo cru do último turno terminal dela (falha, ou interrupção); null = nenhum. */
+  motivo: string | null;
 };
 
 /**
  * Frentes e lotes (definido em 2026-10-12, ADR-099, 0071). Padrão dos repositórios (tipos.ts): WHERE tenant_id explícito
  * sob RLS, escrita só da dona (owner_id), T | null sem lançar. Só leitura e gravação: quem decide abrir, fechar e
- * devolver é o caso de uso (issues seguintes); nenhum caso de uso chama este repositório ainda.
+ * devolver é o caso de uso (src/use-cases/frentes.ts e fechar-lote.ts).
  */
 export function frentesRepo(conn: Conn, escopo: Escopo) {
   return {
@@ -99,14 +101,30 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
 
     /** As frentes do lote, na ordem em que nasceram (pelo índice `trabalhos_por_lote`). */
     async frentesDoLote(loteId: string): Promise<FrenteDoLote[]> {
-      const linhas = await conn<{ id: string; titulo: string; estado: EstadoTrabalho; resumo: ResumoFrente | null; terminado_em: Date | null; de_fora: boolean }[]>`
+      const linhas = await conn<{ id: string; titulo: string; estado: EstadoTrabalho; resumo: ResumoFrente | null; terminado_em: Date | null; de_fora: boolean; motivo: string | null }[]>`
         select w.id, w.titulo, w.estado, w.resumo, w.terminado_em,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
-            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora
+            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
+          (select coalesce(x.motivo_falha::text, x.motivo_interrupcao::text) from turnos x
+            where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('concluido', 'interrompido')
+            order by x.criado_em desc, x.id desc limit 1) as motivo
         from trabalhos w
         where w.tenant_id = ${escopo.tenantId} and w.lote_id = ${loteId}
         order by w.criado_em, w.id`;
-      return linhas.map((l) => ({ id: l.id, titulo: l.titulo, estado: l.estado, resumo: l.resumo, terminadoEm: msOuNull(l.terminado_em), deFora: l.de_fora }));
+      return linhas.map((l) => ({ id: l.id, titulo: l.titulo, estado: l.estado, resumo: l.resumo, terminadoEm: msOuNull(l.terminado_em), deFora: l.de_fora, motivo: l.motivo }));
+    },
+
+    /**
+     * definido em 2026-10-12 (ADR-099, I3): os lotes abertos por estes turnos (o fio de um pedido de colega: o turno de
+     * `pedir_a_bot` e as retomadas dele). A entrega a quem pediu espera todos voltarem e leva as frentes de todos.
+     */
+    async lotesAbertosPor(turnoIds: readonly string[]): Promise<LoteDeFrentes[]> {
+      if (turnoIds.length === 0) return [];
+      const linhas = await conn<LinhaLote[]>`
+        select ${conn.unsafe(COLUNAS_LOTE)} from lotes_de_frentes
+        where tenant_id = ${escopo.tenantId} and aberto_por_turno_id = any(${[...turnoIds]}::uuid[])
+        order by criado_em, id`;
+      return linhas.map(paraLote);
     },
 
     /**

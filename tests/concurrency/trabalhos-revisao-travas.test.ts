@@ -18,6 +18,7 @@ import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 /**
  * Revisão do épico #188 (2026-10-08) com DUAS conexões de verdade: a ordem única das travas (S20) e os estados que só
@@ -182,8 +183,8 @@ describeIntegracao("revisão #188 — travas com duas conexões", () => {
       criados.conversas.push(dev.conversa.id);
       await d.repos.agentes.atualizarPerfil(dev.agente.id, { confirmado: true });
       const { data } = await pedirABot(d, { turnoId: m.turnoId, agenteId: m.agenteId, conversaId: m.conversaId, agente: dev.agente.nome, pedido: "revise o PR 42" });
-      await d.repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
-      return data.tarefa_id;
+      await d.repos.turnos.assentar(tarefaDoPedido(data), { estado: "concluido" });
+      return tarefaDoPedido(data);
     });
     const [entrega, resposta] = await corrida(
       (trx) => entregar(trx, m),

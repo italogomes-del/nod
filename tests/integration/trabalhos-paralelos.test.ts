@@ -9,13 +9,14 @@ import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const JANELA = Date.parse("2026-10-07T08:00:00-03:00");
 const AGORA = JANELA + 60_000;
 
 describeIntegracao("trabalhos em paralelo pelos casos de uso de verdade (#192, critério 1; S7)", () => {
-  it("um bot com uma rotina, um pedido de colega e uma task da pessoa despacha os três juntos, e a mensagem da conversa sai enquanto os três rodam", async () => {
+  it("um bot com uma rotina, um pedido de colega e uma task da pessoa: a task roda em paralelo; rotina e pedido entram na fila do dono, e a fala da pessoa passa na frente do pedido (ADR-099)", async () => {
     await withRollback(MARLON, async (trx) => {
       const dev = await agenteComConversa(trx, MARLON, { nome: "Dev" });
       const chico = await agenteComConversa(trx, MARLON, { nome: "Chico" });
@@ -33,24 +34,32 @@ describeIntegracao("trabalhos em paralelo pelos casos de uso de verdade (#192, c
       const daPessoa = (await criarTrabalho(deps, { agenteId: dev.agenteId, conversaId: dev.conversaId, titulo: "Dashboard de churn", origem: "pessoa" })).trabalho;
       await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", trabalhoId: daPessoa.id, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "monte o dashboard", entradaConfianca: "confiavel", modelo: "m" });
 
-      const tres = [];
-      for (let i = 0; i < 3; i++) tres.push(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA }));
-      expect(new Set(tres.map((t) => t?.agenteId))).toEqual(new Set([dev.agenteId]));
-      expect(new Set(tres.map((t) => t?.origem))).toEqual(new Set(["rotina", "delegacao", "conversa"]));
-      const origens = await Promise.all(tres.map(async (t) => (await repos.trabalhos.buscar(t?.trabalhoId ?? ""))?.origem));
-      expect(new Set(origens)).toEqual(new Set(["rotina", "colega", "pessoa"]));
+      // revisto em 2026-10-12 (ADR-099, I7 revista): a rotina e o pedido de colega entram na fila do dono (a conversa do
+      // Dev, sem trabalho) — eram tasks paralelas (S7). A task da pessoa segue em paralelo; na fila do dono, um por vez.
+      const primeiro = await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA });
+      const segundo = await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA });
+      expect(primeiro).toMatchObject({ agenteId: dev.agenteId, origem: "conversa", trabalhoId: daPessoa.id });
+      expect(segundo).toMatchObject({ agenteId: dev.agenteId, origem: "rotina", trabalhoId: null, id: disparo.data.turno.id });
+      expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA })).toBeNull();
+      expect(await repos.trabalhos.abertosDoAgente(dev.agenteId)).toMatchObject([{ id: daPessoa.id }]);
 
+      // A pessoa escreve enquanto a triagem da rotina roda: espera ela acabar e então passa na frente do pedido do Chico.
       const fala = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev.conversaId, agenteId: dev.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "e aí, como vai?", entradaConfianca: "confiavel", modelo: "m" });
+      expect(await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA })).toBeNull();
+      await repos.turnos.assentar(segundo!.id, { estado: "concluido" });
       expect((await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA }))?.id).toBe(fala?.id);
+      await repos.turnos.assentar(fala!.id, { estado: "concluido" });
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(pedido.data));
+      expect((await repos.turnos.reivindicar({ machineId: randomUUID(), agora: AGORA }))?.id).toBe(tarefa?.id);
 
-      // Quem pediu recebe a resposta numa continuação que segue no trabalho DELE (aqui, a conversa: null) e a entrega
-      // diz de que task veio.
-      const tarefa = await repos.turnos.buscar(pedido.data.tarefa_id);
+      // Quem pediu recebe a resposta numa continuação que segue no trabalho DELE (aqui, a conversa: null); a triagem
+      // respondeu direto, sem task por trás.
       await repos.turnos.assentar(tarefa!.id, { estado: "concluido" });
       const entrega = await entregarRespostaPeer(deps, { tarefaId: tarefa!.id, texto: "Revisei: dois comentários." });
       if (!("mensagem" in entrega.data)) throw new Error("sem entrega");
       expect(entrega.data.continuacao.trabalhoId).toBeNull();
-      expect(entrega.data.mensagem.payload).toMatchObject({ kind: "peer_ask", trabalhoId: tarefa!.trabalhoId });
+      expect(entrega.data.mensagem.payload).toMatchObject({ kind: "peer_ask", tarefaId: tarefa!.id });
+      expect(entrega.data.mensagem.payload).not.toHaveProperty("trabalhoId");
     });
   });
 });

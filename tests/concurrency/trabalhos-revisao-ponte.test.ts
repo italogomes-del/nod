@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { criarPonteInterna, type DepsPonte } from "../../src/adapters/fundo/ponte-interna.ts";
-import { CAPACIDADES_HARNESS } from "../../src/contracts/harness.ts";
+import { CAPACIDADES_HARNESS, type IdHarness } from "../../src/contracts/harness.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
@@ -40,15 +40,15 @@ async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {
 }
 
 const base = servicosDeTeste((t) => criarRepos(t, PESSOA), PESSOA, { interruptor: criarInterruptor() });
-/** O plano do teste: o de deps-l6 (montarPlano) no papel do Claude Code, e com `bifurcar` quando o teste pede. */
-const forcar = { bifurcar: false };
+/** O plano do teste: o de deps-l6 (montarPlano) no papel do Claude Code (ou do harness que o teste pedir), e com `bifurcar` quando o teste pede. */
+const forcar: { bifurcar: boolean; harness: IdHarness } = { bifurcar: false, harness: "claude-cli" };
 const services: Services = {
   ...base,
   planos: {
     ...base.planos,
     async emitir(trx, turnoId, machineId): Promise<PlanoTurno> {
       const p = await base.planos.emitir(trx, turnoId, machineId);
-      return { ...p, harness: "claude-cli", ...(forcar.bifurcar ? { entrada: { ...p.entrada, sessaoCli: p.entrada.sessaoCli ?? "sessao-da-conversa", bifurcar: true } } : {}) };
+      return { ...p, harness: forcar.harness, ...(forcar.bifurcar ? { entrada: { ...p.entrada, sessaoCli: p.entrada.sessaoCli ?? "sessao-da-conversa", bifurcar: true } } : {}) };
     },
   },
 };
@@ -56,6 +56,7 @@ const useCases = useCasesDeTeste();
 
 afterEach(async () => {
   forcar.bifurcar = false;
+  forcar.harness = "claude-cli";
   await escopado(async (trx) => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
@@ -118,20 +119,57 @@ async function montar(o: { capacidades?: boolean; depoisDeAssentar?: DepsPonte["
 }
 
 describeIntegracao("revisão #188 pela ponte: a rede de 2 min", () => {
-  it("S15: a máquina que não anunciou bifurcaSessao não promove; anunciada, promove", async () => {
+  it("S15 revisto (ADR-099, I8): a máquina que não anunciou bifurcaSessao promove a frente e a conversa larga a sessão; anunciada, a conversa fica com ela", async () => {
+    for (const anunciou of [false, true]) {
+      const m = await montar({ capacidades: anunciou });
+      await m.ler((r) => r.conversas.atualizarSessaoCli(m.conversaId, "sessao-da-conversa", "local", "claude-cli"));
+      await m.falar("monte o relatório");
+      const plano = await m.ponte.puxar(PESSOA.pessoaId);
+      expect(plano).toMatchObject({ harness: "claude-cli", entrada: { sessaoCli: "sessao-da-conversa" } });
+      m.avancar(2_000);
+      expect((await m.renovar(plano!.turnoId)).ativo).toBe(true);
+      const promovido = await m.ler((r) => r.turnos.buscar(plano!.turnoId));
+      expect(promovido?.trabalhoId).toBeTruthy();
+      expect(await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!))).toMatchObject({ origem: "rede", forma: "frente", sessaoCli: "sessao-da-conversa" });
+      expect((await m.ler((r) => r.conversas.buscar(m.conversaId)))?.sessaoCli).toBe(anunciou ? "sessao-da-conversa" : null);
+      // A sessão nova com que o promovido termina só volta para a conversa quando a rede bifurcou (S16).
+      await m.ponte.entregar({ turnoId: plano!.turnoId, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: resultado({ sessaoCli: "sessao-da-frente" }) });
+      expect((await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!)))?.sessaoCli).toBe("sessao-da-frente");
+      expect((await m.ler((r) => r.conversas.buscar(m.conversaId)))?.sessaoCli).toBe(anunciou ? "sessao-da-conversa" : null);
+    }
+  });
+
+  it("ADR-099 (I8): o Codex (sem retomar sessão) é promovido a frente sem anúncio de bifurcar; a conversa não muda", async () => {
+    forcar.harness = "codex-cli";
     const m = await montar();
     await m.falar("monte o relatório");
     const plano = await m.ponte.puxar(PESSOA.pessoaId);
-    expect(plano?.harness).toBe("claude-cli");
-    m.avancar(2_000);
-    expect((await m.renovar(plano!.turnoId)).ativo).toBe(true);
-    expect((await m.ler((r) => r.turnos.buscar(plano!.turnoId)))?.trabalhoId).toBeNull();
-
-    await m.conectar(true);
+    expect(plano?.harness).toBe("codex-cli");
+    m.avancar(500);
+    await m.renovar(plano!.turnoId);
+    expect((await m.ler((r) => r.turnos.buscar(plano!.turnoId)))?.trabalhoId, "antes do prazo, não").toBeNull();
+    m.avancar(1_500);
     await m.renovar(plano!.turnoId);
     const promovido = await m.ler((r) => r.turnos.buscar(plano!.turnoId));
-    expect(promovido?.trabalhoId).toBeTruthy();
-    expect(await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!))).toMatchObject({ origem: "rede", sessaoExecutor: null });
+    const frente = await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!));
+    expect(frente).toMatchObject({ origem: "rede", forma: "frente", sessaoHarness: "codex-cli" });
+    expect(await m.ler((r) => r.frentes.buscarLote(frente!.loteId!))).toMatchObject({ abertoPorTurnoId: plano!.turnoId, trabalhoId: null });
+  });
+
+  it("ADR-099 (I8): a retomada do dono (modo conversa) também é promovida pela ponte", async () => {
+    const m = await montar();
+    const original = await m.falar("revise o contrato");
+    const p1 = await m.ponte.puxar(PESSOA.pessoaId);
+    expect(p1?.turnoId).toBe(original);
+    await m.ponte.entregar({ turnoId: original, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "aprova?" }, resultado: resultado({ texto: "aprova?" }) });
+    const retomada = await escopado(async (trx) => (await criarRepos(trx, PESSOA).turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: original, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "[nod] A pessoa aprovou.", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!.id);
+    const p2 = await m.ponte.puxar(PESSOA.pessoaId);
+    expect(p2?.turnoId).toBe(retomada);
+    expect(p2?.modoTurno).toBe("conversa");
+    m.avancar(2_000);
+    await m.renovar(retomada);
+    const promovido = await m.ler((r) => r.turnos.buscar(retomada));
+    expect(await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!))).toMatchObject({ forma: "frente", titulo: "revise o contrato" });
   });
 
   it("S15: o turno que devia bifurcar e voltou recusado faz a conversa largar a sessão (o próximo plano sai em sessão nova, sem bifurcar)", async () => {

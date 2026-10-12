@@ -126,7 +126,7 @@ import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
 import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
-import { abrirTask, mandarParaTask } from "../../use-cases/coordenar-trabalhos.ts";
+import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../use-cases/frentes.ts";
 import { meChameAs } from "../../use-cases/me-chame-as.ts";
 import { esperarComando } from "../../use-cases/esperar-comando.ts";
 import { gerirBots } from "../../use-cases/gerir-bots.ts";
@@ -300,7 +300,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, gerirBots, verAppsConectados, registrarRelatoDoNod };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());

@@ -420,7 +420,8 @@ async function conectar(c: Config) {
   const registryDoLaco: Registry = criado.registry;
   registry = registryDoLaco;
   inventariosAtuais = criado.inventarios; maquinaIdAtual = dados.machineId;
-  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha });
+  // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
+  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao: app.getVersion(), aoFalhar: falha, aoLimparAgora: (pastas) => void limpezaDasTasks?.limparAgora(pastas) });
   cliente = ponteHttp;
   // ADR-048: o gh já logado neste Mac vira o jeito de conectar o GitHub da pessoa, sem ela configurar nada.
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();

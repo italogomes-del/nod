@@ -7,6 +7,7 @@ import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { comoPedidoDeAntes, tarefaDoPedido } from "../helpers/pedido.ts";
 
 /**
  * Tempo da task (protótipo "Nod — tempo da task", aprovado em 2026-10-08): o TrabalhoDto traz quem a task espera (o pedido
@@ -26,6 +27,8 @@ describeIntegracao("tempo da task (2026-10-08)", () => {
       if (!t) throw new Error("turno");
       await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
       const { data } = await pedirABot(deps, { turnoId: t.id, agenteId: ada.agenteId, conversaId: ada.conversaId, agente: "Dev", pedido: "revise o PR 42" });
+      // ADR-099 (I7 revista): o pedido de antes (task de colega), que ainda existe em produção e é o que tem task a mostrar.
+      await comoPedidoDeAntes(trx, deps, data);
       await repos.turnos.assentar(t.id, { estado: "concluido" });
       // 21 min de trabalho no turno da Ada (o Raio-X guarda o começo e o último sinal).
       await trx`insert into turno_raio_x (tenant_id, owner_id, turno_id, composicao, criado_em, atualizado_em)
@@ -35,12 +38,12 @@ describeIntegracao("tempo da task (2026-10-08)", () => {
       const [dto] = await trabalhosParaDto(deps, [(await repos.trabalhos.buscar(w.id))!]);
       expect(dto?.estado).toBe("rodando");
       expect(dto?.turnoVivoId).toBeNull();
-      const tarefa = await repos.turnos.buscar(data.tarefa_id);
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(data));
       expect(dto?.esperandoColega).toMatchObject({ nome: "Dev", trabalhoId: tarefa?.trabalhoId });
       expect(Math.round((dto?.trabalhouMs ?? 0) / 60_000)).toBe(21);
 
       // A task do Dev falhou: a Ada não espera mais ninguém (o varredor da ADR-084 a avisa).
-      await repos.turnos.interromper(data.tarefa_id, "trabalho_incompleto");
+      await repos.turnos.interromper(tarefaDoPedido(data), "trabalho_incompleto");
       await sincronizarTrabalho(deps, tarefa!.trabalhoId!);
       const [depois] = await trabalhosParaDto(deps, [(await repos.trabalhos.buscar(w.id))!]);
       expect(depois?.esperandoColega).toBeNull();

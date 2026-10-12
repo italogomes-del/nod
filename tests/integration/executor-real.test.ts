@@ -9,6 +9,7 @@ import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const pronto = { estado: "pronto", versao: "teste", em: Date.now() } as const;
@@ -31,13 +32,13 @@ describeIntegracao("o turno grava o executor em que de fato roda (NOD-206)", () 
       const r = await pedirABot(deps, { turnoId: deQuemPede?.id ?? "", agenteId: vera.agenteId, conversaId: vera.conversaId, agente: "Tuca", pedido: "qual o status do PR 42?" });
 
       // Sem executor no enfileiramento do pedido: vem do turno de quem pede, que o plano já corrigiu para local.
-      const pedido = await vera.repos.turnos.buscar(r.data.tarefa_id);
+      const pedido = await vera.repos.turnos.buscar(tarefaDoPedido(r.data));
       expect(pedido).toMatchObject({ agenteId: tuca.agenteId, origem: "delegacao", executor: "local" });
 
       // O plano é a fonte da verdade: mesmo com o palpite errado na linha, grava o executor em que o turno roda.
-      await trx`update turnos set executor = 'catcher' where id = ${r.data.tarefa_id}`;
-      await emitirPlanoTurno(deps, { turnoId: r.data.tarefa_id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } });
-      const [linha] = await trx<{ executor: string; estado: string }[]>`select executor, estado from turnos where id = ${r.data.tarefa_id}`;
+      await trx`update turnos set executor = 'catcher' where id = ${tarefaDoPedido(r.data)}`;
+      await emitirPlanoTurno(deps, { turnoId: tarefaDoPedido(r.data), machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } });
+      const [linha] = await trx<{ executor: string; estado: string }[]>`select executor, estado from turnos where id = ${tarefaDoPedido(r.data)}`;
       expect(linha).toEqual({ executor: "local", estado: "pendente" });
     });
   });

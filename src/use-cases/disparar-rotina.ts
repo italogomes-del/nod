@@ -12,7 +12,6 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
 import { preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
-import { criarTrabalho } from "./trabalhos.ts";
 
 export type EntradaDisparo = {
   rotina: Rotina;
@@ -123,7 +122,8 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   if (!input.preservarAgenda) {
     const turnoAbertoId = await deps.repos.rotinaJanelas.turnoAberto(rotina.id);
     // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
-    // não acabou — a execução seguinte, sem ver a anterior, abria a mesma task de novo, a cada janela.
+    // não acabou — a execução seguinte, sem ver a anterior, abria a mesma task de novo, a cada janela. revisto em
+    // 2026-10-12 (ADR-099, I7 revista): e enquanto uma frente que o dono abriu para a rotina não acabou.
     const filha = turnoAbertoId ? null : await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id);
     if (turnoAbertoId || filha) {
       const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(deps.agora(), instanteAgendado) });
@@ -147,16 +147,15 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
     return registrarSemPendencia(deps, input, agora);
   }
-  // definido em 2026-10-07 (ADR-083, S7): cada execução é um trabalho (nunca um por rotina), com sessão própria como já
-  // era. revisto em 2026-10-08 (revisão do épico, S13): e com pasta própria `~/nod/<bot>/<slug>`, como toda task — na
-  // pasta do bot ela rodava em paralelo com a conversa. A cerca do git (ADR-065) aceita qualquer pasta dentro de
-  // `~/nod/<bot>`, então a rotina continua entrando nas worktrees que mantém lá.
-  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: rotina.instrucao, origem: "rotina", rotinaId: rotina.id, pessoaEsperando: input.preservarAgenda === true });
+  // revisto em 2026-10-12 (ADR-099 item 1 e decisão 3, I7 revista; era um trabalho por execução, ADR-083 S7/S13): a rotina
+  // é um alarme que põe um pedido na fila do dono — um turno curto "rodar <rotina>" na conversa dela (a do bot, ou a sala),
+  // sem trabalho, que o `reivindicar` põe depois das falas da pessoa. O dono faz o que é rápido ali mesmo ou abre frentes
+  // (abrir_frentes); o lote volta a ele (I3), que fecha a execução com a linha "da rotina". Modo, catálogo e aprovações
+  // são os da rotina, como antes (o turno é origem 'rotina', ligado à janela).
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,
     origem: "rotina",
-    trabalhoId: trabalho.id,
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
     entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
@@ -175,7 +174,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   const autoria = autoriaPessoa(deps.escopo.pessoaId, "regra:scheduler-rotina");
   return {
     data: { turno, proximaExecucao },
-    events: [...doTrabalho, evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado, trabalhoId: trabalho.id }, { conversaId: rotina.conversaId, turnoId: turno.id })],
+    events: [evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turno.id })],
   };
 };
 
@@ -217,7 +216,7 @@ export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(
  * a retomada segue sem perguntar de novo, 'passou_em_branco' quando a pergunta é deixada pra lá ou vence.
  */
 export const TIPOS_QUE_SEGURAM_A_EXECUCAO: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>([...TIPOS_GATE_ROTINA, ...TIPOS_PEDIDO_A_PESSOA]);
-export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" };
+export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" | "aguardando_frentes" };
 
 /**
  * Assentamento de um turno de rotina (chamado pela L6 ao assentar turno origem 'rotina' ou sua
@@ -237,6 +236,9 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     const turnosDaRotina = new Set([turnoDisparado.id, input.turnoId]);
     const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_QUE_SEGURAM_A_EXECUCAO.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
+    // definido em 2026-10-12 (ADR-099, I7 revista): o turno do dono que abriu frentes para a rotina não é o fim da
+    // execução — o desfecho (e a linha "da rotina") é do retorno do lote, quando as frentes acabam (I3).
+    if ((await deps.repos.pedidosDeColega.frentesAbertasDosTurnos([...turnosDaRotina])) > 0) return { data: { ignorado: "aguardando_frentes" } };
   }
   const agora = deps.agora();
   // definido em 2026-09-24 (ADR-045): UMA linha por janela. A rotina que pergunta e é retomada, ou que

@@ -1,12 +1,15 @@
+import type { Agente } from "../contracts/agente.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { entradaDoPedido } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
+import { cicloDoPedido, instrucaoEsperaCircular, instrucaoPedidoRecebido } from "../domain/triagem.ts";
 import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
+import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { Deps } from "./tipos.ts";
-import { criarTrabalho } from "./trabalhos.ts";
+import { ehColega } from "./ver-colegas.ts";
 
 /**
  * Classes de procuração que autorizam pedir a bot de OUTRO dono (ADR-025). definido em 2026-09-29 (ADR-058):
@@ -42,6 +45,19 @@ async function mensagensDaPessoa(deps: Deps, turno: Turno): Promise<Mensagem[]> 
 }
 
 /**
+ * definido em 2026-10-12 (ADR-099 item 8, I7 revista): só os pedidos deste prazo para cá contam na espera circular — o
+ * mesmo do varredor de pedidos parados (24 h). Um handoff mais velho sem resposta não segura ninguém.
+ */
+export const JANELA_PEDIDOS_ABERTOS_MS = PRAZO_DECISAO_PADRAO_MS;
+
+/** Os colegas de quem pediu que estão livres agora (sem turno vivo nem pronto na fila), fora o alvo. */
+async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agora: number): Promise<Agente[]> {
+  const colegas = (await deps.repos.agentes.listar()).filter((a) => ehColega(remetente, a) && a.id !== alvoId);
+  const livres = new Set(await deps.repos.pedidosDeColega.livres(colegas.map((a) => a.id), agora));
+  return colegas.filter((a) => livres.has(a.id));
+}
+
+/**
  * Ferramenta `pedir_a_bot` (definido em 2026-09-29, ADR-058; substitui perguntar_a_bot e delegar_tarefa): um
  * bot pede a um colega uma resposta ou um trabalho, e o colega resolve com os acessos DELE. O remetente é o
  * agente do TOKEN; o alvo, um colega do mesmo dono (outro dono só com procuração). Vale de conversa, sala,
@@ -72,21 +88,26 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   await autorizarAlvo(deps.repos, remetente, alvo, CLASSES_PEDIR_A_BOT);
   const conversaAlvo = await deps.repos.conversas.buscarPropriaDoAgente(alvo.id);
   if (!conversaAlvo) throw new ErroDeDominio("nao_encontrado", { cause: "conversa própria do alvo" });
+  // definido em 2026-10-12 (ADR-099 item 8, I7 revista): espera circular. A trava por tenant serializa os pedidos
+  // cruzados (A→B e B→A ao mesmo tempo): o segundo espera o primeiro gravar o handoff e então enxerga o ciclo.
+  const agora = deps.agora();
+  await deps.repos.pedidosDeColega.travar();
+  const ciclo = cicloDoPedido(await deps.repos.pedidosDeColega.abertos(agora - JANELA_PEDIDOS_ABERTOS_MS), remetente.id, alvo.id);
+  if (ciclo) {
+    const nomes = await Promise.all(ciclo.map(async (id) => (id === remetente.id ? remetente.nome : (await deps.repos.agentes.buscar(id))?.nome ?? "um colega")));
+    return { data: { ok: false, erro: "espera_circular", instrucao: instrucaoEsperaCircular(nomes) } };
+  }
   const pessoaId = deps.escopo.pessoaId;
   const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
   const pedidos = (await mensagensDaPessoa(deps, turnoRemetente)).map((m) => m.texto);
-  const agora = deps.agora();
-  // definido em 2026-10-07 (ADR-083, S7): o pedido de colega é sempre uma task de quem RECEBE (origem `colega`), na
-  // conversa dele, com os acessos dele (ADR-058): roda em paralelo com a conversa e com as outras tasks dele.
-  // ADR-085 (revisão do #209): pedido feito na conversa com a pessoa (turno dela, fora de task) — ela espera a resposta,
-  // e o Mac apertado não o segura. O pedido que nasce numa task ou numa rotina segue a regra do segundo plano.
-  const pessoaEsperando = !turnoRemetente.trabalhoId && ["conversa", "sala", "ligacao"].includes(turnoRemetente.origem);
-  const { trabalho, events: doTrabalho } = await criarTrabalho(deps, { agenteId: alvo.id, conversaId: conversaAlvo.id, titulo: pedido, origem: "colega", pedidoPorAgenteId: remetente.id, pessoaEsperando });
+  // revisto em 2026-10-12 (ADR-099 itens 1, 1a e 8, I7 revista; era uma task de quem recebe, ADR-083 S7): o pedido entra na
+  // fila do DONO de quem recebe — um turno curto de triagem na conversa própria dele (faixa da conversa, sem trabalho),
+  // que o `reivindicar` põe depois das falas da pessoa. Ali o dono responde já, abre frentes (o lote fica ligado a este
+  // turno e o resultado vai direto a quem pediu, I3), junta a uma frente que já mexe na mesma coisa ou espera.
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: conversaAlvo.id,
     agenteId: alvo.id,
     origem: "delegacao",
-    trabalhoId: trabalho.id,
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: proximaProfundidade(turnoRemetente.profundidade),
     entradaTexto: entradaDoPedido({ pessoaNome, remetenteNome: remetente.nome, pedidos, pedido, contexto }),
@@ -98,6 +119,7 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     executor: turnoRemetente.executor,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do pedido não criado" });
+  // A marca de quem pediu (ADR-062/066) vai no turno de triagem e, dele, nas frentes que ele abrir (frentes.ts).
   if (turnoRemetente.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turnoRemetente.id))) await deps.repos.turnos.contaminar(turno.id, agora);
   const autoria = autoriaAgente(remetente.id, pessoaId, pessoaId);
   const mensagem = await deps.repos.mensagens.criar({
@@ -115,13 +137,13 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     autoria,
     kind: "handoff",
     texto: `${remetente.nome} pediu a ${alvo.nome}: ${pedido}`,
-    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id, trabalhoId: trabalho.id },
+    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id },
     confianca: "nao_confiavel",
   });
+  const livres = await colegasLivres(deps, remetente, alvo.id, agora);
   return {
-    data: { tarefa_id: turno.id },
+    data: { ok: true, tarefa_id: turno.id, instrucao: instrucaoPedidoRecebido(alvo.nome, livres.map((a) => a.nome)), livres: livres.map((a) => ({ id: a.id, nome: a.nome })) },
     events: [
-      ...doTrabalho,
       evento(deps, "mensagem_criada", autoria, { mensagemId: handoff?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
       evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: alvo.id, origem: "delegacao", profundidade: turno.profundidade, remetenteAgenteId: remetente.id, mensagemId: mensagem?.id ?? null }, { conversaId: conversaAlvo.id, turnoId: turno.id }),
     ],
