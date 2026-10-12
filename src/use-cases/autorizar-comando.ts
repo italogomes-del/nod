@@ -35,13 +35,20 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  * nunca é leitura, nunca é arriscado (o arriscado de arquivo é a credencial, que o hook já nega). Antes a gravação
  * ignorava o modo: no manual, o bot gravava em qualquer arquivo do Mac sem card.
  */
+/**
+ * revisto em 2026-10-11: era 8.000. O levantamento das sessões dos bots (VM e Mac, 28/09 a 11/10) achou 27 recusas
+ * "entrada inválida", todas de comandos entre 8.017 e 24.613 caracteres — o `python3 - <<'EOF'` que edita um arquivo
+ * grande. O corpo da rota já tem teto de 1 MB; este limite só segura o comando absurdo.
+ */
+export const COMANDO_MAX = 64_000;
+
 export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } | { plano: PlanoTurno; arquivo: string }, SaidaAutorizarComando> = async (deps, entrada) => {
   const { plano } = entrada;
   const arquivo = "arquivo" in entrada ? entrada.arquivo.trim() : null;
   const nativa = arquivo === null ? "Bash" : "Write";
   if (!(plano.nativas ?? []).includes(nativa)) throw new ErroDeDominio("nao_permitido", { cause: `${nativa} fora do plano deste turno` });
   const texto = arquivo === null ? ("comando" in entrada ? entrada.comando.trim() : "") : `Gravar ${arquivo}`;
-  if (texto === "" || arquivo === "" || texto.length > 8_000) throw new ErroDeDominio("entrada_invalida", { cause: arquivo === null ? "comando" : "arquivo" });
+  if (texto === "" || arquivo === "" || texto.length > COMANDO_MAX) throw new ErroDeDominio("entrada_invalida", { cause: arquivo === null ? "comando" : "arquivo" });
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
   if (arquivo === null && classificarComando(texto).tipo === "leitura" && !contaminado) return { data: { permitir: true, porque: "leitura" } };
   if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { data: { permitir: true, porque: "aprovado" } };

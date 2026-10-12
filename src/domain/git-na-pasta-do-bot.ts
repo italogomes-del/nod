@@ -110,6 +110,36 @@ export function arquivoForaDaPastaDoBot(caminho: string, ctx: ContextoDaPasta): 
   return alvo ?? caminho;
 }
 
+/** Palavras do shell que abrem o comando de verdade: `for …; do git …`, `if …; then git …`. */
+const PALAVRAS_DE_CONTROLE = new Set(["do", "then", "else", "elif", "if", "while", "until", "{", "!", "time"]);
+const ATRIBUICAO = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
+
+/**
+ * definido em 2026-10-11: `$NOME` e `${NOME}` com o valor que o próprio comando deu antes (`T=~/nod/x; git worktree add
+ * "$T/repo"`), e `$HOME`. Variável sem valor conhecido fica como está, e o `resolver` desiste dela. No levantamento de
+ * 11/10, 167 das 177 recusas "numa pasta que não deu para conferir" (VM e Mac, 28/09 a 11/10) eram esse padrão.
+ */
+function expandir(palavra: string, vars: ReadonlyMap<string, string | null>, home: string, literal: (nome: string) => boolean): string {
+  return palavra.replace(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (inteiro, a?: string, b?: string) => {
+    const nome = (a ?? b)!;
+    if (literal(nome)) return inteiro;
+    if (nome === "HOME") return home;
+    return vars.get(nome) ?? inteiro;
+  });
+}
+
+/**
+ * O tokenizador tira as aspas, e `'$T'` é literal no shell. A variável que aparece entre aspas simples em algum ponto do
+ * comando não é expandida em lugar nenhum. A conferência é larga (pode casar de uma aspa que fecha até a próxima que
+ * abre), e o erro dela só nega a mais.
+ */
+const citadaLiteral = (comando: string) => (nome: string) => new RegExp(`'[^']*\\$\\{?${nome}(?![A-Za-z0-9_])[^']*'`).test(comando);
+
+/** `$PWD` é a pasta em que o comando está naquele ponto (o cwd, depois dos `cd`), quando ela é conhecida. */
+function comPwd(vars: ReadonlyMap<string, string | null>, dir: string | null): ReadonlyMap<string, string | null> {
+  return vars.has("PWD") ? vars : new Map([...vars, ["PWD", dir]]);
+}
+
 /** Por que este comando mexeria numa pasta de trabalho fora de ~/nod/<bot>, ou null se pode rodar. */
 export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): string | null {
   if (!/\b(git|gh)\b/.test(comando)) return null;
@@ -121,15 +151,34 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
   }
   let dir = ctx.cwd === null ? null : resolver(ctx.cwd, null, ctx.home);
   let palavras: string[] = [];
-  const segmentos: string[][] = [];
+  // `depois`: o separador que vem antes do segmento. A atribuição vale depois de `;`, do começo e de `&&` (se ela não
+  // rodou, o que vem encadeado por `&&` também não roda). Depois de `||` pode não ter rodado, e num pipe roda num subshell.
+  const segmentos: { palavras: string[]; depois: string }[] = [];
+  let depois = ";";
   for (const t of tokens) {
-    if (t.operador && SEPARADORES.has(t.texto)) { segmentos.push(palavras); palavras = []; continue; }
+    if (t.operador && SEPARADORES.has(t.texto)) { segmentos.push({ palavras, depois }); palavras = []; depois = t.texto; continue; }
     if (!t.operador) palavras.push(t.texto);
   }
-  segmentos.push(palavras);
-  for (const s of segmentos) {
+  segmentos.push({ palavras, depois });
+  const literal = citadaLiteral(comando);
+  const vars = new Map<string, string | null>();
+  for (const seg of segmentos) {
+    let s = seg.palavras;
+    while (s.length > 0 && PALAVRAS_DE_CONTROLE.has(s[0]!)) s = s.slice(1);
+    // `for b in …`: o valor de `b` muda a cada volta.
+    if (s[0] === "for" || s[0] === "select") { if (s[1]) vars.set(s[1], null); continue; }
+    if (s[0] === "export" || s[0] === "local" || s[0] === "readonly") s = s.slice(1).filter((w) => !w.startsWith("-"));
+    if (s.length > 0 && s.every((w) => ATRIBUICAO.test(w))) {
+      for (const w of s) {
+        const [, nome, valor] = ATRIBUICAO.exec(w)!;
+        const v = expandir(valor!, comPwd(vars, dir), ctx.home, literal);
+        vars.set(nome!, (seg.depois === ";" || seg.depois === "&&") && !v.includes("$") ? v : null);
+      }
+      continue;
+    }
+    s = s.map((w) => expandir(w, comPwd(vars, dir), ctx.home, literal));
     // `FOO=bar git …`: a variável não muda a pasta.
-    const inicio = s.findIndex((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    const inicio = s.findIndex((w) => !ATRIBUICAO.test(w));
     const [programa, ...args] = inicio < 0 ? [] : s.slice(inicio);
     if (programa === "cd" || programa === "pushd") { dir = resolver(args[0] ?? "~", dir, ctx.home); continue; }
     if (programa === "gh" && args[0] === "pr" && args[1] === "checkout") {

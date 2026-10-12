@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
-import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
+import { autorizarComando, COMANDO_MAX } from "../../src/use-cases/autorizar-comando.ts";
 import { decidir, entradaDaAprovacao, marcarEDecidir } from "../../src/use-cases/decidir.ts";
 import { liberarNaTarefa, terminalLiberadoNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
@@ -121,6 +121,15 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       expect("aguardar" in (await c.autorizar("cat ~/.ssh/id_rsa")).data).toBe(true);
       await expect(c.autorizar("ls", { ...c.plano, nativas: ["Read"] })).rejects.toMatchObject({ codigo: "nao_permitido" });
       await expect(c.autorizar("   ")).rejects.toMatchObject({ codigo: "entrada_invalida" });
+    });
+  });
+
+  it("revisto em 2026-10-11: o heredoc que edita um arquivo grande (24 mil caracteres) vai à decisão; só o absurdo é recusado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      const heredoc = `python3 - <<'EOF'\np='a.ts'\ns=open(p).read()\ns=s.replace('''${"x".repeat(24_000)}''', '')\nopen(p,'w').write(s)\nEOF`;
+      expect("aguardar" in (await c.autorizar(heredoc)).data).toBe(true);
+      await expect(c.autorizar(`echo ${"x".repeat(COMANDO_MAX)}`)).rejects.toMatchObject({ codigo: "entrada_invalida" });
     });
   });
 
