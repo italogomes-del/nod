@@ -1,6 +1,6 @@
 # Plano: um dono por bot
 
-Entrega da [ADR-099](adr/adr-099-um-dono-por-bot.md) em seis partes. Cada parte vai para produção sozinha e já melhora o
+Entrega da [ADR-099](adr/adr-099-um-dono-por-bot.md) em sete partes. Cada parte vai para produção sozinha e já melhora o
 que se viu em 11/10; a ordem põe primeiro o que tira a confusão e o desperdício, depois a mudança de forma.
 
 Como medir: os números de referência são os de 11/10, lidos na produção (`trabalhos` e `turnos` por bot e por dia:
@@ -35,7 +35,8 @@ Pequena e independente; resolve o "13 trabalhando" antes de tudo.
 - Migração: `trabalhos` ganha a ligação com o dono (a conversa do bot) e a marca de frente; a origem `frente` entra no
   `CHECK`. Frente não abre frente.
 - Ferramenta do dono para abrir frentes em lote e receber o resumo (fatos: o que fez, PR e SHA, o que falta) como uma
-  mensagem só quando o lote termina.
+  mensagem só quando o lote termina; opção "avise a cada uma" para frentes independentes. Frente marcada por conteúdo de
+  fora marca o turno de retorno do dono.
 - Branch e worktree próprios por frente que mexe em repositório; o prompt do dono diz que só ele integra e empurra no
   branch do PR.
 - Limpeza imediata: frente terminada com zero commits além da base e árvore limpa tem a pasta apagada na hora (prova
@@ -45,14 +46,17 @@ Pequena e independente; resolve o "13 trabalhando" antes de tudo.
 
 ## Parte 4 · A fila do dono
 
-- `pedir_a_bot` e rotina entram na fila do dono do bot que recebe; o turno de colega ou rotina vira frente na hora e o dono
-  recebe o resumo. Resposta imediata com a posição na fila.
+- `pedir_a_bot` entra na fila do dono do bot que recebe e vira frente na hora, **sem limite por pedido** (só a capacidade
+  segura, Parte 7). O dono decide na entrada: começar, juntar a uma frente que mexe na mesma coisa, ou esperar uma
+  dependência. A resposta imediata diz qual foi e, se espera, o quê.
+- Rotina vira um pedido na fila do dono ("rodar <rotina>"); some a rotina que abre tasks sozinha.
 - A pessoa passa na frente no `reivindicar`; turno do dono curto (prompt e rede de 2 min promovendo a frente, com histórico
   quando o harness não bifurca).
 - Espera circular recusada no `pedir_a_bot`.
+- Pedido de colega concluído não acorda o dono: só a linha "Respondi ao pedido de X".
 - Varredor da ADR-084 lendo a frente que atende o pedido; três quedas → pergunta à pessoa (item 5 da ADR).
-- **Pronto quando:** um bot nunca tem duas frentes nascidas de pedidos diferentes esperando a mesma coisa; o orquestrador
-  recebe "entrou na fila" em vez de abrir trabalho paralelo. (Referência: 11 tasks do Ze 1 na mesma CI; Leonardo empilhando.)
+- **Pronto quando:** dois pedidos que mexem na mesma coisa viram uma frente ou esperam um pelo outro, por decisão do dono;
+  pedidos independentes rodam juntos. (Referência: 11 tasks do Ze 1 na mesma CI; Leonardo empilhando.)
 
 ## Parte 5 · A tela
 
@@ -73,6 +77,19 @@ Pequena e independente; resolve o "13 trabalhando" antes de tudo.
 - Pasta descartável para frente que não commita (QA, pesquisa): apagada no fim, só os artefatos declarados ficam.
 - Registro de dono para o que é pesado fora da pasta (pgdata, contêineres, clones), recolhido pelo rótulo quando o dono some.
 - **Pronto quando:** o disco da VM não cresce com frentes encerradas; nenhum Postgres de teste sobra sem dono.
+
+## Parte 7 · Cota da IA e custo
+
+Independente das outras; pode andar em paralelo.
+
+- Ler quanto da cota da assinatura já foi usado na janela e na semana, por provedor. Começar pelo que o CLI expõe (o
+  Claude Code mostra o uso da janela) e pelo sinal de limite (429, "limite atingido"); sem leitura direta, estimar pelo gasto.
+- Com 99% da cota usada, frentes novas param de nascer; **1% fica para a conversa com a pessoa**. Sinal de limite segura
+  trabalho novo em vez de deixá-lo falhar, e o que esperava volta sozinho quando a janela abre.
+- Recursos de fora: medir tempo de fila da CI e erros de limite das APIs (GitHub, ClickUp, Gmail) e mostrar; sem trava.
+- Custo por bot no dia, visível atrás de um clique na tela Trabalhos, com aviso discreto quando o ritmo sai do normal.
+- **Pronto quando:** num dia de cota apertada, a conversa com a pessoa nunca recebe "limite atingido" enquanto houver a
+  reserva, e nenhuma frente falha por limite: espera e volta.
 
 ## Fora deste plano
 

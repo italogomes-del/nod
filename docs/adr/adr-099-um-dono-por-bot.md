@@ -44,14 +44,27 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 
 1. **O dono é a fila do bot, não uma sessão única do CLI.**
    - Pedidos da pessoa, de colegas (`pedir_a_bot`) e de rotinas entram na fila do dono, em ordem. A pessoa passa na frente.
-   - Turno de colega ou de rotina vira frente na hora; o dono recebe só o resumo. Assim a marca de conteúdo de fora
-     (ADR-047) fica na frente que leu, e a conversa com a pessoa não perde a escrita por causa de um pedido de colega.
+   - **Não há limite por pedido.** Todo pedido começa na hora se há recurso (item 7). Um pedido só espera na fila quando
+     falta recurso ou quando o dono decide que ele depende de outro trabalho (item 1a).
+   - Turno de colega vira frente na hora; o dono recebe só o resumo. Assim a marca de conteúdo de fora (ADR-047) fica na
+     frente que leu, e a conversa com a pessoa não perde a escrita por causa de um pedido de colega.
+   - **A rotina é um alarme que põe um pedido na fila do dono** ("rodar <rotina>"); a partir daí é igual a qualquer
+     pedido: o dono abre frentes ou pede a colegas e fecha com o resumo. Na conversa continua a linha agrupada "da
+     rotina", que só vira mensagem quando há algo para a pessoa. A rotina não abre frentes sozinha.
    - Sala e ligação continuam paralelas à conversa, como hoje (são conversas diferentes; ADR-072).
+1a. **O dono decide na entrada.** Num turno curto, ao receber um pedido, o dono olha o que já está em andamento e escolhe:
+   começar agora numa frente; juntar a uma frente que já mexe na mesma coisa; ou esperar ("depende do #845, começo quando
+   ele fechar"). É julgamento, não regra: o dono consegue porque é dono de todas as frentes. O conflito entre frentes se
+   resolve pela forma (item 6), não pela contagem.
 2. **Frente.** Uma unidade de trabalho do bot, com sessão e pasta próprias, filha do dono e **que não aparece como task**.
    - É uma linha de `trabalhos` (reaproveita pasta da ADR-065/088, limpeza da ADR-096, custo, memória e `sessaoExecutor`).
      Não usa o subagente do harness: só o Claude tem, e o Nod não o enxerga (motivo da ADR-083).
-   - Devolve ao dono um resumo curto com fatos (o que fez, PR e SHA, o que falta). Um lote de frentes vira uma mensagem do
-     dono, não uma por frente.
+   - Devolve ao dono um resumo curto com fatos (o que fez, PR e SHA, o que falta). **O lote volta junto:** o dono é
+     acordado uma vez, quando a última frente do lote termina, e responde numa mensagem só. Ao abrir o lote, o dono pode
+     pedir "avise a cada uma" quando as frentes são independentes e muito diferentes em duração (ex.: revisar 5 PRs).
+     Uma frente que precisa da pessoa pergunta na hora, sem esperar as outras.
+   - Se alguma frente do lote leu conteúdo de fora, o turno de retorno do dono nasce marcado (ADR-047); o próximo turno
+     da pessoa nasce limpo.
    - Frente não abre frente (`podeAbrirTask`). Não há teto fixo de frentes (ADR-083/085); a máquina decide (item 7).
 3. **O dono fica leve.** O turno do dono dispara frentes, responde em poucas linhas e encerra; o trabalho pesado vai para
    frente. A rede de 2 min (ADR-083) passa a promover o turno a frente, e sem `bifurcaSessao` promove com o histórico.
@@ -72,13 +85,22 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 6. **Cada frente no próprio branch; só o dono integra.** Frentes que mexem num repositório trabalham em branch e worktree
    próprios; o dono junta o resultado e é o único que empurra no branch do PR. Não há trava no hook: é a forma de trabalhar
    que o dono usa ao disparar frentes. Resolve o caso do #845 sem proibir nada.
-7. **Máquina apertada.** A frente herda a origem do pedido: veio da pessoa, não é segurada; veio de colega ou rotina,
-   pode ser segurada (ADR-085). Comandos pesados seguem a fila da ADR-097, se aprovada.
+7. **O limite é a capacidade, medida.** Enquanto houver recurso, o bot trabalha em quantas frentes precisar.
+   - **Máquina:** a frente herda a origem do pedido: veio da pessoa, não é segurada; veio de colega ou rotina, pode ser
+     segurada (ADR-085). Comandos pesados seguem a fila da ADR-097, se aprovada.
+   - **Cota da IA:** a assinatura tem limite por janela e por semana, compartilhado por todas as frentes. Frentes novas
+     param de nascer quando a cota usada chega a 99%: **1% fica reservado para a conversa com a pessoa**, que nunca para
+     por falta de cota. Sinal de limite do provedor (429, "limite atingido") segura trabalho novo em vez de deixá-lo falhar.
+   - **Recursos de fora** (fila da CI, limites de API do GitHub, ClickUp, Gmail) não aparecem na máquina: o Nod mede o tempo
+     de fila e os erros de limite e mostra; não há trava automática por eles.
+   - **Custo visível, sem teto:** quanto cada bot gastou hoje, e um aviso quando o ritmo do dia sai do normal.
 8. **Entre bots.**
-   - `pedir_a_bot` vira pedido na fila do dono do outro bot. A resposta imediata diz a posição ("entrou na fila, depois do
-     #757"); o bot pode sugerir outro colega. A fila freia o orquestrador sem regra nova.
+   - `pedir_a_bot` vira pedido na fila do dono do outro bot. A resposta imediata diz o que aconteceu: começou, ou espera
+     por falta de recurso, ou espera porque depende de outro trabalho (e de qual); o bot pode sugerir um colega livre.
    - Espera circular (A espera B, B espera A) é detectada no `pedir_a_bot` e recusada com instrução ao bot.
    - O varredor da ADR-084 passa a ler o estado da frente que atende o pedido.
+   - **Pedido de colega concluído não acorda o dono:** a resposta vai direto a quem pediu (ADR-084), e na conversa do dono
+     fica só a linha "Respondi ao pedido de X".
 9. **Frente sem trabalho sai na hora.** Ao terminar, a pasta da frente com zero commits além da base e árvore limpa é
    apagada; com trabalho, segue a limpeza da ADR-096 (guardar antes de apagar). Só com prova afirmativa; na dúvida, fica.
 10. **Tela** ([protótipo](../prototipos/um-dono-por-bot/README.md)):
@@ -117,6 +139,11 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 - **Subagente do harness como frente:** só o Claude tem, e o Nod não o enxerga.
 - **Esperar com Bash em segundo plano do CLI:** segura o turno e a fila do bot, e o Codex não tem terminal.
 - **Teto fixo de frentes** (o Hermes recusa a 11ª): o Marlon rejeitou teto (ADR-083/085); a máquina decide.
+- **Um pedido de colega por vez em cada bot:** limitaria pelo número, não pela capacidade, e desperdiçaria o bot com
+  pedidos independentes. O que ele tentava evitar (missões colidindo) se resolve com branch por frente e o julgamento do
+  dono na entrada.
+- **A rotina como coordenador próprio** (abrindo até 10 frentes sem passar pelo dono): criaria um segundo dono dentro do
+  bot.
 - **O Nod virar o harness** (como o Hermes): perderia os laços de agente afinados pelos fabricantes e as assinaturas das
   pessoas; o Nod fica com a coordenação e os CLIs com o trabalho.
 
@@ -126,8 +153,11 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   curto; a compactação continua manual (`/compactar`) ou do CLI. Medir antes de criar regra.
 - **Esperas sem comando** (a resposta de uma pessoa sem conector que avise) usam `me_chame_as` com a mesma paciência do item 5.
 - **O computador do bot** continua um por bot (ADR-037); frentes que precisam dele esperam a vez.
-- **A pessoa pode esperar o turno de um colega.** O dono é leve, mas um turno de colega em andamento ainda vai até o fim
-  antes do próximo.
+- **A pessoa pode esperar o turno do dono.** O dono é leve, mas um turno dele em andamento vai até o fim antes da próxima
+  mensagem da pessoa.
+- **A leitura da cota depende do provedor.** Se o CLI não expõe quanto da janela foi usado, o Nod começa pelo sinal de
+  limite e estima a porcentagem pelo que já gastou; a reserva de 1% garante alguns turnos de conversa, não trabalho longo.
+- **Muitas frentes enchem o contexto do dono** mesmo com resumos curtos. Medir antes de criar regra.
 
 ## Gatilho de reversão
 
@@ -136,3 +166,4 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 - A pessoa abrindo o detalhe das frentes em mais de 30% das vezes em 2 semanas: as frentes voltam a aparecer como itens
   próprios.
 - Mais de 20% das esperas acordando o dono sem fato novo: rever o `esperar_comando` e a orientação do prompt.
+- A conversa com a pessoa parada por falta de cota mesmo com a reserva, mais de uma vez por semana: rever a reserva de 1%.
