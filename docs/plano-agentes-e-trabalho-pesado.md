@@ -64,12 +64,14 @@ cada task nova na máquina com folga em que está pronto, e a task em andamento 
 
 ## Ordem de entrega
 
-| Fase | O quê | Por quê |
-|---|---|---|
-| 0 | **0a** encerrar o que a task abriu (6, PR #254) · **0b** motor que não cai inteiro: `OOMPolicy=continue` e swap comprimido no instalador (4) · **0c** medição por task (1) | Pequeno, sem risco: para a VM de travar como em 11/10 e dá os números para calibrar o resto |
-| 1 | Entrar pela memória (2), fila do forno com `nod-vaga` (3), bots econômicos (5) | É o que libera a dezena de agentes |
-| 2 | Grupo por task na VM (`Delegate=yes`, peso e teto duro) e prioridade no Mac (4) | Deixa a máquina estável com muita gente |
-| 3 | Tela e recomendação de máquina (7) | Usa os dados das fases anteriores |
+| Fase | O quê | Por quê | Onde está (12/10) |
+|---|---|---|---|
+| 0 | **0a** encerrar o que a task abriu (6) · **0b** motor que não cai inteiro: `OOMPolicy=continue` e swap comprimido no instalador (4) · **0c** medição por task (1) | Pequeno, sem risco: para a VM de travar como em 11/10 e dá os números para calibrar o resto | Em produção e na VM (#254, #255, #256) |
+| 1 | Entrar pela memória (2), fila do forno com `nod-vaga` (3), bots econômicos (5) | É o que libera a dezena de agentes | Em produção e na VM (#259, #262, #263); chave pelo repositório no #271. A reserva fixa por agente espera a calibração |
+| 2 | Grupo por task na VM (`Delegate=yes`, peso e teto duro) e prioridade no Mac (4) | Deixa a máquina estável com muita gente | PR #272: grupo por turno com teto e 2 GB de swap; nice 10 no comando pesado (Linux e Mac) |
+| 3 | Tela e recomendação de máquina (7) | Usa os dados das fases anteriores | Espera a tela da ADR-099 (um dono por bot) |
+
+As diferenças entre o que foi entregue e o texto da ADR estão em [ADR-097 › Entrega](adr/adr-097-agentes-entram-trabalho-pesado-faz-fila.md#entrega-1210).
 
 | | Hoje | Depois da fase 1 |
 |---|---|---|

@@ -1,6 +1,6 @@
 # ADR-097 — Agentes entram, trabalho pesado faz fila
 
-Status: proposta · Data: 2026-10-11 · Emenda a [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md) (o portão que
+Status: proposta, com as fases 0 e 1 em produção desde 12/10 (ver "Entrega") · Data: 2026-10-11 · Emenda a [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md) (o portão que
 segura trabalho novo) e a [ADR-091](adr-091-regua-do-processador-cpu-e-fila.md) (a régua do processador). Plano de
 entrega em [plano-agentes-e-trabalho-pesado.md](../plano-agentes-e-trabalho-pesado.md); telas em
 [prototipos/agentes-e-trabalho-pesado](../prototipos/agentes-e-trabalho-pesado/README.md).
@@ -131,6 +131,40 @@ Quem roda muitos agentes resolve de dois jeitos. As plataformas na nuvem (OpenHa
 uma VM por sessão. As ferramentas locais (Conductor, Claude Squad) não cuidam de recursos, e quem as usa relata um teto
 de 4 a 8 agentes por máquina. A fila de comandos pesados dentro do agente não tem um padrão pronto: é a parte nova
 desta ADR, e por isso usa o mecanismo conhecido mais próximo (o jobserver).
+
+## Entrega (12/10)
+
+| Fase | PR | Situação |
+|---|---|---|
+| 0a · task encerra o que abriu (item 7) | #254 | produção desde 11/10 |
+| 0b · `OOMPolicy=continue` e swap no instalador | #255 | produção; na VM desde 12/10 01:44 UTC (zram de 8 GB) |
+| 0c · memória da task inteira e o pico | #256 | produção desde 11/10 |
+| 1a · o processador deixa de segurar no Equilibrado (item 2) | #259 | produção desde 12/10 04:37 UTC |
+| 1b · fila do forno com `nod-vaga` (item 4) | #262 | produção e VM desde 12/10 04:37 UTC; primeiros picos anotados no mesmo dia |
+| 1b · chave pelo repositório | #271 | aberto |
+| 1c · bots econômicos (item 6) | #263 | produção desde 12/10 04:37 UTC |
+| 2 · grupo por turno na VM e o pesado mais gentil (item 5) | #272 | aberto |
+| 3 · tela e recomendação de máquina (item 8) | — | espera a tela da [ADR-099](adr-099-um-dono-por-bot.md) |
+
+O que a implementação mudou em relação ao texto acima:
+
+- **Item 3, a reserva de ~400 MB por agente, não entrou.** A memória segura trabalho novo pelo nível de hoje (alerta
+  abaixo de 20% livres na VM). O número fixo espera os picos que a 0c e a fila estão anotando.
+- **Item 2:** o processador segue segurando no "Pouco", que é a escolha da pessoa de deixar o Mac folgado para ela. A
+  régua sustentada de minutos fica para a fase 3, com a tela.
+- **Item 4, o que entra na fila:** a classificação de aprovação não serve (para ela, testes, lint e tipos "só leem").
+  Ficam fora os programas que não pesam (git sem hook, ls, sed, cat…) e o que já se mostrou abaixo de 256 MB. Entram o
+  Bash e o Monitor, também em segundo plano, porque é como o prompt manda rodar teste demorado. Quem tem a vez há 20
+  min deixa de segurar a fila, para um servidor de desenvolvimento não a prender. A chave do histórico é o repositório
+  pela origem do git (#271); a primeira versão usava o nome da pasta, que na task muda a cada task.
+- **Item 4, a reescrita pelo hook,** foi confirmada no Claude Code da VM: os primeiros comandos de tasks reais
+  apareceram no histórico da fila em 12/10.
+- **Item 5:** cada task tem também 2 GB de swap (`memory.swap.max`). Medido num cgroup v2: só com `memory.max`, a task
+  que passa do teto vai para o swap e segue; com o swap dela esgotado, leva SIGKILL dentro do próprio grupo. O
+  "agente com peso maior que os comandos" saiu como nice 10 no comando que pega a vez da fila, no Linux e no Mac. No
+  Mac, isso fica no lugar do `taskpolicy`, que pede o mesmo e não existe no Linux.
+- **ADR-099:** as frentes dela são linhas de `trabalhos` com sessão própria. O grupo da fase 2 é por turno, então vale
+  igual para elas.
 
 ## Consequências
 
