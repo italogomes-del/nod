@@ -109,8 +109,10 @@ export const RETRY_AFTER_MAX_MS = 5_000;
  * sessão do tool router ainda pode não expor as ferramentas do toolkit (só os meta COMPOSIO_*) ou responder
  * devagar — os conectores do Breno ficaram desligados assim e, minutos depois, a mesma chamada respondeu na
  * hora. O `verificar` repete a sonda com estas esperas (antes de cada tentativa) e não COMEÇA tentativa
- * nova depois de VERIFICAR_TETO_MS contados do início: com prazo de sonda (PROBE_MS) nas tentativas, são
- * duas tentativas em ~18 s; com catálogo vazio que volta na hora, as quatro em ~14 s.
+ * nova depois de VERIFICAR_TETO_MS contados do início; cada sonda recebe como orçamento o que sobra do teto
+ * (revisão do PR #264: sozinha, a sonda http pode levar ORCAMENTO_CONECTOR_MS). Assim a resposta fica em ~20 s
+ * mais o banco: com prazo de sonda (PROBE_MS) nas tentativas, são duas em ~18 s; com catálogo vazio que volta
+ * na hora, as quatro em ~14 s.
  */
 export const ESPERAS_SONDA_VERIFICAR_MS: readonly number[] = [0, 2_000, 4_000, 8_000];
 export const VERIFICAR_TETO_MS = 20_000;

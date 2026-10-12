@@ -87,7 +87,8 @@ export interface ServicesNod<Trx> {
   conectores: {
     /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. `somenteLeitura` (NOD-157): readOnlyHint da ferramenta; ausente = escrita, que só repete em 429. */
     chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean; somenteLeitura?: boolean }): Promise<{ conteudo: string; isError: boolean }>;
-    sondar(conector: Conector): Promise<ResultadoSonda>;
+    /** `orcamentoMs` (NOD-208): teto da sonda inteira (tentativas e esperas do http); ausente = ORCAMENTO_CONECTOR_MS. */
+    sondar(conector: Conector, opcoes?: { orcamentoMs?: number }): Promise<ResultadoSonda>;
   };
   interruptor: {
     registrar(turnoId: string, fn: () => Promise<void>): void;

@@ -25,6 +25,11 @@ export type ConfigSonda = {
 
 export type OpcoesSonda = {
   timeoutMs?: number;
+  /**
+   * NOD-208: orçamento da sonda inteira no http (initialize, tools/list, páginas e novas tentativas); o prazo de
+   * cada requisição é cortado ao que sobra. Ausente = ORCAMENTO_CONECTOR_MS (30 s) do cliente.
+   */
+  orcamentoMs?: number;
   /** Fonte do ambiente base (default process.env); injetável no teste. */
   ambiente?: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
@@ -80,6 +85,7 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
     env,
     timeoutMs: opcoes.timeoutMs ?? PROBE_MS,
     fetchImpl: opcoes.fetchImpl,
+    ...(opcoes.orcamentoMs !== undefined ? { orcamentoMs: Math.max(1, opcoes.orcamentoMs) } : {}),
   });
   try {
     const ferramentas = await cliente.listar();

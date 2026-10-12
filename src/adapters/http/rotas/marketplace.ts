@@ -60,9 +60,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
     return APPS_MARKETPLACE.find((a) => a.slug === slug) ?? { slug, nome: slug, descricao: "", categoria: "" };
   };
   /** definido em 2026-09-25: conectou, os cards "Conecte o X" abertos viram o de permitir na mesma transação. */
-  const sondarUmaVez = (escopo: Escopo, conectorId: string, slug: string): Promise<SaidaSondarConector> =>
+  const sondarUmaVez = (escopo: Escopo, conectorId: string, slug: string, orcamentoMs: number): Promise<SaidaSondarConector> =>
     op.dentro(escopo, async (d) => {
-      const s = await executar(d, sondarConector, { conectorId });
+      const s = await executar(d, sondarConector, { conectorId, orcamentoMs });
       if (s.ok) await executar(d, aoConectarApp, { slug });
       return s;
     });
@@ -200,7 +200,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       for (const [i, espera] of ESPERAS_SONDA_VERIFICAR_MS.entries()) {
         if (i > 0 && agora() - inicio + espera >= VERIFICAR_TETO_MS) break;
         if (espera > 0) await esperar(espera);
-        r = await sondarUmaVez(ctx.escopo, sessao.conectorId, app.slug);
+        // Revisão do PR #264: a sonda http sozinha pode levar até ORCAMENTO_CONECTOR_MS (30 s, com nova tentativa
+        // por dentro); sem este corte, uma tentativa começada aos ~19 s levava a resposta para perto de 50 s.
+        r = await sondarUmaVez(ctx.escopo, sessao.conectorId, app.slug, VERIFICAR_TETO_MS - (agora() - inicio));
         log(r.ok ? "info" : "aviso", "marketplace_verificar_tentativa", { toolkit: app.slug, tentativa: i + 1, ok: r.ok, motivo: r.ok ? null : r.conector.ultimaFalha?.motivo ?? null, decorrido_ms: agora() - inicio });
         if (r.ok) break;
       }

@@ -62,21 +62,23 @@ it("login Composio só habilita após conta ativa, confere o dono, cifra a chave
  * sonda com espera crescente (0, 2, 4, 8 s) e não começa tentativa nova depois do teto de 20 s. Relógio e
  * espera falsos: o teste não dorme.
  */
-async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSondaMs = 0) {
+async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSonda: number | ((n: number, orcamentoMs: number | undefined) => number) = 0) {
   const chave = chaveDe("teste-composio-local");
   const cifra = (s: string) => cifrar(s, chave);
   let agora = 0;
   let sondas = 0;
   const esperas: number[] = [];
+  const orcamentos: (number | undefined)[] = [];
   // Cada tentativa numa transação própria e a espera fora de qualquer uma (não segura conexão do pool).
   let tx = 0;
   let abertas = 0;
   let esperouDentro = false;
   const txDasSondas: number[] = [];
-  const memoria = dentroEmMemoria({ services: servicosDeTeste({ sonda: () => {
+  const memoria = dentroEmMemoria({ services: servicosDeTeste({ sonda: (_id, o) => {
     sondas += 1;
     txDasSondas.push(tx);
-    agora += custoDaSondaMs;
+    orcamentos.push(o?.orcamentoMs);
+    agora += typeof custoDaSonda === "number" ? custoDaSonda : custoDaSonda(sondas, o?.orcamentoMs);
     return sonda(sondas);
   } }) });
   const fakeFetch: typeof fetch = async (url, init) => {
@@ -101,7 +103,7 @@ async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSond
   userId = `nod:${sessao.tenantId}:${sessao.pessoaId}`;
   expect((await srv.chamar(sessao, "POST", "marketplace/configurar", { chave: "ak_segredo" })).status).toBe(200);
   expect((await srv.chamar(sessao, "POST", "marketplace/slack/conectar")).status).toBe(200);
-  return { srv, sessao, memoria, esperas, sondas: () => sondas, agora: () => agora, txDasSondas, esperouDentro: () => esperouDentro };
+  return { srv, sessao, memoria, esperas, orcamentos, sondas: () => sondas, agora: () => agora, txDasSondas, esperouDentro: () => esperouDentro };
 }
 
 const FERRAMENTA_SLACK = { nome: "SLACK_SEND_MESSAGE", descricao: "Envia mensagem", readOnlyHint: false, schema: { type: "object" as const } };
@@ -142,4 +144,29 @@ it("NOD-208: prazo na 1ª sonda e ok na 2ª → conectado; só prazo, para antes
     expect(lenta.sondas()).toBe(2);
     expect(lenta.agora()).toBeLessThanOrEqual(20_000);
   } finally { await lenta.srv.close(); }
+});
+
+// Revisão do PR #264: a sonda http sozinha pode levar até ORCAMENTO_CONECTOR_MS (30 s: prazo de 8 s por requisição
+// mais nova tentativa por dentro). O teto só "começava" tentativas; a resposta podia chegar perto de 50 s.
+const ORCAMENTO_PADRAO_DO_CLIENTE = 30_000;
+const gastaOOrcamento = (orcamentoMs: number | undefined) => Math.min(orcamentoMs ?? ORCAMENTO_PADRAO_DO_CLIENTE, ORCAMENTO_PADRAO_DO_CLIENTE);
+
+it("NOD-208 (revisão): sonda que gasta o orçamento inteiro não leva a resposta além do teto de 20 s", async () => {
+  const m = await montarVerificar(() => ({ ok: false, motivo: "timeout_transporte" }), (_n, orc) => gastaOOrcamento(orc));
+  try {
+    expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true });
+    expect(m.orcamentos).toEqual([20_000]);
+    expect(m.agora()).toBeLessThanOrEqual(20_000);
+  } finally { await m.srv.close(); }
+});
+
+it("NOD-208 (revisão): a última tentativa recebe só o tempo que sobra do teto", async () => {
+  // 0–1 s falha, espera 2, 3–4 s falha, espera 4, a 3ª começa aos 8 s com 12 s e os gasta.
+  const m = await montarVerificar(() => ({ ok: false, motivo: "timeout_transporte" }), (n, orc) => (n < 3 ? 1_000 : gastaOOrcamento(orc)));
+  try {
+    expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true });
+    expect(m.orcamentos).toEqual([20_000, 17_000, 12_000]);
+    expect(m.esperas).toEqual([2_000, 4_000]);
+    expect(m.agora()).toBe(20_000);
+  } finally { await m.srv.close(); }
 });

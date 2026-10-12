@@ -3,7 +3,8 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
-export type EntradaSondarConector = { conectorId: string };
+/** `orcamentoMs` (NOD-208): o `verificar` passa o que sobra do seu teto, para a última tentativa não estourá-lo. */
+export type EntradaSondarConector = { conectorId: string; orcamentoMs?: number };
 export type SaidaSondarConector = { ok: boolean; conector: Conector };
 
 /**
@@ -15,7 +16,7 @@ export type SaidaSondarConector = { ok: boolean; conector: Conector };
 export const sondarConector: CasoDeUso<EntradaSondarConector, SaidaSondarConector> = async (deps, input) => {
   const conector = await deps.repos.conectores.buscar(input.conectorId);
   if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
-  const resultado = await deps.services.conectores.sondar(conectorPublico(conector));
+  const resultado = await deps.services.conectores.sondar(conectorPublico(conector), input.orcamentoMs === undefined ? undefined : { orcamentoMs: input.orcamentoMs });
   const agora = deps.agora();
   const atualizado = await deps.repos.conectores.registrarSonda(
     conector.id,
