@@ -31,6 +31,8 @@ const NOD: Record<string, string> = {
   abrir_frentes: "Começou frentes",
   mandar_para_frente: "Repassou a uma frente",
   devolver_resumo: "Devolveu o resumo",
+  // ADR-099 (parte 2): o Nod roda o comando e acorda o bot quando ele termina.
+  esperar_comando: "Deixou um comando esperando por ele",
 };
 
 /**

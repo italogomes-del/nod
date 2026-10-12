@@ -99,6 +99,7 @@ export function useCasesFalsos(): UseCasesNod {
     abrirFrentes: naoImplementado("useCases.abrirFrentes"),
     mandarParaFrente: naoImplementado("useCases.mandarParaFrente"),
     devolverResumo: naoImplementado("useCases.devolverResumo"),
+    esperarComando: naoImplementado("useCases.esperarComando"),
     gerirBots: naoImplementado("useCases.gerirBots"),
     verAppsConectados: naoImplementado("useCases.verAppsConectados"),
     registrarRelatoDoNod: naoImplementado("useCases.registrarRelatoDoNod"),

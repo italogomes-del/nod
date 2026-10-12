@@ -17,6 +17,7 @@ import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../sr
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
 import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
@@ -41,7 +42,8 @@ import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pa
  *   systemd ──► nod-motor rodar ──► POST /api/maquina/sessao (machineId = id da chave)
  *                                  ├─ vigia das IAs (sonda a cada 3 s até uma ficar pronta) ──► conectar (anúncio)
  *                                  ├─ pool de laços: puxar → claude/codex atrás do proxy MCP → renovar → entregar
- *                                  └─ itens do gh aprovados (ADR-048), de 5 em 5 s
+ *                                  ├─ itens do gh aprovados (ADR-048), de 5 em 5 s
+ *                                  └─ esperas de comando (ADR-099), de 5 em 5 s
  *
  * A costura repete a do app do Mac de propósito: mexer no `desktop/main.ts` exigiria uma release do app para testar.
  */
@@ -97,6 +99,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   let itens: ReturnType<typeof setInterval> | null = null;
   /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
   let limpeza: LimpezaDasTasks | null = null;
+  let esperas: Esperas | null = null;
   const planosAqui = new Map<string, PlanoTurno>();
   let ultimoReanuncio = 0;
   let encerrado = false;
@@ -152,6 +155,10 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     log("info", "limpeza_modo", { modo, onde: "motor" });
     limpeza = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: casa, executar: criarExecutarComando(cfg.env, casa), simular: modo === "simular", emUso: (pasta) => [...planosAqui.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
   }
+
+  // ADR-099 (parte 2): as esperas de comando desta máquina (o puxar, a cada 5 s). O comando roda fora do CLI, com o
+  // ambiente dos drivers; a reconexão não o derruba (o estado mora no módulo, esperas.ts).
+  esperas = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir(), env: cfg.env });
 
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
@@ -210,6 +217,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     atualizador?.parar();
     if (itens) clearInterval(itens);
     limpeza?.parar();
+    esperas?.parar();
     vigia?.parar();
     ponteHttp.cancelar();
     const anterior = laco; laco = null;
