@@ -24,6 +24,11 @@ kernel não tiver zram, ele usa um arquivo de swap de 4 GB no disco. O serviço 
 memória acaba, cai só o processo que o Linux escolher, não o motor inteiro (ADR-097, fase 0b). Para atualizar uma VM
 que já tem o motor, rode o mesmo `curl`.
 
+Os comandos pesados dos bots (testes, `tsc`, builds) fazem fila pela memória da máquina (ADR-097, fase 1b): quando não
+cabe, o comando espera a vez dentro do terminal do bot, e os outros bots seguem. O estado fica em `~/.nod/vaga` do
+usuário `nod` (quem tem a vez, quem espera e o pico de memória de cada comando). Para desligar a fila, ponha
+`Environment=NOD_FILA_DO_FORNO=0` na unidade `nod-motor` e reinicie o serviço.
+
 No fim ele mostra um código (ex.: `K7QM-4F2X`) e um link. Abra o Nod (no Mac ou no navegador) em **Seu espaço ›
 Máquinas › Conectar uma máquina**, digite o código e confirme. O terminal diz "Conectada como <nome>".
 
