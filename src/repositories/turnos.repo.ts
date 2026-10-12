@@ -192,6 +192,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * Reivindicação por UPDATE condicional + FOR UPDATE SKIP LOCKED numa tx curta (ADR-010).
      * EMENDA 12: turno de conversa/sala/retomada passa na frente de rotina enfileirada.
+     * ADR-099 (I6): e, antes de todos eles (menos a ligação), a fala da pessoa na conversa direta — ver o `order by`.
      * EMENDA 13 (agente serial) revista em 2026-10-07 pela ADR-083: a serialização é por FAIXA — a conversa (turno sem
      * trabalho) ou o trabalho —, não mais por agente. O mesmo bot roda a conversa e vários trabalhos ao mesmo tempo.
      *
@@ -281,8 +282,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   and ${naCota(cota.reserva, cota.autoReserva)})
                 or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null)
                   and ${naCota(cota.limite, cota.autoLimite)})))`}
-            -- Ligação primeiro; depois o que não é rotina nem pedido de colega (o turno ou o trabalho dele); depois a ordem.
+            -- Ligação primeiro; depois a fala da pessoa; depois o que não é rotina nem pedido de colega (o turno ou o trabalho
+            -- dele); depois a ordem.
             order by (t.origem = 'ligacao') desc,
+              -- A pessoa passa na frente na fila do dono: o turno de conversa que nasceu de uma fala dela (origem 'conversa'
+              -- com mensagem_origem_id, o mesmo marcador de absorverPendentes) sai antes da volta marcada (me_chame_as), do
+              -- despertar de uma espera, da continuação de colega e de qualquer retorno ao dono. Só fura a fila dos
+              -- pendentes: a conversa com turno despachando continua esperando (o not exists acima). Sala, ligação e a
+              -- faixa do trabalho não mudam. Entre duas falas dela, vale a ordem de chegada (criado_em, abaixo).
+              -- definido em 2026-10-12 (ADR-099, I6)
+              (t.trabalho_id is null and t.origem = 'conversa' and t.mensagem_origem_id is not null) desc,
               (t.origem in ('rotina', 'delegacao', 'peer') or (t.trabalho_id is not null and exists (select 1 from trabalhos x where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and x.origem in ('rotina', 'colega')))) asc,
               t.criado_em asc, t.id asc
             for update skip locked limit 1)
@@ -389,7 +398,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      */
     async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
       const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
-        select t.estado, t.despertar_em is not null as marcou_volta,
+        -- ADR-099 (parte 2): deixar um comando esperando (esperar_comando) também é marcar outra volta.
+        select t.estado, (t.despertar_em is not null or exists (select 1 from esperas e where e.tenant_id = t.tenant_id and e.turno_id = t.id)) as marcou_volta,
           exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
           exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
         from turnos t

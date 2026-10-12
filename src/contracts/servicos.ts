@@ -106,21 +106,19 @@ export interface ServicesNod<Trx> {
 }
 
 /**
- * Quem chamou a ferramenta, derivado do token (nunca do corpo). `plano` é o PLANO JÁ PUXADO
- * (ADR-013/024): a regra de aprovação automática é avaliada localmente a partir dele, nunca por
- * consulta na hora da chamada. AUSENTE = nunca automático — o caminho do computador
- * (adapters/fundo/computadores.ts) chama pedirAprovacaoComputador sem plano, e fail-closed é o
- * comportamento certo ali (ADR-042 claim 1).
+ * Quem chamou a ferramenta, derivado do token (nunca do corpo). `plano` é o PLANO JÁ PUXADO (ADR-013/024): a regra de
+ * aprovação automática é avaliada localmente a partir dele, nunca por consulta na hora da chamada. AUSENTE = nunca
+ * automático — o caminho do computador (adapters/fundo/computadores.ts) chama pedirAprovacaoComputador sem plano, e
+ * fail-closed é o comportamento certo ali (ADR-042 claim 1).
  */
 export type ContextoFerramenta = { turnoId: string; agenteId: string; conversaId: string; plano?: PlanoTurno };
 
 export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
 
 /**
- * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema,
- * aplica gate de parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps`
- * pelo mesmo motivo de ServicesNod. lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/
- * pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
+ * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema, aplica gate de
+ * parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps` pelo mesmo motivo de ServicesNod.
+ * lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
  */
 export type CasoNod<Deps, N extends NomeFerramentaNod> = (
   deps: Deps,
@@ -157,6 +155,7 @@ export interface UseCasesNod<Deps> {
   abrirTask: CasoNod<Deps, "abrir_task">;
   mandarParaTask: CasoNod<Deps, "mandar_para_task">;
   meChameAs: CasoNod<Deps, "me_chame_as">;
+  esperarComando: CasoNod<Deps, "esperar_comando">;
   gerirBots: CasoNod<Deps, "gerir_bots">;
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
@@ -193,6 +192,7 @@ export const USE_CASE_POR_FERRAMENTA = {
   abrir_task: "abrirTask",
   mandar_para_task: "mandarParaTask",
   me_chame_as: "meChameAs",
+  esperar_comando: "esperarComando",
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",

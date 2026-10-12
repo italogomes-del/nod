@@ -27,6 +27,8 @@ const NOD: Record<string, string> = {
   abrir_task: "Abriu uma task",
   mandar_para_task: "Repassou a uma task",
   me_chame_as: "Saiu do Mac até a hora de voltar",
+  // ADR-099 (parte 2): o Nod roda o comando e acorda o bot quando ele termina.
+  esperar_comando: "Deixou um comando esperando por ele",
 };
 
 /**

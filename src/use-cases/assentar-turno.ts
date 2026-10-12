@@ -27,6 +27,7 @@ import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { emSavepoint } from "./savepoint.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { esperaAoAssentar } from "./esperar-comando.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -370,6 +371,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
   // ADR-086: o turno marcou uma volta ("me chame às 16:00") — ela nasce agora, antes de o trabalho reler o estado.
   events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
+  // ADR-099 (parte 2): o comando que o turno deixou esperando — se já acabou, a volta nasce agora; se o turno terminou
+  // mal, a espera é cancelada.
+  events.push(...(await esperaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false, ...(limiteMudou ? { limiteMudou } : {}) }, events };

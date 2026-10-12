@@ -19,6 +19,7 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from relatos where owner_id = ${p}`;
     await trx`delete from turno_diagnosticos where owner_id = ${p}`;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
     await trx`delete from computador_acoes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
