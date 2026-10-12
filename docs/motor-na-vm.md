@@ -24,6 +24,13 @@ kernel não tiver zram, ele usa um arquivo de swap de 4 GB no disco. O serviço 
 memória acaba, cai só o processo que o Linux escolher, não o motor inteiro (ADR-097, fase 0b). Para atualizar uma VM
 que já tem o motor, rode o mesmo `curl`.
 
+Com `Delegate=yes` na unidade (ADR-097, fase 2), cada turno roda no seu grupo de controle (cgroup v2), em
+`/sys/fs/cgroup/system.slice/nod-motor.service/turno-<id>`. O teto de memória de cada task é a máquina menos 1,5 GB, com
+até 2 GB de swap, e o peso de processador é o mesmo para todas. Uma task que passa disso perde um processo dela, não os
+das outras. O motor fica em `…/motor`, com peso maior, para seguir respondendo. O log `grupos_da_maquina_ligados` diz
+que a repartição ligou; `grupos_da_maquina_desligados` diz por que não (sem cgroup v2 ou sem a delegação, por exemplo
+num motor instalado antes da fase 2). Desligada, tudo roda como antes.
+
 Os comandos pesados dos bots (testes, `tsc`, builds) fazem fila pela memória da máquina (ADR-097, fase 1b): quando não
 cabe, o comando espera a vez dentro do terminal do bot, e os outros bots seguem. O estado fica em
 `~/.local/share/nod-motor/executor/vaga` do usuário `nod`: quem tem a vez (`com-a-vez/`), quem espera (`espera/`) e o

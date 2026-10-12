@@ -60,6 +60,8 @@ describe("motor sem janela (ADR-090)", () => {
   it("ADR-097 (fase 0b): um OOM mata o processo, não o serviço; e a máquina sem swap ganha zram (ou arquivo de swap)", () => {
     const script = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0-rc.6" });
     expect(script).toContain("OOMPolicy=continue");
+    // ADR-097 (fase 2): o motor cria um grupo de controle por turno.
+    expect(script).toContain("Delegate=yes");
     // Só liga swap quando não há nenhum, e nunca para a instalação por isso.
     expect(script).toContain('if [ -z "$(swapon --noheadings 2>/dev/null)" ]; then');
     expect(script).toContain("ligar_swap || true");

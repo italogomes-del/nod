@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { encerrarFugitivosDoTurno } from "./fugitivos.ts";
+import { abrirGrupoDoTurno, fecharGrupoDoTurno } from "./grupos-da-maquina.ts";
+import { spawnNoGrupo } from "../../domain/grupos-da-maquina.ts";
 import { gravarArquivoDeGrupos, inicioDesteProcesso, prefixoDaMarca, VARIAVEL_DA_MARCA, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
@@ -188,6 +190,11 @@ export function iniciarProcesso(o: {
    * `executarColetando` (sonda, `--version`) passa false: comando curto não abre servidor, e não vale um `ps` por sonda.
    */
   encerrarFugitivos?: boolean;
+  /**
+   * ADR-097 (fase 2): na VM com a repartição ligada (grupos-da-maquina.ts), o turno nasce no próprio grupo de controle.
+   * Padrão: o mesmo de `encerrarFugitivos` (a sonda e o `--version` não abrem grupo).
+   */
+  repartir?: boolean;
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
   // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
@@ -195,7 +202,10 @@ export function iniciarProcesso(o: {
   const marca = prefixoDeMarca === null ? "" : `${prefixoDeMarca}-${randomBytes(6).toString("hex")}`;
   const env = marca === "" ? o.env : { ...o.env, [VARIAVEL_DA_MARCA]: marca };
   const desdeMs = Date.now();
-  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
+  // ADR-097 (fase 2): o `sh` do spawnNoGrupo entra no grupo e vira o programa (exec): mesmo pid, mesmo grupo de processos.
+  const grupo = (o.repartir ?? o.encerrarFugitivos !== false) ? abrirGrupoDoTurno() : null;
+  const alvo = grupo ? spawnNoGrupo(join(grupo, "cgroup.procs"), o.bin, o.args) : { bin: o.bin, args: [...o.args] };
+  const filho = spawn(alvo.bin, alvo.args, { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
   const pid = filho.pid;
   // ADR-089: o relógio antes e depois do spawn cerca o início que o `ps` vai mostrar para este líder.
   if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin), marca });
@@ -252,6 +262,8 @@ export function iniciarProcesso(o: {
     }
     return r;
   });
+  // O grupo sai quando esvazia: depois do fim e do SIGKILL no grupo de processos (o interromper também espera o fim).
+  if (grupo) void fim.then(() => fecharGrupoDoTurno(grupo));
 
   /** Um neto órfão (servidor MCP que não morreu) pode segurar o pipe aberto depois do exit; fecha à força. */
   const fecharStdio = () => {

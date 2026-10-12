@@ -1,12 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
-import { platform } from "node:os";
+import { getPriority, platform, setPriority } from "node:os";
 import { join } from "node:path";
 import {
   avisoDeEspera, cabe, comPico, estimativaMb, faltouMemoria, lerArvoreDoPs, livreDoMeminfo, livreDoVmStat, memoriaDaArvoreMb, podarHistorico,
   RESERVA_LINUX_MB, RESERVA_MAC_MB, type ComandoComAVez, type Historico,
 } from "../../domain/fila-do-forno.ts";
+import { GENTILEZA_DO_PESADO } from "../../domain/grupos-da-maquina.ts";
 
 /**
  * O nod-vaga (definido em 2026-10-11, ADR-097, fase 1b): a fila do forno de UMA máquina, em arquivos numa pasta que os
@@ -49,6 +50,8 @@ export type DepsDaVaga = {
   /** Põe o vigia para rodar sozinho (o padrão: este mesmo script, desligado do terminal). */
   soltarVigia?: (id: string) => number | null;
   avisar?: (texto: string) => void;
+  /** Deixa o shell do comando pesado mais "gentil" (nice), no Linux e no Mac; o padrão usa setPriority. */
+  gentilizar?: (pid: number) => void;
 };
 
 const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -59,6 +62,15 @@ function vivoPadrao(pid: number): boolean {
     return true;
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** nice GENTILEZA_DO_PESADO no shell do comando; só sobe (quem já é mais gentil fica), e uma falha não pesa. */
+function gentilizarPadrao(pid: number): void {
+  try {
+    if (getPriority(pid) < GENTILEZA_DO_PESADO) setPriority(pid, GENTILEZA_DO_PESADO);
+  } catch {
+    // Outro usuário, ou o shell já saiu: o comando roda com a prioridade de sempre.
   }
 }
 
@@ -117,6 +129,7 @@ export function criarVaga(deps: DepsDaVaga) {
   const ps = deps.ps ?? (() => rodar("ps", ["-A", "-o", "pid=,ppid=,rss="]));
   const vivo = deps.vivo ?? vivoPadrao;
   const avisar = deps.avisar ?? ((t: string) => process.stderr.write(`${t}\n`));
+  const gentilizar = deps.gentilizar ?? gentilizarPadrao;
   const dirVez = join(deps.dir, "com-a-vez");
   const dirEspera = join(deps.dir, "espera");
   const arquivoHistorico = join(deps.dir, "historico.json");
@@ -189,6 +202,8 @@ export function criarVaga(deps: DepsDaVaga) {
       await dormir(BATIDA_DA_FILA_MS);
     }
     if (esperouDesde !== null) avisar(`nod: a vez chegou depois de ${Math.max(1, Math.round((agora() - esperouDesde) / 60_000))} min; o comando começa agora.`);
+    // ADR-097 (fase 2): o comando pesado roda com prioridade menor que a conversa do bot (o shell e o que ele abrir).
+    gentilizar(shell);
     const vigia = deps.soltarVigia ? deps.soltarVigia(id) : soltarVigiaPadrao(id);
     if (vigia !== null) {
       const atual = await lerJson<ComAVez>(join(dirVez, `${id}.json`));
