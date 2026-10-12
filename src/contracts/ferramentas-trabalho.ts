@@ -14,6 +14,12 @@ export const ACORDAR_MIN_MINUTOS = 5;
 export const ACORDAR_MAX_MINUTOS = 24 * 60;
 export const MOTIVO_MAX_DESPERTAR = 300;
 export const VOLTAS_SEGUIDAS_MAX = 24;
+/**
+ * definido em 2026-10-12 (ADR-098 §5, parte 1; o gatilho de reversão da ADR-086 virando regra): voltas seguidas da mesma
+ * espera sem nada novo antes de a próxima virar pergunta à pessoa ("Precisa de você"). Em 11/10 uma task voltou 12 vezes
+ * seguidas sem nada novo, acima das 10 em que a ADR-086 mandava rever. O teto de 24 continua como rede.
+ */
+export const VOLTAS_SEM_NOVIDADE = 3;
 
 export const FERRAMENTAS_TRABALHO = {
   abrir_task: {

@@ -1004,6 +1004,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async voltasMarcadas(retomaTurnoId: string) {
         return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null).length;
       },
+      async ultimasVoltas(retomaTurnoId: string, limite: number) {
+        return doTenant(b.turnos)
+          .filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null)
+          .sort((x, y) => y.criadoEm - x.criadoEm)
+          .slice(0, limite)
+          .map((t) => ({
+            estado: t.estado,
+            marcouVolta: despertares.has(t.id),
+            perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
+            pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
+          }));
+      },
       async juntarEntrada(id: string, texto: string) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
         if (!t) return null;
