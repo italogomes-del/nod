@@ -73,6 +73,7 @@ afterEach(async () => {
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from itens_aprovacao where owner_id = ${p}`;
     await trx`delete from decisao_eventos_varridos where owner_id = ${p}`;

@@ -34,6 +34,7 @@ import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
 import { trabalhosRepo } from "./trabalhos.repo.ts";
+import { frentesRepo } from "./frentes.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
@@ -60,6 +61,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     relatos: relatosRepo(conn, escopo),
     turnos: turnosRepo(conn, escopo),
     trabalhos: trabalhosRepo(conn, escopo),
+    frentes: frentesRepo(conn, escopo),
     decisoes: decisoesRepo(conn, escopo),
     itensAprovacao: itensAprovacaoRepo(conn, escopo),
     rotinas: rotinasRepo(conn, escopo),
