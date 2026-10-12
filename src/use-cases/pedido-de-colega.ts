@@ -10,7 +10,8 @@ import type { Deps } from "./tipos.ts";
  * do dono (`delegacao`, sem trabalho); o lote de frentes que o dono abre nesse turno fica ligado a ele
  * (`lotes_de_frentes.aberto_por_turno_id`). Para saber se um lote é de colega e a quem devolver o resultado, a I3 chama
  * `pedidoDeColegaDoTurno(deps, turnoQueAbriuOLote)`: o critério é o MESMO de `entregarRespostaPeer` (a raiz da cadeia de
- * retomadas, origem `delegacao` ou `peer`, e a fala de outro bot ligada a ela — o `peer_pedido`).
+ * retomadas, origem `delegacao` ou `peer`, e a fala de outro bot ligada a ela — o `peer_pedido`). É o mesmo critério do
+ * `destinoDoLote` da I3 (#280, src/domain/retorno-do-lote.ts): a raiz pela cadeia de retomadas, `delegacao` ou `peer`.
  */
 export type PedidoDeColega = {
   /** A raiz do pedido: o turno `delegacao` (ou `peer`, legado) que a entrega usa como `tarefaId`. */
