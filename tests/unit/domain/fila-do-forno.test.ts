@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   aspasDeShell, avisoDeEspera, cabe, chaveDoComando, comandoNaFila, comPico, DESCONHECIDO_MB, ehLeve, estimativaMb, faltouMemoria, lerArvoreDoPs, livreDoMeminfo,
-  livreDoVmStat, MARCA_DA_FILA, memoriaDaArvoreMb, PICOS_GUARDADOS, podarHistorico, precisaDaVez, semPeso,
+  livreDoVmStat, MARCA_DA_FILA, memoriaDaArvoreMb, PICOS_GUARDADOS, podarHistorico, precisaDaVez, repositorioDaOrigem, semPeso,
 } from "../../../src/domain/fila-do-forno.ts";
 
 describe("fila do forno: o que é pesado (ADR-097)", () => {
-  it("a chave é o nome da pasta (o repositório) e o texto com os espaços juntados", () => {
-    expect(chaveDoComando("  npm   run check ", "/home/nod/nod/Ze 1/ferons-b14-6b72e3/gamefik/")).toBe("gamefik\nnpm run check");
+  it("a chave é o repositório e o texto com os espaços juntados; fora de repositório, só o texto", () => {
+    expect(chaveDoComando("  npm   run check ", "gamefik/gamefik")).toBe("gamefik/gamefik\nnpm run check");
     expect(chaveDoComando("npm test", null)).toBe("\nnpm test");
-    expect(chaveDoComando("npm test", "/a/nod")).not.toBe(chaveDoComando("npm test", "/a/gamefik"));
+    expect(chaveDoComando("npm test", "gamefik/nod")).not.toBe(chaveDoComando("npm test", "gamefik/gamefik"));
+  });
+
+  it("o repositório pela origem do git, igual em SSH e HTTPS, com e sem .git", () => {
+    for (const url of ["git@github.com:gamefik/nod.git", "https://github.com/gamefik/nod.git", "https://github.com/gamefik/nod", "ssh://git@github.com/gamefik/nod.git\n", "https://x-access-token@github.com/gamefik/nod/"]) expect(repositorioDaOrigem(url), url).toBe("gamefik/nod");
+    expect(repositorioDaOrigem("")).toBeNull();
+    expect(repositorioDaOrigem(null)).toBeNull();
+    expect(repositorioDaOrigem("nada")).toBeNull();
   });
 
   it("a reserva é o maior dos últimos picos mais 15%; depois de faltar memória, mais 50%", () => {

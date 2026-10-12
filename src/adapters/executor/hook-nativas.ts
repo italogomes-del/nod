@@ -1,7 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, type Historico } from "../../domain/fila-do-forno.ts";
+import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
 import { decidirNativa } from "../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../shared/constantes.ts";
 import { mainDaVaga } from "./vaga.ts";
@@ -69,17 +70,31 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
  * A fila desta máquina (ADR-097): o que não pesa e o que já se mostrou leve rodam direto; o resto pede a vez. O histórico
  * é lido aqui, de uma vez, sem esperar nada (o hook tem prazo). Qualquer falha = o comando roda direto.
  */
-export function filaDaMaquina(vaga: NonNullable<ConfigHook["vaga"]>, lerHistorico: () => Historico = () => lerHistoricoDaFila(vaga.dir)): Fila {
+export function filaDaMaquina(
+  vaga: NonNullable<ConfigHook["vaga"]>,
+  lerHistorico: () => Historico = () => lerHistoricoDaFila(vaga.dir),
+  repositorio: (cwd: string | null) => string | null = repositorioDoGit,
+): Fila {
   return (comando, cwd) => {
     try {
-      if (comando.trimStart().startsWith(MARCA_DA_FILA)) return null;
-      const chave = chaveDoComando(comando, cwd);
+      if (comando.trimStart().startsWith(MARCA_DA_FILA) || semPeso(comando)) return null;
+      const chave = chaveDoComando(comando, repositorio(cwd));
       if (!precisaDaVez({ comando, historico: lerHistorico()[chave] })) return null;
       return comandoNaFila(comando, { invocar: vaga.invocar, chave64: Buffer.from(chave, "utf8").toString("base64url"), dir: aspasDeShell(vaga.dir) });
     } catch {
       return null;
     }
   };
+}
+
+/** O repositório da pasta do comando, pelo git (uns poucos ms; o hook tem prazo, então até 2 s e, falhando, null). */
+function repositorioDoGit(cwd: string | null): string | null {
+  if (!cwd) return null;
+  try {
+    return repositorioDaOrigem(execFileSync("git", ["-C", cwd, "config", "--get", "remote.origin.url"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    return null;
+  }
 }
 
 function lerHistoricoDaFila(dir: string): Historico {
