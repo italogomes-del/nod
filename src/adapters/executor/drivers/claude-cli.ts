@@ -2,7 +2,7 @@ import { MODELO_SONDA_PADRAO } from "../../../contracts/modelos.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
@@ -57,6 +57,11 @@ export type LigacaoClaudeCli = {
    * Vem de NOD_PRAZO_SONDA_MS pelo boot: o `cfg.env` do driver já passou pela denylist, que apaga NOD_*.
    */
   prazoSondaMs?: number;
+  /**
+   * ADR-097 (fase 1b): a fila do forno — o hook põe o comando pesado do bot na fila da máquina. Ligada por padrão;
+   * `false` (NOD_FILA_DO_FORNO=0 no boot) desliga, e o comando roda direto como antes.
+   */
+  filaDoForno?: boolean;
   /**
    * Espera entre SIGTERM e SIGKILL na interrupção; default SIGTERM_PARA_SIGKILL_MS (5 s).
    * definido em 2026-09-16: existe para o teste que CRONOMETRA `interromper()` poder afirmar
@@ -222,7 +227,17 @@ export function settingsDoTerminal(p: { comandoHook: string }): string {
 
 /** O comando que o CLI roda para o hook: o mesmo Node do proxy, o script do hook e a config 0600 do turno. */
 export function comandoDoHook(p: { nodePath: string; hookPath: string; config: string; electronComoNode?: boolean }): string {
-  return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)} ${aspas(p.config)}`;
+  return `${invocarDoHook(p)} ${aspas(p.config)}`;
+}
+
+/** O node e o script do hook, sem a config: é como o comando do bot chama o nod-vaga (ADR-097). */
+export function invocarDoHook(p: { nodePath: string; hookPath: string; electronComoNode?: boolean }): string {
+  return `${p.electronComoNode ? "ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)}`;
+}
+
+/** ADR-097: a pasta da fila do forno, uma por máquina: ao lado de `turnos`, em NOD_HOME. */
+export function pastaDaFila(cwdBase: string): string {
+  return join(dirname(cwdBase), "vaga");
 }
 
 /**
@@ -501,8 +516,11 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   const config = join(tmpdir, "hook-nativas.json");
                   // ADR-065: a pasta do bot e a home vão para a cerca do git fora da pasta (hook-nativas.ts). ADR-088: com
                   // task, o plano traz `<bot>/<slug>` (ehPastaDeTask) e a worktree nasce ali.
-                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!) }), { mode: 0o600 });
-                  const comandoHook = comandoDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, config, electronComoNode: lig.electronComoNode });
+                  // ADR-097: a fila do forno da máquina, que todos os turnos daqui dividem.
+                  const nodeDoHook = { nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode };
+                  const vaga = lig.filaDoForno === false ? undefined : { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook(nodeDoHook) };
+                  await writeFile(config, JSON.stringify({ url: lig.urlNod, token: plano.tokenDeTurno, pastaDoBot: pastaBot, home, daTask: ehPastaDeTask(plano.pastaDoBot!), ...(vaga ? { vaga } : {}) }), { mode: 0o600 });
+                  const comandoHook = comandoDoHook({ ...nodeDoHook, config });
                   // ADR-055: o Mac inteiro da pessoa, a começar pela pasta dela; os projetos autorizados continuam juntos.
                   const dirsExtras = [...new Set([home, ...(plano.workspacePastas?.aprovadas ?? [])])].filter((p) => p !== pastaBot);
                   terminal = { settings: settingsDoTerminal({ comandoHook }), dirsExtras };
