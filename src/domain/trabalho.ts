@@ -124,8 +124,8 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   return "falhou";
 }
 
-/** Pelo que um trabalho aberto espera sem trabalhar: a resposta de um colega ou a volta marcada (`me_chame_as`). */
-export type EsperaDoTrabalho = "colega" | "volta";
+/** Pelo que um trabalho aberto espera sem trabalhar: um colega, um comando (`esperar_comando`) ou a volta marcada. */
+export type EsperaDoTrabalho = "colega" | "comando" | "volta";
 
 /**
  * definido em 2026-10-12 (ADR-099, parte 1, "esperar não é trabalhar"): o trabalho `rodando` sem turno vivo que só espera
@@ -133,11 +133,13 @@ export type EsperaDoTrabalho = "colega" | "volta";
  * `rodando` (o CHECK de `trabalhos.estado` e quem o lê não mudam); a espera é derivada na leitura, dos campos que o
  * `TrabalhoDto` já traz. A volta conta mesmo depois da hora enquanto ninguém a pegou: sem turno vivo não há trabalho.
  * A web repete a regra em `foraDoMac` (web/lib/trabalhos.ts; tests/unit/web/trabalhos.test.ts confere as duas).
- * Motivo: em 11/10 a tela dizia "Trabalhando · 13" com um trabalhando de fato.
+ * Motivo: em 11/10 a tela dizia "Trabalhando · 13" com um trabalhando de fato. Revisto em 2026-10-12 (ADR-099, parte 5):
+ * a espera de um comando (`esperar_comando`) também é espera, em todo lugar.
  */
-export function esperaDoTrabalho(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & { esperandoColega?: TrabalhoDto["esperandoColega"]; acordaEm?: number | null }): EsperaDoTrabalho | null {
+export function esperaDoTrabalho(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & { esperandoColega?: TrabalhoDto["esperandoColega"]; esperandoComando?: TrabalhoDto["esperandoComando"]; acordaEm?: number | null }): EsperaDoTrabalho | null {
   if (t.estado !== "rodando" || t.turnoVivoId) return null;
   if (t.esperandoColega) return "colega";
+  if (t.esperandoComando) return "comando";
   return t.acordaEm ? "volta" : null;
 }
 

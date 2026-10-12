@@ -384,6 +384,61 @@ describe("ADR-099 (I2): o lote de frentes vira uma linha só, e o recado a uma f
     for (const b of itens(c, e)) expect(ehBalao(b.html) || ehLinha(b.html), b.chave).toBe(true);
   });
 
+  it("ADR-099 (parte 5, quadro 06): a linha das várias frentes é uma só, \"●●● Começou 3 frentes: A, B e C · hora\", com um ponto na cor do bot por frente", () => {
+    const tres = lote("l3", [{ trabalhoId: "f-a", titulo: "Login" }, { trabalhoId: "f-b", titulo: "CI" }, { trabalhoId: "f-c", titulo: "Notas" }], t0 + MIN);
+    const cinco = lote("l5", ["a", "b", "c", "d", "e"].map((x) => ({ trabalhoId: `g-${x}`, titulo: x })), t0 + 2 * MIN);
+    const { e, c } = cenario([daPessoa("p1", t0), tres, cinco]);
+    const planos = planejarLinhas(c.mensagens, e);
+    const html = (planos.get("l3") as { html: string }).html;
+    expect(html).toContain('<div class="linha-centro-wrap"><div class="linha-centro linha-task linha-frentes estatica">');
+    expect(html).toContain("<span>Começou 3 frentes:</span>");
+    expect(html.match(/<span class="ponto-trabalho c-red"><\/span>/g)).toHaveLength(3);
+    expect(html).toMatch(/Login<\/button><span class="linha-sep">, <\/span><button[^>]*>CI<\/button><span class="linha-sep"> e <\/span><button[^>]*>Notas<\/button>/);
+    expect(html).toContain('<span class="linha-hora">· 09:01</span>');
+    // Sem caixas de botão embaixo da linha: os títulos são o atalho.
+    expect(html).not.toContain("linha-acoes");
+    // Acima de três frentes, três pontos (a contagem está no texto).
+    expect((planos.get("l5") as { html: string }).html.match(/class="ponto-trabalho c-red"/g)).toHaveLength(3);
+  });
+
+  it("ADR-099 (parte 5, quadro 02): \"✓ 3 frentes terminaram · hora\" centralizada; com uma frente, a linha abre a tela dela; parou/falhou dizem", () => {
+    const fim = (id: string, frentes: { trabalhoId: string; titulo: string; estado: "terminado" | "parado" | "falhou" }[], criadoEm: number) =>
+      msg(id, criadoEm, { kind: "sistema", texto: "3 frentes terminaram", turnoId: "tv", payload: { kind: "frentes_terminadas", loteId: `l-${id}`, frentes } });
+    const todas = fim("ft", [{ trabalhoId: "f-a", titulo: "Login", estado: "terminado" }, { trabalhoId: "f-b", titulo: "CI", estado: "terminado" }, { trabalhoId: "f-c", titulo: "Notas", estado: "terminado" }], t0 + 55 * MIN);
+    const uma = fim("f1", [{ trabalhoId: "f-d", titulo: "Deploy", estado: "terminado" }], t0 + 56 * MIN);
+    const mista = fim("fm", [{ trabalhoId: "f-e", titulo: "A", estado: "terminado" }, { trabalhoId: "f-f", titulo: "B", estado: "falhou" }], t0 + 57 * MIN);
+    const { e, c } = cenario([daPessoa("p1", t0), todas, uma, mista]);
+    const planos = planejarLinhas(c.mensagens, e);
+    const html = (id: string) => (planos.get(id) as { html: string }).html;
+    expect(html("ft")).toContain('<span class="linha-ok" aria-hidden="true">✓</span><span>3 frentes terminaram · 09:55</span>');
+    expect(html("ft")).toContain("linha-centro estatica");
+    expect(html("f1")).toContain('data-trabalho="f-d"');
+    expect(html("f1")).toContain("<b>Deploy</b><span>terminou · 09:56</span>");
+    expect(html("fm")).toContain('<span class="linha-falhou" aria-hidden="true">!</span><span>2 frentes voltaram · 1 falhou · 09:57</span>');
+    // Nada disso é a mensagem de sistema comum (a caixa cinza à esquerda).
+    for (const b of itens(c, e)) expect(b.html).not.toContain("msg-sistema");
+  });
+
+  it("ADR-099 (decisão 7): o pedido de colega respondido vira \"↩ Respondi ao pedido de X · hora\", centralizada (o nome vem escapado)", () => {
+    const resp = msg("pr", t0 + 20 * MIN, { kind: "sistema", texto: "Respondi ao pedido de Chico", confianca: "nao_confiavel", payload: { kind: "pedido_respondido", loteId: "l9", agenteId: "chico", nome: "Chico" } });
+    const estranho = msg("px", t0 + 21 * MIN, { kind: "sistema", texto: "Respondi ao pedido de <b>", confianca: "nao_confiavel", payload: { kind: "pedido_respondido", loteId: "l8", agenteId: "fora", nome: "<b>x</b>" } });
+    const { e, c } = cenario([daPessoa("p1", t0), resp, estranho]);
+    const planos = planejarLinhas(c.mensagens, e);
+    const html = (planos.get("pr") as { html: string }).html;
+    expect(html).toContain('<div class="linha-centro-wrap"><span class="linha-centro estatica linha-respondido">');
+    expect(html).toContain("<span>Respondi ao pedido de</span>");
+    expect(html).toContain('<span class="linha-nome">Chico</span><span class="linha-hora">· 09:20</span>');
+    expect((planos.get("px") as { html: string }).html).toContain("&lt;b&gt;x&lt;/b&gt;");
+  });
+
+  it("\"Virou a frente\" (a rede de 2 min) também é linha centralizada que abre a frente", () => {
+    const virou = msg("vf", t0 + MIN, { kind: "sistema", texto: "Virou a frente Relatório", turnoId: "tc", origemTurno: "conversa", payload: { kind: "trabalho_aberto", trabalhoId: "f-r", titulo: "Relatório", origem: "rede" } });
+    const { e, c } = cenario([daPessoa("p1", t0), virou]);
+    const html = (planejarLinhas(c.mensagens, e).get("vf") as { html: string }).html;
+    expect(html).toContain("<span>Virou a frente</span><b>Relatório</b>");
+    expect(html).toContain('<div class="linha-centro-wrap"><button type="button" class="linha-centro linha-task"');
+  });
+
   it("o recado a uma frente é uma linha que abre a frente", () => {
     const copia = msg("rc", t0 + MIN, { kind: "sistema", texto: "Recado para a frente Login: teste no iPhone", confianca: "nao_confiavel", turnoId: "tc", origemTurno: "conversa", payload: { kind: "recado_a_frente", trabalhoId: "f-a", titulo: "Login" } });
     const { e, c } = cenario([daPessoa("p1", t0), copia]);

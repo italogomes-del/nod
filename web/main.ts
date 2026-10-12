@@ -82,7 +82,9 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
-import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, chipTrabalhosDoBot, htmlAcoesDaTask, renderFaixaTrabalhos, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
+import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
+import { renderLinhaDoDono, renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
+import { temDonos } from "./lib/dono.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -638,7 +640,7 @@ function renderSidebar(estado: Estado): string {
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
     const subtitulo = emLigacao ? `<span class="sub-em-ligacao">${ICONE_LIGACAO.fone(12)}Em ligação</span>` : a.computadorForaDoAr && a.ownerId === estado.sessao?.pessoaId ? '<span class="sub-fora-do-ar">computador fora do ar</span>' : perguntando ? SUBTITULO_ESPERANDO : paradas.has(a.id) ? SUBTITULO_ROTINA_PARADA : `<span${nova ? ' class="previa-nova"' : ""}>${esc(a.ultimaMensagem?.previa || a.descricaoEstado || "acabamos de nos conhecer")}</span>`;
     // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
-    const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + chipTrabalhosDoBot(estado, a);
+    const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + sinalDoBot(estado, a);
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
     // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
     return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
@@ -663,7 +665,7 @@ function renderSidebar(estado: Estado): string {
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : chipTrabalhosDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
@@ -765,7 +767,8 @@ function renderPrincipal(): void {
       break;
     // ADR-083 (#195/#196): "Todos os trabalhos", a tela da task e a tela provisória de uma linha do chat.
     case "trabalhos":
-      corpo = renderTodosOsTrabalhos(estado, t.filtro);
+      // ADR-099 (parte 5): com o dono de cada bot no servidor, uma linha por bot; sem ele (servidor anterior), por task.
+      corpo = temDonos(estado) ? renderTrabalhosPorBot(estado) : renderTodosOsTrabalhos(estado, t.filtro);
       break;
     case "trabalho":
       cabecalho = renderTopoTrabalho(estado, t.id);
@@ -802,7 +805,8 @@ function renderPrincipal(): void {
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   regiao("erro", erro);
   // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
-  regiao("faixa-trabalhos", t.tipo === "conversa" ? renderFaixaTrabalhos(estado, t.agenteId) : "");
+  // ADR-099 (parte 5): virou a linha do dono — uma linha só, com o estado de maior prioridade; some com o bot livre.
+  regiao("faixa-trabalhos", t.tipo === "conversa" ? renderLinhaDoDono(estado, t.agenteId) : "");
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
   const aoVivoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-ao-vivo", partes.aoVivo));
@@ -1767,6 +1771,28 @@ function verPergunta(decisaoId: string): void {
   window.setTimeout(() => balao.classList.remove("realce"), 1600);
 }
 
+/**
+ * "Esperando você" na linha do dono (definido em 2026-10-12, ADR-099, parte 5): leva à mensagem do bot com a pergunta — a
+ * da decisão, quando a linha a conhece; senão a última pergunta ou o último cartão da conversa. Sem nenhum na janela
+ * carregada, abre o detalhe da linha (ele lista o que espera a pessoa). No celular a folha fecha antes de rolar.
+ */
+function irAoQueEsperaVoce(decisaoId: string | null): void {
+  const timeline = document.getElementById("timeline") ?? document;
+  const id = decisaoId ? CSS.escape(decisaoId) : null;
+  const alvo = (id ? timeline.querySelector<HTMLElement>(`[data-pergunta="${id}"], [data-decisao="${id}"], [data-proposta="${id}"]`) : null)
+    ?? [...timeline.querySelectorAll<HTMLElement>("[data-pergunta], [data-decisao], [data-proposta]")].at(-1) ?? null;
+  const t = estado.tela;
+  if (!alvo) {
+    if (t.tipo === "conversa") dispatch({ tipo: "faixa-trabalhos", agenteId: t.agenteId });
+    return;
+  }
+  if (estado.faixaTrabalhosAberta) dispatch({ tipo: "faixa-trabalhos", agenteId: null });
+  rolagem.soltar();
+  alvo.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
+  alvo.classList.add("realce");
+  window.setTimeout(() => alvo.classList.remove("realce"), 1600);
+}
+
 /** "Ver aprovação" (definido em 2026-10-03): da lista "N coisas esperam você" ao card do pedido na timeline. */
 function verDecisao(decisaoId: string): void {
   const id = CSS.escape(decisaoId);
@@ -2323,6 +2349,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const t = estado.tela;
     dispatch({ tipo: "faixa-trabalhos", agenteId: el.dataset.recolher === "1" || t.tipo !== "conversa" ? null : t.agenteId });
   },
+  // ADR-099 (parte 5): os passos de uma frente na linha do dono aberta, e as frentes de um bot na tela Trabalhos.
+  "frente-aberta": (el) => {
+    const id = el.dataset.id ?? null;
+    dispatch({ tipo: "frente-aberta", id: id && estado.frenteAberta !== id ? id : null });
+  },
+  "bot-trabalhos": (el) => {
+    const id = el.dataset.agente ?? null;
+    dispatch({ tipo: "bot-trabalhos", agenteId: id && estado.botAbertoEmTrabalhos !== id ? id : null });
+  },
+  // "Esperando você" leva à mensagem do bot com a pergunta (a decisão fica na conversa, nunca acima do campo).
+  "ir-a-pergunta": (el) => irAoQueEsperaVoce(el.dataset.id ?? null),
   // ADR-099 §7: o custo de hoje abre e fecha atrás de um clique no topo de Trabalhos.
   "custo-hoje": () => {
     dispatch({ tipo: "custo-aberto", aberto: !estado.custoAberto });
