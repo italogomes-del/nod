@@ -16,6 +16,7 @@ import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executo
 import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
 import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
+import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maquina.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
@@ -233,6 +234,8 @@ async function rodar(): Promise<number> {
     await encerrarFugitivosDaInstancia(arquivoGrupos);
     registrarGruposEm(arquivoGrupos);
   }
+  // ADR-097 (fase 2): com Delegate=yes na unidade, cada turno roda no próprio grupo de controle; sem, nada muda.
+  await prepararGruposDaMaquina();
   process.once("exit", () => encerrarGruposVivos());
   let sessao: Sessao | null = null;
   // O SIGTERM pode chegar no meio do conectar ou da espera entre tentativas: a espera é abortável e, se a sessão nascer

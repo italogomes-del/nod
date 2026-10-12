@@ -199,6 +199,8 @@ TimeoutStopSec=30
 # ADR-097 (fase 0b): sem memória, o Linux mata um processo (um teste, um typecheck) e o motor segue. O padrão (stop)
 # derrubava o serviço inteiro, com todos os bots e turnos da máquina (11/10, 14:35 UTC).
 OOMPolicy=continue
+# ADR-097 (fase 2): o motor cria um grupo de controle por turno (teto de memória e peso de processador por task).
+Delegate=yes
 NoNewPrivileges=true
 PrivateTmp=true
 
