@@ -8,6 +8,8 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { seguimentoNaRede } from "../domain/frente.ts";
+import { capacidadesDe } from "../domain/harness.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
 import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
@@ -40,10 +42,15 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Quem sabe é a ponte, que guardou o plano puxado.
  */
 /**
+ * `maquinaBifurca` (definido em 2026-10-12, ADR-099, I8): a máquina deste turno anunciou que bifurca sessão com este
+ * harness. Sem isso a rede promoveu largando a sessão da conversa (o dono segue com o histórico), e a sessão do turno
+ * promovido nunca volta para a conversa. Ausente = como antes (bifurca).
+ */
+/**
  * `prontosDaPessoa` (definido em 2026-10-10, emenda da ADR-036): as IAs prontas em alguma máquina viva da pessoa (quem
  * sabe é a ponte). No limite da assinatura, o turno do Automático é repetido na próxima delas pela ordem (aposLimite).
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; prontosDaPessoa?: readonly IdHarness[] };
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[] };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -229,8 +236,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // começou uma sessão nova) devolve a sessão que tem o contexto mais novo da conversa. Ela vira também a da conversa —
     // senão a próxima mensagem bifurcava a sessão antiga (de uma promoção anterior) e perdia este turno inteiro. Só se a
     // conversa não ganhou sessão nova depois da promoção.
+    // revisto em 2026-10-12 (ADR-099, I8): só quando a rede bifurcou. Sem bifurcar, a sessão é só da frente; voltar para
+    // a conversa poria o próximo turno do dono na sessão dela.
     const doTrabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
-    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null) {
+    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null && seguimentoNaRede(capacidadesDe(entrega.harness), entrega.maquinaBifurca !== false) === "bifurcar") {
       const conversa = await deps.repos.conversas.buscar(turno.conversaId);
       if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
     }

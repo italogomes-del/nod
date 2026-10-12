@@ -1,4 +1,5 @@
 import type { ResumoFrente } from "../contracts/frente.ts";
+import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { ErroResumo } from "./resumo-da-frente.ts";
 
@@ -38,6 +39,22 @@ export function entradaDaFrente(p: { titulo: string; pedido: string; deRotina: b
   const base = p.branchBase?.trim();
   const onde = repo ? `\n\nRepositório: ${repo}. Parta de ${base || "origin/main"}.` : base ? `\n\nParta do branch ${base}.` : "";
   return `${molduraDaFrente(p.titulo, p.deRotina)}${p.pedido.trim()}${onde}`;
+}
+
+/**
+ * Como o dono segue depois que a rede de 2 min promove o turno dele a frente (definido em 2026-10-12, ADR-099, I8). Só
+ * as capacidades declaradas e o anúncio da máquina decidem, nunca o nome do harness:
+ * - `bifurcar`: o harness bifurca e a máquina do turno anunciou isso — a frente fica com a sessão e a próxima fala do
+ *   dono segue numa cópia dela (`--fork-session`), como desde a #193;
+ * - `largar_sessao`: retoma sessão mas a máquina não bifurca — a sessão vai com a frente e a conversa do dono a larga;
+ *   o próximo turno do dono recebe o histórico recente (dois CLIs nunca dividem uma sessão);
+ * - `historico`: o harness nem retoma sessão (Codex) — nada a largar, o dono já segue com o histórico.
+ */
+export type SeguimentoNaRede = "bifurcar" | "largar_sessao" | "historico";
+
+export function seguimentoNaRede(capacidades: Pick<CapacidadesHarness, "retomaSessao" | "bifurcaSessao">, maquinaBifurca: boolean): SeguimentoNaRede {
+  if (capacidades.bifurcaSessao && maquinaBifurca) return "bifurcar";
+  return capacidades.retomaSessao ? "largar_sessao" : "historico";
 }
 
 /** "Começou a frente X" ou "Começou 3 frentes: A, B e C" (texto da mensagem `sistema`; a web desenha pelo payload). */

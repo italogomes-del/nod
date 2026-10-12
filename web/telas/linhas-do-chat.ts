@@ -234,6 +234,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   }
 
   // ---- "Abriu a task" -------------------------------------------------------------------------------------------------
+  // definido em 2026-10-12 (ADR-099, I8): a da rede de 2 min diz "Virou a frente" (o turno do dono virou frente).
   const ultimaAbertura = [...mensagens].reverse().find((m) => {
     const t = m.payload?.kind === "trabalho_aberto" ? conhecidos.get(m.payload.trabalhoId) : undefined;
     return t !== undefined && aberto(t);
@@ -256,7 +257,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     planos.set(m.id, {
       tipo: "linha",
       chave: `linha:${m.id}`,
-      html: htmlLinha({ tipo: "task", chave: `task:${p.trabalhoId}`, agenteId: dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Abriu a task</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) + memoria,
+      html: htmlLinha({ tipo: "task", chave: `task:${p.trabalhoId}`, agenteId: dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>${p.origem === "rede" ? "Virou a frente" : "Abriu a task"}</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) + memoria,
     });
   }
 

@@ -140,8 +140,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   /**
    * ADR-083 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
+   * ADR-099 (I8, 2026-10-12): e o modo do plano — a retomada do dono só é promovida em modo conversa.
    */
-  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean }>();
+  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean; modo: PlanoTurno["modoTurno"] | null }>();
   /**
    * Revisão do épico (S21, 2026-10-08): a última vez que o turno foi puxado ou renovado. Passado o lease sem notícia, o
    * varredor de lease o encerra no banco e a entrega talvez nunca chegue: `oferecidas` e `despachados` dele saem aqui
@@ -181,6 +182,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       if (inv && todos[id]?.estado !== "pronto") todos[id] = inv;
     }
     return todos;
+  }
+
+  /** S15 (2026-10-08): a máquina anunciou que bifurca sessão com este harness. Ausente (app antigo) = não. */
+  function maquinaBifurcaCom(machineId: string, harness: string | null): boolean {
+    return harness !== null && maquinas.get(machineId)?.capacidades?.[harness as IdHarness]?.bifurcaSessao === true;
   }
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
@@ -297,7 +303,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
-            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true });
+            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true, modo: r.data.plano.modoTurno ?? null });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
@@ -338,7 +344,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, mensagens, ids, semMoldura, conversaSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -388,7 +394,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (mudanca) deps.desfazerMemoria?.(escopo.pessoaId, mudanca);
           throw e;
         }
-        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
+        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
       if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
@@ -396,17 +402,18 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const despachado = despachados.get(p.turnoId);
       const redeMs = deps.redeMs ?? REDE_MS;
       const harness = harnesses.get(p.turnoId) ?? null;
-      // definido em 2026-10-08 (revisão do épico, S15): só promove quando a MÁQUINA deste turno anunciou que bifurca sessão
-      // com este harness (AnuncioMaquina.capacidades, já com o piso do CLI dela). App antigo não anuncia: não promove — ele
-      // poria dois CLIs na mesma sessão, e o CLI sem --fork-session recusaria a próxima mensagem para sempre.
-      const maquinaBifurca = harness !== null && maquinas.get(p.machineId)?.capacidades?.[harness]?.bifurcaSessao === true;
+      // definido em 2026-10-08 (revisão do épico, S15): a MÁQUINA deste turno anunciou que bifurca sessão com este harness
+      // (AnuncioMaquina.capacidades, já com o piso do CLI dela)? App antigo não anuncia.
+      // revisto em 2026-10-12 (ADR-099, I8): isso não decide mais SE promove, só COMO o dono segue — bifurcando, ou com a
+      // sessão indo para a frente e o dono recebendo o histórico (dois CLIs nunca dividem uma sessão).
+      const maquinaBifurca = maquinaBifurcaCom(p.machineId, harness);
       // S17: com mensagem oferecida e ainda não confirmada (nesta renovação ou numa anterior), não promove: a resposta a
       // ela sairia duas vezes (no turno promovido e no turno próprio que a mensagem viraria).
       const semMensagemNoAr = ids.length === 0 && jaOferecidas.size === 0;
-      if (ativo && conversaSemTrabalho && despachado && maquinaBifurca && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
+      if (ativo && doDonoSemTrabalho && despachado && harness !== null && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, maquinaBifurca, redeMs });
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, maquinaBifurca, modo: despachado.modo, redeMs });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
@@ -450,7 +457,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito

@@ -40,7 +40,7 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   }
   // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
   const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
-  // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
+  // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (com bifurcaSessao, a rede de 2 min bifurca).
   const capacidades = capacidadesAnunciadas(b.capacidades);
   return { inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades };
 }
