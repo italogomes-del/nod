@@ -51,6 +51,8 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
+    // ADR-099 (I6): as falas da pessoa que marcam os turnos dela (mensagem_origem_id) saem antes da conversa.
+    await trx`delete from mensagens where conversa_id in ${trx(criados.conversas)}`;
     // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
     await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
@@ -147,6 +149,50 @@ describeIntegracao("concorrência: serialização por faixa (conversa ou trabalh
     criados.turnos.push(ids.rotina, ids.colega, ids.conversa);
     const primeiro = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
     expect(primeiro?.id).toBe(ids.conversa);
+  });
+
+  it("ADR-099 (I6): duas máquinas AO MESMO TEMPO — a fala da pessoa sai antes da volta vencida da mesma conversa, a outra conversa segue, e a fala nova não tira quem já despacha", async () => {
+    const agenteId = randomUUID();
+    const conversaA = randomUUID();
+    const conversaB = randomUUID();
+    const ids = { voltaA: randomUUID(), falaA: randomUUID(), voltaB: randomUUID(), falaNova: randomUUID() };
+    const agora = Date.now();
+    const base = { agenteId, prazoEm: agora + 60_000, profundidade: 0 as const, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m", executor: "catcher" as const };
+    const autoria = { autor_tipo: "pessoa" as const, autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "pessoa" as const, regra_versao: 1 };
+    // A conversa B é a conversa direta de outro bot.
+    const outroAgente = randomUUID();
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Fila", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaA, tipo: "propria", agenteId });
+      await repos.agentes.criar({ id: outroAgente, nome: "Outro", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaB, tipo: "propria", agenteId: outroAgente });
+      // A volta marcada (me_chame_as) já vencida nasce ANTES da fala; a outra conversa tem a sua.
+      await repos.turnos.enfileirar({ ...base, id: ids.voltaA, conversaId: conversaA, origem: "retomada", acordarEm: agora - 60_000 });
+      await repos.turnos.enfileirar({ ...base, id: ids.voltaB, conversaId: conversaB, agenteId: outroAgente, origem: "retomada", acordarEm: agora - 60_000 });
+      const m = await repos.mensagens.criar({ conversaId: conversaA, autoria, kind: "texto", texto: "e aí?", confianca: "confiavel" });
+      await repos.turnos.enfileirar({ ...base, id: ids.falaA, conversaId: conversaA, origem: "conversa", mensagemOrigemId: m?.id ?? null });
+    });
+    criados.agentes.push(agenteId, outroAgente);
+    criados.conversas.push(conversaA, conversaB);
+    criados.turnos.push(ids.voltaA, ids.falaA, ids.voltaB);
+    const resultados = await disputaSimultanea();
+    expect(new Set(resultados), `esperava a fala de A e a volta de B: ${JSON.stringify(resultados)}`).toEqual(new Set([ids.falaA, ids.voltaB]));
+    const lado = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    // A volta de A espera a fala assentar; uma fala nova também espera — ninguém interrompe quem despacha.
+    expect(await lado()).toBeNull();
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      const m = await repos.mensagens.criar({ conversaId: conversaA, autoria, kind: "texto", texto: "mais uma", confianca: "confiavel" });
+      await repos.turnos.enfileirar({ ...base, id: ids.falaNova, conversaId: conversaA, origem: "conversa", mensagemOrigemId: m?.id ?? null });
+    });
+    criados.turnos.push(ids.falaNova);
+    expect(await Promise.all([lado(), lado()])).toEqual([null, null]);
+    const vivos = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.vivosDaConversa(conversaA));
+    expect(vivos.filter((t) => t.estado === "despachando").map((t) => t.id)).toEqual([ids.falaA]);
+    // Assentada a fala, a fala nova sai antes da volta (que chegou primeiro).
+    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.assentar(ids.falaA, { estado: "concluido" }));
+    expect((await lado())?.id).toBe(ids.falaNova);
   });
 
   it("ADR-083 (#192, critério 3): o trabalho com depois_de só sai quando o outro termina", async () => {
