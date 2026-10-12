@@ -197,3 +197,13 @@ aviso**: nenhum caminho dele chama `interromper()`, e o Parar continua sendo o �
 aberta avisam uma vez e não interrompem; 5 chamadas iguais avisam sem argumento), `tests/unit/ponte-http.test.ts`
 (validação estrita), `tests/unit/aviso-vigia.test.ts` (rota renovar, log sem repetir) e
 `tests/integration/executor/claude-cli-falso.test.ts` (cenário `repeticao`: o CLI falso real avisa em 5, 10 e 20).
+
+## Emenda em 2026-10-12 (ADR-099, parte 2)
+
+Esperar algo de fora não é mais comando em segundo plano do CLI ([ADR-099](adr-099-um-dono-por-bot.md), item 4). O Bash
+em segundo plano segura o turno e a fila do bot enquanto o comando roda — é a regra deste ADR, e ela continua valendo para o
+comando do próprio trabalho (testes, build, QA). Para a CI, o deploy ou o processo de outra pessoa, o bot chama
+`esperar_comando`: o motor da máquina roda o comando num grupo próprio (ADR-089), fora do CLI e sem prazo, o turno encerra
+na hora, e o fim do comando abre uma retomada na mesma sessão. O prompt do terminal deixou de citar a CI entre os comandos
+demorados que se rodam em segundo plano.
+

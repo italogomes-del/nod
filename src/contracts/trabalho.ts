@@ -91,10 +91,9 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    */
   esperaDoMac?: MotivoEsperaMac | null;
   /**
-   * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno
-   * na fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera
-   * aliviar ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou máquina
-   * desconhecida.
+   * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno na
+   * fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera aliviar
+   * ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou desconhecida.
    */
   maquina?: MaquinaDoTrabalho | null;
   /**
@@ -104,11 +103,10 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   esperandoColega?: { nome: string; desde: number; trabalhoId: string | null } | null;
   /** Quanto os turnos do trabalho de fato rodaram (do começo ao último sinal de cada um, o que roda até agora), em ms. */
   trabalhouMs?: number;
-  /**
-   * definido em 2026-10-08 (ADR-086): o bot combinou de voltar a esta hora ("me chame às 16:00") e saiu do Mac até lá.
-   * Ausente ou null: nenhuma volta marcada.
-   */
+  /** definido em 2026-10-08 (ADR-086): o bot volta a esta hora ("me chame às 16:00"); ausente ou null: nenhuma volta. */
   acordaEm?: number | null;
+  /** definido em 2026-10-12 (ADR-099, parte 2): o comando que o bot deixou esperando (`esperar_comando`); null = nenhum. */
+  esperandoComando?: { motivo: string; desde: number } | null;
 };
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */
