@@ -139,9 +139,11 @@ export function blocoEsperando(nome: string, url: string | null, curto = false, 
       : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>O navegador não abriu a janela de login. Abra pelo link; quando terminar, isto continua sozinho.</p>${abrir("Abrir o login")}</div></div>`;
   }
   const link = url ? abrir("Abrir o login de novo") : "";
+  // Sem URL ainda (o conectar em voo ou a re-sonda da NOD-208, que pode levar 20 s sem janela): nada de "está aberta".
+  const frase = url ? "A janela de login está aberta. Quando terminar, isto continua sozinho." : `Preparando o login do ${esc(nome)}.`;
   return curto
     ? `<div class="esperando esperando-curto">${GIRO}<span>Esperando você entrar no ${esc(nome)}…</span></div>`
-    : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>A janela de login está aberta. Quando terminar, isto continua sozinho.</p>${link}</div></div>`;
+    : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>${frase}</p>${link}</div></div>`;
 }
 
 export function blocoFalhou(frase: string): string {

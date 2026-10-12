@@ -76,6 +76,14 @@ describe("marketplace (revisto em 2026-09-25)", () => {
     expect(gaveta).not.toContain("A janela de login está aberta.");
   });
 
+  it("antes da URL (inclusive os até 20 s da re-sonda da NOD-208, sem janela nenhuma): a gaveta não diz que a janela está aberta", () => {
+    const gaveta = renderConectores({ ...base, conectando: { clickup: { url: null, falhou: null } }, tela: { tipo: "conectores", gaveta: { slug: "clickup", passo: "detalhes" } } });
+    expect(gaveta).toContain("Preparando o login do ClickUp.");
+    expect(gaveta).not.toContain("A janela de login está aberta.");
+    const comUrl = renderConectores({ ...base, conectando: { clickup: { url: "https://login/x", falhou: null } }, tela: { tipo: "conectores", gaveta: { slug: "clickup", passo: "detalhes" } } });
+    expect(comUrl).toContain("A janela de login está aberta.");
+  });
+
   it("login feito: a gaveta abre em 'Quem pode usar' com Nenhum / Ler / Ler e alterar por bot, o nível atual marcado", () => {
     const html = renderConectores({ ...base, tela: { tipo: "conectores", gaveta: { slug: "slack", passo: "quem-usa" } } });
     expect(html).toContain("Quem pode usar o Slack?");

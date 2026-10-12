@@ -211,6 +211,13 @@ describe("re-sonda: janela bloqueada, Cancelar e troca de sessão com a sonda em
     expect(m.conectados).toEqual(["slack"]);
   });
 
+  it("janela que a pessoa fechou antes da URL chegar não vira 'Abrir o login' (a espera desiste por ela em ~7 s)", async () => {
+    const m = montar({ verificacoes: [], janela: { closed: true, close() {}, location: { href: "" } } });
+    await m.conexoes.iniciar("clickup");
+    expect(m.mudancas.some(([, v]) => v?.semJanela)).toBe(false);
+    expect(m.mudancas.at(-1)).toEqual(["clickup", { url: "https://login.exemplo/x", falhou: FALHA_JANELA_FECHADA }]);
+  });
+
   it("janela aberta no clique não marca semJanela", async () => {
     const m = montar({ verificacoes: [true] });
     await m.conexoes.iniciar("clickup");
