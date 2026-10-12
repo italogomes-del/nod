@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +31,23 @@ describe("rotas do motor (ADR-090)", () => {
     expect(await (await fetch(`${srv.url}/api/motor/instalar`, { headers: { "x-forwarded-proto": "https", "x-forwarded-host": "nod.exemplo.com" } })).text()).toContain('NOD_SERVIDOR="https://nod.exemplo.com"');
     expect((await fetch(`${srv.url}/api/motor/instalar`, { headers: { "x-forwarded-proto": "http", "x-forwarded-host": "nod.exemplo.com" } })).status).toBe(400);
     expect(await (await fetch(`${comPublica.url}/api/motor/instalar`)).text()).toContain('NOD_SERVIDOR="https://nod.exemplo.com"');
+  });
+
+  it("ADR-100: o manifesto traz a versão e o sha256 de cada arquivo; sem o motor empacotado inteiro, 404", async () => {
+    expect((await fetch(`${srv.url}/api/motor/manifesto`)).status).toBe(404);
+    const pasta = await mkdtemp(join(tmpdir(), "nod-dist-motor-inteiro-"));
+    for (const nome of ["nod-motor.mjs", "proxy.mjs", "hook-nativas.mjs"]) await writeFile(join(pasta, nome), `// ${nome}\n`);
+    const inteiro = await servidorDeTeste(rotasMotor({ pasta, versao: "0.5.0-rc.1" }));
+    try {
+      const r = await fetch(`${inteiro.url}/api/motor/manifesto`);
+      expect(r.headers.get("cache-control")).toBe("no-store");
+      const m = (await r.json()) as { versao: string; arquivos: Record<string, string> };
+      expect(m.versao).toBe("0.5.0-rc.1");
+      expect(m.arquivos["proxy.mjs"]).toBe(createHash("sha256").update("// proxy.mjs\n").digest("hex"));
+      expect(Object.keys(m.arquivos).sort()).toEqual(["hook-nativas.mjs", "nod-motor.mjs", "proxy.mjs"]);
+    } finally {
+      await inteiro.close();
+    }
   });
 
   it("/motor redireciona para o script (o curl -L segue)", async () => {

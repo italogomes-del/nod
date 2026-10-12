@@ -56,6 +56,24 @@ describe("pool elástico de laços: um ocioso sempre, um a mais por turno rodand
     await pool.parar();
   });
 
+  it("ADR-100: drenar não puxa trabalho novo e deixa o que roda terminar; desligar volta a puxar", async () => {
+    const { fila, liberar, rodando, pool } = cenario();
+    fila.push("nina");
+    await esperarAte(() => rodando.size === 1);
+    pool.drenar(true);
+    fila.push("taga");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pool.turnosAtuais()).toEqual(["nina"]);
+    expect(fila).toEqual(["taga"]);
+    liberar.get("nina")?.();
+    await esperarAte(() => pool.turnosAtuais().length === 0);
+    expect(fila).toEqual(["taga"]);
+    pool.drenar(false);
+    await esperarAte(() => rodando.has("taga"));
+    liberar.get("taga")?.();
+    await pool.parar();
+  });
+
   it("parar() encerra todos, inclusive os que estão rodando", async () => {
     const { fila, liberar, rodando, pool } = cenario();
     fila.push("nina");
