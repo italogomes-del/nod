@@ -366,7 +366,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-098 §5 (parte 1, definido em 2026-10-12): as últimas voltas marcadas que retomam este turno, da mais nova para a
+     * ADR-099 §5 (parte 1, definido em 2026-10-12): as últimas voltas marcadas que retomam este turno, da mais nova para a
      * mais antiga, com o que a regra de "nada novo" lê (src/domain/voltas-sem-novidade.ts): se a volta marcou outra, se
      * abriu decisão e se pediu algo a um colega (mensagem `handoff` dela).
      */

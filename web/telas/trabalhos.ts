@@ -108,7 +108,7 @@ export function chipTrabalhosDoBot(estado: Estado, a: Pick<Agente, "id" | "cor" 
   // cada mensagem de qualquer bot (medido em 2026-09-30, ADR-061: redesenho por frame travava a tela).
   const lista = abertosDoBot({ trabalhos: estado.trabalhos, conversas: {}, trabalhoDetalhe: {} }, a.id);
   if (lista.length === 0) return "";
-  // definido em 2026-10-12 (ADR-098, parte 1): só pisca com algo trabalhando de fato; com o bot só esperando (a volta
+  // definido em 2026-10-12 (ADR-099, parte 1): só pisca com algo trabalhando de fato; com o bot só esperando (a volta
   // marcada ou um colega), o ponto vazado da espera — o mesmo da linha da task (`pontoTrabalho`).
   const trabalhando = lista.some((t) => t.estado === "rodando" && !foraDoMac(t));
   const esperando = lista.filter((t) => foraDoMac(t)).length;
@@ -134,7 +134,7 @@ export function renderIconeTrabalhos(estado: Estado): string {
 const GRUPOS: { chave: keyof GruposTrabalhos; titulo: string }[] = [
   { chave: "precisa", titulo: "Precisa de você" },
   { chave: "trabalhando", titulo: "Trabalhando" },
-  // definido em 2026-10-12 (ADR-098, parte 1): quem só espera a volta marcada ou um colega, abaixo de quem trabalha.
+  // definido em 2026-10-12 (ADR-099, parte 1): quem só espera a volta marcada ou um colega, abaixo de quem trabalha.
   { chave: "esperando", titulo: "Esperando" },
   { chave: "fila", titulo: "Na fila" },
   { chave: "terminados", titulo: "Terminados hoje" },
@@ -161,7 +161,7 @@ export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string 
 /**
  * Contagem do topo de "Todos os trabalhos": "1 trabalhando · 11 esperando · 1 na fila · 2 precisam de você · os bots usam
  * 3,1 GB do seu Mac". Revisto em 2026-10-09 (a tela fala por máquina): a memória por máquina ("0,4 GB do seu Mac e 0,7 GB
- * na nod-motor-teste"). Revisto em 2026-10-12 (ADR-098, parte 1): "trabalhando" no lugar de "rodando", e quem só espera
+ * na nod-motor-teste"). Revisto em 2026-10-12 (ADR-099, parte 1): "trabalhando" no lugar de "rodando", e quem só espera
  * conta à parte.
  */
 function resumoDosTrabalhos(g: GruposTrabalhos, memoria: string): string {

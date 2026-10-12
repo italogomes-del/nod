@@ -122,7 +122,7 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
 export type EsperaDoTrabalho = "colega" | "volta";
 
 /**
- * definido em 2026-10-12 (ADR-098, parte 1, "esperar não é trabalhar"): o trabalho `rodando` sem turno vivo que só espera
+ * definido em 2026-10-12 (ADR-099, parte 1, "esperar não é trabalhar"): o trabalho `rodando` sem turno vivo que só espera
  * — um colega responder (ADR-084) ou a hora da volta (ADR-086) — está esperando, não trabalhando. O estado gravado continua
  * `rodando` (o CHECK de `trabalhos.estado` e quem o lê não mudam); a espera é derivada na leitura, dos campos que o
  * `TrabalhoDto` já traz. A volta conta mesmo depois da hora enquanto ninguém a pegou: sem turno vivo não há trabalho.

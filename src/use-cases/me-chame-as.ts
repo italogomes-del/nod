@@ -69,7 +69,7 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
   const agora = deps.agora();
   const retomaTurnoId = origemDaVolta(turno);
   await deps.repos.turnos.travarRetomadas(retomaTurnoId);
-  // ADR-098 §5 (parte 1): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa. Só o turno que é ele mesmo
+  // ADR-099 §5 (parte 1): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa. Só o turno que é ele mesmo
   // uma volta pode fechar a conta (a primeira chamada da cadeia ainda não voltou nenhuma vez).
   if (turno.acordarEm != null && alarmeDeVoltas(await deps.repos.turnos.ultimasVoltas(retomaTurnoId, VOLTAS_SEM_NOVIDADE))) {
     return perguntarSemNovidade(deps, turno, pedido.motivo, agora);
@@ -102,7 +102,7 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
 export const REGRA_VOLTAS_SEM_NOVIDADE = "regra:voltas_sem_novidade" as const;
 
 /**
- * ADR-098 §5 (parte 1, definido em 2026-10-12): no lugar da quarta volta, uma pergunta à pessoa — a mesma forma do
+ * ADR-099 §5 (parte 1, definido em 2026-10-12): no lugar da quarta volta, uma pergunta à pessoa — a mesma forma do
  * `pedir_a_pessoa` (decisão `pergunta` da dona no turno que voltou, balão com as respostas prontas). A task vai para
  * "Precisa de você" pela regra de sempre (decisão pendente, `estadoDoTrabalho`), a delegação segura a entrega
  * (`aguardando_pessoa`) e a resposta retoma o turno pela rota da pergunta (`retomarComResposta`). Se a resposta mandar
@@ -114,7 +114,7 @@ async function perguntarSemNovidade(deps: Deps, turno: Turno, motivo: string, ag
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: REGRA_VOLTAS_SEM_NOVIDADE });
   const { texto, opcoes } = perguntaDoAlarme(VOLTAS_SEM_NOVIDADE, motivo);
   const mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto, payload: { kind: "pedido_a_pessoa", decisaoId: decisao.id, opcoes }, confianca: "confiavel" });
-  // Para medir o gatilho de reversão da ADR-098 (esperas acordando sem fato novo).
+  // Para medir o gatilho de reversão da ADR-099 (esperas acordando sem fato novo).
   log("info", "voltas_sem_novidade", { turno_id: turno.id, trabalho_id: turno.trabalhoId ?? null, decisao_id: decisao.id, voltas: VOLTAS_SEM_NOVIDADE });
   return [
     evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: "pergunta", decisor_id: decisao.decisorId, prazo_decisao_em: decisao.prazoDecisaoEm, regra: REGRA_VOLTAS_SEM_NOVIDADE } }),

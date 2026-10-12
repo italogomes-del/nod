@@ -117,7 +117,7 @@ describeIntegracao("me chame às (ADR-086)", () => {
     });
   });
 
-  // ADR-098 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa.
+  // ADR-099 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa.
   async function volta(m: Awaited<ReturnType<typeof montar>>, turnoId: string, motivo: string) {
     if (!(await meChameAs(m.deps, { ...m.ctx, turnoId, em_minutos: 5, motivo })).data.ok) throw new Error("recusou");
     await m.assentar(turnoId);

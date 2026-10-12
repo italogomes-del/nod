@@ -69,11 +69,12 @@ como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", 
 - Turnos com `acordar_em` que voltam e chamam `me_chame_as` de novo mais de 10 vezes seguidas: o bot está usando a volta
   como laço. Rever a orientação ou pôr um teto por trabalho.
 
-## Emenda em 2026-10-12 (ADR-098, parte 1)
+## Emenda em 2026-10-12 (ADR-099, parte 1)
 
 Em 11/10 a tela Trabalhos dizia "Trabalhando · 13" com um trabalhando de fato (onze voltas marcadas do Ze 1 e duas tasks
 esperando colega), e uma task voltou 12 vezes seguidas sem nada novo, acima das 10 do gatilho acima, sem aviso. A
-ADR-098 "um dono por bot" (PR #265, ainda proposta; §5 e §10, "esperar não é trabalhar") muda duas coisas daqui:
+[ADR-099](adr-099-um-dono-por-bot.md) "um dono por bot" (PR #265, ainda proposta; §5 e §10, "esperar não é trabalhar")
+muda duas coisas daqui:
 
 - **A volta marcada não conta como trabalhando** (substitui o item 3 na tela). O estado gravado continua `rodando` (sem
   migração), mas a leitura deriva a espera (`esperaDoTrabalho`, src/domain/trabalho.ts; `foraDoMac` na web): `rodando`,

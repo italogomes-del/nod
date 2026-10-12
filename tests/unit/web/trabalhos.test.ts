@@ -280,7 +280,7 @@ describe("barra lateral (#196, K8 variante 3)", () => {
     expect(chipTrabalhosDoBot(estadoCom([trabalho("b", { estado: "na_fila" })]), { id: "leo", cor: "c-purple", conversaId: "c-leo" })).not.toContain("pulso-trab");
   });
 
-  it("ADR-098 (parte 1): só esperando (volta marcada ou colega), o ponto vazado da espera, sem piscar; com um trabalhando, pisca", () => {
+  it("ADR-099 (parte 1): só esperando (volta marcada ou colega), o ponto vazado da espera, sem piscar; com um trabalhando, pisca", () => {
     const leo = { id: "leo", cor: "c-purple" as const, conversaId: "c-leo" };
     const volta = trabalho("volta", { acordaEm: AGORA + 20 * MIN });
     const colega = trabalho("colega", { esperandoColega: { nome: "Ze 1", desde: AGORA - 10 * MIN, trabalhoId: null } });
@@ -288,7 +288,7 @@ describe("barra lateral (#196, K8 variante 3)", () => {
     const comUm = chipTrabalhosDoBot(estadoCom([volta, colega, trabalho("vivo", { turnoVivoId: "t1" })]), leo);
     expect(comUm).toContain("ponto-trabalho c-purple pulso-trab");
     expect(comUm).toContain('title="3 trabalhos abertos · 2 esperando"');
-    // Precisa de você junto com a espera: o ponto do bot, sem piscar (o azul por bot fica para a parte 5 da ADR-098).
+    // Precisa de você junto com a espera: o ponto do bot, sem piscar (o azul por bot fica para a parte 5 da ADR-099).
     expect(chipTrabalhosDoBot(estadoCom([volta, trabalho("p", { estado: "precisa_de_voce" })]), leo)).toContain('class="ponto-trabalho c-purple"');
   });
 
@@ -360,7 +360,7 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
   });
 });
 
-describe("esperar não é trabalhar (ADR-098, parte 1)", () => {
+describe("esperar não é trabalhar (ADR-099, parte 1)", () => {
   // O dia 11/10: um trabalhando de fato, onze voltas marcadas do Ze 1 e duas tasks do Leonardo esperando o Ze 1.
   const vivo = trabalho("vivo", { titulo: "Corrigir o teste", turnoVivoId: "turno-vivo", memoriaMb: 300 });
   const voltas = Array.from({ length: 11 }, (_, i) => trabalho(`volta-${i}`, { agenteId: "dev1", titulo: `PR ${i}`, acordaEm: AGORA + (11 - i) * MIN }));

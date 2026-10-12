@@ -82,7 +82,7 @@ describe("promoveNaRede (rede de 2 min)", () => {
   });
 });
 
-describe("esperaDoTrabalho (ADR-098, parte 1: esperar não é trabalhar)", () => {
+describe("esperaDoTrabalho (ADR-099, parte 1: esperar não é trabalhar)", () => {
   const rodando = { estado: "rodando" as const, turnoVivoId: null };
   const colega = { nome: "Ze 1", desde: 1, trabalhoId: null };
   it.each([

@@ -2,7 +2,7 @@ import { VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 
 /**
- * Sem progresso, o bot para e pergunta (definido em 2026-10-12, ADR-098 §5, parte 1). Uma volta marcada (`me_chame_as`,
+ * Sem progresso, o bot para e pergunta (definido em 2026-10-12, ADR-099 §5, parte 1). Uma volta marcada (`me_chame_as`,
  * ADR-086) que volta, confere e marca outra, três vezes seguidas sem nada novo, não marca a quarta: vira pergunta à pessoa.
  * Mede-se novidade, não tempo ("só o Parar freia", ADR-067). Puro: quem lê o banco é `turnos.ultimasVoltas`.
  */
@@ -19,7 +19,7 @@ export type VoltaDaCadeia = {
 };
 
 /**
- * definido em 2026-10-12 (ADR-098 §5, parte 1): "nada novo" é a volta que terminou bem e só marcou outra volta — sem
+ * definido em 2026-10-12 (ADR-099 §5, parte 1): "nada novo" é a volta que terminou bem e só marcou outra volta — sem
  * pedir nada à pessoa nem a um colega. Medido pelo que o banco já tem, sem ler o texto do bot (Regra 9, como o
  * `sem_novidade`). A fala final da volta NÃO conta como novidade: toda volta deixa uma ("o CI ainda está rodando, volto às
  * 16:30") e vira balão da task, então "falou" não separa a volta que avançou da que só conferiu. Conservadora no outro

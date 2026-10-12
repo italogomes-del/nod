@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { VOLTAS_SEM_NOVIDADE } from "../../../src/contracts/ferramentas-trabalho.ts";
 import { alarmeDeVoltas, fraseDoAlarme, perguntaDoAlarme, voltaSemNovidade, type VoltaDaCadeia } from "../../../src/domain/voltas-sem-novidade.ts";
 
-/** ADR-098 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo viram pergunta à pessoa. */
+/** ADR-099 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo viram pergunta à pessoa. */
 
 const vazia: VoltaDaCadeia = { estado: "concluido", marcouVolta: true, perguntou: false, pediuAColega: false };
 
-describe("voltas sem novidade (ADR-098 §5)", () => {
+describe("voltas sem novidade (ADR-099 §5)", () => {
   it("o limite é 3", () => {
     expect(VOLTAS_SEM_NOVIDADE).toBe(3);
   });

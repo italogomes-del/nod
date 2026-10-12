@@ -63,7 +63,7 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
     });
   });
 
-  it("ADR-098 (parte 1): a task que só espera a volta marcada vai à conversa como \"esperando\", não \"rodando\"", async () => {
+  it("ADR-099 (parte 1): a task que só espera a volta marcada vai à conversa como \"esperando\", não \"rodando\"", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const t = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Acompanhar a CI", origem: "pessoa" })).trabalho;

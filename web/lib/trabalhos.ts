@@ -101,7 +101,7 @@ export function quandoVolta(instante: number, agora: number): string {
 
 /**
  * ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. definido em 2026-10-12
- * (ADR-098, parte 1, "esperar não é trabalhar"): é também a regra do grupo **Esperando** — quem só espera não conta como
+ * (ADR-099, parte 1, "esperar não é trabalhar"): é também a regra do grupo **Esperando** — quem só espera não conta como
  * trabalhando. Espelha `esperaDoTrabalho` (src/domain/trabalho.ts); tests/unit/web/trabalhos.test.ts confere as duas.
  */
 export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
@@ -301,7 +301,7 @@ const porVolta = (a: TrabalhoDto, b: TrabalhoDto): number => (a.acordaEm ?? Infi
 /**
  * Os grupos da gaveta e de "Todos os trabalhos" (#196): Precisa de você (esperando a pessoa, aberto ou fechado para
  * liberar memória), Trabalhando, Esperando, Na fila e Terminados hoje — o que terminou (ou parou, ou falhou) antes da
- * meia-noite sai. definido em 2026-10-12 (ADR-098, parte 1): Esperando separa de Trabalhando quem está `rodando` sem
+ * meia-noite sai. definido em 2026-10-12 (ADR-099, parte 1): Esperando separa de Trabalhando quem está `rodando` sem
  * turno vivo só esperando a volta marcada ou um colega (`foraDoMac`). Em 11/10 a tela dizia "Trabalhando · 13" com um
  * trabalhando de fato: onze voltas marcadas e duas esperas de colega.
  */
