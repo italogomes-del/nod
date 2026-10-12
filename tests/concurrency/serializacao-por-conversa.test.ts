@@ -51,6 +51,7 @@ afterEach(async () => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from esperas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
+    await trx`delete from lotes_de_frentes where aberto_por_turno_id in ${trx(criados.turnos)} or retorno_turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
     // ADR-099 (I6): as falas da pessoa que marcam os turnos dela (mensagem_origem_id) saem antes da conversa.
     await trx`delete from mensagens where conversa_id in ${trx(criados.conversas)}`;

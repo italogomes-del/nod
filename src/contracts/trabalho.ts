@@ -1,4 +1,5 @@
 import type { Executor } from "./evento.ts";
+import type { CamposDeFrente } from "./frente.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
 import type { LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
@@ -27,7 +28,7 @@ export type EstadoTrabalho = "na_fila" | "rodando" | "precisa_de_voce" | "fechad
 /** Estados em que o trabalho conta como aberto (faixa, chip da barra, "Trabalhando" e "Precisa de você"). */
 export const ESTADOS_ABERTOS_TRABALHO = ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"] as const satisfies readonly EstadoTrabalho[];
 
-export type Trabalho = {
+export type Trabalho = CamposDeFrente & {
   tenantId: TenantId;
   id: string;
   agenteId: string;
@@ -53,10 +54,8 @@ export type Trabalho = {
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
   memoriaMb: number | null;
   custoUsd: number | null;
-  /**
-   * definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando — "Executar agora" numa rotina,
-   * ou um pedido a colega feito na conversa com ela. O Mac apertado não segura este trabalho.
-   */
+  /** definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando ("Executar agora" numa rotina, ou
+   * um pedido a colega feito na conversa com ela). O Mac apertado não segura este trabalho. */
   pessoaEsperando?: boolean;
   criadoEm: EpochMs;
   iniciadoEm: EpochMs | null;

@@ -33,6 +33,7 @@ import type { salasRepo } from "./salas.repo.ts";
 import type { trilhaRepo } from "./trilha.repo.ts";
 import type { turnosRepo } from "./turnos.repo.ts";
 import type { trabalhosRepo } from "./trabalhos.repo.ts";
+import type { frentesRepo } from "./frentes.repo.ts";
 import type { esperasRepo } from "./esperas.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
@@ -70,6 +71,8 @@ export interface Repos {
   relatos: ReturnType<typeof relatosRepo>;
   turnos: ReturnType<typeof turnosRepo>;
   trabalhos: ReturnType<typeof trabalhosRepo>;
+  /** 0071 (ADR-099, partes 3/4): os lotes de frentes e o resumo da frente. */
+  frentes: ReturnType<typeof frentesRepo>;
   /** 0070 (ADR-099, parte 2): as esperas de comando. */
   esperas: ReturnType<typeof esperasRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
