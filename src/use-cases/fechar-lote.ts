@@ -42,7 +42,17 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
     await deps.repos.frentes.marcarDevolvido(lote.id, null, deps.agora());
     return linhaFrentesTerminadas(deps, { lote, conversaId: abertoPor.conversaId, turnoId: null, agenteId: abertoPor.agenteId, frentes: fecho.frentes });
   }
-  return devolverAoDono(deps, { lote, abertoPor, total: frentes.length, frentes: fecho.frentes, fechaLote: fecho.fechaLote, cuidado: fecho.cuidado, faltam: fecho.faltam });
+  return devolverAoDono(deps, { lote, abertoPor, total: frentes.length, frentes: fecho.frentes, fechaLote: fecho.fechaLote, cuidado: fecho.cuidado, faltam: fecho.faltam, trabalhoDoRetorno: trabalhoDoRetorno(lote, frentes) });
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099, I3, combinado com a I8): o trabalho onde o retorno nasce. É o `trabalho_id` do lote (a
+ * rotina-mãe), nunca uma frente do próprio lote nem o trabalho herdado do turno que abriu: na rede de 2 min o turno
+ * promovido abre o lote e passa a pertencer à frente — o retorno ao dono é da faixa da conversa (null, com a sessão da
+ * conversa), não da frente.
+ */
+function trabalhoDoRetorno(lote: LoteDeFrentes, frentes: readonly FrenteNoFecho[]): string | null {
+  return lote.trabalhoId && !frentes.some((f) => f.id === lote.trabalhoId) ? lote.trabalhoId : null;
 }
 
 /**
@@ -50,7 +60,7 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
  * se lava (ADR-062, a regra de entregar-resposta-peer.ts): se uma frente leu conteúdo de fora, ou o turno que abriu já
  * estava marcado, o retorno nasce marcado. O turno seguinte da pessoa nasce limpo (a marca é por turno).
  */
-async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoPor: Turno; frentes: FrenteNoFecho[]; fechaLote: boolean; cuidado: boolean; faltam: number; total: number }): Promise<RuntimeEvent[]> {
+async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoPor: Turno; frentes: FrenteNoFecho[]; fechaLote: boolean; cuidado: boolean; faltam: number; total: number; trabalhoDoRetorno: string | null }): Promise<RuntimeEvent[]> {
   const agora = deps.agora();
   const { abertoPor } = p;
   const retorno = await deps.repos.turnos.enfileirar({
@@ -58,7 +68,8 @@ async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoP
     agenteId: abertoPor.agenteId,
     origem: "retomada",
     retomaTurnoId: abertoPor.id,
-    trabalhoId: p.lote.trabalhoId,
+    // Explícito (null = a conversa do dono): sem ele, o INSERT herdaria o trabalho do turno que abriu o lote.
+    trabalhoId: p.trabalhoDoRetorno,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
     profundidade: abertoPor.profundidade,
     entradaTexto: entradaDoRetorno({ frentes: p.frentes, faltam: p.faltam, total: p.total }),
@@ -102,7 +113,7 @@ async function responderAoColega(deps: DepsFecho, p: { lote: LoteDeFrentes; aber
       await deps.repos.frentes.marcarDevolvido(p.lote.id, null, agora);
       return [];
     }
-    return devolverAoDono(deps, { lote: p.lote, abertoPor: p.abertoPor, frentes, fechaLote: true, cuidado: frentes.some((f) => f.deFora), faltam: 0, total: frentes.length });
+    return devolverAoDono(deps, { lote: p.lote, abertoPor: p.abertoPor, frentes, fechaLote: true, cuidado: frentes.some((f) => f.deFora), faltam: 0, total: frentes.length, trabalhoDoRetorno: trabalhoDoRetorno(p.lote, frentes) });
   }
   await deps.repos.frentes.marcarDevolvido(p.lote.id, null, agora);
   const quem = await deps.repos.agentes.buscar(r.data.remetenteAgenteId);

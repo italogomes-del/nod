@@ -1,16 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Turno } from "../../src/contracts/turno.ts";
+import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { INSTRUCAO_DO_RETORNO } from "../../src/domain/retorno-do-lote.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { fecharLoteSePronto } from "../../src/use-cases/fechar-lote.ts";
 import { abrirFrentes, devolverResumo } from "../../src/use-cases/frentes.ts";
 import { parar } from "../../src/use-cases/parar.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
-import { pararTrabalho, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
+import { criarTrabalho, pararTrabalho, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { contexto, depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { depsSobre as depsL5, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
@@ -180,6 +184,33 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
       expect(linha).toMatchObject({ kind: "sistema", texto: "Respondi ao pedido de Ada", confianca: "nao_confiavel", payload: { loteId, agenteId: m.ada.agenteId, nome: "Ada" } });
       expect(await m.linhas(bia.conversaId, "frentes_terminadas")).toHaveLength(0);
       expect(await m.repos.frentes.buscarLote(loteId)).toMatchObject({ retornoTurnoId: null, devolvidoEm: expect.any(Number) });
+    });
+  });
+  it("lote aberto pela rede (I8): o turno promovido virou da frente, e o retorno nasce na conversa do dono, com a sessão dela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      for (const trabalhoDoLote of ["nulo", "a frente"] as const) {
+        // O formato da I8: o turno da conversa é promovido, abre o lote e passa a pertencer à frente.
+        const promovido = await m.turnoDaConversa({ texto: "migre os relatórios" });
+        const lote = (await m.repos.frentes.criarLote({ agenteId: m.ada.agenteId, abertoPorTurnoId: promovido.id }))!;
+        const { trabalho: frente } = await criarTrabalho(m.deps, { agenteId: m.ada.agenteId, conversaId: m.ada.conversaId, titulo: "Migrar relatórios", origem: "rede", forma: "frente", loteId: lote.id });
+        await trx`update turnos set trabalho_id = ${frente.id} where id = ${promovido.id}`;
+        if (trabalhoDoLote === "a frente") await trx`update lotes_de_frentes set trabalho_id = ${frente.id} where id = ${lote.id}`;
+        await trx`update trabalhos set sessao_cli = 'sessao-da-frente', sessao_executor = 'local', sessao_harness = 'claude-cli' where id = ${frente.id}`;
+        await trx`update conversas set sessao_cli = 'sessao-da-conversa', sessao_executor = 'local', sessao_harness = 'claude-cli' where id = ${m.ada.conversaId}`;
+        await m.repos.turnos.assentar(promovido.id, { estado: "concluido" });
+        await sincronizarTrabalho(m.deps, frente.id);
+
+        const [retorno, ...mais] = await m.retomadasDe((await m.repos.turnos.buscar(promovido.id))!);
+        expect(mais, trabalhoDoLote).toHaveLength(0);
+        expect(retorno, trabalhoDoLote).toMatchObject({ conversaId: m.ada.conversaId, trabalhoId: null, origem: "retomada" });
+        const agora = () => Date.now();
+        const l5 = depsL5(m.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
+        const pronto = { estado: "pronto", versao: "teste", em: Date.now() } as const;
+        const plano = (await emitirPlanoTurno(l5, { turnoId: retorno!.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).data;
+        expect(plano.entrada.sessaoCli, trabalhoDoLote).toBe("sessao-da-conversa");
+        await m.repos.turnos.assentar(retorno!.id, { estado: "concluido" });
+      }
     });
   });
 });
