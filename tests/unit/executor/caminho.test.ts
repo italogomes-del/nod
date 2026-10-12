@@ -98,7 +98,9 @@ describe("caminho do binário (ADR-014 invertido: PATH pelado do Finder)", () =>
       const codex = nvm("versions", "node", "v26.7.0", "bin", "codex");
       await writeFile(codex, "#!/bin/sh\necho codex-cli 0.147.0\n");
       await chmod(codex, 0o755);
-      const camadas = camadasDoPath("/usr/bin:/bin", casa);
+      // revisto em 2026-10-12 (revisão do PR #266): só as camadas do nvm — os extras (/opt/homebrew/bin, /usr/local/bin)
+      // vêm antes delas, e um `codex` instalado de verdade na máquina de quem roda o teste vencia (falha local, CI verde).
+      const camadas = camadasDoPath("/usr/bin:/bin", casa).filter((c) => c.origem === "nvm");
       const path = camadas.map((c) => c.dir).join(":");
       expect(await resolverBinarioDetalhado(undefined, path, casa, "codex", camadas)).toEqual({ caminho: codex, origem: "nvm" });
       expect(await resolverBinarioDetalhado("~/x/codex", path, casa, "codex", camadas)).toBeNull();

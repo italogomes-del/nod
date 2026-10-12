@@ -13,6 +13,7 @@ import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { comoPedidoDeAntes, tarefaDoPedido } from "../helpers/pedido.ts";
 
 /**
  * Pedidos a colega que pararam sem voltar (2026-10-08, diagnóstico do Nod diário): 15 tasks ficaram "rodando" por horas
@@ -31,7 +32,7 @@ async function montar(trx: Tx) {
   const { deps, repos } = depsSobre(trx, MARLON);
   for (const a of [ada, dev]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
   const novoTurno = async (conversaId: string, agenteId: string, trabalhoId: string | null) => {
-    const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
     if (!t) throw new Error("turno");
     return t;
   };
@@ -48,8 +49,11 @@ async function montar(trx: Tx) {
   const t = await novoTurno(ada.conversaId, ada.agenteId, w.id);
   const maquina = await rodar(t.id);
   const { data } = await pedirABot(deps, { turnoId: t.id, agenteId: ada.agenteId, conversaId: ada.conversaId, agente: "Dev", pedido: "revise o PR 42" });
+  // ADR-099 (I7 revista): o pedido novo entra pela triagem do dono (fila-triagem.test.ts); estes casos são os pedidos de
+  // antes, ainda abertos em produção como task de colega, que o varredor continua cuidando.
+  await comoPedidoDeAntes(trx, deps, data);
   await assentarTurno(deps, { turnoId: t.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "Pedi ao Dev." }, resultado: concluido("Pedi ao Dev."), executor: "catcher" });
-  const tarefa = await repos.turnos.buscar(data.tarefa_id);
+  const tarefa = await repos.turnos.buscar(tarefaDoPedido(data));
   if (!tarefa?.trabalhoId) throw new Error("tarefa do colega sem trabalho");
   const colegaId = tarefa.trabalhoId;
   /** A queda de um turno do colega como a recusa no despacho a deixa: interrompido e o trabalho DELE sincronizado. */

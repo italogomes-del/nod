@@ -92,6 +92,19 @@ export type InstalacaoDaIa = {
   registro?: string;
 };
 
+/**
+ * QUAL conta está logada na IA (definido em 2026-10-12, NOD-209), como o próprio CLI diz: o `claude auth status` e o
+ * `account/read` do `codex app-server` (nunca o arquivo de credencial). ADR-019: fica só no app do Mac e na página dele —
+ * não vai ao servidor, ao inventário, ao log nem ao banco, e nunca serve para autorização.
+ */
+export type ContaDaIa = {
+  email: string;
+  /** A organização (o Claude diz "Gamefik"; o ChatGPT não diz). */
+  organizacao: string | null;
+  /** O plano já legível ("Team", "Pro", "Max", "Plus"). */
+  plano: string | null;
+};
+
 export type EstadoIa = {
   ia: "claude-cli" | "codex-cli";
   estado: EstadoDaIa;
@@ -110,6 +123,8 @@ export type EstadoIa = {
   instalacao?: InstalacaoDaIa;
   /** O login aberto pelo app (o em curso ou o último). */
   login?: LoginDaIa;
+  /** A conta logada, quando o CLI disse qual é (só no app do Mac; ver ContaDaIa). */
+  conta?: ContaDaIa;
   em: EpochMs;
 };
 

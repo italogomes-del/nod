@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Tx } from "../../src/shared/types.ts";
-import { abrirTask, absorverNoTrabalho, fazerAqui, fazerDepois, mandarParaTask, mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { absorverNoTrabalho, fazerAqui, fazerDepois, mensagemParaTrabalho } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirTask, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { criarTrabalho, pararTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -18,7 +19,7 @@ async function montar(trx: Tx) {
   await repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
   const task = async (titulo = "Login", origem: "pessoa" | "colega" | "rotina" | "rede" = "pessoa") => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem })).trabalho;
   const turno = async (trabalhoId: string | null) => {
-    const t = await repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
     if (!t) throw new Error("turno");
     return t;
   };

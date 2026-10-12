@@ -108,5 +108,17 @@ describe("cliente do Composio REST: nova tentativa (NOD-157)", () => {
       expect(abortos).toEqual([29_000]);
       expect(Date.now()).toBeLessThanOrEqual(30_000);
     });
+
+    it("NOD-208 (revisão): prazoFinal corta o orçamento de 30 s; o PATCH do fixarConta que não responde desiste nele", async () => {
+      const abortos: number[] = [];
+      const f: typeof fetch = (_url, init) => new Promise((_res, rej) => {
+        init?.signal?.addEventListener("abort", () => { abortos.push(Date.now()); rej(init.signal?.reason); });
+      });
+      const c = criarClienteComposio("chave", f, { aleatorio: () => 0.5, prazoFinal: 5_000 });
+      const r = c.fixarConta("trs_x", "slack", "ca_x").catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+      expect(await r).toMatchObject({ codigo: "conector_indisponivel" });
+      expect(abortos).toEqual([5_000]);
+    });
   });
 });

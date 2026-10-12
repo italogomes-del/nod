@@ -22,7 +22,7 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
 
       // Conversa: a pessoa fala, o bot fala no meio e no fim de um turno encerrado.
       const oi = await repos.mensagens.criar({ conversaId, autoria: pessoa, kind: "texto", texto: "oi", confianca: "confiavel" });
-      const t1 = await repos.turnos.enfileirar({ ...base, origem: "conversa", entradaTexto: "oi", mensagemOrigemId: oi!.id });
+      const t1 = await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", entradaTexto: "oi", mensagemOrigemId: oi!.id });
       const meio = await repos.mensagens.criar({ conversaId, turnoId: t1!.id, autoria: bot, kind: "texto", texto: "Lendo o PR", confianca: "confiavel" });
       const fim = await repos.mensagens.criar({ conversaId, turnoId: t1!.id, autoria: bot, kind: "texto", texto: "Pronto: dois comentários.", confianca: "confiavel" });
       await repos.turnos.assentar(t1!.id, { estado: "concluido" });
@@ -30,7 +30,7 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
       // Task: a fala da pessoa na tela dela e uma fala do bot num turno dela ainda rodando (nada é fim ainda).
       const w = (await criarTrabalho(deps, { agenteId, conversaId, titulo: "Login", origem: "pessoa" })).trabalho;
       const naTask = await repos.mensagens.criar({ conversaId, autoria: pessoa, kind: "texto", texto: "comece pelo Safari", confianca: "confiavel" });
-      const tw = await repos.turnos.enfileirar({ ...base, origem: "conversa", entradaTexto: "x", trabalhoId: w.id, mensagemOrigemId: naTask!.id });
+      const tw = await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", entradaTexto: "x", trabalhoId: w.id, mensagemOrigemId: naTask!.id });
       await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
       await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
       const doMeioDaTask = await repos.mensagens.criar({ conversaId, turnoId: tw!.id, autoria: bot, kind: "texto", texto: "Abrindo o Safari", confianca: "confiavel" });

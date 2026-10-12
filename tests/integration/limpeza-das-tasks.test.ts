@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
-import { LIMPAR_APOS_MS } from "../../src/domain/limpeza-das-tasks.ts";
-import { pastasParaLimpar } from "../../src/use-cases/limpeza-das-tasks.ts";
+import { LIMPAR_APOS_MS, RETOMADA_POSSIVEL_MS } from "../../src/domain/limpeza-das-tasks.ts";
+import { pastaSemTrabalhoDoTurno, pastasParaLimpar } from "../../src/use-cases/limpeza-das-tasks.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -28,7 +28,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
         return t!.id;
       };
       const turnoDo = (trabalhoId: string, acordarEm: number | null = null) =>
-        repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId, acordarEm });
+        repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId, acordarEm });
 
       const antiga = await criar("antiga-aaaaaa", "terminado", 4 * DIA);
       const falhaRecente = await criar("falha-bbbbbb", "falhou", DIA);
@@ -69,6 +69,46 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
       expect((await pastasParaLimpar(deps)).map((p) => p.trabalhoId)).toEqual([falhaRecente]);
       await repos.trabalhos.mudarEstado(antiga, "terminado", agora - LIMPAR_APOS_MS + HORA);
       expect(await pastasParaLimpar(deps)).toContainEqual({ trabalhoId: antiga, pasta: "Vera/antiga-aaaaaa", quando: "so_com_pr_mergeado" });
+    });
+  });
+
+  it("ADR-099 (I5): a frente terminada vale `sem_trabalho` na hora, na lista e pelo turno que a fechou; task, falha e frente aberta não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      // A frente nasce num lote (I2); a sem lote é a task de antes migrada pela 0072 (I10) e limpa como task.
+      const dono = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.turnos.assentar(dono!.id, { estado: "concluido" });
+      const lote = await repos.frentes.criarLote({ agenteId, abertoPorTurnoId: dono!.id });
+      const comTurno = async (slug: string, forma: "frente" | "task", semLote = false) => {
+        const t = await repos.trabalhos.criar({ agenteId, conversaId, titulo: slug, origem: "pessoa", pasta: `~/nod/Vera/${slug}`, forma, loteId: forma === "frente" && !semLote ? lote!.id : null });
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId: t!.id });
+        expect((await repos.turnos.reivindicar({ machineId: randomUUID(), agora }))?.id).toBe(turno!.id);
+        await repos.turnos.assentar(turno!.id, { estado: "concluido" });
+        return { trabalhoId: t!.id, turnoId: turno!.id };
+      };
+      const frente = await comTurno("frente-aaaaaa", "frente");
+      const task = await comTurno("task-bbbbbb", "task");
+      const falhou = await comTurno("frente-falhou-cccccc", "frente");
+      const aberta = await comTurno("frente-aberta-dddddd", "frente");
+      const migrada = await comTurno("frente-migrada-eeeeee", "frente", true);
+      await repos.trabalhos.mudarEstado(frente.trabalhoId, "terminado", agora);
+      await repos.trabalhos.mudarEstado(task.trabalhoId, "terminado", agora);
+      await repos.trabalhos.mudarEstado(migrada.trabalhoId, "terminado", agora);
+      await repos.trabalhos.mudarEstado(falhou.trabalhoId, "falhou", agora);
+
+      const semTrabalho = { trabalhoId: frente.trabalhoId, pasta: "Vera/frente-aaaaaa", quando: "sem_trabalho" };
+      expect(await pastasParaLimpar(deps)).toEqual([semTrabalho]);
+      expect(await pastaSemTrabalhoDoTurno(deps, frente.turnoId)).toEqual(semTrabalho);
+      for (const outro of [task, falhou, aberta, migrada]) expect(await pastaSemTrabalhoDoTurno(deps, outro.turnoId)).toBeNull();
+      expect(await pastaSemTrabalhoDoTurno(deps, randomUUID())).toBeNull();
+
+      // Com o disco apertado, depois das 2 h ela já é `encerrada` (guardar antes de apagar), e o "limpar agora" não a manda.
+      await repos.trabalhos.mudarEstado(frente.trabalhoId, "terminado", agora - RETOMADA_POSSIVEL_MS);
+      expect(await pastasParaLimpar(deps, { apertado: true })).toContainEqual({ ...semTrabalho, quando: "encerrada" });
+      await repos.trabalhos.mudarEstado(frente.trabalhoId, "terminado", agora - LIMPAR_APOS_MS);
+      expect(await pastaSemTrabalhoDoTurno(deps, frente.turnoId)).toBeNull();
     });
   });
 });

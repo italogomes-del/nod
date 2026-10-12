@@ -38,7 +38,8 @@ export const HARNESS_LEGADO = "claude-cli" satisfies IdHarness;
  * - `mensagemNoMeio`: aceita texto num turno em andamento (Claude: stdin stream-json; Codex: `turn/steer` no
  *   app-server). É a promessa estática; se a entrada está aberta AGORA, quem diz é o `aceitaMensagens()` do adapter.
  * - `retomaSessao`: continua uma sessão pelo id (`--resume`). Sem isto o turno recebe o histórico recente.
- * - `bifurcaSessao`: copia uma sessão e segue nas duas (`--fork-session`). Sem isto a rede de 2 min não promove.
+ * - `bifurcaSessao`: copia uma sessão e segue nas duas (`--fork-session`). Na rede de 2 min, quem retoma sem bifurcar não
+ *   promove; quem nem retoma promove e o dono segue com o histórico (revisto em 2026-10-12, ADR-099, I8).
  * - `processoProprio`: o driver sobe um processo local cujo grupo dá para medir (memória) e encerrar.
  * - `terminal`: o kit de terminal do nod (hook das nativas, ADR-055/065) vale para este harness.
  * - `anexos`: os tipos de anexo que o modelo lê como conteúdo (ADR-046). Claude: imagem e PDF viram blocos da mensagem

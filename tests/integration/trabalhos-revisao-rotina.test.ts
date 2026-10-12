@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { TETO_TASKS_POR_EXECUCAO_DE_ROTINA } from "../../src/domain/trabalho.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { abrirTask } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirTask } from "../../src/use-cases/frentes.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -25,7 +25,7 @@ describeIntegracao("revisão #188 — rotina e tasks (S12)", () => {
       const agora = () => Date.now();
       const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
       const turnoDe = async (trabalhoId: string) => {
-        const t = await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "triagem", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+        const t = await base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "triagem", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
         if (!t) throw new Error("turno");
         return t;
       };
@@ -56,7 +56,7 @@ describeIntegracao("revisão #188 — rotina e tasks (S12)", () => {
       await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
       const agora = () => Date.now();
       const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
-      const turno = async (trabalhoId: string | null) => (await base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId }))!;
+      const turno = async (trabalhoId: string | null) => (await base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId }))!;
       const task = async (titulo: string, origem: "pessoa" | "colega") => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem })).trabalho;
       const colega = await task("Pedido do Chico", "colega");
       const lida = await task("Leu a página", "pessoa");

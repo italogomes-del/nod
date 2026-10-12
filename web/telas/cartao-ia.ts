@@ -1,5 +1,5 @@
 import type { IaDesktop } from "../../src/contracts/desktop.ts";
-import type { EstadoDaIa, EstadoIa } from "../../src/contracts/estado-ia.ts";
+import type { ContaDaIa, EstadoDaIa, EstadoIa } from "../../src/contracts/estado-ia.ts";
 import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
 import type { CausaSemIa } from "../../src/contracts/inventario.ts";
 import { esc, hora } from "../lib/render.ts";
@@ -28,6 +28,16 @@ export const PROVEDOR: Record<IaMac, { nome: string; cli: string; empresa: strin
   "codex-cli": { nome: "ChatGPT", cli: "Codex", empresa: "OpenAI", logo: "chatgpt" },
 };
 
+/**
+ * A troca de conta (definido em 2026-10-12, NOD-209; protótipo aprovado pelo Matheus no mesmo dia). "Trocar conta" abre o
+ * mesmo login dentro do cartão; a conta de antes fica aqui para o passo dizer "Agora: …" e a nota dizer se mudou.
+ *  - abrindo: o clique saiu, o login ainda não abriu (um login antigo terminado não conta);
+ *  - entrando: o login está aberto;
+ *  - entrou: o login terminou bem e a conta nova ainda não chegou do Mac;
+ *  - concluida: a nota já foi escrita.
+ */
+export type TrocaDeConta = { antes: ContaDaIa | null; fase: "abrindo" | "entrando" | "entrou" | "concluida" };
+
 /** O que a tela guarda das IAs do Mac (o reducer, `estado.iasMac`): a ponte, o último estado de cada IA e o que é só da tela. */
 export type UiIas = {
   /** Dentro do app do Mac com a ponte `ias` (rc.7 em diante). false = navegador, celular ou app antigo. */
@@ -48,9 +58,27 @@ export type UiIas = {
   copiado: IaMac | null;
   /** O código do Claude que a pessoa está colando (atravessa o redesenho do cartão). */
   codigo: Partial<Record<IaMac, string>>;
+  /** NOD-209: a troca de conta de cada IA (a em curso ou a última). */
+  troca: Partial<Record<IaMac, TrocaDeConta>>;
 };
 
-export const UI_IAS_INICIAL: UiIas = { noApp: false, estados: {}, fluxo: {}, teste: {}, ajuda: null, detalhe: null, verificando: null, nota: {}, copiado: null, codigo: {} };
+export const UI_IAS_INICIAL: UiIas = { noApp: false, estados: {}, fluxo: {}, teste: {}, ajuda: null, detalhe: null, verificando: null, nota: {}, copiado: null, codigo: {}, troca: {} };
+
+/** A linha da conta no cartão: "e-mail · organização · plano" (o que faltar, sai). */
+export const textoDaConta = (c: ContaDaIa): string => [c.email, c.organizacao, c.plano].filter(Boolean).join(" · ");
+/** A conta no passo da troca: "e-mail · organização" (ou o plano, quando não há organização). */
+export const contaCurta = (c: ContaDaIa): string => [c.email, c.organizacao ?? c.plano].filter(Boolean).join(" · ");
+/** No navegador e no celular a conta não aparece (ADR-019: ela só existe no app do Mac). */
+export const NOTA_CONTA_FORA_DO_APP = "Para ver ou trocar a conta, abra o app do nod no Mac.";
+/** A nota depois da troca: a conta mudou ou é a mesma de antes. */
+export function notaDaTroca(antes: ContaDaIa | null, agora: ContaDaIa): string {
+  return antes?.email === agora.email ? `A conta continua a mesma: ${agora.email}.` : `Conta trocada: agora com ${agora.email}.`;
+}
+/** A dica do navegador na troca: a página pode entrar sozinha com a conta que já está aberta nele. */
+export const DICA_DA_TROCA: Record<IaMac, string> = {
+  "claude-cli": "A página da Anthropic pode entrar sozinha com a conta já aberta no navegador. Se aparecer a conta errada, clique no seu nome no canto da página, saia e entre com a outra.",
+  "codex-cli": "A página da OpenAI pode entrar sozinha com a conta já aberta no navegador. Se aparecer a conta errada, clique em “Usar outra conta” antes de digitar o código.",
+};
 
 /** O estado de uma IA como a tela lê: o do Mac (no app) ou o do servidor, com o limite por cima. */
 export type EstadoNaTela = {
@@ -102,7 +130,7 @@ export function estadoNaTela(ia: IaMac, servidor: IaDaPessoa | undefined, ui: Ui
 
 // ---- a vista do cartão --------------------------------------------------------------------------------------------------
 
-export type AcaoIa = "ia-instalar" | "ia-entrar" | "ia-cancelar" | "ia-testar" | "ia-verificar" | "ia-abrir-link" | "ia-colar-codigo" | "ia-copiar-codigo" | "ia-ajuda" | "ia-detalhe" | "secao-espaco";
+export type AcaoIa = "ia-instalar" | "ia-entrar" | "ia-trocar" | "ia-cancelar" | "ia-testar" | "ia-verificar" | "ia-abrir-link" | "ia-colar-codigo" | "ia-copiar-codigo" | "ia-ajuda" | "ia-detalhe" | "secao-espaco";
 export type BotaoIa = { act: AcaoIa; rotulo: string; destaque: boolean };
 
 export type IdPasso = "instalar" | "entrar" | "testar";
@@ -123,6 +151,12 @@ export type PassoIa = {
   acoes: { act: AcaoIa; rotulo: string; contorno?: true }[];
   /** O detalhe da falha da instalação (o arquivo de registro, para o suporte). */
   detalhe: string | null;
+  /** Troca de conta: a conta de agora, que continua se a pessoa cancelar. */
+  contaAtual: string | null;
+  /** Troca de conta: a dica de escolher a outra conta na página. */
+  dica: string | null;
+  /** Troca de conta terminada: a conta nova e a de antes. */
+  trocou: { agora: string; antes: string | null } | null;
 };
 
 export type VistaIa = {
@@ -141,6 +175,10 @@ export type VistaIa = {
   dica: string;
   podeVerificar: boolean;
   passos: PassoIa[] | null;
+  /** NOD-209: a conta logada ("e-mail · organização · plano"), só no app do Mac. */
+  conta: string | null;
+  /** "Trocar conta": um link no onboarding, um botão de contorno em Provedores de IA. */
+  trocar: "link" | "botao" | null;
 };
 
 export type ContextoCartao = {
@@ -219,7 +257,9 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
   const loginFalhou = e.estado === "falta_entrar" && (login?.fase === "falhou" || login?.fase === "expirou");
   const reprovada = e.estado === "sem_acesso" ? e.causa ?? "teste_falhou" : typeof teste === "object" && teste !== null && "causa" in teste ? teste.causa : null;
   const testando = e.estado === "testando" || teste === "testando" || (e.estado === "pronta" && teste === null);
-  const passo = (id: IdPasso, titulo: string, resto: Partial<PassoIa> = {}): PassoIa => ({ id, titulo, marca: "depois", texto: null, log: null, codigo: null, abrir: false, colar: false, esperando: null, acoes: [], detalhe: null, ...resto });
+  const passo = (id: IdPasso, titulo: string, resto: Partial<PassoIa> = {}): PassoIa => ({ id, titulo, marca: "depois", texto: null, log: null, codigo: null, abrir: false, colar: false, esperando: null, acoes: [], detalhe: null, contaAtual: null, dica: null, trocou: null, ...resto });
+  const troca = c.ui.troca[ia];
+  const trocando = troca !== undefined && !aberto.instalar && (troca.fase !== "concluida" || e.estado !== "entrando");
   const lista: PassoIa[] = [];
 
   if (aberto.instalar) {
@@ -236,7 +276,10 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
     else lista.push(passo("instalar", titulo, { marca: "feito" }));
   }
 
-  const tituloEntrar = `Entrar na sua conta do ${nome}`;
+  const tituloEntrar = trocando ? `Entrar com outra conta do ${nome}` : `Entrar na sua conta do ${nome}`;
+  // A troca: o passo diz qual conta continua valendo e como escolher a outra na página.
+  const naTroca: Partial<PassoIa> = trocando ? { contaAtual: troca.antes ? contaCurta(troca.antes) : null, dica: DICA_DA_TROCA[ia] } : {};
+  const outra = trocando ? " com a outra conta" : "";
   const antesDeEntrar = e.estado === "instalando" || instalacaoFalhou || e.estado === "nao_instalada" || e.estado === "sem_node" || e.estado === "desatualizada";
   if (antesDeEntrar) lista.push(passo("entrar", tituloEntrar));
   else if (e.estado === "entrando" && login) {
@@ -244,20 +287,25 @@ export function passosDaIa(ia: IaMac, e: EstadoNaTela, c: ContextoCartao): Passo
       lista.push(passo("entrar", tituloEntrar, { marca: "ativo", texto: "Ainda não vimos o login terminar. Se você já entrou, confira de novo.", abrir: login.host !== null, acoes: [{ act: "ia-verificar", rotulo: "Verificar de novo", contorno: true }] }));
     } else if (!login.host) lista.push(passo("entrar", tituloEntrar, { marca: "girando", texto: "Abrindo o login…" }));
     else if (ia === "codex-cli") {
-      lista.push(passo("entrar", tituloEntrar, { marca: "ativo", texto: `Na página da ${empresa}, digite este código:`, codigo: login.codigoDoDispositivo, abrir: true, esperando: "Esperando você entrar…" }));
+      lista.push(passo("entrar", tituloEntrar, { marca: "ativo", texto: trocando ? `Na página da ${empresa}, entre com a outra conta e digite este código:` : `Na página da ${empresa}, digite este código:`, codigo: login.codigoDoDispositivo, abrir: true, esperando: "Esperando você entrar…", ...naTroca }));
     } else {
       const colar = login.pedeCodigo && !login.codigoEnviado;
       lista.push(passo("entrar", tituloEntrar, {
         marca: "ativo",
-        texto: colar ? `Entre na página da ${empresa} e cole aqui o código que ela mostrar.` : login.codigoEnviado ? "Conferindo o código…" : `Entre na página da ${empresa}. Quando terminar, volte aqui: o nod percebe sozinho.`,
+        texto: colar ? `Entre na página da ${empresa}${outra} e cole aqui o código que ela mostrar.` : login.codigoEnviado ? "Conferindo o código…" : `Entre na página da ${empresa}${outra}. Quando terminar, volte aqui: o nod percebe sozinho.`,
         abrir: true,
         colar,
         esperando: colar ? null : "Esperando você entrar…",
+        ...naTroca,
       }));
     }
   } else if (loginFalhou) lista.push(passo("entrar", tituloEntrar, { marca: "erro", texto: login?.mensagem || "O login não terminou.", acoes: [{ act: "ia-entrar", rotulo: "Tentar de novo", contorno: true }] }));
   else if (e.estado === "falta_entrar") lista.push(passo("entrar", tituloEntrar, { marca: "girando", texto: "Abrindo o login…" }));
-  else lista.push(passo("entrar", tituloEntrar, { marca: "feito" }));
+  else {
+    // A troca terminou: o passo diz a conta nova (e a de antes) enquanto o teste roda.
+    const agora = trocando && (troca.fase === "entrou" || troca.fase === "concluida") ? mac.conta : undefined;
+    lista.push(passo("entrar", tituloEntrar, { marca: "feito", trocou: agora ? { agora: agora.email, antes: troca?.antes?.email ?? null } : null }));
+  }
 
   const tituloTestar = "Testar a resposta";
   if (reprovada) {
@@ -286,16 +334,20 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
   const b = (act: AcaoIa, rotulo: string, forte = destaque): BotaoIa => ({ act, rotulo, destaque: forte });
   const quando = e.em ? haQuanto(Math.max(0, c.agora - e.em)) : null;
   const dica = e.versao ? `${cli} ${e.versao}${quando ? ` · verificado ${quando}` : ""}` : `Procurado ${onde}${quando ? ` ${quando}` : ""}`;
+  // A conta logada: só no app do Mac, e não enquanto o login de outra está aberto (o passo já diz qual continua).
+  const conta = noApp && e.mac?.conta && e.estado !== "entrando" && e.estado !== "instalando" ? textoDaConta(e.mac.conta) : null;
   const vista = (texto: string, tom: VistaIa["tom"], resto: Partial<VistaIa> = {}): VistaIa => ({
-    ia, nome, cli, estado: e.estado, texto, tom, girando: false, botao: null, explica: null, nota: c.ui.nota[ia] ?? null, dica, podeVerificar: true, passos, ...resto,
+    ia, nome, cli, estado: e.estado, texto, tom, girando: false, botao: null, explica: null, nota: c.ui.nota[ia] ?? null, dica, podeVerificar: true, passos, conta, trocar: null, ...resto,
   });
+  /** "Trocar conta" na IA logada (no app); fora dele, a nota diz onde ver e trocar a conta. */
+  const trocar: Partial<VistaIa> = noApp ? { trocar: c.onde === "onboarding" ? "link" : "botao" } : { nota: c.ui.nota[ia] ?? NOTA_CONTA_FORA_DO_APP };
   // O cartão com um fluxo aberto: a frase acompanha o passo, e o botão (quando há) é o Cancelar.
   if (passos) {
     const erro = passos.find((p) => p.marca === "erro");
     if (erro) return vista(erro.id === "instalar" ? "A instalação não terminou" : erro.id === "entrar" ? "O login não terminou" : "A conta não respondeu ao teste", "aviso");
     const ativo = passos.find((p) => p.marca === "ativo" || p.marca === "girando");
     const cancelar = e.estado === "instalando" || e.estado === "entrando" ? b("ia-cancelar", "Cancelar", false) : null;
-    const texto = ativo?.id === "instalar" ? "Instalando…" : ativo?.id === "entrar" ? "Termine no navegador…" : "Testando…";
+    const texto = ativo?.id === "instalar" ? "Instalando…" : ativo?.id === "entrar" ? (c.ui.troca[ia] && !c.ui.fluxo[ia]?.instalar ? "Trocando de conta… termine no navegador" : "Termine no navegador…") : "Testando…";
     return vista(texto, "mudo", { girando: !cancelar, botao: cancelar, podeVerificar: false });
   }
   switch (e.estado) {
@@ -325,7 +377,7 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
         : vista("Não respondeu ao teste", "aviso", noApp ? { botao: b("ia-testar", "Testar de novo") } : {});
     case "no_limite": {
       const ate = e.ate ? ` · volta ${quandoRenova(e.ate, c.agora)}` : "";
-      return vista(`Chegou ao limite da assinatura${ate}`, "aviso", outraPronta ? {} : { explica: `Enquanto isso, seus bots esperam. Conecte o ${PROVEDOR[outra].nome} e eles continuam por ele até o ${nome} voltar.` });
+      return vista(`Chegou ao limite da assinatura${ate}`, "aviso", { ...trocar, ...(outraPronta ? {} : { explica: `Enquanto isso, seus bots esperam. Conecte o ${PROVEDOR[outra].nome} e eles continuam por ele até o ${nome} voltar.` }) });
     }
     case "pronta": {
       if (c.onde === "onboarding" && teste === "testando") return vista("Encontrado · testando a resposta", "mudo", { girando: true, podeVerificar: false });
@@ -336,8 +388,8 @@ export function vistaDaIa(ia: IaMac, c: ContextoCartao): VistaIa {
       }
       const respondeu = teste !== null && typeof teste === "object" && "resposta" in teste;
       // No onboarding, o Continuar só libera com o teste: sem veredito ainda, a IA está achada, não "conectada".
-      if (c.onde === "onboarding" && !respondeu) return vista(`Encontrado ${onde} · falta testar`, "mudo", noApp ? { botao: b("ia-testar", "Testar", false) } : {});
-      return vista(textoPronta(ia, c, estados), "ok");
+      if (c.onde === "onboarding" && !respondeu) return vista(`Encontrado ${onde} · falta testar`, "mudo", noApp ? { botao: b("ia-testar", "Testar", false), ...trocar } : trocar);
+      return vista(textoPronta(ia, c, estados), "ok", trocar);
     }
   }
 }
@@ -411,6 +463,7 @@ export const ICONE_IA = {
   verificar: svg('<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/>', 16, 1.8),
   alca: '<svg width="10" height="14" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="3" r="1.4"/><circle cx="8.5" cy="3" r="1.4"/><circle cx="3.5" cy="8" r="1.4"/><circle cx="8.5" cy="8" r="1.4"/><circle cx="3.5" cy="13" r="1.4"/><circle cx="8.5" cy="13" r="1.4"/></svg>',
   abrir: svg('<path d="M7 17 17 7"/><path d="M8 7h9v9"/>', 12, 2),
+  pessoa: svg('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.9-3.6 3.7-5.6 7-5.6s6.1 2 7 5.6"/>', 12, 1.8),
 };
 const GIRA = '<span class="ob-gira grande" aria-hidden="true"></span>';
 
@@ -431,9 +484,16 @@ function htmlPasso(v: VistaIa, p: PassoIa, n: number, ui: UiIas): string {
         : `<span class="ia-passo-marca${p.marca === "ativo" ? " ativo" : ""}" aria-hidden="true">${n}</span>`;
   const empresa = PROVEDOR[v.ia].empresa;
   const partes: string[] = [`<b>${esc(p.titulo)}</b>`];
+  if (p.contaAtual) partes.push(`<span class="ia-conta-atual">Agora: <b>${esc(p.contaAtual)}</b> · continua valendo se você cancelar</span>`);
+  if (p.trocou) {
+    partes.push(p.trocou.antes === p.trocou.agora
+      ? `<span class="ia-trocou">A conta continua a mesma: <b>${esc(p.trocou.agora)}</b>.</span>`
+      : `<span class="ia-trocou">Agora com <b>${esc(p.trocou.agora)}</b>.${p.trocou.antes ? ` Antes era ${esc(p.trocou.antes)}.` : ""}</span>`);
+  }
   if (p.texto) partes.push(`<span class="${p.marca === "erro" ? "ia-erro-txt" : ""}">${esc(p.texto)}</span>`);
   if (p.log) partes.push(`<span class="ia-log">${esc(p.log)}</span>`);
   if (p.codigo) partes.push(`<div class="ia-codigo"><code>${esc(p.codigo)}</code><button type="button" class="ob-link" data-act="ia-copiar-codigo" data-ia="${v.ia}" data-texto="${esc(p.codigo)}">${ui.copiado === v.ia ? "Copiado" : "Copiar"}</button></div>`);
+  if (p.dica) partes.push(`<div class="ia-troca-dica">${ICONE_IA.aviso}<p>${esc(p.dica)}</p></div>`);
   if (p.abrir || p.esperando) {
     const abrir = p.abrir ? `<button type="button" class="ob-link" data-act="ia-abrir-link" data-ia="${v.ia}">Abrir a página da ${esc(empresa)}${ICONE_IA.abrir}</button>` : "";
     const esperando = p.esperando ? `<span class="ia-esperando"><span class="ob-gira" aria-hidden="true"></span>${esc(p.esperando)}</span>` : "";
@@ -471,10 +531,12 @@ export function renderCartaoIa(v: VistaIa, ui: UiIas, opcoes: { arrastar?: { pos
     : "";
   const gira = v.girando ? GIRA : "";
   const botao = v.botao ? `<button type="button" class="ob-pilula${v.botao.destaque ? "" : " contorno"}" data-act="${v.botao.act}" data-ia="${v.ia}">${esc(v.botao.rotulo)}</button>` : "";
+  const trocar = v.trocar ? `<button type="button" class="${v.trocar === "link" ? "ob-link ia-trocar" : "ob-pilula contorno"}" data-act="ia-trocar" data-ia="${v.ia}" aria-label="Trocar a conta do ${esc(v.nome)}">Trocar conta</button>` : "";
+  const conta = v.conta ? `<span class="ia-conta" title="${esc(v.conta)}">${ICONE_IA.pessoa}<span class="ia-conta-txt"><span class="sr-only">Conta: </span>${esc(v.conta)}</span></span>` : "";
   const verificar = opcoes.verificar !== false && v.podeVerificar
     ? `<span class="ia-dica"><button type="button" class="ia-verificar${ui.verificando === v.ia ? " girando" : ""}" data-act="ia-verificar" data-ia="${v.ia}" aria-label="Verificar o ${esc(v.nome)} de novo">${ICONE_IA.verificar}</button><span class="ia-balao" role="tooltip">${esc(v.dica)}</span></span>`
     : "";
-  const linha = `<div class="ia-linha">${alca}${logoDaIa(v.ia)}<div class="ob-ia-txt"><b>${esc(v.nome)}</b><span${classeEstado} role="status">${marca}${esc(v.texto)}</span></div>${gira}${botao}${verificar}</div>`;
+  const linha = `<div class="ia-linha">${alca}${logoDaIa(v.ia)}<div class="ob-ia-txt"><b>${esc(v.nome)}</b><span${classeEstado} role="status">${marca}${esc(v.texto)}</span>${conta}</div>${gira}${trocar}${botao}${verificar}</div>`;
   const fluxo = v.passos ? `<ol class="ia-fluxo" aria-live="polite">${v.passos.map((p, i) => htmlPasso(v, p, i + 1, ui)).join("")}</ol>` : "";
   const explica = v.explica ? `<div class="ia-explica"><p>${esc(v.explica)}</p></div>` : "";
   const nota = v.nota ? `<p class="ia-aviso-nota" role="status">${esc(v.nota)}</p>` : "";

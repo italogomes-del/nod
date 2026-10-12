@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, type IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
-import { abrirTask, absorverNoTrabalho, fazerAqui, fazerDepois, mandarParaTask, mensagemParaTrabalho, promoverNaRede } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { absorverNoTrabalho, fazerAqui, fazerDepois, mensagemParaTrabalho, promoverNaRede } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirTask, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
 import { criarTrabalho, fecharPorMemoria, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
@@ -26,40 +27,52 @@ async function montar(trx: Trx, agora = () => Date.now()) {
   await base.repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
   const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
   const turno = (extra: { trabalhoId?: string | null; origem?: "conversa" | "rotina" } = {}) =>
-    base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: extra.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o dashboard de churn", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: extra.trabalhoId ?? null });
+    base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: extra.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o dashboard de churn", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: extra.trabalhoId ?? null });
   const ctx = (turnoId: string) => ({ turnoId, agenteId: base.agenteId, conversaId: base.conversaId });
   const plano = async (turnoId: string) => (await emitirPlanoTurno(deps, { turnoId, machineId: randomUUID(), executor: "local", harnesses })).data;
   return { ...base, deps, turno, ctx, plano };
 }
 
 describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
-  it("abrir_task: cria a task da pessoa, a linha \"Abriu a task\" e o turno dela; a conversa recebe a seção Trabalhos em andamento", async () => {
+  it("abrir_task (sinônimo, ADR-099 I2): abre uma frente da pessoa num lote, a linha \"Começou a frente\" e o turno dela; a conversa recebe a seção Trabalhos em andamento", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const conversa = await m.turno();
       const r = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Dashboard de churn", pedido: "Monte o dashboard de churn com os dados de setembro." });
       if (!r.data.ok) throw new Error("deveria abrir");
       const t = await m.repos.trabalhos.buscar(r.data.trabalho_id);
-      expect(t).toMatchObject({ origem: "pessoa", titulo: "Dashboard de churn", estado: "na_fila", conversaId: m.conversaId });
+      expect(t).toMatchObject({ origem: "pessoa", titulo: "Dashboard de churn", estado: "na_fila", conversaId: m.conversaId, forma: "frente", loteId: expect.any(String) });
       const daTask = (await m.repos.turnos.doTrabalho(t!.id))[0];
       expect(daTask).toMatchObject({ origem: "conversa", estado: "pendente", trabalhoId: t!.id });
       expect(daTask?.entradaTexto).toContain("Monte o dashboard de churn com os dados de setembro.");
-      const linha = (await m.repos.mensagens.listarDaConversa(m.conversaId)).find((x) => x.payload?.kind === "trabalho_aberto");
-      expect(linha).toMatchObject({ kind: "sistema", texto: "Abriu a task Dashboard de churn", payload: { trabalhoId: t!.id, titulo: "Dashboard de churn", origem: "pessoa" } });
-      expect((r.events ?? []).map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada", "turno_criado"]);
+      const linha = (await m.repos.mensagens.listarDaConversa(m.conversaId)).find((x) => x.payload?.kind === "frentes_abertas");
+      expect(linha).toMatchObject({ kind: "sistema", texto: "Começou a frente Dashboard de churn", payload: { loteId: t!.loteId, origem: "pessoa", frentes: [{ trabalhoId: t!.id, titulo: "Dashboard de churn" }] } });
+      expect((r.events ?? []).map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado", "mensagem_criada"]);
 
       // O próximo turno da conversa vê a task e tem as duas ferramentas; o turno da task não tem nenhuma das duas.
       const pConversa = await m.plano((await m.turno())!.id);
-      expect(pConversa.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["abrir_task", "mandar_para_task"]));
+      expect(pConversa.catalogo.ferramentas.map((f) => f.nome)).toEqual(expect.arrayContaining(["abrir_frentes", "mandar_para_frente"]));
       expect(pConversa.promptSistemaPartes?.volatil).toContain(`"id":"${t!.id}"`);
       const pTask = await m.plano(daTask!.id);
-      expect(pTask.catalogo.ferramentas.map((f) => f.nome)).not.toContain("abrir_task");
-      expect(pTask.catalogo.ferramentas.map((f) => f.nome)).not.toContain("mandar_para_task");
-      expect(pTask.promptSistema).toContain('Task atual: você está na task "Dashboard de churn"');
+      expect(pTask.catalogo.ferramentas.map((f) => f.nome)).not.toContain("abrir_frentes");
+      expect(pTask.catalogo.ferramentas.map((f) => f.nome)).not.toContain("mandar_para_frente");
+      expect(pTask.promptSistema).toContain('Frente atual: você está na frente "Dashboard de churn"');
 
       // A task não abre outra (2ª camada, além do catálogo).
       const recusa = await abrirTask(m.deps, { ...m.ctx(daTask!.id), titulo: "Outra", pedido: "x" });
       expect(recusa.data).toMatchObject({ ok: false, erro: "nao_abre_task" });
+    });
+  });
+
+  it("ADR-099 (parte 1): a task que só espera a volta marcada vai à conversa como \"esperando\", não \"rodando\"", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const t = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Acompanhar a CI", origem: "pessoa" })).trabalho;
+      await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: t.id, acordarEm: Date.now() + 3_600_000 });
+      await sincronizarTrabalho(m.deps, t.id);
+      expect((await m.repos.trabalhos.buscar(t.id))?.estado).toBe("rodando");
+      const linha = ((await m.plano((await m.turno())!.id)).promptSistemaPartes?.volatil ?? "").split("\n").find((l) => l.startsWith("Trabalhos em andamento")) ?? "";
+      expect(linha).toContain(`{"id":"${t.id}","titulo":"Acompanhar a CI","estado":"esperando"`);
     });
   });
 
@@ -79,15 +92,15 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
 
       const rotina = await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Triagem", origem: "rotina", pasta: null });
       const turnoRotina = await m.turno({ trabalhoId: rotina.trabalho.id, origem: "rotina" });
-      expect((await m.plano(turnoRotina!.id)).catalogo.ferramentas.map((f) => f.nome)).toContain("abrir_task");
+      expect((await m.plano(turnoRotina!.id)).catalogo.ferramentas.map((f) => f.nome)).toContain("abrir_frentes");
       const filha = await abrirTask(m.deps, { ...m.ctx(turnoRotina!.id), titulo: "Responder chamado", pedido: "responda o chamado 42" });
       if (!filha.data.ok) throw new Error("filha");
-      expect(await m.repos.trabalhos.buscar(filha.data.trabalho_id)).toMatchObject({ origem: "rotina", trabalhoMaeId: rotina.trabalho.id });
+      expect(await m.repos.trabalhos.buscar(filha.data.trabalho_id)).toMatchObject({ origem: "rotina", trabalhoMaeId: rotina.trabalho.id, forma: "frente" });
       const turnoFilha = (await m.repos.turnos.doTrabalho(filha.data.trabalho_id))[0];
       expect(turnoFilha?.origem).toBe("rotina");
       const pFilha = await m.plano(turnoFilha!.id);
-      expect(pFilha.catalogo.ferramentas.map((f) => f.nome)).not.toContain("abrir_task");
-      expect(pFilha.promptSistema).toContain("Uma task não abre outras");
+      expect(pFilha.catalogo.ferramentas.map((f) => f.nome)).not.toContain("abrir_frentes");
+      expect(pFilha.promptSistema).toContain("Uma frente não abre outras");
     });
   });
 
@@ -123,6 +136,10 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
       await m.repos.turnos.assentar(vivoA!.id, { estado: "concluido" });
       await sincronizarTrabalho(m.deps, idA);
       expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(turnosB[1]!.id);
+      // ADR-099 (I3): a frente A acabou e o lote dela volta ao dono (a retomada do turno da conversa). Ela sai da fila aqui.
+      const retornoA = (await m.repos.turnos.listarDaConversa(m.conversaId, 100)).filter((t) => t.origem === "retomada" && t.retomaTurnoId === conversa!.id);
+      expect(retornoA).toHaveLength(1);
+      await m.repos.turnos.assentar(retornoA[0]!.id, { estado: "concluido" });
 
       // Sem a outra aberta (ou numa task de rotina), "Fazer depois" só grava: nada para.
       const c = await abrirTask(m.deps, { ...m.ctx(conversa!.id), titulo: "Outra", pedido: "outra" });
@@ -193,7 +210,7 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
     });
   });
 
-  it("rede de 2 min: o turno de conversa com ferramenta vira task `rede` e a próxima mensagem sai com bifurcar; sem bifurcaSessao, não promove", async () => {
+  it("rede de 2 min: o turno de conversa com ferramenta vira frente `rede` e a próxima mensagem sai com bifurcar", async () => {
     await withRollback(MARLON, async (trx) => {
       let relogio = Date.now();
       const m = await montar(trx, () => relogio);
@@ -206,12 +223,11 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
       expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
       relogio += 1_000;
       expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: false, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "codex-cli", sessaoCli: s, maquinaBifurca: true })).data.trabalho).toBeNull();
-      // Revisão do épico (S15): sem a máquina anunciar que bifurca, não promove (app antigo).
-      expect((await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s })).data.trabalho).toBeNull();
+      // revisto em 2026-10-12 (ADR-099, I8): sem bifurcar (Codex, ou a máquina que não anuncia) também promove, com o
+      // histórico — em tests/integration/frentes-rede.test.ts.
       const r = await promoverNaRede(m.deps, { turnoId: vivo!.id, despachadoEm, fezFerramenta: true, harness: "claude-cli", sessaoCli: s, maquinaBifurca: true });
       // Revisão do épico (S13): a task da rede ganha pasta própria (os turnos seguintes rodam nela).
-      expect(r.data.trabalho).toMatchObject({ origem: "rede", estado: "rodando", sessaoCli: s, pasta: expect.stringMatching(/^~\/nod\/Ada\//) });
+      expect(r.data.trabalho).toMatchObject({ origem: "rede", forma: "frente", estado: "rodando", sessaoCli: s, pasta: expect.stringMatching(/^~\/nod\/Ada\//) });
       expect((await m.repos.turnos.buscar(vivo!.id))?.trabalhoId).toBe(r.data.trabalho?.id);
       expect((r.events ?? []).map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada"]);
 

@@ -168,8 +168,11 @@ async function subir(o: { nomePessoa: string; env?: Record<string, string>; rede
 }
 
 const sufixo = () => randomUUID().slice(0, 8);
-/** O marcador `abrir_task` com o pedido (que leva o roteiro da task) e, se houver, o `depois_de`. */
-const abrirTask = (titulo: string, pedido: string, depoisDe?: string) => `[[tool: abrir_task ${JSON.stringify({ titulo, pedido, ...(depoisDe ? { depois_de: depoisDe } : {}) })}]]`;
+/**
+ * O marcador que abre a task com o pedido (que leva o roteiro dela). revisto em 2026-10-12 (ADR-099, I2): o catálogo do
+ * dono tem `abrir_frentes` (um lote de uma frente aqui); `abrir_task` ficou só como sinônimo fora do catálogo.
+ */
+const abrirTask = (titulo: string, pedido: string) => `[[tool: abrir_frentes ${JSON.stringify({ frentes: [{ titulo, pedido }] })}]]`;
 
 describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", () => {
   describe("a conversa coordena", () => {
@@ -186,7 +189,7 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
       await descer?.();
     }, 30_000);
 
-    it("#192: um bot com rotina, pedido de colega e task da pessoa roda os três ao mesmo tempo ([[espera]] nos três) e a mensagem da conversa é respondida enquanto eles rodam", { timeout: 90_000 }, async () => {
+    it("#192 (revisto pela ADR-099, I7): rotina e pedido de colega entram pela triagem do dono, que abre uma frente para cada; com a da pessoa, as três rodam juntas ([[espera]] nas três) e a mensagem da conversa é respondida enquanto elas rodam", { timeout: 90_000 }, async () => {
       // definido em 2026-10-08: 20 s seguram os três rodando enquanto o teste abre os outros e conversa (sob carga, ~5 s).
       const ESPERA = 20_000;
       const dev = await c.criarBot("Dev");
@@ -197,20 +200,25 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
         fonte: "as mensagens desta conversa", entregavel: "um resumo curto", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "diga que não houve",
       });
       const executar = async (rotinaId: string | undefined) => (await c.json<RespostaMutacao>("POST", `rotinas/${rotinaId}/executar`)).ids.turnoId ?? "";
-      expect(await executar((await rotina(dev.agenteId, `Triagem das mensagens da manhã [[espera: ${ESPERA}]] [[texto: Triagem feita.]]`)).ids.rotinaId)).toBeTruthy();
+      // revisto em 2026-10-12 (ADR-099, I7 revista): a rotina e o pedido de colega viram turnos curtos de triagem na conversa
+      // do Dev (sem trabalho); em cada um, o dono abre uma frente com o roteiro longo.
+      const daRotina = await executar((await rotina(dev.agenteId, `Triagem das mensagens da manhã ${abrirTask("Triagem da manhã", `faça a triagem [[espera: ${ESPERA}]] [[texto: Triagem feita.]]`)} [[texto: Abri a frente da triagem.]]`)).ids.rotinaId);
+      expect(daRotina).toBeTruthy();
+      expect(await c.turno(daRotina)).toMatchObject({ origem: "rotina", trabalhoId: null, conversaId: dev.conversaId });
       // O pedido do Chico sai da rotina dele: a fala de uma pessoa iria junto, literal, para a entrada do Dev, e o catcher do
       // Dev leria nela o próprio `[[tool: pedir_a_bot …]]` (definido em 2026-10-08: o roteiro do Dev é só o pedido).
-      const pedido = await executar((await rotina(chico.agenteId, `Peça a revisão ao Dev. [[tool: pedir_a_bot ${JSON.stringify({ agente: "Dev", pedido: `revise o PR 481 [[espera: ${ESPERA}]] [[texto: PR 481 revisado]]` })}]] [[texto: Pedi ao Dev.]]`)).ids.rotinaId);
+      const pedido = await executar((await rotina(chico.agenteId, `Peça a revisão ao Dev. [[tool: pedir_a_bot ${JSON.stringify({ agente: "Dev", pedido: `revise o PR 481 ${abrirTask("PR 481", `revise o PR 481 [[espera: ${ESPERA}]] [[texto: PR 481 revisado]]`)} [[texto: Abri a frente do PR 481.]]` })}]] [[texto: Pedi ao Dev.]]`)).ids.rotinaId);
       await c.esperarTurno(pedido);
       const abertura = await c.enviar(dev.conversaId, `Monte o dashboard. ${abrirTask("Dashboard de churn", `monte o dashboard de churn [[espera: ${ESPERA}]] [[texto: Dashboard pronto]]`)} [[texto: Abri a task do dashboard.]]`);
       await c.esperarTurno(abertura);
 
-      // Os três rodando JUNTOS: um turno vivo em cada trabalho do mesmo bot.
+      // As três frentes rodando JUNTAS: um turno vivo em cada uma, do mesmo bot.
       const tres = await c.comDiagnostico(dev, () => c.srv.esperar(async () => {
         const ts = (await c.trabalhos(dev.agenteId)).trabalhos;
         return ts.length === 3 && ts.every((t) => t.estado === "rodando" && t.turnoVivoId !== null) ? ts : null;
-      }, { nome: "três trabalhos rodando juntos", timeoutMs: 15_000 }));
+      }, { nome: "três trabalhos rodando juntos", timeoutMs: 30_000 }));
       expect(new Set(tres.map((t) => t.origem))).toEqual(new Set(["rotina", "colega", "pessoa"]));
+      expect(tres.map((t) => t.forma)).toEqual(["frente", "frente", "frente"]);
       expect(tres.find((t) => t.origem === "colega")?.pedidoPorNome).toBe("Chico");
       const vivos = await Promise.all(tres.map((t) => c.turno(t.turnoVivoId!)));
       expect(vivos.map((t) => t.estado)).toEqual(["despachando", "despachando", "despachando"]);
@@ -286,9 +294,9 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
 
       const t2 = await c.enviar(leo.conversaId, `monta o dashboard de churn ${abrirTask("Dashboard de churn", `monte o dashboard de churn [[espera: ${ESPERA_2}]] [[texto: Dashboard pronto]]`)} [[texto: Abri a task do dashboard.]]`);
       await c.esperarTurno(t2);
-      // A linha "Abriu a task" da segunda, com o payload que a tela usa para o botão "Fazer depois da …".
+      // A linha "Começou a frente" da segunda, com o payload que a tela usa para o botão "Fazer depois da …".
       const segunda = await c.comDiagnostico(leo, () => c.srv.esperar(async () => (await c.trabalhos(leo.agenteId)).trabalhos.find((t) => t.titulo === "Dashboard de churn" && t.turnoVivoId !== null) ?? null, { nome: "segunda task rodando", timeoutMs: 15_000 }));
-      expect((await c.conversa(leo.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.payload?.kind === "trabalho_aberto" && m.payload.trabalhoId === segunda.id)).toBe(true);
+      expect((await c.conversa(leo.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.payload?.kind === "frentes_abertas" && m.payload.frentes.some((f) => f.trabalhoId === segunda.id))).toBe(true);
       const turnoInicial = segunda.turnoVivoId!;
 
       // "Fazer depois da Migrar relatórios" com a segunda já rodando: ela para e o pedido volta à fila dela.
@@ -323,7 +331,7 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
       const turnoDaTask = task.turnoVivoId!;
 
       // A conversa repassa um recado e fica rodando 4 s depois (a sessão dela também aceita mensagem nesse tempo).
-      const recado = await c.enviar(lia.conversaId, `Avise a task de incluir março. [[tool: mandar_para_task ${JSON.stringify({ trabalho_id: task.id, texto: "inclua março" })}]] [[espera: 4000]] [[texto: Repassei para a task.]]`);
+      const recado = await c.enviar(lia.conversaId, `Avise a task de incluir março. [[tool: mandar_para_frente ${JSON.stringify({ trabalho_id: task.id, texto: "inclua março" })}]] [[espera: 4000]] [[texto: Repassei para a task.]]`);
       const resposta = "Respondendo: [nod] Recado da conversa com a pessoa, repassado por você: inclua março";
       const fala = await c.comDiagnostico(lia, () => c.srv.esperar(async () => {
         const dto = await c.conversa(lia.conversaId);
@@ -338,7 +346,7 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
       // A ferramenta disse que entrou no meio.
       const regs = await c.registros();
       const doRecado = regs.filter((r) => r.turnoId === recado);
-      expect(doRecado.find((r) => r.tipo === "tool_use")?.dados).toMatchObject({ nome: "mandar_para_task" });
+      expect(doRecado.find((r) => r.tipo === "tool_use")?.dados).toMatchObject({ nome: "mandar_para_frente" });
       expect(doRecado.find((r) => r.tipo === "tool_result")?.dados).toMatchObject({ isError: false });
       // Só o turno da task recebeu a mensagem no meio; o da conversa, nunca.
       expect(regs.filter((r) => r.tipo === "mensagem_no_meio").map((r) => r.turnoId)).toEqual([turnoDaTask]);

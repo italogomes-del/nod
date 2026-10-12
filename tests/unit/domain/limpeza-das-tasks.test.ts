@@ -38,6 +38,30 @@ describe("quem pode ser limpo (ADR-088)", () => {
     expect(quandoLimpar(base({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, { apertado: false })).toBe("so_com_pr_mergeado");
   });
 
+  it("ADR-099 (I5): a frente terminada vale `sem_trabalho` desde o fim até virar `encerrada`; a falha e a task seguem a regra de sempre", () => {
+    const frente = (f: Partial<FatosLimpeza> = {}) => base({ forma: "frente", ...f });
+    expect(quandoLimpar(frente({ terminadoEm: AGORA }), AGORA)).toBe("sem_trabalho");
+    expect(quandoLimpar(frente({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS + 1 }), AGORA)).toBe("sem_trabalho");
+    expect(quandoLimpar(frente({ terminadoEm: AGORA - LIMPAR_APOS_MS + 1 }), AGORA)).toBe("sem_trabalho");
+    // 3 dias, ou 2 h com o disco apertado: o caminho da ADR-088/096 (guardar antes de apagar).
+    expect(quandoLimpar(frente({ terminadoEm: AGORA - LIMPAR_APOS_MS }), AGORA)).toBe("encerrada");
+    expect(quandoLimpar(frente({ terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA, { apertado: true })).toBe("encerrada");
+    expect(quandoLimpar(frente({ terminadoEm: AGORA }), AGORA, { apertado: true })).toBe("sem_trabalho");
+    // `falhou`: o varredor da ADR-084 pode retomar nas primeiras 2 h.
+    expect(quandoLimpar(frente({ estado: "falhou", terminadoEm: AGORA }), AGORA)).toBeNull();
+    expect(quandoLimpar(frente({ estado: "falhou", terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA)).toBe("so_com_pr_mergeado");
+    // As travas de sempre valem para a frente.
+    expect(quandoLimpar(frente({ terminadoEm: AGORA, turnosVivos: 1 }), AGORA)).toBeNull();
+    expect(quandoLimpar(frente({ terminadoEm: AGORA, decisaoPendente: true }), AGORA)).toBeNull();
+    expect(quandoLimpar(frente({ terminadoEm: AGORA, pastaDividida: true }), AGORA)).toBeNull();
+    expect(quandoLimpar(frente({ terminadoEm: AGORA, pasta: "~/nod/Dev 1" }), AGORA)).toBeNull();
+    for (const estado of ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"] as const) expect(quandoLimpar(frente({ estado, terminadoEm: null }), AGORA), estado).toBeNull();
+    expect(quandoLimpar(frente({ estado: "parado", terminadoEm: AGORA }), AGORA)).toBeNull();
+    // A task (forma ausente ou `task`) não muda.
+    expect(quandoLimpar(base({ terminadoEm: AGORA }), AGORA)).toBeNull();
+    expect(quandoLimpar(base({ forma: "task", terminadoEm: AGORA - RETOMADA_POSSIVEL_MS }), AGORA)).toBe("so_com_pr_mergeado");
+  });
+
   it("ADR-096: o disco amarelo ou vermelho dispara uma passada apertada, no máximo uma a cada 30 min", () => {
     expect(passadaPorAperto("verde", null, AGORA)).toBe(false);
     expect(passadaPorAperto(null, null, AGORA)).toBe(false);

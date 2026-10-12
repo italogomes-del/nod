@@ -74,6 +74,9 @@ import { criarAcompanhanteDeTarefas } from "../executor/acompanhar-tarefas.ts";
 import { iniciarPoolDeLacos } from "../executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../executor/amostrador-memoria.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza } from "../executor/limpeza-das-tasks.ts";
+import { iniciarEsperas } from "../executor/esperas.ts";
+import { caminhoAumentado } from "../executor/caminho.ts";
+import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { lerNodExecutor, MOTIVO_NAO_REGISTRADO } from "../executor/registry.ts";
 import type { IdDriver, Registry } from "../executor/spi.ts";
 import type { IniciarLaco } from "../fundo/orquestrador-turnos.ts";
@@ -117,13 +120,15 @@ import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
 import { criarRotasComandos } from "./rotas/comandos.ts";
 import { criarRotasUsoDoPlano } from "./rotas/uso-do-plano.ts";
+import { criarRotasCustoDoDia } from "./rotas/custo-do-dia.ts";
 import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
 import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
 import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
 import { desligar, iniciarTarefa } from "../../use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, estadoOnboardingParaVoz, proporBot } from "../../use-cases/onboarding.ts";
-import { abrirTask, mandarParaTask } from "../../use-cases/coordenar-trabalhos.ts";
+import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../use-cases/frentes.ts";
 import { meChameAs } from "../../use-cases/me-chame-as.ts";
+import { esperarComando } from "../../use-cases/esperar-comando.ts";
 import { gerirBots } from "../../use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../use-cases/nod.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
@@ -295,7 +300,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, gerirBots, verAppsConectados, registrarRelatoDoNod };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -979,6 +984,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasRaioX(depsRotas),
     ...criarRotasComandos(depsRotas),
     ...criarRotasUsoDoPlano(depsRotas),
+    ...criarRotasCustoDoDia({ ...depsRotas, fusoPadrao: env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo" }),
     ...criarRotasNaoLidos(depsRotas),
     ...criarRotasLigacoes({
       ...depsRotas,
@@ -1101,10 +1107,14 @@ export function comporApp(o: OpcoesCompor): App {
   // Segunda revisão do #225: o modo efetivo no boot — quem lê o log sabe se algo foi apagado (o padrão é `ligada`, ADR-096).
   if (!compartilhado) log("info", "limpeza_modo", { modo: modoLimpeza, onde: "servidor_local" });
   const pastaEmUso = (pasta: string) => [...planosVivos.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true);
+  // definido em 2026-10-12 (ADR-099, parte 2): as esperas de comando rodam aqui também, uma por pessoa ao lado do pool, com
+  // o ambiente limpo dos drivers (o mesmo regime do Bash do bot: nada do servidor vaza para o comando).
+  const ambienteDasEsperas = { ...montarAmbiente("local", env), PATH: caminhoAumentado(env.PATH, homeDoExecutor), HOME: homeDoExecutor };
   const iniciar: IniciarLaco = (p) => {
     const pool = iniciarLacoDaPessoa(p);
     const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso });
-    return { ...pool, async parar() { limpeza?.parar(); await pool.parar(); } };
+    const esperas = iniciarEsperas({ ponte: p.ponte, pessoaId: p.pessoaId, machineId: p.machineId, home: homeDoExecutor, env: ambienteDasEsperas });
+    return { ...pool, async parar() { limpeza?.parar(); esperas.parar(); await pool.parar(); } };
   };
 
   return {

@@ -10,23 +10,22 @@ export const TURNOS_NO_RAIO_X_DA_CONVERSA = 300;
 export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = async (deps) => ({ data: await deps.repos.preferencias.buscar() });
 
 /**
- * PUT preferencias: o que vier muda, o resto fica. revisto em 2026-10-07 (ADR-083): a faixa de Trabalhos manda só
- * `faixaTrabalhosRecolhida`. revisto em 2026-10-08 (ADR-085): `usoDoMac` ('pouco' | 'equilibrado' | 'livre'), de Seu
+ * PUT preferencias: o que vier muda, o resto fica. revisto em 2026-10-12 (ADR-099, I10): `faixaTrabalhosRecolhida`
+ * (ADR-083) saiu — a web não a mandava desde 09/10; vinda, é ignorada como qualquer chave desconhecida. revisto em 2026-10-08 (ADR-085): `usoDoMac` ('pouco' | 'equilibrado' | 'livre'), de Seu
  * espaço › Este Mac. revisto em 2026-10-10 (0068, emenda da ADR-036): `ordemIas`, a ordem do Automático arrastada em
  * Provedores de IA (lista das IAs integradas, completada no fim com as que faltarem; null = a padrão). Corpo sem nenhum
- * dos quatro, ou com valor fora do tipo, é entrada inválida.
+ * dos três, ou com valor fora do tipo, é entrada inválida.
  */
-export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; faixaTrabalhosRecolhida?: unknown; usoDoMac?: unknown; ordemIas?: unknown }, Preferencias> = async (deps, input) => {
+export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; usoDoMac?: unknown; ordemIas?: unknown }, Preferencias> = async (deps, input) => {
   const ok = (v: unknown) => v === undefined || typeof v === "boolean";
   const usoOk = input.usoDoMac === undefined || (typeof input.usoDoMac === "string" && (USOS_DO_MAC as readonly string[]).includes(input.usoDoMac));
-  const nenhum = input.modoDev === undefined && input.faixaTrabalhosRecolhida === undefined && input.usoDoMac === undefined && input.ordemIas === undefined;
-  if (!ok(input.modoDev) || !ok(input.faixaTrabalhosRecolhida) || !usoOk || nenhum) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
+  const nenhum = input.modoDev === undefined && input.usoDoMac === undefined && input.ordemIas === undefined;
+  if (!ok(input.modoDev) || !usoOk || nenhum) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
   const ordemIas = input.ordemIas === undefined ? undefined : lerOrdemDaPessoa(input.ordemIas);
   return {
     data: await deps.repos.preferencias.gravar({
       ...(ordemIas !== undefined ? { ordemIas } : {}),
       ...(typeof input.modoDev === "boolean" ? { modoDev: input.modoDev } : {}),
-      ...(typeof input.faixaTrabalhosRecolhida === "boolean" ? { faixaTrabalhosRecolhida: input.faixaTrabalhosRecolhida } : {}),
       ...(input.usoDoMac !== undefined ? { usoDoMac: input.usoDoMac as UsoDoMac } : {}),
     }),
   };

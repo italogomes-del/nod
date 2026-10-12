@@ -122,7 +122,7 @@ describeIntegracao("fio da pergunta: rodadas no mesmo fio, estado derivado, cont
       const alvo = await agenteComConversa(trx, MARLON, { nome: "Nina" });
       const nina = agente(trx, alvo);
       const eu = await pessoa();
-      const t0 = await nina.repos.turnos.enfileirar({ ...alvo, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const t0 = await nina.repos.turnos.enfileirar({ executor: "catcher", ...alvo, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
       if (!t0) throw new Error("turno");
 
       const d1 = await nina.perguntar(t0.id, "Posso arquivar o PR 7? Ele está parado há duas semanas.");

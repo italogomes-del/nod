@@ -21,7 +21,7 @@ const MODELO: Record<"claude-cli" | "codex-cli", string> = { "claude-cli": "sonn
 describeIntegracao("sessão do CLI pertence ao harness (0030)", () => {
   type Repos = Awaited<ReturnType<typeof agenteComConversa>>["repos"];
   async function plano(trx: Parameters<Parameters<typeof withRollback>[1]>[0], repos: Repos, agenteId: string, conversaId: string, harness: "claude-cli" | "codex-cli", extra: { mensagemOrigemId?: string } = {}) {
-    const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: MODELO[harness], harness, ...extra });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: MODELO[harness], harness, ...extra });
     const agora = () => Date.now();
     const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
     const harnesses: Partial<Record<IdHarness, typeof pronto>> = { "claude-cli": pronto, "codex-cli": pronto };

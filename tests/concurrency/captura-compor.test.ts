@@ -46,7 +46,7 @@ for (const [rotulo, valor, ligada] of [["ligada (1)", "1", true], ["ausente", un
     it(ligada ? "a tela observada pelo bot fica em capturas até esquecer" : "nada fica em capturas", async () => {
       const plano: PlanoTurno = await srv.app.dentro(srv.pessoa, async (d) => {
         await d.tx(async (trx) => { await trx`update agentes set confirmado = true where id = ${bot.agente.id}`; });
-        const t = await d.repos.turnos.enfileirar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+        const t = await d.repos.turnos.enfileirar({ executor: "catcher", agenteId: bot.agente.id, conversaId: bot.conversa.id, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "Use seu computador", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
         return (await emitirPlanoTurno(d, { turnoId: t!.id, machineId: randomUUID(), executor: "catcher" })).data;
       });
       const r = await fetch(`${srv.url}/api/interno/ferramentas/computador_observar`, { method: "POST", headers: { authorization: `Bearer ${plano.tokenDeTurno}`, "content-type": "application/json" }, body: JSON.stringify({ argumentos: {} }) });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CAPACIDADES_HARNESS, SEM_CAPACIDADES } from "../../../src/contracts/harness.ts";
-import { estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
+import { seguimentoNaRede } from "../../../src/domain/frente.ts";
+import { esperaDoTrabalho, estadoDoTrabalho, pastaDoTrabalho, pastaRelativa, podeAbrirTask, podeMandarParaTask, promoveNaRede, REDE_MS, slugDoTrabalho, tituloDoTrabalho, type FatosTrabalho } from "../../../src/domain/trabalho.ts";
 
 const base: FatosTrabalho = { estadoAtual: "na_fila", iniciado: false, parando: 0, despachando: 0, pendentes: 0, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null };
 
@@ -63,21 +64,62 @@ describe("quem abre e quem repassa (#193)", () => {
 
 describe("promoveNaRede (rede de 2 min)", () => {
   const ok = { origem: "conversa" as const, trabalhoId: null, estado: "despachando" as const, despachadoHaMs: REDE_MS, fezFerramenta: true, capacidades: CAPACIDADES_HARNESS["claude-cli"] };
-  it("promove só a conversa rodando há 2 min, com ferramenta e harness que bifurca", () => {
+  it("promove só o turno do dono rodando há 2 min, com ferramenta", () => {
     expect(promoveNaRede(ok)).toBe(true);
     expect(promoveNaRede({ ...ok, despachadoHaMs: REDE_MS - 1 })).toBe(false);
     expect(promoveNaRede({ ...ok, fezFerramenta: false })).toBe(false);
     expect(promoveNaRede({ ...ok, trabalhoId: "w" })).toBe(false);
-    for (const origem of ["sala", "rotina", "delegacao", "retomada", "ligacao"] as const) expect(promoveNaRede({ ...ok, origem })).toBe(false);
+    expect(promoveNaRede({ ...ok, estado: "pendente" })).toBe(false);
+    for (const origem of ["sala", "rotina", "delegacao", "retomada", "ligacao", "peer"] as const) expect(promoveNaRede({ ...ok, origem })).toBe(false);
   });
-  it("sem a capacidade bifurcaSessao (Codex, harness desconhecido) nunca promove", () => {
-    expect(promoveNaRede({ ...ok, capacidades: CAPACIDADES_HARNESS["codex-cli"] })).toBe(false);
-    expect(promoveNaRede({ ...ok, capacidades: SEM_CAPACIDADES })).toBe(false);
+  it("ADR-099 (I8): a retomada do dono em modo conversa também; a de rotina, colega, sala ou sem modo, não", () => {
+    expect(promoveNaRede({ ...ok, origem: "retomada", modo: "conversa" })).toBe(true);
+    for (const modo of ["rotina", "delegacao", "peer", "sala", "ligacao", "criacao", null, undefined] as const) expect(promoveNaRede({ ...ok, origem: "retomada", modo })).toBe(false);
+    // O modo não muda nada para o turno da fala da pessoa.
+    expect(promoveNaRede({ ...ok, modo: "criacao" })).toBe(true);
+  });
+  it("ADR-099 (I8): as três combinações de capacidade — bifurca promove; nem retoma promove; retoma sem bifurcar, não", () => {
+    const comoClaude = { ...SEM_CAPACIDADES, retomaSessao: true, bifurcaSessao: true };
+    const comoCodex = { ...SEM_CAPACIDADES, retomaSessao: false, bifurcaSessao: false };
+    const retomaSemBifurcar = { ...SEM_CAPACIDADES, retomaSessao: true, bifurcaSessao: false };
+    expect(promoveNaRede({ ...ok, capacidades: comoClaude })).toBe(true);
+    expect(promoveNaRede({ ...ok, capacidades: comoCodex })).toBe(true);
+    expect(promoveNaRede({ ...ok, capacidades: retomaSemBifurcar })).toBe(false);
+    // Os harnesses de hoje, pelas capacidades declaradas (nunca pelo nome): Codex e o desconhecido promovem com o histórico.
+    expect(promoveNaRede({ ...ok, capacidades: CAPACIDADES_HARNESS["codex-cli"] })).toBe(true);
+    expect(promoveNaRede({ ...ok, capacidades: SEM_CAPACIDADES })).toBe(true);
   });
   it("o prazo do e2e (redeMs) troca só o limite de tempo; ausente vale REDE_MS", () => {
     expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000 })).toBe(true);
     expect(promoveNaRede({ ...ok, despachadoHaMs: 2_999, redeMs: 3_000 })).toBe(false);
-    expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000, capacidades: SEM_CAPACIDADES })).toBe(false);
+    expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000, redeMs: 3_000, capacidades: { ...SEM_CAPACIDADES, retomaSessao: true } })).toBe(false);
     expect(promoveNaRede({ ...ok, despachadoHaMs: 3_000 })).toBe(false);
+  });
+});
+
+describe("seguimentoNaRede (ADR-099, I8: como o dono segue depois da promoção)", () => {
+  it("bifurca só com o harness E a máquina; sem a máquina, larga a sessão; sem retomar, segue com o histórico", () => {
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["claude-cli"], true)).toBe("bifurcar");
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["claude-cli"], false)).toBe("largar_sessao");
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], true)).toBe("historico");
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], false)).toBe("historico");
+    expect(seguimentoNaRede(SEM_CAPACIDADES, true)).toBe("historico");
+    expect(seguimentoNaRede({ retomaSessao: true, bifurcaSessao: false }, true)).toBe("largar_sessao");
+  });
+});
+
+describe("esperaDoTrabalho (ADR-099, parte 1: esperar não é trabalhar)", () => {
+  const rodando = { estado: "rodando" as const, turnoVivoId: null };
+  const colega = { nome: "Ze 1", desde: 1, trabalhoId: null };
+  it.each([
+    ["volta marcada, sem turno vivo", { ...rodando, acordaEm: 2_000 }, "volta"],
+    ["esperando colega, sem turno vivo", { ...rodando, esperandoColega: colega }, "colega"],
+    ["colega e volta juntos: o colega", { ...rodando, esperandoColega: colega, acordaEm: 2_000 }, "colega"],
+    ["com turno vivo trabalha, mesmo com a volta ou o colega", { ...rodando, turnoVivoId: "t", esperandoColega: colega, acordaEm: 2_000 }, null],
+    ["rodando sem nada a esperar (retomada na fila)", rodando, null],
+    ["precisa de você não é espera", { ...rodando, estado: "precisa_de_voce" as const, acordaEm: 2_000 }, null],
+    ["na fila não é espera", { ...rodando, estado: "na_fila" as const, esperandoColega: colega }, null],
+  ])("%s", (_nome, t, esperado) => {
+    expect(esperaDoTrabalho(t)).toBe(esperado);
   });
 });

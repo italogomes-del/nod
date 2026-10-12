@@ -21,7 +21,7 @@ import { withRollback } from "../helpers/with-rollback.ts";
 async function cenario(trx: Tx, escopo: Escopo = MARLON) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo, { nome: "Chico" });
   await repos.agentes.atualizarPerfil(agenteId, { confirmado: true, descricao: "Tech Lead" });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "acione os devs agora", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "acione os devs agora", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
   if (!turno) throw new Error("turno não criado");
   const deps = depsSobreTrx(trx, escopo);
   const ctx = { turnoId: turno.id, agenteId, conversaId };
@@ -101,7 +101,7 @@ describeIntegracao("pendências do bot (ADR-064)", () => {
   it("a pendência anotada num turno de entrada não confiável sai com cuidado, e o Fazer agora leva a ressalva na fala", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
-      const deFora = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "varredura", entradaConfianca: "nao_confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const deFora = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "varredura", entradaConfianca: "nao_confiavel", modelo: "claude-haiku-4-5-20251001" });
       const id = await c.anotar("Responder o que o e-mail pediu", { turnoId: deFora?.id ?? "" });
       expect(await c.repos.pendencias.buscar(id)).toMatchObject({ cuidado: true });
       const feito = await executar(c.deps, fazerPendenciaAgora, { agenteId: c.agenteId, pendenciaId: id });
@@ -138,7 +138,7 @@ describeIntegracao("pendências do bot (ADR-064)", () => {
       const agora = () => Date.now();
       const l5 = depsSobre(c.repos, MARLON, { services: servicosL5({ agora }), agora, trx });
       const plano = async (origem: "conversa" | "rotina" | "delegacao", profundidade: 0 | 1) => {
-        const t = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem, prazoEm: agora() + 60_000, profundidade, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+        const t = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem, prazoEm: agora() + 60_000, profundidade, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
         return (await emitirPlanoTurno(l5, { turnoId: t?.id ?? "", machineId: randomUUID(), aFazer: true })).data;
       };
 
@@ -161,7 +161,7 @@ describeIntegracao("pendências do bot (ADR-064)", () => {
 
       // O turno do pedido de colega anota; a pendência mora na conversa própria do bot e guarda a profundidade.
       const colega = await agenteComConversa(trx, MARLON, { nome: "Clarice" });
-      const noColega = await c.repos.turnos.enfileirar({ conversaId: colega.conversaId, agenteId: c.agenteId, origem: "delegacao", prazoEm: agora() + 60_000, profundidade: 3, entradaTexto: "pede ao Dev 3", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const noColega = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: colega.conversaId, agenteId: c.agenteId, origem: "delegacao", prazoEm: agora() + 60_000, profundidade: 3, entradaTexto: "pede ao Dev 3", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
       const id = await c.anotar("Pedir ao Dev 3 que confira a 86ajtj1xk", { turnoId: noColega?.id ?? "" });
       expect(await c.repos.pendencias.buscar(id)).toMatchObject({ conversaId: c.conversaId, turnoId: noColega?.id, profundidade: 3 });
     });

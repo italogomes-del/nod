@@ -91,11 +91,11 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 }
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
-const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, faixa_trabalhos_recolhida, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite";
+const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite";
 
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; faixa_trabalhos_recolhida: boolean; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], faixaTrabalhosRecolhida: l?.faixa_trabalhos_recolhida ?? false, usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {} });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {} });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
@@ -103,16 +103,15 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
       return paraPreferencias(l);
     },
 
-    /** O que vier muda; o que faltar fica como está (ADR-083: `faixaTrabalhosRecolhida` chega sozinho da faixa). */
+    /** O que vier muda; o que faltar fica como está. ADR-099 (I10): `faixa_trabalhos_recolhida` fica no banco, sem uso. */
     /** 0068: `ordemIas` null volta à ordem padrão; ausente não mexe. */
-    async gravar(p: { modoDev?: boolean; faixaTrabalhosRecolhida?: boolean; usoDoMac?: UsoDoMac; ordemIas?: IdHarness[] | null }): Promise<Preferencias> {
+    async gravar(p: { modoDev?: boolean; usoDoMac?: UsoDoMac; ordemIas?: IdHarness[] | null }): Promise<Preferencias> {
       const ordem = p.ordemIas ? jsonb(conn, p.ordemIas) : null;
       const [l] = await conn<Linha[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev, faixa_trabalhos_recolhida, uso_do_mac, ordem_ias)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.faixaTrabalhosRecolhida ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb)
+        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb)
         on conflict (tenant_id, owner_id) do update set
           modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
-          faixa_trabalhos_recolhida = coalesce(${p.faixaTrabalhosRecolhida ?? null}::boolean, preferencias.faixa_trabalhos_recolhida),
           uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
           ordem_ias = case when ${p.ordemIas !== undefined} then ${ordem}::jsonb else preferencias.ordem_ias end,
           atualizado_em = clock_timestamp()

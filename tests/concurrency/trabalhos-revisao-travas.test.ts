@@ -18,6 +18,7 @@ import { db } from "../helpers/db.ts";
 import { depsSobreTrx, executar, servicosDeTeste, useCasesDeTeste } from "../helpers/deps-l6.ts";
 import { TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 /**
  * Revisão do épico #188 (2026-10-08) com DUAS conexões de verdade: a ordem única das travas (S20) e os estados que só
@@ -72,7 +73,9 @@ afterEach(async () => {
   await escopado(async (trx) => {
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from itens_aprovacao where owner_id = ${p}`;
     await trx`delete from decisao_eventos_varridos where owner_id = ${p}`;
@@ -100,7 +103,7 @@ async function montar(nome = "Ada") {
     await d.repos.agentes.atualizarPerfil(c.agente.id, { confirmado: true });
     const tarefa = async (titulo: string) => {
       const w = (await criarTrabalho(d, { agenteId: c.agente.id, conversaId: c.conversa.id, titulo, origem: "pessoa" })).trabalho;
-      const t = (await d.repos.turnos.enfileirar({ conversaId: c.conversa.id, agenteId: c.agente.id, origem: "conversa", trabalhoId: w.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!;
+      const t = (await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversa.id, agenteId: c.agente.id, origem: "conversa", trabalhoId: w.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!;
       return { w, t };
     };
     const { w, t } = await tarefa("Relatório");
@@ -180,8 +183,8 @@ describeIntegracao("revisão #188 — travas com duas conexões", () => {
       criados.conversas.push(dev.conversa.id);
       await d.repos.agentes.atualizarPerfil(dev.agente.id, { confirmado: true });
       const { data } = await pedirABot(d, { turnoId: m.turnoId, agenteId: m.agenteId, conversaId: m.conversaId, agente: dev.agente.nome, pedido: "revise o PR 42" });
-      await d.repos.turnos.assentar(data.tarefa_id, { estado: "concluido" });
-      return data.tarefa_id;
+      await d.repos.turnos.assentar(tarefaDoPedido(data), { estado: "concluido" });
+      return tarefaDoPedido(data);
     });
     const [entrega, resposta] = await corrida(
       (trx) => entregar(trx, m),

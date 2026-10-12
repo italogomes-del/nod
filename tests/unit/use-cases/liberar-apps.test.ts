@@ -43,7 +43,7 @@ async function preparar(opcoes: { comTurno?: boolean } = {}) {
   const slack = await app("Slack", "slack", SLACK);
   const turno = opcoes.comTurno === false
     ? null
-    : await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "já liberei", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+    : await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "já liberei", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
   const retomadas = () => banco.turnos.filter((t) => t.origem === "retomada");
   const consentimentos = () => banco.mensagens.filter((m) => m.kind === "consentimento");
   return { deps, banco, reposDe, bot, gmail, slack, turno, retomadas, consentimentos, liberar: chamar(deps, "liberar", bot.agente.id), dispensar: chamar(deps, "dispensar", bot.agente.id) };
@@ -131,7 +131,7 @@ describe("Permitir no cartão de liberar apps", () => {
 
   it("só turno que a PESSOA abriu é retomado: a execução de rotina mais recente não vira a tarefa a continuar", async () => {
     const { deps, bot, gmail, turno, retomadas, liberar } = await preparar();
-    await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "rotina", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "resumo da manhã", entradaConfianca: "confiavel", modelo: "sonnet" });
+    await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "rotina", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "resumo da manhã", entradaConfianca: "confiavel", modelo: "sonnet" });
     await liberar({ apps: [{ conectorId: gmail.id, nivel: "leitura" }] });
     expect(retomadas().map((t) => t.retomaTurnoId)).toEqual([turno?.id]);
   });

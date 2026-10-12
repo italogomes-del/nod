@@ -33,7 +33,7 @@ function comDepsSobre(trx: Tx, agora: () => number): ComDeps {
 /** Um "Retomar" aberto de um turno de conversa interrompido pelo Mac. */
 async function retomarAberto(trx: Tx, alvo: { agenteId: string; conversaId: string }, agora: number): Promise<string> {
   const repos = criarRepos(trx, MARLON);
-  const turno = await repos.turnos.enfileirar({ conversaId: alvo.conversaId, agenteId: alvo.agenteId, origem: "conversa", prazoEm: agora + 60_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001", interrompidoCom: "maquina_sem_contato" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: alvo.conversaId, agenteId: alvo.agenteId, origem: "conversa", prazoEm: agora + 60_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001", interrompidoCom: "maquina_sem_contato" });
   const d = await repos.decisoes.criar({ tipo: "retomar_turno", agenteId: alvo.agenteId, conversaId: alvo.conversaId, turnoId: turno?.id ?? null, prazoDecisaoEm: agora + DIA, frase: FRASE_QUEDA });
   if (!d) throw new Error("decisão");
   return d.id;

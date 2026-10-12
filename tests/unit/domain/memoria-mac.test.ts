@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acabaEmMs, acabaLogo, AVISO_DA_TENDENCIA_MS, comPonto, TENDENCIA_JANELA_MS, TENDENCIA_PASSO_MS, type PontoDoDisco } from "../../../src/domain/memoria-mac.ts";
-import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, FILA_AMARELA, FILA_VERMELHA, leituraDoProcessador, leituraDoTurno, niveisDoProcessador, nivelDaFila, nivelDoDisco, nivelDoUsoCpu, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo, temposDaCpu, USO_CPU_AMARELO, USO_CPU_VERMELHO, usoDaCpu } from "../../../src/domain/memoria-mac.ts";
+import { cargaDoLoadavg, deveSegurar, DISCO_ALERTA_MB, DISCO_CRITICO_MB, DISCO_SAI_ALERTA_MB, DISCO_SAI_CRITICO_MB, discoDoStatfs, discoSimulado, ESPERA_MAXIMA_FUNDO_MS, esperaDoMac, FILA_AMARELA, FILA_VERMELHA, leituraDoProcessador, leituraDoTurno, niveisDoProcessador, nivelDaFila, nivelDoDisco, nivelDoUsoCpu, portaoDoMac, seguravelPeloMac, nivelDaPressao, nivelDoProcessador, piorNivel, pressaoSimulada, somarPorGrupo, lerLinhasDoPs, somarComFugitivos, marcaNoAmbiente, temposDaCpu, USO_CPU_AMARELO, USO_CPU_VERMELHO, usoDaCpu } from "../../../src/domain/memoria-mac.ts";
 import type { UsoDoMac } from "../../../src/contracts/raio-x.ts";
 
 /** #194 (ADR-083 §4): o mapa da pressão do macOS e a soma da memória por grupo de processos, puros. */
@@ -21,6 +21,26 @@ describe("nível de pressão", () => {
     expect(pressaoSimulada("1")).toBe("verde");
     expect(pressaoSimulada("3")).toBeNull();
     expect(pressaoSimulada(undefined)).toBeNull();
+  });
+});
+
+describe("ADR-097 (fase 0c): memória por grupo com os fugitivos (ps -A -o pid=,pgid=,rss=)", () => {
+  it("lê pid, grupo e rss; linha estranha fica de fora", () => {
+    expect(lerLinhasDoPs("  10  10  2048\nlixo\n 11 10 1024\n")).toEqual([{ pid: 10, pgid: 10, rssKib: 2048 }, { pid: 11, pgid: 10, rssKib: 1024 }]);
+  });
+
+  it("o fugitivo reconhecido soma no grupo do turno; o resto, no próprio grupo", () => {
+    const linhas = lerLinhasDoPs(" 10 10 1000\n 20 20 500\n 21 20 300\n 30 30 7\n");
+    const soma = somarComFugitivos(linhas, new Set([10]), (pid) => (pid === 20 || pid === 21 ? 10 : undefined));
+    expect(soma.get(10)).toBe(1800);
+    expect(soma.get(30)).toBe(7);
+    expect(soma.has(20)).toBe(false);
+  });
+
+  it("a marca sai do ambiente lido; sem ela, null", () => {
+    expect(marcaNoAmbiente("PATH=/x NOD_GRUPO=ab12cd34-0011aa HOME=/y")).toBe("ab12cd34-0011aa");
+    expect(marcaNoAmbiente("NOD_GRUPO= PATH=/x")).toBeNull();
+    expect(marcaNoAmbiente(undefined)).toBeNull();
   });
 });
 
@@ -79,9 +99,9 @@ describe("segurar trabalho novo (uso do Mac)", () => {
     expect(deveSegurar("livre", "vermelha", "vermelha")).toBe(false);
   });
 
-  it("equilibrado: memória em alerta ou processador cheio", () => {
+  it("equilibrado: só a memória em alerta; o processador cheio não segura (ADR-097)", () => {
     expect(deveSegurar("equilibrado", "amarela", "verde")).toBe(true);
-    expect(deveSegurar("equilibrado", "verde", "vermelha")).toBe(true);
+    expect(deveSegurar("equilibrado", "verde", "vermelha")).toBe(false);
     expect(deveSegurar("equilibrado", "verde", "amarela")).toBe(false);
     expect(deveSegurar("equilibrado", "verde", "verde")).toBe(false);
   });
@@ -196,8 +216,9 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", discoNivel: critico })).toEqual({ fundo: "disco", tudoNovo: "disco", semPrazo: false });
   });
 
-  it("o processador continua como antes, com o motivo processador", () => {
-    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
+  it("o processador só segura no pouco, com o motivo processador (ADR-097)", () => {
+    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: null, tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("pouco", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
     expect(portaoDoMac("pouco", { memoria: "verde", processador: "amarela", discoNivel: null })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
   });
 

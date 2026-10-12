@@ -112,7 +112,7 @@ describe("propostas (E1.1): nada é aplicado antes da confirmação", () => {
     const { deps, banco } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
     await gmailConectado(deps);
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "leia meus e-mails", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "leia meus e-mails", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
     const pedido = await pedirAcesso(deps, { turnoId: turno?.id ?? "", agenteId: criado.agente.id, conversaId: criado.conversa.id, conector: "gmail", capacidades: ["GMAIL_FETCH_EMAILS"], nivel: "leitura", nao_pedido: [] });
     const decisoesAntes = banco.decisoes.length;
     const { data, events } = await executar(deps, confirmarProposta, { propostaId: pedido.data.proposta_id });

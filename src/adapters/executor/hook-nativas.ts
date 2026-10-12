@@ -1,7 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
 import { decidirNativa } from "../../domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../shared/constantes.ts";
+import { mainDaVaga } from "./vaga.ts";
 
 /**
  * Hook PreToolUse do nod (ADR-052): o Claude Code o chama ANTES de cada ferramenta nativa do turno, e é ele
@@ -19,9 +23,14 @@ import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../share
  * antigo sem os dois campos não liga a cerca — o comando segue para o servidor como antes.
  */
 /** `daTask` (definido em 2026-10-09, ADR-088): `pastaDoBot` é a pasta da task, e a worktree nasce dentro dela. */
-export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean };
+/**
+ * `vaga` (definido em 2026-10-11, ADR-097, fase 1b): a fila do forno desta máquina — a pasta dela e a chamada ao
+ * nod-vaga (o node e este script, com aspas). Config de um driver anterior sem o campo não liga a fila.
+ */
+export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean; vaga?: { dir: string; invocar: string } };
 
-export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string } };
+/** `updatedInput` (ADR-097): o Bash com a vez da fila em volta; o CLI valida contra o formato da ferramenta. */
+export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string; updatedInput?: Record<string, unknown> } };
 
 /** O que o servidor respondeu sobre a chamada; `motivo` volta ao modelo quando nega. */
 export type Confirmacao = { permitir: boolean; motivo?: string };
@@ -34,7 +43,10 @@ const saida = (permitir: boolean, motivo: string): SaidaHook => ({ hookSpecificO
 export const AINDA_ESPERANDO = "o pedido de aprovação deste comando continua na conversa; quando a pessoa decidir, a tarefa retoma sozinha. Encerre o turno dizendo que está esperando — não repita o comando agora.";
 
 /** Uma decisão completa: evento do CLI → saída do hook. `confirmar` fala com o servidor (injetável no teste). */
-export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask">): Promise<SaidaHook> {
+/** O comando com a vez da fila em volta, ou null se ele roda direto (ADR-097). */
+export type Fila = (comando: string, cwd: string | null) => string | null;
+
+export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask">, fila?: Fila): Promise<SaidaHook> {
   const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
   const ferramenta = typeof e.tool_name === "string" ? e.tool_name : "";
   const entrada = typeof e.tool_input === "object" && e.tool_input !== null ? (e.tool_input as Record<string, unknown>) : {};
@@ -45,7 +57,52 @@ export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?
   // MCP: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
   if (ferramenta.startsWith("mcp__")) return saida(true, d.motivo);
   const c = await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}) });
-  return c.permitir ? saida(true, d.motivo) : saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
+  if (!c.permitir) return saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
+  // ADR-097: a fila do forno no Bash e no Monitor (o prompt manda rodar teste demorado em segundo plano ou com o Monitor:
+  // é ali que mora o peso), depois do servidor liberar o comando. Um servidor de desenvolvimento não prende a fila:
+  // quem tem a vez há mais de TETO_DA_VEZ_MS deixa de segurar (vaga.ts).
+  const naFila = (ferramenta === "Bash" || ferramenta === "Monitor") && fila && d.comando !== undefined ? fila(d.comando, typeof e.cwd === "string" ? e.cwd : null) : null;
+  if (naFila === null) return saida(true, d.motivo);
+  return { hookSpecificOutput: { ...saida(true, d.motivo).hookSpecificOutput, updatedInput: { ...entrada, command: naFila } } };
+}
+
+/**
+ * A fila desta máquina (ADR-097): o que não pesa e o que já se mostrou leve rodam direto; o resto pede a vez. O histórico
+ * é lido aqui, de uma vez, sem esperar nada (o hook tem prazo). Qualquer falha = o comando roda direto.
+ */
+export function filaDaMaquina(
+  vaga: NonNullable<ConfigHook["vaga"]>,
+  lerHistorico: () => Historico = () => lerHistoricoDaFila(vaga.dir),
+  repositorio: (cwd: string | null) => string | null = repositorioDoGit,
+): Fila {
+  return (comando, cwd) => {
+    try {
+      if (comando.trimStart().startsWith(MARCA_DA_FILA) || semPeso(comando)) return null;
+      const chave = chaveDoComando(comando, repositorio(cwd));
+      if (!precisaDaVez({ comando, historico: lerHistorico()[chave] })) return null;
+      return comandoNaFila(comando, { invocar: vaga.invocar, chave64: Buffer.from(chave, "utf8").toString("base64url"), dir: aspasDeShell(vaga.dir) });
+    } catch {
+      return null;
+    }
+  };
+}
+
+/** O repositório da pasta do comando, pelo git (uns poucos ms; o hook tem prazo, então até 2 s e, falhando, null). */
+function repositorioDoGit(cwd: string | null): string | null {
+  if (!cwd) return null;
+  try {
+    return repositorioDaOrigem(execFileSync("git", ["-C", cwd, "config", "--get", "remote.origin.url"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] }));
+  } catch {
+    return null;
+  }
+}
+
+function lerHistoricoDaFila(dir: string): Historico {
+  try {
+    return JSON.parse(readFileSync(join(dir, "historico.json"), "utf8")) as Historico;
+  } catch {
+    return {};
+  }
 }
 
 /** Resposta do POST /api/interno/nativas: liberada, ou uma decisão aberta para esperar. */
@@ -117,11 +174,13 @@ async function lerStdin(): Promise<string> {
 }
 
 export async function main(): Promise<void> {
+  // ADR-097: o nod-vaga mora neste mesmo script (o motor e o app já o instalam): `… hook-nativas.mjs vaga pegar …`.
+  if (process.argv[2] === "vaga") return mainDaVaga(process.argv.slice(3));
   let resposta: SaidaHook;
   try {
     const cfg = JSON.parse(readFileSync(process.argv[2] ?? "", "utf8")) as ConfigHook;
     const evento = JSON.parse(await lerStdin()) as unknown;
-    resposta = await decidirHook(evento, confirmarNoServidor(cfg), cfg);
+    resposta = await decidirHook(evento, confirmarNoServidor(cfg), cfg, cfg.vaga ? filaDaMaquina(cfg.vaga) : undefined);
   } catch {
     resposta = saida(false, "não foi possível decidir esta chamada");
   }

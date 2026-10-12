@@ -1,7 +1,8 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
-import { pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
+import { esperaDoTrabalho, pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
+import { formaEfetiva } from "../domain/frente.ts";
 import { trabalhosParaDto } from "./trabalhos.ts";
 import { randomUUID } from "node:crypto";
 import { MODELOS_LIGACAO_PADRAO, type ModelosLigacao } from "../contracts/modelos.ts";
@@ -16,6 +17,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../domain/inteligencia.ts";
+import { cotaDasIas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
@@ -129,13 +131,20 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   const inventarioCli = await deps.repos.inventario.buscar(MOTOR_CLI);
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
+  // NOD-206 (#200): o executor real só é decidido aqui. Quem enfileira grava um palpite (o pedido de colega e a retomada
+  // nasciam `catcher` por padrão) e a retomada da cadeia compara com ele para decidir o --resume: grava o que vale.
+  if (turno.executor !== executor) await deps.repos.turnos.registrarExecutor(turno.id, executor);
   // 0068 (emenda da ADR-036): a ordem do bot (ou da pessoa), as IAs no limite e o modelo/raciocínio escolhidos por IA.
   const preferencias = await deps.repos.preferencias.buscar();
   const inteligencia = inteligenciaDoAgente(agente);
+  // definido em 2026-10-12 (ADR-099 §7): no trabalho de fundo, o Automático também pula a IA que a cota segura (reserva ou
+  // limite) — o 1% que sobra dela fica para a conversa com a pessoa. Todas seguradas: a primeira pronta (iaDoAutomatico).
+  const fundo = executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
+  const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia) : [];
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
       ordem: ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
-      noLimite: iasNoLimite(preferencias.iasNoLimite, agora),
+      noLimite: [...new Set([...iasNoLimite(preferencias.iasNoLimite, agora), ...pelaCota])],
       escolhas: inteligencia.escolhas,
     })
     : null;
@@ -186,7 +195,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const autorDe = (m: (typeof mensagens)[number]) => (m.autoria.autor_tipo === "pessoa" ? "pessoa" : visiveis.find((a) => a.id === m.autoria.autor_id)?.nome ?? "bot");
   // /nova-sessao (0038): o bot começa do zero — o histórico do prompt só leva o que veio depois do recomeço.
   const recomeco = conversa?.recomecoEm ?? null;
-  const historico = !sessaoCli ? mensagens.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  // definido em 2026-10-12 (ADR-099, I2): a frente sem sessão recebe o histórico DELA (as falas dos turnos dela e os
+  // recados), nunca o da conversa do dono — no Codex a frente via a conversa com a pessoa. A task de antes segue igual.
+  // revisto em 2026-10-12 (ADR-099, I10): a task de antes, migrada pela 0072 sem lote, segue com o histórico de antes.
+  const doHistorico = !sessaoCli && formaEfetiva(trabalho) === "frente" ? await deps.repos.mensagens.doTrabalho(trabalho!.id, MENSAGENS_DO_PLANO) : mensagens;
+  const historico = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
@@ -216,7 +229,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
   // revisto em 2026-10-08 (revisão do épico, S12): a task de rotina que pode abrir outras também (a mãe, nunca a filha).
-  const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
+  // revisto em 2026-10-12 (ADR-099, parte 1): a task que só espera (volta marcada, colega) vai como "esperando", não
+  // "rodando" — em 11/10 o orquestrador via 13 tasks rodando com uma trabalhando e empilhava mais.
+  // revisto em 2026-10-12 (ADR-099 item 1a, I7 revista): a triagem do pedido de colega ou de rotina (fora de trabalho)
+  // também — é olhando o que está em andamento que o dono decide começar, juntar ou esperar.
+  const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao" || modo === "rotina" || modo === "delegacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = input.maquinaRemota ? null : await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
@@ -276,7 +293,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     onboarding,
     // ADR-042: a regra é gravada por (conector_id, capacidade) e o catálogo fala `${slug}__${tool}`.
     // Conector que sumiu do registro não vira nome nenhum, então a regra órfã simplesmente não casa.
-    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === pedidoDelegado?.autoria.autor_id)?.nome ?? "outro bot" } : null,
+    // ADR-099 (I7 revista): a frente aberta na triagem de um pedido de colega não tem o peer_pedido; quem pediu é o dela.
+    delegacao: ehDelegacao ? { pessoaNome: pessoaDelegante?.nome ?? "a pessoa", remetenteNome: visiveis.find((a) => a.id === (pedidoDelegado?.autoria.autor_id ?? trabalho?.pedidoPorAgenteId))?.nome ?? "outro bot" } : null,
     semprePermitir: permissoes.flatMap((p) => {
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];
@@ -291,7 +309,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
     // ADR-083: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
-    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId } : null,
+    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho) } : null,
     trabalhosAbertos,
     harness: escolha?.harness ?? null,
     agora,

@@ -65,7 +65,7 @@ function cardConectar(p: Proposta, estado: Estado): string {
   const conector = conectorDoApp(estado, slug);
   let corpo: string;
   if (login && !login.falhou) {
-    corpo = `${blocoEsperando(nome, login.url)}${passos(nome, bot, 1)}${rodape(botao("cancelar-conexao", "Cancelar", { classe: "link", id: slug }))}`;
+    corpo = `${blocoEsperando(nome, login.url, false, login.semJanela === true)}${passos(nome, bot, 1)}${rodape(botao("cancelar-conexao", "Cancelar", { classe: "link", id: slug }))}`;
   } else if (conector?.habilitado) {
     // O login terminou por outro caminho e o card ainda não virou: um clique abre o de permitir.
     corpo = `<p class="ac-conectado">${ICONE_OK}${esc(nome)} conectado</p>${pn}${passos(nome, bot, 2)}${rodape(botao("confirmar-proposta", "Continuar", { classe: "pri", id: p.id }) + agoraNao)}`;

@@ -1,6 +1,7 @@
 import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
-import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho } from "../contracts/trabalho.ts";
+import type { ModoTurno } from "../contracts/plano-turno.ts";
+import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho, type TrabalhoDto } from "../contracts/trabalho.ts";
 import type { EstadoTurno, OrigemTurno } from "../contracts/turno.ts";
 
 /**
@@ -84,6 +85,11 @@ export type FatosTrabalho = {
   aguardandoColega: boolean;
   /** ADR-086 (revisão do #212): uma volta marcada ("me chame às 16:00") ainda por vir. Não é fila: fica abaixo da decisão. */
   aguardandoDespertar?: boolean;
+  /**
+   * definido em 2026-10-12 (ADR-099, parte 2): um comando que o trabalho deixou esperando (`esperar_comando`) ainda roda na
+   * máquina. Como a volta marcada, não é fila: o fim dele acorda o trabalho.
+   */
+  aguardandoComando?: boolean;
   ultimo: { estado: EstadoTurno; motivo: MotivoInterrupcao | null } | null;
 };
 
@@ -100,8 +106,8 @@ export type FatosTrabalho = {
  * - nada vivo e já `parado`: continua `parado` (revisão do épico, S1, 2026-10-08) — nem a decisão que sobrou nem o
  *   desfecho do turno que acabou depois do Parar o reabrem; só um turno novo (a pessoa escreveu na task) o tira daí;
  * - nada vivo e decisão pendente: `precisa_de_voce` (ou continua `fechado_ocioso`, #194);
- * - nada vivo e pedido a colega sem resposta, ou uma volta marcada (ADR-086): `rodando` (S3) — a resposta ou a volta
- *   chegam como turno do trabalho;
+ * - nada vivo e pedido a colega sem resposta, uma volta marcada (ADR-086) ou um comando esperando (ADR-099): `rodando`
+ *   (S3) — a resposta, a volta ou o fim do comando chegam como turno do trabalho;
  * - nada vivo nem pendente: o desfecho do último turno — concluído `terminado`, parado pela pessoa `parado`, o resto
  *   `falhou` (máquina sumiu sem "Retomar", IA indisponível, erro).
  */
@@ -111,11 +117,30 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.pendentes > 0) return f.iniciado && !f.esperandoOutro ? "rodando" : "na_fila";
   if (f.estadoAtual === "parado") return "parado";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
-  if (f.aguardandoColega || f.aguardandoDespertar) return "rodando";
+  if (f.aguardandoColega || f.aguardandoDespertar || f.aguardandoComando) return "rodando";
   if (f.ultimo === null) return "na_fila";
   if (f.ultimo.estado === "concluido") return "terminado";
   if (f.ultimo.motivo === "parado_pela_pessoa") return "parado";
   return "falhou";
+}
+
+/** Pelo que um trabalho aberto espera sem trabalhar: um colega, um comando (`esperar_comando`) ou a volta marcada. */
+export type EsperaDoTrabalho = "colega" | "comando" | "volta";
+
+/**
+ * definido em 2026-10-12 (ADR-099, parte 1, "esperar não é trabalhar"): o trabalho `rodando` sem turno vivo que só espera
+ * — um colega responder (ADR-084) ou a hora da volta (ADR-086) — está esperando, não trabalhando. O estado gravado continua
+ * `rodando` (o CHECK de `trabalhos.estado` e quem o lê não mudam); a espera é derivada na leitura, dos campos que o
+ * `TrabalhoDto` já traz. A volta conta mesmo depois da hora enquanto ninguém a pegou: sem turno vivo não há trabalho.
+ * A web repete a regra em `foraDoMac` (web/lib/trabalhos.ts; tests/unit/web/trabalhos.test.ts confere as duas).
+ * Motivo: em 11/10 a tela dizia "Trabalhando · 13" com um trabalhando de fato. Revisto em 2026-10-12 (ADR-099, parte 5):
+ * a espera de um comando (`esperar_comando`) também é espera, em todo lugar.
+ */
+export function esperaDoTrabalho(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & { esperandoColega?: TrabalhoDto["esperandoColega"]; esperandoComando?: TrabalhoDto["esperandoComando"]; acordaEm?: number | null }): EsperaDoTrabalho | null {
+  if (t.estado !== "rodando" || t.turnoVivoId) return null;
+  if (t.esperandoColega) return "colega";
+  if (t.esperandoComando) return "comando";
+  return t.acordaEm ? "volta" : null;
 }
 
 /**
@@ -152,16 +177,19 @@ export function soltarPorMemoria(p: { nivel: "verde" | "amarela" | "vermelha" | 
 export const REDE_MS = 120_000;
 
 /**
- * A rede de 2 min (#193): só o turno de CONVERSA da pessoa (nada de sala, ligação, rotina, colega ou retomada), sem
- * trabalho, rodando há REDE_MS, que já chamou ao menos uma ferramenta, e só com harness que bifurca sessão — sem
- * isso a próxima mensagem não teria como seguir a conversa sem atropelar a sessão do trabalho promovido.
- * `redeMs` existe só para o e2e (definido em 2026-10-08): ausente, vale REDE_MS.
+ * A rede de 2 min (#193): só o turno do dono com a pessoa (nada de sala, ligação, rotina ou colega), sem trabalho,
+ * rodando há REDE_MS, que já chamou ao menos uma ferramenta. `redeMs` existe só para o e2e (ausente, vale REDE_MS).
+ * revisto em 2026-10-12 (ADR-099, I8): também a retomada do dono em modo conversa, e com harness que bifurca OU que nem
+ * retoma sessão (o dono segue com o histórico). As capacidades são as declaradas do harness; quem escolhe entre bifurcar
+ * e largar a sessão é a máquina (`seguimentoNaRede`, domain/frente.ts).
  */
-export function promoveNaRede(p: { origem: OrigemTurno; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness; redeMs?: number }): boolean {
-  return p.origem === "conversa" && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= (p.redeMs ?? REDE_MS) && p.fezFerramenta && p.capacidades.bifurcaSessao;
+export function promoveNaRede(p: { origem: OrigemTurno; modo?: ModoTurno | null; trabalhoId: string | null | undefined; estado: EstadoTurno; despachadoHaMs: number; fezFerramenta: boolean; capacidades: CapacidadesHarness; redeMs?: number }): boolean {
+  const doDono = p.origem === "conversa" || (p.origem === "retomada" && p.modo === "conversa");
+  return doDono && !p.trabalhoId && p.estado === "despachando" && p.despachadoHaMs >= (p.redeMs ?? REDE_MS) && p.fezFerramenta && (p.capacidades.bifurcaSessao || !p.capacidades.retomaSessao);
 }
 
 /** O que a linha "Abriu a task …" diz por origem (texto da mensagem `sistema`; a web desenha pelo payload). */
 export function textoTrabalhoAberto(titulo: string, origem: OrigemTrabalho): string {
-  return origem === "rede" ? `Virou a task ${titulo}` : `Abriu a task ${titulo}`;
+  // revisto em 2026-10-12 (ADR-099, I8): a rede promove a frente, não mais a task.
+  return origem === "rede" ? `Virou a frente ${titulo}` : `Abriu a task ${titulo}`;
 }

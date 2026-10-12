@@ -22,10 +22,12 @@ export type ChaveRedacao =
   | "executor-indisponivel"
   | "ia-trocada"
   | "ia-trocada-limite"
+  | "cota-no-limite-espera"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
   | "retomada-automatica"
+  | "frente-retomada-automatica"
   | "parei-falta-dado"
   | "anotei"
   | "permissao-permanente"
@@ -61,12 +63,16 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "ia-trocada": "Respondendo pelo {para}: a conta do {de} neste computador está sem acesso.",
   // definido em 2026-10-10 (emenda da ADR-036): o automático repetiu o pedido na próxima IA da ordem (aposLimite).
   "ia-trocada-limite": "O {de} chegou ao limite da assinatura · respondendo pelo {para}. Ele volta a ser usado {quando}.",
+  // definido em 2026-10-12 (ADR-099 §7): a task bateu no limite e espera a cota renovar, em vez de falhar (aposLimiteNoFundo).
+  "cota-no-limite-espera": "A cota do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",
   retomada: "Retomando o turno interrompido ({motivo}) a partir de onde parou; nada foi reenviado.",
   // definido em 2026-10-08 (pedidos-parados.ts): o pedido de um colega caiu por infraestrutura e o servidor o retomou.
   "retomada-automatica": "Este pedido caiu ({motivo}) e foi retomado sozinho quando as máquinas voltaram: tentativa {tentativa} de {maximo}.",
+  // definido em 2026-10-12 (ADR-099, I9): a frente de um lote caiu por infraestrutura e o servidor a retomou (frentes-caidas.ts).
+  "frente-retomada-automatica": "A frente {titulo} caiu ({motivo}) e foi retomada sozinha quando as máquinas voltaram: tentativa {tentativa} de {maximo}.",
   // definido em 2026-09-24 (emenda da ADR-045): só a frase curta da fila ("Sua vez", decisoes.frase); na
   // conversa a pergunta é a fala do próprio agente (pedir-a-pessoa.ts).
   "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",

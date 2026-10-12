@@ -31,7 +31,7 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
     await withRollback(escopo, async (trx) => {
       const agora = Date.now();
       const a = await agenteComConversa(trx, escopo);
-      const turno = await a.repos.turnos.enfileirar({
+      const turno = await a.repos.turnos.enfileirar({ executor: "catcher",
         conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
         profundidade: 0, entradaTexto: "faça a coisa", entradaConfianca: "confiavel",
         modelo: "claude-haiku-4-5-20251001", harness: "claude-cli",
@@ -174,7 +174,7 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
     await withRollback(escopo, async (trx) => {
       const agora = Date.now();
       const a = await agenteComConversa(trx, escopo);
-      const turno = await a.repos.turnos.enfileirar({
+      const turno = await a.repos.turnos.enfileirar({ executor: "catcher",
         conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
         profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet",
       });

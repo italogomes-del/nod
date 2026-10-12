@@ -1,5 +1,7 @@
+import type { LoteNaTela } from "../contracts/dono.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Executor } from "../contracts/evento.ts";
+import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
@@ -28,13 +30,16 @@ interface Linha {
   memoria_mb: number | null;
   custo_usd: string | null;
   pessoa_esperando: boolean;
+  forma: FormaTrabalho;
+  lote_id: string | null;
+  resumo: ResumoFrente | null;
   criado_em: Date;
   iniciado_em: Date | null;
   terminado_em: Date | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, pessoa_esperando, criado_em, iniciado_em, terminado_em";
+  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, pessoa_esperando, forma, lote_id, resumo, criado_em, iniciado_em, terminado_em";
 
 const paraTrabalho = (l: Linha): Trabalho => ({
   tenantId: l.tenant_id,
@@ -55,6 +60,9 @@ const paraTrabalho = (l: Linha): Trabalho => ({
   memoriaMb: l.memoria_mb,
   custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
   pessoaEsperando: l.pessoa_esperando,
+  forma: l.forma,
+  loteId: l.lote_id,
+  resumo: l.resumo,
   criadoEm: ms(l.criado_em),
   iniciadoEm: msOuNull(l.iniciado_em),
   terminadoEm: msOuNull(l.terminado_em),
@@ -79,6 +87,9 @@ export type NovoTrabalho = {
   iniciadoEm?: number | null;
   /** ADR-085: a pessoa pediu e espera (o Mac apertado não segura). */
   pessoaEsperando?: boolean;
+  /** ADR-099 (0071): `frente` trabalha por baixo do dono; ausente = `task`. Com `loteId`, a frente nasce no lote. */
+  forma?: FormaTrabalho;
+  loteId?: string | null;
 };
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
@@ -100,6 +111,8 @@ export type ExtrasTrabalho = {
   trabalhouMs: number;
   /** ADR-086: a volta marcada ("me chame às 16:00") ainda por vir — a mais próxima; null = nenhuma. */
   acordaEm: number | null;
+  /** ADR-099 (parte 2): o comando que o trabalho deixou esperando e ainda roda — o motivo e desde quando; null = nenhum. */
+  esperandoComando: { motivo: string; desde: number } | null;
   /**
    * definido em 2026-10-09 (a tela fala por máquina): a máquina do turno que roda agora (`turnos.machine_id`) e o alvo do
    * turno pendente mais antigo (alvo-da-maquina.ts, a regra do `reivindicar`). null = sem turno vivo / sem alvo (qualquer
@@ -107,6 +120,10 @@ export type ExtrasTrabalho = {
    */
   maquinaVivaId: string | null;
   maquinaAlvoId: string | null;
+  /** ADR-099 (I10): o motivo da volta marcada mais próxima; null = nenhuma (ou sem motivo). */
+  acordaMotivo?: string | null;
+  /** ADR-099 (I10): o lote da frente; null = sem lote. */
+  lote?: LoteNaTela | null;
 };
 
 /**
@@ -119,10 +136,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async criar(n: NovoTrabalho): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         insert into trabalhos (tenant_id, id, owner_id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id,
-          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando)
+          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando, forma, lote_id)
         values (${escopo.tenantId}, ${n.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.titulo}, ${n.origem},
           ${n.pedidoPorAgenteId ?? null}, ${n.rotinaId ?? null}, ${n.trabalhoMaeId ?? null}, ${n.depoisDeTrabalhoId ?? null}, ${n.estado ?? "na_fila"},
-          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)}, ${n.pessoaEsperando === true})
+          ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)}, ${n.pessoaEsperando === true},
+          ${n.forma ?? "task"}, ${n.loteId ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
     },
@@ -172,12 +190,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * definido em 2026-10-08 (revisão do épico, S12): uma task aberta por uma execução desta rotina (filha, com mãe) que
-     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada.
+     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada. revisto em 2026-10-12 (ADR-099, I7
+     * revista): também a frente que o dono abriu na triagem da rotina (sem mãe: o lote é do dono). revisto na I10: a
+     * execução de rotina de antes, migrada pela 0072 para `frente` sem lote, não segura a próxima (como antes).
      */
     async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from trabalhos
-        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and trabalho_mae_id is not null
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and (trabalho_mae_id is not null or (forma = 'frente' and lote_id is not null))
           and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
         order by criado_em limit 1`;
       return l ? paraTrabalho(l) : null;
@@ -213,11 +233,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
-    /** #194: a última leitura de memória do grupo de processos de cada turno lido, no trabalho dele. */
+    /**
+     * #194: a última leitura de memória do grupo de processos de cada turno lido, no trabalho dele. ADR-097 (fase 0c):
+     * também o pico, que é o que calibra a reserva por agente e a fila do trabalho pesado.
+     */
     async atualizarMemoria(porTurno: readonly { turnoId: string; mb: number }[]): Promise<number> {
       if (porTurno.length === 0) return 0;
       const r = await conn`
-        update trabalhos w set memoria_mb = l.mb
+        update trabalhos w set memoria_mb = l.mb, memoria_pico_mb = greatest(coalesce(w.memoria_pico_mb, 0), l.mb)
         from (select unnest(${porTurno.map((p) => p.turnoId)}::uuid[]) as turno_id, unnest(${porTurno.map((p) => Math.max(0, Math.round(p.mb)))}::int[]) as mb) l
         join turnos t on t.tenant_id = ${escopo.tenantId} and t.id = l.turno_id
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.id = t.trabalho_id
@@ -259,11 +282,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     /**
      * ADR-088 (2026-10-09): as tasks da pessoa encerradas (terminada ou falha) desde `desde`, com pasta, e o que a regra
      * de limpeza precisa (src/domain/limpeza-das-tasks.ts). Lê pelo índice `trabalhos_terminados`; até 500, as mais
-     * antigas primeiro. `parado` fica de fora já aqui.
+     * antigas primeiro. `parado` fica de fora já aqui. ADR-099 (I5, 2026-10-12): com `id`, só aquele trabalho (o
+     * `limparAgora` da frente que acabou de terminar); a `forma` vai junto.
      */
-    async candidatosALimpeza(desde: number): Promise<(FatosLimpeza & { id: string })[]> {
-      const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean }[]>`
-        select w.id, w.estado, w.pasta, w.terminado_em,
+    async candidatosALimpeza(desde: number, o: { id?: string } = {}): Promise<(FatosLimpeza & { id: string })[]> {
+      const id = o.id ?? null;
+      const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean; forma: FormaTrabalho }[]>`
+        -- ADR-099 (I10): a task de antes, migrada pela 0072 sem lote, limpa como task (formaEfetiva, domain/frente.ts).
+        select w.id, w.estado, w.pasta, w.terminado_em, case when w.lote_id is null then 'task' else w.forma end as forma,
           (select count(*)::int from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as vivos,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta')) as decisao,
@@ -272,20 +298,23 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         from trabalhos w
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.terminado_em >= ${data(desde)}
           and w.estado in ('terminado', 'falhou') and w.pasta is not null
+          and (${id}::uuid is null or w.id = ${id}::uuid)
         order by w.terminado_em, w.id
         limit 500`;
-      return linhas.map((l) => ({ id: l.id, estado: l.estado, pasta: l.pasta, terminadoEm: msOuNull(l.terminado_em), turnosVivos: l.vivos, decisaoPendente: l.decisao, pastaDividida: l.dividida }));
+      return linhas.map((l) => ({ id: l.id, estado: l.estado, pasta: l.pasta, terminadoEm: msOuNull(l.terminado_em), turnosVivos: l.vivos, decisaoPendente: l.decisao, pastaDividida: l.dividida, forma: l.forma }));
     },
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
           -- ADR-086 (revisão do #212): a volta marcada para mais tarde não é fila — conta à parte, abaixo da decisão.
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and (t.acordar_em is null or t.acordar_em <= now())) as pendentes,
           exists (select 1 from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'pendente' and t.acordar_em > now()) as despertar,
+          -- ADR-099 (parte 2): o comando que o trabalho deixou esperando; o fim dele acorda o trabalho.
+          exists (select 1 from esperas e where e.tenant_id = ${escopo.tenantId} and e.trabalho_id = ${id} and e.estado = 'rodando') as comando,
           exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
@@ -307,7 +336,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
@@ -317,6 +346,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
         maquina_viva_id: string | null; maquina_alvo_id: string | null;
         colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
+        espera_motivo: string | null; espera_desde: Date | null; acorda_motivo: string | null;
+        lote_id: string | null; lote_criado_em: Date | null; lote_frentes: number | null; lote_abertas: number | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
@@ -328,7 +359,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where t.tenant_id = w.tenant_id and t.trabalho_id = w.id) as trabalhou_ms,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
-          ab.abertos, ab.acorda_em
+          ab.abertos, ab.acorda_em, es.motivo as espera_motivo, es.criado_em as espera_desde, am.motivo as acorda_motivo,
+          lt.id as lote_id, lt.criado_em as lote_criado_em, lt.frentes as lote_frentes, lt.abertas as lote_abertas
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -356,6 +388,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           select array_agg(t.id order by t.criado_em) as abertos, min(t.acordar_em) filter (where t.estado = 'pendente') as acorda_em
           from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')
         ) ab on true
+        -- ADR-099 (parte 2): o comando esperando (o índice esperas_rodando_por_trabalho).
+        left join lateral (
+          select e.motivo, e.criado_em from esperas e
+          where e.tenant_id = w.tenant_id and e.trabalho_id = w.id and e.estado = 'rodando' order by e.criado_em limit 1
+        ) es on true
         left join lateral (
           -- O pedido a colega em aberto mais antigo, pela regra de fatos.colega (sem peer_ask da tarefa, task do colega não final).
           select g.nome, h.criado_em as desde, h.payload->>'trabalhoId' as trabalho_id
@@ -368,6 +405,21 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
               and k.estado in ('terminado', 'parado', 'falhou'))
           order by h.criado_em, h.id limit 1
         ) c on true
+        -- ADR-099 (I10): o motivo da volta marcada mais próxima — o do turno que a marcou (o mesmo despertar_em).
+        left join lateral (
+          select (select x.despertar_motivo from turnos x where x.tenant_id = t.tenant_id and x.despertar_em = t.acordar_em
+              and (x.id = t.retoma_turno_id or x.retoma_turno_id = t.retoma_turno_id) order by x.criado_em desc limit 1) as motivo
+          from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' and t.acordar_em is not null
+          order by t.acordar_em limit 1
+        ) am on true
+        -- ADR-099 (I10): o lote (o pedido) da frente — quando o dono o abriu e quantas frentes dele seguem abertas.
+        left join lateral (
+          select l.id, l.criado_em, count(o.id)::int as frentes,
+            (count(o.id) filter (where o.estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')))::int as abertas
+          from lotes_de_frentes l join trabalhos o on o.tenant_id = l.tenant_id and o.lote_id = l.id
+          where l.tenant_id = w.tenant_id and l.id = w.lote_id
+          group by l.id, l.criado_em
+        ) lt on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
       return new Map(
         linhas.map((l) => [
@@ -382,8 +434,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id } : null,
             trabalhouMs: Math.max(0, Math.round(Number(l.trabalhou_ms ?? 0))),
             acordaEm: l.acorda_em ? ms(l.acorda_em) : null,
+            esperandoComando: l.espera_motivo !== null && l.espera_desde ? { motivo: l.espera_motivo, desde: ms(l.espera_desde) } : null,
             maquinaVivaId: l.maquina_viva_id,
             maquinaAlvoId: l.maquina_alvo_id,
+            acordaMotivo: l.acorda_motivo,
+            lote: l.lote_id && l.lote_criado_em ? { id: l.lote_id, abertoEm: ms(l.lote_criado_em), frentes: l.lote_frentes ?? 0, abertas: l.lote_abertas ?? 0 } : null,
           },
         ]),
       );

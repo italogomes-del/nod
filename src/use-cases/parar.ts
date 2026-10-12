@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { montarFaixaParada, type TentativaInterrupcao } from "../domain/parada.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
+import { cancelarEsperas } from "./esperar-comando.ts";
 import { marcarParado } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -58,6 +59,9 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     }
   }
 
+  // ADR-099 (parte 2): o Parar cancela os comandos que o bot deixou esperando, como cancela a volta marcada (o pendente
+  // acima). Na conversa, todos os do bot dela, tasks inclusive; sem conversa, todos da pessoa.
+  await cancelarEsperas(deps, conversaId === null ? { todas: true } : { conversaId });
   const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora);
   // definido em 2026-09-16: nesta rodada o único efeito externo é item aprovado (L5) e ele é síncrono ao
   // decidir; não há emissão "a caminho" para listar como já entregue — a lista nasce vazia e honesta.

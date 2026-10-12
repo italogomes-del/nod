@@ -20,7 +20,7 @@ describeIntegracao("rotinas: proposta tipada, confirmação, fuso nomeado, pausa
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "todo dia útil às 8", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "todo dia útil às 8", entradaConfianca: "confiavel", modelo: "m" });
       const r = await criarRotina(deps, { ...contexto(agenteId, conversaId, turno?.id), ...rotinaValida() });
       if ("erro" in r.data) throw new Error(`erro inesperado: ${r.data.erro}`);
       expect(new Date(r.data.proxima_execucao).toISOString()).toBe("2026-09-17T11:00:00.000Z");
@@ -42,7 +42,7 @@ describeIntegracao("rotinas: proposta tipada, confirmação, fuso nomeado, pausa
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "todo dia útil às 8", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "todo dia útil às 8", entradaConfianca: "confiavel", modelo: "m" });
       const r = await criarRotina(deps, { ...contexto(agenteId, conversaId, turno?.id), ...rotinaValida() });
       if ("erro" in r.data) throw new Error("proposta");
       // pelo contrato Services.rotinas.ativar, como a L6 chama em confirmarProposta

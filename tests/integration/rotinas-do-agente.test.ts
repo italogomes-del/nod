@@ -33,7 +33,7 @@ async function rotinaAtiva(trx: Parameters<Parameters<typeof withRollback>[1]>[0
     politicaSemDado: a.politica_sem_dado,
   });
   // Turno REAL: decisoes tem FK para turnos, então um turnoId inventado viola a constraint.
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "mexe na rotina", entradaConfianca: "confiavel", modelo: "m" });
   return { agenteId, conversaId, deps, repos, rotinaId: data.rotina.id, turnoId: turno?.id };
 }
 

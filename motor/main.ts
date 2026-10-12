@@ -15,7 +15,10 @@ import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/p
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import { encerrarGruposVivos, executarColetando, registrarGruposEm } from "../src/adapters/executor/processo.ts";
 import { encerrarGruposOrfaos } from "../src/adapters/executor/grupos-orfaos.ts";
+import { encerrarFugitivosDaInstancia } from "../src/adapters/executor/fugitivos.ts";
+import { prepararGruposDaMaquina } from "../src/adapters/executor/grupos-da-maquina.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
@@ -26,6 +29,7 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
+import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
 import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
@@ -39,7 +43,8 @@ import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pa
  *   systemd ──► nod-motor rodar ──► POST /api/maquina/sessao (machineId = id da chave)
  *                                  ├─ vigia das IAs (sonda a cada 3 s até uma ficar pronta) ──► conectar (anúncio)
  *                                  ├─ pool de laços: puxar → claude/codex atrás do proxy MCP → renovar → entregar
- *                                  └─ itens do gh aprovados (ADR-048), de 5 em 5 s
+ *                                  ├─ itens do gh aprovados (ADR-048), de 5 em 5 s
+ *                                  └─ esperas de comando (ADR-099), de 5 em 5 s
  *
  * A costura repete a do app do Mac de propósito: mexer no `desktop/main.ts` exigiria uma release do app para testar.
  */
@@ -95,11 +100,14 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   let itens: ReturnType<typeof setInterval> | null = null;
   /** ADR-088 (limpeza das tasks, #225): as pastas de task encerradas nesta máquina; os turnos rodando nunca são mexidos. */
   let limpeza: LimpezaDasTasks | null = null;
+  let esperas: Esperas | null = null;
   const planosAqui = new Map<string, PlanoTurno>();
   let ultimoReanuncio = 0;
   let encerrado = false;
+  /** ADR-100: o pedido de atualização ao root, quando o motor ficar diferente do servidor (só com a instalação nova). */
+  let atualizador: Atualizador | null = null;
 
-  const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env) };
+  const lig = { urlNod: c.url, proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), hookPath: caminhoAoLado("hook-nativas.mjs", "hook-nativas.ts"), nodePath: process.execPath, electronComoNode: false, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(process.env), filaDoForno: process.env.NOD_FILA_DO_FORNO !== "0" };
   // A pasta do executor (sessões e turnos do CLI) fica fora da pasta da chave (pastaDoExecutor): um turno não está a um `../` dela.
   const envExecutor = { ...process.env, NOD_HOME: executor };
   const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
@@ -116,7 +124,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     }
     if (codigo === "chave_invalida" || codigo === "atualize_app") void parar().then(() => fim(codigo));
   };
-  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar });
+  // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
+  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true, plataforma: "linux" } as const;
 
@@ -149,6 +158,10 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     limpeza = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: casa, executar: criarExecutarComando(cfg.env, casa), simular: modo === "simular", emUso: (pasta) => [...planosAqui.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
   }
 
+  // ADR-099 (parte 2): as esperas de comando desta máquina (o puxar, a cada 5 s). O comando roda fora do CLI, com o
+  // ambiente dos drivers; a reconexão não o derruba (o estado mora no módulo, esperas.ts).
+  esperas = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: cfg.env.HOME ?? homedir(), env: cfg.env });
+
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
     laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria,
@@ -159,6 +172,12 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
       aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
+    if (import.meta.url.endsWith(".mjs")) {
+      void atualizacaoLigada({ url: c.url }).then((ligada) => {
+        if (!ligada || encerrado || atualizador) return;
+        atualizador = iniciarAtualizacao({ url: c.url, dir, pastaDoMotor: pasta, turnosRodando: () => laco?.turnosAtuais().length ?? 0, drenar: (sim) => laco?.drenar(sim) });
+      });
+    }
   };
 
   let lacoNoAr = false;
@@ -197,8 +216,10 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   async function parar() {
     if (encerrado) return;
     encerrado = true;
+    atualizador?.parar();
     if (itens) clearInterval(itens);
     limpeza?.parar();
+    esperas?.parar();
     vigia?.parar();
     ponteHttp.cancelar();
     const anterior = laco; laco = null;
@@ -218,6 +239,19 @@ function sairPor(codigo: "chave_invalida" | "atualize_app", url: string): number
   return 2;
 }
 
+/**
+ * ADR-100: o servidor pede um motor mais novo (426). Com a atualização automática, o motor grava o pedido e sai com o
+ * código 2: o systemd não o reinicia sozinho, mas o atualizador troca os arquivos e o reinicia. Nenhum turno roda aqui:
+ * a sessão já foi recusada.
+ */
+async function sairPorVersao(url: string, pasta: string): Promise<number> {
+  if (!import.meta.url.endsWith(".mjs") || !(await atualizacaoLigada({ url }))) return sairPor("atualize_app", url);
+  await writeFile(arquivoDoPedido(pasta), `${JSON.stringify({ versao: null, em: Date.now(), motivo: "atualize_app" })}\n`, { mode: 0o600 }).catch(() => undefined);
+  log("info", "motor_atualizacao", { motivo: "atualize_app" });
+  process.stderr.write("O servidor pede um motor mais novo: a atualização automática foi pedida.\n");
+  return 2;
+}
+
 async function rodar(): Promise<number> {
   const pasta = pastaDoMotor(process.env);
   const c = await carregarConexao(pasta);
@@ -227,7 +261,13 @@ async function rodar(): Promise<number> {
   // primeiro turno desta; os novos ficam anotados, e saem junto com o processo.
   const arquivoGrupos = join(pastaDoExecutor(process.env), "grupos-vivos.json");
   const orfaos = await encerrarGruposOrfaos({ arquivo: arquivoGrupos }).catch(() => ({ assumiu: true }));
-  if (orfaos.assumiu) registrarGruposEm(arquivoGrupos);
+  if (orfaos.assumiu) {
+    // ADR-097: o que saiu dos grupos com a marca do motor (os Postgres de teste das tasks) e ficou de outra vida.
+    await encerrarFugitivosDaInstancia(arquivoGrupos);
+    registrarGruposEm(arquivoGrupos);
+  }
+  // ADR-097 (fase 2): com Delegate=yes na unidade, cada turno roda no próprio grupo de controle; sem, nada muda.
+  await prepararGruposDaMaquina();
   process.once("exit", () => encerrarGruposVivos());
   let sessao: Sessao | null = null;
   // O SIGTERM pode chegar no meio do conectar ou da espera entre tentativas: a espera é abortável e, se a sessão nascer
@@ -245,14 +285,14 @@ async function rodar(): Promise<number> {
       tentativa = 0;
       recusas = 0;
       const motivo = await sessao.terminou;
-      if (motivo === "atualize_app") return sairPor(motivo, c.url);
+      if (motivo === "atualize_app") return sairPorVersao(c.url, pasta);
       // Um 401/403 de passagem (proxy, deploy) não desliga a máquina de vez: só a terceira recusa seguida sai com o código 2.
       if (motivo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(motivo, c.url);
       if (motivo === "chave_invalida") { await esperar(ESPERA_RECUSA_MS, undefined, { signal: saida.signal }).catch(() => undefined); continue; }
       if (motivo === "parado") return 0;
     } catch (e) {
       const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
-      if (codigo === "atualize_app") return sairPor(codigo, c.url);
+      if (codigo === "atualize_app") return sairPorVersao(c.url, pasta);
       if (codigo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(codigo, c.url);
       if (saida.signal.aborted) return 0;
       const ms = ESPERAS_RECONEXAO_MS[Math.min(tentativa, ESPERAS_RECONEXAO_MS.length - 1)]!;
@@ -312,6 +352,11 @@ async function estado(): Promise<number> {
   const c = await carregarConexao(pasta);
   process.stdout.write(`Motor ${await versaoDoMotor()} · ${hostname()}\n`);
   process.stdout.write(c ? `Conectado a ${c.url}\n` : "Ainda não conectado: nod-motor parear https://seu-nod\n");
+  const marca = await atualizacaoLigada();
+  const mesmoServidor = !c || await atualizacaoLigada({ url: c.url });
+  process.stdout.write(!marca ? `Atualização automática: desligada (sem ${MARCA_DA_ATUALIZACAO})\n`
+    : !mesmoServidor ? `Atualização automática: parada (a instalação é de outro servidor; rode de novo: curl -fsSL ${c?.url}/motor | sh)\n`
+      : "Atualização automática: ligada (espera um momento sem turno)\n");
   const lig = { urlNod: c?.url ?? "https://127.0.0.1", proxyPath: caminhoAoLado("proxy.mjs", "proxy.ts"), sondaSemTurno: true, electronComoNode: false };
   const envExecutor = { ...process.env, NOD_HOME: pastaDoExecutor(process.env) };
   const cfg = await configDosDrivers(envExecutor);

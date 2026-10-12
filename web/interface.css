@@ -1169,6 +1169,95 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .pilula-trab > svg { color: var(--ink-3); }
 .pt-precisa { color: var(--signal); }
 
+/* A linha do dono acima do campo (ADR-099, parte 5; protótipo "um dono por bot", quadros 02–08): uma linha só, com o estado
+   de maior prioridade em negrito e o resto em contagem; "detalhes" abre, embaixo da mesma linha, as frentes, as esperas e a
+   fila. Nunca uma pilha de cartões; no celular o detalhe vira uma folha (mobile.css). */
+.linha-dono { margin: 8px 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.ld-barra { display: flex; align-items: center; min-height: 36px; }
+.ld-principal { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 6px 0 14px; border: 0; border-radius: 14px 0 0 14px;
+  background: none; color: var(--ink-2); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ld-texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-texto b { color: var(--ink); font-weight: 500; }
+.ld-extras { color: var(--ink-3); }
+.ld-pontos { display: inline-flex; flex: none; align-items: center; gap: 3px; }
+.ld-pontos .ponto-trabalho { width: 7px; height: 7px; }
+.ld-num { min-width: 10px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ld-n { margin-left: 2px; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ld-detalhes { display: inline-flex; flex: none; align-items: center; gap: 4px; align-self: stretch; padding: 0 12px; border: 0; border-radius: 0 14px 14px 0; background: none;
+  color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ld-principal:hover, .ld-principal:focus-visible, .ld-detalhes:hover, .ld-detalhes:focus-visible { background: var(--surface-raised); }
+.ld-principal:hover b, .ld-detalhes:hover { color: var(--ink); }
+.linha-dono.aberta .ld-principal { border-bottom-left-radius: 0; }
+.linha-dono.aberta .ld-detalhes { border-bottom-right-radius: 0; }
+.ld-detalhe { max-height: min(52vh, 460px); overflow-y: auto; padding: 2px 6px 8px; border-top: 1px solid var(--line); overscroll-behavior: contain; }
+.ld-folha-cab, .ld-fundo { display: none; }
+.ld-secao h3 { margin: 10px 8px 4px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.ld-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ld-item:hover, .ld-item:focus-visible { background: var(--surface-raised); }
+.ld-item.estatico { cursor: default; }
+.ld-item.estatico:hover { background: none; }
+.ld-item > .ponto-trabalho:not(.feito) { margin: 0 3px; }
+.ld-item > svg { flex: none; color: var(--ink-3); }
+.ld-item-titulo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+b.ld-item-titulo { font-weight: 500; }
+.ld-passo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.ld-item-fim { flex: none; margin-left: auto; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ld-comando { min-width: 0; padding: 0; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; }
+.ld-sub { display: flex; align-items: center; gap: 8px; margin: 0 8px 2px 32px; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.ld-sub.mono { font-family: var(--font-mono); }
+.ld-espera { padding-bottom: 4px; }
+.ld-ordem { flex: none; width: 14px; font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.ld-passos { padding: 0 0 6px; }
+.ld-passos ul { display: flex; flex-direction: column; gap: 2px; margin: 0 8px 4px 32px; padding: 0; list-style: none; font-size: 12.5px; color: var(--ink-2); }
+.ld-passos li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ld-passos li > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-passos .passo-ok { width: 12px; }
+.ld-passos .ld-agora { color: var(--ink); font-family: var(--font-mono); font-size: 12px; }
+.ld-passos .ld-agora .ponto-trabalho { width: 7px; height: 7px; margin: 0 2px; }
+.ld-sem-passos { color: var(--ink-3); }
+.ld-vazio { margin: 10px 8px; font-size: 12.5px; color: var(--ink-3); }
+
+/* O sinal do bot na barra lateral (ADR-099, parte 5): um ponto — vivo, vazado ou azul — e o número de frentes se mais de uma. */
+.chip-trab.sinal-dono { justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; }
+.sinal-n { font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+/* Trabalhos com uma linha por bot (quadro 05): as frentes abrem embaixo do bot, recuadas, com um fio à esquerda. */
+.tb-linha > svg { flex: none; color: var(--ink-3); }
+.tb-frentes { display: flex; flex-direction: column; margin: 0 10px 8px 46px; padding-left: 12px; border-left: 1px solid var(--line); }
+.tb-frente { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.tb-frente:hover, .tb-frente:focus-visible { background: var(--surface-raised); }
+.tb-frente.estatica { cursor: default; }
+.tb-frente.estatica:hover { background: none; }
+.tb-frente > .ponto-trabalho:not(.feito) { margin: 0 3px; }
+.tb-frente-titulo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-frente-passo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.tb-frente-fim { flex: none; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tb-abrir-conversa { align-self: flex-start; margin: 4px 0 0; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tb-abrir-conversa:hover, .tb-abrir-conversa:focus-visible { background: var(--surface-raised); color: var(--ink-2); }
+.tb-sub { margin: 4px 8px; font-size: 12.5px; color: var(--ink-3); }
+.tb-livres { margin: 0; padding: 0 14px; font-size: 12.5px; color: var(--ink-3); }
+/* Estreito (celular, painel apertado): a frase do bot desce para a segunda linha, inteira, embaixo do nome. */
+@media (max-width: 760px) {
+  .tt-linha.tb-linha { flex-wrap: wrap; row-gap: 2px; height: auto; min-height: 44px; padding: 10px 14px; }
+  .tt-linha.tb-linha .tt-bot { flex: 1 1 auto; width: auto; }
+  .tt-linha.tb-linha .tt-meio { order: 5; flex-basis: 100%; padding-left: 26px; }
+  .tt-linha.tb-linha .tt-meio .tt-titulo { font-weight: 400; color: var(--ink-2); }
+  .tt-linha.tb-linha .tt-meio .tt-passo { display: none; }
+}
+
+/* As linhas das frentes na conversa (ADR-099, parte 5, quadros 02 e 06): "●●● Começou 3 frentes: A, B e C · 15:02",
+   "✓ 3 frentes terminaram · 17:55" e "↩ Respondi ao pedido de X". */
+.linha-frentes { flex-wrap: wrap; }
+.linha-pontos { display: inline-flex; align-items: center; gap: 3px; margin-right: 2px; }
+.linha-pontos .ponto-trabalho { width: 7px; height: 7px; }
+.linha-link { padding: 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.linha-link:hover, .linha-link:focus-visible { text-decoration-color: currentColor; }
+.linha-hora { color: var(--ink-3); }
+.linha-falhou { color: var(--danger); font-weight: 700; }
+.linha-parou { color: var(--ink-3); font-size: 9px; }
+
 /* A pílula de memória (M1/M2/M3): amarela é aviso, vermelha é alerta; o "Ver" abre "Todos os trabalhos". */
 .pilula-memoria { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; border: 1px solid; border-radius: 15px; font: inherit; font-size: 12.5px; cursor: pointer; }
 span.pilula-memoria { padding-right: 12px; cursor: default; }
@@ -1241,6 +1330,21 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tt-cab h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .tt-cab p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
 .tela-trabalhos > .linha-centro-wrap { margin: 0 auto; }
+/* ADR-099 §7 (2026-10-12): o custo de hoje, discreto embaixo do resumo; o detalhe por bot só no clique. */
+.tt-custo { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -8px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
+  color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tt-custo:hover, .tt-custo:focus-visible, .tt-custo[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
+.tt-custo.fora { color: var(--warning); }
+.tt-custo-aviso { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.tt-custo-detalhe { width: 320px; max-width: 100%; margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  box-shadow: var(--shadow-pop); font-size: 13px; }
+.tt-custo-detalhe ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.tt-custo-bot { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.tt-custo-bot .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tt-custo-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-custo-bot small { color: var(--warning); font-size: 12px; white-space: nowrap; }
+.tt-custo-bot b { margin-left: auto; color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tt-custo-detalhe p { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .tt-filtros { display: flex; gap: 6px; }
 .tt-filtro { padding: 5px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
 .tt-filtro.ativo { border-color: var(--action); background: var(--action); color: var(--on-action); }

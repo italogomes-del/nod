@@ -99,9 +99,21 @@ export function quandoVolta(instante: number, agora: number): string {
   return `em ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} às ${hora(instante)}`;
 }
 
-/** ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. */
-export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
-  return esperandoColega(t) !== null || voltaMarcada(t) !== null;
+/**
+ * ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. definido em 2026-10-12
+ * (ADR-099, parte 1, "esperar não é trabalhar"): é também a regra do grupo **Esperando** — quem só espera não conta como
+ * trabalhando. Espelha `esperaDoTrabalho` (src/domain/trabalho.ts); tests/unit/web/trabalhos.test.ts confere as duas.
+ */
+export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm"> & Partial<Pick<TrabalhoDto, "esperandoComando">>): boolean {
+  return esperandoColega(t) !== null || esperandoComando(t) !== null || voltaMarcada(t) !== null;
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099, parte 5): a frente deixou um comando rodando (`esperar_comando`, "a CI do #845") e saiu
+ * do Mac até ele acabar — rodando, sem turno vivo. Esperar não é trabalhar: conta como Esperando em todo lugar.
+ */
+export function esperandoComando(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & Partial<Pick<TrabalhoDto, "esperandoComando">>): { motivo: string; desde: number } | null {
+  return t.estado === "rodando" && !t.turnoVivoId && t.esperandoComando ? t.esperandoComando : null;
 }
 
 /** O tempo da task: aberta há (do começo até agora ou o fim), quanto os turnos trabalharam e o resto, que é espera. */
@@ -119,6 +131,11 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
+  // definido em 2026-10-12 (ADR-099 §7): a cota da IA segura a task (o servidor decide, a mesma regra do `reivindicar`); a
+  // hora da volta fica na pílula do topo.
+  if (t.esperaDaCota) return "esperando a cota da IA";
+  const comando = esperandoComando(t);
+  if (comando) return `esperando ${comando.motivo}`;
   const volta = voltaMarcada(t);
   // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
   // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
@@ -273,6 +290,19 @@ export function pilulaMac(segurando: boolean, esperando: number, comVer = true, 
     : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;
 }
 
+/**
+ * A pílula da cota da IA (definido em 2026-10-12, ADR-099 §7): com a IA na reserva de 1% ou no limite, o trabalho de fundo
+ * espera e a conversa com a pessoa segue. Diz quando ele volta (a renovação da janela que segura) e quantas tasks esperam.
+ * Sem "Ver": não há o que a pessoa ajuste; o uso da IA está em Seu espaço › Conexão. Nada segurando (ou servidor anterior): nada.
+ */
+export function pilulaDaCota(cota: TrabalhosDto["cota"], trabalhos: readonly TrabalhoDto[], agora: number): string {
+  if (!cota) return "";
+  const titulo = cota.situacao === "limite" ? "A cota da IA acabou" : "A cota da IA está no fim";
+  const volta = cota.voltaEm ? `trabalho de fundo volta ${quandoVolta(cota.voltaEm, agora)}` : "trabalho de fundo volta quando ela renovar";
+  const esperam = trabalhos.filter((t) => t.esperaDaCota === true).length;
+  return pilula(titulo, `${esperam > 0 ? `${esperam} ${esperam === 1 ? "espera" : "esperam"} · ` : ""}${volta} · a conversa com você segue`, null);
+}
+
 /** "620 MB", "1,4 GB". */
 export function memoriaLegivel(mb: number): string {
   if (mb < 1024) return `${Math.round(mb)} MB`;
@@ -286,24 +316,31 @@ export function meiaNoiteDe(agora: number): number {
   return d.getTime();
 }
 
-export type GruposTrabalhos = { precisa: TrabalhoDto[]; trabalhando: TrabalhoDto[]; fila: TrabalhoDto[]; terminados: TrabalhoDto[] };
+export type GruposTrabalhos = { precisa: TrabalhoDto[]; trabalhando: TrabalhoDto[]; esperando: TrabalhoDto[]; fila: TrabalhoDto[]; terminados: TrabalhoDto[] };
 
 /** Os que mais usam memória primeiro; sem leitura, depois deles, do mais novo ao mais antigo. */
 const porMemoria = (a: TrabalhoDto, b: TrabalhoDto): number => (b.memoriaMb ?? -1) - (a.memoriaMb ?? -1) || b.criadoEm - a.criadoEm;
 
+/** A volta mais cedo primeiro (é a próxima a acordar); esperando colega, depois, do pedido mais antigo ao mais novo. */
+const porVolta = (a: TrabalhoDto, b: TrabalhoDto): number => (a.acordaEm ?? Infinity) - (b.acordaEm ?? Infinity) || (a.esperandoColega?.desde ?? a.criadoEm) - (b.esperandoColega?.desde ?? b.criadoEm);
+
 /**
  * Os grupos da gaveta e de "Todos os trabalhos" (#196): Precisa de você (esperando a pessoa, aberto ou fechado para
- * liberar memória), Trabalhando, Na fila e Terminados hoje — o que terminou (ou parou, ou falhou) antes da meia-noite sai.
+ * liberar memória), Trabalhando, Esperando, Na fila e Terminados hoje — o que terminou (ou parou, ou falhou) antes da
+ * meia-noite sai. definido em 2026-10-12 (ADR-099, parte 1): Esperando separa de Trabalhando quem está `rodando` sem
+ * turno vivo só esperando a volta marcada ou um colega (`foraDoMac`). Em 11/10 a tela dizia "Trabalhando · 13" com um
+ * trabalhando de fato: onze voltas marcadas e duas esperas de colega.
  */
 export function agrupar(lista: readonly TrabalhoDto[], agora: number): GruposTrabalhos {
   const hoje = meiaNoiteDe(agora);
   const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").sort(porMemoria);
-  const trabalhando = lista.filter((t) => t.estado === "rodando").sort(porMemoria);
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).sort(porMemoria);
+  const esperando = lista.filter((t) => foraDoMac(t)).sort(porVolta);
   const fila = lista.filter((t) => t.estado === "na_fila").sort((a, b) => a.criadoEm - b.criadoEm);
   const terminados = lista
     .filter((t) => !aberto(t) && (t.terminadoEm ?? t.criadoEm) >= hoje)
     .sort((a, b) => (b.terminadoEm ?? b.criadoEm) - (a.terminadoEm ?? a.criadoEm));
-  return { precisa, trabalhando, fila, terminados };
+  return { precisa, trabalhando, esperando, fila, terminados };
 }
 
 export function filtrar(lista: readonly TrabalhoDto[], filtro: FiltroTrabalhos | undefined): TrabalhoDto[] {
@@ -336,12 +373,12 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
-export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "acordaEm">>, cor: string | undefined): string {
+export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "esperandoComando" | "acordaEm">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
   // revisto em 2026-10-09: a classe era `esperando`, que já é a caixa "Esperando você entrar no …" do cartão de acesso
   // (interface.css, `.esperando` com padding e fundo) — o ponto de 8 px virava um anel de ~30 px e empurrava a linha.
-  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
+  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, esperandoComando: t.esperandoComando ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.

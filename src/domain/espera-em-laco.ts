@@ -348,10 +348,15 @@ export function esperaEmLaco(comando: string): EsperaEmLaco | null {
  * O que o modelo lê na negação. Com `me_chame_as` no catálogo do turno, ele é o caminho; sem ele (sala, ligação), o turno
  * encerra dizendo o que falta. Nos dois casos fica dito o que continua livre, para o bot não largar o comando de verdade.
  */
-export function motivoDaEsperaNegada(espera: EsperaEmLaco, comMeChameAs: boolean): string {
+export function motivoDaEsperaNegada(espera: EsperaEmLaco, comMeChameAs: boolean, comEsperarComando = false): string {
   const tempo = Number.isFinite(espera.segundos) ? `${Math.round(espera.segundos)} s` : "tempo sem fim";
   const oQue = espera.tipo === "laco_com_sleep" ? `laço de espera com sleep de ${tempo}` : `sleep de ${tempo}`;
   const local = `Para algo que você mesmo subiu neste Mac (um servidor local, um banco), um laço com sleep curto (abaixo de ${SLEEP_DE_ESPERA_S} s) ou dentro de timeout de até ${TIMEOUT_QUE_LIMITA_S / 60} min roda normalmente, como todo comando demorado de verdade (testes, build, npm ci).`;
+  // revisto em 2026-10-12 (ADR-099, parte 2): com esperar_comando no catálogo, a espera de CI e deploy é um comando que o
+  // Nod roda fora deste turno; me_chame_as fica para hora marcada.
+  if (comEsperarComando) {
+    return `${oQue} segura este processo no Mac sem trabalho. Para esperar algo de fora (a CI, um deploy), chame esperar_comando com um comando que só termina quando a espera acabar (gh pr checks <n> --watch, gh run watch <id>) e o que está esperando, e encerre o turno: o Nod roda o comando e você volta nesta mesma sessão quando ele terminar. Sem comando que acompanhe (a resposta de alguém), use me_chame_as. ${local}`;
+  }
   if (comMeChameAs) {
     return `${oQue} segura este processo no Mac sem trabalho. Para esperar algo de fora (o CI, um deploy, a resposta de alguém), chame me_chame_as com em quantos minutos voltar e o que vai conferir, diga em uma frase o que está esperando e encerre o turno: você volta sozinho nesta mesma sessão. ${local}`;
   }

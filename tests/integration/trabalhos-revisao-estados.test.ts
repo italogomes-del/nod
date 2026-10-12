@@ -19,6 +19,7 @@ import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 /**
  * Revisão do épico #188 (2026-10-08), grupo "estados do trabalho": S1 (o Parar vence a decisão aberta), S2 (toda saída
@@ -35,7 +36,7 @@ async function montar(trx: Tx) {
   await repos.agentes.atualizarPerfil(base.agenteId, { confirmado: true });
   const task = async (titulo = "Login do app") => (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem: "pessoa" })).trabalho;
   const turno = async (trabalhoId: string | null) => {
-    const t = await repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId });
     if (!t) throw new Error("turno");
     return t;
   };
@@ -206,9 +207,9 @@ describeIntegracao("revisão #188 — estados do trabalho", () => {
       expect(await m.estado(w.id)).toBe("rodando");
 
       // O colega entrega: a continuação nasce no trabalho de quem pediu, e ele segue rodando.
-      const tarefa = await m.repos.turnos.buscar(data.tarefa_id);
+      const tarefa = await m.repos.turnos.buscar(tarefaDoPedido(data));
       await m.repos.turnos.assentar(tarefa!.id, { estado: "concluido" });
-      const r = await entregarRespostaPeer(m.deps, { tarefaId: data.tarefa_id, texto: "Revisado." });
+      const r = await entregarRespostaPeer(m.deps, { tarefaId: tarefaDoPedido(data), texto: "Revisado." });
       expect("continuacao" in r.data && r.data.continuacao.trabalhoId).toBe(w.id);
       expect(await m.estado(w.id)).toBe("rodando");
       // Assentada a continuação, termina.

@@ -32,7 +32,7 @@ async function montar(trx: Trx) {
   const agora = () => Date.now();
   const deps = depsSobre(base.repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
   const turno = (trabalhoId: string | null | undefined, origem: "conversa" | "retomada" = "conversa", retomaTurnoId?: string) =>
-    base.repos.turnos.enfileirar({ conversaId: base.conversaId, agenteId: base.agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId, ...(retomaTurnoId ? { retomaTurnoId } : {}) });
+    base.repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId, ...(retomaTurnoId ? { retomaTurnoId } : {}) });
   const plano = async (turnoId: string) => (await emitirPlanoTurno(deps, { turnoId, machineId: randomUUID(), executor: "local", harnesses })).data;
   return { ...base, deps, turno, plano };
 }

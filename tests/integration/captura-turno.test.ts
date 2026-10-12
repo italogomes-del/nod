@@ -35,7 +35,7 @@ function comCapturas(trx: Tx, capturas: Deps["services"]["capturas"], agora?: ()
 
 async function turnoDeConversa(trx: Tx, origem: "conversa" | "rotina" = "conversa", texto = "olhe a tela") {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Eng" });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: texto, entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: texto, entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno não criado");
   return { agenteId, conversaId, turnoId: turno.id };
 }
@@ -275,7 +275,7 @@ describeIntegracao("captura de tela no transcript (NOD-200)", () => {
       await assentar(deps, turnoId);
       const [anexo] = await anexosDaConversa(trx, conversaId);
       expect(anexo).toBeDefined();
-      const proximo = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "e agora?", entradaConfianca: "confiavel", modelo: "m" });
+      const proximo = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "e agora?", entradaConfianca: "confiavel", modelo: "m" });
       const plano = await emitirPlanoTurno(deps, { turnoId: proximo?.id ?? "", machineId: randomUUID(), executor: "catcher" });
       expect(plano.data.entrada.anexos ?? []).toEqual([]);
       const serializado = JSON.stringify(plano.data);

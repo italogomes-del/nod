@@ -6,6 +6,7 @@ import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../../src/use-cas
 import { pedirABot } from "../../../src/use-cases/pedir-a-bot.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 import { PESSOA_ANA, TENANT_PADRAO } from "../../helpers/ids.ts";
+import { tarefaDoPedido } from "../../helpers/pedido.ts";
 
 /**
  * pedir_a_bot (definido em 2026-09-29, ADR-058): UM jeito de um bot pedir a outro — pergunta ou tarefa —, e
@@ -24,7 +25,7 @@ async function bot(d: D, nome: string, deps = d.deps) {
 
 /** O turno de quem pede: é dele que o pedido parte (profundidade, confiança, rotina). */
 async function turno(d: D, agenteId: string, conversaId: string, origem: OrigemTurno = "conversa", extra: { profundidade?: Profundidade; confianca?: "confiavel" | "nao_confiavel" } = {}) {
-  const t = await d.deps.repos.turnos.enfileirar({ conversaId, agenteId, origem, prazoEm: AGORA + 60_000, profundidade: extra.profundidade ?? 0, entradaTexto: "trabalho", entradaConfianca: extra.confianca ?? "confiavel", modelo: "haiku" });
+  const t = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, prazoEm: AGORA + 60_000, profundidade: extra.profundidade ?? 0, entradaTexto: "trabalho", entradaConfianca: extra.confianca ?? "confiavel", modelo: "haiku" });
   if (!t) throw new Error("turno não criado");
   return t;
 }
@@ -40,19 +41,36 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     const tuca = await bot(d, "Tuca");
     const t = await turno(d, vera.id, vera.conversaId);
     const r = await pedir(d, vera, t.id, "Tuca", "Explique como a busca por nome funciona hoje.", "PR #415");
-    const tarefa = d.banco.turnos.find((x) => x.id === r.data.tarefa_id);
+    const tarefa = d.banco.turnos.find((x) => x.id === tarefaDoPedido(r.data));
     expect(tarefa).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: d.deps.escopo.pessoaId, estado: "pendente" });
     expect(tarefa?.entradaTexto).toContain("Pedido de Vera:\n<pedido_do_colega>\nPedido: Explique como a busca por nome funciona hoje.\nContexto: PR #415\n</pedido_do_colega>");
     const pedido = d.banco.mensagens.find((m) => m.conversaId === tuca.conversaId && m.payload?.kind === "peer_pedido");
-    expect(pedido).toMatchObject({ turnoId: r.data.tarefa_id, autoria: { autor_tipo: "agente", autor_id: vera.id, sob_procuracao_de: d.deps.escopo.pessoaId }, payload: { turnoOrigemId: t.id, conversaOrigemId: vera.conversaId } });
-    expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: vera.conversaId, texto: "Vera pediu a Tuca: Explique como a busca por nome funciona hoje.", payload: { tarefaId: r.data.tarefa_id } });
-    // ADR-083: o pedido nasce como task de quem recebe (trabalho_mudou) antes do handoff e do turno.
-    expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "mensagem_criada", "turno_criado"]);
-    // ADR-083 (S7): uma task `colega` de quem recebe, na conversa dele, com quem pediu; o handoff aponta para ela.
-    const trabalho = d.banco.trabalhos.find((w) => w.id === tarefa?.trabalhoId);
-    expect(trabalho).toMatchObject({ agenteId: tuca.id, conversaId: tuca.conversaId, origem: "colega", pedidoPorAgenteId: vera.id, titulo: "Explique como a busca por nome funciona hoje.", estado: "na_fila", pessoaEsperando: true });
-    expect(trabalho?.pasta?.startsWith("~/nod/Tuca/explique-como-a-busca")).toBe(true);
-    expect(d.banco.mensagens.find((m) => m.kind === "handoff")?.payload).toMatchObject({ trabalhoId: trabalho?.id });
+    expect(pedido).toMatchObject({ turnoId: tarefaDoPedido(r.data), autoria: { autor_tipo: "agente", autor_id: vera.id, sob_procuracao_de: d.deps.escopo.pessoaId }, payload: { turnoOrigemId: t.id, conversaOrigemId: vera.conversaId } });
+    expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: vera.conversaId, texto: "Vera pediu a Tuca: Explique como a busca por nome funciona hoje.", payload: { tarefaId: tarefaDoPedido(r.data) } });
+    // revisto em 2026-10-12 (ADR-099, I7 revista; era uma task `colega`, ADR-083 S7): o pedido entra como turno de triagem na
+    // conversa do dono de quem recebe — nenhum trabalho, e o handoff aponta só para o turno.
+    expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada", "turno_criado"]);
+    expect(tarefa?.trabalhoId ?? null).toBeNull();
+    expect(d.banco.trabalhos).toHaveLength(0);
+    expect(d.banco.mensagens.find((m) => m.kind === "handoff")?.payload).not.toHaveProperty("trabalhoId");
+    expect(r.data).toMatchObject({ ok: true, instrucao: expect.stringContaining("Pedido entregue a Tuca: entrou na triagem dele"), livres: [] });
+  });
+
+  it("ADR-099 (I7 revista): a espera circular é recusada com instrução, sem turno nem handoff; o colega livre é sugerido", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const vera = await bot(d, "Vera");
+    const tuca = await bot(d, "Tuca");
+    const bia = await bot(d, "Bia");
+    for (const b of [vera, tuca, bia]) await d.deps.repos.agentes.atualizarPerfil(b.id, { confirmado: true });
+    const t = await turno(d, vera.id, vera.conversaId);
+    const r = await pedir(d, vera, t.id, "Tuca", "Revise o PR 42.");
+    expect(r.data).toMatchObject({ ok: true, livres: [{ id: bia.id, nome: "Bia" }], instrucao: expect.stringContaining("Livres agora: Bia") });
+    const triagem = tarefaDoPedido(r.data);
+    const turnos = d.banco.turnos.length;
+    const volta = await pedir(d, tuca, triagem, "Vera", "Qual repositório?");
+    expect(volta.data).toEqual({ ok: false, erro: "espera_circular", instrucao: expect.stringContaining("Espera circular: Vera pediu algo a você") });
+    expect(d.banco.turnos).toHaveLength(turnos);
+    expect(d.banco.mensagens.filter((m) => m.kind === "handoff")).toHaveLength(1);
   });
 
   it("de uma rotina também — o caso da Clarice e do Chico —, e sem o bloco da pessoa (ninguém escreveu)", async () => {
@@ -61,11 +79,12 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     await bot(d, "Chico");
     const t = await turno(d, clarice.id, clarice.conversaId, "rotina", { confianca: "nao_confiavel" });
     const r = await pedir(d, clarice, t.id, "Chico", "Como a busca por nome funciona no Backoffice?");
-    const tarefa = d.banco.turnos.find((x) => x.id === r.data.tarefa_id);
+    const tarefa = d.banco.turnos.find((x) => x.id === tarefaDoPedido(r.data));
     expect(tarefa).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel" });
     expect(tarefa?.entradaTexto).not.toContain("pedido_da_pessoa");
-    // ADR-085 (revisão do #209): ninguém está na conversa esperando — o Mac apertado pode segurar este pedido.
-    expect(d.banco.trabalhos.find((w) => w.id === tarefa?.trabalhoId)?.pessoaEsperando).toBe(false);
+    // ADR-085 (revisão do #209): ninguém está na conversa esperando — as frentes que o dono abrir para este pedido podem
+    // ser seguradas pelo Mac apertado (pessoaEsperaOPedido; tests/unit/domain/triagem.test.ts).
+    expect(tarefa?.trabalhoId ?? null).toBeNull();
   });
 
   it("até o limite da corrente (ADR-063): quem está em 1 ou 2 pede, e o alvo nasce um passe mais fundo; em 3 não pede", async () => {
@@ -75,7 +94,7 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     for (const profundidade of [1, 2] as const) {
       const t = await turno(d, vera.id, vera.conversaId, "delegacao", { profundidade });
       const r = await pedir(d, vera, t.id, "Tuca", "e agora?");
-      expect(d.banco.turnos.find((x) => x.id === r.data.tarefa_id)).toMatchObject({ agenteId: tuca.id, origem: "delegacao", profundidade: profundidade + 1 });
+      expect(d.banco.turnos.find((x) => x.id === tarefaDoPedido(r.data))).toMatchObject({ agenteId: tuca.id, origem: "delegacao", profundidade: profundidade + 1 });
       expect(r.events?.find((e) => e.kind === "turno_criado")?.dados).toMatchObject({ profundidade: profundidade + 1 });
     }
     const noLimite = await turno(d, vera.id, vera.conversaId, "retomada", { profundidade: 3 });
@@ -98,7 +117,7 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     await expect(pedir(d, vera, t.id, "Tuca", "oi")).rejects.toMatchObject({ codigo: "nao_permitido" });
     await comoAna.repos.procuracoes.criar({ agenteConcedenteId: tuca.id, agenteBeneficiarioId: vera.id, classesPermitidas: ["perguntar_a_bot"], tetoDiario: 5 });
     const r = await pedir(d, vera, t.id, "Tuca", "oi");
-    expect(d.banco.turnos.find((x) => x.id === r.data.tarefa_id)?.agenteId).toBe(tuca.id);
+    expect(d.banco.turnos.find((x) => x.id === tarefaDoPedido(r.data))?.agenteId).toBe(tuca.id);
   });
 
   it("outro dono, só um salto (ADR-063, como a Jornada 02): o bot da Ana não repassa, e a continuação da Vera não volta a ele", async () => {
@@ -112,12 +131,12 @@ describe("pedir_a_bot: quem recebe usa os acessos dele", () => {
     const t = await turno(d, vera.id, vera.conversaId);
     const r = await pedir(d, vera, t.id, "Tuca", "levante os clientes do piloto");
     // O Tuca cumpre por procuração; o Zeca, também da Ana, nunca deu procuração a ninguém.
-    await expect(pedir(d, tuca, r.data.tarefa_id, "Zeca", "me ajuda?")).rejects.toMatchObject({ codigo: "nao_permitido" });
-    const volta = await entregarRespostaPeer(d.deps, { tarefaId: r.data.tarefa_id, texto: "12 clientes." });
+    await expect(pedir(d, tuca, tarefaDoPedido(r.data), "Zeca", "me ajuda?")).rejects.toMatchObject({ codigo: "nao_permitido" });
+    const volta = await entregarRespostaPeer(d.deps, { tarefaId: tarefaDoPedido(r.data), texto: "12 clientes." });
     if (!("continuacao" in volta.data)) throw new Error("deveria entregar à Vera");
     await expect(pedir(d, vera, volta.data.continuacao.id, "Tuca", "e os e-mails deles?")).rejects.toMatchObject({ codigo: "nao_permitido" });
     const daVera = await pedir(d, vera, volta.data.continuacao.id, "Bia", "prepare o e-mail aos 12");
-    expect(d.banco.turnos.find((x) => x.id === daVera.data.tarefa_id)).toMatchObject({ agenteId: bia.id, profundidade: 2 });
+    expect(d.banco.turnos.find((x) => x.id === tarefaDoPedido(daVera.data))).toMatchObject({ agenteId: bia.id, profundidade: 2 });
   });
 
   it("bot desconhecido → nao_encontrado; a si mesmo → entrada_invalida; pedido vazio → texto_vazio", async () => {
@@ -138,13 +157,13 @@ describe("a resposta volta como continuação de quem pediu", () => {
     const tuca = await bot(d, "Tuca");
     const t = await turno(d, vera.id, vera.conversaId);
     const r = await pedir(d, vera, t.id, "Tuca", "status do PR 42?");
-    const entrega = await entregarRespostaPeer(d.deps, { tarefaId: r.data.tarefa_id, texto: "PR 42 aprovado, falta o merge." });
+    const entrega = await entregarRespostaPeer(d.deps, { tarefaId: tarefaDoPedido(r.data), texto: "PR 42 aprovado, falta o merge." });
     if (!("mensagem" in entrega.data)) throw new Error("deveria entregar");
     expect(entrega.data.mensagem).toMatchObject({
       conversaId: vera.conversaId,
       kind: "peer_ask",
       texto: "PR 42 aprovado, falta o merge.",
-      payload: { kind: "peer_ask", agenteId: tuca.id, nome: "Tuca", tarefaId: r.data.tarefa_id, turnoOrigemId: t.id, delegada: true },
+      payload: { kind: "peer_ask", agenteId: tuca.id, nome: "Tuca", tarefaId: tarefaDoPedido(r.data), turnoOrigemId: t.id, delegada: true },
     });
     expect(entrega.data.continuacao).toMatchObject({ conversaId: vera.conversaId, agenteId: vera.id, origem: "retomada", retomaTurnoId: t.id, profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: null });
     expect(entrega.data.continuacao.entradaTexto).toContain("Resposta de Tuca ao seu pedido: PR 42 aprovado, falta o merge.");
@@ -186,7 +205,7 @@ describe("a resposta volta como continuação de quem pediu", () => {
     await bot(d, "Chico");
     const t = await turno(d, clarice.id, clarice.conversaId, "rotina", { confianca: "nao_confiavel" });
     const r = await pedir(d, clarice, t.id, "Chico", "como funciona a busca?");
-    const entrega = await entregarRespostaPeer(d.deps, { tarefaId: r.data.tarefa_id, texto: "Busca por tokens, sem acento." });
+    const entrega = await entregarRespostaPeer(d.deps, { tarefaId: tarefaDoPedido(r.data), texto: "Busca por tokens, sem acento." });
     if (!("continuacao" in entrega.data)) throw new Error("deveria entregar");
     expect(entrega.data.continuacao).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, entradaConfianca: "nao_confiavel", profundidade: 1 });
   });
@@ -198,8 +217,8 @@ describe("a resposta volta como continuação de quem pediu", () => {
     const sala = await d.deps.repos.conversas.criar({ tipo: "sala", salaId: randomUUID() });
     const original = await turno(d, vera.id, sala!.id, "sala");
     const r = await pedirABot(d.deps, { turnoId: original.id, agenteId: vera.id, conversaId: sala!.id, agente: "Tuca", pedido: "Quais clientes avisar?" });
-    expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: sala!.id, payload: { tarefaId: r.data.tarefa_id } });
-    const resposta = await entregarRespostaPeer(d.deps, { tarefaId: r.data.tarefa_id, texto: "Clientes do piloto." });
+    expect(d.banco.mensagens.find((m) => m.kind === "handoff")).toMatchObject({ conversaId: sala!.id, payload: { tarefaId: tarefaDoPedido(r.data) } });
+    const resposta = await entregarRespostaPeer(d.deps, { tarefaId: tarefaDoPedido(r.data), texto: "Clientes do piloto." });
     if (!("continuacao" in resposta.data)) throw new Error("resposta ausente");
     expect(resposta.data.continuacao).toMatchObject({ conversaId: sala!.id, origem: "retomada", retomaTurnoId: original.id });
     expect(resposta.data.mensagem.conversaId).toBe(sala!.id);
@@ -223,17 +242,17 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     const chico = await bot(d, "Chico");
     const dev = await bot(d, "Dev");
     const t0 = await turno(d, clarice.id, clarice.conversaId);
-    const d1 = tarefaDe(d, (await pedir(d, clarice, t0.id, "Chico", "acione o Dev para revisar o PR 481")).data.tarefa_id);
+    const d1 = tarefaDe(d, tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "acione o Dev para revisar o PR 481")).data));
     expect(d1).toMatchObject({ agenteId: chico.id, profundidade: 1 });
     // O Chico, cumprindo o pedido da Clarice, aciona o Dev — o que o "um salto" da ADR-058 impedia.
-    const d2 = tarefaDe(d, (await pedir(d, chico, d1.id, "Dev", "revise o PR 481")).data.tarefa_id);
+    const d2 = tarefaDe(d, tarefaDoPedido((await pedir(d, chico, d1.id, "Dev", "revise o PR 481")).data));
     expect(d2).toMatchObject({ agenteId: dev.id, origem: "delegacao", profundidade: 2, sobProcuracaoDe: d.deps.escopo.pessoaId });
     const volta = await entregarRespostaPeer(d.deps, { tarefaId: d2.id, texto: "Aprovar com ressalvas." });
     if (!("continuacao" in volta.data)) throw new Error("deveria entregar ao Chico");
     expect(volta.data.continuacao).toMatchObject({ agenteId: chico.id, conversaId: chico.conversaId, origem: "retomada", retomaTurnoId: d1.id, profundidade: 2, sobProcuracaoDe: d.deps.escopo.pessoaId });
     expect(volta.data.continuacao.entradaTexto).toContain("Todas as respostas que você pediu chegaram: consolide a resposta final para Clarice.");
     // A continuação (2) ainda pede; o pedido nasce no último passe (3), e dali ninguém repassa.
-    const d3 = tarefaDe(d, (await pedir(d, chico, volta.data.continuacao.id, "Dev", "e o CI?")).data.tarefa_id);
+    const d3 = tarefaDe(d, tarefaDoPedido((await pedir(d, chico, volta.data.continuacao.id, "Dev", "e o CI?")).data));
     expect(d3).toMatchObject({ profundidade: 3 });
     await expect(pedir(d, dev, d3.id, "Chico", "me ajuda?")).rejects.toMatchObject({ codigo: "nao_permitido" });
     const ultima = await entregarRespostaPeer(d.deps, { tarefaId: d3.id, texto: "CI verde." });
@@ -248,8 +267,8 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     const chico = await bot(d, "Chico");
     await bot(d, "Dev");
     const cadeia = async (t0: { id: string }) => {
-      const d1 = tarefaDe(d, (await pedir(d, clarice, t0.id, "Chico", "acione o Dev")).data.tarefa_id);
-      const d2 = tarefaDe(d, (await pedir(d, chico, d1.id, "Dev", "revise o PR")).data.tarefa_id);
+      const d1 = tarefaDe(d, tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "acione o Dev")).data));
+      const d2 = tarefaDe(d, tarefaDoPedido((await pedir(d, chico, d1.id, "Dev", "revise o PR")).data));
       return { d1, d2 };
     };
     const marcado = (t: { id: string }) => d.deps.repos.turnos.contaminado(t.id);
@@ -259,7 +278,7 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     const volta = await entregarRespostaPeer(d.deps, { tarefaId: deFora.d2.id, texto: "feito" });
     if (!("continuacao" in volta.data)) throw new Error("deveria entregar ao Chico");
     expect(await marcado(volta.data.continuacao)).toBe(true);
-    const d3 = tarefaDe(d, (await pedir(d, chico, volta.data.continuacao.id, "Dev", "e o CI?")).data.tarefa_id);
+    const d3 = tarefaDe(d, tarefaDoPedido((await pedir(d, chico, volta.data.continuacao.id, "Dev", "e o CI?")).data));
     expect(await marcado(d3)).toBe(true);
     expect(await marcado((await cadeia(await turno(d, clarice.id, clarice.conversaId))).d2)).toBe(false);
     // ADR-062 em cada passe: rotina limpa (fonte da empresa) não marca ninguém na cadeia, nem com exige_aprovacao.
@@ -273,9 +292,9 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     const clarice = await bot(d, "Clarice");
     await bot(d, "Chico");
     const t0 = await turno(d, clarice.id, clarice.conversaId);
-    const d1 = (await pedir(d, clarice, t0.id, "Chico", "veja se o CI do PR 212 passa")).data.tarefa_id;
+    const d1 = tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "veja se o CI do PR 212 passa")).data);
     const tarefa = d.banco.turnos.find((x) => x.id === d1)!;
-    const volta = await d.deps.repos.turnos.enfileirar({ conversaId: tarefa.conversaId, agenteId: tarefa.agenteId, origem: "retomada", retomaTurnoId: d1, prazoEm: AGORA + 600_000, profundidade: tarefa.profundidade, entradaTexto: "[nod] Você marcou para voltar", entradaConfianca: "confiavel", modelo: "haiku", acordarEm: AGORA + 600_000 });
+    const volta = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: tarefa.conversaId, agenteId: tarefa.agenteId, origem: "retomada", retomaTurnoId: d1, prazoEm: AGORA + 600_000, profundidade: tarefa.profundidade, entradaTexto: "[nod] Você marcou para voltar", entradaConfianca: "confiavel", modelo: "haiku", acordarEm: AGORA + 600_000 });
     expect((await entregarRespostaPeer(d.deps, { tarefaId: d1, texto: "Vou esperar o CI." })).data).toEqual({ ignorado: "aguardando_volta" });
     await d.deps.repos.turnos.assentar(volta!.id, { estado: "concluido" });
     const r = await entregarRespostaPeer(d.deps, { tarefaId: volta!.id, texto: "CI verde: pode mergear." });
@@ -290,9 +309,9 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     await bot(d, "Dev 2");
     await bot(d, "Dev 3");
     const t0 = await turno(d, clarice.id, clarice.conversaId);
-    const d1 = (await pedir(d, clarice, t0.id, "Chico", "distribua os PRs 475 e 963 aos Devs")).data.tarefa_id;
-    const paraDev2 = (await pedir(d, chico, d1, "Dev 2", "revise o PR 475")).data.tarefa_id;
-    const paraDev3 = (await pedir(d, chico, d1, "Dev 3", "revise o PR 963")).data.tarefa_id;
+    const d1 = tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "distribua os PRs 475 e 963 aos Devs")).data);
+    const paraDev2 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 2", "revise o PR 475")).data);
+    const paraDev3 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 3", "revise o PR 963")).data);
     const naClarice = () => d.banco.mensagens.filter((m) => m.conversaId === clarice.conversaId && m.payload?.kind === "peer_ask");
 
     // O turno do Chico termina aguardando: nem o texto nem o aviso de falha vão à Clarice.
@@ -325,7 +344,7 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     await bot(d, "Dev 1");
     await bot(d, "Dev 2");
     const t0 = await turno(d, chico.id, chico.conversaId);
-    const paraDev1 = (await pedir(d, chico, t0.id, "Dev 1", "revise o PR 475")).data.tarefa_id;
+    const paraDev1 = tarefaDoPedido((await pedir(d, chico, t0.id, "Dev 1", "revise o PR 475")).data);
     await pedir(d, chico, t0.id, "Dev 2", "revise o PR 481");
     const r = await entregarRespostaPeer(d.deps, { tarefaId: paraDev1, texto: "475 ok" });
     if (!("continuacao" in r.data)) throw new Error("deveria entregar ao Chico");

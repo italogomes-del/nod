@@ -13,7 +13,7 @@ import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -40,7 +40,7 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   }
   // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
   const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
-  // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (a rede de 2 min só promove com bifurcaSessao).
+  // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (com bifurcaSessao, a rede de 2 min bifurca).
   const capacidades = capacidadesAnunciadas(b.capacidades);
   return { inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades };
 }
@@ -267,7 +267,14 @@ export function criarPonteHttpServidor(d: {
       c.recebidas.set(e.turnoId, e.seqLocal);
       if (c.recebidas.size > RECEBIDAS_GUARDADAS) c.recebidas.delete(c.recebidas.keys().next().value!);
       c.planos.delete(e.turnoId);
-      ctx.json(200, { ok: true });
+      // ADR-099 item 9 (definido em 2026-10-12, I5): a frente que terminou com este turno e já vale `sem_trabalho` vai na
+      // resposta, e o Mac a limpa na hora (só com prova). App antigo ignora o campo; falhar aqui não falha a entrega —
+      // a pasta sai na passada de 6 h.
+      const limpar = await (c.ponte.limparAgora?.(ctx.escopo.pessoaId, e.turnoId) ?? Promise.resolve(null)).catch((erro: unknown) => {
+        log("aviso", "limpeza_agora_falhou", { turno_id: e.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
+        return null;
+      });
+      ctx.json(200, limpar ? { ok: true, limparAgora: [limpar] } : { ok: true });
     }),
     /**
      * ADR-048: a máquina PUXA os itens aprovados que rodam no gh dela — o servidor nunca disca (ADR-021).
@@ -315,6 +322,22 @@ export function criarPonteHttpServidor(d: {
       c.ultimo = d.agora();
       await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato));
       ctx.json(200, { ok: true });
+    }),
+    /**
+     * ADR-099 (parte 2, definido em 2026-10-12): a máquina PUXA as esperas de comando que deve estar rodando (o servidor
+     * nunca disca, ADR-021) e relata o fim. A máquina é a da chave, nunca do corpo; servidor antigo responde 404 e o app
+     * segue sem esperas.
+     */
+    rota("esperas", async (ctx) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      ctx.json(200, { esperas: (await c.ponte.esperas?.(ctx.escopo.pessoaId, ctx.params.chaveId!)) ?? [] });
+    }),
+    rota("esperas/resultado", async (ctx, b) => {
+      const c = conexao(ctx);
+      c.ultimo = d.agora();
+      const r = await c.ponte.relatarEspera?.(ctx.escopo.pessoaId, ctx.params.chaveId!, relatoEspera(b.relato));
+      ctx.json(200, r ?? { seguir: false });
     }),
     rota("desconectar", async (ctx) => {
       const c = conexao(ctx);

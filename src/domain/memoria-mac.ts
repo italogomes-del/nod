@@ -54,6 +54,39 @@ export function somarPorGrupo(saidaPs: string): Map<number, number> {
   return soma;
 }
 
+/** Uma linha de `ps -A -o pid=,pgid=,rss=` (rss em KiB). */
+export type LinhaDoPs = { pid: number; pgid: number; rssKib: number };
+
+export function lerLinhasDoPs(saidaPs: string): LinhaDoPs[] {
+  const linhas: LinhaDoPs[] = [];
+  for (const linha of saidaPs.split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/.exec(linha);
+    if (m) linhas.push({ pid: Number(m[1]), pgid: Number(m[2]), rssKib: Number(m[3]) });
+  }
+  return linhas;
+}
+
+/**
+ * A memória de cada grupo, com os fugitivos (definido em 2026-10-11, ADR-097, fase 0c). O Postgres de teste abre sessão
+ * própria e sai do grupo do turno: medido na nod-motor-teste em 11/10, a tela dizia "925 MB" com 5,4 GB em uso. Um
+ * processo fora dos grupos dos turnos que `grupoDoFugitivo` reconhece (pela marca NOD_GRUPO do turno) soma no grupo
+ * dele. Os outros somam no próprio grupo, como antes.
+ */
+export function somarComFugitivos(linhas: readonly LinhaDoPs[], gruposDosTurnos: ReadonlySet<number>, grupoDoFugitivo: (pid: number) => number | undefined): Map<number, number> {
+  const soma = new Map<number, number>();
+  for (const l of linhas) {
+    const dono = gruposDosTurnos.has(l.pgid) ? l.pgid : (grupoDoFugitivo(l.pid) ?? l.pgid);
+    soma.set(dono, (soma.get(dono) ?? 0) + l.rssKib);
+  }
+  return soma;
+}
+
+/** O valor de NOD_GRUPO num ambiente lido (`/proc/<pid>/environ` ou `ps -E`), ou null. */
+export function marcaNoAmbiente(ambiente: string | undefined): string | null {
+  for (const t of (ambiente ?? "").split(/\s+/)) if (t.startsWith("NOD_GRUPO=") && t.length > "NOD_GRUPO=".length) return t.slice("NOD_GRUPO=".length);
+  return null;
+}
+
 const kibParaMb = (kib: number) => Math.round(kib / 1024);
 
 /**
@@ -177,13 +210,17 @@ const peloMenos = (n: NivelPressao | null | undefined, minimo: NivelPressao): bo
  * Trabalho novo em segundo plano espera? (definido em 2026-10-08, ADR-085). Conversa com a pessoa e ligação nunca
  * passam por aqui (o `reivindicar` só segura trabalho que ainda não começou). Sem leitura de um lado, ele não segura.
  * - pouco: a memória em alerta ou o processador começando a apertar (amarela);
- * - equilibrado: a memória em alerta ou o processador cheio (vermelha);
+ * - equilibrado: a memória em alerta;
  * - livre: nunca — só o aviso da ADR-083.
+ * revisto em 2026-10-11 (ADR-097, fase 1): no equilibrado o processador cheio deixou de segurar. Processador cheio deixa
+ * tudo mais lento e não derruba nada; quem o enchia na nod-motor-teste eram os testes que os bots rodavam (rajadas de 1 a 2
+ * min), e o portão barrava um agente novo, que gasta ~5% de um núcleo, por causa deles. Ficou no "pouco", que é a escolha
+ * da pessoa de deixar o Mac folgado para ela.
  */
 export function deveSegurar(uso: UsoDoMac, memoria: NivelPressao | null, processador: NivelPressao | null): boolean {
   if (uso === "livre") return false;
   if (peloMenos(memoria, "amarela")) return true;
-  return peloMenos(processador, uso === "pouco" ? "amarela" : "vermelha");
+  return uso === "pouco" && peloMenos(processador, "amarela");
 }
 
 /**
@@ -317,7 +354,8 @@ export function acabaEmMs(historico: readonly PontoDoDisco[], agora: number): nu
  * - `tudoNovo`: disco crítico (< 3 GB) — nada novo começa, nem a task da pessoa, nem o "Executar agora"; vale em
  *   qualquer uso, até em "O quanto precisar".
  * - `fundo`: só trabalho novo em segundo plano espera (rotina, pedido de colega, a volta marcada); o que a pessoa pediu
- *   passa. Por memória crítica, disco em alerta, memória em alerta ou processador (`deveSegurar`), nunca em "livre".
+ *   passa. Por memória crítica, disco em alerta, memória em alerta ou processador (`deveSegurar`; desde a ADR-097, só no
+ *   "pouco"), nunca em "livre".
  * - `semPrazo`: memória crítica — o segundo plano espera mesmo depois da espera máxima de 1 h.
  * A volta marcada de uma task já começada (ADR-086) só espera pelo disco crítico (revisão do #224: é o próximo passo de
  * algo que já começou).

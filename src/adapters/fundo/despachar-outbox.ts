@@ -1,3 +1,4 @@
+import type { EstadoDoDono } from "../../contracts/dono.ts";
 import type { KindEvento } from "../../contracts/evento.ts";
 import type { TipoFrame } from "../../contracts/frame.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
@@ -7,6 +8,7 @@ import { criarRepos } from "../../repositories/index.ts";
 import type { Barramento } from "../../services/barramento.ts";
 import { OUTBOX_IDADE_MIN_MS, OUTBOX_TETO_TENTATIVAS } from "../../shared/constantes.ts";
 import { ouvirOutbox } from "../../shared/sinal-outbox.ts";
+import { estadoDoDonoAgora } from "../../use-cases/estado-do-dono.ts";
 import type { Conn, Db, Escopo, Relogio } from "../../shared/types.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -90,10 +92,14 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
   const repos = criarRepos(conn, escopo);
   const resultado: ResultadoPassada = { publicados: 0, falhas: 0, abandonadosAgora: 0 };
 
+  const donos = new Map<string, EstadoDoDono | null>();
   for (const item of await repos.outbox.pendentes(opcoes.limite)) {
     try {
+      // ADR-099 (I10, definido em 2026-10-12): o `trabalho.mudou` leva o estado do dono do bot, lido na hora de publicar
+      // (depois do commit de quem mudou): a web atualiza a linha do bot sem refazer a lista. Um por bot por passada.
+      const extra = item.tipo === "trabalho_mudou" ? await estadoDoDonoNoFrame(conn, repos, agora, item.dados.agenteId, donos) : {};
       // conversaId/turnoId do evento vão no frame: é como a web sabe qual conversa reidratar (definido em 2026-09-16, L9).
-      barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
+      barramento.publicar(escopo.pessoaId, frameDoEvento(item.tipo), { ...item.dados, ...extra, kind: item.tipo, eventoId: item.eventoId, conversaId: item.conversaId, turnoId: item.turnoId });
       await repos.outbox.marcarEntregue(item.id);
       resultado.publicados += 1;
     } catch (e) {
@@ -109,6 +115,32 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
     metricas.registrar({ metrica: "outbox_abandonados", tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId }, await repos.outbox.contarAbandonados());
   }
   return resultado;
+}
+
+/**
+ * O estado do dono para o frame (ADR-099, I10). Ler não pode segurar o frame nem a transação do despacho: a leitura roda
+ * num SAVEPOINT e, na falha, o frame sai sem o estado e a web relê por REST, como antes.
+ */
+async function estadoDoDonoNoFrame(conn: Conn, repos: ReturnType<typeof criarRepos>, agora: number, agenteId: unknown, cache: Map<string, EstadoDoDono | null>): Promise<{ estadoDono?: EstadoDoDono }> {
+  if (typeof agenteId !== "string") return {};
+  if (!cache.has(agenteId)) {
+    let estado: EstadoDoDono | null = null;
+    try {
+      await conn`savepoint estado_do_dono`;
+      try {
+        estado = await estadoDoDonoAgora({ repos, agora: () => agora }, agenteId);
+        await conn`release savepoint estado_do_dono`;
+      } catch (e) {
+        await conn`rollback to savepoint estado_do_dono`;
+        throw e;
+      }
+    } catch (e) {
+      log("aviso", "estado_do_dono_falhou", { agente_id: agenteId, erro: e instanceof Error ? e.name : "desconhecido" });
+    }
+    cache.set(agenteId, estado);
+  }
+  const estado = cache.get(agenteId);
+  return estado ? { estadoDono: estado } : {};
 }
 
 /**

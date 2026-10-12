@@ -13,8 +13,9 @@ import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts"
 import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
-import { abrirTask, mandarParaTask } from "../../src/use-cases/coordenar-trabalhos.ts";
+import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { meChameAs } from "../../src/use-cases/me-chame-as.ts";
+import { esperarComando } from "../../src/use-cases/esperar-comando.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
@@ -72,7 +73,7 @@ export type OpcoesServicos = {
   /** Sobrescreve services.conectores (default: falso que registra chamadas e responde "ok:<tool>"). */
   conectores?: Services["conectores"];
   chamadas?: ChamadaConector[];
-  sonda?: (conectorId: string) => ResultadoSonda;
+  sonda?: (conectorId: string, opcoes?: { orcamentoMs?: number }) => ResultadoSonda;
 };
 
 export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { tokenTurno: TokenTurno } {
@@ -89,8 +90,8 @@ export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { token
         chamadas.push({ conectorId, tool, args });
         return { conteudo: `ok:${tool}`, isError: false };
       },
-      async sondar(c) {
-        return opcoes.sonda ? opcoes.sonda(c.id) : { ok: true, ferramentas: [] };
+      async sondar(c, o) {
+        return opcoes.sonda ? opcoes.sonda(c.id, o) : { ok: true, ferramentas: [] };
       },
     },
     interruptor: { registrar: () => undefined, interromper: async () => false },
@@ -116,7 +117,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     passar: async () => ({ data: { ok: true } }),
     encaminhar: async () => ({ data: { ok: true } }),
     semNovidade: async () => ({ data: { ok: true } }),
-    pedirABot: async () => ({ data: { tarefa_id: "tarefa-falsa" } }),
+    pedirABot: async () => ({ data: { ok: true as const, tarefa_id: "tarefa-falsa", instrucao: "pedido entregue", livres: [] } }),
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,
@@ -131,6 +132,10 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     abrirTask,
     mandarParaTask,
     meChameAs,
+    abrirFrentes,
+    mandarParaFrente,
+    devolverResumo,
+    esperarComando,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

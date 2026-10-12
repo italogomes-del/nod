@@ -20,7 +20,7 @@ async function cenario() {
     { nome: "GMAIL_FETCH_EMAILS", descricao: "Lê e-mails", schema: { type: "object" }, readOnlyHint: true },
     { nome: "GMAIL_FETCH_MESSAGE_BY_THREAD_ID", descricao: "Lê thread", schema: { type: "object" }, readOnlyHint: true },
   ];
-  const turno = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "veja meus e-mails", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10_000, profundidade: 0, entradaTexto: "veja meus e-mails", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
   if (!turno) throw new Error("turno");
   const pedir = (capacidades: string[], turnoId = turno.id) =>
     pedirAcesso(deps, { turnoId, conversaId: bot.conversa.id, agenteId: bot.agente.id, conector: "gmail", capacidades, nivel: "leitura", nao_pedido: [] });

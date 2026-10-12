@@ -43,7 +43,9 @@ afterEach(async () => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
     await trx`delete from trabalhos where owner_id = ${p}`;
@@ -86,7 +88,7 @@ async function montar(uso?: UsoDoMac) {
   const tarefa = (origem: OrigemTrabalho, titulo: string) => escopado(async (trx) => {
     const d = depsSobreTrx(trx, PESSOA, { services });
     const { trabalho } = await criarTrabalho(d, { agenteId, conversaId, titulo, origem });
-    const t = await d.repos.turnos.enfileirar({ conversaId, agenteId, origem: origem === "rotina" ? "rotina" : "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    const t = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: origem === "rotina" ? "rotina" : "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: titulo, entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
     return t!.id;
   });
   const puxar = async (l?: LeituraMemoria) => (await ponte.puxar(PESSOA.pessoaId, l))?.turnoId ?? null;
@@ -99,13 +101,18 @@ async function montar(uso?: UsoDoMac) {
 }
 
 describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
-  it("processador cheio no puxar: a task da pessoa sai, a rotina espera; o Mac alivia e, no espaço seguinte, a rotina sai", async () => {
-    const m = await montar();
+  it("processador cheio no puxar, no 'Pouco': a task da pessoa sai, a rotina espera e sai quando o Mac alivia; no equilibrado, nada espera por ele (ADR-097)", async () => {
+    const m = await montar("pouco");
     const rotina = await m.tarefa("rotina", "Verificar o Slack");
     const daPessoa = await m.tarefa("pessoa", "Liberar espaço");
     expect(await m.puxar(leitura("vermelha"))).toBe(daPessoa);
     expect(await m.puxar(leitura("vermelha"))).toBeNull();
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
+
+    await m.gravarUso("equilibrado");
+    m.avancar(ESPACO_FUNDO_MS + 1);
+    const outra = await m.tarefa("rotina", "Verificar o e-mail");
+    expect(await m.puxar(leitura("vermelha"))).toBe(outra);
   });
 
   it("'O quanto precisar' não segura nada (nem com a memória crítica); 'Pouco' segura já no processador apertando", async () => {
@@ -154,7 +161,7 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
   });
 
   it("a mudança só do processador vira o evento do frame (com o processador); o Mac desconectado não segura mais", async () => {
-    const m = await montar();
+    const m = await montar("pouco");
     const rotina = await m.tarefa("rotina", "Rotina A");
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
     m.avancar(ESPACO_FUNDO_MS + 1);

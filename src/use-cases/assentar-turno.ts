@@ -8,23 +8,29 @@ import type { Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { seguimentoNaRede } from "../domain/frente.ts";
+import { capacidadesDe } from "../domain/harness.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
 import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
+import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
+import { trabalhoAberto } from "../domain/trabalho.ts";
+import { entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
-import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { emSavepoint } from "./savepoint.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { esperaAoAssentar } from "./esperar-comando.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -38,10 +44,15 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Quem sabe é a ponte, que guardou o plano puxado.
  */
 /**
+ * `maquinaBifurca` (definido em 2026-10-12, ADR-099, I8): a máquina deste turno anunciou que bifurca sessão com este
+ * harness. Sem isso a rede promoveu largando a sessão da conversa (o dono segue com o histórico), e a sessão do turno
+ * promovido nunca volta para a conversa. Ausente = como antes (bifurca).
+ */
+/**
  * `prontosDaPessoa` (definido em 2026-10-10, emenda da ADR-036): as IAs prontas em alguma máquina viva da pessoa (quem
  * sabe é a ponte). No limite da assinatura, o turno do Automático é repetido na próxima delas pela ordem (aposLimite).
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; prontosDaPessoa?: readonly IdHarness[] };
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[] };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -127,7 +138,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (turno.machineId !== null && turno.machineId !== entrega.machineId) throw new ErroDeDominio("nao_permitido", { cause: "entrega de outra máquina" });
 
   const agora = deps.agora();
-  const executor = entrega.executor ?? "catcher";
+  // NOD-206: a ponte sempre manda o executor do plano; sem ele, o que o plano gravou no turno (nunca um padrão fixo).
+  const executor = entrega.executor ?? turno.executor;
   const resultado = entrega.resultado;
   const tardia = turno.estado !== "pendente" && turno.estado !== "despachando";
   // Revisão do épico (S19, 2026-10-08): mensagens que o CLI recebeu e cuja confirmação não chegou numa renovação (a
@@ -181,7 +193,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
     const conversa = await deps.repos.conversas.buscar(turno.conversaId);
     if (!conversa?.salaId) throw new ErroDeDominio("estado_invalido", { cause: "turno de sala sem sala" });
-    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, eRotina: false });
+    const post = await postarNaSala(deps, { salaId: conversa.salaId, texto: falaTexto, autoria, confianca: turno.entradaConfianca, turnoId: turno.id, executor, eRotina: false });
     mensagem = post.data.mensagem;
     events.push(...(post.events ?? []).filter((ev) => ev.kind !== "mensagem_criada"));
   } else if (falaTexto.trim() !== "" && !silencioso && !rotinaCaida) {
@@ -226,8 +238,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // começou uma sessão nova) devolve a sessão que tem o contexto mais novo da conversa. Ela vira também a da conversa —
     // senão a próxima mensagem bifurcava a sessão antiga (de uma promoção anterior) e perdia este turno inteiro. Só se a
     // conversa não ganhou sessão nova depois da promoção.
+    // revisto em 2026-10-12 (ADR-099, I8): só quando a rede bifurcou. Sem bifurcar, a sessão é só da frente; voltar para
+    // a conversa poria o próximo turno do dono na sessão dela.
     const doTrabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
-    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null) {
+    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null && seguimentoNaRede(capacidadesDe(entrega.harness), entrega.maquinaBifurca !== false) === "bifurcar") {
       const conversa = await deps.repos.conversas.buscar(turno.conversaId);
       if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
     }
@@ -259,22 +273,22 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     else log("aviso", "uso_do_plano_descartado", { turno_id: turno.id, harness_do_turno: entrega.harness ?? null, valido: uso !== undefined });
   }
 
-  for (const nome of resultado.negacoesPermissao) {
+  for (const { nome, causa, vezes } of negacoesDoTurno(resultado)) {
     // definido em 2026-10-01 (ADR-066): a nativa do kit do terminal que o CLI negou foi o HOOK do nod que negou — comando
     // esperando aprovação, recusado ou numa cerca —, não o catálogo. 5 das 6 falas "Bash negada: fora do catálogo deste
     // turno" de 29 e 30/09 (Clarice, Chico, Nina) eram comandos esperando aprovação, num turno com o Bash no plano.
     const motivo = (NATIVAS_DO_TERMINAL as readonly string[]).includes(nome) ? ("alcance_insuficiente" as const) : ("fora_do_catalogo" as const);
-    const negacao = { classe: "ferramenta_negada" as const, nome, motivo, desde: agora, terminal: false };
+    const negacao = { classe: "ferramenta_negada" as const, nome, motivo, desde: agora, terminal: false, ...(causa ? { causa } : {}), ...(vezes > 1 ? { vezes } : {}) };
     const m = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,
       turnoId: turno.id,
       autoria,
       kind: "negacao",
       texto: descreverNegacao(negacao, agora),
-      payload: { kind: "negacao", classe: negacao.classe, nome, motivo: negacao.motivo, terminal: false },
+      payload: { kind: "negacao", classe: negacao.classe, nome, motivo: negacao.motivo, terminal: false, ...(causa ? { causaNativa: causa, vezes } : {}) },
       confianca: "confiavel",
     });
-    events.push(evento(deps.escopo, { kind: "negacao", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { nome, motivo: negacao.motivo, classe: negacao.classe, terminal: false, mensagem_id: m?.id ?? null } }));
+    events.push(evento(deps.escopo, { kind: "negacao", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { nome, motivo: negacao.motivo, classe: negacao.classe, terminal: false, mensagem_id: m?.id ?? null, ...(causa ? { causa_nativa: causa, vezes } : {}) } }));
   }
 
   if (tardia) {
@@ -331,6 +345,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
   } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
+  } else if (limite && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ...limite, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
@@ -365,6 +381,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
   // ADR-086: o turno marcou uma volta ("me chame às 16:00") — ela nasce agora, antes de o trabalho reler o estado.
   events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
+  // ADR-099 (parte 2): o comando que o turno deixou esperando — se já acabou, a volta nasce agora; se o turno terminou
+  // mal, a espera é cancelada.
+  events.push(...(await esperaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
   return { data: { turno: assentado, mensagem, duplicada: false, tardia: false, ...(limiteMudou ? { limiteMudou } : {}) }, events };
@@ -423,6 +442,62 @@ async function aposLimite(
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   // Só códigos e ids (o Marlon lê `ia_trocada` no log de produção depois do deploy).
   log("info", "ia_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, de: p.ia, para, causa: "limite", renova_em: p.renovaEm });
+  return events;
+}
+
+/**
+ * A task (frente) bateu no LIMITE da assinatura e não trocou de IA (definido em 2026-10-12, ADR-099 §7: "nenhuma frente
+ * falha por limite: espera e volta"). Em vez do aviso de interrupção e da task em "não terminou", nasce a retomada do
+ * mesmo trabalho com `acordar_em` na renovação (o prazo do limite, prazoDoLimite: o horário do fornecedor ou 1 h), e a
+ * task ganha uma linha dizendo quando volta. A fila só a entrega depois da hora e com a cota fora do limite (reivindicar);
+ * quem a pega segue na mesma sessão do trabalho. null = não é task aberta (a conversa, a ligação e o turno sem trabalho
+ * ficam com o aviso de sempre), ou a pessoa pediu Parar.
+ */
+async function aposLimiteNoFundo(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora } = p;
+  if (!turno.trabalhoId || turno.origem === "ligacao" || turno.pararSolicitadoEm !== null) return null;
+  const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+  if (!trabalho || !trabalhoAberto(trabalho.estado)) return null;
+  const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
+  await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const volta = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "retomada",
+    retomaTurnoId,
+    trabalhoId: turno.trabalhoId,
+    prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: turno.profundidade,
+    entradaTexto: entradaDaVoltaDaCota(nomeDaIa(p.ia)),
+    entradaConfianca: turno.entradaConfianca,
+    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    executor: turno.executor,
+    acordarEm: p.renovaEm,
+  });
+  if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
+  // A marca de quem leu algo de fora (ADR-062) segue para a volta, como na volta marcada (me-chame-as.ts).
+  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, custo_usd: p.custoUsd } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId, acordar_em: p.renovaEm } }),
+  ];
+  const linha = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    texto: redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }),
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  // Só códigos e ids: para medir o "pronto quando" da parte 7 (nenhuma frente falha por limite).
+  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId, harness: p.ia, renova_em: p.renovaEm });
   return events;
 }
 

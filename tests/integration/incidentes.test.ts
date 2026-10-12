@@ -23,7 +23,7 @@ const T0 = Date.parse("2026-09-24T00:50:00-03:00");
 /** Um turno de conversa rodando numa máquina, com o lease até `ate` (a queda é notada depois). */
 async function turnoRodando(trx: Tx, agenteId: string, conversaId: string, maquina: string, desde: number): Promise<Turno> {
   const repos = criarRepos(trx, MARLON);
-  const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: desde + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+  const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: desde + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
   const r = await repos.turnos.reivindicar({ machineId: maquina, agora: desde });
   if (!t || r?.id !== t.id) throw new Error("turno não reivindicado");
   return r;
@@ -130,7 +130,7 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
   it("0021: as retomar_turno ABERTAS de turnos de rotina (e das retomadas deles) fecham por regra:rotina_nao_retoma; a da conversa fica", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
-      const novo = (origem: "rotina" | "conversa" | "retomada", retomaTurnoId?: string) => repos.turnos.enfileirar({ conversaId, agenteId, origem, retomaTurnoId, prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const novo = (origem: "rotina" | "conversa" | "retomada", retomaTurnoId?: string) => repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, retomaTurnoId, prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const rotina = await novo("rotina");
       const retomada = await novo("retomada", rotina?.id);
       const conversa = await novo("conversa");

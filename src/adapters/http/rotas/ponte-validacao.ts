@@ -1,3 +1,5 @@
+import type { RelatoEspera } from "../../../contracts/espera.ts";
+import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
 import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
@@ -263,6 +265,19 @@ export function comandos(v: unknown): CatalogoDeComandos | undefined {
   return { comandos: lista, soDoTerminal: c.soDoTerminal as string[], versaoCli: c.versaoCli as string | null };
 }
 
+/**
+ * definido em 2026-10-11: o motivo de cada negação do hook do nod. Extra como o uso do plano: fora do formato, some e a
+ * pílula fica com o texto de antes; nunca recusa a entrega.
+ */
+function negacoesDoNod(v: unknown): { nome: string; motivo: string }[] | undefined {
+  if (!Array.isArray(v) || v.length === 0 || v.length > 1000) return undefined;
+  const ok = v.every((x) => {
+    const o = typeof x === "object" && x !== null ? (x as Record<string, unknown>) : null;
+    return o !== null && typeof o.nome === "string" && o.nome.length <= 200 && typeof o.motivo === "string" && o.motivo.length <= 1000;
+  });
+  return ok ? (v as { nome: string; motivo: string }[]).map(({ nome, motivo }) => ({ nome, motivo })) : undefined;
+}
+
 export function entrega(v: unknown, machineId: string, agora: number = Date.now()): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -278,6 +293,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const raioX = execucao(r.execucao);
   const catalogo = comandos(r.comandos);
   const causa = causaSemIa(r.causaSemIa);
+  const doNod = negacoesDoNod(r.negacoesDoNod);
   // NOD-179: o uso do plano também é extra; fora do formato ou com número absurdo, some e a entrega segue.
   const uso = r.usoDoPlano === undefined ? undefined : usoDoPlanoValido(r.usoDoPlano, agora);
   // definido em 2026-09-17: erroCru remoto não entra no log; só os campos do contrato validado atravessam HTTP.
@@ -298,7 +314,26 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(catalogo ? { comandos: catalogo } : {}),
     ...(erroCru ? { erroCru } : {}),
     ...(causa ? { causaSemIa: causa } : {}),
+    ...(doNod ? { negacoesDoNod: doNod } : {}),
     ...(uso ? { usoDoPlano: uso } : {}),
     ...(voltaEm !== null ? { limiteVoltaEm: voltaEm } : {}),
   } };
+}
+
+/**
+ * ADR-099 (parte 2, definido em 2026-10-12): o relato de uma espera. A saída vem cortada pelo app (as últimas linhas); o
+ * teto aqui é 4× o que se guarda, só para recusar o absurdo — o servidor corta de novo (ultimasLinhas).
+ */
+export function relatoEspera(v: unknown): RelatoEspera {
+  const r = objeto(v);
+  const id = uuid(r.id);
+  if (r.tipo === "iniciou") return { id, tipo: "iniciou" };
+  if (r.tipo === "caiu") {
+    exigir(r.motivo === "pasta_ausente" || r.motivo === "nao_iniciou");
+    return { id, tipo: "caiu", motivo: r.motivo };
+  }
+  exigir(r.tipo === "terminou");
+  exigir(r.codigo === null || (typeof r.codigo === "number" && Number.isInteger(r.codigo) && r.codigo >= -1 && r.codigo <= 255));
+  exigir(texto(r.saida, 4 * SAIDA_ESPERA_MAX));
+  return { id, tipo: "terminou", codigo: r.codigo as number | null, saida: r.saida };
 }

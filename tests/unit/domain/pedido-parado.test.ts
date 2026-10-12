@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decidirPedidoParado, DESISTIR_SEM_SINAL_MS, MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS, type PedidoParado } from "../../../src/domain/pedido-parado.ts";
+import { decidirFrenteCaida, decidirPedidoParado, DESISTIR_SEM_SINAL_MS, MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS, type PedidoParado } from "../../../src/domain/pedido-parado.ts";
 
 /** A regra de src/domain/pedido-parado.ts (2026-10-08): o que fazer com um pedido a colega que parou sem voltar. */
 const AGORA = Date.parse("2026-10-08T15:00:00Z");
@@ -55,5 +55,31 @@ describe("decidirPedidoParado", () => {
   it("precisa de você por outra decisão: espera (o vencimento de 24 h já avisa); falhou por outro motivo: avisa com o motivo", () => {
     expect(decidir({ estadoColega: "precisa_de_voce", ultimoMotivo: null })).toEqual({ tipo: "esperar" });
     expect(decidir({ ultimoMotivo: "trabalho_incompleto" })).toEqual({ tipo: "avisar_falha", motivo: "<trabalho_incompleto>" });
+  });
+});
+
+describe("decidirFrenteCaida (ADR-099, I9): a frente de lote que caiu", () => {
+  const caida: Partial<PedidoParado> = { estadoColega: "precisa_de_voce", ultimoMotivo: "maquina_sem_contato", cardRetomar: { id: "c", aberto: true } };
+  const frente = (p: Partial<PedidoParado>) => decidirFrenteCaida({ ...base, ...caida, ...p }, AGORA, legivel);
+
+  it("caiu e as máquinas voltaram: retoma, contando a tentativa; sem sinal ainda, espera", () => {
+    expect(frente({})).toEqual({ tipo: "esperar" });
+    expect(frente({ sinalDepoisDaQueda: true })).toEqual({ tipo: "retomar", turnoId: "ultimo", tentativa: 2 });
+    expect(frente({ sinalDepoisDaQueda: true, quedas: 2 })).toEqual({ tipo: "retomar", turnoId: "ultimo", tentativa: 3 });
+  });
+
+  it(`na ${MAX_QUEDAS_POR_PEDIDO}ª queda, com a queda velha ou sem sinal em 30 min, desiste com o motivo (a frente fecha falhou)`, () => {
+    expect(frente({ quedas: MAX_QUEDAS_POR_PEDIDO, sinalDepoisDaQueda: true })).toEqual({ tipo: "desistir", motivo: `<maquina_sem_contato> (caiu ${MAX_QUEDAS_POR_PEDIDO} vezes)` });
+    expect(frente({ quedaEm: AGORA - RETOMAR_ATE_MS - 1, sinalDepoisDaQueda: true })).toEqual({ tipo: "desistir", motivo: "<maquina_sem_contato>, e já faz mais de 2 h" });
+    expect(frente({ quedaEm: AGORA - DESISTIR_SEM_SINAL_MS - 1 })).toEqual({ tipo: "desistir", motivo: "<maquina_sem_contato>, e as máquinas não voltaram em 30 min" });
+  });
+
+  it("o \"Retomar\" já decidido pela pessoa, ou a frente parada por outra pergunta: espera — a decisão é dela", () => {
+    expect(frente({ cardRetomar: { id: "c", aberto: false }, sinalDepoisDaQueda: true })).toEqual({ tipo: "esperar" });
+    expect(frente({ ultimoMotivo: "trabalho_incompleto" })).toEqual({ tipo: "esperar" });
+  });
+
+  it("frente que terminou não é caso do varredor (a I3 já fechou o lote): espera", () => {
+    expect(frente({ estadoColega: "terminado", textoFinal: "feito", turnoDoTextoFinal: "t" })).toEqual({ tipo: "esperar" });
   });
 });

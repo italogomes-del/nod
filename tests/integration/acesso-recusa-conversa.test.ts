@@ -60,7 +60,7 @@ describeIntegracao("card de acesso recusado pela conversa (NOD-202)", () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const w = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Resumo do Gmail", origem: "pessoa" })).trabalho;
-      const t = await m.repos.turnos.enfileirar({ conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "resuma", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
+      const t = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "resuma", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
       if (!t) throw new Error("turno");
       const machineId = randomUUID();
       for (let i = 0; i < 10; i++) {

@@ -19,7 +19,7 @@ describe("assentarTurno: turno marcado com sem_novidade não escreve a fala na c
     const { deps, banco } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
     const conversaId = criado.conversa.id;
-    const turno = await deps.repos.turnos.enfileirar({ conversaId, agenteId: criado.agente.id, origem, entradaTexto: "verificar o Slack", entradaConfianca: "confiavel", prazoEm: deps.agora() + 60_000, profundidade: 0, modelo: "claude-haiku-4-5-20251001" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId: criado.agente.id, origem, entradaTexto: "verificar o Slack", entradaConfianca: "confiavel", prazoEm: deps.agora() + 60_000, profundidade: 0, modelo: "claude-haiku-4-5-20251001" });
     const machineId = randomUUID();
     await deps.repos.turnos.reivindicar({ machineId, agora: deps.agora() });
     if (opcoes.marcar) await deps.repos.turnos.marcarSemNovidade(turno!.id, "nada_mudou");

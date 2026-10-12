@@ -80,7 +80,8 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
       expect(new Date(r.data.proximaExecucao).toISOString()).toBe(SEGUINTE);
       expect((await c.repos.rotinaJanelas.listar(c.rotina.id)).map((j) => j.turnoId)).toEqual([r.data.turno.id]);
       expect(await c.repos.rotinaExecucoes.listar(c.rotina.id)).toEqual([]);
-      expect(r.events?.map((e) => e.kind)).toEqual(["trabalho_mudou", "turno_criado"]);
+      // ADR-099 (I7 revista): sem trabalho, só o turno do dono.
+      expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
     });
   });
 
@@ -128,7 +129,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
   it("(e) atualizar_rotina só com o flag vira proposta e, aplicada, liga; repetir o valor é entrada_invalida; desligar volta; listar mostra só quando ligado", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx, false);
-      const turno = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "só acorde com pendência", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "só acorde com pendência", entradaConfianca: "confiavel", modelo: "m" });
       const ctx = contexto(c.agenteId, c.conversaId, turno?.id);
       expect((await listarRotinasDoAgente(c.deps, ctx)).data.rotinas[0]).not.toHaveProperty("so_com_pendencia");
 
@@ -164,7 +165,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "crie a rotina", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "crie a rotina", entradaConfianca: "confiavel", modelo: "m" });
       const ctx = contexto(agenteId, conversaId, turno?.id);
       const com = await criarRotina(deps, { ...ctx, ...rotinaValida({ cron: "*/20 * * * *" }), so_com_pendencia: true });
       if ("erro" in com.data) throw new Error(`erro inesperado: ${com.data.erro}`);

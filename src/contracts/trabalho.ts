@@ -1,7 +1,10 @@
 import type { Executor } from "./evento.ts";
+import type { DonosNosTrabalhos, FrenteNaLinhaAberta } from "./dono.ts";
+export type { DonoDto, DonoNaConversa } from "./dono.ts";
+import type { CamposDeFrente } from "./frente.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
-import type { LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
+import type { CotaNosTrabalhos, CotaNoTrabalho, LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
 
 /**
  * Trabalho (definido em 2026-10-07, ADR-083, épico #188): uma unidade de trabalho longo de um bot, com sessão do CLI e
@@ -27,7 +30,7 @@ export type EstadoTrabalho = "na_fila" | "rodando" | "precisa_de_voce" | "fechad
 /** Estados em que o trabalho conta como aberto (faixa, chip da barra, "Trabalhando" e "Precisa de você"). */
 export const ESTADOS_ABERTOS_TRABALHO = ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"] as const satisfies readonly EstadoTrabalho[];
 
-export type Trabalho = {
+export type Trabalho = CamposDeFrente & {
   tenantId: TenantId;
   id: string;
   agenteId: string;
@@ -53,10 +56,8 @@ export type Trabalho = {
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
   memoriaMb: number | null;
   custoUsd: number | null;
-  /**
-   * definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando — "Executar agora" numa rotina,
-   * ou um pedido a colega feito na conversa com ela. O Mac apertado não segura este trabalho.
-   */
+  /** definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando ("Executar agora" numa rotina, ou
+   * um pedido a colega feito na conversa com ela). O Mac apertado não segura este trabalho. */
   pessoaEsperando?: boolean;
   criadoEm: EpochMs;
   iniciadoEm: EpochMs | null;
@@ -92,10 +93,9 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    */
   esperaDoMac?: MotivoEsperaMac | null;
   /**
-   * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno
-   * na fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera
-   * aliviar ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou máquina
-   * desconhecida.
+   * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno na
+   * fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera aliviar
+   * ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou desconhecida.
    */
   maquina?: MaquinaDoTrabalho | null;
   /**
@@ -105,12 +105,11 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   esperandoColega?: { nome: string; desde: number; trabalhoId: string | null } | null;
   /** Quanto os turnos do trabalho de fato rodaram (do começo ao último sinal de cada um, o que roda até agora), em ms. */
   trabalhouMs?: number;
-  /**
-   * definido em 2026-10-08 (ADR-086): o bot combinou de voltar a esta hora ("me chame às 16:00") e saiu do Mac até lá.
-   * Ausente ou null: nenhuma volta marcada.
-   */
+  /** definido em 2026-10-08 (ADR-086): o bot volta a esta hora ("me chame às 16:00"); ausente ou null: nenhuma volta. */
   acordaEm?: number | null;
-};
+  /** definido em 2026-10-12 (ADR-099, parte 2): o comando que o bot deixou esperando (`esperar_comando`); null = nenhum. */
+  esperandoComando?: { motivo: string; desde: number } | null;
+} & CotaNoTrabalho & FrenteNaLinhaAberta;
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */
 export type NivelPressao = "verde" | "amarela" | "vermelha";
@@ -150,7 +149,7 @@ export type TrabalhosDto = {
    * anterior.
    */
   maquinas?: LeituraDeMaquinaDto[];
-};
+} & CotaNosTrabalhos & DonosNosTrabalhos;
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };

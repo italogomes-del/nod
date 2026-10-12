@@ -33,7 +33,11 @@ export type TipoFrame =
   | "relato.criado"
   /** Modo ligação (ADR-071/075): a ligação da pessoa começou, mudou de estado ou acabou; a web relê a conversa e a ligação viva. */
   | "ligacao.mudou"
-  /** ADR-083: um trabalho do bot nasceu, mudou de estado ou de passo: {trabalhoId, agenteId, conversaId, estado}. A web relê os trabalhos. */
+  /**
+   * ADR-083: um trabalho do bot nasceu, mudou de estado ou de passo: {trabalhoId, agenteId, conversaId, estado}. A web relê os
+   * trabalhos. ADR-099 (I10, 2026-10-12): também {forma, loteId} e `estadoDono` (o EstadoDoDono do bot, lido na hora de
+   * publicar; ausente se a leitura falhou) — a linha do bot se atualiza sem refazer a lista.
+   */
   | "trabalho.mudou"
   /** ADR-083 (#194): a pressão de memória do Mac mudou de nível: {nivel}. Só na mudança. */
   | "memoria.mudou"

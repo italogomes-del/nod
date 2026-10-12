@@ -14,6 +14,7 @@ const base = (conversaId: string, agenteId: string, extra: Partial<Parameters<Re
   conversaId,
   agenteId,
   origem: "conversa" as const,
+  executor: "catcher" as const,
   prazoEm: Date.now() + 60_000,
   profundidade: 0 as const,
   entradaTexto: "oi",
@@ -161,6 +162,103 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
       const retomada = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "retomada", retomaTurnoId: id, reenvios: 1 }));
       expect(retomada).toMatchObject({ estado: "pendente", retomaTurnoId: id, reenvios: 1, origem: "retomada" });
       expect((await repos.turnos.listarDaConversa(conversaId)).map((x) => x.id)).toEqual([id, retomada?.id]);
+    });
+  });
+});
+
+/** Uma fala da pessoa gravada na conversa: o marcador que faz o turno ser "da pessoa" (mensagem_origem_id). */
+async function fala(repos: ReturnType<typeof criarRepos>, conversaId: string, texto: string): Promise<string> {
+  const autoria = { autor_tipo: "pessoa" as const, autor_id: PESSOA_MARLON, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "pessoa" as const, regra_versao: 1 };
+  const m = await repos.mensagens.criar({ conversaId, autoria, kind: "texto", texto, confianca: "confiavel" });
+  return m?.id ?? "";
+}
+
+describeIntegracao("turnosRepo: a fala da pessoa passa na frente na fila do dono (ADR-099, I6)", () => {
+  it("a pessoa sai antes da volta marcada já vencida (me_chame_as), mesmo chegando depois; a volta sai em seguida", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const original = await repos.turnos.enfileirar(base(conversaId, agenteId));
+      await repos.turnos.assentar(original?.id ?? "", { estado: "concluido" });
+      const volta = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "retomada", retomaTurnoId: original?.id ?? null, acordarEm: agora - 60_000 }));
+      const pessoa = await repos.turnos.enfileirar(base(conversaId, agenteId, { entradaTexto: "e o relatório?", mensagemOrigemId: await fala(repos, conversaId, "e o relatório?") }));
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(pessoa?.id);
+      // Mesma conversa: a volta espera a fala assentar (um turno de conversa por vez).
+      expect(await repos.turnos.reivindicar({ machineId: MAQUINA, agora })).toBeNull();
+      await repos.turnos.assentar(pessoa?.id ?? "", { estado: "concluido" });
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(volta?.id);
+    });
+  });
+
+  it("a pessoa sai antes do despertar de uma espera (retomada que acorda agora), e nunca tira do lugar quem já está despachando", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const rodando = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "retomada" }));
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(rodando?.id);
+      // Enquanto a retomada roda, chegam o despertar de uma espera e depois a fala da pessoa.
+      const despertar = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "retomada", retomaTurnoId: rodando?.id ?? null, acordarEm: agora }));
+      const pessoa = await repos.turnos.enfileirar(base(conversaId, agenteId, { mensagemOrigemId: await fala(repos, conversaId, "e aí?") }));
+      // A fala não interrompe: nada mais sai da conversa enquanto há um turno dela despachando.
+      expect(await repos.turnos.reivindicar({ machineId: MAQUINA, agora })).toBeNull();
+      expect(await repos.turnos.buscar(rodando?.id ?? "")).toMatchObject({ estado: "despachando", machineId: MAQUINA });
+      expect((await repos.turnos.buscar(pessoa?.id ?? ""))?.estado).toBe("pendente");
+      await repos.turnos.assentar(rodando?.id ?? "", { estado: "concluido" });
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(pessoa?.id);
+      await repos.turnos.assentar(pessoa?.id ?? "", { estado: "concluido" });
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(despertar?.id);
+    });
+  });
+
+  it("a pessoa sai antes da continuação de colega (a retomada de quem pediu e a resposta 'peer'), que mantêm a ordem de antes", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const pediu = await repos.turnos.enfileirar(base(conversaId, agenteId));
+      await repos.turnos.assentar(pediu?.id ?? "", { estado: "concluido" });
+      // entregar-resposta-peer.ts: 'retomada' quando a tarefa foi delegada, 'peer' quando foi uma pergunta.
+      const continuacao = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "retomada", retomaTurnoId: pediu?.id ?? null, profundidade: 1, entradaConfianca: "nao_confiavel" }));
+      const resposta = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "peer", profundidade: 1, entradaConfianca: "nao_confiavel" }));
+      const pessoa = await repos.turnos.enfileirar(base(conversaId, agenteId, { mensagemOrigemId: await fala(repos, conversaId, "pode parar") }));
+      const ordem: (string | undefined)[] = [];
+      for (let i = 0; i < 3; i++) {
+        const t = await repos.turnos.reivindicar({ machineId: MAQUINA, agora });
+        ordem.push(t?.id);
+        await repos.turnos.assentar(t?.id ?? "", { estado: "concluido" });
+      }
+      expect(ordem).toEqual([pessoa?.id, continuacao?.id, resposta?.id]);
+    });
+  });
+
+  it("duas falas da pessoa mantêm a ordem de chegada entre si, as duas antes da volta; turno de conversa sem fala (sem mensagem_origem_id) não fura", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const outra = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const semFala = await repos.turnos.enfileirar(base(outra.conversaId, outra.agenteId));
+      const volta = await repos.turnos.enfileirar(base(outra.conversaId, outra.agenteId, { origem: "retomada", acordarEm: agora - 1_000 }));
+      const primeira = await repos.turnos.enfileirar(base(conversaId, agenteId, { mensagemOrigemId: await fala(repos, conversaId, "um") }));
+      const segunda = await repos.turnos.enfileirar(base(outra.conversaId, outra.agenteId, { mensagemOrigemId: await fala(repos, outra.conversaId, "dois") }));
+      const ordem: (string | undefined)[] = [];
+      for (let i = 0; i < 4; i++) {
+        const t = await repos.turnos.reivindicar({ machineId: MAQUINA, agora });
+        ordem.push(t?.id);
+        await repos.turnos.assentar(t?.id ?? "", { estado: "concluido" });
+      }
+      expect(ordem).toEqual([primeira?.id, segunda?.id, semFala?.id, volta?.id]);
+    });
+  });
+
+  it("a faixa do trabalho não muda: a fala mandada a uma task não passa na frente da volta de outra conversa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const outra = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const volta = await repos.turnos.enfileirar(base(outra.conversaId, outra.agenteId, { origem: "retomada", acordarEm: agora - 1_000 }));
+      const trabalho = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Relatório", origem: "pessoa" });
+      const naTask = await repos.turnos.enfileirar(base(conversaId, agenteId, { trabalhoId: trabalho?.id ?? null, mensagemOrigemId: await fala(repos, conversaId, "para a task") }));
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(volta?.id);
+      expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(naTask?.id);
     });
   });
 });

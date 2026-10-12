@@ -16,7 +16,7 @@ describeIntegracao("memória por bot (Grok Bot: memória não é fonte)", () => 
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
-      const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
 
       const r = await executar(deps, lembrar, { turnoId: turno?.id ?? "", agenteId: criado.agente.id, conversaId: criado.conversa.id, tipo: "preferencia", texto: "prefere resumos em tópicos" });
       expect(r.data).toEqual({ ok: true, id: expect.any(String) });
@@ -49,7 +49,7 @@ describeIntegracao("memória por bot (Grok Bot: memória não é fonte)", () => 
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
-      const turno = await deps.repos.turnos.enfileirar({ conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: criado.conversa.id, agenteId: criado.agente.id, origem: "conversa", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       // A frase que a Clarice gravou em 30/09, 22:50.
       const texto = "Dev 3/Dev 4 não têm terminal nem permissão de push no GitHub";
 

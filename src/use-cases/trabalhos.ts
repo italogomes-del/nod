@@ -6,12 +6,16 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { cotaDasIas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDoTurno } from "../domain/cota-da-ia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { donosDosBots } from "./estado-do-dono.ts";
+import { fecharLoteSePronto } from "./fechar-lote.ts";
+import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -22,14 +26,17 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 
 type DepsTrabalho = Pick<Deps, "repos" | "escopo" | "agora">;
 
-/** O frame `trabalho.mudou` sai pelo outbox: só ids e estado (KindEvento `trabalho_mudou`). */
-export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" | "agenteId" | "conversaId" | "estado" | "origem">): RuntimeEvent {
+/**
+ * O frame `trabalho.mudou` sai pelo outbox: só ids e estado (KindEvento `trabalho_mudou`). revisto em 2026-10-12 (ADR-099,
+ * I10): também a forma e o lote; o estado do dono do bot entra no frame na hora de publicar (despachar-outbox.ts).
+ */
+export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" | "agenteId" | "conversaId" | "estado" | "origem"> & Partial<Pick<Trabalho, "forma" | "loteId">>): RuntimeEvent {
   return evento(deps.escopo, {
     kind: "trabalho_mudou",
     autoria: autoriaAgente({ agenteId: t.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:trabalhos" }),
     agora: deps.agora(),
     conversaId: t.conversaId,
-    dados: { trabalhoId: t.id, agenteId: t.agenteId, conversaId: t.conversaId, estado: t.estado, origem: t.origem },
+    dados: { trabalhoId: t.id, agenteId: t.agenteId, conversaId: t.conversaId, estado: t.estado, origem: t.origem, forma: t.forma ?? "task", loteId: t.loteId ?? null },
   });
 }
 
@@ -63,7 +70,11 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   const novo = estadoDoTrabalho({ ...fatos, estadoAtual: atual.estado, iniciado: atual.iniciadoEm !== null });
   if (novo === atual.estado) return [];
   const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora());
-  return mudou ? [eventoTrabalhoMudou(deps, mudou)] : [];
+  if (!mudou) return [];
+  // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
+  await resumoSeFaltar(deps, mudou);
+  // ADR-099 (I3): e fecha o lote dela, se era a vez (o trabalho já está travado; o lote trava por último).
+  return [eventoTrabalhoMudou(deps, mudou), ...(await fecharLoteSePronto(deps, mudou))];
 }
 
 /**
@@ -175,6 +186,9 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       esperandoColega: e?.esperandoColega ?? null,
       trabalhouMs: e?.trabalhouMs ?? 0,
       acordaEm: e?.acordaEm ?? null,
+      esperandoComando: e?.esperandoComando ?? null,
+      acordaMotivo: e?.acordaMotivo ?? null,
+      lote: e?.lote ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   }).map((dto) => (alemDisso ? { ...dto, ...alemDisso(dto, extras.get(dto.id)) } : dto));
@@ -200,18 +214,33 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
   // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
   const fila = memoria?.fila ?? null;
-  const usoDoMac = memoria === null ? "livre" : (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO;
+  const [preferencias, usos, agentes] = await Promise.all([deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.agentes.listar()]);
+  const usoDoMac = memoria === null ? "livre" : preferencias.usoDoMac ?? USO_DO_MAC_PADRAO;
+  // definido em 2026-10-12 (ADR-099 §7): a cota da IA, a mesma regra do `reivindicar` (domain/cota-da-ia.ts). A pílula diz
+  // quando o fundo volta; a linha da task diz que ela espera a cota.
+  const cotaAgora = cotaDasIas({ usos, limites: preferencias.iasNoLimite, agora: deps.agora() });
+  const conhecidas = iasConhecidas(usos, preferencias.iasNoLimite);
+  const botsPorId = new Map(agentes.map((a) => [a.id, a]));
+  const comCota = (t: TrabalhoDto): TrabalhoDto => {
+    if (cotaAgora.length === 0 || !trabalhoAberto(t.estado)) return t;
+    const bot = botsPorId.get(t.agenteId);
+    const situacao = bot ? situacaoDoTurno({ harness: bot.harness ?? "auto", modelo: bot.modelo }, cotaAgora, conhecidas) : "livre";
+    return esperaDaCotaNaTela(t, situacao) ? { ...t, esperaDaCota: true } : t;
+  };
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
-  const topo = { pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  const topo = { cota: cotaParaTela(cotaAgora), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
+  const bots = input.agenteId ? [input.agenteId] : agentes.filter((a) => a.ownerId === deps.escopo.pessoaId && !a.excluidoEm).map((a) => a.id);
+  const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];
   const servico = deps.services.maquinas;
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
     const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
       const motivo = esperaDoMac(t, portao, agora);
-      return motivo ? { ...t, esperaDoMac: motivo } : t;
+      return comCota(motivo ? { ...t, esperaDoMac: motivo } : t);
     });
-    return { data: { trabalhos: dtos, ...topo } };
+    return { data: { trabalhos: dtos, ...topo, donos } };
   }
   const { maquinas, portoes, nomear } = maquinasDaPessoa(deps, servico, usoDoMac);
   const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
@@ -223,7 +252,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const maquina = espera?.maquinaId ?? id;
     return { esperaDoMac: espera?.motivo ?? null, maquina: maquina === null ? null : nomear(maquina) };
   });
-  return { data: { trabalhos: dtos, ...topo, maquinas } };
+  return { data: { trabalhos: dtos.map(comCota), ...topo, maquinas, donos } };
 };
 
 /**
@@ -256,12 +285,6 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
     };
   });
   return { maquinas, portoes, nomear };
-}
-
-/** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */
-export async function trabalhosAbertosDaConversa(deps: Pick<Deps, "repos" | "services" | "agora">, agenteId: string | null): Promise<TrabalhoDto[]> {
-  if (!agenteId) return [];
-  return trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agenteId));
 }
 
 /**
@@ -303,8 +326,15 @@ export async function fecharPorMemoria(deps: DepsTrabalho, turnoId: string): Pro
 export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<RuntimeEvent[]> {
   if (trabalhoFinal(t.estado)) return [];
   const events = await fecharDecisoesDoTrabalho(deps, t.id);
+  // ADR-099 (parte 2): o comando que a task deixou esperando para junto (o motor mata o grupo no próximo puxar).
+  await deps.repos.esperas.cancelarRodando({ trabalhoId: t.id }, "parada pela pessoa", deps.agora());
   const parado = await deps.repos.trabalhos.mudarEstado(t.id, "parado", deps.agora());
-  if (parado) events.push(eventoTrabalhoMudou(deps, parado));
+  if (parado) {
+    await resumoSeFaltar(deps, parado);
+    events.push(eventoTrabalhoMudou(deps, parado));
+    // ADR-099 (I3): a frente parada pela pessoa conta como encerrada — o lote fecha com o que tiver.
+    events.push(...(await fecharLoteSePronto(deps, parado)));
+  }
   return events;
 }
 

@@ -3,6 +3,9 @@ import type { IdHarness } from "../../contracts/harness.ts";
 import type { LimitesIa } from "../../contracts/inteligencia.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import { iasNoLimite } from "../../domain/inteligencia.ts";
+import { cotaDasIas } from "../../domain/cota-da-ia.ts";
+import type { CotaDaIa } from "../../contracts/cota.ts";
+import type { UsoDoPlano } from "../../contracts/uso-do-plano.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PastaParaLimpar, PedidoRenovar, PonteInterna, RelatoLimpeza, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -18,7 +21,9 @@ import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
-import { camposDoRelato, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
+import { camposDoRelato, pastaSemTrabalhoDoTurno, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
+import { relatarEspera as relatarEsperaDaMaquina } from "../../use-cases/esperar-comando.ts";
+import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "../../contracts/espera.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
@@ -138,8 +143,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   /**
    * ADR-083 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
+   * ADR-099 (I8, 2026-10-12): e o modo do plano — a retomada do dono só é promovida em modo conversa.
    */
-  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean }>();
+  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean; modo: PlanoTurno["modoTurno"] | null }>();
   /**
    * Revisão do épico (S21, 2026-10-08): a última vez que o turno foi puxado ou renovado. Passado o lease sem notícia, o
    * varredor de lease o encerra no banco e a entrega talvez nunca chegue: `oferecidas` e `despachados` dele saem aqui
@@ -151,8 +157,13 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
    */
   const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
-  /** 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). */
-  const limitesLidos = new Map<string, { limites: LimitesIa; ate: number; lidoEm: number }>();
+  /**
+   * 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). ADR-099 §7 (2026-10-12): junto,
+   * o uso do plano que cada CLI informou (a cota), na mesma leitura e no mesmo prazo de 30 s.
+   */
+  const limitesLidos = new Map<string, { limites: LimitesIa; usos: UsoDoPlano[]; ate: number; lidoEm: number }>();
+  /** ADR-099 §7: o que a cota segura em cada pessoa agora — o log `cota_segura` sai só na mudança. */
+  const cotaVista = new Map<string, string>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
   /**
@@ -179,6 +190,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       if (inv && todos[id]?.estado !== "pronto") todos[id] = inv;
     }
     return todos;
+  }
+
+  /** S15 (2026-10-08): a máquina anunciou que bifurca sessão com este harness. Ausente (app antigo) = não. */
+  function maquinaBifurcaCom(machineId: string, harness: string | null): boolean {
+    return harness !== null && maquinas.get(machineId)?.capacidades?.[harness as IdHarness]?.bifurcaSessao === true;
   }
 
   async function resolverEscopo(pessoaId: string): Promise<Escopo | null> {
@@ -221,18 +237,26 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     }
   }
 
-  /** 0068: as IAs da pessoa no limite agora. Sem leitura (erro do banco), a última que deu certo, ou nenhuma. */
-  async function noLimiteDe(escopo: Escopo): Promise<IdHarness[]> {
+  /**
+   * 0068: as IAs da pessoa no limite agora; ADR-099 §7: e as que a cota segura (reserva ou limite). Sem leitura (erro do
+   * banco), a última que deu certo, ou nenhuma.
+   */
+  async function limitesECotaDe(escopo: Escopo): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[] }> {
     const guardado = limitesLidos.get(escopo.pessoaId);
-    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return iasNoLimite(guardado.limites, agora());
+    const de = (g: { limites: LimitesIa; usos: UsoDoPlano[] } | undefined) => ({ noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIas({ usos: g?.usos ?? [], limites: g?.limites, agora: agora() }) });
+    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return de(guardado);
     try {
       const lidoEm = agora();
-      const limites = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).iasNoLimite ?? {};
-      limitesLidos.set(escopo.pessoaId, { limites, ate: lidoEm + LIMITES_VALEM_MS, lidoEm });
-      return iasNoLimite(limites, agora());
+      const { limites, usos } = await abrirTxEscopada(db, escopo)(async (trx) => {
+        const repos = criarRepos(trx, escopo);
+        return { limites: (await repos.preferencias.buscar()).iasNoLimite ?? {}, usos: await repos.usoDoPlano.listar() };
+      });
+      const lido = { limites, usos, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
+      limitesLidos.set(escopo.pessoaId, lido);
+      return de(lido);
     } catch (e) {
       log("aviso", "limites_ia_sem_leitura", { pessoa_id: escopo.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
-      return iasNoLimite(guardado?.limites, agora());
+      return de(guardado);
     }
   }
 
@@ -263,8 +287,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
       const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
       const uso = pressao ? await usoDoMac(escopo) : "livre";
-      // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite.
-      const noLimite = maquina.harnesses ? await noLimiteDe(escopo) : [];
+      // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite. ADR-099 §7: a cota vale para
+      // qualquer máquina (sem a lista de IAs, a de sempre).
+      const lidos = await limitesECotaDe(escopo);
+      const noLimite = maquina.harnesses ? lidos.noLimite : [];
+      const cota = lidos.cota;
+      const cotaAgora = cota.map((c) => `${c.ia}:${c.situacao}`).join(" ");
+      if ((cotaVista.get(pessoaId) ?? "") !== cotaAgora) {
+        cotaVista.set(pessoaId, cotaAgora);
+        // Para medir o gatilho de reversão da ADR-099 (a conversa parada por cota mesmo com a reserva).
+        log("info", cotaAgora ? "cota_segura" : "cota_solta", { pessoa_id: pessoaId, ias: cotaAgora, volta_em: cota.length ? Math.max(...cota.map((c) => c.voltaEm)) : null });
+      }
       // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
       // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
       const portao = portaoDoMac(uso, pressao);
@@ -291,11 +324,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
-            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true });
+            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true, modo: r.data.plano.modoTurno ?? null });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
@@ -336,7 +369,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, mensagens, ids, semMoldura, conversaSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -386,7 +419,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (mudanca) deps.desfazerMemoria?.(escopo.pessoaId, mudanca);
           throw e;
         }
-        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, conversaSemTrabalho: turno !== null && !turno.trabalhoId && turno.origem === "conversa" };
+        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
       if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
@@ -394,17 +427,18 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const despachado = despachados.get(p.turnoId);
       const redeMs = deps.redeMs ?? REDE_MS;
       const harness = harnesses.get(p.turnoId) ?? null;
-      // definido em 2026-10-08 (revisão do épico, S15): só promove quando a MÁQUINA deste turno anunciou que bifurca sessão
-      // com este harness (AnuncioMaquina.capacidades, já com o piso do CLI dela). App antigo não anuncia: não promove — ele
-      // poria dois CLIs na mesma sessão, e o CLI sem --fork-session recusaria a próxima mensagem para sempre.
-      const maquinaBifurca = harness !== null && maquinas.get(p.machineId)?.capacidades?.[harness]?.bifurcaSessao === true;
+      // definido em 2026-10-08 (revisão do épico, S15): a MÁQUINA deste turno anunciou que bifurca sessão com este harness
+      // (AnuncioMaquina.capacidades, já com o piso do CLI dela)? App antigo não anuncia.
+      // revisto em 2026-10-12 (ADR-099, I8): isso não decide mais SE promove, só COMO o dono segue — bifurcando, ou com a
+      // sessão indo para a frente e o dono recebendo o histórico (dois CLIs nunca dividem uma sessão).
+      const maquinaBifurca = maquinaBifurcaCom(p.machineId, harness);
       // S17: com mensagem oferecida e ainda não confirmada (nesta renovação ou numa anterior), não promove: a resposta a
       // ela sairia duas vezes (no turno promovido e no turno próprio que a mensagem viraria).
       const semMensagemNoAr = ids.length === 0 && jaOferecidas.size === 0;
-      if (ativo && conversaSemTrabalho && despachado && maquinaBifurca && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
+      if (ativo && doDonoSemTrabalho && despachado && harness !== null && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = depsDe(trx, escopo);
-          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, maquinaBifurca, redeMs });
+          const r = await promoverNaRede(d, { turnoId: p.turnoId, despachadoEm: despachado.em, fezFerramenta: true, harness, sessaoCli: despachado.sessaoCli, sessaoExecutor: executores.get(p.turnoId) ?? null, maquinaBifurca, modo: despachado.modo, redeMs });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         }).catch((e: unknown) => log("aviso", "rede_promover_falhou", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
       }
@@ -448,7 +482,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true });
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
@@ -528,12 +562,38 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true }));
     },
 
+    /** ADR-099 (I5, 2026-10-12): a frente que terminou com este turno e já vale `sem_trabalho`, para o Mac limpar na hora. */
+    async limparAgora(pessoaId, turnoId): Promise<PastaParaLimpar | null> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return null;
+      return abrirTxEscopada(db, escopo)((trx) => pastaSemTrabalhoDoTurno(depsDe(trx, escopo), turnoId));
+    },
+
     /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
     async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
       const r = relatoValido(relato);
       // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
       // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
       log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
+    },
+
+    /** ADR-099 (parte 2): as esperas que a máquina deve rodar; ler é a notícia dela (`visto_em`). */
+    async esperas(pessoaId, machineId): Promise<EsperaParaRodar[]> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return [];
+      return abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).esperas.paraAMaquina(machineId, agora()));
+    },
+
+    /** ADR-099 (parte 2): o relato da máquina; o fim acorda o dono na mesma transação (o evento sai pelo outbox). */
+    async relatarEspera(pessoaId, machineId, relato: RelatoEspera): Promise<RespostaRelatoEspera> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return { seguir: false };
+      return abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const r = await relatarEsperaDaMaquina(d, { maquinaId: machineId, relato });
+        if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
+        return r.data;
+      });
     },
 
     emMemoria() {

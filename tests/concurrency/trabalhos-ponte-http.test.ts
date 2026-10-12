@@ -44,7 +44,7 @@ describeIntegracao("trabalhos pela ponte HTTP: memória do Mac e mensagem para a
   it("#194: amarela publica uma vez, repetir não republica, vermelha publica de novo e nada é encerrado; a memória do turno vai para a task", async () => {
     const trabalhoId = await srv.app.dentro(srv.pessoa, async (d) => {
       const { trabalho, events } = await criarTrabalho(d, { agenteId, conversaId, titulo: "Relatório pesado", origem: "pessoa" });
-      await d.repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o relatório", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+      await d.repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte o relatório", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
       await d.repos.events.gravarComOutbox(events);
       return trabalho.id;
     });

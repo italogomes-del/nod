@@ -4,7 +4,8 @@ import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
-import type { OrigemTrabalho } from "./trabalho.ts";
+import type { CausaNativa } from "./negacao.ts";
+import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
 import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
@@ -50,8 +51,9 @@ export type PayloadMensagem =
    * `causa` (definido em 2026-10-05): a IA estava logada e a conta não serviu (src/contracts/inventario.ts).
    * `modelo` (NOD-171): o harness está pronto, mas o modelo escolhido no agente não é aceito por ele; a tela pede outro
    * modelo em vez de dizer que a IA "já voltou".
+   * `causaNativa` e `vezes` (definido em 2026-10-11): por que o hook do nod barrou a nativa e quantas vezes no turno.
    */
-  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string }
+  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string; causaNativa?: CausaNativa; vezes?: number }
   /**
    * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
    * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.
@@ -101,7 +103,24 @@ export type PayloadMensagem =
    * definido em 2026-10-07 (ADR-083): a linha centralizada "Abriu a task <titulo>" na conversa do bot. Mensagem
    * `sistema`; a web abre a tela do trabalho ao clicar.
    */
-  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho };
+  | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho }
+  /**
+   * definido em 2026-10-12 (ADR-099, I2): a linha única "Começou N frentes: …" do lote que o dono abriu (abrir_frentes),
+   * no lugar de uma "Abriu a task" por frente. Até a Parte 5 a web abre cada frente como task.
+   */
+  | { kind: "frentes_abertas"; loteId: string; origem: OrigemTrabalho; frentes: { trabalhoId: string; titulo: string }[] }
+  /** definido em 2026-10-12 (ADR-099, I2): a cópia, na conversa do dono, do recado que ele repassou a uma frente. */
+  | { kind: "recado_a_frente"; trabalhoId: string; titulo: string }
+  /**
+   * definido em 2026-10-12 (ADR-099, I3): a linha "3 frentes terminaram" (ou "A frente X terminou", com
+   * `avisar_a_cada_uma`) na conversa do dono, quando o lote volta a ele.
+   */
+  | { kind: "frentes_terminadas"; loteId: string; frentes: { trabalhoId: string; titulo: string; estado: EstadoTrabalho }[] }
+  /**
+   * definido em 2026-10-12 (ADR-099, I3, decisão 7): o lote de um pedido de colega voltou direto a quem pediu — na
+   * conversa do dono fica só a linha "Respondi ao pedido de X" (não confiável: o nome vem de outro bot).
+   */
+  | { kind: "pedido_respondido"; loteId: string; agenteId: string; nome: string };
 
 export type Mensagem = {
   tenantId: TenantId;
@@ -125,6 +144,12 @@ export type Mensagem = {
    * turno foram do meio (ADR-067). Ausentes = servidor anterior ao épico.
    */
   origemTurno?: OrigemTurno | null;
+  /**
+   * definido em 2026-10-12 (ADR-099, I7 revista): o turno de uma retomada leva a raiz da cadeia dele (o turno que ela
+   * continua, até 10 saltos). A execução de rotina e o pedido de colega não viram mais trabalho: sem a raiz, a resposta
+   * da pessoa, a volta marcada e o retorno das frentes saíam da linha agrupada "da rotina" / "Pedido do …".
+   */
+  raiz?: { turnoId: string; origem: OrigemTurno };
   trabalhoId?: string | null;
   fimDoTurno?: boolean;
 };

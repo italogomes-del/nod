@@ -82,8 +82,8 @@ async function inventarioDoRegistry(registry: Registry, executor: IdDriver, agor
 
 /**
  * definido em 2026-10-08 (revisão do épico, S15): o executor do próprio processo anuncia o que os drivers prontos dele
- * declaram (`meta.capacidades`), como o app do Mac faz no conectar — a rede de 2 min só promove com `bifurcaSessao`
- * anunciado. O catcher puro não é harness e fica de fora.
+ * declaram (`meta.capacidades`), como o app do Mac faz no conectar — a rede de 2 min só bifurca com `bifurcaSessao`
+ * anunciado (sem ele, a sessão vai com a frente; ADR-099, I8). O catcher puro não é harness e fica de fora.
  */
 export function capacidadesDoRegistry(registry: Registry): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
   const saida: Partial<Record<IdHarness, CapacidadesHarness>> = {};

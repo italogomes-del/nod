@@ -70,10 +70,14 @@ function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<stri
   const unidades = new Map<string, Unidade>();
   const origens = new Map<string, string>();
   for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") origens.set(m.payload.trabalhoId, m.payload.origem);
+  // ADR-099 (I2): o lote de frentes abre várias numa linha só.
+  for (const m of mensagens) if (m.payload?.kind === "frentes_abertas") for (const f of m.payload.frentes) origens.set(f.trabalhoId, m.payload.origem);
   for (const t of conhecidos.values()) origens.set(t.id, t.origem);
   for (const m of mensagens) {
     if (!marcada(m) || falaDaPessoaNoChat(m, origens)) continue;
-    const chave = m.trabalhoId ? `trabalho:${m.trabalhoId}` : m.turnoId ? `turno:${m.turnoId}` : null;
+    // ADR-099 (I7 revista): a retomada entra na unidade da raiz dela — a execução da rotina e o pedido de colega não viram
+    // mais trabalho, e a resposta da pessoa, a volta marcada e o retorno das frentes continuam na mesma linha.
+    const chave = m.trabalhoId ? `trabalho:${m.trabalhoId}` : m.raiz ? `turno:${m.raiz.turnoId}` : m.turnoId ? `turno:${m.turnoId}` : null;
     if (!chave) continue;
     const u = unidades.get(chave) ?? { chave, tipo: null, mensagens: [], trabalhoId: m.trabalhoId ?? null, trabalho: m.trabalhoId ? conhecidos.get(m.trabalhoId) : undefined, rotinaId: null };
     u.mensagens.push(m);
@@ -84,8 +88,9 @@ function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<stri
     const execucao = u.mensagens.find((m) => m.payload?.kind === "rotina_execucao")?.payload;
     u.rotinaId = u.trabalho?.rotinaId ?? (execucao?.kind === "rotina_execucao" ? execucao.rotinaId : null);
     const origem = u.trabalho?.origem;
-    if (origem === "rotina" || (!origem && (p.includes("rotina_execucao") || u.mensagens.some((m) => m.origemTurno === "rotina")))) u.tipo = "rotina";
-    else if (origem === "colega" || (!origem && (p.includes("peer_pedido") || u.mensagens.some((m) => m.origemTurno === "delegacao")))) u.tipo = "colega";
+    const deOrigem = (o: string): boolean => u.mensagens.some((m) => m.origemTurno === o || m.raiz?.origem === o);
+    if (origem === "rotina" || (!origem && (p.includes("rotina_execucao") || deOrigem("rotina")))) u.tipo = "rotina";
+    else if (origem === "colega" || (!origem && (p.includes("peer_pedido") || deOrigem("delegacao")))) u.tipo = "colega";
     else if (origem || u.trabalhoId) u.tipo = "task";
   }
   return unidades;
@@ -151,6 +156,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   // O título de cada trabalho também vem da linha "Abriu a task": o trabalho que já terminou pode não estar na lista.
   const titulos = new Map<string, string>();
   for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") titulos.set(m.payload.trabalhoId, m.payload.titulo);
+  for (const m of mensagens) if (m.payload?.kind === "frentes_abertas") for (const f of m.payload.frentes) titulos.set(f.trabalhoId, f.titulo);
   const tituloDe = (u: Unidade): string => u.trabalho?.titulo ?? (u.trabalhoId ? titulos.get(u.trabalhoId) : undefined) ?? "sem título";
   const unidades = unidadesDe(mensagens, conhecidos);
   const unidadeDe = new Map<string, Unidade>();
@@ -163,7 +169,10 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const execucoes = u.mensagens.flatMap((m) => (m.payload?.kind === "rotina_execucao" ? [m.payload.desfecho] : []));
     const falou = u.tipo !== "rotina" || execucoes.some((d) => !DESFECHOS_SILENCIOSOS.has(d));
     const etiqueta = u.tipo === "rotina" ? `da rotina ${nomeDaRotina(estado, u) ?? ""}`.trim() : `da task ${tituloDe(u)}`;
-    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true));
+    // ADR-099 (I7 revista): na rotina, o turno do dono que abriu frentes ("comecei…") não é o resultado — o resultado é o
+    // do retorno das frentes; até ele chegar a execução não acabou.
+    const abriramFrentes = new Set(u.tipo === "rotina" ? u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])) : []);
+    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
     // O resultado do trabalho que terminou ganha a linha "… terminou · 39 min · US$ 0,88" logo acima (K5).
     const ultimoFim = [...baloes].reverse().find((m) => m.payload?.kind !== "pedido_a_pessoa");
     for (const m of baloes) {
@@ -185,7 +194,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     for (const m of recolhidas) planos.set(m.id, { tipo: "oculta" });
     // Revisão W7 (2026-10-08): "nada para você" só da execução que acabou — com o trabalho aberto, ou sem a linha da
     // execução nem a última fala do turno, ela ainda pode ter algo a dizer.
-    const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || u.mensagens.some((m) => m.fimDoTurno === true));
+    const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || (abriramFrentes.size === 0 && u.mensagens.some((m) => m.fimDoTurno === true)));
     if (u.tipo === "rotina" && acabou && baloes.length === 0 && !execucoes.some((d) => DESFECHOS_A_VISTA.has(d)) && recolhidas.length > 0) nadaParaVoce.add(u);
     if (u.tipo === "colega" && recolhidas[0]) {
       const pedido = u.mensagens.find((m) => m.payload?.kind === "peer_pedido");
@@ -231,6 +240,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   }
 
   // ---- "Abriu a task" -------------------------------------------------------------------------------------------------
+  // definido em 2026-10-12 (ADR-099, I8): a da rede de 2 min diz "Virou a frente" (o turno do dono virou frente).
   const ultimaAbertura = [...mensagens].reverse().find((m) => {
     const t = m.payload?.kind === "trabalho_aberto" ? conhecidos.get(m.payload.trabalhoId) : undefined;
     return t !== undefined && aberto(t);
@@ -253,8 +263,42 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     planos.set(m.id, {
       tipo: "linha",
       chave: `linha:${m.id}`,
-      html: htmlLinha({ tipo: "task", chave: `task:${p.trabalhoId}`, agenteId: dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Abriu a task</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) + memoria,
+      html: htmlLinha({ tipo: "task", chave: `task:${p.trabalhoId}`, agenteId: dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>${p.origem === "rede" ? "Virou a frente" : "Abriu a task"}</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) + memoria,
     });
+  }
+
+  // ---- "Começou N frentes" e o recado a uma frente (ADR-099, I2) -------------------------------------------------------
+  // Uma linha por lote. Com uma frente só, ela é a "Abriu a task" de antes (clique abre a frente, com Fazer aqui/depois);
+  // com várias, a linha diz quantas e cada título vira um botão que abre a frente (até a Parte 5, na tela da task).
+  for (const m of mensagens) {
+    if (planos.has(m.id)) continue;
+    const p = m.payload;
+    if (p?.kind === "frentes_abertas") {
+      const dono = donoDaConversa ?? conhecidos.get(p.frentes[0]?.trabalhoId ?? "")?.agenteId ?? "";
+      const [unica] = p.frentes;
+      if (p.frentes.length === 1 && unica) {
+        const t = conhecidos.get(unica.trabalhoId);
+        const titulo = t?.titulo ?? unica.titulo;
+        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `task:${unica.trabalhoId}`, agenteId: t?.agenteId ?? dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Começou a frente</span><b>${esc(titulo)}</b>`, trabalhoId: unica.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) });
+      } else {
+        // revisto em 2026-10-12 (ADR-099, parte 5, quadro 06): uma linha só, "●●● Começou 3 frentes: A, B e C · 15:02" —
+        // um ponto na cor do bot por frente (até 3), e cada título abre a frente.
+        const cor = agente(estado, dono)?.cor ?? "";
+        const pontos = `<span class="linha-pontos" aria-hidden="true">${`<span class="ponto-trabalho ${esc(cor)}"></span>`.repeat(Math.min(3, p.frentes.length))}</span>`;
+        const titulos = p.frentes.map((f) => `<button type="button" class="linha-link" data-act="abrir-trabalho" data-id="${esc(f.trabalhoId)}">${esc(conhecidos.get(f.trabalhoId)?.titulo ?? f.titulo)}</button>`);
+        const lista = titulos.length <= 1 ? titulos.join("") : `${titulos.slice(0, -1).join('<span class="linha-sep">, </span>')}<span class="linha-sep"> e </span>${titulos[titulos.length - 1]}`;
+        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><div class="linha-centro linha-task linha-frentes estatica">${pontos}<span>Começou ${p.frentes.length} frentes:</span><span class="linha-titulos">${lista}</span><span class="linha-hora">· ${esc(hora(m.criadoEm))}</span></div></div>` });
+      }
+    } else if (p?.kind === "frentes_terminadas") {
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: linhaFrentesTerminadas(p.frentes, m.criadoEm, conversaId, donoDaConversa ?? "", m.id) });
+    } else if (p?.kind === "pedido_respondido") {
+      // ADR-099 (decisão 7): o pedido de colega concluído não acorda o dono; aqui fica só esta linha (o nome vem do outro bot).
+      const colega = agente(estado, p.agenteId);
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-respondido"><span class="linha-ic" aria-hidden="true">↩</span><span>Respondi ao pedido de</span>${mascote(colega)}<span class="linha-nome">${esc(colega?.nome ?? p.nome)}</span><span class="linha-hora">· ${esc(hora(m.criadoEm))}</span></span></div>` });
+    } else if (p?.kind === "recado_a_frente") {
+      const titulo = conhecidos.get(p.trabalhoId)?.titulo ?? titulos.get(p.trabalhoId) ?? p.titulo;
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `recado:${m.id}`, agenteId: conhecidos.get(p.trabalhoId)?.agenteId ?? donoDaConversa ?? "", conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Repassou um recado à frente</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo }) });
+    }
   }
 
   // ---- execuções seguidas da mesma rotina numa linha só ---------------------------------------------------------------
@@ -328,4 +372,23 @@ function acoesDaAbertura(t: TrabalhoDto | undefined, estado: Estado, conversaId:
       ? botao("trabalho-depois", `Fazer depois da ${esc(outras[outras.length - 1]?.titulo ?? "")}`, { classe: "sm", id: t.id, dados: { depois: outras[outras.length - 1]?.id ?? "" } })
       : "";
   return `<div class="linha-acoes">${depois}${botao("trabalho-fazer-aqui", "Fazer aqui", { classe: "sm", id: t.id, titulo: "cancela a task e responde aqui na conversa" })}</div>`;
+}
+
+/**
+ * "✓ 3 frentes terminaram · 17:55" (definido em 2026-10-12, ADR-099, parte 5, quadro 02): a linha centralizada quando o
+ * lote volta ao dono; o resultado chega na fala do bot logo abaixo. Com uma frente, a linha abre a tela dela; com alguma
+ * que parou ou falhou, o sinal diz (■ ou !) e o texto conta quantas.
+ */
+function linhaFrentesTerminadas(frentes: readonly { trabalhoId: string; titulo: string; estado: string }[], criadoEm: number, conversaId: string, agenteId: string, mensagemId: string): string {
+  const falhou = frentes.filter((f) => f.estado === "falhou").length;
+  const parou = frentes.filter((f) => f.estado === "parado").length;
+  const sinal = falhou ? '<span class="linha-falhou" aria-hidden="true">!</span>' : parou ? '<span class="linha-parou" aria-hidden="true">■</span>' : '<span class="linha-ok" aria-hidden="true">✓</span>';
+  const [unica] = frentes;
+  if (frentes.length === 1 && unica) {
+    const verbo = unica.estado === "parado" ? "parou" : unica.estado === "falhou" ? "falhou" : "terminou";
+    return htmlLinha({ tipo: "task", chave: `fim:${mensagemId}`, agenteId, conteudo: `${sinal}<b>${esc(unica.titulo)}</b><span>${verbo} · ${esc(hora(criadoEm))}</span>`, trabalhoId: unica.trabalhoId, conversaId, mensagens: [mensagemId], titulo: unica.titulo });
+  }
+  const resto = [falhou ? `${falhou} ${falhou === 1 ? "falhou" : "falharam"}` : "", parou ? `${parou} ${parou === 1 ? "parou" : "pararam"}` : ""].filter(Boolean);
+  const texto = resto.length ? `${frentes.length} frentes voltaram · ${resto.join(" · ")}` : `${frentes.length} frentes terminaram`;
+  return `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-terminou">${sinal}<span>${esc(texto)} · ${esc(hora(criadoEm))}</span></span></div>`;
 }

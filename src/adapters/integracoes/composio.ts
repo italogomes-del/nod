@@ -67,6 +67,8 @@ export type OpcoesClienteComposio = {
   agora?: () => number;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
+  /** NOD-208 (revisão do PR #264): instante (no relógio `agora`) em que toda requisição desiste; corta os 30 s. */
+  prazoFinal?: number;
 };
 
 /** definido em 2026-09-17: URLs e erros do provedor nunca transportam a chave para a web ou para o modelo. */
@@ -74,6 +76,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
   const agora = opcoes.agora ?? Date.now;
   const dormir = opcoes.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const aleatorio = opcoes.aleatorio ?? Math.random;
+  const prazoFinal = opcoes.prazoFinal ?? Number.POSITIVE_INFINITY;
 
   /**
    * NOD-157 (emenda à ADR-009): GET é leitura (repete em 429, 5xx e rede); POST e PATCH são escrita (só 429, a
@@ -83,6 +86,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
    */
   async function requisitar(metodo: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<Response> {
     const inicio = agora();
+    const restante = () => Math.min(ORCAMENTO_CONECTOR_MS - (agora() - inicio), prazoFinal - agora());
     const rotulo = `${metodo} /${path.split("?")[0]?.split("/")[1] ?? ""}`;
     let anterior: { status: number | "rede"; espera: number } | null = null;
     for (let tentativa = 1; ; tentativa++) {
@@ -91,7 +95,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
       let falha: FalhaHttp;
       // setTimeout e não AbortSignal.timeout: o relógio falso dos testes controla este, e unref não segura o processo.
       const ctrl = new AbortController();
-      const prazo = setTimeout(() => ctrl.abort(new DOMException("prazo", "TimeoutError")), prazoDaTentativa(CHAMADA_CONECTOR_MS, ORCAMENTO_CONECTOR_MS - (agora() - inicio)));
+      const prazo = setTimeout(() => ctrl.abort(new DOMException("prazo", "TimeoutError")), prazoDaTentativa(CHAMADA_CONECTOR_MS, restante()));
       prazo.unref?.();
       try {
         resposta = await f(`${BASE}${path}`, { method: metodo, headers: { "x-api-key": chave, "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: ctrl.signal, redirect: "error" });
@@ -113,7 +117,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
         ...(typeof falha === "number" ? { status: falha } : {}),
         somenteLeitura: metodo === "GET",
         tentativa,
-        restanteMs: ORCAMENTO_CONECTOR_MS - (agora() - inicio),
+        restanteMs: restante(),
         prazoMs: CHAMADA_CONECTOR_MS,
         ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
       });

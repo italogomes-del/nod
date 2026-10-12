@@ -35,7 +35,8 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-18T11:00:00.000Z");
       expect((await repos.rotinaJanelas.listar(pausada?.id ?? "")).length + (await repos.rotinaJanelas.listar(futura?.id ?? "")).length).toBe(0);
       const kinds = await trx<{ kind: string }[]>`select kind from events where conversa_id = ${conversaId}`;
-      expect(kinds.map((k) => k.kind).sort()).toEqual(["trabalho_mudou", "turno_criado"]);
+      // ADR-099 (I7 revista): a execução é um turno do dono, sem trabalho (era trabalho_mudou + turno_criado).
+      expect(kinds.map((k) => k.kind).sort()).toEqual(["turno_criado"]);
 
       const r2 = await tickPessoa(MARLON, tx, opcoes);
       expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] });

@@ -67,8 +67,9 @@ function formatar(texto: string, opcoes: OpcoesTexto): string {
   return partes.map((trecho, i) => {
     if (i % 2 === 1) return codigo(trecho, aoVivo);
     // NOD-204: ao vivo, a cerca que ainda está abrindo ("\n`", "\n``" no fim) não aparece crua antes da terceira crase.
-    // Só o último trecho: prosa no meio do texto nunca muda.
-    if (aoVivo && i === partes.length - 1) trecho = trecho.replace(/(^|\n)`{1,2}$/, "$1");
+    // Só o último trecho: prosa no meio do texto nunca muda. A cerca pode vir indentada até 3 espaços, como dentro de
+    // um item de lista ("1. Instale:\n   ```bash"), e a indentação fica: é o que o quadro seguinte mostra.
+    if (aoVivo && i === partes.length - 1) trecho = trecho.replace(/(^|\n)( {0,3})`{1,2}$/, "$1$2");
     return blocos(trecho).map((b) => (typeof b === "string" ? comListas(b, opcoes) : tabelaHtml(b, opcoes, tabelas++))).join("");
   }).join("");
 }

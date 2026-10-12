@@ -57,6 +57,19 @@ describe("motor sem janela (ADR-090)", () => {
     execFileSync("sh", ["-n"], { input: script });
   });
 
+  it("ADR-097 (fase 0b): um OOM mata o processo, não o serviço; e a máquina sem swap ganha zram (ou arquivo de swap)", () => {
+    const script = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0-rc.6" });
+    expect(script).toContain("OOMPolicy=continue");
+    // ADR-097 (fase 2): o motor cria um grupo de controle por turno.
+    expect(script).toContain("Delegate=yes");
+    // Só liga swap quando não há nenhum, e nunca para a instalação por isso.
+    expect(script).toContain('if [ -z "$(swapon --noheadings 2>/dev/null)" ]; then');
+    expect(script).toContain("ligar_swap || true");
+    expect(script).toContain("zram-tools");
+    expect(script).toContain("printf 'ALGO=zstd\\nSIZE=%s\\nPRIORITY=100\\n'");
+    expect(script).toContain("/swapfile-nod none swap sw 0 0");
+  });
+
   it("QA NOD-199: o motor reanuncia pela rota só de inventário, como o app do Mac — nunca pelo conectar direto", async () => {
     // O `conectar` com turno rodando volta 409 (o aoFalhar do motor reanuncia de novo) e, depois de 90 s, limpa os planos.
     // Quem decide entre `inventario` e `conectar` é o cliente (`anunciarInventario`, coberto em ponte-http-inventario).
