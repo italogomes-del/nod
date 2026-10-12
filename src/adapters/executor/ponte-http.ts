@@ -17,14 +17,22 @@ export function urlServidor(valor: unknown, desenvolvimento = false): string {
   return u.origin;
 }
 
-/** ADR-088: o que veio do servidor tem a forma de `PastaParaLimpar` (o Mac ainda confere o caminho antes de apagar). */
+/**
+ * ADR-088: o que veio do servidor tem a forma de `PastaParaLimpar` (o Mac ainda confere o caminho antes de apagar). Valor
+ * de `quando` desconhecido (de um servidor mais novo) descarta o item, sem erro. ADR-099 (I5): `sem_trabalho` entra.
+ */
 function pastaParaLimparValida(v: unknown): v is PastaParaLimpar {
   if (typeof v !== "object" || v === null) return false;
   const p = v as Record<string, unknown>;
-  return typeof p.trabalhoId === "string" && typeof p.pasta === "string" && (p.quando === "encerrada" || p.quando === "so_com_pr_mergeado");
+  return typeof p.trabalhoId === "string" && typeof p.pasta === "string" && (p.quando === "encerrada" || p.quando === "so_com_pr_mergeado" || p.quando === "sem_trabalho");
 }
 
-export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void }) {
+/**
+ * `aoLimparAgora` (ADR-099 item 9, definido em 2026-10-12, I5): a resposta do `entregar` trouxe a pasta da frente que
+ * terminou com o turno (`limparAgora`, só `sem_trabalho`). Chamado fora da entrega (`setTimeout`), depois de o laço já ter
+ * esquecido o turno: senão a limpeza veria a pasta ainda em uso.
+ */
+export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void; aoLimparAgora?: (pastas: PastaParaLimpar[]) => void }) {
   const f = o.fetchImpl ?? fetch;
   let anuncio: AnuncioMaquina | null = null;
   /** Um buffer por turno: com o pool de laços, dois turnos renovam em paralelo e não podem trocar texto. */
@@ -99,7 +107,12 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       trechos.delete(e.turnoId);
       try {
         for (let tentativa = 0; ; tentativa++) {
-          try { await chamar("entregar", e); return; }
+          try {
+            const r = await chamar<{ limparAgora?: unknown } | null>("entregar", e);
+            const limpar = Array.isArray(r?.limparAgora) ? r.limparAgora.filter(pastaParaLimparValida).filter((p) => p.quando === "sem_trabalho") : [];
+            if (limpar.length > 0 && o.aoLimparAgora) { const aviso = o.aoLimparAgora; setTimeout(() => { try { aviso(limpar); } catch { /* a passada de 6 h pega a pasta */ } }, 0); }
+            return;
+          }
           catch (erro) {
             if (!(erro instanceof FalhaPonte) || erro.codigo !== "servidor_fora" || tentativa >= 2) throw erro;
             await new Promise((r) => setTimeout(r, 1_000));

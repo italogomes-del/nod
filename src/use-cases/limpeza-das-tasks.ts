@@ -16,7 +16,22 @@ export async function pastasParaLimpar(deps: Deps, o: { apertado?: boolean } = {
   });
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais"];
+/**
+ * ADR-099 item 9 (definido em 2026-10-12, I5): a pasta da frente que terminou com este turno, se ela já vale
+ * `sem_trabalho`. Vai na resposta do `entregar` (rotas/ponte.ts) para o Mac limpar na hora, sem esperar a passada de 6 h.
+ * Turno sem trabalho, task, frente que não terminou: null.
+ */
+export async function pastaSemTrabalhoDoTurno(deps: Deps, turnoId: string): Promise<PastaParaLimpar | null> {
+  const turno = await deps.repos.turnos.buscar(turnoId);
+  if (!turno?.trabalhoId) return null;
+  const agora = deps.agora();
+  const [c] = await deps.repos.trabalhos.candidatosALimpeza(agora - JANELA_DA_LIMPEZA_MS, { id: turno.trabalhoId });
+  if (!c) return null;
+  const pasta = pastaDeTask(c.pasta);
+  return pasta && quandoLimpar(c, agora) === "sem_trabalho" ? { trabalhoId: c.id, pasta, quando: "sem_trabalho" } : null;
+}
+
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais", "sem_prova"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**
@@ -40,6 +55,7 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     ...(o.simulada === true ? { simulada: true, estimadoBytes: inteiro(o.estimadoBytes) } : {}),
     ...(o.adiada === true ? { adiada: true } : {}),
     ...(o.apertada === true ? { apertada: true, cachesBytes: inteiro(o.cachesBytes) } : {}),
+    ...(o.imediata === true ? { imediata: true } : {}),
     // ADR-096 §4: só aparecem quando a máquina manda (máquina antiga não manda).
     ...(inteiro(o.guardadas) > 0 ? { guardadas: inteiro(o.guardadas), guardadoBytes: inteiro(o.guardadoBytes) } : {}),
     ...(inteiro(o.guardadosVencidos) > 0 ? { guardadosVencidos: inteiro(o.guardadosVencidos) } : {}),
@@ -60,6 +76,7 @@ export function camposDoRelato(r: RelatoLimpeza): Record<string, number> {
   };
   if (r.simulada) campos.estimado_mb = Math.round((r.estimadoBytes ?? 0) / 1_048_576);
   if (r.apertada) { campos.apertada = 1; campos.caches_mb = Math.round((r.cachesBytes ?? 0) / 1_048_576); }
+  if (r.imediata) campos.imediata = 1;
   if (r.guardadas) { campos.guardadas = r.guardadas; campos.guardado_mb = Math.round((r.guardadoBytes ?? 0) / 1_048_576); }
   if (r.guardadosVencidos) campos.guardados_vencidos = r.guardadosVencidos;
   if (r.orfasRemovidas) campos.orfas_removidas = r.orfasRemovidas;

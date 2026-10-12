@@ -1,7 +1,8 @@
 import { lstat, mkdir, readdir, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import type { MotivoPuladaLimpeza } from "../../contracts/ponte.ts";
-import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef } from "../../domain/guardado.ts";
+import { protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
 import { log } from "../../obs/log.ts";
 import type { ExecutarComando } from "./limpeza-das-tasks.ts";
 

@@ -120,7 +120,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     }
     if (codigo === "chave_invalida" || codigo === "atualize_app") void parar().then(() => fim(codigo));
   };
-  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar });
+  // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
+  const ponteHttp = criarPonteHttp({ url: c.url, chave: c.chave, versao, aoFalhar, aoLimparAgora: (pastas) => void limpeza?.limparAgora(pastas) });
   const gh = await criarDetectorGh({ ambiente: process.env }).logado();
   const anuncio = { machineId: dados.machineId, nome: hostname(), versaoContrato: 1, github: { gh }, ligacao: true, plataforma: "linux" } as const;
 

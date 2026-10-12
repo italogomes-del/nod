@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { guardarEApagar, temProcessoVivo, vencerGuardados, type OpcoesGuardar } from "../../../src/adapters/executor/guardar-antes-de-apagar.ts";
 import { criarExecutarComando, limparOrfas, type ExecutarComando } from "../../../src/adapters/executor/limpeza-das-tasks.ts";
-import { GUARDADO_VENCE_APERTADO_MS, GUARDADO_VENCE_MS, ORFA_SAI_APERTADO_MS, ORFA_SAI_MS, pedacoDeRef } from "../../../src/domain/limpeza-das-tasks.ts";
+import { GUARDADO_VENCE_APERTADO_MS, GUARDADO_VENCE_MS, ORFA_SAI_APERTADO_MS, ORFA_SAI_MS, pedacoDeRef } from "../../../src/domain/guardado.ts";
 
 // Repositórios git de verdade, `tar` e `rm` de verdade (vários processos por teste). medido em 2026-10-11: 0,2–0,9 s por
 // teste com load ~40; o padrão de 5 s do projeto unit fica perto demais sob carga maior.

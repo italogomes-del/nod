@@ -482,3 +482,77 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
   });
 });
+
+describe("ADR-099 (I5): a frente sem trabalho sai na hora pela resposta do entregar", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const turnoId = "00000000-0000-4000-8000-000000000003";
+  const pasta = { trabalhoId: "00000000-0000-4000-8000-000000000009", pasta: "Dev 1/frente-abc123", quando: "sem_trabalho" } as const;
+  const entregaDe = { turnoId, machineId: "m1", seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: { desfecho: "sucesso", texto: "ok", sessaoCli: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true }, custoUsd: 0, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] } };
+  const conectar = { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } };
+
+  function montar(limparAgora?: PonteInternaNod["limparAgora"]) {
+    const ponte: PonteInternaNod = { conectar: async () => undefined, puxar: async () => ({ turnoId } as PlanoTurno), renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null, ...(limparAgora ? { limparAgora } : {}) };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+    });
+    return async (nome: string, corpo: unknown = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+  }
+
+  it("servidor: a pasta da frente vai na resposta (pela pessoa da chave e pelo turno entregue); sem ela, ou com falha, só ok", async () => {
+    const limparAgora = vi.fn<NonNullable<PonteInternaNod["limparAgora"]>>().mockResolvedValue(pasta);
+    const chamar = montar(limparAgora);
+    await chamar("conectar", conectar);
+    await chamar("puxar");
+    expect(await chamar("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true, limparAgora: [pasta] } });
+    expect(limparAgora).toHaveBeenCalledWith(escopo.pessoaId, turnoId);
+
+    limparAgora.mockResolvedValueOnce(null);
+    await chamar("puxar");
+    expect(await chamar("entregar", { ...entregaDe, seqLocal: 2 })).toEqual({ status: 200, body: { ok: true } });
+
+    limparAgora.mockRejectedValueOnce(new Error("banco fora"));
+    await chamar("puxar");
+    expect(await chamar("entregar", { ...entregaDe, seqLocal: 3 })).toEqual({ status: 200, body: { ok: true } });
+
+    // Ponte sem o verbo: a entrega segue igual.
+    const semVerbo = montar();
+    await semVerbo("conectar", conectar);
+    await semVerbo("puxar");
+    expect(await semVerbo("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true } });
+  });
+
+  it("app: só `sem_trabalho` no formato passa, fora da entrega; resposta sem o campo (servidor antigo) ou com lixo não chama nada", async () => {
+    vi.useFakeTimers();
+    try {
+      const resposta = (corpo: unknown) => vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify(corpo), { headers: { "x-nod-versao-minima": "0.1.0" } }));
+      const entregar = (f: typeof fetch, aoLimparAgora: (p: unknown) => void) => criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f, aoLimparAgora }).ponte.entregar(entregaDe as Parameters<PonteInternaNod["entregar"]>[0]);
+      const aoLimparAgora = vi.fn();
+      await entregar(resposta({ ok: true, limparAgora: [pasta, { ...pasta, quando: "encerrada" }, { ...pasta, quando: "agora" }, { trabalhoId: 1, pasta: "a/b", quando: "sem_trabalho" }] }), aoLimparAgora);
+      expect(aoLimparAgora).not.toHaveBeenCalled();
+      await vi.runAllTimersAsync();
+      expect(aoLimparAgora).toHaveBeenCalledWith([pasta]);
+
+      const antigo = vi.fn();
+      await entregar(resposta({ ok: true }), antigo);
+      await entregar(resposta({ ok: true, limparAgora: "tudo" }), antigo);
+      await entregar(resposta(null), antigo);
+      await vi.runAllTimersAsync();
+      expect(antigo).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("app: a lista da passada normal aceita `sem_trabalho` e descarta valor desconhecido", async () => {
+    const f = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ pastas: [pasta, { ...pasta, quando: "um_dia" }] }), { headers: { "x-nod-versao-minima": "0.1.0" } }));
+    expect(await criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f }).ponte.pastasParaLimpar!("p")).toEqual([pasta]);
+  });
+});
