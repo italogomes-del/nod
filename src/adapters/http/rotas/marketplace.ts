@@ -5,11 +5,14 @@ import { fraseSemJeito } from "../../../domain/github.ts";
 import { formatoDeTokenGithub, garantirGithubSemConfiguracao, guardarComposioGithub, guardarTokenGithub } from "../../../use-cases/conectar-github.ts";
 import { API_GITHUB } from "../../conectores-locais/github/backend-rest.ts";
 import { registrarConector } from "../../../use-cases/registrar-conector.ts";
-import { sondarConector } from "../../../use-cases/sondar-conector.ts";
+import { sondarConector, type SaidaSondarConector } from "../../../use-cases/sondar-conector.ts";
 import { aoConectarApp } from "../../../use-cases/ao-conectar-app.ts";
 import { criarClienteComposio } from "../../integracoes/composio.ts";
 import { criarCatalogoComposio } from "../../integracoes/catalogo-composio.ts";
 import { chavePrivadaValida, criarTokenDeInstalacao } from "../../integracoes/github-app.ts";
+import { log } from "../../../obs/log.ts";
+import { ESPERAS_SONDA_VERIFICAR_MS, VERIFICAR_TETO_MS } from "../../../shared/constantes.ts";
+import type { Escopo } from "../../../shared/types.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -28,10 +31,16 @@ export type OpcoesRotasMarketplace = {
   apiGithub?: string;
   /** O App do tenant mudou: o token de instalação guardado em memória deixa de valer. */
   aoTrocarApp?: (tenantId: string) => void;
+  /** Espera entre as tentativas de sonda do `verificar` (NOD-208); default setTimeout. Injetável no teste. */
+  esperar?: (ms: number) => Promise<void>;
+  /** Relógio do teto do `verificar` (NOD-208); default Date.now. */
+  agora?: () => number;
 };
 
 export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
   const cliente = (chave: string) => criarClienteComposio(chave, op.fetchImpl);
+  const esperar = op.esperar ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const agora = op.agora ?? (() => Date.now());
   const catalogo = criarCatalogoComposio({ decifrar: op.decifrar, fetchImpl: op.fetchImpl });
   /**
    * revisto em 2026-09-21 (ADR-041): a curadoria deixou de ser a lista do que EXISTE, então
@@ -50,6 +59,13 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
     if (!/^[a-z0-9_-]{1,64}$/.test(slug)) throw new ErroDeDominio("nao_encontrado");
     return APPS_MARKETPLACE.find((a) => a.slug === slug) ?? { slug, nome: slug, descricao: "", categoria: "" };
   };
+  /** definido em 2026-09-25: conectou, os cards "Conecte o X" abertos viram o de permitir na mesma transação. */
+  const sondarUmaVez = (escopo: Escopo, conectorId: string, slug: string, orcamentoMs: number): Promise<SaidaSondarConector> =>
+    op.dentro(escopo, async (d) => {
+      const s = await executar(d, sondarConector, { conectorId, orcamentoMs });
+      if (s.ok) await executar(d, aoConectarApp, { slug });
+      return s;
+    });
   return [
     /**
      * Jeito 3 (ADR-048): token pessoal no campo avançado. O GitHub é perguntado ANTES de guardar
@@ -171,16 +187,27 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const app = acharApp(ctx.params.slug ?? "");
       const { cifrada, sessao } = await op.dentro(ctx.escopo, async (d) => ({ cifrada: await d.repos.composio.chave(), sessao: await d.repos.composio.sessao(app.slug) }));
       if (!cifrada || !sessao) throw new ErroDeDominio("estado_invalido");
-      const c = cliente(op.decifrar(cifrada));
+      // Revisão do PR #264: o teto de 20 s conta desde aqui; a consulta da conta e o fixarConta saem dele também.
+      const inicio = agora();
+      const c = criarClienteComposio(op.decifrar(cifrada), op.fetchImpl, { agora, prazoFinal: inicio + VERIFICAR_TETO_MS });
       const ativo = await c.conectado(sessao.contaId, `nod:${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`, app.slug);
       if (!ativo) { ctx.json(200, { conectado: false }); return; }
       await c.fixarConta(sessao.sessaoId, app.slug, sessao.contaId);
-      // definido em 2026-09-25: conectou, os cards "Conecte o X" abertos viram o de permitir na mesma transação.
-      const r = await op.dentro(ctx.escopo, async (d) => {
-        const s = await executar(d, sondarConector, { conectorId: sessao.conectorId });
-        if (s.ok) await executar(d, aoConectarApp, { slug: app.slug });
-        return s;
-      });
+      // definido em 2026-10-12 (NOD-208): logo depois do fixarConta a sessão do Composio pode ainda não expor o
+      // toolkit; a sonda se repete com espera crescente até o teto. Cada tentativa é uma transação: a espera
+      // fica FORA dela e não segura conexão do pool. A falha intermediária grava ultimaFalha; o sucesso a limpa.
+      // A conta não é reconsultada a cada volta: revogada no meio, cai no `falhou` e o "Tentar de novo" refaz o login.
+      let r: SaidaSondarConector | null = null;
+      for (const [i, espera] of ESPERAS_SONDA_VERIFICAR_MS.entries()) {
+        if (i > 0 && agora() - inicio + espera >= VERIFICAR_TETO_MS) break;
+        if (espera > 0) await esperar(espera);
+        // Revisão do PR #264: a sonda http sozinha pode levar até ORCAMENTO_CONECTOR_MS (30 s, com nova tentativa
+        // por dentro); sem este corte, uma tentativa começada aos ~19 s levava a resposta para perto de 50 s.
+        r = await sondarUmaVez(ctx.escopo, sessao.conectorId, app.slug, VERIFICAR_TETO_MS - (agora() - inicio));
+        log(r.ok ? "info" : "aviso", "marketplace_verificar_tentativa", { toolkit: app.slug, tentativa: i + 1, ok: r.ok, motivo: r.ok ? null : r.conector.ultimaFalha?.motivo ?? null, decorrido_ms: agora() - inicio });
+        if (r.ok) break;
+      }
+      if (!r) throw new ErroDeDominio("estado_invalido");
       // definido em 2026-09-25 (revisão do PR #68): conta ativa e sonda falhou = `falhou`, para a web parar de
       // perguntar — sem isso ela repetia fixarConta + sonda a cada 2,5 s por 10 min, com o spinner na tela.
       ctx.json(200, { conectado: r.ok, ...(r.ok ? {} : { falhou: true }), conector: r.conector });

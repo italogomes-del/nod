@@ -575,9 +575,13 @@ function htmlExecutorNoApp(e: TelaExecutor, t: TesteNaTela, ui: UiIas): string {
     ? `<div class="ordem-final"><span>Seus bots usam</span>${logoDaIa(primeira)}<b>${esc(NOME_IA[primeira])}</b><span>e, se ele parar,</span>${logoDaIa(segunda)}<b>${esc(NOME_IA[segunda])}</b></div>`
     : "";
   const rotulo = prontas.length === 1 && primeira ? `Continuar com o ${NOME_IA[primeira]}` : "Continuar";
-  const nota = e.notaIa ?? (prontas.length === 0
-    ? "Conecte pelo menos uma IA para seus bots começarem."
-    : prontas.length === 1 ? "Dica: conecte as duas. Se uma chegar ao limite, a outra assume. Dá para fazer depois em Provedores de IA." : "Dá para mudar a ordem depois em Provedores de IA.");
+  // NOD-209: enquanto a pessoa entra com a outra conta, a IA fica fora do Continuar (cancelar volta para a de agora).
+  const trocando = IAS_MAC.find((ia) => ui.troca[ia]?.fase === "abrindo" || ui.troca[ia]?.fase === "entrando");
+  const nota = e.notaIa ?? (trocando
+    ? `Enquanto você troca, o ${NOME_IA[trocando]} fica de fora. Cancelar volta para a conta atual.`
+    : prontas.length === 0
+      ? "Conecte pelo menos uma IA para seus bots começarem."
+      : prontas.length === 1 ? "Dica: conecte as duas. Se uma chegar ao limite, a outra assume. Dá para fazer depois em Provedores de IA." : "Dá para trocar a conta ou a ordem depois em Provedores de IA.");
   const desab = prontas.length === 0 || t.seguindo;
   return `<section class="ob-tela ob-executor" aria-label="${titulo}">${cabeca}<div class="ob-cards-ia largo">${cards}</div>
     <div class="ob-seguir">${ordem}<button type="button" class="ob-pilula grande" data-act="onboarding-ia-continuar"${desab ? " disabled" : ""}>${t.seguindo ? GIRA : ""}${esc(rotulo)}</button><p class="ob-nota" role="status">${esc(nota)}</p></div></section>`;

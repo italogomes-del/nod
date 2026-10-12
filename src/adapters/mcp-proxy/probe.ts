@@ -25,6 +25,11 @@ export type ConfigSonda = {
 
 export type OpcoesSonda = {
   timeoutMs?: number;
+  /**
+   * NOD-208: orçamento da sonda inteira no http (initialize, tools/list, páginas e novas tentativas); o prazo de
+   * cada requisição é cortado ao que sobra. Ausente = ORCAMENTO_CONECTOR_MS (30 s) do cliente.
+   */
+  orcamentoMs?: number;
   /** Fonte do ambiente base (default process.env); injetável no teste. */
   ambiente?: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
@@ -80,13 +85,19 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
     env,
     timeoutMs: opcoes.timeoutMs ?? PROBE_MS,
     fetchImpl: opcoes.fetchImpl,
+    ...(opcoes.orcamentoMs !== undefined ? { orcamentoMs: Math.max(1, opcoes.orcamentoMs) } : {}),
   });
   try {
     const ferramentas = await cliente.listar();
     const composio = cfg.transporte === "http" && cfg.url && ["app.composio.dev", "backend.composio.dev"].includes(new URL(cfg.url).hostname);
     // definido em 2026-09-17: só ferramentas concretas por capacidade; meta-executores burlariam a aprovação do destino.
     const concretas = composio ? ferramentas.filter((t) => !t.name.startsWith("COMPOSIO_")) : ferramentas;
-    if (concretas.length === 0) return { ok: false, motivo: "conector_indisponivel" };
+    if (concretas.length === 0) {
+      // NOD-208: catálogo vazio também é falha com log (antes, silêncio). `meta` = quantos COMPOSIO_* vieram.
+      // O motivo devolvido segue conector_indisponivel: o contrato e a CHECK do banco não mudam. Sem URL nem chave.
+      log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo: "catalogo_vazio", meta: ferramentas.length - concretas.length, total: ferramentas.length });
+      return { ok: false, motivo: "conector_indisponivel" };
+    }
     return { ok: true, ferramentas: concretas.map(paraCapacidade) };
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";

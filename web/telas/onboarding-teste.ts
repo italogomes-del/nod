@@ -61,6 +61,11 @@ export function criarTesteDeIas(deps: DepsTesteDeIas) {
   /** Por IA: o servidor já disse "não pronto" depois do último veredito (um login novo é o que faz testar de novo). */
   let vistoNaoPronto: Partial<Record<IaDesktop, boolean>> = {};
   let testesSozinhos: Partial<Record<IaDesktop, number>> = {};
+  /**
+   * NOD-209: as IAs trocando de conta, com o veredito da conta antiga guardado. Durante a troca a IA não é testada (o
+   * servidor ainda a vê pronta, com a conta antiga); cancelar devolve o veredito, e o login novo testa a conta nova.
+   */
+  let trocando: Partial<Record<IaDesktop, TesteDeIa | null>> = {};
   let conexao: ConexaoIa | null = null;
   let abrindoLogin = false;
   /** A ligação pode tocar: o teste passou antes de o "olá" acabar, ou a pessoa clicou em Continuar. */
@@ -179,7 +184,7 @@ export function criarTesteDeIas(deps: DepsTesteDeIas) {
       }
     }
     for (const ia of ORDEM_IAS) {
-      if (testando.includes(ia) || !deveTestar(o.executor.ias.find((i) => i.id === ia), vereditos[ia], !!vistoNaoPronto[ia])) continue;
+      if (testando.includes(ia) || ia in trocando || !deveTestar(o.executor.ias.find((i) => i.id === ia), vereditos[ia], !!vistoNaoPronto[ia])) continue;
       const feitos = testesSozinhos[ia] ?? 0;
       if (feitos >= TESTES_SOZINHOS_MAX) continue;
       testesSozinhos[ia] = feitos + 1;
@@ -227,6 +232,31 @@ export function criarTesteDeIas(deps: DepsTesteDeIas) {
     deps.aoMudar();
   }
 
+  /** "Trocar conta": a IA sai do Continuar enquanto a pessoa entra com a outra conta. */
+  function comecarTroca(ia: IaDesktop): void {
+    if (!ativo() || ia in trocando) return;
+    trocando = { ...trocando, [ia]: vereditos[ia] ?? null };
+    const resto = { ...vereditos };
+    delete resto[ia];
+    vereditos = resto;
+    deps.aoMudar();
+  }
+
+  /** O fim da troca: cancelada, volta o veredito de antes; com o login novo, a conta nova é testada já. */
+  function fimDaTroca(ia: IaDesktop, trocou: boolean): void {
+    if (!(ia in trocando)) return;
+    const antes = trocando[ia];
+    const resto = { ...trocando };
+    delete resto[ia];
+    trocando = resto;
+    if (!trocou && antes && !vereditos[ia]) vereditos = { ...vereditos, [ia]: antes };
+    if (trocou) {
+      testesSozinhos[ia] = 0;
+      void testar(ia);
+    }
+    deps.aoMudar();
+  }
+
   /** Zera o teste e o que nasceu dele. */
   function esquecer(): void {
     geracao++;
@@ -237,6 +267,7 @@ export function criarTesteDeIas(deps: DepsTesteDeIas) {
     testando = [];
     vistoNaoPronto = {};
     testesSozinhos = {};
+    trocando = {};
     nome = null;
   }
 
@@ -249,6 +280,8 @@ export function criarTesteDeIas(deps: DepsTesteDeIas) {
     podeLigar: (d: EstadoOnboarding): boolean => liberado && servidorDeAcordo(d.executor.ias, vereditos),
     seguir,
     testar,
+    comecarTroca,
+    fimDaTroca,
     conectar,
     abrirInstalacao,
     abrirLogin,

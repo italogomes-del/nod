@@ -107,7 +107,11 @@ export type NivelGaveta =
   /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
   | { tipo: "trabalhos" };
 
-export type ConexaoApp = { url: string | null; falhou: string | null };
+/**
+ * `semJanela` (revisão do PR #264, NOD-208): a janela de login não abriu (bloqueador de pop-up, app desktop ou
+ * a re-sonda do "Tentar de novo", que a abre fora do clique). O bloco de espera mostra "Abrir o login" como link.
+ */
+export type ConexaoApp = { url: string | null; falhou: string | null; semJanela?: boolean };
 
 /**
  * A ligação viva da pessoa (definido em 2026-10-04, ADR-071): `local` = aberta NESTA página (a tela da ligação);

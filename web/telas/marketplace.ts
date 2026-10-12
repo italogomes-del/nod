@@ -67,7 +67,7 @@ function avataresQueUsam(estado: Estado, c: Conector): string {
 
 function acaoDoCartao(estado: Estado, app: AppComLogo, s: SituacaoApp): string {
   const login = estado.conectando[app.slug];
-  if (s === "conectando") return `${blocoEsperando(app.nome, login?.url ?? null, true)}${botao("cancelar-conexao", "Cancelar", { classe: "link sm", id: app.slug })}`;
+  if (s === "conectando") return `${blocoEsperando(app.nome, login?.url ?? null, true, login?.semJanela === true)}${botao("cancelar-conexao", "Cancelar", { classe: "link sm", id: app.slug })}`;
   if (login?.falhou) return `${blocoFalhou(login.falhou)}${botao("conectar-app", "Tentar de novo", { classe: "sm", id: app.slug })}`;
   if (s === "atencao") return botao("conectar-app", "Entrar de novo", { classe: "pri sm", id: app.slug });
   if (s === "conectado") {
@@ -150,7 +150,7 @@ function gaveta(estado: Estado, app: AppComLogo, passo: "detalhes" | "quem-usa")
   let corpo: string;
   let rodape: string;
   if (s === "conectando") {
-    corpo = `${blocoEsperando(app.nome, login?.url ?? null)}${oQueLibera(estado, app.slug)}`;
+    corpo = `${blocoEsperando(app.nome, login?.url ?? null, false, login?.semJanela === true)}${oQueLibera(estado, app.slug)}`;
     rodape = botao("cancelar-conexao", "Cancelar", { classe: "link", id: app.slug });
   } else if ((s === "conectado" || s === "atencao") && c) {
     const status = s === "atencao"

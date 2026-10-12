@@ -1,0 +1,105 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-11T23:00:00Z"
+ },
+ "title": "Um dono por bot",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "U1-Barra.dc.html": {
+   "h": 820,
+   "title": "Não lidos 1 · o ponto aparece sozinho; o ícone de Não lidos entra no topo, entre a busca e o +",
+   "w": 1160,
+   "x": 1240,
+   "y": 300
+  },
+  "U1-0-Hoje.dc.html": {
+   "x": 0,
+   "y": 300,
+   "w": 1440,
+   "h": 900,
+   "title": "Hoje · 11/10 20:33: 13 linhas em Trabalhando, 1 trabalhando de fato"
+  },
+  "U1-1-Conversa.dc.html": {
+   "x": 1520,
+   "y": 300,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 1 · A conversa do Ze 1 é o dono: frentes por baixo, pedidos entram na fila, espera a CI por comando"
+  },
+  "U1-2-Bloco-aberto.dc.html": {
+   "x": 3040,
+   "y": 300,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 2 · O bloco acima do campo, aberto: o que espera, as frentes do dia e a fila"
+  },
+  "U1-3-Precisa-de-voce.dc.html": {
+   "x": 4560,
+   "y": 300,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 3 · Três tentativas sem verde: ele para e pergunta"
+  },
+  "U1-4-Trabalhos.dc.html": {
+   "x": 6080,
+   "y": 300,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 4 · Trabalhos com uma linha por bot; as frentes abrem com um clique"
+  },
+  "U1-5-Frentes.dc.html": {
+   "x": 1520,
+   "y": 1560,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 5 · Três frentes rodando: uma linha na conversa e a linha fechada acima do campo"
+  },
+  "U1-6-Frentes-abertas.dc.html": {
+   "x": 3040,
+   "y": 1560,
+   "w": 1440,
+   "h": 900,
+   "title": "Proposta 6 · A linha aberta: cada frente com o último passo; clicar numa mostra os passos"
+  },
+  "U1-7-Casos-da-linha.dc.html": {
+   "x": 4560,
+   "y": 1560,
+   "w": 1440,
+   "h": 900,
+   "title": "Casos · a linha acima do campo, por prioridade"
+  }
+ },
+ "order": [
+  "U1-Barra.dc.html",
+  "U1-0-Hoje.dc.html",
+  "U1-1-Conversa.dc.html",
+  "U1-2-Bloco-aberto.dc.html",
+  "U1-3-Precisa-de-voce.dc.html",
+  "U1-4-Trabalhos.dc.html",
+  "U1-5-Frentes.dc.html",
+  "U1-6-Frentes-abertas.dc.html",
+  "U1-7-Casos-da-linha.dc.html"
+ ],
+ "notes": {
+  "titulo-um-dono": {
+   "x": 0,
+   "y": 40,
+   "text": "Um dono por bot · a conversa do bot coordena; o paralelismo fica por baixo dela",
+   "kind": "title1",
+   "maxW": 7520
+  },
+  "titulo-um-dono-frentes": {
+   "x": 1520,
+   "y": 1300,
+   "text": "Onde o paralelismo aparece · as frentes e a linha acima do campo",
+   "kind": "title1",
+   "maxW": 4480
+  }
+ },
+ "designSystems": []
+}

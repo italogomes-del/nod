@@ -551,3 +551,50 @@ describe("sessão MCP expirada (404 com mcp-session-id) abre sessão nova e repe
     await vivos.fechar();
   });
 });
+
+// NOD-208: catálogo vazio (só meta-executores do Composio) era falha em silêncio; agora loga o motivo e quantos meta vieram.
+describe("sonda: catálogo vazio do Composio", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+
+  it("só COMPOSIO_* → conector_indisponivel e log sonda_conector_falhou com motivo catalogo_vazio, sem URL nem chave", async () => {
+    const f: typeof fetch = async (_url, init) => {
+      const q = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (!q.id) return new Response(null, { status: 202 });
+      const result = q.method === "initialize" ? {} : { tools: [{ name: "COMPOSIO_SEARCH_TOOLS", inputSchema: { type: "object" } }, { name: "COMPOSIO_MULTI_EXECUTE_TOOL", inputSchema: { type: "object" } }] };
+      return Response.json({ jsonrpc: "2.0", id: q.id, result });
+    };
+    const url = "https://backend.composio.dev/tool_router/v3/trs_sessao_secreta/mcp";
+    const r = await sondarConector({ nome: "slack", transporte: "http", url, env: { "x-api-key": "ak_chave_secreta" } }, { fetchImpl: f });
+    expect(r).toEqual({ ok: false, motivo: "conector_indisponivel" });
+    const linhas = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("sonda_conector_falhou"));
+    expect(linhas).toHaveLength(1);
+    expect(JSON.parse(linhas[0]!)).toMatchObject({ nivel: "aviso", conector: "slack", motivo: "catalogo_vazio", meta: 2, total: 2 });
+    const tudo = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(tudo).not.toContain("trs_sessao_secreta");
+    expect(tudo).not.toContain("ak_chave_secreta");
+  });
+});
+
+// Revisão do PR #264 (NOD-208): o `verificar` passa o que sobra do teto; a sonda não pode usar os 8 s por requisição
+// nem os 30 s do orçamento padrão quando o teto já está no fim.
+describe("sonda: orçamento vindo do verificar", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+
+  it("conectores vivos repassam orcamentoMs e a requisição é cortada nele", async () => {
+    // Composio que não responde: só o abort do prazo encerra a requisição.
+    const f: typeof fetch = (_url, init) => new Promise((_ok, falhar) => {
+      init?.signal?.addEventListener("abort", () => falhar(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+    const vivos = criarConectoresVivos({ agora: () => 0, fetchImpl: f, carregar: async () => ({ nome: "slack", transporte: "http", url: "https://backend.composio.dev/tool_router/v3/trs_x/mcp" }) });
+    const conector = { id: "c1", slug: "slack", transporte: "http", comando: null, args: [], url: "https://backend.composio.dev/tool_router/v3/trs_x/mcp" } as unknown as Parameters<typeof vivos.sondar>[0];
+    const inicio = Date.now();
+    const r = await vivos.sondar(conector, { orcamentoMs: 50 });
+    expect(r).toEqual({ ok: false, motivo: "timeout_transporte" });
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    await vivos.fechar();
+  });
+});

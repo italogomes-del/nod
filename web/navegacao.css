@@ -501,6 +501,19 @@ div.mac-medidor { padding-right: 36px; }
 .ia-acoes .ob-link svg { margin-left: 3px; vertical-align: -1px; }
 .ia-esperando { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
 .ia-esperando .ob-gira { width: 11px; height: 11px; }
+/* NOD-209 (protótipo aprovado em 2026-10-12): a conta logada, "Trocar conta" e os textos da troca. */
+.ob-ia-txt .ia-conta { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--ink-3); }
+.ia-conta svg { flex: none; opacity: .8; }
+.ob-ia-txt .ia-conta-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: inherit; }
+.ia-trocar { flex: none; font-size: 13px; font-weight: 500; }
+.ia-conta-atual { font-size: 12.5px; color: var(--ink-3); }
+.ia-passo-txt .ia-conta-atual b, .ia-passo-txt .ia-trocou b { font-size: inherit; }
+.ia-conta-atual b { font-weight: 500; color: var(--ink-2); }
+.ia-troca-dica { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.ia-troca-dica p { margin: 0; }
+.ia-troca-dica svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.ia-trocou { color: var(--ink-2); }
+.ia-trocou b { font-weight: 500; color: var(--ink); }
 .ia-colar { display: flex; gap: 8px; margin: 4px 0 0; }
 .ia-colar input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface);
   color: var(--ink); font: inherit; font-size: 13px; }

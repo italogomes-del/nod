@@ -1,5 +1,7 @@
 import { IAS_DESKTOP, type IaDesktop } from "../src/contracts/desktop.ts";
+import type { ContaDaIa } from "../src/contracts/estado-ia.ts";
 import { chaveNegada } from "../src/domain/ambiente-executor.ts";
+import { emailDaConta, organizacaoDaConta, planoLegivel } from "../src/domain/estado-ia.ts";
 
 /**
  * A IA dos bots no Mac, para o onboarding (definido em 2026-10-04, ADR-077): sem Claude Code nem Codex prontos, a web
@@ -62,7 +64,8 @@ export function logadoPeloStatus(ia: IaDesktop, codigo: number | null, stdout: s
  * O comando que diz QUAL conta está logada (definido em 2026-10-05): o app faz um hash da saída e o guarda com o
  * veredito do teste da IA (vigia-ias.ts); a saída em si nunca é guardada nem enviada. Medido em 2026-10-05: o
  * `claude auth status` devolve um JSON com a conta e a organização, então o hash muda quando a pessoa troca de conta;
- * o `codex login status` só diz "Logged in using ChatGPT", e o hash dele não muda (a IA é testada de novo pelo prazo).
+ * o `codex login status` só diz "Logged in using ChatGPT" — revisto em 2026-10-12 (NOD-209): a conta do Codex vem do
+ * `account/read` e entra na impressão por `textoDaImpressaoComConta`.
  */
 export function comandoDeEstadoDoLogin(ia: IaDesktop): { nome: "claude" | "codex"; args: string[] } {
   return ia === "claude-cli" ? { nome: "claude", args: ["auth", "status"] } : { nome: "codex", args: ["login", "status"] };
@@ -84,6 +87,41 @@ export function textoDaImpressao(ia: IaDesktop, stdout: string, stderr: string):
     } catch { /* não é JSON: vale a saída inteira */ }
   }
   return `${stdout.trim()}\n${stderr.trim()}`;
+}
+
+/**
+ * O texto da impressão do Codex com a conta (NOD-209): o `login status` não diz a conta, então o e-mail e o plano do
+ * `account/read` entram no texto e a troca de conta muda a impressão.
+ *
+ * revisto em 2026-10-12 (revisão do PR #266): quando o app-server NÃO respondeu (`conta` undefined: prazo, erro, processo
+ * caído), vale a última conta lida neste Mac. Antes, uma falha passageira tirava a conta do texto e a impressão mudava:
+ * a vigia retestava a IA reprovada (turno pago) e, na primeira passada do app, apagava o veredito sem teste. Sem conta
+ * conhecida, fica só o `login status` (como antes da NOD-209). `conta` null (respondeu sem conta: login por chave) entra
+ * como está — essa é uma resposta, não uma falha.
+ */
+export function textoDaImpressaoComConta(texto: string, conta: ContaDaIa | null | undefined, ultima: ContaDaIa | null): string {
+  const valida = conta === undefined ? ultima : conta;
+  return valida ? `${texto}\n${JSON.stringify([valida.email, valida.plano])}` : texto;
+}
+
+/**
+ * QUAL conta está logada no Claude (definido em 2026-10-12, NOD-209), pela saída do `claude auth status` que o app já
+ * roda. Medido em 2026-10-12 no Claude Code 2.1.296: `{loggedIn: true, authMethod: "claude.ai", email, orgName:
+ * "Gamefik", subscriptionType: "team", …}`. Sem login, sem e-mail ou fora do formato: null.
+ */
+export function contaPeloStatusClaude(stdout: string): ContaDaIa | null {
+  let d: unknown;
+  try {
+    d = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!d || typeof d !== "object" || Array.isArray(d)) return null;
+  const o = d as Record<string, unknown>;
+  if (o.loggedIn !== true) return null;
+  const email = emailDaConta(o.email);
+  if (!email) return null;
+  return { email, organizacao: organizacaoDaConta(o.orgName), plano: planoLegivel(o.subscriptionType) };
 }
 
 /**
