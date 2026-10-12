@@ -93,7 +93,7 @@ export function acoesComAcesso(p: Proposta | null | undefined, ctx: Contexto, at
     const login = ctx.conectando?.[primeiro.slug];
     const depois = faltam.length > 1 ? `Depois, falta conectar ${listaDeApps(faltam.slice(1).map((l) => l.nome))}.` : "";
     const ajuda = depois ? `<p class="rp-liberado mudo">${esc(depois)}</p>` : "";
-    if (login && !login.falhou) return { botoes: `${blocoEsperando(primeiro.nome, login.url, true)}${botao("cancelar-conexao", "Cancelar", { classe: "link", id: primeiro.slug })}`, ajuda };
+    if (login && !login.falhou) return { botoes: `${blocoEsperando(primeiro.nome, login.url, true, login.semJanela === true)}${botao("cancelar-conexao", "Cancelar", { classe: "link", id: primeiro.slug })}`, ajuda };
     const rotulo = `Conectar ${esc(primeiro.nome)} e ${inicio === "Criar rotina" ? "criar rotina" : "aplicar mudança"} ${SETA_EXTERNA}`;
     const conectar = botao("conectar-e-confirmar", rotulo, { classe: "pri", id: primeiro.slug, dados: { proposta: p.id, ato: atos.confirmar } });
     const falhou = login?.falhou ? `<p class="conexao-falhou" role="status">${esc(login.falhou)}</p>` : "";
