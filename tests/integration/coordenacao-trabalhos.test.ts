@@ -63,6 +63,18 @@ describeIntegracao("a conversa coordena (#193, ADR-083 §7)", () => {
     });
   });
 
+  it("ADR-099 (parte 1): a task que só espera a volta marcada vai à conversa como \"esperando\", não \"rodando\"", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const t = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Acompanhar a CI", origem: "pessoa" })).trabalho;
+      await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: t.id, acordarEm: Date.now() + 3_600_000 });
+      await sincronizarTrabalho(m.deps, t.id);
+      expect((await m.repos.trabalhos.buscar(t.id))?.estado).toBe("rodando");
+      const linha = ((await m.plano((await m.turno())!.id)).promptSistemaPartes?.volatil ?? "").split("\n").find((l) => l.startsWith("Trabalhos em andamento")) ?? "";
+      expect(linha).toContain(`{"id":"${t.id}","titulo":"Acompanhar a CI","estado":"esperando"`);
+    });
+  });
+
   it("depois_de espera; \"Fazer depois\" grava, recusa ciclo; a task de rotina abre filhas (profundidade 1) e a filha não abre", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

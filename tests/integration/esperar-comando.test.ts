@@ -224,6 +224,32 @@ describeIntegracao("esperar_comando (ADR-099, parte 2)", () => {
     });
   });
 
+  it("ADR-099 §5 (parte 1): três voltas de espera seguidas que só esperam de novo — a quarta vira pergunta à pessoa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      let turnoId = m.turno.id;
+      const ciclo = async () => {
+        const plano = { ...m.plano, turnoId };
+        const r = await esperarComando(m.deps, { ...m.ctx, turnoId, plano, comando: CI, motivo: "a CI do PR #845" });
+        if (!r.data.ok) throw new Error(`recusou: ${r.data.erro}`);
+        await assentarTurno(m.deps, { turnoId, machineId: m.machineId, seqLocal: 1, fala: { tipo: "texto", texto: "a CI ainda roda" }, resultado: SUCESSO, executor: "catcher" });
+        await m.relatar({ id: r.data.espera_id, tipo: "iniciou" });
+        return m.relatar({ id: r.data.espera_id, tipo: "terminou", codigo: 8, saida: "checks pending" });
+      };
+      for (let i = 0; i < 3; i++) {
+        await ciclo();
+        const volta = await m.repos.turnos.reivindicar({ machineId: m.machineId, agora: Date.now() + 1 });
+        expect(volta?.retomaTurnoId, `volta ${i + 1}`).toBe(m.turno.id);
+        turnoId = volta!.id;
+      }
+      const quarta = await ciclo();
+      expect(quarta.events.some((e) => e.kind === "decisao_criada")).toBe(true);
+      expect((await m.voltas()).filter((t) => t.estado === "pendente")).toEqual([]);
+      const [pergunta] = await m.repos.decisoes.doTurno(turnoId);
+      expect(pergunta).toMatchObject({ tipo: "pergunta", frase: "voltou 3 vezes sem novidade esperando: a CI do PR #845" });
+    });
+  });
+
   it("a pasta do turno não existe na máquina: a espera cai na hora e acorda", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

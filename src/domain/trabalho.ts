@@ -1,6 +1,6 @@
 import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
-import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho } from "../contracts/trabalho.ts";
+import { ESTADOS_ABERTOS_TRABALHO, type EstadoTrabalho, type OrigemTrabalho, type TrabalhoDto } from "../contracts/trabalho.ts";
 import type { EstadoTurno, OrigemTurno } from "../contracts/turno.ts";
 
 /**
@@ -121,6 +121,23 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.ultimo.estado === "concluido") return "terminado";
   if (f.ultimo.motivo === "parado_pela_pessoa") return "parado";
   return "falhou";
+}
+
+/** Pelo que um trabalho aberto espera sem trabalhar: a resposta de um colega ou a volta marcada (`me_chame_as`). */
+export type EsperaDoTrabalho = "colega" | "volta";
+
+/**
+ * definido em 2026-10-12 (ADR-099, parte 1, "esperar não é trabalhar"): o trabalho `rodando` sem turno vivo que só espera
+ * — um colega responder (ADR-084) ou a hora da volta (ADR-086) — está esperando, não trabalhando. O estado gravado continua
+ * `rodando` (o CHECK de `trabalhos.estado` e quem o lê não mudam); a espera é derivada na leitura, dos campos que o
+ * `TrabalhoDto` já traz. A volta conta mesmo depois da hora enquanto ninguém a pegou: sem turno vivo não há trabalho.
+ * A web repete a regra em `foraDoMac` (web/lib/trabalhos.ts; tests/unit/web/trabalhos.test.ts confere as duas).
+ * Motivo: em 11/10 a tela dizia "Trabalhando · 13" com um trabalhando de fato.
+ */
+export function esperaDoTrabalho(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & { esperandoColega?: TrabalhoDto["esperandoColega"]; acordaEm?: number | null }): EsperaDoTrabalho | null {
+  if (t.estado !== "rodando" || t.turnoVivoId) return null;
+  if (t.esperandoColega) return "colega";
+  return t.acordaEm ? "volta" : null;
 }
 
 /**

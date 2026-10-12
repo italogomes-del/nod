@@ -61,10 +61,11 @@ async function acordar(deps: DepsEspera, espera: Espera, entradaTexto: string): 
   if (espera.acordouEm !== null) return [];
   const turno = await deps.repos.turnos.buscar(espera.turnoId);
   if (!turno || turno.estado !== "concluido") return [];
-  const r = await enfileirarVolta(deps, turno, { acordarEm: deps.agora(), entradaTexto });
+  // ADR-099 §5 (parte 1): a volta da espera passa pelo mesmo alarme — três voltas da cadeia sem novidade viram pergunta.
+  const r = await enfileirarVolta(deps, turno, { acordarEm: deps.agora(), entradaTexto, motivo: espera.motivo });
   await deps.repos.esperas.marcarAcordou(espera.id, deps.agora());
   if (!r) return [];
-  log("info", "espera_acordou", { espera_id: espera.id, turno_id: turno.id, volta_id: r.volta.id, estado: espera.estado });
+  log("info", "espera_acordou", { espera_id: espera.id, turno_id: turno.id, volta_id: r.volta?.id ?? null, pergunta: r.volta === null, estado: espera.estado });
   return r.events;
 }
 

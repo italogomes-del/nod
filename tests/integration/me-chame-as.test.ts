@@ -4,7 +4,8 @@ import { VOLTAS_SEGUIDAS_MAX } from "../../src/contracts/ferramentas-trabalho.ts
 import type { Tx } from "../../src/shared/types.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { enfileirarRetomada } from "../../src/use-cases/enfileirar-retomada.ts";
-import { meChameAs } from "../../src/use-cases/me-chame-as.ts";
+import { meChameAs, REGRA_VOLTAS_SEM_NOVIDADE } from "../../src/use-cases/me-chame-as.ts";
+import { fecharComResposta, retomarComResposta } from "../../src/use-cases/responder-decisao.ts";
 import { criarTrabalho, listarTrabalhos, pararTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { esperarErro } from "../helpers/deps-l6.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -113,6 +114,67 @@ describeIntegracao("me chame às (ADR-086)", () => {
       }
       const terceira = await m.repos.turnos.reivindicar({ machineId: m.machineId, agora: nova!.acordarEm! + 1 });
       expect((await meChameAs(m.deps, { ...m.ctx, turnoId: terceira!.id, em_minutos: 5, motivo: "mais uma" })).data).toMatchObject({ ok: false, erro: "voltas_demais" });
+    });
+  });
+
+  // ADR-099 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo — a quarta vira pergunta à pessoa.
+  async function volta(m: Awaited<ReturnType<typeof montar>>, turnoId: string, motivo: string) {
+    if (!(await meChameAs(m.deps, { ...m.ctx, turnoId, em_minutos: 5, motivo })).data.ok) throw new Error("recusou");
+    await m.assentar(turnoId);
+    const proxima = (await m.voltas()).find((t) => t.estado === "pendente");
+    if (!proxima) return null;
+    const pega = await m.repos.turnos.reivindicar({ machineId: m.machineId, agora: proxima.acordarEm! + 1 });
+    if (pega?.id !== proxima.id) throw new Error("reivindicar a volta");
+    return pega;
+  }
+
+  it("três voltas seguidas sem novidade: a quarta não nasce; vira pergunta à pessoa e a task vai para Precisa de você", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const v1 = await volta(m, m.turno.id, "ver se a CI do #845 passou");
+      const v2 = await volta(m, v1!.id, "ver se a CI do #845 passou");
+      const v3 = await volta(m, v2!.id, "ver se a CI do #845 passou");
+      expect([v1, v2, v3].map((v) => v?.retomaTurnoId)).toEqual([m.turno.id, m.turno.id, m.turno.id]);
+      expect((await m.repos.trabalhos.buscar(m.trabalho!.id))?.estado).toBe("rodando");
+
+      // A terceira volta também só confere e marca outra: no lugar da quarta, a pergunta.
+      expect(await volta(m, v3!.id, "ver se a CI do #845 passou ainda")).toBeNull();
+      expect(await m.voltas()).toHaveLength(3);
+      const [pergunta] = await m.repos.decisoes.doTurno(v3!.id);
+      expect(pergunta).toMatchObject({ tipo: "pergunta", estado: "pendente", decisorId: PESSOA_MARLON, frase: "voltou 3 vezes sem novidade esperando: ver se a CI do #845 passou ainda" });
+      const balao = (await m.repos.mensagens.listarDaConversa(m.conversaId)).find((x) => x.payload?.kind === "pedido_a_pessoa");
+      expect(balao).toMatchObject({ kind: "texto", turnoId: v3!.id, payload: { decisaoId: pergunta!.id, opcoes: ["Pode seguir esperando", "Pode parar de esperar"] } });
+      expect(balao?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: m.agenteId, decidido_por: REGRA_VOLTAS_SEM_NOVIDADE });
+      expect((await m.repos.trabalhos.buscar(m.trabalho!.id))?.estado).toBe("precisa_de_voce");
+      const dto = (await listarTrabalhos(m.deps, {})).data.trabalhos.find((t) => t.id === m.trabalho!.id);
+      expect(dto).toMatchObject({ estado: "precisa_de_voce", acordaEm: null });
+
+      // "Pode seguir esperando": a resposta retoma o turno, e a próxima volta começa outra cadeia (a conta zera).
+      const { decisao } = (await fecharComResposta(m.deps, { decisaoId: pergunta!.id, texto: "Pode seguir esperando" })).data;
+      const { turno: retomada } = (await retomarComResposta(m.deps, { decisao, texto: "Pode seguir esperando", respondidaPor: { id: PESSOA_MARLON, nome: "Marlon" } })).data;
+      expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: v3!.id, acordarEm: null, trabalhoId: m.trabalho!.id });
+      const pega = await m.repos.turnos.reivindicar({ machineId: m.machineId, agora: Date.now() });
+      expect(pega?.id).toBe(retomada!.id);
+      const nova = await volta(m, pega!.id, "ver se a CI do #845 passou");
+      expect(nova?.retomaTurnoId).toBe(retomada!.id);
+    });
+  });
+
+  it("a volta que pediu algo à pessoa (ou a um colega) trouxe novidade: a conta não fecha e a volta seguinte nasce", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const v1 = await volta(m, m.turno.id, "ver o deploy");
+      // A primeira volta pediu uma aprovação, já decidida — não segura nada, mas foi novidade.
+      const d = await m.repos.decisoes.criar({ tipo: "pergunta", agenteId: m.agenteId, conversaId: m.conversaId, turnoId: v1!.id, prazoDecisaoEm: Date.now() + 600_000, frase: "posso reiniciar o deploy?" });
+      await m.repos.decisoes.decidir(d!.id, { por: PESSOA_MARLON, agora: Date.now() });
+      const v2 = await volta(m, v1!.id, "ver o deploy");
+      const v3 = await volta(m, v2!.id, "ver o deploy");
+      const v4 = await volta(m, v3!.id, "ver o deploy");
+      expect(v4).toMatchObject({ retomaTurnoId: m.turno.id, estado: "despachando" });
+      expect(await m.repos.decisoes.doTurno(v3!.id)).toEqual([]);
+      // Agora as três mais novas (v2, v3, v4) só conferiram: a quinta vira pergunta.
+      expect(await volta(m, v4!.id, "ver o deploy")).toBeNull();
+      expect((await m.repos.decisoes.doTurno(v4!.id)).map((x) => x.tipo)).toEqual(["pergunta"]);
     });
   });
 

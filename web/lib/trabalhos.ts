@@ -99,7 +99,11 @@ export function quandoVolta(instante: number, agora: number): string {
   return `em ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} às ${hora(instante)}`;
 }
 
-/** ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. */
+/**
+ * ADR-086: a task espera sem nada dela no Mac — um colega ou a hora marcada. Volta sozinha. definido em 2026-10-12
+ * (ADR-099, parte 1, "esperar não é trabalhar"): é também a regra do grupo **Esperando** — quem só espera não conta como
+ * trabalhando. Espelha `esperaDoTrabalho` (src/domain/trabalho.ts); tests/unit/web/trabalhos.test.ts confere as duas.
+ */
 export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
   return esperandoColega(t) !== null || voltaMarcada(t) !== null;
 }
@@ -286,24 +290,31 @@ export function meiaNoiteDe(agora: number): number {
   return d.getTime();
 }
 
-export type GruposTrabalhos = { precisa: TrabalhoDto[]; trabalhando: TrabalhoDto[]; fila: TrabalhoDto[]; terminados: TrabalhoDto[] };
+export type GruposTrabalhos = { precisa: TrabalhoDto[]; trabalhando: TrabalhoDto[]; esperando: TrabalhoDto[]; fila: TrabalhoDto[]; terminados: TrabalhoDto[] };
 
 /** Os que mais usam memória primeiro; sem leitura, depois deles, do mais novo ao mais antigo. */
 const porMemoria = (a: TrabalhoDto, b: TrabalhoDto): number => (b.memoriaMb ?? -1) - (a.memoriaMb ?? -1) || b.criadoEm - a.criadoEm;
 
+/** A volta mais cedo primeiro (é a próxima a acordar); esperando colega, depois, do pedido mais antigo ao mais novo. */
+const porVolta = (a: TrabalhoDto, b: TrabalhoDto): number => (a.acordaEm ?? Infinity) - (b.acordaEm ?? Infinity) || (a.esperandoColega?.desde ?? a.criadoEm) - (b.esperandoColega?.desde ?? b.criadoEm);
+
 /**
  * Os grupos da gaveta e de "Todos os trabalhos" (#196): Precisa de você (esperando a pessoa, aberto ou fechado para
- * liberar memória), Trabalhando, Na fila e Terminados hoje — o que terminou (ou parou, ou falhou) antes da meia-noite sai.
+ * liberar memória), Trabalhando, Esperando, Na fila e Terminados hoje — o que terminou (ou parou, ou falhou) antes da
+ * meia-noite sai. definido em 2026-10-12 (ADR-099, parte 1): Esperando separa de Trabalhando quem está `rodando` sem
+ * turno vivo só esperando a volta marcada ou um colega (`foraDoMac`). Em 11/10 a tela dizia "Trabalhando · 13" com um
+ * trabalhando de fato: onze voltas marcadas e duas esperas de colega.
  */
 export function agrupar(lista: readonly TrabalhoDto[], agora: number): GruposTrabalhos {
   const hoje = meiaNoiteDe(agora);
   const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").sort(porMemoria);
-  const trabalhando = lista.filter((t) => t.estado === "rodando").sort(porMemoria);
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).sort(porMemoria);
+  const esperando = lista.filter((t) => foraDoMac(t)).sort(porVolta);
   const fila = lista.filter((t) => t.estado === "na_fila").sort((a, b) => a.criadoEm - b.criadoEm);
   const terminados = lista
     .filter((t) => !aberto(t) && (t.terminadoEm ?? t.criadoEm) >= hoje)
     .sort((a, b) => (b.terminadoEm ?? b.criadoEm) - (a.terminadoEm ?? a.criadoEm));
-  return { precisa, trabalhando, fila, terminados };
+  return { precisa, trabalhando, esperando, fila, terminados };
 }
 
 export function filtrar(lista: readonly TrabalhoDto[], filtro: FiltroTrabalhos | undefined): TrabalhoDto[] {
