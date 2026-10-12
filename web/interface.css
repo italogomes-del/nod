@@ -1241,6 +1241,21 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .tt-cab h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .tt-cab p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
 .tela-trabalhos > .linha-centro-wrap { margin: 0 auto; }
+/* ADR-099 §7 (2026-10-12): o custo de hoje, discreto embaixo do resumo; o detalhe por bot só no clique. */
+.tt-custo { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -8px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
+  color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tt-custo:hover, .tt-custo:focus-visible, .tt-custo[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
+.tt-custo.fora { color: var(--warning); }
+.tt-custo-aviso { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.tt-custo-detalhe { width: 320px; max-width: 100%; margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  box-shadow: var(--shadow-pop); font-size: 13px; }
+.tt-custo-detalhe ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.tt-custo-bot { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.tt-custo-bot .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tt-custo-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-custo-bot small { color: var(--warning); font-size: 12px; white-space: nowrap; }
+.tt-custo-bot b { margin-left: auto; color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tt-custo-detalhe p { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .tt-filtros { display: flex; gap: 6px; }
 .tt-filtro { padding: 5px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
 .tt-filtro.ativo { border-color: var(--action); background: var(--action); color: var(--on-action); }

@@ -17,6 +17,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../domain/inteligencia.ts";
+import { cotaDasIas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
@@ -136,10 +137,14 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // 0068 (emenda da ADR-036): a ordem do bot (ou da pessoa), as IAs no limite e o modelo/raciocínio escolhidos por IA.
   const preferencias = await deps.repos.preferencias.buscar();
   const inteligencia = inteligenciaDoAgente(agente);
+  // definido em 2026-10-12 (ADR-099 §7): no trabalho de fundo, o Automático também pula a IA que a cota segura (reserva ou
+  // limite) — o 1% que sobra dela fica para a conversa com a pessoa. Todas seguradas: a primeira pronta (iaDoAutomatico).
+  const fundo = executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
+  const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia) : [];
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
       ordem: ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
-      noLimite: iasNoLimite(preferencias.iasNoLimite, agora),
+      noLimite: [...new Set([...iasNoLimite(preferencias.iasNoLimite, agora), ...pelaCota])],
       escolhas: inteligencia.escolhas,
     })
     : null;

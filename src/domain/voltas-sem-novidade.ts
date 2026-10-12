@@ -16,6 +16,12 @@ export type VoltaDaCadeia = {
   perguntou: boolean;
   /** A volta pediu algo a um colega (`pedir_a_bot`, mensagem `handoff` do turno). */
   pediuAColega: boolean;
+  /**
+   * definido em 2026-10-12 (ADR-099 §7, na integração com a parte 1): a volta nasceu da cota no limite (a task parou no
+   * meio e voltou quando a janela renovou), não de uma volta que o bot marcou. Não conta como sem novidade: quebra a
+   * sequência, como a volta que caiu.
+   */
+  porCota?: boolean;
 };
 
 /**
@@ -27,7 +33,7 @@ export type VoltaDaCadeia = {
  * têm o caminho delas — o "Retomar" e o Parar).
  */
 export function voltaSemNovidade(v: VoltaDaCadeia): boolean {
-  return v.estado === "concluido" && v.marcouVolta && !v.perguntou && !v.pediuAColega;
+  return v.estado === "concluido" && v.marcouVolta && !v.perguntou && !v.pediuAColega && v.porCota !== true;
 }
 
 /**

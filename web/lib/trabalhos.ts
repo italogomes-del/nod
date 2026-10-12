@@ -123,6 +123,9 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
+  // definido em 2026-10-12 (ADR-099 §7): a cota da IA segura a task (o servidor decide, a mesma regra do `reivindicar`); a
+  // hora da volta fica na pílula do topo.
+  if (t.esperaDaCota) return "esperando a cota da IA";
   const volta = voltaMarcada(t);
   // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
   // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
@@ -275,6 +278,19 @@ export function pilulaMac(segurando: boolean, esperando: number, comVer = true, 
   return comVer
     ? `<div class="linha-centro-wrap" role="status"><button type="button" class="pilula-memoria amarela" data-act="secao-espaco" data-secao="este-mac">${miolo}<span class="pm-ver">Ver ›</span></button></div>`
     : `<div class="linha-centro-wrap" role="status"><span class="pilula-memoria amarela">${miolo}</span></div>`;
+}
+
+/**
+ * A pílula da cota da IA (definido em 2026-10-12, ADR-099 §7): com a IA na reserva de 1% ou no limite, o trabalho de fundo
+ * espera e a conversa com a pessoa segue. Diz quando ele volta (a renovação da janela que segura) e quantas tasks esperam.
+ * Sem "Ver": não há o que a pessoa ajuste; o uso da IA está em Seu espaço › Conexão. Nada segurando (ou servidor anterior): nada.
+ */
+export function pilulaDaCota(cota: TrabalhosDto["cota"], trabalhos: readonly TrabalhoDto[], agora: number): string {
+  if (!cota) return "";
+  const titulo = cota.situacao === "limite" ? "A cota da IA acabou" : "A cota da IA está no fim";
+  const volta = cota.voltaEm ? `trabalho de fundo volta ${quandoVolta(cota.voltaEm, agora)}` : "trabalho de fundo volta quando ela renovar";
+  const esperam = trabalhos.filter((t) => t.esperaDaCota === true).length;
+  return pilula(titulo, `${esperam > 0 ? `${esperam} ${esperam === 1 ? "espera" : "esperam"} · ` : ""}${volta} · a conversa com você segue`, null);
 }
 
 /** "620 MB", "1,4 GB". */
