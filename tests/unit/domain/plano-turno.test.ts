@@ -312,4 +312,17 @@ describe("montarPlano: o onboarding por ligação (ADR-077)", () => {
       expect(p.promptSistema).not.toContain("me_chame_as");
     }
   });
+
+  it("ADR-099 (parte 2): esperar_comando entra só com terminal, nos modos do me_chame_as; o prompt deixa me_chame_as para hora marcada", () => {
+    const semTerminal = montarPlano(base);
+    expect(nomes(semTerminal)).not.toContain("esperar_comando");
+    expect(semTerminal.promptSistema).not.toContain("esperar_comando");
+    const conversa = montarPlano({ ...base, terminal: true });
+    expect(nomes(conversa)).toContain("esperar_comando");
+    expect(conversa.promptSistema).toContain("Chame esperar_comando com um comando que só termina quando a espera acabar");
+    expect(conversa.promptSistema).toContain("me_chame_as é só para hora marcada");
+    expect(conversa.promptSistema).not.toContain("testes, build, CI, QA");
+    for (const modo of ["criacao", "rotina", "delegacao"] as const) expect(nomes(montarPlano({ ...base, modo, terminal: true }))).toContain("esperar_comando");
+    for (const modo of ["sala", "ligacao", "peer"] as const) expect(nomes(montarPlano({ ...base, modo, terminal: true }))).not.toContain("esperar_comando");
+  });
 });

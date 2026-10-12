@@ -89,6 +89,7 @@ const DESPACHO: Despacho = {
   abrir_task: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.abrir_task](deps, { ...ctx, ...args }),
   mandar_para_task: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.mandar_para_task](deps, { ...ctx, ...args }),
   me_chame_as: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.me_chame_as](deps, { ...ctx, ...args }),
+  esperar_comando: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.esperar_comando](deps, { ...ctx, ...args }),
   gerir_bots: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.gerir_bots](deps, { ...ctx, ...args }),
   ver_apps_conectados: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_apps_conectados](deps, { ...ctx, ...args }),
   registrar_relato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.registrar_relato](deps, { ...ctx, ...args }),

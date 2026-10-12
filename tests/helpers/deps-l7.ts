@@ -96,6 +96,7 @@ export function useCasesFalsos(): UseCasesNod {
     abrirTask: naoImplementado("useCases.abrirTask"),
     mandarParaTask: naoImplementado("useCases.mandarParaTask"),
     meChameAs: naoImplementado("useCases.meChameAs"),
+    esperarComando: naoImplementado("useCases.esperarComando"),
     gerirBots: naoImplementado("useCases.gerirBots"),
     verAppsConectados: naoImplementado("useCases.verAppsConectados"),
     registrarRelatoDoNod: naoImplementado("useCases.registrarRelatoDoNod"),

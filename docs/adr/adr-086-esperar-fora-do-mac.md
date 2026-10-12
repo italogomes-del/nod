@@ -89,3 +89,17 @@ muda duas coisas daqui:
   volta seguinte começa outra cadeia. "Nada novo" = a volta concluiu e só marcou outra, sem abrir decisão e sem pedir
   algo a colega (src/domain/voltas-sem-novidade.ts); a fala final não conta, porque toda volta deixa uma. O teto de 24
   voltas fica como rede.
+
+## Emenda em 2026-10-12 (ADR-099, parte 2)
+
+Pela [ADR-099](adr-099-um-dono-por-bot.md) (item 4), esperar o que um comando acompanha até o fim (CI, deploy, processo)
+passa a ser `esperar_comando`: o Nod roda o comando fora do CLI, na máquina e na pasta do turno, e o fim acorda o bot uma
+vez, com o código de saída e as últimas linhas (tabela `esperas`, migração 0070). Em 11/10 foram 67 voltas por horário e
+cerca de US$ 114 olhando a mesma CI sem novidade.
+
+- `me_chame_as` fica para hora marcada e para o que nenhum comando acompanha (a resposta de alguém). O prompt e a negação
+  do laço com sleep (ADR-089) apontam `esperar_comando` quando ele está no catálogo, que é o de todo turno com terminal nos
+  modos deste ADR. Sem terminal (Codex, máquina sem o hook), nada muda.
+- A volta da espera nasce pelo mesmo caminho da volta marcada (`enfileirarVolta`): retomada do turno de origem, no mesmo
+  trabalho e na mesma sessão, com `acordar_em` = a hora do fim. Ela conta no teto de `VOLTAS_SEGUIDAS_MAX`.
+- Uma volta por turno, de qualquer dos dois tipos: quem marcou `me_chame_as` não deixa espera, e vice-versa.

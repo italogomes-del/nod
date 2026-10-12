@@ -49,6 +49,7 @@ async function conversaComTurnos(quantos: number, agenteId = randomUUID()): Prom
 afterEach(async () => {
   await escopado(async (trx) => {
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
+    await trx`delete from esperas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
     // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.

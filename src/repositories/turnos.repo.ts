@@ -372,7 +372,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      */
     async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
       const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
-        select t.estado, t.despertar_em is not null as marcou_volta,
+        -- ADR-099 (parte 2): deixar um comando esperando (esperar_comando) também é marcar outra volta.
+        select t.estado, (t.despertar_em is not null or exists (select 1 from esperas e where e.tenant_id = t.tenant_id and e.turno_id = t.id)) as marcou_volta,
           exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
           exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
         from turnos t
