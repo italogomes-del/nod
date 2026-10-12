@@ -104,8 +104,16 @@ export function quandoVolta(instante: number, agora: number): string {
  * (ADR-099, parte 1, "esperar não é trabalhar"): é também a regra do grupo **Esperando** — quem só espera não conta como
  * trabalhando. Espelha `esperaDoTrabalho` (src/domain/trabalho.ts); tests/unit/web/trabalhos.test.ts confere as duas.
  */
-export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm">): boolean {
-  return esperandoColega(t) !== null || voltaMarcada(t) !== null;
+export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm"> & Partial<Pick<TrabalhoDto, "esperandoComando">>): boolean {
+  return esperandoColega(t) !== null || esperandoComando(t) !== null || voltaMarcada(t) !== null;
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099, parte 5): a frente deixou um comando rodando (`esperar_comando`, "a CI do #845") e saiu
+ * do Mac até ele acabar — rodando, sem turno vivo. Esperar não é trabalhar: conta como Esperando em todo lugar.
+ */
+export function esperandoComando(t: Pick<TrabalhoDto, "estado" | "turnoVivoId"> & Partial<Pick<TrabalhoDto, "esperandoComando">>): { motivo: string; desde: number } | null {
+  return t.estado === "rodando" && !t.turnoVivoId && t.esperandoComando ? t.esperandoComando : null;
 }
 
 /** O tempo da task: aberta há (do começo até agora ou o fim), quanto os turnos trabalharam e o resto, que é espera. */
@@ -126,6 +134,8 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   // definido em 2026-10-12 (ADR-099 §7): a cota da IA segura a task (o servidor decide, a mesma regra do `reivindicar`); a
   // hora da volta fica na pílula do topo.
   if (t.esperaDaCota) return "esperando a cota da IA";
+  const comando = esperandoComando(t);
+  if (comando) return `esperando ${comando.motivo}`;
   const volta = voltaMarcada(t);
   // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
   // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
@@ -363,12 +373,12 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
-export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "acordaEm">>, cor: string | undefined): string {
+export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "esperandoComando" | "acordaEm">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
   // revisto em 2026-10-09: a classe era `esperando`, que já é a caixa "Esperando você entrar no …" do cartão de acesso
   // (interface.css, `.esperando` com padding e fundo) — o ponto de 8 px virava um anel de ~30 px e empurrava a linha.
-  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
+  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, esperandoComando: t.esperandoComando ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.

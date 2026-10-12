@@ -281,9 +281,20 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
         const titulo = t?.titulo ?? unica.titulo;
         planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `task:${unica.trabalhoId}`, agenteId: t?.agenteId ?? dono, conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Começou a frente</span><b>${esc(titulo)}</b>`, trabalhoId: unica.trabalhoId, conversaId, mensagens: [m.id], titulo, extra: acoesDaAbertura(t, estado, conversaId) }) });
       } else {
-        const botoes = p.frentes.map((f) => botao("abrir-trabalho", esc(conhecidos.get(f.trabalhoId)?.titulo ?? f.titulo), { classe: "sm", id: f.trabalhoId })).join("");
-        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><div class="linha-centro linha-task estatica"><span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Começou ${p.frentes.length} frentes</span></div><div class="linha-acoes">${botoes}</div></div>` });
+        // revisto em 2026-10-12 (ADR-099, parte 5, quadro 06): uma linha só, "●●● Começou 3 frentes: A, B e C · 15:02" —
+        // um ponto na cor do bot por frente (até 3), e cada título abre a frente.
+        const cor = agente(estado, dono)?.cor ?? "";
+        const pontos = `<span class="linha-pontos" aria-hidden="true">${`<span class="ponto-trabalho ${esc(cor)}"></span>`.repeat(Math.min(3, p.frentes.length))}</span>`;
+        const titulos = p.frentes.map((f) => `<button type="button" class="linha-link" data-act="abrir-trabalho" data-id="${esc(f.trabalhoId)}">${esc(conhecidos.get(f.trabalhoId)?.titulo ?? f.titulo)}</button>`);
+        const lista = titulos.length <= 1 ? titulos.join("") : `${titulos.slice(0, -1).join('<span class="linha-sep">, </span>')}<span class="linha-sep"> e </span>${titulos[titulos.length - 1]}`;
+        planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><div class="linha-centro linha-task linha-frentes estatica">${pontos}<span>Começou ${p.frentes.length} frentes:</span><span class="linha-titulos">${lista}</span><span class="linha-hora">· ${esc(hora(m.criadoEm))}</span></div></div>` });
       }
+    } else if (p?.kind === "frentes_terminadas") {
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: linhaFrentesTerminadas(p.frentes, m.criadoEm, conversaId, donoDaConversa ?? "", m.id) });
+    } else if (p?.kind === "pedido_respondido") {
+      // ADR-099 (decisão 7): o pedido de colega concluído não acorda o dono; aqui fica só esta linha (o nome vem do outro bot).
+      const colega = agente(estado, p.agenteId);
+      planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-respondido"><span class="linha-ic" aria-hidden="true">↩</span><span>Respondi ao pedido de</span>${mascote(colega)}<span class="linha-nome">${esc(colega?.nome ?? p.nome)}</span><span class="linha-hora">· ${esc(hora(m.criadoEm))}</span></span></div>` });
     } else if (p?.kind === "recado_a_frente") {
       const titulo = conhecidos.get(p.trabalhoId)?.titulo ?? titulos.get(p.trabalhoId) ?? p.titulo;
       planos.set(m.id, { tipo: "linha", chave: `linha:${m.id}`, html: htmlLinha({ tipo: "task", chave: `recado:${m.id}`, agenteId: conhecidos.get(p.trabalhoId)?.agenteId ?? donoDaConversa ?? "", conteudo: `<span class="linha-ic" aria-hidden="true">${ICONE.brilho}</span><span>Repassou um recado à frente</span><b>${esc(titulo)}</b>`, trabalhoId: p.trabalhoId, conversaId, mensagens: [m.id], titulo }) });
@@ -361,4 +372,23 @@ function acoesDaAbertura(t: TrabalhoDto | undefined, estado: Estado, conversaId:
       ? botao("trabalho-depois", `Fazer depois da ${esc(outras[outras.length - 1]?.titulo ?? "")}`, { classe: "sm", id: t.id, dados: { depois: outras[outras.length - 1]?.id ?? "" } })
       : "";
   return `<div class="linha-acoes">${depois}${botao("trabalho-fazer-aqui", "Fazer aqui", { classe: "sm", id: t.id, titulo: "cancela a task e responde aqui na conversa" })}</div>`;
+}
+
+/**
+ * "✓ 3 frentes terminaram · 17:55" (definido em 2026-10-12, ADR-099, parte 5, quadro 02): a linha centralizada quando o
+ * lote volta ao dono; o resultado chega na fala do bot logo abaixo. Com uma frente, a linha abre a tela dela; com alguma
+ * que parou ou falhou, o sinal diz (■ ou !) e o texto conta quantas.
+ */
+function linhaFrentesTerminadas(frentes: readonly { trabalhoId: string; titulo: string; estado: string }[], criadoEm: number, conversaId: string, agenteId: string, mensagemId: string): string {
+  const falhou = frentes.filter((f) => f.estado === "falhou").length;
+  const parou = frentes.filter((f) => f.estado === "parado").length;
+  const sinal = falhou ? '<span class="linha-falhou" aria-hidden="true">!</span>' : parou ? '<span class="linha-parou" aria-hidden="true">■</span>' : '<span class="linha-ok" aria-hidden="true">✓</span>';
+  const [unica] = frentes;
+  if (frentes.length === 1 && unica) {
+    const verbo = unica.estado === "parado" ? "parou" : unica.estado === "falhou" ? "falhou" : "terminou";
+    return htmlLinha({ tipo: "task", chave: `fim:${mensagemId}`, agenteId, conteudo: `${sinal}<b>${esc(unica.titulo)}</b><span>${verbo} · ${esc(hora(criadoEm))}</span>`, trabalhoId: unica.trabalhoId, conversaId, mensagens: [mensagemId], titulo: unica.titulo });
+  }
+  const resto = [falhou ? `${falhou} ${falhou === 1 ? "falhou" : "falharam"}` : "", parou ? `${parou} ${parou === 1 ? "parou" : "pararam"}` : ""].filter(Boolean);
+  const texto = resto.length ? `${frentes.length} frentes voltaram · ${resto.join(" · ")}` : `${frentes.length} frentes terminaram`;
+  return `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-terminou">${sinal}<span>${esc(texto)} · ${esc(hora(criadoEm))}</span></span></div>`;
 }
