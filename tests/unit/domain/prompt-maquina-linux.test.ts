@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nivelDaMemoriaLinux } from "../../../src/domain/memoria-mac.ts";
-import { montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
+import { MAQUINA_DIVIDIDA, montarPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 import { criarAmostradorMemoria } from "../../../src/adapters/executor/amostrador-memoria.ts";
 
 /** ADR-090: o bot numa máquina Linux da pessoa ouve onde está e não ouve "Mac", "Finder" nem "clone que ela já tem". */
@@ -24,6 +24,13 @@ describe("prompt por máquina (ADR-090)", () => {
     expect(p).not.toContain("credencial do Mac");
     expect(p).toContain("credencial desta máquina");
     expect(p).not.toContain("terminal de verdade do Mac");
+  });
+
+  it("ADR-097 (fase 1c): no Mac e na VM, o bot roda os testes do que mexeu e a suíte completa uma vez antes do PR", () => {
+    for (const p of [montarPromptSistema({ ...base, maquina: { nome: "vm-sp", plataforma: "linux" } }), montarPromptSistema(base)]) {
+      expect(p).toContain(MAQUINA_DIVIDIDA);
+      expect(p).toContain("a suíte completa, uma vez, antes de abrir o PR");
+    }
   });
 
   it("Mac (ou sem a informação, servidor antigo): o texto de sempre", () => {
