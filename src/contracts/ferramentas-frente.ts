@@ -18,6 +18,8 @@ const FRENTE: JsonSchema = {
     pedido: { type: "string", description: "O que esta frente faz, autocontido: ela não vê esta conversa. Inclua nomes, links e o que a pessoa já disse.", minLength: 1, maxLength: 8000 },
     repo: { type: "string", description: "Opcional: o repositório em que ela trabalha (ex.: dono/repo).", minLength: 1, maxLength: 200 },
     branch_base: { type: "string", description: "Opcional: o branch de onde ela parte (padrão: origin/main).", minLength: 1, maxLength: 200 },
+    // definido em 2026-10-12 (ADR-099, I4; decisão 5): a frente só empurra o branch que criou, e só quando o dono pede.
+    pode_empurrar: { type: "boolean", description: "Opcional: true só quando esta frente deve empurrar o próprio branch e abrir o PR dela. O padrão (false) é ela devolver o branch e o SHA para você integrar." },
   },
   required: ["titulo", "pedido"],
   additionalProperties: false,
@@ -60,7 +62,7 @@ export const FERRAMENTAS_FRENTE = {
   },
 } as const satisfies Record<string, JsonSchema>;
 
-export type FrentePedida = { titulo: string; pedido: string; repo?: string; branch_base?: string };
+export type FrentePedida = { titulo: string; pedido: string; repo?: string; branch_base?: string; pode_empurrar?: boolean };
 export type ArgsAbrirFrentes = { frentes: FrentePedida[]; avisar_a_cada_uma?: boolean };
 export type ArgsDevolverResumo = { feito: string; pr?: number; sha?: string; branch?: string; falta?: string };
 

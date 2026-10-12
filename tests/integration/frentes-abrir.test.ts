@@ -32,7 +32,7 @@ async function montar(trx: Trx) {
 
 const TRES = [
   { titulo: "Login no Safari", pedido: "Conserte o login no Safari.", repo: "gamefik/nod" },
-  { titulo: "CI vermelha", pedido: "Descubra por que a CI quebrou.", branch_base: "feat/ci" },
+  { titulo: "CI vermelha", pedido: "Descubra por que a CI quebrou.", branch_base: "feat/ci", pode_empurrar: true },
   { titulo: "Notas da versão", pedido: "Escreva as notas da versão." },
 ];
 
@@ -65,7 +65,9 @@ describeIntegracao("frentes: abrir em lote e devolver o resumo (ADR-099, I2)", (
       expect(entradaLogin).toContain('[nod] Frente "Login no Safari"');
       expect(entradaLogin).toContain("Conserte o login no Safari.");
       expect(entradaLogin).toContain("Repositório: gamefik/nod. Parta de origin/main.");
-      expect((await m.repos.turnos.doTrabalho(ci!.trabalho_id))[0]!.entradaTexto).toContain("Parta do branch feat/ci.");
+      // I4: pode_empurrar vira a linha da entrada; o padrão é não empurrar.
+      expect(entradaLogin).toContain("Não empurre: devolva o branch e o SHA.");
+      expect((await m.repos.turnos.doTrabalho(ci!.trabalho_id))[0]!.entradaTexto).toContain("Parta do branch feat/ci.\nO dono autorizou empurrar o seu branch e abrir PR.");
 
       const linhas = (await m.repos.mensagens.listarDaConversa(m.conversaId)).filter((x) => x.kind === "sistema");
       expect(linhas).toHaveLength(1);

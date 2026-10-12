@@ -3,7 +3,7 @@ import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { molduraDaFrente } from "../domain/frente.ts";
+import { molduraDaFrente, semLinhaDeEmpurrar } from "../domain/frente.ts";
 import { promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -32,7 +32,8 @@ function pedidoSemMoldura(titulo: string, entrada: string): string {
   for (const deRotina of [false, true]) {
     // revisto em 2026-10-12 (ADR-099, I2): a frente nasce com a moldura dela (molduraDaFrente); a task de antes, com esta.
     for (const moldura of [entradaDaTask(titulo, "", deRotina), molduraDaFrente(titulo, deRotina)]) {
-      if (entrada.startsWith(moldura)) return entrada.slice(moldura.length);
+      // revisto em 2026-10-12 (ADR-099, I4): a linha de empurrar é da frente; no dono ela não faz sentido.
+      if (entrada.startsWith(moldura)) return semLinhaDeEmpurrar(entrada.slice(moldura.length));
     }
   }
   return entrada;

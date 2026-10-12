@@ -9,6 +9,7 @@ import type { Profundidade } from "../contracts/turno.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
 import type { FormaTrabalho } from "../contracts/frente.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
+import { BRANCH_NA_FRENTE_ATUAL, DONO_INTEGRA, ehFrente, worktreeDaFrente } from "./frente.ts";
 import { ehPastaDeTask, type MotivoSemTerminal } from "./nativas.ts";
 import { pendenciaNoPrompt } from "./pendencia.ts";
 import { podeRepassar, PROFUNDIDADE_MAXIMA, proximaProfundidade } from "./profundidade.ts";
@@ -327,10 +328,11 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   // prometeu repassar no texto, e nada guardou a promessa. A regra fica na parte ESTÁVEL do prompt; a lista, na dinâmica.
   // definido em 2026-10-07 (ADR-083 §7): a conversa coordena. A regra fica na parte ESTÁVEL; a lista, na volátil.
   // revisto em 2026-10-12 (ADR-099, I2): um pedido, um lote de frentes (abrir_frentes), no lugar de uma task por chamada.
+  // revisto em 2026-10-12 (ADR-099, I4): quem abre frentes num repositório integra os branches delas e é o único a empurrar.
   if (entrada.ferramentas.some((f) => f.nome === "abrir_frentes")) {
-    linhas.push(entrada.ferramentas.some((f) => f.nome === "mandar_para_frente")
+    linhas.push(`${entrada.ferramentas.some((f) => f.nome === "mandar_para_frente")
       ? "Frentes: trabalho que leva mais que alguns minutos ou mexe em arquivos e código vai para frentes — chame abrir_frentes uma vez por pedido, com uma frente para cada parte independente (título curto e pedido autocontido: a frente não vê esta conversa), diga em uma frase o que começou e siga com a pessoa; a conversa fica livre e o resultado e as perguntas das frentes chegam aqui. Pergunta rápida e o que dá para responder já você faz aqui mesmo. A pessoa pode desfazer uma frente (Fazer aqui). Para repassar algo a uma frente aberta, use mandar_para_frente com o id dela; não abra outra frente para o mesmo trabalho."
-      : "Frentes: se esta execução tiver trabalhos longos e independentes entre si, abra-os com abrir_frentes numa chamada só (uma frente por trabalho, título curto e pedido autocontido) e encerre com o que abriu; as frentes rodam à parte e não abrem outras.");
+      : "Frentes: se esta execução tiver trabalhos longos e independentes entre si, abra-os com abrir_frentes numa chamada só (uma frente por trabalho, título curto e pedido autocontido) e encerre com o que abriu; as frentes rodam à parte e não abrem outras."} ${DONO_INTEGRA}`);
   }
   // definido em 2026-10-12 (ADR-099, I2): a frente devolve fatos curtos ao dono e não espera nada de fora (decisão 10).
   if (entrada.ferramentas.some((f) => f.nome === "devolver_resumo")) linhas.push("Frente: você é uma frente do dono (a conversa deste bot com a pessoa), aberta para um pedido só. Ao terminar, chame devolver_resumo com fatos curtos — o que fez, o PR, o SHA, o branch e o que falta — e encerre com uma frase; o dono lê o resumo, não a narrativa. Não espere nada de fora (o CI no GitHub, um deploy, a resposta de alguém): devolva o fato com o que falta e termine; o comando seu (testes, build) você acompanha até o fim. Se precisar da pessoa, pergunte na hora.");
@@ -348,7 +350,10 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   // é a aprovação por comando. O modelo precisa saber as duas coisas para não pedir à pessoa que rode por ele.
   // revisto em 2026-10-09 (ADR-088, #216): na task, a pasta do turno é a da task e a worktree nasce dentro dela — o nod a
   // apaga quando a task acaba. Na conversa (sem task) segue a convenção da ADR-065, na raiz do bot.
-  const worktree = entrada.pastaDoBot && ehPastaDeTask(entrada.pastaDoBot)
+  // revisto em 2026-10-12 (ADR-099, I4): a frente trabalha no próprio branch e só empurra com autorização do dono.
+  const worktree = entrada.pastaDoBot && ehPastaDeTask(entrada.pastaDoBot) && ehFrente(entrada.trabalho)
+    ? worktreeDaFrente(entrada.pastaDoBot)
+    : entrada.pastaDoBot && ehPastaDeTask(entrada.pastaDoBot)
     ? `Para mexer num repositório, trabalhe numa worktree dentro da pasta desta task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo> -b <branch> origin/main (quando a task acaba, o nod apaga a worktree que não tem alteração por commitar; a branch fica no clone); a worktree fora desta pasta e o git que troca de branch ou grava fora dela são negados, para não atropelar o trabalho dela e dos colegas.`
     : `Para mexer num repositório, trabalhe numa worktree sua, uma por task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo>-<task> -b <branch> origin/main; o git que troca de branch ou grava fora da sua pasta é negado, para não atropelar o trabalho dela e dos colegas.`;
   const comNativas = entrada.pastaDoBot && naMaquinaLinux(entrada)
@@ -389,7 +394,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   }
   // ADR-083: a task do turno, e por que ela não abre outra; na conversa, as tasks abertas do bot (mudam a cada turno).
   if (entrada.trabalho?.forma === "frente") {
-    volatil.push(`Frente atual: você está na frente "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e devolva o resumo; a pergunta e o resultado chegam à pessoa como balão da task. Uma frente não abre outras: faça o trabalho aqui mesmo.`);
+    volatil.push(`Frente atual: você está na frente "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e devolva o resumo; a pergunta e o resultado chegam à pessoa como balão da task. Uma frente não abre outras: faça o trabalho aqui mesmo. ${BRANCH_NA_FRENTE_ATUAL}`);
   } else if (entrada.trabalho) {
     const naoAbre = entrada.ferramentas.some((f) => f.nome === "abrir_frentes") ? "" : " Uma task não abre outras (só a rotina abre, um nível): faça o trabalho aqui mesmo.";
     volatil.push(`Task atual: você está na task "${entrada.trabalho.titulo}", ${ORIGEM_DA_TASK[entrada.trabalho.origem]}. Ela roda à parte da conversa: trabalhe até o fim e entregue o resultado; a pergunta e o resultado chegam à pessoa como balão da task.${naoAbre}`);

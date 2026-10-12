@@ -80,7 +80,7 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       trabalhoId: trabalho.id,
       prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
       profundidade: turno.profundidade,
-      entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina, repo: f.repo, branchBase: f.branch_base }),
+      entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }),
       entradaConfianca: turno.entradaConfianca,
       sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
       modelo: agente?.modelo ?? turno.modelo,

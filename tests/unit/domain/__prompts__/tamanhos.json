@@ -8,15 +8,15 @@
     "volatil": 1178
   },
   "conversa-automatico": {
-    "estavel": 14993,
+    "estavel": 15452,
     "volatil": 1099
   },
   "conversa-manual": {
-    "estavel": 13943,
+    "estavel": 14402,
     "volatil": 1099
   },
   "conversa-total": {
-    "estavel": 14732,
+    "estavel": 15191,
     "volatil": 1099
   },
   "criacao-de-bot": {
@@ -24,19 +24,19 @@
     "volatil": 0
   },
   "frente-do-dono": {
-    "estavel": 9329,
-    "volatil": 693
+    "estavel": 9730,
+    "volatil": 826
   },
   "nod": {
     "estavel": 9165,
     "volatil": 0
   },
   "rotina-com-inventario": {
-    "estavel": 8205,
+    "estavel": 8664,
     "volatil": 1590
   },
   "segundo-turno": {
-    "estavel": 14732,
+    "estavel": 15191,
     "volatil": 455
   },
   "sem-terminal-computador-fora": {
