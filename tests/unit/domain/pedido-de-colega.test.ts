@@ -32,7 +32,7 @@ const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map(
 describe("quem recebe um pedido de colega usa os acessos dele", () => {
   it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso, os caminhos de aprovação, ver_colegas, o artefato, anotar o que fica para depois e o computador (ADR-066)", () => {
     const p = montarPlano({ ...base, computador: true, workspace: true, workspaceVinculado: true });
-    expect(p.catalogo.ferramentas.filter((f) => f.origem === "nod").map((f) => f.nome)).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia", "me_chame_as"]);
+    expect(p.catalogo.ferramentas.filter((f) => f.origem === "nod").map((f) => f.nome)).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"]);
     expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "github__pr_revisar", "ler_mais"]));
     expect(p.confiancaEntrada).toBe("confiavel");
     expect(p.politicaExecucao).toEqual({ prazoMs: 86_400_000, orcamentoResultadoChars: expect.any(Number) });

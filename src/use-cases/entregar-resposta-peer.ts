@@ -5,6 +5,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { proximaProfundidade } from "../domain/profundidade.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { perguntaDaTarefa } from "./pedido-de-colega.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
@@ -97,6 +98,9 @@ async function aindaNaoEntrega(deps: DepsEntrega, tarefa: Turno, doLote: string 
   // ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta ("vou esperar o CI"). Essa frase não é o resultado:
   // sem esta espera ela saía como entrega final e o resultado de verdade, na volta, era descartado como ja_entregue.
   if (cadeia.some((t) => t.estado === "pendente" && t.acordarEm != null)) return "aguardando_volta";
+  // definido em 2026-10-12 (ADR-099, I7 revista): ou deixou um comando esperando (esperar_comando, parte 2) — a volta vem
+  // quando ele acabar.
+  if ((await deps.repos.pedidosDeColega.esperasRodandoDosTurnos(cadeia.map((t) => t.id))) > 0) return "aguardando_volta";
   return null;
 }
 
@@ -155,11 +159,9 @@ type Entrega = { tarefa: Turno; texto: string; falha: boolean };
  */
 async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const { tarefa } = e;
-  // A pergunta é a mensagem de TEXTO de outro agente ligada à tarefa; a resposta peer_ask (kind próprio, ligada
-  // à continuação) nunca conta como pergunta — senão a continuação responderia a si mesma em laço.
-  const pergunta = (await deps.repos.mensagens.listarDaConversa(tarefa.conversaId, 500)).find(
-    (m) => m.turnoId === tarefa.id && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.autoria.autor_id !== tarefa.agenteId,
-  );
+  // A pergunta é a mensagem de TEXTO de outro agente ligada à tarefa (perguntaDaTarefa: o mesmo critério que a I3 usa,
+  // por pedidoDeColegaDoTurno, para saber a quem devolver o lote de um pedido de colega).
+  const pergunta = await perguntaDaTarefa(deps, tarefa);
   if (!pergunta) return { data: { ignorado: "nao_e_tarefa_peer" } };
   const delegada = tarefa.origem === "delegacao";
   const remetenteId = pergunta.autoria.autor_id;

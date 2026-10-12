@@ -24,7 +24,10 @@ export const FERRAMENTAS_FORA_DA_FRENTE: readonly string[] = ["me_chame_as", "es
 export const FERRAMENTA_DA_FRENTE = "devolver_resumo" as const;
 
 /** O começo da entrada da frente: quem a abriu e o que se espera dela. O pedido vem logo depois, na linha seguinte. */
-export function molduraDaFrente(titulo: string, deRotina: boolean): string {
+export function molduraDaFrente(titulo: string, deRotina: boolean, pedidoDe: string | null = null): string {
+  // revisto em 2026-10-12 (ADR-099, I7 revista): a frente aberta na triagem de um pedido de colega diz de quem é o pedido;
+  // o resultado vai direto a ele (decisão 7), sem acordar o dono.
+  if (pedidoDe) return `[nod] Frente "${titulo}", aberta por você (o dono) para um pedido de ${pedidoDe}. O resultado volta a ${pedidoDe}; faça o trabalho até o fim e devolva o que fez com devolver_resumo.\n`;
   return deRotina
     ? `[nod] Frente "${titulo}", aberta pela sua rotina. Faça o trabalho até o fim e devolva o que fez com devolver_resumo.\n`
     : `[nod] Frente "${titulo}", aberta por você (o dono) para um pedido da conversa com a pessoa. Ela acompanha pela tela da task; faça o trabalho até o fim e devolva o que fez com devolver_resumo.\n`;
@@ -34,12 +37,12 @@ export function molduraDaFrente(titulo: string, deRotina: boolean): string {
  * A entrada do primeiro turno da frente: a moldura, o pedido autocontido (a frente não vê a conversa) e, quando o dono
  * disse, o repositório e o branch de onde partir; por fim, a linha que diz se ela pode empurrar o próprio branch.
  */
-export function entradaDaFrente(p: { titulo: string; pedido: string; deRotina: boolean; repo?: string; branchBase?: string; podeEmpurrar?: boolean }): string {
+export function entradaDaFrente(p: { titulo: string; pedido: string; deRotina: boolean; pedidoDe?: string | null; repo?: string; branchBase?: string; podeEmpurrar?: boolean }): string {
   const repo = p.repo?.trim();
   const base = p.branchBase?.trim();
   const onde = repo ? `\n\nRepositório: ${repo}. Parta de ${base || "origin/main"}.` : base ? `\n\nParta do branch ${base}.` : "";
   const empurrar = linhaDeEmpurrar(p.podeEmpurrar === true, onde !== "");
-  return `${molduraDaFrente(p.titulo, p.deRotina)}${p.pedido.trim()}${onde ? `${onde}\n` : "\n\n"}${empurrar}`;
+  return `${molduraDaFrente(p.titulo, p.deRotina, p.pedidoDe ?? null)}${p.pedido.trim()}${onde ? `${onde}\n` : "\n\n"}${empurrar}`;
 }
 
 /**

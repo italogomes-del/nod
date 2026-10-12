@@ -76,10 +76,10 @@ export type NovaMensagem = {
 };
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null };
+type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null };
 
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
-  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true };
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
 }
 
 /**
@@ -100,6 +100,14 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
       select x.trabalho_id from turnos x where x.tenant_id = ${tenantId} and x.mensagem_origem_id = m.id and m.turno_id is null
       order by x.criado_em limit 1
     ) o on true
+    left join lateral (
+      with recursive c(id, origem, retoma, n) as (
+        select t.id, t.origem, t.retoma_turno_id, 0 where t.origem = 'retomada'
+        union all
+        select p.id, p.origem, p.retoma_turno_id, c.n + 1 from c join turnos p on p.tenant_id = ${tenantId} and p.id = c.retoma
+        where c.origem = 'retomada' and c.n < 10
+      ) select c.id as raiz_id, c.origem as raiz_origem from c where c.n > 0 order by c.n desc limit 1
+    ) rz on true
     order by m.criado_em, m.id`;
 }
 

@@ -8,6 +8,7 @@ import { ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, textoFrentesAbert
 import { validarResumo } from "../domain/resumo-da-frente.ts";
 import { podeAbrirTask, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, trabalhoAberto } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
+import { origemDasFrentes } from "./pedido-de-colega.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { conversaDoBot, enfileirarNoTrabalho } from "./coordenar-trabalhos.ts";
 import type { Deps } from "./tipos.ts";
@@ -43,6 +44,9 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
     return { ok: false, erro: "depois_de_invalido", instrucao: "depois_de precisa ser o id de uma task sua ainda aberta, como veio em \"Trabalhos em andamento\". Abra sem depois_de ou corrija o id." };
   }
   const deRotina = atual?.origem === "rotina";
+  // revisto em 2026-10-12 (ADR-099, I7 revista): fora de trabalho, o turno do dono pode ser a triagem de um pedido de
+  // colega ou de uma rotina — as frentes herdam a origem do pedido (ADR-085), e as de colega levam quem pediu.
+  const de = atual ? null : await origemDasFrentes(deps, turno);
   // Revisão do épico (S12, 2026-10-08): a execução da rotina abre até TETO_TASKS_POR_EXECUCAO_DE_ROTINA, somando o lote.
   if (deRotina) {
     const ja = (await deps.repos.trabalhos.filhos(atual.id)).length;
@@ -66,10 +70,12 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       agenteId: turno.agenteId,
       conversaId,
       titulo: f.titulo,
-      origem: deRotina ? "rotina" : "pessoa",
-      rotinaId: atual?.rotinaId ?? null,
+      origem: deRotina ? "rotina" : (de?.origem ?? "pessoa"),
+      rotinaId: atual?.rotinaId ?? de?.rotinaId ?? null,
       trabalhoMaeId: deRotina ? atual.id : null,
       depoisDeTrabalhoId: depoisDe?.id ?? null,
+      pedidoPorAgenteId: de?.pedidoPorAgenteId ?? null,
+      pessoaEsperando: de?.pessoaEsperando ?? false,
       forma: "frente",
       loteId: lote.id,
     });
@@ -77,11 +83,11 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
     const novo = await deps.repos.turnos.enfileirar({
       conversaId,
       agenteId: turno.agenteId,
-      origem: deRotina ? "rotina" : "conversa",
+      origem: deRotina ? "rotina" : (de?.turnoOrigem ?? "conversa"),
       trabalhoId: trabalho.id,
       prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
       profundidade: turno.profundidade,
-      entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }),
+      entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina: deRotina || de?.origem === "rotina", pedidoDe: de?.pedidoPorNome ?? null, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }),
       entradaConfianca: turno.entradaConfianca,
       sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
       modelo: agente?.modelo ?? turno.modelo,

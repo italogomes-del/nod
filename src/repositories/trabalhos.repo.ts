@@ -185,12 +185,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * definido em 2026-10-08 (revisão do épico, S12): uma task aberta por uma execução desta rotina (filha, com mãe) que
-     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada.
+     * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada. revisto em 2026-10-12 (ADR-099, I7
+     * revista): também a frente que o dono abriu na triagem da rotina (sem mãe: o lote é do dono).
      */
     async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from trabalhos
-        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and trabalho_mae_id is not null
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and (trabalho_mae_id is not null or forma = 'frente')
           and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
         order by criado_em limit 1`;
       return l ? paraTrabalho(l) : null;

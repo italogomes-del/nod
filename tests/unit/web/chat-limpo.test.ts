@@ -392,3 +392,45 @@ describe("ADR-099 (I2): o lote de frentes vira uma linha só, e o recado a uma f
     expect(html).toContain('data-trabalho="f-a"');
   });
 });
+
+describe("ADR-099 (I7 revista): a rotina e o pedido de colega sem trabalho seguem agrupados pela raiz do turno", () => {
+  // A execução é um turno do dono sem trabalho ("tr"); o retorno das frentes é uma retomada dele ("tv", raiz "tr").
+  const daTriagem = (criadoEm: number): Mensagem[] => [
+    msg("ra", criadoEm, { turnoId: "tr", origemTurno: "rotina", fimDoTurno: true, texto: "Abri uma frente para o PR 7." }),
+    msg("rf", criadoEm, { kind: "sistema", texto: "Começou a frente PR 7", turnoId: "tr", origemTurno: "rotina", payload: { kind: "frentes_abertas", loteId: "l1", origem: "rotina", frentes: [{ trabalhoId: "f-7", titulo: "PR 7" }] } }),
+  ];
+  const doRetorno = (criadoEm: number): Mensagem[] => [
+    msg("rx", criadoEm, { turnoId: "tr", origemTurno: "rotina", kind: "rotina_execucao", texto: "Rotina executou em …", payload: { kind: "rotina_execucao", rotinaId: "rot-prs", instanteAgendado: criadoEm, desfecho: "executou" } }),
+    msg("rv", criadoEm, { turnoId: "tv", origemTurno: "retomada", raiz: { turnoId: "tr", origem: "rotina" }, fimDoTurno: true, texto: "O PR 7 tem dois comentários seus para responder." }),
+  ];
+
+  it("enquanto as frentes rodam: a fala do dono some, fica a linha \"Começou a frente\" e nada de \"nada para você\"", () => {
+    const { e, c } = cenario([daPessoa("p1", t0), ...daTriagem(t0 + MIN)]);
+    const tudo = itens(c, e).map((b) => b.html).join("");
+    expect(tudo).not.toContain("Abri uma frente para o PR 7.");
+    expect(tudo).toContain("Começou a frente");
+    expect(tudo).not.toContain("nada para você");
+  });
+
+  it("no retorno: o resultado da retomada vira o balão \"da rotina\"; o \"comecei\" do dono não", () => {
+    const { e, c } = cenario([daPessoa("p1", t0), ...daTriagem(t0 + MIN), ...doRetorno(t0 + 30 * MIN)]);
+    const daRotina = itens(c, e).filter((b) => ehBalao(b.html) && b.html.includes('<span class="etiqueta-origem">da rotina'));
+    expect(daRotina).toHaveLength(1);
+    expect(daRotina[0]!.html).toContain("O PR 7 tem dois comentários seus para responder.");
+    const tudo = itens(c, e).map((b) => b.html).join("");
+    expect(tudo).not.toContain("Abri uma frente para o PR 7.");
+    expect(tudo).not.toContain("Rotina executou");
+  });
+
+  it("o pedido de colega sem trabalho e a retomada dele viram a mesma linha \"Pedido do Chico\"", () => {
+    const pedido = [
+      msg("k1", t0 + MIN, { autoria: { ...autoriaBot("chico"), sob_procuracao_de: "p" }, turnoId: "tk", origemTurno: "delegacao", payload: { kind: "peer_pedido", conversaOrigemId: "c-chico", turnoOrigemId: "t-chico" }, texto: "Clarice, revisa o #505" }),
+      msg("k2", t0 + 2 * MIN, { turnoId: "tk", origemTurno: "delegacao", fimDoTurno: true, texto: "Pedi acesso ao GitHub" }),
+      msg("k3", t0 + 9 * MIN, { turnoId: "tk2", origemTurno: "retomada", raiz: { turnoId: "tk", origem: "delegacao" }, fimDoTurno: true, texto: "Revisado: dois ajustes" }),
+    ];
+    const { e, c } = cenario([daPessoa("p1", t0), ...pedido]);
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "linha:k1"]);
+    expect(blocos[1]!.html).toMatch(/Pedido do<\/span>.*Chico<\/span><span>· 3 mensagens<\/span>/);
+  });
+});

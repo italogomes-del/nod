@@ -914,7 +914,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.trabalhos).filter((t) => t.agenteId === agenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoTrabalho);
       },
       async filhaAbertaDaRotina(rotinaId) {
-        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && x.trabalhoMaeId !== null && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado));
+        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && (x.trabalhoMaeId !== null || x.forma === "frente") && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado));
         return t ? semDonoTrabalho(t) : null;
       },
       async filhos(maeId) {
@@ -1655,7 +1655,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((j) => {
             const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
             const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
-            return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v))));
+            // ADR-099 (I7 revista): sem trabalho, a cadeia de retomadas da execução (até 10 saltos).
+            const cadeia = new Set([t?.id]);
+            for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+            return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v)))
+              || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
           })
           .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
         return abertas[0]?.turnoId ?? null;
@@ -2463,6 +2467,33 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         },
       };
     })(),
+    // ADR-099 (I7 revista): os pedidos entre bots na triagem do dono. A trava e as quedas se provam no Postgres
+    // (tests/integration/fila-triagem.test.ts, tests/concurrency/pedidos-cruzados.test.ts); aqui, o mínimo para a regra.
+    pedidosDeColega: {
+      async travar() {},
+      async abertos(desde: number) {
+        const ms = doTenant(b.mensagens);
+        const fechado = (id: unknown) => typeof id === "string" && doTenant(b.trabalhos).some((t) => t.id === id && ["terminado", "parado", "falhou"].includes(t.estado));
+        const handoffs = ms.flatMap((m) => (m.payload?.kind === "handoff" && m.payload.tarefaId && m.criadoEm >= desde && !fechado(m.payload.trabalhoId)
+          && !ms.some((r) => r.conversaId === m.conversaId && r.payload?.kind === "peer_ask" && r.payload.tarefaId === (m.payload?.kind === "handoff" ? m.payload.tarefaId : null))
+          ? [{ de: m.payload.de, para: m.payload.para }] : []));
+        const frentes = doTenant(b.trabalhos).filter((t) => t.pedidoPorAgenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).map((t) => ({ de: t.pedidoPorAgenteId as string, para: t.agenteId }));
+        return [...handoffs, ...frentes];
+      },
+      async livres(ids: readonly string[], em: number) {
+        return ids.filter((id) => !doTenant(b.turnos).some((t) => t.agenteId === id && (t.estado === "despachando" || (t.estado === "pendente" && (t.acordarEm == null || t.acordarEm <= em)))));
+      },
+      async frentesAbertasDosTurnos(turnoIds: readonly string[]) {
+        const lotes = doTenant(b.lotes).filter((l) => turnoIds.includes(l.abertoPorTurnoId) && l.devolvidoEm === null).map((l) => l.id);
+        return doTenant(b.trabalhos).filter((t) => t.loteId && lotes.includes(t.loteId) && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).length;
+      },
+      async esperasRodandoDosTurnos(turnoIds: readonly string[]) {
+        return doTenant(b.esperas).filter((e) => turnoIds.includes(e.turnoId) && e.estado === "rodando").length;
+      },
+      async triagensParadas() {
+        return [];
+      },
+    },
   } satisfies Repos;
 
   return repos;

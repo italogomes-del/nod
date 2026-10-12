@@ -22,6 +22,7 @@ import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import type { Tx } from "../../src/shared/types.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
@@ -81,7 +82,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const { taga, dev1, deps, repos, chamadas, turnoTaga } = await cenario(trx);
       await githubDoDev1(repos, dev1);
       const r = await pedir(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(r.data));
       expect(tarefa).toMatchObject({ agenteId: dev1.agenteId, conversaId: dev1.conversaId, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON, estado: "pendente" });
       expect(tarefa?.entradaTexto).toContain("Pedido de Taga:\n<pedido_do_colega>\nPedido: revisar o PR 466\nContexto: https://github.com/acme/app/pull/466\n</pedido_do_colega>");
       expect(tarefa?.entradaTexto).toContain(`<pedido_da_pessoa>\n${PEDIDO}\n</pedido_da_pessoa>`);
@@ -89,8 +90,8 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const [pedido] = (await repos.mensagens.listarDaConversa(dev1.conversaId)).filter((m) => m.payload?.kind === "peer_pedido");
       expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
       expect(pedido?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: taga.agenteId, sob_procuracao_de: PESSOA_MARLON, conta_de_execucao: PESSOA_MARLON });
-      // ADR-083: + o trabalho_mudou da task que nasce em quem recebe.
-      expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(3);
+      // ADR-099 (I7 revista): o handoff e o turno de triagem; não nasce task em quem recebe (era + o trabalho_mudou, ADR-083).
+      expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(2);
 
       const plano = await planoDe(deps, tarefa?.id ?? "");
       expect(plano.events?.[0]?.dados.modo).toBe("delegacao");
@@ -128,7 +129,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       // A rotina do Taga leu um app de fora antes de pedir.
       const daRotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
       const r = await pedir(deps, { turnoId: daRotina.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(r.data));
       expect(tarefa).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel" });
       expect(tarefa?.entradaTexto).not.toContain("pedido_da_pessoa");
       // A página que a rotina leu não se lava pelo pedido (ADR-062): a marca passa a quem recebe, no lugar da trava.
@@ -145,10 +146,10 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
 
       // Rotina que não leu nada de fora, mesmo com exige_aprovacao: nada passa a quem recebe, e a regra dele vale.
       const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      expect(await repos.turnos.contaminado(limpa.data.tarefa_id)).toBe(false);
-      const planoLimpo = await planoDe(deps, limpa.data.tarefa_id);
+      expect(await repos.turnos.contaminado(tarefaDoPedido(limpa.data))).toBe(false);
+      const planoLimpo = await planoDe(deps, tarefaDoPedido(limpa.data));
       expect(chavesDaPolitica(planoLimpo.data)).toEqual(SEM_GATE);
-      expect((await chamar(limpa.data.tarefa_id, "github__pr_comentar", planoLimpo.data)).data).toMatchObject({ ok: true });
+      expect((await chamar(tarefaDoPedido(limpa.data), "github__pr_comentar", planoLimpo.data)).data).toMatchObject({ ok: true });
 
       // Automático: a marca não para — o pedido nascido da rotina que leu algo de fora comenta sozinho.
       await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
@@ -170,7 +171,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
         await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
       for (const t of aceitos) {
-        const tarefa = await repos.turnos.buscar((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data.tarefa_id);
+        const tarefa = await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data));
         expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: (t?.profundidade ?? 0) + 1, entradaConfianca: "confiavel" });
         expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(t?.entradaConfianca === "nao_confiavel");
       }
@@ -197,7 +198,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
         values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${taga.conversaId}, ${taga.agenteId}, 'conversa', now(), 4, 'x', 'confiavel', 'm')`, "23514");
 
       const rotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
-      const tarefa = async (de: { agenteId: string; conversaId: string }, turnoId: string, agente: string) => (await repos.turnos.buscar((await pedir(deps, { turnoId, agenteId: de.agenteId, conversaId: de.conversaId }, agente)).data.tarefa_id))!;
+      const tarefa = async (de: { agenteId: string; conversaId: string }, turnoId: string, agente: string) => (await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId, agenteId: de.agenteId, conversaId: de.conversaId }, agente)).data)))!;
       const d1 = await tarefa(taga, rotina.id, "Dev 1");
       const d2 = await tarefa(dev1, d1.id, "Chico");
       const d3 = await tarefa(chico, d2.id, "Dev 2");
@@ -238,7 +239,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       await trx`update procuracoes set classes_permitidas = ${["delegar_tarefa"]} where id = ${procuracao?.id ?? ""}`;
       await vincularEscopo(trx, MARLON);
       const r = await pedir(deps, ctx);
-      expect(await repos.turnos.buscar(r.data.tarefa_id)).toMatchObject({ agenteId: dev1.agenteId, origem: "delegacao", sobProcuracaoDe: PESSOA_MARLON });
+      expect(await repos.turnos.buscar(tarefaDoPedido(r.data))).toMatchObject({ agenteId: dev1.agenteId, origem: "delegacao", sobProcuracaoDe: PESSOA_MARLON });
     });
   });
 
@@ -248,7 +249,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const criado = await repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
       await repos.conectores.registrarSonda(criado?.id ?? "", { ok: true, catalogo: [cap("pr_ver", true), cap("pr_comentar", false)], agora: AGORA });
       const r = await pedir(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefaId = r.data.tarefa_id;
+      const tarefaId = tarefaDoPedido(r.data);
 
       const pedido = await pedirAcesso(deps, { turnoId: tarefaId, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver", "pr_comentar"], nivel: "escrita", nao_pedido: ["aprovar ou fazer merge"] });
       expect(pedido.data.estado).toBe("aguardando_pessoa");

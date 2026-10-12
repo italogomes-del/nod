@@ -189,7 +189,7 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
       await descer?.();
     }, 30_000);
 
-    it("#192: um bot com rotina, pedido de colega e task da pessoa roda os três ao mesmo tempo ([[espera]] nos três) e a mensagem da conversa é respondida enquanto eles rodam", { timeout: 90_000 }, async () => {
+    it("#192 (revisto pela ADR-099, I7): rotina e pedido de colega entram pela triagem do dono, que abre uma frente para cada; com a da pessoa, as três rodam juntas ([[espera]] nas três) e a mensagem da conversa é respondida enquanto elas rodam", { timeout: 90_000 }, async () => {
       // definido em 2026-10-08: 20 s seguram os três rodando enquanto o teste abre os outros e conversa (sob carga, ~5 s).
       const ESPERA = 20_000;
       const dev = await c.criarBot("Dev");
@@ -200,20 +200,25 @@ describeIntegracao("e2e com catcher: trabalhos em paralelo (#192, #193, #194)", 
         fonte: "as mensagens desta conversa", entregavel: "um resumo curto", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "diga que não houve",
       });
       const executar = async (rotinaId: string | undefined) => (await c.json<RespostaMutacao>("POST", `rotinas/${rotinaId}/executar`)).ids.turnoId ?? "";
-      expect(await executar((await rotina(dev.agenteId, `Triagem das mensagens da manhã [[espera: ${ESPERA}]] [[texto: Triagem feita.]]`)).ids.rotinaId)).toBeTruthy();
+      // revisto em 2026-10-12 (ADR-099, I7 revista): a rotina e o pedido de colega viram turnos curtos de triagem na conversa
+      // do Dev (sem trabalho); em cada um, o dono abre uma frente com o roteiro longo.
+      const daRotina = await executar((await rotina(dev.agenteId, `Triagem das mensagens da manhã ${abrirTask("Triagem da manhã", `faça a triagem [[espera: ${ESPERA}]] [[texto: Triagem feita.]]`)} [[texto: Abri a frente da triagem.]]`)).ids.rotinaId);
+      expect(daRotina).toBeTruthy();
+      expect(await c.turno(daRotina)).toMatchObject({ origem: "rotina", trabalhoId: null, conversaId: dev.conversaId });
       // O pedido do Chico sai da rotina dele: a fala de uma pessoa iria junto, literal, para a entrada do Dev, e o catcher do
       // Dev leria nela o próprio `[[tool: pedir_a_bot …]]` (definido em 2026-10-08: o roteiro do Dev é só o pedido).
-      const pedido = await executar((await rotina(chico.agenteId, `Peça a revisão ao Dev. [[tool: pedir_a_bot ${JSON.stringify({ agente: "Dev", pedido: `revise o PR 481 [[espera: ${ESPERA}]] [[texto: PR 481 revisado]]` })}]] [[texto: Pedi ao Dev.]]`)).ids.rotinaId);
+      const pedido = await executar((await rotina(chico.agenteId, `Peça a revisão ao Dev. [[tool: pedir_a_bot ${JSON.stringify({ agente: "Dev", pedido: `revise o PR 481 ${abrirTask("PR 481", `revise o PR 481 [[espera: ${ESPERA}]] [[texto: PR 481 revisado]]`)} [[texto: Abri a frente do PR 481.]]` })}]] [[texto: Pedi ao Dev.]]`)).ids.rotinaId);
       await c.esperarTurno(pedido);
       const abertura = await c.enviar(dev.conversaId, `Monte o dashboard. ${abrirTask("Dashboard de churn", `monte o dashboard de churn [[espera: ${ESPERA}]] [[texto: Dashboard pronto]]`)} [[texto: Abri a task do dashboard.]]`);
       await c.esperarTurno(abertura);
 
-      // Os três rodando JUNTOS: um turno vivo em cada trabalho do mesmo bot.
+      // As três frentes rodando JUNTAS: um turno vivo em cada uma, do mesmo bot.
       const tres = await c.comDiagnostico(dev, () => c.srv.esperar(async () => {
         const ts = (await c.trabalhos(dev.agenteId)).trabalhos;
         return ts.length === 3 && ts.every((t) => t.estado === "rodando" && t.turnoVivoId !== null) ? ts : null;
-      }, { nome: "três trabalhos rodando juntos", timeoutMs: 15_000 }));
+      }, { nome: "três trabalhos rodando juntos", timeoutMs: 30_000 }));
       expect(new Set(tres.map((t) => t.origem))).toEqual(new Set(["rotina", "colega", "pessoa"]));
+      expect(tres.map((t) => t.forma)).toEqual(["frente", "frente", "frente"]);
       expect(tres.find((t) => t.origem === "colega")?.pedidoPorNome).toBe("Chico");
       const vivos = await Promise.all(tres.map((t) => c.turno(t.turnoVivoId!)));
       expect(vivos.map((t) => t.estado)).toEqual(["despachando", "despachando", "despachando"]);

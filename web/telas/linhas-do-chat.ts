@@ -75,7 +75,9 @@ function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<stri
   for (const t of conhecidos.values()) origens.set(t.id, t.origem);
   for (const m of mensagens) {
     if (!marcada(m) || falaDaPessoaNoChat(m, origens)) continue;
-    const chave = m.trabalhoId ? `trabalho:${m.trabalhoId}` : m.turnoId ? `turno:${m.turnoId}` : null;
+    // ADR-099 (I7 revista): a retomada entra na unidade da raiz dela — a execução da rotina e o pedido de colega não viram
+    // mais trabalho, e a resposta da pessoa, a volta marcada e o retorno das frentes continuam na mesma linha.
+    const chave = m.trabalhoId ? `trabalho:${m.trabalhoId}` : m.raiz ? `turno:${m.raiz.turnoId}` : m.turnoId ? `turno:${m.turnoId}` : null;
     if (!chave) continue;
     const u = unidades.get(chave) ?? { chave, tipo: null, mensagens: [], trabalhoId: m.trabalhoId ?? null, trabalho: m.trabalhoId ? conhecidos.get(m.trabalhoId) : undefined, rotinaId: null };
     u.mensagens.push(m);
@@ -86,8 +88,9 @@ function unidadesDe(mensagens: readonly Mensagem[], conhecidos: ReadonlyMap<stri
     const execucao = u.mensagens.find((m) => m.payload?.kind === "rotina_execucao")?.payload;
     u.rotinaId = u.trabalho?.rotinaId ?? (execucao?.kind === "rotina_execucao" ? execucao.rotinaId : null);
     const origem = u.trabalho?.origem;
-    if (origem === "rotina" || (!origem && (p.includes("rotina_execucao") || u.mensagens.some((m) => m.origemTurno === "rotina")))) u.tipo = "rotina";
-    else if (origem === "colega" || (!origem && (p.includes("peer_pedido") || u.mensagens.some((m) => m.origemTurno === "delegacao")))) u.tipo = "colega";
+    const deOrigem = (o: string): boolean => u.mensagens.some((m) => m.origemTurno === o || m.raiz?.origem === o);
+    if (origem === "rotina" || (!origem && (p.includes("rotina_execucao") || deOrigem("rotina")))) u.tipo = "rotina";
+    else if (origem === "colega" || (!origem && (p.includes("peer_pedido") || deOrigem("delegacao")))) u.tipo = "colega";
     else if (origem || u.trabalhoId) u.tipo = "task";
   }
   return unidades;
@@ -166,7 +169,10 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const execucoes = u.mensagens.flatMap((m) => (m.payload?.kind === "rotina_execucao" ? [m.payload.desfecho] : []));
     const falou = u.tipo !== "rotina" || execucoes.some((d) => !DESFECHOS_SILENCIOSOS.has(d));
     const etiqueta = u.tipo === "rotina" ? `da rotina ${nomeDaRotina(estado, u) ?? ""}`.trim() : `da task ${tituloDe(u)}`;
-    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true));
+    // ADR-099 (I7 revista): na rotina, o turno do dono que abriu frentes ("comecei…") não é o resultado — o resultado é o
+    // do retorno das frentes; até ele chegar a execução não acabou.
+    const abriramFrentes = new Set(u.tipo === "rotina" ? u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])) : []);
+    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
     // O resultado do trabalho que terminou ganha a linha "… terminou · 39 min · US$ 0,88" logo acima (K5).
     const ultimoFim = [...baloes].reverse().find((m) => m.payload?.kind !== "pedido_a_pessoa");
     for (const m of baloes) {
@@ -188,7 +194,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     for (const m of recolhidas) planos.set(m.id, { tipo: "oculta" });
     // Revisão W7 (2026-10-08): "nada para você" só da execução que acabou — com o trabalho aberto, ou sem a linha da
     // execução nem a última fala do turno, ela ainda pode ter algo a dizer.
-    const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || u.mensagens.some((m) => m.fimDoTurno === true));
+    const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || (abriramFrentes.size === 0 && u.mensagens.some((m) => m.fimDoTurno === true)));
     if (u.tipo === "rotina" && acabou && baloes.length === 0 && !execucoes.some((d) => DESFECHOS_A_VISTA.has(d)) && recolhidas.length > 0) nadaParaVoce.add(u);
     if (u.tipo === "colega" && recolhidas[0]) {
       const pedido = u.mensagens.find((m) => m.payload?.kind === "peer_pedido");

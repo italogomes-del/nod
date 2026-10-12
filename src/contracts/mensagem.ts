@@ -144,6 +144,12 @@ export type Mensagem = {
    * turno foram do meio (ADR-067). Ausentes = servidor anterior ao épico.
    */
   origemTurno?: OrigemTurno | null;
+  /**
+   * definido em 2026-10-12 (ADR-099, I7 revista): o turno de uma retomada leva a raiz da cadeia dele (o turno que ela
+   * continua, até 10 saltos). A execução de rotina e o pedido de colega não viram mais trabalho: sem a raiz, a resposta
+   * da pessoa, a volta marcada e o retorno das frentes saíam da linha agrupada "da rotina" / "Pedido do …".
+   */
+  raiz?: { turnoId: string; origem: OrigemTurno };
   trabalhoId?: string | null;
   fimDoTurno?: boolean;
 };

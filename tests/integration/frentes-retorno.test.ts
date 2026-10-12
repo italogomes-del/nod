@@ -159,8 +159,9 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
       const daAda = await m.turnoDaConversa({ texto: "peça à Bia" });
       await m.repos.turnos.assentar(daAda.id, { estado: "concluido" });
       const pedido = await pedirABot(m.deps, { ...contexto(m.ada.agenteId, m.ada.conversaId, daAda.id), agente: "Bia", pedido: "Revise o login e a CI" });
-      // O turno curto da triagem (outra issue) roda na conversa da Bia, fora de task: aqui, o turno do pedido sem trabalho.
-      await trx`update turnos set trabalho_id = null where id = ${pedido.data.tarefa_id}`;
+      if (!pedido.data.ok) throw new Error(pedido.data.instrucao);
+      // O turno curto da triagem roda na conversa da Bia, fora de task (com a triagem, o pedido já nasce assim).
+      expect((await m.repos.turnos.buscar(pedido.data.tarefa_id))?.trabalhoId ?? null).toBeNull();
       const triagem = (await m.repos.turnos.buscar(pedido.data.tarefa_id))!;
       const { loteId, ids } = await m.abrir(triagem, TRES.slice(0, 2));
       await m.repos.turnos.assentar(triagem.id, { estado: "concluido" });
