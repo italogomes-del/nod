@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Seu espaço · Máquinas · Este Mac apertado</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:100%;height:100%;display:block}
+.acel{display:flex;flex-direction:column;gap:12px;padding:16px 18px 18px;border-top:1px solid var(--line)}
+.acel-cab{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink)}
+.acel-cab b{font-weight:500}
+.acel-cab button{margin-left:auto}
+.acel-nota{font-size:12px;color:var(--ink-3)}
+.acel-barra{display:flex;height:6px;max-width:420px;border-radius:3px;overflow:hidden;background:var(--surface-raised)}
+.acel-barra i{display:block;height:100%}
+.acel-barra .ap{background:var(--line-strong)}
+.acel-barra .ag{background:var(--ink-2)}
+.acel-op{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;font-size:13px;color:var(--ink-2)}
+.acel-op div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.acel-op b{font-weight:500;color:var(--ink)}
+.acel-op .bt{flex:none}
+.acel-op a{flex:none;color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; height: 1000px; background: var(--surface);">
+<div class="espaco" role="dialog" aria-modal="true" aria-labelledby="espaco-titulo">
+  <nav class="espaco-nav" aria-label="Seções de Seu espaço">
+    <div class="espaco-volta"><button type="button" class="espaco-voltar" title="Voltar para Clarice (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6l-6 6 6 6"></path></svg><span class="icon mascote c-red shape-circle sm"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span><span>Clarice</span></button><kbd>esc</kbd></div>
+    <h1 id="espaco-titulo">Seu espaço</h1>
+    <div class="espaco-itens">
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"></path></svg><span>Provedores de IA</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 7.5-2.5 8.5h17c0-1-2.5-2-2.5-8.5M10 20.5h4"></path></svg><span>Avisos</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"></path></svg><span>Preferências</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 16.5a8 8 0 1 1 15 0"></path><path d="M12 12.5l3.5-3.5"></path></svg><span>Este Mac</span></button>
+      <button type="button" class="espaco-item" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"></rect><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"></rect><path d="M7 7.25h.01M7 16.75h.01"></path></svg><span>Máquinas</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"></rect><path d="M8.5 20h7M12 16.5V20"></path></svg><span>Computadores</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"></rect></svg><span>Gerenciar agentes</span></button>
+      <button type="button" class="espaco-item"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"></path></svg><span>Relatos</span></button>
+    </div>
+  </nav>
+  <main class="espaco-conteudo"><section class="espaco-secao maquinas">
+    <h2>Máquinas</h2>
+    <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p><button type="button" class="bt pri"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Conectar uma máquina</button></div>
+
+    <div class="maq-lista">
+      <div class="espaco-cartao maq-cartao">
+        <div class="maq-cab">
+          <span class="maq-ic" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="10.5" rx="1.6"></rect><path d="M2.5 18.5h19"></path></svg></span>
+          <span class="maq-id"><b>Este Mac</b><small>MacBook do Marlon · 16 GB de memória</small></span>
+          <span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectado</span>
+        </div>
+        <div class="maq-ias"><span class="maq-ia"><i aria-hidden="true"></i>Claude Code pronto</span><span class="maq-ia"><i aria-hidden="true"></i>Codex pronto</span><span class="maq-ia"><i aria-hidden="true"></i>GitHub</span></div>
+        <details class="maq-leitura"><summary><span class="maq-nivel nivel-amarela" aria-hidden="true"></span><span>Seus apps estão usando quase toda a memória · os testes esperam</span></summary></details>
+        <div class="acel" role="group" aria-label="Como acelerar no Mac">
+          <div class="acel-cab"><b>Os testes do Ze 1 e do Dev 1 esperaram 25 min hoje</b><button type="button" class="bt link">Fechar</button></div>
+          <span class="acel-barra" role="img" aria-label="Seus apps 13 GB, bots 1,8 GB, livre 1,2 GB de 16 GB"><i class="ap" style="width: 81%;"></i><i class="ag" style="width: 11%;"></i></span>
+          <span class="acel-nota">Seus apps usam 13 GB dos 16 GB. Os bots seguem conversando; o que espera são os comandos pesados.</span>
+          <div class="acel-op"><div><b>Deixar os bots usarem mais do Mac</b><span>Hoje está em Equilibrado. Com “O quanto precisar”, os testes não esperam, mas o Mac pode ficar lento enquanto rodam.</span></div><button type="button" class="bt">Usar “O quanto precisar”</button></div>
+          <div class="acel-op"><div><b>Conectar uma VM para os bots pesados</b><span>Ze 1 e Dev 1, que rodam testes, vão para a VM. O Mac fica para você e para os bots leves.</span></div><button type="button" class="bt">Conectar uma máquina</button></div>
+          <div class="acel-op"><div><b>Espalhar as rotinas</b><span>3 rotinas começam às 09:00, quando você também está usando o Mac.</span></div><a href="#">Ver rotinas</a></div>
+        </div>
+        <div class="maq-quem"><span class="maq-avatares"><span class="icon mascote c-red shape-square sm"><img src="/_blob/29d20d2fee6bd83243b75f770a562c3a" alt=""></span><span class="icon mascote c-green shape-cloud sm"><img src="/_blob/698e127b8f94d07c584f88d11905cf48" alt=""></span><span class="icon mascote c-orange shape-square sm"><img src="/_blob/e473d72a730feb1fca9c08839c776a35" alt=""></span><span class="icon mascote c-orange shape-pebble sm"><img src="/_blob/b9bc8d0254c2dc78d07fe2a9250063dd" alt=""></span><span class="icon mascote c-black shape-drop sm"><img src="/_blob/6cf8e7d4cc35a7d32a326738cbf2eefa" alt=""></span><span class="icon mascote c-red shape-circle sm"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span></span><span>9 bots trabalham aqui: Clarice, Milton, Ada, Tarsila, Nina, Ze 1, Dev 1, Chico, Nod</span></div>
+      </div>
+    </div>
+  </section></main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
