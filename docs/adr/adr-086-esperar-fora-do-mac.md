@@ -73,7 +73,7 @@ como quem trabalha. O #208 (tempo da task) trocou o relógio por "esperando X", 
 
 Em 11/10 a tela Trabalhos dizia "Trabalhando · 13" com um trabalhando de fato (onze voltas marcadas do Ze 1 e duas tasks
 esperando colega), e uma task voltou 12 vezes seguidas sem nada novo, acima das 10 do gatilho acima, sem aviso. A
-[ADR-098](adr-098-um-dono-por-bot.md) (§5 e §10, "esperar não é trabalhar") muda duas coisas daqui:
+ADR-098 "um dono por bot" (PR #265, ainda proposta; §5 e §10, "esperar não é trabalhar") muda duas coisas daqui:
 
 - **A volta marcada não conta como trabalhando** (substitui o item 3 na tela). O estado gravado continua `rodando` (sem
   migração), mas a leitura deriva a espera (`esperaDoTrabalho`, src/domain/trabalho.ts; `foraDoMac` na web): `rodando`,
