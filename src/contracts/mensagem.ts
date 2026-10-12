@@ -4,6 +4,7 @@ import type { Autoria } from "./evento.ts";
 import type { IdHarness } from "./harness.ts";
 import type { CAUSA_LIMITE, CausaSemIa } from "./inventario.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
+import type { CausaNativa } from "./negacao.ts";
 import type { OrigemTrabalho } from "./trabalho.ts";
 import type { OrigemTurno } from "./turno.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
@@ -50,8 +51,9 @@ export type PayloadMensagem =
    * `causa` (definido em 2026-10-05): a IA estava logada e a conta não serviu (src/contracts/inventario.ts).
    * `modelo` (NOD-171): o harness está pronto, mas o modelo escolhido no agente não é aceito por ele; a tela pede outro
    * modelo em vez de dizer que a IA "já voltou".
+   * `causaNativa` e `vezes` (definido em 2026-10-11): por que o hook do nod barrou a nativa e quantas vezes no turno.
    */
-  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string }
+  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string; causaNativa?: CausaNativa; vezes?: number }
   /**
    * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
    * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.
