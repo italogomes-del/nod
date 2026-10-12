@@ -551,3 +551,28 @@ describe("sessão MCP expirada (404 com mcp-session-id) abre sessão nova e repe
     await vivos.fechar();
   });
 });
+
+// NOD-208: catálogo vazio (só meta-executores do Composio) era falha em silêncio; agora loga o motivo e quantos meta vieram.
+describe("sonda: catálogo vazio do Composio", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+
+  it("só COMPOSIO_* → conector_indisponivel e log sonda_conector_falhou com motivo catalogo_vazio, sem URL nem chave", async () => {
+    const f: typeof fetch = async (_url, init) => {
+      const q = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (!q.id) return new Response(null, { status: 202 });
+      const result = q.method === "initialize" ? {} : { tools: [{ name: "COMPOSIO_SEARCH_TOOLS", inputSchema: { type: "object" } }, { name: "COMPOSIO_MULTI_EXECUTE_TOOL", inputSchema: { type: "object" } }] };
+      return Response.json({ jsonrpc: "2.0", id: q.id, result });
+    };
+    const url = "https://backend.composio.dev/tool_router/v3/trs_sessao_secreta/mcp";
+    const r = await sondarConector({ nome: "slack", transporte: "http", url, env: { "x-api-key": "ak_chave_secreta" } }, { fetchImpl: f });
+    expect(r).toEqual({ ok: false, motivo: "conector_indisponivel" });
+    const linhas = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("sonda_conector_falhou"));
+    expect(linhas).toHaveLength(1);
+    expect(JSON.parse(linhas[0]!)).toMatchObject({ nivel: "aviso", conector: "slack", motivo: "catalogo_vazio", meta: 2, total: 2 });
+    const tudo = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(tudo).not.toContain("trs_sessao_secreta");
+    expect(tudo).not.toContain("ak_chave_secreta");
+  });
+});

@@ -86,7 +86,12 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
     const composio = cfg.transporte === "http" && cfg.url && ["app.composio.dev", "backend.composio.dev"].includes(new URL(cfg.url).hostname);
     // definido em 2026-09-17: só ferramentas concretas por capacidade; meta-executores burlariam a aprovação do destino.
     const concretas = composio ? ferramentas.filter((t) => !t.name.startsWith("COMPOSIO_")) : ferramentas;
-    if (concretas.length === 0) return { ok: false, motivo: "conector_indisponivel" };
+    if (concretas.length === 0) {
+      // NOD-208: catálogo vazio também é falha com log (antes, silêncio). `meta` = quantos COMPOSIO_* vieram.
+      // O motivo devolvido segue conector_indisponivel: o contrato e a CHECK do banco não mudam. Sem URL nem chave.
+      log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo: "catalogo_vazio", meta: ferramentas.length - concretas.length, total: ferramentas.length });
+      return { ok: false, motivo: "conector_indisponivel" };
+    }
     return { ok: true, ferramentas: concretas.map(paraCapacidade) };
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";

@@ -8,9 +8,12 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
   const mudancas: [string, ConexaoApp | null][] = [];
   const conectados: string[] = [];
   let verificou = 0;
+  let conectou = 0;
+  let abriu = 0;
   const janela: JanelaLogin | null = p.janela === undefined ? { closed: false, location: { href: "" }, close() { (this as { closed: boolean }).closed = true; } } : p.janela;
   const deps: DepsConexao = {
     conectar: async () => {
+      conectou += 1;
       if (p.conectarFalha) throw new Error("servidor");
       return p.conectadoDireto ? { conectado: true } : { url: p.url ?? "https://login.exemplo/x" };
     },
@@ -21,11 +24,11 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
     },
     mudou: (slug, valor) => void mudancas.push([slug, valor]),
     conectado: (slug) => void conectados.push(slug),
-    abrirJanela: () => janela,
+    abrirJanela: () => { abriu += 1; return janela; },
     esperar: async (ms) => void (agora += ms),
     agora: () => agora,
   };
-  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou };
+  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou, conectou: () => conectou, abriu: () => abriu };
 }
 
 describe("login de app sem 'Verificar conexão' (definido em 2026-09-25)", () => {
@@ -103,5 +106,56 @@ describe("login de app sem 'Verificar conexão' (definido em 2026-09-25)", () =>
     expect(f.janela?.closed).toBe(true);
     expect(f.mudancas.at(-1)).toEqual(["clickup", null]);
     expect(f.conexoes.esperando("clickup")).toBe(false);
+  });
+});
+
+describe("'Tentar de novo' depois de FALHA_APP sonda a sessão existente antes do login novo (NOD-208)", () => {
+  it("verificar volta conectado: conclui sem conectar-app nem janela, e o 'depois' roda", async () => {
+    const m = montar({ verificacoes: ["falhou", true] });
+    await m.conexoes.iniciar("slack");
+    expect(m.mudancas.at(-1)).toEqual(["slack", { url: "https://login.exemplo/x", falhou: FALHA_APP }]);
+    expect([m.conectou(), m.abriu(), m.verificou()]).toEqual([1, 1, 1]);
+    const rodou: string[] = [];
+    await m.conexoes.iniciar("slack", () => void rodou.push("rotina"));
+    expect([m.conectou(), m.abriu(), m.verificou()]).toEqual([1, 1, 2]);
+    expect(m.conectados).toEqual(["slack"]);
+    expect(rodou).toEqual(["rotina"]);
+    expect(m.mudancas.slice(-2)).toEqual([["slack", { url: null, falhou: null }], ["slack", null]]);
+  });
+
+  it("verificar falha de novo (ou dá erro): segue para o login de hoje, com janela e espera", async () => {
+    for (const segunda of ["falhou", "erro"] as const) {
+      const m = montar({ verificacoes: ["falhou", segunda, true] });
+      await m.conexoes.iniciar("slack");
+      await m.conexoes.iniciar("slack");
+      expect([m.conectou(), m.abriu(), m.verificou()]).toEqual([2, 2, 3]);
+      expect(m.janela?.location.href).toBe("https://login.exemplo/x");
+      expect(m.conectados).toEqual(["slack"]);
+    }
+  });
+
+  it("outras falhas (janela fechada) e a terceira tentativa depois de um login novo não re-sondam", async () => {
+    const fechada = montar({ verificacoes: [], janela: { closed: true, close() {}, location: { href: "" } } });
+    await fechada.conexoes.iniciar("slack");
+    const antes = fechada.verificou();
+    await fechada.conexoes.iniciar("slack");
+    expect(fechada.conectou()).toBe(2);
+    expect(fechada.verificou() - antes).toBeGreaterThan(0); // só as perguntas da espera do login novo
+    expect(fechada.abriu()).toBe(2);
+
+    const m = montar({ verificacoes: ["falhou", "falhou", false, true] });
+    await m.conexoes.iniciar("slack"); // FALHA_APP
+    await m.conexoes.iniciar("slack"); // re-sonda falha, login novo, conecta
+    expect(m.conectados).toEqual(["slack"]);
+    await m.conexoes.iniciar("slack"); // já conectou: login normal, sem re-sonda
+    expect(m.conectou()).toBe(3);
+  });
+
+  it("Cancelar depois de FALHA_APP esquece a re-sonda", async () => {
+    const m = montar({ verificacoes: ["falhou", true] });
+    await m.conexoes.iniciar("slack");
+    m.conexoes.cancelar("slack");
+    await m.conexoes.iniciar("slack");
+    expect(m.conectou()).toBe(2);
   });
 });
