@@ -80,7 +80,7 @@ describeIntegracao("trabalhos (0060, ADR-083)", () => {
       await repos.mensagens.criar({ conversaId, turnoId: t!.id, autoria, kind: "texto", texto: "Lendo o PR", confianca: "confiavel" });
       const extras = (await repos.trabalhos.extras([w!.id])).get(w!.id);
       // esperandoColega e trabalhouMs (tempo da task, 2026-10-08) se provam em tests/integration/tempo-da-task.test.ts.
-      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id], deFora: true, esperandoColega: null, trabalhouMs: 0, acordaEm: null, esperandoComando: null, maquinaVivaId: MAQUINA, maquinaAlvoId: null });
+      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id], deFora: true, esperandoColega: null, trabalhouMs: 0, acordaEm: null, esperandoComando: null, maquinaVivaId: MAQUINA, maquinaAlvoId: null, acordaMotivo: null, lote: null });
     });
   });
 
