@@ -55,20 +55,21 @@ async function montar(trx: Tx) {
 }
 
 describeIntegracao("a tela fala por máquina (2026-10-09)", () => {
-  it("VM cheia e Mac folgado: só a rotina do bot da VM espera, com o nome dela; a do Mac segue na fila", async () => {
+  it("VM sem memória e Mac folgado: só a rotina do bot da VM espera, com o nome dela; a do Mac segue na fila", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const daVm = await m.rotina(m.ada, "Verificar o Slack");
       const doMac = await m.rotina(m.eli, "Consultar o ClickUp");
-      m.leituras.set(m.vm, { nivel: "verde", portao: "vermelha", totalMb: 700 });
+      // ADR-097: no equilibrado (o padrão) só a memória e o disco seguram; o processador cheio, não.
+      m.leituras.set(m.vm, { nivel: "amarela", portao: "vermelha", totalMb: 700 });
       m.leituras.set(MAC, { nivel: "verde", portao: "verde", totalMb: 400 });
 
       const dto = await m.listar();
       const de = (id: string) => dto.trabalhos.find((t) => t.id === id);
-      expect(de(daVm.trabalho.id)).toMatchObject({ esperaDoMac: "processador", maquina: { id: m.vm, nome: "nod-motor-teste", ehMac: false } });
+      expect(de(daVm.trabalho.id)).toMatchObject({ esperaDoMac: "memoria", maquina: { id: m.vm, nome: "nod-motor-teste", ehMac: false } });
       expect(de(doMac.trabalho.id)).toMatchObject({ esperaDoMac: null, maquina: { id: MAC, nome: "Este Mac", ehMac: true } });
       expect(dto.maquinas).toEqual([
-        expect.objectContaining({ id: m.vm, nome: "nod-motor-teste", ehMac: false, motivoEspera: "processador", memoriaBotsMb: 700 }),
+        expect.objectContaining({ id: m.vm, nome: "nod-motor-teste", ehMac: false, motivoEspera: "memoria", memoriaBotsMb: 700 }),
         expect.objectContaining({ id: MAC, nome: "Este Mac", ehMac: true, motivoEspera: null, memoriaBotsMb: 400 }),
       ]);
       // Os campos de topo continuam pelo pior (a web e o app de antes).
@@ -100,9 +101,9 @@ describeIntegracao("a tela fala por máquina (2026-10-09)", () => {
       const m = await montar(trx);
       const daVm = await m.rotina(m.ada, "Verificar o Slack");
       await m.repos.maquinaTokens.revogar(m.vm, Date.now());
-      m.leituras.set(MAC, { nivel: "verde", portao: "vermelha", totalMb: 400 });
+      m.leituras.set(MAC, { nivel: "amarela", portao: "verde", totalMb: 400 });
       const dto = await m.listar();
-      expect(dto.trabalhos.find((t) => t.id === daVm.trabalho.id)).toMatchObject({ esperaDoMac: "processador", maquina: { id: MAC } });
+      expect(dto.trabalhos.find((t) => t.id === daVm.trabalho.id)).toMatchObject({ esperaDoMac: "memoria", maquina: { id: MAC } });
     });
   });
 
