@@ -10,7 +10,7 @@ import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem } from "./pedido.ts";
 import type { BloqueioRotina, ParadaDaRotina, Rotina } from "./rotina.ts";
-import type { TrabalhoDto } from "./trabalho.ts";
+import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
@@ -55,7 +55,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  */
 export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null };
 
-export type ConversaDto = {
+export type ConversaDto = DonoNaConversa & {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];

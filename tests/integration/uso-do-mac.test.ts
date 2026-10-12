@@ -106,7 +106,7 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const services = { ...deps.services, trabalhosVivos: { ultimaFerramenta: () => null, memoria: () => null, trocouUsoDoMac: trocou } };
       const put = criarRotasRaioX({ abrirTx: () => (fn) => fn(trx), services, useCases: deps.useCases }).find((r) => r.metodo === "PUT" && r.padrao.test("/preferencias"))!;
       const chamar = (corpo: unknown) => put.handler({ escopo: MARLON, params: {}, corpo: async () => corpo, json: () => undefined } as never);
-      await chamar({ faixaTrabalhosRecolhida: true });
+      await chamar({ modoDev: true });
       expect(trocou).not.toHaveBeenCalled();
       await chamar({ usoDoMac: "pouco" });
       expect(trocou).toHaveBeenCalledWith(PESSOA_MARLON);
@@ -119,8 +119,8 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
     await withRollback(MARLON, async (trx) => {
       const { deps } = depsSobre(trx, MARLON);
       expect((await lerPreferencias(deps, {})).data.usoDoMac).toBe("equilibrado");
-      await gravarPreferencias(deps, { faixaTrabalhosRecolhida: true });
-      expect((await gravarPreferencias(deps, { usoDoMac: "pouco" })).data).toMatchObject({ usoDoMac: "pouco", faixaTrabalhosRecolhida: true });
+      await gravarPreferencias(deps, { modoDev: true });
+      expect((await gravarPreferencias(deps, { usoDoMac: "pouco" })).data).toMatchObject({ usoDoMac: "pouco", modoDev: true });
       expect((await gravarPreferencias(deps, { usoDoMac: "livre" })).data.usoDoMac).toBe("livre");
       for (const usoDoMac of ["muito", 3, null, ""]) await esperarErro(() => gravarPreferencias(deps, { usoDoMac }), "entrada_invalida");
       expect((await lerPreferencias(deps, {})).data.usoDoMac).toBe("livre");

@@ -95,3 +95,19 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
   if (p.quedaEm !== null && agora - p.quedaEm > DESISTIR_SEM_SINAL_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e as máquinas não voltaram em 30 min`, semEsperar: true };
   return { tipo: "esperar" };
 }
+
+/**
+ * Frente de lote que caiu (definido em 2026-10-12, ADR-099 itens 5 e 8, issue I9): o varredor da ADR-084 olha também as
+ * frentes que o dono abriu, com a MESMA regra do pedido a colega — retoma a queda por infraestrutura quando as máquinas
+ * voltam, até MAX_QUEDAS_POR_PEDIDO e só nas últimas RETOMAR_ATE_MS. Onde o pedido avisaria quem pediu, a frente
+ * desiste: fecha `falhou` com o motivo, o lote dela fecha (I3) e o dono acorda para perguntar à pessoa como seguir.
+ * Não há "resultado que ficou para trás": a frente que terminou já fechou o lote pelo caminho da I3.
+ */
+export type AcaoFrenteCaida = { tipo: "esperar" } | { tipo: "retomar"; turnoId: string; tentativa: number } | { tipo: "desistir"; motivo: string };
+
+export function decidirFrenteCaida(p: PedidoParado, agora: number, motivoLegivel: (motivo: string) => string): AcaoFrenteCaida {
+  const acao = decidirPedidoParado(p, agora, motivoLegivel);
+  if (acao.tipo === "retomar" || acao.tipo === "esperar") return acao;
+  if (acao.tipo === "avisar_falha") return { tipo: "desistir", motivo: acao.motivo };
+  return { tipo: "esperar" };
+}

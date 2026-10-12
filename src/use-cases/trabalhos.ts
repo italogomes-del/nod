@@ -13,6 +13,7 @@ import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { donosDosBots } from "./estado-do-dono.ts";
 import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -25,14 +26,17 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 
 type DepsTrabalho = Pick<Deps, "repos" | "escopo" | "agora">;
 
-/** O frame `trabalho.mudou` sai pelo outbox: só ids e estado (KindEvento `trabalho_mudou`). */
-export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" | "agenteId" | "conversaId" | "estado" | "origem">): RuntimeEvent {
+/**
+ * O frame `trabalho.mudou` sai pelo outbox: só ids e estado (KindEvento `trabalho_mudou`). revisto em 2026-10-12 (ADR-099,
+ * I10): também a forma e o lote; o estado do dono do bot entra no frame na hora de publicar (despachar-outbox.ts).
+ */
+export function eventoTrabalhoMudou(deps: DepsTrabalho, t: Pick<Trabalho, "id" | "agenteId" | "conversaId" | "estado" | "origem"> & Partial<Pick<Trabalho, "forma" | "loteId">>): RuntimeEvent {
   return evento(deps.escopo, {
     kind: "trabalho_mudou",
     autoria: autoriaAgente({ agenteId: t.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:trabalhos" }),
     agora: deps.agora(),
     conversaId: t.conversaId,
-    dados: { trabalhoId: t.id, agenteId: t.agenteId, conversaId: t.conversaId, estado: t.estado, origem: t.origem },
+    dados: { trabalhoId: t.id, agenteId: t.agenteId, conversaId: t.conversaId, estado: t.estado, origem: t.origem, forma: t.forma ?? "task", loteId: t.loteId ?? null },
   });
 }
 
@@ -183,6 +187,8 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       trabalhouMs: e?.trabalhouMs ?? 0,
       acordaEm: e?.acordaEm ?? null,
       esperandoComando: e?.esperandoComando ?? null,
+      acordaMotivo: e?.acordaMotivo ?? null,
+      lote: e?.lote ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
     };
   }).map((dto) => (alemDisso ? { ...dto, ...alemDisso(dto, extras.get(dto.id)) } : dto));
@@ -224,6 +230,9 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
   const topo = { cota: cotaParaTela(cotaAgora), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
+  const bots = input.agenteId ? [input.agenteId] : agentes.filter((a) => a.ownerId === deps.escopo.pessoaId && !a.excluidoEm).map((a) => a.id);
+  const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];
   const servico = deps.services.maquinas;
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
@@ -231,7 +240,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
       const motivo = esperaDoMac(t, portao, agora);
       return comCota(motivo ? { ...t, esperaDoMac: motivo } : t);
     });
-    return { data: { trabalhos: dtos, ...topo } };
+    return { data: { trabalhos: dtos, ...topo, donos } };
   }
   const { maquinas, portoes, nomear } = maquinasDaPessoa(deps, servico, usoDoMac);
   const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
@@ -243,7 +252,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const maquina = espera?.maquinaId ?? id;
     return { esperaDoMac: espera?.motivo ?? null, maquina: maquina === null ? null : nomear(maquina) };
   });
-  return { data: { trabalhos: dtos.map(comCota), ...topo, maquinas } };
+  return { data: { trabalhos: dtos.map(comCota), ...topo, maquinas, donos } };
 };
 
 /**
@@ -276,12 +285,6 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
     };
   });
   return { maquinas, portoes, nomear };
-}
-
-/** Os abertos do bot da conversa (ConversaDto.trabalhos, a faixa). Conversa de sala não tem bot próprio: lista vazia. */
-export async function trabalhosAbertosDaConversa(deps: Pick<Deps, "repos" | "services" | "agora">, agenteId: string | null): Promise<TrabalhoDto[]> {
-  if (!agenteId) return [];
-  return trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agenteId));
 }
 
 /**

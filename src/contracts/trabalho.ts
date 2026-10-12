@@ -1,4 +1,6 @@
 import type { Executor } from "./evento.ts";
+import type { DonosNosTrabalhos, FrenteNaLinhaAberta } from "./dono.ts";
+export type { DonoDto, DonoNaConversa } from "./dono.ts";
 import type { CamposDeFrente } from "./frente.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
@@ -107,7 +109,7 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   acordaEm?: number | null;
   /** definido em 2026-10-12 (ADR-099, parte 2): o comando que o bot deixou esperando (`esperar_comando`); null = nenhum. */
   esperandoComando?: { motivo: string; desde: number } | null;
-} & CotaNoTrabalho;
+} & CotaNoTrabalho & FrenteNaLinhaAberta;
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */
 export type NivelPressao = "verde" | "amarela" | "vermelha";
@@ -147,7 +149,7 @@ export type TrabalhosDto = {
    * anterior.
    */
   maquinas?: LeituraDeMaquinaDto[];
-} & CotaNosTrabalhos;
+} & CotaNosTrabalhos & DonosNosTrabalhos;
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };
