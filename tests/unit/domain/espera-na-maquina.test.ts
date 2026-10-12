@@ -7,7 +7,8 @@ import { esperaNaMaquina, portaoDoMac, type PortaoDoMac } from "../../../src/dom
  */
 const AGORA = 10_000_000;
 const rotina = { estado: "na_fila" as const, origem: "rotina" as const, iniciadoEm: null, criadoEm: AGORA - 60_000, pessoaEsperando: false };
-const cheia = portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha" });
+// ADR-097: no equilibrado o processador não segura mais; no "pouco", segura.
+const cheia = portaoDoMac("pouco", { memoria: "verde", processador: "vermelha" });
 const folgada = portaoDoMac("equilibrado", { memoria: "verde", processador: "verde" });
 const semMemoria = portaoDoMac("equilibrado", { memoria: "amarela", processador: "verde" });
 
