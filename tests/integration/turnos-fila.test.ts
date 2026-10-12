@@ -173,6 +173,25 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
     });
   });
 
+  it("definido em 2026-10-11: com os motivos do hook, uma pílula por causa, com as vezes, no lugar de 'peça aprovação'", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const maquina = randomUUID();
+      const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const cerca = "git worktree add cria a worktree numa pasta que não deu para conferir. Crie dentro dela: …";
+      const negacoesDoNod = [{ nome: "Bash", motivo: cerca }, { nome: "Bash", motivo: "a pessoa não aprovou este comando" }, { nome: "Bash", motivo: cerca }];
+      await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "feito" }, resultado: sucesso("feito", { negacoesPermissao: ["Bash"], negacoesDoNod }) });
+      const pilulas = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.kind === "negacao");
+      expect(pilulas.map((m) => m.texto)).toEqual([
+        "ferramenta Bash negada: git fora da pasta da task; o bot recebeu o caminho certo (2 vezes)",
+        "ferramenta Bash negada: você não aprovou o comando",
+      ]);
+      expect(pilulas[0]?.payload).toMatchObject({ motivo: "alcance_insuficiente", causaNativa: "git_fora_da_pasta", vezes: 2 });
+    });
+  });
+
   it("entrega tardia de turno já interrompido entra como anexo parcial, sem reabrir", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);

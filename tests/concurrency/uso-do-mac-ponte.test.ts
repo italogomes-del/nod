@@ -99,13 +99,18 @@ async function montar(uso?: UsoDoMac) {
 }
 
 describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
-  it("processador cheio no puxar: a task da pessoa sai, a rotina espera; o Mac alivia e, no espaço seguinte, a rotina sai", async () => {
-    const m = await montar();
+  it("processador cheio no puxar, no 'Pouco': a task da pessoa sai, a rotina espera e sai quando o Mac alivia; no equilibrado, nada espera por ele (ADR-097)", async () => {
+    const m = await montar("pouco");
     const rotina = await m.tarefa("rotina", "Verificar o Slack");
     const daPessoa = await m.tarefa("pessoa", "Liberar espaço");
     expect(await m.puxar(leitura("vermelha"))).toBe(daPessoa);
     expect(await m.puxar(leitura("vermelha"))).toBeNull();
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
+
+    await m.gravarUso("equilibrado");
+    m.avancar(ESPACO_FUNDO_MS + 1);
+    const outra = await m.tarefa("rotina", "Verificar o e-mail");
+    expect(await m.puxar(leitura("vermelha"))).toBe(outra);
   });
 
   it("'O quanto precisar' não segura nada (nem com a memória crítica); 'Pouco' segura já no processador apertando", async () => {
@@ -154,7 +159,7 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
   });
 
   it("a mudança só do processador vira o evento do frame (com o processador); o Mac desconectado não segura mais", async () => {
-    const m = await montar();
+    const m = await montar("pouco");
     const rotina = await m.tarefa("rotina", "Rotina A");
     expect(await m.puxar(leitura("verde"))).toBe(rotina);
     m.avancar(ESPACO_FUNDO_MS + 1);
