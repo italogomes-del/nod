@@ -279,7 +279,7 @@ function darAcesso(estado: Estado, agenteId: string, nomeBot: string): string {
   });
   const faltam = estado.marketplace.filter((app) => situacaoDoApp(estado, app.slug) !== "conectado").slice(0, 6).map((app) => {
     const login = estado.conectando[app.slug];
-    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
+    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true, login.semJanela === true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
     return `<div class="da-linha">${logoApp(estado, app.slug, app.nome)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
   });
   return `<div class="dar-acesso gv-dar-acesso" aria-label="${esc(`Dar a ${nomeBot} acesso a um app`)}">

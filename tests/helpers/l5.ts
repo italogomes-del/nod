@@ -73,7 +73,7 @@ export type OpcoesServicos = {
   /** Sobrescreve services.conectores (default: falso que registra chamadas e responde "ok:<tool>"). */
   conectores?: Services["conectores"];
   chamadas?: ChamadaConector[];
-  sonda?: (conectorId: string) => ResultadoSonda;
+  sonda?: (conectorId: string, opcoes?: { orcamentoMs?: number }) => ResultadoSonda;
 };
 
 export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { tokenTurno: TokenTurno } {
@@ -90,8 +90,8 @@ export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { token
         chamadas.push({ conectorId, tool, args });
         return { conteudo: `ok:${tool}`, isError: false };
       },
-      async sondar(c) {
-        return opcoes.sonda ? opcoes.sonda(c.id) : { ok: true, ferramentas: [] };
+      async sondar(c, o) {
+        return opcoes.sonda ? opcoes.sonda(c.id, o) : { ok: true, ferramentas: [] };
       },
     },
     interruptor: { registrar: () => undefined, interromper: async () => false },
