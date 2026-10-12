@@ -1,8 +1,10 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { IdHarness } from "../contracts/harness.ts";
+import type { CotaDaIa } from "../contracts/cota.ts";
+import { HARNESS_LEGADO, type IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { portaoDaCota } from "../domain/cota-da-ia.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
@@ -40,6 +42,11 @@ export type EntradaDespacharTurno = {
    * máquina que só tem IA no limite enquanto outra máquina viva da pessoa tiver uma fora dele (iasParaOAutomatico).
    */
   noLimite?: readonly string[];
+  /**
+   * definido em 2026-10-12 (ADR-099 §7): as IAs da pessoa que seguram trabalho de fundo pela cota (cotaDasIas). Ausente ou
+   * vazio = nada segura. A conversa com a pessoa nunca espera por isto.
+   */
+  cota?: readonly CotaDaIa[];
 };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
@@ -66,7 +73,10 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const harnessesAuto = input.harnessesProntos && input.noLimite?.length
     ? iasParaOAutomatico({ prontosMaquina: input.harnessesProntos, prontosPessoa: [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa ?? {}).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)])], noLimite: input.noLimite })
     : undefined;
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}) });
+  // ADR-099 §7: o turno do Automático segura pela cota só se todas as IAs que podem pegá-lo nesta máquina seguram (sem a
+  // lista, app anterior: a IA de sempre).
+  const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);

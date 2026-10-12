@@ -4,6 +4,7 @@ import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { PRAZO_LIMITE_SEM_HORARIO_MS } from "../../../src/domain/inteligencia.ts";
 import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
+import { criarTrabalho } from "../../../src/use-cases/trabalhos.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { definirInteligenciaDoBot } from "../../../src/use-cases/inteligencia.ts";
 import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
@@ -24,19 +25,20 @@ const sucesso: ResultadoTurno = { ...base, desfecho: "sucesso", texto: "Pronto."
  * definido em 2026-10-10 (emenda da ADR-036; teste do Breno em 09/10): no limite da assinatura, o bot no Automático
  * repete o pedido na próxima IA da ordem e a conversa ganha a linha "chegou ao limite · respondendo pelo".
  */
-async function cenario(o: { pedido?: unknown; origem?: "conversa" | "rotina" } = {}) {
+async function cenario(o: { pedido?: unknown; origem?: "conversa" | "rotina"; task?: boolean } = {}) {
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => T0 });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Assistente pessoal" });
   if (o.pedido) await executar(deps, definirInteligenciaDoBot, { agenteId: bot.agente.id, pedido: o.pedido });
   const agente = (await deps.repos.agentes.buscar(bot.agente.id))!;
   const origem = await deps.repos.mensagens.criar({ conversaId: bot.conversa.id, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "texto", texto: "oi", confianca: "confiavel" });
-  const t = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "oi", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local" });
+  const trabalhoId = o.task ? (await criarTrabalho(deps, { agenteId: bot.agente.id, conversaId: bot.conversa.id, titulo: "Revisar os PRs", origem: "pessoa" })).trabalho.id : null;
+  const t = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "oi", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId });
   const maquina = randomUUID();
   await deps.repos.turnos.reivindicar({ machineId: maquina, agora: T0 });
   const antes = banco.mensagens.length;
   const entregar = (resultado: ResultadoTurno, harness: IdHarness, prontosDaPessoa: IdHarness[] = ["claude-cli", "codex-cli"]) =>
     executar(deps, assentarTurno, { turnoId: t!.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, executor: "local", harness, prontosDaPessoa });
-  return { deps, banco, turnoId: t!.id, antes, entregar };
+  return { deps, banco, turnoId: t!.id, trabalhoId, antes, entregar };
 }
 
 describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
@@ -90,5 +92,29 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     const r = await c.entregar(sucesso, "claude-cli");
     expect(r.data.limiteMudou).toBe(true);
     expect((await c.deps.repos.preferencias.buscar()).iasNoLimite).toEqual({});
+  });
+
+  it("ADR-099 §7: a task que bate no limite não falha — espera a renovação e volta sozinha, na mesma task", async () => {
+    for (const voltaEm of [T0 + DUAS_HORAS, null]) {
+      const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" }, task: true });
+      const r = await c.entregar(limiteDoClaude(voltaEm), "claude-cli", ["claude-cli"]);
+      const renova = voltaEm ?? T0 + PRAZO_LIMITE_SEM_HORARIO_MS;
+      const volta = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(volta, String(voltaEm)).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, trabalhoId: c.trabalhoId, acordarEm: renova }]);
+      const novas = c.banco.mensagens.slice(c.antes);
+      expect(novas.map((m) => m.kind)).toEqual(["sistema"]);
+      expect(novas[0]?.payload ?? null).toBeNull();
+      expect(novas[0]?.texto).toMatch(/^A cota do Claude Code chegou ao limite\. Esta task espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d, de onde parou\.$/);
+      expect(r.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["turno_interrompido", "turno_criado", "mensagem_criada"]));
+      // A task segue aberta (a volta está na fila), não "não terminou".
+      expect((await c.deps.repos.trabalhos.buscar(c.trabalhoId!))?.estado).not.toBe("falhou");
+    }
+  });
+
+  it("ADR-099 §7: a conversa com a pessoa no limite, sem outra IA, continua com o aviso de sempre (nada espera escondido)", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
+    await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli"]);
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
+    expect(c.banco.turnos).toHaveLength(1);
   });
 });

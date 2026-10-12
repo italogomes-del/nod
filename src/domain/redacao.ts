@@ -22,6 +22,7 @@ export type ChaveRedacao =
   | "executor-indisponivel"
   | "ia-trocada"
   | "ia-trocada-limite"
+  | "cota-no-limite-espera"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
@@ -61,6 +62,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "ia-trocada": "Respondendo pelo {para}: a conta do {de} neste computador está sem acesso.",
   // definido em 2026-10-10 (emenda da ADR-036): o automático repetiu o pedido na próxima IA da ordem (aposLimite).
   "ia-trocada-limite": "O {de} chegou ao limite da assinatura · respondendo pelo {para}. Ele volta a ser usado {quando}.",
+  // definido em 2026-10-12 (ADR-099 §7): a task bateu no limite e espera a cota renovar, em vez de falhar (aposLimiteNoFundo).
+  "cota-no-limite-espera": "A cota do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",

@@ -1,0 +1,178 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
+import type { OrigemTrabalho } from "../../src/contracts/trabalho.ts";
+import type { Turno } from "../../src/contracts/turno.ts";
+import { cotaDasIas, cotaSegura, portaoDaCota, situacaoDoTurno, tipoParaCota } from "../../src/domain/cota-da-ia.ts";
+import type { Tx } from "../../src/shared/types.ts";
+import { lerCustoDoDia } from "../../src/use-cases/custo-do-dia.ts";
+import { criarTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
+import { depsSobre } from "../helpers/deps-l7.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+/**
+ * ADR-099 §7 (definido em 2026-10-12): a cota da IA no `reivindicar`. Com a IA em 99% (reserva), trabalho NOVO de fundo
+ * espera; com ela no limite, todo o fundo espera; a conversa com a pessoa sempre passa. O SQL e a regra pura
+ * (domain/cota-da-ia.ts) têm de dar o mesmo resultado para cada turno.
+ */
+const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const HORA = 3_600_000;
+
+async function montar(trx: Tx) {
+  const base = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
+  const { deps, repos } = depsSobre(trx, MARLON);
+  const turno = async (o: { trabalhoId?: string | null; origem?: Turno["origem"]; harness?: PreferenciaHarness; modelo?: string; acordarEm?: number }) => {
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: o.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: o.modelo ?? "sonnet", harness: o.harness ?? "claude-cli", trabalhoId: o.trabalhoId ?? null, ...(o.acordarEm ? { acordarEm: o.acordarEm } : {}) });
+    if (!t) throw new Error("turno");
+    return t;
+  };
+  const task = async (origem: OrigemTrabalho, titulo: string, comecada = false) => {
+    const w = (await criarTrabalho(deps, { agenteId: base.agenteId, conversaId: base.conversaId, titulo, origem })).trabalho;
+    if (comecada) await repos.trabalhos.mudarEstado(w.id, "rodando", Date.now());
+    return w;
+  };
+  /** A cota lida do banco, como a ponte lê (preferências + uso do plano). */
+  const cota = async () => cotaDasIas({ usos: await repos.usoDoPlano.listar(), limites: (await repos.preferencias.buscar()).iasNoLimite, agora: Date.now() });
+  /** Todos os turnos que o reivindicar entrega com o portão da cota, até a fila não ter mais o que dar. */
+  const reivindicarTudo = async (meus: ReadonlySet<string>, iasDoAuto: string[] = ["claude-cli"]) => {
+    const portao = portaoDaCota(await cota(), iasDoAuto);
+    const pegos: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const r = await repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now(), cota: portao });
+      if (!r) break;
+      if (meus.has(r.id)) pegos.push(r.id);
+      // Conclui na hora: a faixa da conversa (um turno por vez) não esconde o próximo turno dela.
+      await repos.turnos.assentar(r.id, { estado: "concluido" });
+    }
+    return new Set(pegos);
+  };
+  /** O que a regra pura diz que passa (o mesmo cálculo do despacho e da tela). */
+  const passaPelaRegra = async (turnos: readonly Turno[], iasDoAuto: string[] = ["claude-cli"]) => {
+    const c = await cota();
+    const passa: string[] = [];
+    for (const t of turnos) {
+      const w = t.trabalhoId ? await repos.trabalhos.buscar(t.trabalhoId) : null;
+      if (!cotaSegura(tipoParaCota(t, w), situacaoDoTurno({ harness: t.harness ?? "auto", modelo: t.modelo }, c, iasDoAuto))) passa.push(t.id);
+    }
+    return new Set(passa);
+  };
+  return { ...base, deps, repos, turno, task, reivindicarTudo, passaPelaRegra };
+}
+
+const usoDoClaude = (utilizacao: number, medidoEm = Date.now()) => ({ harness: "claude-cli" as const, situacao: "normal" as const, cincoHoras: { utilizacao, renovaEm: medidoEm + 2 * HORA }, semana: { utilizacao: 0.4, renovaEm: medidoEm + 72 * HORA }, medidoEm });
+
+describeIntegracao("cota da IA no reivindicar (ADR-099 §7)", () => {
+  it("reserva de 1%: o fundo novo espera; a conversa, a task já começada, a volta marcada e outra IA seguem", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.995), null);
+      const conversa = await m.turno({});
+      const rotinaSemTask = await m.turno({ origem: "rotina" });
+      const taskNova = await m.turno({ trabalhoId: (await m.task("pessoa", "Revisar o PR")).id });
+      const colegaNovo = await m.turno({ origem: "delegacao", trabalhoId: (await m.task("colega", "Pedido do Leonardo")).id });
+      const comecada = await m.turno({ origem: "retomada", trabalhoId: (await m.task("rotina", "Rotina das 9h", true)).id });
+      const volta = await m.turno({ origem: "retomada", acordarEm: Date.now() - 1_000 });
+      const noCodex = await m.turno({ harness: "codex-cli", modelo: "auto", trabalhoId: (await m.task("pessoa", "Pesquisar")).id });
+      const todos = [conversa, rotinaSemTask, taskNova, colegaNovo, comecada, volta, noCodex];
+      const meus = new Set(todos.map((t) => t.id));
+
+      const esperado = await m.passaPelaRegra(todos);
+      expect(esperado).toEqual(new Set([conversa.id, comecada.id, volta.id, noCodex.id]));
+      expect(await m.reivindicarTudo(meus)).toEqual(esperado);
+      for (const t of [rotinaSemTask, taskNova, colegaNovo]) expect((await m.repos.turnos.buscar(t.id))?.estado).toBe("pendente");
+
+      // A janela renovou (leitura nova abaixo de 99%): o fundo que esperava sai sozinho.
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.05, Date.now() + 1), null);
+      expect(await m.reivindicarTudo(meus)).toEqual(new Set([rotinaSemTask.id, taskNova.id, colegaNovo.id]));
+    });
+  });
+
+  it("limite: todo o fundo espera (também o já começado e a volta marcada); a conversa com a pessoa passa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.preferencias.registrarLimite("claude-cli", { renovaEm: Date.now() + HORA, desde: Date.now() });
+      const conversa = await m.turno({});
+      const retomadaDaPessoa = await m.turno({ origem: "retomada" });
+      const comecada = await m.turno({ origem: "retomada", trabalhoId: (await m.task("pessoa", "Acompanhar a CI", true)).id });
+      const volta = await m.turno({ origem: "retomada", acordarEm: Date.now() - 1_000 });
+      const taskNova = await m.turno({ trabalhoId: (await m.task("pessoa", "Revisar")).id });
+      const todos = [conversa, retomadaDaPessoa, comecada, volta, taskNova];
+
+      const esperado = await m.passaPelaRegra(todos);
+      expect(esperado).toEqual(new Set([conversa.id, retomadaDaPessoa.id]));
+      expect(await m.reivindicarTudo(new Set(todos.map((t) => t.id)))).toEqual(esperado);
+    });
+  });
+
+  it("Automático: segura só se todas as IAs que podem pegá-lo seguram", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.999), null);
+      const auto = await m.turno({ harness: "auto", modelo: "auto", trabalhoId: (await m.task("rotina", "Rotina")).id });
+      const meus = new Set([auto.id]);
+      expect(await m.passaPelaRegra([auto], ["claude-cli"])).toEqual(new Set());
+      expect(await m.reivindicarTudo(meus, ["claude-cli"])).toEqual(new Set());
+      expect(await m.reivindicarTudo(meus, ["claude-cli", "codex-cli"])).toEqual(new Set([auto.id]));
+    });
+  });
+
+  it("GET trabalhos: a pílula diz quando o fundo volta e a task nova diz que espera a cota", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const medido = Date.now();
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.995, medido), null);
+      const nova = await m.task("rotina", "Rotina das 9h");
+      const comecada = await m.task("pessoa", "Acompanhar", true);
+      await m.turno({ trabalhoId: nova.id, origem: "rotina" });
+      await m.turno({ trabalhoId: comecada.id, origem: "retomada" });
+      const { data } = await listarTrabalhos(m.deps, {});
+      expect(data.cota).toEqual({ situacao: "reserva", ias: ["claude-cli"], voltaEm: medido + 2 * HORA });
+      expect(data.trabalhos.find((t) => t.id === nova.id)?.esperaDaCota).toBe(true);
+      expect(data.trabalhos.find((t) => t.id === comecada.id)?.esperaDaCota).toBeUndefined();
+
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.2, medido + 1), null);
+      const depois = (await listarTrabalhos(m.deps, {})).data;
+      expect(depois.cota).toBeNull();
+      expect(depois.trabalhos.some((t) => t.esperaDaCota)).toBe(false);
+    });
+  });
+});
+
+describeIntegracao("custo de cada bot hoje (ADR-099 §7)", () => {
+  it("soma por bot no fuso da pessoa e avisa quem passou de 2× a média do mesmo horário", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const ze = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
+      const ana = await agenteComConversa(trx, MARLON, { nome: "Ana" });
+      // O relógio parado: a soma de hoje vai até este instante, e os dias anteriores até o mesmo horário.
+      const agora = Date.now();
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      const gasto = async (b: { agenteId: string; conversaId: string }, usd: number, em: number) => {
+        const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: b.conversaId, agenteId: b.agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+        await trx`update turnos set custo_usd = ${usd}, criado_em = ${new Date(em)} where id = ${t!.id}`;
+      };
+      // UTC deixa a conta legível: hoje desde 00:00 UTC até agora; os dias anteriores até o mesmo horário.
+      const meiaNoite = Math.floor(agora / 86_400_000) * 86_400_000;
+      const decorrido = agora - meiaNoite;
+      await gasto(ze, 9, meiaNoite + Math.floor(decorrido / 2));
+      await gasto(ana, 1.5, meiaNoite + Math.floor(decorrido / 2));
+      for (let d = 1; d <= 7; d++) {
+        await gasto(ze, 1, meiaNoite - d * 86_400_000 + Math.floor(decorrido / 2));
+        await gasto(ana, 1, meiaNoite - d * 86_400_000 + Math.floor(decorrido / 2));
+        // Depois do mesmo horário não conta na média.
+        await gasto(ze, 50, meiaNoite - d * 86_400_000 + decorrido + 1);
+      }
+      // Antes da janela (8 dias atrás) também não.
+      await gasto(ana, 100, meiaNoite - 8 * 86_400_000 + 1);
+      const { data } = await lerCustoDoDia(deps, { fuso: "UTC" });
+      const dos = (id: string) => data.bots.find((b) => b.agenteId === id);
+      expect(dos(ze.agenteId)).toMatchObject({ hojeUsd: 9, mediaUsd: 1, vezes: 9, foraDoRitmo: true });
+      expect(dos(ana.agenteId)).toMatchObject({ hojeUsd: 1.5, mediaUsd: 1, foraDoRitmo: false });
+      expect(data.foraDoRitmo).toBe(true);
+      expect(data.desde).toBe(meiaNoite);
+      expect(data.totalUsd).toBeGreaterThanOrEqual(10.5);
+    });
+  });
+});

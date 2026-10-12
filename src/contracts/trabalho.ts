@@ -1,7 +1,7 @@
 import type { Executor } from "./evento.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
-import type { LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
+import type { CotaNosTrabalhos, CotaNoTrabalho, LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
 
 /**
  * Trabalho (definido em 2026-10-07, ADR-083, épico #188): uma unidade de trabalho longo de um bot, com sessão do CLI e
@@ -110,7 +110,7 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    * Ausente ou null: nenhuma volta marcada.
    */
   acordaEm?: number | null;
-};
+} & CotaNoTrabalho;
 
 /** Pressão de memória do macOS (kern.memorystatus_vm_pressure_level: 1 = verde, 2 = amarela, 4 = vermelha). */
 export type NivelPressao = "verde" | "amarela" | "vermelha";
@@ -150,7 +150,7 @@ export type TrabalhosDto = {
    * anterior.
    */
   maquinas?: LeituraDeMaquinaDto[];
-};
+} & CotaNosTrabalhos;
 
 /** GET trabalhos/:id: a tela da task. `mensagens` são as do trabalho (inclui as falas do meio). */
 export type TrabalhoDetalheDto = { trabalho: TrabalhoDto; mensagens: Mensagem[] };

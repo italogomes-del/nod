@@ -182,3 +182,11 @@ ajuda, o caminho é perguntar antes de repetir (a linha âmbar "Continuar pelo C
 limite: a ordem e o prazo continuam valendo. Se o Opus no automático custar caro demais para quem tem plano pequeno, o
 Recomendado muda numa linha do catálogo (`recomendado`), sem migração. Se o 1 h do Codex for curto (o limite dele é
 semanal), troque `PRAZO_LIMITE_SEM_HORARIO_MS` ou ensine o horário a `erro-fornecedor.ts` com uma amostra real.
+
+## Emenda (2026-10-12): a cota vira portão do trabalho de fundo (ADR-099 §7)
+
+A emenda NOD-179 dizia que o número da cota nunca seria gate e que, se virasse, seria por ADR nova. A
+[ADR-099](adr-099-um-dono-por-bot.md) §7 é essa ADR. Com 99% de uma janela usada, o trabalho novo de fundo espera, e o
+1% fica para a conversa com a pessoa. No limite, todo o fundo espera a renovação em vez de falhar. Detalhe na emenda de
+2026-10-12 da [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md). A conversa com a pessoa continua como acima: nunca é
+segurada pelo número, e a troca de IA no limite segue igual.

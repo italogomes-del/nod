@@ -3,6 +3,9 @@ import type { IdHarness } from "../../contracts/harness.ts";
 import type { LimitesIa } from "../../contracts/inteligencia.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import { iasNoLimite } from "../../domain/inteligencia.ts";
+import { cotaDasIas } from "../../domain/cota-da-ia.ts";
+import type { CotaDaIa } from "../../contracts/cota.ts";
+import type { UsoDoPlano } from "../../contracts/uso-do-plano.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { AnuncioMaquina, Entrega, PastaParaLimpar, PedidoRenovar, PonteInterna, RelatoLimpeza, RespostaRenovar } from "../../contracts/ponte.ts";
 import { abrirTxEscopada } from "../../db/tx.ts";
@@ -151,8 +154,13 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
    */
   const usos = new Map<string, { uso: UsoDoMac; ate: number; lidoEm: number }>();
-  /** 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). */
-  const limitesLidos = new Map<string, { limites: LimitesIa; ate: number; lidoEm: number }>();
+  /**
+   * 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). ADR-099 §7 (2026-10-12): junto,
+   * o uso do plano que cada CLI informou (a cota), na mesma leitura e no mesmo prazo de 30 s.
+   */
+  const limitesLidos = new Map<string, { limites: LimitesIa; usos: UsoDoPlano[]; ate: number; lidoEm: number }>();
+  /** ADR-099 §7: o que a cota segura em cada pessoa agora — o log `cota_segura` sai só na mudança. */
+  const cotaVista = new Map<string, string>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
   /**
@@ -221,18 +229,26 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     }
   }
 
-  /** 0068: as IAs da pessoa no limite agora. Sem leitura (erro do banco), a última que deu certo, ou nenhuma. */
-  async function noLimiteDe(escopo: Escopo): Promise<IdHarness[]> {
+  /**
+   * 0068: as IAs da pessoa no limite agora; ADR-099 §7: e as que a cota segura (reserva ou limite). Sem leitura (erro do
+   * banco), a última que deu certo, ou nenhuma.
+   */
+  async function limitesECotaDe(escopo: Escopo): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[] }> {
     const guardado = limitesLidos.get(escopo.pessoaId);
-    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return iasNoLimite(guardado.limites, agora());
+    const de = (g: { limites: LimitesIa; usos: UsoDoPlano[] } | undefined) => ({ noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIas({ usos: g?.usos ?? [], limites: g?.limites, agora: agora() }) });
+    if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return de(guardado);
     try {
       const lidoEm = agora();
-      const limites = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).preferencias.buscar())).iasNoLimite ?? {};
-      limitesLidos.set(escopo.pessoaId, { limites, ate: lidoEm + LIMITES_VALEM_MS, lidoEm });
-      return iasNoLimite(limites, agora());
+      const { limites, usos } = await abrirTxEscopada(db, escopo)(async (trx) => {
+        const repos = criarRepos(trx, escopo);
+        return { limites: (await repos.preferencias.buscar()).iasNoLimite ?? {}, usos: await repos.usoDoPlano.listar() };
+      });
+      const lido = { limites, usos, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
+      limitesLidos.set(escopo.pessoaId, lido);
+      return de(lido);
     } catch (e) {
       log("aviso", "limites_ia_sem_leitura", { pessoa_id: escopo.pessoaId, erro: e instanceof Error ? e.name : "desconhecido" });
-      return iasNoLimite(guardado?.limites, agora());
+      return de(guardado);
     }
   }
 
@@ -263,8 +279,17 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // ADR-085: sem leitura deste Mac (app antigo, fora do macOS) nada é segurado nem espaçado.
       const pressao = deps.pressaoDaMaquina?.(maquina.machineId) ?? null;
       const uso = pressao ? await usoDoMac(escopo) : "livre";
-      // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite.
-      const noLimite = maquina.harnesses ? await noLimiteDe(escopo) : [];
+      // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite. ADR-099 §7: a cota vale para
+      // qualquer máquina (sem a lista de IAs, a de sempre).
+      const lidos = await limitesECotaDe(escopo);
+      const noLimite = maquina.harnesses ? lidos.noLimite : [];
+      const cota = lidos.cota;
+      const cotaAgora = cota.map((c) => `${c.ia}:${c.situacao}`).join(" ");
+      if ((cotaVista.get(pessoaId) ?? "") !== cotaAgora) {
+        cotaVista.set(pessoaId, cotaAgora);
+        // Para medir o gatilho de reversão da ADR-099 (a conversa parada por cota mesmo com a reserva).
+        log("info", cotaAgora ? "cota_segura" : "cota_solta", { pessoa_id: pessoaId, ias: cotaAgora, volta_em: cota.length ? Math.max(...cota.map((c) => c.voltaEm)) : null });
+      }
       // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
       // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
       const portao = portaoDoMac(uso, pressao);
@@ -291,7 +316,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());

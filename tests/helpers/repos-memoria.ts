@@ -1286,6 +1286,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      async custoPorAgente(janelas) {
+        const somas = new Map<string, { agenteId: string; janela: number; usd: number }>();
+        for (const t of doTenant(b.turnos)) {
+          if (t.ownerId !== escopo.pessoaId || t.custoUsd === null) continue;
+          janelas.forEach((j, janela) => {
+            if (t.criadoEm < j.inicio || t.criadoEm >= j.fim) return;
+            const chave = `${t.agenteId}:${janela}`;
+            const atual = somas.get(chave) ?? { agenteId: t.agenteId, janela, usd: 0 };
+            atual.usd += t.custoUsd ?? 0;
+            somas.set(chave, atual);
+          });
+        }
+        return [...somas.values()];
+      },
       async barradosPorFaltaDeIa(desde) {
         const meus = doTenant(b.turnos);
         return meus

@@ -461,6 +461,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   // ADR-083: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
   if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
+  // ADR-099 §7: servidor sem a rota (404, versão anterior) fica sem o custo; a tela Trabalhos segue sem ele.
+  if (q === "custo") return { tipo: "hidratar-custo", custo: await api.custoHoje(Intl.DateTimeFormat().resolvedOptions().timeZone).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
   if (q.startsWith("trabalho:")) {
     // Revisão W2 (2026-10-08): a task que sumiu (404) fecha a tela em vez de ficar "carregando" e pedir de novo.
     const id = q.slice(9);
@@ -572,6 +574,7 @@ function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
   if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos") return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
+  if (q === "custo") return t.tipo === "trabalhos";
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
   const secao = estado.espaco?.secao;
   if (q === "gestao") return secao === "agentes";
@@ -2314,6 +2317,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "faixa-trabalhos": (el) => {
     const t = estado.tela;
     dispatch({ tipo: "faixa-trabalhos", agenteId: el.dataset.recolher === "1" || t.tipo !== "conversa" ? null : t.agenteId });
+  },
+  // ADR-099 §7: o custo de hoje abre e fecha atrás de um clique no topo de Trabalhos.
+  "custo-hoje": () => {
+    dispatch({ tipo: "custo-aberto", aberto: !estado.custoAberto });
   },
   "filtro-trabalhos": (el) => {
     const f = el.dataset.id;
