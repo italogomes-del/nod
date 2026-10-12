@@ -186,12 +186,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     /**
      * definido em 2026-10-08 (revisão do épico, S12): uma task aberta por uma execução desta rotina (filha, com mãe) que
      * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada. revisto em 2026-10-12 (ADR-099, I7
-     * revista): também a frente que o dono abriu na triagem da rotina (sem mãe: o lote é do dono).
+     * revista): também a frente que o dono abriu na triagem da rotina (sem mãe: o lote é do dono). revisto na I10: a
+     * execução de rotina de antes, migrada pela 0072 para `frente` sem lote, não segura a próxima (como antes).
      */
     async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from trabalhos
-        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and (trabalho_mae_id is not null or forma = 'frente')
+        where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and (trabalho_mae_id is not null or (forma = 'frente' and lote_id is not null))
           and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
         order by criado_em limit 1`;
       return l ? paraTrabalho(l) : null;
@@ -282,7 +283,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async candidatosALimpeza(desde: number, o: { id?: string } = {}): Promise<(FatosLimpeza & { id: string })[]> {
       const id = o.id ?? null;
       const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean; forma: FormaTrabalho }[]>`
-        select w.id, w.estado, w.pasta, w.terminado_em, w.forma,
+        -- ADR-099 (I10): a task de antes, migrada pela 0072 sem lote, limpa como task (formaEfetiva, domain/frente.ts).
+        select w.id, w.estado, w.pasta, w.terminado_em, case when w.lote_id is null then 'task' else w.forma end as forma,
           (select count(*)::int from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as vivos,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta')) as decisao,

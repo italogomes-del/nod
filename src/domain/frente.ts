@@ -1,4 +1,4 @@
-import type { ResumoFrente } from "../contracts/frente.ts";
+import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { ErroResumo } from "./resumo-da-frente.ts";
@@ -12,6 +12,15 @@ import type { ErroResumo } from "./resumo-da-frente.ts";
 /** A frente é um trabalho com `forma = 'frente'` (0071). Sem forma (montado fora do repositório) = task. */
 export function ehFrente(t: { forma?: string | null } | null | undefined): boolean {
   return t?.forma === "frente";
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099, I10): a forma que vale para o comportamento — o catálogo, o prompt, o histórico e a
+ * limpeza `sem_trabalho`. A task aberta antes das frentes vira `frente` na 0072 mas fica sem lote: sem ninguém para
+ * receber o resumo, ela segue como task (o resultado continua sendo o balão na conversa, como hoje).
+ */
+export function formaEfetiva(t: { forma?: string | null; loteId?: string | null } | null | undefined): FormaTrabalho {
+  return ehFrente(t) && t?.loteId ? "frente" : "task";
 }
 
 /**
