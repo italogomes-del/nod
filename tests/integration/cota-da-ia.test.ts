@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { OrigemTrabalho } from "../../src/contracts/trabalho.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
-import { cotaDasIas, cotaSegura, portaoDaCota, situacaoDoTurno, tipoParaCota } from "../../src/domain/cota-da-ia.ts";
+import { cotaDasIas, cotaSegura, entradaDaVoltaDaCota, portaoDaCota, situacaoDoTurno, tipoParaCota } from "../../src/domain/cota-da-ia.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { lerCustoDoDia } from "../../src/use-cases/custo-do-dia.ts";
 import { criarTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
@@ -173,6 +173,20 @@ describeIntegracao("custo de cada bot hoje (ADR-099 §7)", () => {
       expect(data.foraDoRitmo).toBe(true);
       expect(data.desde).toBe(meiaNoite);
       expect(data.totalUsd).toBeGreaterThanOrEqual(10.5);
+    });
+  });
+
+  it("a volta que a cota no limite marcou não conta como volta sem novidade (alarme da parte 1)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const voltaCom = async (entradaTexto: string) => {
+        const origem = await m.turno({ origem: "retomada", trabalhoId: (await m.task("pessoa", "Acompanhar a CI", true)).id });
+        const v = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: origem.id, trabalhoId: origem.trabalhoId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto, entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: Date.now() - 1_000 });
+        if (!v) throw new Error("volta");
+        return (await m.repos.turnos.ultimasVoltas(origem.id, 3))[0];
+      };
+      expect(await voltaCom(entradaDaVoltaDaCota("Claude Code"))).toMatchObject({ porCota: true });
+      expect(await voltaCom("[nod] Você marcou para voltar às 16:00 para conferir: a CI")).toMatchObject({ porCota: false });
     });
   });
 });

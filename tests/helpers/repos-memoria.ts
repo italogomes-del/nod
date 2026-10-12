@@ -25,6 +25,7 @@ import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
@@ -1053,6 +1054,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             marcouVolta: despertares.has(t.id) || b.esperas.some((e) => e.tenantId === escopo.tenantId && e.turnoId === t.id),
             perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
             pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
+            porCota: t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA),
           }));
       },
       async juntarEntrada(id: string, texto: string) {

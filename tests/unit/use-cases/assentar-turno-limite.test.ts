@@ -108,6 +108,8 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
       expect(r.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["turno_interrompido", "turno_criado", "mensagem_criada"]));
       // A task segue aberta (a volta está na fila), não "não terminou".
       expect((await c.deps.repos.trabalhos.buscar(c.trabalhoId!))?.estado).not.toBe("falhou");
+      // A volta da cota não conta como "volta sem novidade" no alarme da parte 1.
+      expect(await c.deps.repos.turnos.ultimasVoltas(c.turnoId, 3)).toMatchObject([{ porCota: true }]);
     }
   });
 

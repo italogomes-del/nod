@@ -154,3 +154,14 @@ export function iasConhecidas(usos: readonly Pick<UsoDoPlano, "harness">[], limi
   return [...new Set([...usos.map((u) => u.harness), ...(Object.keys(limites ?? {}) as IdHarness[])])];
 }
 
+
+/**
+ * definido em 2026-10-12 (ADR-099 §7, na integração com a parte 1): o começo da entrada da volta que a cota no limite marca
+ * (assentar-turno, aposLimiteNoFundo). É o que separa essa volta das que o bot marcou (me_chame_as, esperar_comando): o
+ * `turnos.ultimasVoltas` o lê para que ela não conte como "volta sem novidade" (voltas-sem-novidade.ts).
+ */
+export const ENTRADA_DA_VOLTA_DA_COTA = "[nod] A cota do ";
+
+export function entradaDaVoltaDaCota(nomeDaIa: string): string {
+  return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite no meio deste trabalho e o nod esperou ela renovar. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+}

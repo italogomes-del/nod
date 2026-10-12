@@ -18,6 +18,7 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
+import { entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -462,7 +463,7 @@ async function aposLimiteNoFundo(
     trabalhoId: turno.trabalhoId,
     prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
     profundidade: turno.profundidade,
-    entradaTexto: `[nod] A cota do ${nomeDaIa(p.ia)} chegou ao limite no meio deste trabalho e o nod esperou ela renovar. Siga de onde parou; o que já saiu antes do limite continua valendo.`,
+    entradaTexto: entradaDaVoltaDaCota(nomeDaIa(p.ia)),
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,

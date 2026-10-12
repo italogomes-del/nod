@@ -17,6 +17,7 @@ describe("voltas sem novidade (ADR-099 §5)", () => {
     ["pediu algo a um colega", { ...vazia, pediuAColega: true }, false],
     ["não marcou outra volta (o que esperava chegou)", { ...vazia, marcouVolta: false }, false],
     ["caiu ou foi parada", { ...vazia, estado: "interrompido" as const }, false],
+    ["voltou porque a cota renovou (ADR-099 §7), não porque o bot marcou", { ...vazia, porCota: true }, false],
     ["ainda não voltou (pendente)", { ...vazia, estado: "pendente" as const, marcouVolta: false }, false],
   ])("%s", (_nome, v, esperado) => {
     expect(voltaSemNovidade(v)).toBe(esperado);

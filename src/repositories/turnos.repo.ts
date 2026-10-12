@@ -4,7 +4,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
-import type { PortaoDaCota } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
@@ -397,15 +397,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * abriu decisão e se pediu algo a um colega (mensagem `handoff` dela).
      */
     async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
-      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
+      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean; por_cota: boolean }[]>`
         -- ADR-099 (parte 2): deixar um comando esperando (esperar_comando) também é marcar outra volta.
         select t.estado, (t.despertar_em is not null or exists (select 1 from esperas e where e.tenant_id = t.tenant_id and e.turno_id = t.id)) as marcou_volta,
           exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
-          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
+          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega,
+          -- ADR-099 §7: a volta que a cota no limite marcou (não o bot) não conta como sem novidade.
+          starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) as por_cota
         from turnos t
         where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
         order by t.criado_em desc, t.id desc limit ${limite}`;
-      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega }));
+      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega, porCota: l.por_cota }));
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
