@@ -1,5 +1,5 @@
 import type { EpochMs } from "../contracts/ids.ts";
-import type { EstadoDaIa, EstadoIa, InstalacaoDaIa, LoginDaIa, OrigemDoBinario } from "../contracts/estado-ia.ts";
+import type { ContaDaIa, EstadoDaIa, EstadoIa, InstalacaoDaIa, LoginDaIa, OrigemDoBinario } from "../contracts/estado-ia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 
 /**
@@ -21,6 +21,8 @@ export type EntradaEstadoIa = {
   /** A assinatura está no limite até este instante (vem com o PR do servidor; null = sem limite conhecido). */
   limiteAte?: EpochMs | null;
   binario?: { caminho: string; origem: OrigemDoBinario } | null;
+  /** A conta que o CLI disse estar logada (NOD-209); vai junto em todo estado, para o cartão mostrar. */
+  conta?: ContaDaIa | null;
   agora: EpochMs;
 };
 
@@ -65,6 +67,7 @@ export function estadoDaIa(e: EntradaEstadoIa): EstadoIa {
     ...(e.binario ? { detalhe: { binario: e.binario.caminho, origem: e.binario.origem } } : {}),
     ...(e.instalacao ? { instalacao: e.instalacao } : {}),
     ...(e.login ? { login: e.login } : {}),
+    ...(e.conta ? { conta: e.conta } : {}),
   };
   const base = (estado: EstadoDaIa, mensagem = MENSAGEM_DO_ESTADO[estado]): EstadoIa => ({ ia: e.ia, estado, mensagem, ...extras, em: e.agora });
   if (e.instalacao?.fase === "instalando") return base("instalando", e.instalacao.mensagem || MENSAGEM_DO_ESTADO.instalando);
@@ -74,4 +77,30 @@ export function estadoDaIa(e: EntradaEstadoIa): EstadoIa {
   const doInv = doInventario(e.inventario);
   if (doInv.estado === "pronta" && e.limiteAte && e.limiteAte > e.agora) return { ...base("no_limite"), ...(doInv.versao ? { versao: doInv.versao } : {}), ate: e.limiteAte };
   return { ia: e.ia, ...doInv, ...extras, em: e.agora };
+}
+
+/**
+ * O plano como a tela mostra (definido em 2026-10-12, NOD-209). Medido em 2026-10-12: o Claude Code 2.1.296 diz
+ * `"subscriptionType": "team"` e o Codex 0.162.1 diz `"planType": "pro"`; a tela mostra "Team" e "Pro". Cada palavra
+ * ganha a inicial maiúscula ("max_5x" vira "Max 5x"); vazio ou estranho vira null.
+ */
+export function planoLegivel(bruto: unknown): string | null {
+  if (typeof bruto !== "string") return null;
+  const palavras = bruto.trim().split(/[\s_-]+/).filter(Boolean);
+  if (palavras.length === 0 || bruto.length > 40) return null;
+  return palavras.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
+}
+
+/** O e-mail que o CLI disse, conferido: texto com @, sem espaço, até 254 caracteres. */
+export function emailDaConta(bruto: unknown): string | null {
+  if (typeof bruto !== "string") return null;
+  const t = bruto.trim();
+  return t.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(t) ? t : null;
+}
+
+/** O nome da organização: texto curto, sem quebra de linha. */
+export function organizacaoDaConta(bruto: unknown): string | null {
+  if (typeof bruto !== "string") return null;
+  const t = bruto.replace(/\s+/g, " ").trim();
+  return t && t.length <= 80 ? t : null;
 }

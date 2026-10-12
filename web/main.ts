@@ -1841,6 +1841,9 @@ const iasDoMac = criarIasDoMac({
   },
   copiar: (texto) => navigator.clipboard.writeText(texto),
   agendar: (fn, ms) => { window.setTimeout(fn, ms); },
+  // NOD-209: no onboarding, trocar de conta tira o veredito da conta antiga; a nova é testada antes do Continuar.
+  aoComecarTroca: (ia) => { if (telaOnboarding.cobre()) telaOnboarding.comecarTroca(ia); },
+  aoFimDaTroca: (ia, trocou) => { if (telaOnboarding.cobre()) telaOnboarding.fimDaTroca(ia, trocou); },
 });
 void iasDoMac.iniciar();
 
@@ -1989,6 +1992,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // estado do cartão ou numa nota escrita (web/lib/ias-do-mac.ts); fora de Provedores de IA, abre a seção para a pessoa
   // ver o cartão andar (o código do login, o campo de colar, o erro).
   "ia-entrar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) { verCartaoDaIa(el); void iasDoMac.entrar(ia); } },
+  // NOD-209: "Trocar conta" na IA logada — o mesmo login dentro do cartão; cancelar mantém a conta atual.
+  "ia-trocar": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) { verCartaoDaIa(el); void iasDoMac.trocar(ia); } },
   "ia-conectar": (el) => {
     const ia = el.dataset.ia;
     if (!ehIa(ia)) return;
