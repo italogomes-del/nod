@@ -21,6 +21,19 @@ export type ResumoFrente = {
   falta?: string;
 };
 
+/**
+ * O que o `Trabalho` ganha com a 0071 (definido em 2026-10-12, ADR-099), fora de trabalho.ts para ele ficar abaixo das 200
+ * linhas (gatilho do AGENTS.md). Só leitura e gravação por enquanto: nenhum caso de uso decide por eles.
+ */
+export type CamposDeFrente = {
+  /** `task` (a de hoje) ou `frente`. Ausente = `task` (quem monta o trabalho fora do repositório; o banco sempre tem). */
+  forma?: FormaTrabalho;
+  /** O lote da frente; null = solta (toda task, e a frente fora de lote). */
+  loteId?: string | null;
+  /** O que a frente devolveu; null = ainda nada. */
+  resumo?: ResumoFrente | null;
+};
+
 /** definido em 2026-10-12 (especificação das Partes 3/4): cada texto do resumo até 1000 caracteres. */
 export const TETO_TEXTO_RESUMO = 1000;
 /** CHECK trabalho_resumo da 0071: o JSON inteiro até 16000 bytes. */
