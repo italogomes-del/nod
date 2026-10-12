@@ -1,4 +1,5 @@
 import type { Executor } from "./evento.ts";
+import type { FormaTrabalho, ResumoFrente } from "./frente.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { Mensagem } from "./mensagem.ts";
 import type { LeituraDaMaquinaViva, LeituraDeMaquinaDto, MaquinaDoTrabalho } from "./maquina.ts";
@@ -58,6 +59,14 @@ export type Trabalho = {
    * ou um pedido a colega feito na conversa com ela. O Mac apertado não segura este trabalho.
    */
   pessoaEsperando?: boolean;
+  /**
+   * definido em 2026-10-12 (ADR-099, 0071): `task` (a de hoje) ou `frente` (trabalha por baixo do dono e devolve um
+   * resumo). Ausente = `task` (quem monta o trabalho fora do repositório). `loteId`: o lote da frente (null = solta);
+   * `resumo`: o que a frente devolveu (null = ainda nada). Só leitura e gravação por enquanto: ninguém decide por eles.
+   */
+  forma?: FormaTrabalho;
+  loteId?: string | null;
+  resumo?: ResumoFrente | null;
   criadoEm: EpochMs;
   iniciadoEm: EpochMs | null;
   terminadoEm: EpochMs | null;

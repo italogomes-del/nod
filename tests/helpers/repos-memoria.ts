@@ -22,6 +22,8 @@ import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
+import type { NovoLote } from "../../src/repositories/frentes.repo.ts";
+import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
@@ -115,6 +117,8 @@ export type BancoMemoria = {
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
   maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null }[];
+  /** 0071 (ADR-099, partes 3/4): os lotes de frentes, com a dona (o comportamento completo se prova no Postgres). */
+  lotes: (LoteDeFrentes & { tenantId: string; ownerId: string })[];
 };
 
 export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escopo): Repos } {
@@ -172,6 +176,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     events: [],
     outbox: [],
     maquinaTokens: [],
+    lotes: [],
   };
   return { banco, repos: (escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
 }
@@ -845,6 +850,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           memoriaMb: null,
           custoUsd: null,
           pessoaEsperando: n.pessoaEsperando === true,
+          forma: n.forma ?? "task",
+          loteId: n.loteId ?? null,
+          resumo: null,
           criadoEm: agora() + b.trabalhos.length / 1000,
           iniciadoEm: n.iniciadoEm ?? null,
           terminadoEm: null,
@@ -2373,6 +2381,43 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           const ids = [...new Set(conectorIds)];
           for (const id of ids) b.liberacoesDispensadas.set(prefixo(agenteId) + id, Math.max(b.liberacoesDispensadas.get(prefixo(agenteId) + id) ?? -Infinity, em));
           return ids.length;
+        },
+      };
+    })(),
+    frentes: (() => {
+      const meus = () => b.lotes.filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId);
+      const semDonoLote = ({ tenantId: _t, ownerId: _d, ...l }: LoteDeFrentes & { tenantId: string; ownerId: string }): LoteDeFrentes => ({ ...l });
+      return {
+        async criarLote(n: NovoLote) {
+          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null };
+          b.lotes.push(linha);
+          return semDonoLote(linha);
+        },
+        async buscarLote(id: string) { const l = doTenant(b.lotes).find((x) => x.id === id); return l ? semDonoLote(l) : null; },
+        async buscarLoteTravado(id: string) { const l = meus().find((x) => x.id === id); return l ? semDonoLote(l) : null; },
+        async ligarAoLote(loteId: string, ids: readonly string[]) {
+          const lote = doTenant(b.lotes).find((x) => x.id === loteId && x.devolvidoEm === null);
+          if (!lote) return 0;
+          const alvos = doTenant(b.trabalhos).filter((t) => ids.includes(t.id) && t.ownerId === escopo.pessoaId && t.agenteId === lote.agenteId && t.forma === "frente" && !t.loteId);
+          for (const t of alvos) t.loteId = loteId;
+          return alvos.length;
+        },
+        async gravarResumo(trabalhoId: string, resumo: ResumoFrente) {
+          const t = doTenant(b.trabalhos).find((x) => x.id === trabalhoId && x.ownerId === escopo.pessoaId && x.forma === "frente");
+          if (!t) return false;
+          t.resumo = resumo;
+          return true;
+        },
+        async frentesDoLote(loteId: string) {
+          return doTenant(b.trabalhos).filter((t) => t.loteId === loteId).sort((x, y) => x.criadoEm - y.criadoEm)
+            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega" }));
+        },
+        async marcarDevolvido(loteId: string, retornoTurnoId: string | null, em: number) {
+          const l = meus().find((x) => x.id === loteId && x.devolvidoEm === null);
+          if (!l) return null;
+          l.devolvidoEm = em;
+          l.retornoTurnoId = retornoTurnoId;
+          return semDonoLote(l);
         },
       };
     })(),
