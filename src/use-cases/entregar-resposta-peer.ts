@@ -8,7 +8,13 @@ import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
-export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "ja_entregue" | "remetente_excluido" };
+export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" };
+
+/**
+ * definido em 2026-10-12 (ADR-099, I3): a entrega roda também dentro do fecho de um lote de frentes, que só tem repos,
+ * escopo e relógio (sincronizarTrabalho); nada aqui usa serviços.
+ */
+type DepsEntrega = Pick<Deps, "repos" | "escopo" | "agora">;
 
 /** Moldura do SERVIDOR: a resposta chega ao remetente marcada como não supervisionada e não confiável. */
 export function moldurarResposta(alvoNome: string, texto: string): string {
@@ -29,7 +35,7 @@ export function moldurarResultado(alvoNome: string, texto: string): string {
  * uma aprovação decidida no long-poll, enquanto o pedido de acesso é da raiz. Desde a ADR-063 serve também
  * ao fio de quem pediu a colegas (raiz de conversa, rotina ou delegação), para achar os pedidos em aberto.
  */
-async function cadeiaDaDelegacao(deps: Deps, raiz: Turno): Promise<Turno[]> {
+export async function cadeiaDaDelegacao(deps: Pick<Deps, "repos">, raiz: Turno): Promise<Turno[]> {
   const daConversa = await deps.repos.turnos.listarDaConversa(raiz.conversaId, 500);
   const cadeia = [raiz];
   const ids = new Set([raiz.id]);
@@ -47,7 +53,7 @@ async function cadeiaDaDelegacao(deps: Deps, raiz: Turno): Promise<Turno[]> {
 }
 
 /** A raiz do fio: sobe a cadeia de retomaTurnoId, com o mesmo teto de saltos de rotinaDoTurno. */
-async function raizDoFio(deps: Deps, turno: Turno): Promise<Turno> {
+async function raizDoFio(deps: DepsEntrega, turno: Turno): Promise<Turno> {
   let atual = turno;
   for (let saltos = 0; atual.origem === "retomada" && atual.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
     const acima = await deps.repos.turnos.buscar(atual.retomaTurnoId);
@@ -62,7 +68,7 @@ async function raizDoFio(deps: Deps, turno: Turno): Promise<Turno> {
  * da cadeia, com tarefaId, sem peer_ask da mesma tarefa na conversa — nem resultado nem aviso de falha. `exceto` é
  * a tarefa que está voltando agora: a peer_ask dela nasce depois da continuação.
  */
-async function pedidosEmAberto(deps: Deps, cadeia: readonly Turno[], exceto: string | null = null): Promise<{ tarefaId: string; agenteId: string }[]> {
+async function pedidosEmAberto(deps: DepsEntrega, cadeia: readonly Turno[], exceto: string | null = null): Promise<{ tarefaId: string; agenteId: string }[]> {
   const conversaId = cadeia[0]?.conversaId;
   if (!conversaId) return [];
   const ids = new Set(cadeia.map((t) => t.id));
@@ -80,9 +86,12 @@ async function pedidosEmAberto(deps: Deps, cadeia: readonly Turno[], exceto: str
  * cumpre o pedido pediu a um colega e a resposta dele ainda não voltou. Sem a segunda, "pedi ao Dev, aguardo" saía
  * como resultado final e a resposta de verdade era descartada como ja_entregue (a entrega é uma por raiz).
  */
-async function aindaNaoEntrega(deps: Deps, tarefa: Turno): Promise<"aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | null> {
+async function aindaNaoEntrega(deps: DepsEntrega, tarefa: Turno, doLote: string | null = null): Promise<"aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | null> {
   if (tarefa.origem !== "delegacao") return null;
   const cadeia = await cadeiaDaDelegacao(deps, tarefa);
+  // definido em 2026-10-12 (ADR-099, I3): quem cumpre o pedido abriu frentes para ele — o "comecei 3 frentes" não é o
+  // resultado. A resposta sai quando o último lote do fio fecha (fechar-lote.ts, que passa o lote que está fechando).
+  if ((await deps.repos.frentes.lotesAbertosPor(cadeia.map((t) => t.id))).some((l) => l.devolvidoEm === null && l.id !== doLote)) return "aguardando_frentes";
   if (await aguardandoPessoa(deps, cadeia)) return "aguardando_pessoa";
   if ((await pedidosEmAberto(deps, cadeia)).length > 0) return "aguardando_colega";
   // ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta ("vou esperar o CI"). Essa frase não é o resultado:
@@ -100,7 +109,7 @@ function emLista(nomes: readonly string[]): string {
  * pediu cumpre ele mesmo um pedido de colega e tudo voltou — a quem vai a resposta final. Fio de conversa ou rotina
  * sem pendência não ganha frase: a tarefa original do contexto já diz o que fazer.
  */
-async function fechoDaContinuacao(deps: Deps, pediu: Turno, tarefaId: string): Promise<string> {
+async function fechoDaContinuacao(deps: DepsEntrega, pediu: Turno, tarefaId: string): Promise<string> {
   const faltam = await pedidosEmAberto(deps, await cadeiaDaDelegacao(deps, await raizDoFio(deps, pediu)), tarefaId);
   if (faltam.length > 0) {
     const nomes = [...new Set(await Promise.all(faltam.map(async (p) => (await deps.repos.agentes.buscar(p.agenteId))?.nome ?? "um colega")))];
@@ -119,7 +128,7 @@ async function fechoDaContinuacao(deps: Deps, pediu: Turno, tarefaId: string): P
  * "pedi acesso" como se fosse o resultado (o plano da ADR-047: "o remetente só recebe o resultado final").
  * Olha a CADEIA inteira, não só o turno que assentou (revisão da ADR-047).
  */
-async function aguardandoPessoa(deps: Deps, cadeia: readonly Turno[]): Promise<boolean> {
+async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Promise<boolean> {
   for (const t of cadeia) {
     const decisoes = await deps.repos.decisoes.doTurno(t.id);
     if (decisoes.some((d) => d.estado === "pendente" || d.estado === "reaberta")) return true;
@@ -144,7 +153,7 @@ type Entrega = { tarefa: Turno; texto: string; falha: boolean };
  * original terminar E criava uma retomada, e as duas entregavam. O aviso de falha também sai uma vez, e
  * não sai se o resultado já saiu; um resultado depois de um aviso (a pessoa retomou) sai normalmente.
  */
-async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const { tarefa } = e;
   // A pergunta é a mensagem de TEXTO de outro agente ligada à tarefa; a resposta peer_ask (kind próprio, ligada
   // à continuação) nunca conta como pergunta — senão a continuação responderia a si mesma em laço.
@@ -240,15 +249,15 @@ async function entregar(deps: Deps, e: Entrega): Promise<{ data: SaidaEntregaPee
  * a ADR-058 a continuação é a retomada do turno que pediu, no modo e com a trava dele. A autoria da entrega
  * fica "alvo · por pessoa". Turno sem pedido ligado é a própria continuação: nada a entregar.
  */
-export const entregarRespostaPeer: CasoDeUso<{ tarefaId: string; texto: string }, SaidaEntregaPeer> = async (deps, input) => {
+export async function entregarRespostaPeer(deps: DepsEntrega, input: { tarefaId: string; texto: string; doLote?: string }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const assentado = exigir(await deps.repos.turnos.buscar(input.tarefaId), "nao_encontrado", "tarefa");
   // definido em 2026-09-24 (ADR-047): tarefa delegada entrega também — ela mesma ou a retomada dela.
   const tarefa = assentado.origem === "peer" ? assentado : await delegacaoDoTurno(deps.repos, assentado);
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
-  const espera = await aindaNaoEntrega(deps, tarefa);
+  const espera = await aindaNaoEntrega(deps, tarefa, input.doLote ?? null);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.texto, falha: false });
-};
+}
 
 /**
  * A tarefa delegada não vai terminar (definido em 2026-09-24, revisão da ADR-047): o turno do alvo foi

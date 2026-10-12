@@ -12,6 +12,7 @@ import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -67,7 +68,8 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   if (!mudou) return [];
   // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
   await resumoSeFaltar(deps, mudou);
-  return [eventoTrabalhoMudou(deps, mudou)];
+  // ADR-099 (I3): e fecha o lote dela, se era a vez (o trabalho já está travado; o lote trava por último).
+  return [eventoTrabalhoMudou(deps, mudou), ...(await fecharLoteSePronto(deps, mudou))];
 }
 
 /**
@@ -311,6 +313,8 @@ export async function marcarParado(deps: DepsTrabalho, t: Trabalho): Promise<Run
   if (parado) {
     await resumoSeFaltar(deps, parado);
     events.push(eventoTrabalhoMudou(deps, parado));
+    // ADR-099 (I3): a frente parada pela pessoa conta como encerrada — o lote fecha com o que tiver.
+    events.push(...(await fecharLoteSePronto(deps, parado)));
   }
   return events;
 }
