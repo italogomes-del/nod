@@ -7,8 +7,33 @@ import { VERSAO_MINIMA_APP, type PonteInternaNod } from "../../src/adapters/fund
 import { criarPonteHttpServidor } from "../../src/adapters/http/rotas/ponte.ts";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
-import { entrega, falas, inventario, memoria, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { entrega, falas, inventario, memoria, relatoEspera, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
+
+describe("ADR-099 (parte 2): as esperas pela ponte HTTP", () => {
+  const ID = "3f6b0d1e-2a4c-4b5d-8e9f-0a1b2c3d4e5f";
+  it("o cliente puxa as esperas e relata; servidor antigo (404) ou fora do ar devolve null, sem aviso de falha", async () => {
+    const aoFalhar = vi.fn();
+    const ok = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(JSON.stringify({ esperas: [{ id: ID, comando: "gh pr checks 1 --watch", pasta: "Ada/ci", iniciada: false }, { id: 1 }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ seguir: true })));
+    const c = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: ok, aoFalhar });
+    expect(await c.ponte.esperas?.("p", "m")).toEqual([{ id: ID, comando: "gh pr checks 1 --watch", pasta: "Ada/ci", iniciada: false }]);
+    expect(await c.ponte.relatarEspera?.("p", "m", { id: ID, tipo: "iniciou" })).toEqual({ seguir: true });
+    expect(ok).toHaveBeenLastCalledWith("https://nod.example/api/maquina/esperas/resultado", expect.objectContaining({ body: JSON.stringify({ relato: { id: ID, tipo: "iniciou" } }) }));
+    const antigo = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 404 })), aoFalhar });
+    expect(await antigo.ponte.esperas?.("p", "m")).toBeNull();
+    expect(await antigo.ponte.relatarEspera?.("p", "m", { id: ID, tipo: "iniciou" })).toBeNull();
+    expect(aoFalhar).not.toHaveBeenCalled();
+  });
+  it("o servidor valida o relato: id uuid, tipo e motivo conhecidos, código inteiro e saída com teto", () => {
+    expect(relatoEspera({ id: ID, tipo: "terminou", codigo: 0, saida: "ok" })).toEqual({ id: ID, tipo: "terminou", codigo: 0, saida: "ok" });
+    expect(relatoEspera({ id: ID, tipo: "terminou", codigo: null, saida: "" })).toMatchObject({ codigo: null });
+    expect(relatoEspera({ id: ID, tipo: "caiu", motivo: "pasta_ausente" })).toEqual({ id: ID, tipo: "caiu", motivo: "pasta_ausente" });
+    for (const r of [{ id: "x", tipo: "iniciou" }, { id: ID, tipo: "sumiu" }, { id: ID, tipo: "caiu", motivo: "outro" }, { id: ID, tipo: "terminou", codigo: 1.5, saida: "" }, { id: ID, tipo: "terminou", codigo: 0, saida: "x".repeat(20_000) }]) {
+      expect(() => relatoEspera(r)).toThrow();
+    }
+  });
+});
 
 describe("desktop: fronteiras HTTP", () => {
   it("só aceita HTTPS sem credenciais ou caminhos; loopback exige opção de desenvolvimento", () => {

@@ -19,7 +19,7 @@ function quando(instante: number, agora: number): string {
  * não alongam a cadeia de retomadas (SALTOS_DE_RETOMADA, apoio-l7.ts): a rotina continua rotina e a delegação continua
  * delegação na 11ª volta (revisão do #212).
  */
-function origemDaVolta(turno: Turno): string {
+export function origemDaVolta(turno: Turno): string {
   return turno.acordarEm != null && turno.retomaTurnoId ? turno.retomaTurnoId : turno.id;
 }
 
@@ -43,6 +43,8 @@ export const meChameAs: CasoNod<Deps, "me_chame_as"> = async (deps, input) => {
   if ((await deps.repos.turnos.voltasMarcadas(origemDaVolta(turno))) >= VOLTAS_SEGUIDAS_MAX) {
     return { data: { ok: false, erro: "voltas_demais", instrucao: `Você já voltou ${VOLTAS_SEGUIDAS_MAX} vezes para conferir a mesma coisa. Não marque outra volta: diga à pessoa o que está esperando e por quê, e encerre o turno.` } };
   }
+  // ADR-099 (parte 2): uma volta por turno — quem já deixou um comando esperando volta quando ele terminar.
+  if (await deps.repos.esperas.doTurnoTravada(turno.id)) return { data: { ok: false, erro: "ja_esperando", instrucao: "Você já deixou um comando esperando neste turno (esperar_comando) e volta quando ele terminar. Não marque outra volta: encerre o turno." } };
   const agora = deps.agora();
   const acordarEm = agora + minutos * 60_000;
   if (!(await deps.repos.turnos.marcarDespertar(turno.id, acordarEm, motivo))) {
@@ -62,8 +64,25 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
   if (!concluiu || turno.pararSolicitadoEm !== null) return [];
   const pedido = await deps.repos.turnos.despertarDoTurno(turno.id);
   if (!pedido) return [];
+  const agora = deps.agora();
+  // A hora marcada é fato da criação; a hora de verdade da volta o plano já diz (o Mac pode ter estado fora).
+  const r = await enfileirarVolta(deps, turno, {
+    acordarEm: pedido.em,
+    entradaTexto: `[nod] Você marcou para voltar ${quando(pedido.em, agora)} para conferir: ${pedido.motivo}\nConfira e siga de onde parou. Se ainda não estiver pronto, marque outra volta com me_chame_as e encerre o turno.`,
+  });
+  return r?.events ?? [];
+}
+
+/**
+ * A volta de um turno que terminou bem (ADR-086, revisão do #212): uma retomada com `acordar_em`, no trabalho e na sessão
+ * de AGORA (a rede de 2 min pode tê-lo promovido), com o modelo, o harness, a confiança e a procuração do turno, e com a
+ * marca de conteúdo de fora já final. null = a task dele já fechou (parada, terminada ou falhou): não há volta.
+ * revisto em 2026-10-12 (ADR-099, parte 2): o fim de um `esperar_comando` acorda pelo mesmo caminho, com `acordarEm` =
+ * a hora em que o comando terminou (a fila entrega na hora; a volta conta no teto de voltas seguidas como as marcadas).
+ */
+export async function enfileirarVolta(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Turno, v: { acordarEm: number; entradaTexto: string }): Promise<{ volta: Turno; events: RuntimeEvent[] } | null> {
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
-  if (trabalho && !trabalhoAberto(trabalho.estado)) return [];
+  if (trabalho && !trabalhoAberto(trabalho.estado)) return null;
   const agora = deps.agora();
   const retomaTurnoId = origemDaVolta(turno);
   await deps.repos.turnos.travarRetomadas(retomaTurnoId);
@@ -73,20 +92,19 @@ export async function voltaMarcadaAoAssentar(deps: Deps, turno: Turno, concluiu:
     origem: "retomada",
     retomaTurnoId,
     trabalhoId: turno.trabalhoId ?? null,
-    prazoEm: pedido.em + PRAZO_DECISAO_PADRAO_MS,
+    prazoEm: v.acordarEm + PRAZO_DECISAO_PADRAO_MS,
     profundidade: turno.profundidade,
-    // A hora marcada é fato da criação; a hora de verdade da volta o plano já diz (o Mac pode ter estado fora).
-    entradaTexto: `[nod] Você marcou para voltar ${quando(pedido.em, agora)} para conferir: ${pedido.motivo}\nConfira e siga de onde parou. Se ainda não estiver pronto, marque outra volta com me_chame_as e encerre o turno.`,
+    entradaTexto: v.entradaTexto,
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,
     harness: turno.harness,
     executor: turno.executor,
-    acordarEm: pedido.em,
+    acordarEm: v.acordarEm,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada da volta marcada não criada" });
   // A marca de quem leu algo de fora (ADR-062): lida agora, com o turno assentado — nada que ele leu escapa.
   if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher" });
-  return [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: volta.trabalhoId ?? null, acordar_em: pedido.em } })];
+  return { volta, events: [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: volta.trabalhoId ?? null, acordar_em: v.acordarEm } })] };
 }

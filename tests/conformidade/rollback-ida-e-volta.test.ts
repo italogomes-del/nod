@@ -206,8 +206,10 @@ describeIntegracao("NOD-195: o ROLLBACK de cada migração nova volta o schema e
     await sql
       .begin(async (trx) => {
         const t = trx as unknown as Sql;
-        // A 0061-0063 saem antes, como num rollback de verdade (ordem inversa).
-        for (const nome of ["0063_trabalhos.sql", "0062_relatos_do_nod.sql", "0061_nod.sql"]) {
+        // As depois da 0060 saem antes, como num rollback de verdade (ordem inversa). revisto em 2026-10-12: era a lista
+        // fixa 0063–0061, e a 0070 (esperas, com FK para trabalhos) impedia o rollback da 0063.
+        const depois = (await readdir(DIR)).filter((f) => f.endsWith(".sql") && f > "0061").sort().reverse();
+        for (const nome of depois) {
           await t.unsafe(trechoDeRollback(await ler(nome)) ?? "");
         }
         await t.unsafe(`alter table propostas no force row level security;

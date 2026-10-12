@@ -16,6 +16,7 @@ import { criarAcompanhanteDeTarefas } from "../src/adapters/executor/acompanhar-
 import { iniciarPoolDeLacos, type PoolDeLacos } from "../src/adapters/executor/pool-lacos.ts";
 import { criarAmostradorMemoria } from "../src/adapters/executor/amostrador-memoria.ts";
 import { criarExecutarComando, iniciarLimpezaDasTasks, modoDaLimpeza, type LimpezaDasTasks } from "../src/adapters/executor/limpeza-das-tasks.ts";
+import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.ts";
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { lerPathDoShell, resolverBinario, resolverBinarioDetalhado } from "../src/adapters/executor/caminho.ts";
@@ -73,6 +74,8 @@ let falhando = false;
 let itensGithub: ReturnType<typeof setInterval> | null = null;
 /** ADR-088 (2026-10-09): a limpeza das pastas de task encerradas neste Mac (o servidor diz quais; o Mac apaga). */
 let limpezaDasTasks: LimpezaDasTasks | null = null;
+/** ADR-099 (parte 2, 2026-10-12): o laço das esperas de comando deste Mac; os comandos em si moram no módulo esperas.ts. */
+let esperasDoMac: Esperas | null = null;
 /** Revisão do #225: os turnos rodando neste Mac — a limpeza não mexe na pasta de nenhum deles. */
 const planosNoMac = new Map<string, PlanoTurno>();
 /**
@@ -343,6 +346,8 @@ async function parar() {
   itensGithub = null;
   limpezaDasTasks?.parar();
   limpezaDasTasks = null;
+  esperasDoMac?.parar();
+  esperasDoMac = null;
   vigiaIas?.parar();
   vigiaIas = null;
   const anterior = laco; laco = null;
@@ -428,6 +433,9 @@ async function conectar(c: Config) {
     const modo = modoDaLimpeza(process.env);
     log("info", "limpeza_modo", { modo, onde: "app_do_mac" });
     limpezaDasTasks = modo === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, home: homeDoMac, executar: criarExecutarComando(cfg.env, homeDoMac), simular: modo === "simular", emUso: (pasta) => [...planosNoMac.values()].some((p) => p.pastaDoBot === pasta || p.pastaDoBot?.startsWith(`${pasta}/`) === true) });
+    // ADR-099 (parte 2): as esperas de comando deste Mac (o puxar, a cada 5 s), com o ambiente dos drivers.
+    esperasDoMac?.parar();
+    esperasDoMac = iniciarEsperas({ ponte: ponteHttp.ponte, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, home: homeDoMac, env: cfg.env });
   }
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {

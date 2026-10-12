@@ -19,6 +19,8 @@ import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
 import { camposDoRelato, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
+import { relatarEspera as relatarEsperaDaMaquina } from "../../use-cases/esperar-comando.ts";
+import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "../../contracts/espera.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
 import type { MudancaDePressao } from "./trabalhos-vivos.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../contracts/trabalho.ts";
@@ -534,6 +536,25 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
       // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
       log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
+    },
+
+    /** ADR-099 (parte 2): as esperas que a máquina deve rodar; ler é a notícia dela (`visto_em`). */
+    async esperas(pessoaId, machineId): Promise<EsperaParaRodar[]> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return [];
+      return abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).esperas.paraAMaquina(machineId, agora()));
+    },
+
+    /** ADR-099 (parte 2): o relato da máquina; o fim acorda o dono na mesma transação (o evento sai pelo outbox). */
+    async relatarEspera(pessoaId, machineId, relato: RelatoEspera): Promise<RespostaRelatoEspera> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return { seguir: false };
+      return abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const r = await relatarEsperaDaMaquina(d, { maquinaId: machineId, relato });
+        if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
+        return r.data;
+      });
     },
 
     emMemoria() {

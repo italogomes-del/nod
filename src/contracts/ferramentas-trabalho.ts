@@ -1,5 +1,9 @@
 import type { JsonSchema } from "./json-schema.ts";
 
+/** Os tetos do `esperar_comando` (CHECKs da 0070); moram aqui porque o schema é contrato (EMENDA 26: só `as const`). */
+export const COMANDO_ESPERA_MAX = 4_000;
+export const MOTIVO_ESPERA_MAX = 300;
+
 /**
  * As ferramentas da conversa coordenadora (definido em 2026-10-07, ADR-083 §7, issue #193). Moram fora de
  * ferramentas-nod.ts pelo gatilho de 200 linhas da EMENDA 26, como as de pendência; são espalhadas em FERRAMENTAS_NOD.
@@ -42,7 +46,7 @@ export const FERRAMENTAS_TRABALHO = {
   me_chame_as: {
     type: "object",
     description:
-      "Sai do Mac e volta sozinho mais tarde, na mesma sessão e no mesmo ponto. Use para esperar algo demorado que não depende de você — um CI, um deploy, um build longo, uma resposta de fora — em vez de ficar num laço com sleep ou checando de tempos em tempos: enquanto espera, nada seu ocupa o Mac. Depois de chamar, pare os comandos que deixou em segundo plano e encerre o turno; a volta só é marcada quando o turno termina.",
+      "Sai do Mac e volta sozinho mais tarde, na mesma sessão e no mesmo ponto. Use para hora marcada (\"me chame amanhã às 9 h\") ou para esperar algo de fora que não tem comando que acompanhe — a resposta de alguém, um fornecedor — em vez de ficar num laço com sleep ou checando de tempos em tempos. Para CI, deploy ou processo que um comando acompanha até o fim, use esperar_comando se ele estiver disponível. Depois de chamar, pare os comandos que deixou em segundo plano e encerre o turno; a volta só é marcada quando o turno termina.",
     properties: {
       em_minutos: { type: "integer", description: `Daqui a quantos minutos voltar, inteiro de ${ACORDAR_MIN_MINUTOS} a ${ACORDAR_MAX_MINUTOS} (24 h).` },
       motivo: { type: "string", description: "O que você vai conferir quando voltar, numa frase (ex.: \"ver se o CI do PR #212 passou\").", minLength: 1, maxLength: MOTIVO_MAX_DESPERTAR },
@@ -50,11 +54,25 @@ export const FERRAMENTAS_TRABALHO = {
     required: ["em_minutos", "motivo"],
     additionalProperties: false,
   },
+  // definido em 2026-10-12 (ADR-099 item 4, parte 2): esperar o que um comando acompanha até o fim. O Nod roda o comando
+  // fora do CLI, na máquina e na pasta deste turno, e o fim acorda o bot uma vez — em vez de voltas por horário.
+  esperar_comando: {
+    type: "object",
+    description:
+      "Espera algo de fora terminar sem ficar acordado: o Nod roda o comando na sua máquina e na sua pasta, fora deste turno, e você volta sozinho nesta mesma sessão quando ele terminar, com o código de saída e as últimas linhas. Use para CI, deploy e processos que um comando acompanha até o fim (gh pr checks 845 --watch -R dono/repo, gh run watch 123 -R dono/repo, kubectl rollout status deploy/app). O comando segue as regras do seu terminal e não pode ser laço com sleep. Um por turno. Depois de chamar, diga em uma frase o que vai esperar e encerre o turno.",
+    properties: {
+      comando: { type: "string", description: "Uma linha de shell que só termina quando a espera acabar (ex.: \"gh pr checks 845 --watch -R gamefik/app\").", minLength: 1, maxLength: COMANDO_ESPERA_MAX },
+      motivo: { type: "string", description: "O que você está esperando, numa frase (ex.: \"a CI do PR #845\").", minLength: 1, maxLength: MOTIVO_ESPERA_MAX },
+    },
+    required: ["comando", "motivo"],
+    additionalProperties: false,
+  },
 } as const satisfies Record<string, JsonSchema>;
 
 export type ArgsAbrirTask = { titulo: string; pedido: string; depois_de?: string };
 export type ArgsMandarParaTask = { trabalho_id: string; texto: string };
 export type ArgsMeChameAs = { em_minutos: number; motivo: string };
+export type ArgsEsperarComando = { comando: string; motivo: string };
 
 export type ResultadoAbrirTask =
   | { ok: true; trabalho_id: string; instrucao: string }
@@ -65,11 +83,16 @@ export type ResultadoMandarParaTask =
 /** `volta_as`: a hora no fuso de São Paulo (horaDaFrase; o servidor não guarda o da pessoa); `acordar_em`: o instante (ISO). */
 export type ResultadoMeChameAs =
   | { ok: true; volta_as: string; acordar_em: string; instrucao: string }
-  | { ok: false; erro: "turno_parado" | "task_fechada" | "voltas_demais"; instrucao: string };
+  | { ok: false; erro: "turno_parado" | "task_fechada" | "voltas_demais" | "ja_esperando"; instrucao: string };
+/** ADR-099 (parte 2): `espera_id` para a tela e o Raio-X; o resto é instrução. */
+export type ResultadoEsperarComando =
+  | { ok: true; espera_id: string; instrucao: string }
+  | { ok: false; erro: "turno_parado" | "task_fechada" | "ja_esperando" | "sem_maquina" | "sem_terminal" | "precisa_aprovacao" | "comando_invalido" | "voltas_demais"; instrucao: string };
 
-/** Args ↔ resultado das três, intersectado em ContratoFerramentaNod. */
+/** Args ↔ resultado destas ferramentas, intersectado em ContratoFerramentaNod. */
 export type ContratoFerramentasTrabalho = {
   abrir_task: { args: ArgsAbrirTask; resultado: ResultadoAbrirTask };
   mandar_para_task: { args: ArgsMandarParaTask; resultado: ResultadoMandarParaTask };
   me_chame_as: { args: ArgsMeChameAs; resultado: ResultadoMeChameAs };
+  esperar_comando: { args: ArgsEsperarComando; resultado: ResultadoEsperarComando };
 };
