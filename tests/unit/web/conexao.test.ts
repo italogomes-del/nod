@@ -10,25 +10,28 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
   let verificou = 0;
   let conectou = 0;
   let abriu = 0;
+  const ordem: string[] = [];
   const janela: JanelaLogin | null = p.janela === undefined ? { closed: false, location: { href: "" }, close() { (this as { closed: boolean }).closed = true; } } : p.janela;
   const deps: DepsConexao = {
     conectar: async () => {
       conectou += 1;
+      ordem.push("conectar");
       if (p.conectarFalha) throw new Error("servidor");
       return p.conectadoDireto ? { conectado: true } : { url: p.url ?? "https://login.exemplo/x" };
     },
     verificar: async () => {
+      ordem.push("verificar");
       const v = p.verificacoes[verificou++] ?? false;
       if (v === "erro") throw new Error("rede");
       return v === "falhou" ? { conectado: false, falhou: true } : { conectado: v };
     },
     mudou: (slug, valor) => void mudancas.push([slug, valor]),
     conectado: (slug) => void conectados.push(slug),
-    abrirJanela: () => { abriu += 1; return janela; },
+    abrirJanela: () => { abriu += 1; ordem.push("abrir"); return janela; },
     esperar: async (ms) => void (agora += ms),
     agora: () => agora,
   };
-  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou, conectou: () => conectou, abriu: () => abriu };
+  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou, conectou: () => conectou, abriu: () => abriu, ordem };
 }
 
 describe("login de app sem 'Verificar conexão' (definido em 2026-09-25)", () => {
@@ -135,27 +138,37 @@ describe("'Tentar de novo' depois de FALHA_APP sonda a sessão existente antes d
   });
 
   it("outras falhas (janela fechada) e a terceira tentativa depois de um login novo não re-sondam", async () => {
+    // A ordem prova: a tentativa nova começa por abrir a janela e conectar, sem verificar antes.
     const fechada = montar({ verificacoes: [], janela: { closed: true, close() {}, location: { href: "" } } });
     await fechada.conexoes.iniciar("slack");
-    const antes = fechada.verificou();
+    const antes = fechada.ordem.length;
     await fechada.conexoes.iniciar("slack");
-    expect(fechada.conectou()).toBe(2);
-    expect(fechada.verificou() - antes).toBeGreaterThan(0); // só as perguntas da espera do login novo
-    expect(fechada.abriu()).toBe(2);
+    expect(fechada.ordem.slice(antes, antes + 2)).toEqual(["abrir", "conectar"]);
 
     const m = montar({ verificacoes: ["falhou", "falhou", false, true] });
     await m.conexoes.iniciar("slack"); // FALHA_APP
     await m.conexoes.iniciar("slack"); // re-sonda falha, login novo, conecta
     expect(m.conectados).toEqual(["slack"]);
+    const depois = m.ordem.length;
     await m.conexoes.iniciar("slack"); // já conectou: login normal, sem re-sonda
-    expect(m.conectou()).toBe(3);
+    expect(m.ordem.slice(depois, depois + 2)).toEqual(["abrir", "conectar"]);
+  });
+
+  it("troca de sessão (cancelarTodas) esquece a FALHA_APP: o próximo clique abre o login no gesto", async () => {
+    const m = montar({ verificacoes: ["falhou", true] });
+    await m.conexoes.iniciar("slack");
+    m.conexoes.cancelarTodas();
+    const antes = m.ordem.length;
+    await m.conexoes.iniciar("slack");
+    expect(m.ordem.slice(antes, antes + 2)).toEqual(["abrir", "conectar"]);
   });
 
   it("Cancelar depois de FALHA_APP esquece a re-sonda", async () => {
     const m = montar({ verificacoes: ["falhou", true] });
     await m.conexoes.iniciar("slack");
     m.conexoes.cancelar("slack");
+    const antes = m.ordem.length;
     await m.conexoes.iniciar("slack");
-    expect(m.conectou()).toBe(2);
+    expect(m.ordem.slice(antes, antes + 2)).toEqual(["abrir", "conectar"]);
   });
 });

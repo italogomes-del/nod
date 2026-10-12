@@ -68,8 +68,14 @@ async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSond
   let agora = 0;
   let sondas = 0;
   const esperas: number[] = [];
+  // Cada tentativa numa transação própria e a espera fora de qualquer uma (não segura conexão do pool).
+  let tx = 0;
+  let abertas = 0;
+  let esperouDentro = false;
+  const txDasSondas: number[] = [];
   const memoria = dentroEmMemoria({ services: servicosDeTeste({ sonda: () => {
     sondas += 1;
+    txDasSondas.push(tx);
     agora += custoDaSondaMs;
     return sonda(sondas);
   } }) });
@@ -83,13 +89,19 @@ async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSond
     throw new Error("endpoint inesperado");
   };
   let userId = "";
-  const op = { dentro: memoria.dentro, cifrar: cifra, decifrar: (s: string) => decifrar(s, chave), fetchImpl: fakeFetch, esperar: async (ms: number) => { esperas.push(ms); agora += ms; }, agora: () => agora };
+  const dentro = (async (escopo, fn) => {
+    tx += 1;
+    abertas += 1;
+    try { return await memoria.dentro(escopo, fn); } finally { abertas -= 1; }
+  }) as typeof memoria.dentro;
+  const esperar = async (ms: number) => { if (abertas > 0) esperouDentro = true; esperas.push(ms); agora += ms; };
+  const op = { dentro, cifrar: cifra, decifrar: (s: string) => decifrar(s, chave), fetchImpl: fakeFetch, esperar, agora: () => agora };
   const srv = await servidorDeTeste([...rotasMarketplace(op), ...rotasConectores(op)]);
   const sessao = await srv.entrar("marlon");
   userId = `nod:${sessao.tenantId}:${sessao.pessoaId}`;
   expect((await srv.chamar(sessao, "POST", "marketplace/configurar", { chave: "ak_segredo" })).status).toBe(200);
   expect((await srv.chamar(sessao, "POST", "marketplace/slack/conectar")).status).toBe(200);
-  return { srv, sessao, memoria, esperas, sondas: () => sondas, agora: () => agora };
+  return { srv, sessao, memoria, esperas, sondas: () => sondas, agora: () => agora, txDasSondas, esperouDentro: () => esperouDentro };
 }
 
 const FERRAMENTA_SLACK = { nome: "SLACK_SEND_MESSAGE", descricao: "Envia mensagem", readOnlyHint: false, schema: { type: "object" as const } };
@@ -110,6 +122,8 @@ it("NOD-208: sonda vazia em todas → falhou depois das 4 tentativas, dentro do 
     expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true });
     expect(m.sondas()).toBe(4);
     expect(m.esperas).toEqual([2_000, 4_000, 8_000]);
+    expect(new Set(m.txDasSondas).size).toBe(4);
+    expect(m.esperouDentro()).toBe(false);
     expect(m.agora()).toBeLessThanOrEqual(20_000);
     expect(m.memoria.banco.conectores[0]?.habilitado).toBe(false);
   } finally { await m.srv.close(); }

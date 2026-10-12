@@ -171,6 +171,8 @@ export function criarConexoes(deps: DepsConexao) {
     /** Sessão trocada ou encerrada: nenhuma espera continua perguntando em nome de outra pessoa. */
     cancelarTodas(): void {
       for (const slug of [...vivas.keys()]) this.cancelar(slug);
+      // A FALHA_APP da sessão anterior não vale para a próxima: sem isso, o clique dela sondaria antes do login.
+      comFalhaDoApp.clear();
     },
     esperando(slug: string): boolean {
       return vivas.has(slug);
