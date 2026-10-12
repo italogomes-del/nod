@@ -214,11 +214,18 @@ describe("o comando reescrito num shell de verdade, com o script do hook (ADR-09
     expect(segundo.status).toBe(0);
   }, 60_000);
 
-  it("sem a pasta da fila gravável, o comando roda direto (a fila nunca impede um comando)", async () => {
-    const comando = await reescrito(`node -e "console.log('rodou')"`, "/proc/nao-existe-nod");
-    expect(comando).toContain("vaga pegar");
-    const r = await bash(comando);
-    expect(r.stdout).toContain("rodou");
-    expect(r.status).toBe(0);
-  }, 30_000);
+  it("sem a pasta da fila gravável, o comando roda direto e na hora (a fila nunca impede um comando)", async () => {
+    // Uma pasta "dentro" de um arquivo não se cria em nenhum sistema; sem NOD_HOME, a pasta da fila também não.
+    const arquivo = join(await pasta(), "um-arquivo");
+    await writeFile(arquivo, "x");
+    for (const dir of [join(arquivo, "vaga"), join(await pasta(), "sem-nod-home", "vaga")]) {
+      const comando = await reescrito(`node -e "console.log('rodou')"`, dir);
+      expect(comando).toContain("vaga pegar");
+      const inicio = Date.now();
+      const r = await bash(comando);
+      expect(r.stdout).toContain("rodou");
+      expect(r.status).toBe(0);
+      expect(Date.now() - inicio).toBeLessThan(10_000);
+    }
+  }, 60_000);
 });

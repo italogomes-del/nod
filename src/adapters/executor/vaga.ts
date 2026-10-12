@@ -95,6 +95,14 @@ async function gravarJson(arquivo: string, valor: unknown): Promise<void> {
   await rename(tmp, arquivo);
 }
 
+async function garantirPasta(p: string): Promise<void> {
+  try {
+    await mkdir(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+}
+
 async function listar<T>(dir: string): Promise<{ nome: string; valor: T }[]> {
   const nomes = await readdir(dir).catch(() => [] as string[]);
   const lidos: { nome: string; valor: T | null }[] = await Promise.all(nomes.filter((n) => n.endsWith(".json")).sort().map(async (nome) => ({ nome, valor: await lerJson<T>(join(dir, nome)) })));
@@ -121,7 +129,9 @@ export function criarVaga(deps: DepsDaVaga) {
       try {
         await mkdir(trava);
         minha = true;
-      } catch {
+      } catch (e) {
+        // Só a trava de outro processo faz esperar; a pasta que não existe ou não se grava falha na hora (fail-open).
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
         const s = await stat(trava).catch(() => null);
         if (s && agora() - s.mtimeMs > TRAVA_VELHA_MS) await rmdir(trava).catch(() => {});
         else await dormir(50);
@@ -144,8 +154,9 @@ export function criarVaga(deps: DepsDaVaga) {
 
   async function pegar(chave: string, shell: number): Promise<string> {
     const id = randomUUID().slice(0, 12);
-    await mkdir(dirVez, { recursive: true });
-    await mkdir(dirEspera, { recursive: true });
+    // Sem `recursive`: a pasta da fila mora em NOD_HOME, que já existe (os turnos estão ali). No CI (Linux) em 12/10 uma
+    // pasta da fila sob /proc prendeu o comando 30 s em vez de falhar na hora; pasta que não se cria falha já aqui.
+    for (const p of [deps.dir, dirVez, dirEspera]) await garantirPasta(p);
     const ticket = join(dirEspera, `${String(agora()).padStart(15, "0")}-${id}.json`);
     let naFila = false;
     let esperouDesde: number | null = null;
