@@ -61,8 +61,8 @@ describe("o hook põe o comando pesado na fila (ADR-097)", () => {
   });
 
   it("o que não pesa, o que já se mostrou leve e o que o servidor negou rodam como vieram", async () => {
-    const leve: Historico = { [chaveDoComando("npm run lint", "/home/nod/nod/Ze 1/task/gamefik")]: { picos: [90], em: 1 } };
-    const fila = filaDaMaquina(vaga, () => leve);
+    const leve: Historico = { [chaveDoComando("npm run lint", "gamefik/gamefik")]: { picos: [90], em: 1 } };
+    const fila = filaDaMaquina(vaga, () => leve, () => "gamefik/gamefik");
     expect((await decidirHook(evento("git status"), permitir, undefined, fila)).hookSpecificOutput.updatedInput).toBeUndefined();
     expect((await decidirHook(evento("npm run lint"), permitir, undefined, fila)).hookSpecificOutput.updatedInput).toBeUndefined();
     const negado = await decidirHook(evento("npm test"), async () => ({ permitir: false, motivo: "não" }), undefined, fila);
@@ -82,6 +82,16 @@ describe("o hook põe o comando pesado na fila (ADR-097)", () => {
     const uma = String((await decidirHook(evento("npm test"), permitir, undefined, fila)).hookSpecificOutput.updatedInput?.command);
     expect((await decidirHook(evento(uma), permitir, undefined, fila)).hookSpecificOutput.updatedInput).toBeUndefined();
     expect((await decidirHook(evento("npm test"), permitir)).hookSpecificOutput.updatedInput).toBeUndefined();
+  });
+
+  it("a chave vem da origem do git da pasta do comando: o pico vale em qualquer task do mesmo repositório", async () => {
+    const repo = await pasta();
+    await new Promise<void>((r, f) => execFile("git", ["init", "-q", repo], (e) => (e ? f(e) : r())));
+    await new Promise<void>((r, f) => execFile("git", ["-C", repo, "remote", "add", "origin", "git@github.com:gamefik/gamefik.git"], (e) => (e ? f(e) : r())));
+    const fila = filaDaMaquina(vaga, () => ({}));
+    const comando = String((await decidirHook({ tool_name: "Bash", tool_input: { command: "npm test" }, cwd: repo }, permitir, undefined, fila)).hookSpecificOutput.updatedInput?.command);
+    const chave64 = / vaga pegar (\S+) /.exec(comando)?.[1] ?? "";
+    expect(Buffer.from(chave64, "base64url").toString("utf8")).toBe("gamefik/gamefik\nnpm test");
   });
 
   it("o driver: a pasta da fila ao lado de turnos, e o nod-vaga chamado pelo mesmo node do hook", () => {
@@ -192,7 +202,8 @@ describe("o comando reescrito num shell de verdade, com o script do hook (ADR-09
     expect(r.stdout).toContain("alocou");
     expect(r.stdout).toContain("status=7 pasta=sub x=42");
     const chave = Object.keys((await ate(() => lerHistorico(dir))) ?? {})[0]!;
-    expect(chave.startsWith(`${dir.split("/").pop()}\ncd sub`)).toBe(true);
+    // Fora de um repositório, a chave é só o texto.
+    expect(chave.startsWith("\ncd sub")).toBe(true);
     const h = await ate(async () => ((await lerHistorico(dir))?.[chave]?.picos.length ? (await lerHistorico(dir))![chave]! : null));
     expect(h.picos[0]).toBeGreaterThan(250);
     expect(await ate(async () => ((await readdir(join(dir, "com-a-vez"))).length === 0 ? true : null))).toBe(true);

@@ -42,12 +42,23 @@ export type HistoricoDoComando = { picos: number[]; faltou?: boolean; em: number
 export type Historico = Record<string, HistoricoDoComando>;
 
 /**
- * A chave de um comando: a pasta em que ele roda (o nome dela, que é o do repositório: a pasta da task muda a cada task)
- * e o texto, com os espaços juntados. `npm test` no gamefik e no nod são comandos diferentes.
+ * A chave de um comando: o repositório em que ele roda e o texto, com os espaços juntados. `npm test` no gamefik e no
+ * nod são comandos diferentes. revisto em 2026-10-12: era o nome da pasta, e na VM as chaves saíram com o nome da pasta
+ * da task ("revise-o-seu-proprio-pr-…-c35427"), que muda a cada task: o pico medido numa task não valia na seguinte.
+ * Fora de um repositório (a pasta da task, antes do `cd` para o clone), a chave é só o texto.
  */
-export function chaveDoComando(comando: string, cwd: string | null): string {
-  const pasta = (cwd ?? "").replace(/\/+$/, "").split("/").pop() ?? "";
-  return `${pasta}\n${comando.trim().replace(/\s+/g, " ").slice(0, 300)}`;
+export function chaveDoComando(comando: string, repositorio: string | null): string {
+  return `${repositorio ?? ""}\n${comando.trim().replace(/\s+/g, " ").slice(0, 300)}`;
+}
+
+/**
+ * O repositório pelo `remote.origin.url` do git: "dono/nome", igual para todas as worktrees e clones do mesmo projeto.
+ * `git@github.com:gamefik/nod.git`, `https://github.com/gamefik/nod(.git)`, `ssh://git@host/dono/nome`. Outro formato,
+ * ou vazio, é null.
+ */
+export function repositorioDaOrigem(url: string | null | undefined): string | null {
+  const m = /[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec((url ?? "").trim());
+  return m ? `${m[1]}/${m[2]}` : null;
 }
 
 /** A reserva do comando em MB, ou null se ele nunca foi medido. */
