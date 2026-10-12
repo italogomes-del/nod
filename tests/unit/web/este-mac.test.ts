@@ -114,6 +114,17 @@ describe("Seu espaço › Este Mac", () => {
     expect(antigo).not.toContain("<b>Fila</b>");
   });
 
+  it("ADR-097: no Equilibrado o processador cheio não segura nada, e a tela diz isso; no Pouco, segura", () => {
+    const cheio = { processador: "vermelha" as const, usoProcessador: 0.95, cargaProcessador: 1.2, fila: "vermelha" as const };
+    const equilibrado = renderEsteMac(estadoCom([rodando], cheio));
+    expect(equilibrado).toContain("nada espera por isso: no Equilibrado, só a memória e o disco seguram trabalho novo.");
+    expect(equilibrado).not.toContain("esperam a fila baixar");
+    expect(equilibrado).toContain("Processador cheio só deixa tudo mais lento");
+    const pouco = renderEsteMac({ ...estadoCom([rodando], cheio), usoDoMac: "pouco" });
+    expect(pouco).toContain("Rotinas e pedidos entre bots que ainda não começaram esperam; o que você pede começa.");
+    expect(pouco).toContain("esperam a fila baixar");
+  });
+
   it("o uso escolhido muda pela ação do reducer; o padrão é equilibrado", () => {
     expect(estadoInicial.usoDoMac).toBe("equilibrado");
     const e = reduzir(estadoCom([]), { tipo: "uso-do-mac", uso: "pouco" });

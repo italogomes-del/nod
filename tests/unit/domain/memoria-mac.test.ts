@@ -99,9 +99,9 @@ describe("segurar trabalho novo (uso do Mac)", () => {
     expect(deveSegurar("livre", "vermelha", "vermelha")).toBe(false);
   });
 
-  it("equilibrado: memória em alerta ou processador cheio", () => {
+  it("equilibrado: só a memória em alerta; o processador cheio não segura (ADR-097)", () => {
     expect(deveSegurar("equilibrado", "amarela", "verde")).toBe(true);
-    expect(deveSegurar("equilibrado", "verde", "vermelha")).toBe(true);
+    expect(deveSegurar("equilibrado", "verde", "vermelha")).toBe(false);
     expect(deveSegurar("equilibrado", "verde", "amarela")).toBe(false);
     expect(deveSegurar("equilibrado", "verde", "verde")).toBe(false);
   });
@@ -216,8 +216,9 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", discoNivel: critico })).toEqual({ fundo: "disco", tudoNovo: "disco", semPrazo: false });
   });
 
-  it("o processador continua como antes, com o motivo processador", () => {
-    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
+  it("o processador só segura no pouco, com o motivo processador (ADR-097)", () => {
+    expect(portaoDoMac("equilibrado", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: null, tudoNovo: null, semPrazo: false });
+    expect(portaoDoMac("pouco", { memoria: "verde", processador: "vermelha", discoNivel: folgado })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
     expect(portaoDoMac("pouco", { memoria: "verde", processador: "amarela", discoNivel: null })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
   });
 

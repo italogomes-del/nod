@@ -8,15 +8,15 @@
     "volatil": 1178
   },
   "conversa-automatico": {
-    "estavel": 14629,
+    "estavel": 14953,
     "volatil": 1099
   },
   "conversa-manual": {
-    "estavel": 13579,
+    "estavel": 13903,
     "volatil": 1099
   },
   "conversa-total": {
-    "estavel": 14368,
+    "estavel": 14692,
     "volatil": 1099
   },
   "criacao-de-bot": {
@@ -32,7 +32,7 @@
     "volatil": 1590
   },
   "segundo-turno": {
-    "estavel": 14368,
+    "estavel": 14692,
     "volatil": 455
   },
   "sem-terminal-computador-fora": {

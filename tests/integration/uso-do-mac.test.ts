@@ -137,6 +137,9 @@ describeIntegracao("uso do Mac (ADR-085)", () => {
       const deps = { ...m.deps, services: { ...m.deps.services, trabalhosVivos: { ultimaFerramenta: () => null, memoria: () => leitura } } };
 
       const rotina = await m.task("rotina", "Verificar o Slack");
+      // ADR-097: no equilibrado (o padrão) o processador cheio não segura; no "pouco", segura.
+      expect((await listarTrabalhos(deps, {})).data.segurando).toBe(false);
+      await gravarPreferencias(m.deps, { usoDoMac: "pouco" });
       const dto = (await listarTrabalhos(deps, {})).data;
       expect(dto.trabalhos.find((t) => t.id === parada.id)?.memoriaMb).toBeNull();
       // A linha diz "esperando o Mac aliviar" pela marca do servidor (a mesma regra do reivindicar).

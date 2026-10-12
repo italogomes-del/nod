@@ -1,4 +1,5 @@
 import type { Negacao } from "../contracts/negacao.ts";
+import { CAUSA_NATIVA_HUMANA } from "./negacao-nativa.ts";
 
 function horaMinuto(instante: number, fusoIana: string): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: fusoIana, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(instante));
@@ -41,8 +42,12 @@ export function descreverNegacao(n: Negacao, agora: number, fusoIana = "UTC"): s
       if (n.causa === "acesso_recusado") return `conector ${n.nome} recusou o acesso: o app precisa ser reconectado`;
       if (n.motivo === "timeout_transporte") return `conector ${n.nome} não respondeu a tempo: a chamada pode ser grande demais; tente pedir menos itens ou só metadados`;
       return `conector ${n.nome} indisponível: servidor fora ${haQuanto(n.desde, agora)}`;
-    case "ferramenta_negada":
-      return `ferramenta ${n.nome} negada: ${MOTIVO_HUMANO[n.motivo]}${n.terminal ? " (terminal)" : ""}`;
+    case "ferramenta_negada": {
+      // definido em 2026-10-11: com a causa que o hook do nod deu, ela diz o porquê; sem ela (motor anterior), o motivo do enum.
+      const porque = n.causa && n.causa !== "acesso_recusado" ? CAUSA_NATIVA_HUMANA[n.causa] : MOTIVO_HUMANO[n.motivo];
+      const vezes = (n.vezes ?? 1) > 1 ? ` (${n.vezes} vezes)` : "";
+      return `ferramenta ${n.nome} negada: ${porque}${vezes}${n.terminal ? " (terminal)" : ""}`;
+    }
     case "plano_ausente":
       return `nenhum trabalho começa: ${MOTIVO_HUMANO[n.motivo]} desde ${horaMinuto(n.desde, fusoIana)}`;
   }
