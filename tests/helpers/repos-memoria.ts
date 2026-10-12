@@ -2274,13 +2274,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
     preferencias: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
-      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], faixaTrabalhosRecolhida: false, usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} };
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} };
       return {
         async buscar() {
           return atual();
         },
         async gravar(p) {
-          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.faixaTrabalhosRecolhida !== undefined ? { faixaTrabalhosRecolhida: p.faixaTrabalhosRecolhida } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}), ...(p.ordemIas !== undefined ? { ordemIas: p.ordemIas } : {}) };
+          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}), ...(p.ordemIas !== undefined ? { ordemIas: p.ordemIas } : {}) };
           b.preferencias.set(chave, nova);
           return nova;
         },
@@ -2487,6 +2487,28 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         },
       };
     })(),
+    // ADR-099 (I10): o estado do dono se prova no Postgres (tests/integration/estado-do-dono.test.ts); aqui, as frentes
+    // vivas e as decisões abertas, o bastante para o estado principal.
+    donos: {
+      async fatos(agenteIds: readonly string[]) {
+        const vivos = doTenant(b.turnos).filter((t) => agenteIds.includes(t.agenteId) && t.estado === "despachando");
+        const decisoes = new Map<string, { quantas: number; desde: number }>();
+        for (const d of doTenant(b.decisoes).filter((x) => agenteIds.includes(x.agenteId) && (x.estado === "pendente" || x.estado === "reaberta"))) {
+          const atual = decisoes.get(d.agenteId);
+          const em = Date.parse(d.criadoEm);
+          decisoes.set(d.agenteId, { quantas: (atual?.quantas ?? 0) + 1, desde: Math.min(atual?.desde ?? em, em) });
+        }
+        return {
+          vivos: new Map(vivos.filter((t) => !t.trabalhoId).map((t) => [t.agenteId, t.criadoEm])),
+          frentesVivas: new Set(vivos.flatMap((t) => (t.trabalhoId ? [t.trabalhoId] : []))),
+          decisoes,
+          comandos: [],
+          voltas: [],
+          colegas: [],
+          fila: [],
+        };
+      },
+    },
     // ADR-099 (I7 revista): os pedidos entre bots na triagem do dono. A trava e as quedas se provam no Postgres
     // (tests/integration/fila-triagem.test.ts, tests/concurrency/pedidos-cruzados.test.ts); aqui, o mínimo para a regra.
     pedidosDeColega: {

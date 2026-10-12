@@ -12,7 +12,8 @@ import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
-import { trabalhosAbertosDaConversa } from "./trabalhos.ts";
+import { donosDosBots } from "./estado-do-dono.ts";
+import { trabalhosParaDto } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaEnviarMensagem = {
@@ -187,6 +188,11 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
     .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null, trabalhoId: t.trabalhoId ?? null }));
   const fios = await fiosDaConversa(deps.repos, mensagens);
-  const trabalhos = await trabalhosAbertosDaConversa(deps, conversa.tipo === "propria" ? conversa.agenteId : null);
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos } };
+  const doBot = conversa.tipo === "propria" ? conversa.agenteId : null;
+  // Os abertos do bot da conversa (a faixa, ADR-083); conversa de sala não tem bot próprio: lista vazia.
+  const abertos = doBot ? await deps.repos.trabalhos.abertosDoAgente(doBot) : [];
+  const trabalhos = await trabalhosParaDto(deps, abertos);
+  // ADR-099 (I10): o dono do bot da conversa própria — a linha acima do campo (estado, esperas e fila).
+  const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos)).get(doBot) ?? null) : null;
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono } };
 };
