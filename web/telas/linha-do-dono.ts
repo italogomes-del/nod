@@ -35,6 +35,11 @@ function decisoesDoBot(estado: Estado, agenteId: string): { id: string; frase: s
   return itens.map((i) => ({ id: i.decisao.id, frase: i.decisao.frase, desde: Date.parse(i.decisao.criadoEm) })).sort((a, b) => b.desde - a.desde);
 }
 
+/** Quantas decisões abertas desta conversa a fila da pessoa traz (as que a faixa do campo já mostra). */
+function decisoesNaConversa(estado: Estado, conversaId: string): number {
+  return (estado.suaVez?.itens ?? []).filter((i) => i.decisao.conversaId === conversaId && i.estadoColuna !== "vencido").length;
+}
+
 // ---- a linha acima do campo (quadros 02, 03, 06, 07 e 08) ------------------------------------------------------------
 
 /**
@@ -47,7 +52,12 @@ export function renderLinhaDoDono(estado: Estado, agenteId: string): string {
   const bot = agente(estado, agenteId);
   const dono = donoDoBot(estado, agenteId, bot?.conversaId);
   if (!dono) return renderFaixaTrabalhos(estado, agenteId);
-  const l = linhaDoDono(dono, estado.agora);
+  // O que espera a pessoa nesta conversa já tem a faixa no alto do campo ("Ze 2 está esperando sua resposta", ADR-045, com
+  // Responder/Outro assunto; "1 coisa espera você" para os pedidos): a linha não repete — fica com o resto (as frentes, a
+  // espera, a fila). "Esperando você" sobra só para o que a faixa não mostra (a frente parada à espera, sem decisão).
+  const naFaixa = bot?.conversaId ? decisoesNaConversa(estado, bot.conversaId) : 0;
+  const visto = naFaixa > 0 ? { ...dono, estado: { ...dono.estado, esperandoVoce: Math.max(0, dono.estado.esperandoVoce - naFaixa) } } : dono;
+  const l = linhaDoDono(visto, estado.agora);
   if (!l) return "";
   const nome = bot?.nome ?? "bot";
   const aberta = estado.faixaTrabalhosAberta === agenteId;
@@ -60,7 +70,7 @@ export function renderLinhaDoDono(estado: Estado, agenteId: string): string {
     : `<button type="button" class="ld-principal" data-act="faixa-trabalhos" data-recolher="${aberta ? 1 : 0}" aria-expanded="${aberta}">${pontos(l, bot?.cor)}<span class="ld-texto"><b>${esc(l.texto)}</b>${extras}</span></button>`;
   const detalhes = `<button type="button" class="ld-detalhes" data-act="faixa-trabalhos" data-recolher="${aberta ? 1 : 0}" aria-expanded="${aberta}" aria-label="${aberta ? "Fechar" : "Ver"} os detalhes de ${esc(nome)}"><span class="ld-detalhes-txt">${aberta ? "fechar" : "detalhes"}</span>${aberta ? ICONE.recolher : ICONE.abrir}</button>`;
   // No celular o detalhe é uma folha por cima da conversa; o fundo escurecido a fecha ao toque (mobile.css).
-  const corpo = aberta ? `<button type="button" class="ld-fundo" data-act="faixa-trabalhos" data-recolher="1" tabindex="-1" aria-hidden="true"></button>${detalheDoDono(estado, dono, agenteId, bot)}` : "";
+  const corpo = aberta ? `<button type="button" class="ld-fundo" data-act="faixa-trabalhos" data-recolher="1" tabindex="-1" aria-hidden="true"></button>${detalheDoDono(estado, visto, agenteId, bot)}` : "";
   return `<section class="linha-dono${aberta ? " aberta" : ""}" data-sinal="${l.sinal}" aria-label="${esc(`${nome}: ${resumo}`)}"><div class="ld-barra">${principal}${detalhes}</div>${corpo}</section>`;
 }
 
@@ -158,7 +168,9 @@ function fraseDoBot(estado: Estado, x: LinhaDoBot, todos: readonly TrabalhoDto[]
   const desde = e.desde ?? estado.agora;
   if (x.grupo === "precisa") {
     const d = decisoesDoBot(estado, x.bot.id)[0];
-    return { frase: d?.frase ?? "Esperando você", detalhe: x.linha.extras.join(" · "), tempo: `há ${duracaoCurta(estado.agora - desde)}` };
+    // A frase da fila da pergunta é "parei para perguntar a Marlon: <a pergunta>"; aqui só a pergunta.
+    const frase = d?.frase.replace(/^parei para perguntar a [^:]{1,60}:\s*/, "") || "Esperando você";
+    return { frase, detalhe: x.linha.extras.join(" · "), tempo: `há ${duracaoCurta(estado.agora - desde)}` };
   }
   if (x.grupo === "trabalhando") {
     // Uma frente só trabalhando: o título dela é a frase (quadro 05); mais de uma, "Trabalhando em N frentes".

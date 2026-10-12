@@ -103,7 +103,8 @@ describe("a linha acima do campo, por prioridade (quadro 08)", () => {
   });
 
   it("\"Esperando você\" leva à mensagem com a pergunta (a decisão mais nova do bot); \"detalhes\" continua abrindo a linha", () => {
-    const decisao = (id: string, criadoEm: number) => ({ decisao: { id, agenteId: "ze1", conversaId: "c-ze1", frase: `Como seguir ${id}?`, criadoEm: new Date(criadoEm).toISOString() }, estadoColuna: "pendente" }) as never;
+    // A decisão é de outra conversa do bot (uma sala): a faixa do campo desta conversa não a mostra, a linha sim.
+    const decisao = (id: string, criadoEm: number) => ({ decisao: { id, agenteId: "ze1", conversaId: "c-sala", tipo: "pergunta", frase: `Como seguir ${id}?`, criadoEm: new Date(criadoEm).toISOString() }, estadoColuna: "pendente" }) as never;
     const e = estadoCom([], [dono({ esperandoVoce: 2, fila: 2 }, [], [pedido(1), pedido(2)])], { suaVez: { itens: [decisao("d-velha", AGORA - 60 * MIN), decisao("d-nova", AGORA - 5 * MIN)], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } });
     const html = renderLinhaDoDono(e, "ze1");
     expect(html).toContain('<button type="button" class="ld-principal" data-act="ir-a-pergunta" data-id="d-nova"');
@@ -114,6 +115,15 @@ describe("a linha acima do campo, por prioridade (quadro 08)", () => {
     expect(aberta).toContain("<h3>Esperando você</h3>");
     expect(aberta).toContain('data-act="ir-a-pergunta" data-id="d-velha"');
     expect(aberta).not.toMatch(/data-act="(decidir|aprovar|responder)/);
+  });
+
+  it("a decisão desta conversa já está na faixa do campo (\"Ze 1 está esperando sua resposta\"): a linha não repete, fica com o resto", () => {
+    const item = { decisao: { id: "d1", agenteId: "ze1", conversaId: "c-ze1", tipo: "pergunta", frase: "Como seguir?", criadoEm: new Date(AGORA).toISOString() }, estadoColuna: "pendente" } as never;
+    const suaVez = { itens: [item], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null };
+    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 1, fila: 1 }, [], [pedido(1)])], { suaVez }), "ze1")).toContain("<b>1 pedido na fila</b>");
+    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 1 })], { suaVez }), "ze1")).toBe("");
+    // A frente parada à espera da pessoa, sem decisão na fila: a linha diz "Esperando você".
+    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 2 })], { suaVez }), "ze1")).toContain("<b>Esperando você</b>");
   });
 
   it("sem o dono no servidor (anterior ao I10): a faixa de tasks de antes", () => {
@@ -226,7 +236,7 @@ describe("Trabalhos com uma linha por bot (quadro 05)", () => {
     dono({ agenteId: "nod" }),
     dono({ agenteId: "eng" }),
   ];
-  const decisao = { decisao: { id: "d1", agenteId: "ze1", conversaId: "c-ze1", frase: "Como seguir com o #845?", criadoEm: new Date(AGORA - 33 * MIN).toISOString() }, estadoColuna: "pendente" } as never;
+  const decisao = { decisao: { id: "d1", agenteId: "ze1", conversaId: "c-ze1", frase: "parei para perguntar a Marlon: Como seguir com o #845?", criadoEm: new Date(AGORA - 33 * MIN).toISOString() }, estadoColuna: "pendente" } as never;
   const base = (extra: Partial<Estado> = {}) => estadoCom([frenteZe2a, frenteZe2b, feitaZe2], donos, { tela: { tipo: "trabalhos" }, suaVez: { itens: [decisao], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null }, ...extra });
 
   it("os grupos Precisa de você, Trabalhando e Esperando, e os livres numa linha; o topo conta bots", () => {
