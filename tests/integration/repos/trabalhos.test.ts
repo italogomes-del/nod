@@ -51,7 +51,7 @@ describeIntegracao("trabalhos (0060, ADR-083)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
       const w = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Fatos", origem: "pessoa" });
-      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, aguardandoDespertar: false, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null });
+      expect(await repos.trabalhos.fatos(w!.id)).toEqual({ parando: 0, despachando: 0, pendentes: 0, aguardandoDespertar: false, aguardandoComando: false, esperandoOutro: false, decisaoPendente: false, aguardandoColega: false, ultimo: null });
       // "Fazer depois da …": espera enquanto a outra está aberta, e para de esperar quando ela acaba.
       const antes = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Antes", origem: "pessoa" });
       await repos.trabalhos.marcarDepoisDe(w!.id, antes!.id);
@@ -80,7 +80,7 @@ describeIntegracao("trabalhos (0060, ADR-083)", () => {
       await repos.mensagens.criar({ conversaId, turnoId: t!.id, autoria, kind: "texto", texto: "Lendo o PR", confianca: "confiavel" });
       const extras = (await repos.trabalhos.extras([w!.id])).get(w!.id);
       // esperandoColega e trabalhouMs (tempo da task, 2026-10-08) se provam em tests/integration/tempo-da-task.test.ts.
-      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id], deFora: true, esperandoColega: null, trabalhouMs: 0, acordaEm: null, maquinaVivaId: MAQUINA, maquinaAlvoId: null });
+      expect(extras).toEqual({ pedidoPorNome: "Chico", rotinaNome: null, ultimaFala: "Lendo o PR", turnoVivoId: t!.id, turnosAbertos: [t!.id], deFora: true, esperandoColega: null, trabalhouMs: 0, acordaEm: null, esperandoComando: null, maquinaVivaId: MAQUINA, maquinaAlvoId: null });
     });
   });
 
