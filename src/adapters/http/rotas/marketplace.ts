@@ -187,7 +187,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const app = acharApp(ctx.params.slug ?? "");
       const { cifrada, sessao } = await op.dentro(ctx.escopo, async (d) => ({ cifrada: await d.repos.composio.chave(), sessao: await d.repos.composio.sessao(app.slug) }));
       if (!cifrada || !sessao) throw new ErroDeDominio("estado_invalido");
-      const c = cliente(op.decifrar(cifrada));
+      // Revisão do PR #264: o teto de 20 s conta desde aqui; a consulta da conta e o fixarConta saem dele também.
+      const inicio = agora();
+      const c = criarClienteComposio(op.decifrar(cifrada), op.fetchImpl, { agora, prazoFinal: inicio + VERIFICAR_TETO_MS });
       const ativo = await c.conectado(sessao.contaId, `nod:${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`, app.slug);
       if (!ativo) { ctx.json(200, { conectado: false }); return; }
       await c.fixarConta(sessao.sessaoId, app.slug, sessao.contaId);
@@ -195,7 +197,6 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       // toolkit; a sonda se repete com espera crescente até o teto. Cada tentativa é uma transação: a espera
       // fica FORA dela e não segura conexão do pool. A falha intermediária grava ultimaFalha; o sucesso a limpa.
       // A conta não é reconsultada a cada volta: revogada no meio, cai no `falhou` e o "Tentar de novo" refaz o login.
-      const inicio = agora();
       let r: SaidaSondarConector | null = null;
       for (const [i, espera] of ESPERAS_SONDA_VERIFICAR_MS.entries()) {
         if (i > 0 && agora() - inicio + espera >= VERIFICAR_TETO_MS) break;

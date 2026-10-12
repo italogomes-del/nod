@@ -62,7 +62,7 @@ it("login Composio só habilita após conta ativa, confere o dono, cifra a chave
  * sonda com espera crescente (0, 2, 4, 8 s) e não começa tentativa nova depois do teto de 20 s. Relógio e
  * espera falsos: o teste não dorme.
  */
-async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSonda: number | ((n: number, orcamentoMs: number | undefined) => number) = 0) {
+async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSonda: number | ((n: number, orcamentoMs: number | undefined) => number) = 0, custoComposio = 0) {
   const chave = chaveDe("teste-composio-local");
   const cifra = (s: string) => cifrar(s, chave);
   let agora = 0;
@@ -86,6 +86,8 @@ async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSond
     if (u.endsWith("/toolkits?limit=1")) return Response.json({ items: [] });
     if (u.endsWith("/session")) return Response.json({ session_id: "trs_teste", mcp: { url: "https://app.composio.dev/tool_router/v3/trs_teste/mcp" } });
     if (u.endsWith("/link")) return Response.json({ redirect_url: "https://app.composio.dev/link/lt_teste", connected_account_id: "ca_teste" });
+    if (u.endsWith("/connected_accounts/ca_teste")) agora += custoComposio;
+    if (u.endsWith("/session/trs_teste") && init?.method === "PATCH") agora += custoComposio;
     if (u.endsWith("/connected_accounts/ca_teste")) return Response.json({ status: "ACTIVE", user_id: userId, toolkit: { slug: "slack" } });
     if (u.endsWith("/session/trs_teste") && init?.method === "PATCH") return Response.json({});
     throw new Error("endpoint inesperado");
@@ -167,6 +169,16 @@ it("NOD-208 (revisão): a última tentativa recebe só o tempo que sobra do teto
     expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true });
     expect(m.orcamentos).toEqual([20_000, 17_000, 12_000]);
     expect(m.esperas).toEqual([2_000, 4_000]);
+    expect(m.agora()).toBe(20_000);
+  } finally { await m.srv.close(); }
+});
+
+it("NOD-208 (revisão): o tempo da consulta da conta e do fixarConta sai do mesmo teto de 20 s", async () => {
+  // conectado e fixarConta gastam 3 s cada: a sonda começa aos 6 s e recebe só os 14 s que sobram.
+  const m = await montarVerificar(() => ({ ok: false, motivo: "timeout_transporte" }), (_n, orc) => gastaOOrcamento(orc), 3_000);
+  try {
+    expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true });
+    expect(m.orcamentos).toEqual([14_000]);
     expect(m.agora()).toBe(20_000);
   } finally { await m.srv.close(); }
 });
