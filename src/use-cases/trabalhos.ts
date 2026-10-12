@@ -6,6 +6,7 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { cotaDasIas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDoTurno } from "../domain/cota-da-ia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
@@ -201,16 +202,28 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
   // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
   const fila = memoria?.fila ?? null;
-  const usoDoMac = memoria === null ? "livre" : (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO;
+  const [preferencias, usos, agentes] = await Promise.all([deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.agentes.listar()]);
+  const usoDoMac = memoria === null ? "livre" : preferencias.usoDoMac ?? USO_DO_MAC_PADRAO;
+  // definido em 2026-10-12 (ADR-099 §7): a cota da IA, a mesma regra do `reivindicar` (domain/cota-da-ia.ts). A pílula diz
+  // quando o fundo volta; a linha da task diz que ela espera a cota.
+  const cotaAgora = cotaDasIas({ usos, limites: preferencias.iasNoLimite, agora: deps.agora() });
+  const conhecidas = iasConhecidas(usos, preferencias.iasNoLimite);
+  const botsPorId = new Map(agentes.map((a) => [a.id, a]));
+  const comCota = (t: TrabalhoDto): TrabalhoDto => {
+    if (cotaAgora.length === 0 || !trabalhoAberto(t.estado)) return t;
+    const bot = botsPorId.get(t.agenteId);
+    const situacao = bot ? situacaoDoTurno({ harness: bot.harness ?? "auto", modelo: bot.modelo }, cotaAgora, conhecidas) : "livre";
+    return esperaDaCotaNaTela(t, situacao) ? { ...t, esperaDaCota: true } : t;
+  };
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
-  const topo = { pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  const topo = { cota: cotaParaTela(cotaAgora), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
   const servico = deps.services.maquinas;
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
     const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
       const motivo = esperaDoMac(t, portao, agora);
-      return motivo ? { ...t, esperaDoMac: motivo } : t;
+      return comCota(motivo ? { ...t, esperaDoMac: motivo } : t);
     });
     return { data: { trabalhos: dtos, ...topo } };
   }
@@ -224,7 +237,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const maquina = espera?.maquinaId ?? id;
     return { esperaDoMac: espera?.motivo ?? null, maquina: maquina === null ? null : nomear(maquina) };
   });
-  return { data: { trabalhos: dtos, ...topo, maquinas } };
+  return { data: { trabalhos: dtos.map(comCota), ...topo, maquinas } };
 };
 
 /**

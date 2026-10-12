@@ -1,6 +1,6 @@
 # ADR-085 — Uso do Mac: o Mac apertado segura trabalho novo em segundo plano
 
-Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · emenda 2026-10-09 (a tela fala por máquina, abaixo) · o processador do item 1 foi
+Status: aceito · Data: 2026-10-08 · emenda 2026-10-09 (memória crítica e disco, #219) · emenda 2026-10-09 (a tela fala por máquina, abaixo) · emenda 2026-10-12 (o motivo "cota", ADR-099 §7, abaixo) · o processador do item 1 foi
 emendado pela [ADR-091](adr-091-regua-do-processador-cpu-e-fila.md) (uso da CPU e fila, 2026-10-09) · Emenda a [ADR-083](adr-083-trabalhos-paralelos-a-conversa-coordena.md) §4 ("sem teto:
 o limite é a máquina"). Decisão do Marlon em 2026-10-08: o caminho "sem teto, sem desperdício", aprovado no protótipo
 "Nod — Ritmo do Mac" (canvas VmT4WwEbgfZ14PbLy4En8d, pranchas 1–3).
@@ -218,3 +218,46 @@ juntava as máquinas "pelo pior Mac" e chamava a junta de "Mac".
 Gatilho de reversão: se um trabalho aparecer "esperando <máquina>" e a mesma máquina o entregar no `puxar` seguinte
 (log `fundo_comecou` com a máquina do trabalho logo depois de a tela dizer que ele esperava, sem a leitura ter mudado),
 a regra da tela e a do `reivindicar` divergiram: voltar a ler `alvoDoTurno` nos dois lados antes de mexer no texto.
+
+## Emenda de 2026-10-12 — o motivo "cota" (ADR-099 §7)
+
+A [ADR-099](adr-099-um-dono-por-bot.md) §7 pôs a cota da IA ao lado da máquina como limite do trabalho. Decisão do Marlon
+em 12/10: com 99% da cota usada, na janela de 5 h ou na semana, o que vier primeiro, trabalho novo de fundo para de
+nascer, e 1% fica para a conversa com a pessoa. Quando o provedor dá o sinal de limite, o trabalho espera a janela abrir
+em vez de falhar.
+
+1. **A leitura.** É a que o próprio CLI manda a cada turno: o `rate_limit_event` do Claude Code, gravado em
+   `uso_do_plano` (NOD-179). Ela traz `utilization` de 0 a 1 e o `resetsAt` de cada janela. A outra fonte é o limite que
+   o turno devolveu (`preferencias.ias_no_limite`, 0068). Não há migração nova. A regra pura é `cotaDasIas`
+   (src/domain/cota-da-ia.ts):
+   - **reserva**: uma janela em 99% ou mais que ainda não renovou;
+   - **limite**: uma janela em 100%, o limite gravado pelo turno, ou a última leitura "esgotado" há menos de 1 h;
+   - uma janela já renovada não segura nada; uma janela sem horário de renovação vale 1 h desde a leitura.
+2. **O portão, por IA.** O `reivindicar` ganha o motivo "cota", ao lado da memória, do processador e do disco:
+   - com a IA do turno na reserva, espera o fundo **novo**: a task (frente) que nunca rodou, de qualquer origem, inclusive
+     a aberta pela pessoa, e o turno de rotina ou de pedido de colega sem task;
+   - com a IA no limite, espera **todo** o fundo: também o próximo turno de uma task já começada e a volta marcada;
+   - a conversa com a pessoa nunca espera: o turno de conversa, de sala, a retomada que ela pediu e a ligação.
+
+   A IA do turno é a fixada; no Automático, o turno só espera se todas as IAs que podem pegá-lo na máquina seguram, e o
+   plano do turno de fundo pula a IA segurada (`noLimite`). A regra está uma vez em SQL e uma vez em
+   `tipoParaCota`/`cotaSegura`; tests/integration/cota-da-ia.test.ts confere as duas turno a turno.
+3. **Volta sozinha.** A task que bate no limite no meio do turno, sem outra IA para trocar, não vai para "não terminou".
+   Nasce a retomada da mesma task com `acordar_em` na renovação, e a task ganha a linha "A cota do Claude Code chegou ao
+   limite. Esta task espera e volta sozinha às 14:30, de onde parou." (`aposLimiteNoFundo`, assentar-turno.ts). A
+   conversa com a pessoa continua com o aviso de sempre (ADR-036, NOD-171).
+4. **A tela.** `GET trabalhos` traz `cota` (situação, IAs e quando o fundo volta), e cada task segurada traz
+   `esperaDaCota`. A pílula de Trabalhos diz "A cota da IA está no fim · 2 esperam · trabalho de fundo volta às 17:30 · a
+   conversa com você segue". A linha da task diz "esperando a cota da IA". No Automático a tela aproxima pelas IAs que a
+   pessoa já usou, porque a lista não conhece as IAs prontas da máquina.
+5. **O log.** `cota_segura` / `cota_solta` saem na mudança, por pessoa, e `cota_limite_task_espera` sai quando uma task
+   passa a esperar a renovação.
+
+Limite: o Codex não tem leitura de porcentagem no Nod. O app-server dele emite `account/rateLimits/updated`, mas isso não
+foi homologado no CLI real. Para ele vale só o sinal de limite, com prazo de 1 h sem horário. A reserva de 1% garante
+alguns turnos de conversa, não trabalho longo. O próximo turno da task já começada ainda pode gastar a reserva até o
+limite: só o fundo novo para na reserva, por decisão do Marlon.
+
+Gatilho de reversão: a conversa com a pessoa receber "limite atingido" mais de uma vez por semana com o portão no ar
+(log `ia_no_limite` de turno de conversa logo depois de `cota_segura` com reserva). Nesse caso, a reserva ficou pequena
+para o que segue rodando, e o caminho é segurar também o fundo que já começou na reserva, não aumentar o 1%.

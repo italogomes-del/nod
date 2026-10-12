@@ -120,6 +120,7 @@ import { criarRotasTurnos } from "./rotas/turnos.ts";
 import { criarRotasRaioX } from "./rotas/raio-x.ts";
 import { criarRotasComandos } from "./rotas/comandos.ts";
 import { criarRotasUsoDoPlano } from "./rotas/uso-do-plano.ts";
+import { criarRotasCustoDoDia } from "./rotas/custo-do-dia.ts";
 import { criarRotasNaoLidos } from "./rotas/nao-lidos.ts";
 import { criarRotasLigacoes } from "./rotas/ligacoes.ts";
 import { neutralizarDelimitadores } from "../mcp-proxy/moldura.ts";
@@ -983,6 +984,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...criarRotasRaioX(depsRotas),
     ...criarRotasComandos(depsRotas),
     ...criarRotasUsoDoPlano(depsRotas),
+    ...criarRotasCustoDoDia({ ...depsRotas, fusoPadrao: env.NOD_FUSO_PADRAO ?? "America/Sao_Paulo" }),
     ...criarRotasNaoLidos(depsRotas),
     ...criarRotasLigacoes({
       ...depsRotas,

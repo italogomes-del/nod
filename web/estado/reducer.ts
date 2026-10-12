@@ -19,6 +19,7 @@ import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { NivelPressao, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
+import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
@@ -135,7 +136,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -286,6 +287,13 @@ export type Estado = {
   usoDoMac: UsoDoMac;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
   tempoTaskAberto: string | null;
+  /**
+   * definido em 2026-10-12 (ADR-099 §7): o custo de cada bot hoje (`GET custo-hoje`), lido quando a tela Trabalhos abre.
+   * undefined = ainda não lido; null = servidor sem a rota.
+   */
+  custoHoje?: CustoDoDiaDto | null;
+  /** O detalhe do custo aberto no topo de Trabalhos (atrás de um clique; o Marlon quer a tela limpa). */
+  custoAberto: boolean;
 };
 
 export type Acao =
@@ -351,6 +359,8 @@ export type Acao =
   | { tipo: "faixa-trabalhos"; agenteId: string | null }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
   | { tipo: "tempo-task"; id: string | null }
+  | { tipo: "hidratar-custo"; custo: CustoDoDiaDto | null }
+  | { tipo: "custo-aberto"; aberto: boolean }
   | { tipo: "hidratar-taxas-linhas"; taxas: TaxaDeAbertura[] };
 
 export const estadoInicial: Estado = {
@@ -411,6 +421,7 @@ export const estadoInicial: Estado = {
   faixaTrabalhosAberta: null,
   usoDoMac: "equilibrado",
   tempoTaskAberto: null,
+  custoAberto: false,
 };
 
 /** A posição de uma IA na ordem nova (as que não estão nela vão para o fim, na ordem de antes). */
@@ -651,7 +662,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "trabalho.mudou": (e, f) => {
     const id = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id);
     const aberta = id && (e.trabalhoDetalhe[id] || (e.tela.tipo === "trabalho" && e.tela.id === id)) ? (`trabalho:${id}` as Invalidacao) : null;
-    return invalidar(e, "trabalhos", conv(f), aberta);
+    // ADR-099 §7: o custo de hoje também (só é buscado com a tela Trabalhos aberta; `relevante` no main).
+    return invalidar(e, "trabalhos", "custo", conv(f), aberta);
   },
   // #194: o nível vale na hora (a pílula aparece sem esperar o REST); a lista relê para o total de memória.
   "memoria.mudou": (e, f) => {
@@ -682,6 +694,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
+        custoHoje: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.custoHoje : undefined,
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
@@ -895,6 +908,11 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
     case "tempo-task":
       return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
+    case "hidratar-custo":
+      return { ...estado, custoHoje: acao.custo };
+    case "custo-aberto":
+      // Abrir relê o custo (o gasto anda a cada turno; a tela não fica com o número de quando abriu).
+      return estado.custoAberto === acao.aberto ? estado : acao.aberto ? invalidar({ ...estado, custoAberto: true }, "custo") : { ...estado, custoAberto: false };
     case "hidratar-taxas-linhas":
       return estado.modoDev.ligado ? { ...estado, modoDev: { ...estado.modoDev, taxasLinhas: acao.taxas } } : estado;
     case "esquecer-disponibilidade-ligacao": {
@@ -1003,6 +1021,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // ADR-083: o chip de cada bot na barra e o ícone "Trabalhos" do topo também (e a faixa, a gaveta, a tela da task).
   if (estado.sessao && !estado.trabalhos) faltas.push("trabalhos");
   if (t.tipo === "trabalho" && !estado.trabalhoDetalhe[t.id]) faltas.push(`trabalho:${t.id}`);
+  // ADR-099 §7: o custo de hoje na tela Trabalhos (o aviso de ritmo aparece sem clique; o detalhe, atrás dele).
+  if (estado.sessao && t.tipo === "trabalhos" && estado.custoHoje === undefined) faltas.push("custo");
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).

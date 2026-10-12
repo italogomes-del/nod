@@ -17,9 +17,11 @@ import { NATIVAS_DO_TERMINAL } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
+import { trabalhoAberto } from "../domain/trabalho.ts";
+import { entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { log } from "../obs/log.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
-import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
@@ -334,6 +336,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
   } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
+  } else if (limite && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ...limite, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
@@ -429,6 +433,62 @@ async function aposLimite(
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   // Só códigos e ids (o Marlon lê `ia_trocada` no log de produção depois do deploy).
   log("info", "ia_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, de: p.ia, para, causa: "limite", renova_em: p.renovaEm });
+  return events;
+}
+
+/**
+ * A task (frente) bateu no LIMITE da assinatura e não trocou de IA (definido em 2026-10-12, ADR-099 §7: "nenhuma frente
+ * falha por limite: espera e volta"). Em vez do aviso de interrupção e da task em "não terminou", nasce a retomada do
+ * mesmo trabalho com `acordar_em` na renovação (o prazo do limite, prazoDoLimite: o horário do fornecedor ou 1 h), e a
+ * task ganha uma linha dizendo quando volta. A fila só a entrega depois da hora e com a cota fora do limite (reivindicar);
+ * quem a pega segue na mesma sessão do trabalho. null = não é task aberta (a conversa, a ligação e o turno sem trabalho
+ * ficam com o aviso de sempre), ou a pessoa pediu Parar.
+ */
+async function aposLimiteNoFundo(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora } = p;
+  if (!turno.trabalhoId || turno.origem === "ligacao" || turno.pararSolicitadoEm !== null) return null;
+  const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+  if (!trabalho || !trabalhoAberto(trabalho.estado)) return null;
+  const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
+  await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const volta = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "retomada",
+    retomaTurnoId,
+    trabalhoId: turno.trabalhoId,
+    prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: turno.profundidade,
+    entradaTexto: entradaDaVoltaDaCota(nomeDaIa(p.ia)),
+    entradaConfianca: turno.entradaConfianca,
+    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    executor: turno.executor,
+    acordarEm: p.renovaEm,
+  });
+  if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
+  // A marca de quem leu algo de fora (ADR-062) segue para a volta, como na volta marcada (me-chame-as.ts).
+  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, custo_usd: p.custoUsd } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId, acordar_em: p.renovaEm } }),
+  ];
+  const linha = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    texto: redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }),
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  // Só códigos e ids: para medir o "pronto quando" da parte 7 (nenhuma frente falha por limite).
+  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId, harness: p.ia, renova_em: p.renovaEm });
   return events;
 }
 

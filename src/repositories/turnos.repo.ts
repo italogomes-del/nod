@@ -4,6 +4,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
@@ -209,11 +210,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * 0068: `harnessesAuto` (ausente = os prontos) são as IAs desta máquina que valem para o turno do Automático — sem a
      * que está no limite enquanto a pessoa tiver outra fora dele (iasParaOAutomatico).
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; cota?: PortaoDaCota | null }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         // ADR-090: a máquina-alvo do turno `t` (alvo-da-maquina.ts; a lista de trabalhos usa a mesma regra).
         const alvo = alvoDoTurno(trx, p.agora);
+        // definido em 2026-10-12 (ADR-099 §7): o portão da cota. A IA do turno: a fixada, ou (Automático) a regra das IAs que
+        // podem pegá-lo, decidida antes (portaoDaCota). Mesma regra de `tipoParaCota` e `cotaSegura` (domain/cota-da-ia.ts).
+        const cota = p.cota ?? null;
+        const iaDoTurno = trx`(case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end)`;
+        const naCota = (ias: readonly string[], auto: boolean) => trx`(case when t.harness = 'auto' and t.modelo = 'auto' then ${auto}::boolean else ${iaDoTurno} = any(${[...ias]}::text[]) end)`;
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true
           where (tenant_id, id) = (
@@ -265,6 +271,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   ${p.segurarNovo !== true ? trx`` : trx`and t.acordar_em is null and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null)`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
+              -- definido em 2026-10-12 (ADR-099 §7, decisão do Marlon): a cota da IA. Com a IA do turno na reserva (99% de uma
+              -- janela), trabalho NOVO de fundo — task que nunca rodou, de qualquer origem, e rotina ou pedido de colega sem
+              -- task — espera: o 1% fica para a conversa com a pessoa. Com a IA no limite, TODO o fundo espera (o que já
+              -- começou e a volta marcada também), até a janela renovar, em vez de falhar. A conversa com a pessoa (conversa,
+              -- sala, a retomada que ela pediu) e a ligação nunca esperam pela cota.
+              ${cota === null ? trx`` : trx`and not (t.origem <> 'ligacao' and (
+                (((t.trabalho_id is null and t.origem in ('rotina', 'delegacao', 'peer'))
+                    or exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null))
+                  and ${naCota(cota.reserva, cota.autoReserva)})
+                or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null)
+                  and ${naCota(cota.limite, cota.autoLimite)})))`}
             -- Ligação primeiro; depois a fala da pessoa; depois o que não é rotina nem pedido de colega (o turno ou o trabalho
             -- dele); depois a ordem.
             order by (t.origem = 'ligacao') desc,
@@ -380,15 +397,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * abriu decisão e se pediu algo a um colega (mensagem `handoff` dela).
      */
     async ultimasVoltas(retomaTurnoId: string, limite: number): Promise<VoltaDaCadeia[]> {
-      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean }[]>`
+      const linhas = await conn<{ estado: EstadoTurno; marcou_volta: boolean; perguntou: boolean; pediu_a_colega: boolean; por_cota: boolean }[]>`
         -- ADR-099 (parte 2): deixar um comando esperando (esperar_comando) também é marcar outra volta.
         select t.estado, (t.despertar_em is not null or exists (select 1 from esperas e where e.tenant_id = t.tenant_id and e.turno_id = t.id)) as marcou_volta,
           exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
-          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega
+          exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega,
+          -- ADR-099 §7: a volta que a cota no limite marcou (não o bot) não conta como sem novidade.
+          starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) as por_cota
         from turnos t
         where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
         order by t.criado_em desc, t.id desc limit ${limite}`;
-      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega }));
+      return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega, porCota: l.por_cota }));
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
@@ -680,6 +699,24 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and conversa_id = any(${[...conversaIds]}::uuid[]) and estado = 'concluido'
         group by conversa_id`;
       return new Map(linhas.map((l) => [l.conversa_id, l.n]));
+    },
+
+    /**
+     * definido em 2026-10-12 (ADR-099 §7, custo visível): a soma de `custo_usd` por bot em cada janela [inicio, fim), pela
+     * criação do turno (como o total do Raio-X, raio-x.repo.ts). `janela` é o índice em `janelas`. Só a pessoa (RLS e o
+     * filtro do dono); turno sem custo não conta.
+     */
+    async custoPorAgente(janelas: readonly { inicio: number; fim: number }[]): Promise<{ agenteId: string; janela: number; usd: number }[]> {
+      if (janelas.length === 0) return [];
+      const inicios = janelas.map((j) => new Date(j.inicio).toISOString());
+      const fins = janelas.map((j) => new Date(j.fim).toISOString());
+      const linhas = await conn<{ agente_id: string; janela: number; usd: string }[]>`
+        select t.agente_id, (j.i - 1)::int as janela, sum(t.custo_usd)::text as usd
+        from unnest(${inicios}::text[], ${fins}::text[]) with ordinality as j(inicio, fim, i)
+        join turnos t on t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId}
+          and t.criado_em >= j.inicio::timestamptz and t.criado_em < j.fim::timestamptz and t.custo_usd is not null
+        group by t.agente_id, j.i`;
+      return linhas.map((l) => ({ agenteId: l.agente_id, janela: l.janela, usd: Number(l.usd) }));
     },
 
     /**

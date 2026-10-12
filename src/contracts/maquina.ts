@@ -3,6 +3,8 @@ import type { EpochMs } from "./ids.ts";
 import type { Inventario } from "./inventario.ts";
 import type { PlataformaMaquina } from "./ponte.ts";
 import type { DiscoDoMac, LeituraDisco, MotivoEsperaMac, NivelPressao } from "./trabalho.ts";
+// ADR-099 §7 (2026-10-12): a cota da IA segura trabalho como a máquina; trabalho.ts lê os campos daqui (teto de 200 linhas).
+export type { CotaNosTrabalhos, CotaNoTrabalho } from "./cota.ts";
 
 /**
  * ADR-090: uma máquina da pessoa na tela "Máquinas" — a chave viva, com o que a máquina anunciou se está conectada agora
