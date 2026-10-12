@@ -486,3 +486,33 @@ describe("Continuar: a ligação espera o servidor concordar", () => {
     expect(n.destino()).toBe("testando");
   });
 });
+
+describe("trocar conta no onboarding (NOD-209)", () => {
+  it("a IA sai do Continuar durante a troca; cancelar devolve o veredito, sem gastar outro teste", async () => {
+    const mac = ponteFalsa();
+    const m = montar([claude("pronto"), codex("pronto")], mac.ponte);
+    m.iniciar();
+    mac.responder(CLAUDE_RESPONDEU, CODEX_RESPONDEU);
+    await fluir();
+    const antes = mac.testes().length;
+    m.t.comecarTroca("codex-cli");
+    expect(m.t.naTela()?.vereditos["codex-cli"]).toBeUndefined();
+    m.t.fimDaTroca("codex-cli", false);
+    expect(m.t.naTela()?.vereditos["codex-cli"]).toEqual(CODEX_RESPONDEU);
+    expect(mac.testes().length).toBe(antes);
+  });
+
+  it("com o login novo, a conta nova é testada já", async () => {
+    const mac = ponteFalsa();
+    const m = montar([claude("pronto"), codex("pronto")], mac.ponte);
+    m.iniciar();
+    mac.responder(CLAUDE_RESPONDEU, CODEX_RESPONDEU);
+    await fluir();
+    const antes = mac.testes().length;
+    m.t.comecarTroca("codex-cli");
+    m.t.fimDaTroca("codex-cli", true);
+    await fluir();
+    expect(mac.testes().length).toBe(antes + 1);
+    expect(mac.testes().at(-1)).toContain("codex-cli");
+  });
+});

@@ -462,6 +462,9 @@ export function criarTelaOnboarding(deps: DepsOnboarding) {
     acoes,
     forms,
     deNovo,
+    /** NOD-209: "Trocar conta" num cartão do onboarding (web/lib/ias-do-mac.ts avisa o começo e o fim). */
+    comecarTroca: (ia: IaDesktop): void => teste.comecarTroca(ia),
+    fimDaTroca: (ia: IaDesktop, trocou: boolean): void => teste.fimDaTroca(ia, trocou),
     /** A mídia da ligação: um campo anotado (o painel ao lado) ou o fim da entrevista (a pílula e os cards). */
     aoOnboarding(etapa: EtapaOnboarding, campos: CamposEntrevista): void {
       const d = deps.dados();
