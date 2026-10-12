@@ -113,8 +113,10 @@ export type VigiaVivo = { mudoMs: number; aberta?: string; emFundo: number; repe
  * Uma pasta de task encerrada que o Mac pode limpar (definido em 2026-10-09, ADR-088). `pasta` é relativa a `~/nod`
  * (`<bot>/<slug>`, a forma de `trabalhos.pasta` sem o `~/nod/`). `quando`: `encerrada` = acabou há mais de 3 dias e as
  * worktrees limpas saem; `so_com_pr_mergeado` = acabou há menos, e só sai a worktree cujo PR já foi mergeado.
+ * `sem_trabalho` (definido em 2026-10-12, ADR-099 item 9, I5) = frente terminada: a pasta sai na hora só com prova de que
+ * não há trabalho nela, senão fica para o caminho da ADR-088/096. App antigo descarta o valor (ponte-http.ts).
  */
-export type PastaParaLimpar = { trabalhoId: string; pasta: string; quando: "encerrada" | "so_com_pr_mergeado" };
+export type PastaParaLimpar = { trabalhoId: string; pasta: string; quando: "encerrada" | "so_com_pr_mergeado" | "sem_trabalho" };
 
 /**
  * O que o Mac relata de uma passada da limpeza (ADR-088): só números e motivos, nunca caminho (o slug da pasta vem do
@@ -139,6 +141,8 @@ export type RelatoLimpeza = {
   estimadoBytes?: number;
   /** Segunda revisão do #225: o Docker está instalado e não respondeu — a passada não mexeu em nada. */
   adiada?: boolean;
+  /** ADR-099 (I5): a passada só da frente que acabou de terminar (`limparAgora`), fora das 6 h. */
+  imediata?: boolean;
   /** ADR-096: a passada foi disparada pelo disco apertado (fora das 6 h). */
   apertada?: boolean;
   /** ADR-096: o que os caches de pacote (npm, pnpm) liberaram na passada apertada, pelo `statfs`. */
@@ -157,8 +161,9 @@ export type RelatoLimpeza = {
  * se refaz), `head_solto` (commit fora de qualquer branch, remoto ou tag), `em_uso` (um turno deste Mac roda na pasta) e
  * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar). ADR-096 §4: `processo_vivo` (um `*.pid`
  * da pasta aponta para um processo vivo, como um Postgres de teste) e `grande_demais` (o guardado passaria de 2 GB).
+ * ADR-099 (I5): `sem_prova` (a pasta `sem_trabalho` não provou que não há trabalho; fica, o detalhe vai no log).
  */
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais";
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova";
 
 /**
  * Os cinco verbos da ponte (ADR-021), faladas in-process nesta rodada. A ponte HTTP entra depois
@@ -182,6 +187,8 @@ export interface PonteInterna {
    * disco da máquina está amarelo ou vermelho, e a task encerrada há mais de 2 h já vale como `encerrada`.
    */
   pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean }): Promise<PastaParaLimpar[]>;
+  /** ADR-099 (I5): a pasta da frente que terminou com este turno, se já vale `sem_trabalho` (vai na resposta do entregar). */
+  limparAgora?(pessoaId: string, turnoId: string): Promise<PastaParaLimpar | null>;
   /** ADR-088: o resumo da passada, para o log `limpeza_feita` do servidor. */
   relatarLimpeza?(pessoaId: string, relato: RelatoLimpeza): Promise<void>;
   /**

@@ -18,7 +18,7 @@ import { despacharTurno } from "../../use-cases/despachar-turno.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
-import { camposDoRelato, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
+import { camposDoRelato, pastaSemTrabalhoDoTurno, pastasParaLimpar, relatoValido } from "../../use-cases/limpeza-das-tasks.ts";
 import { relatarEspera as relatarEsperaDaMaquina } from "../../use-cases/esperar-comando.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "../../contracts/espera.ts";
 import { REDE_MS } from "../../domain/trabalho.ts";
@@ -528,6 +528,13 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return [];
       return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true }));
+    },
+
+    /** ADR-099 (I5, 2026-10-12): a frente que terminou com este turno e já vale `sem_trabalho`, para o Mac limpar na hora. */
+    async limparAgora(pessoaId, turnoId): Promise<PastaParaLimpar | null> {
+      const escopo = await resolverEscopo(pessoaId);
+      if (!escopo) return null;
+      return abrirTxEscopada(db, escopo)((trx) => pastaSemTrabalhoDoTurno(depsDe(trx, escopo), turnoId));
     },
 
     /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
