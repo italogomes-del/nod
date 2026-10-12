@@ -1,4 +1,5 @@
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
+import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
@@ -22,6 +23,13 @@ function pastaParaLimparValida(v: unknown): v is PastaParaLimpar {
   if (typeof v !== "object" || v === null) return false;
   const p = v as Record<string, unknown>;
   return typeof p.trabalhoId === "string" && typeof p.pasta === "string" && (p.quando === "encerrada" || p.quando === "so_com_pr_mergeado");
+}
+
+/** ADR-099: o que veio do servidor tem a forma de `EsperaParaRodar` (o app ainda confere a pasta antes de rodar). */
+function esperaValida(v: unknown): v is EsperaParaRodar {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return typeof e.id === "string" && typeof e.comando === "string" && (e.pasta === null || typeof e.pasta === "string") && typeof e.iniciada === "boolean";
 }
 
 export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void }) {
@@ -118,6 +126,26 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       }
     },
     async relatarLimpeza(_pessoaId, relato) { await chamar("limpeza/resultado", { relato }).catch(() => undefined); },
+    /**
+     * ADR-099 (parte 2): as esperas que esta máquina deve rodar (a máquina é a da chave). Servidor antigo (404) ou fora do
+     * ar: null — sem resposta, a máquina não mata nem começa nada.
+     */
+    async esperas() {
+      try {
+        const r = await chamar<{ esperas?: unknown }>("esperas", {}, { rota404: true });
+        return Array.isArray(r.esperas) ? r.esperas.filter(esperaValida) : null;
+      } catch {
+        return null;
+      }
+    },
+    async relatarEspera(_pessoaId, _machineId, relato) {
+      try {
+        const r = await chamar<{ seguir?: unknown }>("esperas/resultado", { relato }, { rota404: true });
+        return { seguir: r.seguir === true };
+      } catch {
+        return null;
+      }
+    },
   };
   /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos do turno. */
   function aparar(turnoId: string) {

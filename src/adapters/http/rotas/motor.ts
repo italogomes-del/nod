@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Rota } from "../roteador.ts";
@@ -21,6 +22,24 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
         if (!servidor) { ctx.json(400, { codigo: "entrada_invalida", mensagem: "Abra este endereço pelo HTTPS do seu Nod." }); return; }
         ctx.res.writeHead(200, { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "no-store" });
         ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao }));
+      },
+    },
+    {
+      // ADR-100: o que o motor compara para saber se está igual ao servidor, e o que o atualizador confere depois de
+      // baixar. O sha256 de cada arquivo, não a versão: vários merges saem com o mesmo número.
+      metodo: "GET",
+      padrao: /^\/motor\/manifesto$/,
+      publica: true,
+      async handler(ctx) {
+        const arquivos: Record<string, string> = {};
+        try {
+          for (const nome of ARQUIVOS_DO_MOTOR) arquivos[nome] = createHash("sha256").update(await readFile(join(o.pasta, nome))).digest("hex");
+        } catch {
+          ctx.json(404, { codigo: "nao_encontrado", mensagem: "Este servidor não tem o motor empacotado (npm run motor:build)." });
+          return;
+        }
+        ctx.res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        ctx.res.end(JSON.stringify({ versao: o.versao, arquivos }));
       },
     },
     {
