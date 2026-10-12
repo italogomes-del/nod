@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { CORTE_DA_ULTIMA_FALA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, textoFrentesAbertas } from "../../../src/domain/frente.ts";
+import { BRANCH_NA_FRENTE_ATUAL, branchDaFrente, CORTE_DA_ULTIMA_FALA, DONO_INTEGRA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, semLinhaDeEmpurrar, textoFrentesAbertas } from "../../../src/domain/frente.ts";
+import { errosDoSchema } from "../../../src/domain/schema-args.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
 import { validarResumo, type ErroResumo } from "../../../src/domain/resumo-da-frente.ts";
@@ -83,10 +84,10 @@ describe("regras puras das frentes (ADR-099, I2)", () => {
   });
 
   it("a entrada da frente: a moldura, o pedido e, se houver, o repositório e o branch de partida", () => {
-    expect(entradaDaFrente({ titulo: "Login", pedido: " Conserte o login. ", deRotina: false })).toBe(`${molduraDaFrente("Login", false)}Conserte o login.`);
+    expect(entradaDaFrente({ titulo: "Login", pedido: " Conserte o login. ", deRotina: false })).toBe(`${molduraDaFrente("Login", false)}Conserte o login.\n\nSe mexer num repositório, não empurre: devolva o branch e o SHA.`);
     expect(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false, repo: "gamefik/nod" })).toContain("Repositório: gamefik/nod. Parta de origin/main.");
     expect(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false, repo: "gamefik/nod", branchBase: "feat/a" })).toContain("Parta de feat/a.");
-    expect(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: true, branchBase: "feat/a" })).toBe(`${molduraDaFrente("Login", true)}x\n\nParta do branch feat/a.`);
+    expect(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: true, branchBase: "feat/a" })).toBe(`${molduraDaFrente("Login", true)}x\n\nParta do branch feat/a.\nNão empurre: devolva o branch e o SHA.`);
     expect(molduraDaFrente("Login", false)).toContain("devolver_resumo");
   });
 
@@ -108,5 +109,80 @@ describe("regras puras das frentes (ADR-099, I2)", () => {
   it("toda recusa do resumo vira instrução com o campo", () => {
     const erros: ErroResumo[] = ["nao_e_objeto", "campo_desconhecido", "feito_vazio", "texto_invalido", "texto_longo", "pr_invalido", "sha_invalido", "resumo_grande"];
     for (const e of erros) expect(instrucaoDoResumoInvalido(e, "sha")).toMatch(/^O resumo não foi guardado \(sha\): .+ Chame devolver_resumo de novo\.$/);
+  });
+});
+
+describe("cada frente no próprio branch; só o dono integra (ADR-099, I4)", () => {
+  type TrabalhoDoTeste = NonNullable<EntradaPlano["trabalho"]>;
+  const frente: TrabalhoDoTeste = { titulo: "Login no Safari", origem: "pessoa", trabalhoMaeId: null, forma: "frente" };
+  const pasta = "Vera/login-no-safari-abc123";
+  const promptDa = (p: { trabalho?: TrabalhoDoTeste; pastaDoBot?: string; linux?: boolean; modo?: "conversa" | "rotina" }) => {
+    const modo = p.modo ?? "conversa";
+    const ferramentas = montarPlano({ ...base, modo, trabalho: p.trabalho }).catalogo.ferramentas;
+    const { estavel, volatil } = partesDoPromptSistema({ agente, ferramentas, nativas: ["Read", "Edit", "Write", "Bash"], pastaDoBot: p.pastaDoBot ?? pasta, pessoaNome: "Marlon", modo, memorias: [], trabalho: p.trabalho ?? null, maquina: p.linux ? { nome: "vm-bots", plataforma: "linux" } : null });
+    return { estavel: estavel.join("\n"), volatil: volatil.join("\n") };
+  };
+
+  it("a frente cria a worktree no próprio branch frente/<slug> a partir do branch_base e só empurra o dela com autorização", () => {
+    const { estavel, volatil } = promptDa({ trabalho: frente });
+    expect(branchDaFrente(pasta)).toBe("frente/login-no-safari-abc123");
+    expect(estavel).toContain(`worktree add ~/nod/${pasta}/<repo> -b frente/login-no-safari-abc123 <branch_base> (o branch de onde a entrada mandou partir; sem ele, origin/main)`);
+    expect(estavel).toContain("Commite só nesse branch e nunca empurre um branch que você não criou");
+    expect(estavel).toContain("Empurre o seu branch ou abra PR só se a entrada disser que o dono autorizou");
+    expect(estavel).toContain("devolva o branch e o SHA no devolver_resumo");
+    expect(estavel).not.toContain("-b <branch> origin/main");
+    expect(volatil).toContain('Frente atual: você está na frente "Login no Safari"');
+    expect(volatil).toContain(BRANCH_NA_FRENTE_ATUAL);
+    // A frente não integra: a regra do dono não aparece para ela.
+    expect(estavel).not.toContain(DONO_INTEGRA);
+  });
+
+  it("numa máquina Linux a frente parte do clone desta máquina, com as mesmas regras de branch", () => {
+    const { estavel } = promptDa({ trabalho: frente, linux: true });
+    expect(estavel).toContain("num branch só seu, a partir do clone: git -C <clone> fetch origin");
+    expect(estavel).toContain("-b frente/login-no-safari-abc123 <branch_base>");
+    expect(estavel).toContain("nunca empurre um branch que você não criou");
+  });
+
+  it("a task de antes (forma task) segue com o texto de sempre, sem branch de frente", () => {
+    const { estavel, volatil } = promptDa({ trabalho: { ...frente, forma: "task" } });
+    expect(estavel).toContain(`worktree add ~/nod/${pasta}/<repo> -b <branch> origin/main`);
+    expect(estavel).not.toContain("frente/");
+    expect(volatil).not.toContain(BRANCH_NA_FRENTE_ATUAL);
+  });
+
+  it("o dono e a rotina-mãe veem a regra de integração: branch_base por frente, merge na própria worktree, só ele empurra", () => {
+    expect(promptDa({ pastaDoBot: "Vera" }).estavel).toContain(DONO_INTEGRA);
+    expect(DONO_INTEGRA).toContain("dê a cada frente o repo e o branch_base");
+    expect(DONO_INTEGRA).toContain("integre esses branches na sua worktree (git merge, sem push");
+    expect(DONO_INTEGRA).toContain("só você empurra no branch do PR");
+    expect(DONO_INTEGRA).toContain("nunca peça a duas frentes que empurrem no mesmo branch");
+    expect(promptDa({ modo: "rotina", trabalho: { titulo: "Triagem", origem: "rotina", trabalhoMaeId: null, forma: "task" } }).estavel).toContain(DONO_INTEGRA);
+  });
+
+  it("pode_empurrar vira uma linha clara na entrada da frente; o padrão é não empurrar", () => {
+    const sem = entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false, repo: "gamefik/nod", branchBase: "feat/pr-845" });
+    expect(sem.endsWith("Repositório: gamefik/nod. Parta de feat/pr-845.\nNão empurre: devolva o branch e o SHA.")).toBe(true);
+    expect(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false, repo: "gamefik/nod", podeEmpurrar: false })).toContain("Não empurre: devolva o branch e o SHA.");
+    const com = entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false, repo: "gamefik/nod", podeEmpurrar: true });
+    expect(com.endsWith("Repositório: gamefik/nod. Parta de origin/main.\nO dono autorizou empurrar o seu branch e abrir PR.")).toBe(true);
+    expect(com).not.toContain("Não empurre");
+    expect(entradaDaFrente({ titulo: "Notas", pedido: "x", deRotina: false, podeEmpurrar: true }).endsWith("x\n\nO dono autorizou empurrar o seu branch e abrir PR.")).toBe(true);
+    // O "Fazer aqui" devolve o pedido ao dono sem a linha, que só faz sentido na frente.
+    const moldura = molduraDaFrente("Login", false);
+    expect(semLinhaDeEmpurrar(com.slice(moldura.length))).toBe("x\n\nRepositório: gamefik/nod. Parta de origin/main.");
+    expect(semLinhaDeEmpurrar(entradaDaFrente({ titulo: "Login", pedido: "x", deRotina: false }).slice(moldura.length))).toBe("x");
+    expect(semLinhaDeEmpurrar("sem linha nenhuma")).toBe("sem linha nenhuma");
+  });
+
+  it("o schema de abrir_frentes aceita pode_empurrar booleano e recusa outro tipo", () => {
+    const schema = FERRAMENTAS_NOD.abrir_frentes;
+    const lote = (extra: Record<string, unknown>) => ({ frentes: [{ titulo: "Login", pedido: "x", repo: "gamefik/nod", branch_base: "feat/a", ...extra }] });
+    expect(errosDoSchema(schema, lote({}))).toEqual([]);
+    expect(errosDoSchema(schema, lote({ pode_empurrar: true }))).toEqual([]);
+    expect(errosDoSchema(schema, lote({ pode_empurrar: false }))).toEqual([]);
+    expect(errosDoSchema(schema, lote({ pode_empurrar: "sim" }))).not.toEqual([]);
+    expect(errosDoSchema(schema, lote({ empurrar: true }))).not.toEqual([]);
+    expect(schema.properties.frentes.items.properties?.pode_empurrar?.type).toBe("boolean");
   });
 });
