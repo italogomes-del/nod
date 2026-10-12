@@ -3,11 +3,11 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { classificarComando, comandoArriscado, tocaCredencial } from "../domain/comando.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { decidirPeloModo, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, REGRA_MODO_TOTAL, type DecisaoDoModo } from "../domain/modo-aprovacao.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O destino do item de aprovação de um comando: não é conector, é o terminal do Mac da pessoa (ADR-055). */
 export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as const;
@@ -42,6 +42,41 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  */
 export const COMANDO_MAX = 64_000;
 
+type Permitir = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" | "modo_automatico" | "modo_total" };
+type PedeCard = { card: { agenteNome: string | null; motivo: Extract<DecisaoDoModo, { automatico: false }> | null; risco: string | null } };
+
+/** Os passos 1–4 acima, sem efeito: roda (e por quê) ou pede card. Quem cria o card é `autorizarComando`. */
+async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, arquivo: string | null): Promise<Permitir | PedeCard> {
+  const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
+  if (arquivo === null && classificarComando(texto).tipo === "leitura" && !contaminado) return { permitir: true, porque: "leitura" };
+  if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { permitir: true, porque: "aprovado" };
+  const risco = arquivo === null ? comandoArriscado(texto) : null;
+  const credencial = tocaCredencial(arquivo ?? texto);
+  // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
+  // a credencial nem o arriscado — antes esta linha vinha antes das duas cercas, e um "pode fazer" num `ls` liberava
+  // o `security find-generic-password` e o `rm -rf` seguintes, que nem o modo total libera sem a pessoa.
+  if (!contaminado && !credencial && risco === null && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
+    return { permitir: true, porque: "liberado_na_tarefa" };
+  }
+  const agente = await deps.repos.agentes.buscar(plano.agenteId);
+  // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo.
+  const doModo = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial });
+  if (doModo?.automatico) return { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" };
+  return { card: { agenteNome: agente?.nome ?? null, motivo: doModo ?? null, risco } };
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099, parte 2): `esperar_comando` passa o comando pelas MESMAS regras do terminal do bot, mas
+ * não abre card — o turno vai encerrar logo depois, e ninguém esperaria a resposta. null = o comando pediria aprovação.
+ */
+export async function comandoRodaSemCard(deps: Deps, plano: PlanoTurno, comando: string): Promise<Permitir | null> {
+  if (!(plano.nativas ?? []).includes("Bash")) return null;
+  const texto = comando.trim();
+  if (texto === "" || texto.length > COMANDO_MAX) return null;
+  const r = await decidirComando(deps, plano, texto, null);
+  return "permitir" in r ? r : null;
+}
+
 export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } | { plano: PlanoTurno; arquivo: string }, SaidaAutorizarComando> = async (deps, entrada) => {
   const { plano } = entrada;
   const arquivo = "arquivo" in entrada ? entrada.arquivo.trim() : null;
@@ -49,21 +84,9 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
   if (!(plano.nativas ?? []).includes(nativa)) throw new ErroDeDominio("nao_permitido", { cause: `${nativa} fora do plano deste turno` });
   const texto = arquivo === null ? ("comando" in entrada ? entrada.comando.trim() : "") : `Gravar ${arquivo}`;
   if (texto === "" || arquivo === "" || texto.length > COMANDO_MAX) throw new ErroDeDominio("entrada_invalida", { cause: arquivo === null ? "comando" : "arquivo" });
-  const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
-  if (arquivo === null && classificarComando(texto).tipo === "leitura" && !contaminado) return { data: { permitir: true, porque: "leitura" } };
-  if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { data: { permitir: true, porque: "aprovado" } };
-  const risco = arquivo === null ? comandoArriscado(texto) : null;
-  const credencial = tocaCredencial(arquivo ?? texto);
-  // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
-  // a credencial nem o arriscado — antes esta linha vinha antes das duas cercas, e um "pode fazer" num `ls` liberava
-  // o `security find-generic-password` e o `rm -rf` seguintes, que nem o modo total libera sem a pessoa.
-  if (!contaminado && !credencial && risco === null && (await terminalLiberadoNaTarefa(deps, plano.turnoId))) {
-    return { data: { permitir: true, porque: "liberado_na_tarefa" } };
-  }
-  const agente = await deps.repos.agentes.buscar(plano.agenteId);
-  // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo.
-  const doModo = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial });
-  if (doModo?.automatico) return { data: { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" } };
+  const decidido = await decidirComando(deps, plano, texto, arquivo);
+  if ("permitir" in decidido) return { data: decidido };
+  const { agenteNome, motivo: doModo, risco } = decidido.card;
 
   const agora = deps.agora();
   const decisao = await deps.repos.decisoes.criar({
@@ -72,7 +95,7 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
     conversaId: plano.conversaId,
     turnoId: plano.turnoId,
     prazoDecisaoEm: agora + PRAZO_DECISAO_MS,
-    frase: `${agente?.nome ?? "O bot"} quer ${arquivo === null ? "rodar um comando" : "gravar um arquivo"} no seu Mac`,
+    frase: `${agenteNome ?? "O bot"} quer ${arquivo === null ? "rodar um comando" : "gravar um arquivo"} no seu Mac`,
   });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
   await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: arquivo === null ? { comando: texto } : { arquivo } }, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",

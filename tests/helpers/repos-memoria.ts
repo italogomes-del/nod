@@ -33,6 +33,7 @@ import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
 import type { ItemOutbox } from "../../src/repositories/outbox.repo.ts";
 import type { ExtrasTrabalho } from "../../src/repositories/trabalhos.repo.ts";
+import type { Espera } from "../../src/contracts/espera.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
@@ -70,6 +71,8 @@ export type BancoMemoria = {
   turnos: Turno[];
   /** 0063 (ADR-083): os trabalhos, com a dona. */
   trabalhos: (Trabalho & { ownerId: string })[];
+  /** 0070 (ADR-099, parte 2): as esperas de comando, com a dona (o comportamento completo se prova no Postgres). */
+  esperas: (Espera & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
   decisoes: (Decisao & { decididaEm: number | null })[];
   varridos: Set<string>;
@@ -138,6 +141,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     propostas: [],
     turnos: [],
     trabalhos: [],
+    esperas: [],
     entregas: new Set(),
     decisoes: [],
     varridos: new Set(),
@@ -191,6 +195,7 @@ const agora = () => Date.now();
 const despertares = new Map<string, { em: number; motivo: string }>();
 const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
+const semDonoEspera = ({ tenantId: _tenant, ownerId: _dona, ...e }: Espera & { tenantId: string; ownerId: string }): Espera => ({ ...e });
 const semDonoTrabalho = ({ ownerId: _dona, ...t }: Trabalho & { ownerId: string }): Trabalho => ({ ...t });
 const semDonoPendencia = ({ ownerId: _dona, resolvidaNoTurnoId: _turno, ...p }: Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null }): Pendencia => ({ ...p });
 
@@ -208,6 +213,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     const ultima = t ? lista.filter((x) => x.turnoId === t.id && falaDoBot(x)).at(-1) : undefined;
     return { ...m, origemTurno: t?.origem ?? null, trabalhoId: t?.trabalhoId ?? aberto?.trabalhoId ?? null, fimDoTurno: Boolean(t && (t.estado === "concluido" || t.estado === "interrompido") && falaDoBot(m) && ultima?.id === m.id) };
   });
+  const minhasEsperas = () => b.esperas.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
   const repos = {
     computadores: {
       buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
@@ -828,6 +834,36 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    esperas: {
+      async criar(e) {
+        if (b.esperas.some((x) => x.tenantId === escopo.tenantId && x.turnoId === e.turnoId)) return null;
+        const linha = { ...e, tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), estado: "rodando" as const, codigoSaida: null, saida: null, motivoFim: null, quedas: 0, iniciadaEm: null, vistoEm: null, acordouEm: null, criadoEm: agora(), terminadoEm: null };
+        b.esperas.push(linha);
+        return semDonoEspera(linha);
+      },
+      async buscar(id) { const e = minhasEsperas().find((x) => x.id === id); return e ? semDonoEspera(e) : null; },
+      async buscarTravado(id) { const e = minhasEsperas().find((x) => x.id === id); return e ? semDonoEspera(e) : null; },
+      async doTurnoTravada(turnoId) { const e = minhasEsperas().find((x) => x.turnoId === turnoId); return e ? semDonoEspera(e) : null; },
+      async paraAMaquina(maquinaId, quando) {
+        return minhasEsperas().filter((x) => x.maquinaId === maquinaId && x.estado === "rodando").map((x) => { x.vistoEm = quando; return { id: x.id, comando: x.comando, pasta: x.pasta, iniciada: x.iniciadaEm !== null }; });
+      },
+      async marcarIniciada(id, quando) { const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando"); if (!e) return false; e.iniciadaEm ??= quando; e.vistoEm = quando; return true; },
+      async gravarQuedas(id, quedas, quando) { const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando"); if (!e) return false; e.quedas = quedas; e.vistoEm = quando; return true; },
+      async finalizar(id, f) {
+        const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando");
+        if (!e) return null;
+        Object.assign(e, { estado: f.estado, codigoSaida: f.codigo ?? null, saida: f.saida ?? null, motivoFim: f.motivoFim ?? null, terminadoEm: f.agora });
+        return semDonoEspera(e);
+      },
+      async marcarAcordou(id, quando) { const e = minhasEsperas().find((x) => x.id === id && x.acordouEm === null); if (!e) return false; e.acordouEm = quando; return true; },
+      async cancelarRodando(alvo, motivoFim, quando) {
+        const alvos = minhasEsperas().filter((x) => x.estado === "rodando" && ("conversaId" in alvo ? x.conversaId === alvo.conversaId : "trabalhoId" in alvo ? x.trabalhoId === alvo.trabalhoId : true));
+        for (const e of alvos) Object.assign(e, { estado: "cancelada", motivoFim, terminadoEm: quando });
+        return alvos.map((e) => e.id);
+      },
+      // O varredor das esperas sem notícia se prova no Postgres (tests/integration/esperar-comando.test.ts).
+      async semNoticia() { return []; },
+    },
     trabalhos: {
       async criar(n) {
         const linha: Trabalho & { ownerId: string } = {
@@ -943,6 +979,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           despachando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm === null).length,
           pendentes: dele.filter((t) => t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).length,
           aguardandoDespertar: dele.some((t) => t.estado === "pendente" && (t.acordarEm ?? 0) > agora()),
+          aguardandoComando: b.esperas.some((e) => e.tenantId === escopo.tenantId && e.trabalhoId === id && e.estado === "rodando"),
           esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
           decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
           aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
@@ -970,6 +1007,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             esperandoColega: null,
             trabalhouMs: 0,
             acordaEm: turnos.filter((x) => x.estado === "pendente" && x.acordarEm).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
+            // As esperas de comando (ADR-099) se provam no Postgres (tests/integration/esperar-comando.test.ts).
+            esperandoComando: null,
             // O alvo pela chave viva (desta vez → bot → padrão) se prova no Postgres; aqui, só a máquina do bot.
             maquinaVivaId: turnos.find((x) => x.estado === "despachando")?.machineId ?? null,
             maquinaAlvoId: doTenant(b.agentes).find((a) => a.id === t.agenteId)?.maquinaId ?? null,
@@ -1019,7 +1058,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .slice(0, limite)
           .map((t) => ({
             estado: t.estado,
-            marcouVolta: despertares.has(t.id),
+            marcouVolta: despertares.has(t.id) || b.esperas.some((e) => e.tenantId === escopo.tenantId && e.turnoId === t.id),
             perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
             pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
           }));

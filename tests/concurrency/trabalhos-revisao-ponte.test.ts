@@ -60,6 +60,7 @@ afterEach(async () => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
     await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from turno_diagnosticos where owner_id = ${p}`;
