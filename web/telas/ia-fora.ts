@@ -33,6 +33,15 @@ export const ehIa = (v: unknown): v is IdIa => v === "claude-cli" || v === "code
 
 const logo = (ia: IdIa): string => `<span class="ia-logo" aria-hidden="true">${LOGOS_IA[PROVEDOR_DA_IA[ia].logo]}</span>`;
 
+/**
+ * NOD-213/NOD-220: a sonda prova que a IA voltou só se for "pronto" e MAIS NOVA que a negação. Os dois horários são epoch
+ * ms do relógio do SERVIDOR (o anúncio do Mac é carimbado na chegada, em lerAnuncio; a negação, no `agora` do servidor):
+ * fuso e relógio do Mac não entram. Sonda ausente, horário ausente/não numérico ou igual ao da negação: não voltou.
+ */
+export function prontaDepois(inv: Inventario | null | undefined, negadaEm: number): boolean {
+  return inv?.estado === "pronto" && typeof inv.em === "number" && Number.isFinite(inv.em) && typeof negadaEm === "number" && Number.isFinite(negadaEm) && inv.em > negadaEm;
+}
+
 /** O inventário de uma IA no catálogo que a tela já tem (GET executor); null quando ainda não chegou. */
 export function inventarioDaIa(estado: Pick<Estado, "executor">, ia: IdIa): Inventario | null {
   return estado.executor?.harnesses?.opcoes.find((o) => o.id === ia)?.inventario ?? null;
@@ -109,18 +118,24 @@ export function avisoContaSemAcesso(m: Mensagem, estado: Pick<Estado, "executor"
 /**
  * NOD-171 (protótipo do Gil, estado 2): o bot fixado numa IA que não está pronta. O aviso diz QUAL IA e em que pé ela
  * está — desatualizada (com a versão e a mínima), sem login ou fora do Mac — e traz o botão que resolve e "Trocar a IA".
- * null quando a IA já voltou, só demorou ou o catálogo ainda não chegou: aí vale o aviso genérico.
+ * NOD-220: também o bot no Automático cuja IA do turno (payload `ia`) recusou. Sem estado que explique (sonda "pronto" de
+ * antes da negação, sonda lenta, sem catálogo), o aviso nomeia a IA e manda conferir a Conexão. Quem chama só o usa com a
+ * IA ainda fora (prontaDepois falso).
  */
-export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, p: { nomeDoBot: string | null; agenteId: string | null; ia: IdIa; noApp: boolean }): string | null {
+export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, p: { nomeDoBot: string | null; agenteId: string | null; ia: IdIa; noApp: boolean }): string {
   const inv = inventarioDaIa(estado, p.ia);
-  if (!inv || inv.estado === "pronto" || inv.causa === "sonda_lenta") return null;
   const { nome, cli } = PROVEDOR_DA_IA[p.ia];
   const bot = p.nomeDoBot ?? "O bot";
   const botNoMeio = p.nomeDoBot ?? "o bot";
   const dados = { ia: p.ia };
   const antigo = desatualizado(inv);
   const conectar = botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } });
-  const [titulo, situacao, resolve] = antigo
+  // NOD-220: a IA segue fora sem estado que o catálogo explique (sonda "pronto" anterior à negação, sonda lenta ou servidor
+  // sem catálogo): o aviso ainda nomeia a IA e diz o que conferir — nunca "sua conta de IA" sem dizer qual.
+  const semEstado = !inv || inv.estado === "pronto" || inv.causa === "sonda_lenta";
+  const [titulo, situacao, resolve] = semEstado
+    ? ["Nenhum trabalho começou.", `${bot} não pôde começar: o ${cli} (${nome}) estava indisponível. Confira em Conexão se o ${cli} está instalado e com a conta conectada.`, conectar]
+    : antigo
     ? [`${bot} não começou: o ${cli} deste Mac está desatualizado.`, `${bot} usa o ${nome} (${cli}). A versão instalada é a ${antigo.versao}, e o nod precisa da ${versaoLegivel(antigo.minima)} ou mais nova.`, p.noApp ? botao("ia-atualizar", `Atualizar o ${cli}`, { classe: "pri sm", dados }) : ""]
     // NOD-213: no limite da assinatura a IA está logada; "falta entrar" seria falso. Resolve trocando de IA (ou esperando).
     : inv.estado === "nao_autenticado" && inv.causa === "limite"

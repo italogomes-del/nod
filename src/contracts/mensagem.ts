@@ -53,8 +53,12 @@ export type PayloadMensagem =
    * `modelo` (NOD-171): o harness está pronto, mas o modelo escolhido no agente não é aceito por ele; a tela pede outro
    * modelo em vez de dizer que a IA "já voltou".
    * `causaNativa` e `vezes` (definido em 2026-10-11): por que o hook do nod barrou a nativa e quantas vezes no turno.
+   * `ia` (NOD-220): o harness do turno que a IA recusou (plano_ausente). Só existe quando a recusa foi de uma IA; a do
+   * executor (motor ausente, `nome` = motorDe: "claude-cli" no local, "catcher") não o grava. `nome` mistura os dois;
+   * `ia` não. A web decide "já voltou" e nomeia a IA por `ia`; valor fora do catálogo da web não vale (nada se infere).
+   * As negações gravadas antes não o têm: a web nunca conclui "já voltou" por inferência de outra IA.
    */
-  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string; causaNativa?: CausaNativa; vezes?: number }
+  | { kind: "negacao"; classe: "ferramenta_negada" | "conector_indisponivel" | "plano_ausente"; nome: string; motivo: MotivoNegacao; terminal: boolean; causa?: CausaSemIa; modelo?: string; causaNativa?: CausaNativa; vezes?: number; ia?: IdHarness }
   /**
    * definido em 2026-10-05: o bot em "automático" passou a responder por outra IA porque a conta da primeira não
    * serviu. Linha de sistema, dita uma vez por troca; o turno que falhou foi repetido na outra IA.

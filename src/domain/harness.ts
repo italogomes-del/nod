@@ -74,6 +74,14 @@ export function modeloMaisPotente(harness: IdHarness): string | null {
   return MODELO_MAIS_POTENTE[harness] ?? null;
 }
 
+/**
+ * NOD-220: a IA que uma negação de executor indisponível registra — o harness do turno, quando é do catálogo. Sem harness
+ * (o executor faltou), "catcher", "ia" e ids desconhecidos: undefined (a web não infere outra no lugar).
+ */
+export function iaDaNegacao(harness: string | null | undefined): IdHarness | undefined {
+  return HARNESSES.find((h) => h.id === harness)?.id;
+}
+
 const SEM_SONDA_DO_HARNESS = "não está pronto em nenhum computador conectado";
 
 /** Nenhuma máquina viva da pessoa anunciou este harness: não se sabe se falta instalar, logar ou atualizar. */

@@ -9,7 +9,7 @@ import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { hora } from "../../../web/lib/render.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
 import { situacaoMotorFora, textoInventario } from "../../../web/telas/frota.ts";
-import { COMANDO_ATUALIZAR_IA, desatualizado, fraseDesatualizado, pedeInstalar, versaoLegivel } from "../../../web/telas/ia-fora.ts";
+import { COMANDO_ATUALIZAR_IA, desatualizado, fraseDesatualizado, pedeInstalar, prontaDepois, versaoLegivel } from "../../../web/telas/ia-fora.ts";
 import { motivoDoInventario, renderLinhaInteligencia } from "../../../web/telas/inteligencia.ts";
 import { UI_IAS_INICIAL } from "../../../web/telas/cartao-ia.ts";
 import { estadoDoCardIa, situacaoDaIa } from "../../../web/telas/onboarding.ts";
@@ -159,8 +159,9 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
     expect(html).not.toContain('data-act="ia-entrar"');
   });
 
+  // NOD-220: o motor do executor se chama "claude-cli" (motorDe); "codex-cli" no nome só sai do harness recusado.
   it("bot no automático: o nome da negação é só o motor; fica o aviso de sempre", () => {
-    const html = renderMensagem(negacao("codex-cli"), com({ claude: SEM_LOGIN, codex: ANTIGO, harnessDoGil: "auto" }));
+    const html = renderMensagem(negacao("claude-cli"), com({ claude: SEM_LOGIN, codex: ANTIGO, harnessDoGil: "auto" }));
     expect(html).toContain("Nenhum trabalho começou.");
     expect(html).not.toContain("deste Mac está desatualizado");
     expect(html).not.toContain('data-act="ia-atualizar"');
@@ -336,5 +337,169 @@ describe("NOD-213: bot no GPT/Codex nunca ouve que a IA 'já voltou' sem ela ter
   it("com o Codex de volta (sonda nova), o aviso de sempre pode dizer que voltou", () => {
     const html = renderMensagem(negacao("codex-cli"), comChico({ claude: NOVO, codex: NOVO }));
     expect(html).toContain("mande a mensagem de novo");
+  });
+});
+
+/**
+ * NOD-220 (regressão da NOD-213): em 13/10 às 09:45 a Ada (no Automático, turno roteado ao Codex) mostrou "Ela já voltou"
+ * com o Codex indisponível desde 05:05. O bot não fixado olhava o motor em uso (Claude, pronto). Agora a IA que negou
+ * (payload `ia`; nas antigas, "codex-cli" no nome) decide o "já voltou" e é a que o aviso nomeia.
+ */
+describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'", () => {
+  const NEGADA_EM = 5;
+  const daAda = (payload: Partial<Extract<NonNullable<Mensagem["payload"]>, { kind: "negacao" }>>): Mensagem => {
+    const m = negacao("codex-cli");
+    return { ...m, criadoEm: NEGADA_EM, texto: "Nenhum trabalho começa: executor indisponível (Codex indisponível) desde 05:05.", payload: { kind: "negacao", classe: "plano_ausente", nome: "codex-cli", motivo: "plano_ausente", terminal: true, ...payload } };
+  };
+  const auto = (p: { claude: Inventario; codex: Inventario }) => com({ ...p, harnessDoGil: "auto" });
+  const CLAUDE_NOVO: Inventario = { ...PRONTO, em: 10 };
+  const CODEX_DE_ANTES: Inventario = { ...PRONTO, em: 0 };
+
+  it("regressão: bot não fixado + negação 'Codex indisponível' + Claude pronto — nomeia o Codex, com botão; nunca 'já voltou'", () => {
+    const html = renderMensagem(daAda({ ia: "codex-cli" }), auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES }));
+    expect(html).not.toContain("já voltou");
+    expect(html).toContain("Gil não pôde começar: o Codex (ChatGPT) estava indisponível.");
+    expect(html).toContain("Sua mensagem fica guardada: quando o Codex estiver pronto, Gil responde sozinho.");
+    expect(html).toMatch(/data-act="secao-espaco" data-secao="conexao">Conectar IA</);
+    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
+  });
+
+  // Revisão do #303 (a): a negação antiga (sem `ia`) não nomeia a IA no aviso — o `nome` mistura motor e harness —, mas
+  // segue legível e decide pela sonda da IA do nome, nunca pela do Claude pronto.
+  it("negação antiga sem `ia` com o Codex fora: aviso de sempre, legível, sem 'já voltou'", () => {
+    const html = renderMensagem(daAda({}), auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES }));
+    expect(html).not.toContain("já voltou");
+    expect(html).toContain("Gil não pôde começar: sua conta de IA não está conectada neste computador.");
+    expect(html).toContain("Sua mensagem fica guardada");
+    expect(html).toMatch(/data-act="secao-espaco" data-secao="conexao">Conectar IA</);
+  });
+
+  it("com o Codex sem login, no limite ou desatualizado, o aviso é o da IA que negou (o estado dela), nunca 'já voltou'", () => {
+    const LIMITE: Inventario = { estado: "nao_autenticado", causa: "limite", motivo: "limite de uso", em: 10 };
+    const casos: [Inventario, string][] = [[SEM_LOGIN, "Gil não começou: falta entrar no Codex."], [LIMITE, "Gil não começou: a conta do ChatGPT chegou ao limite da assinatura."], [ANTIGO, "Gil não começou: o Codex deste Mac está desatualizado."]];
+    for (const [codex, titulo] of casos) {
+      const html = renderMensagem(daAda({ ia: "codex-cli" }), auto({ claude: CLAUDE_NOVO, codex }));
+      expect(html).toContain(titulo);
+      expect(html).not.toContain("já voltou");
+    }
+  });
+
+  it("'já voltou' só com a IA QUE NEGOU pronta numa sonda posterior à negação", () => {
+    const voltou = renderMensagem(daAda({ ia: "codex-cli" }), auto({ claude: SEM_LOGIN, codex: { ...PRONTO, em: NEGADA_EM + 1 } }));
+    expect(voltou).toContain("O Codex já voltou: se a resposta não chegou, mande a mensagem de novo.");
+    // A sonda da mesma hora (ou anterior) não prova a volta; a do Claude, mais nova, também não.
+    for (const estado of [auto({ claude: CLAUDE_NOVO, codex: { ...PRONTO, em: NEGADA_EM } }), auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES })]) {
+      expect(renderMensagem(daAda({ ia: "codex-cli" }), estado)).not.toContain("já voltou");
+    }
+  });
+
+  it("negação antiga sem `ia` e sem IA no nome ('catcher', 'ia'): nunca 'já voltou' pela sonda de outra IA", () => {
+    for (const nome of ["catcher", "ia"]) {
+      const html = renderMensagem({ ...negacao(nome), criadoEm: NEGADA_EM }, auto({ claude: CLAUDE_NOVO, codex: CLAUDE_NOVO }));
+      expect(html).not.toContain("já voltou");
+      expect(html).toContain("Sua mensagem fica guardada");
+    }
+  });
+
+  it("negação antiga com o Codex no nome (sem `ia`): a IA é o Codex, e o Claude pronto não a faz 'voltar'", () => {
+    const antiga = { ...negacao("codex-cli"), criadoEm: NEGADA_EM };
+    expect(renderMensagem(antiga, auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES }))).not.toContain("já voltou");
+    expect(renderMensagem(antiga, auto({ claude: SEM_LOGIN, codex: { ...PRONTO, em: NEGADA_EM + 1 } }))).toContain("O Codex já voltou");
+  });
+
+  it("bot fixado no Claude (sem regressão): Claude de volta depois da negação diz que voltou", () => {
+    const html = renderMensagem(daAda({ nome: "claude-cli", ia: "claude-cli" }), com({ claude: CLAUDE_NOVO, codex: SEM_LOGIN, harnessDoGil: "claude-cli" }));
+    expect(html).toContain("O Claude Code já voltou");
+  });
+
+  // Revisão do #303 (b): a negação do Claude no bot fixado nele segue nomeando o Claude Code e o estado dele.
+  it("bot fixado no Claude com o Claude ainda fora: o aviso é do Claude Code, nunca 'já voltou'", () => {
+    const fixadoClaude = (claude: Inventario) => com({ claude, codex: CLAUDE_NOVO, harnessDoGil: "claude-cli" });
+    const semLogin = renderMensagem(daAda({ nome: "claude-cli", ia: "claude-cli" }), fixadoClaude({ ...SEM_LOGIN, em: 10 }));
+    expect(semLogin).toContain("Gil não começou: falta entrar no Claude Code.");
+    expect(semLogin).not.toContain("já voltou");
+    const deAntes = renderMensagem(daAda({ nome: "claude-cli", ia: "claude-cli" }), fixadoClaude({ ...PRONTO, em: NEGADA_EM }));
+    expect(deAntes).toContain("o Claude Code (Claude) estava indisponível");
+    expect(deAntes).not.toContain("já voltou");
+  });
+
+  // Revisão do #303, achado 2: o executor fora (sem harness) grava nome "claude-cli" sem `ia`; o bot fixado no Codex
+  // depende só do Codex. Antes o PR exigia o Claude Code também e o aviso nunca dizia que o Codex voltou.
+  it("bot fixado no Codex + negação do executor (nome claude-cli, sem `ia`): Codex de volta diz 'O Codex já voltou'", () => {
+    const m = { ...negacao("claude-cli"), criadoEm: NEGADA_EM };
+    const html = renderMensagem(m, com({ claude: AUSENTE, codex: { ...PRONTO, em: NEGADA_EM + 1 }, harnessDoGil: "codex-cli" }));
+    expect(html).toContain("O Codex já voltou: se a resposta não chegou, mande a mensagem de novo.");
+  });
+
+  // Achado 3: o bot que antes negou no Codex e foi fixado no Claude depende só do Claude (NOD-171: a IA DELE).
+  it("bot fixado no Claude + negação antiga do Codex: decide e nomeia pelo Claude, nunca pelo Codex", () => {
+    const estado = com({ claude: CLAUDE_NOVO, codex: SEM_LOGIN, harnessDoGil: "claude-cli" });
+    const html = renderMensagem(daAda({ ia: "codex-cli" }), estado);
+    expect(html).toContain("O Claude Code já voltou");
+    expect(html).not.toContain("falta entrar no Codex");
+  });
+
+  // Achado 5: no Automático, o turno roteado ao Claude Code que recusou grava ia = claude-cli e o aviso o nomeia (a web não
+  // repete mais a regra do motorDe para adivinhar se foi o executor ou a IA).
+  it("Automático + `ia` claude-cli (o harness Claude recusou): o aviso nomeia o Claude Code", () => {
+    const html = renderMensagem(daAda({ nome: "claude-cli", ia: "claude-cli" }), auto({ claude: { ...SEM_LOGIN, em: 10 }, codex: CLAUDE_NOVO }));
+    expect(html).toContain("Gil não começou: falta entrar no Claude Code.");
+    expect(html).not.toContain("já voltou");
+  });
+
+  // Validação do campo novo: `ia` fora do catálogo da web não vale nem cai para o `nome`.
+  it("`ia` desconhecida: nada se infere — nunca 'já voltou', aviso de sempre legível", () => {
+    for (const ia of ["gemini-cli", "", 42, null]) {
+      const m = daAda({ ia: ia as never });
+      const html = renderMensagem(m, auto({ claude: CLAUDE_NOVO, codex: CLAUDE_NOVO }));
+      expect(html).not.toContain("já voltou");
+      expect(html).toContain("Gil não pôde começar: sua conta de IA não está conectada neste computador.");
+    }
+  });
+
+  // Achado 4: a negação do catcher (o executor que faltou) volta pela sonda DO CATCHER, nunca pela de uma IA.
+  it("negação do catcher: 'já voltou' só com o catcher pronto depois; Claude pronto não basta", () => {
+    const comCatcher = (catcher: Inventario): Estado => {
+      const e = auto({ claude: CLAUDE_NOVO, codex: CLAUDE_NOVO });
+      return { ...e, executor: { ...e.executor!, atual: "catcher", opcoes: [{ id: "catcher", inventario: catcher }] as unknown as NonNullable<Estado["executor"]>["opcoes"] } };
+    };
+    const m = { ...negacao("catcher"), criadoEm: NEGADA_EM };
+    expect(renderMensagem(m, comCatcher({ ...PRONTO, em: NEGADA_EM + 1 }))).toContain("Ela já voltou");
+    expect(renderMensagem(m, comCatcher({ ...PRONTO, em: NEGADA_EM }))).not.toContain("já voltou");
+    expect(renderMensagem(m, comCatcher({ ...AUSENTE, em: 10 }))).not.toContain("já voltou");
+  });
+
+  // Achado 7: o aviso nomeado sem estado que o catálogo explique sai do avisoHarnessFora (um só lugar), também sem catálogo.
+  it("bot fixado no Codex, servidor sem catálogo: o aviso ainda nomeia o Codex, com os botões", () => {
+    const e = com({ claude: CLAUDE_NOVO, codex: SEM_LOGIN, harnessDoGil: "codex-cli" });
+    const html = renderMensagem(daAda({ ia: "codex-cli" }), { ...e, executor: { ...e.executor!, harnesses: undefined } as unknown as Estado["executor"] });
+    expect(html).toContain("Gil não pôde começar: o Codex (ChatGPT) estava indisponível.");
+    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
+    expect(html).not.toContain("já voltou");
+  });
+});
+
+/** Revisão do #303 (c): a sonda tem de ser posterior à negação, comparada de forma robusta. */
+describe("prontaDepois: sonda posterior à negação", () => {
+  it("pronto e mais nova: voltou; igual, anterior ou não pronto: não", () => {
+    expect(prontaDepois({ ...PRONTO, em: 6 }, 5)).toBe(true);
+    expect(prontaDepois({ ...PRONTO, em: 5 }, 5)).toBe(false);
+    expect(prontaDepois({ ...PRONTO, em: 4 }, 5)).toBe(false);
+    expect(prontaDepois({ ...SEM_LOGIN, em: 6 }, 5)).toBe(false);
+  });
+
+  it("sonda ausente ou sem data válida (null, undefined, NaN, string ISO): não voltou", () => {
+    expect(prontaDepois(null, 5)).toBe(false);
+    expect(prontaDepois(undefined, 5)).toBe(false);
+    for (const em of [undefined, Number.NaN, Number.POSITIVE_INFINITY, "2026-10-13T12:00:00Z"]) {
+      expect(prontaDepois({ ...PRONTO, em } as unknown as Inventario, 5)).toBe(false);
+    }
+    expect(prontaDepois({ ...PRONTO, em: 6 }, Number.NaN)).toBe(false);
+  });
+
+  it("epoch ms não depende de fuso: o mesmo instante em fusos diferentes é o mesmo número", () => {
+    const negada = Date.parse("2026-10-13T09:45:00-03:00");
+    expect(prontaDepois({ ...PRONTO, em: Date.parse("2026-10-13T12:46:00Z") }, negada)).toBe(true);
+    expect(prontaDepois({ ...PRONTO, em: Date.parse("2026-10-13T12:45:00Z") }, negada)).toBe(false);
   });
 });

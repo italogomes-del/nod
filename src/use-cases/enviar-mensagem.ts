@@ -6,7 +6,7 @@ import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
-import { motivoHarnessIndisponivel } from "../domain/harness.ts";
+import { iaDaNegacao, motivoHarnessIndisponivel } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
@@ -149,13 +149,17 @@ export async function mensagemExecutorIndisponivel(
   // NOD-171: o harness escolhido e o inventário DELE; sem harness (turno antigo, catcher), o do motor.
   const nome = p.harness ?? motorDe(p.executor);
   const motivo = motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido);
+  // NOD-220: a IA que negou vai no payload; a web decide "já voltou" pela sonda DELA, nunca pela do motor em uso.
+  // Só o harness do turno é IA que negou: sem ele, quem faltou foi o executor (motorDe), e `nome` "claude-cli" é o motor
+  // local, não a IA. Gravar `ia` aí prenderia a web esperando o Claude Code num bot que roda no Codex (revisão do #303).
+  const ia = iaDaNegacao(p.harness);
   return deps.repos.mensagens.criar({
     conversaId: p.conversaId,
     turnoId: p.turnoId,
     autoria: autoriaAgente({ agenteId: p.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
     texto: redigir("executor-indisponivel", p.agora, { motivo, desde: horaDaFrase(p.inventario.em, p.agora) }),
-    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}) },
+    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(ia ? { ia } : {}), ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}) },
     confianca: "confiavel",
   });
 }
