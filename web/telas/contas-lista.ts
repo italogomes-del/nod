@@ -80,7 +80,8 @@ function detalheDe(c: ContaIa, x: ContextoContas): DetalheDaConta | null {
 
 /** A conta que os bots usam agora: a primeira fora do limite (na máquina do filtro, se há filtro). */
 function emUso(x: ContextoContas): string | null {
-  const lista = x.contas.contas.filter((c) => !noLimite(c, x.agora) && (!x.ui.filtro || prontaEm(c, x.ui.filtro)));
+  // QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
+  const lista = x.contas.contas.filter((c) => !noLimite(c, x.agora) && (x.ui.filtro ? prontaEm(c, x.ui.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
   return lista[0]?.id ?? null;
 }
 
@@ -139,7 +140,12 @@ function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null):
   const cancelar = `<button type="button" class="ob-link" data-act="cl-login-cancelar" data-login="${id}">Cancelar</button>`;
   if (g.fase === "pronto") {
     const outra = g.contaId && g.contaFinalId && g.contaFinalId !== g.contaId;
-    return `<div class="cl-login ok" data-login="${id}">${cab(`<span class="cl-ok">✓ Entrou</span>`)}${outra ? `<p class="cl-aviso">Você entrou com outra conta, não a ${esc(conta ? nomeDaContaNaTela(conta) : "pedida")}. Ela entrou na lista como uma conta nova.</p>` : ""}</div>`;
+    // QA do PR #306 (ISSUE-003): a "conta nova" era uma conta que já estava na lista — a tela diz qual, em vez de só sumir.
+    const jaNaLista = !g.contaId && g.contaFinalId ? x.contas.contas.find((c) => c.id === g.contaFinalId) : undefined;
+    const aviso = outra
+      ? `<p class="cl-aviso">Você entrou com outra conta, não a ${esc(conta ? nomeDaContaNaTela(conta) : "pedida")}. Ela entrou na lista como uma conta nova.</p>`
+      : jaNaLista ? `<p class="cl-aviso">Essa conta já estava na lista: <b>${esc(nomeDaContaNaTela(jaNaLista))}</b>. A ${esc(nome)} ficou com ela. <button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button></p>` : "";
+    return `<div class="cl-login ok" data-login="${id}">${cab(`<span class="cl-ok">✓ Entrou</span>`)}${aviso}</div>`;
   }
   if (g.fase === "falhou" || g.fase === "cancelado") {
     const tentar = `<button type="button" class="bt sm" data-act="cl-login-de-novo" data-login="${id}">Tentar de novo</button><button type="button" class="ob-link" data-act="cl-login-fechar" data-login="${id}">Fechar</button>`;
@@ -175,7 +181,7 @@ function menu(c: ContaIa, x: ContextoContas): string {
     const m = x.maquinas.find((y) => y.id === mid);
     if (!m) return "";
     const outras = nomes(logadas.filter((o) => o !== mid));
-    return `<button type="button" data-act="cl-sair" data-id="${id}" data-maquina="${esc(mid)}">${ICONE.sair}<span>Sair do${m.plataforma === "darwin" ? "" : "a"} ${esc(nomeCurto(m, x.maquinas))}<small>${outras.length ? `continua n${outras.length === 1 && x.maquinas.find((y) => y.id === logadas.find((o) => o !== mid))?.plataforma === "darwin" ? "o" : "a"} ${esc(outras.join(", "))}` : "fica sem nenhuma máquina"}</small></span></button>`;
+    return `<button type="button" data-act="cl-sair" data-id="${id}" data-maquina="${esc(mid)}">${ICONE.sair}<span>Sair d${m.plataforma === "darwin" ? "o" : "a"} ${esc(nomeCurto(m, x.maquinas))}<small>${outras.length ? `continua n${outras.length === 1 && x.maquinas.find((y) => y.id === logadas.find((o) => o !== mid))?.plataforma === "darwin" ? "o" : "a"} ${esc(outras.join(", "))}` : "fica sem nenhuma máquina"}</small></span></button>`;
   }).join("");
   return `<div class="cl-menu" aria-label="${esc(nomeDaContaNaTela(c))}">
       <span class="cl-menu-tit">${esc(nomeDaContaNaTela(c))}</span>
@@ -296,6 +302,13 @@ function confirmacao(x: ContextoContas): string {
   return `<div class="cl-fundo" data-act="cl-confirmar-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="cl-dialogo-tit"><h3 id="cl-dialogo-tit">${esc(titulo)}</h3>${corpo}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="cl-confirmar-fechar" data-cl-autofoco>Cancelar</button>${botao}</div></div>`;
 }
 
+/** QA do PR #306 (ISSUE-009): "Entrando…" só enquanto algum login corre; terminado, a linha diz como acabou. */
+function estadoDosLogins(ls: readonly LoginNaTela[]): string {
+  const fases = ls.map((l) => (l.onde === "vm" ? l.login.fase : "abrindo"));
+  if (fases.some((f) => f !== "pronto" && f !== "falhou" && f !== "cancelado")) return '<span class="contas-estado e-disp">Entrando…</span>';
+  return fases.includes("pronto") ? '<span class="contas-estado e-uso">Entrou</span>' : "";
+}
+
 /** Os logins de contas novas (sem conta na lista ainda) aparecem embaixo da lista. */
 function loginsSemConta(x: ContextoContas): string {
   const soltos = x.ui.logins.filter((l) => {
@@ -312,7 +325,7 @@ function loginsSemConta(x: ContextoContas): string {
   }
   return [...porConta.entries()].map(([k, ls]) => {
     const [ia, apelido] = k.split(":") as [IaComConta, string];
-    return `<li class="cl-linha entrando"><span class="cl-alca" aria-hidden="true"></span><span class="cl-pos" aria-hidden="true">+</span>${logoDaIa(ia, "cl-logo")}<div class="cl-corpo"><div class="cl-nome"><b>${esc(PROVEDOR[ia].nome)}${apelido ? ` · ${esc(apelido)}` : ""}</b></div><div class="cl-ident"><span>conta nova · pelo ${esc(PROVEDOR[ia].cli)}</span></div>${ls.map((l) => blocoDoLogin(l, x, null)).join("")}</div><div class="cl-dir"><span class="contas-estado e-disp">Entrando…</span></div><div class="cl-mais"></div></li>`;
+    return `<li class="cl-linha entrando"><span class="cl-alca" aria-hidden="true"></span><span class="cl-pos" aria-hidden="true">+</span>${logoDaIa(ia, "cl-logo")}<div class="cl-corpo"><div class="cl-nome"><b>${esc(PROVEDOR[ia].nome)}${apelido ? ` · ${esc(apelido)}` : ""}</b></div><div class="cl-ident"><span>conta nova · pelo ${esc(PROVEDOR[ia].cli)}</span></div>${ls.map((l) => blocoDoLogin(l, x, null)).join("")}</div><div class="cl-dir">${estadoDosLogins(ls)}</div><div class="cl-mais"></div></li>`;
   }).join("");
 }
 

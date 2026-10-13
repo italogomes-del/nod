@@ -73,7 +73,8 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
           trocarLogin(l.login.id, (x) => (x.onde === "vm" ? { ...x, login: novo } : x));
           if (novo.fase === "pronto") {
             d.invalidar();
-            d.agendar(() => trocarLogin(novo.id, () => null), PRONTO_VISIVEL_MS);
+            // A conta "nova" que já estava na lista deixa o aviso até a pessoa fechar (QA do PR #306, ISSUE-003).
+            if (novo.contaId || !novo.contaFinalId) d.agendar(() => trocarLogin(novo.id, () => null), PRONTO_VISIVEL_MS);
           }
         }
       })().finally(() => { conferindo = false; conferir(); });

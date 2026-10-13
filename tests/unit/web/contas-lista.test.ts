@@ -62,6 +62,35 @@ describe("lista única de contas (ADR-102)", () => {
     expect(html).toContain("Remover de todas as máquinas");
   });
 
+  // Regression: ISSUE-004 — o menu dizia "Sair doa vm-qa". Found by /qa on 2026-10-13.
+  it("QA do PR #306: o menu diz 'Sair da vm-bots' e 'Sair do Mac'", () => {
+    const html = renderListaDeContas(ctx({ ui: { menu: PESSOAL.id } }));
+    expect(html).toContain("Sair da vm-bots");
+    expect(html).toContain("Sair do Mac");
+    expect(html).not.toContain("doa ");
+  });
+
+  // Regression: ISSUE-008 — sem máquina nenhuma, a primeira conta aparecia "Em uso". Found by /qa on 2026-10-13.
+  it("QA do PR #306: conta sem máquina não aparece 'Em uso'", () => {
+    const sem = { ...CONTAS, contas: [{ ...PESSOAL, maquinas: [] }, GPT] };
+    const html = renderListaDeContas(ctx({ contas: sem }));
+    expect(html.indexOf("Em uso")).toBeGreaterThan(html.indexOf("ChatGPT · Pessoal"));
+  });
+
+  // Regression: ISSUE-003 — entrar numa conta que já estava na lista não dizia nada. Found by /qa on 2026-10-13.
+  it("QA do PR #306: login de conta nova que era uma conta da lista avisa qual", () => {
+    const html = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ contaId: null, fase: "pronto", contaFinalId: PESSOAL.id }), codigo: "", enviando: false, erroEnvio: null }] } }));
+    expect(html).toContain("já estava na lista");
+    expect(html).toContain("Claude · Pessoal");
+  });
+
+  // Regression: ISSUE-009 — a linha da conta nova seguia "Entrando…" depois do login concluído. Found by /qa on 2026-10-13.
+  it("QA do PR #306: a linha da conta nova diz 'Entrou' quando o login termina", () => {
+    const html = renderListaDeContas(ctx({ ui: { logins: [{ onde: "vm", login: login({ contaId: null, fase: "pronto" }), codigo: "", enviando: false, erroEnvio: null }] } }));
+    expect(html).not.toContain("Entrando…");
+    expect(html).toContain(">Entrou</span>");
+  });
+
   it("sair: o diálogo diz o que acontece com os bots da máquina; remover: de quantas máquinas", () => {
     const sair = renderListaDeContas(ctx({ ui: { confirmar: { tipo: "sair", contaId: PESSOAL.id, maquinaId: VM } } }));
     expect(sair).toContain("Sair da Claude · Pessoal na vm-bots?");
