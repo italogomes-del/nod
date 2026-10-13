@@ -2722,7 +2722,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-confirmar": async () => { const volta = gatilhoDoDialogo(); await contasDaPessoa.confirmar(); focarGatilho(volta); },
   "cl-confirmar-fechar": () => { const volta = gatilhoDoDialogo(); contasDaPessoa.fecharConfirmacao(); focarGatilho(volta); },
   "cl-entrar": (el) => contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? ""),
-  "cl-nova": () => { contasDaPessoa.abrirNova(); document.querySelector<HTMLInputElement>("#espaco [data-cl-nova-apelido]")?.focus(); },
+  "cl-nova": () => { contasDaPessoa.abrirNova(); document.querySelector<HTMLElement>("#espaco [data-cl-nova-apelido], #espaco [data-act='cl-conectar-vm']")?.focus(); },
+  // Sem máquina para o login: fecha a conta nova e abre o Conectar em Máquinas, já no comando com o convite.
+  "cl-conectar-vm": (el) => { contasDaPessoa.fecharNova(); abrirEspaco("maquinas"); return ACOES["conectar-maquina"]!(el); },
   "cl-nova-fechar": () => contasDaPessoa.fecharNova(),
   "cl-nova-na-maquina": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDaPessoa.novaNaMaquina(ia, el.dataset.maquina ?? ""); },
   "cl-modo": (el) => { const m = el.dataset.modo; if (m === "perguntar" || m === "automatico") void contasDaPessoa.modo(m); },

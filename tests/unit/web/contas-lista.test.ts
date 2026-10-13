@@ -126,6 +126,37 @@ describe("lista única de contas (ADR-102)", () => {
   it("com mais de uma conta, o modo vale para a lista inteira", () => {
     expect(renderListaDeContas(ctx())).toContain('data-act="cl-modo" data-modo="automatico"');
   });
+
+  describe("PR #306: Adicionar conta sem máquina que receba o login", () => {
+    const nova = { ia: "claude-cli" as const, apelido: "", maquinas: [] };
+
+    it("sem máquina nenhuma: no lugar do formulário, o porquê e o Conectar uma VM", () => {
+      const html = renderListaDeContas(ctx({ maquinas: [], ui: { nova } }));
+      expect(html).not.toContain('data-form="cl-nova"');
+      expect(html).toContain("o login do Claude e do ChatGPT é feito no Mac, pelo app do nod, ou numa VM");
+      expect(html).toContain('data-act="cl-conectar-vm"');
+      expect(html).toContain('data-act="cl-nova-fechar"');
+      expect(html).toContain("No Mac, o login é feito pelo app do nod");
+    });
+
+    it("só o Mac conectado e a pessoa no navegador: o aviso diz para abrir o app nele", () => {
+      const html = renderListaDeContas(ctx({ maquinas: [maquina(MAC, "MacBook", { plataforma: "darwin" })], ui: { nova } }));
+      expect(html).not.toContain('data-form="cl-nova"');
+      expect(html).toContain("Seu Mac já está conectado: abra o app do nod nele");
+    });
+
+    it("VM desconectada não conta como máquina para o login", () => {
+      const html = renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots", { conectada: false })], ui: { nova } }));
+      expect(html).toContain('data-act="cl-conectar-vm"');
+    });
+
+    it("com uma VM conectada (ou dentro do app do Mac), o formulário de sempre", () => {
+      expect(renderListaDeContas(ctx({ maquinas: [maquina(VM, "vm-bots")], ui: { nova } }))).toContain('data-form="cl-nova"');
+      const noMac = renderListaDeContas(ctx({ maquinas: [maquina(MAC, "MacBook", { plataforma: "darwin" })], noApp: true, detalhes: { maquinaId: MAC, contas: [] }, ui: { nova } }));
+      expect(noMac).toContain('data-form="cl-nova"');
+      expect(noMac).toContain("Este Mac");
+    });
+  });
 });
 
 describe("Provedores e Máquinas com a lista (ADR-102)", () => {

@@ -251,6 +251,10 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
 function formNova(x: ContextoContas): string {
   const n = x.ui.nova;
   if (!n) return `<button type="button" class="bt cl-adicionar" data-act="cl-nova">${ICONE.mais}Adicionar conta</button>`;
+  // O login mora numa máquina (a impressão da conta só existe depois dele): sem uma que receba o login, não há formulário,
+  // e sim o porquê e o caminho (pedido do Marlon no PR #306: "não entendi esse ponto de conectar em uma máquina").
+  const recebem = x.maquinas.filter((m) => m.conectada && (m.plataforma !== "darwin" || ehEsteMac(m, x)));
+  if (recebem.length === 0) return semMaquina(x);
   const ias: IaComConta[] = ["claude-cli", "codex-cli"];
   const provedor = ias.map((ia) => `<label class="cl-prov${n.ia === ia ? " ativo" : ""}"><input type="radio" name="ia" value="${ia}" data-cl-nova-ia${n.ia === ia ? " checked" : ""}>${logoDaIa(ia, "cl-logo")}<span><b>${esc(PROVEDOR[ia].nome)}</b><small>pelo ${esc(PROVEDOR[ia].cli)}</small></span></label>`).join("");
   const maqs = x.maquinas.filter((m) => m.conectada).map((m) => {
@@ -266,9 +270,25 @@ function formNova(x: ContextoContas): string {
       <label class="cl-campo">Apelido<input name="apelido" maxlength="40" placeholder="ex.: Leapy, Pessoal, Freela" value="${esc(n.apelido)}" data-cl-nova-apelido data-manter-foco="cl-nova-apelido"></label>
       <small class="mudo">Aparece na lista e na conversa. E-mail e organização ficam só nas suas máquinas.</small>
       <span class="cl-campo-tit">Entrar em</span>
-      <div class="cl-maqs-form">${maqs || '<p class="mudo">Nenhuma máquina conectada agora. Conecte uma em Máquinas.</p>'}</div>
+      <div class="cl-maqs-form">${maqs}</div>
       <div class="cl-nova-acoes"><button type="button" class="bt" data-act="cl-nova-fechar">Cancelar</button><button type="submit" class="bt pri"${marcadas === 0 ? " disabled" : ""}>${marcadas > 1 ? `Entrar nas ${marcadas} máquinas` : "Entrar"}</button></div>
     </form>`;
+}
+
+/** "Adicionar conta" sem nenhuma máquina que receba o login: diz por que e leva a conectar uma. */
+function semMaquina(x: ContextoContas): string {
+  const macFechado = x.maquinas.some((m) => m.conectada && m.plataforma === "darwin");
+  const mac = x.noApp
+    ? ""
+    : macFechado
+      ? "<p>Seu Mac já está conectado: abra o app do nod nele para entrar por lá.</p>"
+      : "<p>No Mac, o login é feito pelo app do nod: abra o app e ele se conecta sozinho.</p>";
+  return `<div class="espaco-cartao cl-nova cl-sem-maquina" role="group" aria-labelledby="cl-sem-maquina-tit">
+      <b class="cl-nova-tit" id="cl-sem-maquina-tit">Nova conta</b>
+      <p>Suas contas de IA ficam nas suas máquinas: o login do Claude e do ChatGPT é feito no Mac, pelo app do nod, ou numa VM. O nod guarda só o apelido. Conecte uma máquina para entrar.</p>
+      ${mac}
+      <div class="cl-nova-acoes"><button type="button" class="bt" data-act="cl-nova-fechar">Cancelar</button><button type="button" class="bt pri" data-act="cl-conectar-vm">${ICONE.servidor}Conectar uma VM</button></div>
+    </div>`;
 }
 
 /** As confirmações (G1-P5 Sair, G1-P6 Remover) num diálogo sobre a tela. */

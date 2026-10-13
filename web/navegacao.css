@@ -725,6 +725,8 @@ div.mac-medidor { padding-right: 36px; }
 .cl-adicionar { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; }
 .cl-nova { margin-top: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
 .cl-nova-tit { font-size: 15px; }
+.cl-sem-maquina p { margin: 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.cl-sem-maquina .bt.pri { display: inline-flex; align-items: center; gap: 8px; }
 .cl-provs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cl-prov { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
 .cl-prov.ativo { border: 1.5px solid var(--ink); }
