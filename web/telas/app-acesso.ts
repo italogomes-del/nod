@@ -130,13 +130,14 @@ export function passos(app: string, bot: string, ativo: 1 | 2): string {
 /**
  * `semJanela` (revisão do PR #264, NOD-208): a janela não abriu. Sem o link, o card curto ficava girando até o
  * prazo de 10 min sem caminho para entrar — o caso comum do "Tentar de novo" depois da re-sonda.
+ * definido em 2026-10-12 (GFK-2019): o desktop também mantém o link, porque não confirma a abertura externa.
  */
 export function blocoEsperando(nome: string, url: string | null, curto = false, semJanela = false): string {
   const abrir = (texto: string) => `<a class="link" href="${esc(url ?? "")}" target="_blank" rel="noopener noreferrer">${texto} ${SETA_EXTERNA}</a>`;
   if (semJanela && url) {
     return curto
       ? `<div class="esperando esperando-curto">${GIRO}<span>Esperando você entrar no ${esc(nome)}…</span></div>${abrir("Abrir o login")}`
-      : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>O navegador não abriu a janela de login. Abra pelo link; quando terminar, isto continua sozinho.</p>${abrir("Abrir o login")}</div></div>`;
+      : `<div class="esperando">${GIRO}<div><b>Esperando você entrar no ${esc(nome)}</b><p>Se a janela de login não abriu, use o link. Quando terminar, isto continua sozinho.</p>${abrir("Abrir o login")}</div></div>`;
   }
   const link = url ? abrir("Abrir o login de novo") : "";
   // Sem URL ainda (o conectar em voo ou a re-sonda da NOD-208, que pode levar 20 s sem janela): nada de "está aberta".

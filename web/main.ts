@@ -1330,6 +1330,10 @@ const conexoes = criarConexoes({
       return janela;
     } catch { return null; }
   },
+  ...(window.nodDesktop !== undefined ? { abrirNoNavegador: (url: string) => {
+    // definido em 2026-10-12 (GFK-2019): o handler do Electron pede abertura fora e retorna deny/null, sem confirmação.
+    window.open(url, "_blank", "noopener,noreferrer");
+  } } : {}),
   esperar: (ms) => new Promise((r) => window.setTimeout(r, ms)),
   agora: () => Date.now(),
 });

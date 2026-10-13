@@ -67,12 +67,14 @@ describe("marketplace (revisto em 2026-09-25)", () => {
     expect(html).toMatch(/id="app-clickup">[\s\S]*?O login deu certo, mas o app não respondeu\.[\s\S]*?data-act="conectar-app" data-id="clickup">Tentar de novo/);
   });
 
-  it("conectando sem janela (pop-up bloqueado, re-sonda da NOD-208): o cartão e a gaveta mostram 'Abrir o login'", () => {
+  it("conectando sem janela monitorável (desktop, pop-up bloqueado, re-sonda): o cartão e a gaveta mantêm 'Abrir o login'", () => {
     const sem = { clickup: { url: "https://login/x", falhou: null, semJanela: true } };
     const cartao = renderConectores({ ...base, conectando: sem });
     expect(cartao).toMatch(/id="app-clickup">[\s\S]*?Esperando você entrar no ClickUp[\s\S]*?<a class="link" href="https:\/\/login\/x" target="_blank" rel="noopener noreferrer">Abrir o login /);
     const gaveta = renderConectores({ ...base, conectando: sem, tela: { tipo: "conectores", gaveta: { slug: "clickup", passo: "detalhes" } } });
-    expect(gaveta).toContain("O navegador não abriu a janela de login.");
+    expect(gaveta).toContain("Se a janela de login não abriu, use o link. Quando terminar, isto continua sozinho.");
+    expect(gaveta).toContain('href="https://login/x" target="_blank" rel="noopener noreferrer">Abrir o login ');
+    expect(gaveta).not.toContain("O navegador não abriu a janela de login.");
     expect(gaveta).not.toContain("A janela de login está aberta.");
   });
 

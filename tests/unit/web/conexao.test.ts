@@ -3,7 +3,7 @@ import type { ConexaoApp } from "../../../web/estado/reducer.ts";
 import { criarConexoes, ERROS_SEGUIDOS_MAX, FALHA_APP, FALHA_JANELA_FECHADA, FALHA_PRAZO, FALHA_SERVIDOR, INTERVALO_MS, PRAZO_MS, type DepsConexao, type JanelaLogin } from "../../../web/lib/conexao.ts";
 
 /** Relógio falso: `esperar` avança o tempo na hora, sem timer de verdade. */
-function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string; conectadoDireto?: boolean; janela?: JanelaLogin | null; conectarFalha?: boolean }) {
+function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string; conectadoDireto?: boolean; janela?: JanelaLogin | null; conectarFalha?: boolean; conectar?: DepsConexao["conectar"]; abrirNoNavegador?: (url: string) => void }) {
   let agora = 0;
   const mudancas: [string, ConexaoApp | null][] = [];
   const conectados: string[] = [];
@@ -11,12 +11,14 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
   let conectou = 0;
   let abriu = 0;
   const ordem: string[] = [];
+  const urlsAbertas: string[] = [];
   const janela: JanelaLogin | null = p.janela === undefined ? { closed: false, location: { href: "" }, close() { (this as { closed: boolean }).closed = true; } } : p.janela;
   const deps: DepsConexao = {
-    conectar: async () => {
+    conectar: async (slug) => {
       conectou += 1;
       ordem.push("conectar");
       if (p.conectarFalha) throw new Error("servidor");
+      if (p.conectar) return p.conectar(slug);
       return p.conectadoDireto ? { conectado: true } : { url: p.url ?? "https://login.exemplo/x" };
     },
     verificar: async () => {
@@ -28,11 +30,101 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
     mudou: (slug, valor) => void mudancas.push([slug, valor]),
     conectado: (slug) => void conectados.push(slug),
     abrirJanela: () => { abriu += 1; ordem.push("abrir"); return janela; },
+    ...(p.abrirNoNavegador ? { abrirNoNavegador: (url: string) => { ordem.push("abrir-externo"); urlsAbertas.push(url); return p.abrirNoNavegador!(url); } } : {}),
     esperar: async (ms) => void (agora += ms),
     agora: () => agora,
   };
-  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou, conectou: () => conectou, abriu: () => abriu, ordem };
+  return { conexoes: criarConexoes(deps), mudancas, conectados, janela, verificou: () => verificou, conectou: () => conectou, abriu: () => abriu, ordem, urlsAbertas };
 }
+
+function conectarPendente() {
+  let resolver: ((resposta: { url: string }) => void) | null = null;
+  const promise = new Promise<{ url: string }>((r) => { resolver = r; });
+  return { promise, resolve: (resposta: { url: string }) => resolver?.(resposta) };
+}
+
+describe("login no navegador externo do desktop (GFK-2019)", () => {
+  it("espera a URL real sem janela vazia, mantém link manual e verifica até conectar", async () => {
+    const m = montar({ verificacoes: [false, true], abrirNoNavegador: () => undefined });
+    await m.conexoes.iniciar("slack");
+    expect(m.abriu()).toBe(0);
+    expect(m.urlsAbertas).toEqual(["https://login.exemplo/x"]);
+    expect(m.ordem).toEqual(["conectar", "abrir-externo", "verificar", "verificar"]);
+    expect(m.mudancas).toEqual([["slack", { url: null, falhou: null }], ["slack", { url: "https://login.exemplo/x", falhou: null, semJanela: true }], ["slack", null]]);
+    expect(m.conectados).toEqual(["slack"]);
+  });
+
+  it("se abrir fora lançar, conserva a URL para o link manual e continua verificando", async () => {
+    const m = montar({ verificacoes: [true], abrirNoNavegador: () => { throw new Error("não abriu"); } });
+    await m.conexoes.iniciar("notion");
+    expect(m.abriu()).toBe(0);
+    expect(m.urlsAbertas).toEqual(["https://login.exemplo/x"]);
+    expect(m.mudancas).toContainEqual(["notion", { url: "https://login.exemplo/x", falhou: null, semJanela: true }]);
+    expect(m.conectados).toEqual(["notion"]);
+  });
+
+  it("conta já conectada conclui sem abrir navegador", async () => {
+    const m = montar({ verificacoes: [], conectadoDireto: true, abrirNoNavegador: () => undefined });
+    await m.conexoes.iniciar("github");
+    expect(m.abriu()).toBe(0);
+    expect(m.urlsAbertas).toEqual([]);
+    expect(m.verificou()).toBe(0);
+    expect(m.conectados).toEqual(["github"]);
+  });
+
+  it("Cancelar com conectar em voo impede a abertura quando a URL chega", async () => {
+    const pendente = conectarPendente();
+    const m = montar({ verificacoes: [true], conectar: () => pendente.promise, abrirNoNavegador: () => undefined });
+    const tentativa = m.conexoes.iniciar("slack");
+    m.conexoes.cancelar("slack");
+    pendente.resolve({ url: "https://login.exemplo/cancelado" });
+    await tentativa;
+    expect(m.abriu()).toBe(0);
+    expect(m.urlsAbertas).toEqual([]);
+    expect(m.verificou()).toBe(0);
+    expect(m.mudancas.at(-1)).toEqual(["slack", null]);
+  });
+
+  it("tentativa substituída não abre a URL antiga nem conclui a tentativa vigente", async () => {
+    const antiga = conectarPendente();
+    const atual = conectarPendente();
+    let conectar = 0;
+    const m = montar({ verificacoes: [true], conectar: () => conectar++ === 0 ? antiga.promise : atual.promise, abrirNoNavegador: () => undefined });
+    const primeira = m.conexoes.iniciar("slack");
+    const segunda = m.conexoes.iniciar("slack");
+    antiga.resolve({ url: "https://login.exemplo/antigo" });
+    await primeira;
+    expect(m.urlsAbertas).toEqual([]);
+    expect(m.conectados).toEqual([]);
+    expect(m.conexoes.esperando("slack")).toBe(true);
+    atual.resolve({ url: "https://login.exemplo/atual" });
+    await segunda;
+    expect(m.urlsAbertas).toEqual(["https://login.exemplo/atual"]);
+    expect(m.conectados).toEqual(["slack"]);
+  });
+
+  it("re-sonda da sessão existente resolve antes de abrir outro login externo", async () => {
+    const m = montar({ verificacoes: ["falhou", true], abrirNoNavegador: () => undefined });
+    await m.conexoes.iniciar("slack");
+    const antes = m.ordem.length;
+    await m.conexoes.iniciar("slack");
+    expect(m.ordem.slice(antes)).toEqual(["verificar"]);
+    expect(m.urlsAbertas).toHaveLength(1);
+    expect(m.abriu()).toBe(0);
+    expect(m.conectados).toEqual(["slack"]);
+  });
+
+  it("re-sonda falha: abre a URL do novo login no navegador externo", async () => {
+    const m = montar({ verificacoes: ["falhou", "falhou", true], abrirNoNavegador: () => undefined });
+    await m.conexoes.iniciar("slack");
+    const antes = m.ordem.length;
+    await m.conexoes.iniciar("slack");
+    expect(m.ordem.slice(antes)).toEqual(["verificar", "conectar", "abrir-externo", "verificar"]);
+    expect(m.urlsAbertas).toHaveLength(2);
+    expect(m.abriu()).toBe(0);
+    expect(m.conectados).toEqual(["slack"]);
+  });
+});
 
 describe("login de app sem 'Verificar conexão' (definido em 2026-09-25)", () => {
   it("abre a janela no clique, põe a URL do provedor nela e pergunta sozinho até conectar", async () => {

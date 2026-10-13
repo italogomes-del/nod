@@ -308,8 +308,8 @@ export function comporApp(o: OpcoesCompor): App {
     if (events.length) await criarRepos(trx, escopoDoContexto()).events.gravarComOutbox(events);
   };
 
-  // Conectores vivos (L5): quem carrega e DECIFRA o env é este callback — o conector é da pessoa que o
-  // registrou, então a busca corre as pessoas do servidor (ids são uuid: acha em uma).
+  // definido em 2026-10-12 (NOD-212): na transação autenticada, carregar respeita seu escopo e a RLS,
+  // mesmo se a pessoa não estiver no catálogo. Aprovações executadas fora da transação mantêm a busca pela dona.
   const donoDoConector = new Map<string, Escopo>();
   /**
    * revisto em 2026-09-24 (ADR-048): o gh roda na MÁQUINA do turno, e só para a dona dela. No modo
@@ -371,13 +371,17 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-068: o nod local está no Mac da pessoa e sobe o arquivo que o bot cita; o compartilhado não o alcança.
     ...(compartilhado ? {} : { subirArquivo: criarSubidaComposio() }),
     async carregar(conectorId, contexto) {
-      const escopos = donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
+      const atual = contextoAtual();
+      const escopos = atual
+        ? [{ tenantId: atual.tenantId, pessoaId: atual.pessoaId }]
+        : donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
       for (const escopo of escopos) {
         const c = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).conectores.buscar(conectorId));
         if (!c) continue;
-        donoDoConector.set(conectorId, escopo);
+        const dono = { tenantId: c.tenantId, pessoaId: c.ownerId };
+        donoDoConector.set(conectorId, dono);
         const envDecifrado = c.envCifrado ? (JSON.parse(decifrar(c.envCifrado, chave)) as Record<string, string>) : {};
-        return configDe(conectorId, c, envDecifrado, escopo, contexto.rotina);
+        return configDe(conectorId, c, envDecifrado, dono, contexto.rotina);
       }
       return null;
     },

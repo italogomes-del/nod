@@ -7,8 +7,9 @@ import type { ConexaoApp } from "../estado/reducer.ts";
  * se o login terminou. Terminou: o servidor já sondou o app e virou os cards "Conecte o X" em cards de
  * permitir (ao-conectar-app.ts); quem chamou decide o passo seguinte (`aoConectar`).
  *
- * Sem janela (o app desktop abre links fora; bloqueador de pop-up), a URL fica no estado e o card mostra
- * "Abrir o login" como link comum: a espera continua igual.
+ * definido em 2026-10-12 (GFK-2019): no desktop, o navegador externo só recebe a URL real — o Electron
+ * recusa about:blank e não cria uma janela que possa ser navegada depois. Sem janela monitorável
+ * (desktop ou pop-up bloqueado), a URL fica no estado e o card mostra "Abrir o login": a espera continua.
  */
 
 /** O que a espera usa da janela de login (Window cumpre; o tipo é pequeno para rodar fora do navegador). */
@@ -25,6 +26,8 @@ export type DepsConexao = {
   /** Conectou. Chamado uma vez, depois de `mudou(slug, null)`. */
   conectado(slug: string): void | Promise<void>;
   abrirJanela(nome: string): JanelaLogin | null;
+  /** Desktop: pede abertura da URL real, sem janela monitorável nem confirmação de que o navegador abriu. */
+  abrirNoNavegador?(url: string): void;
   esperar(ms: number): Promise<void>;
   agora(): number;
 };
@@ -122,14 +125,14 @@ export function criarConexoes(deps: DepsConexao) {
       const id = ++proximoId;
       const reSondar = comFalhaDoApp.delete(slug);
       // Re-sonda primeiro: a janela de login só abre se ela não resolver (senão ficaria em branco durante a sonda).
-      let janela = reSondar ? null : deps.abrirJanela(`nod-login-${slug}`);
+      let janela = reSondar || deps.abrirNoNavegador ? null : deps.abrirJanela(`nod-login-${slug}`);
       const viva = { id, janela, depois };
       vivas.set(slug, viva);
       deps.mudou(slug, { url: null, falhou: null });
       if (reSondar) {
         if (await sondarDeNovo(slug, id)) return;
         // Fora do gesto o navegador pode bloquear a janela: sem ela, o card mostra "Abrir o login" como link.
-        janela = viva.janela = deps.abrirJanela(`nod-login-${slug}`);
+        if (!deps.abrirNoNavegador) janela = viva.janela = deps.abrirJanela(`nod-login-${slug}`);
       }
       let r: RespostaConectar;
       try {
@@ -154,11 +157,12 @@ export function criarConexoes(deps: DepsConexao) {
         return;
       }
       try {
-        if (janela && !janela.closed) janela.location.href = r.url;
+        if (deps.abrirNoNavegador) deps.abrirNoNavegador(r.url);
+        else if (janela && !janela.closed) janela.location.href = r.url;
       } catch {
-        // janela de outra origem: segue pelo link do card
+        // janela de outra origem ou navegador externo indisponível: segue pelo link do card
       }
-      // Sem janela (bloqueada, sobretudo a aberta fora do clique depois da re-sonda): o card mostra o link. Janela
+      // Sem janela monitorável (desktop ou bloqueada, sobretudo depois da re-sonda): o card mantém o link. Janela
       // que existiu e a pessoa fechou não conta: a espera desiste por ela com FALHA_JANELA_FECHADA.
       deps.mudou(slug, { url: r.url, falhou: null, ...(janela ? {} : { semJanela: true }) });
       await esperarLogin(slug, id, r.url);
