@@ -256,6 +256,8 @@ Produção na GCP (VM + Cloud SQL, deploy pelo workflow `deploy`): [docs/deploy-
 com chave escopada. O id da chave identifica o computador; o corpo não escolhe o escopo.
 `npm run desktop:build` compila Electron, preload e proxy; a cerca do bundle recusa imports de
 banco/repositórios/casos de uso/HTTP/fundo. `npm run desktop:mac` exige assinatura/notarização.
+`npm run release:mac` publica a pré-release local sem assinatura (`desktop-v<versão>`); o merge que sobe a versão abre
+a issue "Release do app do Mac pendente" ([docs/processo-de-release.md](docs/processo-de-release.md)).
 O proxy usa o runtime do app com ELECTRON_RUN_AS_NODE somente em seu mcp.json.
 Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.mjs` testa JSON-RPC
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
