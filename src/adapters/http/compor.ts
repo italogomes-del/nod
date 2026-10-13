@@ -182,6 +182,8 @@ export type OpcoesCompor = {
   voz?: ProvedoresVoz;
   /** Só em teste (definido em 2026-10-08): o prazo da rede de 2 min (ADR-083 §2), para o e2e não esperar 120 s. Default: REDE_MS. */
   redeMs?: number;
+  /** NOD-214: quando o processo começou (boot.ts), para a carência do lease na adoção. Ausente = a hora da composição. */
+  inicioDoProcesso?: number;
 };
 
 export type App = {
@@ -290,7 +292,22 @@ export function comporApp(o: OpcoesCompor): App {
   // NOD_JUNTAR_DELTAS_MS=0 volta a um frame por pedaço de texto (para medir ou isolar um problema).
   const barramento = criarBarramento({ juntarDeltasMs: env.NOD_JUNTAR_DELTAS_MS === undefined ? JUNTAR_DELTAS_MS : Math.max(0, Number(env.NOD_JUNTAR_DELTAS_MS) || 0) });
   const interruptor = criarInterruptor();
-  const tokens = criarTokenTurno({ agora: relogio });
+  // revisto em 2026-10-12 (NOD-214): o token que falta na memória (o processo é novo, o turno seguiu na máquina durante o
+  // deploy) é procurado pelo hash em `turno_credenciais`, no escopo que o token alega, e só vale com o turno ainda
+  // despachando. O plano dele volta pelo mesmo caminho do despacho (`recomporPlano`, mais abaixo).
+  const tokens = criarTokenTurno({
+    agora: relogio,
+    buscar: (escopo, hash) =>
+      abrirTxEscopada(db, escopo)(async (trx) => {
+        const repos = criarRepos(trx, escopo);
+        const c = await repos.turnoCredenciais.buscarPorHash(hash);
+        if (!c) return null;
+        const t = await repos.turnos.buscar(c.turnoId);
+        if (!t || t.estado !== "despachando") return null;
+        return { turnoId: c.turnoId, tokenHash: c.tokenHash, epoch: c.epoch, identidade: c.identidade, sobreviveReinicio: c.sobreviveReinicio };
+      }),
+    recompor: (identidade, token) => recomporPlano(identidade, token),
+  });
 
   // tenant de uma pessoa (pessoas é catálogo sem RLS por pessoa); cache com recarga quando não achar.
   const tenants = new Map<string, string>();
@@ -440,6 +457,31 @@ export function comporApp(o: OpcoesCompor): App {
 
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
 
+  /**
+   * definido em 2026-10-12 (NOD-214): o plano do turno adotado depois de um reinício, recomposto pelo emitir do despacho
+   * com o token que a máquina já tem e a IA que o despacho escolheu (`turno_credenciais`). null = o turno não está mais
+   * despachando ou a credencial sumiu (entregue ou assentado pelo lease enquanto isso).
+   */
+  async function recomporPlano(identidade: { tenantId: string; pessoaId: string; turnoId: string }, token: string): Promise<PlanoTurno | null> {
+    const escopo: Escopo = { tenantId: identidade.tenantId, pessoaId: identidade.pessoaId };
+    return abrirTxEscopada(db, escopo)(async (trx) => {
+      const d = depsDe(trx, escopo);
+      const [c, t] = await Promise.all([d.repos.turnoCredenciais.buscar(identidade.turnoId), d.repos.turnos.buscar(identidade.turnoId)]);
+      if (!c || !t || t.estado !== "despachando" || !t.machineId) return null;
+      const daPonte = compartilhado || maquinaDaPonte(escopo, t.machineId);
+      const visto = c.harness ? (daPonte ? ponteHttp.harnesses(escopo, t.machineId)[c.harness] : inventarioDe(c.harness)) : undefined;
+      // A máquina já roda esta IA: o inventário que ainda não voltou depois do reinício não a tira do plano.
+      const inventario: Inventario = visto?.estado === "pronto" ? visto : { estado: "pronto", versao: "adotado", em: relogio() };
+      const r = await emitirPlanoTurno(d, {
+        turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
+        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, aFazer, semFerramentasDoNod,
+        maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
+        recompor: { tokenDeTurno: token, harness: c.harness },
+      });
+      return r.data;
+    });
+  }
+
   // NOD-200: a chave liga o guardador e o serviço juntos; desligada, nada fica em memória e `tomar` é sempre null.
   const capturaNoTranscript = capturaLigada(env);
   const computadores = criarComputadores({ dentro, driver: o.computador ?? criarDriverDocker(env), executor: () => executorAtual, guardarTelas: capturaNoTranscript,
@@ -477,6 +519,8 @@ export function comporApp(o: OpcoesCompor): App {
     useCases,
     executor: () => executorAtual,
     agora: relogio,
+    // NOD-214: a carência do lease só no compartilhado — no modo local o reinício é o nod fechado (ADR-045).
+    ...(compartilhado ? { inicioDoProcesso: o.inicioDoProcesso ?? relogio() } : {}),
     listarPessoas: o.listarPessoas,
     esquecerTurno: (id) => {
       interruptor.esquecer(id);
@@ -1168,7 +1212,7 @@ export function comporApp(o: OpcoesCompor): App {
     anexarVoz(server, resolverEscopo) {
       return anexarCanaisVoz(server, {
         resolverEscopo,
-        autorizarTokenTurno: (token) => tokens.autorizar(token),
+        autorizarTokenTurno: (token) => tokens.autorizarComBanco(token),
         ligacaoDoTurno: (turnoId) => tokens.planoDe(turnoId)?.ligacaoVoz?.ligacaoId ?? null,
         anexarMidia: ({ escopo, ligacaoId, retomar, canal }) => voz.anexarMidia({ pessoaId: escopo.pessoaId, ligacaoId, retomar, canal }),
         anexarCerebro: ({ identidade, ligacaoId, canal }) => voz.anexarCerebro({ turnoId: identidade.turnoId, ligacaoId, canal }),

@@ -145,6 +145,11 @@ function tarefasDoTrecho(v: unknown[]): TarefaDoBot[] | null {
   return saida;
 }
 export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.test(v)); return v; }
+/**
+ * NOD-214: a sessão do CLI que a renovação traz (app ≥ PR 1 da NOD-214). Fora do formato vira ausente — nunca derruba a
+ * renovação, que é o lease do turno.
+ */
+export function sessaoDaRenovacao(v: unknown): string | undefined { return typeof v === "string" && UUID.test(v) ? v : undefined; }
 const TIPOS_ANEXO: readonly TipoAnexo[] = ["imagem", "pdf", "texto"];
 /**
  * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente

@@ -32,7 +32,8 @@ export type IdentidadeCerebro = Escopo & { turnoId: string; agenteId: string };
 
 export type DepsCanaisVoz = {
   resolverEscopo(req: IncomingMessage): Escopo | null;
-  autorizarTokenTurno(token: string): IdentidadeCerebro | null;
+  /** revisto em 2026-10-12 (NOD-214): pode ir ao banco (turno adotado depois de um reinício). */
+  autorizarTokenTurno(token: string): IdentidadeCerebro | null | Promise<IdentidadeCerebro | null>;
   /** A ligação do turno-cérebro (do plano guardado com o token); null = o turno não é de ligação. */
   ligacaoDoTurno(turnoId: string): string | null;
   /** Primeira mensagem `ola` da mídia: anexa o canal à ligação, ou devolve o código de fechamento. */
@@ -129,15 +130,19 @@ export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz 
     if (CEREBRO.test(caminho)) {
       if (req.headers.origin !== undefined) return recusar(socket, 403);
       const auth = req.headers.authorization ?? "";
-      const identidade = auth.startsWith("Bearer ") ? deps.autorizarTokenTurno(auth.slice(7)) : null;
-      if (!identidade) return recusar(socket, 401);
-      const ligacaoId = deps.ligacaoDoTurno(identidade.turnoId);
-      if (!ligacaoId) return recusar(socket, 404);
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        const canal = canalDeSocket(ws);
-        const codigo = deps.anexarCerebro({ identidade, ligacaoId, canal });
-        if (codigo !== null) canal.fechar(codigo);
-      });
+      // NOD-214: a autorização pode ir ao banco; o erro dela recusa o upgrade em vez de derrubar o processo.
+      void Promise.resolve(auth.startsWith("Bearer ") ? deps.autorizarTokenTurno(auth.slice(7)) : null)
+        .catch(() => null)
+        .then((identidade) => {
+          if (!identidade) return recusar(socket, 401);
+          const ligacaoId = deps.ligacaoDoTurno(identidade.turnoId);
+          if (!ligacaoId) return recusar(socket, 404);
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            const canal = canalDeSocket(ws);
+            const codigo = deps.anexarCerebro({ identidade, ligacaoId, canal });
+            if (codigo !== null) canal.fechar(codigo);
+          });
+        });
       return;
     }
     recusar(socket, 404);

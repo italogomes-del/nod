@@ -8,6 +8,7 @@ import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
 
 /** O que a regra de queda usa de Deps: o varredor de lease (laço de fundo) monta só isto. */
 export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora">;
@@ -115,6 +116,12 @@ export type EntradaVarredura = {
   inicioDoProcesso?: number | null;
   /** Só no modo compartilhado: a máquina voltou a puxar? Ausente = modo local, a máquina é este processo. */
   maquinaPresente?: (machineId: string | null) => boolean;
+  /**
+   * NOD-214 (carência do lease no boot): até aqui (inicioDoProcesso + LEASE_MS), o turno cuja máquina atravessa o
+   * reinício (`turno_credenciais.sobrevive_reinicio`) NÃO é assentado por `reinicio_servidor` — a máquina segue rodando e
+   * a próxima renovação dela adota o turno. Ausente = sem carência (modo local).
+   */
+  carenciaAte?: number | null;
 };
 
 /**
@@ -125,10 +132,22 @@ export type EntradaVarredura = {
 export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarredura): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
   const agora = deps.agora();
   const caidos: Caido[] = [];
+  const naCarencia = input.carenciaAte != null && agora < input.carenciaAte ? await deps.repos.turnoCredenciais.quaisSobrevivem(input.turnos.map((t) => t.id)) : new Set<string>();
   for (const vencido of input.turnos) {
+    if (naCarencia.has(vencido.id)) continue;
     const motivo = motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
     const turno = await deps.repos.turnos.interromper(vencido.id, motivo);
-    if (turno) caidos.push({ turno, motivo, perdidoDesde: ultimoSinalDoTurno(vencido, agora), maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
+    if (!turno) continue;
+    // NOD-214: a sessão que a renovação gravou no turno vale como a da entrega que não veio (a próxima mensagem a
+    // retoma), e a credencial sai — o turno assentado não é mais adotável. Sem credencial (turno de antes da 0073), nada.
+    const cred = await deps.repos.turnoCredenciais.buscar(turno.id);
+    if (cred) {
+      const sessao = await deps.repos.turnos.sessaoDoTurno(turno.id);
+      // A máquina não diz aqui se bifurca: `false` nunca põe a conversa na sessão da frente (ADR-099, I8).
+      if (sessao) await propagarSessaoDoTurno(deps, { turno, sessaoCli: sessao.sessaoCli, executor: cred.executor, harness: cred.harness, maquinaBifurca: false });
+      await deps.repos.turnoCredenciais.apagar(turno.id);
+    }
+    caidos.push({ turno, motivo, perdidoDesde: ultimoSinalDoTurno(vencido, agora), maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
   }
   return aplicar(deps, caidos, input.prazoMs);
 }

@@ -37,7 +37,8 @@ export interface IdentidadeDeTurno extends Escopo {
 
 export interface DepsRoteador {
   resolverEscopo(req: IncomingMessage): Escopo | null;
-  autorizarTokenTurno?(token: string): IdentidadeDeTurno | null;
+  /** revisto em 2026-10-12 (NOD-214): pode ir ao banco (o token de um turno adotado depois de um reinício). */
+  autorizarTokenTurno?(token: string): IdentidadeDeTurno | null | Promise<IdentidadeDeTurno | null>;
   autorizarMaquina?(token: string): Promise<(Escopo & { chaveId: string }) | null>;
   /** Último recurso quando nenhuma rota casa (ex.: estático). Devolve true se respondeu. */
   fallback?(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
@@ -113,7 +114,7 @@ export function criarRoteador(rotas: Rota[], deps: DepsRoteador): (req: Incoming
       }
       const auth = req.headers.authorization ?? "";
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      const identidade = token && deps.autorizarTokenTurno ? deps.autorizarTokenTurno(token) : null;
+      const identidade = token && deps.autorizarTokenTurno ? await deps.autorizarTokenTurno(token) : null;
       if (!identidade) {
         json(res, 401, { codigo: "nao_permitido", mensagem: "token de turno ausente ou inválido" });
         return;

@@ -146,12 +146,13 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
     staticDir: o.staticDir ?? env.NOD_STATIC_DIR,
-    autorizarTokenTurno: app.tokens.autorizar,
+    // NOD-214: o token de um turno que atravessou o reinício é reconhecido pelo banco.
+    autorizarTokenTurno: app.tokens.autorizarComBanco,
     // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
     autorizarMaquina: app.autorizarMaquina,
     sessao,
@@ -278,7 +279,10 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       app.drenarPonte();
       // definido em 2026-10-05 (NOD-175): só o compartilhado espera tokens — no modo local o turno roda neste processo e
       // o Ctrl+C do `npm start` não pode travar 10 min; o servidor local espera só as ligações, como antes.
-      const turnos = () => (app.compartilhado ? app.tokens.ativos() + app.reservasEmVoo() : 0);
+      // revisto em 2026-10-12 (NOD-214, emenda à ADR-071): o turno da máquina que atravessa o reinício (`sobreviveReinicio`
+      // no anúncio) não segura o deploy — ela continua rodando, e o processo novo o adota pelo token (turno_credenciais).
+      // A drenagem espera só os outros (app antigo, a ponte interna), as reservas em voo e as ligações; o teto segue.
+      const turnos = () => (app.compartilhado ? app.tokens.ativos({ semSobrevive: true }) + app.reservasEmVoo() : 0);
       const pendente = () => app.voz.vivas() > 0 || turnos() > 0;
       while (pendente() && agora() - inicio < prazoMs) {
         await new Promise((r) => setTimeout(r, Math.min(intervaloMs, Math.max(1, prazoMs - (agora() - inicio)))));

@@ -9,11 +9,11 @@ import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
-import type { PonteInternaNod } from "../../fundo/ponte-interna.ts";
+import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -28,7 +28,7 @@ type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo
  * NOD-199: o que um anúncio da máquina diz das IAs dela, lido com os mesmos filtros nas duas rotas que o recebem
  * (`conectar` e `inventario`): só ids integrados, `semLacoDeVoz` só de harness pronto neste anúncio, capacidades validadas.
  */
-type LeituraAnuncio = { inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas> };
+type LeituraAnuncio = { inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas>; sobreviveReinicio: boolean };
 function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   const inv = inventario(b.inventario, agora);
   // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
@@ -42,7 +42,8 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
   const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
   // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (com bifurcaSessao, a rede de 2 min bifurca).
   const capacidades = capacidadesAnunciadas(b.capacidades);
-  return { inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades };
+  // NOD-214: o cliente com o laço que atravessa o reinício do servidor (só o booleano conta; app antigo não manda).
+  return { inv, gh, motores, harnessesAusente: b.harnesses === undefined, semLacoDeVoz, capacidades, sobreviveReinicio: b.sobreviveReinicio === true };
 }
 
 /** ADR-090: uma máquina conectada da pessoa, como a tela "Máquinas" a mostra (sem credencial nem inventário bruto). */
@@ -128,6 +129,26 @@ export function criarPonteHttpServidor(d: {
     if (!c || c.escopo.pessoaId !== ctx.escopo.pessoaId || c.escopo.tenantId !== ctx.escopo.tenantId) throw new ErroDeDominio("estado_invalido");
     return c;
   }
+  /**
+   * NOD-214: o turno que esta máquina roda e o processo não conhece (despachado antes do reinício). Só com o token do
+   * turno no header — a chave de máquina sozinha nunca devolve um plano; a ponte confere o resto no banco.
+   */
+  async function adocao(ctx: Ctx, c: Conexao, turnoId: string): Promise<DesfechoAdocao | null> {
+    const token = ctx.req.headers["x-nod-token-turno"];
+    if (typeof token !== "string" || token === "" || token.length > 512 || !c.ponte.adotar) return null;
+    try {
+      return await c.ponte.adotar({ pessoaId: ctx.escopo.pessoaId, turnoId, machineId: ctx.params.chaveId!, token });
+    } catch (e) {
+      log("aviso", "adocao_falhou", { turno_id: turnoId, erro: e instanceof Error ? e.name : "desconhecido" });
+      return null;
+    }
+  }
+  async function adotado(ctx: Ctx, c: Conexao, turnoId: string): Promise<PlanoTurno | null> {
+    const r = await adocao(ctx, c, turnoId);
+    if (r?.tipo !== "adotado") return null;
+    c.planos.set(turnoId, r.plano);
+    return r.plano;
+  }
   function rota(nome: string, fn: (ctx: Ctx, corpo: Record<string, unknown>) => Promise<void>): Rota {
     return { metodo: "POST", padrao: new RegExp(`^/${nome}$`), maquina: true, async handler(ctx) {
       ctx.res.setHeader("x-nod-versao-minima", VERSAO_MINIMA_APP);
@@ -160,7 +181,7 @@ export function criarPonteHttpServidor(d: {
       c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
       c.nome = nome;
       c.plataforma = plataforma;
-      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}) };
+      c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
@@ -184,7 +205,7 @@ export function criarPonteHttpServidor(d: {
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
       const { nome, ligacao } = c.anuncio ?? { nome: c.nome, ligacao: false };
-      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}) };
+      c.anuncio = { machineId: ctx.params.chaveId!, nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
@@ -231,16 +252,17 @@ export function criarPonteHttpServidor(d: {
       const c = conexao(ctx), turnoId = uuid(b.turnoId);
       exigir(b.eventos === undefined || (Array.isArray(b.eventos) && b.eventos.length === 0));
       const s = sinais(b.sinais);
-      const plano = c.planos.get(turnoId);
+      const plano = c.planos.get(turnoId) ?? await adotado(ctx, c, turnoId);
       if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
       c.ultimo = d.agora();
+      const sessaoCli = d.descartarSessao ? undefined : sessaoDaRenovacao(b.sessaoCli);
       // ADR-067: as falas da sessão viva e o pedido de mensagens novas viajam na renovação.
       const fs = falas(b.falas);
       // #189: o que o app escreveu na sessão (confirmado) e o que não conseguiu (fica na fila).
       const entregues = idsDeMensagens(b.mensagensEntregues), devolvidas = idsDeMensagens(b.mensagensDevolvidas);
       // ADR-083 (#194): a memória do Mac, amostrada uma vez por máquina e mandada em cada renovação.
       const mem = memoria(b.memoria);
-      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(entregues ? { mensagensEntregues: entregues } : {}), ...(devolvidas?.length ? { mensagensDevolvidas: devolvidas } : {}), ...(mem ? { memoria: mem } : {}) });
+      const r = await c.ponte.renovar({ turnoId, machineId: ctx.params.chaveId!, sinais: s, eventos: [], ...(fs.length ? { falas: fs } : {}), ...(b.aceitaMensagens === true ? { aceitaMensagens: true } : {}), ...(entregues ? { mensagensEntregues: entregues } : {}), ...(devolvidas?.length ? { mensagensDevolvidas: devolvidas } : {}), ...(mem ? { memoria: mem } : {}), ...(sessaoCli ? { sessaoCli } : {}) });
       if (fs.length && r.ativo) d.fala?.(plano);
       if (r.ativo && texto(b.delta, 16_000) && b.delta) d.delta(plano, b.delta);
       if (r.ativo) for (const t of trechos(b.trechos)) {
@@ -255,7 +277,16 @@ export function criarPonteHttpServidor(d: {
       const c = conexao(ctx), lida = entrega(b, ctx.params.chaveId!);
       const e = d.descartarSessao && lida.resultado.sessaoCli !== null ? { ...lida, resultado: { ...lida.resultado, sessaoCli: null } } : lida;
       if (c.recebidas.get(e.turnoId) === e.seqLocal) { ctx.json(200, { ok: true }); return; }
-      if (!c.planos.has(e.turnoId)) throw new ErroDeDominio("nao_permitido");
+      // NOD-214: sem o plano nesta conexão (o processo reiniciou no meio do turno), a entrega adota o turno pelo token —
+      // ou, já assentado (pelo varredor, ou por uma entrega cuja resposta se perdeu), assenta como tardia/duplicada e
+      // responde `ja_assentado`, que o app lê como sucesso.
+      let jaAssentado = false;
+      if (!c.planos.has(e.turnoId)) {
+        const r = await adocao(ctx, c, e.turnoId);
+        if (r?.tipo === "adotado") c.planos.set(e.turnoId, r.plano);
+        else if (r?.tipo === "ja_assentado") jaAssentado = true;
+        else throw new ErroDeDominio("nao_permitido");
+      }
       c.ultimo = d.agora();
       await c.ponte.entregar(e);
       // definido em 2026-10-05: o turno reprovou a conta da IA (ponte-interna, reprovarHarness) — o inventário desta
@@ -267,6 +298,7 @@ export function criarPonteHttpServidor(d: {
       c.recebidas.set(e.turnoId, e.seqLocal);
       if (c.recebidas.size > RECEBIDAS_GUARDADAS) c.recebidas.delete(c.recebidas.keys().next().value!);
       c.planos.delete(e.turnoId);
+      if (jaAssentado) { ctx.json(200, { ok: true, codigo: "ja_assentado" }); return; }
       // ADR-099 item 9 (definido em 2026-10-12, I5): a frente que terminou com este turno e já vale `sem_trabalho` vai na
       // resposta, e o Mac a limpa na hora (só com prova). App antigo ignora o campo; falhar aqui não falha a entrega —
       // a pasta sai na passada de 6 h.

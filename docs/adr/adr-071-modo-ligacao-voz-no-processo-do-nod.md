@@ -202,3 +202,30 @@ que o navegador toca enquanto chega não precisa de sessão de mídia, e o Caddy
 precisa de cota própria) ou o custo de TTS das leituras passar o das ligações no mês (o teto diário desce ou a leitura
 passa a ter cache por mensagem, o que exigiria rever a regra de nenhum áudio guardado da ADR-075).
 
+
+## Emenda 2026-10-13 — o deploy não espera a frente que atravessa o reinício (NOD-214)
+
+**O que muda.** Revisto em 2026-10-13: substitui o **custo aceito** da emenda NOD-175. Um deploy com uma frente longa
+num Mac (horas de trabalho) congelava a fila por até 10 min e, passado o prazo, assentava a frente como
+`reinicio_servidor` com a máquina ainda rodando. Agora:
+
+- **A máquina anuncia que atravessa o reinício.** O app com o laço da NOD-214 (PR 1) manda `sobreviveReinicio: true` no
+  `conectar`. A renovação sem resposta vira `indefinido` (o CLI segue) e a entrega insiste por até 2 min.
+- **A drenagem não espera o turno dessa máquina.** Ela espera `tokenTurno.ativos({semSobrevive: true})` mais as
+  reservas em voo. O turno de máquina que não anuncia (app antigo) e o modo local seguem como antes.
+- **O processo novo reconhece o turno.** O puxar grava o sha256 do token de turno em `turno_credenciais` (0073, RLS por
+  pessoa, nunca o token em claro). A renovação ou a entrega de um turno que o processo não conhece traz o token no
+  header `x-nod-token-turno`. A ponte confere a máquina, o estado `despachando` e o hash em tempo constante, e recoloca
+  o token e o plano na memória (a adoção). A chave de máquina sozinha nunca adota. Turno já assentado responde 200
+  `{ok:true, codigo:"ja_assentado"}`, e o app lê isso como sucesso.
+- **Carência no boot.** Nos primeiros `LEASE_MS` (90 s) do processo, no modo compartilhado, o varredor não assenta como
+  `reinicio_servidor` o turno com credencial `sobrevive_reinicio`, e a adoção aceita o lease vencido. Passada a
+  carência sem a máquina voltar, o turno assenta como antes, e a sessão do CLI que a renovação gravou no turno vai para a
+  conversa (a próxima mensagem retoma em vez de começar do zero).
+
+**Fica de fora.** A ligação de voz segue segurando a drenagem (ela vive no processo); fazer a voz atravessar o reinício
+é follow-up.
+
+**Gatilho de reversão.** `pos_restart{desfecho="perdido",origem="restart_servidor"}` não cair nos deploys com frente
+longa, ou `adocao_falhou` aparecer em deploy normal (a adoção não está segurando o turno e a drenagem curta passa a
+perder trabalho; volta a esperar todos os tokens).

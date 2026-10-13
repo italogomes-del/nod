@@ -88,11 +88,16 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     reconexao ??= ponte.conectar(m).finally(() => { reconexao = null; });
     return reconexao;
   }
-  async function chamar<T>(nome: string, corpo: unknown, opcoes: { rota404?: true } = {}): Promise<T> {
+  /**
+   * NOD-214: o token de cada turno puxado (vem no plano). Vai no header `x-nod-token-turno` da renovação e da entrega: o
+   * processo novo de um deploy, que não conhece o turno, reconhece-o por ele. Sai junto com o turno (entregue ou abandonado).
+   */
+  const tokens = new Map<string, string>();
+  async function chamar<T>(nome: string, corpo: unknown, opcoes: { rota404?: true; tokenDeTurno?: string } = {}): Promise<T> {
     const ctrl = new AbortController(); ativos.add(ctrl);
     const timer = setTimeout(() => ctrl.abort(), 35_000);
     try {
-      const r = await f(`${o.url}/api/maquina/${nome}`, { method: "POST", headers: { authorization: `Bearer ${o.chave}`, "content-type": "application/json", "x-nod-versao": o.versao }, body: JSON.stringify(corpo), signal: ctrl.signal, redirect: "error" });
+      const r = await f(`${o.url}/api/maquina/${nome}`, { method: "POST", headers: { authorization: `Bearer ${o.chave}`, "content-type": "application/json", "x-nod-versao": o.versao, ...(opcoes.tokenDeTurno ? { "x-nod-token-turno": opcoes.tokenDeTurno } : {}) }, body: JSON.stringify(corpo), signal: ctrl.signal, redirect: "error" });
       const minima = r.headers.get("x-nod-versao-minima");
       if (r.status === 426 || (minima && !versaoAceita(o.versao, minima))) throw new FalhaPonte("atualize_app");
       const codigo = r.ok ? undefined : await codigoDoCorpo(r);
@@ -144,11 +149,12 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     async puxar(_pessoaId, maquina) {
       try {
         const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano;
-        if (plano) { emAndamento.add(plano.turnoId); ultimaResposta.set(plano.turnoId, agora()); }
+        if (plano) { emAndamento.add(plano.turnoId); ultimaResposta.set(plano.turnoId, agora()); if (plano.tokenDeTurno) tokens.set(plano.turnoId, plano.tokenDeTurno); }
         return plano;
       }
       catch (e) {
-        if (e instanceof FalhaPonte && e.codigo === "reconectar" && anuncio) await ponte.conectar(anuncio);
+        // Revisão do PR #295: o 409 do puxar entra na mesma reconexão das renovações (uma `conectar` só por reinício).
+        if (e instanceof FalhaPonte && e.codigo === "reconectar" && anuncio) await reconectar(anuncio);
         throw e;
       }
     },
@@ -160,7 +166,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
      */
     async renovar(p) {
       const enviar = trechos.get(p.turnoId) ?? []; trechos.delete(p.turnoId);
-      const pedir = () => chamar<RespostaRenovar>("renovar", { ...p, trechos: enviar });
+      const token = tokens.get(p.turnoId);
+      const pedir = () => chamar<RespostaRenovar>("renovar", { ...p, trechos: enviar }, token ? { tokenDeTurno: token } : {});
       try {
         let r: RespostaRenovar;
         try { r = await pedir(); }
@@ -192,7 +199,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       try {
         for (;;) {
           try {
-            const r = await chamar<{ limparAgora?: unknown } | null>("entregar", e);
+            const token = tokens.get(e.turnoId);
+            const r = await chamar<{ limparAgora?: unknown } | null>("entregar", e, token ? { tokenDeTurno: token } : {});
             const limpar = Array.isArray(r?.limparAgora) ? r.limparAgora.filter(pastaParaLimparValida).filter((p) => p.quando === "sem_trabalho") : [];
             if (limpar.length > 0 && o.aoLimparAgora) { const aviso = o.aoLimparAgora; setTimeout(() => { try { aviso(limpar); } catch { /* a passada de 6 h pega a pasta */ } }, 0); }
             return;
@@ -207,7 +215,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
             if (erro.codigo === "reconectar" && anuncio) await reconectar(anuncio).catch(() => undefined);
           }
         }
-      } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
+      } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
     /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */

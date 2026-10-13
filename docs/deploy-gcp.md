@@ -33,7 +33,10 @@ na branch `main`, pode usar as duas últimas.
    boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
 
 O deploy é recreate: o nod fica fora do ar alguns segundos. Os Macs reconectam sozinhos (o
-long-poll recomeça). Um deploy manual: Actions → deploy → Run workflow.
+long-poll recomeça). Desde a NOD-214, o turno que um Mac atualizado está rodando segue rodando no
+deploy: a drenagem não o espera, e o processo novo o reconhece pelo token de turno (o hash fica em
+`turno_credenciais`) quando a máquina renova ou entrega. Mac com app antigo ainda segura a drenagem
+até 10 min (ADR-071). Um deploy manual: Actions → deploy → Run workflow.
 
 ## Estado em 2026-10-02
 

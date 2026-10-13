@@ -38,6 +38,7 @@ import { frentesRepo } from "./frentes.repo.ts";
 import { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
 import { donosRepo } from "./donos.repo.ts";
 import { esperasRepo } from "./esperas.repo.ts";
+import { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
@@ -68,6 +69,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     pedidosDeColega: pedidosDeColegaRepo(conn, escopo),
     donos: donosRepo(conn, escopo),
     esperas: esperasRepo(conn, escopo),
+    turnoCredenciais: turnoCredenciaisRepo(conn, escopo),
     decisoes: decisoesRepo(conn, escopo),
     itensAprovacao: itensAprovacaoRepo(conn, escopo),
     rotinas: rotinasRepo(conn, escopo),

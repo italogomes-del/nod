@@ -65,6 +65,13 @@ export type EntradaEmitirPlano = {
    * pastas DO MAC e não existem lá: o plano sai sem workspace, como no modo compartilhado. Ausente = o turno roda no Mac.
    */
   maquinaRemota?: boolean;
+  /**
+   * definido em 2026-10-12 (NOD-214): RECOMPÕE o plano de um turno que a máquina continuou rodando durante o reinício do
+   * servidor (a adoção). Mesmo caminho do despacho — catálogo e concessões lidos AGORA —, mas com o token que a máquina
+   * já tem (nenhum token novo), a IA que o despacho escolheu e sem efeito: não regrava o executor, não grava o raio-x nem
+   * o evento turno_despachado (o turno já foi despachado).
+   */
+  recompor?: { tokenDeTurno: string; harness: IdHarness | null };
 };
 
 /**
@@ -133,13 +140,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const executor: Executor = input.executor ?? (inventarioCli?.estado === "pronto" ? "local" : "catcher");
   // NOD-206 (#200): o executor real só é decidido aqui. Quem enfileira grava um palpite (o pedido de colega e a retomada
   // nasciam `catcher` por padrão) e a retomada da cadeia compara com ele para decidir o --resume: grava o que vale.
-  if (turno.executor !== executor) await deps.repos.turnos.registrarExecutor(turno.id, executor);
+  if (!input.recompor && turno.executor !== executor) await deps.repos.turnos.registrarExecutor(turno.id, executor);
   // 0068 (emenda da ADR-036): a ordem do bot (ou da pessoa), as IAs no limite e o modelo/raciocínio escolhidos por IA.
   const preferencias = await deps.repos.preferencias.buscar();
   const inteligencia = inteligenciaDoAgente(agente);
   // definido em 2026-10-12 (ADR-099 §7): no trabalho de fundo, o Automático também pula a IA que a cota segura (reserva ou
   // limite) — o 1% que sobra dela fica para a conversa com a pessoa. Todas seguradas: a primeira pronta (iaDoAutomatico).
-  const fundo = executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
+  const fundo = !input.recompor && executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
   const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia) : [];
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
@@ -353,8 +360,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     });
   }
 
-  const tokenDeTurno = deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
+  const tokenDeTurno = input.recompor?.tokenDeTurno ?? deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
+  // NOD-214: o recomposto é guardado por quem pediu (tokenTurno.planoOuRecompor), e só se o token ainda for o mesmo.
+  if (input.recompor) return { data: plano, events: [] };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;

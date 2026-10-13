@@ -32,6 +32,11 @@ export type OpcoesServidorCompleto = {
   computador?: OpcoesBoot["computador"];
   env?: Record<string, string | undefined>;
   intervalos?: OpcoesBoot["intervalos"];
+  /**
+   * NOD-214: reusa a pessoa de um servidor anterior sobre o mesmo banco (o "processo novo" do deploy). Ausente = uma
+   * pessoa nova. Quem passa limpa uma vez só, pelo servidor que a criou.
+   */
+  pessoaId?: string;
   /** Nome da pessoa própria (default 'Pessoa E2E'). */
   nomePessoa?: string;
   /** Pessoas ADICIONAIS que os laços devem enxergar (default: só a própria). */
@@ -55,7 +60,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
   // definido em 2026-09-16: 6 conexões — rota (1) + conector carregado (1) + ponte/laços (≤3) sem enfileirar sob carga.
   const db = criarDb(urlTeste, { max: 6 });
   const dbDono = criarDb(urlDonoDeTeste(), { max: 1 });
-  const pessoaId = randomUUID();
+  const pessoaId = o.pessoaId ?? randomUUID();
   const escopo: Escopo = { tenantId: TENANT_PADRAO, pessoaId };
   // O CI nunca roda seed (Práticas §6): o tenant de identidade nasce aqui como nod_dono (idempotente) e fica — é catálogo, não dado.
   await dbDono`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod') on conflict do nothing`;

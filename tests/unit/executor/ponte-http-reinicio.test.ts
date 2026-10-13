@@ -153,6 +153,27 @@ describe("NOD-214: a renovação sem resposta não para o CLI", () => {
     expect(ultimoAnuncio.corpo).toMatchObject({ nome: "Mac novo", sobreviveReinicio: true });
   });
 
+  it("409 no puxar e na renovação ao mesmo tempo: o puxar entra na MESMA reconexão", async () => {
+    // Revisão do PR #295: o servidor recém-subido devolve 409 ao puxar (long poll) e às renovações juntos; o puxar
+    // reconectava por conta própria — dois `conectar` em rajada, o segundo trocando a conexão que a renovação já adotou.
+    const s = await comTurno();
+    s.status.renovar = 409;
+    s.status.puxar = 409;
+    let soltar!: () => void;
+    const portao = new Promise<void>((r) => { soltar = r; });
+    s.ganchos.segurar = (rota) => (rota === "conectar" ? portao : undefined);
+    s.ganchos.antes = (rota) => { if (rota === "conectar") delete s.status.renovar; };
+    s.chamadas.length = 0;
+    const a = s.c.ponte.renovar(pedido());
+    const p = s.c.ponte.puxar("p").catch((e: unknown) => e);
+    await vi.waitFor(() => expect(s.rotas().filter((r) => r === "renovar" || r === "puxar")).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 0));
+    soltar();
+    expect((await a).ativo).toBe(true);
+    expect(String(await p)).toContain("reconectar");
+    expect(s.rotas().filter((r) => r === "conectar")).toHaveLength(1);
+  });
+
   it("409 com reconexão sem resposta: `indefinido`, não `false`", async () => {
     const s = await comTurno();
     s.status.renovar = 409;
@@ -263,3 +284,29 @@ describe("NOD-214: o anúncio diz que este cliente sobrevive ao reinício", () =
     for (const a of anuncios) expect(a.corpo).toMatchObject({ sobreviveReinicio: true });
   });
 });
+
+describe("NOD-214 (PR 2): o token do turno vai no header da renovação e da entrega", () => {
+  it("o token do plano puxado acompanha renovar e entregar daquele turno, e some depois da entrega", async () => {
+    const headers: { rota: string; token: string | null }[] = [];
+    const f = vi.fn<typeof fetch>(async (url, init) => {
+      const rota = String(url).replace("https://nod.example/api/maquina/", "");
+      headers.push({ rota, token: new Headers(init?.headers).get("x-nod-token-turno") });
+      const corpo = rota === "puxar" ? { plano: { turnoId: TURNO, tokenDeTurno: "tok-do-turno" } } : rota === "renovar" ? { ativo: true, versaoMinimaApp: "0.1.0" } : { ok: true };
+      return new Response(JSON.stringify(corpo), { headers: { "x-nod-versao-minima": "0.1.0" } });
+    });
+    const { ponte } = criarPonteHttp({ url: "https://nod.example", chave: "test-only", versao: "0.1.0", fetchImpl: f, relogio: () => 1_000, dormir: async () => undefined });
+    await ponte.conectar(anuncio);
+    await ponte.puxar("p");
+    await ponte.renovar(pedido());
+    await ponte.entregar(entrega());
+    await ponte.renovar(pedido());
+    expect(headers).toEqual([
+      { rota: "conectar", token: null },
+      { rota: "puxar", token: null },
+      { rota: "renovar", token: "tok-do-turno" },
+      { rota: "entregar", token: "tok-do-turno" },
+      { rota: "renovar", token: null },
+    ]);
+  });
+});
+

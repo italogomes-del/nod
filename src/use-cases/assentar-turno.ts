@@ -8,8 +8,6 @@ import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { seguimentoNaRede } from "../domain/frente.ts";
-import { capacidadesDe } from "../domain/harness.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
 import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
@@ -23,7 +21,7 @@ import { trabalhoAberto } from "../domain/trabalho.ts";
 import { entradaDaTrocaDeConta, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { fraseDaDecisao } from "../domain/contas-da-ia.ts";
 import { log } from "../obs/log.ts";
-import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
@@ -31,6 +29,7 @@ import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { emSavepoint } from "./savepoint.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
 import { esperaAoAssentar } from "./esperar-comando.ts";
 import { voltaMarcadaAoAssentar } from "./me-chame-as.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -219,35 +218,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   }
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 
-  // 0005: a sessão é do executor que a criou; o catcher não cria sessão real (devolve null).
-  // definido em 2026-09-24 (ADR-044): a retomada ligada a uma rotina roda em sessão própria, como a
-  // rotina (emitir-plano-turno.ts); gravá-la trocaria a sessão da conversa pela da execução agendada.
-  // definido em 2026-09-24 (ADR-047): a tarefa delegada roda em sessão própria (emitir-plano-turno) e não
-  // pode virar a sessão da conversa do alvo com a pessoa.
-  // definido em 2026-10-04 (ADR-072): a sessão do laço de voz é efêmera e nunca vira a sessão da conversa.
-  // definido em 2026-10-07 (ADR-083): o turno de um trabalho grava a sessão no TRABALHO, nunca na conversa — a conversa
-  // segue livre e na sessão dela enquanto o trabalho roda à parte.
-  const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
-    && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
-  if (resultado.sessaoCli && sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
+  // Revisto em 2026-10-12 (NOD-214): as regras de onde a sessão vale estão em sessao-do-turno.ts (o varredor também usa).
+  await propagarSessaoDoTurno(deps, { turno, sessaoCli: resultado.sessaoCli, executor, harness: entrega.harness ?? null, maquinaBifurca: entrega.maquinaBifurca !== false });
   // Revisão do épico (S15, 2026-10-08): o turno que devia continuar numa cópia da sessão voltou recusado (o CLI daquela
   // máquina não bifurca). A conversa larga a sessão: o próximo plano sai em sessão nova com o histórico recente, em vez de
   // pedir a cópia de novo e ser recusado em laço.
   if (entrega.bifurcou && !turno.trabalhoId && desfecho.motivoInterrupcao === "executor_indisponivel" && !resultado.causaSemIa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, null);
-  if (resultado.sessaoCli && turno.trabalhoId) {
-    // Revisão do épico (S16, 2026-10-08): o turno promovido pela rede que NÃO seguia a sessão da conversa (bifurcou, ou
-    // começou uma sessão nova) devolve a sessão que tem o contexto mais novo da conversa. Ela vira também a da conversa —
-    // senão a próxima mensagem bifurcava a sessão antiga (de uma promoção anterior) e perdia este turno inteiro. Só se a
-    // conversa não ganhou sessão nova depois da promoção.
-    // revisto em 2026-10-12 (ADR-099, I8): só quando a rede bifurcou. Sem bifurcar, a sessão é só da frente; voltar para
-    // a conversa poria o próximo turno do dono na sessão dela.
-    const doTrabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
-    if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null && seguimentoNaRede(capacidadesDe(entrega.harness), entrega.maquinaBifurca !== false) === "bifurcar") {
-      const conversa = await deps.repos.conversas.buscar(turno.conversaId);
-      if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, resultado.sessaoCli, executor, entrega.harness ?? null);
-    }
-    await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, resultado.sessaoCli, entrega.harness ?? null, executor);
-  }
   // 0035: o `total_cost_usd` do CLI é o total da SESSÃO; numa sessão retomada ele traz o custo dos turnos
   // anteriores. O turno custa a diferença — em gastos, no turno e nos eventos.
   const anterior = resultado.sessaoCli ? await deps.repos.turnos.totalAnteriorDaSessao(resultado.sessaoCli, turno.id) : null;

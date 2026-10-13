@@ -39,3 +39,20 @@ toolsets.py::resolve_toolset (formato {description, tools, includes} com include
 
 Média. O formato do plano pode evoluir por versionamento de campo, mas trocar o portador (de plano para configuração estática) desfaz o ADR-013.
 
+
+## Emenda 2026-10-13 — o hash do token de turno vai para o banco (NOD-214, revisa a EMENDA 3)
+
+**O que muda.** Revisto em 2026-10-13: o token de turno deixa de viver **só** na memória do servidor. O puxar grava o
+sha256 dele, o epoch, a identidade do turno e o necessário para recompor o plano em `turno_credenciais` (0073, sob RLS
+por pessoa). O token em claro nunca é gravado. Depois de um reinício, o token que chega e falta na memória
+(`autorizarComBanco`: proxy MCP, rotas internas, voz) é procurado pelo hash e volta para a memória. O plano é recomposto
+pelo mesmo caminho do emitir, com o token que já existe (`planoOuRecompor`), sem cunhar outro. A linha sai quando o
+turno assenta (entrega ou lease).
+
+**Desvio do plano da issue.** Com RLS FORCE, procurar o hash sem escopo nunca acha a linha. Por isso o token passa a
+levar o escopo alegado na frente, como a chave de máquina (ADR-031): `base64url(JSON{t,p}) "." base64url(24 bytes)`.
+O escopo não autoriza nada sozinho: o hash cobre o token inteiro, e a identidade gravada tem de bater com o escopo
+alegado. Token no formato antigo segue valendo só pela memória.
+
+**Gatilho de reversão.** Um vazamento de `turno_credenciais` permitir agir como um turno (só se o sha256 de 24 bytes
+aleatórios for invertível), ou a busca pelo hash aparecer como custo no p95 das rotas internas.

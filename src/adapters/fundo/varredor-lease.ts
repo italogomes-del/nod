@@ -2,6 +2,7 @@ import { maquinaVoltou } from "../../domain/incidente.ts";
 import { log } from "../../obs/log.ts";
 import { metricas as registroPadrao, type Metricas } from "../../obs/metricas.ts";
 import { criarRepos } from "../../repositories/index.ts";
+import { LEASE_MS } from "../../shared/constantes.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { interromperPorMaquina, registrarVoltaDasMaquinas, type SaidaQuedaDaMaquina } from "../../use-cases/interromper-por-maquina.ts";
 import { varrerEsperasSemNoticia } from "../../use-cases/esperar-comando.ts";
@@ -37,7 +38,9 @@ export async function varrerPessoa(tx: Transacao, escopo: Escopo, agora: number,
     const deps = { repos, escopo, agora: () => agora };
     const presente = opcoes.ultimoContato ? (id: string | null) => id !== null && maquinaVoltou(opcoes.ultimoContato?.(id) ?? null, agora) : undefined;
     const vencidos = await repos.turnos.vencidos(agora);
-    const r = vencidos.length ? await interromperPorMaquina(deps, { turnos: vencidos, prazoMs: opcoes.prazoDecisaoMs, inicioDoProcesso: opcoes.inicioDoProcesso ?? null, maquinaPresente: presente }) : null;
+    // NOD-214: a carência do lease no boot (só com inicioDoProcesso, o modo compartilhado).
+    const carenciaAte = opcoes.inicioDoProcesso !== undefined ? opcoes.inicioDoProcesso + LEASE_MS : null;
+    const r = vencidos.length ? await interromperPorMaquina(deps, { turnos: vencidos, prazoMs: opcoes.prazoDecisaoMs, inicioDoProcesso: opcoes.inicioDoProcesso ?? null, maquinaPresente: presente, carenciaAte }) : null;
     if (r?.events.length) await repos.events.gravarComOutbox(r.events);
     if (r) contarPerdidos(opcoes.metricas ?? registroPadrao, escopo, r.data);
     // ADR-099 (parte 2): a espera de comando cuja máquina sumiu cai e acorda o dono (depois dos turnos: a volta lê o turno).

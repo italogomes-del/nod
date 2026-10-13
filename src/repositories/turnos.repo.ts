@@ -316,16 +316,23 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * Batida de 30s (ADR-009/021): os quatro sinais viajam a cada renovação; {ativo:false} quando
      * a pessoa pediu Parar ou o turno já não é desta máquina — o executor aborta.
      */
-    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number): Promise<{ ativo: boolean }> {
+    /**
+     * revisto em 2026-10-12 (NOD-214): `sessaoCli` (a sessão do CLI que a máquina mandou na renovação) é gravada já aqui,
+     * não só na entrega — se a entrega se perder num reinício, o assentamento pelo lease ainda a propaga. `aceitaVencido`
+     * só na adoção dentro da carência do boot: o lease venceu enquanto o servidor estava fora, mas o turno segue
+     * `despachando` (o varredor não o assentou).
+     */
+    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean }> {
       const [l] = await conn<{ ativo: boolean }[]>`
         update turnos set
           lease_ate = case when estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao) then ${data(agora + LEASE_MS)} else lease_ate end,
           attempted = attempted or ${sinais.attempted ?? false},
           rejected = rejected or ${sinais.rejected ?? false},
           prompt_submitted = prompt_submitted or ${sinais.promptSubmitted ?? false},
-          produced_output = produced_output or ${sinais.producedOutput ?? false}
+          produced_output = produced_output or ${sinais.producedOutput ?? false},
+          sessao_cli = coalesce(${o.sessaoCli ?? null}, sessao_cli)
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
-          and lease_ate > ${data(agora)}
+          and (lease_ate > ${data(agora)} or (${o.aceitaVencido === true} and estado = 'despachando'))
         returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo`;
       return { ativo: l?.ativo === true };
     },

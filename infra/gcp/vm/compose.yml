@@ -1,10 +1,13 @@
 # Produção na VM (docs/deploy-gcp.md): o nod e o Caddy na frente. Uma instância do nod só — tokens de
-# turno, conexões dos Macs e o barramento vivem em memória (ADR-017, ADR-021); deploy é recreate.
+# turno, conexões dos Macs e o barramento vivem em memória (ADR-017, ADR-021; do token de turno, o hash também fica no
+# banco desde a NOD-214); deploy é recreate.
 services:
   nod:
     image: ${NOD_IMAGEM:?defina NOD_IMAGEM}
     restart: unless-stopped
-    # ADR-071: no SIGTERM o nod drena as ligações vivas por até 10 min (NOD_DRENAGEM_MAX_MS) antes de sair.
+    # ADR-071: no SIGTERM o nod drena por até 10 min (NOD_DRENAGEM_MAX_MS) antes de sair: as ligações vivas e os turnos
+    # de Mac que não atravessam o reinício. O turno do Mac que atravessa (NOD-214) não segura o deploy: o processo novo
+    # o adota pelo token (turno_credenciais).
     stop_grace_period: 11m
     env_file: /opt/nod/nod.env
     volumes:

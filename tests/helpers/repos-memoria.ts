@@ -21,6 +21,7 @@ import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
+import type { CredencialTurno } from "../../src/repositories/turno-credenciais.repo.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { NovoLote } from "../../src/repositories/frentes.repo.ts";
 import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts";
@@ -74,6 +75,8 @@ export type BancoMemoria = {
   trabalhos: (Trabalho & { ownerId: string })[];
   /** 0070 (ADR-099, parte 2): as esperas de comando, com a dona (o comportamento completo se prova no Postgres). */
   esperas: (Espera & { tenantId: string; ownerId: string })[];
+  /** 0073 (NOD-214): as credenciais dos turnos despachados (o comportamento completo se prova no Postgres). */
+  credenciais: (CredencialTurno & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
   decisoes: (Decisao & { decididaEm: number | null })[];
   varridos: Set<string>;
@@ -143,6 +146,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     turnos: [],
     trabalhos: [],
     esperas: [],
+    credenciais: [],
     entregas: new Set(),
     decisoes: [],
     varridos: new Set(),
@@ -214,6 +218,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     const ultima = t ? lista.filter((x) => x.turnoId === t.id && falaDoBot(x)).at(-1) : undefined;
     return { ...m, origemTurno: t?.origem ?? null, trabalhoId: t?.trabalhoId ?? aberto?.trabalhoId ?? null, fimDoTurno: Boolean(t && (t.estado === "concluido" || t.estado === "interrompido") && falaDoBot(m) && ultima?.id === m.id) };
   });
+  const minhasCredenciais = () => b.credenciais.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
   const minhasEsperas = () => b.esperas.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
   const repos = {
     computadores: {
@@ -865,6 +870,19 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // O varredor das esperas sem notícia se prova no Postgres (tests/integration/esperar-comando.test.ts).
       async semNoticia() { return []; },
     },
+    turnoCredenciais: {
+      async gravar(c) {
+        const i = b.credenciais.findIndex((x) => x.tenantId === escopo.tenantId && x.turnoId === c.turnoId);
+        if (i >= 0 && b.credenciais[i]!.epoch > c.epoch) return;
+        if (i >= 0) b.credenciais.splice(i, 1);
+        b.credenciais.push({ ...c, falasSeq: 0, tenantId: escopo.tenantId, ownerId: escopo.pessoaId });
+      },
+      async buscar(turnoId) { return minhasCredenciais().find((x) => x.turnoId === turnoId) ?? null; },
+      async buscarPorHash(hash) { return minhasCredenciais().find((x) => x.tokenHash.equals(hash)) ?? null; },
+      async registrarFalas(turnoId, seq) { const c = minhasCredenciais().find((x) => x.turnoId === turnoId); if (c) c.falasSeq = Math.max(c.falasSeq, seq); },
+      async apagar(turnoId) { b.credenciais = b.credenciais.filter((x) => !(x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.turnoId === turnoId)); },
+      async quaisSobrevivem(ids) { return new Set(minhasCredenciais().filter((x) => ids.includes(x.turnoId) && x.sobreviveReinicio).map((x) => x.turnoId)); },
+    },
     trabalhos: {
       async criar(n) {
         const linha: Trabalho & { ownerId: string } = {
@@ -1177,9 +1195,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.sinais = { ...t.sinais, attempted: true };
         return t;
       },
-      async renovarLease(id, machineId, sinais, em) {
+      async renovarLease(id, machineId, sinais, em, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.machineId === machineId);
         if (!t) return { ativo: false };
+        // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
+        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false };
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,

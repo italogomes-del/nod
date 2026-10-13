@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
 import type { IdHarness } from "../../contracts/harness.ts";
 import type { LimitesIa } from "../../contracts/inteligencia.ts";
@@ -31,6 +32,7 @@ import type { UsoDoMac } from "../../contracts/raio-x.ts";
 import { USO_DO_MAC_PADRAO } from "../../contracts/raio-x.ts";
 import { ESPACO_FUNDO_MS, portaoDoMac } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
+import type { TokenTurno } from "../../services/token-turno.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
 export const VERSAO_MINIMA_APP = "0.1.0";
@@ -88,13 +90,29 @@ export type DepsPonte = {
    * alvo (o bot escolhido para ela, ou o padrão da pessoa); o resto é do Mac, onde estão os arquivos dos bots.
    */
   soComoAlvo?: boolean;
+  /**
+   * NOD-214 (carência do lease no boot): quando este processo começou. Nos primeiros LEASE_MS daqui, a adoção aceita o
+   * turno de lease vencido que segue `despachando` — o lease venceu enquanto o servidor estava fora, não a máquina.
+   * Ausente = sem carência (o modo local: lá o reinício é o nod fechado).
+   */
+  inicioDoProcesso?: number;
 };
+
+/** NOD-214: o que a máquina apresenta para o processo novo reconhecer um turno que ela continuou rodando. */
+export type PedidoAdocao = { pessoaId: string; turnoId: string; machineId: string; token: string };
+/**
+ * NOD-214: `adotado` traz o plano (recomposto) para a conexão; `ja_assentado` = o turno desta máquina já foi assentado
+ * (a entrega dela é idempotente); `recusado` = nada a adotar (token de outro turno, outra máquina, turno parado).
+ */
+export type DesfechoAdocao = { tipo: "adotado"; plano: PlanoTurno } | { tipo: "ja_assentado" } | { tipo: "recusado" };
 
 export type PonteInternaNod = PonteInterna & {
   maquinasConectadas(): AnuncioMaquina[];
   escopoDoTurno(turnoId: string): Escopo | null;
   /** Quantos turnos cada mapa da ponte guarda (revisão do épico, S21): o log de saúde e os testes olham por aqui. */
   emMemoria?(): { escopos: number; oferecidas: number; despachados: number };
+  /** NOD-214: reconhece o turno despachado por um processo anterior (rotas/ponte.ts, header x-nod-token-turno). */
+  adotar?(p: PedidoAdocao): Promise<DesfechoAdocao>;
 };
 
 /** definido em 2026-10-08 (revisão do épico, S20): o assentar vítima de impasse é repetido até isto de vezes. */
@@ -264,6 +282,19 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     return { repos: criarRepos(trx, escopo), services: deps.services, useCases: deps.useCases, tx: (fn) => fn(trx), escopo, agora };
   }
 
+  /**
+   * NOD-214: o serviço de token completo (o contrato só tem cunhar/autorizar/revogar). Nos testes que injetam um token
+   * mínimo, os métodos novos faltam — e a ponte segue como antes: sem credencial no banco, sem adoção.
+   */
+  const tokens = deps.services.tokenTurno as Partial<TokenTurno> & Services["tokenTurno"];
+  const dentroDaCarencia = (): boolean => deps.inicioDoProcesso !== undefined && agora() < deps.inicioDoProcesso + LEASE_MS;
+
+  /** NOD-214: o token saiu (entrega, falha) — a credencial no banco também, na mesma tx do assentar quando há uma. */
+  async function apagarCredencial(escopo: Escopo, turnoId: string): Promise<void> {
+    await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).turnoCredenciais.apagar(turnoId))
+      .catch((e: unknown) => log("aviso", "credencial_turno_nao_apagada", { turno_id: turnoId, erro: e instanceof Error ? e.name : "desconhecido" }));
+  }
+
   return {
     async conectar(m) {
       maquinas.set(m.machineId, m);
@@ -332,6 +363,13 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
+            // NOD-214: o hash do token vai para o banco na mesma tx do despacho — o processo novo de um deploy reconhece o
+            // turno que a máquina continuou rodando. O token em claro nunca sai da memória.
+            const cred = tokens.credencialDe?.(r.data.plano.turnoId);
+            if (cred) {
+              await d.repos.turnoCredenciais.gravar({ turnoId: r.data.plano.turnoId, tokenHash: cred.tokenHash, epoch: cred.epoch, identidade: cred.identidade, harness: r.data.plano.harness ?? null, executor: r.data.plano.executor, modo: r.data.plano.modoTurno ?? null, despachadoEm: agora(), bifurcou: r.data.plano.entrada.bifurcar === true, sobreviveReinicio: maquina.sobreviveReinicio === true });
+              if (maquina.sobreviveReinicio === true) tokens.marcarSobrevive?.(r.data.plano.turnoId);
+            }
             // ADR-085 (revisão do #209): começou trabalho novo em segundo plano — o próximo deste Mac espera ESPACO_FUNDO_MS.
             const w = uso !== "livre" && r.data.turno.trabalhoId ? await d.repos.trabalhos.buscar(r.data.turno.trabalhoId) : null;
             // ADR-086: a volta marcada também conta (processo novo no Mac sem ninguém esperando).
@@ -371,7 +409,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
       const { ativo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora());
+        // NOD-214: a sessão do CLI fica no turno já na renovação — a entrega pode se perder num reinício.
+        const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora(), p.sessaoCli ? { sessaoCli: p.sessaoCli } : {});
+        // NOD-214: o maior seq de fala gravado vai junto, na mesma tx — o processo novo não grava a mesma fala de novo.
+        if (novas.length && tokens.credencialDe) await d.repos.turnoCredenciais.registrarFalas(p.turnoId, novas.at(-1)!.seq);
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
         const events: RuntimeEvent[] = [];
         if (novas.length) {
@@ -520,6 +561,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
         const events = [...(r.events ?? []), ...extras];
         if (events.length) await d.repos.events.gravarComOutbox(events);
+        // NOD-214: assentado, o turno não é mais adotável — a credencial sai na mesma tx.
+        if (tokens.credencialDe) await d.repos.turnoCredenciais.apagar(e.turnoId);
       });
       try {
         for (let tentativa = 1; ; tentativa++) {
@@ -534,6 +577,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       } catch (err) {
         // O processo do turno já acabou: o token e o interruptor saem. O escopo e os mapas ficam para a entrega repetida.
         deps.services.tokenTurno.revogar(e.turnoId);
+        // NOD-214: e a credencial no banco (o token revogado não pode voltar por um processo novo). Melhor esforço.
+        if (tokens.credencialDe) await apagarCredencial(escopo, e.turnoId);
         deps.esquecerTurno?.(e.turnoId);
         throw err;
       }
@@ -553,6 +598,54 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // NOD-200: a captura do turno sai só com o assentar confirmado; na falha fica, como o escopo, para a entrega repetida.
       deps.services.capturas?.esquecer(e.turnoId);
       deps.esquecerTurno?.(e.turnoId);
+    },
+
+    /**
+     * NOD-214 (revisão da EMENDA 3 da ADR-024): o deploy trocou o processo e a máquina seguiu rodando o turno. Ela
+     * apresenta o token do turno (a chave dela já foi conferida na rota); o turno só volta para esta ponte se, no banco,
+     * está `despachando` NESTA máquina e o hash do token bate com a credencial gravada no despacho. O lease é renovado na
+     * mesma tx (atômico contra o varredor; dentro da carência do boot, aceita o lease vencido) e os mapas da ponte são
+     * refeitos da credencial: escopo, executor, harness, quando foi despachado, se bifurcou, o modo e as falas gravadas.
+     * O turno já assentado desta máquina não é adotado: a entrega dele vira tardia/duplicada (ADR-045), nunca uma recusa.
+     */
+    async adotar(p: PedidoAdocao): Promise<DesfechoAdocao> {
+      const recusado: DesfechoAdocao = { tipo: "recusado" };
+      const escopo = await resolverEscopo(p.pessoaId);
+      if (!escopo || !tokens.adotar || !tokens.planoOuRecompor || p.token === "") return recusado;
+      const hash = createHash("sha256").update(p.token).digest();
+      const lido = await abrirTxEscopada(db, escopo)(async (trx) => {
+        const repos = criarRepos(trx, escopo);
+        const turno = await repos.turnos.buscar(p.turnoId);
+        if (!turno || turno.machineId !== p.machineId) return null;
+        if (turno.estado !== "despachando" && turno.estado !== "pendente") return { assentado: true as const, executor: turno.executor };
+        if (turno.estado !== "despachando") return null;
+        const cred = await repos.turnoCredenciais.buscar(p.turnoId);
+        if (!cred || cred.tokenHash.length !== hash.length || !timingSafeEqual(cred.tokenHash, hash)) return null;
+        const r = await repos.turnos.renovarLease(p.turnoId, p.machineId, {}, agora(), { aceitaVencido: dentroDaCarencia() });
+        return r.ativo ? { assentado: false as const, cred } : null;
+      });
+      if (!lido) return recusado;
+      if (lido.assentado) {
+        // A entrega que chegar segue o caminho da tardia (o escopo é o que falta a ela num processo novo).
+        escopos.set(p.turnoId, escopo);
+        if (!executores.has(p.turnoId) && lido.executor) executores.set(p.turnoId, lido.executor);
+        return { tipo: "ja_assentado" };
+      }
+      const { cred } = lido;
+      if (!tokens.adotar(p.token, { turnoId: p.turnoId, tokenHash: cred.tokenHash, epoch: cred.epoch, identidade: cred.identidade, sobreviveReinicio: cred.sobreviveReinicio })) return recusado;
+      escopos.set(p.turnoId, escopo);
+      executores.set(p.turnoId, cred.executor);
+      if (cred.harness) harnesses.set(p.turnoId, cred.harness);
+      falasGravadas.set(p.turnoId, Math.max(falasGravadas.get(p.turnoId) ?? 0, cred.falasSeq));
+      vistos.set(p.turnoId, agora());
+      const plano = await tokens.planoOuRecompor(p.turnoId).catch((e: unknown) => {
+        log("aviso", "plano_nao_recomposto", { turno_id: p.turnoId, erro: e instanceof Error ? e.name : "desconhecido" });
+        return null;
+      });
+      if (!plano) return recusado;
+      if (!despachados.has(p.turnoId)) despachados.set(p.turnoId, { em: cred.despachadoEm, sessaoCli: cred.bifurcou ? null : plano.entrada.sessaoCli, bifurcou: cred.bifurcou, modo: cred.modo });
+      log("info", "turno_adotado", { turno_id: p.turnoId, machine_id: p.machineId, carencia: dentroDaCarencia() });
+      return { tipo: "adotado", plano };
     },
 
     /** ADR-088: a regra de quem pode ser limpo lê o banco na tx escopada da pessoa; o Mac apaga. */

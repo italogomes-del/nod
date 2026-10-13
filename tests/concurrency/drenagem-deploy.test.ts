@@ -363,3 +363,103 @@ describeIntegracao("NOD-176: modo local com token vivo", () => {
     }
   });
 });
+
+describeIntegracao("NOD-214 (PR 2): deploy com uma frente longa na máquina que atravessa o reinício", () => {
+  // Dois processos sobre o mesmo banco e a mesma pessoa: o velho drena e fecha, o novo sobe e continua a fila.
+  let velho: ServidorCompleto | null = null;
+  let novo: ServidorCompleto | null = null;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  afterAll(async () => {
+    await novo?.fechar();
+    await velho?.fechar();
+    if (velho) {
+      const v = velho;
+      await v.db.begin(async (tx) => { await vincularEscopo(tx, v.pessoa); await tx`delete from maquina_tokens where owner_id = ${v.pessoa.pessoaId}`; });
+      await limparPessoaE2E(v.db, v.dbDono, v.pessoa, criados);
+    }
+    await novo?.desligar();
+    await velho?.desligar();
+  });
+
+  it("a drenagem não espera a frente; o processo novo despacha a fila e aceita renovar e entregar da frente antiga pelo token", async () => {
+    const env = { NOD_MODO: "compartilhado", NOD_LONGPOLL_MS: "20" };
+    velho = await servidorCompleto({ env });
+    const v = velho;
+    const { chave, dados } = await v.json<{ chave: string; dados: { id: string } }>("POST", "maquinas/chaves", { nome: "Mac" });
+    const machineId = dados.id;
+    const pedirEm = (srv: ServidorCompleto) => (nome: string, body: unknown = {}, token?: string) => fetch(`${srv.url}/api/maquina/${nome}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${chave}`, "content-type": "application/json", "x-nod-versao": "0.1.0", ...(token ? { "x-nod-token-turno": token } : {}) },
+      body: JSON.stringify(body),
+    });
+    const conectar = { nome: "Mac", versaoContrato: 1, inventario: { estado: "pronto", versao: "fake-sem-custo", em: 0 }, sobreviveReinicio: true };
+    const bot = async (srv: ServidorCompleto, nome: string) => {
+      const r = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome });
+      criados.agentes.push(r.agente.id);
+      criados.conversas.push(r.conversa.id);
+      return r.conversa.id;
+    };
+    const escopado = <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => v.db.begin(async (trx) => {
+      await vincularEscopo(trx, v.pessoa);
+      return fn(trx);
+    }) as Promise<T>;
+    const linhaDoTurno = async (id: string) => (await escopado((trx) => trx<{ estado: string; sessao_cli: string | null }[]>`select estado, sessao_cli from turnos where id = ${id}`))[0];
+    const credencial = async (id: string) => (await escopado((trx) => trx<{ linha: string }[]>`select row_to_json(c)::text as linha from turno_credenciais c where turno_id = ${id}`))[0]?.linha ?? null;
+
+    // A frente longa começa no processo velho.
+    const pedirV = pedirEm(v);
+    expect((await pedirV("conectar", conectar)).status).toBe(200);
+    const conversaA = await bot(v, "Frente longa");
+    await v.json<RespostaMutacao>("POST", `conversas/${conversaA}/mensagens`, { texto: "Trabalho de horas" });
+    const { plano: frente } = (await (await pedirV("puxar")).json()) as { plano: PlanoTurno };
+    expect(frente).not.toBeNull();
+    const sessao = randomUUID();
+    expect(((await (await pedirV("renovar", { turnoId: frente.turnoId, sinais, eventos: [], sessaoCli: sessao }, frente.tokenDeTurno)).json()) as { ativo: boolean }).ativo).toBe(true);
+    expect((await linhaDoTurno(frente.turnoId))?.sessao_cli).toBe(sessao);
+    // O banco guarda só o hash: nem o token inteiro nem a parte aleatória aparecem na linha.
+    const gravada = await credencial(frente.turnoId);
+    expect(gravada).not.toBeNull();
+    expect(gravada).not.toContain(frente.tokenDeTurno);
+    expect(gravada).not.toContain(frente.tokenDeTurno.split(".")[1]!);
+
+    // Antes: o token vivo segurava a drenagem até o prazo (10 min no deploy) e a fila parava junto.
+    const inicio = Date.now();
+    expect(await v.drenar({ prazoMs: 600_000, intervaloMs: 50 })).toMatchObject({ turnos: 0, prazo_vencido: false });
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    await v.fechar();
+
+    // O processo novo: a máquina reconecta e a fila anda (um turno novo é despachado com a frente ainda rodando).
+    novo = await servidorCompleto({ env, pessoaId: v.pessoa.pessoaId });
+    const n = novo;
+    const pedirN = pedirEm(n);
+    expect((await pedirN("conectar", conectar)).status).toBe(200);
+    const conversaB = await bot(n, "Chegou no deploy");
+    const enviadaB = await n.json<RespostaMutacao>("POST", `conversas/${conversaB}/mensagens`, { texto: "Responde rápido" });
+    const { plano: novoTurno } = (await (await pedirN("puxar")).json()) as { plano: PlanoTurno };
+    expect(novoTurno?.turnoId).toBe(enviadaB.ids.turno);
+
+    // A chave de máquina sozinha não adota; o token de OUTRO turno também não.
+    expect(((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] })).json()) as { ativo: boolean }).ativo).toBe(false);
+    expect(((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] }, novoTurno.tokenDeTurno)).json()) as { ativo: boolean }).ativo).toBe(false);
+    expect((await linhaDoTurno(frente.turnoId))?.estado).toBe("despachando");
+
+    // Com o token da frente: renova (a sessão do CLI fica), entrega e conclui. Duas renovações ao mesmo tempo (a da
+    // frente e a repetida pelo cliente) adotam o mesmo turno sem uma derrubar a outra.
+    const duas = await Promise.all([0, 1].map(async () => ((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] }, frente.tokenDeTurno)).json()) as { ativo: boolean }).ativo));
+    expect(duas).toEqual([true, true]);
+    // Os dois tokens (o adotado e o do turno novo) são de máquina que sobrevive: nenhum segura a próxima drenagem.
+    expect(n.app.tokens.ativos()).toBe(2);
+    expect(n.app.tokens.ativos({ semSobrevive: true })).toBe(0);
+    expect((await pedirN("entregar", entregaDe(frente, machineId, 1), frente.tokenDeTurno)).status).toBe(200);
+    expect(await linhaDoTurno(frente.turnoId)).toEqual({ estado: "concluido", sessao_cli: sessao });
+    expect(await credencial(frente.turnoId)).toBeNull();
+
+    // A entrega repetida cuja resposta se perdeu (outro seqLocal, plano já solto): 200 `ja_assentado`, não 403.
+    const repetida = await pedirN("entregar", entregaDe(frente, machineId, 2), frente.tokenDeTurno);
+    expect(repetida.status).toBe(200);
+    expect(await repetida.json()).toMatchObject({ ok: true, codigo: "ja_assentado" });
+
+    expect((await pedirN("entregar", entregaDe(novoTurno, machineId, 1))).status).toBe(200);
+    expect((await linhaDoTurno(novoTurno.turnoId))?.estado).toBe("concluido");
+  }, 30_000);
+});

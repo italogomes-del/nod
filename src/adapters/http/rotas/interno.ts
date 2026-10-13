@@ -24,7 +24,11 @@ export type DepsRotasInternas = {
   workspaces?: Workspaces;
   computadores?: Computadores;
   dentro: DentroDeTx;
-  tokens: Pick<TokenTurno, "planoDe">;
+  /**
+   * revisto em 2026-10-12 (NOD-214): o plano sai de `planoOuRecompor` — o do turno adotado depois de um reinício do
+   * servidor é recomposto na primeira chamada, com o token que a máquina já tem.
+   */
+  tokens: Pick<TokenTurno, "planoOuRecompor">;
   agora: Relogio;
   /** definido em 2026-09-16: teto do long-poll (LONGPOLL_APROVACAO_MS); a consulta é curta e a conexão do banco é liberada entre as fatias. */
   longpollMs?: number;
@@ -56,7 +60,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       padrao: /^\/plano$/,
       interno: true,
       async handler(ctx) {
-        const plano = deps.tokens.planoDe(ctx.params.turnoId ?? "");
+        const plano = await deps.tokens.planoOuRecompor(ctx.params.turnoId ?? "");
         if (!plano) {
           ctx.json(404, { codigo: "nao_encontrado", mensagem: "plano de turno ausente" });
           return;
@@ -71,7 +75,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       padrao: /^\/anexos\/(?<aid>[^/]+)$/,
       interno: true,
       async handler(ctx) {
-        const plano = deps.tokens.planoDe(ctx.params.turnoId ?? "");
+        const plano = await deps.tokens.planoOuRecompor(ctx.params.turnoId ?? "");
         const aid = ctx.params.aid ?? "";
         if (!plano?.entrada.anexos?.some((a) => a.id === aid)) {
           ctx.json(404, { codigo: "nao_encontrado", mensagem: "anexo fora do turno" });
@@ -92,7 +96,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       async handler(ctx) {
         const corpo = (await ctx.corpo()) as { argumentos?: unknown };
         const turnoId = ctx.params.turnoId ?? "";
-        const plano = deps.tokens.planoDe(turnoId);
+        const plano = await deps.tokens.planoOuRecompor(turnoId);
         // definido em 2026-09-24 (revisão da ADR-047): computador e pasta também deixam a chamada na trilha —
         // o que eles devolvem é conteúdo de fora, e a trilha é o registro do que o turno tocou (E8.4).
         if (plano && ((ctx.params.nome?.startsWith("workspace_") && deps.workspaces) || (ctx.params.nome?.startsWith("computador_") && deps.computadores))) {
@@ -112,7 +116,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             agenteId: ctx.params.agenteId ?? "",
             nome: ctx.params.nome ?? "",
             argumentos: typeof corpo === "object" && corpo !== null ? (corpo.argumentos ?? {}) : {},
-            plano: deps.tokens.planoDe(turnoId),
+            plano,
           }),
         );
         ctx.json(200, resultado);
@@ -196,7 +200,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown } | null;
         const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
         const turnoId = ctx.params.turnoId ?? "";
-        const plano = deps.tokens.planoDe(turnoId);
+        const plano = await deps.tokens.planoOuRecompor(turnoId);
         if (!plano || !(plano.nativas ?? []).includes(ferramenta)) {
           ctx.json(403, { codigo: "nao_permitido", mensagem: "ferramenta nativa fora do plano deste turno" });
           return;
@@ -243,7 +247,8 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const c = (await ctx.corpo()) as { nome?: unknown; codigo?: unknown } | null;
         if (typeof c?.nome !== "string" || typeof c.codigo !== "string") throw new ErroDeDominio("entrada_invalida");
         const turnoId = ctx.params.turnoId ?? "";
-        const ok = await deps.dentro(ctx.escopo, (d) => registrarExecucaoLocal(d, { turnoId, agenteId: ctx.params.agenteId ?? "", plano: deps.tokens.planoDe(turnoId), nome: c.nome as string, codigo: c.codigo as string }));
+        const plano = await deps.tokens.planoOuRecompor(turnoId);
+        const ok = await deps.dentro(ctx.escopo, (d) => registrarExecucaoLocal(d, { turnoId, agenteId: ctx.params.agenteId ?? "", plano, nome: c.nome as string, codigo: c.codigo as string }));
         if (!ok) throw new ErroDeDominio("nao_permitido");
         ctx.json(200, { ok: true });
       },
@@ -258,7 +263,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         const classe = CLASSES.find((k) => k === c.classe);
         if (!motivo || !classe || typeof c.nome !== "string") throw new ErroDeDominio("entrada_invalida", { cause: "negação malformada" });
         const turnoId = ctx.params.turnoId ?? "";
-        const plano = deps.tokens.planoDe(turnoId);
+        const plano = await deps.tokens.planoOuRecompor(turnoId);
         const negacao = await deps.dentro(ctx.escopo, (d) =>
           executar(d, registrarNegacao, {
             turnoId,
