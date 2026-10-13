@@ -204,8 +204,10 @@ export function criarContasLocais(d: DepsContasLocais) {
     async descartarRepetidas(): Promise<number> {
       const vistas = new Set<string>();
       const repetidas: ContaLocal[] = [];
-      // Fica a melhor cópia (a pronta, a de login mais novo); a de sempre só ganha no empate, porque nunca sai.
-      for (const c of [...contas].sort((a, b) => melhorCopia(a, b) || (a.id === ID_CONTA_PADRAO ? -1 : b.id === ID_CONTA_PADRAO ? 1 : 0))) {
+      // Fica a pronta; entre prontas, a de sempre (ela nunca sai, então só ficando com ela a repetida some — QA do PR #306,
+      // ISSUE-002); depois, a de login mais novo.
+      const paraFicar = (a: ContaLocal, b: ContaLocal) => (a.estado === "pronta" ? 0 : 1) - (b.estado === "pronta" ? 0 : 1) || (a.id === ID_CONTA_PADRAO ? -1 : b.id === ID_CONTA_PADRAO ? 1 : 0) || b.logadaEm - a.logadaEm;
+      for (const c of [...contas].sort(paraFicar)) {
         if (!c.impressao) continue;
         const chave = `${c.ia}:${c.impressao}`;
         if (vistas.has(chave) && c.id !== ID_CONTA_PADRAO) repetidas.push(c);
@@ -224,15 +226,18 @@ export function criarContasLocais(d: DepsContasLocais) {
      * false = a máquina não tem essa conta (nada a fazer: o servidor apaga o vínculo do mesmo jeito).
      */
     async sair(impressao: string): Promise<boolean> {
-      const c = contas.find((x) => x.impressao === impressao);
-      if (!c) return false;
-      if (c.id === ID_CONTA_PADRAO) {
-        // Revisão do PR #306: sem logout, a conta continua logada aqui — a saída fica pendente (o servidor pede de novo).
-        if (!(await d.logout(c.ia, {}).catch(() => false))) throw new Error("logout_falhou");
-        Object.assign(c, { impressao: null, plano: null, estado: "sem_login", logadaEm: 0, apelido: null });
-      } else {
-        await removerPastaDaConta({ base: d.base, ia: c.ia, id: c.id, logout: (env) => d.logout(c.ia, env) });
-        contas = contas.filter((x) => x !== c);
+      // QA do PR #306 (ISSUE-006): a mesma conta pode estar em mais de uma pasta; sair é sair de todas.
+      const copias = contas.filter((x) => x.impressao === impressao);
+      if (copias.length === 0) return false;
+      for (const c of copias) {
+        if (c.id === ID_CONTA_PADRAO) {
+          // Revisão do PR #306: sem logout, a conta continua logada aqui — a saída fica pendente (o servidor pede de novo).
+          if (!(await d.logout(c.ia, {}).catch(() => false))) throw new Error("logout_falhou");
+          Object.assign(c, { impressao: null, plano: null, estado: "sem_login", logadaEm: 0, apelido: null });
+        } else {
+          await removerPastaDaConta({ base: d.base, ia: c.ia, id: c.id, logout: (env) => d.logout(c.ia, env) });
+          contas = contas.filter((x) => x !== c);
+        }
       }
       await gravar();
       return true;

@@ -11,7 +11,7 @@ import type { PuxadaDeContas } from "../../../src/contracts/contas-ia.ts";
  * ADR-102 no app do Mac (2026-10-13): a lista que vai ao servidor segue a do app (contas.json, ADR-101), o e-mail e a
  * organização ficam só na memória (para a tela, pela ponte do app) e a puxada atende "Sair do Mac" e "Desconectar".
  */
-async function montar(identidades: Record<string, IdentidadeDaConta>) {
+async function montar(identidades: Record<string, IdentidadeDaConta>, aoLogout: (env: Record<string, string>) => void = () => undefined) {
   const raiz = await mkdtemp(join(tmpdir(), "nod-contas-locais-"));
   const arquivo = join(raiz, "contas-locais.json");
   const contas = criarContasLocais({
@@ -21,7 +21,7 @@ async function montar(identidades: Record<string, IdentidadeDaConta>) {
     padrao: (ia) => join(raiz, ia),
     // O ambiente diz qual pasta: a conta de sempre não tem variável.
     lerIdentidade: async (ia: IaDesktop, env) => identidades[`${ia}:${Object.values(env)[0]?.split("/").at(-1) ?? "padrao"}`] ?? { logado: false, email: null, orgId: null, plano: null },
-    logout: async () => true,
+    logout: async (_ia, env) => { aoLogout(env); return true; },
     agora: Date.now,
   });
   await contas.carregar();
@@ -70,6 +70,26 @@ describe("contas locais no app do Mac (ADR-102)", () => {
     await m.contas.ler();
     Object.assign(m.contas.porId("padrao", "claude-cli")!, { estado: "sem_login" });
     expect((await m.contas.pastaParaLogin("claude-cli", null))?.id).toBe("padrao");
+  });
+
+  // Regression: ISSUE-002/006 — a mesma conta logada na pasta de sempre e numa pasta nova ficava nas duas, e o "Sair"
+  // fazia logout só numa (a conta continuava na máquina). Found by /qa on 2026-10-13.
+  it("QA do PR #306: com a mesma conta em duas pastas prontas, a repetida sai e a de sempre fica; o Sair faz logout em todas", async () => {
+    const logouts: string[] = [];
+    const m = await montar({ "claude-cli:padrao": LEAPY, "claude-cli:c-1": LEAPY, "claude-cli:c-2": LEAPY }, (env) => { logouts.push(Object.values(env)[0]?.split("/").at(-1) ?? "padrao"); });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }, { ia: "claude-cli", id: "c-1", apelido: null }, { ia: "claude-cli", id: "c-2", apelido: null }]);
+    await m.contas.ler();
+    Object.assign(m.contas.porId("c-1", "claude-cli")!, { logadaEm: Date.now() + 5 });
+    expect(await m.contas.descartarRepetidas()).toBe(2);
+    expect(m.contas.listar().filter((c) => c.ia === "claude-cli").map((c) => c.id)).toEqual(["padrao"]);
+    // Duas cópias de novo (o login pela tela numa pasta nova): o Sair sai das duas.
+    const m2 = await montar({ "claude-cli:padrao": LEAPY, "claude-cli:c-1": LEAPY }, (env) => { logouts.push(Object.values(env)[0]?.split("/").at(-1) ?? "padrao"); });
+    await m2.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }, { ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m2.contas.ler();
+    logouts.length = 0;
+    await m2.contas.sair(m2.contas.anuncio()[0]!.impressao);
+    expect(logouts.sort()).toEqual(["c-1", "padrao"]);
+    expect(m2.contas.anuncio()).toEqual([]);
   });
 
   it("a mesma conta em duas pastas vai ao servidor uma vez só", async () => {
