@@ -57,7 +57,7 @@ describe("assentarTurno: a conta da IA não serve (causaSemIa)", () => {
     const r = await c.entregar(null);
     const novas = c.banco.mensagens.slice(c.antes);
     expect(novas.map((m) => m.kind)).toEqual(["negacao"]);
-    expect(novas[0]?.payload).toEqual({ kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: true, causa: "conta_sem_acesso" });
+    expect(novas[0]?.payload).toEqual({ kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: true, causa: "conta_sem_acesso", ia: "claude-cli" });
     expect(c.banco.turnos).toHaveLength(1);
     expect(r.events.map((e) => e.kind)).toEqual(["turno_interrompido", "mensagem_criada"]);
   });

@@ -183,7 +183,7 @@ describeIntegracao("NOD-171: harness fixado e indisponível", () => {
       expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
       expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "motor_ausente" });
       const negacao = await b.repos.mensagens.ultimaDaConversa(b.conversaId);
-      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli" } });
+      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli", ia: "codex-cli" } });
       expect(negacao?.texto).toContain("Codex não instalado: Harness não encontrado neste computador");
       expect(negacao?.texto).not.toContain("motor pronto");
       expect(negacao?.texto).not.toContain("claude-cli");
@@ -276,7 +276,7 @@ describeIntegracao("NOD-213: bot 'auto' com modelo GPT roda no Codex", () => {
       const b = await montar(trx, { "claude-cli": pronto, "codex-cli": { estado: "nao_autenticado", motivo: "faça login", em: Date.now() } });
       expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
       const negacao = await b.repos.mensagens.ultimaDaConversa(b.conversaId);
-      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli" } });
+      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli", ia: "codex-cli" } });
       expect(negacao?.payload).not.toHaveProperty("modelo");
       expect(negacao?.texto).toContain("Codex sem conta conectada");
     });
