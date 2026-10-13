@@ -24,7 +24,7 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
 3. **O login na VM é pela tela** (opção 2A, emenda o item 4 da ADR-090). O motor roda o login do CLI e manda o link (e,
    no Codex, o código do aparelho) pelo servidor. O código que a página da Anthropic devolve vai **cifrado no navegador**
    com a chave pública que o motor gerou para aquele login (RSA-OAEP 2048 envolvendo uma chave AES-GCM 256); o servidor
-   só repassa e não consegue ler. No Claude, o terminal continua como saída discreta (`nod-motor entrar claude`).
+   só repassa: o código nunca fica em claro no servidor (memória longa, log, banco). A cifra não protege contra o próprio servidor comprometido, que serve o JS da tela (revisão R5). No Claude, o terminal continua como saída discreta (`nod-motor entrar claude`).
 4. **A mesma conta em duas máquinas é reconhecida por uma impressão** (opção 3A). A máquina calcula
    `sha256("nod-conta-v1", pessoa, ia, e-mail, organização)` com o que o CLI informa e manda só o hash. O servidor casa
    as contas iguais sem ver o e-mail; a mesma conta em duas pessoas dá hashes diferentes.

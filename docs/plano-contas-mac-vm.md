@@ -207,7 +207,7 @@ Sem contas registradas (máquina antiga), nada muda.
 
 - `src/adapters/executor/contas-locais.ts` (novo, sem Electron, usado pelo motor e pelo app): a lista local de pastas
   (`contas.json` em `pastaDoExecutor`), `prepararPastaDaConta`/`removerPastaDaConta` de `desktop/contas-mac.ts`
-  (movidas para cá), `lerImpressao(dir)` (auth status/account read com a variável da conta),
+  (importadas de lá, R8), `lerImpressao(dir)` (auth status/account read com a variável da conta),
   `anunciar()` → `ContaAnunciada[]` (cache de 60 s, refeito depois de login/logout), `instanciaDaConta(ia, impressao)`
   (cria e guarda um driver por conta com `envPorDriver`).
 - `laco.ts:298`: com `plano.conta`, o driver vem de `instanciaDaConta`; conta que a máquina não tem mais → entrega
@@ -341,3 +341,210 @@ app do Mac 4 h · web 8 h · testes junto · QA 3 h. Total ~35 h de pessoa; algu
 ## Relacionados
 
 ADR-019, ADR-069, ADR-090, ADR-092, ADR-100, ADR-101 · NOD-209, NOD-211 · PR #286.
+
+---
+
+# Revisão de engenharia (/plan-eng-review, 2026-10-13)
+
+Alvo: este plano e a ADR-102 (PR #306, issue #305). O Marlon pediu para seguir sem chamá-lo até o fim ("depois de fazer
+tudo isso, você me chama novamente"). Por isso, cada escolha abaixo é **decisão automática pela recomendação,
+autorizada por ele**, e fica registrada aqui para ele rever.
+
+## Scope Challenge
+
+- **Complexidade:** ~35 arquivos e 4 peças novas (`contas-da-pessoa`, `contas-ia.repo`, `logins-na-maquina`,
+  `contas-locais`). Passa do limite de 8 arquivos / 2 classes.
+- **Cortes:** nenhum. O Marlon pediu "tudo funcionando" na jornada inteira.
+- **Arranjo:** o original, em fatias sequenciais, cada uma terminando com `npm run check` verde.
+- **O que já existe e resolve parte do problema:**
+  - `contas-da-ia.ts`: `entraNaTroca`, `ehCorporativa`, `fraseDaDecisao`.
+  - `desktop/contas-mac.ts`: pastas, symlinks e logout, sem Electron.
+  - `desktop/login-ia.ts`: parsers, `LINKS_OFICIAIS` e `colarCodigo`, sem Electron.
+  - `pareamento-dispositivo.ts`: limites e prazo do pareamento.
+  - `ordem-arrastavel.ts`, `aviso-termos.ts` e `rodar-desta-vez`.
+- **Resultado:** `scope accepted as-is`.
+- **Busca:** sem Aside nesta máquina. A cifra híbrida RSA-OAEP + AES-GCM é o padrão do WebCrypto **[Layer 1]**.
+
+## 1. Arquitetura
+
+- **[P1] (9/10)** `src/use-cases/emitir-plano-turno.ts:188` (`const sessaoDoHarness = escolha ? retoma &&
+  conversa?.sessaoHarness === escolha.harness : true;`).
+  - **Problema:** a sessão do Codex mora no `CODEX_HOME` da conta; só o Claude compartilha `projects/`
+    (`desktop/contas-mac.ts`). Trocar a conta do Codex entre turnos pediria `--resume` de uma sessão que a outra pasta
+    não tem.
+  - **R1:** gravar a conta da sessão (`conversas.sessao_conta_id`). No Codex, o resume só vale com a mesma conta; no
+    Claude vale entre contas, porque `projects/` é compartilhado no Mac e na VM.
+- **[P1] (9/10)** `src/adapters/http/rotas/maquinas.ts:148` (`nome: viva?.nome ?? c.nome`).
+  - **Problema:** com a máquina conectada, o hostname anunciado ganha do nome da chave, e "Renomear a máquina" seria
+    desfeito no próximo contato.
+  - **R2:** o DTO usa `c.nome`, e `PATCH /maquinas/:id` grava `maquina_tokens.nome`.
+- **[P1] (8/10)** Plano §4, `doAnuncio`.
+  - **Problema:** duas máquinas anunciando contas novas ao mesmo tempo leem o mesmo `max(posicao)`.
+  - **R3:** `pg_advisory_xact_lock` da pessoa em `doAnuncio` e `reordenar`, mais
+    `ON CONFLICT (tenant_id, owner_id, ia, impressao)`.
+- **[P1] (8/10)** Plano §4, "Remover de todas".
+  - **Problema:** uma máquina desligada que volta anuncia a conta removida, e ela ressuscita.
+  - **R4:** o anúncio leva `logadaEm`. A conta removida só volta se `logadaEm > removida_em`; senão vai para `sair`
+    daquela máquina.
+- **[P2] (8/10)** ADR-102 item 3.
+  - **Problema:** "o servidor só repassa e não consegue ler" promete demais, porque o próprio servidor serve o JS que
+    cifra.
+  - **R5:** a ADR diz o modelo de ameaça: o código nunca fica em claro em memória longa, log ou banco do servidor, mas
+    um servidor comprometido poderia trocar a chave.
+- **[P2] (7/10)** Plano §5, `conta_ausente`.
+  - **Problema:** sem tratamento, a corrida comum entre sair de uma conta e nascer um turno vira falha visível para a
+    pessoa.
+  - **R6:** o assentamento apaga o vínculo e refaz o turno uma vez; na segunda falha, a conversa recebe a nota de conta.
+- **[P2] (6/10)** Suposição 10.
+  - **Problema:** o `account/read` do Codex não diz o workspace
+    (`tests/fixtures/login-ia/codex-0.162.1-account-read.jsonl`), então duas contas do ChatGPT com o mesmo e-mail viram
+    uma só.
+  - **R7:** fica como limite conhecido. O plano do ChatGPT não entra na impressão, porque mudaria a cada upgrade.
+
+## 2. Qualidade de código
+
+- **[P2] (8/10)** O motor passa a usar `desktop/contas-mac.ts` e `desktop/login-ia.ts`.
+  - **R8:** importar direto, como o motor já faz com `ia-mac.ts` e `vigia-ias.ts`. O `scripts/motor/build.mjs` só
+    barra `src/adapters/http`, db, use-cases e electron, então não há extração.
+- **[P2] (7/10)** `contas-no-app.ts` decide ordem, modo e escolhida no Mac.
+  - **R9:** essa lógica roda só sem `plano.conta` (servidor antigo, modo local), marcada no código como fallback.
+
+## 3. Testes
+
+```
+CAMINHOS DE CÓDIGO                                      JORNADAS
+[+] domain/contas-da-pessoa.ts                          [+] Provedores (lista única)
+  ├── contaDoTurno                                        ├── [GAP] arrastar → PUT ordem
+  │   ├── [GAP] ordem intercalada C,G,C                   ├── [GAP] ⋯ renomear / sair de 1 máquina / remover
+  │   ├── [GAP] 1ª da IA no limite → outra IA             ├── [GAP] adicionar conta (Mac + VM)
+  │   ├── [GAP] perguntar entre contas do mesmo provedor  ├── [GAP] filtro ?maquina= e voltar
+  │   ├── [GAP] escolhida até a 1ª renovar                └── [GAP] app antigo → tela de hoje + aviso
+  │   ├── [GAP] automático + corporativa desmarcada     [+] Login na VM (2A) [→E2E]
+  │   └── [GAP] bot com IA fixa / ordem própria           ├── [GAP] link oficial em ≤ 3 s
+  ├── decidirLimiteDaConta (4 desfechos)                  ├── [GAP] código cifrado chega ao CLI falso
+  ├── reconciliarAnuncio (nova/estado/some/removida R4)   ├── [GAP] link fora da lista → 400
+  └── impressaoDaConta                                    ├── [GAP] cancelar / prazo / servidor reiniciou
+[+] contas-ia.repo [integração]                           └── [GAP] terminal discreto (`entrar --conta`)
+  ├── [GAP] 2 máquinas, mesma impressão → 1 conta       [+] Máquinas
+  ├── [GAP] corrida de posição (R3) [concorrência]        ├── [GAP] cartão com contas + "Gerenciar contas"
+  └── [GAP] RLS: outra pessoa não vê                      ├── [GAP] renomear (R2) persiste com a máquina viva
+[+] logins-na-maquina                                     └── [GAP] desconectar ± sair das contas
+  └── [GAP] prazo, 3 por pessoa, código 1 vez           [+] Conversa
+[+] emitir / despachar / assentar                         ├── [GAP] limite na VM → "Seguir com" refaz o turno
+  ├── [GAP] plano.conta + turnos.conta_id                 ├── [GAP] conta só no Mac → "Entrar na VM"
+  ├── [GAP] sem conta utilizável → nota sem turno pago    └── [GAP] fila "saiu da conta" → login na conversa
+  ├── [GAP] limite marca a conta, não ias_no_limite     [+] Regressão (CRÍTICO)
+  ├── [GAP] conta_ausente refaz 1 vez (R6)                ├── [★★★] máquina sem contas = comportamento de hoje
+  └── [GAP] resume do Codex só com a mesma conta (R1)     └── [★★★] modo local = tela da ADR-101
+[+] motor: contas, laco.ts:298, instalação
+  ├── [GAP] driver por conta (env da pasta certa)
+  ├── [GAP] sair: logout com a variável + apaga a pasta
+  └── [GAP] script: convite embutido, Codex sem flag
+COBERTURA: 0/38 caminhos novos (tudo é novo) | regressão: os testes de hoje continuam
+```
+
+**Regressão (regra de ferro):** uma máquina sem `contas` no anúncio e o modo local mantêm o comportamento de hoje. Os
+testes de hoje passam sem mudança: `assentar-turno-contas`, `contas-ia`, `inteligencia`, `ponte-http`, `motor`. A
+única mudança intencional é o nome da máquina no DTO (R2), com o teste de `maquinas` ajustado.
+
+## 4. Desempenho
+
+- **[P3] (7/10)** Puxar `/api/maquina/contas` a cada 3 s por máquina dá cerca de 1 pedido/s com 2 a 3 máquinas.
+  - **R10:** índice parcial `contas_ia_maquinas (tenant_id, maquina_id) WHERE sair_pedido_em IS NOT NULL`.
+- **[P3] (6/10)** Sondar cada conta (até 6 por IA) multiplica o `claude auth status`.
+  - **R11:** a impressão é lida depois de login/logout e a cada 10 min (cache no `contas.json`). A sonda de prontidão
+    continua uma por IA.
+
+## Outside voice
+
+O Codex não está instalado (`codex not found`), e o fallback nativo exige TaskOutput, que esta sessão não tem. Fica
+**indisponível**: sem cobertura externa e sem crédito de revisão limpa.
+
+## NOT in scope
+
+- Login pela tela no Mac vindo de outro aparelho.
+- Lista única no modo local.
+- E-mail de conta que só existe na VM.
+- Workspace do ChatGPT na impressão (R7).
+
+## What already exists
+
+Reusados sem reescrever: `contas-da-ia.ts`, `contas-mac.ts`, `login-ia.ts`, `pareamento-dispositivo.ts`,
+`ordem-arrastavel.ts`, `aviso-termos.ts`, `rodar-desta-vez`, `aposTrocaDeConta` e `aposLimite`.
+
+## Failure modes
+
+| Caminho | Falha realista | Coberto | O que a pessoa vê |
+|---|---|---|---|
+| Login na VM | servidor reinicia no meio | teste do serviço | "O login não terminou" + Tentar de novo |
+| Login na VM | código colado errado | CLI falso devolve erro | erro no passo + Tentar de novo |
+| Puxada de contas | servidor antigo (404) | teste do motor | nada; a VM segue como hoje |
+| Turno com conta | a conta saiu no meio | R6 | turno refeito; na 2ª vez, a nota |
+| Anúncio | duas máquinas ao mesmo tempo | R3 | nada |
+| Remover | máquina desligada volta | R4 | a conta não volta |
+
+Lacunas críticas: 0.
+
+## Paralelização
+
+Implementação sequencial. As fatias dividem contratos, plano do turno e motor, então trabalhar em paralelo geraria
+conflitos. A ordem:
+
+1. Contratos, domínio, migração e repositório.
+2. Rotas e o turno.
+3. Motor.
+4. App do Mac.
+5. Web.
+6. QA.
+
+## Implementation Tasks
+
+- [ ] **T1 (P1, human: ~1d / CC: ~1h)** — banco, domínio e repositório (R3, R4, R10). Verificar com testes unitários,
+  de integração e de concorrência.
+- [ ] **T2 (P1, human: ~1d / CC: ~1h)** — rotas de contas, logins, convite e máquina (R2, R5). Verificar com testes de
+  rotas e de concorrência da ponte.
+- [ ] **T3 (P1, human: ~1d / CC: ~1h)** — conta no plano, pré-spawn, assentamento e resume do Codex (R1, R6).
+  Verificar com testes dos use-cases.
+- [ ] **T4 (P1, human: ~2d / CC: ~2h)** — motor: contas locais, driver por conta, puxada, login cifrado, sair, convite
+  e Codex sempre instalado (R8, R11). Verificar com testes do motor e de concorrência.
+- [ ] **T5 (P1, human: ~1d / CC: ~1h)** — app do Mac: anúncio, `plano.conta` e ponte `detalhes` (R9). Verificar com
+  testes do desktop.
+- [ ] **T6 (P1, human: ~2d / CC: ~2h)** — web: Provedores, Máquinas, Conectar e conversa. Verificar com testes da web e
+  QA no navegador.
+
+## Decision ledger
+
+R1 a R11 foram decididas automaticamente pela recomendação, com a autorização do Marlon (mensagem de 13/10, "depois de
+fazer tudo isso, você me chama novamente"). Accepted scope: o texto de cada R. Approval readiness: PASS (R1–R11,
+autorização de 13/10).
+
+## Completion summary
+
+- Step 0: Scope Challenge — scope accepted as-is
+- Architecture Review: 7 issues found
+- Code Quality Review: 2 issues found
+- Test Review: diagram produced, 38 gaps identified
+- Performance Review: 2 issues found
+- NOT in scope: written
+- What already exists: written
+- TODOS.md updates: 0 items proposed to user (sem TODOS.md no repo)
+- Failure modes: 0 critical gaps flagged
+- Unresolved decisions: 0 in this review
+- Outside voice: codex, unavailable (not installed; fallback nativo sem TaskOutput)
+- Parallelization: 1 lane, 0 parallel / 6 sequential
+- Lake Score: N/A
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Outside Review | codex (`/plan-eng-review`) | Independent 2nd opinion | 1 | unavailable | não instalado |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | issues_open | 11 issues, 0 critical gaps (todas mapeadas em R1–R11) |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | protótipo aprovado pelo Marlon no canvas |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+
+- **OUTSIDE COVERAGE:** codex, plan-review, unavailable (CLI ausente), sem achados.
+- **VERDICT:** Eng Review com achados mapeados em tarefas (R1–R11); implementar seguindo T1–T6.
+
+NO UNRESOLVED DECISIONS
