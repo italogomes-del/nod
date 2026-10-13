@@ -16,6 +16,32 @@ Em 2026-09-17, o mantenedor pediu repetir a preview anterior e adiar a distribui
 
 O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assinado de tags `v*`. Não se alteram `forceCodeSigning`, hardened runtime ou notarização da configuração de distribuição estável. Para gerar somente os artefatos desta preview, aplique os overrides explícitos na linha de comando: `CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dmg --x64 --arm64 --publish never --config.mac.identity=null --config.mac.notarize=false --config.dmg.sign=false`. Os demais passos e requisitos abaixo descrevem a distribuição assinada.
 
+## Pré-release local: `npm run release:mac`
+
+Definido em 2026-10-13. É o fluxo de hoje, enquanto os secrets da Apple não estão cadastrados e o workflow assinado
+não roda. As rc.1 a rc.9 da 0.4.0 saíram assim.
+
+1. **A versão sobe por PR** (`chore: versão X`, `npm version X --no-git-tag-version`). O app manda `app.getVersion()`
+   no header `x-nod-versao`, então a versão vem antes do build.
+2. **O merge desse PR abre uma issue** "Release do app do Mac pendente: X", atribuída ao mantenedor
+   (`.github/workflows/release-pendente.yml`). O passo depois do merge se perdia: a rc.5, a rc.8 e a rc.9 ficaram
+   mergeadas sem release.
+3. **Num Mac com o `gh` logado, rode `npm run release:mac`** (`scripts/desktop/release-mac.sh`). O script:
+   - builda numa cópia limpa do commit (worktree temporária). Se a tag `desktop-vX` já existe, usa o commit dela sem
+     movê-la; senão, usa a `origin/main`;
+   - testa o `hdiutil` antes: ele trava com o Mac saturado (rc.8);
+   - embute o servidor de `NOD_SERVIDOR_PADRAO` (ambiente ou variável do repositório; sem elas, o endereço de produção);
+   - gera os DMGs x64 e arm64 com assinatura ad-hoc e verifica cada um: `hdiutil verify`, `codesign`, arquitetura,
+     versão, servidor e npm embutidos e o smoke do proxy na arquitetura do Mac;
+   - escreve as notas com os títulos dos PRs desde a última release publicada (`--notas arquivo` troca por outras);
+   - cria o rascunho, baixa o que o GitHub guardou, confere os hashes e publica. `--sem-publicar` para no rascunho;
+   - copia os DMGs para `~/Downloads/nod-X/`.
+4. **A publicação fecha a issue.** Se a versão subir de novo antes da release, a issue antiga fecha como substituída.
+
+O app não se atualiza sozinho: cada pessoa baixa e instala o DMG. Só precisa de versão nova o que roda no Mac
+(`desktop/`, o executor local, o proxy). A tela e o servidor chegam a todos pelo deploy, porque o app carrega a página
+do servidor.
+
 ## Uma vez: preparar a distribuição
 
 - Integre e revise `desktop/`, `scripts/desktop/`, `electron-builder.yml`, scripts npm, ponte HTTP e workflow. Preserve os testes e migrações mais recentes da main.
