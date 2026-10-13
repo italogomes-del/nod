@@ -62,7 +62,7 @@ async function rodarUmCiclo(ponte: PonteInternaNod, machineId: string): Promise<
   const resultado = await adapter.rodarTurno({
     async sinal(s) {
       sinais = { ...sinais, [s]: true };
-      renovacoes.push((await ponte.renovar({ turnoId: plano.turnoId, machineId, sinais, eventos: [] })).ativo);
+      renovacoes.push((await ponte.renovar({ turnoId: plano.turnoId, machineId, sinais, eventos: [] })).ativo === true);
     },
     evento(e: EventoStream) {
       if (e.tipo === "tool_use") {

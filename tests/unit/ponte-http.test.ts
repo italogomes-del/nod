@@ -51,9 +51,11 @@ describe("desktop: fronteiras HTTP", () => {
     expect(await c.ponte.puxar("id-ignorado")).toBeNull();
     expect(f).toHaveBeenCalledWith("https://nod.example/api/maquina/puxar", expect.objectContaining({ redirect: "error", body: "{}", headers: { authorization: "Bearer test-only", "content-type": "application/json", "x-nod-versao": "0.1.0" } }));
   });
-  it.each([401, 426, 503])("renovação que falha (%i) manda abortar o CLI", async (status) => {
+  // revisto em 2026-10-12 (NOD-214): só a resposta definitiva (chave revogada, app velho) aborta na hora; o 5xx do servidor
+  // reiniciando vira `indefinido` e o CLI segue (tests/unit/executor/ponte-http-reinicio.test.ts).
+  it.each([[401, false], [426, false], [503, "indefinido"]] as const)("renovação que falha (%i) devolve %s", async (status, ativo) => {
     const c = criarPonteHttp({ url: "https://nod.example", chave: "test", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status })) });
-    expect((await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, eventos: [] })).ativo).toBe(false);
+    expect((await c.ponte.renovar({ turnoId: "x", machineId: "y", sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, eventos: [] })).ativo).toBe(ativo);
   });
   it("não confia no relógio nem em prosa do inventário remoto", () => {
     expect(inventario({ estado: "ausente", em: Infinity, motivo: "segredo" }, 100)).toEqual({ estado: "ausente", em: 100, motivo: "Harness não encontrado neste computador" });

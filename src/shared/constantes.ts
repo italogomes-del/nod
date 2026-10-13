@@ -4,6 +4,21 @@
 export const LEASE_MS = 90_000;
 /** Batida de renovação. definido em 2026-09-16: um terço do lease (ADR-010/021). */
 export const RENOVACAO_MS = 30_000;
+/**
+ * definido em 2026-10-12 (NOD-214): por quanto tempo a máquina segue o turno sem resposta do servidor (o deploy reinicia o
+ * processo; o novo responde em ~10 s). Passado isso, a renovação vira `{ativo:false}` e o CLI para. Fica ABAIXO de
+ * `LEASE_MS`: se o servidor não voltar, a máquina desiste antes de o varredor assentar o turno por lease vencido — nunca
+ * roda um turno que o servidor já deu por perdido. `TOLERANCIA_REINICIO_MS < LEASE_MS` é conferido em teste e no carregamento
+ * da ponte HTTP.
+ */
+export const TOLERANCIA_REINICIO_MS = 60_000;
+/**
+ * definido em 2026-10-12 (NOD-214): a entrega tenta de novo com espera exponencial de 1 s a 10 s por até 120 s — o servidor
+ * reiniciando no fim de um turno não perde a resposta (antes eram 3 tentativas em ~2 s).
+ */
+export const ENTREGA_PERSISTENCIA_MS = 120_000;
+export const ENTREGA_ESPERA_INICIAL_MS = 1_000;
+export const ENTREGA_ESPERA_MAX_MS = 10_000;
 /** Máquina sem poll há mais que isto = offline. definido em 2026-09-16: dois pulls de 20s + folga (ADR-021, presença derivada do poll). */
 export const OFFLINE_MS = 60_000;
 /**

@@ -2,6 +2,7 @@ import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
+import { criarPonteHttp } from "../../src/adapters/executor/ponte-http.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
@@ -51,7 +52,7 @@ async function compartilhadoComMaquina(env: Record<string, string> = {}) {
     await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, criados);
     await srv.desligar();
   };
-  return { srv, machineId: dados.id, pedir, bot, limpar };
+  return { srv, machineId: dados.id, chave, pedir, bot, limpar };
 }
 
 /** O long-poll dos testes que medem "voltou na hora"; o puxar vazio na drenagem tem que voltar bem antes dele. */
@@ -98,6 +99,44 @@ describeIntegracao("NOD-175: drenagem com turno em execução", () => {
     // /api/saude segue 200 durante a drenagem.
     expect((await fetch(`${srv.url}/api/saude`)).status).toBe(200);
   });
+});
+
+describeIntegracao("NOD-214 (PR 1): o cliente da máquina atravessa o servidor fora do ar", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" });
+  });
+  afterAll(async () => {
+    await m?.limpar();
+  });
+
+  it("a renovação sem resposta vira `indefinido` (o CLI segue) e a entrega insiste até o servidor voltar e concluir o turno", async () => {
+    const { srv, bot, machineId, chave } = m;
+    // O cliente de verdade do app; `fora` simula o servidor reiniciando (a conexão nem abre).
+    let fora = false;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      if (fora) throw new TypeError("fetch failed");
+      return fetch(url, init);
+    };
+    const { ponte } = criarPonteHttp({ url: srv.url, chave, versao: "0.1.0", fetchImpl });
+    await ponte.conectar({ machineId, nome: "Mac", versaoContrato: 1, inventario: { estado: "pronto", versao: "fake-sem-custo", em: 0 } });
+    const conversa = await bot("Bot do deploy");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Trabalho no deploy" });
+    const plano = await ponte.puxar("ignorado");
+    expect(plano).not.toBeNull();
+
+    fora = true;
+    // Antes: `{ativo:false}` na primeira renovação perdida, e o laço matava o CLI no meio do deploy.
+    expect((await ponte.renovar({ turnoId: plano!.turnoId, machineId, sinais, eventos: [] })).ativo).toBe("indefinido");
+
+    // O servidor volta ~3,5 s depois (o deploy leva ~10 s); antes, a entrega desistia em ~2 s (3 tentativas) e o turno se perdia.
+    const volta = setTimeout(() => { fora = false; }, 3_500);
+    try {
+      await ponte.entregar(entregaDe(plano!, machineId, 1));
+    } finally { clearTimeout(volta); }
+    expect(fora).toBe(false);
+    expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${plano!.turnoId}`)).turno.estado).toBe("concluido");
+  }, 30_000);
 });
 
 describeIntegracao("NOD-175: drenagem com o prazo vencido", () => {

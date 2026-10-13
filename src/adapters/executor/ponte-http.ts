@@ -1,12 +1,22 @@
-import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
+import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
+import { ENTREGA_ESPERA_INICIAL_MS, ENTREGA_ESPERA_MAX_MS, ENTREGA_PERSISTENCIA_MS, LEASE_MS, TOLERANCIA_REINICIO_MS } from "../../shared/constantes.ts";
+
+// NOD-214: a máquina desiste do turno sem resposta ANTES de o lease vencer no servidor — nunca roda o que ele já deu por perdido.
+if (TOLERANCIA_REINICIO_MS >= LEASE_MS) throw new Error("TOLERANCIA_REINICIO_MS precisa ficar abaixo de LEASE_MS");
 
 export class FalhaPonte extends Error {
-  /** `rota_ausente` (NOD-199): o servidor não conhece a rota (404) — só a chamada que pede `rota404` vê este código. */
-  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida" | "rota_ausente";
+  /**
+   * `rota_ausente` (NOD-199): o servidor não conhece a rota (404) — só a chamada que pede `rota404` vê este código.
+   * `ja_assentado` (NOD-214): o servidor diz que o turno já foi assentado — para a entrega, é sucesso.
+   * `acao_recusada` (revisão do PR #291): 403 `nao_permitido` de uma rota de máquina — a chave vale (chave inválida é 401
+   * no roteador), mas o servidor recusa ESTA ação (o entregar de um turno que o processo novo não conhece). Não é
+   * `chave_invalida`: essa faz o motor e o app pararem todos os turnos.
+   */
+  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida" | "rota_ausente" | "ja_assentado" | "acao_recusada";
   constructor(codigo: FalhaPonte["codigo"]) { super(codigo); this.codigo = codigo; }
 }
 
@@ -40,8 +50,18 @@ function esperaValida(v: unknown): v is EsperaParaRodar {
  * terminou com o turno (`limparAgora`, só `sem_trabalho`). Chamado fora da entrega (`setTimeout`), depois de o laço já ter
  * esquecido o turno: senão a limpeza veria a pasta ainda em uso.
  */
-export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void; aoLimparAgora?: (pastas: PastaParaLimpar[]) => void }) {
+/**
+ * `relogio`/`dormir` (NOD-214): injetáveis no teste da tolerância ao reinício e da espera da entrega.
+ */
+export function criarPonteHttp(o: { url: string; chave: string; versao: string; fetchImpl?: typeof fetch; aoFalhar?: (codigo: FalhaPonte["codigo"]) => void; aoLimparAgora?: (pastas: PastaParaLimpar[]) => void; relogio?: () => number; dormir?: (ms: number) => Promise<void> }) {
   const f = o.fetchImpl ?? fetch;
+  const agora = o.relogio ?? Date.now;
+  const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  /**
+   * NOD-214: a última resposta do servidor a cada turno (o puxar que o entregou ou uma renovação respondida). A renovação
+   * sem resposta devolve `indefinido` até `TOLERANCIA_REINICIO_MS` depois dela; daí em diante, `false`.
+   */
+  const ultimaResposta = new Map<string, number>();
   let anuncio: AnuncioMaquina | null = null;
   /** Um buffer por turno: com o pool de laços, dois turnos renovam em paralelo e não podem trocar texto. */
   const trechos = new Map<string, TrechoVivo[]>();
@@ -57,6 +77,17 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
    * se o servidor de fato esqueceu a máquina, a própria rota de inventário responde 409 e só então cai no `conectar`.
    */
   let conectado = false;
+  /**
+   * Revisão do PR #291: a reconexão do 409 em voo. Com o pool de laços, os turnos vivos recebem 409 juntos depois do
+   * reinício; todos esperam a MESMA reconexão em vez de mandar N `conectar` em rajada ao servidor recém-subido.
+   */
+  let reconexao: Promise<void> | null = null;
+  /** QA da NOD-214: quantos `conectar` o servidor aceitou — o reanúncio sabe se outra reconexão já passou enquanto ele esperava. */
+  let conexoes = 0;
+  function reconectar(m: AnuncioMaquina): Promise<void> {
+    reconexao ??= ponte.conectar(m).finally(() => { reconexao = null; });
+    return reconexao;
+  }
   async function chamar<T>(nome: string, corpo: unknown, opcoes: { rota404?: true } = {}): Promise<T> {
     const ctrl = new AbortController(); ativos.add(ctrl);
     const timer = setTimeout(() => ctrl.abort(), 35_000);
@@ -64,6 +95,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       const r = await f(`${o.url}/api/maquina/${nome}`, { method: "POST", headers: { authorization: `Bearer ${o.chave}`, "content-type": "application/json", "x-nod-versao": o.versao }, body: JSON.stringify(corpo), signal: ctrl.signal, redirect: "error" });
       const minima = r.headers.get("x-nod-versao-minima");
       if (r.status === 426 || (minima && !versaoAceita(o.versao, minima))) throw new FalhaPonte("atualize_app");
+      const codigo = r.ok ? undefined : await codigoDoCorpo(r);
+      if (codigo === "ja_assentado") throw new FalhaPonte("ja_assentado");
+      if (r.status === 403 && codigo === "nao_permitido") throw new FalhaPonte("acao_recusada");
       if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
       if (r.status === 409) throw new FalhaPonte("reconectar");
       if (r.status === 404 && opcoes.rota404) throw new FalhaPonte("rota_ausente");
@@ -72,12 +106,14 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     } catch (e) {
       const erro = e instanceof FalhaPonte ? e : new FalhaPonte("servidor_fora");
       // O 404 da rota nova num servidor antigo não é falha de conexão: quem pediu decide (nada de aviso na tela).
-      if (erro.codigo !== "rota_ausente") o.aoFalhar?.(erro.codigo);
+      // `ja_assentado` e `acao_recusada` falam do turno, não da conexão: nada de aviso (nem de parar a máquina).
+      if (erro.codigo !== "rota_ausente" && erro.codigo !== "ja_assentado" && erro.codigo !== "acao_recusada") o.aoFalhar?.(erro.codigo);
       throw erro;
     } finally { clearTimeout(timer); ativos.delete(ctrl); }
   }
   const ponte: PonteInterna & Required<Pick<PonteInterna, "anunciarInventario">> = {
-    async conectar(m) { anuncio = m; await chamar("conectar", m); conectado = true; },
+    // NOD-214: este cliente (com o laço) atravessa o reinício do servidor — o anúncio diz isso, e a drenagem deixa de esperá-lo.
+    async conectar(m) { anuncio = { ...m, sobreviveReinicio: true }; await chamar("conectar", anuncio); conectado = true; conexoes++; },
     /**
      * NOD-199: o anúncio da vigia. Antes do primeiro `conectar` aceito vai pelo `conectar`; o 409 da rota de inventário
      * (servidor sem esta conexão) também cai nele, que é a recuperação. Conectado, vai pela rota só de inventário e guarda o anúncio, para um `reconectar` depois não
@@ -86,19 +122,29 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
      */
     async anunciarInventario(m) {
       if (!conectado) { await ponte.conectar(m); return; }
-      anuncio = m;
-      try { await chamar("inventario", m, { rota404: true }); }
+      anuncio = { ...m, sobreviveReinicio: true };
+      const vistas = conexoes;
+      try { await chamar("inventario", anuncio, { rota404: true }); }
       catch (e) {
         if (!(e instanceof FalhaPonte)) throw e;
-        if (e.codigo === "reconectar") { await ponte.conectar(m); return; }
-        if (e.codigo === "rota_ausente" && emAndamento.size === 0) { await ponte.conectar(m); return; }
+        if (e.codigo === "reconectar") {
+          // QA da NOD-214: o 409 de uma renovação dispara este reanúncio (aoFalhar → vigia) junto da reconexão dela. Um
+          // `conectar` próprio aqui chegava ao servidor novo depois de a renovação adotar o turno e levava 409 (ou passava
+          // na frente e era a reconexão da renovação que levava). Entra na mesma reconexão; se outra já passou ou está em
+          // voo, ela pode ter levado o inventário de antes: reenvia o novo pela rota de inventário.
+          if (!reconexao && conexoes === vistas) { await reconectar(m); return; }
+          if (reconexao) await reconexao;
+          await chamar("inventario", anuncio, { rota404: true });
+          return;
+        }
+        if (e.codigo === "rota_ausente" && emAndamento.size === 0) { await reconectar(m); return; }
         throw e;
       }
     },
     async puxar(_pessoaId, maquina) {
       try {
         const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano;
-        if (plano) emAndamento.add(plano.turnoId);
+        if (plano) { emAndamento.add(plano.turnoId); ultimaResposta.set(plano.turnoId, agora()); }
         return plano;
       }
       catch (e) {
@@ -106,15 +152,45 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
         throw e;
       }
     },
+    /**
+     * revisto em 2026-10-12 (NOD-214): a renovação sem resposta não interrompe mais o CLI na hora. Servidor fora, 5xx ou
+     * 409 devolvem `{ativo:"indefinido"}` (o laço segue) até `TOLERANCIA_REINICIO_MS` depois da última resposta; daí em
+     * diante, `false`. No 409 (o servidor não conhece esta conexão: reiniciou) reconecta e SÓ ENTÃO renova — a renovação
+     * antes da reconexão voltaria 409 de novo. 401/403 (chave revogada), 403 `nao_permitido` (turno recusado) e 426 (app velho) são resposta definitiva: `false`.
+     */
     async renovar(p) {
       const enviar = trechos.get(p.turnoId) ?? []; trechos.delete(p.turnoId);
-      try { return await chamar("renovar", { ...p, trechos: enviar }); }
-      catch { return { ativo: false, versaoMinimaApp: o.versao }; }
+      const pedir = () => chamar<RespostaRenovar>("renovar", { ...p, trechos: enviar });
+      try {
+        let r: RespostaRenovar;
+        try { r = await pedir(); }
+        catch (e) {
+          if (!(e instanceof FalhaPonte) || e.codigo !== "reconectar" || !anuncio) throw e;
+          await reconectar(anuncio);
+          r = await pedir();
+        }
+        ultimaResposta.set(p.turnoId, agora());
+        return r;
+      } catch (e) {
+        const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
+        if (codigo === "chave_invalida" || codigo === "atualize_app" || codigo === "acao_recusada") return { ativo: false, versaoMinimaApp: o.versao };
+        const desde = ultimaResposta.get(p.turnoId);
+        if (desde === undefined) ultimaResposta.set(p.turnoId, agora());
+        else if (agora() - desde >= TOLERANCIA_REINICIO_MS) return { ativo: false, versaoMinimaApp: o.versao };
+        return { ativo: "indefinido", versaoMinimaApp: o.versao };
+      }
     },
+    /**
+     * revisto em 2026-10-12 (NOD-214): servidor fora, 5xx e 409 (reconecta antes da próxima) tentam de novo com espera de
+     * 1 s, 2 s, 4 s… até 10 s, por até `ENTREGA_PERSISTENCIA_MS` (120 s) — o deploy reinicia o servidor em ~10 s, e as 3
+     * tentativas em ~2 s de antes perdiam a entrega. `ja_assentado` é sucesso: o servidor já tem o desfecho do turno.
+     */
     async entregar(e) {
       trechos.delete(e.turnoId);
+      const inicio = agora();
+      let espera = ENTREGA_ESPERA_INICIAL_MS;
       try {
-        for (let tentativa = 0; ; tentativa++) {
+        for (;;) {
           try {
             const r = await chamar<{ limparAgora?: unknown } | null>("entregar", e);
             const limpar = Array.isArray(r?.limparAgora) ? r.limparAgora.filter(pastaParaLimparValida).filter((p) => p.quando === "sem_trabalho") : [];
@@ -122,11 +198,16 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
             return;
           }
           catch (erro) {
-            if (!(erro instanceof FalhaPonte) || erro.codigo !== "servidor_fora" || tentativa >= 2) throw erro;
-            await new Promise((r) => setTimeout(r, 1_000));
+            if (erro instanceof FalhaPonte && erro.codigo === "ja_assentado") return;
+            const transitorio = erro instanceof FalhaPonte && (erro.codigo === "servidor_fora" || erro.codigo === "reconectar");
+            if (!transitorio || agora() - inicio + espera > ENTREGA_PERSISTENCIA_MS) throw erro;
+            await dormir(espera);
+            espera = Math.min(espera * 2, ENTREGA_ESPERA_MAX_MS);
+            // 409: o servidor esqueceu a conexão (reiniciou) — reconecta antes da próxima tentativa; falhou, a próxima decide.
+            if (erro.codigo === "reconectar" && anuncio) await reconectar(anuncio).catch(() => undefined);
           }
         }
-      } finally { emAndamento.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
+      } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
     /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */
@@ -160,6 +241,13 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       }
     },
   };
+  /** O `codigo` do corpo JSON de uma resposta de erro (sem corpo ou sem JSON: undefined). */
+  async function codigoDoCorpo(r: Response): Promise<string | undefined> {
+    try {
+      const corpo = await r.clone().json() as { codigo?: unknown } | null;
+      return typeof corpo?.codigo === "string" ? corpo.codigo : undefined;
+    } catch { return undefined; }
+  }
   /** Teto de 16k de texto por renovação (o mesmo da rota): descarta os trechos mais antigos do turno. */
   function aparar(turnoId: string) {
     let fila = trechos.get(turnoId) ?? [];

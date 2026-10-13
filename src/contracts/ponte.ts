@@ -42,6 +42,13 @@ export type AnuncioMaquina = {
    * "Mac" quando ela é Linux. Ausente = app do Mac anterior a este campo: vale `darwin`.
    */
   plataforma?: PlataformaMaquina;
+  /**
+   * definido em 2026-10-12 (NOD-214): o cliente desta máquina atravessa o reinício do servidor — a renovação sem resposta
+   * vira `indefinido` (o CLI segue) por até `TOLERANCIA_REINICIO_MS`, a entrega insiste por até 120 s e a mensagem com id
+   * repetido não é escrita duas vezes. Só com isto o servidor pode deixar de esperar o turno na drenagem do deploy.
+   * Ausente = app antigo: a drenagem espera o turno como antes (NOD-175/176). Quem anuncia é a ponte HTTP do cliente.
+   */
+  sobreviveReinicio?: boolean;
 };
 
 /** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */
@@ -89,13 +96,22 @@ export type PedidoRenovar = {
   mensagensDevolvidas?: string[];
   /** definido em 2026-10-07 (ADR-083, #194): a memória do Mac, amostrada uma vez por máquina a cada 30 s. */
   memoria?: LeituraMemoria;
+  /**
+   * definido em 2026-10-12 (NOD-214): a sessão do CLI deste turno (do evento `init` do harness), em toda renovação. O
+   * servidor a grava cedo: se a entrega se perder num reinício, a volta retoma a mesma sessão em vez de abrir outra.
+   */
+  sessaoCli?: string;
 };
 /**
  * O que a renovação devolve. `mensagens`: as falas da pessoa que entraram neste turno vivo, na ordem (ADR-067).
  * `mensagensIds` (#189): o id do turno de cada uma, na mesma ordem, para o app confirmar em `mensagensEntregues`.
  */
 /** `mensagensSemMoldura`: ids (de `mensagensIds`) que são recado para a task, não fala da pessoa — entram sem a moldura. */
-export type RespostaRenovar = { ativo: boolean; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
+/**
+ * `ativo: "indefinido"` (NOD-214): só o cliente HTTP devolve — o servidor não respondeu (fora, 5xx, 409 sem reconexão) e
+ * ainda está dentro de `TOLERANCIA_REINICIO_MS`. O laço segue o turno; só `false` interrompe. O servidor nunca o manda.
+ */
+export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes

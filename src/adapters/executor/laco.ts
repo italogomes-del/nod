@@ -138,6 +138,13 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     let entregues: string[] = [];
     let devolvidas: string[] = [];
     let medirGrupo = false;
+    // NOD-214: a sessão do CLI (do `init`), mandada em toda renovação — o servidor a grava cedo e a volta de um turno
+    // perdido no reinício retoma a mesma sessão. E os ids já escritos na sessão: a renovação repetida depois de uma
+    // resposta perdida pode trazer a mesma mensagem de novo, e ela não entra duas vezes.
+    let sessaoCli: string | null = null;
+    const escritas = new Set<string>();
+    /** QA da NOD-214: as que o adapter avisou que entraram (mensagemEntrou) — só essas a repetida confirma de novo. */
+    const entraram = new Set<string>();
     const aConfirmar = () => entregues.length > 0 || devolvidas.length > 0;
     // X5 (revisto em 2026-10-08): a última leitura de memória que o servidor confirmou (o número da amostra e quando).
     let memoriaEnviada: { amostra: number; em: number } | null = null;
@@ -173,15 +180,17 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             ...(aceita || confirmar.length ? { mensagensEntregues: confirmar } : {}),
             ...(devolver.length ? { mensagensDevolvidas: devolver } : {}),
             ...(memoria ? { memoria } : {}),
+            ...(sessaoCli ? { sessaoCli } : {}),
           });
-          // A ponte HTTP devolve {ativo:false} quando a chamada falha: só uma resposta ativa confirma as falas. As que
-          // ficarem voltam na próxima renovação (ou antes da entrega), e o servidor ignora o `seq` já gravado.
-          confirmou = r.ativo;
-          if (enviadas.length && r.ativo) {
+          // revisto em 2026-10-12 (NOD-214): a ponte HTTP devolve `indefinido` quando a chamada falha (o servidor pode estar
+          // reiniciando) e `false` só depois da tolerância. Só uma resposta `true` confirma as falas; as que ficarem voltam
+          // na próxima renovação (ou antes da entrega), e o servidor ignora o `seq` já gravado.
+          confirmou = r.ativo === true;
+          if (enviadas.length && confirmou) {
             falas = falas.filter((f) => !enviadas.includes(f));
             o.aoFalaGravada?.(plano);
           }
-          if (r.ativo) {
+          if (confirmou) {
             entregues = entregues.filter((id) => !confirmar.includes(id));
             devolvidas = devolvidas.filter((id) => !devolver.includes(id));
             if (memoria) memoriaEnviada = { amostra, em: agora };
@@ -193,9 +202,17 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             // ADR-083 §6: a mensagem chega com a moldura ("responda a ela primeiro"), igual em todo driver. X3 (revisto
             // em 2026-10-08): o recado para a task não é fala da pessoa — entra como veio.
             const entrada = id !== undefined && semMoldura.includes(id) ? texto : molduraMensagemNoMeio(texto);
+            // NOD-214: já escrita nesta sessão (a confirmação se perdeu): não escreve de novo, só confirma outra vez. QA da
+            // NOD-214: a que ainda não entrou (o adapter vai escrever) espera o mensagemEntrou/mensagemDevolvida dela (X2).
+            if (id !== undefined && escritas.has(id)) {
+              if (entraram.has(id) && !entregues.includes(id)) entregues.push(id);
+              log("info", "laco_mensagem_repetida", { turno_id: plano.turnoId });
+              continue;
+            }
             // X2: `true` = o adapter vai escrevê-la; ela só é confirmada quando ele avisar que entrou (mensagemEntrou).
             if (adapterAtual?.receberMensagem?.(entrada, id)) {
               mensagensRecebidas += 1;
+              if (id !== undefined) escritas.add(id);
             } else {
               // O CLI morreu entre o pedido e a resposta: a mensagem volta para a fila (#189) e vira turno próprio. A
               // sessão que recusou a escrita não pede mais mensagens neste turno (senão a mesma voltaria a cada renovação).
@@ -204,7 +221,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
               log("aviso", "laco_mensagem_sem_sessao", { turno_id: plano.turnoId, devolvida: id !== undefined });
             }
           }
-          if (!r.ativo && adapterAtual) await adapterAtual.interromper();
+          // NOD-214: só `false` (o servidor disse, ou a tolerância ao reinício acabou) para o CLI; `indefinido` segue.
+          if (r.ativo === false && adapterAtual) await adapterAtual.interromper();
         } catch (erro) {
           log("aviso", "laco_renovar_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
         } finally {
@@ -297,6 +315,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           if (s === "promptSubmitted") await renovar();
         },
         evento(ev) {
+          if (ev.tipo === "init" && ev.sessaoCli) sessaoCli = ev.sessaoCli;
           o.aoEvento?.(plano, ev);
           avisar(vigia.registrar(ev, o.relogio()));
         },
@@ -310,6 +329,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
         },
         // X2 (revisto em 2026-10-08): só o que entrou na sessão é confirmado; o devolvido volta para a fila do servidor.
         mensagemEntrou(id) {
+          entraram.add(id);
           if (!entregues.includes(id)) entregues.push(id);
           void renovar();
         },

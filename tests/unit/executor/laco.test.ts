@@ -358,7 +358,7 @@ function driverControlado(o: { capacidades?: CapacidadesHarness; aceita?: () => 
 }
 
 /** Ponte que grava as renovações e responde com as mensagens da fila quando a sessão as aceita (com ids, #189). */
-function ponteDaSessao(o: { fila?: string[]; ativo?: (p: PedidoRenovar) => boolean; semIds?: boolean; semMoldura?: string[]; falhar?: (p: PedidoRenovar) => boolean } = {}): PonteFalsa {
+function ponteDaSessao(o: { fila?: string[]; ativo?: (p: PedidoRenovar) => boolean | "indefinido"; semIds?: boolean; semMoldura?: string[]; falhar?: (p: PedidoRenovar) => boolean } = {}): PonteFalsa {
   const base = ponteFalsa([planoDeTeste("t1", "tarefa longa"), null]);
   const fila = (o.fila ?? []).map((texto, i) => ({ id: `m${i + 1}`, texto }));
   base.renovar = async (p) => {
@@ -692,3 +692,112 @@ describe("sessão viva no laço (ADR-067)", () => {
   });
 });
 
+
+describe("NOD-214: o laço atravessa o reinício do servidor", () => {
+  async function cenario(d: ReturnType<typeof driverControlado>, ponte: PonteFalsa) {
+    const registry = await registryCom(d.driver);
+    const laco = iniciarLaco({ ponte, registry, pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10 ** 6, checagemMensagensMs: 10 ** 6, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => d.sinks() !== null);
+    return laco;
+  }
+
+  it("renovação `indefinido` (servidor sem resposta) não interrompe nem confirma a fala; `true` depois confirma", async () => {
+    const d = driverControlado();
+    let resposta: boolean | "indefinido" = "indefinido";
+    const ponte = ponteDaSessao({ ativo: () => resposta });
+    const laco = await cenario(d, ponte);
+    d.sinks()!.falaIntermediaria!("parte 1");
+    await esperarAte(() => ponte.renovacoes.some((r) => r.falas?.length));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(d.interrupcoes()).toBe(0);
+    resposta = true;
+    d.terminar("fim");
+    await esperarAte(() => ponte.entregas.length === 1);
+    // A fala não confirmada pelo `indefinido` voltou com o mesmo seq antes da entrega.
+    expect(ponte.renovacoes.filter((r) => r.falas?.some((f) => f.seq === 1)).length).toBeGreaterThanOrEqual(2);
+    expect(ponte.entregas[0]?.resultado.desfecho).toBe("sucesso");
+    await laco.parar();
+  });
+
+  it("só `false` interrompe o CLI", async () => {
+    const d = driverControlado();
+    const ponte = ponteDaSessao({ ativo: () => false });
+    const laco = await cenario(d, ponte);
+    d.sinks()!.falaIntermediaria!("parte 1");
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.interrupcoes()).toBeGreaterThanOrEqual(1);
+    expect(ponte.entregas[0]?.resultado.desfecho).toBe("interrompido");
+    await laco.parar();
+  });
+
+  it("a mesma mensagem (mesmo id) devolvida duas vezes entra na sessão uma vez só e é confirmada de novo", async () => {
+    const d = driverControlado();
+    const ponte = ponteDaSessao();
+    // O servidor manda m1, a resposta se perde (o laço não sabe que ela foi confirmada) e ele manda m1 de novo.
+    let vezes = 0;
+    ponte.renovar = async (p) => {
+      ponte.renovacoes.push({ ...p, sinais: { ...p.sinais }, ...(p.mensagensEntregues ? { mensagensEntregues: [...p.mensagensEntregues] } : {}) });
+      const manda = p.aceitaMensagens && vezes < 2;
+      if (manda) vezes += 1;
+      return { ativo: true, versaoMinimaApp: "0.1.0", ...(manda ? { mensagens: ["e o prazo?"], mensagensIds: ["m1"] } : {}) };
+    };
+    const laco = await cenario(d, ponte);
+    expect(await d.sinks()!.ocioso!()).toBe(true);
+    await esperarAte(() => ponte.renovacoes.some((r) => r.mensagensEntregues?.includes("m1")));
+    expect(await d.sinks()!.ocioso!()).toBe(false);
+    await esperarAte(() => vezes === 2);
+    await esperarAte(() => ponte.renovacoes.filter((r) => r.mensagensEntregues?.includes("m1")).length >= 2);
+    expect(d.recebidas).toHaveLength(1);
+    expect(d.ids).toEqual(["m1"]);
+    d.terminar("4");
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+  });
+
+  it("a mensagem repetida que ainda NÃO entrou na sessão não é confirmada; se o CLI a devolve, ela só volta para a fila", async () => {
+    // QA da NOD-214: a repetida ia direto para `mensagensEntregues`, mesmo pendente no adapter (X2: só o que entrou é
+    // confirmado). O CLI morria antes de escrever, o adapter a devolvia — e ela seguia confirmada e devolvida juntas.
+    const d = driverControlado({ confirma: false });
+    const ponte = ponteDaSessao();
+    let vezes = 0;
+    ponte.renovar = async (p) => {
+      ponte.renovacoes.push({ ...p, sinais: { ...p.sinais }, ...(p.mensagensEntregues ? { mensagensEntregues: [...p.mensagensEntregues] } : {}), ...(p.mensagensDevolvidas ? { mensagensDevolvidas: [...p.mensagensDevolvidas] } : {}) });
+      const manda = p.aceitaMensagens && vezes < 2;
+      if (manda) vezes += 1;
+      return { ativo: true, versaoMinimaApp: "0.1.0", ...(manda ? { mensagens: ["e o prazo?"], mensagensIds: ["m1"] } : {}) };
+    };
+    const laco = await cenario(d, ponte);
+    expect(await d.sinks()!.ocioso!()).toBe(true);
+    await esperarAte(() => vezes === 1 && d.ids.length === 1);
+    // O servidor manda m1 de novo enquanto o adapter ainda não a escreveu.
+    d.sinks()!.falaIntermediaria!("pensando");
+    await esperarAte(() => vezes === 2);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ponte.renovacoes.some((r) => r.mensagensEntregues?.includes("m1"))).toBe(false);
+    d.sinks()!.mensagemDevolvida!("m1");
+    await esperarAte(() => ponte.renovacoes.some((r) => r.mensagensDevolvidas?.includes("m1")));
+    d.terminar("fim");
+    await esperarAte(() => ponte.entregas.length === 1);
+    expect(d.ids).toEqual(["m1"]);
+    expect(ponte.renovacoes.some((r) => r.mensagensEntregues?.includes("m1"))).toBe(false);
+    expect(ponte.entregas[0]!.mensagensEntregues ?? []).not.toContain("m1");
+    await laco.parar();
+  });
+
+  it("a sessão do CLI (evento `init`) vai em toda renovação depois dele", async () => {
+    const d = driverControlado();
+    const ponte = ponteDaSessao();
+    const laco = await cenario(d, ponte);
+    d.sinks()!.falaIntermediaria!("antes");
+    await esperarAte(() => ponte.renovacoes.length >= 1);
+    expect(ponte.renovacoes[0]?.sessaoCli).toBeUndefined();
+    d.sinks()!.evento({ tipo: "init", sessaoCli: "sessao-1", ferramentas: [], modelo: "m", versaoCli: "1", apiKeySource: "none" });
+    d.sinks()!.falaIntermediaria!("depois");
+    await esperarAte(() => ponte.renovacoes.some((r) => r.sessaoCli === "sessao-1"));
+    d.terminar("fim");
+    await esperarAte(() => ponte.entregas.length === 1);
+    const depois = ponte.renovacoes.slice(ponte.renovacoes.findIndex((r) => r.sessaoCli === "sessao-1"));
+    expect(depois.every((r) => r.sessaoCli === "sessao-1")).toBe(true);
+    await laco.parar();
+  });
+});
