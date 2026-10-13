@@ -64,7 +64,7 @@ function renderProvedoresContas(estado: Estado): string {
   const intro = filtro
     ? `Mostrando as contas d${filtro.plataforma === "darwin" ? "o" : "a"} ${esc(nomeCurto(filtro, maquinas))}. A ordem é a mesma em todas as máquinas: os bots dela pulam as que não estão logadas lá.`
     : "Suas contas de IA, numa lista só. Os bots usam a primeira livre, de cima para baixo, na máquina onde trabalham. Arraste para mudar a ordem; cada bot pode ter a dele.";
-  return `<section class="espaco-secao provedores contas-lista">
+  return `<section class="espaco-secao provedores prov-contas">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       <p class="intro">${intro}</p>
       ${lista}

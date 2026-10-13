@@ -31,6 +31,11 @@ export type ContaAnunciada = {
 
 /** Teto do anúncio: 6 contas por IA (CONTAS_POR_IA_MAX) nas duas IAs. */
 export const CONTAS_ANUNCIADAS_MAX = 12;
+/**
+ * Revisão do PR #306: o teto da lista da pessoa (contas não removidas). Uma máquina que anuncia além disso não cria
+ * conta nova — sem teto, a lista crescia sem fim e passava do limite do `PUT contas-ia/ordem` (50).
+ */
+export const CONTAS_DA_PESSOA_MAX = 24;
 
 export type MaquinaDaConta = { maquinaId: string; nome: string; estado: EstadoContaNaMaquina };
 
@@ -63,7 +68,6 @@ export type ContaDoPlano = { id: string; impressao: string; apelido: string };
 // ── Login de uma conta numa máquina pela tela (ADR-102 item 3) ──────────────────────────────────────────────────────
 
 export type FaseLogin = "pedido" | "abrindo" | "aguardando_pessoa" | "conferindo" | "pronto" | "falhou" | "cancelado";
-export const FASES_LOGIN: readonly FaseLogin[] = ["pedido", "abrindo", "aguardando_pessoa", "conferindo", "pronto", "falhou", "cancelado"];
 export const FASES_LOGIN_FINAIS: readonly FaseLogin[] = ["pronto", "falhou", "cancelado"];
 
 export type LoginNaMaquina = {
@@ -84,7 +88,10 @@ export type LoginNaMaquina = {
   chavePublica: string | null;
   /** O código já foi entregue à máquina (a tela mostra "Conferindo…"). */
   codigoEnviado: boolean;
-  /** Código curto do erro (falhou): "tempo_esgotado", "codigo_recusado", "cli_ausente", "conta_diferente"… */
+  /**
+   * Código curto do erro (falhou): "tempo_esgotado" e "codigo_ilegivel"/"contas_demais" (do motor), as causas do login
+   * do CLI (CausaFalhaLogin, estado-ia.ts) e os motivos de colar o código (ResultadoColarCodigo).
+   */
   erro: string | null;
   /** A conta que entrou (pronto). Diferente de `contaId` = a pessoa entrou com outra conta (a tela avisa). */
   contaFinalId: string | null;
@@ -124,9 +131,8 @@ export type ProgressoDoLogin = {
   pedeCodigo?: boolean;
   chavePublica?: string;
   erro?: string;
-  /** pronto: a impressão da conta que entrou (o anúncio seguinte a registra). */
+  /** pronto: a impressão da conta que entrou (o anúncio seguinte a registra, com o plano). */
   impressao?: string;
-  plano?: string | null;
 };
 
 // ── O limite de uma conta na conversa (payload `limite_do_plano.contas`) ─────────────────────────────────────────────

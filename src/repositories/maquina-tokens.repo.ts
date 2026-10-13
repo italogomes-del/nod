@@ -46,6 +46,17 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
       return linhas.length > 0;
     },
 
+    /**
+     * ADR-102 (revisão do PR #306): a chave passa a vencer em `ate` (ou antes, se já vencia antes). É o "Desconectar e
+     * sair das contas": a máquina tem até lá para sair das contas e confirmar; sem confirmação, a chave cai sozinha —
+     * gravado no banco, sobrevive a um reinício do servidor.
+     */
+    async vencerEm(id: string, ate: number): Promise<boolean> {
+      const r = await conn`update maquina_tokens set expira_em = least(coalesce(expira_em, ${data(ate)}), ${data(ate)})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and revogado_em is null returning id`;
+      return r.length > 0;
+    },
+
     async buscarVivaPorHash(hash: Buffer, agora: number): Promise<{ id: string; hash: Buffer } | null> {
       const [l] = await conn<{ id: string; hash: Buffer }[]>`
         select id, hash from maquina_tokens

@@ -7,7 +7,8 @@ import { VERSAO_MINIMA_APP, type PonteInternaNod } from "../../src/adapters/fund
 import { criarPonteHttpServidor } from "../../src/adapters/http/rotas/ponte.ts";
 import { criarPonteHttp, urlServidor } from "../../src/adapters/executor/ponte-http.ts";
 import { versaoAceita } from "../../src/domain/versao-app.ts";
-import { entrega, falas, inventario, memoria, relatoEspera, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { contasAnunciadas, entrega, falas, impressoes, inventario, memoria, progressoDoLogin, relatoEspera, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
+import { CONTAS_ANUNCIADAS_MAX } from "../../src/contracts/contas-ia.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
 
 describe("ADR-099 (parte 2): as esperas pela ponte HTTP", () => {
@@ -592,5 +593,34 @@ describe("ADR-099 (I5): a frente sem trabalho sai na hora pela resposta do entre
   it("app: a lista da passada normal aceita `sem_trabalho` e descarta valor desconhecido", async () => {
     const f = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({ pastas: [pasta, { ...pasta, quando: "um_dia" }] }), { headers: { "x-nod-versao-minima": "0.1.0" } }));
     expect(await criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: f }).ponte.pastasParaLimpar!("p")).toEqual([pasta]);
+  });
+});
+
+describe("validação das contas anunciadas (ADR-102, revisão do PR #306)", () => {
+  const AGORA_V = 1_760_000_000_000;
+  const imp = "a".repeat(64);
+  it("só impressão, IA e estado conhecidos; e-mail não passa; duplicata some; logadaEm ausente ou futuro vira 0 (não ressuscita conta removida)", () => {
+    const r = contasAnunciadas([
+      { impressao: imp, ia: "claude-cli", estado: "pronta", plano: "x@y.com", apelidoSugerido: "Pessoal", logadaEm: AGORA_V + 3_600_000 },
+      { impressao: imp, ia: "claude-cli", estado: "pronta" },
+      { impressao: "b".repeat(64), ia: "gemini", estado: "pronta" },
+      { impressao: "c".repeat(64), ia: "codex-cli", estado: "sem_login", logadaEm: AGORA_V - 5 },
+    ], AGORA_V)!;
+    expect(r).toEqual([
+      { impressao: imp, ia: "claude-cli", estado: "pronta", plano: null, corporativa: false, logadaEm: 0, apelidoSugerido: "Pessoal" },
+      { impressao: "c".repeat(64), ia: "codex-cli", estado: "sem_login", plano: null, corporativa: false, logadaEm: AGORA_V - 5 },
+    ]);
+    expect(contasAnunciadas("lixo", AGORA_V)).toBeUndefined();
+    expect(contasAnunciadas(Array.from({ length: 40 }, (_, i) => ({ impressao: i.toString(16).padStart(64, "0"), ia: "claude-cli", estado: "pronta" })), AGORA_V)).toHaveLength(CONTAS_ANUNCIADAS_MAX);
+  });
+
+  it("progresso do login e impressões: formato fechado", () => {
+    const loginId = "11111111-1111-4111-8111-111111111111";
+    expect(progressoDoLogin({ loginId, fase: "pronto", impressao: imp })).toEqual({ loginId, fase: "pronto", impressao: imp });
+    expect(() => progressoDoLogin({ loginId, fase: "pronto", erro: "x".repeat(41) })).toThrow();
+    expect(() => progressoDoLogin({ loginId: "nao-uuid", fase: "pronto" })).toThrow();
+    expect(() => progressoDoLogin({ loginId, fase: "cancelado" })).toThrow();
+    expect(() => impressoes(["nao-hex"])).toThrow();
+    expect(impressoes([imp])).toEqual([imp]);
   });
 });

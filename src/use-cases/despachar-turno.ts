@@ -146,6 +146,7 @@ async function semContaNaMaquina(
   p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; agora: number },
 ): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
   const { turno, agora } = p;
+  if (!(await deps.repos.contasIa.temContaNaMaquina(p.machineId))) return null;
   const c = await lerContasDaMaquina(deps, p.machineId);
   if (c.naMaquina.size === 0) return null;
   const agente = await deps.repos.agentes.buscar(turno.agenteId);

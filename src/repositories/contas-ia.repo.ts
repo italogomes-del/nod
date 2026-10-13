@@ -1,3 +1,4 @@
+import { CONTAS_DA_PESSOA_MAX } from "../contracts/contas-ia.ts";
 import type { ContaAnunciada, EstadoContaNaMaquina, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
 import { apelidoPadrao, decidirAnuncio, ehIaComConta, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -53,6 +54,13 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
   }
 
   return {
+    /** Serializa as mudanças da lista da pessoa até o fim da transação (o "Seguir com" clicado duas vezes, R3). */
+    travar: async (): Promise<void> => { await travarPessoa(); },
+    /** Revisão do PR #306: o despacho só lê a lista inteira quando a máquina tem alguma conta pronta (o caso raro hoje). */
+    async temContaNaMaquina(maquinaId: string): Promise<boolean> {
+      const [l] = await conn`select 1 from contas_ia_maquinas where ${doDono()} and maquina_id = ${maquinaId} and estado = 'pronta' and sair_pedido_em is null limit 1`;
+      return l !== undefined;
+    },
     /** As contas (com as removidas, que o anúncio precisa ver) e todos os vínculos com as máquinas. */
     async listar(): Promise<{ contas: ContaGuardadaNoServidor[]; vinculos: VinculoDaConta[] }> {
       const [contas, vinculos] = await Promise.all([
@@ -80,9 +88,12 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
       const sair: string[] = [];
       const vistas: string[] = [];
       let mudou = false;
+      let ativas = existentes.filter((c) => c.removidaEm === null).length;
       for (const a of anunciadas) {
         const existente = porChave.get(`${a.ia}:${a.impressao}`) ?? null;
         const decisao = decidirAnuncio(existente, a.logadaEm);
+        if ((decisao === "criar" || decisao === "voltar") && ativas >= CONTAS_DA_PESSOA_MAX) continue;
+        if (decisao === "criar" || decisao === "voltar") ativas++;
         let id: string;
         if (decisao === "sair") {
           sair.push(a.impressao);

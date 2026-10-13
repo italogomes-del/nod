@@ -19,14 +19,14 @@ const PESSOA = "pessoa-1";
 const parados: (() => void)[] = [];
 afterEach(() => { for (const p of parados.splice(0)) p(); });
 
-async function montar() {
+async function montar(o: { logoutFalha?: boolean } = {}) {
   const raiz = await mkdtemp(join(tmpdir(), "nod-contas-motor-"));
   const bin = join(raiz, "claude.mjs");
   await copyFile(new URL("../../fixtures/login-ia/claude-login-falso.mjs", import.meta.url), bin);
   await chmod(bin, 0o755);
   const casa = join(raiz, "casa");
   await mkdir(casa, { recursive: true });
-  const clis: ClisDoMotor = { bin: async (ia) => (ia === "claude-cli" ? bin : null), envBase: () => ({ PATH: process.env.PATH ?? "", HOME: casa, CODIGO_CERTO: "codigo-certo-123", EMAIL_FALSO: "Marlon@Leapy.com.br", ORG_FALSA: "org-leapy" }), home: casa, versao: "teste" };
+  const clis: ClisDoMotor = { bin: async (ia) => (ia === "claude-cli" ? bin : null), envBase: () => ({ PATH: process.env.PATH ?? "", HOME: casa, CODIGO_CERTO: "codigo-certo-123", EMAIL_FALSO: "Marlon@Leapy.com.br", ORG_FALSA: "org-leapy", ...(o.logoutFalha ? { LOGOUT_FALHA: "1" } : {}) }), home: casa, versao: "teste" };
   const arquivo = join(raiz, "contas-locais.json");
   const contas = criarContasLocais({ base: raiz, arquivo, pessoaId: PESSOA, padrao: (ia) => join(casa, ia === "claude-cli" ? ".claude" : ".codex"), lerIdentidade: (ia, env) => lerIdentidadeNoCli(clis, ia, env), logout: (ia, env) => logoutNoCli(clis, ia, env), agora: Date.now });
   await contas.carregar();
@@ -55,6 +55,16 @@ async function montar() {
   return { contas, progresso, saidas, respostas, esperar, arquivo, get reanuncios() { return reanuncios; }, get desconectou() { return desconectou; } };
 }
 
+/** Um login completo pela tela (o código certo), até o `pronto`. */
+async function logar(m: Awaited<ReturnType<typeof montar>>): Promise<void> {
+  const id = "55555555-5555-4555-8555-555555555555";
+  m.respostas.push({ logins: [{ id, ia: "claude-cli", impressao: null, apelido: null }], sair: [], desconectar: false });
+  await m.esperar(() => m.progresso.some((p) => p.fase === "aguardando_pessoa"));
+  const chave = m.progresso.find((p) => p.fase === "aguardando_pessoa")!.chavePublica!;
+  m.respostas.push({ logins: [{ id, ia: "claude-cli", impressao: null, apelido: null, codigo: await cifrarCodigo(chave, "codigo-certo-123") }], sair: [], desconectar: false });
+  await m.esperar(() => m.progresso.some((p) => p.fase === "pronto"));
+}
+
 const impressaoEsperada = createHash("sha256").update(textoDaImpressaoDaConta({ pessoaId: PESSOA, ia: "claude-cli", email: "marlon@leapy.com.br", orgId: "org-leapy" })).digest("hex");
 
 describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
@@ -68,7 +78,7 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     const cifrado = await cifrarCodigo(aguardando.chavePublica!, "codigo-certo-123");
     m.respostas.push({ logins: [{ id: "11111111-1111-4111-8111-111111111111", ia: "claude-cli", impressao: null, apelido: "Leapy", codigo: cifrado }], sair: [], desconectar: false });
     await m.esperar(() => m.progresso.some((p) => p.fase === "pronto" || p.fase === "falhou"));
-    expect(m.progresso.at(-1)).toMatchObject({ fase: "pronto", impressao: impressaoEsperada, plano: "Max" });
+    expect(m.progresso.at(-1)).toMatchObject({ fase: "pronto", impressao: impressaoEsperada });
     expect(m.progresso.map((p) => p.fase)).toEqual(expect.arrayContaining(["abrindo", "aguardando_pessoa", "conferindo", "pronto"]));
     expect(m.reanuncios).toBeGreaterThan(0);
     // A conta entrou na pasta de sempre (a primeira do Claude nesta máquina), com o apelido para o anúncio.
@@ -107,6 +117,24 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     m.respostas.push({ logins: [], sair: [], desconectar: true });
     await m.esperar(() => m.desconectou);
     expect(m.saidas).toEqual([{ impressoes: [], desconectada: true }]);
+  });
+
+  it("desconectar depois de um login: sai da conta (logout na pasta) e confirma a impressão", async () => {
+    const m = await montar();
+    await logar(m);
+    m.respostas.push({ logins: [], sair: [], desconectar: true });
+    await m.esperar(() => m.desconectou);
+    expect(m.saidas).toEqual([{ impressoes: [impressaoEsperada], desconectada: true }]);
+    expect(m.contas.anuncio()).toEqual([]);
+  });
+
+  it("revisão do PR #306: logout que falha não é confirmado (a saída fica pendente e a conta continua anunciada)", async () => {
+    const m = await montar({ logoutFalha: true });
+    await logar(m);
+    m.respostas.push({ logins: [], sair: [impressaoEsperada], desconectar: false });
+    await m.esperar(() => m.saidas.length > 0);
+    expect(m.saidas[0]).toEqual({ impressoes: [], desconectada: false });
+    expect(m.contas.anuncio()).toHaveLength(1);
   });
 
   it("servidor sem contas (404): a puxada para e nada mais acontece", async () => {

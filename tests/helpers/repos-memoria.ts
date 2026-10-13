@@ -2217,6 +2217,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         l.revogadaEm ??= em;
         return true;
       },
+      async vencerEm(id, ate) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
+        if (!l) return false;
+        l.expiraEm = l.expiraEm === null ? ate : Math.min(l.expiraEm, ate);
+        return true;
+      },
       async buscarVivaPorHash(hash, em) {
         // Filtra expiração como o repo real (maquina-tokens.repo.ts): duplo que ignora `em` esconde bug.
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.revogadaEm === null && (x.expiraEm === null || x.expiraEm > em) && x.hash.equals(hash));

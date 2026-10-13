@@ -13,6 +13,7 @@
  * ADR-102 (2026-10-13): o comando que a tela mostra leva um convite de uso único (`/motor?convite=…`); o pareamento
  * no fim o leva junto e a tela vê a máquina chegar sem a pessoa digitar código. O Codex vem sempre.
  */
+import { CONVITE } from "../../shared/convite.ts";
 import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
 
 export { ARQUIVOS_DO_MOTOR, type ArquivoDoMotor } from "../../domain/atualizacao-do-motor.ts";
@@ -32,7 +33,7 @@ export function servidorParaScript(proto: string, host: string): string | null {
 }
 
 /** O convite do comando (ADR-102): 32 caracteres base64url, nada que o shell interprete. */
-export const CONVITE_NO_SCRIPT = /^[A-Za-z0-9_-]{32}$/;
+export const CONVITE_NO_SCRIPT = CONVITE;
 
 export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null }): string {
   if (!/^https?:\/\/[a-z0-9.:-]+$/.test(o.servidor) || !/^[0-9A-Za-z.+-]+$/.test(o.versao)) throw new Error("servidor_ou_versao_invalida");
@@ -115,8 +116,9 @@ como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=
 passo "Claude Code"
 # ADR-102: o Codex vem sempre (antes só com NOD_COM_CODEX=1); NOD_SEM_CODEX=1 desliga.
 if [ "\${NOD_SEM_CODEX:-0}" != "1" ]; then
-  como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null
-  passo "Codex"
+  # Revisão do PR #306: o Codex não derruba a instalação (nem a atualização de uma VM que já roda só com o Claude).
+  if como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null; then passo "Codex"
+  else printf 'Aviso: o Codex não instalou agora. Rode a instalação de novo depois para tentar outra vez.\\n'; fi
 fi
 
 $SUDO mkdir -p "$PASTA/app"

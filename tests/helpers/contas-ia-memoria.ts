@@ -1,3 +1,4 @@
+import { CONTAS_DA_PESSOA_MAX } from "../../src/contracts/contas-ia.ts";
 import { randomUUID } from "node:crypto";
 import type { ContaAnunciada, IaComConta, ModoDasContas } from "../../src/contracts/contas-ia.ts";
 import { apelidoPadrao, decidirAnuncio, type VinculoDaConta } from "../../src/domain/contas-da-pessoa.ts";
@@ -22,6 +23,8 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
   const proximaPosicao = () => Math.max(0, ...minhas().filter((c) => c.removidaEm === null).map((c) => c.posicao)) + 1;
   const dono = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId };
   return {
+    async travar() {},
+    async temContaNaMaquina(maquinaId: string) { return meusVinculos().some((v) => v.maquinaId === maquinaId && v.estado === "pronta" && v.sairPedidoEm === null); },
     async listar() {
       return { contas: [...minhas()].sort((a, b) => a.posicao - b.posicao).map((c) => sem(c) as ContaGuardadaNoServidor), vinculos: meusVinculos().map((v) => sem(v) as VinculoDaConta) };
     },
@@ -33,6 +36,7 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
       for (const a of anunciadas) {
         const existente = minhas().find((c) => c.ia === a.ia && c.impressao === a.impressao) ?? null;
         const decisao = decidirAnuncio(existente, a.logadaEm);
+        if ((decisao === "criar" || decisao === "voltar") && minhas().filter((c) => c.removidaEm === null).length >= CONTAS_DA_PESSOA_MAX) continue;
         let conta = existente;
         if (decisao === "criar") {
           const posicao = proximaPosicao();

@@ -1,3 +1,4 @@
+import { conviteValido } from "../shared/convite.ts";
 import { randomBytes, randomInt } from "node:crypto";
 import { PLATAFORMAS_MAQUINA, type PlataformaMaquina } from "../contracts/ponte.ts";
 import type { Escopo } from "../shared/types.ts";
@@ -30,7 +31,7 @@ export interface PareamentoDispositivo {
    * O pedido que chegou com o convite, para a tela confirmar ("A vm-bots apareceu. Conectar?"). `pendente` = ainda não
    * chegou; `invalido` = não existe, venceu ou é de outra pessoa.
    */
-  verConvite(e: { convite: string; escopo: Escopo }): { estado: "pendente" } | { estado: "invalido" } | { estado: "chegou"; codigo: string; pedido: PedidoDispositivo };
+  verConvite(e: { convite: string; escopo: Escopo }): { estado: "pendente" } | { estado: "invalido" } | { estado: "conflito" } | { estado: "chegou"; codigo: string; pedido: PedidoDispositivo };
   /** O pedido do código, para a tela confirmar; null = não existe, venceu, já foi aprovado ou a pessoa errou demais. */
   ver(e: { codigoPessoa: string; escopo: Escopo }): PedidoDispositivo | null;
   aprovar(e: { codigoPessoa: string; escopo: Escopo }): boolean;
@@ -48,7 +49,8 @@ export const MAX_PEDIDOS_DISPOSITIVO = 1_000;
 /** definido em 2026-10-13 (ADR-102): o convite vale 30 min e uma vez (o tempo de criar a VM e colar o comando). */
 export const PRAZO_CONVITE_MS = 30 * 60_000;
 const MAX_CONVITES = 1_000;
-const CONVITE = /^[A-Za-z0-9_-]{32}$/;
+/** Revisão do PR #306: convites abertos por pessoa; o mais antigo DELA sai (antes, qualquer um despejava os dos outros). */
+export const MAX_CONVITES_POR_PESSOA = 5;
 /** Sem 0/O, 1/I/L e U (RFC 8628 §6.1): 31 símbolos, 8 caracteres ≈ 2^39 combinações para um código que vive 10 min. */
 const ALFABETO = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODIGO_DISPOSITIVO = /^[A-Za-z0-9_-]{43}$/;
@@ -72,7 +74,7 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
   const porDispositivo = new Map<string, Pedido>();
   const porPessoa = new Map<string, string>();
   const erros = new Map<string, { n: number; desde: number }>();
-  const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null }>();
+  const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null; conflito: boolean }>();
   const varrer = () => {
     const t = agora();
     for (const [c, p] of porDispositivo) if (p.ate <= t) { porDispositivo.delete(c); porPessoa.delete(p.codigoPessoa); }
@@ -111,7 +113,10 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       const codigoPessoa = novoCodigoPessoa();
       // ADR-102: o convite válido e ainda não usado liga este pedido à tela de quem o criou; inválido, o pedido segue
       // como o de sempre (o código no terminal), e a pessoa ainda pode digitá-lo.
-      const v = convite && CONVITE.test(convite) ? convites.get(convite) : undefined;
+      const v = conviteValido(convite) ? convites.get(convite) : undefined;
+      // Revisão do PR #306: o convite anda em URL (log de proxy, histórico do shell). Um segundo pedido com o mesmo
+      // convite o derruba: a tela avisa e a pessoa gera outro, em vez de aprovar sem saber qual máquina chegou primeiro.
+      if (v && v.codigoPessoa !== null) v.conflito = true;
       if (v && v.codigoPessoa === null) v.codigoPessoa = codigoPessoa;
       porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: null });
       porPessoa.set(codigoPessoa, codigoDispositivo);
@@ -119,17 +124,19 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
     },
     criarConvite(escopo) {
       varrer();
-      // Cheio: o mais antigo sai (o convite é da tela, com sessão; não há como alguém de fora encher a lista).
+      const dela = [...convites].filter(([, v]) => chaveDe(v.escopo) === chaveDe(escopo));
+      if (dela.length >= MAX_CONVITES_POR_PESSOA) convites.delete(dela[0]![0]);
       if (convites.size >= MAX_CONVITES) convites.delete(convites.keys().next().value!);
       const convite = randomBytes(24).toString("base64url");
       const expiraEm = agora() + PRAZO_CONVITE_MS;
-      convites.set(convite, { escopo, ate: expiraEm, codigoPessoa: null });
+      convites.set(convite, { escopo, ate: expiraEm, codigoPessoa: null, conflito: false });
       return { convite, expiraEm };
     },
     verConvite({ convite, escopo }) {
       varrer();
-      const v = CONVITE.test(convite) ? convites.get(convite) : undefined;
+      const v = conviteValido(convite) ? convites.get(convite) : undefined;
       if (!v || v.escopo.tenantId !== escopo.tenantId || v.escopo.pessoaId !== escopo.pessoaId) return { estado: "invalido" };
+      if (v.conflito) return { estado: "conflito" };
       if (v.codigoPessoa === null) return { estado: "pendente" };
       const dispositivo = porPessoa.get(v.codigoPessoa);
       const p = dispositivo ? porDispositivo.get(dispositivo) : undefined;

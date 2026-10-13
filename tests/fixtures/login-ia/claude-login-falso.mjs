@@ -16,6 +16,7 @@ if (a === "auth" && b === "status") {
   process.stdout.write(`${JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: c.email, orgId: c.orgId, orgName: "Empresa", subscriptionType: "max" })}\n`);
   process.exit(0);
 }
+if (a === "auth" && b === "logout" && process.env.LOGOUT_FALHA === "1") { process.stderr.write("logout falhou\n"); process.exit(1); }
 if (a === "auth" && b === "logout") { rmSync(arquivo, { force: true }); process.stdout.write("Logged out\n"); process.exit(0); }
 if (a === "auth" && b === "login") {
   process.stdout.write("Browser didn't open? Use the url below to sign in (c to copy)\n");

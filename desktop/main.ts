@@ -480,7 +480,9 @@ async function conectar(c: Config) {
       driversPorConta.set(chave, criando);
       criando.catch(() => { if (driversPorConta.get(chave) === criando) driversPorConta.delete(chave); });
     }
-    return (await pronto.catch(() => null)) ?? "ausente";
+    // Revisão do PR #306: falhar ao criar o driver é erro do turno, não conta ausente (o servidor apagaria o vínculo e o
+    // reanúncio o traria de volta, num laço de turnos refeitos).
+    return (await pronto) ?? "ausente";
   };
   // A lista de tarefas do bot (definido em 2026-09-28) vai como trecho vivo, como o nome das ferramentas.
   const subirLaco = (reg: Registry) => {
@@ -929,7 +931,7 @@ async function sairDaContaNoMac(impressao: string): Promise<boolean> {
   const posicao = contasDoApp.posicaoDe(local.ia, local.id);
   if (posicao !== null && posicao > 1) await contasDoApp.remover(local.ia, posicao);
   else {
-    await logoutDaConta(local.ia, {});
+    if (!(await logoutDaConta(local.ia, {}))) throw new Error("logout_falhou");
     contaLidaEm.delete(local.ia);
     void atualizarConta(local.ia, true);
   }

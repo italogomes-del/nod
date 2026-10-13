@@ -108,26 +108,35 @@ export type DepsContasDoMotor = {
   agendar(fn: () => void, ms: number): { cancelar(): void };
 };
 
-type LoginEmCurso = { pedido: LoginPendente; conta: ContaLocal; par: ParDoLogin | null; login: ReturnType<typeof criarLoginDasIas>; relatado: string; fim: boolean; nova: boolean };
+type LoginEmCurso = { pedido: LoginPendente; conta: ContaLocal; par: ParDoLogin | null; login: ReturnType<typeof criarLoginDasIas>; relatado: string; fim: boolean; nova: boolean; pendente?: Omit<ProgressoDoLogin, "loginId"> };
 
-export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void; emCurso(): number } {
+export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   const logins = new Map<string, LoginEmCurso>();
+  /**
+   * Revisão do PR #306: o login que terminou fica aqui até o servidor receber o relato final. Sem isto, uma puxada que
+   * ainda trazia o login (o relato não tinha chegado) abria um segundo `auth login` numa pasta nova; e um relato que
+   * falhou nunca era repetido (a tela ficava "abrindo" até o prazo). null = terminou sem relato (cancelado).
+   */
+  const terminados = new Map<string, Omit<ProgressoDoLogin, "loginId"> | null>();
   let parado = false;
   let timer: { cancelar(): void } | null = null;
   let mtime = 0;
 
-  async function relatar(l: LoginEmCurso, p: Omit<ProgressoDoLogin, "loginId">): Promise<void> {
+  /** Só marca como relatado o que o servidor recebeu: o que falhou vai de novo na próxima mudança ou volta. */
+  async function relatar(l: LoginEmCurso, p: Omit<ProgressoDoLogin, "loginId">): Promise<boolean> {
     const chave = JSON.stringify(p);
-    if (chave === l.relatado) return;
-    l.relatado = chave;
-    await d.ponte.progresso({ loginId: l.pedido.id, ...p });
+    if (chave === l.relatado) return true;
+    const ok = await d.ponte.progresso({ loginId: l.pedido.id, ...p }).catch(() => false);
+    if (ok) { l.relatado = chave; delete l.pendente; } else l.pendente = p;
+    return ok;
   }
 
   async function terminar(l: LoginEmCurso, p: Omit<ProgressoDoLogin, "loginId"> | null): Promise<void> {
     if (l.fim) return;
     l.fim = true;
     logins.delete(l.pedido.id);
-    if (p) await relatar(l, p);
+    terminados.set(l.pedido.id, p);
+    if (!p || (await relatar(l, p))) terminados.delete(l.pedido.id);
     await l.login.parar().catch(() => undefined);
   }
 
@@ -160,7 +169,7 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void; emC
     await d.contas.descartarRepetidas().catch(() => 0);
     await d.reanunciar().catch(() => undefined);
     log("info", "motor_login_pronto", { login_id: l.pedido.id, ia: l.conta.ia });
-    await terminar(l, impressao ? { fase: "pronto", impressao, plano: conta?.plano ?? null } : { fase: "falhou", erro: "nao_confirmou" });
+    await terminar(l, impressao ? { fase: "pronto", impressao } : { fase: "falhou", erro: "nao_confirmou" });
   }
 
   async function comecar(p: LoginPendente): Promise<void> {
@@ -194,13 +203,23 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void; emC
     if (!r.ok) await terminar(l, { fase: "falhou", erro: r.motivo });
   }
 
+  /** Mantém a última fase relatada viva: o que não chegou ao servidor vai de novo a cada volta. */
+  async function repetirRelatos(listados: ReadonlySet<string>): Promise<void> {
+    for (const [id, p] of [...terminados]) {
+      if (!listados.has(id) || !p) { terminados.delete(id); continue; }
+      if (await d.ponte.progresso({ loginId: id, ...p }).catch(() => false)) terminados.delete(id);
+    }
+  }
+
   async function sairDe(impressoes: readonly string[]): Promise<string[]> {
     const feitas: string[] = [];
     for (const imp of impressoes) {
       const conta = d.contas.porImpressao(imp);
       if (conta) await d.aoSairDaConta?.(conta).catch(() => undefined);
-      await d.contas.sair(imp).catch(() => false);
-      feitas.push(imp);
+      // Revisão do PR #306: só confirma ao servidor a saída que aconteceu (ou a conta que nem estava aqui). Um logout
+      // que falhou fica pendente e é tentado de novo na próxima puxada; confirmado, o anúncio seguinte a traria de volta.
+      const saiu = await d.contas.sair(imp).then(() => true, (e: unknown) => { log("aviso", "motor_sair_da_conta_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); return false; });
+      if (saiu) feitas.push(imp);
     }
     return feitas;
   }
@@ -248,7 +267,10 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void; emC
       if (await d.ponte.saiu(feitas, false)) await d.reanunciar().catch(() => undefined);
       log("info", "motor_saiu_das_contas", { contas: feitas.length });
     }
+    await repetirRelatos(new Set(r.logins.map((p) => p.id)));
+    for (const l of logins.values()) if (l.pendente && !l.fim) await relatar(l, l.pendente);
     for (const p of r.logins) {
+      if (terminados.has(p.id)) continue;
       const l = logins.get(p.id);
       if (p.cancelado) { if (l) await l.login.cancelar(l.conta.ia).catch(() => undefined); continue; }
       if (!l) { await comecar(p).catch((e) => log("aviso", "motor_login_falhou_ao_comecar", { login_id: p.id, erro: e instanceof Error ? e.name : "desconhecido" })); continue; }
@@ -272,6 +294,5 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void; emC
       for (const l of logins.values()) void l.login.parar().catch(() => undefined);
       logins.clear();
     },
-    emCurso: () => logins.size,
   };
 }

@@ -96,6 +96,25 @@ describe("a conta do turno no limite (ADR-102)", () => {
     expect((await c.deps.repos.contasIa.listar()).vinculos.some((v) => v.contaId === c.contas.cPessoal.id)).toBe(false);
     expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", reenvios: 1 }]);
   });
+
+  it("R6: na segunda ausência (a fala já foi refeita uma vez) não refaz de novo", async () => {
+    const c = await cenario();
+    const t = c.banco.turnos.find((x) => x.id === c.turnoId)!;
+    t.reenvios = 1;
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+    await c.entregar({ ...base, desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", contaAusente: true }, "claude-cli");
+    expect(c.banco.turnos.filter((x) => x.estado === "pendente")).toEqual([]);
+  });
+
+  it("R6 numa task: não vira 'limite' (frase e IA erradas) nem retomada sem freio — fica o aviso de sempre", async () => {
+    const c = await cenario({ origem: "rotina", comTask: true });
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.gPessoal.id);
+    await c.entregar({ ...base, desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", contaAusente: true }, "codex-cli");
+    expect(c.banco.turnos.filter((x) => x.estado === "pendente")).toEqual([]);
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.texto).join(" ")).not.toMatch(/limite/i);
+  });
 });
 
 describe("o despacho sem conta utilizável (ADR-102)", () => {

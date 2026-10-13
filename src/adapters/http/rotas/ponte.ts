@@ -88,6 +88,8 @@ export function criarPonteHttpServidor(d: {
   descartarSessao?: boolean;
   /** ADR-090 (0067): grava na chave o sistema que a máquina anunciou — o aviso de queda nomeia a VM depois que a conexão some. */
   registrarPlataforma?(escopo: Escopo, chaveId: string, plataforma: PlataformaMaquina): Promise<void>;
+  /** ADR-102 (R2): o nome que a pessoa deu à chave (Renomear em Máquinas); null = sem nome guardado (vale o anunciado). */
+  nomeDaChave?(escopo: Escopo, chaveId: string): Promise<string | null>;
   /**
    * definido em 2026-10-10 (plano das IAs, PR 2): o que as máquinas da pessoa dizem das IAs mudou num `conectar` ou num
    * reanúncio — a composição publica `inventario.mudou` e a tela relê sem recarregar (antes só a troca do interruptor
@@ -197,7 +199,8 @@ export function criarPonteHttpServidor(d: {
       }
       const a = lerAnuncio(b, d.agora());
       c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
-      c.nome = nome;
+      // Revisão do PR #306: o prompt e "Rodar no X" usam o mesmo nome da tela (o da chave), não o hostname anunciado.
+      c.nome = (await d.nomeDaChave?.(ctx.escopo, id).catch(() => null)) ?? nome;
       c.plataforma = plataforma;
       c.anuncio = { machineId: id, nome: b.nome, plataforma: c.plataforma, inventario: c.inv, versaoContrato: 1, harnesses: a.harnessesAusente ? { "claude-cli": c.inv } : a.motores, ligacao: b.ligacao === true, ...(a.semLacoDeVoz.length > 0 ? { semLacoDeVoz: a.semLacoDeVoz } : {}), ...(a.capacidades ? { capacidades: a.capacidades } : {}), ...(a.sobreviveReinicio ? { sobreviveReinicio: true } : {}) };
       await c.ponte.conectar(c.anuncio);
@@ -479,9 +482,14 @@ export function criarPonteHttpServidor(d: {
       return [{ machineId: id, nome: c.nome, plataforma: c.plataforma, ias, gh: c.gh }];
     });
   }
+  /** ADR-102: a pessoa renomeou a máquina; a conexão viva passa a usar o nome novo. */
+  function renomear(escopo: Escopo, machineId: string, nome: string): void {
+    const c = conexoes.get(machineId);
+    if (c && c.escopo.pessoaId === escopo.pessoaId && c.escopo.tenantId === escopo.tenantId) c.nome = nome;
+  }
   /** NOD-175: a partir daqui o puxar volta `{plano:null}` na hora; renovar e entregar seguem aceitos. Não se desfaz. */
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, maquinasDaPessoa, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

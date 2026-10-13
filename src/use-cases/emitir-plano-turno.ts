@@ -153,7 +153,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // ADR-102 (2026-10-13): a conta do turno, pela lista da pessoa e pelo que a máquina do turno tem logado. Com conta
   // anunciada na máquina, a posição da conta em uso de cada IA decide a ordem, e a IA sem conta utilizável entra no
   // "no limite" (o limite é da conta, não mais da IA); sem conta anunciada (motor ou app antigo), nada muda.
-  const daMaquina = executor !== "catcher" && input.harnesses ? await lerContasDaMaquina(deps, input.machineId) : null;
+  const daMaquina = executor !== "catcher" && input.harnesses && (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContasDaMaquina(deps, input.machineId) : null;
   const contas = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, agora) : null;
   const governadas = (ia: IdHarness) => contas !== null && ia in contas.porIa;
   const escolha = executor !== "catcher" && input.harnesses
@@ -166,11 +166,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     })
     : null;
   // A adoção (NOD-214) recompõe com a conta que o despacho já gravou; o despacho grava a escolhida agora.
-  const contaEscolhida = input.recompor
-    ? await (async () => { const id = await deps.repos.turnos.contaDoTurno(turno.id); return id ? await deps.repos.contasIa.buscar(id) : null; })()
-    : escolha && contas ? (contas.porIa[escolha.harness as IaComConta] ?? null) : null;
-  const conta = contaEscolhida;
-  if (!input.recompor) await deps.repos.turnos.registrarConta(turno.id, conta?.id ?? null);
+  // Revisão do PR #306: a gravada só vale se for da IA que a recomposição escolheu agora; senão, a da lista para essa IA
+  // (o plano nunca sai com o harness de uma IA e a conta de outra).
+  const daLista = escolha && contas ? (contas.porIa[escolha.harness as IaComConta] ?? null) : null;
+  const gravada = input.recompor ? await (async () => { const id = await deps.repos.turnos.contaDoTurno(turno.id); return id ? await deps.repos.contasIa.buscar(id) : null; })() : null;
+  const conta = gravada && escolha && gravada.ia === escolha.harness ? gravada : daLista;
+  // A coluna nasce nula: só grava quando há conta (o caso comum hoje não paga a escrita na tabela mais quente).
+  if (conta && conta.id !== gravada?.id) await deps.repos.turnos.registrarConta(turno.id, conta.id);
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6

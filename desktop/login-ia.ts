@@ -38,7 +38,8 @@ export const PRAZO_DEPOIS_DO_CODIGO_MS = 60_000;
 /** Teto da saída guardada em memória (o CLI imprime menos de 2 KB até o link). */
 const SAIDA_MAX = 32_768;
 
-// Os endereços oficiais e a conferência do link moram no domínio desde 2026-10-13 (o servidor confere o link da VM).
+// Os endereços oficiais e a conferência do link moram em src/shared/links-de-login.ts desde 2026-10-13 (o servidor
+// confere o link da VM).
 export { LINKS_OFICIAIS, linkOficial } from "../src/shared/links-de-login.ts";
 import { linkOficial } from "../src/shared/links-de-login.ts";
 

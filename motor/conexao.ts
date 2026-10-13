@@ -1,3 +1,4 @@
+import { conviteValido } from "../src/shared/convite.ts";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -73,7 +74,7 @@ export function lerComando(args: readonly string[]): ComandoMotor {
     if (!servidor) return { tipo: "ajuda", erro: "Diga o endereço do seu Nod: nod-motor parear https://seu-nod" };
     // ADR-102: o convite do comando de instalação (só o formato dele; outro valor é ignorado e vale o código).
     const convite = valor("--convite");
-    return { tipo: "parear", servidor, nome: valor("--nome"), convite: convite && /^[A-Za-z0-9_-]{32}$/.test(convite) ? convite : null };
+    return { tipo: "parear", servidor, nome: valor("--nome"), convite: conviteValido(convite) ? convite : null };
   }
   if (cmd === "entrar") {
     const ia = resto[0];

@@ -574,8 +574,10 @@ async function aposContaAusente(
   await deps.repos.contasIa.apagarVinculo(p.contaId, p.machineId);
   log("aviso", "conta_ausente_na_maquina", { turno_id: p.turno.id, conta_id: p.contaId, machine_id: p.machineId });
   if (p.turno.pararSolicitadoEm !== null || p.turno.reenvios >= 1) return null;
-  if (p.turno.trabalhoId) return aposLimiteNoFundo(deps, { turno: p.assentado, executor: p.executor, ia: "claude-cli", renovaEm: p.agora, motivoInterrupcao: p.motivoInterrupcao, motivoFalha: p.motivoFalha, autoria: p.autoria, agora: p.agora, custoUsd: p.custoUsd });
-  if (p.turno.origem !== "conversa") return null;
+  // Revisão do PR #306: a task não passa pelo caminho do limite (não houve limite; a frase e a IA sairiam erradas, e a
+  // retomada não leva `reenvios`, então a trava acima não valeria). Vale o aviso de sempre; sem o vínculo, o próximo
+  // plano já escolhe outra conta.
+  if (p.turno.origem !== "conversa" || p.turno.trabalhoId) return null;
   await deps.repos.mensagens.marcarParciaisDoTurno(p.turno.id);
   return [
     evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_ausente: p.contaId, custo_usd: p.custoUsd } }),
@@ -606,14 +608,6 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
 }
 
 /**
- * A task (frente) bateu no LIMITE da assinatura e não trocou de IA (definido em 2026-10-12, ADR-099 §7: "nenhuma frente
- * falha por limite: espera e volta"). Em vez do aviso de interrupção e da task em "não terminou", nasce a retomada do
- * mesmo trabalho com `acordar_em` na renovação (o prazo do limite, prazoDoLimite: o horário do fornecedor ou 1 h), e a
- * task ganha uma linha dizendo quando volta. A fila só a entrega depois da hora e com a cota fora do limite (reivindicar);
- * quem a pega segue na mesma sessão do trabalho. null = não é task aberta (a conversa, a ligação e o turno sem trabalho
- * ficam com o aviso de sempre), ou a pessoa pediu Parar.
- */
-/**
  * ADR-102 (2026-10-13): a frente cujo turno chegou à máquina sem conta livre (todas no limite) espera do mesmo jeito que a
  * frente no limite da ADR-099 §7 — o turno fica interrompido e uma retomada nasce com hora para acordar. Nunca volta a
  * 'pendente' (ADR-009/010). null = não é frente com task aberta (quem chamou segue com a nota na conversa).
@@ -625,6 +619,14 @@ export function esperarContaNaFrente(
   return aposLimiteNoFundo(deps, { ...p, motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", custoUsd: null });
 }
 
+/**
+ * A task (frente) bateu no LIMITE da assinatura e não trocou de IA (definido em 2026-10-12, ADR-099 §7: "nenhuma frente
+ * falha por limite: espera e volta"). Em vez do aviso de interrupção e da task em "não terminou", nasce a retomada do
+ * mesmo trabalho com `acordar_em` na renovação (o prazo do limite, prazoDoLimite: o horário do fornecedor ou 1 h), e a
+ * task ganha uma linha dizendo quando volta. A fila só a entrega depois da hora e com a cota fora do limite (reivindicar);
+ * quem a pega segue na mesma sessão do trabalho. null = não é task aberta (a conversa, a ligação e o turno sem trabalho
+ * ficam com o aviso de sempre), ou a pessoa pediu Parar.
+ */
 async function aposLimiteNoFundo(
   deps: Deps,
   p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; conta?: Exclude<ContaNoLimite, { tipo: "todas_no_limite" }>; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },

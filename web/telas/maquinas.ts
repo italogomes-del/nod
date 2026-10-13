@@ -71,15 +71,17 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
 /** ADR-102 (G2-M3): o ⋯ da máquina — renomear, as contas dela e desconectar. */
 function menuDaMaquina(estado: Estado, m: MaquinaDto): string {
   const aberto = estado.contasUi.maquinaMenu === m.id;
+  const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
   const itens = aberto
-    ? `<div class="cl-menu" role="menu" aria-label="${esc(m.nome)}">
+    ? `<div class="cl-menu" aria-label="${esc(m.nome)}">
         <span class="cl-menu-tit">${esc(m.nome)}</span>
-        <button type="button" role="menuitem" data-act="maq-renomear" data-maquina="${esc(m.id)}">${ICONE.lapis}<span>Renomear</span></button>
-        ${estado.contasIa?.disponivel ? `<button type="button" role="menuitem" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas</span></button>` : ""}
-        <hr><button type="button" role="menuitem" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar</span></button>
+        <button type="button" data-act="maq-renomear" data-maquina="${esc(m.id)}">${ICONE.lapis}<span>Renomear máquina</span></button>
+        ${estado.contasIa?.disponivel ? `<button type="button" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas<small>abre Provedores de IA filtrado</small></span></button>` : ""}
+        <button type="button" data-act="maq-bots" data-maquina="${esc(m.id)}">${ICONE.agentes}<span>Bots desta máquina<small>${esc(bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}`)}</small></span></button>
+        <hr><button type="button" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar máquina</span></button>
       </div>`
     : "";
-  return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-haspopup="menu" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
+  return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
 }
 
 /** ADR-102 (G2-M5): "Desconectar" com "Sair também das contas de IA" (marcada quando há contas lá). */
@@ -141,7 +143,7 @@ export function renderMaquinas(estado: Estado): string {
     ${conectar}
     <div class="maq-lista">${lista}</div>
     ${dialogoDesconectar(estado)}
-    ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
+    ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo" id="bots-das-maquinas" tabindex="-1">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
     <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas, noMac)}` : ""}
     <ul class="regras-maq">
       ${noMac ? `<li>"Este Mac": o bot roda aqui, onde o Nod está aberto. Uma VM só pega o trabalho dos bots escolhidos para ela.</li>
@@ -197,9 +199,9 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
     corpo = `<h3>Rode este comando na sua máquina Linux</h3>
       <p>Debian ou Ubuntu, em qualquer provedor (2 vCPU e 4 GB para começar; 4 vCPU e 8 GB com vários bots). Ele instala o motor com o Claude Code e o Codex. A máquina não precisa de porta aberta: é ela que procura trabalho no Nod.</p>
       <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd } })}</div>
-      <div class="cx-espera" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Esperando a máquina aparecer…</span><small>o convite vale 30 min e uma vez</small></div>
+      <div class="cx-espera" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Esperando a máquina aparecer…</span><small>o convite vale ${c.conviteAte ? `até ${esc(hora(c.conviteAte))}` : "por 30 min"} e uma vez</small></div>
       ${erro}
-      <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Apareceu um código?", { classe: "link", dados: { passo: "codigo" } })}</div>`;
+      <div class="cx-rodape">${fechar}<span class="cx-segue">Esta tela segue sozinha · ${botao("passo-conectar-maquina", "apareceu um código?", { classe: "link", dados: { passo: "codigo" } })}</span></div>`;
   } else if (c.passo === "comando") {
     // O endereço deste Nod (a página é servida por ele); os testes de render rodam sem DOM.
     const origem = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";

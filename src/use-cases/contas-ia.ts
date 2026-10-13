@@ -70,6 +70,8 @@ export async function removerConta(d: Deps, id: string): Promise<void> {
  * no limite e ainda não foi refeito; nada a refazer = só grava a escolha.
  */
 export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: string }): Promise<{ data: { turnoId: string | null }; events: RuntimeEvent[] }> {
+  // Revisão do PR #306: dois cliques (ou duas abas) esperam um pelo outro; o segundo já vê o "Seguindo com" do primeiro.
+  await d.repos.contasIa.travar();
   const conta = await d.repos.contasIa.buscar(p.contaId);
   if (!conta || conta.removidaEm !== null) throw new ErroDeDominio("nao_encontrado", { cause: "conta" });
   await d.repos.contasIa.definirEscolhida(conta.ia, conta.id);

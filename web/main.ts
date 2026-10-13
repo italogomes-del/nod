@@ -2064,6 +2064,16 @@ const contasDaPessoa = criarContasDaPessoa({
 });
 // O app do Mac anterior a 2026-10-13 (sem a ponte `contas.detalhes`) mostra a tela de antes, com a faixa (suposição 8).
 if (window.nodDesktop?.contas && !window.nodDesktop.contas.detalhes) dispatch({ tipo: "contas-ui", mudanca: { appAntigo: true } });
+/** O ⋯ que abriu o diálogo aberto agora (o foco volta para ele ao fechar; revisão do PR #306). */
+function gatilhoDoDialogo(): string | null {
+  const u = estado.contasUi;
+  if (u.confirmar) return `[data-act="cl-menu"][data-id="${CSS.escape(u.confirmar.contaId)}"]`;
+  if (u.desconectar) return `[data-act="maq-menu"][data-maquina="${CSS.escape(u.desconectar.maquinaId)}"]`;
+  return null;
+}
+function focarGatilho(seletor: string | null): void {
+  if (seletor) document.querySelector<HTMLElement>(`#espaco ${seletor}`)?.focus();
+}
 /** O campo marcado com `data-cl-autofoco` recebe o foco logo depois do redesenho (o renomear, o diálogo). */
 function focarNovo(): void {
   document.querySelector<HTMLElement>("#espaco [data-cl-autofoco]")?.focus();
@@ -2702,9 +2712,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     return agir(async () => void (await api!.revogarChave(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["chaves"] })));
   },
   "fechar-chave-emitida": () => dispatch({ tipo: "chave-emitida", emitida: null }),
-  // ADR-090: Seu espaço › Máquinas.
-  // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
-  // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
   // ADR-102: a lista única de contas (Provedores de IA) e as ações da máquina (Máquinas).
   "cl-menu": (el) => contasDaPessoa.menu(el.dataset.id ?? ""),
   "cl-renomear": (el) => { contasDaPessoa.renomear(el.dataset.id ?? null); focarNovo(); },
@@ -2712,8 +2719,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-detalhe": (el) => contasDaPessoa.detalhe(el.dataset.id ?? ""),
   "cl-sair": (el) => { contasDaPessoa.pedirSaida(el.dataset.id ?? "", el.dataset.maquina ?? ""); focarNovo(); },
   "cl-remover": (el) => { contasDaPessoa.pedirRemocao(el.dataset.id ?? ""); focarNovo(); },
-  "cl-confirmar": () => contasDaPessoa.confirmar(),
-  "cl-confirmar-fechar": () => contasDaPessoa.fecharConfirmacao(),
+  "cl-confirmar": async () => { const volta = gatilhoDoDialogo(); await contasDaPessoa.confirmar(); focarGatilho(volta); },
+  "cl-confirmar-fechar": () => { const volta = gatilhoDoDialogo(); contasDaPessoa.fecharConfirmacao(); focarGatilho(volta); },
   "cl-entrar": (el) => contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? ""),
   "cl-nova": () => { contasDaPessoa.abrirNova(); document.querySelector<HTMLInputElement>("#espaco [data-cl-nova-apelido]")?.focus(); },
   "cl-nova-fechar": () => contasDaPessoa.fecharNova(),
@@ -2738,6 +2745,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "maq-menu": (el) => dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: estado.contasUi.maquinaMenu === el.dataset.maquina ? null : el.dataset.maquina ?? null } }),
   "maq-renomear": (el) => { dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: el.dataset.maquina ?? null, maquinaMenu: null } }); focarNovo(); },
+  "maq-bots": () => {
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    const alvo = document.getElementById("bots-das-maquinas");
+    alvo?.scrollIntoView({ behavior: "smooth", block: "start" });
+    alvo?.focus({ preventScroll: true });
+  },
   "maq-renomear-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } }),
   "maq-desconectar": (el) => {
     const id = el.dataset.maquina ?? "";
@@ -2745,7 +2758,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "contas-ui", mudanca: { desconectar: { maquinaId: id, sair: temContas }, maquinaMenu: null } });
     focarNovo();
   },
-  "maq-desconectar-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { desconectar: null } }),
+  "maq-desconectar-fechar": () => { const volta = gatilhoDoDialogo(); dispatch({ tipo: "contas-ui", mudanca: { desconectar: null } }); focarGatilho(volta); },
   "maq-desconectar-confirmar": () => agir(async () => {
     const q = estado.contasUi.desconectar;
     if (!q) return;
@@ -2753,12 +2766,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.desconectarMaquina(q.maquinaId, q.sair);
     dispatch({ tipo: "invalidar", quais: ["maquinas", "frota", "contas"] });
   }),
+  // ADR-090: Seu espaço › Máquinas.
+  // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
+  // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
   "conectar-maquina": () => agir(async () => {
     const chavesAntes = await chavesAtuais();
     // ADR-102 (CMJ): no modo compartilhado, o comando leva um convite e a tela vê a máquina chegar (sem digitar código).
-    const convite = estado.maquinas?.servidorNoMac ? null : await api!.criarConvite().then((r) => r.convite, () => null);
-    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [], convite } });
-    if (convite) void esperarConvite(convite);
+    const criado = estado.maquinas?.servidorNoMac ? null : await api!.criarConvite().catch(() => null);
+    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [], convite: criado?.convite ?? null, conviteAte: criado?.expiraEm ?? null } });
+    if (criado) void esperarConvite(criado.convite, criado.expiraEm);
   }),
   "fechar-conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: null }),
   "passo-conectar-maquina": (el) => {
@@ -2984,12 +3000,27 @@ document.addEventListener("click", (ev) => {
   if ((u.menu || u.maquinaMenu) && !(ev.target as HTMLElement).closest(".cl-mais")) dispatch({ tipo: "contas-ui", mudanca: { menu: null, maquinaMenu: null } });
 }, true);
 document.addEventListener("keydown", (ev) => {
+  // O Tab fica dentro do diálogo aberto (Sair, Remover, Desconectar), como na gaveta de conectores.
+  const dialogo = ev.key === "Tab" ? document.querySelector<HTMLElement>("#espaco .cl-dialogo") : null;
+  if (dialogo) {
+    const focaveis = [...dialogo.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])")];
+    const primeiro = focaveis[0];
+    const ultimo = focaveis.at(-1);
+    const dentro = dialogo.contains(document.activeElement);
+    if (primeiro && ultimo && (!dentro || (ev.shiftKey && document.activeElement === primeiro) || (!ev.shiftKey && document.activeElement === ultimo))) {
+      ev.preventDefault();
+      (ev.shiftKey ? ultimo : primeiro).focus();
+    }
+    return;
+  }
   if (ev.key !== "Escape" || !estado.espaco) return;
   const u = estado.contasUi;
   const mudanca = u.confirmar ? { confirmar: null } : u.desconectar ? { desconectar: null } : u.menu || u.maquinaMenu ? { menu: null, maquinaMenu: null } : u.renomear ? { renomear: null } : u.maquinaRenomear ? { maquinaRenomear: null } : null;
   if (!mudanca) return;
   ev.stopPropagation();
+  const volta = gatilhoDoDialogo();
   dispatch({ tipo: "contas-ui", mudanca });
+  focarGatilho(volta);
 }, true);
 
 document.addEventListener("submit", (ev) => {
@@ -3540,14 +3571,16 @@ async function esperarMaquinaNova(): Promise<void> {
   }
 }
 /** ADR-102 (CMJ): com o convite no comando, a tela confere a cada 2 s se a máquina já pediu para entrar. */
-async function esperarConvite(convite: string): Promise<void> {
-  for (let i = 0; i < 900; i++) {
-    await new Promise((r) => setTimeout(r, 2_000));
+const INTERVALO_CONVITE_MS = 2_000;
+async function esperarConvite(convite: string, ate: number): Promise<void> {
+  while (Date.now() < ate) {
+    await new Promise((r) => setTimeout(r, INTERVALO_CONVITE_MS));
     const c = estado.conectarMaquina;
     if (!c || c.convite !== convite || !api) return;
     if (c.passo !== "comando") continue;
-    const r = await api.verConvite(convite).catch((e: unknown) => (e instanceof ErroApi && e.status === 404 ? "vencido" as const : null));
+    const r = await api.verConvite(convite).catch((e: unknown) => (e instanceof ErroApi && e.status === 404 ? "vencido" as const : e instanceof ErroApi && e.status === 409 ? "conflito" as const : null));
     if (r === "vencido") { atualizarConectar({ erro: "O convite venceu. Feche e abra o Conectar de novo para gerar outro." }); return; }
+    if (r === "conflito") { atualizarConectar({ erro: "Duas máquinas usaram este convite, então ele foi cancelado por segurança. Feche e abra o Conectar de novo para gerar outro." }); return; }
     if (r?.estado === "chegou") { atualizarConectar({ passo: "confirmar", codigo: r.codigo, pedido: r.pedido, erro: null }); return; }
   }
 }

@@ -67,9 +67,7 @@ describe("logins na máquina", () => {
     expect(logins.progresso(MARLON, VM, { loginId: l.id, fase: "pronto" }).aceito).toBe(false);
     const outro = logins.pedir({ escopo: MARLON, maquinaId: VM, ia: "codex-cli", contaId: null, impressao: null, apelido: null })!;
     expect(logins.cancelar(MARLON, outro.id)).toBe(true);
-    expect(logins.temAberto(MARLON, VM)).toBe(true);
     expect(logins.pendentes(MARLON, VM)).toEqual([{ id: outro.id, ia: "codex-cli", impressao: null, apelido: null, cancelado: true }]);
-    expect(logins.temAberto(MARLON, VM)).toBe(false);
   });
 
   it("o código do aparelho do Codex só no formato dele; pronto liga a conta que entrou", () => {

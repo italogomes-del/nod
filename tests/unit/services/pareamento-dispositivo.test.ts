@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { criarPareamentoDispositivo, formatarCodigoPessoa, MAX_ERROS_POR_PESSOA, MAX_PEDIDOS_DISPOSITIVO, normalizarCodigoPessoa, PRAZO_CONVITE_MS, PRAZO_DISPOSITIVO_MS, type PareamentoDispositivo } from "../../../src/services/pareamento-dispositivo.ts";
+import { criarPareamentoDispositivo, formatarCodigoPessoa, MAX_CONVITES_POR_PESSOA, MAX_ERROS_POR_PESSOA, MAX_PEDIDOS_DISPOSITIVO, normalizarCodigoPessoa, PRAZO_CONVITE_MS, PRAZO_DISPOSITIVO_MS, type PareamentoDispositivo } from "../../../src/services/pareamento-dispositivo.ts";
 
 const MARLON = { tenantId: "t1", pessoaId: "p-marlon" };
 const ANA = { tenantId: "t1", pessoaId: "p-ana" };
@@ -86,15 +86,31 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
     const pedido = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
     const visto = p.verConvite({ convite, escopo: MARLON });
     expect(visto).toEqual({ estado: "chegou", codigo: pedido.codigoPessoa, pedido: { nome: "vm-bots", plataforma: "linux", pedidoHaS: 0 } });
-    // Uma segunda máquina com o mesmo convite pareia pelo caminho de sempre (código), sem tomar o lugar da primeira.
-    const segundo = p.pedir({ nome: "intrusa", plataforma: "linux", convite })!;
-    expect(p.verConvite({ convite, escopo: MARLON })).toMatchObject({ estado: "chegou", codigo: pedido.codigoPessoa });
-    expect(segundo.codigoPessoa).not.toBe(pedido.codigoPessoa);
     if (visto.estado !== "chegou") throw new Error("não chegou");
     expect(p.aprovar({ codigoPessoa: visto.codigo, escopo: MARLON })).toBe(true);
     expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toMatchObject({ estado: "aprovado", nome: "vm-bots" });
     // Aprovado: o convite não mostra mais pedido.
     expect(p.verConvite({ convite, escopo: MARLON })).toEqual({ estado: "invalido" });
+  });
+
+  it("revisão do PR #306: um segundo pedido com o mesmo convite o derruba (a tela avisa); o código de cada um segue valendo", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const { convite } = p.criarConvite(MARLON);
+    const pedido = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
+    const segundo = p.pedir({ nome: "vm-bots", plataforma: "linux", convite })!;
+    expect(p.verConvite({ convite, escopo: MARLON })).toEqual({ estado: "conflito" });
+    expect(segundo.codigoPessoa).not.toBe(pedido.codigoPessoa);
+    // Quem estava no terminal da máquina certa ainda pareia pelo código dela.
+    expect(p.ver({ codigoPessoa: pedido.codigoPessoa, escopo: MARLON })).toMatchObject({ nome: "vm-bots" });
+  });
+
+  it("revisão do PR #306: até MAX_CONVITES_POR_PESSOA convites abertos; o mais antigo DELA sai, o dos outros fica", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const daAna = p.criarConvite(ANA).convite;
+    const meus = Array.from({ length: MAX_CONVITES_POR_PESSOA + 1 }, () => p.criarConvite(MARLON).convite);
+    expect(p.verConvite({ convite: meus[0]!, escopo: MARLON })).toEqual({ estado: "invalido" });
+    expect(p.verConvite({ convite: meus.at(-1)!, escopo: MARLON })).toEqual({ estado: "pendente" });
+    expect(p.verConvite({ convite: daAna, escopo: ANA })).toEqual({ estado: "pendente" });
   });
 
   it("o convite vence em 30 min e um convite inventado não liga nada", () => {

@@ -3,7 +3,7 @@ import { ehIaComConta } from "../../../domain/contas-da-pessoa.ts";
 import { apelidoValido } from "../../../domain/contas-da-ia.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
-import { cifradoValido, type LoginsNaMaquina } from "../../../services/logins-na-maquina.ts";
+import { cifradoValido, PRAZO_DESCONEXAO_MS, type LoginsNaMaquina } from "../../../services/logins-na-maquina.ts";
 import type { PareamentoDispositivo } from "../../../services/pareamento-dispositivo.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { assertUuid } from "../../../use-cases/apoio-l7.ts";
@@ -28,6 +28,8 @@ export type DepsRotasContas = {
   avisar(escopo: Escopo, motivo: string, loginId?: string): void;
   /** A máquina está conectada agora (a ponte a ouviu no último minuto)? */
   maquinaViva(escopo: Escopo, id: string): boolean;
+  /** A conexão viva da máquina passa a usar o nome novo (o prompt e "Rodar no X"). */
+  aoRenomear?(escopo: Escopo, id: string, nome: string): void;
 };
 
 /** A máquina existe, é da pessoa e não foi revogada. */
@@ -201,6 +203,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
         if (nome.length === 0 || nome.length > 60) throw new ErroDeDominio("entrada_invalida", { cause: "nome da máquina" });
         const id = assertUuid(ctx.params.id, "máquina");
         if (!(await deps.dentro(ctx.escopo, (d) => d.repos.maquinaTokens.renomear(id, nome)))) throw new ErroDeDominio("nao_encontrado", { cause: "máquina" });
+        deps.aoRenomear?.(ctx.escopo, id, nome);
         deps.avisar(ctx.escopo, "maquina");
         ctx.json(200, { id, nome });
       },
@@ -216,10 +219,11 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
         const r = await deps.dentro(ctx.escopo, async (d) => {
           const m = await exigirMaquina(d, id);
           // Com "Sair também das contas" e a máquina no ar, ela recebe o pedido na próxima puxada, sai das contas e para;
-          // a chave é revogada quando ela confirma. Fora do ar (ou sem a caixa), a chave é revogada agora: as contas
-          // ficam na máquina parada, e a tela diz isso.
+          // a chave é revogada quando ela confirma e, de todo jeito, vence em PRAZO_DESCONEXAO_MS (revisão do PR #306:
+          // antes dependia só da máquina confirmar). Fora do ar (ou sem a caixa), a chave é revogada agora.
           const contas = sair ? await d.repos.contasIa.pedirSaidaDeTodas(m.id, d.agora()) : 0;
           if (!sair || !viva) await executar(d, revogarChaveMaquina, { id: m.id });
+          else await d.repos.maquinaTokens.vencerEm(m.id, d.agora() + PRAZO_DESCONEXAO_MS);
           return { maquina: m, contas };
         });
         if (sair && viva) deps.logins.pedirDesconexao(ctx.escopo, id);
@@ -241,6 +245,7 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       async handler(ctx) {
         const r = deps.dispositivo.verConvite({ convite: decodeURIComponent(ctx.params.convite ?? ""), escopo: ctx.escopo });
         if (r.estado === "invalido") { ctx.json(404, { codigo: "convite_invalido" }); return; }
+        if (r.estado === "conflito") { ctx.json(409, { codigo: "convite_em_conflito" }); return; }
         ctx.json(200, r);
       },
     },

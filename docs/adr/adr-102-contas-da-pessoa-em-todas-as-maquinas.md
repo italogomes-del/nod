@@ -57,6 +57,19 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
 - O modo local (ADR-092) continua com a tela da ADR-101.
 - O app do Mac precisa da versão nova para entrar na lista; o antigo mostra a tela de hoje com o aviso de atualizar.
 
+### Limites conhecidos (revisão do PR #306, 2026-10-13; pedem decisão do Marlon)
+
+- **A impressão é pseudônima, não anônima.** É um sha256 sem chave de entradas fáceis de adivinhar (a pessoa, a IA, o
+  e-mail, a organização). Com o banco e uma lista de e-mails prováveis do tenant, cada impressão se confirma por
+  dicionário. Na prática, o e-mail não fica guardado em claro, mas também não fica secreto. A coluna `contas_ia.impressao`
+  deve ser tratada como dado pessoal. A saída mais forte seria um HMAC com um segredo da pessoa que o servidor não
+  guarde, repassado entre as máquinas cifrado como o código do login.
+- **O estado dos logins e convites fica só na memória do servidor.** Isso inclui os logins pela tela, os convites e o
+  pedido de desconexão. Um reinício ou deploy perde o login em curso, e a pessoa recomeça. A segurança do "Desconectar e
+  sair das contas" não depende dessa memória: a chave da máquina vence em 2 min, gravado em `maquina_tokens.expira_em`.
+- **O código do Claude é entregue uma vez à máquina.** Se a resposta da puxada se perder, ou se o motor reiniciar no meio
+  do login, o login fica parado até vencer (15 min), e a pessoa pede de novo.
+
 ## Gatilho de reversão
 
 - Um fornecedor proibir explicitamente a troca entre contas próprias (vale o gatilho da ADR-101).

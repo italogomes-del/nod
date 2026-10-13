@@ -29,9 +29,10 @@ export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): voi
   async function sairDe(impressoes: readonly string[]): Promise<string[]> {
     const feitas: string[] = [];
     for (const i of impressoes) {
-      // Mesmo sem a conta aqui, a saída é confirmada: o servidor só apaga o vínculo.
-      await d.sair(i).catch((e: unknown) => { d.registrar?.("conta_sair_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); return false; });
-      feitas.push(i);
+      // Sem a conta aqui (false), a saída é confirmada: o servidor só apaga o vínculo. Se o logout falhou (exceção), não:
+      // a saída fica pendente e o servidor pede de novo na próxima puxada (revisão do PR #306).
+      const saiu = await d.sair(i).then(() => true, (e: unknown) => { d.registrar?.("conta_sair_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); return false; });
+      if (saiu) feitas.push(i);
     }
     return feitas;
   }

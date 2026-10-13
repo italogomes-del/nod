@@ -172,7 +172,7 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       const q = d.ui().confirmar;
       const api = d.api();
       d.mudar({ confirmar: null });
-      if (!q || !api || q.tipo === "modo") return;
+      if (!q || !api) return;
       try {
         if (q.tipo === "sair") {
           await api.sairDaConta(q.contaId, q.maquinaId);

@@ -94,6 +94,8 @@ export type ConectarMaquina = {
   marcados: string[];
   /** ADR-102: o convite do comando de instalação (modo compartilhado); a tela vê a máquina chegar sem código. */
   convite?: string | null;
+  /** Até quando o convite vale (o servidor diz); a tela para de esperar e mostra a hora. */
+  conviteAte?: number | null;
 };
 
 export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";

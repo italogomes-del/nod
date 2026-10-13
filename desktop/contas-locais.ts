@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import type { ContaAnunciada, EstadoContaNaMaquina } from "../src/contracts/contas-ia.ts";
 import { IAS_DESKTOP, type DetalheDaConta, type IaDesktop } from "../src/contracts/desktop.ts";
 import { CONTAS_POR_IA_MAX, ID_CONTA_PADRAO, contaCorporativa, apelidoValido } from "../src/domain/contas-da-ia.ts";
 import { textoDaImpressaoDaConta } from "../src/domain/contas-da-pessoa.ts";
-import { ambienteDaConta, novoIdDeConta, pastaDaConta, prepararPastaDaConta, removerPastaDaConta, VARIAVEL_DA_CONTA } from "./contas-mac.ts";
+import { ambienteDaConta, novoIdDeConta, pastaDaConta, prepararPastaDaConta, removerPastaDaConta } from "./contas-mac.ts";
 
 /**
  * As contas de IA logadas NESTA máquina (definido em 2026-10-13, ADR-102), sem Electron: o motor da VM usa, e o app do
@@ -60,10 +60,19 @@ export function criarContasLocais(d: DepsContasLocais) {
 
   const padraoDe = (ia: IaDesktop): ContaLocal => ({ id: ID_CONTA_PADRAO, ia, apelido: null, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
 
-  async function gravar(): Promise<void> {
-    const tmp = `${d.arquivo}.tmp`;
-    await writeFile(tmp, `${JSON.stringify({ versao: 1, contas })}\n`, { mode: 0o600 });
-    await rename(tmp, d.arquivo);
+  let fila: Promise<unknown> = Promise.resolve();
+  /**
+   * Revisão do PR #306: uma gravação de cada vez, num temporário próprio (o serviço e o `nod-motor entrar` escrevem no
+   * mesmo arquivo; com o nome fixo, duas gravações se cruzavam e o JSON podia sair truncado).
+   */
+  function gravar(): Promise<void> {
+    const vez = fila.then(async () => {
+      const tmp = `${d.arquivo}.${randomBytes(3).toString("hex")}.tmp`;
+      await writeFile(tmp, `${JSON.stringify({ versao: 1, contas })}\n`, { mode: 0o600 });
+      await rename(tmp, d.arquivo);
+    });
+    fila = vez.catch(() => undefined);
+    return vez;
   }
 
   function ambiente(c: Pick<ContaLocal, "ia" | "id">): Record<string, string> {
@@ -118,6 +127,8 @@ export function criarContasLocais(d: DepsContasLocais) {
       const padrao = contas.find((c) => c.ia === ia && c.id === ID_CONTA_PADRAO);
       if (padrao && padrao.impressao === null && padrao.estado !== "pronta") {
         padrao.apelido = apelido;
+        // O arquivo passa a existir já aqui: o serviço percebe o login do terminal pela data dele.
+        await gravar();
         return padrao;
       }
       if (contas.filter((c) => c.ia === ia).length >= CONTAS_POR_IA_MAX) return null;
@@ -177,7 +188,8 @@ export function criarContasLocais(d: DepsContasLocais) {
       const c = contas.find((x) => x.impressao === impressao);
       if (!c) return false;
       if (c.id === ID_CONTA_PADRAO) {
-        await d.logout(c.ia, {}).catch(() => false);
+        // Revisão do PR #306: sem logout, a conta continua logada aqui — a saída fica pendente (o servidor pede de novo).
+        if (!(await d.logout(c.ia, {}).catch(() => false))) throw new Error("logout_falhou");
         Object.assign(c, { impressao: null, plano: null, estado: "sem_login", logadaEm: 0, apelido: null });
       } else {
         await removerPastaDaConta({ base: d.base, ia: c.ia, id: c.id, logout: (env) => d.logout(c.ia, env) });
@@ -234,6 +246,5 @@ export function criarContasLocais(d: DepsContasLocais) {
       }));
     },
 
-    variavel: (ia: IaDesktop) => VARIAVEL_DA_CONTA[ia],
   };
 }

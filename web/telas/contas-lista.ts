@@ -1,5 +1,6 @@
 import type { ContaIa, ContasIaDto, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
 import type { DetalheDaConta, DetalhesDasContas } from "../../src/contracts/desktop.ts";
+import type { CausaFalhaLogin, ResultadoColarCodigo } from "../../src/contracts/estado-ia.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc, hora } from "../lib/render.ts";
@@ -17,8 +18,7 @@ import { planoNaTela } from "./contas-ia.ts";
 
 export type ConfirmacaoContas =
   | { tipo: "sair"; contaId: string; maquinaId: string }
-  | { tipo: "remover"; contaId: string }
-  | { tipo: "modo" };
+  | { tipo: "remover"; contaId: string };
 
 /** O login de uma conta numa máquina aberto na tela: o da VM (pela API) ou o do Mac (pela ponte do app). */
 export type LoginNaTela =
@@ -98,7 +98,7 @@ function pilulas(c: ContaIa, x: ContextoContas): string {
     const texto = v?.estado === "sem_login" ? `Entrar de novo na ${nome}` : `Entrar na ${nome}`;
     return podeEntrar
       ? `<button type="button" class="cl-pil tracejada" data-act="cl-entrar" data-id="${esc(c.id)}" data-maquina="${esc(m.id)}">${ic}${esc(texto)}</button>`
-      : `<span class="cl-pil tracejada mudo" title="Abra o app do nod nesse Mac para entrar nele">${ic}${esc(texto)}</span>`;
+      : `<span class="cl-pil tracejada mudo">${ic}${esc(`Entre pelo app do nod no ${nome}`)}</span>`;
   }).join("");
 }
 
@@ -106,15 +106,23 @@ export const maquinaDoLogin = (l: LoginNaTela): string => (l.onde === "vm" ? l.l
 export const contaDoLogin = (l: LoginNaTela): string | null => (l.onde === "vm" ? l.login.contaId : l.contaId);
 export const idDoLogin = (l: LoginNaTela): string => (l.onde === "vm" ? l.login.id : l.id);
 
-const ERROS_LOGIN: Record<string, string> = {
+/** Revisão do PR #306: os códigos que o motor manda de verdade (motor/contas.ts, CausaFalhaLogin, ResultadoColarCodigo). */
+const ERROS_LOGIN: Partial<Record<CausaFalhaLogin | Exclude<ResultadoColarCodigo, { ok: true }>["motivo"] | "tempo_esgotado" | "codigo_ilegivel" | "contas_demais", string>> = {
   tempo_esgotado: "O login demorou demais e foi cancelado. Tente de novo.",
   codigo_ilegivel: "A máquina não conseguiu ler o código. Gere outro na página e cole de novo.",
   contas_demais: "Essa máquina já tem contas demais dessa IA. Saia de uma antes.",
   nao_confirmou: "O login terminou, mas a máquina não confirmou a conta. Tente de novo.",
-  cli_ausente: "A IA não está instalada nessa máquina.",
-  maquina_fora: "A máquina ficou sem contato durante o login.",
+  nao_instalada: "A IA não está instalada nessa máquina. Rode a instalação do motor de novo.",
+  codigo_invalido: "A página não aceitou o código. Gere outro e cole de novo.",
+  login_por_codigo_bloqueado: "A conta não permite entrar por código. Entre pelo terminal da máquina.",
+  sem_link: "A máquina não conseguiu abrir o login. Tente de novo.",
+  link_nao_oficial: "O login abriu um endereço que não é o oficial e foi cancelado por segurança.",
+  cli_antigo: "A IA dessa máquina está desatualizada. Rode a instalação do motor de novo.",
+  config_invalida: "A configuração da IA nessa máquina está com problema. Rode a instalação do motor de novo.",
+  sem_login_aberto: "O login dessa máquina já tinha terminado. Tente de novo.",
+  ja_enviado: "O código já foi enviado. Espere a máquina conferir.",
 };
-const erroDoLogin = (e: string | null): string => (e && ERROS_LOGIN[e]) || "O login não terminou. Tente de novo.";
+const erroDoLogin = (e: string | null): string => (e ? (ERROS_LOGIN as Record<string, string | undefined>)[e] : undefined) ?? "O login não terminou. Tente de novo.";
 
 /** O bloco de um login aberto (G1-P3): os passos da VM, ou o cartão do Mac com os passos do app. */
 function blocoDoLogin(l: LoginNaTela, x: ContextoContas, conta: ContaIa | null): string {
@@ -167,14 +175,14 @@ function menu(c: ContaIa, x: ContextoContas): string {
     const m = x.maquinas.find((y) => y.id === mid);
     if (!m) return "";
     const outras = nomes(logadas.filter((o) => o !== mid));
-    return `<button type="button" role="menuitem" data-act="cl-sair" data-id="${id}" data-maquina="${esc(mid)}">${ICONE.sair}<span>Sair do${m.plataforma === "darwin" ? "" : "a"} ${esc(nomeCurto(m, x.maquinas))}<small>${outras.length ? `continua n${outras.length === 1 && x.maquinas.find((y) => y.id === logadas.find((o) => o !== mid))?.plataforma === "darwin" ? "o" : "a"} ${esc(outras.join(", "))}` : "fica sem nenhuma máquina"}</small></span></button>`;
+    return `<button type="button" data-act="cl-sair" data-id="${id}" data-maquina="${esc(mid)}">${ICONE.sair}<span>Sair do${m.plataforma === "darwin" ? "" : "a"} ${esc(nomeCurto(m, x.maquinas))}<small>${outras.length ? `continua n${outras.length === 1 && x.maquinas.find((y) => y.id === logadas.find((o) => o !== mid))?.plataforma === "darwin" ? "o" : "a"} ${esc(outras.join(", "))}` : "fica sem nenhuma máquina"}</small></span></button>`;
   }).join("");
-  return `<div class="cl-menu" role="menu" aria-label="${esc(nomeDaContaNaTela(c))}">
+  return `<div class="cl-menu" aria-label="${esc(nomeDaContaNaTela(c))}">
       <span class="cl-menu-tit">${esc(nomeDaContaNaTela(c))}</span>
-      <button type="button" role="menuitem" data-act="cl-renomear" data-id="${id}">${ICONE.lapis}<span>Renomear</span></button>
-      <button type="button" role="menuitem" data-act="cl-detalhe" data-id="${id}">${ICONE.info}<span>Detalhes da conta<small>plano, organização e onde ela está logada</small></span></button>
+      <button type="button" data-act="cl-renomear" data-id="${id}">${ICONE.lapis}<span>Renomear</span></button>
+      <button type="button" data-act="cl-detalhe" data-id="${id}">${ICONE.info}<span>Detalhes da conta<small>plano, organização e onde ela está logada</small></span></button>
       ${sair ? `<hr><span class="cl-menu-tit">Máquinas</span>${sair}` : ""}
-      <hr><button type="button" role="menuitem" class="perigo" data-act="cl-remover" data-id="${id}">${ICONE.lixo}<span>Remover de todas as máquinas</span></button>
+      <hr><button type="button" class="perigo" data-act="cl-remover" data-id="${id}">${ICONE.lixo}<span>Remover de todas as máquinas</span></button>
     </div>`;
 }
 
@@ -229,7 +237,7 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
         ${logins}
       </div>
       <div class="cl-dir">${direita}</div>
-      <div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="cl-menu" data-id="${esc(c.id)}" aria-haspopup="menu" aria-expanded="${x.ui.menu === c.id}" aria-label="Mais ações de ${esc(nome)}">${ICONE.pontos}</button>${x.ui.menu === c.id ? menu(c, x) : ""}</div>
+      <div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="cl-menu" data-id="${esc(c.id)}" aria-expanded="${x.ui.menu === c.id}" aria-label="Mais ações de ${esc(nome)}">${ICONE.pontos}</button>${x.ui.menu === c.id ? menu(c, x) : ""}</div>
     </li>`;
 }
 
@@ -260,7 +268,7 @@ function formNova(x: ContextoContas): string {
 /** As confirmações (G1-P5 Sair, G1-P6 Remover) num diálogo sobre a tela. */
 function confirmacao(x: ContextoContas): string {
   const q = x.ui.confirmar;
-  if (!q || q.tipo === "modo") return "";
+  if (!q) return "";
   const c = x.contas.contas.find((y) => y.id === q.contaId);
   if (!c) return "";
   const nome = nomeDaContaNaTela(c);
@@ -352,7 +360,7 @@ export function renderContasNaMaquina(x: ContextoContas, maquinaId: string): str
   }).join("");
   const novas = x.ui.logins.filter((l) => maquinaDoLogin(l) === maquinaId && (contaDoLogin(l) === null || !x.contas.contas.some((c) => c.id === contaDoLogin(l)))).map((l) => blocoDoLogin(l, x, null)).join("");
   const atalhos = (["claude-cli", "codex-cli"] as const).map((ia) => `<button type="button" class="bt sm" data-act="cl-nova-na-maquina" data-ia="${ia}" data-maquina="${esc(maquinaId)}">${logoDaIa(ia, "cl-logo mini")}Conta nova do ${esc(PROVEDOR[ia].nome)}</button>`).join("");
-  return `<ol class="espaco-cartao cl-lista cl-na-maquina" aria-label="Suas contas na ${esc(nome)}">${linhas || `<li class="cl-linha"><div class="cl-corpo"><span class="mudo">Você ainda não tem contas de IA. Entre na primeira aqui.</span></div></li>`}</ol>
+  return `<ol class="espaco-cartao cl-lista cl-na-maquina" aria-label="Suas contas na ${esc(nome)}">${linhas || `<li class="cl-linha cl-vazia"><span class="mudo">Você ainda não tem contas de IA. Entre na primeira aqui.</span></li>`}</ol>
     ${novas ? `<div class="cl-novas">${novas}</div>` : ""}
     <div class="cl-atalhos">${atalhos}</div>`;
 }

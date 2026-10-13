@@ -22,6 +22,11 @@ import type { Escopo } from "../shared/types.ts";
 export const PRAZO_LOGIN_MS = 15 * 60_000;
 /** definido em 2026-10-13: logins abertos ao mesmo tempo por pessoa (o protótipo abre dois: um Claude e um Codex). */
 export const MAX_LOGINS_POR_PESSOA = 3;
+/**
+ * definido em 2026-10-13 (revisão do PR #306): quanto a máquina tem para sair das contas e confirmar o "Desconectar".
+ * Ela puxa a cada 3 s; passado o prazo a chave vence sozinha (maquina_tokens.expira_em).
+ */
+export const PRAZO_DESCONEXAO_MS = 2 * 60_000;
 /** O texto cifrado é pequeno (o código do Claude tem até 2048 caracteres): 8 KB de folga. */
 const MAX_CIFRADO = 8_192;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -41,8 +46,6 @@ export interface LoginsNaMaquina {
   progresso(escopo: Escopo, maquinaId: string, p: ProgressoDoLogin): { aceito: boolean; login: LoginNaMaquina | null };
   colarCodigo(escopo: Escopo, id: string, cifrado: CodigoCifrado): "ok" | "sem_login" | "nao_pede_codigo" | "ja_enviado" | "invalido";
   cancelar(escopo: Escopo, id: string): boolean;
-  /** Algum login aberto nesta máquina? (a máquina puxa mais rápido enquanto houver) */
-  temAberto(escopo: Escopo, maquinaId: string): boolean;
   /** O anúncio registrou a conta que entrou: o login aponta para ela (a tela mostra "Pronta" na linha certa). */
   ligarConta(escopo: Escopo, id: string, contaFinalId: string): void;
   /** "Desconectar a máquina" com "Sair também das contas": a próxima puxada leva `desconectar: true` (vale 10 min). */
@@ -168,16 +171,12 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
       Object.assign(l, { fase: "cancelado", avisarCancelamento: true, codigo: null, atualizadoEm: agora() });
       return true;
     },
-    temAberto(escopo, maquinaId) {
-      varrer();
-      return daPessoa(escopo).some((l) => l.maquinaId === maquinaId && (!final(l.fase) || (l.fase === "cancelado" && l.avisarCancelamento)));
-    },
     ligarConta(escopo, id, contaFinalId) {
       const l = doEscopo(escopo, id);
       if (l) l.contaFinalId = contaFinalId;
     },
     pedirDesconexao(escopo, maquinaId) {
-      desconexoes.set(chaveMaquina(escopo, maquinaId), agora() + 10 * 60_000);
+      desconexoes.set(chaveMaquina(escopo, maquinaId), agora() + PRAZO_DESCONEXAO_MS);
     },
     desconexaoPedida(escopo, maquinaId) {
       const ate = desconexoes.get(chaveMaquina(escopo, maquinaId));
