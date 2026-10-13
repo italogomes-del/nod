@@ -5,6 +5,7 @@ import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-ia.ts";
+import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
@@ -218,7 +219,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         // definido em 2026-10-12 (ADR-099 §7): o portão da cota. A IA do turno: a fixada, ou (Automático) a regra das IAs que
         // podem pegá-lo, decidida antes (portaoDaCota). Mesma regra de `tipoParaCota` e `cotaSegura` (domain/cota-da-ia.ts).
         const cota = p.cota ?? null;
-        const iaDoTurno = trx`(case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end)`;
+        // NOD-213: a IA do turno `auto` com modelo escolhido é a dona do modelo (iaDoModelo, pelos `modelosPorIa`), não o legado.
+        const porIa = modelosPorIa();
+        const iaDoTurno = trx`(case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end)`;
         const naCota = (ias: readonly string[], auto: boolean) => trx`(case when t.harness = 'auto' and t.modelo = 'auto' then ${auto}::boolean else ${iaDoTurno} = any(${[...ias]}::text[]) end)`;
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true
@@ -229,8 +232,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               and (t.acordar_em is null or t.acordar_em <= ${data(p.agora)})
               -- ADR-090 (revisão do PR): a máquina que é o alvo do turno o pega mesmo sem a IA pronta; o despacho recusa nomeando a
               -- IA (NOD-171), em vez de o turno esperar em silêncio uma máquina que nunca vai pegá-lo.
-              ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end) = any(${[...p.harnessesProntos]}::text[]))
-                ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and (case when t.harness = 'auto' then ${HARNESS_LEGADO} else t.harness end) <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
+              ${p.harnessesProntos === undefined ? trx`` : trx`and (${alvo} = ${p.machineId} or (t.harness = 'auto' and t.modelo = 'auto' and ${(p.harnessesAuto ?? p.harnessesProntos).length > 0}) or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} = any(${[...p.harnessesProntos]}::text[]))
+                ${p.harnessesProntosPessoa === undefined ? trx`` : trx`or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} <> all(${[...p.harnessesProntosPessoa]}::text[]))`})`}
               and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
               -- definido em 2026-10-09 (ADR-090): onde o bot trabalha (o alvo, abaixo). O turno só sai para o alvo; sem alvo, para
               -- qualquer máquina.

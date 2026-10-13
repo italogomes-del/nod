@@ -16,7 +16,8 @@ const autoria = { autor_tipo: "agente" as const, autor_id: "frida", sob_procurac
 const TEXTO = "Nenhum trabalho começa: executor indisponível (claude-cli: conta sem acesso) desde 2026-10-05T14:46:55.000Z.";
 const negacao = (causa: "conta_sem_acesso" | "teste_falhou" = "conta_sem_acesso"): Mensagem => ({ tenantId: "t", id: "m1", conversaId: "c1", turnoId: "t1", autoria, kind: "negacao", texto: TEXTO, payload: { kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: true, causa }, confianca: "confiavel", parcial: false, criadoEm: 0 });
 const SEM_ACESSO: Inventario = { estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "x", em: 0 };
-const PRONTO: Inventario = { estado: "pronto", versao: "1", em: 0 };
+// NOD-213: a sonda "pronto" é posterior à negação (criadoEm 0); uma sonda anterior não prova que a IA voltou.
+const PRONTO: Inventario = { estado: "pronto", versao: "1", em: 1 };
 const AUSENTE: Inventario = { estado: "ausente", motivo: "x", em: 0 };
 
 function com(p: { claude: Inventario; codex: Inventario }): Estado {

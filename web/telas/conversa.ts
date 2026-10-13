@@ -29,7 +29,7 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
@@ -224,6 +224,18 @@ function linhaDeIa(m: Mensagem, estado: Estado): string | null {
 }
 
 /**
+ * NOD-213: "a IA já voltou" só vale com a IA que vai rodar o bot — a do bot fixado; no Automático, o motor em uso —
+ * pronta numa sonda MAIS NOVA que a negação. A negação prova que, na hora dela, o servidor não tinha IA pronta: uma sonda
+ * anterior ("pronto" em cache) não desmente isso. Sem sonda (inventário null) vale como fora. Antes bastava o Claude
+ * estar pronto (o bot com modelo GPT era tratado como fixado nele) e a pessoa reenviava num laço: cada reenvio gerava
+ * uma negação nova com o mesmo "já voltou".
+ */
+function iaVoltouDepois(m: Mensagem, estado: Estado, fixado: IdIa | null): boolean {
+  const inv = fixado ? inventarioDaIa(estado, fixado) : inventarioEmUso(estado);
+  return inv?.estado === "pronto" && inv.em > m.criadoEm;
+}
+
+/**
  * Executor indisponível (ADR-029, classe plano_ausente) como aviso de ERRO do design system (definido em 2026-10-04):
  * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e a hora);
  * na frente, o que aconteceu em palavras e o próximo passo: "Conectar IA" enquanto a IA continua fora, e "mande de
@@ -234,22 +246,22 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   const nome = bot?.nome;
   const negacao = m.payload?.kind === "negacao" ? m.payload : null;
   const ia = negacao && ehIa(negacao.nome) ? negacao.nome : null;
-  // NOD-171: o bot FIXADO numa IA depende do inventário DELA, não do motor em uso: com o Claude pronto e o bot fixado
-  // no Codex fora, dizer "já voltou" seria falso. No automático (ou bot desconhecido) vale o motor em uso.
-  // O bot antigo em "auto" com modelo escolhido roda fixado no Claude Code (resolverHarness; inteligencia.ts faz igual).
-  const fixado = bot?.harness && bot.harness !== "auto" ? bot.harness : bot?.modelo && bot.modelo !== "auto" ? "claude-cli" : null;
-  const doFixado = ia !== null && fixado === ia;
-  const inv = doFixado && ia ? inventarioDaIa(estado, ia) : inventarioEmUso(estado);
-  // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
-  const aindaFora = !inv || inv.estado !== "pronto";
+  // NOD-171/NOD-213: o bot FIXADO numa IA depende do inventário DELA, não do motor em uso. Quem diz se o bot está fixado
+  // (e em qual IA) é a `inteligencia` que o servidor calcula pelo domínio (iaDoModelo): um bot com modelo GPT é do Codex,
+  // nunca do Claude Code. A regra não se repete aqui.
+  const intel = bot ? inteligenciaDoBot(bot) : null;
+  const fixado = intel?.modo === "fixa" && intel.fixa && ehIa(intel.fixa) ? intel.fixa : null;
+  // A IA do aviso: a que a negação nomeia; sem nome de IA ("ia", "catcher"), a do bot fixado.
+  const iaDoAviso = ia ?? fixado;
+  const aindaFora = !iaVoltouDepois(m, estado, fixado);
   const noApp = "nodDesktop" in globalThis;
   // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
-  if (negacao?.causa && ia) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia, causa: negacao.causa, aindaFora, noApp });
+  if (negacao?.causa && iaDoAviso) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia: iaDoAviso, causa: negacao.causa, aindaFora, noApp });
   // NOD-171: a IA está pronta e recusou o modelo do agente; esperar não resolve.
-  if (negacao?.modelo && ia) return avisoModeloRecusado(m, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia, modelo: negacao.modelo });
-  // NOD-171: o bot fixado numa IA que não está pronta — o aviso nomeia a IA e o estado dela (desatualizada, sem login,
-  // fora). No automático o nome da negação é só o motor em uso: vale o aviso de sempre.
-  const doHarness = doFixado && ia ? avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia, noApp }) : null;
+  if (negacao?.modelo && iaDoAviso) return avisoModeloRecusado(m, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: iaDoAviso, modelo: negacao.modelo });
+  // NOD-171: o bot fixado numa IA que não está pronta — o aviso nomeia a IA DELE e o estado dela (desatualizada, sem
+  // login, no limite, fora), mesmo quando a negação nomeou outra. No automático vale o aviso de sempre.
+  const doHarness = fixado ? avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: fixado, noApp }) : null;
   if (doHarness) return doHarness;
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   return avisoDeEstado({

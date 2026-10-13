@@ -3,6 +3,7 @@ import { HARNESS_LEGADO, HARNESSES, type IdHarness, type PreferenciaHarness } fr
 import { MODOS_INTELIGENCIA, RACIOCINIOS, type EscolhaDaIa, type EscolhasIa, type IaDaPessoa, type IasDaPessoa, type InteligenciaBot, type LimiteDaIa, type LimitesIa } from "../contracts/inteligencia.ts";
 import { CAUSA_LIMITE, type Inventario } from "../contracts/inventario.ts";
 import { ErroDeDominio } from "./erro.ts";
+import { iaAceitaModelo, iaDoModelo } from "./ia-do-modelo.ts";
 
 /**
  * A inteligência de cada bot (definido em 2026-10-10, emenda da ADR-036; plano "IAs: conexão, troca e escolha de
@@ -144,14 +145,13 @@ function semModelos(escolhas: EscolhasIa): EscolhasIa {
 /** O modelo é aceito pela IA (o catálogo, ou um `claude-…` pelo id no Claude)? Mesma regra de `validarInteligencia`. */
 function modeloAceito(ia: IdHarness, modelo: string): boolean {
   if (modelo.length > 160 || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(modelo)) return false;
-  const h = HARNESSES.find((x) => x.id === ia && x.integrado);
-  return Boolean(h && (h.modelos.some((m) => m.id === modelo) || (ia === "claude-cli" && modelo.startsWith("claude-"))));
+  return iaAceitaModelo(ia, modelo);
 }
 
 /**
  * O pedido antigo `{harness, modelo, esforco}` (a tela de Inteligência de antes, `gerir_bots`, a criação) traduzido.
- * `auto/auto` = Automático sem modelo escolhido (a ordem e os raciocínios ficam); `auto` com um modelo = o Claude fixo naquele modelo (como o
- * `harnessFixado` de sempre); uma IA = "Uma IA só", com o modelo (ou o recomendado, para `auto`). O esforço era só do
+ * `auto/auto` = Automático sem modelo escolhido (a ordem e os raciocínios ficam); `auto` com um modelo = a IA dona do modelo
+ * fixa nele (NOD-213, iaDoModelo, como o `harnessFixado`: GPT → Codex; Claude ou desconhecido → Claude); uma IA = "Uma IA só", com o modelo (ou o recomendado, para `auto`). O esforço era só do
  * Claude na tela antiga: vira o raciocínio do Claude. Quem valida a dupla é quem chama (`validarInteligencia`).
  */
 export function inteligenciaDoLegado(atual: InteligenciaBot, p: { harness: PreferenciaHarness; modelo: string; esforco?: EsforcoAgente | null }): InteligenciaBot {
@@ -159,7 +159,7 @@ export function inteligenciaDoLegado(atual: InteligenciaBot, p: { harness: Prefe
   // "Automático" na tela antiga era "nenhum modelo escolhido": os modelos saem; os raciocínios e a ordem ficam.
   if (p.harness === "auto" && p.modelo === "auto") i = { ...atual, modo: "auto", fixa: null, escolhas: semModelos(atual.escolhas) };
   else {
-    const fixa: IdHarness = p.harness === "auto" ? HARNESS_LEGADO : p.harness;
+    const fixa: IdHarness = p.harness === "auto" ? (iaDoModelo(p.modelo) ?? HARNESS_LEGADO) : p.harness;
     i = { ...atual, modo: "fixa", fixa, escolhas: comEscolha(atual.escolhas, fixa, (e) => ({ ...e, modelo: p.modelo === "auto" ? undefined : p.modelo })) };
   }
   if (p.esforco !== undefined) i = { ...i, escolhas: comEscolha(i.escolhas, HARNESS_LEGADO, (e) => ({ ...e, raciocinio: p.esforco ?? undefined })) };

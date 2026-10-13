@@ -20,7 +20,7 @@ import type { IaDaPessoa } from "../../src/contracts/inteligencia.ts";
  * Funções puras de desenho; os cliques (`ia-entrar`, `ia-conectar`) são tratados em web/main.ts.
  */
 
-type IdIa = Extract<IdHarness, "claude-cli" | "codex-cli">;
+export type IdIa = Extract<IdHarness, "claude-cli" | "codex-cli">;
 /** Como a tela chama cada IA (o mesmo do onboarding): o provedor, o CLI e o logo. */
 export const PROVEDOR_DA_IA: Record<IdIa, { nome: string; cli: string; logo: keyof typeof LOGOS_IA }> = {
   "claude-cli": { nome: "Claude", cli: "Claude Code", logo: "claude" },
@@ -121,6 +121,9 @@ export function avisoHarnessFora(m: Mensagem, estado: Pick<Estado, "executor">, 
   const conectar = botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } });
   const [titulo, situacao, resolve] = antigo
     ? [`${bot} não começou: o ${cli} deste Mac está desatualizado.`, `${bot} usa o ${nome} (${cli}). A versão instalada é a ${antigo.versao}, e o nod precisa da ${versaoLegivel(antigo.minima)} ou mais nova.`, p.noApp ? botao("ia-atualizar", `Atualizar o ${cli}`, { classe: "pri sm", dados }) : ""]
+    // NOD-213: no limite da assinatura a IA está logada; "falta entrar" seria falso. Resolve trocando de IA (ou esperando).
+    : inv.estado === "nao_autenticado" && inv.causa === "limite"
+      ? [`${bot} não começou: a conta do ${nome} chegou ao limite da assinatura.`, `${bot} usa o ${nome} (${cli}), e a conta conectada está no limite de uso.`, ""]
     : inv.estado === "nao_autenticado"
       ? [`${bot} não começou: falta entrar no ${cli}.`, `${bot} usa o ${nome} (${cli}). Ele está instalado neste Mac, mas sem conta conectada.`, p.noApp ? botao("ia-entrar", `${logo(p.ia)}Entrar no ${nome}`, { classe: "pri sm com-logo", dados }) : conectar]
       : [`${bot} não começou: o ${cli} não está neste Mac.`, `${bot} usa o ${nome} (${cli}), que não foi encontrado neste Mac.`, p.noApp ? botao("ia-conectar", `${logo(p.ia)}Instalar o ${cli}`, { classe: "pri sm com-logo", dados }) : conectar];

@@ -42,11 +42,15 @@ const RACIOCINIO_PADRAO: EsforcoAgente = "medium";
  * `inteligenciaDoLegado` (src/domain/inteligencia.ts): `auto/auto` = Automático; um modelo = "Uma IA só".
  */
 export function inteligenciaDoBot(a: Pick<Agente, "harness" | "modelo" | "esforco" | "inteligencia">): InteligenciaBot {
+  // NOD-213: o servidor SEMPRE manda a `inteligencia` (agentes.repo, pelo domínio: iaDoModelo diz a IA de cada modelo).
+  // O resto é a leitura anterior à 0068, só para o agente sem ela (fixtures); nenhuma tela real passa por aqui.
   if (a.inteligencia) return a.inteligencia;
   const harness = a.harness ?? "auto";
   const esforco: EscolhasIa = a.esforco ? { "claude-cli": { raciocinio: a.esforco } } : {};
-  if (harness === "auto" && a.modelo === "auto") return { modo: "auto", fixa: null, ordem: null, escolhas: esforco };
-  const fixa: IdHarness = harness === "auto" ? "claude-cli" : harness;
+  // Só o servidor sabe de qual IA é um modelo (iaDoModelo); sem a `inteligencia` dele, a web não adivinha: `auto` (com
+  // ou sem modelo) é o Automático, e só a IA escolhida explicitamente fixa o bot.
+  if (harness === "auto") return { modo: "auto", fixa: null, ordem: null, escolhas: esforco };
+  const fixa: IdHarness = harness;
   const modelo = a.modelo !== "auto" ? { modelo: a.modelo } : {};
   return { modo: "fixa", fixa, ordem: null, escolhas: { ...esforco, [fixa]: { ...esforco[fixa], ...modelo } } };
 }

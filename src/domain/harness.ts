@@ -5,19 +5,19 @@ import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
+import { iaAceitaModelo, iaDoModelo } from "./ia-do-modelo.ts";
 import { iaDoAutomatico, modeloERaciocinio, ordemEfetiva } from "./inteligencia.ts";
 
 export function validarInteligencia(harness: unknown, modelo: unknown): asserts harness is PreferenciaHarness {
   if (typeof modelo !== "string" || !modelo.trim() || modelo.length > 160 || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(modelo)) throw new ErroDeDominio("entrada_invalida");
   if (harness === "auto") {
-    if (modelo === "auto") return;
-    // definido em 2026-09-18: modelos anteriores à seleção de harness continuam vinculados ao Claude.
-    if (["sonnet", "haiku", "opus"].includes(modelo) || modelo.startsWith("claude-")) return;
+    // NOD-213: `auto` com um modelo escolhido vale para a IA DONA do modelo (iaDoModelo): o Claude para os do Claude
+    // (a regra de 2026-09-18), o Codex para os GPT. Modelo fora do catálogo continua recusado.
+    if (modelo === "auto" || iaDoModelo(modelo) !== null) return;
     throw new ErroDeDominio("entrada_invalida");
   }
-  const opcao = HARNESSES.find((h) => h.id === harness && h.integrado);
-  if (!opcao) throw new ErroDeDominio("entrada_invalida");
-  if (modelo === "auto" || opcao.modelos.some((m) => m.id === modelo) || (harness === "claude-cli" && modelo.startsWith("claude-"))) return;
+  if (!HARNESSES.some((h) => h.id === harness && h.integrado)) throw new ErroDeDominio("entrada_invalida");
+  if (modelo === "auto" || iaAceitaModelo(harness as IdHarness, modelo)) return;
   throw new ErroDeDominio("entrada_invalida");
 }
 
@@ -35,10 +35,15 @@ export function causaHarnessIndisponivel(e: unknown): CausaHarnessIndisponivel |
   return c && typeof c === "object" && typeof c.harness === "string" ? (c as CausaHarnessIndisponivel) : null;
 }
 
-/** O harness em que o turno está fixado; null = `auto`/`auto`, que vai para qualquer harness pronto. */
+/**
+ * O harness em que o turno está fixado; null = `auto`/`auto`, que vai para qualquer harness pronto. NOD-213: o `auto` com
+ * modelo escolhido fica na IA DONA do modelo (iaDoModelo: GPT → Codex, Claude → Claude Code); modelo desconhecido, no
+ * legado (é o `validarInteligencia` que o recusa, nomeando esse harness).
+ */
 export function harnessFixado(harness: string | undefined, modelo: string): IdHarness | null {
   const pedido = harness ?? "auto";
-  return pedido !== "auto" ? (pedido as IdHarness) : modelo !== "auto" ? HARNESS_LEGADO : null;
+  if (pedido !== "auto") return pedido as IdHarness;
+  return modelo === "auto" ? null : (iaDoModelo(modelo) ?? HARNESS_LEGADO);
 }
 
 /**

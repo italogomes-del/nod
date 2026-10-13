@@ -240,6 +240,49 @@ describeIntegracao("NOD-171: harness fixado e indisponível", () => {
   });
 });
 
+describeIntegracao("NOD-213: bot 'auto' com modelo GPT roda no Codex", () => {
+  type Harnesses = Partial<Record<"claude-cli" | "codex-cli", Inventario>>;
+  const montar = async (trx: Parameters<Parameters<typeof withRollback>[1]>[0], harnesses: Harnesses) => {
+    const base = await agenteComConversa(trx, escopo);
+    const agora = () => Date.now();
+    const servicos = servicosDeTeste({ agora });
+    const services: Services = { ...servicos, planos: { ...servicos.planos, emitir: async (_t, turnoId, machineId) => (await emitirPlanoTurno(deps, { turnoId, machineId, executor: "local", harnesses })).data } };
+    const deps = depsSobre(base.repos, escopo, { agora, trx, services });
+    const turno = await base.repos.turnos.enfileirar({ executor: "catcher", agenteId: base.agenteId, conversaId: base.conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "gpt-5.6-sol", harness: "auto" });
+    return { ...base, deps, turno: turno! };
+  };
+  const puxar = (b: Awaited<ReturnType<typeof montar>>, extra: Partial<Parameters<typeof despacharTurno>[1]> = {}) =>
+    despacharTurno(b.deps, { machineId: randomUUID(), executor: "local", inventario: pronto, ...extra });
+
+  it("com o Codex (falso) e o Claude prontos, o turno roda no Codex com o modelo GPT — antes era recusado como modelo do Claude", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": pronto });
+      expect((await puxar(b)).data.plano).toMatchObject({ turnoId: b.turno.id, harness: "codex-cli", entrada: { modelo: "gpt-5.6-sol" } });
+    });
+  });
+
+  it("app do Mac: a fila manda o turno para a máquina com o Codex, não para a do Claude", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": pronto });
+      const harnessesDaPessoa = { "claude-cli": pronto, "codex-cli": pronto };
+      expect((await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa })).data.motivo).toBe("fila_vazia");
+      expect(await b.repos.turnos.buscar(b.turno.id)).toMatchObject({ estado: "pendente" });
+      expect((await puxar(b, { harnessesProntos: ["codex-cli"], harnessesDaPessoa })).data.plano).toMatchObject({ harness: "codex-cli" });
+    });
+  });
+
+  it("com o Codex fora e o Claude pronto, a negação nomeia o Codex (nunca o Claude, nunca modelo recusado)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const b = await montar(trx, { "claude-cli": pronto, "codex-cli": { estado: "nao_autenticado", motivo: "faça login", em: Date.now() } });
+      expect((await puxar(b)).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+      const negacao = await b.repos.mensagens.ultimaDaConversa(b.conversaId);
+      expect(negacao).toMatchObject({ kind: "negacao", payload: { nome: "codex-cli" } });
+      expect(negacao?.payload).not.toHaveProperty("modelo");
+      expect(negacao?.texto).toContain("Codex sem conta conectada");
+    });
+  });
+});
+
 describeIntegracao("Codex sem app-server: recusa própria do Ligar (NOD-167)", () => {
   const contexto: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
   it("o Mac anunciou o Codex sem app-server: recusa em pt-BR antes de tocar; sem IA pronta continua sem_ia; desligado no servidor continua codex_em_breve", async () => {

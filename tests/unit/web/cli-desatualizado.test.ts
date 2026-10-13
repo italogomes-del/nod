@@ -166,9 +166,10 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
     expect(html).not.toContain('data-act="ia-atualizar"');
   });
 
-  it("a IA do bot já voltou: fica o aviso de sempre ('mande de novo')", () => {
-    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: PRONTO }));
+  it("a IA do bot já voltou (sonda mais nova que a negação): fica o aviso de sempre ('mande de novo')", () => {
+    const html = renderMensagem(negacao("codex-cli"), com({ claude: PRONTO, codex: { ...PRONTO, em: 1 } }));
     expect(html).toContain("Nenhum trabalho começou.");
+    expect(html).toContain("mande a mensagem de novo");
   });
 
   it("revisão: fixado no Codex sem catálogo ou só lento, com o Claude pronto, nunca diz que a IA 'já voltou'", () => {
@@ -259,5 +260,81 @@ describe("Inteligência (2A): a IA desatualizada", () => {
     const html = renderLinhaInteligencia({ id: "gil", nome: "Gil", modelo: "gpt-antigo", harness: "codex-cli" }, ctxPronto, true);
     expect(html).toContain('<span class="ia-atual">');
     expect(html).toContain("gpt-antigo");
+  });
+});
+
+/**
+ * NOD-213: o Chico em GPT/Codex mostrava "Nenhum trabalho começou" em laço, e o aviso dizia que a IA "já voltou" — o bot
+ * com modelo GPT era lido como fixado no Claude Code (pronto). A IA do bot vem agora da `inteligencia` que o servidor
+ * calcula pelo domínio (iaDoModelo), e "já voltou" só com a IA DO BOT pronta numa sonda posterior à negação.
+ */
+describe("NOD-213: bot no GPT/Codex nunca ouve que a IA 'já voltou' sem ela ter voltado", () => {
+  // Como o servidor manda o Chico: gravado antes da 0068 como harness "auto" + modelo GPT; a inteligencia diz Codex.
+  const chico = { id: "gil", nome: "Gil", harness: "auto", modelo: "gpt-5.6-sol", conversaId: "c1", ownerId: "marcelo", excluidoEm: null,
+    inteligencia: { modo: "fixa", fixa: "codex-cli", ordem: null, escolhas: { "codex-cli": { modelo: "gpt-5.6-sol" } } } } as unknown as FrotaDto["agentes"][number];
+  const comChico = (p: { claude: Inventario; codex: Inventario }): Estado => ({ ...com(p), frota: { agentes: [chico], negacoes: [] } as unknown as Estado["frota"] });
+  const NOVO: Inventario = { ...PRONTO, em: 1 };
+  const LIMITE: Inventario = { estado: "nao_autenticado", causa: "limite", motivo: "limite de uso", em: 1 };
+  const comCausa = (nome: string): Mensagem => {
+    const m = negacao(nome);
+    return { ...m, payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, causa: "conta_sem_acesso" } };
+  };
+
+  it("regressão: Codex fora e Claude pronto — o aviso nomeia o Codex, não diz 'já voltou' (falha na main af5962a)", () => {
+    for (const nome of ["claude-cli", "codex-cli"]) {
+      const html = renderMensagem(negacao(nome), comChico({ claude: NOVO, codex: SEM_LOGIN }));
+      expect(html).not.toContain("já voltou");
+      expect(html).toContain("Codex");
+      expect(html).toContain("Sua mensagem fica guardada");
+    }
+  });
+
+  it("negação do assentamento sem IA no nome ('ia') e com causa: o aviso é da IA do bot, nunca 'já voltou'", () => {
+    const html = renderMensagem(comCausa("ia"), comChico({ claude: NOVO, codex: { ...SEM_LOGIN, causa: "conta_sem_acesso" } }));
+    expect(html).not.toContain("já voltou");
+    expect(html).toContain("Codex");
+    expect(html).not.toContain("Já há uma IA pronta");
+  });
+
+  it("Codex no limite da assinatura: o aviso diz o limite e oferece trocar a IA, nunca 'já voltou'", () => {
+    const html = renderMensagem(negacao("codex-cli"), comChico({ claude: NOVO, codex: LIMITE }));
+    expect(html).toContain("Gil não começou: a conta do ChatGPT chegou ao limite da assinatura.");
+    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar a IA de Gil</);
+    expect(html).not.toContain("já voltou");
+  });
+
+  it("o laço: sonda 'pronto' ANTERIOR à negação não prova que a IA voltou", () => {
+    const depois = { ...negacao("claude-cli"), criadoEm: 5 };
+    for (const estado of [com({ claude: PRONTO, codex: PRONTO, harnessDoGil: "auto" }), comChico({ claude: PRONTO, codex: PRONTO })]) {
+      const html = renderMensagem(depois, estado);
+      expect(html).not.toContain("já voltou");
+      expect(html).toContain("Sua mensagem fica guardada");
+    }
+  });
+
+  it("nenhum caso de IA fora ou modelo inválido diz 'já voltou'", () => {
+    const foras: Inventario[] = [SEM_LOGIN, LIMITE, ANTIGO, AUSENTE, { ...SEM_LOGIN, causa: "conta_sem_acesso" }];
+    const comModelo: Mensagem = { ...negacao("codex-cli"), payload: { kind: "negacao", classe: "plano_ausente", nome: "codex-cli", motivo: "plano_ausente", terminal: true, modelo: "gpt-zz" } };
+    for (const codex of foras) for (const m of [negacao("claude-cli"), negacao("codex-cli"), negacao("ia"), comCausa("ia"), comCausa("codex-cli")]) {
+      expect(renderMensagem(m, comChico({ claude: NOVO, codex }))).not.toContain("já voltou");
+    }
+    expect(renderMensagem(comModelo, comChico({ claude: NOVO, codex: NOVO }))).not.toContain("já voltou");
+  });
+
+  // QA (Tarsila): o bot que a 0068 (passo 3) deixaria em `claude-cli` + GPT — a negação traz o modelo recusado. O aviso
+  // diz que o Claude Code não aceita o modelo e oferece trocar; nunca "já voltou", mesmo com as duas IAs prontas.
+  it("bot `claude-cli` + GPT (saído da 0068): aviso de modelo recusado com botão, nunca 'já voltou'", () => {
+    const daMigracao = { ...chico, harness: "claude-cli", inteligencia: { modo: "fixa", fixa: "claude-cli", ordem: null, escolhas: { "claude-cli": { modelo: "gpt-5.6-sol" } } } } as unknown as FrotaDto["agentes"][number];
+    const estado: Estado = { ...com({ claude: NOVO, codex: NOVO }), frota: { agentes: [daMigracao], negacoes: [] } as unknown as Estado["frota"] };
+    const m: Mensagem = { ...negacao("claude-cli"), payload: { kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: true, modelo: "gpt-5.6-sol" } };
+    const html = renderMensagem(m, estado);
+    expect(html).toContain("Gil não começou: o Claude Code não aceita o modelo gpt-5.6-sol.");
+    expect(html).toMatch(/data-act="inteligencia" data-id="gil">Trocar o modelo de Gil</);
+    expect(html).not.toContain("já voltou");
+  });
+
+  it("com o Codex de volta (sonda nova), o aviso de sempre pode dizer que voltou", () => {
+    const html = renderMensagem(negacao("codex-cli"), comChico({ claude: NOVO, codex: NOVO }));
+    expect(html).toContain("mande a mensagem de novo");
   });
 });

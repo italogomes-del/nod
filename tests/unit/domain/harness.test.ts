@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { HARNESSES, type CatalogoHarness } from "../../../src/contracts/harness.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import { capacidadesDe, causaHarnessIndisponivel, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { iaDoModelo } from "../../../src/domain/ia-do-modelo.ts";
+import { inteligenciaDoAgente } from "../../../src/domain/inteligencia.ts";
 
 describe("escolha de inteligência", () => {
   it("escolhe uma conta conectada sem configurar harness ou modelo", () => {
@@ -60,6 +62,45 @@ describe("escolha de inteligência", () => {
     });
     it("sem sonda do harness não afirma 'não instalado'", () => {
       expect(motivoHarnessIndisponivel("codex-cli", inventarioHarnessSemSonda(0))).toBe("Codex não está pronto em nenhum computador conectado");
+    });
+  });
+
+  describe("NOD-213: a IA do bot sai do modelo (uma regra só)", () => {
+    const causaDe = (f: () => unknown) => { try { f(); } catch (e) { return causaHarnessIndisponivel(e); } return null; };
+    it("iaDoModelo: GPT é do Codex, Claude (apelido ou prefixo) do Claude Code, auto e desconhecido não têm IA", () => {
+      expect(iaDoModelo("gpt-5.6-sol")).toBe("codex-cli");
+      expect(iaDoModelo("gpt-6-astra")).toBe("codex-cli");
+      expect(iaDoModelo("opus")).toBe("claude-cli");
+      expect(iaDoModelo("claude-haiku-4-5-20251001")).toBe("claude-cli");
+      expect(iaDoModelo("auto")).toBeNull();
+      expect(iaDoModelo("gpt-zz")).toBeNull();
+    });
+    it("harnessFixado: auto + GPT fixa no Codex (antes caía no Claude Code)", () => {
+      expect(harnessFixado("auto", "gpt-5.6-sol")).toBe("codex-cli");
+      expect(validarInteligencia("auto", "gpt-5.6-sol")).toBeUndefined();
+    });
+    it("auto + GPT com Codex e Claude prontos roda no Codex", () => {
+      expect(resolverHarness({ modelo: "gpt-5.6-sol", prontos: ["claude-cli", "codex-cli"] })).toMatchObject({ harness: "codex-cli", modelo: "gpt-5.6-sol" });
+    });
+    it("auto + GPT com Codex fora e Claude pronto: a negação nomeia o Codex, não o Claude", () => {
+      expect(() => resolverHarness({ modelo: "gpt-5.6-sol", prontos: ["claude-cli"] })).toThrow("executor_indisponivel");
+      expect(causaDe(() => resolverHarness({ modelo: "gpt-5.6-sol", prontos: ["claude-cli"] }))).toEqual({ harness: "codex-cli" });
+    });
+    it("codex-cli + GPT com o Codex no limite: indisponível e nomeando o Codex", () => {
+      expect(causaDe(() => resolverHarness({ harness: "codex-cli", modelo: "gpt-5.6-sol", prontos: ["claude-cli"], noLimite: ["codex-cli"] }))).toEqual({ harness: "codex-cli" });
+    });
+    // QA (Tarsila, 2026-10-12): o passo 3 da 0068 trocaria um bot `auto`+GPT anterior a ela para `claude-cli`+GPT (o
+    // passo 1 grava o modelo em escolhas["claude-cli"] e o 4 põe "Uma IA só"). Nenhum caminho validado gravava `auto`+GPT
+    // (validarInteligencia recusa desde a 0013) e a 0068 já rodou em produção; se a linha existir, ela não roda no Claude
+    // com um modelo GPT nem some em silêncio: o despacho recusa como modelo inválido nomeando o Claude Code.
+    it("linha que a 0068 geraria de um `auto`+GPT (claude-cli + GPT): fica no Claude e é recusada como modelo inválido", () => {
+      const linha = { harness: "claude-cli" as const, modelo: "gpt-5.6-sol", esforco: null, inteligencia: { modo: "fixa" as const, fixa: "claude-cli" as const, ordem: null, escolhas: { "claude-cli": { modelo: "gpt-5.6-sol" } } } };
+      expect(inteligenciaDoAgente(linha)).toEqual(linha.inteligencia);
+      expect(causaDe(() => resolverHarness({ harness: "claude-cli", modelo: "gpt-5.6-sol", prontos: ["claude-cli", "codex-cli"] }))).toEqual({ harness: "claude-cli", modelo: "gpt-5.6-sol", motivo: "modelo_invalido" });
+    });
+    it("auto + modelo do Claude continua no Claude; auto + auto continua no Automático", () => {
+      expect(resolverHarness({ modelo: "sonnet", prontos: ["claude-cli", "codex-cli"] })).toMatchObject({ harness: "claude-cli", modelo: "sonnet" });
+      expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"] })).toEqual({ harness: "claude-cli", modelo: "opus", raciocinio: "medium" });
     });
   });
 });

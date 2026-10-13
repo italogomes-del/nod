@@ -35,11 +35,25 @@ describe("as cópias da web batem com o servidor", () => {
   it.each([
     { harness: "auto" as const, modelo: "auto", esforco: null },
     { harness: "auto" as const, modelo: "auto", esforco: "high" as const },
-    { harness: "auto" as const, modelo: "sonnet", esforco: null },
     { harness: "codex-cli" as const, modelo: "gpt-6-astra", esforco: null },
     { harness: "claude-cli" as const, modelo: "auto", esforco: "max" as const },
   ])("o bot sem a inteligência gravada traduz os campos antigos como o domínio (%o)", (a) => {
     expect(inteligenciaDoBot(a)).toEqual(inteligenciaDoAgente(a));
+  });
+
+  // NOD-213 (revisão): de qual IA é um modelo só o servidor diz (iaDoModelo). Sem a `inteligencia` dele, a web não
+  // adivinha o Claude para `auto` com modelo — era assim que um bot GPT virava "fixado no Claude Code" na tela.
+  it.each(["sonnet", "gpt-6-astra"])("`auto` com o modelo %s sem a inteligência do servidor: a web não fixa IA nenhuma", (modelo) => {
+    const i = inteligenciaDoBot({ harness: "auto", modelo, esforco: null });
+    expect(i.modo).toBe("auto");
+    expect(i.fixa).toBeNull();
+  });
+
+  it("com a inteligência do servidor, a web usa a dela (o bot `auto` + GPT é do Codex)", () => {
+    const a = { harness: "auto" as const, modelo: "gpt-6-astra", esforco: null };
+    const doServidor = inteligenciaDoAgente(a);
+    expect(doServidor.fixa).toBe("codex-cli");
+    expect(inteligenciaDoBot({ ...a, inteligencia: doServidor })).toEqual(doServidor);
   });
 
   it("o raciocínio que vale para cada modelo é o mesmo do domínio", () => {
