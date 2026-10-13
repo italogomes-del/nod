@@ -228,7 +228,7 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
   } else if (c.passo === "confirmar" && c.pedido) {
     corpo = `<h3>Conectar ${esc(c.pedido.nome)}?</h3>
       <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${c.pedido.plataforma === "linux" ? "Linux" : "Mac"} · código ${esc(c.codigo.toUpperCase())} · pediu ${esc(haQuantoPediu(c.pedido.pedidoHaS))}</small></div></div>
-      <p class="cx-nota">Conecte só se foi você quem rodou o comando nessa máquina agora e o código é o que apareceu nela. Quem conecta uma máquina passa a receber o trabalho dos bots que você mover para ela.</p>
+      <p class="cx-nota">Confira se o terminal da máquina mostra o código <b>${esc(c.codigo.toUpperCase())}</b>. Conecte só se foi você quem rodou o comando nessa máquina agora. Quem conecta uma máquina passa a receber o trabalho dos bots que você mover para ela.</p>
       ${erro}
       <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: comConvite ? "comando" : "codigo" } })}${botao("aprovar-maquina", `Conectar ${esc(c.pedido.nome)}`, { classe: "pri" })}</div>`;
   } else if (c.passo === "ias" && contextoDasContas(estado)) {

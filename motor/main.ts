@@ -157,12 +157,14 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const registryDoLaco: Registry = criado.registry;
   const memoria = criarAmostradorMemoria({ env: process.env, lerNoLinux: true });
 
+  let desconectada = false;
   const aoFalhar = (codigo: FalhaPonte["codigo"]) => {
     if (codigo === "reconectar" && vigia && Date.now() - ultimoReanuncio >= ESPERA_REANUNCIO_MS) {
       ultimoReanuncio = Date.now();
       log("info", "motor_reanuncio", { motivo: "servidor_esqueceu_a_maquina" });
       void vigia.reanunciar().catch(() => undefined);
     }
+    if (desconectada) return;
     if (codigo === "chave_invalida" || codigo === "atualize_app") void parar().then(() => fim(codigo));
   };
   // ADR-099 (I5): a frente que terminou sem trabalho sai na hora (a resposta do entregar traz a pasta).
@@ -276,8 +278,11 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     reanunciar: () => vigiaAtual.reanunciar(),
     desconectar: async () => {
       // A pessoa desconectou a máquina na tela: a conexão sai daqui e o motor para (código 2: o systemd não reinicia).
+      // QA do PR #306 (ISSUE-007): marca antes de parar — a chave já caiu, e o 401 do laço não pode virar "chave inválida".
+      desconectada = true;
       await rm(arquivoDaConexao(pasta), { force: true });
-      void parar().then(() => fim("desconectada"));
+      fim("desconectada");
+      void parar();
     },
     aoSairDaConta: descartarDriverDaConta,
     agora: Date.now,
@@ -394,7 +399,7 @@ async function parear(servidorBruto: string, nomeBruto: string | null, convite: 
   const p = (await pedido.json()) as { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number };
   // ADR-102: com o convite, a tela já vê esta máquina chegar; o código fica de reserva.
   process.stdout.write(convite
-    ? `\nPronto: volte à tela do Nod e confirme a conexão de ${nome}.\n(Se a tela não mostrar, digite o código ${p.codigoPessoa} em Seu espaço › Máquinas › Conectar.)\n\nAguardando a confirmação…\n`
+    ? `\nPronto: volte à tela do Nod e confirme a conexão de ${nome}.\nAntes de confirmar, confira se a tela mostra este código:\n\n        ${p.codigoPessoa}\n\nSe o código for outro, não confirme: feche o Conectar e gere um novo.\n\nAguardando a confirmação…\n`
     : `\nPara conectar esta máquina (${nome}) ao seu Nod, abra Seu espaço › Máquinas › Conectar e digite o código:\n\n        ${p.codigoPessoa}\n\nOu abra: ${url}/?parear-maquina=${encodeURIComponent(p.codigoPessoa)}  (vale por ${Math.round(p.prazoS / 60)} min)\n\nAguardando a confirmação…\n`);
   const ate = Date.now() + p.prazoS * 1000;
   while (Date.now() < ate) {
