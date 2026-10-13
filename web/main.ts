@@ -35,13 +35,14 @@ import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema } from "./lib/tema.ts";
 import { estadoMascoteNaConversa } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
+import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { contextoInteligencia, nivelDaGaveta, renderDetalhes } from "./telas/detalhes.ts";
+import { contextoInteligencia, nivelDaGaveta } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova } from "./telas/maquinas.ts";
@@ -795,9 +796,7 @@ function renderPrincipal(): void {
       composer = { chave: `sala:${t.salaId}`, html: htmlComposer(PLACEHOLDER_SALA, nomesDosMembros(estado, t.salaId)) };
       break;
   }
-  // Um formulário da gaveta com algo digitado não é regravado por um frame qualquer; ele volta a acompanhar o estado
-  // quando a pessoa salva, cancela ou sai do nível.
-  if (gavetaSuja !== chaveDaGaveta()) regiao("detalhes", lembrar("detalhes", estado, [], renderDetalhes));
+  atualizarGaveta(estado, gavetaSuja);
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
   // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
@@ -1909,7 +1908,7 @@ function mudarInteligencia(agenteId: string | undefined, m: (r: RascunhoIntelige
   const mudanca = m(r);
   if (!mudanca) return;
   dispatch({ tipo: "rascunho-ia", rascunho: mudarRascunho(r, mudanca, contextoInteligencia(estado)) });
-  gavetaSuja = chaveDaGaveta();
+  if (mudanca.tipo !== "pilula") gavetaSuja = chaveDaGaveta();
 }
 const iaDaTela = (id: string | undefined) => iasDaTela(estado).find((i) => i.id === id);
 
