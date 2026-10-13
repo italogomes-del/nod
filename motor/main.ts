@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,15 +22,19 @@ import { iniciarEsperas, type Esperas } from "../src/adapters/executor/esperas.t
 import type { PlanoTurno } from "../src/contracts/plano-turno.ts";
 import { configDosDrivers, criarRegistryDetalhado } from "../src/adapters/executor/registry.ts";
 import { prazoSondaDoEnv } from "../src/adapters/executor/sonda.ts";
-import type { ConfigDriver, Driver, Registry } from "../src/adapters/executor/spi.ts";
+import type { ConfigDriver, Driver, Registry, RegistroDriver } from "../src/adapters/executor/spi.ts";
 import { criarDetectorGh, executarGithubNaMaquina } from "../src/adapters/conectores-locais/github/maquina.ts";
 import type { IaDesktop } from "../src/contracts/desktop.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
+import { criarContasLocais, type ContaLocal } from "../desktop/contas-locais.ts";
+import { diretorioPadrao } from "../desktop/contas-mac.ts";
+import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
+import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
-import { AJUDA, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
+import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
 
 /**
  * O motor do Nod sem janela (ADR-090): o mesmo laço do app do Mac (`desktop/main.ts`, `conectar()`) numa máquina Linux
@@ -81,7 +85,7 @@ async function impressaoDoLogin(ia: IaDesktop, cfg: ConfigDriver): Promise<strin
   return r.exitCode === 0 ? createHash("sha256").update(textoDaImpressao(ia, r.stdout, r.stderr)).digest("hex") : null;
 }
 
-type Sessao = { parar(): Promise<void>; terminou: Promise<FalhaPonte["codigo"] | "parado"> };
+type Sessao = { parar(): Promise<void>; terminou: Promise<FalhaPonte["codigo"] | "parado" | "desconectada"> };
 
 /** Uma conexão inteira: sessão, vigia das IAs, laços e gh. Termina quando a chave não vale ou o app precisa atualizar. */
 async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao: string): Promise<Sessao> {
@@ -93,8 +97,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const dados = (await r.json()) as { escopo: { pessoaId: string }; machineId: string };
   if (!dados.escopo?.pessoaId || !dados.machineId) throw new FalhaPonte("resposta_invalida");
 
-  let fim: (motivo: FalhaPonte["codigo"] | "parado") => void = () => undefined;
-  const terminou = new Promise<FalhaPonte["codigo"] | "parado">((resolver) => { fim = resolver; });
+  let fim: (motivo: FalhaPonte["codigo"] | "parado" | "desconectada") => void = () => undefined;
+  const terminou = new Promise<FalhaPonte["codigo"] | "parado" | "desconectada">((resolver) => { fim = resolver; });
   let laco: PoolDeLacos | null = null;
   let vigia: VigiaDasIas | null = null;
   let itens: ReturnType<typeof setInterval> | null = null;
@@ -113,6 +117,43 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   const drivers: Driver[] = [criarClaudeCliDriver(lig), criarCodexCliDriver(lig)];
   const cfg = await configDosDrivers(envExecutor);
   const criado = await criarRegistryDetalhado(envExecutor, drivers, { cfg });
+  // ADR-102 (2026-10-13): as contas de IA desta máquina, uma pasta por conta (CLAUDE_CONFIG_DIR/CODEX_HOME); o servidor
+  // recebe só a impressão de cada uma. A lista fica na pasta do executor, ao lado das sessões.
+  const casaDasContas = cfg.env.HOME ?? homedir();
+  const clis: ClisDoMotor = {
+    bin: (ia) => resolverBinario(ia === "claude-cli" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", casaDasContas, ia === "claude-cli" ? "claude" : "codex"),
+    envBase: () => cfg.env,
+    home: casaDasContas,
+    versao,
+  };
+  const arquivoContas = join(executor, "contas-locais.json");
+  const contasLocais = criarContasLocais({ base: executor, arquivo: arquivoContas, pessoaId: dados.escopo.pessoaId, padrao: (ia) => diretorioPadrao(ia, cfg.env, casaDasContas), lerIdentidade: (ia, env) => lerIdentidadeNoCli(clis, ia, env), logout: (ia, env) => logoutNoCli(clis, ia, env), agora: Date.now });
+  await contasLocais.carregar();
+  await contasLocais.ler({ forcar: true }).catch(() => false);
+  await contasLocais.descartarRepetidas().catch(() => 0);
+  /** O driver de cada conta que não é a de sempre, criado na primeira vez que um plano pede a conta. */
+  const porConta = new Map<string, RegistroDriver>();
+  const registroDaConta = async (plano: PlanoTurno): Promise<RegistroDriver | "ausente" | null> => {
+    const local = plano.conta ? contasLocais.porImpressao(plano.conta.impressao) : null;
+    if (!local || local.estado !== "pronta") return "ausente";
+    if (local.id === ID_CONTA_PADRAO) return null;
+    const chave = `${local.ia}:${local.id}`;
+    const pronto = porConta.get(chave);
+    if (pronto) return pronto;
+    const driver = drivers.find((x) => x.meta.id === local.ia);
+    if (!driver) return "ausente";
+    const instance = await driver.create({ ...cfg, envPorDriver: { ...cfg.envPorDriver, [local.ia]: { ...(cfg.envPorDriver?.[local.ia] ?? {}), ...contasLocais.ambiente(local) } } });
+    const registro: RegistroDriver = { estado: "pronto", driver, instance };
+    porConta.set(chave, registro);
+    return registro;
+  };
+  const descartarDriverDaConta = async (conta: ContaLocal) => {
+    const chave = `${conta.ia}:${conta.id}`;
+    const reg = porConta.get(chave);
+    porConta.delete(chave);
+    if (reg?.estado === "pronto") await reg.instance.dispose().catch(() => undefined);
+  };
+  let contasDoMotor: ReturnType<typeof iniciarContasDoMotor> | null = null;
   const registryDoLaco: Registry = criado.registry;
   const memoria = criarAmostradorMemoria({ env: process.env, lerNoLinux: true });
 
@@ -164,7 +205,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
 
   const subirLaco = (reg: Registry) => {
     const tarefasVivas = criarAcompanhanteDeTarefas((turnoId, tarefas) => ponteHttp.tarefas(turnoId, tarefas));
-    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria,
+    laco = iniciarPoolDeLacos((ponte) => iniciarLaco({ ponte, registry: reg, pessoaId: dados.escopo.pessoaId, machineId: dados.machineId, relogio: () => Date.now(), renovacaoMs: 1_000, esperaVaziaMs: 1000, memoria, registroDaConta,
       aoDelta: (p, t) => ponteHttp.delta(p.turnoId, t),
       aoEvento: (p, ev) => { if (ev.tipo === "tool_use") ponteHttp.ferramenta(p.turnoId, ev.nome); tarefasVivas.evento(p.turnoId, ev); },
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
@@ -189,7 +230,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       if (encerrado) return;
       // NOD-199: como no app do Mac, o reanúncio vai pela rota só de inventário — o `conectar` recusaria (409) ou, depois
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
-      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades });
+      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades, contas: contasLocais.anuncio() });
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
     },
     aoRegistry: (novo, algumaPronta) => {
@@ -211,12 +252,31 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
     await parar();
     throw e;
   }
-  log("info", "motor_conectado", { servidor: c.url, machine_id: dados.machineId, nome: anuncio.nome });
+  log("info", "motor_conectado", { servidor: c.url, machine_id: dados.machineId, nome: anuncio.nome, contas: contasLocais.anuncio().length });
+  // ADR-102: o que a tela pede a esta máquina (logins pela tela, saídas, desconexão), a cada 3 s.
+  contasDoMotor = iniciarContasDoMotor({
+    ponte: ponteHttp.contas,
+    contas: contasLocais,
+    clis,
+    arquivo: arquivoContas,
+    reanunciar: () => vigiaAtual.reanunciar(),
+    desconectar: async () => {
+      // A pessoa desconectou a máquina na tela: a conexão sai daqui e o motor para (código 2: o systemd não reinicia).
+      await rm(arquivoDaConexao(pasta), { force: true });
+      void parar().then(() => fim("desconectada"));
+    },
+    aoSairDaConta: descartarDriverDaConta,
+    agora: Date.now,
+    agendar: (fn, ms) => { const t = setTimeout(fn, ms); return { cancelar: () => clearTimeout(t) }; },
+  });
 
   async function parar() {
     if (encerrado) return;
     encerrado = true;
     atualizador?.parar();
+    contasDoMotor?.parar();
+    for (const reg of porConta.values()) if (reg.estado === "pronto") await reg.instance.dispose().catch(() => undefined);
+    porConta.clear();
     if (itens) clearInterval(itens);
     limpeza?.parar();
     esperas?.parar();
@@ -290,6 +350,11 @@ async function rodar(): Promise<number> {
       if (motivo === "chave_invalida" && ++recusas >= RECUSAS_PARA_DESISTIR) return sairPor(motivo, c.url);
       if (motivo === "chave_invalida") { await esperar(ESPERA_RECUSA_MS, undefined, { signal: saida.signal }).catch(() => undefined); continue; }
       if (motivo === "parado") return 0;
+      if (motivo === "desconectada") {
+        log("info", "motor_desconectado", {});
+        process.stderr.write("Esta máquina foi desconectada do Nod (pela tela). Para conectar de novo: nod-motor parear <servidor>\n");
+        return 2;
+      }
     } catch (e) {
       const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
       if (codigo === "atualize_app") return sairPorVersao(c.url, pasta);
@@ -305,15 +370,18 @@ async function rodar(): Promise<number> {
 }
 
 /** Pareamento por código (ADR-090): pede o código, mostra, e pergunta ao servidor até a pessoa aprovar. */
-async function parear(servidorBruto: string, nomeBruto: string | null): Promise<number> {
+async function parear(servidorBruto: string, nomeBruto: string | null, convite: string | null = null): Promise<number> {
   let url: string;
   // http só em loopback (o próprio servidor nesta máquina, testes); qualquer outro endereço precisa de HTTPS.
   try { url = urlServidor(servidorBruto, true); } catch { process.stderr.write("Use o endereço HTTPS do seu Nod, por exemplo https://nod.seudominio.com\n"); return 1; }
   const nome = (nomeBruto ?? hostname()).trim().slice(0, 60) || "maquina";
-  const pedido = await fetch(`${url}/api/pareamento/dispositivo`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, plataforma: "linux" }), signal: AbortSignal.timeout(15_000) });
+  const pedido = await fetch(`${url}/api/pareamento/dispositivo`, { method: "POST", redirect: "error", headers: { "content-type": "application/json" }, body: JSON.stringify({ nome, plataforma: "linux", ...(convite ? { convite } : {}) }), signal: AbortSignal.timeout(15_000) });
   if (!pedido.ok) { process.stderr.write(`O servidor recusou o pareamento (HTTP ${pedido.status}). Confira o endereço.\n`); return 1; }
   const p = (await pedido.json()) as { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number };
-  process.stdout.write(`\nPara conectar esta máquina (${nome}) ao seu Nod, abra Seu espaço › Máquinas › Conectar e digite o código:\n\n        ${p.codigoPessoa}\n\nOu abra: ${url}/?parear-maquina=${encodeURIComponent(p.codigoPessoa)}  (vale por ${Math.round(p.prazoS / 60)} min)\n\nAguardando a confirmação…\n`);
+  // ADR-102: com o convite, a tela já vê esta máquina chegar; o código fica de reserva.
+  process.stdout.write(convite
+    ? `\nPronto: volte à tela do Nod e confirme a conexão de ${nome}.\n(Se a tela não mostrar, digite o código ${p.codigoPessoa} em Seu espaço › Máquinas › Conectar.)\n\nAguardando a confirmação…\n`
+    : `\nPara conectar esta máquina (${nome}) ao seu Nod, abra Seu espaço › Máquinas › Conectar e digite o código:\n\n        ${p.codigoPessoa}\n\nOu abra: ${url}/?parear-maquina=${encodeURIComponent(p.codigoPessoa)}  (vale por ${Math.round(p.prazoS / 60)} min)\n\nAguardando a confirmação…\n`);
   const ate = Date.now() + p.prazoS * 1000;
   while (Date.now() < ate) {
     await esperar(p.intervaloS * 1000);
@@ -323,7 +391,7 @@ async function parear(servidorBruto: string, nomeBruto: string | null): Promise<
     if (r.status === 201) {
       const { chave } = (await r.json()) as { chave: string };
       await guardarConexao(pastaDoMotor(process.env), { url, chave });
-      process.stdout.write(`\n✓ Conectada como ${nome}.\n\nAgora entre nas suas IAs, nesta máquina:\n  nod-motor entrar claude\n  nod-motor entrar codex     (opcional)\n  nod-motor entrar github    (opcional)\n\n`);
+      process.stdout.write(`\n✓ Conectada como ${nome}.\n\nAgora entre nas suas contas de IA pela tela (Seu espaço › Provedores de IA), ou aqui:\n  nod-motor entrar claude\n  nod-motor entrar codex\n  nod-motor entrar github    (opcional)\n\n`);
       return 0;
     }
     process.stderr.write("O código venceu ou não vale mais. Rode o pareamento de novo.\n");
@@ -338,11 +406,24 @@ async function entrar(ia: "claude" | "codex" | "github"): Promise<number> {
   const { nome, args } = comandoDeEntrar(ia);
   const cfg = await configDosDrivers({ ...process.env, NOD_HOME: pastaDoExecutor(process.env) });
   const home = cfg.env.HOME ?? "";
+  // ADR-102: Claude e Codex entram numa pasta de conta (a de sempre, se ainda sem login; senão uma nova). O serviço vê o
+  // arquivo mudar, lê a conta e anuncia; a impressão é calculada lá (com a pessoa da chave).
+  let envConta: Record<string, string> = {};
+  if (nome !== "gh") {
+    const executor = pastaDoExecutor(process.env);
+    const iaDaConta = nome === "claude" ? "claude-cli" : "codex-cli";
+    const locais = criarContasLocais({ base: executor, arquivo: join(executor, "contas-locais.json"), pessoaId: "", padrao: (x) => diretorioPadrao(x, cfg.env, home), lerIdentidade: async () => undefined, logout: async () => false, agora: Date.now });
+    await locais.carregar();
+    const conta = await locais.pastaParaLogin(iaDaConta, null);
+    if (!conta) { process.stderr.write("Esta máquina já tem contas demais dessa IA. Saia de uma pela tela (Provedores de IA).\n"); return 1; }
+    envConta = locais.ambiente(conta);
+  }
   const bin = nome === "gh" ? await resolverBinario(undefined, cfg.env.PATH ?? "", home, "gh") : await resolverBinario(nome === "claude" ? cfg.bin : cfg.bins?.["codex-cli"], cfg.env.PATH ?? "", home, nome as "claude" | "codex");
   if (!bin) { process.stderr.write(`${nome} não está instalado nesta máquina. Rode a instalação de novo com a opção dele.\n`); return 1; }
   return new Promise((resolver) => {
-    const filho = spawn(bin, args, { stdio: "inherit", env: { ...ambienteDoLogin(cfg.env), PATH: cfg.env.PATH ?? process.env.PATH ?? "" }, cwd: home || undefined });
-    filho.once("exit", (codigo) => resolver(codigo ?? 1));
+    const filho = spawn(bin, args, { stdio: "inherit", env: { ...ambienteDoLogin(cfg.env), ...envConta, PATH: cfg.env.PATH ?? process.env.PATH ?? "" }, cwd: home || undefined });
+    // ADR-102: o serviço relê a lista quando o arquivo muda — tocá-lo no fim faz o login novo valer em segundos.
+    filho.once("exit", (codigo) => { const agora = new Date(); void utimes(join(pastaDoExecutor(process.env), "contas-locais.json"), agora, agora).catch(() => undefined).finally(() => resolver(codigo ?? 1)); });
     filho.once("error", () => resolver(1));
   });
 }
@@ -369,7 +450,7 @@ async function estado(): Promise<number> {
 const comando = lerComando(process.argv.slice(2));
 const saida =
   comando.tipo === "rodar" ? rodar()
-  : comando.tipo === "parear" ? parear(comando.servidor, comando.nome)
+  : comando.tipo === "parear" ? parear(comando.servidor, comando.nome, comando.convite)
   : comando.tipo === "entrar" ? entrar(comando.ia)
   : comando.tipo === "estado" ? estado()
   : comando.tipo === "versao" ? versaoDoMotor().then((v) => { process.stdout.write(`${v}\n`); return 0; })

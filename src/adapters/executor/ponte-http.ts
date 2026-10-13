@@ -1,3 +1,4 @@
+import type { ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { AnuncioMaquina, PastaParaLimpar, PonteInterna, RespostaRenovar, TrechoVivo, VigiaVivo } from "../../contracts/ponte.ts";
 import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -271,6 +272,26 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   }
   return {
     ponte,
+    /**
+     * ADR-102 (2026-10-13): as contas de IA desta máquina. `puxar`: o que a tela pediu (logins, saídas, desconexão);
+     * null = sem resposta (rede, servidor fora); "sem_rota" = servidor sem contas (404: modo local ou servidor antigo).
+     */
+    contas: {
+      async puxar(): Promise<PuxadaDeContas | null | "sem_rota"> {
+        try {
+          const r = await chamar<Partial<PuxadaDeContas>>("contas", {}, { rota404: true });
+          return { logins: Array.isArray(r.logins) ? r.logins : [], sair: Array.isArray(r.sair) ? r.sair.filter((x): x is string => typeof x === "string") : [], desconectar: r.desconectar === true };
+        } catch (e) {
+          return e instanceof FalhaPonte && e.codigo === "rota_ausente" ? "sem_rota" : null;
+        }
+      },
+      async progresso(p: ProgressoDoLogin): Promise<boolean> {
+        try { await chamar("contas/progresso", p, { rota404: true }); return true; } catch { return false; }
+      },
+      async saiu(impressoes: string[], desconectada: boolean): Promise<boolean> {
+        try { await chamar("contas/saiu", { impressoes, desconectada }, { rota404: true }); return true; } catch { return false; }
+      },
+    },
     /**
      * ADR-048: os itens aprovados que rodam no gh DESTE Mac. A máquina puxa (o servidor nunca disca,
      * ADR-021), executa e relata; falha de rede devolve lista vazia e a próxima volta tenta de novo.

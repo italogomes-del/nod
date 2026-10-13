@@ -53,13 +53,13 @@ export async function guardarConexao(pasta: string, c: ConexaoMotor): Promise<vo
 
 export type ComandoMotor =
   | { tipo: "rodar" }
-  | { tipo: "parear"; servidor: string; nome: string | null }
+  | { tipo: "parear"; servidor: string; nome: string | null; convite: string | null }
   | { tipo: "entrar"; ia: "claude" | "codex" | "github" }
   | { tipo: "estado" }
   | { tipo: "versao" }
   | { tipo: "ajuda"; erro: string | null };
 
-/** `nod-motor [rodar] | parear <servidor> [--nome N] | entrar claude|codex|github | estado | versao`. */
+/** `nod-motor [rodar] | parear <servidor> [--nome N] [--convite C] | entrar claude|codex|github | estado | versao`. */
 export function lerComando(args: readonly string[]): ComandoMotor {
   const [cmd, ...resto] = args;
   // Sem argumento mostra a ajuda: quem digita "nod-motor" não quer subir um segundo motor ao lado do serviço.
@@ -68,11 +68,12 @@ export function lerComando(args: readonly string[]): ComandoMotor {
   if (cmd === "estado") return { tipo: "estado" };
   if (cmd === "versao" || cmd === "--version") return { tipo: "versao" };
   if (cmd === "parear") {
-    const servidor = resto.find((a, i) => !a.startsWith("--") && resto[i - 1] !== "--nome");
-    const i = resto.indexOf("--nome");
-    const nome = i >= 0 ? resto[i + 1] ?? null : null;
+    const servidor = resto.find((a, i) => !a.startsWith("--") && resto[i - 1] !== "--nome" && resto[i - 1] !== "--convite");
+    const valor = (flag: string) => { const i = resto.indexOf(flag); return i >= 0 ? resto[i + 1] ?? null : null; };
     if (!servidor) return { tipo: "ajuda", erro: "Diga o endereço do seu Nod: nod-motor parear https://seu-nod" };
-    return { tipo: "parear", servidor, nome };
+    // ADR-102: o convite do comando de instalação (só o formato dele; outro valor é ignorado e vale o código).
+    const convite = valor("--convite");
+    return { tipo: "parear", servidor, nome: valor("--nome"), convite: convite && /^[A-Za-z0-9_-]{32}$/.test(convite) ? convite : null };
   }
   if (cmd === "entrar") {
     const ia = resto[0];
@@ -85,7 +86,8 @@ export function lerComando(args: readonly string[]): ComandoMotor {
 export const AJUDA = `nod-motor — o motor do Nod nesta máquina (ADR-090)
 
   nod-motor parear <https://seu-nod> [--nome vm-sp]   conecta esta máquina à sua conta (mostra um código)
-  nod-motor entrar claude | codex | github            entra na sua IA ou no GitHub, direto com o fornecedor
+  nod-motor entrar claude | codex | github            entra numa conta da IA (uma conta nova a cada vez) ou no GitHub
+                                                      — o jeito fácil é pela tela: Seu espaço › Provedores de IA
   nod-motor estado                                    o servidor conectado e as IAs prontas
   nod-motor rodar                                     roda o motor (o serviço nod-motor faz isso sozinho)
 `;

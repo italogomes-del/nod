@@ -10,7 +10,7 @@ import { log } from "../../obs/log.ts";
 import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import { INTERVALO_AMOSTRA_MEMORIA_MS, type FonteMemoria } from "./amostrador-memoria.ts";
-import type { Adapter, IdDriver, Registry } from "./spi.ts";
+import type { Adapter, IdDriver, Registry, RegistroDriver } from "./spi.ts";
 
 /**
  * Laço puxar → rodar → renovar → entregar (ADR-021: o app puxa, o servidor nunca disca) sobre uma
@@ -62,6 +62,12 @@ export type OpcoesLaco = {
    * renovação leva a última leitura; o grupo do turno entra na soma só com driver de `processoProprio`.
    */
   memoria?: FonteMemoria;
+  /**
+   * ADR-102 (2026-10-13): o plano traz a conta da lista da pessoa que o turno usa. Quem roda acha a pasta dela
+   * (CLAUDE_CONFIG_DIR/CODEX_HOME) e devolve o driver naquela pasta; `ausente` = a máquina não tem mais a conta (o turno
+   * volta com `contaAusente` e o servidor refaz noutra, R6). Ausente esta opção, ou plano sem conta: o registry de sempre.
+   */
+  registroDaConta?: (plano: PlanoTurno) => Promise<RegistroDriver | "ausente" | null>;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
 };
@@ -295,7 +301,13 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     };
 
     try {
-      const registro = o.registry[driverDoPlano(plano)];
+      const daConta = plano.conta && o.registroDaConta ? await o.registroDaConta(plano) : null;
+      if (daConta === "ausente") {
+        log("aviso", "laco_conta_ausente", { turno_id: plano.turnoId, conta_id: plano.conta?.id ?? null });
+        await entregar({ ...resultadoDeExcecao(null, sinais), desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", contaAusente: true });
+        return;
+      }
+      const registro = daConta ?? o.registry[driverDoPlano(plano)];
       if (!registro || registro.estado !== "pronto") {
         log("aviso", "laco_driver_em_sombra", { turno_id: plano.turnoId, driver: driverDoPlano(plano), motivo: registro?.motivo ?? "Harness não disponível neste computador" });
         await entregar({ ...resultadoDeExcecao(null, sinais), desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel" });

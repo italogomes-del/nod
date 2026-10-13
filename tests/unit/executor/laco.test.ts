@@ -204,6 +204,22 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(ponte.entregas[0]?.resultado).toMatchObject({ desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", sinais: SINAIS_ZERADOS });
   });
 
+  it("ADR-102: com a conta no plano, o driver vem da pasta dela; conta que a máquina não tem mais volta como contaAusente (R6)", async () => {
+    const conta = { id: "c1", impressao: "a".repeat(64), apelido: "Leapy" };
+    const ponte = ponteFalsa([{ ...planoDeTeste("t-conta", "[[texto: da conta]]"), conta }, { ...planoDeTeste("t-sem", "x"), conta: { ...conta, id: "c2" } }]);
+    const registry = await registryCom(driverFalso());
+    const pedidas: string[] = [];
+    const laco = iniciarLaco({
+      ponte, registry, pessoaId: "p", machineId: "m1", relogio: Date.now, dormir: async () => new Promise((r) => setTimeout(r, 1)),
+      registroDaConta: async (plano) => { pedidas.push(plano.conta!.id); return plano.conta!.id === "c1" ? registry.catcher : "ausente"; },
+    });
+    await esperarAte(() => ponte.entregas.length === 2);
+    await laco.parar();
+    expect(pedidas).toEqual(["c1", "c2"]);
+    expect(ponte.entregas[0]?.resultado).toMatchObject({ desfecho: "sucesso", texto: "da conta" });
+    expect(ponte.entregas[1]?.resultado).toMatchObject({ desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", contaAusente: true });
+  });
+
   it("NOD-160 critério 5: harness fora do registry (cursor-cli) é interrompido executor_indisponivel e o laço segue para o próximo turno", async () => {
     const ponte = ponteFalsa([{ ...planoDeTeste("t5b", "x", "local"), harness: "cursor-cli" }, planoDeTeste("t5c", "[[texto: segui]]")]);
     const registry = await registryCom(driverFalso());

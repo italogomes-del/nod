@@ -10,8 +10,12 @@ describe("motor sem janela (ADR-090)", () => {
   it("lê os comandos do nod-motor", () => {
     expect(lerComando([])).toEqual({ tipo: "ajuda", erro: null });
     expect(lerComando(["rodar"])).toEqual({ tipo: "rodar" });
-    expect(lerComando(["parear", "https://nod.exemplo.com", "--nome", "vm-sp"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp" });
-    expect(lerComando(["parear", "--nome", "vm-sp", "https://nod.exemplo.com"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp" });
+    expect(lerComando(["parear", "https://nod.exemplo.com", "--nome", "vm-sp"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null });
+    expect(lerComando(["parear", "--nome", "vm-sp", "https://nod.exemplo.com"])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: "vm-sp", convite: null });
+    // ADR-102: o convite do comando de instalação; um valor fora do formato é ignorado (vale o código de sempre).
+    const convite = "A".repeat(32);
+    expect(lerComando(["parear", "https://nod.exemplo.com", "--convite", convite])).toEqual({ tipo: "parear", servidor: "https://nod.exemplo.com", nome: null, convite });
+    expect(lerComando(["parear", "--convite", "x; rm -rf /", "https://nod.exemplo.com"])).toMatchObject({ servidor: "https://nod.exemplo.com", convite: null });
     expect(lerComando(["parear"]).tipo).toBe("ajuda");
     expect(lerComando(["entrar", "claude"])).toEqual({ tipo: "entrar", ia: "claude" });
     expect(lerComando(["entrar", "gemini"]).tipo).toBe("ajuda");
@@ -55,6 +59,18 @@ describe("motor sem janela (ADR-090)", () => {
     expect(script).toContain("User=nod");
     expect(script).not.toContain("${o.");
     execFileSync("sh", ["-n"], { input: script });
+  });
+
+  it("ADR-102: o convite vai no script e no pareamento; o Codex vem sempre (NOD_SEM_CODEX=1 desliga)", () => {
+    const convite = "Ab_-".repeat(8);
+    const comConvite = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite });
+    expect(comConvite).toContain(`NOD_CONVITE="${convite}"`);
+    expect(comConvite).toContain(`parear "$NOD_SERVIDOR" --convite "$NOD_CONVITE"`);
+    expect(comConvite).toContain('if [ "${NOD_SEM_CODEX:-0}" != "1" ]; then');
+    expect(comConvite).not.toContain("NOD_COM_CODEX:-0");
+    // Convite fora do formato nunca entra no shell.
+    expect(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite: '"; rm -rf / #' })).toContain('NOD_CONVITE=""');
+    expect(execFileSync("sh", ["-n"], { input: comConvite }).toString()).toBe("");
   });
 
   it("ADR-097 (fase 0b): um OOM mata o processo, não o serviço; e a máquina sem swap ganha zram (ou arquivo de swap)", () => {
