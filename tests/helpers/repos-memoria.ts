@@ -1,3 +1,4 @@
+import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
@@ -75,6 +76,8 @@ export type BancoMemoria = {
   trabalhos: (Trabalho & { ownerId: string })[];
   /** 0070 (ADR-099, parte 2): as esperas de comando, com a dona (o comportamento completo se prova no Postgres). */
   esperas: (Espera & { tenantId: string; ownerId: string })[];
+  /** 0074 (ADR-102): as contas de IA da pessoa e os vínculos com as máquinas. */
+  contasIa: EstadoContasIaMemoria;
   /** 0073 (NOD-214): as credenciais dos turnos despachados (o comportamento completo se prova no Postgres). */
   credenciais: (CredencialTurno & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
@@ -146,6 +149,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     turnos: [],
     trabalhos: [],
     esperas: [],
+    contasIa: estadoContasIaMemoria(),
     credenciais: [],
     entregas: new Set(),
     decisoes: [],
@@ -839,6 +843,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return p;
       },
     },
+
+    contasIa: contasIaMemoria(b.contasIa, escopo),
 
     esperas: {
       async criar(e) {
