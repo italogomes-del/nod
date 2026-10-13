@@ -370,7 +370,8 @@ export function contasAnunciadas(v: unknown, agora: number): ContaAnunciada[] | 
     vistas.add(`${o.ia}:${o.impressao}`);
     const plano = typeof o.plano === "string" && /^[\p{L}\p{N} ._-]{1,40}$/u.test(o.plano) ? o.plano : null;
     const logadaEm = Number.isSafeInteger(o.logadaEm) && Number(o.logadaEm) > 0 && Number(o.logadaEm) <= agora + 60_000 ? Number(o.logadaEm) : 0;
-    const apelido = apelidoValido(o.apelidoSugerido);
+    // Red team do PR #306: um apelido com "@" seria o e-mail (a ADR-101 usava a organização, "<e-mail>'s Organization").
+    const apelido = typeof o.apelidoSugerido === "string" && o.apelidoSugerido.includes("@") ? null : apelidoValido(o.apelidoSugerido);
     saida.push({ impressao: o.impressao, ia: o.ia, estado: o.estado as EstadoContaNaMaquina, plano, corporativa: o.corporativa === true, logadaEm, ...(apelido ? { apelidoSugerido: apelido } : {}) });
   }
   return saida;

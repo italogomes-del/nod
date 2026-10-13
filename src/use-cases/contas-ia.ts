@@ -39,11 +39,18 @@ export async function contasDaPessoa(d: Deps): Promise<Omit<ContasIaDto, "dispon
 
 /** O anúncio de uma máquina; a ordem das IAs da pessoa acompanha a lista quando ela muda (suposição 3 da ADR-102). */
 export async function anunciarContasDaMaquina(d: Deps, maquinaId: string, anunciadas: readonly ContaAnunciada[]): Promise<ResultadoDoAnuncio> {
-  const r = await d.repos.contasIa.doAnuncio(maquinaId, anunciadas, d.agora());
+  // Red team do PR #306: as primeiras contas da pessoa entram na ordem de IAs que ela já tinha (quem preferia o ChatGPT
+  // segue nele), não na ordem em que a máquina as descobriu.
+  const vazia = (await d.repos.contasIa.listar()).contas.every((c) => c.removidaEm !== null);
+  const ordem = vazia ? ((await d.repos.preferencias.buscar()).ordemIas ?? ORDEM_IAS_PADRAO) : null;
+  const naOrdem = ordem ? [...anunciadas].sort((a, b) => posicaoNaOrdem(ordem, a.ia) - posicaoNaOrdem(ordem, b.ia)) : anunciadas;
+  const r = await d.repos.contasIa.doAnuncio(maquinaId, naOrdem, d.agora());
   if (r.mudou) await recalcularOrdemIas(d);
   if (r.sair.length > 0) log("info", "contas_saida_pedida_no_anuncio", { maquina_id: maquinaId, contas: r.sair.length });
   return r;
 }
+
+const posicaoNaOrdem = (ordem: readonly string[], ia: string): number => { const i = ordem.indexOf(ia); return i < 0 ? ordem.length : i; };
 
 export async function recalcularOrdemIas(d: Deps): Promise<void> {
   const { contas } = await d.repos.contasIa.listar();

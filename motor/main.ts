@@ -29,7 +29,7 @@ import { versaoAceita } from "../src/domain/versao-app.ts";
 import { log } from "../src/obs/log.ts";
 import { ambienteDoLogin, comandoDeEstadoDoLogin, lerIaDesktop, textoDaImpressao } from "../desktop/ia-mac.ts";
 import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vigia-ias.ts";
-import { criarContasLocais, type ContaLocal } from "../desktop/contas-locais.ts";
+import { criarContasLocais, inventariosComContas, type ContaLocal } from "../desktop/contas-locais.ts";
 import { diretorioPadrao } from "../desktop/contas-mac.ts";
 import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
 import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
@@ -211,7 +211,13 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       aoIniciarTurno: (p) => { planosAqui.set(p.turnoId, p); },
       aoTerminarTurno: (p) => { tarefasVivas.esquecer(p.turnoId); planosAqui.delete(p.turnoId); },
       aoVigia: (p, aviso) => ponteHttp.vigia(p.turnoId, aviso),
-      aoResultado: (p, r) => { const ia = lerIaDesktop(driverDoPlano(p)); if (ia && r.causaSemIa) void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined); } }), ponteHttp.ponte);
+      aoResultado: (p, r) => {
+        const ia = lerIaDesktop(driverDoPlano(p));
+        if (!ia || !r.causaSemIa) return;
+        // Red team do PR #306 (como no Mac): o turno rodou numa conta da lista — a conta é relida, a IA não é reprovada.
+        if (p.conta) { const local = contasLocais.porImpressao(p.conta.impressao); void contasLocais.ler({ forcar: true, ...(local ? { id: local.id } : {}) }).then((mudou) => (mudou ? vigiaAtual.reanunciar() : undefined)).catch(() => undefined); return; }
+        void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined);
+      } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
     if (import.meta.url.endsWith(".mjs")) {
       void atualizacaoLigada({ url: c.url }).then((ligada) => {
@@ -222,6 +228,10 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
   };
 
   let lacoNoAr = false;
+  /** Red team do PR #306: com a conta de sempre fora e outra conta pronta, o laço sobe do mesmo jeito (os turnos levam a conta). */
+  const subirSeTemConta = () => {
+    if (!lacoNoAr && !encerrado && contasLocais.anuncio().some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); }
+  };
   const arquivoVereditos = join(pasta, "ias-testadas.json");
   const vigiaAtual = criarVigiaDasIas({
     sondar: () => criarRegistryDetalhado(envExecutor, drivers, { cfg }),
@@ -230,13 +240,17 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       if (encerrado) return;
       // NOD-199: como no app do Mac, o reanúncio vai pela rota só de inventário — o `conectar` recusaria (409) ou, depois
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
-      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades, contas: contasLocais.anuncio() });
+      const contas = contasLocais.anuncio();
+      const comContas = inventariosComContas(inventarios, contas);
+      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: comContas["claude-cli"] ?? principal, harnesses: comContas, semLacoDeVoz, capacidades, contas });
+      subirSeTemConta();
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
     },
     aoRegistry: (novo, algumaPronta) => {
       if (encerrado) return;
       Object.assign(registryDoLaco, novo);
       if (algumaPronta && !lacoNoAr) { lacoNoAr = true; subirLaco(registryDoLaco); }
+      subirSeTemConta();
     },
     ler: async () => JSON.parse(await readFile(arquivoVereditos, "utf8")) as unknown,
     gravar: (vereditos: Veredito[]) => writeFile(arquivoVereditos, `${JSON.stringify(vereditos)}\n`, { mode: 0o600 }),

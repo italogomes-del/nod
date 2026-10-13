@@ -338,7 +338,7 @@ export function renderListaDeContas(x: ContextoContas): string {
     ${nota}
     ${filtro ? "" : formNova(x)}
     ${modo}
-    <p class="contas-privado">E-mail e organização ficam só nas suas máquinas: o servidor do nod recebe o apelido, o plano e uma impressão da conta que não dá para desfazer.</p>
+    <p class="contas-privado">E-mail e organização ficam só nas suas máquinas: o servidor do nod recebe o apelido, o plano e uma impressão da conta, nunca o e-mail.</p>
     ${confirmacao(x)}`;
 }
 

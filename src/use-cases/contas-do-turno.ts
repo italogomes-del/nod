@@ -27,14 +27,22 @@ export type ContasDaMaquina = {
   nomeDaMaquina: string | null;
 };
 
-export async function lerContasDaMaquina(deps: Pick<Deps, "repos">, machineId: string): Promise<ContasDaMaquina> {
+/**
+ * Red team do PR #306: "noutra máquina" só vale para máquina com contato recente (a chave é usada a cada puxada); uma VM
+ * desligada sem "Desconectar" não é oferecida em "Rodar no <máquina> desta vez".
+ */
+export const CONTATO_RECENTE_MS = 2 * 60_000;
+
+export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
   const [{ contas, vinculos }, { modo, escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
-  const vivas = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
+  const agora = deps.agora();
+  const nomes = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
+  const vivas = new Map(chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
   const prontas = vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
   const naMaquina = new Set(prontas.filter((v) => v.maquinaId === machineId).map((v) => v.contaId));
   const noutraMaquina = new Map<string, { id: string; nome: string }>();
   for (const v of prontas) if (v.maquinaId !== machineId && vivas.has(v.maquinaId) && !noutraMaquina.has(v.contaId)) noutraMaquina.set(v.contaId, { id: v.maquinaId, nome: vivas.get(v.maquinaId)! });
-  return { contas, vinculos, modo, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: vivas.get(machineId) ?? null };
+  return { contas, vinculos, modo, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
 }
 
 export function escolherContaDoTurno(c: ContasDaMaquina, ordemDoBot: readonly IdHarness[] | null, agora: number): ContaDoTurno<ContaGuardadaNoServidor> | null {

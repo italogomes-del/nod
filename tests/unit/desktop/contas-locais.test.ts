@@ -36,7 +36,8 @@ describe("contas locais no app do Mac (ADR-102)", () => {
     const m = await montar({ "claude-cli:padrao": PESSOAL, "claude-cli:c-1": LEAPY });
     await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }, { ia: "claude-cli", id: "c-1", apelido: "Leapy" }, { ia: "codex-cli", id: "padrao", apelido: null }]);
     await m.contas.ler();
-    expect(m.contas.anuncio().map((c) => c.apelidoSugerido)).toEqual(["Pessoal", "Leapy"]);
+    // O apelido igual à organização da conta não sai (red team do PR #306: a ADR-101 o tirava da organização).
+    expect(m.contas.anuncio().map((c) => c.apelidoSugerido)).toEqual(["Pessoal", undefined]);
     const sairam = await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }]);
     expect(sairam.map((c) => c.id)).toEqual(["c-1"]);
     expect(m.contas.anuncio()).toHaveLength(1);
@@ -50,6 +51,25 @@ describe("contas locais no app do Mac (ADR-102)", () => {
     expect(m.contas.detalhes()[0]!.impressao).toBe(m.contas.anuncio()[0]!.impressao);
     expect(JSON.stringify(m.contas.anuncio())).not.toContain("leapy.com.br");
     expect(await readFile(m.arquivo, "utf8")).not.toContain("leapy.com.br");
+  });
+
+  it("red team do PR #306: entre duas cópias da mesma conta, vale a pronta (a vencida não esconde o login novo)", async () => {
+    const m = await montar({ "claude-cli:padrao": LEAPY, "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }, { ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler();
+    // A de sempre perde o login; a c-1 segue pronta com a mesma conta.
+    const padrao = m.contas.porId("padrao", "claude-cli")!;
+    Object.assign(padrao, { estado: "sem_login" });
+    expect(m.contas.anuncio()).toEqual([expect.objectContaining({ estado: "pronta" })]);
+    expect(m.contas.porImpressao(m.contas.anuncio()[0]!.impressao)?.id).toBe("c-1");
+  });
+
+  it("red team do PR #306: o login novo reaproveita a conta de sempre vencida (o `nod-motor entrar` renova o login)", async () => {
+    const m = await montar({ "claude-cli:padrao": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }]);
+    await m.contas.ler();
+    Object.assign(m.contas.porId("padrao", "claude-cli")!, { estado: "sem_login" });
+    expect((await m.contas.pastaParaLogin("claude-cli", null))?.id).toBe("padrao");
   });
 
   it("a mesma conta em duas pastas vai ao servidor uma vez só", async () => {

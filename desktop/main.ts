@@ -31,7 +31,8 @@ import type { ContaDaIa, EstadoIa, LoginDaIa, ResultadoColarCodigo } from "../sr
 import { contaDoCodex } from "./conta-codex.ts";
 import { ambienteNaConta, diretorioPadrao, gravarContasDoMac, iaDasContas, lerContasDoMac, prepararPastaDaConta, removerPastaDaConta } from "./contas-mac.ts";
 import { criarContasDoApp } from "./contas-no-app.ts";
-import { criarContasLocais, type ContasLocais } from "./contas-locais.ts";
+import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
+import { criarContasLocais, inventariosComContas, type ContasLocais } from "./contas-locais.ts";
 import { iniciarContasNoServidor } from "./contas-no-servidor.ts";
 import { lerIdentidadeNoCli, type ClisDoMotor } from "../motor/contas.ts";
 import { estadoDaIa } from "../src/domain/estado-ia.ts";
@@ -525,7 +526,7 @@ async function conectar(c: Config) {
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
     aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: principal, harnesses: inventarios, semLacoDeVoz, capacidades, contas: contasLocais?.anuncio() ?? [] }); },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: comContas["claude-cli"] ?? principal, harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);
@@ -928,9 +929,12 @@ function sincronizarContas(o: { ia?: IaDesktop; todas?: boolean } = {}): Promise
 async function sairDaContaNoMac(impressao: string): Promise<boolean> {
   const local = contasLocais?.porImpressao(impressao);
   if (!local) return false;
-  const posicao = contasDoApp.posicaoDe(local.ia, local.id);
-  if (posicao !== null && posicao > 1) await contasDoApp.remover(local.ia, posicao);
-  else {
+  // Red team do PR #306: pela identidade da conta, não pela posição (a lista da ADR-101 se reordena).
+  const posicao = local.id === ID_CONTA_PADRAO ? null : contasDoApp.posicaoDe(local.ia, local.id);
+  if (local.id !== ID_CONTA_PADRAO) {
+    if (posicao === null) return false;
+    await contasDoApp.remover(local.ia, posicao);
+  } else {
     if (!(await logoutDaConta(local.ia, {}))) throw new Error("logout_falhou");
     contaLidaEm.delete(local.ia);
     void atualizarConta(local.ia, true);

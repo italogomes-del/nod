@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import type { ContaAnunciada, EstadoContaNaMaquina } from "../src/contracts/contas-ia.ts";
+import type { Inventario } from "../src/contracts/inventario.ts";
 import { IAS_DESKTOP, type DetalheDaConta, type IaDesktop } from "../src/contracts/desktop.ts";
 import { CONTAS_POR_IA_MAX, ID_CONTA_PADRAO, contaCorporativa, apelidoValido } from "../src/domain/contas-da-ia.ts";
 import { textoDaImpressaoDaConta } from "../src/domain/contas-da-pessoa.ts";
@@ -47,6 +48,24 @@ export type DepsContasLocais = {
   logout(ia: IaDesktop, env: Record<string, string>): Promise<boolean>;
   agora(): number;
 };
+
+/**
+ * Red team do PR #306: a sonda da IA roda só na conta de sempre. Com ela fora (saiu, venceu) e outra conta da mesma IA
+ * pronta nesta máquina, a IA não pode ser anunciada como fora: os turnos com conta rodam na pasta da conta. "ausente" (o
+ * CLI não está instalado) continua ausente.
+ */
+export function inventariosComContas<T extends Partial<Record<string, Inventario>>>(inventarios: T, contas: readonly ContaAnunciada[]): T {
+  const saida: Partial<Record<string, Inventario>> = { ...inventarios };
+  for (const [ia, inv] of Object.entries(inventarios)) {
+    if (!inv || inv.estado !== "nao_autenticado") continue;
+    if (contas.some((c) => c.ia === ia && c.estado === "pronta")) saida[ia] = { estado: "pronto", versao: inv.versao ?? "desconhecida", em: inv.em };
+  }
+  return saida as T;
+}
+
+/** Entre cópias da mesma conta, a pronta e, entre iguais, a de login mais novo (red team do PR #306). */
+const melhorCopia = (a: ContaLocal, b: ContaLocal): number =>
+  (a.estado === "pronta" ? 0 : 1) - (b.estado === "pronta" ? 0 : 1) || b.logadaEm - a.logadaEm;
 
 /** definido em 2026-10-13 (R11): sem login/logout, a identidade de cada conta é relida no máximo a cada 10 min. */
 export const RELEITURA_DA_CONTA_MS = 10 * 60_000;
@@ -97,6 +116,17 @@ export function criarContasLocais(d: DepsContasLocais) {
     return antes !== `${c.impressao}|${c.estado}|${c.plano}`;
   }
 
+  /**
+   * Red team do PR #306: o apelido da ADR-101 nasce da organização quando a pessoa não digitou nenhum (e a organização
+   * do Claude pessoal é "<e-mail>'s Organization"). Ele só vai ao servidor se não for e-mail nem a organização da conta.
+   */
+  const apelidoQuePodeSair = (c: ContaLocal): boolean => {
+    if (!c.apelido || c.apelido.includes("@")) return false;
+    const d = c.impressao ? detalhes.get(c.impressao) : undefined;
+    const igual = (x: string | null | undefined) => !!x && x.trim().toLowerCase().slice(0, 40) === c.apelido!.trim().toLowerCase();
+    return !d || !(igual(d.organizacao) || igual(d.email));
+  };
+
   return {
     async carregar(): Promise<void> {
       const texto = await readFile(d.arquivo, "utf8").catch(() => null);
@@ -116,7 +146,7 @@ export function criarContasLocais(d: DepsContasLocais) {
 
     listar: (): readonly ContaLocal[] => contas,
     ambiente,
-    porImpressao: (impressao: string): ContaLocal | null => contas.find((c) => c.impressao === impressao) ?? null,
+    porImpressao: (impressao: string): ContaLocal | null => contas.filter((c) => c.impressao === impressao).sort(melhorCopia)[0] ?? null,
     porId: (id: string, ia: IaDesktop): ContaLocal | null => contas.find((c) => c.id === id && c.ia === ia) ?? null,
 
     /**
@@ -125,7 +155,15 @@ export function criarContasLocais(d: DepsContasLocais) {
      */
     async pastaParaLogin(ia: IaDesktop, apelido: string | null): Promise<ContaLocal | null> {
       const padrao = contas.find((c) => c.ia === ia && c.id === ID_CONTA_PADRAO);
-      if (padrao && padrao.impressao === null && padrao.estado !== "pronta") {
+      // Red team do PR #306: a conta de sempre sem login (nunca entrou, ou o login venceu) é a primeira a ser reaproveitada;
+      // depois, uma pasta extra sem login (login interrompido, vencido). Só então nasce uma pasta nova.
+      const livre = padrao && padrao.estado !== "pronta" ? padrao : contas.find((c) => c.ia === ia && c.id !== ID_CONTA_PADRAO && c.estado !== "pronta");
+      if (livre && livre !== padrao) {
+        livre.apelido = apelido;
+        await gravar();
+        return livre;
+      }
+      if (padrao && padrao.estado !== "pronta") {
         padrao.apelido = apelido;
         // O arquivo passa a existir já aqui: o serviço percebe o login do terminal pela data dele.
         await gravar();
@@ -166,7 +204,8 @@ export function criarContasLocais(d: DepsContasLocais) {
     async descartarRepetidas(): Promise<number> {
       const vistas = new Set<string>();
       const repetidas: ContaLocal[] = [];
-      for (const c of [...contas].sort((a, b) => (a.id === ID_CONTA_PADRAO ? -1 : b.id === ID_CONTA_PADRAO ? 1 : a.logadaEm - b.logadaEm))) {
+      // Fica a melhor cópia (a pronta, a de login mais novo); a de sempre só ganha no empate, porque nunca sai.
+      for (const c of [...contas].sort((a, b) => melhorCopia(a, b) || (a.id === ID_CONTA_PADRAO ? -1 : b.id === ID_CONTA_PADRAO ? 1 : 0))) {
         if (!c.impressao) continue;
         const chave = `${c.ia}:${c.impressao}`;
         if (vistas.has(chave) && c.id !== ID_CONTA_PADRAO) repetidas.push(c);
@@ -229,20 +268,22 @@ export function criarContasLocais(d: DepsContasLocais) {
     /** O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`), uma vez cada. */
     anuncio(): ContaAnunciada[] {
       const vistas = new Set<string>();
-      return contas.filter((c) => {
-        if (c.impressao === null) return false;
+      const escolhidas = new Set<ContaLocal>();
+      // A melhor cópia de cada conta, na ordem da lista (a ordem em que as contas novas entram no servidor).
+      for (const c of [...contas].sort(melhorCopia)) {
         const k = `${c.ia}:${c.impressao}`;
-        if (vistas.has(k)) return false;
+        if (c.impressao === null || vistas.has(k)) continue;
         vistas.add(k);
-        return true;
-      }).map((c) => ({
+        escolhidas.add(c);
+      }
+      return contas.filter((c) => escolhidas.has(c)).map((c) => ({
         impressao: c.impressao!,
         ia: c.ia,
         estado: c.estado,
         plano: c.plano,
         corporativa: contaCorporativa({ id: c.id, plano: c.plano?.toLowerCase() ?? null }),
         logadaEm: c.logadaEm,
-        ...(c.apelido ? { apelidoSugerido: c.apelido } : {}),
+        ...(apelidoQuePodeSair(c) ? { apelidoSugerido: c.apelido! } : {}),
       }));
     },
 
