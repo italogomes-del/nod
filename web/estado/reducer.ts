@@ -121,8 +121,16 @@ export type ConexaoApp = { url: string | null; falhou: string | null; semJanela?
  */
 export type LigacaoVivaNaTela = { ligacaoId: string; agenteId: string; conversaId: string; local: boolean };
 
-/** `trabalhoId` (ADR-083): o turno é de um trabalho — o ao vivo dele aparece na tela da task, nunca no chat. */
-export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null };
+/**
+ * `trabalhoId` (ADR-083): o turno é de um trabalho — o ao vivo dele aparece na tela da task, nunca no chat.
+ * `vistoEm` (NOD-216): o relógio da web quando o servidor confirmou o turno pela última vez (frame ou leitura). A leitura
+ * que não o traz só o tira se ela saiu DEPOIS disso — um frame mais novo que o GET não some com a resposta velha.
+ * `chegouEm` (NOD-216, revisão): o relógio DA WEB quando ela viu o turno pela primeira vez — a janela de "pensando" conta
+ * daqui, e não do `desde` do banco, que vem no relógio do servidor (um relógio adiantado ou atrasado decidiria a animação).
+ * `origem` (NOD-216, revisão): de onde o turno veio (`turno_criado.origem`, `TurnoEmCursoDto.origem`); só as origens da
+ * fila do dono (`ORIGENS_DA_FILA_DO_DONO`) podem ser desmentidas por ela.
+ */
+export type TurnoVivo = { turnoId: string; conversaId: string; estado: "na_fila" | "rodando"; executor: string | null; machineId: string | null; desde: number; trabalhoId?: string | null; vistoEm?: number; chegouEm?: number; origem?: string | null };
 
 export type ConversaEstado = ConversaDto & {
   carregadaEm: number;
@@ -138,7 +146,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -176,6 +184,11 @@ export type Estado = {
    * bot ficava "Trabalhando" para sempre. Só os mais recentes (`ENCERRADOS_GUARDADOS`).
    */
   turnosEncerrados: readonly string[];
+  /**
+   * NOD-216 (revisão): os turnos que uma leitura tirou (turnoId → quando a leitura saiu). A resposta MAIS VELHA que chega
+   * depois não os traz de volta — sem isto, o GET conversa que saiu antes do GET trabalhos devolvia o fantasma.
+   */
+  turnosDesmentidos: Readonly<Record<string, number>>;
   /** Cancelar da fila tem 5 s de Desfazer antes de ir ao servidor (turnoId → instante do clique). */
   cancelando: Record<string, number>;
   salas: { sala: Sala; membros: MembroSala[] }[];
@@ -364,7 +377,8 @@ export type Acao =
   | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string }
   | { tipo: "hidratar-onboarding"; onboarding: EstadoOnboarding | null }
   | { tipo: "onboarding-aberto"; aberto: boolean }
-  | { tipo: "hidratar-trabalhos"; trabalhos: TrabalhosDto }
+  /** `agora` (NOD-216): quando a leitura saiu; com ele, os donos reconciliam os turnos vivos das conversas dos bots. */
+  | { tipo: "hidratar-trabalhos"; trabalhos: TrabalhosDto; agora?: number }
   | { tipo: "hidratar-trabalho"; detalhe: TrabalhoDetalheDto; agora: number }
   /** O `GET trabalhos/:id` voltou 404: a task não existe (ou não é desta pessoa). */
   | { tipo: "trabalho-sumiu"; id: string }
@@ -394,6 +408,7 @@ export const estadoInicial: Estado = {
   atividades: {},
   turnosVivos: {},
   turnosEncerrados: [],
+  turnosDesmentidos: {},
   cancelando: {},
   salas: [],
   suaVez: null,
@@ -476,6 +491,73 @@ function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
 
 /** definido em 2026-10-08 (W6): quantos turnos encerrados a web lembra — bem mais que os GETs que podem estar em voo. */
 export const ENCERRADOS_GUARDADOS = 200;
+
+/** NOD-216: o turno vivo foi confirmado pelo servidor antes de uma leitura que saiu em `leituraEm`? */
+const confirmadoAntes = (v: TurnoVivo, leituraEm: number): boolean => (v.vistoEm ?? v.desde) < leituraEm;
+
+/**
+ * NOD-216 (revisão): as origens que `dono.fila` lista (src/repositories/donos.repo.ts). Um pendente de outra origem
+ * (`retomada`, por exemplo) não aparece nela e nem por isso é fantasma; origem desconhecida também não se desmente.
+ */
+export const ORIGENS_DA_FILA_DO_DONO: ReadonlySet<string> = new Set(["conversa", "delegacao", "peer", "rotina"]);
+
+/** Tira os turnos desmentidos por uma leitura que saiu em `leituraEm`, e lembra disso (`turnosDesmentidos`). */
+function semDesmentidos(estado: Estado, ids: readonly string[], leituraEm: number): Estado {
+  if (ids.length === 0) return estado;
+  const turnosVivos = { ...estado.turnosVivos };
+  const lembrados = Object.entries({ ...estado.turnosDesmentidos, ...Object.fromEntries(ids.map((id) => [id, leituraEm])) });
+  for (const id of ids) delete turnosVivos[id];
+  return { ...estado, turnosVivos, turnosDesmentidos: Object.fromEntries(lembrados.slice(-ENCERRADOS_GUARDADOS)) };
+}
+
+/** A leitura que saiu em `leituraEm` é mais velha que a que desmentiu o turno: ela não o traz de volta. */
+const desmentidoDepois = (estado: Estado, turnoId: string, leituraEm: number): boolean => (estado.turnosDesmentidos[turnoId] ?? -Infinity) > leituraEm;
+
+/**
+ * NOD-216: os mascotes da barra são dos bots cuja conversa NÃO está aberta — essa conversa não é relida, e um turno vivo
+ * que perdeu o `turno.encerrado` ficava animando o bot para sempre. `GET trabalhos` traz o dono de cada bot, lido no
+ * servidor agora: sem `conversaTrabalhando`, nenhum turno da conversa roda; fora de `fila`, nenhum espera a vez. O vivo
+ * da conversa do bot que o dono desmente sai (só o confirmado antes da leitura; o de task é da tela da task).
+ */
+function reconciliarPelosDonos(estado: Estado, trabalhos: TrabalhosDto, leituraEm: number | undefined): Estado {
+  const donos = trabalhos.donos;
+  if (leituraEm === undefined || !Array.isArray(donos) || donos.length === 0) return estado;
+  const conversaDe = new Map((estado.frota?.agentes ?? []).map((a) => [a.id, a.conversaId]));
+  const desmentidos: string[] = [];
+  for (const dono of donos) {
+    const conversaId = conversaDe.get(dono.estado.agenteId);
+    if (!conversaId) continue;
+    const naFila = new Set(dono.fila.map((p) => p.turnoId));
+    for (const v of Object.values(estado.turnosVivos)) {
+      if (v.conversaId !== conversaId || v.trabalhoId || !confirmadoAntes(v, leituraEm)) continue;
+      // Revisão: o "na fila" fora da fila com o bot trabalhando pode ser o mesmo turno, já despachado (o frame
+      // turno_despachado perdido ou ainda a caminho) — fica; e só a origem que a fila lista pode ser desmentida por ela.
+      const desmentido = v.estado === "rodando"
+        ? !dono.estado.conversaTrabalhando
+        : !naFila.has(v.turnoId) && !dono.estado.conversaTrabalhando && ORIGENS_DA_FILA_DO_DONO.has(v.origem ?? "");
+      if (desmentido) desmentidos.push(v.turnoId);
+    }
+  }
+  return semDesmentidos(estado, desmentidos, leituraEm);
+}
+
+/**
+ * QA do PR #302 (NOD-216): o bot que o dono diz trabalhando (ou com fila) e cuja conversa a web ainda não leu tem a
+ * conversa pedida (`vivos:`, buscada mesmo fora da tela). Sem isto, depois de um reload a barra mostrava "disponível" o
+ * bot que rodava, até a conversa dele abrir: os turnos vivos só vinham da conversa carregada, e `GET trabalhos` só
+ * desmente. A leitura da conversa traz os turnos dela (a sala e a task continuam fora); lida uma vez, não se pede de novo.
+ */
+function comConversasDosDonos(estado: Estado): Estado {
+  const donos = estado.trabalhos?.donos;
+  if (!Array.isArray(donos) || donos.length === 0 || !estado.frota) return estado;
+  const conversaDe = new Map(estado.frota.agentes.map((a) => [a.id, a.conversaId]));
+  const pedir: Invalidacao[] = [];
+  for (const dono of donos) {
+    const conversaId = conversaDe.get(dono.estado.agenteId);
+    if (conversaId && !estado.conversas[conversaId] && (dono.estado.conversaTrabalhando || dono.fila.length > 0)) pedir.push(`vivos:${conversaId}`);
+  }
+  return invalidar(estado, ...pedir);
+}
 
 function encerrado(estado: Estado, turnoId: string | null): Estado {
   if (!turnoId || estado.turnosEncerrados.includes(turnoId)) return estado;
@@ -598,7 +680,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
     const trabalhoId = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id) ?? anterior?.trabalhoId ?? null;
-    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora, trabalhoId };
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora, trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null };
     return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f));
   },
   "turno.delta": (e, f) => {
@@ -791,7 +873,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "hidratar-gestao":
       return { ...estado, gestao: acao.gestao };
     case "hidratar-frota":
-      return resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario });
+      return comConversasDosDonos(resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario }));
     case "hidratar-inventario":
       return { ...estado, inventario: acao.inventario };
     case "hidratar-executor":
@@ -815,9 +897,21 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // volta a ser vivo, com o `desde` do banco. O frame turno.iniciado não se repete para quem chegou depois.
       // TODO(servidor, modo ligação): `TurnoEmCursoDto` (src/contracts/api.ts) não traz `origem`; o plano diz que
       // `lerConversa` já exclui o turno `ligacao`. Se ele vier, a web o ignora aqui pelo campo `origem` (ou `modo`).
-      const novos = (acao.conversa.turnosEmCurso ?? []).filter((t) => !estado.turnosVivos[t.id] && !("origem" in t && t.origem === "ligacao") && !("modo" in t && t.modo === "ligacao"));
-      const turnosVivos = novos.length === 0 ? estado.turnosVivos : { ...estado.turnosVivos };
-      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde, trabalhoId: t.trabalhoId ?? null };
+      // NOD-216: o que a web já viu encerrar nunca volta (o GET que saiu antes do `turno.encerrado`), como em hidratar-trabalho.
+      // Revisão: e o que uma leitura mais nova já desmentiu também não (a resposta velha que chega por último).
+      const leuTurnos = Array.isArray(acao.conversa.turnosEmCurso);
+      const emCurso = acao.conversa.turnosEmCurso ?? [];
+      const novos = emCurso.filter((t) => !estado.turnosVivos[t.id] && !estado.turnosEncerrados.includes(t.id) && !desmentidoDepois(estado, t.id, acao.agora) && !("origem" in t && t.origem === "ligacao") && !("modo" in t && t.modo === "ligacao"));
+      // NOD-216: e o turno da conversa que o servidor não devolve mais sai — o `turno.encerrado` perdido (SSE caído, aba
+      // dormindo) deixava "na fila · há 6h" e o mascote animado para sempre. Só os confirmados ANTES desta leitura sair; o
+      // de task (`trabalhoId`) é da tela da task (hidratar-trabalho).
+      // Revisão: a resposta sem `turnosEmCurso` (servidor antigo, resposta parcial) não diz que nada roda — não tira nada.
+      const naLeitura = new Set(emCurso.map((t) => t.id));
+      const sumiram = leuTurnos ? Object.values(estado.turnosVivos).filter((v) => v.conversaId === conversaId && !v.trabalhoId && !naLeitura.has(v.turnoId) && confirmadoAntes(v, acao.agora)).map((v) => v.turnoId) : [];
+      const semSumidos = semDesmentidos(estado, sumiram, acao.agora);
+      const turnosVivos = novos.length === 0 ? semSumidos.turnosVivos : { ...semSumidos.turnosVivos };
+      // `chegouEm`: o relógio da web, nunca adiante do `desde` do banco (o relógio da web atrasado faria a fila "pensar").
+      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde, trabalhoId: t.trabalhoId ?? null, vistoEm: acao.agora, chegouEm: Math.min(t.desde, acao.agora), origem: t.origem ?? null };
       // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
       const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
       const anteriores = estado.atividades[conversaId] ?? {};
@@ -828,7 +922,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         for (const turnoId of mortos) delete restantes[turnoId];
         atividades = { ...estado.atividades, [conversaId]: restantes };
       }
-      return { ...estado, turnosVivos, atividades, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, carregadaEm: acao.agora } } };
+      return { ...semSumidos, turnosVivos, atividades, conversas: { ...estado.conversas, [conversaId]: { ...acao.conversa, carregadaEm: acao.agora } } };
     }
     case "hidratar-sua-vez": {
       // A escolha do campo só vale enquanto a conversa tem pergunta aberta: respondida ou deixada pra lá
@@ -927,7 +1021,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return estado.onboardingAberto === acao.aberto ? estado : { ...estado, onboardingAberto: acao.aberto };
     case "hidratar-trabalhos":
       // O servidor manda o nível que vale agora: null (nenhum Mac falou) também limpa o amarelo antigo (revisão W4).
-      return { ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao };
+      return comConversasDosDonos(reconciliarPelosDonos({ ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao }, acao.trabalhos, acao.agora));
     case "hidratar-trabalho": {
       // Página aberta no meio do trabalho: o turno que roda volta a ser vivo, para o ao vivo dele ser guardado e desenhado.
       // definido em 2026-10-08 (revisão W6): o turno do trabalho que não é mais o vivo dele sai, e o que a web já viu
@@ -1082,6 +1176,17 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
+}
+
+/**
+ * O que o stream que voltou a `aberto` relê (definido em 2026-10-13, NOD-216): os turnos vivos — `GET trabalhos` traz o
+ * dono de cada bot (os mascotes da barra) e cada conversa carregada, os turnos dela. Só a aberta é buscada na hora.
+ */
+export function invalidacoesAoReconectar(estado: Estado): Invalidacao[] {
+  if (!estado.sessao) return [];
+  // Revisão: a tela da task aberta também — é a leitura dela que tira o turno fantasma da task (hidratar-trabalho).
+  const t = estado.tela;
+  return ["trabalhos", ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`), ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : [])];
 }
 
 /**

@@ -19,7 +19,7 @@ import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
 import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
@@ -35,7 +35,7 @@ import "./pwa.ts";
 import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema } from "./lib/tema.ts";
-import { estadoMascoteNaConversa } from "./lib/mascote.ts";
+import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
 import { lembrar } from "./lib/lembrar.ts";
 import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
@@ -533,7 +533,7 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "salas") return { tipo: "hidratar-salas", salas: (await api.salas()).salas };
   if (q === "nao-lidos") return { tipo: "hidratar-nao-lidos", naoLidos: await api.naoLidos() };
   // ADR-083: servidor sem a rota (404) fica sem trabalhos — sem faixa, sem chip, sem ícone; nenhum erro sobe.
-  if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }) };
+  if (q === "trabalhos") return { tipo: "hidratar-trabalhos", trabalhos: await api.trabalhos().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { trabalhos: [], pressao: null, memoriaTotalMb: null }; throw e; }), agora };
   // ADR-099 §7: servidor sem a rota (404, versão anterior) fica sem o custo; a tela Trabalhos segue sem ele.
   if (q === "custo") return { tipo: "hidratar-custo", custo: await api.custoHoje(Intl.DateTimeFormat().resolvedOptions().timeZone).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
   if (q.startsWith("trabalho:")) {
@@ -566,6 +566,8 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
     void carregarRaioX(q.slice(9));
     return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(9)), agora };
   }
+  // QA do PR #302 (NOD-216): a conversa do bot que o dono diz trabalhando, lida fora da tela para a barra animar.
+  if (q.startsWith("vivos:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(6)), agora };
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
   if (q.startsWith("pendencias:")) return { tipo: "hidratar-pendencias", agenteId: q.slice(11), pendencias: (await api.pendencias(q.slice(11))).pendencias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
@@ -656,7 +658,7 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
-  if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos") return true;
+  if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos" || q.startsWith("vivos:")) return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q === "custo") return t.tipo === "trabalhos";
   if (q.startsWith("disponibilidade:")) return t.tipo === "conversa" && t.agenteId === q.slice(16);
@@ -715,7 +717,8 @@ function renderSidebar(estado: Estado): string {
     const aviso = avisoDe(a);
     const rotuloAviso = aviso ? ` (${ESPERA[aviso]})` : "";
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
-    const estadoVisual = aviso && mascote === "disponivel" ? "aguardando" : mascote;
+    // NOD-216: a fila parada não esconde o aviso — ela é tão "parada" quanto o disponível.
+    const estadoVisual = mascoteComAviso(mascote, aviso);
     // definido em 2026-09-24 (sidebar no estilo do Grok): o título vira um chip ao lado do nome e a linha de
     // baixo é a última mensagem; os estados que pedem ação (fora do ar, pergunta, rotina parada) ganham dela.
     // definido em 2026-10-04 (ADR-071): "Em ligação" ganha da última mensagem, discreto, com o fone.
@@ -747,7 +750,7 @@ function renderSidebar(estado: Estado): string {
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", aviso && mascote === "disponivel" ? "aguardando" : mascote, aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
@@ -1143,12 +1146,25 @@ function renderEntrada(): string {
   return `<section class="tela entrar"><h1>nod</h1><p>Login de desenvolvimento (só nesta máquina): entre como uma pessoa do cadastro.</p>${pessoas}</section>`;
 }
 
+/**
+ * NOD-216 (revisão): o pedido que entrou na fila "pensa" por JANELA_PENSANDO_MS e depois fica parado. O relógio do estado
+ * só anda no tick de 15 s, então um timer único (sempre o próximo vencimento; o anterior é cancelado) redesenha na hora.
+ */
+let viradaDoMascote: { em: number; timer: number } | null = null;
+function agendarViradaDoMascote(): void {
+  const em = proximaViradaDoMascote(estado, Date.now());
+  if (viradaDoMascote?.em === em) return;
+  if (viradaDoMascote) window.clearTimeout(viradaDoMascote.timer);
+  viradaDoMascote = em === null ? null : { em, timer: window.setTimeout(() => { viradaDoMascote = null; dispatch({ tipo: "tick", agora: Date.now() }); }, Math.max(0, em - Date.now()) + 50) };
+}
+
 function render(): void {
   // Um redesenho síncrono já cobre o que o quadro pendente ia mostrar.
   if (quadroPendente) {
     window.cancelAnimationFrame(quadroPendente);
     quadroPendente = 0;
   }
+  agendarViradaDoMascote();
   if (!estado.sessao) {
     document.querySelector(".app")?.classList.add("sem-sessao");
     regiao("detalhes", "");
@@ -1319,7 +1335,13 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") receberFrame(ev.frame);
-    else if (ev.tipo === "conexao") dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
+    else if (ev.tipo === "conexao") {
+      // NOD-216: o stream que volta depois de cair relê os turnos vivos (a conversa aberta e os donos da barra), mesmo
+      // com o replay: um turno.encerrado de antes do buffer deixaria o mascote animado para sempre.
+      const voltou = ev.estado === "aberto" && estado.conexao.estado === "reconectando";
+      dispatch({ tipo: "conexao", estado: ev.estado, tentativa: ev.tentativa, proximaEmMs: ev.proximaEmMs });
+      if (voltou) dispatch({ tipo: "invalidar", quais: invalidacoesAoReconectar(estado) });
+    }
   });
   live.connect();
   dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "nao-lidos", "salas", "executor", "rotinas"] });

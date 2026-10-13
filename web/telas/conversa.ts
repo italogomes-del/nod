@@ -12,7 +12,7 @@ import { maquinaDoBot } from "./maquinas.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
-import { estadoMascoteNaConversa } from "../lib/mascote.ts";
+import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
@@ -576,7 +576,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "O agente";
   if (atividade && atividade.ferramentas > 0) {
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: renderCartaoAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: renderCartaoAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
   }
   // NOD-73: sem cartão, o aviso de silêncio vira uma linha só, com o Parar.
   const mudo = t.estado === "rodando" ? minutosSemNovidade(atividade, estado.agora) : null;
@@ -584,7 +584,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   if (atividade?.atual) {
     // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
     // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
   }
   return [{ chave, html: linhaDoTurnoVivo(t, c, estado) + linhaMuda }];
 }
@@ -602,10 +602,12 @@ function comCursor(html: string): string {
  * cima. O cabeçalho é um bloco À PARTE do corpo: o corpo muda a cada pedaço e a cada segundo do relógio, e o
  * <nod-mascote> regravado junto reiniciaria a animação; este bloco só muda quando o turno sai da fila.
  */
-function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string): BlocoDaTimeline {
+function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string, agora: number): BlocoDaTimeline {
+  // NOD-216: a mesma regra do mascote da barra — só o turno rodando anima; o recém-chegado pensa; a fila fica parada.
+  const mascote = t.estado === "rodando" ? "trabalhando" : filaRecente(t, agora) ? "pensando" : "na_fila";
   return {
     chave: `vivo-cab:${t.turnoId}`,
-    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", t.estado === "rodando" ? "trabalhando" : "pensando") : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
+    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", mascote) : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
   };
 }
 
@@ -764,7 +766,8 @@ export function turnosDeTrabalho(c: ConversaEstado, estado: Estado): ReadonlySet
 /** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
 export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const deTrabalho = turnosDeTrabalho(c, estado);
-  const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id && !deTrabalho.has(t.turnoId));
+  // NOD-216: a mesma fonte do mascote (turnosVivosDaConversa), mais o que a conversa relida diz ser de trabalho.
+  const vivos = turnosVivosDaConversa(estado, c.conversa.id).filter((t) => !deTrabalho.has(t.turnoId));
   const blocos: BlocoDaTimeline[] = [...vivos.flatMap((t) => blocosDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
   return blocos.filter((b) => b.html !== "");
 }
@@ -857,9 +860,14 @@ const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stro
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
-  const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
+  // NOD-216: o cabeçalho lê a mesma fonte do mascote da barra (turnosVivosDaConversa + estadoMascoteNaConversa). Antes
+  // qualquer turno vivo da conversa — na fila há horas, ou de uma task — dizia "Trabalhando".
+  const vivos = a?.conversaId ? turnosVivosDaConversa(estado, a.conversaId) : [];
+  const vivo = vivos[0];
+  const rodando = vivos.find((v) => v.estado === "rodando");
+  const mascote = a ? estadoMascoteNaConversa(estado, a.conversaId) : "disponivel";
   // NOD-73: "Trabalhando · sem novidade há N min" quando o vigia avisou silêncio.
-  const mudo = vivo && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[vivo.turnoId], estado.agora) : null;
+  const mudo = rodando && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[rodando.turnoId], estado.agora) : null;
   const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
   // ADR-083 (#195): com task aberta o Parar fica no cabeçalho mesmo sem turno da conversa — ele para tudo do bot.
@@ -868,12 +876,16 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string): strin
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
   // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
   const esperam = new Set((estado.suaVez?.itens ?? []).filter((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido").map(chaveDoItem)).size;
+  const sep = ` <span class="presenca-sep" aria-hidden="true">·</span> `;
+  const comEsperam = esperam ? `${sep}<b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : "";
   const presenca = emLigacao
     ? "Em ligação"
-    : vivo
-    ? `Trabalhando${mudo !== null ? ` <span class="presenca-sep" aria-hidden="true">·</span> sem novidade há ${mudo} min` : ""}${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
-    : esperam ? "Aguardando você" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
+    : mascote === "trabalhando"
+    ? `Trabalhando${mudo !== null ? `${sep}sem novidade há ${mudo} min` : ""}${comEsperam}`
+    : mascote === "pensando"
+    ? `Pensando${comEsperam}`
+    : esperam ? "Aguardando você" : mascote === "na_fila" ? "Na fila" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
+  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", mascote) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${mascoteAnimado(mascote) || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
     <div class="cab-acoes">
       ${renderSeloModoDev(estado, a?.conversaId, nome)}
       ${ligar}
