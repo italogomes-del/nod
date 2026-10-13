@@ -188,6 +188,14 @@ export function criarContasDoApp(d: DepsContasDoApp) {
       return contas ? ambienteDaConta(d.base, ia, contaEmUso(contas[ia], d.agora()).id) : {};
     },
     adicionando: (ia: IaDesktop): boolean => emLogin[ia] !== undefined,
+    /** ADR-102: as contas de cada IA (id e apelido), na ordem do app — a lista que contas-locais.ts segue. */
+    contasPorId: (): { ia: IaDesktop; id: string; apelido: string | null }[] =>
+      (contas ? IAS_DESKTOP.flatMap((ia) => contas![ia].contas.map((c) => ({ ia, id: c.id, apelido: c.apelido || null }))) : []),
+    /** A posição (1, 2…) da conta na lista da IA; null = não existe. */
+    posicaoDe: (ia: IaDesktop, id: string): number | null => {
+      const i = contas ? contas[ia].contas.findIndex((c) => c.id === id) : -1;
+      return i < 0 ? null : i + 1;
+    },
     listar: (): ContasNaTela[] => (contas ? IAS_DESKTOP.map(naTela) : []),
     naTela,
 

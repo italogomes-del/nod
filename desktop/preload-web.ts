@@ -33,6 +33,7 @@ const contas: PonteContas = {
   renomear: (ia: IaDesktop, posicao: number, apelido: string) => ipcRenderer.invoke(CANAIS_DESKTOP.contasRenomear, ia, posicao, apelido),
   definirModo: (ia: IaDesktop, modo: "perguntar" | "automatico") => ipcRenderer.invoke(CANAIS_DESKTOP.contasDefinirModo, ia, modo),
   definirTrocaAutomatica: (ia: IaDesktop, posicao: number, ligado: boolean) => ipcRenderer.invoke(CANAIS_DESKTOP.contasDefinirTroca, ia, posicao, ligado),
+  detalhes: () => ipcRenderer.invoke(CANAIS_DESKTOP.contasDetalhes),
   aoMudar: (fn: (lista: ContasNaTela[]) => void) => {
     ipcRenderer.removeAllListeners(CANAIS_DESKTOP.contasMudaram);
     ipcRenderer.on(CANAIS_DESKTOP.contasMudaram, (_evento, lista: ContasNaTela[]) => fn(lista));

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import type { CodigoCifrado, LoginPendente, ProgressoDoLogin, PuxadaDeContas } from "../src/contracts/contas-ia.ts";
 import type { IaDesktop } from "../src/contracts/desktop.ts";
 import type { LoginDaIa } from "../src/contracts/estado-ia.ts";
-import { emailDaConta, planoLegivel } from "../src/domain/estado-ia.ts";
+import { emailDaConta, organizacaoDaConta, planoLegivel } from "../src/domain/estado-ia.ts";
 import { log } from "../src/obs/log.ts";
 import { decifrarCodigo, gerarParDoLogin, type ParDoLogin } from "../src/shared/cifra-do-codigo.ts";
 import { executarColetando, iniciarProcesso } from "../src/adapters/executor/processo.ts";
@@ -51,14 +51,14 @@ export async function lerIdentidadeNoCli(c: ClisDoMotor, ia: IaDesktop, envConta
     try {
       const o = JSON.parse(r.stdout) as Record<string, unknown>;
       const email = o.loggedIn === true ? emailDaConta(o.email) : null;
-      return { logado: email !== null, email, orgId: typeof o.orgId === "string" ? o.orgId : null, plano: planoLegivel(o.subscriptionType) };
+      return { logado: email !== null, email, orgId: typeof o.orgId === "string" ? o.orgId : null, plano: planoLegivel(o.subscriptionType), organizacao: organizacaoDaConta(o.orgName) };
     } catch {
       return { logado: false, email: null, orgId: null, plano: null };
     }
   }
   const conta = await contaDoCodex({ bin, env, cwd, versao: c.versao });
   if (conta === undefined) return undefined;
-  return conta ? { logado: true, email: conta.email, orgId: null, plano: conta.plano } : { logado: false, email: null, orgId: null, plano: null };
+  return conta ? { logado: true, email: conta.email, orgId: null, plano: conta.plano, organizacao: conta.organizacao } : { logado: false, email: null, orgId: null, plano: null };
 }
 
 export async function logoutNoCli(c: ClisDoMotor, ia: IaDesktop, envConta: Record<string, string>): Promise<boolean> {

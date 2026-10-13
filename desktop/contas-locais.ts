@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import type { ContaAnunciada, EstadoContaNaMaquina } from "../src/contracts/contas-ia.ts";
-import { IAS_DESKTOP, type IaDesktop } from "../src/contracts/desktop.ts";
+import { IAS_DESKTOP, type DetalheDaConta, type IaDesktop } from "../src/contracts/desktop.ts";
 import { CONTAS_POR_IA_MAX, ID_CONTA_PADRAO, contaCorporativa, apelidoValido } from "../src/domain/contas-da-ia.ts";
 import { textoDaImpressaoDaConta } from "../src/domain/contas-da-pessoa.ts";
 import { ambienteDaConta, novoIdDeConta, pastaDaConta, prepararPastaDaConta, removerPastaDaConta, VARIAVEL_DA_CONTA } from "./contas-mac.ts";
@@ -29,7 +29,10 @@ export type ContaLocal = {
   lidaEm: number;
 };
 
-export type IdentidadeDaConta = { logado: boolean; email: string | null; orgId: string | null; plano: string | null };
+export type IdentidadeDaConta = { logado: boolean; email: string | null; orgId: string | null; plano: string | null; organizacao?: string | null };
+
+/** O que a tela do Mac mostra de cada conta (e-mail, organização): só na memória e só pela ponte do app (ADR-019). */
+export type DetalheDaContaLocal = DetalheDaConta;
 
 export type DepsContasLocais = {
   /** A pasta onde ficam as pastas das contas (`<base>/contas/<ia>/<id>`). */
@@ -52,6 +55,8 @@ export type ContasLocais = ReturnType<typeof criarContasLocais>;
 
 export function criarContasLocais(d: DepsContasLocais) {
   let contas: ContaLocal[] = [];
+  /** E-mail e organização por impressão: nunca vão ao arquivo nem ao anúncio. */
+  const detalhes = new Map<string, DetalheDaContaLocal>();
 
   const padraoDe = (ia: IaDesktop): ContaLocal => ({ id: ID_CONTA_PADRAO, ia, apelido: null, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
 
@@ -76,6 +81,7 @@ export function criarContasLocais(d: DepsContasLocais) {
       c.impressao = impressao;
       c.plano = id.plano;
       c.estado = "pronta";
+      detalhes.set(impressao, { impressao, ia: c.ia, email: id.email, organizacao: id.organizacao ?? null, plano: id.plano });
     } else {
       c.estado = "sem_login";
     }
@@ -181,9 +187,43 @@ export function criarContasLocais(d: DepsContasLocais) {
       return true;
     },
 
-    /** O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`). */
+    /**
+     * O app do Mac (ADR-102): a lista de contas é a do contas.json do app (ADR-101); esta segue a dele. Conta nova entra
+     * sem leitura (o próximo `ler()` a lê); conta que saiu de lá sai daqui sem logout (o app já fez). Devolve as que saíram.
+     */
+    async sincronizar(lista: readonly { ia: IaDesktop; id: string; apelido: string | null }[]): Promise<ContaLocal[]> {
+      const chave = (x: { ia: IaDesktop; id: string }) => `${x.ia}:${x.id}`;
+      const querem = new Map(lista.map((x) => [chave(x), x]));
+      const sairam = contas.filter((c) => c.id !== ID_CONTA_PADRAO && !querem.has(chave(c)));
+      let mudou = sairam.length > 0;
+      contas = contas.filter((c) => !sairam.includes(c));
+      for (const x of lista) {
+        const c = contas.find((y) => chave(y) === chave(x));
+        const apelido = apelidoValido(x.apelido) ?? null;
+        if (c) { if (c.apelido !== apelido) { c.apelido = apelido; mudou = true; } continue; }
+        if (x.id !== ID_CONTA_PADRAO && !pastaDaConta(d.base, x.ia, x.id)) continue;
+        contas.push({ id: x.id, ia: x.ia, apelido, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
+        mudou = true;
+      }
+      if (mudou) await gravar();
+      return sairam;
+    },
+
+    /** E-mail, organização e plano de cada conta lida nesta máquina (para a tela; nunca ao servidor). */
+    detalhes(): DetalheDaContaLocal[] {
+      return contas.flatMap((c) => (c.impressao && c.estado === "pronta" && detalhes.has(c.impressao) ? [detalhes.get(c.impressao)!] : []));
+    },
+
+    /** O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`), uma vez cada. */
     anuncio(): ContaAnunciada[] {
-      return contas.filter((c) => c.impressao !== null).map((c) => ({
+      const vistas = new Set<string>();
+      return contas.filter((c) => {
+        if (c.impressao === null) return false;
+        const k = `${c.ia}:${c.impressao}`;
+        if (vistas.has(k)) return false;
+        vistas.add(k);
+        return true;
+      }).map((c) => ({
         impressao: c.impressao!,
         ia: c.ia,
         estado: c.estado,

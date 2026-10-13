@@ -1,0 +1,95 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { criarContasLocais, type IdentidadeDaConta } from "../../../desktop/contas-locais.ts";
+import { iniciarContasNoServidor } from "../../../desktop/contas-no-servidor.ts";
+import type { IaDesktop } from "../../../src/contracts/desktop.ts";
+import type { PuxadaDeContas } from "../../../src/contracts/contas-ia.ts";
+
+/**
+ * ADR-102 no app do Mac (2026-10-13): a lista que vai ao servidor segue a do app (contas.json, ADR-101), o e-mail e a
+ * organização ficam só na memória (para a tela, pela ponte do app) e a puxada atende "Sair do Mac" e "Desconectar".
+ */
+async function montar(identidades: Record<string, IdentidadeDaConta>) {
+  const raiz = await mkdtemp(join(tmpdir(), "nod-contas-locais-"));
+  const arquivo = join(raiz, "contas-locais.json");
+  const contas = criarContasLocais({
+    base: raiz,
+    arquivo,
+    pessoaId: "pessoa-1",
+    padrao: (ia) => join(raiz, ia),
+    // O ambiente diz qual pasta: a conta de sempre não tem variável.
+    lerIdentidade: async (ia: IaDesktop, env) => identidades[`${ia}:${Object.values(env)[0]?.split("/").at(-1) ?? "padrao"}`] ?? { logado: false, email: null, orgId: null, plano: null },
+    logout: async () => true,
+    agora: Date.now,
+  });
+  await contas.carregar();
+  return { contas, arquivo };
+}
+
+const LEAPY: IdentidadeDaConta = { logado: true, email: "marlon@leapy.com.br", orgId: "org-leapy", plano: "Team", organizacao: "Leapy" };
+const PESSOAL: IdentidadeDaConta = { logado: true, email: "marlon@exemplo.com", orgId: "org-p", plano: "Max", organizacao: null };
+
+describe("contas locais no app do Mac (ADR-102)", () => {
+  it("segue a lista do app: conta nova entra e é lida, a que saiu some do anúncio", async () => {
+    const m = await montar({ "claude-cli:padrao": PESSOAL, "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }, { ia: "claude-cli", id: "c-1", apelido: "Leapy" }, { ia: "codex-cli", id: "padrao", apelido: null }]);
+    await m.contas.ler();
+    expect(m.contas.anuncio().map((c) => c.apelidoSugerido)).toEqual(["Pessoal", "Leapy"]);
+    const sairam = await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }]);
+    expect(sairam.map((c) => c.id)).toEqual(["c-1"]);
+    expect(m.contas.anuncio()).toHaveLength(1);
+  });
+
+  it("e-mail e organização só nos detalhes (memória), nunca no arquivo nem no anúncio", async () => {
+    const m = await montar({ "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler();
+    expect(m.contas.detalhes()).toEqual([expect.objectContaining({ ia: "claude-cli", email: "marlon@leapy.com.br", organizacao: "Leapy", plano: "Team" })]);
+    expect(m.contas.detalhes()[0]!.impressao).toBe(m.contas.anuncio()[0]!.impressao);
+    expect(JSON.stringify(m.contas.anuncio())).not.toContain("leapy.com.br");
+    expect(await readFile(m.arquivo, "utf8")).not.toContain("leapy.com.br");
+  });
+
+  it("a mesma conta em duas pastas vai ao servidor uma vez só", async () => {
+    const m = await montar({ "claude-cli:padrao": LEAPY, "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: null }, { ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler();
+    expect(m.contas.anuncio()).toHaveLength(1);
+  });
+});
+
+describe("puxada de contas no app do Mac (ADR-102)", () => {
+  const agendar = (fn: () => void, ms: number) => { const t = setTimeout(fn, ms === 0 ? 0 : 10); return { cancelar: () => clearTimeout(t) }; };
+  const esperar = async (cond: () => boolean) => { const ate = Date.now() + 2_000; while (!cond()) { if (Date.now() > ate) throw new Error("tempo"); await new Promise((r) => setTimeout(r, 5)); } };
+
+  it("sair: sai de cada conta pedida e confirma ao servidor", async () => {
+    const respostas: (PuxadaDeContas | "sem_rota")[] = [{ logins: [], sair: ["a".repeat(64)], desconectar: false }];
+    const saiu: unknown[] = [];
+    const sairam: string[] = [];
+    const p = iniciarContasNoServidor({ ponte: { puxar: async () => respostas.shift() ?? { logins: [], sair: [], desconectar: false }, saiu: async (i, d) => { saiu.push({ i, d }); return true; } }, sair: async (i) => { sairam.push(i); return true; }, todas: () => [], desconectar: async () => undefined, agendar });
+    await esperar(() => saiu.length > 0);
+    p.parar();
+    expect(sairam).toEqual(["a".repeat(64)]);
+    expect(saiu).toEqual([{ i: ["a".repeat(64)], d: false }]);
+  });
+
+  it("desconectar com 'sair das contas': sai de todas, confirma desconectada e para", async () => {
+    const saiu: unknown[] = [];
+    let desconectou = false;
+    let puxadas = 0;
+    iniciarContasNoServidor({ ponte: { puxar: async () => { puxadas++; return { logins: [], sair: [], desconectar: true }; }, saiu: async (i, d) => { saiu.push({ i, d }); return true; } }, sair: async () => true, todas: () => ["b".repeat(64)], desconectar: async () => { desconectou = true; }, agendar });
+    await esperar(() => desconectou);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(saiu).toEqual([{ i: ["b".repeat(64)], d: true }]);
+    expect(puxadas).toBe(1);
+  });
+
+  it("servidor sem contas (404): para de puxar", async () => {
+    let puxadas = 0;
+    iniciarContasNoServidor({ ponte: { puxar: async () => { puxadas++; return "sem_rota"; }, saiu: async () => true }, sair: async () => true, todas: () => [], desconectar: async () => undefined, agendar });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(puxadas).toBe(1);
+  });
+});
