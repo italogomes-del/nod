@@ -34,6 +34,10 @@ import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
 import type { EstadoOnboarding, PedidoEtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { corpoDoEnvio } from "./envio-idempotente.ts";
+import { podeRepetir, tentarDeNovo } from "./tentar-de-novo.ts";
+import { ErroApi, ehAbort, erroDaResposta, falhaDeTransporte, rotaDe } from "./erro-api.ts";
+
+export { ErroApi, FRASE_SEM_INTERNET, FRASE_SERVIDOR_INDISPONIVEL, rotaDe } from "./erro-api.ts";
 
 /**
  * Cliente REST da web (ADR-020: a web DECIDE, nunca executa; ADR-018: só `import type` de src).
@@ -41,34 +45,53 @@ import { corpoDoEnvio } from "./envio-idempotente.ts";
  * servidor chega como `ErroApi` com o código FECHADO da tabela de erros — a web renderiza o código,
  * nunca inventa texto a partir de err.message (ADR-002/004).
  */
-/** NOD-174: quando o servidor não manda frase (proxy, corpo vazio), a pessoa lê isto — nunca "falha" solta. */
-const FALHA_SEM_FRASE = "Algo deu errado. Tente de novo; se repetir, relate o problema.";
-const FALHA_DE_REDE = "Não conseguimos falar com o servidor. Confira a conexão e tente de novo.";
-
-export class ErroApi extends Error {
-  readonly status: number;
-  readonly codigo: string;
-  readonly correlationId: string | null;
-  constructor(status: number, codigo: string, mensagem: string, correlationId: string | null = null) {
-    super(mensagem);
-    this.name = "ErroApi";
-    this.status = status;
-    this.codigo = codigo;
-    this.correlationId = correlationId;
-  }
-}
-
 export type SalaDto = { sala: Sala; membros: MembroSala[] };
 export type RegistroCatcher = { id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number };
 
-async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoes: { keepalive?: true } = {}): Promise<T> {
-  const r = await fetch(url, {
-    method: metodo,
-    headers: corpo === undefined ? {} : { "content-type": "application/json" },
-    body: corpo === undefined ? undefined : JSON.stringify(corpo),
-    ...opcoes,
-  });
-  const texto = await r.text();
+/**
+ * Quem acompanha a rede (main.ts): `falhou` a cada falha de transporte (inclusive as que ainda vão repetir), `voltou`
+ * quando o nod responde qualquer coisa. Um só, como o resto do estado da página.
+ */
+export type ObservadorDeRede = { falhou(e: ErroApi): void; voltou(): void };
+let observador: ObservadorDeRede | null = null;
+export function observarRede(o: ObservadorDeRede | null): void {
+  observador = o;
+}
+
+/**
+ * `silencioso`: chamada de fundo que a pessoa não fez (o lote da telemetria, inclusive o do `pagehide`): a falha dela
+ * não acende o "Reconectando…" (revisão NOD-215) — quem chama já engole o erro.
+ */
+type OpcoesPedido = { keepalive?: true; silencioso?: true };
+
+async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoesPedido: OpcoesPedido = {}): Promise<T> {
+  const rota = rotaDe(metodo, url);
+  const { silencioso, ...opcoes } = opcoesPedido;
+  const obs = silencioso ? null : observador;
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: metodo,
+      headers: corpo === undefined ? {} : { "content-type": "application/json" },
+      body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      ...opcoes,
+    });
+  } catch (e) {
+    // Navegação/troca de tela cancelou: não é falha, ninguém precisa de aviso.
+    if (ehAbort(e)) throw e;
+    const falha = falhaDeTransporte(rota);
+    obs?.falhou(falha);
+    throw falha;
+  }
+  let texto = "";
+  try {
+    texto = await r.text();
+  } catch (e) {
+    if (ehAbort(e)) throw e;
+    const falha = falhaDeTransporte(rota);
+    obs?.falhou(falha);
+    throw falha;
+  }
   let lido: unknown = null;
   try {
     lido = texto === "" ? null : JSON.parse(texto);
@@ -76,25 +99,48 @@ async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoes: { 
     lido = null;
   }
   if (!r.ok) {
-    const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null };
-    throw new ErroApi(r.status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null);
+    const erro = erroDaResposta(r.status, lido, rota);
+    if (erro.codigo === "servidor_indisponivel") obs?.falhou(erro);
+    else obs?.voltou();
+    throw erro;
   }
+  obs?.voltou();
   return lido as T;
 }
 
+/** GET e mutação com chave de idempotência atravessam alguns segundos de servidor fora (web/lib/tentar-de-novo.ts). */
+function pedirDeNovoSeCair<T>(metodo: string, url: string, corpo?: unknown, chave?: string): Promise<T> {
+  if (!podeRepetir(metodo, chave)) return pedir<T>(metodo, url, corpo);
+  return tentarDeNovo(() => pedir<T>(metodo, url, corpo));
+}
+
 function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void): Promise<AnexoMeta> {
+  const rota = rotaDe("POST", url);
+  // Upload não repete sozinho (não é idempotente): só a frase certa.
   return new Promise((resolver, rejeitar) => {
     const x = new XMLHttpRequest();
     x.open("POST", url);
     x.setRequestHeader("content-type", mime);
     x.setRequestHeader("x-nod-nome", encodeURIComponent(arquivo.name));
     x.upload.onprogress = (e) => { if (e.lengthComputable) aoProgresso?.(e.loaded / e.total); };
-    x.onerror = () => rejeitar(new ErroApi(0, "falha_interna", FALHA_DE_REDE));
+    x.onerror = () => {
+      const falha = falhaDeTransporte(rota);
+      observador?.falhou(falha);
+      rejeitar(falha);
+    };
     x.onload = () => {
-      let lido: { codigo?: string; mensagem?: string } & Partial<AnexoMeta> = {};
-      try { lido = JSON.parse(x.responseText) as typeof lido; } catch { lido = {}; }
-      if (x.status >= 200 && x.status < 300) resolver(lido as AnexoMeta);
-      else rejeitar(new ErroApi(x.status, lido.codigo ?? "falha_interna", lido.mensagem ?? FALHA_SEM_FRASE));
+      let lido: unknown = null;
+      try { lido = JSON.parse(x.responseText); } catch { lido = null; }
+      if (x.status >= 200 && x.status < 300) {
+        observador?.voltou();
+        // Corpo vazio/ilegível num 2xx: objeto vazio como antes do NOD-215 (quem chama lê meta.id sem estourar).
+        resolver((lido ?? {}) as AnexoMeta);
+        return;
+      }
+      const erro = erroDaResposta(x.status, lido, rota);
+      if (erro.codigo === "servidor_indisponivel") observador?.falhou(erro);
+      else observador?.voltou();
+      rejeitar(erro);
     };
     x.send(arquivo);
   });
@@ -114,7 +160,7 @@ export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: Decisa
 
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
-  const get = <T>(caminho: string) => pedir<T>("GET", `${base}/${caminho}`);
+  const get = <T>(caminho: string) => pedirDeNovoSeCair<T>("GET", `${base}/${caminho}`);
   const post = <T>(caminho: string, corpo?: unknown) => pedir<T>("POST", `${base}/${caminho}`, corpo ?? {});
   const patch = <T>(caminho: string, corpo: unknown) => pedir<T>("PATCH", `${base}/${caminho}`, corpo);
   const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
@@ -151,7 +197,7 @@ export function criarApi(escopo: Escopo) {
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
     /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
     enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string) =>
-      post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio)),
+      pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio), idEnvio),
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
@@ -183,7 +229,7 @@ export function criarApi(escopo: Escopo) {
     trabalhoFazerAqui: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/fazer-aqui`),
     // #191: o que a tela mostrou e o que a pessoa abriu, em lote; a taxa por tipo aparece no Modo dev.
     // Revisão W12 (2026-10-08): o último lote sai no `pagehide`; com keepalive o POST termina depois de a aba fechar.
-    telemetriaLinhas: (eventos: readonly EventoLinha[]) => pedir<RespostaMutacao>("POST", `${base}/telemetria/linhas`, { eventos }, { keepalive: true }),
+    telemetriaLinhas: (eventos: readonly EventoLinha[]) => pedir<RespostaMutacao>("POST", `${base}/telemetria/linhas`, { eventos }, { keepalive: true, silencioso: true }),
     taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
@@ -295,8 +341,8 @@ export function criarApi(escopo: Escopo) {
  * só existe no login de desenvolvimento (NOD_LOGIN=stub, 127.0.0.1).
  */
 export const sessao = {
-  atual: () => pedir<Escopo>("GET", "/api/sessao"),
-  modo: () => pedir<ModoSessaoDto>("GET", "/api/sessao/modo"),
+  atual: () => pedirDeNovoSeCair<Escopo>("GET", "/api/sessao"),
+  modo: () => pedirDeNovoSeCair<ModoSessaoDto>("GET", "/api/sessao/modo"),
   entrar: (pessoaId: string) => pedir<Escopo>("POST", "/api/sessao/entrar", { pessoaId }),
   urlGoogle: "/api/sessao/google",
 };

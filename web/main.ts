@@ -20,7 +20,9 @@ import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
-import { criarApi, ErroApi, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
+import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
+import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
 import { tabelaComo } from "./lib/texto-formatado.ts";
 import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
 import { abrirPareamento } from "./telas/parear-mac.ts";
@@ -294,7 +296,7 @@ const telaOnboarding = criarTelaOnboarding({
     return achar();
   },
   invalidar: () => dispatch({ tipo: "invalidar", quais: ["frota", "sua-vez", "rotinas", "conectores", ...(conversaDaTela(estado) ? [`conversa:${conversaDaTela(estado)?.conversa.id}` as Invalidacao] : [])] }),
-  erro: (e) => dispatch({ tipo: "erro", erro: erroDe(e) }),
+  erro: (e) => mostrarErro(e),
   aoMudar: () => render(),
 });
 /** A ligação viva que a página achou ao abrir (recarregada no meio dela): volta como pílula quando o bot chegar na frota. */
@@ -405,12 +407,78 @@ function receberFrame(frame: FrameSse): void {
   if (estado.invalidacoes !== antes.invalidacoes) void reidratar();
 }
 
-function erroDe(e: unknown): { codigo: string; mensagem: string; correlationId?: string | null } {
-  // O correlation_id atravessa para o relato poder citá-lo (ADR-041): é o que liga o que a pessoa
-  // viu na tela à linha de log do servidor. Continua fora do que se RENDERIZA (ADR-002).
-  if (e instanceof ErroApi) return { codigo: e.codigo, mensagem: e.message, correlationId: e.correlationId };
-  return { codigo: "falha_interna", mensagem: "Não conseguimos falar com o servidor. Confira a conexão e tente de novo." };
+/**
+ * NOD-215: exceção da própria web (não ErroApi) é registrada uma vez por origem, com limite por minuto e por carga.
+ * `reportError` põe o registro no console do navegador e no log do renderer do app do Mac (sem `console.*`, AGENTS.md);
+ * não há rota de log do cliente no servidor. Revisão: vai um Error NOVO só com nome, origem e pilha curta sem query —
+ * nunca a exceção original, cuja mensagem pode trazer texto da pessoa, token ou URL com segredo.
+ */
+const registrarErroDaTela = criarRegistroDeErros((r) => globalThis.reportError?.(erroParaRelatar(r)));
+
+/**
+ * O correlation_id atravessa para o relato e para "Detalhes" (ADR-041); a frase nunca é err.message (ADR-002).
+ * Exceção que não é ErroApi vira `erro_da_tela` (frase de erro interno + Relatar), nunca "confira a conexão" (NOD-215).
+ */
+function erroDe(e: unknown): ErroNaTela | null {
+  return traduzirErro(e, registrarErroDaTela, estado.tela.tipo);
 }
+
+/**
+ * Mostra o erro de uma AÇÃO da pessoa (agir, gestão, conexão, onboarding); o AbortError não mostra nada. Revisão
+ * NOD-215: a falha de rede que chega aqui não vai mais ser repetida (mutação sem chave, ou esgotou as tentativas), então
+ * vira `acao_nao_concluida` no banner — antes virava o "Reconectando… Tentamos de novo sozinhos", que sumia na próxima
+ * leitura e deixava a pessoa achando que a ação tinha sido refeita.
+ */
+function mostrarErro(e: unknown): void {
+  const erro = erroDe(e);
+  if (erro === null) return;
+  dispatch({ tipo: "erro", erro: erroDaAcao(erro) });
+}
+
+/**
+ * O que reidratar deixou de buscar porque a rede caiu (revisão NOD-215): as invalidações já tinham sido consumidas e
+ * se perdiam — a tela parecia sã com dado velho. Voltam para a fila quando o nod responder de novo.
+ */
+const pendentesDeRede = new Set<Invalidacao>();
+/** O boot caiu por rede (sem sessão): quando o nod voltar, a página recarrega em vez de ficar em branco. */
+let bootCaiuPorRede = false;
+
+/** Acende o "Reconectando…" (se não houver outro erro na tela) e garante a sonda que o apaga quando o nod voltar. */
+function redeCaiu(erro: ErroNaTela): void {
+  if (estado.erro !== null && (!ehErroDeRede(estado.erro) || estado.erro.codigo === erro.codigo)) {
+    sonda.lembrar();
+    return;
+  }
+  dispatch({ tipo: "rede-caiu", erro });
+  sonda.lembrar();
+}
+
+const sonda = criarSondaDeRede({
+  sondar: () => sessaoApi.atual(),
+  precisa: () => ehErroDeRede(estado.erro) || pendentesDeRede.size > 0 || bootCaiuPorRede,
+  agendar: (fn, ms) => window.setTimeout(fn, ms),
+});
+
+// NOD-215: cada falha de transporte (mesmo a que ainda vai repetir) acende o "Reconectando…"; qualquer resposta do nod
+// o apaga. Só despacha quando muda algo: `voltou` chega a cada chamada que dá certo, e `falhou` com outro erro na tela
+// (ou o mesmo aviso já aceso) não redesenha a cada tentativa.
+observarRede({
+  falhou: (e) => {
+    const erro = erroDe(e);
+    if (erro) redeCaiu(erro);
+  },
+  voltou: () => {
+    if (bootCaiuPorRede) {
+      bootCaiuPorRede = false;
+      window.location.reload();
+      return;
+    }
+    const devolver = [...pendentesDeRede];
+    pendentesDeRede.clear();
+    if (ehErroDeRede(estado.erro)) dispatch({ tipo: "rede-voltou" });
+    if (devolver.length > 0) dispatch({ tipo: "invalidar", quais: devolver });
+  },
+});
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
 async function agir(fn: () => Promise<void>): Promise<void> {
@@ -421,7 +489,7 @@ async function agir(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (e) {
-    dispatch({ tipo: "erro", erro: erroDe(e) });
+    mostrarErro(e);
   } finally {
     // definido em 2026-09-21: 'ocupado' saía do catch ligado e travava os botões da tela até a próxima
     // ação bem-sucedida (visto no 409 do card de acesso: "Permitir acesso" ficava inerte depois do erro).
@@ -552,7 +620,7 @@ async function reidratar(): Promise<void> {
   try {
     // definido em 2026-09-17: consumir antes do GET preserva frames recebidos durante a busca.
     estado = reduzir(estado, { tipo: "invalidacoes-tratadas", quais: relevantes });
-    for (const q of relevantes) {
+    for (const [i, q] of relevantes.entries()) {
       try {
         const acao = await buscar(q);
         if (acao) estado = reduzir(estado, acao);
@@ -560,7 +628,18 @@ async function reidratar(): Promise<void> {
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
         if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
       } catch (e) {
-        if (!(e instanceof ErroApi && e.status === 404)) estado = reduzir(estado, { tipo: "erro", erro: erroDe(e) });
+        if (!(e instanceof ErroApi && e.status === 404)) {
+          const erro = erroDe(e);
+          if (erro && ehErroDeRede(erro)) {
+            // Revisão NOD-215: a rede caiu depois das tentativas desta leitura. O resto da passada também cairia (cada
+            // GET esperaria mais 8,5 s com `reidratando` preso): guarda esta e as que faltam para quando o nod voltar.
+            for (const resto of relevantes.slice(i)) pendentesDeRede.add(resto);
+            if (estado.erro === null || ehErroDeRede(estado.erro)) estado = reduzir(estado, acaoDoErro(erro));
+            sonda.lembrar();
+            break;
+          }
+          if (erro) estado = reduzir(estado, acaoDoErro(erro));
+        }
       }
     }
     render();
@@ -736,10 +815,26 @@ function botaoAbrirBots(): string {
   return `<button type="button" class="abrir-bots" data-act="abrir-bots" aria-label="Bots e conversas" aria-controls="sidebar" aria-expanded="${celular.botsAbertos()}">${MENU}</button>`;
 }
 
+/**
+ * NOD-215: o erro de rede é um aviso discreto "Reconectando…" (tom neutro, sem ×: some sozinho quando o SSE volta a
+ * `aberto` ou a próxima chamada dá certo). Os outros seguem no banner; o `erro_da_tela` ganha "Relatar", que abre a
+ * conversa com o Nod (é ele quem registra relato sem mensagem apontada, 0062). "Detalhes" traz tipo, rota, status e
+ * correlation_id (ADR-041), nunca err.message.
+ */
+function htmlDoErro(e: ErroNaTela): string {
+  const detalhes = `<details class="erro-detalhe"><summary>Detalhes</summary><code>${esc(detalhesDoErro(e))}</code></details>`;
+  if (ehErroDeRede(e)) {
+    return avisoDeEstado({ tom: "info", titulo: "Reconectando…", texto: e.mensagem, extra: detalhes, papel: "status", classe: "aviso-compacto aviso-reconectando" });
+  }
+  const nod = e.codigo === "erro_da_tela" ? (estado.frota?.agentes ?? []).find((a) => a.papel === "nod" && a.ownerId === estado.sessao?.pessoaId) : undefined;
+  const relatar = nod ? ` ${botao("abrir-conversa", "Relatar", { classe: "sm", dados: { conversa: nod.conversaId, agente: nod.id } })}` : "";
+  return `<div class="erro" role="alert">${esc(e.mensagem)}${relatar} ${botao("fechar-erro", "×", { classe: "sm" })}${detalhes}</div>`;
+}
+
 function renderPrincipal(): void {
   const t = estado.tela;
   // NOD-174: a pessoa lê a frase do servidor; o código fechado fica só no <details>, para quem depura.
-  const erro = estado.erro ? `<div class="erro" role="alert">${esc(estado.erro.mensagem)} ${botao("fechar-erro", "×", { classe: "sm" })}<details class="erro-detalhe"><summary>Detalhes</summary><code>${esc(estado.erro.codigo)}</code></details></div>` : "";
+  const erro = estado.erro ? htmlDoErro(estado.erro) : "";
   let cabecalho = "";
   let corpo = "";
   let partes: PartesDaTimeline | null = null;
@@ -1300,10 +1395,20 @@ async function boot(): Promise<void> {
         entrada = { ...entrada, modo: await sessaoApi.modo() };
         render();
       } catch (e2) {
-        dispatch({ tipo: "erro", erro: erroDe(e2) });
+        mostrarErroDoBoot(e2);
       }
-    } else dispatch({ tipo: "erro", erro: erroDe(e) });
+    } else mostrarErroDoBoot(e);
   }
+}
+
+/** Revisão NOD-215: sem sessão, a falha de rede do boot fica no "Reconectando…" e a página recarrega quando o nod voltar. */
+function mostrarErroDoBoot(e: unknown): void {
+  const erro = erroDe(e);
+  if (erro === null) return;
+  if (ehErroDeRede(erro)) {
+    bootCaiuPorRede = true;
+    redeCaiu(erro);
+  } else dispatch({ tipo: "erro", erro });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1347,7 +1452,7 @@ function iniciarConexao(slug: string, depois: (() => Promise<void>) | null = nul
     return;
   }
   dispatch({ tipo: "erro", erro: null });
-  void conexoes.iniciar(slug, depois).catch((e: unknown) => dispatch({ tipo: "erro", erro: erroDe(e) }));
+  void conexoes.iniciar(slug, depois).catch((e: unknown) => mostrarErro(e));
 }
 
 function propostaDoEstado(id: string): Proposta | null {
@@ -1403,7 +1508,7 @@ async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn();
     dispatch({ tipo: "invalidar", quais: ["frota", "gestao", "rotinas", "salas", "sua-vez"] });
-  } catch (e) { dispatch({ tipo: "erro", erro: erroDe(e) }); throw e; }
+  } catch (e) { mostrarErro(e); throw e; }
 }
 
 function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {

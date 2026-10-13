@@ -126,6 +126,9 @@ body.ocupado { cursor: progress; }
   border-radius: 8px; font-size: 13px; }
 .erro-detalhe { margin-top: 4px; font-size: 12px; color: var(--ink-3); }
 .erro-detalhe summary { cursor: pointer; }
+/* NOD-215: o "Reconectando…" ocupa o lugar do banner de erro, com o mesmo respiro, no tom neutro do aviso de estado. */
+/* Revisão: `.aviso-compacto` (mais abaixo, mesma especificidade) ganhava; as duas classes juntas vencem. */
+.aviso-compacto.aviso-reconectando { margin: 10px 14px 0; }
 /* Aviso de estado (componente Notice do design system, web/lib/aviso-estado.ts; definido em 2026-10-04): o que aconteceu,
    o motivo e o botão que resolve. O botão primário dentro do aviso usa a cor do estado. */
 .aviso-estado { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 12px; border: 1px solid; border-radius: 10px;

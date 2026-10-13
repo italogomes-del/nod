@@ -25,6 +25,7 @@ import type { Escopo } from "../../src/shared/types.ts";
 import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
+import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
 import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
@@ -254,7 +255,7 @@ export type Estado = {
   /** O que a próxima volta do main precisa buscar por REST (conjunto, sem duplicata). */
   invalidacoes: Invalidacao[];
   agora: number;
-  erro: { codigo: string; mensagem: string; correlationId?: string | null } | null;
+  erro: ErroNaTela | null;
   ocupado: boolean;
   ligacaoViva: LigacaoVivaNaTela | null;
   /** A disponibilidade de ligar para cada bot (só decide se o botão "Ligar" aparece); null = a leitura falhou. */
@@ -352,7 +353,11 @@ export type Acao =
   | { tipo: "composer"; conversaId: string; escolha: EscolhaComposer | null }
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
-  | { tipo: "erro"; erro: { codigo: string; mensagem: string; correlationId?: string | null } | null }
+  | { tipo: "erro"; erro: ErroNaTela | null }
+  /** NOD-215: uma chamada caiu por rede (ainda tentando de novo ou já desistiu): vira "Reconectando…", nunca por cima de outro erro. */
+  | { tipo: "rede-caiu"; erro: ErroNaTela }
+  /** NOD-215: o nod respondeu de novo: o "Reconectando…" some sozinho. */
+  | { tipo: "rede-voltou" }
   | { tipo: "ocupado"; valor: boolean }
   | { tipo: "ligacao-viva"; viva: LigacaoVivaNaTela | null }
   | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
@@ -776,8 +781,11 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const comAgora = { ...estado, agora: acao.agora };
       return estado.suaVez?.incidentes.some((i) => i.voltouEm === null) ? invalidar(comAgora, "sua-vez") : comAgora;
     }
-    case "conexao":
-      return { ...estado, conexao: { estado: acao.estado, tentativa: acao.tentativa, proximaEmMs: acao.proximaEmMs } };
+    case "conexao": {
+      // NOD-215: o SSE de volta a `aberto` prova que o servidor voltou; só o erro DE REDE some (outro erro fica).
+      const erro = acao.estado === "aberto" && ehErroDeRede(estado.erro) ? null : estado.erro;
+      return { ...estado, conexao: { estado: acao.estado, tentativa: acao.tentativa, proximaEmMs: acao.proximaEmMs }, erro };
+    }
     case "frame":
       return aplicarFrame(estado, acao.frame, acao.agora);
     case "hidratar-gestao":
@@ -897,6 +905,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, invalidacoes: estado.invalidacoes.filter((q) => !acao.quais.includes(q)) };
     case "erro":
       return { ...estado, erro: acao.erro, ocupado: false };
+    case "rede-caiu":
+      // Um erro de outra natureza na tela não é trocado pelo aviso de rede; o "ocupado" fica: a ação segue tentando.
+      if (estado.erro !== null && !ehErroDeRede(estado.erro)) return estado;
+      return { ...estado, erro: acao.erro };
+    case "rede-voltou":
+      return ehErroDeRede(estado.erro) ? { ...estado, erro: null } : estado;
     case "ocupado":
       return { ...estado, ocupado: acao.valor };
     case "ligacao-viva": {
