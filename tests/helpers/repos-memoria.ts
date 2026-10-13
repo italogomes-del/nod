@@ -1,3 +1,4 @@
+import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
@@ -75,6 +76,11 @@ export type BancoMemoria = {
   trabalhos: (Trabalho & { ownerId: string })[];
   /** 0070 (ADR-099, parte 2): as esperas de comando, com a dona (o comportamento completo se prova no Postgres). */
   esperas: (Espera & { tenantId: string; ownerId: string })[];
+  /** 0074 (ADR-102): as contas de IA da pessoa e os vínculos com as máquinas. */
+  contasIa: EstadoContasIaMemoria;
+  /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
+  contaDoTurno: Map<string, string | null>;
+  contaDaSessao: Map<string, string | null>;
   /** 0073 (NOD-214): as credenciais dos turnos despachados (o comportamento completo se prova no Postgres). */
   credenciais: (CredencialTurno & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
@@ -146,6 +152,9 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     turnos: [],
     trabalhos: [],
     esperas: [],
+    contasIa: estadoContasIaMemoria(),
+    contaDoTurno: new Map(),
+    contaDaSessao: new Map(),
     credenciais: [],
     entregas: new Set(),
     decisoes: [],
@@ -609,7 +618,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         c.sessaoExecutor = sessaoCli ? sessaoExecutor : null;
         c.sessaoHarness = sessaoCli ? sessaoHarness : null;
         c.sessaoEm = sessaoCli ? agora() : null;
+        b.contaDaSessao.delete(`conversa:${id}`);
         return true;
+      },
+      async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`conversa:${id}`, contaId); },
+      async contaDaSessao(id) { return b.contaDaSessao.get(`conversa:${id}`) ?? null;
       },
     },
 
@@ -840,6 +853,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
 
+    contasIa: contasIaMemoria(b.contasIa, escopo),
+
     esperas: {
       async criar(e) {
         if (b.esperas.some((x) => x.tenantId === escopo.tenantId && x.turnoId === e.turnoId)) return null;
@@ -953,7 +968,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.sessaoCli = sessaoCli;
         t.sessaoHarness = harness;
         t.sessaoExecutor = executor;
+        b.contaDaSessao.delete(`trabalho:${id}`);
         return true;
+      },
+      async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`trabalho:${id}`, contaId); },
+      async contaDaSessao(id) { return b.contaDaSessao.get(`trabalho:${id}`) ?? null;
       },
       async somarCusto(id, custoUsd) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
@@ -1126,6 +1145,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = doTenant(b.turnos).find((x) => x.id === id);
         if (t) t.executor = executor;
       },
+      async registrarConta(id, contaId) { b.contaDoTurno.set(id, contaId); },
+      async contaDoTurno(id) { return b.contaDoTurno.get(id) ?? null; },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,
@@ -2188,12 +2209,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return b.maquinaTokens
           .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId)
           .sort((x, y) => y.criadaEm - x.criadaEm)
-          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }));
+          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm, expiraEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm: revogadaEm ?? (expiraEm !== null && expiraEm <= Date.now() ? expiraEm : null) }));
       },
       async revogar(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (!l) return false;
         l.revogadaEm ??= em;
+        return true;
+      },
+      async vencerEm(id, ate) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
+        if (!l) return false;
+        l.expiraEm = l.expiraEm === null ? ate : Math.min(l.expiraEm, ate);
         return true;
       },
       async buscarVivaPorHash(hash, em) {
@@ -2204,6 +2231,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async marcarUso(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (l) l.ultimoUsoEm = em;
+      },
+      async renomear(id, nome) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
+        if (!l) return false;
+        l.nome = nome;
+        return true;
       },
       async registrarPlataforma(id, plataforma) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);

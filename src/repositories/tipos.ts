@@ -37,6 +37,7 @@ import type { frentesRepo } from "./frentes.repo.ts";
 import type { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
 import type { donosRepo } from "./donos.repo.ts";
 import type { esperasRepo } from "./esperas.repo.ts";
+import type { contasIaRepo } from "./contas-ia.repo.ts";
 import type { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
@@ -82,6 +83,8 @@ export interface Repos {
   donos: ReturnType<typeof donosRepo>;
   /** 0070 (ADR-099, parte 2): as esperas de comando. */
   esperas: ReturnType<typeof esperasRepo>;
+  /** 0074 (ADR-102): as contas de IA da pessoa em todas as máquinas. */
+  contasIa: ReturnType<typeof contasIaRepo>;
   /** 0073 (NOD-214): a credencial do turno despachado (hash do token), para atravessar o reinício do servidor. */
   turnoCredenciais: ReturnType<typeof turnoCredenciaisRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;

@@ -30,8 +30,12 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
     },
 
     async listar(): Promise<ChaveMaquinaDto[]> {
+      // ADR-102 (revisão do PR #306): a chave que venceu (o "Desconectar" sem confirmação) conta como cancelada na data
+      // em que venceu — a tela, a escolha de máquina dos bots e as contas a veem como as revogadas.
       const linhas = await conn<Linha[]>`
-        select id, nome, prefixo, criado_em, ultimo_uso_em, revogado_em from maquina_tokens
+        select id, nome, prefixo, criado_em, ultimo_uso_em,
+          coalesce(revogado_em, case when expira_em <= now() then expira_em end) as revogado_em
+        from maquina_tokens
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
         order by criado_em desc`;
       return linhas.map(paraDto);
@@ -44,6 +48,17 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
         returning id`;
       return linhas.length > 0;
+    },
+
+    /**
+     * ADR-102 (revisão do PR #306): a chave passa a vencer em `ate` (ou antes, se já vencia antes). É o "Desconectar e
+     * sair das contas": a máquina tem até lá para sair das contas e confirmar; sem confirmação, a chave cai sozinha —
+     * gravado no banco, sobrevive a um reinício do servidor.
+     */
+    async vencerEm(id: string, ate: number): Promise<boolean> {
+      const r = await conn`update maquina_tokens set expira_em = least(coalesce(expira_em, ${data(ate)}), ${data(ate)})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and revogado_em is null returning id`;
+      return r.length > 0;
     },
 
     async buscarVivaPorHash(hash: Buffer, agora: number): Promise<{ id: string; hash: Buffer } | null> {
@@ -68,6 +83,12 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<{ nome: string; plataforma: PlataformaMaquina | null }[]>`
         select nome, plataforma from maquina_tokens where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return l ?? null;
+    },
+
+    /** ADR-102 (R2): o nome que a pessoa deu à máquina; a tela e as notas usam este, não o hostname anunciado. */
+    async renomear(id: string, nome: string): Promise<boolean> {
+      const r = await conn`update maquina_tokens set nome = ${nome} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and revogado_em is null returning id`;
+      return r.length > 0;
     },
 
     async marcarUso(id: string, agora: number): Promise<void> {

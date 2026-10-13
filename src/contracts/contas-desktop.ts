@@ -32,6 +32,13 @@ export type ContasNaTela = {
   adicaoFalhou?: { apelido: string } | null;
   max: number;
 };
+/**
+ * ADR-102 (2026-10-13): o que a tela mostra de cada conta logada neste Mac, achada pela impressão (a mesma que o servidor
+ * guarda). E-mail e organização vêm do CLI e só passam pela ponte do app: nunca vão ao servidor (ADR-019).
+ */
+export type DetalheDaConta = { impressao: string; ia: IaDesktop; email: string; organizacao: string | null; plano: string | null };
+/** O que a ponte devolve: as contas deste Mac e a máquina que ele é no servidor (null = ainda sem conexão). */
+export type DetalhesDasContas = { maquinaId: string | null; contas: DetalheDaConta[] };
 export type PonteContas = {
   listar(): Promise<ContasNaTela[]>;
   usar(ia: IaDesktop, posicao: number): Promise<ContasNaTela | null>;
@@ -46,4 +53,6 @@ export type PonteContas = {
   definirTrocaAutomatica(ia: IaDesktop, posicao: number, ligado: boolean): Promise<ContasNaTela>;
   /** Um ouvinte só (registrar de novo troca o anterior). */
   aoMudar(fn: (contas: ContasNaTela[]) => void): void;
+  /** ADR-102: e-mail e organização das contas deste Mac, pela impressão. Opcional: o app anterior a 2026-10-13 não tem. */
+  detalhes?(): Promise<DetalhesDasContas>;
 };

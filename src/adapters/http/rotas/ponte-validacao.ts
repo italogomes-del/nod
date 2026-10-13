@@ -1,4 +1,6 @@
-import { contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
+import { apelidoValido, contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
+import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, type EstadoContaNaMaquina, type ProgressoDoLogin } from "../../../contracts/contas-ia.ts";
+import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
@@ -328,6 +330,8 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(uso ? { usoDoPlano: uso } : {}),
     ...(voltaEm !== null ? { limiteVoltaEm: voltaEm } : {}),
     ...(contaNoLimite ? { contaNoLimite } : {}),
+    // ADR-102 (R6): só num turno interrompido, e só o booleano.
+    ...(r.desfecho === "interrompido" && r.contaAusente === true ? { contaAusente: true as const } : {}),
   } };
 }
 
@@ -347,4 +351,49 @@ export function relatoEspera(v: unknown): RelatoEspera {
   exigir(r.codigo === null || (typeof r.codigo === "number" && Number.isInteger(r.codigo) && r.codigo >= -1 && r.codigo <= 255));
   exigir(texto(r.saida, 4 * SAIDA_ESPERA_MAX));
   return { id, tipo: "terminou", codigo: r.codigo as number | null, saida: r.saida };
+}
+
+/**
+ * ADR-102 (2026-10-13): as contas que a máquina anuncia (`conectar` e `inventario`). É extra como as capacidades: app
+ * ou motor antigo não manda (undefined, nada muda), e o anúncio nunca é recusado por isto — item fora do formato some.
+ * Só impressão (sha256 hex), IA com conta, estado conhecido, plano curto e o apelido sugerido; nada de e-mail.
+ */
+export function contasAnunciadas(v: unknown, agora: number): ContaAnunciada[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const saida: ContaAnunciada[] = [];
+  const vistas = new Set<string>();
+  for (const bruto of v.slice(0, CONTAS_ANUNCIADAS_MAX)) {
+    if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) continue;
+    const o = bruto as Record<string, unknown>;
+    if (typeof o.impressao !== "string" || !IMPRESSAO.test(o.impressao) || !ehIaComConta(o.ia) || !ESTADOS_CONTA_NA_MAQUINA.includes(o.estado as EstadoContaNaMaquina)) continue;
+    if (vistas.has(`${o.ia}:${o.impressao}`)) continue;
+    vistas.add(`${o.ia}:${o.impressao}`);
+    const plano = typeof o.plano === "string" && /^[\p{L}\p{N} ._-]{1,40}$/u.test(o.plano) ? o.plano : null;
+    const logadaEm = Number.isSafeInteger(o.logadaEm) && Number(o.logadaEm) > 0 && Number(o.logadaEm) <= agora + 60_000 ? Number(o.logadaEm) : 0;
+    // Red team do PR #306: um apelido com "@" seria o e-mail (a ADR-101 usava a organização, "<e-mail>'s Organization").
+    const apelido = typeof o.apelidoSugerido === "string" && o.apelidoSugerido.includes("@") ? null : apelidoValido(o.apelidoSugerido);
+    saida.push({ impressao: o.impressao, ia: o.ia, estado: o.estado as EstadoContaNaMaquina, plano, corporativa: o.corporativa === true, logadaEm, ...(apelido ? { apelidoSugerido: apelido } : {}) });
+  }
+  return saida;
+}
+
+const FASES_DO_PROGRESSO: readonly ProgressoDoLogin["fase"][] = ["abrindo", "aguardando_pessoa", "conferindo", "pronto", "falhou"];
+/** O progresso de um login relatado pela máquina; o conteúdo (link oficial, código, chave) é conferido no serviço. */
+export function progressoDoLogin(v: unknown): ProgressoDoLogin {
+  const o = objeto(v);
+  exigir(typeof o.loginId === "string" && UUID.test(o.loginId) && FASES_DO_PROGRESSO.includes(o.fase as ProgressoDoLogin["fase"]));
+  const p: ProgressoDoLogin = { loginId: o.loginId, fase: o.fase as ProgressoDoLogin["fase"] };
+  if (o.url !== undefined) { exigir(texto(o.url, 4_096)); p.url = o.url; }
+  if (o.codigoDispositivo !== undefined) { exigir(texto(o.codigoDispositivo, 20)); p.codigoDispositivo = o.codigoDispositivo; }
+  if (o.pedeCodigo !== undefined) { exigir(typeof o.pedeCodigo === "boolean"); p.pedeCodigo = o.pedeCodigo; }
+  if (o.chavePublica !== undefined) { exigir(texto(o.chavePublica, 2_048)); p.chavePublica = o.chavePublica; }
+  if (o.erro !== undefined) { exigir(texto(o.erro, 40)); p.erro = o.erro; }
+  if (o.impressao !== undefined) { exigir(typeof o.impressao === "string" && IMPRESSAO.test(o.impressao)); p.impressao = o.impressao; }
+  return p;
+}
+
+/** As impressões de que a máquina saiu (logout feito). */
+export function impressoes(v: unknown): string[] {
+  exigir(Array.isArray(v) && v.length <= CONTAS_ANUNCIADAS_MAX && v.every((x) => typeof x === "string" && IMPRESSAO.test(x)));
+  return v as string[];
 }

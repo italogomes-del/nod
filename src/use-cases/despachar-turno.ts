@@ -13,6 +13,12 @@ import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
+import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
+import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
+import { log } from "../obs/log.ts";
+import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, semContaParaOTurno } from "./contas-do-turno.ts";
+import { esperarContaNaFrente } from "./assentar-turno.ts";
 
 export type EntradaDespacharTurno = {
   machineId: string;
@@ -104,6 +110,13 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     return recusarPorExecutor(deps, { turno, executor, inventario: doHarness, agora, harness: fixo });
   }
 
+  // ADR-102 (2026-10-13): a máquina tem contas anunciadas e nenhuma serve sem a pessoa decidir — na conversa, a nota com
+  // as contas livres (sem gastar turno pago); no fundo (task, rotina), o turno volta à fila até a primeira conta renovar.
+  if (executor !== "catcher" && turno.origem !== "ligacao") {
+    const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, agora });
+    if (semConta) return semConta;
+  }
+
   // Fila lida junta (definido em 2026-09-24), só depois dos gates: um turno recusado não arrasta as outras
   // falas. As demais pendentes desta conversa entram neste turno e cada uma sai 'absorvido'.
   const { turno: comFila, absorvidos } = await deps.repos.turnos.absorverPendentes(turno, entradaDaFila);
@@ -127,6 +140,39 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     throw e;
   }
 };
+
+async function semContaNaMaquina(
+  deps: Deps,
+  p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; agora: number },
+): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
+  const { turno, agora } = p;
+  if (!(await deps.repos.contasIa.temContaNaMaquina(p.machineId))) return null;
+  const c = await lerContasDaMaquina(deps, p.machineId);
+  if (c.naMaquina.size === 0) return null;
+  const agente = await deps.repos.agentes.buscar(turno.agenteId);
+  const r = escolherContaDoTurno(c, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
+  const fixo = harnessFixado(turno.harness, turno.modelo);
+  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora);
+  if (!sem) return null;
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
+  if (turno.origem !== "conversa") {
+    // ADR-099 §7: nenhuma frente falha por limite — a task espera a conta voltar (1 h sem horário do fornecedor).
+    const volta = sem.voltaEm !== null && sem.voltaEm > agora ? sem.voltaEm : agora + PRAZO_SEM_HORARIO_MS;
+    const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia: sem.de.ia, renovaEm: volta, autoria, agora });
+    if (espera) {
+      log("info", "turno_sem_conta_espera", { turno_id: turno.id, acordar_em: volta });
+      return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...(await sincronizarDoTurno(deps, turno))] };
+    }
+  }
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "limite_do_plano", sem_conta: true } }),
+    ...(await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
+    ...(await sincronizarDoTurno(deps, turno)),
+  ];
+  log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo });
+  return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events };
+}
 
 async function recusarPorExecutor(
   deps: Deps,

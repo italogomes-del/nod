@@ -1,3 +1,4 @@
+import { conviteValido } from "../../shared/convite.ts";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Escopo } from "../../shared/types.ts";
 import { log } from "../../obs/log.ts";
@@ -46,8 +47,11 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
   });
   const server = createServer((req, res) => {
     // ADR-090: `curl -fsSL https://<nod>/motor | sh` — o endereço curto do script de instalação do motor (o -L segue).
-    if (req.method === "GET" && (req.url === "/motor" || req.url === "/motor/")) {
-      res.writeHead(302, { location: "/api/motor/instalar", "cache-control": "no-store" });
+    // ADR-102: `/motor?convite=…` leva o convite junto (só o formato dele; qualquer outra coisa some).
+    const caminhoMotor = (req.url ?? "").split("?")[0];
+    if (req.method === "GET" && (caminhoMotor === "/motor" || caminhoMotor === "/motor/")) {
+      const convite = new URL(req.url ?? "/", "http://x").searchParams.get("convite");
+      res.writeHead(302, { location: `/api/motor/instalar${conviteValido(convite) ? `?convite=${convite}` : ""}`, "cache-control": "no-store" });
       res.end();
       return;
     }

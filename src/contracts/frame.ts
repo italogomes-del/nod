@@ -27,6 +27,8 @@ export type TipoFrame =
   | "sala.handoff"
   | "negacao"
   | "inventario.mudou"
+  /** ADR-102: as contas de IA da pessoa ou um login numa máquina mudaram: {motivo, loginId?}. A web relê as contas. */
+  | "contas.mudou"
   | "computador.mudou"
   | "agente.mudou"
   | "parada.faixa"

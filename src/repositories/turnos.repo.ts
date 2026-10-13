@@ -462,6 +462,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       await conn`update turnos set executor = ${executor} where tenant_id = ${escopo.tenantId} and id = ${id}`;
     },
 
+    /** ADR-102 (0074): a conta que o plano mandou a máquina usar (null = a pasta padrão da máquina). */
+    async registrarConta(id: string, contaId: string | null): Promise<void> {
+      await conn`update turnos set conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and id = ${id}`;
+    },
+
+    async contaDoTurno(id: string): Promise<string | null> {
+      const [l] = await conn<{ conta_id: string | null }[]>`select conta_id from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.conta_id ?? null;
+    },
+
     /** ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela. */
     async sessaoDoTurno(id: string): Promise<{ sessaoCli: string; executor: string } | null> {
       const [l] = await conn<{ sessao_cli: string | null; executor: string }[]>`select sessao_cli, executor from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;

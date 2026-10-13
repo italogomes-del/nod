@@ -16,7 +16,7 @@ import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
-import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva } from "../domain/inteligencia.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva } from "../domain/inteligencia.ts";
 import { cotaDasIas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
@@ -33,6 +33,8 @@ import type { TokenTurno } from "../services/token-turno.ts";
 import type { Services } from "./tipos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 import { delegacaoDoTurno, rotinaDoTurno } from "./apoio-l7.ts";
+import { contaDoPlano, escolherContaDoTurno, lerContasDaMaquina } from "./contas-do-turno.ts";
+import type { IaComConta } from "../contracts/contas-ia.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import { ehColega } from "./ver-colegas.ts";
 
@@ -148,13 +150,29 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // limite) — o 1% que sobra dela fica para a conversa com a pessoa. Todas seguradas: a primeira pronta (iaDoAutomatico).
   const fundo = !input.recompor && executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
   const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia) : [];
+  // ADR-102 (2026-10-13): a conta do turno, pela lista da pessoa e pelo que a máquina do turno tem logado. Com conta
+  // anunciada na máquina, a posição da conta em uso de cada IA decide a ordem, e a IA sem conta utilizável entra no
+  // "no limite" (o limite é da conta, não mais da IA); sem conta anunciada (motor ou app antigo), nada muda.
+  const daMaquina = executor !== "catcher" && input.harnesses && (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContasDaMaquina(deps, input.machineId) : null;
+  const contas = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, agora) : null;
+  const governadas = (ia: IdHarness) => contas !== null && ia in contas.porIa;
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
-      ordem: ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
-      noLimite: [...new Set([...iasNoLimite(preferencias.iasNoLimite, agora), ...pelaCota])],
+      ordem: contas
+        ? ordemCompleta([...(input.harnessPreferido ? [input.harnessPreferido] : []), ...contas.ordemIas, ...ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null })])
+        : ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
+      noLimite: [...new Set([...(contas?.iasSemConta ?? []), ...iasNoLimite(preferencias.iasNoLimite, agora).filter((ia) => !governadas(ia)), ...pelaCota])],
       escolhas: inteligencia.escolhas,
     })
     : null;
+  // A adoção (NOD-214) recompõe com a conta que o despacho já gravou; o despacho grava a escolhida agora.
+  // Revisão do PR #306: a gravada só vale se for da IA que a recomposição escolheu agora; senão, a da lista para essa IA
+  // (o plano nunca sai com o harness de uma IA e a conta de outra).
+  const daLista = escolha && contas ? (contas.porIa[escolha.harness as IaComConta] ?? null) : null;
+  const gravada = input.recompor ? await (async () => { const id = await deps.repos.turnos.contaDoTurno(turno.id); return id ? await deps.repos.contasIa.buscar(id) : null; })() : null;
+  const conta = gravada && escolha && gravada.ia === escolha.harness ? gravada : daLista;
+  // A coluna nasce nula: só grava quando há conta (o caso comum hoje não paga a escrita na tabela mais quente).
+  if (conta && conta.id !== gravada?.id) await deps.repos.turnos.registrarConta(turno.id, conta.id);
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
@@ -184,8 +202,13 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
   // revisto em 2026-10-08 (revisão do épico, S14): e só para o executor que criou a sessão, como a da conversa (0005) — a
   // sessão do catcher não existe no CLI real, e a do CLI real não serve ao catcher.
-  const sessaoDoTrabalho = trabalho && retoma && input.permitirResume !== false && trabalho.sessaoCli && trabalho.sessaoExecutor === executor && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
-  const sessaoDoHarness = escolha ? retoma && conversa?.sessaoHarness === escolha.harness : true;
+  // ADR-102 (R1 da revisão): a sessão do Codex mora na pasta da conta (CODEX_HOME); com outra conta, não há o que retomar.
+  // O Claude compartilha `projects/` entre as contas (contas-mac.ts), então retoma em qualquer uma.
+  const mesmaContaDaSessao = async (gravada: () => Promise<string | null>) => !conta || escolha?.harness !== "codex-cli" || (await gravada()) === conta.id;
+  const contaDoTrabalhoOk = trabalho ? await mesmaContaDaSessao(() => deps.repos.trabalhos.contaDaSessao(trabalho.id)) : true;
+  const contaDaConversaOk = await mesmaContaDaSessao(() => deps.repos.conversas.contaDaSessao(turno.conversaId));
+  const sessaoDoTrabalho = trabalho && retoma && contaDoTrabalhoOk && input.permitirResume !== false && trabalho.sessaoCli && trabalho.sessaoExecutor === executor && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
+  const sessaoDoHarness = (escolha ? retoma && conversa?.sessaoHarness === escolha.harness : true) && contaDaConversaOk;
   const sessaoDaConversa = !trabalho && sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
   // definido em 2026-10-01 (ADR-066): a retomada de rotina ou de pedido de colega volta na sessão DO TURNO que ela
   // continua (nunca na da conversa, pelos motivos acima). Antes ela começava do zero: em 30/09 o Milton, retomado 13
@@ -361,7 +384,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   }
 
   const tokenDeTurno = input.recompor?.tokenDeTurno ?? deps.services.tokenTurno.cunhar(turno.id, { tenantId: deps.escopo.tenantId, pessoaId: deps.escopo.pessoaId, agenteId: agente.id });
-  const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
+  const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), ...(conta ? { conta: contaDoPlano(conta) } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   // NOD-214: o recomposto é guardado por quem pediu (tokenTurno.planoOuRecompor), e só se o token ainda for o mesmo.
   if (input.recompor) return { data: plano, events: [] };
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);

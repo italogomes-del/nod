@@ -1,3 +1,4 @@
+import type { ContaDoPlano } from "./contas-ia.ts";
 import type { AnexoMeta } from "./anexo.ts";
 import type { EsforcoAgente, ModoAprovacao } from "./agente.ts";
 import type { IdHarness } from "./harness.ts";
@@ -66,6 +67,11 @@ export type PlanoTurno = {
   machineId: string;
   executor: Executor;
   harness?: IdHarness;
+  /**
+   * ADR-102 (2026-10-13): a conta da lista da pessoa que este turno usa. A máquina acha a pasta dela pela impressão
+   * (CLAUDE_CONFIG_DIR/CODEX_HOME). Ausente = a pasta padrão da máquina (máquina que não anunciou contas).
+   */
+  conta?: ContaDoPlano;
   workspaceId?: string | null;
   /**
    * definido em 2026-09-18: onde o harness abre (pasta preparada do projeto ativo) e o que ele

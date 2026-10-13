@@ -5,7 +5,7 @@ import { criarContasDoMac, NOTA_LOGOUT_FALHOU } from "../../../web/lib/contas-do
 import { htmlDoAvisoDosTermos, TERMOS_DA_TROCA } from "../../../web/telas/aviso-termos.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../../../web/telas/cartao-ia.ts";
 import { planoNaTela, renderContasDaIa } from "../../../web/telas/contas-ia.ts";
-import { linhaContaTrocada, linhaLimiteSemOutra } from "../../../web/telas/ia-fora.ts";
+import { linhaContaSeguiu, linhaContaTrocada, linhaLimiteSemOutra } from "../../../web/telas/ia-fora.ts";
 
 /** ADR-101 (2026-10-12, NOD-211): as contas em Provedores de IA e as linhas do limite na conversa (protótipo v3). */
 const AGORA = 1_760_000_000_000;
@@ -211,5 +211,36 @@ describe("criarContasDoMac", () => {
     await t.c.adicionar("claude-cli", "  Leapy ");
     expect(t.chamadas).toEqual(["adicionar Leapy"]);
     expect(t.estado().contaNova["claude-cli"]).toBeUndefined();
+  });
+});
+
+describe("a conversa no limite de uma conta da lista (ADR-102, CMD-1)", () => {
+  const nota = msg("Claude · Pessoal no limite na vm-bots até 14:00. Seguir com Claude · Leapy?", {
+    kind: "limite_do_plano", harness: "claude-cli", voltaEm: AGORA + 2 * HORA,
+    contas: {
+      de: { id: "c1", apelido: "Pessoal", ia: "claude-cli" },
+      livres: [
+        { id: "c2", apelido: "Leapy", ia: "claude-cli", naMaquina: true, outraMaquina: null },
+        { id: "c3", apelido: "<img src=x>", ia: "claude-cli", naMaquina: false, outraMaquina: { id: "m2", nome: "MacBook" } },
+      ],
+      maquina: { id: "m1", nome: "vm-bots" },
+      voltaEm: AGORA + 2 * HORA,
+    },
+  });
+
+  it("um passo por saída: seguir com a conta da máquina, rodar no outro, entrar com ela aqui, ou esperar", () => {
+    const html = linhaLimiteSemOutra(nota, p(ui())) ?? "";
+    expect(html).toContain('data-act="cl-seguir" data-id="c2" data-conversa="c1">Seguir com Claude · Leapy</button>');
+    expect(html).toContain('data-act="rodar-desta-vez" data-conversa="c1" data-maquina="m2">Rodar no MacBook desta vez</button>');
+    expect(html).toContain('data-act="cl-entrar-chat" data-id="c3" data-ia="claude-cli"');
+    expect(html).toContain("na vm-bots</button>");
+    expect(html).toMatch(/ou esperar até \d\d:\d\d/);
+    // O apelido é da pessoa, mas passa escapado.
+    expect(html).not.toContain("<img");
+  });
+
+  it("as linhas de conta seguida e escolhida", () => {
+    expect(linhaContaSeguiu(msg("Seguindo com Claude · Leapy.", { kind: "conta_escolhida", contaId: "c2", apelido: "Leapy", ia: "claude-cli" }))).toContain("Seguindo com Claude · Leapy.");
+    expect(linhaContaSeguiu(msg("x", { kind: "parada", interrompidas: 0, nadaRodando: true }))).toBeNull();
   });
 });

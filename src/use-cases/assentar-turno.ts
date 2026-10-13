@@ -20,7 +20,10 @@ import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proxima
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
 import { entradaDaTrocaDeConta, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
-import { fraseDaDecisao } from "../domain/contas-da-ia.ts";
+import { fraseDaDecisao, PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
+import { decidirLimiteDaConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
+import { harnessFixado } from "../domain/harness.ts";
+import { criarNotaDeContas, lerContasDaMaquina } from "./contas-do-turno.ts";
 import { log } from "../obs/log.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -299,8 +302,16 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // escolhe com quem seguir. Só a conta em uso parou (o Mac guarda isso; o servidor só vê posições).
   const contas = ehLimite ? resultado.contaNoLimite : undefined;
   const contaLivre = contas !== undefined && contas.tipo !== "todas_no_limite";
+  // ADR-102 (2026-10-13): a conta da lista que o plano mandou usar. No limite, quem para é ELA (vale em todas as
+  // máquinas), não a IA; a decisão segue as regras da lista (contas-da-pessoa.ts).
+  const contaDoTurnoId = entrega.harness ? await deps.repos.turnos.contaDoTurno(turno.id) : null;
+  const limiteDaConta = ehLimite && contaDoTurnoId && !contaLivre
+    ? await decidirLimiteNoAssentamento(deps, { turno, contaId: contaDoTurnoId, machineId: entrega.machineId, ate: desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm ?? null : null, agora })
+    : null;
   if (ehLimite && entrega.harness && contaLivre) {
     log("aviso", "conta_no_limite", { turno_id: turno.id, harness: entrega.harness, tipo: contas.tipo, de: contas.de, para: contas.tipo === "trocou" ? contas.para : null });
+  } else if (ehLimite && entrega.harness && limiteDaConta) {
+    log("aviso", "conta_da_lista_no_limite", { turno_id: turno.id, harness: entrega.harness, conta_id: contaDoTurnoId, decisao: limiteDaConta.decisao.tipo, volta_em: limiteDaConta.voltaEm });
   } else if (ehLimite && entrega.harness) {
     const renovaEm = prazoDoLimite(desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm : null, agora);
     await deps.repos.preferencias.registrarLimite(entrega.harness, { renovaEm, desde: agora });
@@ -309,6 +320,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     log("aviso", "ia_no_limite", { turno_id: turno.id, harness: entrega.harness, renova_em: renovaEm, do_fornecedor: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm === renovaEm });
   } else if (desfecho.estado === "concluido" && entrega.harness) {
     limiteMudou = await deps.repos.preferencias.limparLimite(entrega.harness);
+    // ADR-102: o turno deu certo na conta — ela sai do limite antes do prazo.
+    if (contaDoTurnoId && (await deps.repos.contasIa.limparLimite(contaDoTurnoId))) limiteMudou = true;
   }
 
   if (turno.origem === "ligacao") {
@@ -327,6 +340,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...q.events);
   } else if (resultado.causaSemIa) {
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
+  } else if (resultado.contaAusente && contaDoTurnoId && (trocou = await aposContaAusente(deps, { turno, assentado, executor, contaId: contaDoTurnoId, machineId: entrega.machineId, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
+  } else if (limiteDaConta && (trocou = await aposLimiteDaConta(deps, { turno, assentado, executor, ...limiteDaConta, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (contas?.tipo === "trocou" && entrega.harness && (trocou = await aposTrocaDeConta(deps, { turno, executor, ia: entrega.harness, troca: contas, autoria, agora, custoUsd, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha }))) {
     events.push(...trocou);
   } else if (contaLivre && entrega.harness && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ia: entrega.harness, renovaEm: contas.tipo === "trocou" ? agora : prazoDoLimite(contas.voltaEm, agora), conta: contas, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
@@ -483,6 +500,123 @@ async function aposTrocaDeConta(
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   log("info", "conta_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, harness: p.ia, de: troca.de, para: troca.para });
   return events;
+}
+
+/**
+ * ADR-102: o turno que usou uma conta da lista bateu no limite. Marca a conta (vale em todas as máquinas), tira a escolha
+ * que apontava para ela e decide pela lista. Com a IA fixa no bot, trocar de IA não vale: a decisão fica entre as contas
+ * dela (perguntar, ou trocar com "Trocar sozinho").
+ */
+async function decidirLimiteNoAssentamento(
+  deps: Deps,
+  p: { turno: Turno; contaId: string; machineId: string; ate: number | null; agora: number },
+): Promise<{ conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number } | null> {
+  const c = await lerContasDaMaquina(deps, p.machineId);
+  const conta = c.contas.find((x) => x.id === p.contaId);
+  if (!conta) return null;
+  const voltaEm = p.ate !== null && p.ate > p.agora ? p.ate : p.agora + PRAZO_SEM_HORARIO_MS;
+  await deps.repos.contasIa.marcarLimite(conta.id, voltaEm);
+  if (c.escolhidas[conta.ia] === conta.id) await deps.repos.contasIa.definirEscolhida(conta.ia, null);
+  const agente = await deps.repos.agentes.buscar(p.turno.agenteId);
+  const fixo = harnessFixado(p.turno.harness, p.turno.modelo);
+  // Com a IA fixa, só as contas dela contam como "nesta máquina" (as outras aparecem como livres noutro lugar).
+  const naMaquina = fixo ? new Set([...c.naMaquina].filter((id) => c.contas.find((x) => x.id === id)?.ia === fixo)) : c.naMaquina;
+  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina, noutraMaquina: c.noutraMaquina, modo: c.modo, escolhidas: c.escolhidas, ordemDoBot: agente ? inteligenciaDoAgente(agente).ordem : null, contaId: conta.id, ate: voltaEm, agora: p.agora });
+  return { conta, decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm };
+}
+
+/**
+ * ADR-102: depois do limite de uma conta da lista. Trocou (de conta ou de IA): a fala da pessoa é refeita (o próximo plano
+ * já escolhe a outra conta) com a linha "Claude · Pessoal no limite até 14:00. Seguindo com ChatGPT · Pessoal."; a task
+ * segue na hora. Perguntar ou todas no limite: a nota com as contas livres (a tela desenha "Seguir com", "Entrar com ela
+ * na <máquina>", "Rodar no <outra> desta vez"); a task espera a conta voltar. null = a pessoa pediu Parar (vale o aviso
+ * de sempre).
+ */
+async function aposLimiteDaConta(
+  deps: Deps,
+  p: { turno: Turno; assentado: Turno; executor: Executor; conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora, decisao } = p;
+  if (turno.pararSolicitadoEm !== null) return null;
+  const segue = decisao.tipo === "trocou" || decisao.tipo === "outra_ia";
+  if (turno.trabalhoId) return aposLimiteNoFundo(deps, { turno: p.assentado, executor: p.executor, ia: p.conta.ia, renovaEm: segue ? agora : p.voltaEm, motivoInterrupcao: p.motivoInterrupcao, motivoFalha: p.motivoFalha, autoria, agora, custoUsd: p.custoUsd });
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_no_limite: p.conta.id, decisao: decisao.tipo, custo_usd: p.custoUsd } }),
+  ];
+  if (!segue || turno.origem !== "conversa") {
+    events.push(...(await criarNotaDeContas(deps, { turno, autoria, agora, de: p.conta, decisao, maquina: p.maquina, voltaEm: p.voltaEm })));
+    return events;
+  }
+  const linha = await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    texto: fraseDoLimiteDaConta(p.conta, decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora), voltaEm: p.voltaEm }),
+    payload: { kind: "conta_seguiu", de: { id: p.conta.id, apelido: p.conta.apelido, ia: p.conta.ia }, para: { id: decisao.para.id, apelido: decisao.para.apelido, ia: decisao.para.ia }, voltaEm: p.voltaEm },
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  events.push(...(await repetirNaConversa(deps, { turno, executor: p.executor, agora })));
+  log("info", "conta_seguiu", { turno_id: turno.id, de: p.conta.id, para: decisao.para.id, troca_de_ia: decisao.tipo === "outra_ia" });
+  return events;
+}
+
+/**
+ * ADR-102 (R6 da revisão): a máquina não tinha mais a conta do plano (saiu dela entre o anúncio e o turno). O vínculo sai
+ * e o turno é refeito UMA vez (o próximo plano escolhe outra conta); na segunda, vale o aviso de sempre.
+ */
+async function aposContaAusente(
+  deps: Deps,
+  p: { turno: Turno; assentado: Turno; executor: Executor; contaId: string; machineId: string; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  await deps.repos.contasIa.apagarVinculo(p.contaId, p.machineId);
+  log("aviso", "conta_ausente_na_maquina", { turno_id: p.turno.id, conta_id: p.contaId, machine_id: p.machineId });
+  if (p.turno.pararSolicitadoEm !== null || p.turno.reenvios >= 1) return null;
+  // Revisão do PR #306: a task não passa pelo caminho do limite (não houve limite; a frase e a IA sairiam erradas, e a
+  // retomada não leva `reenvios`, então a trava acima não valeria). Vale o aviso de sempre; sem o vínculo, o próximo
+  // plano já escolhe outra conta.
+  if (p.turno.origem !== "conversa" || p.turno.trabalhoId) return null;
+  await deps.repos.mensagens.marcarParciaisDoTurno(p.turno.id);
+  return [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_ausente: p.contaId, custo_usd: p.custoUsd } }),
+    ...(await repetirNaConversa(deps, { turno: p.turno, executor: p.executor, agora: p.agora })),
+  ];
+}
+
+/** A fala da pessoa de novo na fila (a mesma entrada; `reenvios` + 1), como na troca de IA e de conta. */
+async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Executor; agora: number }): Promise<RuntimeEvent[]> {
+  const { turno } = p;
+  const novo = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "conversa",
+    prazoEm: turno.prazoEm,
+    profundidade: turno.profundidade,
+    entradaTexto: turno.entradaTexto,
+    mensagemOrigemId: turno.mensagemOrigemId,
+    entradaAnexos: turno.entradaAnexos,
+    entradaConfianca: turno.entradaConfianca,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    reenvios: turno.reenvios + 1,
+    executor: p.executor,
+    trabalhoId: turno.trabalhoId ?? null,
+  });
+  return novo ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } })] : [];
+}
+
+/**
+ * ADR-102 (2026-10-13): a frente cujo turno chegou à máquina sem conta livre (todas no limite) espera do mesmo jeito que a
+ * frente no limite da ADR-099 §7 — o turno fica interrompido e uma retomada nasce com hora para acordar. Nunca volta a
+ * 'pendente' (ADR-009/010). null = não é frente com task aberta (quem chamou segue com a nota na conversa).
+ */
+export function esperarContaNaFrente(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; autoria: Autoria; agora: number },
+): Promise<RuntimeEvent[] | null> {
+  return aposLimiteNoFundo(deps, { ...p, motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", custoUsd: null });
 }
 
 /**

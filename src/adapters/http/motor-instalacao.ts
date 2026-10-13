@@ -4,12 +4,16 @@
  * x64 e arm64. Roda de novo para atualizar: troca os arquivos, mantém a conexão e o login das IAs.
  *
  *   root/sudo ── apt (curl, git, gh) ── Node fixo em /opt/nod-motor/node ── usuário `nod`
- *            └─ Claude Code (e o Codex, com NOD_COM_CODEX=1) no ~/.local do `nod` ── /opt/nod-motor/app (3 arquivos)
+ *            └─ Claude Code e Codex (sem o Codex com NOD_SEM_CODEX=1) no ~/.local do `nod` ── /opt/nod-motor/app (3 arquivos)
  *            └─ /usr/local/bin/nod-motor (roda como `nod`) ── serviço nod-motor (systemd) ── pareamento por código
  *
  * O motor roda como o usuário `nod`, nunca root. A chave fica em ~nod/.config/nod-motor (0600). O login das IAs é feito
- * pela pessoa, no terminal (`nod-motor entrar claude`): o script não pede nem guarda credencial nenhuma.
+ * pela pessoa, pela tela (ADR-102) ou no terminal (`nod-motor entrar claude`): o script não pede nem guarda credencial.
+ *
+ * ADR-102 (2026-10-13): o comando que a tela mostra leva um convite de uso único (`/motor?convite=…`); o pareamento
+ * no fim o leva junto e a tela vê a máquina chegar sem a pessoa digitar código. O Codex vem sempre.
  */
+import { CONVITE } from "../../shared/convite.ts";
 import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
 
 export { ARQUIVOS_DO_MOTOR, type ArquivoDoMotor } from "../../domain/atualizacao-do-motor.ts";
@@ -28,8 +32,12 @@ export function servidorParaScript(proto: string, host: string): string | null {
   return null;
 }
 
-export function scriptDeInstalacao(o: { servidor: string; versao: string }): string {
+/** O convite do comando (ADR-102): 32 caracteres base64url, nada que o shell interprete. */
+export const CONVITE_NO_SCRIPT = CONVITE;
+
+export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null }): string {
   if (!/^https?:\/\/[a-z0-9.:-]+$/.test(o.servidor) || !/^[0-9A-Za-z.+-]+$/.test(o.versao)) throw new Error("servidor_ou_versao_invalida");
+  const convite = o.convite && CONVITE_NO_SCRIPT.test(o.convite) ? o.convite : "";
   return `#!/bin/sh
 # Nod: instala ou atualiza o motor nesta máquina (ADR-090). Servido por ${o.servidor}/motor
 set -eu
@@ -39,6 +47,7 @@ PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 cd /
 NOD_SERVIDOR="${o.servidor}"
 NOD_VERSAO="${o.versao}"
+NOD_CONVITE="${convite}"
 NODE_VERSAO="${NODE_DO_MOTOR}"
 PASTA=/opt/nod-motor
 USUARIO=nod
@@ -105,9 +114,11 @@ passo "usuário $USUARIO"
 
 como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code >/dev/null
 passo "Claude Code"
-if [ "\${NOD_COM_CODEX:-0}" = "1" ]; then
-  como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null
-  passo "Codex"
+# ADR-102: o Codex vem sempre (antes só com NOD_COM_CODEX=1); NOD_SEM_CODEX=1 desliga.
+if [ "\${NOD_SEM_CODEX:-0}" != "1" ]; then
+  # Revisão do PR #306: o Codex não derruba a instalação (nem a atualização de uma VM que já roda só com o Claude).
+  if como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null; then passo "Codex"
+  else printf 'Aviso: o Codex não instalou agora. Rode a instalação de novo depois para tentar outra vez.\\n'; fi
 fi
 
 $SUDO mkdir -p "$PASTA/app"
@@ -292,7 +303,11 @@ if $SUDO test -f "$CASA/.config/nod-motor/conexao.json"; then
 fi
 
 printf '\\n'
-/usr/local/bin/nod-motor parear "$NOD_SERVIDOR" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
+if [ -n "$NOD_CONVITE" ]; then
+  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" --convite "$NOD_CONVITE" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
+else
+  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
+fi
 printf 'Dica: deixe esta máquina só para o Nod, com atualizações de segurança automáticas e SSH só por chave.\\n'
 }
 

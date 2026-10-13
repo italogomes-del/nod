@@ -83,7 +83,7 @@ export type PonteIas = {
 };
 
 // ADR-101: as várias contas ficam em contas-desktop.ts (o teto de 200 linhas por contrato).
-export type { ContaNaTela, ContasNaTela, PonteContas } from "./contas-desktop.ts";
+export type { ContaNaTela, ContasNaTela, DetalheDaConta, DetalhesDasContas, PonteContas } from "./contas-desktop.ts";
 
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */
@@ -170,6 +170,8 @@ export const CANAIS_DESKTOP = {
   contasDefinirModo: "nod:contas-definir-modo",
   contasDefinirTroca: "nod:contas-definir-troca",
   contasMudaram: "nod:contas-mudaram",
+  // ADR-102 (2026-10-13): e-mail e organização das contas deste Mac, para a lista única da tela.
+  contasDetalhes: "nod:contas-detalhes",
 } as const;
 
 /** Tetos do que a página pode mandar ao macOS (o corpo que a web redige tem até 140). */

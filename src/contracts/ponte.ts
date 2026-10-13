@@ -1,3 +1,4 @@
+import type { ContaAnunciada } from "./contas-ia.ts";
 import type { EsperaParaRodar, RelatoEspera, RespostaRelatoEspera } from "./espera.ts";
 import type { CapacidadesHarness, IdHarness } from "./harness.ts";
 import type { RuntimeEvent } from "./evento.ts";
@@ -49,6 +50,8 @@ export type AnuncioMaquina = {
    * Ausente = app antigo: a drenagem espera o turno como antes (NOD-175/176). Quem anuncia é a ponte HTTP do cliente.
    */
   sobreviveReinicio?: boolean;
+  /** ADR-102 (2026-10-13): as contas de IA logadas nesta máquina (só a impressão, nunca e-mail). Ausente = app antigo. */
+  contas?: ContaAnunciada[];
 };
 
 /** ADR-090: as plataformas em que o motor roda — o app do Mac e o motor sem janela numa máquina Linux. */

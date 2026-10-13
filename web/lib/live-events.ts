@@ -79,6 +79,7 @@ const TIPOS: Record<TipoFrame, true> = {
   negacao: true,
   "computador.mudou": true,
   "inventario.mudou": true,
+  "contas.mudou": true,
   "agente.mudou": true,
   "parada.faixa": true,
   "relato.criado": true,
