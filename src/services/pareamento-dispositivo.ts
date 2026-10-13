@@ -19,8 +19,18 @@ export type PedidoDispositivo = { nome: string; plataforma: PlataformaMaquina; p
 export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string } | { estado: "invalido" };
 
 export interface PareamentoDispositivo {
-  /** null = cheio (pedidos demais abertos): quem chama responde 429, e nenhum pedido válido é despejado. */
-  pedir(e: { nome: string; plataforma: PlataformaMaquina }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number } | null;
+  /**
+   * null = cheio (pedidos demais abertos): quem chama responde 429, e nenhum pedido válido é despejado. Com `convite`
+   * válido (ADR-102), o pedido fica ligado a ele: a tela de quem criou o convite o vê sem a pessoa digitar o código.
+   */
+  pedir(e: { nome: string; plataforma: PlataformaMaquina; convite?: string }): { codigoDispositivo: string; codigoPessoa: string; intervaloS: number; prazoS: number } | null;
+  /** ADR-102: o convite de uso único que vai no comando de instalação (30 min). */
+  criarConvite(escopo: Escopo): { convite: string; expiraEm: number };
+  /**
+   * O pedido que chegou com o convite, para a tela confirmar ("A vm-bots apareceu. Conectar?"). `pendente` = ainda não
+   * chegou; `invalido` = não existe, venceu ou é de outra pessoa.
+   */
+  verConvite(e: { convite: string; escopo: Escopo }): { estado: "pendente" } | { estado: "invalido" } | { estado: "chegou"; codigo: string; pedido: PedidoDispositivo };
   /** O pedido do código, para a tela confirmar; null = não existe, venceu, já foi aprovado ou a pessoa errou demais. */
   ver(e: { codigoPessoa: string; escopo: Escopo }): PedidoDispositivo | null;
   aprovar(e: { codigoPessoa: string; escopo: Escopo }): boolean;
@@ -35,6 +45,10 @@ export const INTERVALO_DISPOSITIVO_S = 5;
 export const MAX_ERROS_POR_PESSOA = 10;
 const JANELA_ERROS_MS = 600_000;
 export const MAX_PEDIDOS_DISPOSITIVO = 1_000;
+/** definido em 2026-10-13 (ADR-102): o convite vale 30 min e uma vez (o tempo de criar a VM e colar o comando). */
+export const PRAZO_CONVITE_MS = 30 * 60_000;
+const MAX_CONVITES = 1_000;
+const CONVITE = /^[A-Za-z0-9_-]{32}$/;
 /** Sem 0/O, 1/I/L e U (RFC 8628 §6.1): 31 símbolos, 8 caracteres ≈ 2^39 combinações para um código que vive 10 min. */
 const ALFABETO = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODIGO_DISPOSITIVO = /^[A-Za-z0-9_-]{43}$/;
@@ -58,9 +72,11 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
   const porDispositivo = new Map<string, Pedido>();
   const porPessoa = new Map<string, string>();
   const erros = new Map<string, { n: number; desde: number }>();
+  const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null }>();
   const varrer = () => {
     const t = agora();
     for (const [c, p] of porDispositivo) if (p.ate <= t) { porDispositivo.delete(c); porPessoa.delete(p.codigoPessoa); }
+    for (const [c, v] of convites) if (v.ate <= t) convites.delete(c);
     for (const [k, e] of erros) if (t - e.desde >= JANELA_ERROS_MS) erros.delete(k);
   };
   const chaveDe = (escopo: Escopo) => `${escopo.tenantId}:${escopo.pessoaId}`;
@@ -87,15 +103,38 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
     }
   };
   return {
-    pedir({ nome, plataforma }) {
+    pedir({ nome, plataforma, convite }) {
       varrer();
       // Revisão do PR: a rota é pública; despejar o mais antigo deixaria qualquer um derrubar os pareamentos dos outros.
       if (porDispositivo.size >= MAX_PEDIDOS_DISPOSITIVO) return null;
       const codigoDispositivo = randomBytes(32).toString("base64url");
       const codigoPessoa = novoCodigoPessoa();
+      // ADR-102: o convite válido e ainda não usado liga este pedido à tela de quem o criou; inválido, o pedido segue
+      // como o de sempre (o código no terminal), e a pessoa ainda pode digitá-lo.
+      const v = convite && CONVITE.test(convite) ? convites.get(convite) : undefined;
+      if (v && v.codigoPessoa === null) v.codigoPessoa = codigoPessoa;
       porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: null });
       porPessoa.set(codigoPessoa, codigoDispositivo);
       return { codigoDispositivo, codigoPessoa: formatarCodigoPessoa(codigoPessoa), intervaloS: INTERVALO_DISPOSITIVO_S, prazoS: PRAZO_DISPOSITIVO_MS / 1000 };
+    },
+    criarConvite(escopo) {
+      varrer();
+      // Cheio: o mais antigo sai (o convite é da tela, com sessão; não há como alguém de fora encher a lista).
+      if (convites.size >= MAX_CONVITES) convites.delete(convites.keys().next().value!);
+      const convite = randomBytes(24).toString("base64url");
+      const expiraEm = agora() + PRAZO_CONVITE_MS;
+      convites.set(convite, { escopo, ate: expiraEm, codigoPessoa: null });
+      return { convite, expiraEm };
+    },
+    verConvite({ convite, escopo }) {
+      varrer();
+      const v = CONVITE.test(convite) ? convites.get(convite) : undefined;
+      if (!v || v.escopo.tenantId !== escopo.tenantId || v.escopo.pessoaId !== escopo.pessoaId) return { estado: "invalido" };
+      if (v.codigoPessoa === null) return { estado: "pendente" };
+      const dispositivo = porPessoa.get(v.codigoPessoa);
+      const p = dispositivo ? porDispositivo.get(dispositivo) : undefined;
+      if (!p || p.aprovadoPor) return { estado: "invalido" };
+      return { estado: "chegou", codigo: formatarCodigoPessoa(v.codigoPessoa), pedido: { nome: p.nome, plataforma: p.plataforma, pedidoHaS: Math.max(0, Math.round((agora() - p.criado) / 1000)) } };
     },
     ver({ codigoPessoa, escopo }) {
       const p = aberto(codigoPessoa, escopo);

@@ -1,0 +1,249 @@
+import type { ContasIaDto } from "../../../contracts/contas-ia.ts";
+import { ehIaComConta } from "../../../domain/contas-da-pessoa.ts";
+import { apelidoValido } from "../../../domain/contas-da-ia.ts";
+import { ErroDeDominio } from "../../../domain/erro.ts";
+import { log } from "../../../obs/log.ts";
+import { cifradoValido, type LoginsNaMaquina } from "../../../services/logins-na-maquina.ts";
+import type { PareamentoDispositivo } from "../../../services/pareamento-dispositivo.ts";
+import type { Escopo } from "../../../shared/types.ts";
+import { assertUuid } from "../../../use-cases/apoio-l7.ts";
+import { contasDaPessoa, removerConta, reordenarContas, seguirComConta } from "../../../use-cases/contas-ia.ts";
+import type { Deps } from "../../../use-cases/tipos.ts";
+import type { Rota } from "../roteador.ts";
+import { revogarChaveMaquina } from "../../../use-cases/chaves-maquina.ts";
+import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
+
+/**
+ * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102): a lista única de Provedores de IA, a
+ * gestão (renomear, ordem, sair de uma máquina, remover, o modo no limite), o login de uma conta numa máquina pela tela,
+ * o convite do comando de instalação e o nome/desconexão da máquina. Rotas de PESSOA (cookie).
+ */
+export type DepsRotasContas = {
+  dentro: DentroDeTx;
+  logins: LoginsNaMaquina;
+  dispositivo: PareamentoDispositivo;
+  /** false no modo local (ADR-092): a tela mostra a de antes (suposição 7 da ADR-102). */
+  compartilhado: boolean;
+  /** Publica `contas.mudou` para a tela reler. */
+  avisar(escopo: Escopo, motivo: string, loginId?: string): void;
+  /** A máquina está conectada agora (a ponte a ouviu no último minuto)? */
+  maquinaViva(escopo: Escopo, id: string): boolean;
+};
+
+/** A máquina existe, é da pessoa e não foi revogada. */
+async function exigirMaquina(d: Deps, id: string | undefined): Promise<{ id: string; nome: string }> {
+  const maquinaId = assertUuid(id, "máquina");
+  const viva = (await d.repos.maquinaTokens.listar()).find((c) => c.id === maquinaId && c.revogadaEm === null);
+  if (!viva) throw new ErroDeDominio("nao_encontrado", { cause: "máquina" });
+  return { id: viva.id, nome: viva.nome };
+}
+
+export function rotasContasIa(deps: DepsRotasContas): Rota[] {
+  return [
+    {
+      metodo: "GET",
+      padrao: /^\/contas-ia$/,
+      async handler(ctx) {
+        const r: ContasIaDto = deps.compartilhado
+          ? { disponivel: true, ...(await deps.dentro(ctx.escopo, (d) => contasDaPessoa(d))) }
+          : { disponivel: false, modo: "perguntar", contas: [] };
+        ctx.json(200, r);
+      },
+    },
+    {
+      metodo: "PUT",
+      padrao: /^\/contas-ia\/ordem$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { ids?: unknown };
+        if (!Array.isArray(corpo.ids) || corpo.ids.length > 50) throw new ErroDeDominio("entrada_invalida", { cause: "ids" });
+        const ids = corpo.ids.map((id) => assertUuid(id, "conta"));
+        await deps.dentro(ctx.escopo, (d) => reordenarContas(d, ids));
+        deps.avisar(ctx.escopo, "ordem");
+        ctx.json(204, null);
+      },
+    },
+    {
+      metodo: "PUT",
+      padrao: /^\/contas-ia\/modo$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { modo?: unknown };
+        if (corpo.modo !== "perguntar" && corpo.modo !== "automatico") throw new ErroDeDominio("entrada_invalida", { cause: "modo" });
+        const modo = corpo.modo;
+        await deps.dentro(ctx.escopo, (d) => d.repos.contasIa.definirModo(modo));
+        log("info", "contas_modo", { pessoa_id: ctx.escopo.pessoaId, modo });
+        deps.avisar(ctx.escopo, "modo");
+        ctx.json(204, null);
+      },
+    },
+    {
+      metodo: "PATCH",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)$/,
+      async handler(ctx) {
+        const id = assertUuid(ctx.params.id, "conta");
+        const corpo = (await ctx.corpo()) as { apelido?: unknown; entraNaTrocaAutomatica?: unknown };
+        const apelido = corpo.apelido === undefined ? undefined : apelidoValido(corpo.apelido);
+        if (apelido === null) throw new ErroDeDominio("entrada_invalida", { cause: "apelido" });
+        if (corpo.entraNaTrocaAutomatica !== undefined && typeof corpo.entraNaTrocaAutomatica !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "entraNaTrocaAutomatica" });
+        const ok = await deps.dentro(ctx.escopo, async (d) => {
+          if (apelido !== undefined && !(await d.repos.contasIa.renomear(id, apelido))) return false;
+          if (typeof corpo.entraNaTrocaAutomatica === "boolean" && !(await d.repos.contasIa.definirTrocaAutomatica(id, corpo.entraNaTrocaAutomatica))) return false;
+          return true;
+        });
+        if (!ok) throw new ErroDeDominio("nao_encontrado", { cause: "conta" });
+        deps.avisar(ctx.escopo, "conta");
+        ctx.json(204, null);
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)\/sair$/,
+      async handler(ctx) {
+        const id = assertUuid(ctx.params.id, "conta");
+        const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
+        const ok = await deps.dentro(ctx.escopo, async (d) => d.repos.contasIa.pedirSaida(id, (await exigirMaquina(d, corpo.maquinaId as string | undefined)).id, d.agora()));
+        if (!ok) throw new ErroDeDominio("nao_encontrado", { cause: "conta nesta máquina" });
+        log("info", "conta_saida_pedida", { pessoa_id: ctx.escopo.pessoaId, conta_id: id });
+        deps.avisar(ctx.escopo, "sair");
+        ctx.json(202, { ok: true });
+      },
+    },
+    {
+      metodo: "DELETE",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)$/,
+      async handler(ctx) {
+        const id = assertUuid(ctx.params.id, "conta");
+        await deps.dentro(ctx.escopo, (d) => removerConta(d, id));
+        log("info", "conta_removida", { pessoa_id: ctx.escopo.pessoaId, conta_id: id });
+        deps.avisar(ctx.escopo, "remover");
+        ctx.json(202, { ok: true });
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)\/seguir$/,
+      async handler(ctx) {
+        const contaId = assertUuid(ctx.params.id, "conta");
+        const corpo = (await ctx.corpo()) as { conversaId?: unknown };
+        const conversaId = assertUuid(corpo.conversaId, "conversa");
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, (dd, i) => seguirComConta(dd, i), { contaId, conversaId }));
+        deps.avisar(ctx.escopo, "seguir");
+        ctx.json(202, r);
+      },
+    },
+    // ── O login de uma conta numa máquina pela tela (ADR-102 item 3) ──────────────────────────────────────────────────
+    {
+      metodo: "POST",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/logins$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { ia?: unknown; contaId?: unknown; apelido?: unknown };
+        if (!ehIaComConta(corpo.ia)) throw new ErroDeDominio("entrada_invalida", { cause: "ia" });
+        const ia = corpo.ia;
+        const apelido = corpo.apelido === undefined || corpo.apelido === null ? null : apelidoValido(corpo.apelido);
+        if (corpo.apelido !== undefined && corpo.apelido !== null && apelido === null) throw new ErroDeDominio("entrada_invalida", { cause: "apelido" });
+        const { maquina, conta } = await deps.dentro(ctx.escopo, async (d) => {
+          const m = await exigirMaquina(d, ctx.params.id);
+          if (corpo.contaId === undefined || corpo.contaId === null) return { maquina: m, conta: null };
+          const c = await d.repos.contasIa.buscar(assertUuid(corpo.contaId, "conta"));
+          if (!c || c.removidaEm !== null || c.ia !== ia) throw new ErroDeDominio("nao_encontrado", { cause: "conta" });
+          return { maquina: m, conta: c };
+        });
+        const login = deps.logins.pedir({ escopo: ctx.escopo, maquinaId: maquina.id, ia, contaId: conta?.id ?? null, impressao: conta?.impressao ?? null, apelido: conta?.apelido ?? apelido });
+        if (!login) { ctx.json(429, { codigo: "muitos_pedidos", mensagem: "Você já tem logins demais abertos. Termine ou cancele um deles." }); return; }
+        log("info", "login_na_maquina_pedido", { pessoa_id: ctx.escopo.pessoaId, maquina_id: maquina.id, login_id: login.id, ia, conta_id: conta?.id ?? null });
+        deps.avisar(ctx.escopo, "login", login.id);
+        ctx.json(201, login);
+      },
+    },
+    {
+      metodo: "GET",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/logins\/(?<login>[^/]+)$/,
+      async handler(ctx) {
+        const login = deps.logins.ver(ctx.escopo, assertUuid(ctx.params.login, "login"));
+        if (!login || login.maquinaId !== ctx.params.id) throw new ErroDeDominio("nao_encontrado", { cause: "login" });
+        ctx.json(200, login);
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/logins\/(?<login>[^/]+)\/codigo$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { cifrado?: unknown };
+        const cifrado = cifradoValido(corpo.cifrado);
+        if (!cifrado) throw new ErroDeDominio("entrada_invalida", { cause: "código cifrado" });
+        const loginId = assertUuid(ctx.params.login, "login");
+        const atual = deps.logins.ver(ctx.escopo, loginId);
+        if (!atual || atual.maquinaId !== ctx.params.id) throw new ErroDeDominio("nao_encontrado", { cause: "login" });
+        const r = deps.logins.colarCodigo(ctx.escopo, loginId, cifrado);
+        if (r !== "ok") { ctx.json(409, { codigo: r }); return; }
+        deps.avisar(ctx.escopo, "login", loginId);
+        ctx.json(202, { ok: true });
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/logins\/(?<login>[^/]+)\/cancelar$/,
+      async handler(ctx) {
+        const loginId = assertUuid(ctx.params.login, "login");
+        const atual = deps.logins.ver(ctx.escopo, loginId);
+        if (!atual || atual.maquinaId !== ctx.params.id) throw new ErroDeDominio("nao_encontrado", { cause: "login" });
+        deps.logins.cancelar(ctx.escopo, loginId);
+        deps.avisar(ctx.escopo, "login", loginId);
+        ctx.json(202, { ok: true });
+      },
+    },
+    // ── A máquina: nome, desconexão e o convite do comando de instalação ─────────────────────────────────────────────
+    {
+      metodo: "PATCH",
+      padrao: /^\/maquinas\/(?<id>[^/]+)$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { nome?: unknown };
+        const nome = typeof corpo.nome === "string" ? corpo.nome.replace(/\s+/g, " ").trim() : "";
+        if (nome.length === 0 || nome.length > 60) throw new ErroDeDominio("entrada_invalida", { cause: "nome da máquina" });
+        const id = assertUuid(ctx.params.id, "máquina");
+        if (!(await deps.dentro(ctx.escopo, (d) => d.repos.maquinaTokens.renomear(id, nome)))) throw new ErroDeDominio("nao_encontrado", { cause: "máquina" });
+        deps.avisar(ctx.escopo, "maquina");
+        ctx.json(200, { id, nome });
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/desconectar$/,
+      async handler(ctx) {
+        const corpo = (await ctx.corpo()) as { sairDasContas?: unknown };
+        const sair = corpo.sairDasContas === true;
+        const id = assertUuid(ctx.params.id, "máquina");
+        const viva = deps.maquinaViva(ctx.escopo, id);
+        const r = await deps.dentro(ctx.escopo, async (d) => {
+          const m = await exigirMaquina(d, id);
+          // Com "Sair também das contas" e a máquina no ar, ela recebe o pedido na próxima puxada, sai das contas e para;
+          // a chave é revogada quando ela confirma. Fora do ar (ou sem a caixa), a chave é revogada agora: as contas
+          // ficam na máquina parada, e a tela diz isso.
+          const contas = sair ? await d.repos.contasIa.pedirSaidaDeTodas(m.id, d.agora()) : 0;
+          if (!sair || !viva) await executar(d, revogarChaveMaquina, { id: m.id });
+          return { maquina: m, contas };
+        });
+        if (sair && viva) deps.logins.pedirDesconexao(ctx.escopo, id);
+        log("info", "maquina_desconectada", { pessoa_id: ctx.escopo.pessoaId, maquina_id: id, sair_das_contas: sair, no_ar: viva, contas: r.contas });
+        deps.avisar(ctx.escopo, "maquina");
+        ctx.json(202, { ok: true, contas: r.contas, aguardandoMaquina: sair && viva });
+      },
+    },
+    {
+      metodo: "POST",
+      padrao: /^\/maquinas\/convites$/,
+      async handler(ctx) {
+        ctx.json(201, deps.dispositivo.criarConvite(ctx.escopo));
+      },
+    },
+    {
+      metodo: "GET",
+      padrao: /^\/maquinas\/convites\/(?<convite>[^/]+)$/,
+      async handler(ctx) {
+        const r = deps.dispositivo.verConvite({ convite: decodeURIComponent(ctx.params.convite ?? ""), escopo: ctx.escopo });
+        if (r.estado === "invalido") { ctx.json(404, { codigo: "convite_invalido" }); return; }
+        ctx.json(200, r);
+      },
+    },
+  ];
+}
+

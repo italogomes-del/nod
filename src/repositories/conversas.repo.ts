@@ -95,15 +95,27 @@ export function conversasRepo(conn: Conn, escopo: Escopo) {
      */
     /** /nova-sessao (0038): sem sessão para retomar, e o histórico do prompt recomeça agora. */
     async recomecar(id: string): Promise<boolean> {
-      const r = await conn`update conversas set sessao_cli = null, sessao_executor = null, sessao_harness = null, sessao_em = null,
+      const r = await conn`update conversas set sessao_cli = null, sessao_executor = null, sessao_harness = null, sessao_em = null, sessao_conta_id = null,
         recomeco_em = clock_timestamp() where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count > 0;
     },
 
     async atualizarSessaoCli(id: string, sessaoCli: string | null, sessaoExecutor: Executor | null = null, sessaoHarness: IdHarness | null = null): Promise<boolean> {
+      // ADR-102 (R1): a conta da sessão é gravada por definirContaDaSessao logo depois; aqui volta a nenhuma.
       const r = await conn`update conversas set sessao_cli = ${sessaoCli}, sessao_executor = ${sessaoCli ? sessaoExecutor : null},
-        sessao_harness = ${sessaoCli ? sessaoHarness : null}, sessao_em = ${sessaoCli ? conn`clock_timestamp()` : null} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+        sessao_harness = ${sessaoCli ? sessaoHarness : null}, sessao_em = ${sessaoCli ? conn`clock_timestamp()` : null}, sessao_conta_id = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
+    },
+
+    /** ADR-102 (R1): a conta em que a sessão do CLI foi criada (a sessão do Codex mora na pasta da conta). */
+    async definirContaDaSessao(id: string, contaId: string | null): Promise<void> {
+      await conn`update conversas set sessao_conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    },
+
+    async contaDaSessao(id: string): Promise<string | null> {
+      const [l] = await conn<{ sessao_conta_id: string | null }[]>`select sessao_conta_id from conversas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l?.sessao_conta_id ?? null;
     },
   };
 }

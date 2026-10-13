@@ -21,7 +21,9 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
         const servidor = o.urlPublica ?? servidorParaScript(proto, String(h["x-forwarded-host"] ?? h.host ?? ""));
         if (!servidor) { ctx.json(400, { codigo: "entrada_invalida", mensagem: "Abra este endereço pelo HTTPS do seu Nod." }); return; }
         ctx.res.writeHead(200, { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "no-store" });
-        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao }));
+        // ADR-102: o convite de uso único do comando que a tela mostra (inválido = o script de sempre, com o código).
+        const convite = new URL(ctx.req.url ?? "/", "http://x").searchParams.get("convite");
+        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite }));
       },
     },
     {

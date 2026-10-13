@@ -27,9 +27,14 @@ export async function propagarSessaoDoTurno(
 ): Promise<void> {
   const { turno, sessaoCli, executor, harness } = p;
   if (!sessaoCli) return;
+  // ADR-102 (R1): a conta em que a sessão nasceu (o resume do Codex só vale na mesma conta).
+  const contaId = await deps.repos.turnos.contaDoTurno(turno.id);
   const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
-  if (sessaoDaConversa) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+  if (sessaoDaConversa) {
+    await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+    if (contaId) await deps.repos.conversas.definirContaDaSessao(turno.conversaId, contaId);
+  }
   if (turno.trabalhoId) {
     // Revisão do épico (S16, 2026-10-08): o turno promovido pela rede que NÃO seguia a sessão da conversa (bifurcou, ou
     // começou uma sessão nova) devolve a sessão que tem o contexto mais novo da conversa. Ela vira também a da conversa —
@@ -40,8 +45,12 @@ export async function propagarSessaoDoTurno(
     const doTrabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
     if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null && seguimentoNaRede(capacidadesDe(harness), p.maquinaBifurca) === "bifurcar") {
       const conversa = await deps.repos.conversas.buscar(turno.conversaId);
-      if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+      if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) {
+        await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+        if (contaId) await deps.repos.conversas.definirContaDaSessao(turno.conversaId, contaId);
+      }
     }
     await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, sessaoCli, harness, executor);
+    if (contaId) await deps.repos.trabalhos.definirContaDaSessao(turno.trabalhoId, contaId);
   }
 }

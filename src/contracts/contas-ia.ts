@@ -9,7 +9,6 @@ import type { EpochMs } from "./ids.ts";
 /** As IAs que têm conta (as do Mac e da VM). */
 export const IAS_COM_CONTA = ["claude-cli", "codex-cli"] as const;
 export type IaComConta = (typeof IAS_COM_CONTA)[number];
-export const ehIaComConta = (v: unknown): v is IaComConta => typeof v === "string" && (IAS_COM_CONTA as readonly string[]).includes(v);
 
 export type EstadoContaNaMaquina = "pronta" | "sem_login" | "sem_acesso";
 export const ESTADOS_CONTA_NA_MAQUINA: readonly EstadoContaNaMaquina[] = ["pronta", "sem_login", "sem_acesso"];

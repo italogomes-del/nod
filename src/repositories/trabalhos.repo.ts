@@ -221,9 +221,19 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      */
     async atualizarSessao(id: string, sessaoCli: string, harness: string | null, executor: Executor | null = null): Promise<boolean> {
       const r = await conn`
-        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}
+        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}, sessao_conta_id = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
+    },
+
+    /** ADR-102 (R1): a conta em que a sessão do trabalho foi criada. */
+    async definirContaDaSessao(id: string, contaId: string | null): Promise<void> {
+      await conn`update trabalhos set sessao_conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+    },
+
+    async contaDaSessao(id: string): Promise<string | null> {
+      const [l] = await conn<{ sessao_conta_id: string | null }[]>`select sessao_conta_id from trabalhos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l?.sessao_conta_id ?? null;
     },
 
     async somarCusto(id: string, custoUsd: number): Promise<boolean> {

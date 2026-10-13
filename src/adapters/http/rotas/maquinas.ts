@@ -95,10 +95,11 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       async handler(ctx) {
         // Quem pede é o motor, nunca uma página (como pareamento/trocar).
         if (ctx.req.headers.origin !== undefined) { ctx.json(403, { codigo: "nao_permitido" }); return; }
-        const corpo = (await ctx.corpo()) as { nome?: unknown; plataforma?: unknown };
+        const corpo = (await ctx.corpo()) as { nome?: unknown; plataforma?: unknown; convite?: unknown };
         const plataforma = lerPlataforma(corpo.plataforma);
         if (!plataforma) throw new ErroDeDominio("entrada_invalida", { cause: "plataforma" });
-        const pedido = deps.dispositivo.pedir({ nome: nomeDaMaquina(corpo.nome), plataforma });
+        // ADR-102: o convite do comando de instalação (opcional; inválido = o pareamento de sempre, com o código).
+        const pedido = deps.dispositivo.pedir({ nome: nomeDaMaquina(corpo.nome), plataforma, ...(typeof corpo.convite === "string" ? { convite: corpo.convite } : {}) });
         if (!pedido) { ctx.json(429, { codigo: "muitos_pedidos", mensagem: "Pedidos de pareamento demais agora. Tente de novo em alguns minutos." }); return; }
         ctx.json(201, pedido);
       },
@@ -145,7 +146,8 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const vivas = new Map((deps.maquinasVivas?.(ctx.escopo) ?? []).map((m) => [m.machineId, m]));
         const maquinas: MaquinaDto[] = chaves.filter((c) => c.revogadaEm === null).map((c) => {
           const viva = vivas.get(c.id);
-          return { id: c.id, nome: viva?.nome ?? c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false };
+          // ADR-102 (R2 da revisão): o nome da chave, que a pessoa pode trocar; o hostname anunciado só o batiza no pareamento.
+          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false };
         });
         // ADR-092: com o servidor no Mac (modo local), o bot sem máquina roda neste Mac ("Este Mac" na tela), e a VM chega à
         // API deste Mac por um túnel SSH — a tela mostra o endereço da API, que é o que o motor guarda.

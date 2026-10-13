@@ -1,3 +1,4 @@
+import type { ContasNoLimite, IaComConta } from "./contas-ia.ts";
 import type { AnexoMeta } from "./anexo.ts";
 import type { PayloadLinhaLigacao } from "./ligacao.ts";
 import type { Autoria } from "./evento.ts";
@@ -67,7 +68,14 @@ export type PayloadMensagem =
    * Code, ou a classe `limite_de_uso` do texto do Codex). Vai no aviso "Turno interrompido" para a tela desenhar o card
    * com a hora LOCAL de `voltaEm` (o texto gravado traz a de São Paulo). `voltaEm` null: o fornecedor não disse quando.
    */
-  | { kind: "limite_do_plano"; harness: IdHarness | null; voltaEm: EpochMs | null; conta?: ContaNoLimite }
+  | { kind: "limite_do_plano"; harness: IdHarness | null; voltaEm: EpochMs | null; conta?: ContaNoLimite; contas?: ContasNoLimite }
+  /**
+   * definido em 2026-10-13 (ADR-102): a conta da lista bateu no limite e o turno seguiu noutra (a mesma IA, com "Trocar
+   * sozinho", ou outra IA). A conta pelo apelido (o servidor guarda a lista).
+   */
+  | { kind: "conta_seguiu"; de: { id: string; apelido: string; ia: IaComConta }; para: { id: string; apelido: string; ia: IaComConta }; voltaEm: EpochMs | null }
+  /** ADR-102: a pessoa escolheu "Seguir com <conta>" e o turno foi refeito nela. */
+  | { kind: "conta_escolhida"; contaId: string; apelido: string; ia: IaComConta }
   /**
    * definido em 2026-10-12 (ADR-101 item 6): a conta em uso bateu no limite, "Trocar sozinho" estava ligado e o turno foi
    * refeito na conta `para`. Só posições; `foraDaTroca` são as contas livres que a troca pulou (corporativas não marcadas).

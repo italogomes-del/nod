@@ -1,3 +1,7 @@
+import { criarLoginsNaMaquina } from "../../services/logins-na-maquina.ts";
+import { anunciarContasDaMaquina } from "../../use-cases/contas-ia.ts";
+import { rotasContasIa } from "./rotas/contas-ia.ts";
+import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia.ts";
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
 import { type Computadores, criarComputadores } from "../fundo/computadores.ts";
@@ -571,6 +575,10 @@ export function comporApp(o: OpcoesCompor): App {
 
   const ponte = criarPonteInterna(db, depsPonte);
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
+  // ADR-102 (2026-10-13): os logins de contas pela tela e o pareamento por código/convite (em memória, src/services).
+  const logins = criarLoginsNaMaquina(relogio);
+  const dispositivo = criarPareamentoDispositivo(relogio);
+  const avisarContas = (escopo: Escopo, motivo: string, loginId?: string) => { barramento.publicar(escopo.pessoaId, "contas.mudou", { motivo, ...(loginId ? { loginId } : {}) }); };
   /**
    * ADR-092: no modo local a ponte HTTP também fica de pé, para as máquinas Linux da pessoa (o motor da ADR-090) — o Mac
    * continua rodando os bots neste processo. A máquina da ponte só pega o turno que tem ELA como alvo, roda sempre a IA
@@ -610,6 +618,40 @@ export function comporApp(o: OpcoesCompor): App {
       const r = await concluirItemNaMaquina(d, { itemId, desfecho });
       if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
     }),
+    // ADR-102: as contas da pessoa são do modo compartilhado (suposição 7: o modo local fica com a tela da ADR-101).
+    ...(compartilhado ? { contas: {
+      anunciar: async (escopo: Escopo, chaveId: string, anunciadas: ContaAnunciada[]) => {
+        const r = await dentro(escopo, (d) => anunciarContasDaMaquina(d, chaveId, anunciadas));
+        if (r.mudou) avisarContas(escopo, "anuncio");
+      },
+      puxada: async (escopo: Escopo, chaveId: string): Promise<PuxadaDeContas> => ({
+        logins: logins.pendentes(escopo, chaveId),
+        sair: await dentro(escopo, (d) => d.repos.contasIa.saidasPendentes(chaveId)),
+        desconectar: logins.desconexaoPedida(escopo, chaveId),
+      }),
+      progresso: async (escopo: Escopo, chaveId: string, p: ProgressoDoLogin) => {
+        const r = logins.progresso(escopo, chaveId, p);
+        if (!r.aceito) {
+          log("aviso", "login_progresso_recusado", { machine_id: chaveId, login_id: p.loginId, fase: p.fase });
+          return false;
+        }
+        if (p.fase === "pronto" && p.impressao) {
+          const conta = await dentro(escopo, async (d) => (await d.repos.contasIa.listar()).contas.find((c) => c.impressao === p.impressao && c.removidaEm === null) ?? null);
+          if (conta) logins.ligarConta(escopo, p.loginId, conta.id);
+        }
+        log("info", "login_na_maquina", { machine_id: chaveId, login_id: p.loginId, fase: p.fase, erro: p.erro ?? null });
+        avisarContas(escopo, "login", p.loginId);
+        return true;
+      },
+      saiu: async (escopo: Escopo, chaveId: string, impressoes: string[], desconectada: boolean) => {
+        await dentro(escopo, async (d) => {
+          await d.repos.contasIa.saiu(chaveId, impressoes);
+          // "Desconectar com sair das contas": a máquina confirmou — agora a chave dela é revogada.
+          if (desconectada && logins.concluirDesconexao(escopo, chaveId)) await d.repos.maquinaTokens.revogar(chaveId, d.agora());
+        });
+        avisarContas(escopo, "saiu");
+      },
+    } } : {}),
   });
 
   // ---- Ligação por voz (definido em 2026-10-04, ADR-071/072) ----------------------------------------------------------
@@ -1074,7 +1116,8 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasTrilha({ dentro }),
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
-    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo: criarPareamentoDispositivo(relogio), maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) }),
+    ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id) }),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) }),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),

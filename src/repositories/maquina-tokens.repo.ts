@@ -70,6 +70,12 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
       return l ?? null;
     },
 
+    /** ADR-102 (R2): o nome que a pessoa deu à máquina; a tela e as notas usam este, não o hostname anunciado. */
+    async renomear(id: string, nome: string): Promise<boolean> {
+      const r = await conn`update maquina_tokens set nome = ${nome} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and revogado_em is null returning id`;
+      return r.length > 0;
+    },
+
     async marcarUso(id: string, agora: number): Promise<void> {
       await conn`update maquina_tokens set ultimo_uso_em = ${data(agora)} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
     },

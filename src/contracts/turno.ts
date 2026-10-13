@@ -126,6 +126,11 @@ export type ResultadoTurno = {
    * ("conta 1", "conta 2"); apelido, e-mail e plano ficam no Mac (ADR-019). Ausente = a IA tem uma conta só no nod.
    */
   contaNoLimite?: ContaNoLimite;
+  /**
+   * ADR-102 (R6 da revisão, 2026-10-13): o plano mandou usar uma conta que a máquina não tem mais (saiu dela entre o
+   * anúncio e o turno). O servidor apaga o vínculo e refaz o turno uma vez noutra conta.
+   */
+  contaAusente?: true;
 };
 
 /**

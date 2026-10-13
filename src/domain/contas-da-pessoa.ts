@@ -39,12 +39,14 @@ export function textoDaImpressaoDaConta(p: { pessoaId: string; ia: IaComConta; e
 
 export const IMPRESSAO = /^[0-9a-f]{64}$/;
 
+export const ehIaComConta = (v: unknown): v is IaComConta => typeof v === "string" && (IAS_COM_CONTA as readonly string[]).includes(v);
+
 const livre = (c: Pick<ContaDaPessoa, "noLimiteAte">, agora: EpochMs) => c.noLimiteAte === null || c.noLimiteAte <= agora;
 const entraNaTroca = (c: ContaDaPessoa) => !c.corporativa || c.entraNaTrocaAutomatica;
-const emOrdem = (contas: readonly ContaDaPessoa[]) => contas.filter((c) => c.removidaEm === null).sort((a, b) => a.posicao - b.posicao);
+const emOrdem = <T extends ContaDaPessoa>(contas: readonly T[]): T[] => contas.filter((c) => c.removidaEm === null).sort((a, b) => a.posicao - b.posicao);
 
 /** A conta em uso de uma IA entre as logadas na máquina (já em ordem). null = nenhuma utilizável sem a pessoa decidir. */
-function contaEmUsoDaIa(daIa: readonly ContaDaPessoa[], p: { modo: ModoDasContas; escolhida: string | null; agora: EpochMs }): ContaDaPessoa | null {
+function contaEmUsoDaIa<T extends ContaDaPessoa>(daIa: readonly T[], p: { modo: ModoDasContas; escolhida: string | null; agora: EpochMs }): T | null {
   const [preferida] = daIa;
   if (!preferida) return null;
   if (livre(preferida, p.agora)) return preferida;
@@ -54,9 +56,9 @@ function contaEmUsoDaIa(daIa: readonly ContaDaPessoa[], p: { modo: ModoDasContas
   return null;
 }
 
-export type ContaDoTurno = {
+export type ContaDoTurno<T extends ContaDaPessoa = ContaDaPessoa> = {
   /** A conta de cada IA que tem conta logada na máquina (null = nenhuma utilizável agora). */
-  porIa: Partial<Record<IaComConta, ContaDaPessoa | null>>;
+  porIa: Partial<Record<IaComConta, T | null>>;
   /** A ordem das IAs para o escolherHarness: as com conta em uso, pela posição dela (ou pela ordem do bot). */
   ordemIas: IdHarness[];
   /** IAs com conta nesta máquina mas nenhuma utilizável agora: entram no `noLimite` do escolherHarness. */
@@ -67,8 +69,8 @@ export type ContaDoTurno = {
  * A conta do próximo turno numa máquina. null = a máquina não anunciou conta nenhuma (motor ou app antigo, ou ainda sem
  * login): o turno segue como hoje, sem `plano.conta`.
  */
-export function contaDoTurno(p: {
-  contas: readonly ContaDaPessoa[];
+export function contaDoTurno<T extends ContaDaPessoa>(p: {
+  contas: readonly T[];
   /** Os ids das contas `pronta` na máquina do turno, sem saída pedida. */
   naMaquina: ReadonlySet<string>;
   modo: ModoDasContas;
@@ -76,10 +78,10 @@ export function contaDoTurno(p: {
   /** A ordem própria do bot (2B), quando ele tem uma. */
   ordemDoBot: readonly IdHarness[] | null;
   agora: EpochMs;
-}): ContaDoTurno | null {
+}): ContaDoTurno<T> | null {
   const lista = emOrdem(p.contas).filter((c) => p.naMaquina.has(c.id));
   if (lista.length === 0) return null;
-  const porIa: Partial<Record<IaComConta, ContaDaPessoa | null>> = {};
+  const porIa: Partial<Record<IaComConta, T | null>> = {};
   for (const ia of IAS_COM_CONTA) {
     const daIa = lista.filter((c) => c.ia === ia);
     if (daIa.length > 0) porIa[ia] = contaEmUsoDaIa(daIa, { modo: p.modo, escolhida: p.escolhidas[ia] ?? null, agora: p.agora });

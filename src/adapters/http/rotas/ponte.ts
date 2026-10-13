@@ -6,6 +6,7 @@ import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
+import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../contracts/contas-ia.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
@@ -13,7 +14,7 @@ import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { capacidadesAnunciadas, entrega, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -93,6 +94,17 @@ export function criarPonteHttpServidor(d: {
    * local avisava).
    */
   inventarioMudou?(escopo: Escopo): void;
+  /**
+   * ADR-102 (2026-10-13): as contas de IA da máquina — o anúncio (no `conectar` e no `inventario`), a puxada de contas
+   * (logins pedidos pela tela, saídas e a desconexão), o progresso de um login e as saídas feitas. Ausente = servidor sem
+   * contas (modo local): a máquina recebe 404 na puxada e segue como antes.
+   */
+  contas?: {
+    anunciar(escopo: Escopo, chaveId: string, anunciadas: ContaAnunciada[]): Promise<void>;
+    puxada(escopo: Escopo, chaveId: string): Promise<PuxadaDeContas>;
+    progresso(escopo: Escopo, chaveId: string, p: ProgressoDoLogin): Promise<boolean>;
+    saiu(escopo: Escopo, chaveId: string, impressoes: string[], desconectada: boolean): Promise<void>;
+  };
 }) {
   const conexoes = new Map<string, Conexao>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
@@ -123,6 +135,12 @@ export function criarPonteHttpServidor(d: {
   }
   function avisarSeMudou(escopo: Escopo, antes: string): void {
     if (assinaturaDasIas(escopo.pessoaId) !== antes) d.inventarioMudou?.(escopo);
+  }
+  /** ADR-102: melhor esforço — o anúncio das IAs não pode falhar porque o das contas falhou. */
+  async function anunciarContas(escopo: Escopo, chaveId: string, bruto: unknown): Promise<void> {
+    const anunciadas = d.contas ? contasAnunciadas(bruto, d.agora()) : undefined;
+    if (!anunciadas || !d.contas) return;
+    await d.contas.anunciar(escopo, chaveId, anunciadas).catch((e) => log("aviso", "contas_anuncio_falhou", { machine_id: chaveId, erro: e instanceof Error ? e.name : "desconhecido" }));
   }
   function conexao(ctx: Ctx): Conexao {
     const c = conexoes.get(ctx.params.chaveId ?? "");
@@ -185,9 +203,10 @@ export function criarPonteHttpServidor(d: {
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
+      await anunciarContas(ctx.escopo, id, b.contas);
       await repetirBarrados(c);
       avisarSeMudou(ctx.escopo, antes);
-      ctx.json(200, { machineId: id, escopo: ctx.escopo });
+      ctx.json(200, { machineId: id, escopo: ctx.escopo, ...(d.contas ? { contasIa: true } : {}) });
     }),
     /**
      * NOD-199 (emenda à ADR-021): anúncio SÓ de inventário, para a máquina já conectada — a IA que ficou pronta (ou caiu)
@@ -209,8 +228,28 @@ export function criarPonteHttpServidor(d: {
       // O `conectar` da ponte interna só registra o anúncio da máquina (idempotente): seguro com turno rodando.
       await c.ponte.conectar(c.anuncio);
       await persistir(c);
+      await anunciarContas(ctx.escopo, ctx.params.chaveId!, b.contas);
       await repetirBarrados(c);
       avisarSeMudou(ctx.escopo, antes);
+      ctx.json(200, { ok: true });
+    }),
+    /** ADR-102: o que a tela pediu a esta máquina (logins, saídas, desconexão). O motor puxa a cada 3 s (1 s com login aberto). */
+    rota("contas", async (ctx) => {
+      const c = conexao(ctx);
+      if (!d.contas) { ctx.json(404, { codigo: "sem_contas" }); return; }
+      c.ultimo = d.agora();
+      ctx.json(200, await d.contas.puxada(ctx.escopo, ctx.params.chaveId!));
+    }),
+    rota("contas/progresso", async (ctx, b) => {
+      conexao(ctx);
+      if (!d.contas) { ctx.json(404, { codigo: "sem_contas" }); return; }
+      const ok = await d.contas.progresso(ctx.escopo, ctx.params.chaveId!, progressoDoLogin(b));
+      ctx.json(ok ? 200 : 409, ok ? { ok: true } : { codigo: "login_recusado" });
+    }),
+    rota("contas/saiu", async (ctx, b) => {
+      conexao(ctx);
+      if (!d.contas) { ctx.json(404, { codigo: "sem_contas" }); return; }
+      await d.contas.saiu(ctx.escopo, ctx.params.chaveId!, impressoes(b.impressoes ?? []), b.desconectada === true);
       ctx.json(200, { ok: true });
     }),
     rota("puxar", async (ctx, b) => {

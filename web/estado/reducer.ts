@@ -146,7 +146,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -753,6 +753,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
   "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", "maquinas"),
+  // ADR-102: a lista de contas (ou um login numa máquina) mudou.
+  "contas.mudou": (e) => invalidar(e, "contas", "maquinas"),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de

@@ -1,6 +1,5 @@
 import type { ContaAnunciada, EstadoContaNaMaquina, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
-import { ehIaComConta } from "../contracts/contas-ia.ts";
-import { apelidoPadrao, decidirAnuncio, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
+import { apelidoPadrao, decidirAnuncio, ehIaComConta, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
 
