@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ConexaoApp } from "../../../web/estado/reducer.ts";
-import { criarConexoes, ERROS_SEGUIDOS_MAX, FALHA_APP, FALHA_JANELA_FECHADA, FALHA_PRAZO, FALHA_SERVIDOR, INTERVALO_MS, PRAZO_MS, type DepsConexao, type JanelaLogin } from "../../../web/lib/conexao.ts";
+import { criarConexoes, ERROS_SEGUIDOS_MAX, FALHA_APP, FALHA_COMPOSIO, FALHA_JANELA_FECHADA, FALHA_PRAZO, FALHA_SERVIDOR, INTERVALO_MS, PRAZO_MS, type DepsConexao, type JanelaLogin } from "../../../web/lib/conexao.ts";
 
 /** Relógio falso: `esperar` avança o tempo na hora, sem timer de verdade. */
-function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string; conectadoDireto?: boolean; janela?: JanelaLogin | null; conectarFalha?: boolean; conectar?: DepsConexao["conectar"]; abrirNoNavegador?: (url: string) => void }) {
+function montar(p: { verificacoes: (boolean | "falhou" | "falhou_composio" | "erro")[]; url?: string; conectadoDireto?: boolean; janela?: JanelaLogin | null; conectarFalha?: boolean; conectar?: DepsConexao["conectar"]; abrirNoNavegador?: (url: string) => void }) {
   let agora = 0;
   const mudancas: [string, ConexaoApp | null][] = [];
   const conectados: string[] = [];
@@ -25,6 +25,7 @@ function montar(p: { verificacoes: (boolean | "falhou" | "erro")[]; url?: string
       ordem.push("verificar");
       const v = p.verificacoes[verificou++] ?? false;
       if (v === "erro") throw new Error("rede");
+      if (v === "falhou_composio") return { conectado: false, falhou: true, causa: "composio" as const };
       return v === "falhou" ? { conectado: false, falhou: true } : { conectado: v };
     },
     mudou: (slug, valor) => void mudancas.push([slug, valor]),
@@ -345,5 +346,18 @@ describe("re-sonda: janela bloqueada, Cancelar e troca de sessão com a sonda em
     expect(m.conectados).toEqual([]);
     expect(m.conexoes.esperando("slack")).toBe(false);
     expect(m.ordem.filter((o) => o === "conectar")).toHaveLength(1);
+  });
+});
+
+describe("falha atribuída ao Composio (NOD-212)", () => {
+  it("diz que foi o Composio, e o 'Tentar de novo' vai direto ao login novo, sem re-sondar a sessão", async () => {
+    const m = montar({ verificacoes: ["falhou_composio", true] });
+    await m.conexoes.iniciar("slack");
+    expect(m.mudancas.at(-1)).toEqual(["slack", { url: "https://login.exemplo/x", falhou: FALHA_COMPOSIO }]);
+    const antes = m.ordem.length;
+    await m.conexoes.iniciar("slack");
+    expect(m.ordem.slice(antes, antes + 2)).toEqual(["abrir", "conectar"]);
+    expect([m.conectou(), m.abriu()]).toEqual([2, 2]);
+    expect(m.conectados).toEqual(["slack"]);
   });
 });

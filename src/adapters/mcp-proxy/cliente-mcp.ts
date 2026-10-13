@@ -4,7 +4,7 @@ import { classificarFalhaHttp, ehRedirecionamentoRecusado, esperaAntes, lerRetry
 import { log } from "../../obs/log.ts";
 import { ORCAMENTO_CONECTOR_MS } from "../../shared/constantes.ts";
 import { CODIGO, interpretar, notificacao, requisicao, type ErroJsonRpc } from "./jsonrpc.ts";
-import { lerRespostaHttp } from "./resposta-http.ts";
+import { lerRespostaHttp, TETO_CATALOGO_MCP_BYTES, TETO_RESPOSTA_MCP_BYTES } from "./resposta-http.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
 
 /**
@@ -92,8 +92,11 @@ export function textoDoConteudo(result: unknown): ResultadoChamadaMcp {
 export const PROTOCOLO_MCP = "2025-06-18";
 
 type Transporte = {
-  /** `prazoMs` corta o timeout desta requisição (só http; o stdio usa sempre o seu). */
-  enviar(linha: string, prazoMs?: number): Promise<{ result?: unknown; error?: ErroJsonRpc } | null>;
+  /**
+   * `prazoMs` corta o timeout desta requisição (só http; o stdio usa sempre o seu). `tetoBytes` (NOD-212, só http):
+   * teto da resposta; padrão TETO_RESPOSTA_MCP_BYTES.
+   */
+  enviar(linha: string, prazoMs?: number, tetoBytes?: number): Promise<{ result?: unknown; error?: ErroJsonRpc } | null>;
   fechar(): Promise<void>;
 };
 
@@ -198,7 +201,7 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
   const url = cfg.url;
   let sessao: string | null = null;
   return {
-    async enviar(linha, prazoMs) {
+    async enviar(linha, prazoMs, tetoBytes = TETO_RESPOSTA_MCP_BYTES) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, prazoMs ?? timeoutMs));
       try {
@@ -223,7 +226,7 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
         }
         const pedido = interpretar(linha);
         const id = pedido.tipo === "requisicao" ? pedido.id : null;
-        const m = await lerRespostaHttp(r, id);
+        const m = await lerRespostaHttp(r, id, tetoBytes);
         if (!m) {
           if (id === null) return null;
           throw new ErroTransporteMcp("falha_tecnica", "resposta não JSON-RPC");
@@ -310,7 +313,8 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
     for (let tentativa = 1; ; tentativa++) {
       const campos = (desfecho: string) => ({ conector: cfg.nome, ferramenta: rotulo, status: anterior?.status, tentativa, espera_ms: anterior?.espera, desfecho });
       try {
-        r = await transporte.enviar(requisicao(proximoId++, metodo, params), prazo(inicio));
+        // NOD-212: o catálogo (tools/list) tem teto próprio; acima de 1 MiB ele falhava sempre, e a re-sonda repetia a falha.
+        r = await transporte.enviar(requisicao(proximoId++, metodo, params), prazo(inicio), metodo === "tools/list" ? TETO_CATALOGO_MCP_BYTES : undefined);
         if (anterior) log("info", "conector_nova_tentativa", campos("recuperou"));
         logRenovacao("recuperou");
         break;

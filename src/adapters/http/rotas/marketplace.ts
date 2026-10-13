@@ -192,7 +192,9 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
       const c = criarClienteComposio(op.decifrar(cifrada), op.fetchImpl, { agora, prazoFinal: inicio + VERIFICAR_TETO_MS });
       const ativo = await c.conectado(sessao.contaId, `nod:${ctx.escopo.tenantId}:${ctx.escopo.pessoaId}`, app.slug);
       if (!ativo) { ctx.json(200, { conectado: false }); return; }
-      await c.fixarConta(sessao.sessaoId, app.slug, sessao.contaId);
+      const fixada = await c.fixarConta(sessao.sessaoId, app.slug, sessao.contaId);
+      // NOD-212: o que o próprio Composio diz que a sessão expõe depois de fixar a conta; separa no log a falha dele da nossa.
+      log("info", "marketplace_fixar_conta", { toolkit: app.slug, ferramentas_sessao: fixada.ferramentas, avisos: fixada.avisos.join(",") || null });
       // definido em 2026-10-12 (NOD-208): logo depois do fixarConta a sessão do Composio pode ainda não expor o
       // toolkit; a sonda se repete com espera crescente até o teto. Cada tentativa é uma transação: a espera
       // fica FORA dela e não segura conexão do pool. A falha intermediária grava ultimaFalha; o sucesso a limpa.
@@ -208,9 +210,13 @@ export function rotasMarketplace(op: OpcoesRotasMarketplace): Rota[] {
         if (r.ok) break;
       }
       if (!r) throw new ErroDeDominio("estado_invalido");
+      // NOD-212: falha final com a sessão sem nenhuma ferramenta concreta segundo o próprio Composio é dele, não do app nem
+      // do nod: a web diz isso e o "Tentar de novo" vai direto a um login novo (sessão nova), sem re-sondar esta.
+      const causa = r.ok ? null : fixada.ferramentas === 0 ? "composio" : "app";
+      if (!r.ok) log("aviso", "marketplace_verificar_falhou", { toolkit: app.slug, causa, motivo: r.conector.ultimaFalha?.motivo ?? null, ferramentas_sessao: fixada.ferramentas, decorrido_ms: agora() - inicio });
       // definido em 2026-09-25 (revisão do PR #68): conta ativa e sonda falhou = `falhou`, para a web parar de
       // perguntar — sem isso ela repetia fixarConta + sonda a cada 2,5 s por 10 min, com o spinner na tela.
-      ctx.json(200, { conectado: r.ok, ...(r.ok ? {} : { falhou: true }), conector: r.conector });
+      ctx.json(200, { conectado: r.ok, ...(r.ok ? {} : { falhou: true, causa }), conector: r.conector });
     } },
   ];
 }

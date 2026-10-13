@@ -1,10 +1,12 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { rotasMarketplace } from "../../src/adapters/http/rotas/marketplace.ts";
 import { rotasConectores } from "../../src/adapters/http/rotas/conectores.ts";
 import type { ResultadoSonda } from "../../src/contracts/servicos.ts";
 import { chaveDe, cifrar, decifrar } from "../../src/db/cifra.ts";
 import { dentroEmMemoria, servicosDeTeste } from "../helpers/l5.ts";
 import { servidorDeTeste } from "../helpers/servidor-de-teste.ts";
+import { sondarConector } from "../../src/adapters/mcp-proxy/probe.ts";
+import { catalogoComposio, mcpComposioFalso, URL_SESSAO_COMPOSIO } from "../helpers/composio-mcp-falso.ts";
 
 it("login Composio só habilita após conta ativa, confere o dono, cifra a chave e não concede ferramentas", async () => {
   const chave = chaveDe("teste-composio-local");
@@ -62,7 +64,7 @@ it("login Composio só habilita após conta ativa, confere o dono, cifra a chave
  * sonda com espera crescente (0, 2, 4, 8 s) e não começa tentativa nova depois do teto de 20 s. Relógio e
  * espera falsos: o teste não dorme.
  */
-async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSonda: number | ((n: number, orcamentoMs: number | undefined) => number) = 0, custoComposio = 0) {
+async function montarVerificar(sonda: (n: number) => ResultadoSonda | Promise<ResultadoSonda>, custoDaSonda: number | ((n: number, orcamentoMs: number | undefined) => number) = 0, custoComposio = 0, corpoPatch: unknown = {}) {
   const chave = chaveDe("teste-composio-local");
   const cifra = (s: string) => cifrar(s, chave);
   let agora = 0;
@@ -89,7 +91,7 @@ async function montarVerificar(sonda: (n: number) => ResultadoSonda, custoDaSond
     if (u.endsWith("/connected_accounts/ca_teste")) agora += custoComposio;
     if (u.endsWith("/session/trs_teste") && init?.method === "PATCH") agora += custoComposio;
     if (u.endsWith("/connected_accounts/ca_teste")) return Response.json({ status: "ACTIVE", user_id: userId, toolkit: { slug: "slack" } });
-    if (u.endsWith("/session/trs_teste") && init?.method === "PATCH") return Response.json({});
+    if (u.endsWith("/session/trs_teste") && init?.method === "PATCH") return Response.json(corpoPatch);
     throw new Error("endpoint inesperado");
   };
   let userId = "";
@@ -181,4 +183,41 @@ it("NOD-208 (revisão): o tempo da consulta da conta e do fixarConta sai do mesm
     expect(m.orcamentos).toEqual([14_000]);
     expect(m.agora()).toBe(20_000);
   } finally { await m.srv.close(); }
+});
+
+/**
+ * NOD-212 (reprodução local; não confirmada em log de produção): a sonda REAL, pelo cliente MCP, contra uma sessão no
+ * formato do tool router com o catálogo do Slack (170 ferramentas, página única acima de 1 MiB). Antes da correção as
+ * 4 tentativas falhavam igual e o Breno via "o app não respondeu".
+ */
+it("NOD-212: catálogo do Slack acima de 1 MiB pela sonda real → conectado na 1ª tentativa", async () => {
+  const mcp = mcpComposioFalso({ ferramentas: catalogoComposio("SLACK", 170) }) as typeof fetch;
+  const cfg = { nome: "slack", transporte: "http" as const, url: URL_SESSAO_COMPOSIO, env: { "x-api-key": "ak_segredo" } };
+  const m = await montarVerificar(() => sondarConector(cfg, { fetchImpl: mcp, orcamentoMs: 20_000 }));
+  try {
+    expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: true });
+    expect(m.sondas()).toBe(1);
+    expect(m.memoria.banco.conectores[0]).toMatchObject({ habilitado: true, ultimaFalha: null });
+  } finally { await m.srv.close(); }
+});
+
+it("NOD-212: o Composio diz que a sessão não tem ferramenta do Slack e a sonda falha → causa composio, dito no log", async () => {
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const corpo = { tool_router_tools: ["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL"], warnings: [{ code: "PRELOAD_TOOLS_HIGH_CONTEXT_USAGE" }] };
+  const m = await montarVerificar(() => ({ ok: false, motivo: "conector_indisponivel" }), 0, 0, corpo);
+  try {
+    expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true, causa: "composio" });
+    const linhas = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(linhas.find((l) => l.evento === "marketplace_fixar_conta")).toMatchObject({ toolkit: "slack", ferramentas_sessao: 0, avisos: "PRELOAD_TOOLS_HIGH_CONTEXT_USAGE" });
+    expect(linhas.find((l) => l.evento === "marketplace_verificar_falhou")).toMatchObject({ toolkit: "slack", causa: "composio", motivo: "conector_indisponivel", ferramentas_sessao: 0 });
+  } finally { logSpy.mockRestore(); await m.srv.close(); }
+});
+
+it("NOD-212: a sessão expõe o Slack (ou o Composio não disse) e a sonda falha → causa app", async () => {
+  for (const corpo of [{ tool_router_tools: ["SLACK_SEND_MESSAGE"] }, {}]) {
+    const m = await montarVerificar(() => ({ ok: false, motivo: "conector_indisponivel" }), 0, 0, corpo);
+    try {
+      expect(await (await m.srv.chamar(m.sessao, "POST", "marketplace/slack/verificar")).json()).toMatchObject({ conectado: false, falhou: true, causa: "app" });
+    } finally { await m.srv.close(); }
+  }
 });

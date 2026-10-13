@@ -232,9 +232,25 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
       const t = r.toolkit as { slug?: unknown } | undefined;
       return r.status === "ACTIVE" && r.is_disabled !== true && r.user_id === userId && t?.slug === toolkit;
     },
-    async fixarConta(sessaoId: string, toolkit: string, contaId: string) {
+    /**
+     * NOD-212: a resposta do PATCH traz `tool_router_tools`, as ferramentas que a sessão expõe depois de fixar a conta.
+     * `ferramentas` conta as concretas (sem COMPOSIO_*); null = o provedor não mandou a lista (resposta sem corpo ou
+     * noutro formato) e ninguém conclui nada dela. `avisos` são só os códigos (ex.: PRELOAD_TOOLS_HIGH_CONTEXT_USAGE).
+     */
+    async fixarConta(sessaoId: string, toolkit: string, contaId: string): Promise<{ ferramentas: number | null; avisos: string[] }> {
       const r = await requisitar("PATCH", `/tool_router/session/${encodeURIComponent(sessaoId)}`, { connected_accounts: { [toolkit]: [contaId] } }).catch(() => null);
       if (!r?.ok) throw new ErroDeDominio("conector_indisponivel");
+      const lido: unknown = await r.json().catch(() => null);
+      const corpo = lido && typeof lido === "object" && !Array.isArray(lido) ? lido as Record<string, unknown> : null;
+      const lista = corpo?.tool_router_tools;
+      // Autorrevisão do PR #288: item que não é string = formato que não conhecemos; contar 0 culparia o Composio.
+      const ferramentas = Array.isArray(lista) && lista.every((t): t is string => typeof t === "string")
+        ? lista.filter((t) => !t.startsWith("COMPOSIO_")).length
+        : null;
+      const avisos = (Array.isArray(corpo?.warnings) ? corpo.warnings as unknown[] : [])
+        .map((w) => (w && typeof w === "object" ? (w as Record<string, unknown>).code : null))
+        .filter((c): c is string => typeof c === "string" && /^[A-Z0-9_]{1,64}$/.test(c));
+      return { ferramentas, avisos };
     },
   };
 }

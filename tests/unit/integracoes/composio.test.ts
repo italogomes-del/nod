@@ -44,7 +44,7 @@ describe("cliente do Composio REST: nova tentativa (NOD-157)", () => {
     await expect(a.c.fixarConta("s1", "gmail", "ca1")).rejects.toMatchObject({ codigo: "conector_indisponivel" });
     expect(a.metodos).toEqual(["PATCH"]);
     const b = cliente([429]);
-    await expect(b.c.fixarConta("s1", "gmail", "ca1")).resolves.toBeUndefined();
+    await expect(b.c.fixarConta("s1", "gmail", "ca1")).resolves.toEqual({ ferramentas: null, avisos: [] });
     expect(b.metodos).toEqual(["PATCH", "PATCH"]);
   });
 
@@ -120,5 +120,33 @@ describe("cliente do Composio REST: nova tentativa (NOD-157)", () => {
       expect(await r).toMatchObject({ codigo: "conector_indisponivel" });
       expect(abortos).toEqual([5_000]);
     });
+  });
+});
+
+// NOD-212: a resposta do PATCH diz o que a sessão expõe; é ela que separa no log a falha do Composio da nossa.
+describe("fixarConta lê tool_router_tools (NOD-212)", () => {
+  beforeEach(() => { vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { vi.restoreAllMocks(); });
+  const comResposta = (corpo: unknown) => criarClienteComposio("chave", (async () => Response.json(corpo)) as typeof fetch);
+
+  it("conta só as concretas e devolve os códigos de aviso", async () => {
+    const r = await comResposta({ session_id: "s1", tool_router_tools: ["COMPOSIO_MULTI_EXECUTE_TOOL", "SLACK_SEND_MESSAGE", "SLACK_LIST_CHANNELS"], warnings: [{ code: "PRELOAD_TOOLS_HIGH_CONTEXT_USAGE", message: "muitas ferramentas" }, { code: "com espaço e https://x" }] }).fixarConta("s1", "slack", "ca1");
+    expect(r).toEqual({ ferramentas: 2, avisos: ["PRELOAD_TOOLS_HIGH_CONTEXT_USAGE"] });
+  });
+
+  it("sessão só com COMPOSIO_* → 0; sem a lista → null (ninguém conclui nada)", async () => {
+    expect(await comResposta({ tool_router_tools: ["COMPOSIO_SEARCH_TOOLS"] }).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: 0, avisos: [] });
+    expect(await comResposta({}).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+  });
+
+  // Autorrevisão do PR #288: lista noutro formato (objetos, null no meio) contava 0 e virava causa "composio",
+  // culpando o provedor e mandando refazer o login sem evidência. Formato desconhecido = null.
+  it("lista com item que não é string, corpo array/primitivo ou warnings estranho → null e sem quebrar", async () => {
+    expect(await comResposta({ tool_router_tools: [{ slug: "SLACK_SEND_MESSAGE" }] }).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+    expect(await comResposta({ tool_router_tools: ["SLACK_SEND_MESSAGE", null] }).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+    expect(await comResposta({ tool_router_tools: "SLACK_SEND_MESSAGE", warnings: "x" }).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+    expect(await comResposta(["SLACK_SEND_MESSAGE"]).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+    expect(await comResposta(5).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: null, avisos: [] });
+    expect(await comResposta({ tool_router_tools: [], warnings: [null, 3, { code: 7 }, { code: "OK_1" }] }).fixarConta("s1", "slack", "ca1")).toEqual({ ferramentas: 0, avisos: ["OK_1"] });
   });
 });

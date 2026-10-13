@@ -73,7 +73,7 @@ export type OpcoesServicos = {
   /** Sobrescreve services.conectores (default: falso que registra chamadas e responde "ok:<tool>"). */
   conectores?: Services["conectores"];
   chamadas?: ChamadaConector[];
-  sonda?: (conectorId: string, opcoes?: { orcamentoMs?: number }) => ResultadoSonda;
+  sonda?: (conectorId: string, opcoes?: { orcamentoMs?: number }) => ResultadoSonda | Promise<ResultadoSonda>;
 };
 
 export function servicosDeTeste(opcoes: OpcoesServicos = {}): Services & { tokenTurno: TokenTurno } {

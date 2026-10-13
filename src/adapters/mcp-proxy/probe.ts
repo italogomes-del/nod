@@ -74,6 +74,27 @@ export function paraCapacidade(t: FerramentaDescoberta): CapacidadeConector {
   };
 }
 
+/**
+ * NOD-212: a causa de uma falha de sonda, para o log separar o que o `motivo` junta (conector_indisponivel cobre 401,
+ * 5xx, rede, sessão expirada e resposta grande). Só rótulos fixos e o código: nunca a URL, a chave ou a mensagem bruta.
+ */
+export function causaDaFalhaDeSonda(e: unknown): string {
+  if (!(e instanceof ErroTransporteMcp)) return "falha_tecnica";
+  if (e.sessaoExpirada) return "sessao_expirada";
+  if (e.status !== undefined) return `http_${e.status}`;
+  if (e.motivo === "timeout_transporte") return "prazo";
+  if (e.cause instanceof ErroTransporteMcp) return causaDaFalhaDeSonda(e.cause);
+  if (e.cause instanceof Error && e.cause.message === "resposta_mcp_grande") return "resposta_grande";
+  if (e.cause instanceof Error && e.cause.name === "AbortError") return "prazo";
+  if (typeof e.cause === "string") {
+    const rpc = /^(-\d+) /.exec(e.cause);
+    if (rpc) return `rpc_${rpc[1]}`;
+    if (e.cause === "resposta não JSON-RPC") return "resposta_invalida";
+  }
+  if (e.motivo === "falha_tecnica") return "catalogo_invalido";
+  return "rede";
+}
+
 export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {}): Promise<ResultadoSonda> {
   const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
   const cliente = criarClienteMcp({
@@ -101,7 +122,7 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
     return { ok: true, ferramentas: concretas.map(paraCapacidade) };
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";
-    log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, erro: e instanceof Error ? e.name : "desconhecido" });
+    log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, causa: causaDaFalhaDeSonda(e), ...(e instanceof ErroTransporteMcp && e.status !== undefined ? { status: e.status } : {}), erro: e instanceof Error ? e.name : "desconhecido" });
     return { ok: false, motivo };
   } finally {
     await cliente.fechar().catch(() => undefined);

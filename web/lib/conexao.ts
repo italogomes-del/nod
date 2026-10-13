@@ -19,8 +19,11 @@ export type RespostaConectar = { url?: string; conectado?: boolean; frase?: stri
 
 export type DepsConexao = {
   conectar(slug: string): Promise<RespostaConectar>;
-  /** `falhou`: a conta entrou, mas o app não respondeu à sonda — esperar mais não resolve. */
-  verificar(slug: string): Promise<{ conectado: boolean; falhou?: boolean }>;
+  /**
+   * `falhou`: a conta entrou, mas o app não respondeu à sonda — esperar mais não resolve. `causa` (NOD-212):
+   * "composio" = a sessão do Composio não expõe nenhuma ferramenta do app; o resto é "app".
+   */
+  verificar(slug: string): Promise<{ conectado: boolean; falhou?: boolean; causa?: "composio" | "app" | null }>;
   /** O estado do login mudou (null = acabou: conectou ou foi cancelado). */
   mudou(slug: string, valor: ConexaoApp | null): void;
   /** Conectou. Chamado uma vez, depois de `mudou(slug, null)`. */
@@ -44,6 +47,11 @@ export const FALHA_JANELA_FECHADA = "A janela de login foi fechada antes de term
 export const FALHA_PRAZO = "O login não terminou a tempo.";
 export const FALHA_SERVIDOR = "Não consegui falar com o app agora.";
 export const FALHA_APP = "O login deu certo, mas o app não respondeu. Tente de novo em instantes.";
+/**
+ * NOD-212: o Composio confirmou a conta, mas a sessão dele não liberou nenhuma ferramenta do app. Esperar não resolve;
+ * o próximo passo é um login novo (que abre outra sessão). Fica no log `marketplace_verificar_falhou` com causa composio.
+ */
+export const FALHA_COMPOSIO = "O login deu certo, mas o Composio não liberou as ferramentas deste app. Clique em Tentar de novo para refazer o login; se repetir, avise o suporte com o horário.";
 
 /** O que acontece quando ESTA tentativa conecta (criar a rotina que esperava o app, por exemplo). Morre com ela. */
 export type Depois = () => void | Promise<void>;
@@ -70,7 +78,7 @@ export function criarConexoes(deps: DepsConexao) {
         erros = 0;
         if (vivas.get(slug)?.id !== id) return;
         if (r.conectado) return concluir(slug, id);
-        if (r.falhou) return falhar(slug, id, url, FALHA_APP);
+        if (r.falhou) return falhar(slug, id, url, r.causa === "composio" ? FALHA_COMPOSIO : FALHA_APP);
       } catch {
         // estado_invalido enquanto a sessão do provedor ainda não existe, ou rede: continua, com teto.
         erros += 1;
