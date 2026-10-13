@@ -5,6 +5,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
 import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
+import { renderContasNaMaquina, resumoDasContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
 
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
@@ -67,6 +68,33 @@ export function leituraNoCartao(estado: Pick<Estado, "trabalhos">, id: string): 
   return `<details class="maq-leitura" data-disclosure="maq-leitura-${esc(id)}"><summary><span class="maq-nivel nivel-${nivel}" aria-hidden="true"></span><span>${esc(curto)}</span></summary><p class="mac-det-txt">${esc(numeros)}.${esc(porque)} O quanto os bots podem usar (Este Mac) vale para todas as máquinas.</p></details>`;
 }
 
+/** ADR-102 (G2-M3): o ⋯ da máquina — renomear, as contas dela e desconectar. */
+function menuDaMaquina(estado: Estado, m: MaquinaDto): string {
+  const aberto = estado.contasUi.maquinaMenu === m.id;
+  const itens = aberto
+    ? `<div class="cl-menu" role="menu" aria-label="${esc(m.nome)}">
+        <span class="cl-menu-tit">${esc(m.nome)}</span>
+        <button type="button" role="menuitem" data-act="maq-renomear" data-maquina="${esc(m.id)}">${ICONE.lapis}<span>Renomear</span></button>
+        ${estado.contasIa?.disponivel ? `<button type="button" role="menuitem" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas</span></button>` : ""}
+        <hr><button type="button" role="menuitem" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar</span></button>
+      </div>`
+    : "";
+  return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-haspopup="menu" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
+}
+
+/** ADR-102 (G2-M5): "Desconectar" com "Sair também das contas de IA" (marcada quando há contas lá). */
+function dialogoDesconectar(estado: Estado): string {
+  const q = estado.contasUi.desconectar;
+  const m = q ? estado.maquinas?.maquinas.find((x) => x.id === q.maquinaId) : null;
+  if (!q || !m) return "";
+  const n = (estado.contasIa?.contas ?? []).filter((c) => c.maquinas.some((v) => v.maquinaId === m.id && v.estado === "pronta")).length;
+  const bots = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id).map((b) => b.nome);
+  const pareceMac = m.plataforma === "darwin";
+  const volta = bots.length ? ` ${bots.join(", ")} ${bots.length === 1 ? "volta" : "voltam"} para ${estado.maquinas?.servidorNoMac ? "este Mac" : "outra máquina"} no próximo trabalho; o que está rodando agora termina lá.` : "";
+  const caixa = n > 0 ? `<label class="cl-caixa cl-check"><input type="checkbox" data-maq-sair-contas${q.sair ? " checked" : ""}><span>Sair também ${n === 1 ? "da conta" : `das ${n} contas`} de IA ${pareceMac ? "no" : "na"} ${esc(m.nome)}<small>Recomendado se a máquina vai ser apagada ou passar para outra pessoa. Nas outras máquinas as contas continuam.</small></span></label>` : "";
+  return `<div class="cl-fundo" data-act="maq-desconectar-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="maq-desc-tit"><h3 id="maq-desc-tit">Desconectar ${pareceMac ? "o" : "a"} ${esc(m.nome)}?</h3><p>A chave dela é cancelada e ela para de pegar trabalho.${esc(volta)}</p>${caixa}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="maq-desconectar-fechar" data-cl-autofoco>Cancelar</button><button type="button" class="bt perigo" data-act="maq-desconectar-confirmar">Desconectar ${esc(m.nome)}</button></div></div>`;
+}
+
 function cartao(estado: Estado, m: MaquinaDto): string {
   const aqui = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id);
   const quem = aqui.length === 0 ? "Nenhum bot trabalha só aqui" : aqui.length === 1 ? `${aqui[0]!.nome} trabalha aqui` : `${aqui.length} bots trabalham aqui: ${aqui.map((b) => b.nome).join(", ")}`;
@@ -76,10 +104,13 @@ function cartao(estado: Estado, m: MaquinaDto): string {
   return `<div class="espaco-cartao maq-cartao">
     <div class="maq-cab">
       <span class="maq-ic" aria-hidden="true">${m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor}</span>
-      <span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>
+      ${estado.contasUi.maquinaRenomear === m.id
+        ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt pri sm">Salvar</button><button type="button" class="bt sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
+        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
       ${estadoTxt}
+      ${menuDaMaquina(estado, m)}
     </div>
-    ${chipsDasIas(m)}
+    ${estado.contasIa?.disponivel ? resumoDasContasNaMaquina(estado.contasIa, m) : chipsDasIas(m)}
     ${m.conectada ? leituraNoCartao(estado, m.id) : ""}
     <div class="maq-quem"><span class="maq-avatares">${aqui.slice(0, 6).map((b) => iconeAgente(b, "sm")).join("")}</span><span>${esc(quem)}</span></div>
   </div>`;
@@ -109,6 +140,7 @@ export function renderMaquinas(estado: Estado): string {
     <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: "pri" })}</div>
     ${conectar}
     <div class="maq-lista">${lista}</div>
+    ${dialogoDesconectar(estado)}
     ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
     <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas, noMac)}` : ""}
     <ul class="regras-maq">
@@ -132,21 +164,43 @@ export function maquinaNova(estado: Estado, c: ConectarMaquina): MaquinaDto | nu
   return (estado.maquinas?.maquinas ?? []).find((m) => !c.chavesAntes.includes(m.id)) ?? null;
 }
 
+/** ADR-102: o contexto da lista de contas para o passo "Contas" do Conectar (só VM: o Mac entra pelo app dele). */
+function contextoDasContas(estado: Estado): ContextoContas | null {
+  if (!estado.contasIa?.disponivel) return null;
+  return {
+    contas: estado.contasIa, maquinas: estado.maquinas?.maquinas ?? [], detalhes: estado.detalhesContas, ui: estado.contasUi, agora: estado.agora,
+    noApp: estado.detalhesContas !== null, botsNaMaquina: () => [], cartaoDoMac: () => "",
+  };
+}
+
 function renderConectar(estado: Estado, c: ConectarMaquina): string {
-  const passos = [
-    ["comando", "Instalar"],
-    ["codigo", "Digitar o código"],
-    ["confirmar", "Confirmar"],
-    ["ias", "Entrar nas IAs"],
-    ["bots", "Escolher os bots"],
-  ] as const;
-  const indice = passos.findIndex(([id]) => id === c.passo);
+  // ADR-102 (CMJ): com o convite, a tela vê a máquina chegar — sem o passo de digitar o código.
+  const comConvite = Boolean(c.convite);
+  const passos = comConvite
+    ? ([["comando", "Instalar"], ["confirmar", "Confirmar"], ["ias", "Contas"], ["bots", "Escolher os bots"]] as const)
+    : ([
+      ["comando", "Instalar"],
+      ["codigo", "Digitar o código"],
+      ["confirmar", "Confirmar"],
+      ["ias", "Entrar nas IAs"],
+      ["bots", "Escolher os bots"],
+    ] as const);
+  const indice = (passos as readonly (readonly [string, string])[]).findIndex(([id]) => id === (comConvite && c.passo === "codigo" ? "comando" : c.passo));
   const trilha = `<ol class="cx-trilha">${passos.map(([id, nome], i) => `<li class="${i < indice ? "feito" : i === indice ? "agora" : ""}"${id === c.passo ? ' aria-current="step"' : ""}><span>${i < indice ? "✓" : i + 1}</span>${esc(nome)}</li>`).join("")}</ol>`;
   const erro = c.erro ? `<p class="cx-erro" role="alert">${esc(c.erro)}</p>` : "";
   const fechar = botao("fechar-conectar-maquina", "Fechar", { classe: "link" });
   const nova = maquinaNova(estado, c);
   let corpo = "";
-  if (c.passo === "comando") {
+  if (c.passo === "comando" && comConvite) {
+    const origem = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";
+    const cmd = `curl -fsSL "${origem}/motor?convite=${c.convite}" | sh`;
+    corpo = `<h3>Rode este comando na sua máquina Linux</h3>
+      <p>Debian ou Ubuntu, em qualquer provedor (2 vCPU e 4 GB para começar; 4 vCPU e 8 GB com vários bots). Ele instala o motor com o Claude Code e o Codex. A máquina não precisa de porta aberta: é ela que procura trabalho no Nod.</p>
+      <div class="cx-cmd"><code>${esc(cmd)}</code>${botao("copiar-texto", "Copiar", { classe: "sm", dados: { texto: cmd } })}</div>
+      <div class="cx-espera" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Esperando a máquina aparecer…</span><small>o convite vale 30 min e uma vez</small></div>
+      ${erro}
+      <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Apareceu um código?", { classe: "link", dados: { passo: "codigo" } })}</div>`;
+  } else if (c.passo === "comando") {
     // O endereço deste Nod (a página é servida por ele); os testes de render rodam sem DOM.
     const origem = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";
     // ADR-092: com o servidor no Mac, a VM chega à API deste Mac por um túnel SSH aberto daqui (nada fica exposto na
@@ -174,7 +228,15 @@ function renderConectar(estado: Estado, c: ConectarMaquina): string {
       <div class="cx-confirma"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><div><b>${esc(c.pedido.nome)}</b><small>${c.pedido.plataforma === "linux" ? "Linux" : "Mac"} · código ${esc(c.codigo.toUpperCase())} · pediu ${esc(haQuantoPediu(c.pedido.pedidoHaS))}</small></div></div>
       <p class="cx-nota">Conecte só se foi você quem rodou o comando nessa máquina agora e o código é o que apareceu nela. Quem conecta uma máquina passa a receber o trabalho dos bots que você mover para ela.</p>
       ${erro}
-      <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: "codigo" } })}${botao("aprovar-maquina", `Conectar ${esc(c.pedido.nome)}`, { classe: "pri" })}</div>`;
+      <div class="cx-rodape">${botao("passo-conectar-maquina", "Voltar", { classe: "link", dados: { passo: comConvite ? "comando" : "codigo" } })}${botao("aprovar-maquina", `Conectar ${esc(c.pedido.nome)}`, { classe: "pri" })}</div>`;
+  } else if (c.passo === "ias" && contextoDasContas(estado)) {
+    const nome = nova?.nome ?? c.pedido?.nome ?? "a máquina";
+    const ctx = contextoDasContas(estado)!;
+    corpo = `<h3>Entre nas suas contas de IA na ${esc(nome)}</h3>
+      <p>O login abre aqui na tela: você entra na página da Anthropic ou da OpenAI e a ${esc(nome)} fica com a conta. O Nod não vê sua senha, e o código que você cola vai cifrado direto para a máquina.</p>
+      ${nova ? renderContasNaMaquina(ctx, nova.id) : `<div class="cx-espera" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Esperando a ${esc(nome)} terminar de conectar…</span></div>`}
+      <p class="cx-nota">GitHub (opcional), no terminal da máquina: <code>nod-motor entrar github</code></p>
+      <div class="cx-rodape">${fechar}${botao("passo-conectar-maquina", "Continuar", { classe: "pri", dados: { passo: "bots" }, desabilitado: !nova })}</div>`;
   } else if (c.passo === "ias") {
     const nome = nova?.nome ?? c.pedido?.nome ?? "a máquina";
     const claude = nova?.ias["claude-cli"];

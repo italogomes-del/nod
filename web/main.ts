@@ -9,6 +9,9 @@ import { iasDaTela, mudarRascunho, ordemDaPessoa, pedidoDoMenu, pedidoDoRascunho
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
 import { abrirAvisoDosTermos } from "./telas/aviso-termos-dialogo.ts";
 import { criarContasDoMac } from "./lib/contas-do-mac.ts";
+import { criarContasDaPessoa } from "./lib/contas-da-pessoa.ts";
+import { cifrarCodigo } from "./lib/cifra.ts";
+import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
@@ -546,6 +549,14 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
   if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
+  // ADR-102: servidor sem a rota (404, versão anterior) fica com a tela de antes.
+  if (q === "contas") {
+    const contas = await api.contasIa().catch((e: unknown): ContasIaDto => { if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] }; throw e; });
+    const ponte = window.nodDesktop?.contas;
+    const detalhes = ponte?.detalhes ? await ponte.detalhes().catch(() => null) : null;
+    window.setTimeout(() => contasDaPessoa.aoHidratar(contas), 0);
+    return { tipo: "hidratar-contas", contas, detalhes };
+  }
   // ADR-077: falha fechada — sem a rota (ou com erro), o onboarding não abre e o app segue normal.
   if (q === "onboarding") return { tipo: "hidratar-onboarding", onboarding: await api.onboarding().catch(() => null) };
   if (q === "ligacao") {
@@ -667,7 +678,8 @@ function relevante(q: Invalidacao): boolean {
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
-  if (q === "maquinas") return secao === "maquinas" || t.tipo === "conversa";
+  if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
+  if (q === "contas") return secao === "maquinas" || secao === "conexao";
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -1359,12 +1371,21 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
 function regiaoReabrindo(id: string, html: string): void {
   const raiz = document.getElementById(id);
   if (!raiz || !regiaoMudaria(id, html)) return regiao(id, html);
+  // ADR-102: o campo marcado (o código do login, o apelido) volta com o foco e o cursor depois de redesenhar.
+  const campo = document.activeElement instanceof HTMLInputElement && raiz.contains(document.activeElement) ? document.activeElement : null;
+  const manter = campo?.dataset.manterFoco ? { chave: campo.dataset.manterFoco, valor: campo.value, ini: campo.selectionStart, fim: campo.selectionEnd } : null;
   const abertos = new Set([...raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure][open]")].map((el) => el.dataset.disclosure));
   const ativo = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement.closest<HTMLDetailsElement>("details[data-disclosure]")?.dataset.disclosure ?? null : null;
   regiao(id, html);
   for (const el of raiz.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) {
     if (abertos.has(el.dataset.disclosure)) el.open = true;
     if (ativo !== null && el.dataset.disclosure === ativo) el.querySelector("summary")?.focus();
+  }
+  const volta = manter ? raiz.querySelector<HTMLInputElement>(`input[data-manter-foco="${CSS.escape(manter.chave)}"]`) : null;
+  if (volta && manter) {
+    volta.value = manter.valor;
+    volta.focus();
+    volta.setSelectionRange(manter.ini, manter.fim);
   }
 }
 
@@ -2016,6 +2037,37 @@ const contasDoMac = criarContasDoMac({
   avisarTermos: abrirAvisoDosTermos,
 });
 void contasDoMac.iniciar();
+// ADR-102 (2026-10-13): a lista única de contas de IA, em todas as máquinas (web/lib/contas-da-pessoa.ts).
+const contasDaPessoa = criarContasDaPessoa({
+  api: () => api,
+  ui: () => estado.contasUi,
+  mudar: (mudanca) => dispatch({ tipo: "contas-ui", mudanca }),
+  contas: () => estado.contasIa,
+  trocarContas: (contas) => dispatch({ tipo: "trocar-contas", contas }),
+  maquinas: () => estado.maquinas?.maquinas ?? [],
+  detalhes: () => estado.detalhesContas,
+  invalidar: () => dispatch({ tipo: "invalidar", quais: ["contas", "maquinas"] }),
+  // No Mac, o login é o do app: a conta de sempre, se ainda sem login; senão uma pasta nova (ADR-101).
+  entrarNoMac: async (ia, apelido) => {
+    const e = estado.iasMac.estados[ia];
+    if (!e?.conta) {
+      await (pedeInstalar(inventarioDaIa(estado, ia)) ? iasDoMac.instalar(ia) : iasDoMac.entrar(ia));
+      return true;
+    }
+    const ponte = window.nodDesktop?.contas;
+    return ponte ? ponte.adicionar(ia, apelido ?? "").catch(() => false) : false;
+  },
+  avisarTermos: abrirAvisoDosTermos,
+  cifrar: (chave, codigo) => cifrarCodigo(chave, codigo),
+  agendar: (fn, ms) => { window.setTimeout(fn, ms); },
+  agora: Date.now,
+});
+// O app do Mac anterior a 2026-10-13 (sem a ponte `contas.detalhes`) mostra a tela de antes, com a faixa (suposição 8).
+if (window.nodDesktop?.contas && !window.nodDesktop.contas.detalhes) dispatch({ tipo: "contas-ui", mudanca: { appAntigo: true } });
+/** O campo marcado com `data-cl-autofoco` recebe o foco logo depois do redesenho (o renomear, o diálogo). */
+function focarNovo(): void {
+  document.querySelector<HTMLElement>("#espaco [data-cl-autofoco]")?.focus();
+}
 
 /**
  * O clique de IA que veio de fora de um cartão (um aviso no chat, o menu da conta) abre Provedores de IA, onde o cartão
@@ -2041,6 +2093,7 @@ const iaDaTela = (id: string | undefined) => iasDaTela(estado).find((i) => i.id 
 
 /** A ordem arrastada: a da pessoa (Provedores de IA) grava na hora; a do bot (2B) vai para o rascunho. */
 instalarOrdemArrastavel(document, (lista, ordem) => {
+  if (lista === "contas") { void contasDaPessoa.reordenar(ordem); return; }
   const ids = ordem.filter(ehIaMac);
   if (lista === "pessoa") {
     const completa = [...ids, ...(estado.ias?.ordem ?? []).filter((id) => !ids.includes(id as never))];
@@ -2652,9 +2705,60 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // ADR-090: Seu espaço › Máquinas.
   // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
   // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
+  // ADR-102: a lista única de contas (Provedores de IA) e as ações da máquina (Máquinas).
+  "cl-menu": (el) => contasDaPessoa.menu(el.dataset.id ?? ""),
+  "cl-renomear": (el) => { contasDaPessoa.renomear(el.dataset.id ?? null); focarNovo(); },
+  "cl-renomear-fechar": () => contasDaPessoa.renomear(null),
+  "cl-detalhe": (el) => contasDaPessoa.detalhe(el.dataset.id ?? ""),
+  "cl-sair": (el) => { contasDaPessoa.pedirSaida(el.dataset.id ?? "", el.dataset.maquina ?? ""); focarNovo(); },
+  "cl-remover": (el) => { contasDaPessoa.pedirRemocao(el.dataset.id ?? ""); focarNovo(); },
+  "cl-confirmar": () => contasDaPessoa.confirmar(),
+  "cl-confirmar-fechar": () => contasDaPessoa.fecharConfirmacao(),
+  "cl-entrar": (el) => contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? ""),
+  "cl-nova": () => { contasDaPessoa.abrirNova(); document.querySelector<HTMLInputElement>("#espaco [data-cl-nova-apelido]")?.focus(); },
+  "cl-nova-fechar": () => contasDaPessoa.fecharNova(),
+  "cl-nova-na-maquina": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDaPessoa.novaNaMaquina(ia, el.dataset.maquina ?? ""); },
+  "cl-modo": (el) => { const m = el.dataset.modo; if (m === "perguntar" || m === "automatico") void contasDaPessoa.modo(m); },
+  "cl-filtro": (el) => contasDaPessoa.filtro(el.dataset.maquina || null),
+  "cl-gerenciar": (el) => { dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } }); abrirEspaco("conexao"); contasDaPessoa.filtro(el.dataset.maquina || null); },
+  "cl-login-cancelar": (el) => contasDaPessoa.cancelarLogin(el.dataset.login ?? ""),
+  "cl-login-fechar": (el) => contasDaPessoa.fecharLogin(el.dataset.login ?? ""),
+  "cl-login-de-novo": (el) => contasDaPessoa.deNovo(el.dataset.login ?? ""),
+  "cl-terminal": (el) => contasDaPessoa.terminal(el.dataset.login ?? ""),
+  // ADR-102: os passos da linha "conta no limite" do chat (o login abre em Provedores de IA, onde a linha mostra os passos).
+  "cl-seguir": (el) => agir(async () => {
+    const conversaId = el.dataset.conversa ?? "";
+    await api!.seguirComConta(el.dataset.id ?? "", conversaId);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
+  }),
+  "cl-entrar-chat": (el) => {
+    const ia = el.dataset.ia;
+    abrirEspaco("conexao");
+    if (ia === "claude-cli" || ia === "codex-cli") void contasDaPessoa.entrar(el.dataset.id ?? "", el.dataset.maquina ?? "", { ia, apelido: el.dataset.apelido ?? "" });
+  },
+  "maq-menu": (el) => dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: estado.contasUi.maquinaMenu === el.dataset.maquina ? null : el.dataset.maquina ?? null } }),
+  "maq-renomear": (el) => { dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: el.dataset.maquina ?? null, maquinaMenu: null } }); focarNovo(); },
+  "maq-renomear-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } }),
+  "maq-desconectar": (el) => {
+    const id = el.dataset.maquina ?? "";
+    const temContas = (estado.contasIa?.contas ?? []).some((c) => c.maquinas.some((v) => v.maquinaId === id && v.estado === "pronta"));
+    dispatch({ tipo: "contas-ui", mudanca: { desconectar: { maquinaId: id, sair: temContas }, maquinaMenu: null } });
+    focarNovo();
+  },
+  "maq-desconectar-fechar": () => dispatch({ tipo: "contas-ui", mudanca: { desconectar: null } }),
+  "maq-desconectar-confirmar": () => agir(async () => {
+    const q = estado.contasUi.desconectar;
+    if (!q) return;
+    dispatch({ tipo: "contas-ui", mudanca: { desconectar: null } });
+    await api!.desconectarMaquina(q.maquinaId, q.sair);
+    dispatch({ tipo: "invalidar", quais: ["maquinas", "frota", "contas"] });
+  }),
   "conectar-maquina": () => agir(async () => {
     const chavesAntes = await chavesAtuais();
-    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [] } });
+    // ADR-102 (CMJ): no modo compartilhado, o comando leva um convite e a tela vê a máquina chegar (sem digitar código).
+    const convite = estado.maquinas?.servidorNoMac ? null : await api!.criarConvite().then((r) => r.convite, () => null);
+    dispatch({ tipo: "conectar-maquina", conectar: { passo: "comando", codigo: "", pedido: null, erro: null, chavesAntes, marcados: [], convite } });
+    if (convite) void esperarConvite(convite);
   }),
   "fechar-conectar-maquina": () => dispatch({ tipo: "conectar-maquina", conectar: null }),
   "passo-conectar-maquina": (el) => {
@@ -2718,6 +2822,24 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
 };
 
 const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
+  // ADR-102: a lista única de contas e o nome da máquina.
+  "cl-nova": async (form) => {
+    const ia = form.querySelector<HTMLInputElement>('input[name="ia"]:checked')?.value;
+    const apelido = form.querySelector<HTMLInputElement>('input[name="apelido"]')?.value ?? "";
+    const maquinas = [...form.querySelectorAll<HTMLInputElement>("input[data-cl-nova-maq]:checked")].map((x) => x.value);
+    if (ia !== "claude-cli" && ia !== "codex-cli") return;
+    contasDaPessoa.mudarNova({ ia, apelido, maquinas });
+    await contasDaPessoa.enviarNova();
+  },
+  "cl-renomear": async (form) => contasDaPessoa.salvarApelido(form.dataset.id ?? "", form.querySelector<HTMLInputElement>('input[name="apelido"]')?.value ?? ""),
+  "cl-codigo": async (form) => contasDaPessoa.enviarCodigo(form.dataset.login ?? "", form.querySelector<HTMLInputElement>('input[name="codigo"]')?.value ?? ""),
+  "maq-renomear": (form) => agir(async () => {
+    const nome = form.querySelector<HTMLInputElement>('input[name="nome"]')?.value.trim() ?? "";
+    if (!nome) return;
+    await api!.renomearMaquina(form.dataset.maquina ?? "", nome);
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } });
+    dispatch({ tipo: "invalidar", quais: ["maquinas", "contas"] });
+  }),
   "conta-nova": async (form) => {
     const ia = form.dataset.ia;
     if (ehIa(ia)) await contasDoMac.adicionar(ia, String(new FormData(form).get("apelido") ?? ""));
@@ -2856,6 +2978,20 @@ document.addEventListener("click", (ev) => {
   if (acao) void acao(el);
 });
 
+// ADR-102: o ⋯ da conta e o da máquina fecham num clique fora deles; Esc fecha o diálogo, o menu e o formulário abertos.
+document.addEventListener("click", (ev) => {
+  const u = estado.contasUi;
+  if ((u.menu || u.maquinaMenu) && !(ev.target as HTMLElement).closest(".cl-mais")) dispatch({ tipo: "contas-ui", mudanca: { menu: null, maquinaMenu: null } });
+}, true);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape" || !estado.espaco) return;
+  const u = estado.contasUi;
+  const mudanca = u.confirmar ? { confirmar: null } : u.desconectar ? { desconectar: null } : u.menu || u.maquinaMenu ? { menu: null, maquinaMenu: null } : u.renomear ? { renomear: null } : u.maquinaRenomear ? { maquinaRenomear: null } : null;
+  if (!mudanca) return;
+  ev.stopPropagation();
+  dispatch({ tipo: "contas-ui", mudanca });
+}, true);
+
 document.addEventListener("submit", (ev) => {
   const form = (ev.target as HTMLElement).closest<HTMLFormElement>("form[data-form]");
   if (!form) return;
@@ -2876,6 +3012,23 @@ document.addEventListener("change", (ev) => {
     const horario = cb.closest("form")?.querySelector<HTMLInputElement>('input[name="horario"]');
     const intervalo = cb.value.startsWith("intervalo:") || cb.value === "hora";
     if (horario) { horario.disabled = intervalo; horario.required = !intervalo; horario.closest("label")!.hidden = intervalo; }
+    return;
+  }
+  // ADR-102: o formulário "Adicionar conta", o opt-in na lista única e o "sair das contas" do desconectar.
+  if (cb.matches("[data-cl-nova-ia]")) {
+    if (cb.value === "claude-cli" || cb.value === "codex-cli") contasDaPessoa.mudarNova({ ia: cb.value });
+    return;
+  }
+  if (cb.matches("[data-cl-nova-maq]")) {
+    const n = estado.contasUi.nova;
+    if (n) contasDaPessoa.mudarNova({ maquinas: cb.checked ? [...new Set([...n.maquinas, cb.value])] : n.maquinas.filter((x) => x !== cb.value) });
+    return;
+  }
+  if (cb.matches("[data-cl-nova-apelido]")) { contasDaPessoa.mudarNova({ apelido: cb.value }); return; }
+  if (cb.matches("[data-cl-optin]")) { void contasDaPessoa.optin(cb.dataset.clOptin ?? "", cb.checked); return; }
+  if (cb.matches("[data-maq-sair-contas]")) {
+    const q = estado.contasUi.desconectar;
+    if (q) dispatch({ tipo: "contas-ui", mudanca: { desconectar: { ...q, sair: cb.checked } } });
     return;
   }
   // ADR-101 (NOD-211): o opt-in da conta corporativa, o modo no limite e o apelido da conta nova.
@@ -3008,6 +3161,10 @@ document.addEventListener("input", (ev) => {
   // O código do Claude atravessa o redesenho do cartão (o foco volta pelo `manterFocoDoCodigo`).
   const iaDoCodigo = (ta as HTMLElement).dataset?.iaCodigo;
   if (ehIa(iaDoCodigo)) { dispatch({ tipo: "ias-mac", mudanca: { codigo: { ...estado.iasMac.codigo, [iaDoCodigo]: ta.value } } }); return; }
+  // ADR-102: o código do login na VM e o apelido da conta nova ficam guardados sem redesenhar a cada tecla.
+  const loginDoCodigo = (ta as HTMLElement).dataset?.clCodigo;
+  if (loginDoCodigo) { contasDaPessoa.digitarCodigo(loginDoCodigo, ta.value); return; }
+  if ((ta as HTMLElement).matches?.("[data-cl-nova-apelido]") && estado.contasUi.nova) { estado.contasUi.nova.apelido = ta.value; return; }
   if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
   if (ta.matches("[data-customiza-mascote]")) {
     const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');
@@ -3378,8 +3535,20 @@ async function esperarMaquinaNova(): Promise<void> {
     if (dados) dispatch({ tipo: "hidratar-maquinas", maquinas: dados });
     const nova = estado.conectarMaquina ? maquinaNova(estado, estado.conectarMaquina) : null;
     // Na tela das IAs, continua relendo até o Claude Code ficar pronto (a pessoa está logando no terminal).
-    if (nova && (estado.conectarMaquina?.passo !== "ias" || nova.ias["claude-cli"] === "pronto")) return;
+    if (nova && (estado.conectarMaquina?.passo !== "ias" || estado.conectarMaquina.convite || nova.ias["claude-cli"] === "pronto")) return;
     await new Promise((r) => setTimeout(r, 3_000));
+  }
+}
+/** ADR-102 (CMJ): com o convite no comando, a tela confere a cada 2 s se a máquina já pediu para entrar. */
+async function esperarConvite(convite: string): Promise<void> {
+  for (let i = 0; i < 900; i++) {
+    await new Promise((r) => setTimeout(r, 2_000));
+    const c = estado.conectarMaquina;
+    if (!c || c.convite !== convite || !api) return;
+    if (c.passo !== "comando") continue;
+    const r = await api.verConvite(convite).catch((e: unknown) => (e instanceof ErroApi && e.status === 404 ? "vencido" as const : null));
+    if (r === "vencido") { atualizarConectar({ erro: "O convite venceu. Feche e abra o Conectar de novo para gerar outro." }); return; }
+    if (r?.estado === "chegou") { atualizarConectar({ passo: "confirmar", codigo: r.codigo, pedido: r.pedido, erro: null }); return; }
   }
 }
 function atualizarConectar(p: Partial<NonNullable<typeof estado.conectarMaquina>>): void {

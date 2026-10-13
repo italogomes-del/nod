@@ -1,5 +1,7 @@
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
+import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
 import type { EstadoExecutor } from "../../src/contracts/executor.ts";
@@ -28,6 +30,7 @@ import type { EstadoConexao } from "../lib/live-events.ts";
 import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
+import { UI_CONTAS_INICIAL, type UiContas } from "../telas/contas-lista.ts";
 import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
 
 /**
@@ -89,6 +92,8 @@ export type ConectarMaquina = {
   erro: string | null;
   chavesAntes: string[];
   marcados: string[];
+  /** ADR-102: o convite do comando de instalação (modo compartilhado); a tela vê a máquina chegar sem código. */
+  convite?: string | null;
 };
 
 export type SecaoEspaco = "conexao" | "avisos" | "preferencias" | "este-mac" | "maquinas" | "computadores" | "agentes" | "relatos";
@@ -248,6 +253,12 @@ export type Estado = {
   maquinas: MaquinasDto | null;
   /** ADR-090: o "Conectar uma máquina" aberto em Seu espaço › Máquinas (passo, código digitado, o pedido visto). */
   conectarMaquina: ConectarMaquina | null;
+  /** ADR-102: as contas de IA da pessoa em todas as máquinas; null = ainda não carregou. */
+  contasIa: ContasIaDto | null;
+  /** ADR-102: e-mail e organização das contas que este Mac conhece (só no app do Mac); null = fora do app ou app antigo. */
+  detalhesContas: DetalhesDasContas | null;
+  /** O que é só da tela na lista de contas e em Máquinas (menu aberto, logins na tela, confirmações). */
+  contasUi: UiContas;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
   /**
@@ -358,6 +369,9 @@ export type Acao =
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
   | { tipo: "conectar-maquina"; conectar: ConectarMaquina | null }
+  | { tipo: "hidratar-contas"; contas: ContasIaDto; detalhes: DetalhesDasContas | null }
+  | { tipo: "trocar-contas"; contas: ContasIaDto }
+  | { tipo: "contas-ui"; mudanca: Partial<UiContas> }
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
   | { tipo: "modo-dev"; ligado: boolean }
   | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
@@ -433,6 +447,9 @@ export const estadoInicial: Estado = {
   chaves: null,
   maquinas: null,
   conectarMaquina: null,
+  contasIa: null,
+  detalhesContas: null,
+  contasUi: UI_CONTAS_INICIAL,
   relatos: null,
   modoDev: { ligado: false, raioX: {} },
   chaveEmitida: null,
@@ -814,7 +831,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
     case "sessao":
       // Trocou a pessoa: chaves E relatos somem. Relato carrega correlationId, machineId e o erro
       // cru do fornecedor — não pode ficar na tela da próxima sessão (ADR-002).
-      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
+      return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
         custoHoje: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.custoHoje : undefined,
@@ -978,6 +995,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, maquinas: acao.maquinas };
     case "conectar-maquina":
       return { ...estado, conectarMaquina: acao.conectar };
+    case "hidratar-contas":
+      return { ...estado, contasIa: acao.contas, detalhesContas: acao.detalhes };
+    case "trocar-contas":
+      return { ...estado, contasIa: acao.contas };
+    case "contas-ui":
+      return { ...estado, contasUi: { ...estado.contasUi, ...acao.mudanca } };
     case "hidratar-relatos":
       return { ...estado, relatos: acao.relatos };
     // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.
@@ -1174,7 +1197,9 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
-  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || t.tipo === "conversa")) faltas.push("maquinas");
+  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("maquinas");
+  // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
+  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao")) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));

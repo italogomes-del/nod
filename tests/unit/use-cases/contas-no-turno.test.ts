@@ -24,7 +24,7 @@ const base = {
 } satisfies Omit<ResultadoTurno, "desfecho">;
 const limite = (voltaEm: number): ResultadoTurno => ({ ...base, desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: voltaEm, erroCru: "usage limit" });
 
-async function cenario(o: { origem?: "conversa" | "rotina" } = {}) {
+async function cenario(o: { origem?: "conversa" | "rotina"; comTask?: boolean } = {}) {
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => T0 });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Ze 1" });
   const chave = await deps.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: "8f2a", hash: randomBytes(32) });
@@ -33,7 +33,8 @@ async function cenario(o: { origem?: "conversa" | "rotina" } = {}) {
   const [cPessoal, gPessoal, cLeapy] = (await deps.repos.contasIa.listar()).contas;
   const agente = (await deps.repos.agentes.buscar(bot.agente.id))!;
   const origem = await deps.repos.mensagens.criar({ conversaId: bot.conversa.id, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "texto", texto: "revisa o #861", confianca: "confiavel" });
-  const t = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "revisa o #861", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: null });
+  const task = o.comTask ? await deps.repos.trabalhos.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, titulo: "Revisar o #861", origem: "rotina", rotinaId: null, forma: "frente" }) : null;
+  const t = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "revisa o #861", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "local", trabalhoId: task?.id ?? null });
   const antes = banco.mensagens.length;
   const despachar = () => executar(deps, despacharTurno, { machineId: vm, executor: "local", inventario: { estado: "pronto", versao: "2.1.296", em: T0 }, harnessesProntos: ["claude-cli", "codex-cli"] });
   const reivindicar = () => deps.repos.turnos.reivindicar({ machineId: vm, agora: T0 });
@@ -115,14 +116,25 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
     expect(r.data.plano).not.toBeNull();
   });
 
-  it("fundo (rotina): o turno volta à fila até a primeira conta renovar, sem aviso", async () => {
-    const c = await cenario({ origem: "rotina" });
+  it("frente (task): espera a primeira conta renovar numa retomada que acorda na hora; o turno nunca volta a 'pendente'", async () => {
+    const c = await cenario({ origem: "rotina", comTask: true });
     await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + 2 * HORA);
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
     const r = await c.despachar();
-    expect(r.data).toMatchObject({ plano: null, motivo: "fila_vazia" });
-    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "pendente", acordarEm: T0 + 2 * HORA });
-    expect(c.banco.mensagens.slice(c.antes)).toEqual([]);
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "limite_do_plano" });
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 + 2 * HORA }]);
+  });
+
+  it("fundo sem task (rotina antiga): a nota com a espera fica na conversa, nada refeito", async () => {
+    const c = await cenario({ origem: "rotina" });
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + 2 * HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, T0 + 4 * HORA);
+    const r = await c.despachar();
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
   });
 
   it("'Seguir com' grava a escolhida da IA e refaz a fala que parou no limite", async () => {

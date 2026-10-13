@@ -29,7 +29,7 @@ import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, type IdIa } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
@@ -213,6 +213,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
 function linhaDeIa(m: Mensagem, estado: Estado): string | null {
   const p = m.payload;
   if (p?.kind === "conta_trocada") return linhaContaTrocada(m);
+  if (p?.kind === "conta_seguiu" || p?.kind === "conta_escolhida") return linhaContaSeguiu(m);
   if (p?.kind !== "ia_trocada" && p?.kind !== "limite_do_plano") return null;
   const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
   const ias = iasDaTela(estado);

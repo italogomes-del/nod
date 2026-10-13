@@ -1145,12 +1145,6 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = doTenant(b.turnos).find((x) => x.id === id);
         if (t) t.executor = executor;
       },
-      async adiar(id, acordarEm) {
-        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "despachando");
-        if (!t) return false;
-        Object.assign(t, { estado: "pendente", machineId: null, leaseAte: null, acordarEm });
-        return true;
-      },
       async registrarConta(id, contaId) { b.contaDoTurno.set(id, contaId); },
       async contaDoTurno(id) { return b.contaDoTurno.get(id) ?? null; },
       async enfileirar(t) {

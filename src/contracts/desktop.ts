@@ -83,7 +83,7 @@ export type PonteIas = {
 };
 
 // ADR-101: as várias contas ficam em contas-desktop.ts (o teto de 200 linhas por contrato).
-export type { ContaNaTela, ContasNaTela, DetalheDaConta, PonteContas } from "./contas-desktop.ts";
+export type { ContaNaTela, ContasNaTela, DetalheDaConta, DetalhesDasContas, PonteContas } from "./contas-desktop.ts";
 
 export type NodDesktop = {
   /** Mostra o aviso só se a janela do nod não estiver na frente; devolve se mostrou. */

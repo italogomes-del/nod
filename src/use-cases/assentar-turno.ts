@@ -612,6 +612,18 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
  * quem a pega segue na mesma sessão do trabalho. null = não é task aberta (a conversa, a ligação e o turno sem trabalho
  * ficam com o aviso de sempre), ou a pessoa pediu Parar.
  */
+/**
+ * ADR-102 (2026-10-13): a frente cujo turno chegou à máquina sem conta livre (todas no limite) espera do mesmo jeito que a
+ * frente no limite da ADR-099 §7 — o turno fica interrompido e uma retomada nasce com hora para acordar. Nunca volta a
+ * 'pendente' (ADR-009/010). null = não é frente com task aberta (quem chamou segue com a nota na conversa).
+ */
+export function esperarContaNaFrente(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; autoria: Autoria; agora: number },
+): Promise<RuntimeEvent[] | null> {
+  return aposLimiteNoFundo(deps, { ...p, motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", custoUsd: null });
+}
+
 async function aposLimiteNoFundo(
   deps: Deps,
   p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; conta?: Exclude<ContaNoLimite, { tipo: "todas_no_limite" }>; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },

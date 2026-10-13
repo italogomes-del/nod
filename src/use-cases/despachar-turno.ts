@@ -18,6 +18,7 @@ import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
 import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, semContaParaOTurno } from "./contas-do-turno.ts";
+import { esperarContaNaFrente } from "./assentar-turno.ts";
 
 export type EntradaDespacharTurno = {
   machineId: string;
@@ -152,15 +153,17 @@ async function semContaNaMaquina(
   const fixo = harnessFixado(turno.harness, turno.modelo);
   const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora);
   if (!sem) return null;
-  if (turno.origem !== "conversa") {
-    // ADR-099 §7: nenhuma frente falha por limite — espera a conta voltar (1 h sem horário do fornecedor).
-    const volta = sem.voltaEm !== null && sem.voltaEm > agora ? sem.voltaEm : agora + PRAZO_SEM_HORARIO_MS;
-    await deps.repos.turnos.adiar(turno.id, volta);
-    log("info", "turno_sem_conta_adiado", { turno_id: turno.id, acordar_em: volta });
-    return { data: { plano: null, turno: null, motivo: "fila_vazia" }, events: [] };
-  }
   const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
+  if (turno.origem !== "conversa") {
+    // ADR-099 §7: nenhuma frente falha por limite — a task espera a conta voltar (1 h sem horário do fornecedor).
+    const volta = sem.voltaEm !== null && sem.voltaEm > agora ? sem.voltaEm : agora + PRAZO_SEM_HORARIO_MS;
+    const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia: sem.de.ia, renovaEm: volta, autoria, agora });
+    if (espera) {
+      log("info", "turno_sem_conta_espera", { turno_id: turno.id, acordar_em: volta });
+      return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...(await sincronizarDoTurno(deps, turno))] };
+    }
+  }
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "limite_do_plano", sem_conta: true } }),
     ...(await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),

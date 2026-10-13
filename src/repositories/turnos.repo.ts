@@ -462,17 +462,6 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       await conn`update turnos set executor = ${executor} where tenant_id = ${escopo.tenantId} and id = ${id}`;
     },
 
-    /**
-     * ADR-102: o turno de fundo (task, rotina) reivindicado sem nenhuma conta utilizável na máquina volta à fila e só sai
-     * a partir de `acordarEm` (a primeira conta que renova), como a frente no limite da ADR-099 §7. Nada rodou: o
-     * `attempted` volta a false. false = o turno já não estava sendo despachado.
-     */
-    async adiar(id: string, acordarEm: number): Promise<boolean> {
-      const r = await conn`update turnos set estado = 'pendente', machine_id = null, lease_ate = null, attempted = false, acordar_em = ${data(acordarEm)}
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'despachando'`;
-      return r.count === 1;
-    },
-
     /** ADR-102 (0074): a conta que o plano mandou a máquina usar (null = a pasta padrão da máquina). */
     async registrarConta(id: string, contaId: string | null): Promise<void> {
       await conn`update turnos set conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and id = ${id}`;

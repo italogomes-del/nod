@@ -26,7 +26,7 @@ import type { ConfigDriver, Driver, RegistroDriver } from "../src/adapters/execu
 import { criarPonteHttp, FalhaPonte, urlServidor } from "../src/adapters/executor/ponte-http.ts";
 import type { Registry } from "../src/adapters/executor/spi.ts";
 import { versaoAceita } from "../src/domain/versao-app.ts";
-import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type ContasNaTela, type DetalheDaConta, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
+import { CANAIS_DESKTOP, IAS_DESKTOP, type AlvoAviso, type ContasNaTela, type DetalhesDasContas, type AvisoDesktop, type IaDesktop, type PreferenciasDesktop, type ResultadoIaDesktop, type TemaDesktop, type TesteDeIa } from "../src/contracts/desktop.ts";
 import type { ContaDaIa, EstadoIa, LoginDaIa, ResultadoColarCodigo } from "../src/contracts/estado-ia.ts";
 import { contaDoCodex } from "./conta-codex.ts";
 import { ambienteNaConta, diretorioPadrao, gravarContasDoMac, iaDasContas, lerContasDoMac, prepararPastaDaConta, removerPastaDaConta } from "./contas-mac.ts";
@@ -1177,7 +1177,7 @@ else {
     // definido em 2026-10-12 (ADR-101): as várias contas. A página escolhe a IA e a posição; o resto é validado aqui.
     ipcMain.handle(CANAIS_DESKTOP.contasListar, (e): ContasNaTela[] => { validarRemetenteWeb(e); return contasDoApp.listar(); });
     // ADR-102: e-mail e organização das contas deste Mac, só para a página do app (nunca ao servidor).
-    ipcMain.handle(CANAIS_DESKTOP.contasDetalhes, async (e): Promise<DetalheDaConta[]> => { validarRemetenteWeb(e); await sincronizandoContas; return contasLocais?.detalhes() ?? []; });
+    ipcMain.handle(CANAIS_DESKTOP.contasDetalhes, async (e): Promise<DetalhesDasContas> => { validarRemetenteWeb(e); await sincronizandoContas; return { maquinaId: maquinaIdAtual, contas: contasLocais?.detalhes() ?? [] }; });
     const iaDasContasDoPedido = (e: IpcMainInvokeEvent, ia: unknown): IaDesktop => {
       validarRemetenteWeb(e);
       const lida = iaDasContas(ia);

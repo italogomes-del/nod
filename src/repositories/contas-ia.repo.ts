@@ -43,11 +43,12 @@ export type ResultadoDoAnuncio = { sair: string[]; mudou: boolean };
  * lock da pessoa (R3 da revisão): duas máquinas anunciando contas novas ao mesmo tempo não pegam a mesma posição.
  */
 export function contasIaRepo(conn: Conn, escopo: Escopo) {
-  const doDono = conn`tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+  // Uma função: os repositórios nascem juntos (criarRepos) e alguns testes passam uma conexão que não é o postgres.js.
+  const doDono = () => conn`tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
   const travarPessoa = () => conn`select pg_advisory_xact_lock(hashtext(${`contas_ia:${escopo.tenantId}:${escopo.pessoaId}`}))`;
 
   async function proximaPosicao(): Promise<number> {
-    const [l] = await conn<{ max: number | null }[]>`select max(posicao) as max from contas_ia where ${doDono} and removida_em is null`;
+    const [l] = await conn<{ max: number | null }[]>`select max(posicao) as max from contas_ia where ${doDono()} and removida_em is null`;
     return (l?.max ?? 0) + 1;
   }
 
@@ -55,14 +56,14 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
     /** As contas (com as removidas, que o anúncio precisa ver) e todos os vínculos com as máquinas. */
     async listar(): Promise<{ contas: ContaGuardadaNoServidor[]; vinculos: VinculoDaConta[] }> {
       const [contas, vinculos] = await Promise.all([
-        conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono} order by posicao, criada_em`,
-        conn<LinhaVinculo[]>`select conta_id, maquina_id, estado, sair_pedido_em from contas_ia_maquinas where ${doDono}`,
+        conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono()} order by posicao, criada_em`,
+        conn<LinhaVinculo[]>`select conta_id, maquina_id, estado, sair_pedido_em from contas_ia_maquinas where ${doDono()}`,
       ]);
       return { contas: contas.map(paraConta), vinculos: vinculos.map(paraVinculo) };
     },
 
     async buscar(id: string): Promise<ContaGuardadaNoServidor | null> {
-      const [l] = await conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono} and id = ${id}`;
+      const [l] = await conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono()} and id = ${id}`;
       return l ? paraConta(l) : null;
     },
 
@@ -74,7 +75,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
      */
     async doAnuncio(maquinaId: string, anunciadas: readonly ContaAnunciada[], agora: number): Promise<ResultadoDoAnuncio> {
       await travarPessoa();
-      const existentes = (await conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono}`).map(paraConta);
+      const existentes = (await conn<LinhaConta[]>`select ${conn.unsafe(COLUNAS)} from contas_ia where ${doDono()}`).map(paraConta);
       const porChave = new Map(existentes.map((c) => [`${c.ia}:${c.impressao}`, c]));
       const sair: string[] = [];
       const vistas: string[] = [];
@@ -104,17 +105,17 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
           mudou = true;
         } else if (decisao === "voltar") {
           const posicao = await proximaPosicao();
-          await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)} where ${doDono} and id = ${existente!.id}`;
+          await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)} where ${doDono()} and id = ${existente!.id}`;
           id = existente!.id;
           mudou = true;
         } else {
           id = existente!.id;
           if (a.plano !== null && (a.plano !== existente!.plano || corporativaDe(a) !== existente!.corporativa)) {
-            await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)} where ${doDono} and id = ${id}`;
+            await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)} where ${doDono()} and id = ${id}`;
             mudou = true;
           }
         }
-        const [antes] = await conn<{ estado: string }[]>`select estado from contas_ia_maquinas where ${doDono} and conta_id = ${id} and maquina_id = ${maquinaId}`;
+        const [antes] = await conn<{ estado: string }[]>`select estado from contas_ia_maquinas where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
         if (antes?.estado !== a.estado) mudou = true;
         await conn`
           insert into contas_ia_maquinas (tenant_id, owner_id, conta_id, maquina_id, estado, visto_em)
@@ -123,7 +124,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         vistas.push(id);
       }
       const apagados = await conn`
-        delete from contas_ia_maquinas where ${doDono} and maquina_id = ${maquinaId}
+        delete from contas_ia_maquinas where ${doDono()} and maquina_id = ${maquinaId}
           and not (conta_id = any(${vistas}::uuid[]))
         returning conta_id`;
       if (apagados.length > 0) mudou = true;
@@ -131,52 +132,52 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
     },
 
     async renomear(id: string, apelido: string): Promise<boolean> {
-      const r = await conn`update contas_ia set apelido = ${apelido} where ${doDono} and id = ${id} and removida_em is null returning id`;
+      const r = await conn`update contas_ia set apelido = ${apelido} where ${doDono()} and id = ${id} and removida_em is null returning id`;
       return r.length > 0;
     },
 
     async definirTrocaAutomatica(id: string, entra: boolean): Promise<boolean> {
-      const r = await conn`update contas_ia set entra_na_troca_automatica = ${entra} where ${doDono} and id = ${id} and removida_em is null returning id`;
+      const r = await conn`update contas_ia set entra_na_troca_automatica = ${entra} where ${doDono()} and id = ${id} and removida_em is null returning id`;
       return r.length > 0;
     },
 
     /** A nova ordem: exatamente as contas não removidas, cada uma uma vez. false = a lista mudou no meio (a tela relê). */
     async reordenar(ids: readonly string[]): Promise<boolean> {
       await travarPessoa();
-      const atuais = await conn<{ id: string }[]>`select id from contas_ia where ${doDono} and removida_em is null`;
+      const atuais = await conn<{ id: string }[]>`select id from contas_ia where ${doDono()} and removida_em is null`;
       const conjunto = new Set(atuais.map((l) => l.id));
       if (ids.length !== conjunto.size || new Set(ids).size !== ids.length || ids.some((id) => !conjunto.has(id))) return false;
-      for (const [i, id] of ids.entries()) await conn`update contas_ia set posicao = ${i + 1} where ${doDono} and id = ${id}`;
+      for (const [i, id] of ids.entries()) await conn`update contas_ia set posicao = ${i + 1} where ${doDono()} and id = ${id}`;
       return true;
     },
 
     async marcarLimite(id: string, ate: number): Promise<void> {
-      await conn`update contas_ia set no_limite_ate = ${data(ate)} where ${doDono} and id = ${id}`;
+      await conn`update contas_ia set no_limite_ate = ${data(ate)} where ${doDono()} and id = ${id}`;
     },
 
     /** Um turno deu certo na conta: ela sai do limite antes do prazo. true = estava no limite. */
     async limparLimite(id: string): Promise<boolean> {
-      const r = await conn`update contas_ia set no_limite_ate = null where ${doDono} and id = ${id} and no_limite_ate is not null returning id`;
+      const r = await conn`update contas_ia set no_limite_ate = null where ${doDono()} and id = ${id} and no_limite_ate is not null returning id`;
       return r.length > 0;
     },
 
     /** "Sair desta máquina": a máquina faz o logout no próximo contato. false = a conta não está nela. */
     async pedirSaida(id: string, maquinaId: string, agora: number): Promise<boolean> {
-      const r = await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono} and conta_id = ${id} and maquina_id = ${maquinaId} returning conta_id`;
+      const r = await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId} returning conta_id`;
       return r.length > 0;
     },
 
     /** "Remover de todas": some da lista na hora; cada máquina sai dela no próximo contato. */
     async remover(id: string, agora: number): Promise<boolean> {
-      const r = await conn`update contas_ia set removida_em = ${data(agora)}, no_limite_ate = null where ${doDono} and id = ${id} and removida_em is null returning id`;
+      const r = await conn`update contas_ia set removida_em = ${data(agora)}, no_limite_ate = null where ${doDono()} and id = ${id} and removida_em is null returning id`;
       if (r.length === 0) return false;
-      await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono} and conta_id = ${id}`;
+      await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono()} and conta_id = ${id}`;
       return true;
     },
 
     /** Desconectar a máquina pedindo para sair das contas: todos os vínculos dela ganham a saída. */
     async pedirSaidaDeTodas(maquinaId: string, agora: number): Promise<number> {
-      const r = await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono} and maquina_id = ${maquinaId} returning conta_id`;
+      const r = await conn`update contas_ia_maquinas set sair_pedido_em = coalesce(sair_pedido_em, ${data(agora)}) where ${doDono()} and maquina_id = ${maquinaId} returning conta_id`;
       return r.length;
     },
 
@@ -201,7 +202,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
 
     /** A conta sumiu da máquina no meio do turno (`conta_ausente`, R6): o vínculo sai. */
     async apagarVinculo(id: string, maquinaId: string): Promise<void> {
-      await conn`delete from contas_ia_maquinas where ${doDono} and conta_id = ${id} and maquina_id = ${maquinaId}`;
+      await conn`delete from contas_ia_maquinas where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
     },
 
     async modo(): Promise<{ modo: ModoDasContas; escolhidas: Partial<Record<IaComConta, string>> }> {

@@ -7,6 +7,7 @@ import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/co
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
@@ -323,6 +324,22 @@ export function criarApi(escopo: Escopo) {
     verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string; pedidoHaS: number }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
     aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
     rodarDestaVez: (conversaId: string, maquinaId: string) => post<{ turnos: number }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId }),
+    // ADR-102: as contas de IA da pessoa em todas as máquinas, o login numa máquina pela tela e o convite da VM.
+    contasIa: () => get<ContasIaDto>("contas-ia"),
+    ordemContas: (ids: string[]) => pedir<null>("PUT", `${base}/contas-ia/ordem`, { ids }),
+    modoContas: (modo: ModoDasContas) => pedir<null>("PUT", `${base}/contas-ia/modo`, { modo }),
+    mudarConta: (id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }) => patch<null>(`contas-ia/${encodeURIComponent(id)}`, corpo),
+    sairDaConta: (id: string, maquinaId: string) => post<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}/sair`, { maquinaId }),
+    removerConta: (id: string) => del<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}`),
+    seguirComConta: (id: string, conversaId: string) => post<unknown>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId }),
+    pedirLogin: (maquinaId: string, p: { ia: IaComConta; contaId?: string; apelido?: string | null }) => post<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins`, p),
+    verLogin: (maquinaId: string, loginId: string) => get<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}`),
+    colarCodigoLogin: (maquinaId: string, loginId: string, cifrado: CodigoCifrado) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/codigo`, { cifrado }),
+    cancelarLogin: (maquinaId: string, loginId: string) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/cancelar`),
+    renomearMaquina: (id: string, nome: string) => patch<{ id: string; nome: string }>(`maquinas/${encodeURIComponent(id)}`, { nome }),
+    desconectarMaquina: (id: string, sairDasContas: boolean) => post<{ ok: true; contas: number; aguardandoMaquina: boolean }>(`maquinas/${encodeURIComponent(id)}/desconectar`, { sairDasContas }),
+    criarConvite: () => post<{ convite: string; expiraEm: number }>("maquinas/convites"),
+    verConvite: (convite: string) => get<{ estado: "pendente" } | { estado: "chegou"; codigo: string; pedido: { nome: string; plataforma: string; pedidoHaS: number } }>(`maquinas/convites/${encodeURIComponent(convite)}`),
     /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */
     parearMac: (nome: string, desafio: string) => post<{ codigo: string }>("maquinas/pareamentos", { nome, desafio }),
     // ADR-051 (definido em 2026-09-28): o card do artefato busca o HTML da SUA versão e o estado da pessoa.

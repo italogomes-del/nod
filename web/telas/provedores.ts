@@ -3,6 +3,8 @@ import { botao, esc, hora } from "../lib/render.ts";
 import { haQuanto } from "../lib/relogio.ts";
 import { ordemDasIas, pilhaDeAvatares, renderCartaoIa, UI_IAS_INICIAL, vistaDaIa, type ContextoCartao } from "./cartao-ia.ts";
 import { renderContasDaIa } from "./contas-ia.ts";
+import { nomeCurto, renderListaDeContas } from "./contas-lista.ts";
+import { botsDaPessoa, maquinaDoBot } from "./maquinas.ts";
 import { renderExecutor } from "./frota.ts";
 import { logoApp } from "./marketplace.ts";
 import { renderNegacoes, textoMotivo } from "./negacao.ts";
@@ -18,6 +20,8 @@ import { renderNegacoes, textoMotivo } from "./negacao.ts";
  * local (o servidor diz `trocavel`), o interruptor de simulação, atrás de "Configurar conexão".
  */
 export function renderProvedores(estado: Estado): string {
+  // ADR-102 (2026-10-13): no modo compartilhado, a lista única de contas; no modo local e no app do Mac antigo, a de antes.
+  if (estado.contasIa?.disponivel && !estado.contasUi.appAntigo) return renderProvedoresContas(estado);
   const ui = estado.iasMac ?? UI_IAS_INICIAL;
   const servidor = estado.ias?.ias ?? null;
   const c: ContextoCartao = { servidor, ui, agora: estado.agora, onde: "provedores" };
@@ -30,10 +34,40 @@ export function renderProvedores(estado: Estado): string {
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
   return `<section class="espaco-secao provedores">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
+      ${estado.contasIa?.disponivel ? '<p class="cl-faixa" role="status">Atualize o app do nod para ver e gerenciar as contas de todas as máquinas numa lista só.</p>' : ""}
       <p class="intro">As IAs que seus bots usam${ui.noApp ? " neste Mac" : ""}. No automático, eles seguem esta ordem: a primeira pronta responde e, se ela parar ou chegar ao limite, a próxima assume.</p>
       <div class="prov-ordem"><span>Ordem dos seus bots</span><span>arraste para mudar · cada bot pode ter a dele</span></div>
       <div class="espaco-cartao prov-lista" data-ordem-lista="pessoa">${linhas}</div>
       <p class="ia-nota">Recomendado: o Claude com <b>Opus</b> e o ChatGPT com <b>Sol</b>. Para outro modelo ou outra ordem num bot, abra a Inteligência dele.</p>
+      ${executor}
+      ${foraDoAr(estado)}
+    </section>`;
+}
+
+/** A lista única de contas (web/telas/contas-lista.ts), com o filtro por máquina vindo de Máquinas. */
+function renderProvedoresContas(estado: Estado): string {
+  const ui = estado.iasMac ?? UI_IAS_INICIAL;
+  const contexto: ContextoCartao = { servidor: estado.ias?.ias ?? null, ui, agora: estado.agora, onde: "provedores" };
+  const maquinas = estado.maquinas?.maquinas ?? [];
+  const filtro = estado.contasUi.filtro ? maquinas.find((m) => m.id === estado.contasUi.filtro) ?? null : null;
+  const lista = renderListaDeContas({
+    contas: estado.contasIa!,
+    maquinas,
+    detalhes: estado.detalhesContas,
+    ui: estado.contasUi,
+    agora: estado.agora,
+    noApp: ui.noApp && estado.detalhesContas !== null,
+    botsNaMaquina: (id) => botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === id).map((b) => b.nome),
+    cartaoDoMac: (ia) => renderCartaoIa(vistaDaIa(ia, contexto), ui),
+  });
+  const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
+  const intro = filtro
+    ? `Mostrando as contas d${filtro.plataforma === "darwin" ? "o" : "a"} ${esc(nomeCurto(filtro, maquinas))}. A ordem é a mesma em todas as máquinas: os bots dela pulam as que não estão logadas lá.`
+    : "Suas contas de IA, numa lista só. Os bots usam a primeira livre, de cima para baixo, na máquina onde trabalham. Arraste para mudar a ordem; cada bot pode ter a dele.";
+  return `<section class="espaco-secao provedores contas-lista">
+      <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
+      <p class="intro">${intro}</p>
+      ${lista}
       ${executor}
       ${foraDoAr(estado)}
     </section>`;

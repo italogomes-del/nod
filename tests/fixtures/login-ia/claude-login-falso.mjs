@@ -9,24 +9,24 @@ import { createInterface } from "node:readline";
 const pasta = process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || "/tmp", ".claude");
 const arquivo = join(pasta, "conta-falsa.json");
 const [a, b] = process.argv.slice(2);
-if (a === "--version") { console.log("2.1.296 (Claude Code)"); process.exit(0); }
+if (a === "--version") { process.stdout.write("2.1.296 (Claude Code)\n"); process.exit(0); }
 if (a === "auth" && b === "status") {
-  if (!existsSync(arquivo)) { console.log(JSON.stringify({ loggedIn: false })); process.exit(1); }
+  if (!existsSync(arquivo)) { process.stdout.write(`${JSON.stringify({ loggedIn: false })}\n`); process.exit(1); }
   const c = JSON.parse(readFileSync(arquivo, "utf8"));
-  console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: c.email, orgId: c.orgId, orgName: "Empresa", subscriptionType: "max" }));
+  process.stdout.write(`${JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email: c.email, orgId: c.orgId, orgName: "Empresa", subscriptionType: "max" })}\n`);
   process.exit(0);
 }
-if (a === "auth" && b === "logout") { rmSync(arquivo, { force: true }); console.log("Logged out"); process.exit(0); }
+if (a === "auth" && b === "logout") { rmSync(arquivo, { force: true }); process.stdout.write("Logged out\n"); process.exit(0); }
 if (a === "auth" && b === "login") {
-  console.log("Browser didn't open? Use the url below to sign in (c to copy)");
-  console.log("https://claude.com/cai/oauth/authorize?code=true&client_id=falso&state=xyz");
-  console.log("Paste code here if prompted >");
+  process.stdout.write("Browser didn't open? Use the url below to sign in (c to copy)\n");
+  process.stdout.write("https://claude.com/cai/oauth/authorize?code=true&client_id=falso&state=xyz\n");
+  process.stdout.write("Paste code here if prompted >\n");
   const rl = createInterface({ input: process.stdin });
   rl.on("line", (linha) => {
-    if (linha.trim() !== (process.env.CODIGO_CERTO || "codigo-certo-123")) { console.error("OAuth error: Invalid code"); process.exit(1); }
+    if (linha.trim() !== (process.env.CODIGO_CERTO || "codigo-certo-123")) { process.stderr.write("OAuth error: Invalid code\n"); process.exit(1); }
     mkdirSync(pasta, { recursive: true });
     writeFileSync(arquivo, JSON.stringify({ email: process.env.EMAIL_FALSO || "pessoa@exemplo.com", orgId: process.env.ORG_FALSA || "org-1" }));
-    console.log("Login successful.");
+    process.stdout.write("Login successful.\n");
     process.exit(0);
   });
 } else {

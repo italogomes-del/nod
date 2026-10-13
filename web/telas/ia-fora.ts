@@ -1,6 +1,7 @@
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { CausaSemIa, Inventario } from "../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
+import type { ContasNoLimite } from "../../src/contracts/contas-ia.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { formatoData } from "../lib/formato-data.ts";
@@ -177,6 +178,8 @@ export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; 
     const quando = l.voltaEm !== null ? `até ${hora(l.voltaEm)}` : `às ${hora(m.criadoEm)}`;
     return `<div class="linha-centro-wrap linha-limite-passou"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(nome)} esteve no limite ${esc(quando)}</span></span></div>`;
   }
+  // ADR-102: a conta da lista (servidor) bateu no limite — a frase do servidor e um passo por saída.
+  if (l.contas && (l.contas.livres.length > 0 || l.contas.voltaEm !== null)) return linhaContasNoLimite(m, l.contas, p.agora);
   if (l.conta?.tipo === "perguntar" && ia) return linhaSeguirComConta(ia, l.conta, m.texto, p);
   // ADR-101: todas as contas da IA no limite — a frase do servidor diz quando a primeira volta; o passo segue o de sempre.
   const limite = l.conta?.tipo === "todas_no_limite" ? m.texto : l.voltaEm !== null ? `${nome} no limite até ${quandoVolta(l.voltaEm, p.agora).replace(/^às /, "")}` : `${nome} chegou ao limite`;
@@ -219,6 +222,34 @@ function linhaSeguirComConta(
       ...extras,
     ].join(sep);
   return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(frase)}</span><span aria-hidden="true">·</span>${fim}</span></div>`;
+}
+
+/**
+ * ADR-102 (2026-10-13, protótipo CMD-1): a conta bateu no limite e há outra livre do mesmo provedor ("Perguntar antes"),
+ * ou só noutra máquina. A frase do servidor ("Claude · Pessoal no limite na vm-bots até 14:00. Seguir com …?") e um passo
+ * por saída: "Seguir com <conta>" (logada na máquina do turno; o turno é refeito nela), "Rodar no <máquina> desta vez"
+ * (a conta livre só noutra máquina), "Entrar com <conta> na <máquina>" (o login abre em Provedores de IA) e a espera.
+ */
+function linhaContasNoLimite(m: Mensagem, c: ContasNoLimite, agora: number): string {
+  const sep = '<span aria-hidden="true">·</span>';
+  const conversa = esc(m.conversaId);
+  const passos: string[] = [];
+  for (const l of c.livres) {
+    const nome = `${PROVEDOR_DA_IA[l.ia].nome} · ${l.apelido}`;
+    if (l.naMaquina) passos.push(`<button type="button" class="linha-link forte" data-act="cl-seguir" data-id="${esc(l.id)}" data-conversa="${conversa}">Seguir com ${esc(nome)}</button>`);
+    else if (l.outraMaquina) {
+      passos.push(`<button type="button" class="linha-link" data-act="rodar-desta-vez" data-conversa="${conversa}" data-maquina="${esc(l.outraMaquina.id)}">Rodar no ${esc(l.outraMaquina.nome)} desta vez</button>`);
+      if (c.maquina) passos.push(`<button type="button" class="linha-link" data-act="cl-entrar-chat" data-id="${esc(l.id)}" data-ia="${l.ia}" data-apelido="${esc(l.apelido)}" data-maquina="${esc(c.maquina.id)}">Entrar com ${esc(nome)} na ${esc(c.maquina.nome)}</button>`);
+    }
+  }
+  if (c.voltaEm !== null) passos.push(`<span>ou esperar ${esc(quandoVolta(c.voltaEm, agora).replace(/^às /, "até "))}</span>`);
+  return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(m.texto)}</span>${passos.length ? `${sep}${passos.join(sep)}` : ""}</span></div>`;
+}
+
+/** ADR-102: o turno seguiu noutra conta sozinho ("Trocar sozinho" ou outra IA), ou na conta que a pessoa escolheu. */
+export function linhaContaSeguiu(m: Mensagem): string | null {
+  if (m.payload?.kind !== "conta_seguiu" && m.payload?.kind !== "conta_escolhida") return null;
+  return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
 }
 
 /**
