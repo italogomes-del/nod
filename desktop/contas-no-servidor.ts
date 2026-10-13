@@ -6,6 +6,8 @@ import type { PuxadaDeContas } from "../src/contracts/contas-ia.ts";
  * navegador daqui), então os `logins` da puxada são ignorados. Sem Electron: o main.ts injeta a ponte e as ações.
  */
 export const INTERVALO_CONTAS_NO_MAC_MS = 3_000;
+/** Revisão do PR #306: tentativas de logout por conta antes de confirmar a saída mesmo assim (com aviso no log). */
+export const TENTATIVAS_DE_SAIR_NO_MAC = 3;
 
 export type DepsContasNoServidor = {
   ponte: {
@@ -25,6 +27,7 @@ export type DepsContasNoServidor = {
 export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): void } {
   let parado = false;
   let timer: { cancelar(): void } | null = null;
+  const tentativas = new Map<string, number>();
 
   async function sairDe(impressoes: readonly string[]): Promise<string[]> {
     const feitas: string[] = [];
@@ -32,7 +35,12 @@ export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): voi
       // Sem a conta aqui (false), a saída é confirmada: o servidor só apaga o vínculo. Se o logout falhou (exceção), não:
       // a saída fica pendente e o servidor pede de novo na próxima puxada (revisão do PR #306).
       const saiu = await d.sair(i).then(() => true, (e: unknown) => { d.registrar?.("conta_sair_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); return false; });
-      if (saiu) feitas.push(i);
+      const n = (tentativas.get(i) ?? 0) + 1;
+      if (saiu || n >= TENTATIVAS_DE_SAIR_NO_MAC) {
+        if (!saiu) d.registrar?.("conta_sair_desistiu", { tentativas: String(n) });
+        tentativas.delete(i);
+        feitas.push(i);
+      } else tentativas.set(i, n);
     }
     return feitas;
   }
@@ -44,7 +52,14 @@ export function iniciarContasNoServidor(d: DepsContasNoServidor): { parar(): voi
     if (r === "sem_rota") return; // servidor sem contas (modo local ou antigo): nada a puxar
     if (r) {
       if (r.desconectar) {
-        const feitas = await sairDe(d.todas());
+        const todas = d.todas();
+        const feitas = await sairDe(todas);
+        // Logout pendente: confirma o que saiu e tenta de novo na próxima puxada (a chave vence em 2 min de todo jeito).
+        if (feitas.length < todas.length) {
+          await d.ponte.saiu(feitas, false);
+          if (!parado) timer = d.agendar(() => void volta(), INTERVALO_CONTAS_NO_MAC_MS);
+          return;
+        }
         await d.ponte.saiu(feitas, true);
         parado = true;
         await d.desconectar();

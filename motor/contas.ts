@@ -24,6 +24,8 @@ import { criarLoginDasIas, type ProcessoDeLogin, type StatusDoLogin } from "../d
 /** definido em 2026-10-13: a puxada de contas (3 s; 1 s com login aberto, para o link e o código chegarem rápido à tela). */
 export const INTERVALO_CONTAS_MS = 3_000;
 export const INTERVALO_CONTAS_LOGIN_MS = 1_000;
+/** Revisão do PR #306: quantas vezes o logout de uma conta é tentado antes de a saída ser confirmada mesmo assim. */
+export const TENTATIVAS_DE_SAIR = 3;
 
 export type PonteDeContas = {
   puxar(): Promise<PuxadaDeContas | null | "sem_rota">;
@@ -117,7 +119,9 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
    * ainda trazia o login (o relato não tinha chegado) abria um segundo `auth login` numa pasta nova; e um relato que
    * falhou nunca era repetido (a tela ficava "abrindo" até o prazo). null = terminou sem relato (cancelado).
    */
-  const terminados = new Map<string, Omit<ProgressoDoLogin, "loginId"> | null>();
+  const terminados = new Map<string, Omit<ProgressoDoLogin, "loginId"> | "entregue">();
+  /** Revisão do PR #306: tentativas de logout por impressão; passado o teto, a saída é confirmada (com aviso no log). */
+  const tentativasDeSair = new Map<string, number>();
   let parado = false;
   let timer: { cancelar(): void } | null = null;
   let mtime = 0;
@@ -135,8 +139,9 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     if (l.fim) return;
     l.fim = true;
     logins.delete(l.pedido.id);
-    terminados.set(l.pedido.id, p);
-    if (!p || (await relatar(l, p))) terminados.delete(l.pedido.id);
+    // Fica marcado até a puxada deixar de trazer o login (a puxada em voo ainda o traz e não pode reabri-lo).
+    terminados.set(l.pedido.id, p ?? "entregue");
+    if (p && (await relatar(l, p))) terminados.set(l.pedido.id, "entregue");
     await l.login.parar().catch(() => undefined);
   }
 
@@ -206,8 +211,8 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
   /** Mantém a última fase relatada viva: o que não chegou ao servidor vai de novo a cada volta. */
   async function repetirRelatos(listados: ReadonlySet<string>): Promise<void> {
     for (const [id, p] of [...terminados]) {
-      if (!listados.has(id) || !p) { terminados.delete(id); continue; }
-      if (await d.ponte.progresso({ loginId: id, ...p }).catch(() => false)) terminados.delete(id);
+      if (!listados.has(id)) { terminados.delete(id); continue; }
+      if (p !== "entregue" && (await d.ponte.progresso({ loginId: id, ...p }).catch(() => false))) terminados.set(id, "entregue");
     }
   }
 
@@ -219,7 +224,12 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
       // Revisão do PR #306: só confirma ao servidor a saída que aconteceu (ou a conta que nem estava aqui). Um logout
       // que falhou fica pendente e é tentado de novo na próxima puxada; confirmado, o anúncio seguinte a traria de volta.
       const saiu = await d.contas.sair(imp).then(() => true, (e: unknown) => { log("aviso", "motor_sair_da_conta_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); return false; });
-      if (saiu) feitas.push(imp);
+      const n = (tentativasDeSair.get(imp) ?? 0) + 1;
+      if (saiu || n >= TENTATIVAS_DE_SAIR) {
+        if (!saiu) log("aviso", "motor_sair_da_conta_desistiu", { tentativas: n });
+        tentativasDeSair.delete(imp);
+        feitas.push(imp);
+      } else tentativasDeSair.set(imp, n);
     }
     return feitas;
   }
@@ -257,6 +267,9 @@ export function iniciarContasDoMotor(d: DepsContasDoMotor): { parar(): void } {
     if (r.desconectar) {
       const todas = d.contas.listar().filter((c) => c.impressao !== null).map((c) => c.impressao!);
       const feitas = await sairDe(todas);
+      // Revisão do PR #306: com algum logout pendente, confirma só o que saiu e tenta de novo na próxima puxada (a chave
+      // vence em 2 min de todo jeito); com tudo fora, confirma a desconexão e para.
+      if (feitas.length < todas.length) { await d.ponte.saiu(feitas, false); return "seguir"; }
       await d.ponte.saiu(feitas, true);
       log("info", "motor_desconectado_pela_pessoa", { contas: feitas.length });
       await d.desconectar();

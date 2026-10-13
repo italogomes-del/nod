@@ -30,8 +30,12 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
     },
 
     async listar(): Promise<ChaveMaquinaDto[]> {
+      // ADR-102 (revisão do PR #306): a chave que venceu (o "Desconectar" sem confirmação) conta como cancelada na data
+      // em que venceu — a tela, a escolha de máquina dos bots e as contas a veem como as revogadas.
       const linhas = await conn<Linha[]>`
-        select id, nome, prefixo, criado_em, ultimo_uso_em, revogado_em from maquina_tokens
+        select id, nome, prefixo, criado_em, ultimo_uso_em,
+          coalesce(revogado_em, case when expira_em <= now() then expira_em end) as revogado_em
+        from maquina_tokens
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
         order by criado_em desc`;
       return linhas.map(paraDto);

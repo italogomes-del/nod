@@ -150,6 +150,8 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
     aprovar({ codigoPessoa, escopo }) {
       const p = aberto(codigoPessoa, escopo);
       if (!p) return false;
+      // Revisão do PR #306: o convite deste pedido recebeu outro pedido depois — não aprova sem a pessoa gerar outro.
+      if ([...convites.values()].some((v) => v.conflito && v.codigoPessoa === p.codigoPessoa)) return false;
       p.aprovadoPor = escopo;
       return true;
     },

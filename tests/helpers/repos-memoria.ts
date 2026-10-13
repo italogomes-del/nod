@@ -2209,7 +2209,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return b.maquinaTokens
           .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId)
           .sort((x, y) => y.criadaEm - x.criadaEm)
-          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }));
+          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm, expiraEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm: revogadaEm ?? (expiraEm !== null && expiraEm <= Date.now() ? expiraEm : null) }));
       },
       async revogar(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);

@@ -102,6 +102,8 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
     expect(segundo.codigoPessoa).not.toBe(pedido.codigoPessoa);
     // Quem estava no terminal da máquina certa ainda pareia pelo código dela.
     expect(p.ver({ codigoPessoa: pedido.codigoPessoa, escopo: MARLON })).toMatchObject({ nome: "vm-bots" });
+    // Mas a aprovação pelo convite em conflito é recusada (a tela que já mostrava "Conectar?" não aprova a errada).
+    expect(p.aprovar({ codigoPessoa: pedido.codigoPessoa, escopo: MARLON })).toBe(false);
   });
 
   it("revisão do PR #306: até MAX_CONVITES_POR_PESSOA convites abertos; o mais antigo DELA sai, o dos outros fica", () => {
