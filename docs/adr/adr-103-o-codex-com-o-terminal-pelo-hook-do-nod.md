@@ -62,6 +62,10 @@ scratchpad da sessão e, para o que fica, `scripts/sonda-codex-terminal.ts`:
    copia na rede de 2 min (`thread/fork`). Thread que a conta não tem vira uma nova. O anexo também vai ao app-server
    (imagem como `localImage`). `CAPACIDADES_HARNESS["codex-cli"]`: terminal, pasta, retomar e bifurcar.
 8. **A entrada `[projects]` que a thread grava sai no fim do turno** quando a pasta não estava lá antes.
+9. **O servidor só promete o terminal do Codex a quem consegue.** O plano leva o kit ao Codex só quando a máquina do
+   turno anunciou `terminal` para ele (`AnuncioMaquina.capacidades`, app ou motor desta versão, com o hook). O app ou o
+   motor de antes anuncia o Codex sem terminal (ou não anuncia nada) e segue isolado, com o prompt de antes; sem isso o
+   prompt diria "você tem o terminal" a um Codex que não tem. A versão do app sobe para 0.4.0-rc.11.
 
 ## Alternativas descartadas
 

@@ -1,4 +1,4 @@
-import type { IdHarness } from "../contracts/harness.ts";
+import type { CapacidadesHarness, IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
 import { esperaDoTrabalho, pastaRelativa, podeAbrirTask } from "../domain/trabalho.ts";
@@ -67,6 +67,12 @@ export type EntradaEmitirPlano = {
    * pastas DO MAC e não existem lá: o plano sai sem workspace, como no modo compartilhado. Ausente = o turno roda no Mac.
    */
   maquinaRemota?: boolean;
+  /**
+   * ADR-103: as capacidades que a máquina do turno anunciou, por IA (só na ponte). O terminal do Codex só vai no plano
+   * quando ela anunciou `terminal`: o app ou o motor de antes roda o Codex isolado, e o prompt prometeria o que ele não
+   * dá. Ausente = o turno roda neste processo (o driver local decide e avisa o modelo, como no Claude sem o hook).
+   */
+  capacidadesDaMaquina?: Partial<Record<IdHarness, CapacidadesHarness>>;
   /**
    * definido em 2026-10-12 (NOD-214): RECOMPÕE o plano de um turno que a máquina continuou rodando durante o reinício do
    * servidor (a adoção). Mesmo caminho do despacho — catálogo e concessões lidos AGORA —, mas com o token que a máquina
@@ -336,7 +342,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
     // revisto em 2026-10-07 (ADR-083, S3): pela capacidade `terminal`, não pelo nome do harness.
-    terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true),
+    // ADR-103: no Codex, só com a máquina que anunciou o terminal (o app/motor com o hook do Codex).
+    terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true) && (escolha?.harness !== "codex-cli" || input.capacidadesDaMaquina === undefined || input.capacidadesDaMaquina["codex-cli"]?.terminal === true),
     // ADR-083: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
     trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho) } : null,
