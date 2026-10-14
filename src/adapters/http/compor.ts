@@ -441,7 +441,8 @@ export function comporApp(o: OpcoesCompor): App {
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: !daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
           harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod,
-          maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}) });
+          maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
+          ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(d.escopo, machineIdDoPlano) } : {}) });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
         return r.data;
       },
@@ -480,6 +481,7 @@ export function comporApp(o: OpcoesCompor): App {
         turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
         harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, aFazer, semFerramentasDoNod,
         maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
+        ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(escopo, t.machineId) } : {}),
         recompor: { tokenDeTurno: token, harness: c.harness },
       });
       return r.data;

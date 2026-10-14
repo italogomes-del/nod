@@ -190,3 +190,9 @@ A emenda NOD-179 dizia que o número da cota nunca seria gate e que, se virasse,
 1% fica para a conversa com a pessoa. No limite, todo o fundo espera a renovação em vez de falhar. Detalhe na emenda de
 2026-10-12 da [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md). A conversa com a pessoa continua como acima: nunca é
 segurada pelo número, e a troca de IA no limite segue igual.
+
+## Emenda (2026-10-14): o Codex com o terminal
+
+O "Codex continua só com o proxy" desta ADR caiu com a [ADR-103](adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md):
+o chat do Codex no app-server tem o kit do terminal pelo hook PreToolUse do Codex, confiado pela API do app-server, e o
+isolamento de antes fica para a máquina sem o hook e para o `codex exec` de reserva.

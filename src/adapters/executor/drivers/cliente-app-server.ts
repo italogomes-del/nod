@@ -34,8 +34,13 @@ export type ClienteAppServer = {
   fechando(): boolean;
   enviar(montar: (id: IdRpc) => string, aoResponder?: (r: RespostaAppServer) => void): void;
   pedir(montar: (id: IdRpc) => string): Promise<Record<string, unknown>>;
-  /** initialize → initialized → thread/start; lança (com o processo já encerrado) se ele morre ou não responde no prazo. */
-  abrirThread(p: { versaoNod: string; threadStart: (id: IdRpc) => string; prazoMs: number }): Promise<void>;
+  /**
+   * initialize → initialized → thread/start; lança (com o processo já encerrado) se ele morre ou não responde no prazo.
+   * revisto em 2026-10-14 (ADR-103): `antes` roda entre o initialized e a thread (a confiança do hook do nod; lançar
+   * derruba a abertura como qualquer falha do handshake), e `reserva` abre outra thread quando a primeira é recusada
+   * (o `thread/resume` de uma thread que esta conta não tem vira uma thread nova).
+   */
+  abrirThread(p: { versaoNod: string; threadStart: (id: IdRpc) => string; prazoMs: number; antes?: () => Promise<void>; reserva?: (id: IdRpc) => string; aoReserva?: (motivo: string) => void }): Promise<void>;
   /**
    * `turn/start`. `aoAbrir(id)` quando o turno abre; `aoAbrir(null)` quando o app-server o recusa. Não chama quando o
    * turno já concluiu antes de a resposta chegar, nem quando uma interrupção foi pedida enquanto ele subia (ele é
@@ -142,7 +147,12 @@ export function criarClienteAppServer(o: {
           (async () => {
             await pedir((id) => pedidoInitialize(id, { nome: "nod", versao: p.versaoNod }));
             processo.escrever(notificacaoInitialized());
-            const r = await pedir(p.threadStart);
+            if (p.antes) await p.antes();
+            const r = await pedir(p.threadStart).catch((e: unknown) => {
+              if (!p.reserva) throw e;
+              p.aoReserva?.(e instanceof Error ? e.message : "recusada");
+              return pedir(p.reserva);
+            });
             const id = idDaThread(r);
             if (!id) throw new Error("thread_sem_id");
             threadId = id;

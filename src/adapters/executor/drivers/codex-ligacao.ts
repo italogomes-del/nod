@@ -12,7 +12,7 @@ import type { Processo } from "../processo.ts";
 import type { SinksTurno } from "../spi.ts";
 import { PEDIDO_DE_RESUMO, textoDaVez } from "./claude-ligacao.ts";
 import { criarClienteAppServer } from "./cliente-app-server.ts";
-import { configMcpCodex, escreverLauncherProxy, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
+import { configMcpCodex, escreverLauncherProxy, overridesIsolamentoCodex, overridesTerminalCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
 
 /**
  * O laço de voz do Codex (definido em 2026-10-04, ADR-076), no molde do de Claude (ADR-072). O turno-cérebro de uma
@@ -39,7 +39,17 @@ const SAIDA_APOS_RESUMO_MS = 2_000;
  * argv do app-server. As chaves `-c` vão ANTES do subcomando (são do `codex` raiz e chegam a qualquer subcomando); a
  * config do MCP aponta para o launcher 0600, e o token do turno nunca entra aqui.
  */
-export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex; sandbox?: SandboxCodex }): string[] {
+export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex; sandbox?: SandboxCodex; terminal?: { hooks: string; argMcp: string; mcpDaPessoa: boolean } }): string[] {
+  // ADR-103: com o kit do terminal, sem sandbox (como o Claude, ADR-055), o hook do nod no lugar do isolamento e o MCP do
+  // nod junto dos da pessoa nos modos dela. Sem ele, o isolamento de sempre.
+  if (p.terminal) {
+    return [
+      "-c", p.terminal.argMcp, "-c", 'approval_policy="never"', "-c", 'sandbox_mode="danger-full-access"', "-c", p.terminal.hooks,
+      ...overridesTerminalCodex({ mcpDaPessoa: p.terminal.mcpDaPessoa, recusadas: p.recusadas }).flatMap((o) => ["-c", o]),
+      "app-server",
+      ...FLAGS_OPCIONAIS_APP_SERVER.filter((f) => p.flagsNoHelp.includes(f)),
+    ];
+  }
   return [
     // definido em 2026-10-07 (ADR-083 §6): o chat com projeto autorizado escreve na pasta, como o `codex exec`.
     "-c", `mcp_servers=${p.configMcp}`, "-c", 'approval_policy="never"', "-c", `sandbox_mode="${p.sandbox ?? "read-only"}"`,

@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import { CAPACIDADES_HARNESS } from "../../src/contracts/harness.ts";
 import type { Services } from "../../src/use-cases/tipos.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
 import { duplicarAgente } from "../../src/use-cases/duplicar-agente.ts";
@@ -36,6 +37,31 @@ describeIntegracao("harness por agente", () => {
       await expect(emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).rejects.toThrow("executor_indisponivel");
     });
   });
+  // ADR-103: o terminal do Codex só vai a quem consegue; o app ou o motor de antes roda o Codex isolado.
+  it("o Codex leva o kit do terminal só para a máquina que anunciou o terminal dele; sem anúncio (processo local), vale o driver", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);
+      const agora = () => Date.now();
+      const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      await editarPerfil(deps, { agenteId, harness: "codex-cli", modelo: "auto" });
+      const plano = async (capacidadesDaMaquina?: Parameters<typeof emitirPlanoTurno>[1]["capacidadesDaMaquina"]) => {
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", agenteId, conversaId, origem: "conversa", prazoEm: agora() + 60000, profundidade: 0, entradaTexto: "roda os testes", entradaConfianca: "confiavel", modelo: "auto", harness: "codex-cli" });
+        return (await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: randomUUID(), executor: "local", harnesses: { "codex-cli": pronto }, ...(capacidadesDaMaquina ? { capacidadesDaMaquina } : {}) })).data;
+      };
+      const comTerminal = await plano({ "codex-cli": { ...CAPACIDADES_HARNESS["codex-cli"], terminal: true } });
+      expect(comTerminal.nativas).toEqual(expect.arrayContaining(["Bash", "apply_patch", "web_search"]));
+      expect(comTerminal.pastaDoBot).toBeTruthy();
+      expect(comTerminal.promptSistema).toContain("Você tem o terminal e os arquivos do Codex");
+      // App de antes: anunciou o Codex sem terminal, ou não anunciou capacidade nenhuma.
+      for (const anuncio of [{ "codex-cli": { ...CAPACIDADES_HARNESS["codex-cli"], terminal: false } }, {}]) {
+        const antigo = await plano(anuncio);
+        expect(antigo.nativas ?? []).not.toContain("Bash");
+        expect(antigo.promptSistema).not.toContain("terminal e os arquivos do Codex");
+      }
+      expect((await plano()).nativas).toContain("Bash");
+    });
+  });
+
   it("/uso só vira /cost quando a IA escolhida para o turno é o Claude Code; no automático com só o Codex pronto, não (NOD-179)", async () => {
     await withRollback(escopo, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, escopo);

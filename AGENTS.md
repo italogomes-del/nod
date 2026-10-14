@@ -306,8 +306,8 @@ e fica sem IA com o motivo escrito, nunca cai no catcher (NOD-160). `NOD_MODELO=
 Claude para os agentes criados com esse override. Boot/desktop usam sondagem de login sem inferência;
 `scripts/sonda.ts` e `e2e:aceite` continuam explicitamente separados e pagos.
 
-Codex exige flags de isolamento verificadas no help, usa apenas o proxy nod para integrações, não
-herda chaves OpenAI nem configuração de plugins/apps e não põe o token de turno no argv. Seu launcher
+Codex exige flags de isolamento verificadas no help, usa o proxy nod para as integrações do nod (os MCPs da pessoa só pelo hook, ADR-103), não
+herda chaves OpenAI nem, fora dos modos da dona (ADR-103), plugins/apps, e não põe o token de turno no argv. Seu launcher
 0600 chama `main()` do proxy e é apagado ao encerrar. `desktop/proxy.ts` deve exportar `main` além de
 funcionar como executável direto. Valide ambos os caminhos sem modelos reais.
 
@@ -324,6 +324,21 @@ Revisto em 2026-10-05 (primeiro uso real do Codex em produção: nove turnos, ze
 `node scripts/sonda-codex-ferramentas.ts` (paga, centavos da assinatura do Codex) roda o driver de verdade contra um
 servidor MCP de prova e diz se o `tools/call` chegou. Rode-a quando o Codex mudar de versão. O erro que o Codex devolve
 (`turn.failed`, item `error`, última linha do stderr) vai para `erroCru`, só no diagnóstico.
+
+Revisto em 2026-10-14 ([ADR-103](docs/adr/adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md), paridade): o chat do Codex
+no app-server tem o kit do terminal. O isolamento acima vale só sem o hook (máquina sem o script, hook não confiado) e no
+`codex exec` de reserva. Regras medidas no 0.147.0 e no 0.162.0:
+- **O hook de `-c hooks=…` só roda confiado.** A confiança é gravada pelo próprio app-server (`hooks/list` +
+  `config/batchWrite`, em `codex-chat.ts`); `--dangerously-bypass-hook-trust` NÃO funciona no app-server. Não mude o
+  comando nem o matcher do hook à toa: o hash muda e a confiança é gravada de novo no `config.toml` da pessoa.
+- **O hook do Codex falha aberto** (timeout estourado ou hook quebrado = o comando roda). O `hook-nativas.ts` nega sozinho
+  em `PRAZO_HOOK_CODEX_MS`, abaixo do `TIMEOUT_HOOK_CODEX_S` que o Codex recebe; não inverta os dois.
+- **No Codex, "permitir" é stdout vazio** (`formato: "codex"`); o JSON de allow sem `updatedInput` conta como falha.
+- **O Codex usa o caminho real da pasta** (`realpath`): o `cwd` do hook é o real; o caminho dentro do patch segue o que
+  o driver passou.
+- `node scripts/sonda-codex-terminal.ts --codex <bin>` (paga, três turnos do Luna) homologa o hook, a recusa, o patch, a
+  web, o `thread/resume` e o `thread/fork` com o Codex de verdade. Rode-a a cada versão nova do Codex; o Codex que o
+  app usa fica em `~/Library/Application Support/nod/ferramentas/codex-cli/atual/bin/codex`, não no do nvm.
 
 Conta logada que não responde (2026-10-05, emenda da ADR-019). Login conferido não prova que a conta serve: uma
 organização pode ter desativado o uso por assinatura. `nao_autenticado` leva um código `causa` (`conta_sem_acesso` |

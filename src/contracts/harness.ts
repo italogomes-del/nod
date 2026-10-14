@@ -68,10 +68,13 @@ export const SEM_CAPACIDADES: CapacidadesHarness = { mensagemNoMeio: false, reto
 /**
  * definido em 2026-10-07 (ADR-083): o Codex do chat roda no app-server quando a sonda o acha (`turn/steer`), mas
  * `thread/resume` e fork não foram medidos — continua recebendo o histórico recente. Mudou uma medição: troque aqui.
+ * revisto em 2026-10-14 (ADR-103, paridade do Codex): o chat do Codex tem o kit do terminal (o hook PreToolUse do Codex
+ * leva cada comando ao servidor), trabalha na pasta do bot e continua a thread (`thread/resume`, `thread/fork`). Quando
+ * a máquina não consegue ligar o hook, o driver roda isolado e avisa o modelo, como o Claude sem o hook.
  */
 export const CAPACIDADES_HARNESS: Record<IdHarness, CapacidadesHarness> = {
   "claude-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "pdf", "texto"], comandosDoCli: true, pastaDeTrabalho: true },
-  "codex-cli": { mensagemNoMeio: true, retomaSessao: false, bifurcaSessao: false, processoProprio: true, terminal: false, anexos: ["imagem", "texto"], comandosDoCli: false, pastaDeTrabalho: false },
+  "codex-cli": { mensagemNoMeio: true, retomaSessao: true, bifurcaSessao: true, processoProprio: true, terminal: true, anexos: ["imagem", "texto"], comandosDoCli: false, pastaDeTrabalho: true },
   "cursor-cli": SEM_CAPACIDADES,
   hermes: SEM_CAPACIDADES,
 };

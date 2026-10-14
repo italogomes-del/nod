@@ -204,7 +204,7 @@ export type EntradaPlano = {
   aFazer?: boolean;
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
-  /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
+  /** O harness do turno tem o hook do nod (ADR-052; o Codex desde a ADR-103): libera o kit do terminal. */
   terminal?: boolean;
   /** A IA que roda o turno; ausente ou null = Claude Code (catcher, legado). Decide a tradução dos comandos da conversa. */
   harness?: IdHarness | null;
@@ -248,7 +248,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
   const doNod = ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semFerramentasDoNod ? FERRAMENTAS_DO_NOD : [];
-  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true });
+  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true, harness: entrada.harness ?? null });
   // definido em 2026-10-12 (ADR-099, parte 2): esperar_comando entra onde o bot espera com tempo (os modos do me_chame_as)
   // E tem terminal — o comando roda pelas regras do Bash dele, na máquina e na pasta do turno. Sem terminal (Codex, sala,
   // ligação), não há onde rodar: fica o me_chame_as.
@@ -321,7 +321,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}) }),
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}) }),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
     politicaExecucao: {
       prazoMs,

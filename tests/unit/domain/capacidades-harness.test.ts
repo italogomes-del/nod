@@ -13,9 +13,10 @@ describe("capacidadesDe (ADR-083): diferença entre harnesses só por capacidade
     for (const h of ["grok", "", null, undefined, "auto", "__proto__"]) expect(capacidadesDe(h)).toEqual(SEM_CAPACIDADES);
   });
 
-  it("Claude retoma e bifurca a sessão; o Codex recebe mensagem no meio mas não retoma (thread/resume não medido)", () => {
-    expect(capacidadesDe("claude-cli")).toMatchObject({ retomaSessao: true, bifurcaSessao: true, mensagemNoMeio: true });
-    expect(capacidadesDe("codex-cli")).toMatchObject({ retomaSessao: false, bifurcaSessao: false, mensagemNoMeio: true });
+  // ADR-103: o Codex continua a thread (thread/resume), a copia (thread/fork), tem o terminal e a pasta do bot.
+  it("Claude e Codex retomam e bifurcam a sessão, recebem mensagem no meio e têm o terminal e a pasta", () => {
+    expect(capacidadesDe("claude-cli")).toMatchObject({ retomaSessao: true, bifurcaSessao: true, mensagemNoMeio: true, terminal: true, pastaDeTrabalho: true });
+    expect(capacidadesDe("codex-cli")).toMatchObject({ retomaSessao: true, bifurcaSessao: true, mensagemNoMeio: true, terminal: true, pastaDeTrabalho: true });
   });
 
   // NOD-207: as diferenças que antes comparavam o id agora saem do catálogo; o comportamento de cada harness é o mesmo.

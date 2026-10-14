@@ -9,8 +9,9 @@ import type { Profundidade } from "../contracts/turno.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
 import type { FormaTrabalho } from "../contracts/frente.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import { BRANCH_NA_FRENTE_ATUAL, DONO_INTEGRA, ehFrente, worktreeDaFrente } from "./frente.ts";
-import { ehPastaDeTask, type MotivoSemTerminal } from "./nativas.ts";
+import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA, type MotivoSemTerminal } from "./nativas.ts";
 import { pendenciaNoPrompt } from "./pendencia.ts";
 import { podeRepassar, PROFUNDIDADE_MAXIMA, proximaProfundidade } from "./profundidade.ts";
 import { redigir } from "./redacao.ts";
@@ -215,6 +216,8 @@ export type EntradaPromptSistema = {
    * nomeia a máquina e não afirma Mac, Finder nem os clones do Mac. Ausente ou `darwin` = o texto de sempre.
    */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
+  /** ADR-103: a IA do turno. Com o Codex e o terminal, a linha do terminal fala das ferramentas dele, não das do Claude. */
+  harness?: IdHarness | null;
 };
 
 /** Uma task aberta do bot como entra no prompt da conversa: id (para mandar_para_frente), título, estado e o último passo. */
@@ -367,7 +370,9 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
     : entrada.pastaDoBot && ehPastaDeTask(entrada.pastaDoBot)
     ? `Para mexer num repositório, trabalhe numa worktree dentro da pasta desta task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo> -b <branch> origin/main (quando a task acaba, o nod apaga a worktree que não tem alteração por commitar; a branch fica no clone); a worktree fora desta pasta e o git que troca de branch ou grava fora dela são negados, para não atropelar o trabalho dela e dos colegas.`
     : `Para mexer num repositório, trabalhe numa worktree sua, uma por task, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${entrada.pastaDoBot}/<repo>-<task> -b <branch> origin/main; o git que troca de branch ou grava fora da sua pasta é negado, para não atropelar o trabalho dela e dos colegas.`;
-  const comNativas = entrada.pastaDoBot && naMaquinaLinux(entrada)
+  const comNativas = entrada.pastaDoBot && entrada.harness === "codex-cli" && nativas.includes("Bash")
+    ? terminalNoCodex({ pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, regraDoModo: TERMINAL_POR_MODO[modoAprovacao], worktree, maquina: naMaquinaLinux(entrada) ? entrada.maquina!.nome : null, mcpDaPessoa: nativas.includes(NATIVA_MCP_DA_PESSOA) })
+    : entrada.pastaDoBot && naMaquinaLinux(entrada)
     ? terminalNaMaquinaLinux({ nativas, pastaDoBot: entrada.pastaDoBot, pessoaNome: entrada.pessoaNome, maquina: entrada.maquina!.nome, regraDoModo: TERMINAL_POR_MODO[modoAprovacao], worktree })
     : entrada.pastaDoBot
     ? `Também há as ferramentas nativas ${nativas.join(", ")}, como no Claude Code do terminal. O diretório atual é a sua pasta no Mac de ${entrada.pessoaNome}: ~/nod/${entrada.pastaDoBot} (o que você grava ali ela abre no Finder); você lê e grava arquivos em qualquer lugar do Mac dela. O Bash é o terminal de verdade do Mac: tem rede e o gh, o git e o npm logados dela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${worktree} Comando que só lê (git status/diff/log, gh pr list/view/diff, ls, rg, rodar testes) roda direto; ${TERMINAL_POR_MODO[modoAprovacao]} Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo. Comando demorado do seu trabalho (testes, build, QA) não tem limite de tempo: rode em segundo plano (run_in_background) ou acompanhe com Monitor e siga trabalhando — quando ele terminar, você é chamado de novo nesta mesma sessão. Não encerre dizendo que vai acompanhar depois: acompanhe agora, até concluir. ${MAQUINA_DIVIDIDA} A pessoa pode mandar mensagem enquanto você trabalha; ela chega no meio do trabalho. Para mandar um arquivo do Mac (vídeo, print, PDF) a um app, chame a ferramenta do app que recebe arquivo e ponha o caminho no campo s3key: o nod envia o arquivo. Nunca peça à pessoa para rodar um comando por você. Para entregar algo visual ou marcável, use publicar_artefato.`
@@ -453,6 +458,20 @@ function naMaquinaLinux(entrada: Pick<EntradaPromptSistema, "maquina">): boolean
   return entrada.maquina?.plataforma === "linux";
 }
 const semMac = (linha: string): string => linha.replaceAll("credencial do Mac", "credencial desta máquina");
+
+/**
+ * definido em 2026-10-14 (ADR-103): o texto do kit do terminal no Codex. As regras são as do Claude (mesma cerca, mesmo
+ * modo de aprovação, mesma pasta); muda o nome das ferramentas (o shell e o apply_patch, não Bash/Monitor/run_in_background)
+ * e entram o AGENTS.md (o Codex só lê o da pasta atual para cima, e a worktree fica abaixo dela) e os apps da pessoa.
+ * `maquina` = o nome da máquina Linux (ADR-090); null = o Mac da pessoa.
+ */
+export function terminalNoCodex(p: { pastaDoBot: string; pessoaNome: string; regraDoModo: string; worktree: string; maquina: string | null; mcpDaPessoa: boolean }): string {
+  const onde = p.maquina
+    ? `Você trabalha na máquina ${p.maquina} de ${p.pessoaNome}, um Linux sempre ligado, e não no Mac dela. O diretório atual é a sua pasta nessa máquina: ~/nod/${p.pastaDoBot}; você lê e grava arquivos em qualquer lugar dela. Os arquivos ficam aqui: ${p.pessoaNome} não os vê no Mac, então entregue o resultado na resposta, num artefato (publicar_artefato) ou num app. O terminal é o de verdade dessa máquina: tem rede e o gh e o git logados nela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). Os clones do Mac dela não estão aqui: se ainda não houver clone nesta máquina, clone na sua pasta (gh repo clone dono/repo ~/nod/${p.pastaDoBot}/<repo>). ${p.worktree.replace("a partir do clone que ela já tem", "a partir do clone")}`
+    : `O diretório atual é a sua pasta no Mac de ${p.pessoaNome}: ~/nod/${p.pastaDoBot} (o que você grava ali ela abre no Finder); você lê e grava arquivos em qualquer lugar do Mac dela. O terminal é o de verdade do Mac: tem rede e o gh, o git e o npm logados dela — use gh para o GitHub (por exemplo gh pr list -R dono/repo). ${p.worktree}`;
+  const apps = p.mcpDaPessoa ? ` Os apps que ${p.pessoaNome} configurou no Codex dela (servidores MCP) também estão aqui; cada uso passa pelo nod e segue a mesma regra do comando que muda algo.` : "";
+  return `Você tem o terminal e os arquivos do Codex, como no Codex do terminal: rode comandos de shell e crie ou edite arquivos com apply_patch. ${onde} Ao entrar num repositório, leia o AGENTS.md dele antes de mexer. Comando que só lê (git status/diff/log, gh pr list/view/diff, ls, rg, rodar testes) roda direto; ${p.regraDoModo} Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo.${apps} Comando demorado do seu trabalho (testes, build, QA) não tem limite de tempo: acompanhe a saída até ele terminar antes de encerrar. Não encerre dizendo que vai acompanhar depois: acompanhe agora, até concluir. ${MAQUINA_DIVIDIDA} A pessoa pode mandar mensagem enquanto você trabalha; ela chega no meio do trabalho.${p.maquina ? "" : " Para mandar um arquivo do Mac (vídeo, print, PDF) a um app, chame a ferramenta do app que recebe arquivo e ponha o caminho no campo s3key: o nod envia o arquivo."} Nunca peça à pessoa para rodar um comando por você. Para entregar algo visual ou marcável, use publicar_artefato.`;
+}
 
 /**
  * definido em 2026-10-09 (ADR-090): o texto do kit do terminal quando o motor roda numa máquina Linux da pessoa. Mesmas

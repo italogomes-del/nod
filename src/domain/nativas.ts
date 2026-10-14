@@ -2,6 +2,7 @@ import { tocaCredencial } from "./comando.ts";
 import { arquivoForaDaPastaDoBot, gitForaDaPastaDoBot, type ContextoDaPasta } from "./git-na-pasta-do-bot.ts";
 import { FERRAMENTAS_DE_TAREFA } from "./tarefas-do-bot.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 
 /**
@@ -33,8 +34,30 @@ export const NATIVAS_DE_SKILL = ["Skill", "Agent"] as const;
 export const NATIVAS_DE_SEGUNDO_PLANO = ["Monitor", "TaskStop"] as const;
 export const NATIVAS_DO_TERMINAL = [...NATIVAS_DE_ARQUIVO, "Bash", ...NATIVAS_DE_SEGUNDO_PLANO, "WebFetch", "WebSearch", ...NATIVAS_DE_SKILL, ...FERRAMENTAS_DE_TAREFA] as const;
 
+/**
+ * definido em 2026-10-14 (ADR-103, paridade do Codex): o kit do terminal no Codex, pelo nome que o PreToolUse do Codex
+ * informa ao hook (medido no 0.147.0 com um turno real: "Bash" para o shell e o `exec_command`, "apply_patch" para criar
+ * e editar arquivo, com o patch inteiro em `tool_input.command`). `spawn_agent` é o subagente (o `Agent` do Claude) e
+ * `view_image` lê uma imagem do disco. `web_search` é ferramenta hospedada: o hook nunca a vê (documentação de hooks do
+ * Codex, "Tool coverage"); quem avisa o servidor é o driver, pelo item `webSearch` do stream, e a chamada contamina o
+ * turno como a busca do Claude. Skills do Codex não são ferramenta: entram como instrução.
+ */
+export const NATIVAS_DO_TERMINAL_CODEX = ["Bash", "apply_patch", "view_image", "spawn_agent", "web_search"] as const;
+
+/**
+ * definido em 2026-10-14 (ADR-103): uma ferramenta de um servidor MCP DA PESSOA (o config.toml dela), nunca o do nod.
+ * Não passa pelo proxy: o hook a manda ao servidor como esta nativa, que decide pelo modo como um comando que muda algo.
+ */
+export const NATIVA_MCP_DA_PESSOA = "mcp_da_pessoa";
+
+/**
+ * Os modos em que o turno é da dona do bot (ADR-103): ela abriu a conversa, criou o bot ou marcou a rotina. Num pedido
+ * de colega, numa sala ou numa ligação, um MCP dela usaria as credenciais dela a pedido de outra pessoa.
+ */
+const MODOS_DA_DONA: readonly ModoTurno[] = ["conversa", "criacao", "rotina"];
+
 /** As nativas que trazem conteúdo de FORA para o turno: a chamada marca o turno como contaminado (0033). */
-export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch"];
+export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch", "web_search", NATIVA_MCP_DA_PESSOA];
 
 /**
  * Quais nativas o turno recebe. definido em 2026-09-28: só turno de CONVERSA e CONFIÁVEL. Até aqui qualquer
@@ -52,8 +75,13 @@ export const NATIVAS_QUE_CONTAMINAM: readonly string[] = ["WebFetch", "WebSearch
  * implementaram nenhum dos 6 pedidos do Chico porque o pedido de colega não tinha terminal. Só o peer legado fica
  * sem. Sem o hook (driver antigo, só --restricted), ninguém decide as nativas: elas ficam na conversa confiável.
  */
-export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pastasAutorizadas: boolean; terminal?: boolean }): readonly string[] {
+/**
+ * revisto em 2026-10-14 (ADR-103): com `harness` = Codex e o terminal, o kit dele (NATIVAS_DO_TERMINAL_CODEX), mais o
+ * MCP da pessoa nos modos da dona. A regra de QUANDO há terminal é a mesma dos dois harnesses.
+ */
+export function nativasDoTurno(t: { modo: ModoTurno; confianca: Confianca; pastasAutorizadas: boolean; terminal?: boolean; harness?: IdHarness | null }): readonly string[] {
   if (t.modo === "peer") return [];
+  if (t.terminal && t.harness === "codex-cli") return MODOS_DA_DONA.includes(t.modo) ? [...NATIVAS_DO_TERMINAL_CODEX, NATIVA_MCP_DA_PESSOA] : NATIVAS_DO_TERMINAL_CODEX;
   if (t.terminal) return NATIVAS_DO_TERMINAL;
   return t.pastasAutorizadas && (t.modo === "conversa" || t.modo === "criacao") && t.confianca === "confiavel" ? NATIVAS_DE_ARQUIVO : [];
 }
@@ -101,7 +129,29 @@ export function ehPastaDeTask(pastaRelativaANod: string): boolean {
  * `arquivo` (definido em 2026-10-01, ADR-066): Write/Edit/NotebookEdit fora de ~/nod/<bot> — o servidor decide pelo
  * modo, como o comando. Só com o contexto da pasta (config do hook novo); sem ele, a gravação passa como antes.
  */
-export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string; arquivo?: string };
+export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string };
+
+/**
+ * definido em 2026-10-14 (ADR-103): os arquivos que um `apply_patch` do Codex cria, muda, apaga ou para onde move.
+ * Formato medido no 0.147.0 (`*** Begin Patch` / `*** Add File: <caminho>` / `*** End Patch`); os outros cabeçalhos
+ * são os da gramática do apply_patch (`Update File`, `Delete File`, `Move to`).
+ */
+export function caminhosDoPatch(patch: string): string[] {
+  const caminhos: string[] = [];
+  for (const linha of patch.split("\n")) {
+    const m = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/.exec(linha.trimEnd());
+    if (m) caminhos.push(m[1]!.trim());
+  }
+  return caminhos;
+}
+
+/** O pedido de um MCP da pessoa como o card o mostra: servidor, ferramenta e argumentos, com teto. */
+const TETO_ARGUMENTOS_MCP = 2_000;
+function textoDoMcp(ferramenta: string, entrada: Record<string, unknown>): string {
+  const [, servidor = "", ...resto] = ferramenta.split("__");
+  const argumentos = JSON.stringify(entrada);
+  return `${servidor}: ${resto.join("__")} ${argumentos.length > TETO_ARGUMENTOS_MCP ? `${argumentos.slice(0, TETO_ARGUMENTOS_MCP)}…` : argumentos}`;
+}
 
 /**
  * A decisão do hook do nod para UMA chamada nativa, pura. revisto em 2026-09-28 (ADR-055, "terminal de verdade,
@@ -110,11 +160,37 @@ export type DecisaoNativa = { permitir: boolean; motivo: string; contamina: bool
  * as credenciais dela, e por isso cada comando passa pelo servidor. Fail-closed: ferramenta desconhecida e Bash
  * sem comando → nega.
  */
-export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown>; pasta?: ContextoDaPasta }): DecisaoNativa {
+/**
+ * `mcpDaPessoa` (definido em 2026-10-14, ADR-103): o turno do Codex carregou os MCPs da pessoa, e uma ferramenta MCP que
+ * não é do nod vai ao servidor. Sem a marca (o Claude, ou um modo que não é da dona), MCP segue com o proxy, como antes.
+ */
+export function decidirNativa(p: { ferramenta: string; entrada: Record<string, unknown>; pasta?: ContextoDaPasta; mcpDaPessoa?: boolean }): DecisaoNativa {
   // Ferramenta MCP do nod não é nativa: quem decide é o proxy (ADR-013), que também grava a trilha. Medido ao
   // vivo em 2026-09-28: com o matcher "*", o CLI consultava o hook para MCP e ele negava publicar_artefato.
-  if (p.ferramenta.startsWith("mcp__")) return { permitir: true, motivo: "ferramenta do nod: quem decide é o proxy", contamina: false };
+  if (p.ferramenta.startsWith("mcp__nod__") || (p.ferramenta.startsWith("mcp__") && !p.mcpDaPessoa)) return { permitir: true, motivo: "ferramenta do nod: quem decide é o proxy", contamina: false };
+  // ADR-103: no Codex, os MCPs da pessoa carregam junto com o do nod; cada chamada vai ao servidor, que decide pelo modo.
+  if (p.ferramenta.startsWith("mcp__")) {
+    const texto = textoDoMcp(p.ferramenta, p.entrada);
+    if (tocaCredencial(texto)) return { permitir: false, motivo: "o pedido toca uma credencial (chaves, tokens, Keychain): o nod não manda; se a tarefa precisar, peça à pessoa", contamina: false };
+    return { permitir: true, motivo: "app da pessoa: o servidor do nod decide", contamina: true, mcp: texto };
+  }
   switch (p.ferramenta) {
+    // ADR-103: o apply_patch do Codex grava (cria, muda, apaga, move) os arquivos do patch — a mesma regra do Write.
+    case "apply_patch": {
+      const patch = typeof p.entrada.command === "string" ? p.entrada.command : "";
+      const caminhos = caminhosDoPatch(patch);
+      if (caminhos.length === 0) return { permitir: false, motivo: "patch sem arquivo reconhecível", contamina: false };
+      if (caminhos.some(tocaCredencial)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      const fora = p.pasta ? caminhos.map((c) => arquivoForaDaPastaDoBot(c, p.pasta!)).find((f) => f !== null) ?? null : null;
+      return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false, ...(fora ? { arquivo: fora } : {}) };
+    }
+    case "view_image": {
+      const caminho = typeof p.entrada.path === "string" ? p.entrada.path : "";
+      if (tocaCredencial(caminho)) return { permitir: false, motivo: "arquivo de credencial (chaves, tokens, Keychain): o nod não abre; se a tarefa precisar, peça à pessoa", contamina: false };
+      return { permitir: true, motivo: "arquivos do Mac da pessoa", contamina: false };
+    }
+    case "spawn_agent":
+      return { permitir: true, motivo: "subagente: cada ferramenta dele passa pelo nod", contamina: false };
     case "Read":
     case "Write":
     case "Edit":

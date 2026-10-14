@@ -1,5 +1,5 @@
 import { HARNESSES } from "../../../contracts/harness.ts";
-import type { IdHarness } from "../../../contracts/harness.ts";
+import type { CapacidadesHarness, IdHarness } from "../../../contracts/harness.ts";
 import { setTimeout as esperar } from "node:timers/promises";
 import type { Inventario } from "../../../contracts/inventario.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
@@ -474,6 +474,15 @@ export function criarPonteHttpServidor(d: {
     if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return null;
     return { nome: c.nome, plataforma: c.plataforma };
   }
+  /**
+   * ADR-103: as capacidades que a máquina viva do turno anunciou por IA (AnuncioMaquina.capacidades). {} = não anunciou
+   * (app antigo) ou não está conectada; quem decide o terminal do Codex lê daqui.
+   */
+  function capacidadesDaMaquina(escopo: Escopo, machineId: string): Partial<Record<IdHarness, CapacidadesHarness>> {
+    const c = conexoes.get(machineId);
+    if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return {};
+    return c.ponte.maquinasConectadas().find((m) => m.machineId === machineId)?.capacidades ?? {};
+  }
   /** ADR-090: as máquinas vivas da pessoa (último contato há menos de 60 s), para a tela "Máquinas". */
   function maquinasDaPessoa(escopo: Escopo): MaquinaConectada[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
@@ -491,5 +500,5 @@ export function criarPonteHttpServidor(d: {
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, capacidadesDaMaquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

@@ -167,7 +167,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
-  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env), filaDoForno: env.NOD_FILA_DO_FORNO !== "0" }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, prazoSondaMs: prazoSondaDoEnv(env) })];
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env), filaDoForno: env.NOD_FILA_DO_FORNO !== "0" }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, prazoSondaMs: prazoSondaDoEnv(env), filaDoForno: env.NOD_FILA_DO_FORNO !== "0" })];
   //    NOD-160: NOD_EXECUTOR desconhecido sobe só o catcher (que não vira executor) e avisa UMA vez, aqui.
   const lido = lerNodExecutor(env);
   if ("desconhecido" in lido) log("aviso", "nod_executor_desconhecido", { valor: lido.desconhecido, validos: VALIDOS_NOD_EXECUTOR.join(", ") });

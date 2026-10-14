@@ -43,7 +43,12 @@ export type EventoAppServer =
    * Item do turno começou ou acabou. `ferramenta` = `mcp__<servidor>__<ferramenta>` quando é chamada MCP (o mesmo nome
    * que o Claude Code usa), null para os outros itens. `texto` = o texto completo de uma mensagem do agente, no fim.
    */
-  | { tipo: "item"; fase: "inicio" | "fim"; turnId: string | null; itemId: string | null; tipoItem: string; ferramenta: string | null; falhou: boolean; texto: string | null }
+  /**
+   * revisto em 2026-10-14 (ADR-103): as nativas do Codex também viram `ferramenta`, pelo nome que o hook do nod conhece
+   * (NATIVAS_DO_TERMINAL_CODEX), e `entrada` leva o que identifica o passo (o comando, o caminho, a busca) para a trilha
+   * da conversa — nunca a saída.
+   */
+  | { tipo: "item"; fase: "inicio" | "fim"; turnId: string | null; itemId: string | null; tipoItem: string; ferramenta: string | null; falhou: boolean; texto: string | null; entrada?: Record<string, unknown> | null }
   | { tipo: "turno_concluido"; turnId: string | null; status: "completed" | "interrupted" | "failed"; erro: string | null }
   /** Pedido do servidor que EXIGE resposta (sem ela o turno trava). O laço sempre nega. */
   | { tipo: "pedido_servidor"; id: IdRpc; metodo: string }
@@ -79,7 +84,8 @@ export function notificacaoInitialized(): string {
   return linha({ method: "initialized" });
 }
 
-export type SandboxCodex = "read-only" | "workspace-write";
+/** revisto em 2026-10-14 (ADR-103): `danger-full-access` = o kit do terminal, sem sandbox, como o Claude (ADR-055). */
+export type SandboxCodex = "read-only" | "workspace-write" | "danger-full-access";
 
 /**
  * Thread efêmera do laço de voz: nada vai para o histórico do Codex, sem aprovação interativa (o nod decide pelo
@@ -100,11 +106,75 @@ export function pedidoThreadStart(id: IdRpc, p: { modelo: string; instrucoes: st
   });
 }
 
+/**
+ * definido em 2026-10-14 (ADR-103): o chat continua a thread do Codex como o Claude continua a sessão. `retomar` =
+ * `thread/resume` pelo id (a conversa segue); `bifurcar` = `thread/fork` (a rede de 2 min: a original fica com o trabalho
+ * promovido). Os dois aceitam os mesmos cwd, sandbox e instruções do `thread/start` (protocolo v2 do 0.147.0).
+ */
+export type AberturaThread = { tipo: "nova" } | { tipo: "retomar"; threadId: string } | { tipo: "bifurcar"; threadId: string };
+
+export function pedidoAbrirThread(id: IdRpc, abertura: AberturaThread, p: { modelo: string; instrucoes: string; cwd: string; sandbox: SandboxCodex }): string {
+  const comum = { model: p.modelo, cwd: p.cwd, approvalPolicy: "never", sandbox: p.sandbox, developerInstructions: p.instrucoes };
+  if (abertura.tipo === "retomar") return pedido(id, "thread/resume", { threadId: abertura.threadId, ...comum });
+  if (abertura.tipo === "bifurcar") return pedido(id, "thread/fork", { threadId: abertura.threadId, ...comum, ephemeral: false });
+  return pedido(id, "thread/start", { ...comum, ephemeral: false });
+}
+
+/** ADR-103: os hooks que o app-server carregou para a pasta (a confiança do hook do nod sai daqui). */
+export function pedidoHooksList(id: IdRpc, cwd: string): string {
+  return pedido(id, "hooks/list", { cwds: [cwd] });
+}
+
+export type HookListado = { chave: string; hash: string; confiado: boolean; comando: string | null; daSessao: boolean };
+
+/** `hooks/list` → `{data: [{cwd, hooks: [{key, currentHash, trustStatus, command, source}]}]}` (medido no 0.147.0). */
+export function hooksDaLista(resultado: Obj): HookListado[] {
+  const entradas = Array.isArray(resultado.data) ? resultado.data : [];
+  return entradas.flatMap((e: unknown) => (ehObj(e) && Array.isArray(e.hooks) ? e.hooks : [])).flatMap((h: unknown) => {
+    if (!ehObj(h)) return [];
+    const chave = texto(h.key);
+    const hash = texto(h.currentHash);
+    if (!chave || !hash) return [];
+    return [{ chave, hash, confiado: h.trustStatus === "trusted", comando: texto(h.command), daSessao: h.source === "sessionFlags" }];
+  });
+}
+
+/**
+ * definido em 2026-10-14 (ADR-103): grava no config.toml da conta. `valor` null apaga a chave (medido no 0.147.0:
+ * `config/batchWrite` com `value: null` tira `[projects."<pasta>"]` e o arquivo volta ao de antes).
+ */
+export function pedidoConfigBatchWrite(id: IdRpc, edicoes: readonly { chave: string; valor: unknown }[]): string {
+  return pedido(id, "config/batchWrite", { edits: edicoes.map((e) => ({ keyPath: e.chave, value: e.valor, mergeStrategy: "replace" })), reloadUserConfig: true });
+}
+
+/** A chave TOML de um caminho, entre aspas (o caminho tem barra e ponto). */
+export const chaveToml = (...partes: string[]): string => partes.map((p) => (/^[A-Za-z0-9_-]+$/.test(p) ? p : JSON.stringify(p))).join(".");
+
+/** `config/read` → o config efetivo; a chave `projects.<pasta>` diz se a pasta já estava confiada antes do turno. */
+export function pedidoConfigRead(id: IdRpc, cwd: string): string {
+  return pedido(id, "config/read", { cwd });
+}
+
+/** `config/read` → `{config: {projects: {"<pasta>": {trust_level}}}}`: a pasta já tinha entrada na config da pessoa? */
+export function pastaNaConfig(resultado: Obj, pasta: string): boolean {
+  const config = ehObj(resultado.config) ? resultado.config : {};
+  const projetos = ehObj(config.projects) ? config.projects : {};
+  return ehObj(projetos[pasta]);
+}
+
+/** ADR-103: o id da thread que `thread/resume` e `thread/fork` devolvem (`{thread: {id}}`, como o `thread/start`). */
+export const idDaThreadAberta = (resultado: Obj): string | null => idDaThread(resultado);
+
 const entradaTexto = (t: string) => [{ type: "text", text: t }];
 
-/** Sem `esforco` (o chat com o esforço padrão do modelo), o campo não vai: vale o do modelo. */
-export function pedidoTurnStart(id: IdRpc, p: { threadId: string; texto: string; esforco?: EsforcoCodex }): string {
-  return pedido(id, "turn/start", { threadId: p.threadId, input: entradaTexto(p.texto), ...(p.esforco ? { effort: p.esforco } : {}) });
+/**
+ * Sem `esforco` (o chat com o esforço padrão do modelo), o campo não vai: vale o do modelo.
+ * revisto em 2026-10-14 (ADR-103): `imagens` = arquivos do turno que entram como `localImage` (UserInput do protocolo v2
+ * do 0.147.0); antes o anexo levava o turno ao `codex exec`, sem o terminal.
+ */
+export function pedidoTurnStart(id: IdRpc, p: { threadId: string; texto: string; esforco?: EsforcoCodex; imagens?: readonly string[] }): string {
+  const input = [...entradaTexto(p.texto), ...(p.imagens ?? []).map((path) => ({ type: "localImage", path }))];
+  return pedido(id, "turn/start", { threadId: p.threadId, input, ...(p.esforco ? { effort: p.esforco } : {}) });
 }
 
 /** Fala nova no meio de um turno: entra no turno em andamento, sem abrir outro. */
@@ -194,12 +264,41 @@ export function idDoTurno(resultado: Obj): string | null {
   return (ehObj(resultado.turn) ? texto(resultado.turn.id) : null) ?? texto(resultado.turnId);
 }
 
+/**
+ * definido em 2026-10-14 (ADR-103): o item do app-server → o nome da nativa no plano (o mesmo que o PreToolUse do Codex
+ * manda ao hook). Tipos do protocolo v2 da versão 0.147.0 (`codex app-server generate-ts`, ThreadItem).
+ */
+const NATIVA_DO_ITEM: Record<string, string> = {
+  commandExecution: "Bash",
+  fileChange: "apply_patch",
+  webSearch: "web_search",
+  imageView: "view_image",
+  collabAgentToolCall: "spawn_agent",
+  imageGeneration: "image_generation",
+};
+
 function nomeDaFerramenta(item: Obj): string | null {
   const tipo = texto(item.type);
   const ferramenta = texto(item.tool);
   if (tipo === "mcpToolCall" && ferramenta) return `mcp__${texto(item.server) ?? "nod"}__${ferramenta}`;
   if (tipo === "dynamicToolCall" && ferramenta) return ferramenta;
-  return null;
+  return tipo !== null ? NATIVA_DO_ITEM[tipo] ?? null : null;
+}
+
+/** ADR-103: o que identifica o passo de uma nativa (o comando, os arquivos, a busca, a imagem); null nas outras. */
+function entradaDoItem(item: Obj): Obj | null {
+  switch (texto(item.type)) {
+    case "commandExecution":
+      return texto(item.command) !== null ? { command: texto(item.command) } : null;
+    case "fileChange":
+      return Array.isArray(item.changes) ? { arquivos: item.changes.flatMap((c: unknown) => (ehObj(c) && texto(c.path) !== null ? [texto(c.path)] : [])) } : null;
+    case "webSearch":
+      return texto(item.query) !== null ? { query: texto(item.query) } : null;
+    case "imageView":
+      return texto(item.path) !== null ? { path: texto(item.path) } : null;
+    default:
+      return null;
+  }
 }
 
 function turnoDe(params: Obj): string | null {
@@ -229,6 +328,7 @@ function interpretarNotificacao(metodo: string, params: Obj): EventoAppServer {
         ferramenta: nomeDaFerramenta(item),
         falhou: fim && (item.status === "failed" || item.status === "declined" || (item.error !== undefined && item.error !== null)),
         texto: fim && tipoItem === "agentMessage" ? texto(item.text) : null,
+        entrada: entradaDoItem(item),
       };
     }
     case "turn/completed": {

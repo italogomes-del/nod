@@ -76,13 +76,24 @@ describe("linhas do servidor", () => {
 
   it("ferramenta MCP começa e acaba com o nome no formato do Claude; mensagem completa traz o texto", () => {
     const inicio = { method: "item/started", params: { threadId: "thr", turnId: "t1", item: { type: "mcpToolCall", id: "m1", server: "nod", tool: "lembrar", status: "inProgress", arguments: { a: 1 } } } };
-    expect(interpretarLinhaAppServer(linha(inicio))).toEqual({ tipo: "item", fase: "inicio", turnId: "t1", itemId: "m1", tipoItem: "mcpToolCall", ferramenta: "mcp__nod__lembrar", falhou: false, texto: null });
+    expect(interpretarLinhaAppServer(linha(inicio))).toEqual({ tipo: "item", fase: "inicio", turnId: "t1", itemId: "m1", tipoItem: "mcpToolCall", ferramenta: "mcp__nod__lembrar", falhou: false, texto: null, entrada: null });
     const falhou = { method: "item/completed", params: { turnId: "t1", item: { type: "mcpToolCall", id: "m1", server: "nod", tool: "lembrar", status: "failed", error: { message: "x" } } } };
     expect(interpretarLinhaAppServer(linha(falhou))).toMatchObject({ fase: "fim", ferramenta: "mcp__nod__lembrar", falhou: true });
     const msg = { method: "item/completed", params: { turnId: "t1", item: { type: "agentMessage", id: "a1", text: "Pronto." } } };
     expect(interpretarLinhaAppServer(linha(msg))).toMatchObject({ tipo: "item", fase: "fim", tipoItem: "agentMessage", ferramenta: null, falhou: false, texto: "Pronto." });
-    const comando = { method: "item/started", params: { turnId: "t1", item: { type: "commandExecution", id: "c1", command: "ls" } } };
-    expect(interpretarLinhaAppServer(linha(comando))).toMatchObject({ tipoItem: "commandExecution", ferramenta: null });
+  });
+
+  // ADR-103: as nativas do Codex viram ferramenta com o nome que o hook do nod conhece, e o passo leva o que o identifica.
+  it.each([
+    [{ type: "commandExecution", id: "c1", command: "git status" }, "Bash", { command: "git status" }],
+    [{ type: "fileChange", id: "c2", changes: [{ path: "/u/nod/x/a.ts", kind: "add" }], status: "inProgress" }, "apply_patch", { arquivos: ["/u/nod/x/a.ts"] }],
+    [{ type: "webSearch", id: "c3", query: "preço do plano" }, "web_search", { query: "preço do plano" }],
+    [{ type: "imageView", id: "c4", path: "/tmp/print.png" }, "view_image", { path: "/tmp/print.png" }],
+    [{ type: "collabAgentToolCall", id: "c5", tool: "spawn_agent" }, "spawn_agent", null],
+    [{ type: "reasoning", id: "c6" }, null, null],
+  ])("item %j → ferramenta %j", (item, ferramenta, entrada) => {
+    const ev = interpretarLinhaAppServer(linha({ method: "item/started", params: { turnId: "t1", item } }));
+    expect(ev).toMatchObject({ tipo: "item", ferramenta, entrada });
   });
 
   it("turno iniciado e concluído (completo, interrompido, falhou)", () => {

@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { aspasDeShell, chaveDoComando, comandoNaFila, MARCA_DA_FILA, precisaDaVez, repositorioDaOrigem, semPeso, type Historico } from "../../domain/fila-do-forno.ts";
-import { decidirNativa } from "../../domain/nativas.ts";
-import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS } from "../../shared/constantes.ts";
+import { decidirNativa, NATIVA_MCP_DA_PESSOA } from "../../domain/nativas.ts";
+import { ESPERA_APROVACAO_NO_TURNO_MS, LONGPOLL_APROVACAO_MS, VARIAVEL_CONFIG_HOOK } from "../../shared/constantes.ts";
 import { mainDaVaga } from "./vaga.ts";
 
 /**
@@ -27,7 +27,16 @@ import { mainDaVaga } from "./vaga.ts";
  * `vaga` (definido em 2026-10-11, ADR-097, fase 1b): a fila do forno desta máquina — a pasta dela e a chamada ao
  * nod-vaga (o node e este script, com aspas). Config de um driver anterior sem o campo não liga a fila.
  */
-export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean; vaga?: { dir: string; invocar: string } };
+/**
+ * Campos do Codex (definido em 2026-10-14, ADR-103), todos medidos no 0.147.0 com um turno real:
+ * - `formato: "codex"`: "permitir" sai SEM nada no stdout (o JSON com `permissionDecision: "allow"` sem `updatedInput`
+ *   o Codex marca o hook como falho, e segue); negar continua o mesmo JSON do Claude.
+ * - `prazoMs`: o hook do Codex FALHA ABERTO — estourou o `timeout` dele, o comando roda. O hook nega sozinho antes disso.
+ * - `negacoes`: arquivo do turno onde cada negação é anotada ({nome, motivo}); o comando barrado não vira item no stream
+ *   do Codex, e o driver junta daqui as negações do turno (a pílula "ferramenta negada" com a causa, como no Claude).
+ * - `mcpDaPessoa`: o turno carregou os MCPs da pessoa; os que não são do nod vão ao servidor (NATIVA_MCP_DA_PESSOA).
+ */
+export type ConfigHook = { url: string; token: string; pastaDoBot?: string; home?: string; daTask?: boolean; vaga?: { dir: string; invocar: string }; formato?: "claude" | "codex"; prazoMs?: number; negacoes?: string; mcpDaPessoa?: boolean };
 
 /** `updatedInput` (ADR-097): o Bash com a vez da fila em volta; o CLI valida contra o formato da ferramenta. */
 export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "allow" | "deny"; permissionDecisionReason: string; updatedInput?: Record<string, unknown> } };
@@ -35,7 +44,7 @@ export type SaidaHook = { hookSpecificOutput: { hookEventName: "PreToolUse"; per
 /** O que o servidor respondeu sobre a chamada; `motivo` volta ao modelo quando nega. */
 export type Confirmacao = { permitir: boolean; motivo?: string };
 /** `arquivo` (ADR-066): a gravação fora de ~/nod/<bot>, que o servidor decide pelo modo — e o hook espera, como no Bash. */
-export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string; arquivo?: string }) => Promise<Confirmacao>;
+export type Confirmar = (p: { ferramenta: string; contamina: boolean; comando?: string; arquivo?: string; mcp?: string }) => Promise<Confirmacao>;
 
 const saida = (permitir: boolean, motivo: string): SaidaHook => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: permitir ? "allow" : "deny", permissionDecisionReason: `nod: ${motivo}` } });
 
@@ -46,17 +55,20 @@ export const AINDA_ESPERANDO = "o pedido de aprovação deste comando continua n
 /** O comando com a vez da fila em volta, ou null se ele roda direto (ADR-097). */
 export type Fila = (comando: string, cwd: string | null) => string | null;
 
-export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask">, fila?: Fila): Promise<SaidaHook> {
+export async function decidirHook(evento: unknown, confirmar: Confirmar, pastas?: Pick<ConfigHook, "pastaDoBot" | "home" | "daTask" | "mcpDaPessoa">, fila?: Fila): Promise<SaidaHook> {
   const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
   const ferramenta = typeof e.tool_name === "string" ? e.tool_name : "";
   const entrada = typeof e.tool_input === "object" && e.tool_input !== null ? (e.tool_input as Record<string, unknown>) : {};
   // ADR-065: o `cwd` do evento é a pasta em que o Bash está agora (o Claude Code a mantém entre comandos).
   const pasta = pastas?.pastaDoBot && pastas.home ? { cwd: typeof e.cwd === "string" ? e.cwd : null, pastaDoBot: pastas.pastaDoBot, home: pastas.home, daTask: pastas.daTask === true } : undefined;
-  const d = decidirNativa({ ferramenta, entrada, ...(pasta ? { pasta } : {}) });
+  const d = decidirNativa({ ferramenta, entrada, ...(pasta ? { pasta } : {}), ...(pastas?.mcpDaPessoa ? { mcpDaPessoa: true } : {}) });
   if (!d.permitir) return saida(false, d.motivo);
-  // MCP: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
-  if (ferramenta.startsWith("mcp__")) return saida(true, d.motivo);
-  const c = await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}) });
+  // MCP do nod: o proxy já decide e registra; o hook não confirma de novo no servidor (a rota só aceita nativas).
+  // ADR-103: o MCP da pessoa (no Codex) vai ao servidor como a nativa NATIVA_MCP_DA_PESSOA, com o texto do pedido.
+  if (ferramenta.startsWith("mcp__") && d.mcp === undefined) return saida(true, d.motivo);
+  const c = d.mcp !== undefined
+    ? await confirmar({ ferramenta: NATIVA_MCP_DA_PESSOA, contamina: d.contamina, mcp: d.mcp })
+    : await confirmar({ ferramenta, contamina: d.contamina, ...(d.comando !== undefined ? { comando: d.comando } : {}), ...(d.arquivo !== undefined ? { arquivo: d.arquivo } : {}) });
   if (!c.permitir) return saida(false, c.motivo ?? "o servidor do nod não confirmou esta chamada");
   // ADR-097: a fila do forno no Bash e no Monitor (o prompt manda rodar teste demorado em segundo plano ou com o Monitor:
   // é ali que mora o peso), depois do servidor liberar o comando. Um servidor de desenvolvimento não prende a fila:
@@ -132,12 +144,12 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
   const buscar = opcoes.fetch ?? fetch;
   const base = cfg.url.replace(/\/+$/, "");
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
-  return async ({ ferramenta, contamina, comando, arquivo }) => {
+  return async ({ ferramenta, contamina, comando, arquivo, mcp }) => {
     const pedir = async (): Promise<RespostaNativa | Confirmacao> => {
       const r = await buscar(`${base}/api/interno/nativas`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}) }),
+        body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}), ...(mcp !== undefined ? { mcp } : {}) }),
         signal: AbortSignal.timeout(10_000),
       });
       const corpo = (await r.json().catch(() => ({}))) as RespostaNativa;
@@ -173,18 +185,62 @@ async function lerStdin(): Promise<string> {
   return texto;
 }
 
+/**
+ * O que vai ao stdout (ADR-103): no Codex, "permitir" sem `updatedInput` é o stdout vazio (o JSON de allow puro o Codex
+ * marca como falha do hook); o resto é o JSON de sempre, que os dois CLIs entendem.
+ */
+export function textoDaSaida(resposta: SaidaHook, formato: ConfigHook["formato"]): string {
+  const s = resposta.hookSpecificOutput;
+  if (formato === "codex" && s.permissionDecision === "allow" && s.updatedInput === undefined) return "";
+  return JSON.stringify(resposta);
+}
+
+/** ADR-103: a negação anotada para o driver do Codex (uma linha JSON por negação; falhar aqui nunca muda a decisão). */
+function anotarNegacao(arquivo: string | undefined, evento: unknown, resposta: SaidaHook): void {
+  if (!arquivo || resposta.hookSpecificOutput.permissionDecision !== "deny") return;
+  try {
+    const e = (typeof evento === "object" && evento !== null ? evento : {}) as { tool_name?: unknown };
+    const nome = typeof e.tool_name === "string" ? (e.tool_name.startsWith("mcp__") && !e.tool_name.startsWith("mcp__nod__") ? NATIVA_MCP_DA_PESSOA : e.tool_name) : "";
+    appendFileSync(arquivo, `${JSON.stringify({ nome, motivo: resposta.hookSpecificOutput.permissionDecisionReason.slice(0, 1000) })}\n`, { mode: 0o600 });
+  } catch {
+    // A negação já vale; só a pílula fica sem a causa.
+  }
+}
+
+/**
+ * Decide com prazo (ADR-103): `prazoMs` vencido = nega dizendo que a aprovação segue na conversa. No Codex o próprio CLI
+ * deixaria o comando rodar ao estourar o timeout dele; o prazo do hook fica abaixo do timeout que o driver configura.
+ */
+export async function decidirComPrazo(decidir: () => Promise<SaidaHook>, prazoMs: number | undefined): Promise<SaidaHook> {
+  if (!prazoMs) return decidir();
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const vencido = new Promise<SaidaHook>((r) => { relogio = setTimeout(() => r(saida(false, AINDA_ESPERANDO)), prazoMs); });
+  try {
+    return await Promise.race([decidir(), vencido]);
+  } finally {
+    clearTimeout(relogio);
+  }
+}
+
 export async function main(): Promise<void> {
   // ADR-097: o nod-vaga mora neste mesmo script (o motor e o app já o instalam): `… hook-nativas.mjs vaga pegar …`.
   if (process.argv[2] === "vaga") return mainDaVaga(process.argv.slice(3));
   let resposta: SaidaHook;
+  let cfg: ConfigHook | null = null;
+  let evento: unknown = null;
   try {
-    const cfg = JSON.parse(readFileSync(process.argv[2] ?? "", "utf8")) as ConfigHook;
-    const evento = JSON.parse(await lerStdin()) as unknown;
-    resposta = await decidirHook(evento, confirmarNoServidor(cfg), cfg, cfg.vaga ? filaDaMaquina(cfg.vaga) : undefined);
+    // ADR-103: no Codex o caminho vem pela variável (o comando do hook é fixo); no Claude, pelo argumento, como antes.
+    cfg = JSON.parse(readFileSync(process.argv[2] ?? process.env[VARIAVEL_CONFIG_HOOK] ?? "", "utf8")) as ConfigHook;
+    const c = cfg;
+    evento = JSON.parse(await lerStdin()) as unknown;
+    resposta = await decidirComPrazo(() => decidirHook(evento, confirmarNoServidor(c), c, c.vaga ? filaDaMaquina(c.vaga) : undefined), c.prazoMs);
   } catch {
     resposta = saida(false, "não foi possível decidir esta chamada");
   }
-  process.stdout.write(JSON.stringify(resposta));
+  anotarNegacao(cfg?.negacoes, evento, resposta);
+  process.stdout.write(textoDaSaida(resposta, cfg?.formato));
+  // O prazo pode vencer com a consulta ao servidor ainda aberta: o hook sai na hora, sem esperar a rede.
+  if (cfg?.prazoMs) process.exit(0);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
