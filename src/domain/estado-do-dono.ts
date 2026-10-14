@@ -25,6 +25,8 @@ export type FatosDoDono = {
   frentes: readonly FrenteParaODono[];
   /** Desde quando um turno do bot fora de frente roda; null = nenhum. */
   conversaTrabalhandoDesde: number | null;
+  /** NOD-219: o mesmo, só na conversa própria (sem sala). Ausente = não lido; o estado sai sem `conversaPropriaTrabalhando`. */
+  conversaPropriaTrabalhandoDesde?: number | null;
   /** As decisões abertas do bot (da conversa e das frentes) e a mais antiga. */
   decisoes: { quantas: number; desde: number | null };
   /** Todas as esperas do bot (da conversa: `trabalhoId` null; das frentes: o id dela). */
@@ -80,7 +82,18 @@ export function estadoDoDono(f: FatosDoDono): EstadoDoDono {
           : principal === "fila"
             ? menor([...f.fila.map((p) => p.desde), ...(porSituacao.get("fila") ?? []).map((x) => x.criadoEm)])
             : null;
-  return { agenteId: f.agenteId, principal, frentes, conversaTrabalhando, esperandoVoce, esperando, fila, motivoEspera: maisAntiga?.motivo ?? null, desde };
+  return {
+    agenteId: f.agenteId,
+    principal,
+    frentes,
+    conversaTrabalhando,
+    ...(f.conversaPropriaTrabalhandoDesde === undefined ? {} : { conversaPropriaTrabalhando: f.conversaPropriaTrabalhandoDesde !== null }),
+    esperandoVoce,
+    esperando,
+    fila,
+    motivoEspera: maisAntiga?.motivo ?? null,
+    desde,
+  };
 }
 
 /**

@@ -18,6 +18,13 @@ export type EstadoDoDono = {
   frentes: number;
   /** O turno da própria conversa (fora de frente) está rodando: conta como trabalhando, mesmo com 0 frentes. */
   conversaTrabalhando: boolean;
+  /**
+   * NOD-219 (definido em 2026-10-13): um turno da conversa PRÓPRIA do bot roda agora. `conversaTrabalhando` conta também
+   * o turno numa sala, e a web reconciliava a conversa própria por ele — o turno da sala segurava o "Trabalhando" de uma
+   * conversa própria parada. Opcional: o servidor de antes (o do Mac, modo local) não manda; ausente, a web usa
+   * `conversaTrabalhando`.
+   */
+  conversaPropriaTrabalhando?: boolean;
   /** Decisões e perguntas abertas do bot e das frentes dele: "Esperando você". */
   esperandoVoce: number;
   /** O que só espera algo de fora — comando, volta marcada, colega —, das frentes e da conversa. */

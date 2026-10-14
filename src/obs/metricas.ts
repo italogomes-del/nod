@@ -1,5 +1,5 @@
 /**
- * As SEIS métricas do ADR-017 (revisado + refinamento de 2026-09-16), cada uma ligada a uma
+ * As SETE métricas do ADR-017 (revisado + refinamentos de 2026-09-16 e 2026-10-13), cada uma ligada a uma
  * promessa de produto — nenhuma de infraestrutura (checkout do pool, distância de partição e taxa
  * de resumed:false ficaram de fora por decisão). O rótulo é um UNION FECHADO: nenhuma string
  * livre entra, e nunca id/email de terceiros (tenant_id e pessoa_id identificam quem usa o nod).
@@ -13,7 +13,9 @@
  *    src/adapters/fundo/despachar-outbox.ts (L8);
  *  - polls_abertos → src/adapters/http/sse.ts (L8) e, quando a ponte HTTP entrar, o long-poll (L9);
  *  - expiracao (contador, dois rótulos) → quem roda decisoesRepo.vencerPendentes (varredor de expiração);
- *  - pos_restart (contador) → quem assenta turno retomado/perdido após reinício ou máquina sumida.
+ *  - pos_restart (contador) → quem assenta turno retomado/perdido após reinício ou máquina sumida;
+ *  - turno_velho_na_fila (contador, por bloqueio) → o varredor de turnos órfãos (src/use-cases/turnos-orfaos.ts, NOD-219),
+ *    no máximo uma vez por hora por turno.
  */
 export type Rotulo = { tenant_id: string; pessoa_id?: string } & (
   | { metrica: "pendencia_mais_velha_s" }
@@ -22,6 +24,7 @@ export type Rotulo = { tenant_id: string; pessoa_id?: string } & (
   | { metrica: "custo_servidor_mes" }
   | { metrica: "polls_abertos" }
   | { metrica: "outbox_abandonados" }
+  | { metrica: "turno_velho_na_fila"; bloqueio: "depois_de" | "faixa_ocupada" | "condicao_da_maquina" }
 );
 
 export type NomeMetrica = Rotulo["metrica"];
@@ -34,6 +37,7 @@ export const TIPO_METRICA = {
   custo_servidor_mes: "gauge",
   polls_abertos: "gauge",
   outbox_abandonados: "gauge",
+  turno_velho_na_fila: "counter",
 } as const satisfies Record<NomeMetrica, "gauge" | "counter">;
 
 export const AJUDA: Record<NomeMetrica, string> = {
@@ -43,6 +47,7 @@ export const AJUDA: Record<NomeMetrica, string> = {
   custo_servidor_mes: "custo em USD do executor de SERVIDOR no mês civil (ADR-017 #5); nesta rodada todo executor é local, logo 0 por construção",
   polls_abertos: "conexões de eventos (SSE) e polls abertos agora, por pessoa (ADR-017 #6)",
   outbox_abandonados: "itens do outbox abandonados pelas DUAS condições, contados e nunca apagados (ADR-010/017 refinados)",
+  turno_velho_na_fila: "pendentes que passaram do prazo da fila e seguem presos, por bloqueio; no máximo uma vez por hora por turno (ADR-017, refinamento de 2026-10-13, NOD-219)",
 };
 
 type NomeContador = { [N in NomeMetrica]: (typeof TIPO_METRICA)[N] extends "counter" ? N : never }[NomeMetrica];

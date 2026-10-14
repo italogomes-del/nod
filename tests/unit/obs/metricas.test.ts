@@ -4,10 +4,10 @@ import { AJUDA, TIPO_METRICA, criarMetricas, type NomeMetrica, type Rotulo } fro
 const T = "11111111-1111-4111-8111-111111111111";
 const P = "22222222-2222-4222-8222-222222222222";
 
-describe("métricas do ADR-017: seis rótulos, union fechado, texto Prometheus", () => {
-  it("são exatamente seis métricas, com tipo e ajuda declarados", () => {
+describe("métricas do ADR-017: sete rótulos, union fechado, texto Prometheus", () => {
+  it("são exatamente sete métricas, com tipo e ajuda declarados", () => {
     const nomes = Object.keys(TIPO_METRICA).sort();
-    expect(nomes).toEqual(["custo_servidor_mes", "expiracao", "outbox_abandonados", "pendencia_mais_velha_s", "polls_abertos", "pos_restart"]);
+    expect(nomes).toEqual(["custo_servidor_mes", "expiracao", "outbox_abandonados", "pendencia_mais_velha_s", "polls_abertos", "pos_restart", "turno_velho_na_fila"]);
     for (const n of nomes as NomeMetrica[]) expect(AJUDA[n].length).toBeGreaterThan(10);
   });
 

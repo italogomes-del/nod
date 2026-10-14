@@ -8,6 +8,7 @@ import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-i
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
+import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -91,6 +92,14 @@ function paraTurno(l: Linha): Turno {
     acordarEm: msOuNull(l.acordar_em),
   };
 }
+
+/** NOD-219: um pendente que o varredor de órfãos olha, com os fatos de domain/turno-orfao.ts. */
+export type OrfaoCandidato = FatosTurnoOrfao & {
+  id: string;
+  conversaId: string;
+  agenteId: string;
+  trabalhoId: string | null;
+};
 
 export type NovoTurno = {
   id?: string;
@@ -623,6 +632,67 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa', lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
         returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
+     * NOD-219 (definido em 2026-10-13): os pendentes da pessoa que o varredor de órfãos olha — os que nenhum `reivindicar`
+     * pode pegar (agente excluído, ou vivo com outra geração) e os que passaram do prazo da fila — com os fatos de
+     * domain/turno-orfao.ts. Ligação e volta marcada para mais tarde não entram. Os impossíveis primeiro; `limite` por
+     * passada, para a tx do varredor ficar curta (o resto sai na próxima).
+     * revisto em 2026-10-13 (revisão do PR #307): `jaObservados` (os velhos observados na última hora) sai já na consulta,
+     * como os adiados do #218 — com o `limite`, pular depois deixava os mesmos 50 velhos na frente e o 51º nunca era
+     * observado. Só vale para o velho: um observado que vira impossível (agente excluído no meio) entra de novo.
+     */
+    async orfaosCandidatos(agora: number, o: { jaObservados?: readonly string[]; limite?: number } = {}): Promise<OrfaoCandidato[]> {
+      const jaObservados = [...(o.jaObservados ?? [])];
+      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean }[]>`
+        select x.* from (
+          select t.id, t.conversa_id, t.agente_id, t.origem, t.trabalho_id, t.criado_em, t.prazo_em, t.acordar_em,
+            coalesce(a.excluido_em is not null, true) as agente_excluido,
+            (a.excluido_em is null and a.geracao_execucao is distinct from t.geracao_execucao) as geracao_antiga,
+            (t.trabalho_id is not null and exists (select 1 from trabalhos w join trabalhos dep on dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
+              where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
+            (case when t.trabalho_id is null
+              then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao')
+              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada
+          from turnos t
+          left join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
+          where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
+            and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
+        ) x
+        where x.agente_excluido or x.geracao_antiga or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
+        order by (x.agente_excluido or x.geracao_antiga) desc, x.criado_em asc, x.id asc
+        limit ${o.limite ?? 50}`;
+      return linhas.map((l) => ({
+        id: l.id,
+        conversaId: l.conversa_id,
+        agenteId: l.agente_id,
+        origem: l.origem,
+        trabalhoId: l.trabalho_id,
+        criadoEm: ms(l.criado_em),
+        prazoEm: ms(l.prazo_em),
+        acordarEm: msOuNull(l.acordar_em),
+        agenteExcluido: l.agente_excluido,
+        geracaoAntiga: l.geracao_antiga,
+        depoisDeAberto: l.depois_de_aberto,
+        faixaOcupada: l.faixa_ocupada,
+      }));
+    },
+
+    /**
+     * NOD-219: encerra o pendente que nenhum `reivindicar` pode pegar. UPDATE condicional — o mesmo predicado que o
+     * `reivindicar` nega (agente vivo com a mesma geração), mais `estado = 'pendente'`: o turno que uma máquina acabou de
+     * reivindicar fica intacto (tests/concurrency/varredor-orfaos-reivindicar.test.ts). `parado_pela_pessoa` porque o
+     * enum de motivos não tem outro que sirva; a causa vai no evento `turno_interrompido`.
+     */
+    async encerrarOrfao(id: string, agora: number): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos t set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa', lease_ate = null
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.id = ${id} and t.estado = 'pendente' and t.origem <> 'ligacao'
+          and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
+          and not exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
+        returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `t.${c}`).join(", "))}`;
       return l ? paraTurno(l) : null;
     },
 

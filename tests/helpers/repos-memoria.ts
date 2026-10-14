@@ -1065,6 +1065,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     turnos: {
+      // NOD-219: os órfãos se provam no Postgres (tests/integration/turnos-orfaos.test.ts) — a geração do agente vive na
+      // tabela e no trigger da 0012, que a memória não tem.
+      async orfaosCandidatos() {
+        return [];
+      },
+      async encerrarOrfao() {
+        return null;
+      },
       async buscarPorMensagemOrigem(mensagemId: string) {
         return doTenant(b.turnos).filter((t) => t.mensagemOrigemId === mensagemId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
@@ -2553,6 +2561,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return {
           vivos: new Map(vivos.filter((t) => !t.trabalhoId).map((t) => [t.agenteId, t.criadoEm])),
+          vivosPropria: new Map(vivos.filter((t) => !t.trabalhoId && doTenant(b.conversas).some((c) => c.id === t.conversaId && c.tipo === "propria")).map((t) => [t.agenteId, t.criadoEm])),
           frentesVivas: new Set(vivos.flatMap((t) => (t.trabalhoId ? [t.trabalhoId] : []))),
           decisoes,
           comandos: [],

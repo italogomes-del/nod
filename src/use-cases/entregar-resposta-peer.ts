@@ -165,7 +165,10 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   if (!pergunta) return { data: { ignorado: "nao_e_tarefa_peer" } };
   const delegada = tarefa.origem === "delegacao";
   const remetenteId = pergunta.autoria.autor_id;
-  const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId), "nao_encontrado", "bot alvo");
+  // revisto em 2026-10-13 (NOD-219, revisão do PR #307): o aviso de FALHA sai mesmo com o colega excluído — é justamente
+  // o caso do turno órfão. Buscar só os vivos lançava `nao_encontrado`, desfazia a passada do varredor e envenenava as
+  // seguintes (o órfão é o primeiro da fila). O resultado de um colega excluído continua sem entrega.
+  const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId, e.falha), "nao_encontrado", "bot alvo");
   // definido em 2026-10-09: quem pediu foi excluído enquanto o colega trabalhava (a Elis, com a fatia 5 do Ze 1 na VM). O
   // 404 desfazia o assentamento inteiro: a máquina tentava entregar de novo, desistia, e o turno do colega caía como
   // "seu Mac parou de responder", com a resposta perdida. Agora a resposta fica na conversa de quem a escreveu e a

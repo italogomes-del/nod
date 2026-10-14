@@ -4,6 +4,7 @@ import { despacharPessoa } from "../../src/adapters/fundo/despachar-outbox.ts";
 import type { FrameSse } from "../../src/contracts/frame.ts";
 import { criarMetricas } from "../../src/obs/metricas.ts";
 import { criarBarramento } from "../../src/services/barramento.ts";
+import { criarSala } from "../../src/use-cases/criar-sala.ts";
 import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
 import { abrirFrentes } from "../../src/use-cases/frentes.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
@@ -63,12 +64,12 @@ describeIntegracao("o estado do dono na tela: GET trabalhos, ConversaDto e o fra
       const m = await montar(trx);
       const { data } = await listarTrabalhos(m.deps, {});
       const dono = data.donos?.find((d) => d.estado.agenteId === m.ze.agenteId);
-      expect(dono?.estado).toMatchObject({ principal: "trabalhando", frentes: 1, conversaTrabalhando: false, esperandoVoce: 0, esperando: 1, fila: 3, motivoEspera: "a CI do #845" });
+      expect(dono?.estado).toMatchObject({ principal: "trabalhando", frentes: 1, conversaTrabalhando: false, conversaPropriaTrabalhando: false, esperandoVoce: 0, esperando: 1, fila: 3, motivoEspera: "a CI do #845" });
       expect(dono?.esperas).toEqual([expect.objectContaining({ tipo: "comando", trabalhoId: m.ci, motivo: "a CI do #845", comando: "gh pr checks 845 --watch -R gamefik/gamefik", ultimaLinha: null, tentativa: 1, tentativas: 3 })]);
       expect(dono?.fila.map((p) => [p.turnoId, p.de, p.nome])).toEqual([[m.daPessoa.id, "pessoa", null], [m.triagem, "colega", "Ada"]]);
       // A Ada, que pediu e segue no turno, trabalha; o pedido sem resposta dela fica contado como espera da conversa só
       // quando o turno acabar (esperar não é trabalhar).
-      expect(data.donos?.find((d) => d.estado.agenteId === m.ada.agenteId)?.estado).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true, esperando: 0 });
+      expect(data.donos?.find((d) => d.estado.agenteId === m.ada.agenteId)?.estado).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true, conversaPropriaTrabalhando: true, esperando: 0 });
 
       const ci = data.trabalhos.find((t) => t.id === m.ci);
       expect(ci).toMatchObject({ forma: "frente", estado: "rodando", turnoVivoId: null, esperandoComando: { motivo: "a CI do #845" }, lote: { frentes: 3, abertas: 3 } });
@@ -136,6 +137,20 @@ describeIntegracao("o estado do dono na tela: GET trabalhos, ConversaDto e o fra
       const comVolta = (await lerConversa(deps, { conversaId: ze.conversaId })).data.dono;
       expect(comVolta?.esperas.find((e) => e.tipo === "volta")).toMatchObject({ trabalhoId: null, motivo: "o deploy terminar", acordaEm: em });
       expect(comVolta?.estado).toMatchObject({ principal: "esperando", esperando: 1 });
+    });
+  });
+
+  it("NOD-219: o turno vivo numa SALA conta como conversa trabalhando, mas não como a conversa PRÓPRIA do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const vera = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const tuca = await agenteComConversa(trx, MARLON, { nome: "Tuca" });
+      const { deps, repos } = depsSobre(trx, MARLON);
+      for (const a of [vera, tuca]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
+      const s = await criarSala(deps, { nome: "revisão", agenteIds: [vera.agenteId, tuca.agenteId] });
+      const naSala = await repos.turnos.enfileirar({ executor: "catcher", conversaId: s.data.conversa.id, agenteId: vera.agenteId, origem: "sala", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "@Vera olha", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${naSala?.id ?? ""}`;
+      const { data } = await listarTrabalhos(deps, { agenteId: vera.agenteId });
+      expect(data.donos?.[0]?.estado).toMatchObject({ conversaTrabalhando: true, conversaPropriaTrabalhando: false });
     });
   });
 });

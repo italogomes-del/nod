@@ -533,9 +533,16 @@ function semDesmentidos(estado: Estado, ids: readonly string[], leituraEm: numbe
 const desmentidoDepois = (estado: Estado, turnoId: string, leituraEm: number): boolean => (estado.turnosDesmentidos[turnoId] ?? -Infinity) > leituraEm;
 
 /**
+ * NOD-219 (definido em 2026-10-13): a conversa PRÓPRIA do bot trabalha? A barra e a conversa reconciliadas aqui são a
+ * própria; `conversaTrabalhando` conta também o turno do bot numa sala, que segurava o vivo de uma conversa própria
+ * parada. O servidor de antes não manda o campo novo: aí vale o de sempre.
+ */
+const propriaTrabalhando = (e: EstadoDoDono): boolean => e.conversaPropriaTrabalhando ?? e.conversaTrabalhando;
+
+/**
  * NOD-216: os mascotes da barra são dos bots cuja conversa NÃO está aberta — essa conversa não é relida, e um turno vivo
  * que perdeu o `turno.encerrado` ficava animando o bot para sempre. `GET trabalhos` traz o dono de cada bot, lido no
- * servidor agora: sem `conversaTrabalhando`, nenhum turno da conversa roda; fora de `fila`, nenhum espera a vez. O vivo
+ * servidor agora: sem `conversaPropriaTrabalhando` (NOD-219), nenhum turno da conversa roda; fora de `fila`, nenhum espera a vez. O vivo
  * da conversa do bot que o dono desmente sai (só o confirmado antes da leitura; o de task é da tela da task).
  */
 function reconciliarPelosDonos(estado: Estado, trabalhos: TrabalhosDto, leituraEm: number | undefined): Estado {
@@ -547,13 +554,14 @@ function reconciliarPelosDonos(estado: Estado, trabalhos: TrabalhosDto, leituraE
     const conversaId = conversaDe.get(dono.estado.agenteId);
     if (!conversaId) continue;
     const naFila = new Set(dono.fila.map((p) => p.turnoId));
+    const trabalhando = propriaTrabalhando(dono.estado);
     for (const v of Object.values(estado.turnosVivos)) {
       if (v.conversaId !== conversaId || v.trabalhoId || !confirmadoAntes(v, leituraEm)) continue;
       // Revisão: o "na fila" fora da fila com o bot trabalhando pode ser o mesmo turno, já despachado (o frame
       // turno_despachado perdido ou ainda a caminho) — fica; e só a origem que a fila lista pode ser desmentida por ela.
       const desmentido = v.estado === "rodando"
-        ? !dono.estado.conversaTrabalhando
-        : !naFila.has(v.turnoId) && !dono.estado.conversaTrabalhando && ORIGENS_DA_FILA_DO_DONO.has(v.origem ?? "");
+        ? !trabalhando
+        : !naFila.has(v.turnoId) && !trabalhando && ORIGENS_DA_FILA_DO_DONO.has(v.origem ?? "");
       if (desmentido) desmentidos.push(v.turnoId);
     }
   }
@@ -573,7 +581,7 @@ function comConversasDosDonos(estado: Estado): Estado {
   const pedir: Invalidacao[] = [];
   for (const dono of donos) {
     const conversaId = conversaDe.get(dono.estado.agenteId);
-    if (conversaId && !estado.conversas[conversaId] && (dono.estado.conversaTrabalhando || dono.fila.length > 0)) pedir.push(`vivos:${conversaId}`);
+    if (conversaId && !estado.conversas[conversaId] && (propriaTrabalhando(dono.estado) || dono.fila.length > 0)) pedir.push(`vivos:${conversaId}`);
   }
   return invalidar(estado, ...pedir);
 }

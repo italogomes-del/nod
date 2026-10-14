@@ -185,7 +185,13 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
  * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração. `sem_pendencia` (definido em 2026-10-01, item 7
  * da ADR-066) hoje só nasce em registrarSemPendencia, sem turno; está na união para o histórico ter um tipo só.
  */
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null };
+export type EntradaDesfecho = {
+  turnoId: string;
+  desfecho: DesfechoRotina;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null;
+  /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
+  regra?: `regra:${string}`;
+};
 
 /** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
 const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
@@ -263,7 +269,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   // nem este marcador. Uma rotina que roda a cada 5 min e não acha novidade não deve deixar rastro
   // no chat; quem quer conferir que ela rodou olha o histórico.
   if (SILENCIOSOS.has(input.desfecho)) {
-    const autoriaSilencio = input.desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
+    const autoriaSilencio = input.desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, input.regra ?? "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
     return {
       data: { execucao, rotina, podadas },
       events: [evento(deps, "rotina_executou", autoriaSilencio, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })],

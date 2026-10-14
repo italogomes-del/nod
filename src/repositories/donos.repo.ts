@@ -25,6 +25,11 @@ export type PedidoDoDono = { turnoId: string; agenteId: string; de: DeQuemPediu;
 export type FatosCrusDosDonos = {
   /** agenteId → desde quando um turno dele fora de frente roda. */
   vivos: Map<string, number>;
+  /**
+   * NOD-219 (definido em 2026-10-13): o mesmo, só na conversa PRÓPRIA do bot (`conversas.tipo = 'propria'`). `vivos`
+   * conta também o turno numa sala; a web, que reconcilia a conversa própria pelo dono, lê este.
+   */
+  vivosPropria: Map<string, number>;
   /** Os trabalhos (frentes) com turno vivo agora. */
   frentesVivas: Set<string>;
   /** agenteId → as decisões abertas dele e a mais antiga. */
@@ -44,14 +49,15 @@ export type FatosCrusDosDonos = {
 export function donosRepo(conn: Conn, escopo: Escopo) {
   return {
     async fatos(agenteIds: readonly string[], agora: number, desdeColegas: number): Promise<FatosCrusDosDonos> {
-      const vazio: FatosCrusDosDonos = { vivos: new Map(), frentesVivas: new Set(), decisoes: new Map(), comandos: [], voltas: [], colegas: [], fila: [] };
+      const vazio: FatosCrusDosDonos = { vivos: new Map(), vivosPropria: new Map(), frentesVivas: new Set(), decisoes: new Map(), comandos: [], voltas: [], colegas: [], fila: [] };
       if (agenteIds.length === 0) return vazio;
       const ids = [...agenteIds];
       const [vivos, frentesVivas, decisoes, comandos, voltas, colegas, fila] = await Promise.all([
-        conn<{ agente_id: string; desde: Date }[]>`
-          select agente_id, min(criado_em) as desde from turnos
-          where tenant_id = ${escopo.tenantId} and agente_id = any(${ids}::uuid[]) and estado = 'despachando' and trabalho_id is null
-          group by agente_id`,
+        conn<{ agente_id: string; desde: Date; desde_propria: Date | null }[]>`
+          select t.agente_id, min(t.criado_em) as desde, min(t.criado_em) filter (where c.tipo = 'propria') as desde_propria
+          from turnos t left join conversas c on c.tenant_id = t.tenant_id and c.id = t.conversa_id
+          where t.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and t.estado = 'despachando' and t.trabalho_id is null
+          group by t.agente_id`,
         conn<{ trabalho_id: string }[]>`
           select distinct trabalho_id from turnos
           where tenant_id = ${escopo.tenantId} and agente_id = any(${ids}::uuid[]) and estado = 'despachando' and trabalho_id is not null`,
@@ -107,6 +113,7 @@ export function donosRepo(conn: Conn, escopo: Escopo) {
       ]);
       return {
         vivos: new Map(vivos.map((l) => [l.agente_id, ms(l.desde)])),
+        vivosPropria: new Map(vivos.flatMap((l) => (l.desde_propria ? [[l.agente_id, ms(l.desde_propria)] as const] : []))),
         frentesVivas: new Set(frentesVivas.map((l) => l.trabalho_id)),
         decisoes: new Map(decisoes.map((l) => [l.agente_id, { quantas: l.quantas, desde: ms(l.desde) }])),
         comandos: comandos.map((l) => ({ id: l.id, agenteId: l.agente_id, trabalhoId: l.trabalho_id, turnoId: l.turno_id, comando: l.comando, motivo: l.motivo, desde: ms(l.criado_em), saidaAnterior: l.saida_anterior, emVolta: l.em_volta, origem: l.origem })),

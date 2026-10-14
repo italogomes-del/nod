@@ -19,6 +19,10 @@ Uma frente cortou a métrica (2) dizendo que ela foi justificada por cardinalida
 
 Entra a sexta métrica, `outbox_abandonados` (por tenant), do ADR-010 refinado: item do outbox abandonado pelas DUAS condições é contado, não apagado — no projeto de referência isso era um `console.error` que ninguém lia. O rótulo continua union fechado em `src/obs/metricas.ts` (L8), sem id/email de titular.
 
+## Refinamento (2026-10-13, NOD-219)
+
+Entra a sétima métrica, `turno_velho_na_fila` (contador, por tenant e pessoa, rótulo `bloqueio`: `depois_de` | `faixa_ocupada` | `condicao_da_maquina`). A promessa é a mesma da (1): o pedido que a pessoa fez não pode ficar "na fila" em silêncio. Ela conta a partir do prazo da fila do turno (`prazo_em`, em geral 24 h depois do pedido), não antes: o "na fila · há 6h" do diagnóstico continua sem alarme, e se as primeiras semanas mostrarem que 24 h é tarde demais, o limiar próprio é decisão a tomar com o dado dela. O varredor de turnos órfãos encerra só o pendente impossível de rodar (agente excluído, geração antiga); o pendente que passou do prazo da fila mas pode sair a qualquer momento (preso por outro trabalho, pela faixa ou pela condição da máquina — cota, Mac fora, memória, disco) não é encerrado, é contado, no máximo uma vez por hora por turno. É a medida que falta para decidir se esse caso merece regra própria; sem ela, a decisão seria no escuro, como foi o diagnóstico da NOD-219. Union continua fechado, sem id de turno no rótulo (o id vai só no log `turno_velho_na_fila`). O gatilho abaixo vale para ela: dois meses sem decisão operacional, sai.
+
 ## Gatilho de reversão
 
-Reabrir (segundo container ou métricas de infraestrutura) se o executor de servidor passar a competir por CPU com o long-poll a ponto de o `puxar` estourar o teto de 20 s medido, ou se alguma das seis métricas ficar dois meses sem gerar decisão operacional — aí ela sai, não entra outra.
+Reabrir (segundo container ou métricas de infraestrutura) se o executor de servidor passar a competir por CPU com o long-poll a ponto de o `puxar` estourar o teto de 20 s medido, ou se alguma das sete métricas ficar dois meses sem gerar decisão operacional — aí ela sai, não entra outra.

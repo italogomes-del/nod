@@ -32,8 +32,8 @@ function base(turnosVivos: Record<string, TurnoVivo> = {}): Estado {
   };
 }
 
-const dono = (agenteId: string, o: { conversaTrabalhando?: boolean; fila?: string[] } = {}): DonoDto => ({
-  estado: { agenteId, principal: "livre", frentes: 0, conversaTrabalhando: o.conversaTrabalhando ?? false, esperandoVoce: 0, esperando: 0, fila: o.fila?.length ?? 0, motivoEspera: null, desde: null },
+const dono = (agenteId: string, o: { conversaTrabalhando?: boolean; conversaPropriaTrabalhando?: boolean; fila?: string[] } = {}): DonoDto => ({
+  estado: { agenteId, principal: "livre", frentes: 0, conversaTrabalhando: o.conversaTrabalhando ?? false, ...(o.conversaPropriaTrabalhando === undefined ? {} : { conversaPropriaTrabalhando: o.conversaPropriaTrabalhando }), esperandoVoce: 0, esperando: 0, fila: o.fila?.length ?? 0, motivoEspera: null, desde: null },
   esperas: [],
   fila: (o.fila ?? []).map((turnoId) => ({ turnoId, de: "rotina" as const, nome: null, desde: AGORA - 6 * H })),
 });
@@ -246,5 +246,33 @@ describe("QA do PR #302: reload com o bot trabalhando e a conversa dele fechada 
     expect(semFrota.invalidacoes.filter((q) => q.startsWith("vivos:"))).toEqual([]);
     const comFrota = reduzir(semFrota, { tipo: "hidratar-frota", frota: { ...base().frota, inventario: null } as never });
     expect(comFrota.invalidacoes).toContain(`vivos:${OUTRA}`);
+  });
+});
+
+describe("o dono reconcilia só pela conversa PRÓPRIA do bot (NOD-219)", () => {
+  // Em produção: o bot trabalhando numa sala (`conversaTrabalhando: true`) segurava o vivo morto da conversa própria dele.
+  it("o turno da sala não segura o vivo da conversa própria: conversaPropriaTrabalhando false desmente", () => {
+    const e = base({ roda: vivo("roda", { estado: "rodando", vistoEm: AGORA - H }), fila: vivo("fila", { vistoEm: AGORA - H, origem: "conversa" }) });
+    const depois = reduzir(e, { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("a", { conversaTrabalhando: true, conversaPropriaTrabalhando: false })]), agora: AGORA });
+    expect(Object.keys(depois.turnosVivos)).toEqual([]);
+  });
+
+  it("conversaPropriaTrabalhando true mantém o vivo, mesmo que o servidor antigo diria outra coisa", () => {
+    const e = base({ roda: vivo("roda", { estado: "rodando", vistoEm: AGORA - H }) });
+    const depois = reduzir(e, { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("a", { conversaTrabalhando: true, conversaPropriaTrabalhando: true })]), agora: AGORA });
+    expect(Object.keys(depois.turnosVivos)).toEqual(["roda"]);
+  });
+
+  it("sem o campo novo (servidor de antes) vale conversaTrabalhando, como na NOD-216", () => {
+    const e = base({ roda: vivo("roda", { estado: "rodando", vistoEm: AGORA - H }) });
+    expect(Object.keys(reduzir(e, { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("a", { conversaTrabalhando: true })]), agora: AGORA }).turnosVivos)).toEqual(["roda"]);
+    expect(Object.keys(reduzir(e, { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("a")]), agora: AGORA }).turnosVivos)).toEqual([]);
+  });
+
+  it("só pede a conversa própria quando ELA trabalha (ou há fila), não pelo turno da sala", () => {
+    const soSala = reduzir(base(), { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("b", { conversaTrabalhando: true, conversaPropriaTrabalhando: false })]), agora: AGORA });
+    expect(soSala.invalidacoes).not.toContain(`vivos:${OUTRA}`);
+    const propria = reduzir(base(), { tipo: "hidratar-trabalhos", trabalhos: trabalhos([dono("b", { conversaTrabalhando: true, conversaPropriaTrabalhando: true })]), agora: AGORA });
+    expect(propria.invalidacoes).toContain(`vivos:${OUTRA}`);
   });
 });

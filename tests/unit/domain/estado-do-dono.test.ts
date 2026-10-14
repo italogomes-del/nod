@@ -25,6 +25,12 @@ describe("estadoDoDono: cada prioridade sozinha", () => {
     expect(estado({ conversaTrabalhandoDesde: T0 + 1 })).toMatchObject({ principal: "trabalhando", frentes: 0, conversaTrabalhando: true, desde: T0 + 1 });
   });
 
+  it("NOD-219: conversaPropriaTrabalhando sai só quando o fato foi lido; o turno da sala conta como trabalhando, a própria não", () => {
+    expect(estado({})).not.toHaveProperty("conversaPropriaTrabalhando");
+    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null })).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true, conversaPropriaTrabalhando: false });
+    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: T0 })).toMatchObject({ conversaTrabalhando: true, conversaPropriaTrabalhando: true });
+  });
+
   it("esperando X: a frente sem turno vivo que só espera (comando, volta, colega) — com o motivo da espera mais antiga", () => {
     const [a, b] = [frente("rodando"), frente("rodando")];
     const r = estado({ frentes: [a, b], esperas: [{ trabalhoId: b.id, motivo: "o deploy", desde: T0 + 9 }, { trabalhoId: a.id, motivo: "a CI do #845", desde: T0 + 3 }] });

@@ -10,6 +10,7 @@ export type ChaveRedacao =
   | "agente-nasceu"
   | "sem-acessos-nunca-executou"
   | "turno-interrompido"
+  | "turno-orfao-encerrado"
   | "parada-nada-rodando"
   | "memoria-nao-e-fonte"
   | "proposta-confirmada"
@@ -48,6 +49,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "agente-nasceu": "Este agente nasce com identidade de execução vazia: sem nome definitivo, sem acessos, sem rotina. Diga o que ele faz.",
   "sem-acessos-nunca-executou": "sem acessos · nunca executou",
   "turno-interrompido": "Turno interrompido: {motivo}. O que já saiu fica marcado como parcial; nada foi reenviado.",
+  // definido em 2026-10-13 (NOD-219): o pendente que nenhuma máquina podia pegar sai da fila com a causa em palavras.
+  "turno-orfao-encerrado": "Tirei este pedido da fila: {causa}, e ele não ia mais sair. Nada foi feito com ele; se ainda precisar, peça de novo.",
   "parada-nada-rodando": "Nada estava rodando. Nenhum turno foi interrompido.",
   "permissao-permanente": "{pessoa} permitiu para sempre: {ferramentas}. Vale já, para qualquer destino destas ferramentas, enquanto o bot não tiver lido conteúdo de fora na tarefa.",
   "memoria-nao-e-fonte": "Memória do agente: não substitui fonte autoritativa. Se um dado importa, confira na origem.",

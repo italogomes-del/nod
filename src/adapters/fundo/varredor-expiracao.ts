@@ -12,6 +12,7 @@ import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCA
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
 import { cuidarDasFrentesCaidas } from "../../use-cases/frentes-caidas.ts";
 import { cuidarDosPedidosParados, type PedidosAdiados } from "../../use-cases/pedidos-parados.ts";
+import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../use-cases/turnos-orfaos.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
@@ -27,6 +28,8 @@ export type OpcoesVarredor = {
   metricas?: Metricas;
   /** #218: pedidos parados adiados entre as passadas (pedidos-parados.ts); o laço cria um mapa só para o processo. */
   pedidosAdiados?: PedidosAdiados;
+  /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
+  turnosObservados?: TurnosObservados;
 };
 /** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
@@ -70,6 +73,25 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "frentes_caidas_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-13 (NOD-219): os turnos pendentes órfãos (turnos-orfaos.ts), em transação própria — encerra o que
+  // nenhuma máquina pode pegar e observa o que passou do prazo da fila. Um erro aqui não desfaz os blocos de cima.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      // Cada candidato num SAVEPOINT desta tx: o que lança volta sozinho, e os outros saem (revisão do PR #307).
+      const isolar = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const caixa: { valor?: T } = {};
+        await trx.savepoint(async () => {
+          caixa.valor = await fn();
+        });
+        return caixa.valor as T;
+      };
+      const r = await cuidarDosTurnosOrfaos(deps, { observados: opcoes.turnosObservados, metricas: opcoes.metricas ?? registroPadrao, isolar });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "turnos_orfaos_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   return resultado;
 }
@@ -164,7 +186,7 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
 }
 
 export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
-  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>() };
+  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
   let rodando = false;
   const timer = setInterval(() => {
     if (rodando) return;
