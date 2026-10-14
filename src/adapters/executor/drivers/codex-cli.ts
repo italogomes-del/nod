@@ -17,9 +17,9 @@ import { executarColetando, iniciarProcesso, type Processo } from "../processo.t
 import { extrairVersao, inventarioAbaixoDoPiso } from "../flag-floors.ts";
 import { PRAZO_SONDA_PADRAO_MS } from "../sonda.ts";
 import type { Driver } from "../spi.ts";
-import type { LigacaoClaudeCli } from "./claude-cli.ts";
+import { comAvisoSemTerminal, invocarDoHook, pastaDaFila, type LigacaoClaudeCli } from "./claude-cli.ts";
 import { ambienteCodex, configMcpCodex, escreverLauncherProxy, negociarConfigCodex, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
-import { rodarChatCodex, type SessaoChatCodex } from "./codex-chat.ts";
+import { rodarChatCodex, type SessaoChatCodex, type TerminalChatCodex } from "./codex-chat.ts";
 import { rodarLigacaoCodex } from "./codex-ligacao.ts";
 import { capacidadesDe } from "../../../domain/harness.ts";
 
@@ -128,6 +128,14 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         recusadas = negociacao.recusadas;
         return inv = { estado: "pronto", versao, em };
       }
+      /**
+       * ADR-103: o kit do terminal no Codex precisa do script do hook do nod nesta máquina (o app e o motor o instalam;
+       * o servidor de desenvolvimento também). Sem ele, o chat roda isolado e o prompt diz que não há terminal.
+       */
+      const terminalDaMaquina = (): TerminalChatCodex | null => lig.hookPath
+        ? { hookPath: lig.hookPath, nodePath: lig.nodePath ?? process.execPath, electronComoNode: lig.electronComoNode, home,
+            ...(lig.filaDoForno === false ? {} : { vaga: { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode }) } }) }
+        : null;
       // ADR-076: piso do laço de voz = `codex app-server --help` responde; as flags listadas ali decidem as opcionais.
       let flagsAppServer: { bin: string; flags: string[] | null } | null = null;
       async function sondarAppServer(b: string): Promise<string[] | null> {
@@ -175,13 +183,22 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         },
         // X9 (definido em 2026-10-08, revisão do épico #188): a mensagem no meio só existe no chat do app-server; sem ele
         // (Codex antigo, ou a sonda não o achou) o turno roda no `codex exec` e o app não a anuncia.
+        // revisto em 2026-10-14 (ADR-103): o terminal e a pasta também dependem do app-server e do hook desta máquina.
         async capacidades() {
-          if (!capacidadesDoDriver.mensagemNoMeio) return capacidadesDoDriver;
           let appServer = false;
           if ((await sondar()).estado === "pronto" && bin) {
             try { appServer = (await sondarAppServer(bin)) !== null; } catch { appServer = false; }
           }
-          return { ...capacidadesDoDriver, mensagemNoMeio: appServer };
+          // A thread só continua no app-server; o `codex exec` de reserva é um prompt por turno.
+          const terminal = appServer && terminalDaMaquina() !== null;
+          return {
+            ...capacidadesDoDriver,
+            mensagemNoMeio: capacidadesDoDriver.mensagemNoMeio && appServer,
+            retomaSessao: capacidadesDoDriver.retomaSessao && appServer,
+            bifurcaSessao: capacidadesDoDriver.bifurcaSessao && appServer,
+            terminal: capacidadesDoDriver.terminal && terminal,
+            pastaDeTrabalho: capacidadesDoDriver.pastaDeTrabalho && terminal,
+          };
         },
         adapter(plano) {
           let proc: Processo | null = null;
@@ -218,25 +235,26 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 });
               }
               await mkdir(cfg.cwdBase, { recursive: true });
-              // ADR-083 §6: o chat no app-server quando a sonda o acha. Anexo segue no `codex exec` (a imagem entra por
-              // --image, e o `localImage` do app-server não foi medido) — definido em 2026-10-07.
-              if (!plano.entrada.anexos?.length) {
-                const flagsAppServer = await sondarAppServer(bin).catch(() => null);
-                if (flagsAppServer) {
-                  const r = await rodarChatCodex({
-                    plano, sinks, bin, flagsNoHelp: flagsAppServer, recusadas, env, cwdBase: cfg.cwdBase,
-                    urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
-                    sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
-                    aoProcesso: (p) => {
-                      proc = p;
-                      if (p && parado) void p.interromper();
-                    },
-                    aoSessao: (s) => { sessao = s; },
-                  });
-                  // null: o app-server não subiu e nada foi escrito para o modelo; segue no `codex exec` (que respeita o Parar).
-                  if (r) return r;
-                }
+              // ADR-083 §6: o chat no app-server quando a sonda o acha. revisto em 2026-10-14 (ADR-103): o anexo também
+              // (imagem como `localImage`), e com o kit do terminal quando a máquina tem o hook do nod.
+              const flagsAppServer = await sondarAppServer(bin).catch(() => null);
+              if (flagsAppServer) {
+                const r = await rodarChatCodex({
+                  plano, sinks, bin, flagsNoHelp: flagsAppServer, recusadas, env, cwdBase: cfg.cwdBase,
+                  urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
+                  sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
+                  terminal: terminalDaMaquina(),
+                  aoProcesso: (p) => {
+                    proc = p;
+                    if (p && parado) void p.interromper();
+                  },
+                  aoSessao: (s) => { sessao = s; },
+                });
+                // null: o app-server não subiu e nada foi escrito para o modelo; segue no `codex exec` (que respeita o Parar).
+                if (r) return r;
               }
+              // ADR-103: o `codex exec` roda sempre isolado; o plano que prometia o terminal leva o aviso de que não há.
+              const planoExec = (plano.nativas ?? []).includes("Bash") ? { ...plano, ...comAvisoSemTerminal(plano) } : plano;
               const dir = await mkdtemp(join(cfg.cwdBase, "codex-"));
               try {
                 const launcher = await escreverLauncherProxy(dir, { urlNod: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath });
@@ -244,7 +262,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 // --image, texto de arquivo no prompt, PDF vira linha de "não lido".
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
                 const entrada = anexos.length > 0 ? await entradaCodex(plano.entrada.texto, anexos, dir) : { texto: plano.entrada.texto, imagens: [] };
-                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }, recusadas), entrada.imagens, recusadas);
+                const args = argsCodex(planoExec, configMcpCodex(plano, { ...lig, proxyPath: launcher }, recusadas), entrada.imagens, recusadas);
                 const pendentes: Promise<void>[] = [];
                 // O que o Codex disse de errado (item `error`, evento `error`): hoje é a única pista de um turno que falha.
                 let ultimoErro: string | null = null;

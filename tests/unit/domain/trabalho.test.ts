@@ -101,8 +101,8 @@ describe("seguimentoNaRede (ADR-099, I8: como o dono segue depois da promoção)
   it("bifurca só com o harness E a máquina; sem a máquina, larga a sessão; sem retomar, segue com o histórico", () => {
     expect(seguimentoNaRede(CAPACIDADES_HARNESS["claude-cli"], true)).toBe("bifurcar");
     expect(seguimentoNaRede(CAPACIDADES_HARNESS["claude-cli"], false)).toBe("largar_sessao");
-    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], true)).toBe("historico");
-    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], false)).toBe("historico");
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], true)).toBe("bifurcar");
+    expect(seguimentoNaRede(CAPACIDADES_HARNESS["codex-cli"], false)).toBe("largar_sessao");
     expect(seguimentoNaRede(SEM_CAPACIDADES, true)).toBe("historico");
     expect(seguimentoNaRede({ retomaSessao: true, bifurcaSessao: false }, true)).toBe("largar_sessao");
   });

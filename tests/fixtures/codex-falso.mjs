@@ -128,8 +128,46 @@ async function appServer() {
   if (process.env.TESTE_NOD_PID) writeFileSync(process.env.TESTE_NOD_PID, String(process.pid)); // NOD-209: ver account/read
   const registro = { args, env: process.env, cwd: process.cwd(), thread: null, turnos: [], steers: [], interrupcoes: 0, aprovacao: null };
   const gravar = () => { if (process.env.TESTE_NOD_REGISTRO) writeFileSync(process.env.TESTE_NOD_REGISTRO, JSON.stringify(registro)); };
-  const indiceMcp = args.findIndex((a) => a.startsWith("mcp_servers="));
+  // ADR-103: com os MCPs da pessoa, o nod entra como `mcp_servers.nod={…}` (junto dos dela) em vez de trocar a tabela.
+  const indiceMcp = args.findIndex((a) => a.startsWith("mcp_servers=") || a.startsWith("mcp_servers.nod="));
   const launcher = indiceMcp >= 0 ? /args = \["([^"]+)"\]/.exec(args[indiceMcp])?.[1] ?? null : null;
+  // ADR-103: o hook PreToolUse de `-c hooks=…`, como o 0.147.0 (medido em 2026-10-14): só roda CONFIADO (config/batchWrite
+  // grava o hash); permitir = stdout vazio; negar = JSON deny ou exit 2; falhou ou estourou = o comando roda (falha aberto).
+  // TESTE_NOD_HOOK_NAO_CONFIA: a gravação responde ok e o hook continua não confiado.
+  const argHooks = args.find((a) => a.startsWith("hooks="));
+  const hook = argHooks ? { comando: JSON.parse(`"${/command="((?:[^"\\]|\\.)*)"/.exec(argHooks)?.[1] ?? ""}"`), timeoutS: Number(/timeout=(\d+)/.exec(argHooks)?.[1] ?? 600) } : null;
+  const CHAVE_HOOK = "/<session-flags>/config.toml:pre_tool_use:0:0";
+  let hookConfiado = false;
+  registro.configEscritas = [];
+  registro.comandos = [];
+  /** Divide o comando como o Codex: aspas simples, sem shell. */
+  const partesDoComando = (c) => [...c.matchAll(/'((?:[^']|'\\'')*)'|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1].replace(/'\\''/g, "'") : m[2]));
+  /** Roda o hook para uma ferramenta; true = o Codex roda a ferramenta. */
+  const rodarHook = (threadId, turnId, tool_name, tool_input) => new Promise((resolve) => {
+    if (!hook || !hookConfiado) return resolve(true);
+    const [bin, ...resto] = partesDoComando(hook.comando);
+    const child = spawn(bin, resto, { cwd: process.cwd(), env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+    let saida = "";
+    let erro = "";
+    child.stdout.on("data", (v) => { saida += v; });
+    child.stderr.on("data", (v) => { erro += v; });
+    child.on("close", (codigo) => {
+      let status = "completed";
+      let motivo = null;
+      if (codigo === 2) { status = "blocked"; motivo = erro.trim(); }
+      else if (codigo !== 0) status = "failed";
+      else if (saida.trim() !== "") {
+        try {
+          const s = JSON.parse(saida).hookSpecificOutput ?? {};
+          if (s.permissionDecision === "deny") { status = "blocked"; motivo = s.permissionDecisionReason ?? ""; }
+          else if (s.updatedInput === undefined) status = "failed"; // o allow puro conta como falha, e a ferramenta segue
+        } catch { status = "failed"; }
+      }
+      notificar("hook/completed", { threadId, turnId, run: { id: `pre-tool-use:0:${CHAVE_HOOK}:${tool_name}`, eventName: "preToolUse", status, entries: motivo ? [{ kind: "feedback", text: motivo }] : [] } });
+      resolve(status !== "blocked");
+    });
+    child.stdin.end(JSON.stringify({ session_id: threadId, turn_id: turnId, cwd: process.cwd(), hook_event_name: "PreToolUse", model: "falso", permission_mode: "bypassPermissions", tool_name, tool_input, tool_use_id: `exec-${tool_name}` }));
+  });
   // O launcher do proxy precisa existir, ser 0600 e responder ao initialize do MCP.
   const validacao = (async () => {
     if (!launcher) return { ok: false };
@@ -241,7 +279,29 @@ async function appServer() {
       await falar(threadId, turnId, ["Entendi: ", desfecho.steer.replace(/^\[nod\][^\n]*\n/, ""), "."]);
       return concluir(threadId, turnId, "completed");
     }
-    const limpo = texto.replace(/^\[nod\][^\n]*\n/, "").replace("[[ferramenta]]", "").trim();
+    // ADR-103: "[[comando:X]]" e "[[patch:caminho]]" passam pelo hook antes de rodar (sem item quando ele barra, como o
+    // 0.147.0); "[[web]]" é a busca hospedada, que o hook não vê.
+    for (const [, command] of texto.matchAll(/\[\[comando:([^\]]+)\]\]/g)) {
+      const roda = await rodarHook(threadId, turnId, "Bash", { command });
+      registro.comandos.push({ command, roda }); gravar();
+      if (!roda) continue;
+      const id = `cmd_${turnId}_${registro.comandos.length}`;
+      notificar("item/started", { threadId, turnId, item: { type: "commandExecution", id, command, status: "inProgress" } });
+      notificar("item/completed", { threadId, turnId, item: { type: "commandExecution", id, command, status: "completed", exitCode: 0, aggregatedOutput: "ok\n" } });
+    }
+    for (const [, caminho] of texto.matchAll(/\[\[patch:([^\]]+)\]\]/g)) {
+      const roda = await rodarHook(threadId, turnId, "apply_patch", { command: `*** Begin Patch\n*** Add File: ${caminho}\n+oi\n*** End Patch` });
+      registro.comandos.push({ patch: caminho, roda }); gravar();
+      if (!roda) continue;
+      const id = `patch_${turnId}_${registro.comandos.length}`;
+      notificar("item/started", { threadId, turnId, item: { type: "fileChange", id, changes: [{ path: caminho, kind: "add" }], status: "inProgress" } });
+      notificar("item/completed", { threadId, turnId, item: { type: "fileChange", id, changes: [{ path: caminho, kind: "add" }], status: "completed" } });
+    }
+    if (texto.includes("[[web]]")) {
+      notificar("item/started", { threadId, turnId, item: { type: "webSearch", id: `web_${turnId}`, query: "preço" } });
+      notificar("item/completed", { threadId, turnId, item: { type: "webSearch", id: `web_${turnId}`, query: "preço" } });
+    }
+    const limpo = texto.replace(/^\[nod\][^\n]*\n/, "").replace("[[ferramenta]]", "").replace(/\[\[(comando|patch):[^\]]+\]\]/g, "").replace("[[web]]", "").trim();
     await falar(threadId, turnId, ["Entendi: ", limpo, "."]);
     concluir(threadId, turnId, "completed");
   }
@@ -271,6 +331,28 @@ async function appServer() {
             responder(m.id, { thread: { id: "thr_falso" }, model: m.params.model });
           });
           break;
+        // ADR-103: a continuação da thread (resume pelo id; "thr_inexistente" não existe nesta conta) e a cópia (fork).
+        case "thread/resume":
+        case "thread/fork":
+          registro.thread = { ...m.params, metodo: m.method }; gravar();
+          if (m.params.threadId === "thr_inexistente") { emit({ jsonrpc: "2.0", id: m.id, error: { code: -32600, message: "no rollout found" } }); break; }
+          void validacao.then((v) => {
+            registro.launcher = v; gravar();
+            responder(m.id, { thread: { id: m.method === "thread/fork" ? "thr_copia" : m.params.threadId }, model: m.params.model });
+          });
+          break;
+        // ADR-103: os hooks de `-c`, a gravação da confiança (e a limpeza de `[projects]`) e a leitura da config.
+        case "hooks/list":
+          responder(m.id, { data: [{ cwd: m.params.cwds?.[0] ?? "", hooks: hook ? [{ key: CHAVE_HOOK, eventName: "preToolUse", handlerType: "command", command: hook.comando, timeoutSec: hook.timeoutS, source: "sessionFlags", enabled: true, isManaged: false, currentHash: "sha256:falso", trustStatus: hookConfiado ? "trusted" : "untrusted" }] : [], warnings: [], errors: [] }] });
+          break;
+        case "config/batchWrite":
+          registro.configEscritas.push(...(m.params.edits ?? [])); gravar();
+          if (!process.env.TESTE_NOD_HOOK_NAO_CONFIA && (m.params.edits ?? []).some((e) => e.keyPath === `hooks.state.${JSON.stringify(CHAVE_HOOK)}.trusted_hash` && e.value === "sha256:falso")) hookConfiado = true;
+          responder(m.id, { status: "ok", version: "sha256:v", filePath: "/casa/.codex/config.toml" });
+          break;
+        case "config/read":
+          responder(m.id, { config: { projects: {} }, origins: {}, layers: null });
+          break;
         case "model/list":
           registro.modelList = (registro.modelList ?? 0) + 1;
           responder(m.id, { data: [
@@ -280,7 +362,8 @@ async function appServer() {
           break;
         case "turn/start": {
           const texto = m.params.input?.[0]?.text ?? "";
-          registro.turnos.push({ texto, effort: m.params.effort }); gravar();
+          const imagens = (m.params.input ?? []).filter((i) => i.type === "localImage").map((i) => i.path);
+          registro.turnos.push({ texto, effort: m.params.effort, ...(imagens.length ? { imagens } : {}) }); gravar();
           if (Number(process.env.TESTE_NOD_RECUSAR_TURNO) === registro.turnos.length) {
             emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "turno recusado" } });
             break;

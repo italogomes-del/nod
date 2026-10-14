@@ -48,6 +48,6 @@ describe("NOD-207: harness fictício só no catálogo", () => {
   it("os harnesses reais seguem iguais com o fictício no catálogo", () => {
     expect(aceitaDoBot(catalogo, "codex-cli")).toBe("sem_pdf");
     expect(traduzirParaOCli("/uso", "claude-cli")).toBe("/cost");
-    expect(mostraCaminhoDaPasta(catalogo, "codex-cli")).toBe(false);
+    expect(mostraCaminhoDaPasta(catalogo, "codex-cli")).toBe(true);
   });
 });

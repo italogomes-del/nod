@@ -1,38 +1,67 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { EsforcoAgente } from "../../../contracts/agente.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../../../contracts/turno.ts";
-import { pedidoThreadStart, pedidoTurnStart, type EsforcoCodex, type EventoAppServer } from "../../../domain/codex-app-server.ts";
+import {
+  chaveToml,
+  hooksDaLista,
+  pastaNaConfig,
+  pedidoAbrirThread,
+  pedidoConfigBatchWrite,
+  pedidoConfigRead,
+  pedidoHooksList,
+  pedidoTurnStart,
+  type AberturaThread,
+  type EsforcoCodex,
+  type EventoAppServer,
+  type SandboxCodex,
+} from "../../../domain/codex-app-server.ts";
 import { ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
+import { ehPastaDeTask, NATIVA_MCP_DA_PESSOA } from "../../../domain/nativas.ts";
 import { classificarSessao, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { log } from "../../../obs/log.ts";
+import { ESPERA_APROVACAO_NO_TURNO_MS, VARIAVEL_CONFIG_HOOK } from "../../../shared/constantes.ts";
+import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
+import type { ConfigHook } from "../hook-nativas.ts";
 import type { Processo } from "../processo.ts";
 import type { SinksTurno } from "../spi.ts";
-import { criarClienteAppServer } from "./cliente-app-server.ts";
-import { configMcpCodex, escreverLauncherProxy, type RecusadasCodex } from "./codex-comum.ts";
+import { comAvisoSemTerminal } from "./claude-cli.ts";
+import { criarClienteAppServer, type ClienteAppServer } from "./cliente-app-server.ts";
+import { argMcpCodex, comandoHookCodex, configMcpCodex, escreverLauncherProxy, hooksDoTerminalCodex, type RecusadasCodex } from "./codex-comum.ts";
 import { argsAppServer } from "./codex-ligacao.ts";
 
 /**
  * O chat do Codex no `codex app-server` (definido em 2026-10-07, ADR-083 §6, decisão S4). O `codex exec` é um prompt
  * por turno, sem sessão: a mensagem da pessoa no meio do trabalho esperava o turno acabar. Aqui o turno é uma thread
- * (efêmera, X8) aberta enquanto o bot trabalha, com a mesma sessão viva do Claude (ADR-067): cada volta do modelo
- * fecha com um `turn/completed` (vira um `result`), a mensagem nova entra pelo `turn/steer` no turno ativo (ou abre o
- * próximo `turn/start`) e, sem nada novo, a entrada fecha e o processo sai.
+ * aberta enquanto o bot trabalha, com a mesma sessão viva do Claude (ADR-067): cada volta do modelo fecha com um
+ * `turn/completed` (vira um `result`), a mensagem nova entra pelo `turn/steer` no turno ativo (ou abre o próximo
+ * `turn/start`) e, sem nada novo, a entrada fecha e o processo sai.
  *
- * O que continua igual ao `codex exec`: o proxy do nod pelo launcher 0600, as chaves de isolamento negociadas na sonda,
- * a sandbox conforme as pastas, `sessaoCli` null (retomaSessao=false até `thread/resume` ser medido). Sem app-server,
- * ou se ele não sobe, quem chama segue no `codex exec`.
- *
- * NÃO HOMOLOGADO: só exercitado contra o app-server falso (tests/fixtures/codex-falso.mjs). O passo "steer no chat"
- * da sonda paga (scripts/sonda-codex-app-server.ts) é o que confirma no Codex real.
+ * revisto em 2026-10-14 (ADR-103, paridade do Codex): com o kit do terminal no plano, o Codex roda como o da pessoa —
+ * shell, apply_patch, web, skills, AGENTS.md, subagentes — sem sandbox, na pasta do bot, e cada nativa passa pelo hook
+ * PreToolUse do nod, confiado pela API do app-server (medido no 0.147.0: hook de `-c` só roda confiado; o
+ * `--dangerously-bypass-hook-trust` não vale no app-server). Sem o hook (máquina sem o script, hook que não carregou ou
+ * não ficou confiado), o turno roda isolado, como antes, e o prompt diz que não há terminal. A thread não é mais
+ * efêmera: o id volta como `sessaoCli`, e o turno seguinte a continua (`thread/resume`) ou a copia (`thread/fork`).
+ * Sem app-server, ou se ele não sobe, quem chama segue no `codex exec`.
  */
 
 /** definido em 2026-10-07: o mesmo prazo do handshake da ligação (só o subir; não é relógio de trabalho, ADR-067). */
 const PRAZO_HANDSHAKE_MS = 30_000;
 /** definido em 2026-10-07: depois de fechar a entrada, o tempo que o app-server tem para sair sozinho. */
 const SAIDA_APOS_FIM_MS = 2_000;
+/** definido em 2026-10-14 (ADR-103): o tempo para tirar a entrada `[projects]` da config antes de fechar. */
+const PRAZO_LIMPEZA_MS = 5_000;
+
+/**
+ * definido em 2026-10-14 (ADR-103): o hook do Codex falha ABERTO (medido no 0.147.0: timeout de 5 s estourado → o comando
+ * rodou). O hook nega sozinho em PRAZO_HOOK_CODEX_MS — a espera da aprovação no turno mais folga para a confirmação —, e o
+ * timeout que o Codex recebe fica TIMEOUT_HOOK_CODEX_S acima disso, para o node subir e responder com folga.
+ */
+export const PRAZO_HOOK_CODEX_MS = ESPERA_APROVACAO_NO_TURNO_MS + 15_000;
+export const TIMEOUT_HOOK_CODEX_S = Math.ceil(PRAZO_HOOK_CODEX_MS / 1000) + 45;
 
 /**
  * definido em 2026-10-07: o esforço do bot no vocabulário do Codex. Sem esforço escolhido, o campo não vai e vale o
@@ -55,6 +84,12 @@ export type SessaoChatCodex = { aceitaMensagens(): boolean; receberMensagem(text
 /** Uma mensagem da pessoa a caminho da sessão, com os ids que o laço confirma quando ela entrar (X2). */
 type ItemDaFila = { texto: string; ids: string[] };
 
+/**
+ * ADR-103: o que a máquina tem para o kit do terminal no Codex — o script do hook do nod, o node que o roda, a home (a
+ * pasta do bot é ~/nod/<bot>) e a fila do forno (ADR-097). Ausente = esta máquina não liga o terminal no Codex.
+ */
+export type TerminalChatCodex = { hookPath: string; nodePath: string; electronComoNode?: boolean; home: string; vaga?: { dir: string; invocar: string } };
+
 export type ContextoChatCodex = {
   plano: PlanoTurno;
   sinks: SinksTurno;
@@ -69,6 +104,8 @@ export type ContextoChatCodex = {
   electronComoNode?: boolean;
   sigtermParaSigkillMs?: number;
   versaoNod?: string;
+  terminal?: TerminalChatCodex | null;
+  fetch?: typeof fetch;
   aoProcesso(p: Processo | null): void;
   aoSessao(s: SessaoChatCodex | null): void;
 };
@@ -81,22 +118,67 @@ const menos = (a: TokensTurno, b: TokensTurno): TokensTurno => ({
   cacheCriacao: 0,
 });
 
+/** O hook do nod não ficou de pé nesta abertura: o turno roda de novo, isolado (ADR-103). */
+class SemHook extends Error {}
+
 /** O turno inteiro no app-server; null = o app-server não subiu (quem chama roda o `codex exec`). */
 export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTurno | null> {
+  const querTerminal = (c.plano.nativas ?? []).includes("Bash");
+  const pode = querTerminal && c.terminal != null && typeof c.plano.pastaDoBot === "string" && c.plano.pastaDoBot !== "";
+  if (pode) {
+    const r = await rodarUmaVez(c, true);
+    if (r !== "sem_hook") return r;
+  }
+  // O plano prometeu o terminal e esta máquina não o dá: o modelo lê que não há, como no Claude sem o hook.
+  const plano = querTerminal ? { ...c.plano, ...comAvisoSemTerminal(c.plano) } : c.plano;
+  const r = await rodarUmaVez({ ...c, plano }, false);
+  return r === "sem_hook" ? null : r;
+}
+
+async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<ResultadoTurno | null | "sem_hook"> {
   const { plano, sinks } = c;
   const pastas = plano.workspacePastas ?? null;
-  // Sem pasta, o cwd é estável por bot (como o do Claude, NOD-188); com pasta, a ativa.
-  const cwd = pastas?.ativa ?? join(c.cwdBase, `texto-${plano.agenteId}`);
-  if (!pastas) await mkdir(cwd, { recursive: true });
+  const terminal = comTerminal ? c.terminal! : null;
+  // ADR-103: com o terminal, a pasta do bot (ou a da task); sem pasta, o cwd estável por bot (NOD-188); com pasta, a ativa.
+  const pastaBot = terminal ? join(terminal.home, "nod", plano.pastaDoBot!) : null;
+  const pasta = pastaBot ?? pastas?.ativa ?? join(c.cwdBase, `texto-${plano.agenteId}`);
+  if (pastaBot || !pastas) await mkdir(pasta, { recursive: true });
+  // ADR-103: com o terminal, o Codex recebe o caminho REAL da pasta. Medido na sonda paga (0.162.0): o `cwd` que ele manda
+  // ao hook é o real (/private/var), mas o caminho dentro do patch segue o cwd dado (/var); com o real dos dois lados a
+  // cerca compara igual, e um arquivo dentro da pasta do bot não vira "gravar fora".
+  const cwd = pastaBot ? await realpath(pasta).catch(() => pasta) : pasta;
   const dir = await mkdtemp(join(c.cwdBase, "codex-chat-"));
   let timerSaida: ReturnType<typeof setTimeout> | null = null;
   let devolverRestantes: (() => void) | null = null;
   try {
     const launcher = await escreverLauncherProxy(dir, { urlNod: c.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: c.proxyPath });
-    const configMcp = configMcpCodex(plano, { urlNod: c.urlNod, proxyPath: launcher, nodePath: c.nodePath, electronComoNode: c.electronComoNode }, c.recusadas);
-    const sandbox = pastas ? "workspace-write" : "read-only";
-    const args = argsAppServer({ configMcp, flagsNoHelp: c.flagsNoHelp, recusadas: c.recusadas, sandbox });
+    const lig = { urlNod: c.urlNod, proxyPath: launcher, nodePath: c.nodePath, electronComoNode: c.electronComoNode };
+    const configMcp = configMcpCodex(plano, lig, c.recusadas);
+    const sandbox: SandboxCodex = terminal ? "danger-full-access" : pastas ? "workspace-write" : "read-only";
+    const mcpDaPessoa = terminal !== null && (plano.nativas ?? []).includes(NATIVA_MCP_DA_PESSOA);
+    let env = c.env;
+    let comandoHook: string | null = null;
+    const arquivoNegacoes = join(dir, "negacoes.jsonl");
+    let argTerminal: { hooks: string; argMcp: string; mcpDaPessoa: boolean } | undefined;
+    if (terminal && pastaBot) {
+      // ADR-103: a config do hook (0600, no diretório do turno, apagada no fim) vai pela variável; o comando fica fixo.
+      // A cerca compara com o caminho real da pasta (o cwd acima) e da home.
+      const real = (p: string) => realpath(p).catch(() => p);
+      const config: ConfigHook = {
+        url: c.urlNod, token: plano.tokenDeTurno, pastaDoBot: cwd, home: await real(terminal.home), daTask: ehPastaDeTask(plano.pastaDoBot!),
+        ...(terminal.vaga ? { vaga: terminal.vaga } : {}), formato: "codex", prazoMs: PRAZO_HOOK_CODEX_MS, negacoes: arquivoNegacoes, mcpDaPessoa,
+      };
+      const caminhoConfig = join(dir, "hook-nativas.json");
+      await writeFile(caminhoConfig, JSON.stringify(config), { mode: 0o600 });
+      env = { ...c.env, [VARIAVEL_CONFIG_HOOK]: caminhoConfig };
+      comandoHook = comandoHookCodex({ nodePath: terminal.nodePath, hookPath: terminal.hookPath, electronComoNode: terminal.electronComoNode });
+      argTerminal = { hooks: hooksDoTerminalCodex({ comando: comandoHook, timeoutS: TIMEOUT_HOOK_CODEX_S }), argMcp: argMcpCodex(plano, lig, { recusadas: c.recusadas, mcpDaPessoa }), mcpDaPessoa };
+    }
+    const args = argsAppServer({ configMcp, flagsNoHelp: c.flagsNoHelp, recusadas: c.recusadas, sandbox, ...(argTerminal ? { terminal: argTerminal } : {}) });
     const esforco = plano.entrada.esforco ? ESFORCO_CODEX[plano.entrada.esforco] : undefined;
+    // ADR-103: anexo entra no app-server (imagem como localImage, texto na mensagem); antes levava o turno ao `codex exec`.
+    const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, c.urlNod, c.fetch) : [];
+    const primeira = anexos.length > 0 ? await entradaCodex(plano.entrada.texto, anexos, dir) : { texto: plano.entrada.texto, imagens: [] as string[] };
 
     const eventos: EventoStream[] = [];
     const pendentes: Promise<void>[] = [];
@@ -125,6 +207,9 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     let totalAnterior = TOKENS_ZERADOS;
     let ultimoErro: string | null = null;
     const ferramentasAbertas = new Map<string, string>();
+    // ADR-103: a pasta do turno já tinha `[projects]` na config da pessoa antes? Se não, o nod tira a entrada no fim.
+    let pastaReal: string | null = null;
+    let projetoExistia = true;
 
     const emitir = (ev: EventoStream) => {
       eventos.push(ev);
@@ -154,6 +239,25 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       }
     };
 
+    /**
+     * ADR-103: a busca na web é ferramenta hospedada (o hook não a vê); o driver avisa o servidor na hora, pela mesma rota
+     * do hook, e o turno passa a tratar o que vier de fora como não confiável (0033). Falhar aqui não para o turno.
+     */
+    const contaminar = (ferramenta: string) => {
+      const buscar = c.fetch ?? fetch;
+      pendentes.push(
+        buscar(`${c.urlNod.replace(/\/+$/, "")}/api/interno/nativas`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${plano.tokenDeTurno}`, "content-type": "application/json" },
+          body: JSON.stringify({ ferramenta, contamina: true }),
+          signal: AbortSignal.timeout(10_000),
+        }).then(
+          (r) => { if (!r.ok) log("aviso", "codex_chat_web_nao_marcada", { turno_id: plano.turnoId, status: r.status }); },
+          () => { log("aviso", "codex_chat_web_nao_marcada", { turno_id: plano.turnoId, status: null }); },
+        ),
+      );
+    };
+
     function tratar(ev: EventoAppServer): void {
       switch (ev.tipo) {
         case "delta":
@@ -164,7 +268,8 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
           if (!ev.ferramenta || !ev.itemId) return;
           if (ev.fase === "inicio") {
             ferramentasAbertas.set(ev.itemId, ev.ferramenta);
-            emitir({ tipo: "tool_use", id: ev.itemId, nome: ev.ferramenta, input: null });
+            if (ev.ferramenta === "web_search" && terminal) contaminar("web_search");
+            emitir({ tipo: "tool_use", id: ev.itemId, nome: ev.ferramenta, input: ev.entrada ?? null });
           } else if (ferramentasAbertas.delete(ev.itemId)) {
             emitir({ tipo: "tool_result", toolUseId: ev.itemId, isError: ev.falhou, texto: "" });
           }
@@ -181,10 +286,10 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       }
     }
 
-    const cliente = criarClienteAppServer({
+    const cliente: ClienteAppServer = criarClienteAppServer({
       bin: c.bin,
       args,
-      env: c.env,
+      env,
       cwd,
       sigtermParaSigkillMs: c.sigtermParaSigkillMs,
       aoEvento: tratar,
@@ -200,9 +305,25 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     const proc = cliente.processo;
     c.aoProcesso(proc);
 
-    const encerrar = () => {
+    /** ADR-103: tira `[projects."<pasta>"]` que o app-server gravou na config da pessoa por causa deste turno. */
+    const limparProjeto = async () => {
+      if (!terminal || projetoExistia || pastaReal === null || cliente.fechando()) return;
+      const chave = chaveToml("projects", pastaReal);
+      let relogio: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        cliente.pedir((id) => pedidoConfigBatchWrite(id, [{ chave, valor: null }])).catch(() => log("aviso", "codex_chat_projeto_ficou", { turno_id: plano.turnoId })),
+        new Promise<void>((r) => { relogio = setTimeout(r, PRAZO_LIMPEZA_MS); }),
+      ]);
+      clearTimeout(relogio);
+      projetoExistia = true;
+    };
+
+    let encerrando = false;
+    const encerrar = async () => {
       aberta = false;
-      if (cliente.fechando()) return;
+      if (encerrando || cliente.fechando()) return;
+      encerrando = true;
+      await limparProjeto();
       cliente.fechar();
       timerSaida = setTimeout(() => void proc.interromper(), SAIDA_APOS_FIM_MS);
     };
@@ -226,9 +347,9 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     };
 
     /** `itens` = as mensagens da pessoa que este turno leva (nenhuma no primeiro, que leva o pedido do plano). */
-    const iniciar = (texto: string, itens: readonly ItemDaFila[] = []) => {
+    const iniciar = (texto: string, itens: readonly ItemDaFila[] = [], imagens: readonly string[] = []) => {
       const ids = itens.flatMap((i) => i.ids);
-      cliente.iniciarTurno((id, threadId) => pedidoTurnStart(id, { threadId, texto, ...(esforco ? { esforco } : {}) }), (id, r) => {
+      cliente.iniciarTurno((id, threadId) => pedidoTurnStart(id, { threadId, texto, ...(esforco ? { esforco } : {}), ...(imagens.length ? { imagens } : {}) }), (id, r) => {
         if (id === null) {
           log("aviso", "codex_chat_turno_recusado", { turno_id: plano.turnoId, codigo: r.tipo === "resposta_erro" ? r.codigo : null });
           // X2: a volta que levava as mensagens não abriu — elas voltam para a fila do servidor (viram turno próprio).
@@ -262,9 +383,9 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
           fila = [];
           return iniciar(juntos.map((i) => i.texto).join("\n\n"), juntos);
         }
-        encerrar();
+        await encerrar();
       } catch {
-        encerrar();
+        await encerrar();
       } finally {
         decidindo = false;
       }
@@ -281,24 +402,51 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       },
     });
 
+    /**
+     * ADR-103: antes da thread, o hook do nod tem de estar carregado e confiado — o app-server só roda hook de `-c`
+     * confiado (medido no 0.147.0). A confiança vai para a config da conta pelo próprio app-server (`config/batchWrite`,
+     * como o codex-acp faz) e vale para o hash do hook, que é fixo: grava uma vez por conta e máquina.
+     */
+    const confiarNoHook = async () => {
+      if (!terminal || !comandoHook) return;
+      const listar = async () => hooksDaLista(await cliente.pedir((id) => pedidoHooksList(id, cwd))).find((h) => h.daSessao && h.comando === comandoHook);
+      const nosso = await listar();
+      if (!nosso) throw new SemHook("hook_nao_carregou");
+      if (!nosso.confiado) {
+        await cliente.pedir((id) => pedidoConfigBatchWrite(id, [{ chave: chaveToml("hooks", "state", nosso.chave, "trusted_hash"), valor: nosso.hash }]));
+        if (!(await listar())?.confiado) throw new SemHook("hook_nao_confiado");
+        log("info", "codex_hook_confiado", { turno_id: plano.turnoId });
+      }
+      pastaReal = cwd;
+      projetoExistia = pastaNaConfig(await cliente.pedir((id) => pedidoConfigRead(id, pastaReal!)), pastaReal);
+    };
+
+    const sessao = plano.entrada.sessaoCli;
+    const abertura: AberturaThread = sessao ? (plano.entrada.bifurcar ? { tipo: "bifurcar", threadId: sessao } : { tipo: "retomar", threadId: sessao }) : { tipo: "nova" };
+    const pedirThread = (a: AberturaThread) => (id: number | string) => pedidoAbrirThread(id, a, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox });
     try {
       await cliente.abrirThread({
         versaoNod: c.versaoNod ?? "0",
         prazoMs: PRAZO_HANDSHAKE_MS,
-                // X8 (revisto em 2026-10-08): efêmera. Sem `thread/resume` medido (retomaSessao=false), o histórico que a thread
-        // não efêmera deixava em ~/.codex/sessions nunca era lido de novo; só ocupava o disco da pessoa.
-        threadStart: (id) => pedidoThreadStart(id, { modelo: plano.entrada.modelo, instrucoes: plano.promptSistema, cwd, sandbox, efemera: true }),
+        antes: confiarNoHook,
+        threadStart: pedirThread(abertura),
+        // ADR-103: a thread que esta conta não tem (outra máquina, outra conta, sessão apagada) vira uma thread nova.
+        ...(abertura.tipo !== "nova" ? { reserva: pedirThread({ tipo: "nova" }), aoReserva: (motivo: string) => log("aviso", "codex_chat_retomada_falhou", { turno_id: plano.turnoId, abertura: abertura.tipo, motivo: motivo.slice(0, 80) }) } : {}),
       });
     } catch (e) {
+      if (e instanceof SemHook) {
+        log("aviso", "codex_chat_sem_hook", { turno_id: plano.turnoId, motivo: e.message });
+        return "sem_hook";
+      }
       // Nada foi escrito para o modelo ainda: o turno segue no `codex exec`, como sem app-server.
       log("aviso", "codex_chat_app_server_falhou", { turno_id: plano.turnoId, erro: e instanceof Error ? e.message.slice(0, 80) : "handshake" });
       return null;
     }
-    emitir({ tipo: "init", sessaoCli: null, ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp), modelo: plano.entrada.modelo, versaoCli: "codex-app-server", apiKeySource: "none" });
+    emitir({ tipo: "init", sessaoCli: cliente.threadId(), ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp), modelo: plano.entrada.modelo, versaoCli: "codex-app-server", apiKeySource: "none" });
     // ADR-009: promptSubmitted gravado antes de o prompt sair para o app-server.
     await Promise.all(pendentes);
     aberta = true;
-    iniciar(plano.entrada.texto);
+    iniciar(primeira.texto, [], primeira.imagens);
 
     const fim = await proc.fim;
     aberta = false;
@@ -315,7 +463,11 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
       falaDoMeio: meio,
     });
     const erroCru = r.desfecho === "sucesso" ? r.erroCru : r.erroCru ?? ultimoErro ?? ultimaLinhaUtil(fim.stderr);
-    return { ...r, erroCru, sessaoCli: null };
+    // ADR-103: o comando que o hook barrou não vira item no stream do Codex; a causa vem do arquivo que o hook anotou.
+    const negacoesDoNod = terminal ? await lerNegacoes(arquivoNegacoes) : [];
+    // ADR-103: a thread persiste no Codex da conta; o id é a sessão que o próximo turno continua.
+    const sessaoCli = cliente.threadId() || null;
+    return { ...r, erroCru, sessaoCli, ...(negacoesDoNod.length > 0 ? { negacoesDoNod: [...(r.negacoesDoNod ?? []), ...negacoesDoNod] } : {}) };
   } finally {
     if (timerSaida) clearTimeout(timerSaida);
     // X2: o que ficou na fila ou com o steer no ar quando a sessão acabou não entrou: volta para a fila do servidor.
@@ -324,4 +476,17 @@ export async function rodarChatCodex(c: ContextoChatCodex): Promise<ResultadoTur
     c.aoProcesso(null);
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** As negações que o hook anotou no turno (ADR-103); linha que não é o formato dele fica de fora. */
+async function lerNegacoes(arquivo: string): Promise<{ nome: string; motivo: string }[]> {
+  const texto = await readFile(arquivo, "utf8").catch(() => "");
+  return texto.split("\n").flatMap((l) => {
+    try {
+      const v = JSON.parse(l) as { nome?: unknown; motivo?: unknown };
+      return typeof v.nome === "string" && typeof v.motivo === "string" ? [{ nome: v.nome, motivo: v.motivo }] : [];
+    } catch {
+      return [];
+    }
+  });
 }

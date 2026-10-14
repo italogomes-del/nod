@@ -5,7 +5,7 @@ import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-laco.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_TOTAL } from "../../../domain/modo-aprovacao.ts";
-import { NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
+import { NATIVA_MCP_DA_PESSOA, NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import { log } from "../../../obs/log.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
@@ -197,7 +197,7 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
       // revisto em 2026-09-28 (ADR-055): o Bash vem com o comando, e quem decide é autorizarComando — o que só lê
       // roda; o resto abre um card e a resposta diz ao hook qual decisão esperar. Trilha só do que roda.
       async handler(ctx) {
-        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown } | null;
+        const c = (await ctx.corpo()) as { ferramenta?: unknown; comando?: unknown; arquivo?: unknown; mcp?: unknown } | null;
         const ferramenta = typeof c?.ferramenta === "string" ? c.ferramenta : "";
         const turnoId = ctx.params.turnoId ?? "";
         const plano = await deps.tokens.planoOuRecompor(turnoId);
@@ -208,6 +208,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         // ADR-067: o Monitor roda um comando como o Bash, e passa pela mesma decisão.
         const rodaComando = ferramenta === "Bash" || ferramenta === "Monitor";
         if (rodaComando && typeof c?.comando !== "string") throw new ErroDeDominio("entrada_invalida", { cause: `${ferramenta} sem comando` });
+        // ADR-103: a chamada a um app (MCP) da pessoa vem com o texto do pedido (servidor, ferramenta e argumentos).
+        const mcp = ferramenta === NATIVA_MCP_DA_PESSOA ? (typeof c?.mcp === "string" ? c.mcp : null) : null;
+        if (ferramenta === NATIVA_MCP_DA_PESSOA && mcp === null) throw new ErroDeDominio("entrada_invalida", { cause: `${ferramenta} sem pedido` });
         // ADR-089 (#217): o laço de espera com sleep (e o sleep longo) segura o processo do bot no Mac sem trabalho. Nega
         // antes de qualquer card ou trilha, em qualquer modo — nem o modo total aprova esperar assim. A saída é a volta
         // marcada (me_chame_as, ADR-086) quando ela está no catálogo deste turno; senão, encerrar dizendo o que falta.
@@ -224,9 +227,10 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.
           let regra: { regra: `regra:${string}`; regraVersao: number } = { regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA };
           // ADR-066: a gravação fora de ~/nod/<bot> (o hook manda `arquivo`) passa pela mesma decisão do comando.
-          const arquivo = ["Write", "Edit", "NotebookEdit"].includes(ferramenta) && typeof c?.arquivo === "string" ? c.arquivo : null;
-          if (rodaComando || arquivo !== null) {
-            const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : { plano, comando: String(c?.comando) });
+          // ADR-103: o apply_patch do Codex grava como o Write do Claude.
+          const arquivo = ["Write", "Edit", "NotebookEdit", "apply_patch"].includes(ferramenta) && typeof c?.arquivo === "string" ? c.arquivo : null;
+          if (rodaComando || arquivo !== null || mcp !== null) {
+            const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
             if ("aguardar" in r) return r.aguardar;
             if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: VERSAO_MODO_AUTOMATICO };
             if (r.porque === "modo_total") regra = { regra: REGRA_MODO_TOTAL, regraVersao: VERSAO_MODO_TOTAL };

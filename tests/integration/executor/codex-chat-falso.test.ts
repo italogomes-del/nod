@@ -34,17 +34,17 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-it("com app-server, o chat abre uma thread efêmera (X8), nega a aprovação pedida e fala a resposta; sessaoCli segue null", async () => {
+it("com app-server, o chat abre uma thread que fica (ADR-103), nega a aprovação pedida e fala a resposta; o id volta como sessão", async () => {
   const instance = await criarCodexCliDriver(lig).create(cfg);
   const deltas: string[] = [];
   const r = await instance.adapter(planoHarness({ texto: "olá", esforco: "max" })).rodarTurno({ sinal: async () => {}, delta: (d) => deltas.push(d), evento: () => {} });
-  expect(r).toMatchObject({ desfecho: "sucesso", texto: "Entendi: olá.", sessaoCli: null, custoUsd: null });
+  expect(r).toMatchObject({ desfecho: "sucesso", texto: "Entendi: olá.", sessaoCli: "thr_falso", custoUsd: null });
   expect(deltas.join("")).toBe("Entendi: olá.");
   const reg = await registro();
   expect(reg.args).toContain("app-server");
   expect(reg.args).toContain('sandbox_mode="read-only"');
-  // X8: sem `thread/resume` medido, nada fica em ~/.codex/sessions.
-  expect(reg.thread).toMatchObject({ ephemeral: true, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
+  // revisto em 2026-10-14 (ADR-103): a thread persiste no Codex da conta, e o próximo turno a continua (thread/resume).
+  expect(reg.thread).toMatchObject({ ephemeral: false, sandbox: "read-only", model: "gpt-5.6-sol", approvalPolicy: "never" });
   // revisto em 2026-10-10: o `max` existe no Codex (model/list do 0.147, Sol e Luna) e vai como `max`.
   expect(reg.turnos).toEqual([{ texto: "olá", effort: "max" }]);
   expect(reg.aprovacao).toEqual({ decision: "decline" });
@@ -160,12 +160,15 @@ it("X2: o turn/start que levaria a mensagem é recusado — ela nunca é confirm
   expect(r.desfecho).toBeDefined();
 });
 
-it("X9: capacidades anunciadas — mensagem no meio só com o app-server achado pela sonda", async () => {
+// revisto em 2026-10-14 (ADR-103): retomar e bifurcar também só com o app-server; terminal e pasta, com ele E o hook.
+it("X9: capacidades anunciadas — mensagem no meio, sessão e terminal só com o app-server achado pela sonda", async () => {
   const comAppServer = await criarCodexCliDriver(lig).create(cfg);
-  expect(await comAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: true, bifurcaSessao: false, retomaSessao: false });
+  expect(await comAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: true, bifurcaSessao: true, retomaSessao: true, terminal: false, pastaDeTrabalho: false });
+  const comHook = await criarCodexCliDriver({ ...lig, hookPath: "/app/hook-nativas.mjs" }).create(cfg);
+  expect(await comHook.capacidades!()).toMatchObject({ terminal: true, pastaDeTrabalho: true });
   cfg.env.TESTE_NOD_SEM_APP_SERVER = "1";
-  const semAppServer = await criarCodexCliDriver(lig).create(cfg);
-  expect(await semAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: false, bifurcaSessao: false });
+  const semAppServer = await criarCodexCliDriver({ ...lig, hookPath: "/app/hook-nativas.mjs" }).create(cfg);
+  expect(await semAppServer.capacidades!()).toMatchObject({ mensagemNoMeio: false, bifurcaSessao: false, retomaSessao: false, terminal: false });
 });
 
 it("Parar no meio do chat encerra o app-server e sai interrompido; o grupo do processo é medível enquanto roda", async () => {

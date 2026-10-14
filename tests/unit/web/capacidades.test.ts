@@ -35,7 +35,7 @@ describe("NOD-207: a web decide anexo e pasta pelas capacidades do catálogo (AD
     [undefined, true],
     ["auto", true],
     ["claude-cli", true],
-    ["codex-cli", false],
+    ["codex-cli", true],
     ["cursor-cli", false],
     ["hermes", false],
   ])("a gaveta do bot %j mostra o caminho da pasta: %j", (harness, mostra) => {
@@ -55,14 +55,12 @@ describe("NOD-207: a web decide anexo e pasta pelas capacidades do catálogo (AD
     const com = (harness: string): Estado => ({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: catalogo }, frota: { agentes: [bot(harness)], inventario: { estado: "pronto", versao: "1", em: 0 }, negacoes: [] }, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } as Estado);
     const caminho = `<code>${caminhoDaPastaDoBot("Nina")}</code>`;
 
-    it("Claude e auto mostram o caminho; Codex e Cursor mostram só a linha", () => {
-      expect(renderDetalhes(com("claude-cli"))).toContain(caminho);
-      expect(renderDetalhes(com("auto"))).toContain(caminho);
-      for (const h of ["codex-cli", "cursor-cli"]) {
-        const html = renderDetalhes(com(h));
-        expect(html).toContain("Pasta de trabalho");
-        expect(html).not.toContain(caminho);
-      }
+    // ADR-103: o Codex trabalha na pasta do bot como o Claude; o Cursor (sem driver) mostra só a linha.
+    it("Claude, Codex e auto mostram o caminho; Cursor mostra só a linha", () => {
+      for (const h of ["claude-cli", "codex-cli", "auto"]) expect(renderDetalhes(com(h))).toContain(caminho);
+      const html = renderDetalhes(com("cursor-cli"));
+      expect(html).toContain("Pasta de trabalho");
+      expect(html).not.toContain(caminho);
     });
   });
 });

@@ -40,6 +40,8 @@ export const LONGPOLL_APROVACAO_MS = 20_000;
  * repetido. Era abaixo da isenção do vigia (480 s); o vigia saiu em 2026-10-01 (ADR-067) e o valor ficou.
  */
 export const ESPERA_APROVACAO_NO_TURNO_MS = 420_000;
+/** ADR-103: a variável com o caminho da config do hook do nod no Codex (o comando do hook é fixo; a config vai por aqui). */
+export const VARIAVEL_CONFIG_HOOK = "NOD_HOOK_CONFIG";
 /** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */
 export const UNTRUSTED_WRAP_MIN_CHARS = 32;
 /**
