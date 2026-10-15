@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classificarIgnorado, ENTRE_PASSADAS_APERTADAS_MS, LIMPAR_ANTES_DE_ACABAR_MS, LIMPAR_APOS_MS, motivoDaRecusa, passadaPorAperto, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, codigosDaMaquina, ENTRE_PASSADAS_APERTADAS_MS, LIMPAR_ANTES_DE_ACABAR_MS, LIMPAR_APOS_MS, motivoDaRecusa, PASTAS_DA_MAQUINA_MAX, passadaPorAperto, pastaDeTask, protegidoPorMontagem, quandoLimpar, RETOMADA_POSSIVEL_MS, type FatosLimpeza } from "../../../src/domain/limpeza-das-tasks.ts";
 
 const AGORA = Date.UTC(2026, 9, 9, 12);
 const DIA = 24 * 3_600_000;
@@ -116,5 +116,17 @@ describe("proteções do disco (ADR-088)", () => {
     expect(motivoDaRecusa("fatal: '/x' contains modified or untracked files, use --force to delete it")).toBe("suja");
     expect(motivoDaRecusa("fatal: cannot remove a locked working tree, lock reason: x\nuse 'remove -f -f' to override or unlock first")).toBe("travada");
     expect(motivoDaRecusa("fatal: '/x' is not a working tree")).toBe("erro");
+  });
+});
+
+describe("ADR-105: os códigos das pastas que a máquina manda", () => {
+  it("só sha256 em hex minúsculo, sem repetir, até o teto; não lista = máquina antiga", () => {
+    const codigo = (i: number) => i.toString(16).padStart(64, "0");
+    const muitos = Array.from({ length: PASTAS_DA_MAQUINA_MAX + 1 }, (_, i) => codigo(i));
+    expect(codigosDaMaquina(muitos)).toHaveLength(PASTAS_DA_MAQUINA_MAX);
+    expect(codigosDaMaquina([codigo(1), codigo(1), "Vera/a-111111", codigo(0xab).toUpperCase(), `${codigo(3)}0`, 7])).toEqual([codigo(1)]);
+    expect(codigosDaMaquina([])).toEqual([]);
+    expect(codigosDaMaquina(codigo(1))).toBeNull();
+    expect(codigosDaMaquina(undefined)).toBeNull();
   });
 });

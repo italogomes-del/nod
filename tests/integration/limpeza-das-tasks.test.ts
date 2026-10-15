@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { codigoDaPasta } from "../../src/adapters/executor/limpeza-das-tasks.ts";
 import { LIMPAR_APOS_MS, RETOMADA_POSSIVEL_MS } from "../../src/domain/limpeza-das-tasks.ts";
 import { pastaSemTrabalhoDoTurno, pastasParaLimpar } from "../../src/use-cases/limpeza-das-tasks.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -73,33 +74,63 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
     });
   });
 
-  it("ADR-105: com as pastas da máquina, só elas entram (em NFC); lista vazia não consulta; e o teto de 500 não esconde a pasta nova", async () => {
+  // ADR-105: estes dois criam mais de 500 tasks, uma a uma (~4 s com a máquina quieta em 15/10); o teto folga para carga.
+  const MUITAS_TASKS_MS = 60_000;
+  const criarEm = (trx: Parameters<Parameters<typeof withRollback>[1]>[0], agora: number) => async () => {
+    const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Cecília" });
+    const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+    const criar = async (slug: string, haMs: number, pasta = `~/nod/Cecília/${slug}`) => {
+      const t = await repos.trabalhos.criar({ agenteId, conversaId, titulo: slug, origem: "pessoa", pasta });
+      await repos.trabalhos.mudarEstado(t!.id, "terminado", agora - haMs);
+      return t!.id;
+    };
+    return { deps, criar };
+  };
+
+  it("ADR-105: com os códigos da máquina, só as pastas dela entram (NFC ou NFD no banco), sem o teto de 500 nem a janela de 30 dias", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();
-      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Cecília" });
-      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
-      const criar = async (slug: string, haMs: number, pasta = `~/nod/Cecília/${slug}`) => {
-        const t = await repos.trabalhos.criar({ agenteId, conversaId, titulo: slug, origem: "pessoa", pasta });
-        await repos.trabalhos.mudarEstado(t!.id, "terminado", agora - haMs);
-        return t!.id;
-      };
-      // 520 tasks antigas já limpas (o caso de 15/10: 1.151 encerradas em 30 dias) e a nova, que ainda está no disco.
+      const { deps, criar } = await criarEm(trx, agora)();
+      // 505 tasks que acabaram agora (ainda não podem sair) na frente: com o teto de 500 elas escondiam as que podem.
+      const recentes: string[] = [];
+      for (let i = 0; i < 505; i++) { const slug = `recente-${String(i).padStart(6, "0")}`; await criar(slug, 10 * 60_000); recentes.push(`Cecília/${slug}`); }
+      const nova = await criar("nova-aaaaaa", 4 * DIA);
+      // O banco com o acento decomposto (NFD) casa com o código do nome composto (NFC).
+      const decomposta = await criar("nfd-dddddd", 6 * DIA, "~/nod/Cecília/nfd-dddddd".normalize("NFD"));
+      // Presa há 40 dias: fora da janela, mas a pasta ainda está no disco.
+      const presa = await criar("presa-eeeeee", 40 * DIA);
+      await criar("fora-da-lista-ffffff", 4 * DIA);
+
+      const pastas = [...recentes, "Cecília/nova-aaaaaa", "Cecília/sumiu-cccccc", "Cecília/nfd-dddddd", "Cecília/presa-eeeeee"];
+      const daMaquina = await pastasParaLimpar(deps, { codigos: pastas.map(codigoDaPasta) });
+      expect(daMaquina.map((p) => [p.trabalhoId, p.quando])).toEqual([[nova, "encerrada"], [decomposta, "encerrada"], [presa, "encerrada"]]);
+      expect(daMaquina[0]!.pasta).toBe("Cecília/nova-aaaaaa");
+      expect(await pastasParaLimpar(deps, { codigos: [] })).toEqual([]);
+      // A reconfirmação: só o código daquela pasta.
+      expect(await pastasParaLimpar(deps, { codigos: [codigoDaPasta("Cecília/nfd-dddddd")] })).toEqual([{ trabalhoId: decomposta, pasta: "Cecília/nfd-dddddd".normalize("NFD"), quando: "encerrada" }]);
+
+      // Revisão do #320: a pasta de duas tasks só sai pela mais recente — a antiga não a oferece como encerrada
+      // enquanto a nova acabou há 10 min.
+      const comum = "~/nod/Cecília/compartilhada";
+      await criar("antiga-da-comum", 20 * DIA, comum);
+      await criar("nova-da-comum", 10 * 60_000, comum);
+      expect(await pastasParaLimpar(deps, { codigos: [codigoDaPasta("Cecília/compartilhada")] })).toEqual([]);
+    });
+  }, MUITAS_TASKS_MS);
+
+  it("ADR-105: sem lista (máquina antiga), as 500 mais recentes — a nova não fica atrás das 520 antigas já limpas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const { deps, criar } = await criarEm(trx, agora)();
+      // O caso de 15/10: 1.151 encerradas em 30 dias, as mais antigas já fora do disco.
       for (let i = 0; i < 520; i++) await criar(`velha-${String(i).padStart(6, "0")}`, 20 * DIA);
       const nova = await criar("nova-aaaaaa", 4 * DIA);
       const outra = await criar("outra-bbbbbb", 5 * DIA);
-      // O banco com o acento decomposto (NFD) casa com o nome composto (NFC) que a rota manda.
-      const decomposta = await criar("nfd-dddddd", 6 * DIA, "~/nod/Cecília/nfd-dddddd".normalize("NFD"));
-
-      const daMaquina = await pastasParaLimpar(deps, { pastas: ["Cecília/nova-aaaaaa", "Cecília/sumiu-cccccc", "Cecília/nfd-dddddd"].map((p) => p.normalize("NFC")) });
-      expect(daMaquina.map((p) => [p.trabalhoId, p.quando])).toEqual([[nova, "encerrada"], [decomposta, "encerrada"]]);
-      expect(daMaquina[0]!.pasta).toBe("Cecília/nova-aaaaaa".normalize("NFC"));
-      expect(await pastasParaLimpar(deps, { pastas: [] })).toEqual([]);
-      // Sem lista (máquina antiga): as 500 mais recentes, e a nova está entre elas.
       const semLista = await pastasParaLimpar(deps);
       expect(semLista).toHaveLength(500);
       expect(semLista.slice(0, 2).map((p) => p.trabalhoId)).toEqual([nova, outra]);
     });
-  });
+  }, MUITAS_TASKS_MS);
 
   it("ADR-099 (I5): a frente terminada vale `sem_trabalho` na hora, na lista e pelo turno que a fechou; task, falha e frente aberta não", async () => {
     await withRollback(MARLON, async (trx) => {

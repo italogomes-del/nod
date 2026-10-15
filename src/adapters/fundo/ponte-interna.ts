@@ -655,7 +655,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     async pastasParaLimpar(pessoaId, o): Promise<PastaParaLimpar[]> {
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return [];
-      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true, ...(o?.pastas ? { pastas: o.pastas } : {}) }));
+      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true, ...(o?.codigos ? { codigos: o.codigos } : {}) }));
     },
 
     /** ADR-099 (I5, 2026-10-12): a frente que terminou com este turno e já vale `sem_trabalho`, para o Mac limpar na hora. */

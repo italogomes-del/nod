@@ -38,6 +38,12 @@ interface Linha {
   terminado_em: Date | null;
 }
 
+/**
+ * ADR-105 (definido em 2026-10-15): o teto da consulta da limpeza quando a máquina manda os códigos das pastas. A lista
+ * vem com até 5.000 (`PASTAS_DA_MAQUINA_MAX`); o dobro cobre pasta com mais de uma task (a decidida por quem chamou).
+ */
+const TETO_COM_CODIGOS = 10_000;
+
 const COLUNAS =
   "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, pessoa_esperando, forma, lote_id, resumo, criado_em, iniciado_em, terminado_em";
 
@@ -295,28 +301,35 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * `parado` fica de fora já aqui. ADR-099 (I5, 2026-10-12): com `id`, só aquele trabalho (o `limparAgora` da frente
      * que acabou de terminar); a `forma` vai junto.
      *
-     * revisto em 2026-10-15 (ADR-105): com `pastas` (`<bot>/<slug>`, em NFC), só as tasks dessas pastas — as que a
-     * máquina ainda tem no disco. E as mais RECENTES primeiro: antes eram as mais antigas, e com 1.151 encerradas em 30
-     * dias as 500 da resposta paravam em 09/10, todas já limpas; a VM dos bots encheu sem a limpeza ver as pastas novas.
+     * revisto em 2026-10-15 (ADR-105): com `codigos`, só as tasks cuja pasta tem um desses códigos — o sha256 em hex de
+     * `<bot>/<slug>` em NFC, as pastas que a máquina ainda tem no disco. Aí o teto sobe para `TETO_COM_CODIGOS`: a
+     * lista da máquina já limita, e com 500 as tasks recentes que ainda não podem sair escondiam as antigas que podem.
+     * E as mais RECENTES primeiro: antes eram as mais antigas, e com 1.151 encerradas em 30 dias as 500 da resposta
+     * paravam em 09/10, todas já limpas; a VM dos bots encheu sem a limpeza ver as pastas novas.
      */
-    async candidatosALimpeza(desde: number, o: { id?: string; pastas?: readonly string[] } = {}): Promise<(FatosLimpeza & { id: string })[]> {
+    async candidatosALimpeza(desde: number, o: { id?: string; codigos?: readonly string[] } = {}): Promise<(FatosLimpeza & { id: string })[]> {
       const id = o.id ?? null;
-      const pastas = o.pastas ? o.pastas.map((p) => `~/nod/${p}`) : null;
+      const codigos = o.codigos ?? null;
       const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean; forma: FormaTrabalho }[]>`
         -- ADR-099 (I10): a task de antes, migrada pela 0072 sem lote, limpa como task (formaEfetiva, domain/frente.ts).
         select w.id, w.estado, w.pasta, w.terminado_em, case when w.lote_id is null then 'task' else w.forma end as forma,
           (select count(*)::int from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as vivos,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta')) as decisao,
+          -- revisão do #320 (ADR-105): também a pasta que outra task usou e encerrou DEPOIS desta. Só a task mais
+          -- recente da pasta decide: sem isso, a antiga oferecia como "encerrada" a pasta de uma task que acabou de
+          -- terminar (e sem a janela de 30 dias, qualquer task do histórico serviria).
           exists (select 1 from trabalhos o where o.tenant_id = w.tenant_id and o.pasta = w.pasta and o.id <> w.id
-            and o.estado not in ('terminado', 'falhou')) as dividida
+            and (o.estado not in ('terminado', 'falhou') or o.terminado_em > w.terminado_em
+              or (o.terminado_em = w.terminado_em and o.id > w.id))) as dividida
         from trabalhos w
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.terminado_em >= ${data(desde)}
           and w.estado in ('terminado', 'falhou') and w.pasta is not null
           and (${id}::uuid is null or w.id = ${id}::uuid)
-          and (${pastas}::text[] is null or normalize(w.pasta, NFC) = any(${pastas}::text[]))
+          and (${codigos}::text[] is null or (w.pasta like '~/nod/%'
+            and encode(sha256(convert_to(normalize(substr(w.pasta, 7), NFC), 'UTF8')), 'hex') = any(${codigos}::text[])))
         order by w.terminado_em desc, w.id
-        limit 500`;
+        limit ${codigos ? TETO_COM_CODIGOS : 500}`;
       return linhas.map((l) => ({ id: l.id, estado: l.estado, pasta: l.pasta, terminadoEm: msOuNull(l.terminado_em), turnosVivos: l.vivos, decisaoPendente: l.decisao, pastaDividida: l.dividida, forma: l.forma }));
     },
 

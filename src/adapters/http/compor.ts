@@ -1210,7 +1210,7 @@ export function comporApp(o: OpcoesCompor): App {
   const ambienteDasEsperas = { ...montarAmbiente("local", env), PATH: caminhoAumentado(env.PATH, homeDoExecutor), HOME: homeDoExecutor };
   const iniciar: IniciarLaco = (p) => {
     const pool = iniciarLacoDaPessoa(p);
-    const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso });
+    const limpeza = modoLimpeza === "desligada" ? null : iniciarLimpezaDasTasks({ ponte: p.ponte, pessoaId: p.pessoaId, home: homeDoExecutor, executar: criarExecutarComando(env, homeDoExecutor), simular: modoLimpeza === "simular", emUso: pastaEmUso, machineId: p.machineId });
     const esperas = iniciarEsperas({ ponte: p.ponte, pessoaId: p.pessoaId, machineId: p.machineId, home: homeDoExecutor, env: ambienteDasEsperas });
     return { ...pool, async parar() { limpeza?.parar(); esperas.parar(); await pool.parar(); } };
   };
