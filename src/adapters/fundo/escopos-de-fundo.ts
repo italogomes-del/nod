@@ -44,7 +44,15 @@ export async function paraCadaPessoa(
 ): Promise<void> {
   const listar = opcoes.listarPessoas ?? (() => comPrazoDeConexao(listarTodas(db)));
   const aoFalhar = opcoes.aoFalhar ?? logarFalha;
-  const lista = await listar();
+  // QA do PR #321: banco_ocupado na listagem também só encerra a volta (o comPrazoDeConexao já logou). Lançado daqui,
+  // virava unhandled rejection nos laços de `setInterval(() => void tick())` e derrubava o processo com o pool cheio.
+  let lista: Pick<Pessoa, "tenantId" | "id">[];
+  try {
+    lista = await listar();
+  } catch (e) {
+    if (e instanceof ErroBancoOcupado) return;
+    throw e;
+  }
   const sortear = opcoes.sortearInicio ?? ((total: number) => Math.floor(Math.random() * total));
   const inicio = lista.length > 0 ? sortear(lista.length) % lista.length : 0;
   const pessoas = [...lista.slice(inicio), ...lista.slice(0, inicio)];
