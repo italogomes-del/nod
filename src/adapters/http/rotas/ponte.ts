@@ -9,6 +9,7 @@ import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../contracts/contas-ia.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { estadoDaMaquina } from "../../../domain/harness.ts";
 import { log } from "../../../obs/log.ts";
 import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
@@ -31,7 +32,6 @@ type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo
  */
 type LeituraAnuncio = { inv: Inventario; gh: boolean; motores: Partial<Record<IdHarness, Inventario>>; harnessesAusente: boolean; semLacoDeVoz: IdHarness[]; capacidades: ReturnType<typeof capacidadesAnunciadas>; sobreviveReinicio: boolean };
 function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
-  const inv = inventario(b.inventario, agora);
   // ADR-048: o gh desta máquina (app ≥ 2026-09-24). Ausente = app antigo = sem gh.
   const gh = objeto(b.github ?? {}).gh === true;
   const motores: Partial<Record<IdHarness, Inventario>> = {};
@@ -39,6 +39,9 @@ function lerAnuncio(b: Record<string, unknown>, agora: number): LeituraAnuncio {
     const anunciados = objeto(b.harnesses);
     for (const h of HARNESSES) if (anunciados[h.id] !== undefined && h.integrado) motores[h.id] = inventario(anunciados[h.id], agora, h.nome);
   }
+  // #313: a máquina está pronta se QUALQUER IA dela está — o app rc.10/rc.11 manda em `inventario` o estado do Claude, e
+  // quem só tem o ChatGPT ficava sem nenhum turno (envio negado, puxar vazio). App antigo sem `harnesses`: o `inventario` puro.
+  const inv = estadoDaMaquina(inventario(b.inventario, agora), motores);
   // NOD-167: só ids integrados e prontos neste anúncio; qualquer outra coisa é ignorada (app antigo não manda o campo).
   const semLacoDeVoz = Array.isArray(b.semLacoDeVoz) ? HARNESSES.filter((h) => h.integrado && (b.semLacoDeVoz as unknown[]).includes(h.id) && motores[h.id]?.estado === "pronto").map((h) => h.id) : [];
   // Revisão do épico (S15, 2026-10-08): o que os drivers desta máquina declaram (com bifurcaSessao, a rede de 2 min bifurca).

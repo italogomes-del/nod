@@ -63,6 +63,25 @@ describeIntegracao("NOD-199: anúncio de inventário persiste no banco", () => {
     });
   });
 
+  // #313: o app rc.10/rc.11 manda em `inventario` o estado do Claude (sempre instalado). Quem só tinha o ChatGPT logado
+  // ficava com o envio negado ("motor_ausente") e a máquina sem puxar turno. O servidor deriva o estado dos harnesses.
+  it("#313: só o Codex pronto (com o `inventario` do Claude sem login): a máquina fica pronta, no banco e no puxar", async () => {
+    await withRollback(escopo, async (trx) => {
+      const { repos } = await agenteComConversa(trx, escopo);
+      const { chamar, maquinas } = montar(repos);
+      const codex = { estado: "pronto", versao: "0.162.0", em: 0 } as const;
+      await chamar("conectar", { versaoContrato: 1, nome: "gamefik-codex-dev", plataforma: "linux", inventario: semLogin, harnesses: { "claude-cli": semLogin, "codex-cli": semLogin } });
+      expect((await repos.inventario.buscar("claude-cli"))?.estado).toBe("nao_autenticado");
+      expect((await chamar("puxar", {})).body).toEqual({ plano: null });
+      // O login do ChatGPT pela tela termina: o anúncio só de inventário chega com o Codex pronto e o Claude ainda sem login.
+      await chamar("inventario", { versaoContrato: 1, inventario: semLogin, harnesses: { "claude-cli": semLogin, "codex-cli": codex } });
+      expect(await repos.inventario.buscar("claude-cli")).toMatchObject({ estado: "pronto", versao: "0.162.0" });
+      expect(maquinas.get("m1")?.inventario).toMatchObject({ estado: "pronto" });
+      expect(maquinas.get("m1")?.harnesses).toMatchObject({ "claude-cli": { estado: "nao_autenticado" }, "codex-cli": { estado: "pronto" } });
+      expect((await chamar("puxar", {})).body).toEqual({ plano: { turnoId } });
+    });
+  });
+
   it("sem conexão: estado_invalido (409 → reconectar); chave de outra pessoa: recusa; app antigo: 426 — e nada chega ao banco", async () => {
     await withRollback(escopo, async (trx) => {
       const { repos } = await agenteComConversa(trx, escopo);

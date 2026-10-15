@@ -2,10 +2,12 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { criarContasLocais, type IdentidadeDaConta } from "../../../desktop/contas-locais.ts";
+import { criarContasLocais, inventariosComContas, type IdentidadeDaConta } from "../../../desktop/contas-locais.ts";
 import { iniciarContasNoServidor } from "../../../desktop/contas-no-servidor.ts";
 import type { IaDesktop } from "../../../src/contracts/desktop.ts";
-import type { PuxadaDeContas } from "../../../src/contracts/contas-ia.ts";
+import type { ContaAnunciada, PuxadaDeContas } from "../../../src/contracts/contas-ia.ts";
+import type { Inventario } from "../../../src/contracts/inventario.ts";
+import { estadoDaMaquina } from "../../../src/domain/harness.ts";
 
 /**
  * ADR-102 no app do Mac (2026-10-13): a lista que vai ao servidor segue a do app (contas.json, ADR-101), o e-mail e a
@@ -131,5 +133,27 @@ describe("puxada de contas no app do Mac (ADR-102)", () => {
     iniciarContasNoServidor({ ponte: { puxar: async () => { puxadas++; return "sem_rota"; }, saiu: async () => true }, sair: async () => true, todas: () => [], desconectar: async () => undefined, agendar });
     await new Promise((r) => setTimeout(r, 60));
     expect(puxadas).toBe(1);
+  });
+});
+
+// #313: o anúncio (motor/main.ts e desktop/main.ts) manda `estadoDaMaquina(principal, inventariosComContas(…))`. Antes mandava
+// `comContas["claude-cli"] ?? principal`: com o Claude sempre instalado, a máquina só com o ChatGPT nunca ficava pronta.
+describe("o estado da máquina no anúncio (#313)", () => {
+  const semLogin: Inventario = { estado: "nao_autenticado", motivo: "Entre na conta do harness neste computador", em: 1 };
+  const conta = (ia: ContaAnunciada["ia"]): ContaAnunciada => ({ impressao: "a".repeat(64), ia, estado: "pronta", plano: null, corporativa: false, logadaEm: 1 });
+
+  it("só o Codex pronto: a máquina vai pronta pelo Codex", () => {
+    const comContas = inventariosComContas({ "claude-cli": semLogin, "codex-cli": { estado: "pronto", versao: "0.162.0", em: 2 } }, []);
+    expect(estadoDaMaquina(semLogin, comContas)).toMatchObject({ estado: "pronto", versao: "0.162.0" });
+  });
+
+  it("red team do PR #306 continua: a conta de sempre deslogada e outra conta Claude pronta deixam a máquina pronta", () => {
+    const comContas = inventariosComContas({ "claude-cli": semLogin, "codex-cli": semLogin }, [conta("claude-cli")]);
+    expect(estadoDaMaquina(semLogin, comContas)).toMatchObject({ estado: "pronto" });
+  });
+
+  it("nenhuma IA pronta nem conta pronta: vai a explicação da vigia (`principal`)", () => {
+    const principal: Inventario = { estado: "nao_autenticado", causa: "teste_falhou", motivo: "testei e não respondeu", em: 3 };
+    expect(estadoDaMaquina(principal, inventariosComContas({ "claude-cli": semLogin, "codex-cli": semLogin }, []))).toBe(principal);
   });
 });

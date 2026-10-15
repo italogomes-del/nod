@@ -369,7 +369,7 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
   it("negação antiga sem `ia` com o Codex fora: aviso de sempre, legível, sem 'já voltou'", () => {
     const html = renderMensagem(daAda({}), auto({ claude: CLAUDE_NOVO, codex: CODEX_DE_ANTES }));
     expect(html).not.toContain("já voltou");
-    expect(html).toContain("Gil não pôde começar: sua conta de IA não está conectada neste computador.");
+    expect(html).toContain("Gil não pôde começar: nenhuma IA está pronta agora.");
     expect(html).toContain("Sua mensagem fica guardada");
     expect(html).toMatch(/data-act="secao-espaco" data-secao="conexao">Conectar IA</);
   });
@@ -453,7 +453,7 @@ describe("NOD-220: o bot no Automático com o Codex fora nunca ouve 'já voltou'
       const m = daAda({ ia: ia as never });
       const html = renderMensagem(m, auto({ claude: CLAUDE_NOVO, codex: CLAUDE_NOVO }));
       expect(html).not.toContain("já voltou");
-      expect(html).toContain("Gil não pôde começar: sua conta de IA não está conectada neste computador.");
+      expect(html).toContain("Gil não pôde começar: nenhuma IA está pronta agora.");
     }
   });
 

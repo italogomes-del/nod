@@ -214,7 +214,7 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const { data, events } = await executar(deps, despacharTurno, { machineId: randomUUID(), executor: "local", inventario: { estado: "nao_autenticado", motivo: "faça login no claude", em: 5 } });
       expect(data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
       expect(await deps.repos.turnos.buscar(enviado.turno.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
-      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Claude Code sem conta conectada: faça login no claude");
+      expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("nenhuma IA pronta na máquina deste bot");
       expect(events.map((e) => e.kind)).toEqual(["turno_interrompido", "mensagem_criada"]);
     });
   });

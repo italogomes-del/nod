@@ -296,7 +296,7 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
     tom: "erro",
     titulo: "Nenhum trabalho começou.",
     texto: aindaFora
-      ? `${nome ?? "O bot"} não pôde começar: sua conta de IA não está conectada neste computador. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
+      ? `${nome ?? "O bot"} não pôde começar: nenhuma IA está pronta agora. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
       : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. ${voltou}: se a resposta não chegou, mande a mensagem de novo.`,
     extra: detalhes,
     acao: aindaFora ? botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }) : undefined,
@@ -342,7 +342,7 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   const doBot = agente ? maquinaDoBot(estado, agente) : null;
   // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
-  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude)` };
+  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
   if (doBot && !doBot.conectada) {
     const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
     return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };

@@ -32,6 +32,7 @@ import { criarVigiaDasIas, type Veredito, type VigiaDasIas } from "../desktop/vi
 import { criarContasLocais, inventariosComContas, type ContaLocal } from "../desktop/contas-locais.ts";
 import { diretorioPadrao } from "../desktop/contas-mac.ts";
 import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
+import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { iniciarContasDoMotor, lerIdentidadeNoCli, logoutNoCli, type ClisDoMotor } from "./contas.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, MARCA_DA_ATUALIZACAO, type Atualizador } from "./atualizacao.ts";
 import { AJUDA, arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, pastaDoExecutor, pastaDoMotor, type ConexaoMotor } from "./conexao.ts";
@@ -244,7 +245,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
       const contas = contasLocais.anuncio();
       const comContas = inventariosComContas(inventarios, contas);
-      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: comContas["claude-cli"] ?? principal, harnesses: comContas, semLacoDeVoz, capacidades, contas });
+      await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas });
       subirSeTemConta();
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });
     },

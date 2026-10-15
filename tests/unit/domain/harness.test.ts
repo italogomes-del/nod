@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HARNESSES, type CatalogoHarness } from "../../../src/contracts/harness.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
-import { capacidadesDe, causaHarnessIndisponivel, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { capacidadesDe, causaHarnessIndisponivel, estadoDaMaquina, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, motivoSemIaPronta, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
 import { iaDoModelo } from "../../../src/domain/ia-do-modelo.ts";
 import { inteligenciaDoAgente } from "../../../src/domain/inteligencia.ts";
 
@@ -62,6 +62,26 @@ describe("escolha de inteligência", () => {
     });
     it("sem sonda do harness não afirma 'não instalado'", () => {
       expect(motivoHarnessIndisponivel("codex-cli", inventarioHarnessSemSonda(0))).toBe("Codex não está pronto em nenhum computador conectado");
+    });
+  });
+
+  // #313: quem só conectou o ChatGPT nunca rodava nada — o anúncio mandava o estado do Claude como o da máquina.
+  describe("#313: a máquina está pronta se qualquer IA dela está", () => {
+    const semLogin: Inventario = { estado: "nao_autenticado", motivo: "Entre na conta do harness neste computador", em: 1 };
+    const claude: Inventario = { estado: "pronto", versao: "2.1.290", em: 2 };
+    const codex: Inventario = { estado: "pronto", versao: "0.162.0", em: 3 };
+    it.each([
+      ["o inventário já pronto fica", claude, { "codex-cli": codex }, claude],
+      ["só o Codex pronto: a máquina fica pronta pelo Codex", semLogin, { "claude-cli": semLogin, "codex-cli": codex }, codex],
+      ["nenhuma pronta: a explicação de quem chamou", semLogin, { "claude-cli": semLogin, "codex-cli": { ...semLogin, em: 9 } }, semLogin],
+      ["as duas prontas: o Claude, na ordem do catálogo", semLogin, { "codex-cli": codex, "claude-cli": claude }, claude],
+      ["sem IAs anunciadas (app antigo): o inventário puro", semLogin, {}, semLogin],
+    ] as const)("%s", (_, inv, ias, esperado) => {
+      expect(estadoDaMaquina(inv, ias)).toBe(esperado);
+    });
+    it("sem IA para nomear, a negação diz onde faltou, não chama ninguém de Claude Code e guarda o motivo do inventário", () => {
+      expect(motivoSemIaPronta("maquinas", semLogin)).toBe("nenhuma IA pronta nas suas máquinas: Entre na conta do harness neste computador");
+      expect(motivoSemIaPronta("maquina_do_bot", { estado: "ausente", motivo: "NOD_EXECUTOR desconhecido", em: 0 })).toBe("nenhuma IA pronta na máquina deste bot: NOD_EXECUTOR desconhecido");
     });
   });
 
