@@ -1049,6 +1049,7 @@ export function comporApp(o: OpcoesCompor): App {
     get executor() {
       return executorAtual;
     },
+    ...(compartilhado ? { harnessesDaPessoa: (pessoaId: string) => ponteHttp.harnessesDaPessoa(pessoaId) } : {}),
   };
   const depsL7: DepsRotasL7 = { executor: () => executorAtual, txPara: (escopo) => abrirTxEscopada(db, escopo), services, useCases, agora: relogio };
   const rotas: Rota[] = [

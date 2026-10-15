@@ -100,7 +100,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   // L4 (callback injetado), não o puxar — definido em 2026-09-16: um upsert por puxar (a cada 1 s por pessoa)
   // é churn e travou com o advisory lock da reivindicação em dois puxares paralelos da mesma pessoa.
   const inventario = input.inventario ?? (await deps.repos.inventario.buscar(motorDe(executor))) ?? inventarioAusente(agora);
-  if (inventario.estado !== "pronto") return recusarPorExecutor(deps, { turno, executor, inventario, agora });
+  if (inventario.estado !== "pronto") return recusarPorExecutor(deps, { turno, executor, inventario, agora, semIaOnde: "maquina_do_bot" });
 
   // NOD-171: fixado num harness que esta máquina não tem pronto. O reivindicar só entrega isso quando nenhuma máquina
   // viva da pessoa o tem (harnessesProntosPessoa): recusa já, nomeando o harness, e o turno não fica preso na fila.
@@ -133,7 +133,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     // NOD-171: com a causa, a recusa fala do harness que faltou (e do modelo inválido), nunca do motor.
     if (ehErroDeDominio(e) && e.codigo === "executor_indisponivel") {
       const causa = causaHarnessIndisponivel(e);
-      if (!causa) return recusarPorExecutor(deps, { turno, executor, inventario, agora });
+      if (!causa) return recusarPorExecutor(deps, { turno, executor, inventario, agora, semIaOnde: "maquina_do_bot" });
       const doHarness = causa.inventario ?? input.harnessesDaPessoa?.[causa.harness] ?? (causa.motivo === "modelo_invalido" ? inventario : inventarioHarnessSemSonda(agora));
       return recusarPorExecutor(deps, { turno, executor, inventario: doHarness, agora, harness: causa.harness, modeloInvalido: causa.motivo === "modelo_invalido" ? causa.modelo : undefined });
     }
@@ -176,12 +176,12 @@ async function semContaNaMaquina(
 
 async function recusarPorExecutor(
   deps: Deps,
-  p: { turno: Turno; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string },
+  p: { turno: Turno; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; semIaOnde?: "maquina_do_bot" },
 ): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] }> {
   // nao_autenticado/motor_ausente são MotivoFalha (do inventário, nunca do classificador); a interrupção é executor_indisponivel.
   const motivoFalha = p.inventario.estado === "nao_autenticado" ? "nao_autenticado" : "motor_ausente";
   const assentado = await deps.repos.turnos.assentar(p.turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha });
-  const negacao = await mensagemExecutorIndisponivel(deps, { conversaId: p.turno.conversaId, turnoId: p.turno.id, agenteId: p.turno.agenteId, executor: p.executor, inventario: p.inventario, agora: p.agora, harness: p.harness, modeloInvalido: p.modeloInvalido });
+  const negacao = await mensagemExecutorIndisponivel(deps, { conversaId: p.turno.conversaId, turnoId: p.turno.id, agenteId: p.turno.agenteId, executor: p.executor, inventario: p.inventario, agora: p.agora, harness: p.harness, modeloInvalido: p.modeloInvalido, semIaOnde: p.semIaOnde });
   const autoria = autoriaAgente({ agenteId: p.turno.agenteId, contaDeExecucao: p.turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
   const events = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: motivoFalha, inventario: p.inventario.estado } }),

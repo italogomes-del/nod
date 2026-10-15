@@ -110,6 +110,30 @@ describe("NOD-220: a negação grava a IA que negou", () => {
     expect(catcher.data.negacao?.payload).not.toHaveProperty("ia");
   });
 
+  // #313: no envio, o bot fixado nomeia a IA DELE (com o estado que as máquinas anunciam) e o Automático não chama o motor
+  // de "Claude Code" — quem só tinha o ChatGPT lia "Claude Code sem conta conectada" com o bot fixado no Codex.
+  it("#313: bot fixado no Codex sem Codex pronto: a negação nomeia o Codex e grava `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", harness: "codex-cli", modelo: "gpt-5.6-sol" });
+    const semLogin = { estado: "nao_autenticado" as const, motivo: "entre no codex", em: 0 };
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", executor: "local", inventario: AUSENTE, harnessesDaPessoa: { "claude-cli": PRONTO, "codex-cli": semLogin } });
+    expect(data.negacao?.payload).toMatchObject({ kind: "negacao", nome: "codex-cli", ia: "codex-cli" });
+    expect(data.negacao?.texto).toContain("Codex sem conta conectada: entre no codex");
+    expect(data.negacao?.texto).not.toContain("Claude Code");
+    // Sem máquina viva nenhuma: não afirma "não instalado", diz que nenhum computador conectado o tem pronto.
+    const semMaquina = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "de novo", executor: "local", inventario: AUSENTE, harnessesDaPessoa: {} });
+    expect(semMaquina.data.negacao?.texto).toContain("Codex não está pronto em nenhum computador conectado");
+  });
+
+  it("#313: bot no Automático sem IA pronta: 'nenhuma IA pronta nas suas máquinas', sem nomear IA nem gravar `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", executor: "local", inventario: { estado: "nao_autenticado", motivo: "Entre na conta do harness neste computador", em: 0 }, harnessesDaPessoa: {} });
+    expect(data.negacao?.texto).toContain("nenhuma IA pronta nas suas máquinas");
+    expect(data.negacao?.texto).not.toContain("Claude Code");
+    expect(data.negacao?.payload).not.toHaveProperty("ia");
+  });
+
   it("harness Claude recusado: ia = claude-cli; harness fora do catálogo não grava `ia`", async () => {
     const { deps } = depsEmMemoria();
     const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });

@@ -32,6 +32,7 @@ import { contaDoCodex } from "./conta-codex.ts";
 import { ambienteNaConta, diretorioPadrao, gravarContasDoMac, iaDasContas, lerContasDoMac, prepararPastaDaConta, removerPastaDaConta } from "./contas-mac.ts";
 import { criarContasDoApp } from "./contas-no-app.ts";
 import { ID_CONTA_PADRAO } from "../src/domain/contas-da-ia.ts";
+import { estadoDaMaquina } from "../src/domain/harness.ts";
 import { criarContasLocais, inventariosComContas, type ContasLocais } from "./contas-locais.ts";
 import { iniciarContasNoServidor } from "./contas-no-servidor.ts";
 import { lerIdentidadeNoCli, type ClisDoMotor } from "../motor/contas.ts";
@@ -526,7 +527,7 @@ async function conectar(c: Config) {
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
     aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: comContas["claude-cli"] ?? principal, harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);

@@ -1,12 +1,13 @@
 import type { ConversaDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
-import { iaDaNegacao, motivoHarnessIndisponivel } from "../domain/harness.ts";
+import { harnessFixado, iaDaNegacao, inventarioHarnessSemSonda, motivoHarnessIndisponivel, motivoSemIaPronta } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
@@ -30,6 +31,8 @@ export type EntradaEnviarMensagem = {
   inventario?: Inventario;
   /** Chave de idempotência (UUID) que o compositor cria, uma por fala (NOD-156): o reenvio devolve a mesma mensagem e o mesmo turno. */
   idEnvio?: string;
+  /** #313: as IAs de todas as máquinas vivas da pessoa (modo compartilhado) — a negação do bot fixado nomeia a IA DELE. */
+  harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>;
 };
 
 export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: Mensagem | null };
@@ -112,7 +115,12 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const events = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto" } })];
   let negacao: Mensagem | null = null;
   if (recusado) {
-    negacao = await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario, agora });
+    // #313: o bot fixado nomeia a IA dele, com o estado dela (como o despacho, NOD-171); o Automático diz que nenhuma IA
+    // está pronta — o `inventario` aqui é o da máquina, e chamá-lo de "Claude Code" confundia quem só tem o ChatGPT.
+    const fixo = harnessFixado(agente.harness, agente.modelo);
+    negacao = fixo
+      ? await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario: input.harnessesDaPessoa?.[fixo] ?? inventarioHarnessSemSonda(agora), agora, harness: fixo })
+      : await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario, agora, semIaOnde: "maquinas" });
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { motivo: "executor_indisponivel", inventario: inventario.estado } }));
     if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
   } else {
@@ -144,11 +152,12 @@ async function envioRepetido(deps: Deps, existente: Mensagem, texto: string, ane
  */
 export async function mensagemExecutorIndisponivel(
   deps: Deps,
-  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string },
+  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; semIaOnde?: "maquinas" | "maquina_do_bot" },
 ): Promise<Mensagem | null> {
   // NOD-171: o harness escolhido e o inventário DELE; sem harness (turno antigo, catcher), o do motor.
   const nome = p.harness ?? motorDe(p.executor);
-  const motivo = motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido);
+  // #313: sem IA para nomear, quem chama diz onde faltou (envio: nas máquinas; despacho: na máquina do bot).
+  const motivo = !p.harness && p.semIaOnde ? motivoSemIaPronta(p.semIaOnde, p.inventario) : motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido);
   // NOD-220: a IA que negou vai no payload; a web decide "já voltou" pela sonda DELA, nunca pela do motor em uso.
   // Só o harness do turno é IA que negou: sem ele, quem faltou foi o executor (motorDe), e `nome` "claude-cli" é o motor
   // local, não a IA. Gravar `ia` aí prenderia a web esperando o Claude Code num bot que roda no Codex (revisão do #303).

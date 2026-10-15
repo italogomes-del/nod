@@ -1,8 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Executor, RuntimeEvent } from "../../contracts/evento.ts";
-import type { IdHarness } from "../../contracts/harness.ts";
+import { HARNESSES, type IdHarness } from "../../contracts/harness.ts";
 import type { LimitesIa } from "../../contracts/inteligencia.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
+import { estadoDaMaquina } from "../../domain/harness.ts";
 import { iasNoLimite } from "../../domain/inteligencia.ts";
 import { cotaDasIas } from "../../domain/cota-da-ia.ts";
 import type { CotaDaIa } from "../../contracts/cota.ts";
@@ -235,10 +236,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     if (!m) return null;
     const reprovado: Inventario = { estado: "nao_autenticado", causa, motivo: MOTIVO_DA_CAUSA[causa], em: agora() };
     const todos: Partial<Record<IdHarness, Inventario>> = { ...(m.harnesses ?? { "claude-cli": m.inventario }), [harness]: reprovado };
-    const outra = (Object.entries(todos) as [IdHarness, Inventario][]).find(([id, i]) => id !== harness && i.estado === "pronto");
-    maquinas.set(machineId, { ...m, harnesses: todos, inventario: outra ? outra[1] : reprovado });
-    log("aviso", "ia_reprovada_no_turno", { machine_id: machineId, harness, causa, outra: outra?.[0] ?? null });
-    return outra?.[0] ?? null;
+    // #313: a máquina segue pronta pela outra IA pronta — a mesma regra do anúncio (estadoDaMaquina).
+    const inventario = estadoDaMaquina(reprovado, todos);
+    const outra = inventario === reprovado ? null : (HARNESSES.find((h) => todos[h.id] === inventario)?.id ?? null);
+    maquinas.set(machineId, { ...m, harnesses: todos, inventario });
+    log("aviso", "ia_reprovada_no_turno", { machine_id: machineId, harness, causa, outra });
+    return outra;
   }
 
   async function usoDoMac(escopo: Escopo): Promise<UsoDoMac> {

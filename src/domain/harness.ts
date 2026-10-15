@@ -90,6 +90,30 @@ export function inventarioHarnessSemSonda(agora: number): Inventario {
 }
 
 /**
+ * #313 (2026-10-15): o estado "da máquina" que os portões leem (envio, puxar, despacho, executor do plano) — pronta se
+ * QUALQUER IA dela está pronta, na ordem do catálogo (o Claude antes do Codex). Sem nenhuma, o `inv` de quem chama, que
+ * já é a melhor explicação da falta. Antes cada lado tinha a regra à mão, e o anúncio passou a mandar o estado do Claude
+ * (d14c7b1e): quem só tinha o ChatGPT nunca rodava nada.
+ */
+export function estadoDaMaquina(inv: Inventario, ias: Partial<Record<IdHarness, Inventario>>): Inventario {
+  if (inv.estado === "pronto") return inv;
+  for (const h of HARNESSES) {
+    const i = ias[h.id];
+    if (i?.estado === "pronto") return i;
+  }
+  return inv;
+}
+
+/**
+ * #313: a negação que não tem uma IA para nomear (o bot no Automático) diz onde faltou, sem chamar o motor de Claude Code;
+ * o motivo do inventário segue depois (é o diagnóstico: "Entre na conta…", "NOD_EXECUTOR desconhecido…").
+ */
+export function motivoSemIaPronta(onde: "maquinas" | "maquina_do_bot", inventario: Inventario): string {
+  const lugar = onde === "maquinas" ? "nenhuma IA pronta nas suas máquinas" : "nenhuma IA pronta na máquina deste bot";
+  return inventario.estado !== "pronto" && inventario.motivo ? `${lugar}: ${inventario.motivo}` : lugar;
+}
+
+/**
  * NOD-171: o motivo da negação de harness indisponível, sempre do harness ESCOLHIDO e com o estado DELE, em pt-BR.
  * Nunca "motor pronto": um harness pronto só chega aqui se outra regra o recusou, e então diz só que está indisponível.
  * Sem sonda do harness não afirma "não instalado": diz só que nenhum computador conectado o tem pronto.
