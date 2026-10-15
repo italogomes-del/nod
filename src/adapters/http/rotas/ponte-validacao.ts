@@ -153,6 +153,15 @@ export function uuid(v: unknown): string { exigir(typeof v === "string" && UUID.
  * renovação, que é o lease do turno.
  */
 export function sessaoDaRenovacao(v: unknown): string | undefined { return typeof v === "string" && UUID.test(v) ? v : undefined; }
+/**
+ * Auditoria A4 (definido em 2026-10-15): os turnos que o processo da máquina roda agora, no `conectar` (app com a A4).
+ * Ausente ou fora do formato = undefined, e o `conectar` segue a regra de antes (app antigo); nunca derruba o conectar,
+ * que é a volta da máquina. O teto é o da memória por turno (um pool de laços não passa disso).
+ */
+export function turnosEmAndamento(v: unknown): Set<string> | undefined {
+  if (!Array.isArray(v) || v.length > TETO_TURNOS_MEMORIA || !v.every((x) => typeof x === "string" && UUID.test(x))) return undefined;
+  return new Set(v as string[]);
+}
 const TIPOS_ANEXO: readonly TipoAnexo[] = ["imagem", "pdf", "texto"];
 /**
  * #189 (definido em 2026-10-07): os ids das mensagens que o app escreveu (ou não conseguiu escrever) na sessão. Ausente

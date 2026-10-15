@@ -112,4 +112,20 @@ describe("NOD-199: anúncio só de inventário no cliente da ponte", () => {
     await expect(s.c.resultadoItemLocal("x", "executado")).rejects.toThrow("servidor_fora");
     expect(s.falhas).toEqual(["servidor_fora"]);
   });
+
+  it("auditoria A4: o conectar leva os turnos que este processo roda — vazio no primeiro, o puxado e ainda não entregue no da reconexão", async () => {
+    const s = servidor({ puxar: () => ({ turnoId: TURNO }) });
+    await s.c.ponte.conectar(anuncio(semLogin));
+    expect(s.chamadas[0]!.corpo).toMatchObject({ turnosEmAndamento: [] });
+    await s.c.ponte.puxar("p");
+    // O servidor reiniciou: o puxar seguinte leva 409 e a reconexão diz que o turno puxado segue rodando aqui.
+    s.status.puxar = 409;
+    await expect(s.c.ponte.puxar("p")).rejects.toThrow("reconectar");
+    expect(s.chamadas.at(-1)).toMatchObject({ rota: "conectar", corpo: { turnosEmAndamento: [TURNO] } });
+    delete s.status.puxar;
+    await s.c.ponte.entregar(entrega());
+    s.status.inventario = 409;
+    await s.c.ponte.anunciarInventario(anuncio(pronto));
+    expect(s.chamadas.at(-1)).toMatchObject({ rota: "conectar", corpo: { turnosEmAndamento: [] } });
+  });
 });

@@ -1188,6 +1188,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           mensagemOrigemId: t.mensagemOrigemId ?? null,
           absorvidoPor: null,
           sobProcuracaoDe: t.sobProcuracaoDe ?? null,
+          // Auditoria A3 (2026-10-15): o turno-cérebro guarda a ligação, como a coluna `ligacao_id` do repo real.
+          ligacaoId: t.ligacaoId ?? null,
           // A retomada herda o trabalho do turno que continua, como o INSERT do repo real.
           trabalhoId: t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? (doTenant(b.turnos).find((r) => r.id === t.retomaTurnoId)?.trabalhoId ?? null) : null,
           acordarEm: t.acordarEm ?? null,
