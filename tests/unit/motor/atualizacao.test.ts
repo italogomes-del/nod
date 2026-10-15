@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scriptDeInstalacao } from "../../../src/adapters/http/motor-instalacao.ts";
-import { ATUALIZACAO_PARADA, ESPERA_DEPOIS_DE_FALHAR_MS, ESPERA_DO_PEDIDO_MS, JANELA_OCIOSA_MS, motorDiferente, proximoPasso } from "../../../src/domain/atualizacao-do-motor.ts";
+import { ATUALIZACAO_PARADA, DRENAGEM_MAXIMA_MS, ESPERA_DEPOIS_DE_DESISTIR_MS, ESPERA_DEPOIS_DE_FALHAR_MS, ESPERA_DO_PEDIDO_MS, JANELA_OCIOSA_MS, motorDiferente, proximoPasso } from "../../../src/domain/atualizacao-do-motor.ts";
 import { arquivoDoPedido, atualizacaoLigada, iniciarAtualizacao, shaDosArquivos } from "../../../motor/atualizacao.ts";
 
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
@@ -21,7 +21,7 @@ describe("o motor se atualiza sozinho (ADR-100): quando", () => {
 
   it("igual: nada; diferente e sem turno: drena e pede na hora", () => {
     expect(proximoPasso(ATUALIZACAO_PARADA, { agora: 0, diferente: false, turnosRodando: 3 })).toMatchObject({ pedir: false, motivo: "igual", estado: ATUALIZACAO_PARADA });
-    expect(proximoPasso(ATUALIZACAO_PARADA, { agora: 5, diferente: true, turnosRodando: 0 })).toEqual({ pedir: true, motivo: "pedido", estado: { pendenteDesde: 5, drenando: true, pedidoEm: 5, falhouEm: null } });
+    expect(proximoPasso(ATUALIZACAO_PARADA, { agora: 5, diferente: true, turnosRodando: 0 })).toEqual({ pedir: true, motivo: "pedido", estado: { pendenteDesde: 5, drenando: true, drenandoDesde: 5, pedidoEm: 5, falhouEm: null, desistiuEm: null } });
   });
 
   it("com turnos rodando espera um momento ocioso; passada a janela, drena (nunca interrompe) e pede quando acabam", () => {
@@ -30,11 +30,44 @@ describe("o motor se atualiza sozinho (ADR-100): quando", () => {
     p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS - 1, diferente: true, turnosRodando: 2 });
     expect(p.motivo).toBe("esperando_ocioso");
     p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS, diferente: true, turnosRodando: 2 });
-    expect(p).toMatchObject({ pedir: false, motivo: "drenando", estado: { drenando: true } });
-    p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS + 90 * MIN, diferente: true, turnosRodando: 1 });
+    expect(p).toMatchObject({ pedir: false, motivo: "drenando", estado: { drenando: true, drenandoDesde: JANELA_OCIOSA_MS } });
+    p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS + DRENAGEM_MAXIMA_MS - 1, diferente: true, turnosRodando: 1 });
     expect(p.motivo).toBe("drenando");
-    p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS + 91 * MIN, diferente: true, turnosRodando: 0 });
+    p = proximoPasso(p.estado, { agora: JANELA_OCIOSA_MS + DRENAGEM_MAXIMA_MS - 1, diferente: true, turnosRodando: 0 });
     expect(p).toMatchObject({ pedir: true, motivo: "pedido" });
+  });
+
+  it("emenda de 2026-10-15: a drenagem tem teto — com um turno de horas, volta a puxar e tenta de novo depois de uma hora", () => {
+    // O caso de produção: um turno de delegação de horas segurava a VM inteira (nenhum outro bot andava).
+    const T0 = JANELA_OCIOSA_MS;
+    let p = proximoPasso({ ...ATUALIZACAO_PARADA, pendenteDesde: 0 }, { agora: T0, diferente: true, turnosRodando: 1 });
+    expect(p.motivo).toBe("drenando");
+    p = proximoPasso(p.estado, { agora: T0 + DRENAGEM_MAXIMA_MS, diferente: true, turnosRodando: 1 });
+    expect(p).toMatchObject({ pedir: false, motivo: "drenagem_desistiu", estado: { drenando: false, drenandoDesde: null, desistiuEm: T0 + DRENAGEM_MAXIMA_MS } });
+    const desistiu = T0 + DRENAGEM_MAXIMA_MS;
+    // Na espera: puxa normalmente, mesmo com o turno longo ainda rodando.
+    p = proximoPasso(p.estado, { agora: desistiu + ESPERA_DEPOIS_DE_DESISTIR_MS - 1, diferente: true, turnosRodando: 3 });
+    expect(p).toMatchObject({ pedir: false, motivo: "esperando_nova_tentativa", estado: { drenando: false } });
+    // Passada a espera, drena de novo na hora (a janela ociosa já passou) — e desiste de novo no teto.
+    p = proximoPasso(p.estado, { agora: desistiu + ESPERA_DEPOIS_DE_DESISTIR_MS, diferente: true, turnosRodando: 1 });
+    expect(p).toMatchObject({ motivo: "drenando", estado: { drenando: true, drenandoDesde: desistiu + ESPERA_DEPOIS_DE_DESISTIR_MS } });
+    p = proximoPasso(p.estado, { agora: desistiu + ESPERA_DEPOIS_DE_DESISTIR_MS + DRENAGEM_MAXIMA_MS, diferente: true, turnosRodando: 1 });
+    expect(p.motivo).toBe("drenagem_desistiu");
+  });
+
+  it("emenda de 2026-10-15: depois de desistir, um momento ocioso pede na hora (não espera a hora inteira)", () => {
+    const desistiu = proximoPasso({ ...ATUALIZACAO_PARADA, pendenteDesde: 0, drenando: true, drenandoDesde: 0 }, { agora: DRENAGEM_MAXIMA_MS, diferente: true, turnosRodando: 1 });
+    expect(desistiu.motivo).toBe("drenagem_desistiu");
+    expect(proximoPasso(desistiu.estado, { agora: DRENAGEM_MAXIMA_MS + 5 * MIN, diferente: true, turnosRodando: 0 })).toMatchObject({ pedir: true, motivo: "pedido", estado: { desistiuEm: null } });
+    // Ficar igual ao servidor limpa tudo.
+    expect(proximoPasso(desistiu.estado, { agora: DRENAGEM_MAXIMA_MS + 1, diferente: false, turnosRodando: 1 }).estado).toEqual(ATUALIZACAO_PARADA);
+  });
+
+  it("emenda de 2026-10-15: o estado de antes (drenando, sem drenandoDesde) conta o teto a partir de agora", () => {
+    const antigo = { pendenteDesde: 0, drenando: true, pedidoEm: null, falhouEm: null };
+    const p = proximoPasso(antigo, { agora: 5 * 60 * MIN, diferente: true, turnosRodando: 1 });
+    expect(p).toMatchObject({ motivo: "drenando", estado: { drenandoDesde: 5 * 60 * MIN } });
+    expect(proximoPasso(p.estado, { agora: 5 * 60 * MIN + DRENAGEM_MAXIMA_MS, diferente: true, turnosRodando: 1 }).motivo).toBe("drenagem_desistiu");
   });
 
   it("o pedido que não vira reinício volta a puxar e tenta de novo depois de uma hora; ficar igual cancela tudo", () => {
