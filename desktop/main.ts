@@ -788,8 +788,8 @@ async function statusDoLogin(ia: IaDesktop): Promise<StatusDoLogin> {
 
 // ---- A conta logada em cada IA (definido em 2026-10-12, NOD-209) ----------------------------------------------------
 // O cartão mostra QUAL conta está logada (e-mail · organização · plano), como o CLI diz: `claude auth status` e o
-// `account/read` de um `codex app-server` curto. Nada de arquivo de credencial nem turno pago. ADR-019: a conta fica só
-// neste Mac e na página do app — nunca vai ao log, ao inventário nem ao servidor.
+// `account/read` de um `codex app-server` curto. Nada de arquivo de credencial nem turno pago. ADR-019: nunca vai ao log
+// nem ao inventário; o servidor só recebe o e-mail e a organização pelo anúncio das contas (ADR-105).
 /** definido em 2026-10-12: a conta é lida de novo depois de 10 min (pega a troca feita no terminal, fora do nod). */
 const VALIDADE_CONTA_MS = 10 * 60_000;
 const contasDasIas = new Map<IaDesktop, ContaDaIa>();

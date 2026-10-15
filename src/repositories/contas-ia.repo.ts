@@ -15,12 +15,15 @@ interface LinhaConta {
   entra_na_troca_automatica: boolean;
   no_limite_ate: Date | null;
   removida_em: Date | null;
+  email: string | null;
+  organizacao: string | null;
 }
 interface LinhaVinculo { conta_id: string; maquina_id: string; estado: EstadoContaNaMaquina; sair_pedido_em: Date | null }
 
-const COLUNAS = "id, ia, impressao, apelido, plano, corporativa, posicao, entra_na_troca_automatica, no_limite_ate, removida_em";
+const COLUNAS = "id, ia, impressao, apelido, plano, corporativa, posicao, entra_na_troca_automatica, no_limite_ate, removida_em, email, organizacao";
 
-export type ContaGuardadaNoServidor = ContaDaPessoa & { impressao: string };
+/** ADR-105: o e-mail e a organização são só para a tela; o domínio da troca de conta não os lê. */
+export type ContaGuardadaNoServidor = ContaDaPessoa & { impressao: string; email: string | null; organizacao: string | null };
 
 const paraConta = (l: LinhaConta): ContaGuardadaNoServidor => ({
   id: l.id,
@@ -33,6 +36,8 @@ const paraConta = (l: LinhaConta): ContaGuardadaNoServidor => ({
   entraNaTrocaAutomatica: l.entra_na_troca_automatica,
   noLimiteAte: msOuNull(l.no_limite_ate),
   removidaEm: msOuNull(l.removida_em),
+  email: l.email,
+  organizacao: l.organizacao,
 });
 const paraVinculo = (l: LinhaVinculo): VinculoDaConta => ({ contaId: l.conta_id, maquinaId: l.maquina_id, estado: l.estado, sairPedidoEm: msOuNull(l.sair_pedido_em) });
 
@@ -108,21 +113,28 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         if (decisao === "criar") {
           const posicao = await proximaPosicao();
           const [l] = await conn<{ id: string }[]>`
-            insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao)
-            values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao})
-            on conflict (tenant_id, owner_id, ia, impressao) do update set plano = coalesce(excluded.plano, contas_ia.plano)
+            insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao, email, organizacao)
+            values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao}, ${a.email ?? null}, ${a.organizacao ?? null})
+            on conflict (tenant_id, owner_id, ia, impressao) do update set plano = coalesce(excluded.plano, contas_ia.plano),
+              email = coalesce(excluded.email, contas_ia.email), organizacao = coalesce(excluded.organizacao, contas_ia.organizacao)
             returning id`;
           id = l!.id;
           mudou = true;
         } else if (decisao === "voltar") {
           const posicao = await proximaPosicao();
-          await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)} where ${doDono()} and id = ${existente!.id}`;
+          await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)},
+            email = coalesce(${a.email ?? null}, email), organizacao = coalesce(${a.organizacao ?? null}, organizacao) where ${doDono()} and id = ${existente!.id}`;
           id = existente!.id;
           mudou = true;
         } else {
           id = existente!.id;
           if (a.plano !== null && (a.plano !== existente!.plano || corporativaDe(a) !== existente!.corporativa)) {
             await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)} where ${doDono()} and id = ${id}`;
+            mudou = true;
+          }
+          // ADR-105: preenche as contas criadas antes de 2026-10-15 e acompanha a troca de organização. Ausente não apaga.
+          if ((a.email !== undefined && a.email !== existente!.email) || (a.organizacao !== undefined && a.organizacao !== existente!.organizacao)) {
+            await conn`update contas_ia set email = coalesce(${a.email ?? null}, email), organizacao = coalesce(${a.organizacao ?? null}, organizacao) where ${doDono()} and id = ${id}`;
             mudou = true;
           }
         }

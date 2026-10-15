@@ -94,8 +94,8 @@ export type InstalacaoDaIa = {
 
 /**
  * QUAL conta está logada na IA (definido em 2026-10-12, NOD-209), como o próprio CLI diz: o `claude auth status` e o
- * `account/read` do `codex app-server` (nunca o arquivo de credencial). ADR-019: fica só no app do Mac e na página dele —
- * não vai ao servidor, ao inventário, ao log nem ao banco, e nunca serve para autorização.
+ * `account/read` do `codex app-server` (nunca o arquivo de credencial). ADR-019: nunca serve para autorização nem vai ao
+ * log ou ao inventário. Desde 2026-10-15 (ADR-105) o e-mail e a organização vão ao servidor só pelo anúncio das contas.
  */
 export type ContaDaIa = {
   email: string;

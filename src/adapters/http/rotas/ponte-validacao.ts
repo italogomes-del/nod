@@ -1,6 +1,7 @@
 import { apelidoValido, contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
 import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, type EstadoContaNaMaquina, type ProgressoDoLogin } from "../../../contracts/contas-ia.ts";
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
+import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
@@ -356,7 +357,8 @@ export function relatoEspera(v: unknown): RelatoEspera {
 /**
  * ADR-102 (2026-10-13): as contas que a máquina anuncia (`conectar` e `inventario`). É extra como as capacidades: app
  * ou motor antigo não manda (undefined, nada muda), e o anúncio nunca é recusado por isto — item fora do formato some.
- * Só impressão (sha256 hex), IA com conta, estado conhecido, plano curto e o apelido sugerido; nada de e-mail.
+ * Impressão (sha256 hex), IA com conta, estado conhecido, plano curto, o apelido sugerido e (ADR-105, 2026-10-15) o
+ * e-mail e a organização que o CLI disse, pelos mesmos normalizadores da máquina; fora do formato, o campo some.
  */
 export function contasAnunciadas(v: unknown, agora: number): ContaAnunciada[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -372,7 +374,12 @@ export function contasAnunciadas(v: unknown, agora: number): ContaAnunciada[] | 
     const logadaEm = Number.isSafeInteger(o.logadaEm) && Number(o.logadaEm) > 0 && Number(o.logadaEm) <= agora + 60_000 ? Number(o.logadaEm) : 0;
     // Red team do PR #306: um apelido com "@" seria o e-mail (a ADR-101 usava a organização, "<e-mail>'s Organization").
     const apelido = typeof o.apelidoSugerido === "string" && o.apelidoSugerido.includes("@") ? null : apelidoValido(o.apelidoSugerido);
-    saida.push({ impressao: o.impressao, ia: o.ia, estado: o.estado as EstadoContaNaMaquina, plano, corporativa: o.corporativa === true, logadaEm, ...(apelido ? { apelidoSugerido: apelido } : {}) });
+    const email = emailDaConta(o.email);
+    const organizacao = organizacaoDaConta(o.organizacao);
+    saida.push({
+      impressao: o.impressao, ia: o.ia, estado: o.estado as EstadoContaNaMaquina, plano, corporativa: o.corporativa === true, logadaEm,
+      ...(apelido ? { apelidoSugerido: apelido } : {}), ...(email ? { email } : {}), ...(organizacao ? { organizacao } : {}),
+    });
   }
   return saida;
 }

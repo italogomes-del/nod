@@ -40,7 +40,7 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
         let conta = existente;
         if (decisao === "criar") {
           const posicao = proximaPosicao();
-          conta = { ...dono, id: randomUUID(), ia: a.ia, impressao: a.impressao, apelido: a.apelidoSugerido ?? apelidoPadrao(posicao), plano: a.plano, corporativa: a.corporativa, posicao, entraNaTrocaAutomatica: false, noLimiteAte: null, removidaEm: null };
+          conta = { ...dono, id: randomUUID(), ia: a.ia, impressao: a.impressao, apelido: a.apelidoSugerido ?? apelidoPadrao(posicao), plano: a.plano, corporativa: a.corporativa, posicao, entraNaTrocaAutomatica: false, noLimiteAte: null, removidaEm: null, email: a.email ?? null, organizacao: a.organizacao ?? null };
           e.contas.push(conta);
           mudou = true;
         } else if (decisao === "voltar") {
@@ -48,6 +48,11 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
           mudou = true;
         } else if (decisao === "atualizar" && a.plano !== null && (a.plano !== conta!.plano || a.corporativa !== conta!.corporativa)) {
           Object.assign(conta!, { plano: a.plano, corporativa: a.corporativa });
+          mudou = true;
+        }
+        // ADR-105: como o repositório, ausente não apaga.
+        if (conta && decisao !== "sair" && decisao !== "criar" && ((a.email !== undefined && a.email !== conta.email) || (a.organizacao !== undefined && a.organizacao !== conta.organizacao))) {
+          Object.assign(conta, { email: a.email ?? conta.email, organizacao: a.organizacao ?? conta.organizacao });
           mudou = true;
         }
         const v = meusVinculos().find((x) => x.contaId === conta!.id && x.maquinaId === maquinaId);

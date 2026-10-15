@@ -34,7 +34,8 @@ export type ContasNaTela = {
 };
 /**
  * ADR-102 (2026-10-13): o que a tela mostra de cada conta logada neste Mac, achada pela impressão (a mesma que o servidor
- * guarda). E-mail e organização vêm do CLI e só passam pela ponte do app: nunca vão ao servidor (ADR-019).
+ * guarda). E-mail e organização vêm do CLI; o servidor recebe os mesmos pelo anúncio (ADR-105) e a tela prefere estes,
+ * os mais novos.
  */
 export type DetalheDaConta = { impressao: string; ia: IaDesktop; email: string; organizacao: string | null; plano: string | null };
 /** O que a ponte devolve: as contas deste Mac e a máquina que ele é no servidor (null = ainda sem conexão). */

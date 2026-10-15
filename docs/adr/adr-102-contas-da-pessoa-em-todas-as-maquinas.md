@@ -76,3 +76,9 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
 - O `claude auth status`/`account/read` deixar de dizer e-mail e organização: a impressão perde a base (voltar à 3B).
 - Mais de 1 em cada 10 logins pela tela falhar por um código que não chega ao CLI em 14 dias: rever a cifra e o
   repasse (o terminal continua como saída).
+
+## Emenda de 2026-10-15 — item 6 (ADR-105)
+
+O e-mail e a organização deixam de ficar só nas máquinas: vão no anúncio e moram em `contas_ia` (0075), e a lista os
+mostra em qualquer máquina. A impressão segue sendo a chave da conta (item 4). Motivo e alternativas na
+[ADR-105](adr-105-email-da-conta-de-ia-no-servidor.md).

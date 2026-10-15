@@ -50,7 +50,7 @@ export type AnuncioMaquina = {
    * Ausente = app antigo: a drenagem espera o turno como antes (NOD-175/176). Quem anuncia é a ponte HTTP do cliente.
    */
   sobreviveReinicio?: boolean;
-  /** ADR-102 (2026-10-13): as contas de IA logadas nesta máquina (só a impressão, nunca e-mail). Ausente = app antigo. */
+  /** ADR-102 (2026-10-13): as contas de IA logadas nesta máquina (impressão e, ADR-105, e-mail). Ausente = app antigo. */
   contas?: ContaAnunciada[];
 };
 

@@ -86,3 +86,10 @@ O que a vigia do Mac sonda de novo (login novo, CLI atualizado, IA que volta no 
 inventário da ponte ([ADR-021, emenda de 2026-10-08](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md)),
 não pelo `conectar`: o servidor passa a saber da IA nova sem recusar nem limpar o turno que roda. Anúncio que falhou é
 repetido no passo de 30 s da vigia, mesmo com todas as IAs prontas.
+
+## Emenda de 2026-10-15 — o e-mail da conta vai ao servidor (ADR-105)
+
+"O email do fornecedor NÃO é gravado" deixa de valer para as contas de IA: o anúncio das contas leva o e-mail e a
+organização, e `contas_ia` os guarda para a tela de Provedores dizer qual conta é qual em qualquer máquina. A regra (2)
+continua inteira: a identidade é cosmética, nada autoriza nem casa conta por ela. O inventário da sonda continua sem
+e-mail. Detalhes e gatilho de reversão na [ADR-105](adr-105-email-da-conta-de-ia-no-servidor.md).

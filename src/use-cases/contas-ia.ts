@@ -24,6 +24,8 @@ export async function contasDaPessoa(d: Deps): Promise<Omit<ContasIaDto, "dispon
       ia: c.ia,
       impressao: c.impressao,
       apelido: c.apelido,
+      email: c.email,
+      organizacao: c.organizacao,
       plano: c.plano,
       corporativa: c.corporativa,
       posicao: c.posicao,
