@@ -219,10 +219,13 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
-    /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */
+    /**
+     * ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. ADR-105: as
+     * pastas que a máquina tem vão junto; servidor antigo as ignora e responde como antes.
+     */
     async pastasParaLimpar(_pessoaId, op) {
       try {
-        const r = await chamar<{ pastas?: unknown }>("limpeza", op?.apertado === true ? { apertado: true } : {});
+        const r = await chamar<{ pastas?: unknown }>("limpeza", { ...(op?.apertado === true ? { apertado: true } : {}), ...(op?.pastas ? { pastas: op.pastas } : {}) });
         return Array.isArray(r.pastas) ? r.pastas.filter(pastaParaLimparValida) : [];
       } catch {
         return [];

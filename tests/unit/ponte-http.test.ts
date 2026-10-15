@@ -489,21 +489,29 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: true });
     await chamar("limpeza", { apertado: "sim" });
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
+    // ADR-105: as pastas da máquina atravessam validadas — só `<bot>/<slug>`, em NFC, sem repetir; lista vazia é lista.
+    await chamar("limpeza", { pastas: ["Vera/a-111111", "Vera", "../fora", ".guardado/x", 3, "Vera/a-111111", "Cecília/b-222222".normalize("NFD")] });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false, pastas: ["Vera/a-111111", "Cecília/b-222222"] });
+    await chamar("limpeza", { pastas: [] });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false, pastas: [] });
+    await chamar("limpeza", { pastas: "Vera/a-111111" });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
     await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
-    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
+    // ADR-105: o relato leva a máquina que limpou.
+    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 }, "m1");
     // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
     await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }), "m1");
     // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
     await chamar("limpeza/resultado", { relato: { adiada: true } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }), "m1");
     // ADR-096: a passada apertada atravessa marcada, com o que os caches liberaram.
     await chamar("limpeza/resultado", { relato: { apertada: true, cachesBytes: 4096, removidas: 2 } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }), "m1");
     // ADR-096 §4: os guardados, os vencidos, as órfãs e os motivos novos atravessam; número inválido some.
-    await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1 } } });
+    await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1, clone_sumiu: 1 } } });
     const ultimo = relatarLimpeza.mock.lastCall?.[1];
-    expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1 } });
+    expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1, clone_sumiu: 1 } });
     expect(ultimo).not.toHaveProperty("orfasRemovidas");
   });
 

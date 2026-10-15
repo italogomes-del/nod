@@ -291,12 +291,17 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * ADR-088 (2026-10-09): as tasks da pessoa encerradas (terminada ou falha) desde `desde`, com pasta, e o que a regra
-     * de limpeza precisa (src/domain/limpeza-das-tasks.ts). Lê pelo índice `trabalhos_terminados`; até 500, as mais
-     * antigas primeiro. `parado` fica de fora já aqui. ADR-099 (I5, 2026-10-12): com `id`, só aquele trabalho (o
-     * `limparAgora` da frente que acabou de terminar); a `forma` vai junto.
+     * de limpeza precisa (src/domain/limpeza-das-tasks.ts). Lê pelo índice `trabalhos_terminados`; até 500.
+     * `parado` fica de fora já aqui. ADR-099 (I5, 2026-10-12): com `id`, só aquele trabalho (o `limparAgora` da frente
+     * que acabou de terminar); a `forma` vai junto.
+     *
+     * revisto em 2026-10-15 (ADR-105): com `pastas` (`<bot>/<slug>`, em NFC), só as tasks dessas pastas — as que a
+     * máquina ainda tem no disco. E as mais RECENTES primeiro: antes eram as mais antigas, e com 1.151 encerradas em 30
+     * dias as 500 da resposta paravam em 09/10, todas já limpas; a VM dos bots encheu sem a limpeza ver as pastas novas.
      */
-    async candidatosALimpeza(desde: number, o: { id?: string } = {}): Promise<(FatosLimpeza & { id: string })[]> {
+    async candidatosALimpeza(desde: number, o: { id?: string; pastas?: readonly string[] } = {}): Promise<(FatosLimpeza & { id: string })[]> {
       const id = o.id ?? null;
+      const pastas = o.pastas ? o.pastas.map((p) => `~/nod/${p}`) : null;
       const linhas = await conn<{ id: string; estado: EstadoTrabalho; pasta: string | null; terminado_em: Date | null; vivos: number; decisao: boolean; dividida: boolean; forma: FormaTrabalho }[]>`
         -- ADR-099 (I10): a task de antes, migrada pela 0072 sem lote, limpa como task (formaEfetiva, domain/frente.ts).
         select w.id, w.estado, w.pasta, w.terminado_em, case when w.lote_id is null then 'task' else w.forma end as forma,
@@ -309,7 +314,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.terminado_em >= ${data(desde)}
           and w.estado in ('terminado', 'falhou') and w.pasta is not null
           and (${id}::uuid is null or w.id = ${id}::uuid)
-        order by w.terminado_em, w.id
+          and (${pastas}::text[] is null or normalize(w.pasta, NFC) = any(${pastas}::text[]))
+        order by w.terminado_em desc, w.id
         limit 500`;
       return linhas.map((l) => ({ id: l.id, estado: l.estado, pasta: l.pasta, terminadoEm: msOuNull(l.terminado_em), turnosVivos: l.vivos, decisaoPendente: l.decisao, pastaDividida: l.dividida, forma: l.forma }));
     },

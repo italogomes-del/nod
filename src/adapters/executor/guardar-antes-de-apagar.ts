@@ -1,5 +1,5 @@
 import { lstat, mkdir, readdir, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { MotivoPuladaLimpeza } from "../../contracts/ponte.ts";
 import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef } from "../../domain/guardado.ts";
 import { protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
@@ -93,6 +93,22 @@ async function worktreesNaPasta(dir: string, achadas: string[] = [], vistas = { 
 const dentroDe = (caminho: string, pasta: string) => caminho === pasta || caminho.startsWith(`${pasta}${sep}`);
 
 /**
+ * ADR-105 (definido em 2026-10-15): a worktree `wt` aponta (`gitdir:` do arquivo `.git`) para um clone dentro de `raiz`
+ * (`~/nod`) que não existe mais? Na VM dos bots, em 15/10, uma task tinha apagado o clone `nod` de outra: a worktree que
+ * sobrou dava `erro` no `git rev-parse` a cada passada e segurava a pasta para sempre (`Ada/…-169c93`, e cinco da
+ * Tarsila). Sem o clone não há commit a salvar nem worktree a desligar — só os arquivos, que o guardado leva. Clone fora
+ * de `~/nod` que sumiu (um disco desmontado) não conta: pode voltar.
+ */
+export async function cloneSumiu(wt: string, raiz: string): Promise<boolean> {
+  const m = /^gitdir:\s*(.+)$/m.exec(await readFile(join(wt, ".git"), "utf8").catch(() => ""));
+  if (!m) return false;
+  const gitdir = resolve(wt, m[1]!.trim());
+  const raizReal = await realpath(raiz).catch(() => raiz);
+  if (!dentroDe(gitdir, raiz) && !dentroDe(gitdir, raizReal)) return false;
+  return lstat(gitdir).then(() => false, (e: NodeJS.ErrnoException) => e.code === "ENOENT");
+}
+
+/**
  * Guarda a pasta `base` (dentro de `~/nod/<bot>/`) e a apaga. `rotulo` vai no nome das referências (o id da task, ou
  * `orfa`). Devolve o motivo de ter ficado, ou null com o que foi guardado e liberado.
  */
@@ -110,6 +126,8 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   const achadas = await worktreesNaPasta(base);
   const porClone = new Map<string, string[]>();
   for (const wt of achadas) {
+    // ADR-105: a worktree sem clone não tem o que desligar nem commit a referenciar; os arquivos vão no guardado.
+    if (await cloneSumiu(wt, o.raiz)) continue;
     const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
     const dirComum = comum.stdout.trim();
     if (comum.codigo !== 0 || !isAbsolute(dirComum)) return vazio("erro");

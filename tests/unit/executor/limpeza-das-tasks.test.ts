@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../../src/contracts/ponte.ts";
-import { contarOrfas, criarExecutarComando, iniciarLimpezaDasTasks, limparPastas, modoDaLimpeza, montagensDoDocker, prefixoDeFundo, travarLimpeza, type ExecutarComando, type OpcoesLimpeza } from "../../../src/adapters/executor/limpeza-das-tasks.ts";
+import { contarOrfas, criarExecutarComando, iniciarLimpezaDasTasks, limparOrfas, limparPastas, modoDaLimpeza, montagensDoDocker, pastasNoDisco, prefixoDeFundo, travarLimpeza, type ExecutarComando, type OpcoesLimpeza } from "../../../src/adapters/executor/limpeza-das-tasks.ts";
 
 // Cada teste cria repositórios git de verdade e roda `git worktree add/remove` (vários processos por teste). medido em
 // 2026-10-09: 0,3–1,1 s por teste com load ~195 (uptime); o padrão de 5 s do projeto unit fica perto demais sob carga maior.
@@ -470,7 +470,9 @@ describe("ADR-096: o disco que se cuida", () => {
     livreMb = 8 * 1024;
     await vi.waitFor(() => expect(relatos).toHaveLength(1), { timeout: 20_000 });
     limpeza.parar();
-    expect(pedidos[0]).toEqual({ apertado: true });
+    // ADR-105: o pedido leva as pastas que o disco tem, e a reconfirmação só a pasta que vai sair.
+    expect(pedidos[0]).toEqual({ apertado: true, pastas: ["Dev 1/apertada-444444"] });
+    expect(pedidos[1]).toEqual({ apertado: true, pastas: ["Dev 1/apertada-444444"] });
     expect(relatos[0]).toMatchObject({ apertada: true, removidas: 1 });
     expect(chamadas).toContain("[fundo] npm cache clean --force");
     expect(chamadas).toContain("[fundo] pnpm store prune");
@@ -507,5 +509,68 @@ describe("ADR-096: o disco que se cuida", () => {
     await new Promise((r) => setTimeout(r, 100));
     limpeza.parar();
     expect(relatos).toBe(1);
+  });
+});
+
+describe("ADR-105: a máquina diz o que tem, e a worktree sem clone não trava a pasta", () => {
+  it("as pastas do disco: `<bot>/<slug>` em NFC, sem escondida, sem arquivo e sem a raiz do bot", async () => {
+    for (const p of ["Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb", "Ze 1/.escondida", ".guardado/Ze 1", "Cecília/c-cccccc".normalize("NFD")]) await mkdir(join(home, "nod", p), { recursive: true });
+    await writeFile(join(home, "nod", "Ze 1", "solto.txt"), "x");
+    expect((await pastasNoDisco(home)).sort()).toEqual(["Cecília/c-cccccc", "Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb"]);
+    expect(await pastasNoDisco(join(home, "nao-existe"))).toEqual([]);
+  });
+
+  /** Um clone de verdade dentro de `~/nod/<rel>` (como o `nod` que uma task do bot clona) com uma worktree em `wtRel`. */
+  async function worktreeDeCloneNaTask(cloneRel: string, wtRel: string): Promise<{ cloneDir: string; wt: string }> {
+    const cloneDir = join(home, "nod", cloneRel);
+    await mkdir(cloneDir, { recursive: true });
+    git(cloneDir, "init", "-q", "-b", "main");
+    await writeFile(join(cloneDir, "README.md"), "nod\n");
+    git(cloneDir, "add", ".");
+    git(cloneDir, "commit", "-q", "-m", "inicio");
+    const wt = join(home, "nod", wtRel);
+    await mkdir(join(wt, ".."), { recursive: true });
+    git(cloneDir, "worktree", "add", wt, "-b", "feat/x");
+    await writeFile(join(wt, "rascunho.md"), "trabalho que só existe aqui\n");
+    return { cloneDir, wt };
+  }
+
+  it("a worktree cujo clone dentro de ~/nod foi apagado vira `clone_sumiu`: na encerrada é guardada e a pasta sai; na recente fica", async () => {
+    const { cloneDir, wt } = await worktreeDeCloneNaTask("Ada/outra-111111/nod", "Ada/tarefa-222222/nod");
+    await rm(join(cloneDir, ".."), { recursive: true, force: true });
+    const recente = await limparPastas([{ trabalhoId: "t-1", pasta: "Ada/tarefa-222222", quando: "so_com_pr_mergeado" }], opcoes(executor()));
+    expect(recente).toMatchObject({ pastas: 1, removidas: 0, puladas: { clone_sumiu: 1 } });
+    expect(existsSync(wt)).toBe(true);
+
+    const r = await limparPastas([encerrada("Ada/tarefa-222222")], opcoes(executor()));
+    expect(r).toMatchObject({ pastas: 1, guardadas: 1, pastasApagadas: 1, puladas: { clone_sumiu: 1 } });
+    expect(existsSync(join(home, "nod", "Ada", "tarefa-222222"))).toBe(false);
+    expect(lerDoGuardado("Ada", "tarefa-222222", "nod/rascunho.md")).toBe("trabalho que só existe aqui\n");
+  });
+
+  it("clone fora de ~/nod que sumiu (um disco desmontado) segue `erro`: pode voltar, a pasta fica", async () => {
+    const fora = join(home, "code", "fora");
+    await mkdir(fora, { recursive: true });
+    git(fora, "init", "-q", "-b", "main");
+    await writeFile(join(fora, "README.md"), "x\n");
+    git(fora, "add", ".");
+    git(fora, "commit", "-q", "-m", "inicio");
+    const wt = join(home, "nod", "Ada", "tarefa-333333", "fora");
+    await mkdir(join(wt, ".."), { recursive: true });
+    git(fora, "worktree", "add", wt, "-b", "feat/y");
+    await rm(fora, { recursive: true, force: true });
+    const r = await limparPastas([encerrada("Ada/tarefa-333333")], opcoes(executor()));
+    expect(r).toMatchObject({ puladas: { erro: 1 } });
+    expect(r.guardadas ?? 0).toBe(0);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it("a órfã da raiz do bot com o clone apagado sai guardando quando está parada", async () => {
+    const { cloneDir, wt } = await worktreeDeCloneNaTask("Ada/outra-444444/nod", "Ada/solta");
+    await rm(join(cloneDir, ".."), { recursive: true, force: true });
+    const r = await limparOrfas(opcoes(executor()), Date.now() + 31 * 24 * 3_600_000, false);
+    expect(r).toMatchObject({ guardadas: 1, puladas: {} });
+    expect(existsSync(wt)).toBe(false);
+    expect(lerDoGuardado("Ada", "solta", "rascunho.md")).toBe("trabalho que só existe aqui\n");
   });
 });

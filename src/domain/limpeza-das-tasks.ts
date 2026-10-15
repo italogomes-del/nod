@@ -23,7 +23,9 @@ export const RETOMADA_POSSIVEL_MS = RETOMAR_ATE_MS;
 /**
  * definido em 2026-10-09: o servidor só oferece as tasks encerradas nos últimos 30 dias. O Mac confere cada pasta
  * (um `lstat`); sem a janela, a lista cresceria para sempre com pastas já limpas. O que sobrar de mais antigo é órfão
- * (aparece na contagem `orfas` quando fica na raiz do bot) e espera a tela de Este Mac.
+ * (aparece na contagem `orfas` quando fica na raiz do bot) e espera a tela de Este Mac. revisto em 2026-10-15 (ADR-105):
+ * a janela sozinha não bastou — com 1.151 tasks encerradas em 30 dias, o teto de 500 da consulta (as mais antigas
+ * primeiro) só alcançava pastas já limpas. Agora a máquina manda as pastas que tem, e o servidor só olha essas.
  */
 export const JANELA_DA_LIMPEZA_MS = 30 * 24 * 3_600_000;
 
@@ -56,6 +58,30 @@ export function pastaDeTask(pasta: string | null): string | null {
   if (partes.length !== 2) return null;
   if (partes.some((p) => p.trim() === "" || p.startsWith(".") || p.includes("\\") || p.includes("\0"))) return null;
   return rel;
+}
+
+/**
+ * ADR-105 (definido em 2026-10-15): quantas pastas de task a máquina manda no pedido da limpeza. A VM dos bots tinha ~300
+ * em 15/10 e o Mac do Marlon 261 worktrees em 09/10; o teto só segura um corpo absurdo. Passou disso, vão as primeiras.
+ */
+export const PASTAS_DA_MAQUINA_MAX = 5_000;
+const PASTA_DA_MAQUINA_MAX_CHARS = 512;
+
+/**
+ * ADR-105: a lista de pastas (`<bot>/<slug>`) que a máquina diz ter no disco, validada: só texto na forma de
+ * `pastaDeTask`, em NFC (o APFS do Mac pode devolver o nome em NFD), sem repetir, até `PASTAS_DA_MAQUINA_MAX`. Não é
+ * lista (máquina antiga, que não manda) = null; lista sem nada válido = vazia (a máquina não tem pasta nenhuma).
+ */
+export function pastasDaMaquina(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const vistas = new Set<string>();
+  for (const x of v) {
+    if (vistas.size >= PASTAS_DA_MAQUINA_MAX) break;
+    if (typeof x !== "string" || x.length > PASTA_DA_MAQUINA_MAX_CHARS) continue;
+    const nfc = x.normalize("NFC");
+    if (pastaDeTask(`~/nod/${nfc}`) === nfc) vistas.add(nfc);
+  }
+  return [...vistas];
 }
 
 /**

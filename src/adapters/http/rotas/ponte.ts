@@ -10,6 +10,7 @@ import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { estadoDaMaquina } from "../../../domain/harness.ts";
+import { pastasDaMaquina } from "../../../domain/limpeza-das-tasks.ts";
 import { log } from "../../../obs/log.ts";
 import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
@@ -387,17 +388,19 @@ export function criarPonteHttpServidor(d: {
     /**
      * ADR-088 (2026-10-09): o Mac PUXA as pastas de task encerradas que pode limpar (o servidor nunca disca, ADR-021) e
      * relata o resumo. A pessoa é a da chave; o relato só vira log (relatoValido descarta o que não é número conhecido).
-     * ADR-096: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho.
+     * ADR-096: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho. ADR-105: `pastas` =
+     * as pastas de task que a máquina tem no disco (validadas por `pastasDaMaquina`); ausente = app antigo.
      */
     rota("limpeza", async (ctx, b) => {
       const c = conexao(ctx);
       c.ultimo = d.agora();
-      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId, { apertado: b.apertado === true })) ?? [] });
+      const pastas = pastasDaMaquina(b.pastas);
+      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId, { apertado: b.apertado === true, ...(pastas ? { pastas } : {}) })) ?? [] });
     }),
     rota("limpeza/resultado", async (ctx, b) => {
       const c = conexao(ctx);
       c.ultimo = d.agora();
-      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato));
+      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato), ctx.params.chaveId);
       ctx.json(200, { ok: true });
     }),
     /**

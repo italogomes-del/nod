@@ -5,10 +5,14 @@ import type { Deps } from "./tipos.ts";
 /**
  * As pastas de task que o Mac da pessoa pode limpar (definido em 2026-10-09, ADR-088). O servidor decide pelo banco
  * (src/domain/limpeza-das-tasks.ts); o Mac confere o disco e apaga só o que o git deixa apagar sem --force.
+ *
+ * ADR-105 (2026-10-15): `pastas` = as pastas que a máquina tem no disco (já validadas por `pastasDaMaquina`); só elas
+ * entram. Lista vazia = nada a limpar. Sem lista (máquina antiga), as encerradas mais recentes primeiro.
  */
-export async function pastasParaLimpar(deps: Deps, o: { apertado?: boolean } = {}): Promise<PastaParaLimpar[]> {
+export async function pastasParaLimpar(deps: Deps, o: { apertado?: boolean; pastas?: readonly string[] } = {}): Promise<PastaParaLimpar[]> {
+  if (o.pastas?.length === 0) return [];
   const agora = deps.agora();
-  const candidatos = await deps.repos.trabalhos.candidatosALimpeza(agora - JANELA_DA_LIMPEZA_MS);
+  const candidatos = await deps.repos.trabalhos.candidatosALimpeza(agora - JANELA_DA_LIMPEZA_MS, o.pastas ? { pastas: o.pastas } : {});
   return candidatos.flatMap((c) => {
     const quando = quandoLimpar(c, agora, { apertado: o.apertado === true });
     const pasta = pastaDeTask(c.pasta);
@@ -31,7 +35,7 @@ export async function pastaSemTrabalhoDoTurno(deps: Deps, turnoId: string): Prom
   return pasta && quandoLimpar(c, agora) === "sem_trabalho" ? { trabalhoId: c.id, pasta, quando: "sem_trabalho" } : null;
 }
 
-const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais", "sem_prova"];
+const MOTIVOS: readonly (keyof RelatoLimpeza["puladas"])[] = ["suja", "travada", "montagem", "pr_nao_mergeado", "clone", "fora_da_pasta", "aninhado", "ignorado_valioso", "head_solto", "em_uso", "nao_reconfirmada", "erro", "processo_vivo", "grande_demais", "sem_prova", "clone_sumiu"];
 const inteiro = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), Number.MAX_SAFE_INTEGER) : 0);
 
 /**

@@ -151,13 +151,15 @@ export interface PonteInterna {
   /**
    * ADR-088 (2026-10-09): as pastas de task encerradas que este Mac pode limpar. A regra (quem pode) é do servidor, que
    * tem o banco; o disco é do Mac, que apaga. Ausente = ponte antiga: a limpeza não roda. ADR-096: `apertado` = o
-   * disco da máquina está amarelo ou vermelho, e a task encerrada há mais de 2 h já vale como `encerrada`.
+   * disco da máquina está amarelo ou vermelho, e a task encerrada há mais de 2 h já vale como `encerrada`. ADR-105:
+   * `pastas` = as pastas de task (`<bot>/<slug>`) que existem no disco da máquina; o servidor só responde sobre elas.
+   * Ausente = máquina antiga: as mais recentes primeiro.
    */
-  pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean }): Promise<PastaParaLimpar[]>;
+  pastasParaLimpar?(pessoaId: string, o?: { apertado?: boolean; pastas?: readonly string[] }): Promise<PastaParaLimpar[]>;
   /** ADR-099 (I5): a pasta da frente que terminou com este turno, se já vale `sem_trabalho` (vai na resposta do entregar). */
   limparAgora?(pessoaId: string, turnoId: string): Promise<PastaParaLimpar | null>;
-  /** ADR-088: o resumo da passada, para o log `limpeza_feita` do servidor. */
-  relatarLimpeza?(pessoaId: string, relato: RelatoLimpeza): Promise<void>;
+  /** ADR-088: o resumo da passada, para o log `limpeza_feita` do servidor. ADR-105: `machineId` = a máquina que limpou. */
+  relatarLimpeza?(pessoaId: string, relato: RelatoLimpeza, machineId?: string): Promise<void>;
   /**
    * definido em 2026-10-12 (ADR-099, parte 2): as esperas de comando que esta máquina deve estar rodando agora (o puxar, a
    * cada 5 s, também é a notícia que o varredor confere). `machineId` só vale na ponte in-process: na HTTP a máquina é a
