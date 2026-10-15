@@ -23,7 +23,7 @@ export const RETOMADA_POSSIVEL_MS = RETOMAR_ATE_MS;
 /**
  * definido em 2026-10-09: o servidor só oferece as tasks encerradas nos últimos 30 dias. O Mac confere cada pasta
  * (um `lstat`); sem a janela, a lista cresceria para sempre com pastas já limpas. O que sobrar de mais antigo é órfão
- * (aparece na contagem `orfas` quando fica na raiz do bot) e espera a tela de Este Mac. revisto em 2026-10-15 (ADR-105):
+ * (aparece na contagem `orfas` quando fica na raiz do bot) e espera a tela de Este Mac. revisto em 2026-10-15 (ADR-106):
  * a janela sozinha não bastou — com 1.151 tasks encerradas em 30 dias, o teto de 500 da consulta (as mais antigas
  * primeiro) só alcançava pastas já limpas. Agora a máquina manda as pastas que tem, e o servidor só olha essas — e aí
  * sem janela nem o teto de 500: a lista da máquina já limita, e a pasta presa há mais de 30 dias volta a ser vista.
@@ -42,7 +42,7 @@ export type FatosLimpeza = {
   turnosVivos: number;
   decisaoPendente: boolean;
   /**
-   * Outra task que não acabou usa a mesma pasta (pasta decidida por quem chamou, fora do slug com id). ADR-105 (revisão
+   * Outra task que não acabou usa a mesma pasta (pasta decidida por quem chamou, fora do slug com id). ADR-106 (revisão
    * do #320): ou outra task da pasta encerrou depois desta — só a mais recente decide.
    */
   pastaDividida: boolean;
@@ -65,7 +65,7 @@ export function pastaDeTask(pasta: string | null): string | null {
 }
 
 /**
- * ADR-105 (definido em 2026-10-15): quantas pastas a máquina manda no pedido da limpeza. A VM dos bots tinha ~300 em
+ * ADR-106 (definido em 2026-10-15): quantas pastas a máquina manda no pedido da limpeza. A VM dos bots tinha ~300 em
  * 15/10 e o Mac do Marlon 261 worktrees em 09/10; o teto só segura um corpo absurdo. Com 64 caracteres por código,
  * 5.000 dão ~335 KB, abaixo do corpo máximo de 1 MiB (`CORPO_MAX`). Passou disso, vão as primeiras e o relato conta as
  * cortadas.
@@ -73,7 +73,7 @@ export function pastaDeTask(pasta: string | null): string | null {
 export const PASTAS_DA_MAQUINA_MAX = 5_000;
 
 /**
- * ADR-105: as pastas que a máquina diz ter no disco chegam como CÓDIGO — o sha256 em hexadecimal de `<bot>/<slug>` em
+ * ADR-106: as pastas que a máquina diz ter no disco chegam como CÓDIGO — o sha256 em hexadecimal de `<bot>/<slug>` em
  * NFC (`codigoDaPasta`, no executor) —, nunca como nome: em `~/nod/<bot>/` moram também clones, órfãs e pastas criadas à
  * mão, com nome que pode citar cliente ou jovem, e no modo local as de outra pessoa. O servidor só reconhece o código de
  * uma pasta que ele mesmo já guarda em `trabalhos.pasta`. Validados: 64 dígitos hexadecimais minúsculos, sem repetir,

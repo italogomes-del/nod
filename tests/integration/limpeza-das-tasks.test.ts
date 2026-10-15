@@ -53,7 +53,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
       await criar("dividida", "terminado", 4 * DIA, "~/nod/Vera/compartilhada");
       await criar("dividida-aberta", null, 0, "~/nod/Vera/compartilhada");
 
-      // ADR-105: as mais recentes primeiro.
+      // ADR-106: as mais recentes primeiro.
       const oferecidas = await pastasParaLimpar(deps);
       expect(oferecidas).toEqual([
         { trabalhoId: falhaRecente, pasta: "Vera/falha-bbbbbb", quando: "so_com_pr_mergeado" },
@@ -74,7 +74,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
     });
   });
 
-  // ADR-105: estes dois criam mais de 500 tasks, uma a uma (~4 s com a máquina quieta em 15/10); o teto folga para carga.
+  // ADR-106: estes dois criam mais de 500 tasks, uma a uma (~4 s com a máquina quieta em 15/10); o teto folga para carga.
   const MUITAS_TASKS_MS = 60_000;
   const criarEm = (trx: Parameters<Parameters<typeof withRollback>[1]>[0], agora: number) => async () => {
     const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Cecília" });
@@ -87,7 +87,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
     return { deps, criar };
   };
 
-  it("ADR-105: com os códigos da máquina, só as pastas dela entram (NFC ou NFD no banco), sem o teto de 500 nem a janela de 30 dias", async () => {
+  it("ADR-106: com os códigos da máquina, só as pastas dela entram (NFC ou NFD no banco), sem o teto de 500 nem a janela de 30 dias", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();
       const { deps, criar } = await criarEm(trx, agora)();
@@ -118,7 +118,7 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
     });
   }, MUITAS_TASKS_MS);
 
-  it("ADR-105: sem lista (máquina antiga), as 500 mais recentes — a nova não fica atrás das 520 antigas já limpas", async () => {
+  it("ADR-106: sem lista (máquina antiga), as 500 mais recentes — a nova não fica atrás das 520 antigas já limpas", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();
       const { deps, criar } = await criarEm(trx, agora)();

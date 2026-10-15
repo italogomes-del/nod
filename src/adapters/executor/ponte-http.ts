@@ -221,7 +221,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     async desconectar() { await chamar("desconectar", {}); },
     /**
-     * ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. ADR-105: os
+     * ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. ADR-106: os
      * códigos das pastas que a máquina tem vão junto; servidor antigo os ignora e responde como antes.
      */
     async pastasParaLimpar(_pessoaId, op) {
@@ -229,7 +229,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
         const r = await chamar<{ pastas?: unknown }>("limpeza", { ...(op?.apertado === true ? { apertado: true } : {}), ...(op?.codigos ? { codigos: op.codigos } : {}) });
         return Array.isArray(r.pastas) ? r.pastas.filter(pastaParaLimparValida) : [];
       } catch (e) {
-        // ADR-105: a lista vazia por erro parece "nada a limpar" — sem este log a limpeza pararia calada.
+        // ADR-106: a lista vazia por erro parece "nada a limpar" — sem este log a limpeza pararia calada.
         log("aviso", "limpeza_pedido_falhou", { erro: e instanceof Error ? e.name : "desconhecido", codigos: op?.codigos?.length ?? null });
         return [];
       }

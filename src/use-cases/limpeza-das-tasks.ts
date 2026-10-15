@@ -6,7 +6,7 @@ import type { Deps } from "./tipos.ts";
  * As pastas de task que o Mac da pessoa pode limpar (definido em 2026-10-09, ADR-088). O servidor decide pelo banco
  * (src/domain/limpeza-das-tasks.ts); o Mac confere o disco e apaga só o que o git deixa apagar sem --force.
  *
- * ADR-105 (2026-10-15): `codigos` = o sha256 de cada pasta que a máquina tem no disco (`codigosDaMaquina`); só essas
+ * ADR-106 (2026-10-15): `codigos` = o sha256 de cada pasta que a máquina tem no disco (`codigosDaMaquina`); só essas
  * entram, e sem a janela de 30 dias — a lista já limita, e a pasta presa há mais tempo volta a ser vista. Lista vazia =
  * nada a limpar. Sem lista (máquina antiga), as encerradas dos últimos 30 dias, das mais recentes para as mais antigas.
  */
@@ -65,7 +65,7 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     ...(inteiro(o.guardadas) > 0 ? { guardadas: inteiro(o.guardadas), guardadoBytes: inteiro(o.guardadoBytes) } : {}),
     ...(inteiro(o.guardadosVencidos) > 0 ? { guardadosVencidos: inteiro(o.guardadosVencidos) } : {}),
     ...(inteiro(o.orfasRemovidas) > 0 ? { orfasRemovidas: inteiro(o.orfasRemovidas) } : {}),
-    // ADR-105: só a máquina nova manda; zero também é notícia (nenhuma pasta no disco, nada oferecido).
+    // ADR-106: só a máquina nova manda; zero também é notícia (nenhuma pasta no disco, nada oferecido).
     ...(typeof o.pastasEnviadas === "number" ? { pastasEnviadas: inteiro(o.pastasEnviadas), pastasCortadas: inteiro(o.pastasCortadas), candidatos: inteiro(o.candidatos) } : {}),
   };
 }

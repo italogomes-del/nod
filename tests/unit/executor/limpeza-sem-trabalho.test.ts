@@ -219,7 +219,7 @@ describe("limparAgora: a passada só da frente que acabou de terminar (ADR-099, 
     expect(await limpeza.limparAgora([semTrabalho("Dev 1/x-qqqqqq")])).toBeNull();
   });
 
-  it("ADR-105: a frente com a worktree cujo clone dentro de ~/nod foi apagado não prova e fica (`sem_prova`)", async () => {
+  it("ADR-106: a frente com a worktree cujo clone dentro de ~/nod foi apagado não prova e fica (`sem_prova`)", async () => {
     const clone = pastaDe("Ada/outra-555555/nod");
     await mkdir(clone, { recursive: true });
     git(clone, "init", "-q", "-b", "main");

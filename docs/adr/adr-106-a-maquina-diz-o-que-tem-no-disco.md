@@ -1,4 +1,4 @@
-# ADR-105 — A limpeza pergunta pelas pastas que a máquina tem no disco
+# ADR-106 — A limpeza pergunta pelas pastas que a máquina tem no disco
 
 Status: aceito (pedido do Marlon, 2026-10-15; decisões D1–D4 da revisão do PR #320 no mesmo dia) · Data: 2026-10-15 ·
 Revisa a [ADR-088](adr-088-limpeza-das-pastas-de-task.md) (quem pode ser limpo) e a

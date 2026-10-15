@@ -119,7 +119,7 @@ describe("proteções do disco (ADR-088)", () => {
   });
 });
 
-describe("ADR-105: os códigos das pastas que a máquina manda", () => {
+describe("ADR-106: os códigos das pastas que a máquina manda", () => {
   it("só sha256 em hex minúsculo, sem repetir, até o teto; não lista = máquina antiga", () => {
     const codigo = (i: number) => i.toString(16).padStart(64, "0");
     const muitos = Array.from({ length: PASTAS_DA_MAQUINA_MAX + 1 }, (_, i) => codigo(i));

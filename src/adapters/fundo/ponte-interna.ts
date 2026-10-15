@@ -666,7 +666,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     },
 
     /**
-     * ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). ADR-105: com a máquina que
+     * ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). ADR-106: com a máquina que
      * limpou — em 15/10 o Mac e a VM da mesma pessoa se misturavam no log, e os 24,7 GB liberados no Mac pareciam da VM.
      */
     async relatarLimpeza(pessoaId, relato: RelatoLimpeza, machineId?: string) {

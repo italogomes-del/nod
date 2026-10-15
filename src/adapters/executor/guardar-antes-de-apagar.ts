@@ -14,7 +14,7 @@ import type { ExecutarComando } from "./limpeza-das-tasks.ts";
  * conferido a pasta sai. Nada vai ao GitHub.
  *
  * Fica sem mexer: montagem de container dentro, worktree travada, `*.pid` de processo vivo, guardado acima de 2 GB e
- * qualquer erro no caminho (o guardado pela metade é apagado e a pasta fica). ADR-105 (revisão do #320): também um
+ * qualquer erro no caminho (o guardado pela metade é apagado e a pasta fica). ADR-106 (revisão do #320): também um
  * clone dentro da pasta com worktree viva fora dela (`clone_em_uso`), e o "não" da reconferência logo antes de apagar
  * (`antesDeApagar`; o guardado recém-criado sai). A worktree cujo clone sumiu de vez (`cloneSumiu`) não tem git a
  * consultar: os arquivos dela só vão no guardado.
@@ -38,7 +38,7 @@ export type OpcoesGuardar = {
   /** O teto do guardado compactado; padrão GUARDADO_MAX_BYTES (injetável nos testes). */
   maxBytes?: number;
   /**
-   * ADR-105 (revisão do #320): perguntado logo antes do primeiro `worktree remove`/`rm`, depois do guardado pronto — a
+   * ADR-106 (revisão do #320): perguntado logo antes do primeiro `worktree remove`/`rm`, depois do guardado pronto — a
    * compactação leva até 20 min, e um turno pode ter voltado à pasta nesse meio. Um motivo (ou um erro, que vira
    * `erro`) = a pasta fica e o guardado que acabou de nascer sai (ela continua inteira no disco). As referências
    * `refs/nod/guardado/…` do passo 1 ficam no clone: apontam para commits que existem, e a próxima passada as reescreve.
@@ -94,7 +94,7 @@ type GitsNaPasta = { worktrees: string[]; clones: string[]; incompleto: boolean 
 
 /**
  * As worktrees (`.git` ARQUIVO) e os clones (`.git` PASTA) dentro da pasta, em qualquer nível fora de node_modules,
- * sem seguir link. ADR-105 (revisão do #320): `incompleto` = passou do teto de pastas ou uma pasta não se leu — um
+ * sem seguir link. ADR-106 (revisão do #320): `incompleto` = passou do teto de pastas ou uma pasta não se leu — um
  * clone não visto escaparia da conferência das worktrees de fora, então quem chama não apaga.
  */
 async function gitsNaPasta(dir: string, achados: GitsNaPasta = { worktrees: [], clones: [], incompleto: false }, vistas = { n: 0 }): Promise<GitsNaPasta> {
@@ -117,7 +117,7 @@ const ausente = (caminho: string) => lstat(caminho).then(() => false, (e: NodeJS
 const naoEstaLa = (e: unknown) => ["ENOENT", "ENOTDIR"].includes((e as NodeJS.ErrnoException).code ?? "");
 
 /**
- * ADR-105 (revisão do #320): `caminho` não existe e nunca vai voltar? Só dentro de `~/nod` e sem link no caminho: o
+ * ADR-106 (revisão do #320): `caminho` não existe e nunca vai voltar? Só dentro de `~/nod` e sem link no caminho: o
  * primeiro ancestral que existe tem de ser o próprio caminho real, dentro de `~/nod`. Um link para um disco que não está
  * montado (`~/nod/<bot>/x -> /Volumes/…`), ou um caminho fora de `~/nod`, pode voltar.
  */
@@ -134,7 +134,7 @@ async function sumiuDeVezEmNod(caminho: string, raiz: string, raizReal: string):
 }
 
 /**
- * ADR-105 (revisão do #320): as worktrees que um clone registra, lidas do disco (`.git/worktrees/<nome>/gitdir` e
+ * ADR-106 (revisão do #320): as worktrees que um clone registra, lidas do disco (`.git/worktrees/<nome>/gitdir` e
  * `locked`) — sem rodar o git, que num `.git` quebrado sobe para o repositório de cima e lista as worktrees de outro.
  * null = não deu para ler tudo (dúvida).
  */
@@ -158,7 +158,7 @@ const CLONE_PROFUNDIDADE = 4;
 const CLONE_MAX_PASTAS = 20_000;
 
 /**
- * ADR-105 (revisão do #320): algum clone dentro de `raiz` ainda registra a worktree cujo `.git` é `alvos`? É o clone
+ * ADR-106 (revisão do #320): algum clone dentro de `raiz` ainda registra a worktree cujo `.git` é `alvos`? É o clone
  * que mudou de lugar: a worktree aponta para o caminho velho, mas o registro está vivo e o `git worktree repair`
  * conserta. Não desce em repositório (o que tem `.git`) nem em pasta escondida ou node_modules. Na dúvida = sim (fica):
  * passou do teto de pastas sem ter olhado tudo, ou uma leitura falhou por outro motivo que "não está lá".
@@ -186,7 +186,7 @@ async function algumCloneRegistra(raiz: string, alvos: ReadonlySet<string>): Pro
 }
 
 /**
- * ADR-105 (definido em 2026-10-15): a worktree `wt` aponta (`gitdir:` do arquivo `.git`) para um clone dentro de `raiz`
+ * ADR-106 (definido em 2026-10-15): a worktree `wt` aponta (`gitdir:` do arquivo `.git`) para um clone dentro de `raiz`
  * (`~/nod`) que não existe mais? Na VM dos bots, em 15/10, uma task tinha apagado o clone `nod` de outra: a worktree que
  * sobrou dava `erro` no `git rev-parse` a cada passada e segurava a pasta para sempre (`Ada/…-169c93`, e cinco da
  * Tarsila). Sem o clone não há commit a salvar nem worktree a desligar — só os arquivos, que o guardado leva.
@@ -227,7 +227,7 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   // As worktrees dentro da pasta, e as que o clone delas conhece aqui dentro (inclusive em pasta escondida).
   const { worktrees: achadas, clones, incompleto } = await gitsNaPasta(base);
   if (incompleto) return vazio("erro");
-  // ADR-105 (revisão do #320): o clone que mora aqui sai junto com a pasta — então nenhuma worktree dele pode morar
+  // ADR-106 (revisão do #320): o clone que mora aqui sai junto com a pasta — então nenhuma worktree dele pode morar
   // fora dela. Era assim que uma task apagava o clone `nod` de outra (a worktree `Ada/…-169c93/nod` de 15/10), e uma
   // task ativa perderia o repositório no meio do trabalho. Fica também com a de fora travada (`locked`) ou num caminho
   // que pode voltar (disco desmontado, link). Só o registro velho de uma worktree que sumiu de vez em ~/nod não conta.
@@ -242,7 +242,7 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   }
   const porClone = new Map<string, string[]>();
   for (const wt of achadas) {
-    // ADR-105: a worktree sem clone não tem o que desligar nem commit a referenciar; os arquivos vão no guardado.
+    // ADR-106: a worktree sem clone não tem o que desligar nem commit a referenciar; os arquivos vão no guardado.
     if (await cloneSumiu(wt, o.raiz)) continue;
     const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
     const dirComum = comum.stdout.trim();

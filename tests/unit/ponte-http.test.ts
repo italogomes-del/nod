@@ -490,7 +490,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: true });
     await chamar("limpeza", { apertado: "sim" });
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
-    // ADR-105: os códigos das pastas atravessam validados — só sha256 em hex minúsculo, sem repetir; lista vazia é
+    // ADR-106: os códigos das pastas atravessam validados — só sha256 em hex minúsculo, sem repetir; lista vazia é
     // lista. Nome de pasta não passa (nunca sai da máquina).
     const a = "a".repeat(64);
     const b = "0123456789abcdef".repeat(4);
@@ -501,7 +501,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     await chamar("limpeza", { codigos: a, pastas: ["Vera/a-111111"] });
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
     await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
-    // ADR-105: o relato leva a máquina que limpou.
+    // ADR-106: o relato leva a máquina que limpou.
     expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 }, "m1");
     // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
     await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
@@ -518,7 +518,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1, clone_sumiu: 1 } });
     expect(ultimo).not.toHaveProperty("orfasRemovidas");
     expect(ultimo).not.toHaveProperty("pastasEnviadas");
-    // ADR-105: os contadores da lista atravessam (zero também); a máquina antiga não manda e eles não aparecem.
+    // ADR-106: os contadores da lista atravessam (zero também); a máquina antiga não manda e eles não aparecem.
     await chamar("limpeza/resultado", { relato: { pastasEnviadas: 300, pastasCortadas: 0, candidatos: -2 } });
     expect(relatarLimpeza.mock.lastCall?.[1]).toMatchObject({ pastasEnviadas: 300, pastasCortadas: 0, candidatos: 0 });
     // E viram campos do `limpeza_feita`, zero inclusive; sem eles (máquina antiga), os campos não aparecem.
@@ -536,7 +536,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({});
     await novo.ponte.pastasParaLimpar!("p", { apertado: true });
     expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ apertado: true });
-    // ADR-105: os códigos das pastas do disco vão no corpo, sozinhos ou com o aperto; lista vazia também vai.
+    // ADR-106: os códigos das pastas do disco vão no corpo, sozinhos ou com o aperto; lista vazia também vai.
     await novo.ponte.pastasParaLimpar!("p", { codigos: ["a".repeat(64)] });
     expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ codigos: ["a".repeat(64)] });
     await novo.ponte.pastasParaLimpar!("p", { apertado: true, codigos: [] });
@@ -545,7 +545,7 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
   });
 
-  it("ADR-105: o pedido que falha não vira um 'nada a limpar' calado — fica no log, só com a contagem dos códigos", async () => {
+  it("ADR-106: o pedido que falha não vira um 'nada a limpar' calado — fica no log, só com a contagem dos códigos", async () => {
     const saida = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       const fora = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed")) });

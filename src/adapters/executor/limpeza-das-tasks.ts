@@ -162,7 +162,7 @@ export type OpcoesLimpeza = {
 };
 
 /**
- * ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). ADR-105: a worktree
+ * ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). ADR-106: a worktree
  * cujo clone sumiu (`clone_sumiu`) também — antes ela dava `erro` e segurava a pasta para sempre.
  */
 const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado", "clone_sumiu"]);
@@ -479,7 +479,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
       if (!confirmada) { pular("nao_reconfirmada"); continue; }
     }
-    // ADR-105 (revisão do #320): de novo logo antes de apagar — a compactação pode levar 20 min.
+    // ADR-106 (revisão do #320): de novo logo antes de apagar — a compactação pode levar 20 min.
     const antesDeApagar = async (): Promise<MotivoPuladaLimpeza | null> => (o.emUso?.(rel) ? "em_uso" : o.reconfirmar && !(await o.reconfirmar(p)) ? "nao_reconfirmada" : null);
     const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now, antesDeApagar });
     if (g.motivo) {
@@ -706,7 +706,7 @@ const discoPadrao = async (caminho: string): Promise<LeituraDisco | null> => dis
 export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean }): Promise<RelatoLimpeza | null>; limparAgora(pastas: readonly PastaParaLimpar[]): Promise<RelatoLimpeza | null> };
 
 /**
- * Revisão do #225: logo antes de apagar, o servidor ainda oferece a pasta (a mesma, ou já como `encerrada`). ADR-105: a
+ * Revisão do #225: logo antes de apagar, o servidor ainda oferece a pasta (a mesma, ou já como `encerrada`). ADR-106: a
  * pergunta leva só o código daquela pasta — com a lista inteira, a pasta que caía fora das 500 da resposta não se
  * reconfirmava.
  */
@@ -714,7 +714,7 @@ const reconfirmarPela = (pastasParaLimpar: NonNullable<PonteInterna["pastasParaL
   (await pastasParaLimpar(pessoaId, { ...pedido, codigos: [codigoDaPasta(p.pasta)] })).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando));
 
 /**
- * ADR-105 (definido em 2026-10-15): o código de uma pasta (`<bot>/<slug>`) no pedido da limpeza — o sha256 em
+ * ADR-106 (definido em 2026-10-15): o código de uma pasta (`<bot>/<slug>`) no pedido da limpeza — o sha256 em
  * hexadecimal do nome em NFC. O nome não sai da máquina: em `~/nod/<bot>/` moram também clones, órfãs e pastas criadas
  * à mão, com nome que pode citar cliente ou jovem. O servidor calcula o mesmo código das pastas que já guarda
  * (`trabalhos.pasta`) e só reconhece essas. NFC porque o APFS do Mac pode devolver o nome com o acento decomposto.
@@ -724,7 +724,7 @@ export function codigoDaPasta(rel: string): string {
 }
 
 /**
- * ADR-105: as pastas de task (`<bot>/<slug>`) que existem em `~/nod`, para o servidor só responder sobre elas. Só lê
+ * ADR-106: as pastas de task (`<bot>/<slug>`) que existem em `~/nod`, para o servidor só responder sobre elas. Só lê
  * nomes (dois `readdir`), nunca mede: em 15/10 a VM dos bots tinha ~300. Pasta escondida (`.guardado`) fica de fora; o
  * que mora na raiz do bot (clones, órfãs, pastas à mão) entra como pasta qualquer, só como código — nenhuma task aponta
  * para essas, e o servidor não as reconhece. Passou de `PASTAS_DA_MAQUINA_MAX`, as seguintes só se contam (`cortadas`,
@@ -772,7 +772,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
     const inicio = agora();
     const pedido = apertado ? { apertado: true } : undefined;
     try {
-      // ADR-105: o servidor só responde sobre as pastas que este disco tem, e só pelo código delas.
+      // ADR-106: o servidor só responde sobre as pastas que este disco tem, e só pelo código delas.
       const noDisco = await pastasNoDisco(o.home);
       const pastas = await pastasParaLimpar(o.pessoaId, { ...pedido, codigos: noDisco.pastas.map(codigoDaPasta) });
       const reconfirmar = o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId, pedido);

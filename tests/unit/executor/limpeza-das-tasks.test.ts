@@ -473,7 +473,7 @@ describe("ADR-096: o disco que se cuida", () => {
     livreMb = 8 * 1024;
     await vi.waitFor(() => expect(relatos).toHaveLength(1), { timeout: 20_000 });
     limpeza.parar();
-    // ADR-105: o pedido leva o código (sha256) das pastas que o disco tem, nunca o nome; a reconfirmação, só o da pasta
+    // ADR-106: o pedido leva o código (sha256) das pastas que o disco tem, nunca o nome; a reconfirmação, só o da pasta
     // que vai sair. O relato conta o que foi e o que voltou.
     const codigo = createHash("sha256").update("Dev 1/apertada-444444").digest("hex");
     expect(codigoDaPasta("Dev 1/apertada-444444")).toBe(codigo);
@@ -481,7 +481,7 @@ describe("ADR-096: o disco que se cuida", () => {
     expect(pedidos[1]).toEqual({ apertado: true, codigos: [codigo] });
     expect(JSON.stringify(pedidos)).not.toContain("apertada-444444");
     expect(relatos[0]).toMatchObject({ apertada: true, removidas: 1, pastasEnviadas: 1, pastasCortadas: 0, candidatos: 1 });
-    // ADR-105: o relato diz qual máquina limpou (no modo local é este o caminho do `machine_id`).
+    // ADR-106: o relato diz qual máquina limpou (no modo local é este o caminho do `machine_id`).
     expect(maquinas[0]).toBe("m-teste");
     expect(chamadas).toContain("[fundo] npm cache clean --force");
     expect(chamadas).toContain("[fundo] pnpm store prune");
@@ -521,7 +521,7 @@ describe("ADR-096: o disco que se cuida", () => {
   });
 });
 
-describe("ADR-105: a máquina diz o que tem, e a worktree sem clone não trava a pasta", () => {
+describe("ADR-106: a máquina diz o que tem, e a worktree sem clone não trava a pasta", () => {
   it("as pastas do disco: `<bot>/<slug>` em NFC, sem escondida, sem arquivo e sem a raiz do bot", async () => {
     for (const p of ["Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb", "Ze 1/.escondida", ".guardado/Ze 1", "Cecília/c-cccccc".normalize("NFD")]) await mkdir(join(home, "nod", p), { recursive: true });
     await writeFile(join(home, "nod", "Ze 1", "solto.txt"), "x");

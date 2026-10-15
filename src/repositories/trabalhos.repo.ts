@@ -39,7 +39,7 @@ interface Linha {
 }
 
 /**
- * ADR-105 (definido em 2026-10-15): o teto da consulta da limpeza quando a máquina manda os códigos das pastas. A lista
+ * ADR-106 (definido em 2026-10-15): o teto da consulta da limpeza quando a máquina manda os códigos das pastas. A lista
  * vem com até 5.000 (`PASTAS_DA_MAQUINA_MAX`); o dobro cobre pasta com mais de uma task (a decidida por quem chamou).
  */
 const TETO_COM_CODIGOS = 10_000;
@@ -301,7 +301,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * `parado` fica de fora já aqui. ADR-099 (I5, 2026-10-12): com `id`, só aquele trabalho (o `limparAgora` da frente
      * que acabou de terminar); a `forma` vai junto.
      *
-     * revisto em 2026-10-15 (ADR-105): com `codigos`, só as tasks cuja pasta tem um desses códigos — o sha256 em hex de
+     * revisto em 2026-10-15 (ADR-106): com `codigos`, só as tasks cuja pasta tem um desses códigos — o sha256 em hex de
      * `<bot>/<slug>` em NFC, as pastas que a máquina ainda tem no disco. Aí o teto sobe para `TETO_COM_CODIGOS`: a
      * lista da máquina já limita, e com 500 as tasks recentes que ainda não podem sair escondiam as antigas que podem.
      * E as mais RECENTES primeiro: antes eram as mais antigas, e com 1.151 encerradas em 30 dias as 500 da resposta
@@ -316,7 +316,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           (select count(*)::int from turnos t where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('pendente', 'despachando')) as vivos,
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta')) as decisao,
-          -- revisão do #320 (ADR-105): também a pasta que outra task usou e encerrou DEPOIS desta. Só a task mais
+          -- revisão do #320 (ADR-106): também a pasta que outra task usou e encerrou DEPOIS desta. Só a task mais
           -- recente da pasta decide: sem isso, a antiga oferecia como "encerrada" a pasta de uma task que acabou de
           -- terminar (e sem a janela de 30 dias, qualquer task do histórico serviria).
           exists (select 1 from trabalhos o where o.tenant_id = w.tenant_id and o.pasta = w.pasta and o.id <> w.id
