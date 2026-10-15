@@ -1,4 +1,4 @@
-import { abrirTxEscopada } from "../../db/tx.ts";
+import { abrirTxEscopada, comPrazoDeConexao, ErroBancoOcupado } from "../../db/tx.ts";
 import { log } from "../../obs/log.ts";
 import { listarTodas, type Pessoa } from "../../repositories/pessoas.repo.ts";
 import type { Db, Escopo, Transacao } from "../../shared/types.ts";
@@ -29,13 +29,16 @@ const logarFalha = (escopo: Escopo, erro: unknown): void => {
  * pessoa, nunca um savepoint dentro de outra: o escopo de uma pessoa não pode nascer dentro da
  * transação de outra (ver src/db/tx.ts). Não existe "transação sem pessoa": esquecer o escopo
  * lança escopo_vazio em vez de devolver zero linhas em silêncio (ADR-003 revisado).
+ *
+ * definido em 2026-10-15 (NOD-266): o primeiro `banco_ocupado` encerra a volta — com o pool esgotado, tentar a próxima
+ * pessoa só põe mais um na fila e multiplica o log; a próxima volta do laço tenta de novo. A listagem também tem prazo.
  */
 export async function paraCadaPessoa(
   db: Db,
   fn: (escopo: Escopo, tx: Transacao) => Promise<void>,
   opcoes: OpcoesLaco = {},
 ): Promise<void> {
-  const listar = opcoes.listarPessoas ?? (() => listarTodas(db));
+  const listar = opcoes.listarPessoas ?? (() => comPrazoDeConexao(listarTodas(db)));
   const aoFalhar = opcoes.aoFalhar ?? logarFalha;
   const pessoas = await listar();
   for (const p of pessoas) {
@@ -44,6 +47,7 @@ export async function paraCadaPessoa(
       await fn(escopo, abrirTxEscopada(db, escopo));
     } catch (e) {
       aoFalhar(escopo, e);
+      if (e instanceof ErroBancoOcupado) return;
     }
   }
 }

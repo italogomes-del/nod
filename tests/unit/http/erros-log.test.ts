@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { responderErro } from "../../../src/adapters/http/erros.ts";
+import { MENSAGEM_FALHA_INTERNA, responderErro } from "../../../src/adapters/http/erros.ts";
+import { ErroBancoOcupado, ErroTxEncerrada } from "../../../src/db/tx.ts";
 import { ErroDeDominio } from "../../../src/domain/erro.ts";
 
 function resposta(): { res: ServerResponse; status: () => number; corpo: () => unknown } {
@@ -61,5 +62,22 @@ describe("responderErro registra a recusa no log", () => {
     expect(r.status()).toBe(400);
     expect(linhas()[0]).toMatchObject({ evento: "requisicao_recusada", causa: "id_malformado", rota: "/api/x" });
     expect(JSON.stringify(linhas()[0])).not.toContain("abc");
+  });
+
+  it("NOD-266: banco_ocupado vira 503 com a mensagem genérica e o correlation_id do log, sem nada do driver", () => {
+    const r = resposta();
+    const cid = "5b3f1c2e-7d4a-4e8b-9c1d-2a3b4c5d6e7f";
+    responderErro(r.res, new ErroBancoOcupado(cid, 10_004), { metodo: "GET", caminho: "/api/t/172e1fdf-428d-48cb-b052-3bd7d2573e18/conversas" });
+    expect(r.status()).toBe(503);
+    expect(r.corpo()).toEqual({ codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: cid });
+    expect(linhas()).toEqual([expect.objectContaining({ nivel: "aviso", evento: "requisicao_recusada", codigo: "banco_ocupado", status: 503, rota: "/api/t/:id/conversas", correlation_id: cid })]);
+  });
+
+  it("NOD-266: tx_encerrada é falha interna (500), não banco ocupado", () => {
+    const r = resposta();
+    responderErro(r.res, new ErroTxEncerrada());
+    expect(r.status()).toBe(500);
+    expect(r.corpo()).toMatchObject({ codigo: "falha_interna" });
+    expect(linhas()[0]).toMatchObject({ evento: "falha_interna", erro: "ErroTxEncerrada" });
   });
 });

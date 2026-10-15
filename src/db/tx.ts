@@ -1,6 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { executarComContexto } from "../obs/contexto.ts";
+import { log } from "../obs/log.ts";
 import type { Db, Escopo, Transacao, Tx } from "../shared/types.ts";
 
 /**
@@ -11,6 +13,74 @@ import type { Db, Escopo, Transacao, Tx } from "../shared/types.ts";
  * consulta da mesma conexão do pool — provado em tests/integration/spike-rls-rollback.test.ts
  * e, para o jit, em tests/integration/jit-local.test.ts.
  */
+
+/**
+ * Prazos da transação escopada (NOD-266, emenda de 2026-10-15 da ADR-001). definido em 2026-10-15: em 15/10 08:07–10:12 o
+ * pool de 5 se esgotou com conexões presas por chamada de conector e o servidor ficou ~2 h esperando uma conexão livre,
+ * sem erro nem log. Quem espera mais que PRAZO_CONEXAO_MS desiste com `banco_ocupado` (503) em vez de pendurar.
+ */
+export const PRAZO_CONEXAO_MS = 10_000;
+/** Tx que dura mais que isto gera o log `tx_longa` (aviso) — forense C17 pede medir antes de mexer no pool. */
+export const LIMIAR_TX_LONGA_MS = 5_000;
+
+/** Os timeouts que o próprio Postgres aplica à tx escopada, por SET LOCAL (valem com ou sem pooler). */
+export interface TimeoutsTx {
+  /** statement_timeout: consulta além disto é cancelada (57014); a transação aborta e a conexão volta ao pool. */
+  statement: string;
+  /** lock_timeout: esperar uma trava além disto falha (55P03) em vez de segurar a conexão. */
+  lock: string;
+  /**
+   * idle_in_transaction_session_timeout: a sessão ociosa dentro da tx além disto é ENCERRADA pelo Postgres (FATAL 25P03).
+   * definido em 2026-10-15 (NOD-266): 660 s, acima do caminho legítimo mais longo de hoje — o conector roda dentro da tx e a
+   * chamada com arquivo vai até 600 s (CHAMADA_COM_ARQUIVO_MS). Baixa para 60 s quando a NOD-263 tirar o conector da tx.
+   * Só é seguro ligar porque a `trx` entregue a `fn` é guardada (`guardarTrx`): ver o spike no comentário dela.
+   */
+  idleNaTx: string;
+}
+
+export const TIMEOUTS_TX: TimeoutsTx = { statement: "60s", lock: "10s", idleNaTx: "660s" };
+
+export interface OpcoesTx {
+  /** Prazo para pegar conexão e abrir o BEGIN. Default PRAZO_CONEXAO_MS; o teste injeta um curto. */
+  prazoConexaoMs?: number;
+  /** Limiar do log `tx_longa`. Default LIMIAR_TX_LONGA_MS. */
+  limiarTxLongaMs?: number;
+  /** Timeouts do Postgres para esta tx. Default TIMEOUTS_TX; o teste injeta valores curtos. */
+  timeouts?: Partial<TimeoutsTx>;
+}
+
+/**
+ * Não deu para pegar uma conexão do pool dentro do prazo. Erro de INFRA, não de domínio: não entra em CODIGOS_ERRO nem no
+ * enum `codigo_erro` (nunca é persistido como motivo de turno ou evento). `responderErro` o devolve como 503
+ * `banco_ocupado` com a mensagem genérica e o correlation_id gerado antes do BEGIN — o mesmo dos logs.
+ */
+export class ErroBancoOcupado extends Error {
+  override readonly name = "ErroBancoOcupado";
+  readonly codigo = "banco_ocupado" as const;
+  readonly correlationId: string;
+  readonly esperaMs: number;
+  constructor(correlationId: string, esperaMs: number) {
+    super("banco_ocupado");
+    this.correlationId = correlationId;
+    this.esperaMs = esperaMs;
+  }
+}
+
+/**
+ * A `trx` foi usada depois que a transação acabou (commit, rollback ou a conexão encerrada pelo Postgres). Infra: vira 500
+ * com correlation_id. Existe para a consulta FALHAR em vez de rodar fora da transação, sem escopo (ver `guardarTrx`).
+ */
+export class ErroTxEncerrada extends Error {
+  override readonly name = "ErroTxEncerrada";
+  constructor() {
+    super("tx_encerrada");
+  }
+}
+
+/** Os erros de infra desta camada: quem trata falha de app (ex.: marcarFalha do conector) os relança sem mexer. */
+export function ehErroDeInfraDaTx(e: unknown): e is ErroBancoOcupado | ErroTxEncerrada {
+  return e instanceof ErroBancoOcupado || e instanceof ErroTxEncerrada;
+}
 
 function exigirEscopo(escopo: Escopo): void {
   if (!escopo || typeof escopo.tenantId !== "string" || escopo.tenantId === "") {
@@ -31,11 +101,74 @@ function exigirEscopo(escopo: Escopo): void {
  * OLTP não se paga com compilação. Fica no SET LOCAL, e não em parâmetro de conexão, porque o pooler em modo
  * transação do deploy (ADR-001) não repassa parâmetro de startup; e não em ALTER DATABASE, que só vale para
  * sessão nova e some do código.
+ *
+ * NOD-266: os timeouts da tx (TIMEOUTS_TX) entram no MESMO select, também LOCAIS — a conexão que volta ao pool fica com o
+ * valor da sessão (tests/integration/timeouts-da-tx.test.ts).
  */
-export async function vincularEscopo(trx: Tx, escopo: Escopo): Promise<void> {
+export async function vincularEscopo(trx: Tx, escopo: Escopo, timeouts: Partial<TimeoutsTx> = {}): Promise<void> {
   exigirEscopo(escopo);
-  await trx`select set_config('nod.tenant_id', ${escopo.tenantId}, true), set_config('nod.pessoa_id', ${escopo.pessoaId}, true), set_config('jit', 'off', true)`;
+  const t = { ...TIMEOUTS_TX, ...timeouts };
+  await trx`select set_config('nod.tenant_id', ${escopo.tenantId}, true), set_config('nod.pessoa_id', ${escopo.pessoaId}, true), set_config('jit', 'off', true), set_config('statement_timeout', ${t.statement}, true), set_config('lock_timeout', ${t.lock}, true), set_config('idle_in_transaction_session_timeout', ${t.idleNaTx}, true)`;
 }
+
+/**
+ * A `trx` que `fn` recebe só fala com o banco enquanto a transação vive; depois, qualquer consulta lança ErroTxEncerrada.
+ *
+ * Spike de 2026-10-15 (NOD-266, postgres.js 3.4.9 remendado, Postgres 17, tests/concurrency/banco-ocupado.test.ts): com
+ * `idle_in_transaction_session_timeout` de 1 s e a `fn` ociosa 2,5 s, o Postgres encerra a sessão e o `begin` rejeita com
+ * CONNECTION_CLOSED — mas a `fn` segue viva com a `trx` na mão. O handler da `trx` executa no MESMO objeto Connection que
+ * o pool reabre para a próxima consulta: com pool `max 1`, a consulta seguinte da `trx` rodou na conexão nova, FORA de
+ * transação e sem escopo (`nod.tenant_id` nulo; uma escrita ali seria confirmada sozinha); com `max 3`, ela falhou com
+ * CONNECTION_CLOSED, tirou a conexão da fila de fechadas (o pool perde a vaga para sempre) e a seguinte pendurou. A
+ * guarda fecha os dois: a marca `encerrada` é posta quando a `fn` termina e quando o `begin` assenta (a rejeição do
+ * fechamento chega em microtarefas do mesmo evento `close`, antes de qualquer E/S que reabra a conexão), e toda forma
+ * de emitir SQL pela `trx` (template, `unsafe`, `file`, `savepoint`) checa a marca antes de chegar ao handler.
+ *
+ * O que a guarda não cobre é o próprio `begin`: quando a `fn` termina depois da queda, ele manda COMMIT/ROLLBACK pelo
+ * handler cru. Duas emendas fecham isso — o callback de `abrirTxEscopada` não assenta quando o `begin` já assentou, e o
+ * remendo `nod:remendo-vaga-do-pool` (scripts/remendar-postgres.mjs) impede que a conexão fechada saia da fila de
+ * fechadas (com `max 1`, o pool travava para sempre).
+ */
+function guardarTrx(trx: Tx, encerrada: () => boolean): Tx {
+  const exigirViva = (): void => {
+    if (encerrada()) throw new ErroTxEncerrada();
+  };
+  return new Proxy(trx, {
+    apply(alvo, este, args: unknown[]) {
+      exigirViva();
+      return Reflect.apply(alvo, este, args);
+    },
+    get(alvo, prop) {
+      const valor: unknown = Reflect.get(alvo, prop, alvo);
+      if (typeof valor !== "function") return valor;
+      if (prop === "unsafe" || prop === "file") {
+        return (...args: unknown[]) => {
+          exigirViva();
+          return Reflect.apply(valor, alvo, args);
+        };
+      }
+      if (prop === "savepoint") {
+        // O savepoint entrega outro sql sobre a mesma conexão: a guarda vale para ele também.
+        return (...args: unknown[]) => {
+          exigirViva();
+          const ultimo = args[args.length - 1];
+          if (typeof ultimo === "function") {
+            args[args.length - 1] = (s: Tx) => Reflect.apply(ultimo, undefined, [guardarTrx(s, encerrada)]);
+          }
+          return Reflect.apply(valor, alvo, args);
+        };
+      }
+      return valor;
+    },
+  });
+}
+
+interface TxDoContexto {
+  escopo: Escopo;
+  trx: Tx;
+  viva: () => boolean;
+}
+const txDoContexto = new AsyncLocalStorage<TxDoContexto>();
 
 /**
  * BEGIN → set_config tenant → set_config pessoa → correlation_id no AsyncLocalStorage → fn.
@@ -47,21 +180,121 @@ export async function vincularEscopo(trx: Tx, escopo: Escopo): Promise<void> {
  * Motivo (medido em 2026-09-16 no psql): um SET LOCAL feito dentro de um SAVEPOINT PERSISTE
  * depois do RELEASE — abrir a "tx da pessoa B" como savepoint dentro da transação de A deixaria
  * a transação de A rodando como B. Escopo aninhado não existe: quem já tem um trx usa vincularEscopo.
+ *
+ * NOD-266: prazo para pegar a conexão (máquina de estado síncrona esperando → iniciou | desistiu; quem marcar primeiro
+ * vence). Estourou antes do callback do BEGIN: lança ErroBancoOcupado e loga `banco_ocupado`. A conexão que chega depois
+ * da desistência faz rollback sem rodar `vincularEscopo` nem `fn`. O correlation_id nasce antes do BEGIN, para o 503 e os
+ * logs saírem com o mesmo id.
  */
-export function abrirTxEscopada(db: Db, escopo: Escopo): Transacao {
+export function abrirTxEscopada(db: Db, escopo: Escopo, opcoes: OpcoesTx = {}): Transacao {
   exigirEscopo(escopo);
   if (typeof db.begin !== "function") {
     throw new ErroDeDominio("estado_invalido", { cause: "abrirTxEscopada recebeu uma transação aberta; use vincularEscopo" });
   }
+  const prazoMs = opcoes.prazoConexaoMs ?? PRAZO_CONEXAO_MS;
+  const limiarMs = opcoes.limiarTxLongaMs ?? LIMIAR_TX_LONGA_MS;
   return async <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => {
+    const correlationId = randomUUID();
+    const pedidoEm = Date.now();
+    // Objeto, não `let`: muda dentro de callbacks e o TS estreitaria um `let` para o valor inicial.
+    const maquina: { estado: "esperando" | "iniciou" | "desistiu" } = { estado: "esperando" };
+    let iniciouEm = 0;
+    let encerrada = false;
+    let beginAssentou = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const caixa: { valor?: T } = {};
-    await db.begin(async (trx) => {
-      await vincularEscopo(trx, escopo);
-      caixa.valor = await executarComContexto(
-        { tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, correlationId: randomUUID() },
-        () => fn(trx),
-      );
+
+    const desistencia = new Promise<never>((_, rejeitar) => {
+      timer = setTimeout(() => {
+        if (maquina.estado !== "esperando") return;
+        maquina.estado = "desistiu";
+        const esperaMs = Date.now() - pedidoEm;
+        log("aviso", "banco_ocupado", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId, correlation_id: correlationId, espera_ms: esperaMs });
+        rejeitar(new ErroBancoOcupado(correlationId, esperaMs));
+      }, prazoMs);
+      timer.unref?.();
     });
-    return caixa.valor as T;
+
+    const beginP = db.begin(async (trx) => {
+      // A conexão chegou depois da desistência: lança ANTES de vincularEscopo; o begin faz rollback e fn nunca roda.
+      if (maquina.estado === "desistiu") throw new ErroBancoOcupado(correlationId, Date.now() - pedidoEm);
+      maquina.estado = "iniciou";
+      iniciouEm = Date.now();
+      clearTimeout(timer);
+      const guardada = guardarTrx(trx, () => encerrada);
+      let falha: { erro: unknown } | undefined;
+      try {
+        await vincularEscopo(guardada, escopo, opcoes.timeouts);
+        caixa.valor = await txDoContexto.run({ escopo, trx: guardada, viva: () => !encerrada }, () =>
+          executarComContexto({ tenantId: escopo.tenantId, pessoaId: escopo.pessoaId, correlationId }, () => fn(guardada)),
+        );
+      } catch (e) {
+        falha = { erro: e };
+      }
+      encerrada = true;
+      // A conexão caiu com a fn viva (o begin já rejeitou): este callback NUNCA assenta. Se assentasse, o begin mandaria
+      // COMMIT/ROLLBACK pelo handler cru da transação — a guarda não o cobre — no objeto Connection que o pool pode já ter
+      // reaberto e entregue a outra requisição: o COMMIT fecharia a transação de outra pessoa. A promessa pendente não
+      // segura nada vivo: ninguém mais a referencia depois que o begin assentou, e o GC a recolhe com o escopo.
+      if (beginAssentou) return new Promise<never>(() => {});
+      if (falha) throw falha.erro;
+    });
+    // O fechamento da conexão (ex.: kill por idle) rejeita o begin com a fn ainda viva: a marca vale a partir daqui.
+    const assentado = beginP.finally(() => {
+      beginAssentou = true;
+      encerrada = true;
+    });
+    // Perdeu para o prazo: o throw tardio do callback (ou um erro do BEGIN) não pode virar unhandled rejection.
+    assentado.catch(() => {});
+
+    try {
+      await Promise.race([assentado, desistencia]);
+      return caixa.valor as T;
+    } finally {
+      clearTimeout(timer);
+      if (maquina.estado === "iniciou") {
+        const duracaoMs = Date.now() - iniciouEm;
+        if (duracaoMs > limiarMs) log("aviso", "tx_longa", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId, correlation_id: correlationId, duracao_ms: duracaoMs });
+      }
+    }
   };
+}
+
+/**
+ * Para quem PODE já estar dentro da tx escopada da mesma pessoa (o carregador de conectores da composição, chamado de
+ * dentro do caso de uso): reusa a `trx` do contexto em vez de abrir outra. NOD-266: abrir uma segunda tx com a primeira
+ * segurando conexão é deadlock de pool quando ele está cheio — a de fora espera a de dentro, que espera uma conexão que
+ * a de fora não solta. Escopo diferente (ou fora de tx, ou com a tx do contexto já encerrada) abre a própria, como antes.
+ */
+export function txEscopadaOuDoContexto(db: Db, escopo: Escopo, opcoes: OpcoesTx = {}): Transacao {
+  exigirEscopo(escopo);
+  return async <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => {
+    const atual = txDoContexto.getStore();
+    if (atual && atual.viva() && atual.escopo.tenantId === escopo.tenantId && atual.escopo.pessoaId === escopo.pessoaId) return fn(atual.trx);
+    return abrirTxEscopada(db, escopo, opcoes)(fn);
+  };
+}
+
+/**
+ * Prazo para uma consulta solta no pool (fora de tx escopada), como o `listarTodas` dos laços de fundo: estourou, lança
+ * ErroBancoOcupado. A consulta segue na fila do pool; o resultado tardio é descartado.
+ */
+export async function comPrazoDeConexao<T>(consulta: Promise<T>, prazoMs: number = PRAZO_CONEXAO_MS): Promise<T> {
+  const correlationId = randomUUID();
+  const inicio = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  consulta.catch(() => {});
+  const prazo = new Promise<never>((_, rejeitar) => {
+    timer = setTimeout(() => {
+      const esperaMs = Date.now() - inicio;
+      log("aviso", "banco_ocupado", { correlation_id: correlationId, espera_ms: esperaMs });
+      rejeitar(new ErroBancoOcupado(correlationId, esperaMs));
+    }, prazoMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([consulta, prazo]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

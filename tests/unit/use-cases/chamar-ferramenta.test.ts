@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ErroTransporteMcp } from "../../../src/adapters/mcp-proxy/cliente-mcp.ts";
+import { ErroBancoOcupado, ErroTxEncerrada } from "../../../src/db/tx.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { chamarFerramenta, errosDoSchema, validarArgsNod } from "../../../src/use-cases/chamar-ferramenta.ts";
@@ -278,6 +279,17 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(marcar).toHaveBeenCalledTimes(1);
     expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
     expect(r.data).not.toHaveProperty("negacao.causa");
+  });
+
+  it.each([
+    ["banco_ocupado", () => new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000)],
+    ["tx_encerrada", () => new ErroTxEncerrada()],
+  ])("NOD-266: %s durante a chamada é falha nossa, não do app — relança sem marcarFalha nem negação", async (_nome, erro) => {
+    const c = await cenario({ responder: () => { throw erro(); } });
+    const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+    await expect(c.chamar("exemplo__somar", { a: 1, b: 2 })).rejects.toBeInstanceOf(erro().constructor);
+    expect(marcar).not.toHaveBeenCalled();
+    expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toBeNull();
   });
 
   it("NOD-193: sessão MCP expirada (404 com mcp-session-id) uma vez e depois 200 → ok: true, sem marcarFalha", async () => {

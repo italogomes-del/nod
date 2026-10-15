@@ -97,16 +97,15 @@ describeIntegracao("concorrência: reivindicação de turno (advisory lock por p
     expect(await segunda).toBeNull();
   });
 
-  it("commitada, a reivindicação vale para a outra conexão; renovar de outra máquina é {ativo:false}; sobre o POOL abre a própria tx", async () => {
+  it("commitada, a reivindicação vale para a outra conexão; renovar de outra máquina é {ativo:false}; sobre o POOL abre a própria tx escopada", async () => {
     const { turnoId } = await fixture();
     const maquinaA = randomUUID();
-    // Direto no pool (sem transação aberta): reivindicar abre a tx curta por conta própria — mas o pool
-    // não carrega escopo (set_config é LOCAL), então a policy falha FECHADO com erro do Postgres; o
-    // `null` do contrato é para "não achou", nunca para "sem escopo". O catch aqui só prova o fail-closed.
-    const ganho = await criarRepos(db, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() }).then(() => "reivindicou", () => "recusado");
-    expect(ganho).toBe("recusado");
-    const ganhoEscopado = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() }));
-    expect(ganhoEscopado?.id).toBe(turnoId);
+    // Direto no pool (sem transação aberta): reivindicar abre a tx curta por conta própria. definido em 2026-10-15
+    // (NOD-266): ela é a escopada (abrirTxEscopada — escopo, prazo de conexão e timeouts), então reivindica de verdade.
+    // Antes era um `begin` cru: sem escopo, a policy falhava fechado; sem prazo, pendurava com o pool cheio.
+    const ganho = await criarRepos(db, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() });
+    expect(ganho?.id).toBe(turnoId);
+    expect(await criarRepos(db, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() })).toBeNull();
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))).toBeNull();
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false });
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, maquinaA, { promptSubmitted: true }, Date.now()))).toEqual({ ativo: true });

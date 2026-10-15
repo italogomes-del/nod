@@ -20,7 +20,7 @@ import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
-import { abrirTxEscopada } from "../../db/tx.ts";
+import { abrirTxEscopada, txEscopadaOuDoContexto } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
@@ -364,7 +364,7 @@ export function comporApp(o: OpcoesCompor): App {
   const cofreDoApp = criarCofreDeTokensDoApp<Escopo>({
     agora: relogio,
     async gerar(escopo) {
-      const cfg = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config());
+      const cfg = await txEscopadaOuDoContexto(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config());
       if (!cfg) return null;
       return criarTokenDeInstalacao({ appId: cfg.appId, instalacaoId: cfg.instalacaoId, chavePem: decifrar(cfg.chavePrivadaCifrada, chave), agora: relogio() });
     },
@@ -400,7 +400,7 @@ export function comporApp(o: OpcoesCompor): App {
         ? [{ tenantId: atual.tenantId, pessoaId: atual.pessoaId }]
         : donoDoConector.has(conectorId) ? [donoDoConector.get(conectorId) as Escopo] : (await listar()).map((p) => ({ tenantId: p.tenantId, pessoaId: p.id }));
       for (const escopo of escopos) {
-        const c = await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).conectores.buscar(conectorId));
+        const c = await txEscopadaOuDoContexto(db, escopo)((trx) => criarRepos(trx, escopo).conectores.buscar(conectorId));
         if (!c) continue;
         const dono = { tenantId: c.tenantId, pessoaId: c.ownerId };
         donoDoConector.set(conectorId, dono);
@@ -411,7 +411,7 @@ export function comporApp(o: OpcoesCompor): App {
     },
     async sondarNativo(c) {
       const escopo = { tenantId: c.tenantId, pessoaId: c.ownerId };
-      const appConfigurado = (await abrirTxEscopada(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config())) !== null;
+      const appConfigurado = (await txEscopadaOuDoContexto(db, escopo)((trx) => criarRepos(trx, escopo).githubApp.config())) !== null;
       return sondaGithubNativa({ ghNaMaquina: await ghDaPessoa(escopo), envChaves: Object.keys(c.env), appConfigurado });
     },
   });
