@@ -77,6 +77,26 @@ describeIntegracao("NOD-267: watchdog no boot do compartilhado", () => {
     }
   });
 
+  // QA da NOD-267 (Tarsila, 2026-10-15): o contrato "batimento só no compartilhado" no boot REAL — no Mac, acordar do
+  // sono deixaria o batimento velho; aqui o tick trava de verdade no modo local e a saúde segue 200, sem watchdog.
+  it("modo local com o tick travado: /api/saude segue 200 e não há watchdog", async () => {
+    const portao = portaoDasPessoas();
+    const sair = vi.fn();
+    const srv = await servidorCompleto({
+      env: { NOD_MODO: undefined },
+      envolverListarPessoas: portao.envolver,
+      watchdog: { intervaloMs: 50, carenciaMs: 0, sair, lacoParadoMinimoMs: 0 },
+    });
+    abertos.push({ srv, portao });
+    const saude = async () => (await fetch(`${srv.url}/api/saude`)).status;
+    await expect.poll(saude, { timeout: 5_000, interval: 50 }).toBe(200);
+
+    portao.travar();
+    await new Promise((r) => setTimeout(r, 1_500)); // > 3 × 200 ms de laço vencido e > 4 verificações de 50 ms
+    expect(await saude()).toBe(200);
+    expect(sair).not.toHaveBeenCalled();
+  });
+
   it("na drenagem do deploy (ADR-071) o watchdog não sai, mesmo com o tick travado", async () => {
     const { srv, portao, sair, saude } = await subir();
     await expect.poll(saude, { timeout: 5_000, interval: 50 }).toBe(200);
