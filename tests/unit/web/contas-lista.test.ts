@@ -9,7 +9,7 @@ import { renderProvedores } from "../../../web/telas/provedores.ts";
 
 /**
  * ADR-102 (2026-10-13): a lista única de contas em Provedores de IA (protótipos G1/CM1-A), o login na VM pela tela (G1-P3)
- * e o que Máquinas mostra das contas (G2). E-mail e organização só aparecem com os detalhes do app do Mac.
+ * e o que Máquinas mostra das contas (G2). E-mail e organização vêm do servidor (ADR-105).
  */
 const AGORA = Date.UTC(2026, 9, 13, 15, 0);
 const VM = "11111111-1111-4111-8111-111111111111";
@@ -17,7 +17,7 @@ const MAC = "22222222-2222-4222-8222-222222222222";
 const maquina = (id: string, nome: string, o: Partial<MaquinaDto> = {}): MaquinaDto => ({ id, nome, prefixo: "abcd1234", criadaEm: 1, ultimoUsoEm: null, conectada: true, plataforma: "linux", ias: {}, gh: false, ...o });
 const MAQUINAS = [maquina(VM, "vm-bots"), maquina(MAC, "MacBook", { plataforma: "darwin" })];
 const conta = (id: string, ia: ContaIa["ia"], apelido: string, maquinas: string[], o: Partial<ContaIa> = {}): ContaIa => ({
-  id, ia, impressao: id.replace(/-/g, "").padEnd(64, "a").slice(0, 64), apelido, plano: "Max", corporativa: false, posicao: 1, entraNaTrocaAutomatica: false, noLimiteAte: null,
+  id, ia, impressao: id.replace(/-/g, "").padEnd(64, "a").slice(0, 64), apelido, email: null, organizacao: null, plano: "Max", corporativa: false, posicao: 1, entraNaTrocaAutomatica: false, noLimiteAte: null,
   maquinas: maquinas.map((m) => ({ maquinaId: m, nome: m === VM ? "vm-bots" : "MacBook", estado: "pronta" as const })), ...o,
 });
 const PESSOAL = conta("aaaaaaaa-0000-4000-8000-000000000001", "claude-cli", "Pessoal", [VM, MAC]);
@@ -47,10 +47,24 @@ describe("lista única de contas (ADR-102)", () => {
     expect(html).toContain('data-ordem-lista="contas"');
   });
 
-  it("o e-mail e a organização só aparecem com os detalhes do app do Mac (pela impressão)", () => {
+  it("sem e-mail no servidor nem no app, a linha diz só por qual CLI", () => {
     expect(renderListaDeContas(ctx())).not.toContain("@");
-    const html = renderListaDeContas(ctx({ noApp: true, detalhes: { maquinaId: MAC, contas: [{ impressao: LEAPY.impressao, ia: "claude-cli", email: "marlon@leapy.com.br", organizacao: "Leapy", plano: "Team" }] } }));
+    expect(renderListaDeContas(ctx())).toContain("<span>pelo Claude Code</span>");
+  });
+
+  it("ADR-105: o e-mail e a organização vêm do servidor, em qualquer máquina (fora do app também)", () => {
+    const comEmail = { ...CONTAS, contas: [PESSOAL, GPT, { ...LEAPY, email: "marlon@leapy.com.br", organizacao: "Leapy" }] };
+    const html = renderListaDeContas(ctx({ contas: comEmail }));
     expect(html).toContain("marlon@leapy.com.br · organização Leapy · pelo Claude Code");
+    // O Detalhes da conta também.
+    expect(renderListaDeContas(ctx({ contas: comEmail, ui: { detalhe: LEAPY.id } }))).toContain("<dt>Conta</dt><dd>marlon@leapy.com.br · Leapy</dd>");
+  });
+
+  it("ADR-105: o app do Mac que conhece a conta ganha do servidor (é o que o CLI disse agora)", () => {
+    const comEmail = { ...CONTAS, contas: [PESSOAL, GPT, { ...LEAPY, email: "antigo@leapy.com.br", organizacao: "Leapy" }] };
+    const html = renderListaDeContas(ctx({ contas: comEmail, noApp: true, detalhes: { maquinaId: MAC, contas: [{ impressao: LEAPY.impressao, ia: "claude-cli", email: "marlon@leapy.com.br", organizacao: "Leapy SA", plano: "Team" }] } }));
+    expect(html).toContain("marlon@leapy.com.br · organização Leapy SA · pelo Claude Code");
+    expect(html).not.toContain("antigo@");
   });
 
   it("o ⋯ abre Renomear, Detalhes, Sair de cada máquina e Remover de todas", () => {

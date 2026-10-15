@@ -16,7 +16,7 @@ import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, uuid } from "./ponte-validacao.ts";
+import { capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -24,8 +24,10 @@ import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
  * `planos`: os turnos que esta máquina está rodando AGORA (definido em 2026-09-24). Com o pool de laços
  * o app roda um turno por agente em paralelo; antes era um `plano` só e a renovação do segundo turno
  * voltava {ativo:false}, matando a CLI. `recebidas` guarda a última entrega de cada turno (idempotência).
+ * `rebaixada` (definido em 2026-10-15, auditoria A2): o varredor deu o inventário por `ausente` depois de 60 s de silêncio
+ * e só o próximo anúncio (`conectar`/`inventario`) o devolve — até lá o puxar responde 409 para a máquina se reanunciar.
  */
-type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina; anuncio: AnuncioMaquina | null };
+type Conexao = { escopo: Escopo; ponte: PonteInternaNod; inv: Inventario; ultimo: number; puxando: boolean; planos: Map<string, PlanoTurno>; recebidas: Map<string, number>; gh: boolean; nome: string; plataforma: PlataformaMaquina; anuncio: AnuncioMaquina | null; rebaixada: boolean };
 
 /**
  * NOD-199: o que um anúncio da máquina diz das IAs dela, lido com os mesmos filtros nas duas rotas que o recebem
@@ -194,15 +196,21 @@ export function criarPonteHttpServidor(d: {
       const plataforma = PLATAFORMAS_MAQUINA.find((x) => x === b.plataforma) ?? "darwin";
       let c = conexoes.get(id);
       if (!c) {
-        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null };
+        c = { escopo: ctx.escopo, ponte: d.criar(ctx.escopo), inv: ausente(), ultimo: d.agora(), puxando: false, planos: new Map(), recebidas: new Map(), gh: false, nome, plataforma, anuncio: null, rebaixada: false };
         conexoes.set(id, c);
       }
       if (c.planos.size > 0) {
-        if (d.agora() - c.ultimo < 90_000) throw new ErroDeDominio("estado_invalido");
-        c.planos.clear();
+        // Auditoria A4 (definido em 2026-10-15): o app novo diz quais turnos roda. O plano que ele não conhece é de um
+        // processo que morreu sem `desconectar` (SIGKILL, OOM) e voltou em menos de 90 s — antes o `conectar` recusava
+        // para sempre (o laço novo renova `ultimo` a cada puxar) e nenhum anúncio chegava. O que ele roda fica; se um
+        // plano sair por engano, a renovação com o token do turno o adota de volta (NOD-214). App antigo: a regra de antes.
+        const rodando = turnosEmAndamento(b.turnosEmAndamento);
+        if (rodando) { for (const id of [...c.planos.keys()]) if (!rodando.has(id)) c.planos.delete(id); }
+        else if (d.agora() - c.ultimo < 90_000) throw new ErroDeDominio("estado_invalido");
+        else c.planos.clear();
       }
       const a = lerAnuncio(b, d.agora());
-      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
+      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh; c.rebaixada = false;
       // Revisão do PR #306: o prompt e "Rodar no X" usam o mesmo nome da tela (o da chave), não o hostname anunciado.
       c.nome = (await d.nomeDaChave?.(ctx.escopo, id).catch(() => null)) ?? nome;
       c.plataforma = plataforma;
@@ -227,7 +235,7 @@ export function criarPonteHttpServidor(d: {
       exigir(b.versaoContrato === 1);
       const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       const a = lerAnuncio(b, d.agora());
-      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh;
+      c.inv = a.inv; c.ultimo = d.agora(); c.gh = a.gh; c.rebaixada = false;
       // A conexão só nasce no `conectar`, que grava o anúncio: daqui saem o nome e o laço de voz, que não mudam aqui.
       // ADR-090: a plataforma também é do `conectar` — o motor na VM Linux não vira "darwin" ao reanunciar.
       const { nome, ligacao } = c.anuncio ?? { nome: c.nome, ligacao: false };
@@ -270,6 +278,10 @@ export function criarPonteHttpServidor(d: {
         if (!leiturasInvalidas.has(ctx.params.chaveId!)) log("aviso", "puxar_leitura_invalida", { machine_id: ctx.params.chaveId });
         leiturasInvalidas.add(ctx.params.chaveId!);
       }
+      // Auditoria A2 (definido em 2026-10-15): a máquina voltou de 60–90 s de silêncio (tampa fechada, troca de rede) e a
+      // conexão ainda existe, mas o varredor já pôs o inventário em `ausente`. Sem isto o puxar respondia 200 sem nunca
+      // reservar (só reserva com `pronto`) e nada restaurava o inventário; o 409 faz o cliente reconectar com o anúncio.
+      if (c.rebaixada) throw new ErroDeDominio("estado_invalido");
       if (c.puxando) throw new ErroDeDominio("estado_invalido");
       c.puxando = true;
       try {
@@ -433,7 +445,7 @@ export function criarPonteHttpServidor(d: {
   async function varrer() {
     for (const [id, c] of conexoes) {
       if (d.agora() - c.ultimo < 60_000 || c.puxando) continue;
-      c.inv = ausente();
+      c.inv = ausente(); c.rebaixada = true;
       await persistir(c);
       if (d.agora() - c.ultimo >= 90_000) conexoes.delete(id);
     }

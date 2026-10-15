@@ -1,4 +1,4 @@
-import type { Executor } from "../contracts/evento.ts";
+import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao, PayloadLinhaLigacao } from "../contracts/ligacao.ts";
 import { VERSAO_CONSENTIMENTO_VOZ } from "../contracts/ligacao.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -11,6 +11,7 @@ import { FECHO_LEITURA, redigirLeituraDeAprovacao, type PedidoDeLeitura } from "
 import { rotuloFerramenta } from "../domain/rotulo-ferramenta.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { encerrarCerebroSemLigacao } from "./despachar-turno.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -274,11 +275,18 @@ export const encerrarLigacao: CasoDeUso<{ ligacaoId: string; motivo: MotivoFimLi
   if (!l) return { data: await deps.repos.ligacoes.buscar(input.ligacaoId) };
   if (l.mensagemId) await deps.repos.ligacoes.atualizarLinha(l.mensagemId, { kind: "ligacao", ligacaoId: l.id, duracaoMs: l.duracaoMs, estado: l.estado }, textoDaLinha(l.estado, l.duracaoMs));
   const autoria = autoriaPessoa(deps.escopo);
-  const events = [evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId: l.conversaId, dados: { ligacao_id: l.id, estado: l.estado, motivo: l.motivoFim } })];
+  const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId: l.conversaId, dados: { ligacao_id: l.id, estado: l.estado, motivo: l.motivoFim } })];
   // Só quem encerrou de fato chega aqui (o repo devolve a linha uma vez): a 2ª chamada não duplica o aviso.
   const texto = l.motivoFim ? textoDoFim(l.motivoFim) : null;
   const aviso = texto ? await deps.repos.mensagens.criar({ conversaId: l.conversaId, autoria, kind: "sistema", texto, confianca: "confiavel" }) : null;
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: l.conversaId, dados: { mensagem_id: aviso.id, kind: "sistema", ligacao_id: l.id } }));
+  // Auditoria A3 (definido em 2026-10-15): o turno-cérebro que nenhuma máquina pegou não roda mais — sai na mesma tx que
+  // fecha a ligação. Pendente, ele envenenava a fila da máquina com voz (despacharTurno também o assenta, para o que já
+  // tinha ficado preso). O que já roda termina pelo `fim` do laço de voz, como antes.
+  for (const t of await deps.repos.turnos.pendentesDaPessoa(l.conversaId)) {
+    if (t.origem !== "ligacao" || t.ligacaoId !== l.id) continue;
+    events.push(...(await encerrarCerebroSemLigacao(deps, t, t.executor, agora)).events);
+  }
   return { data: l, events };
 };
 

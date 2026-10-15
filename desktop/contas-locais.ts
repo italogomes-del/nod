@@ -11,8 +11,9 @@ import { ambienteDaConta, novoIdDeConta, pastaDaConta, prepararPastaDaConta, rem
  * As contas de IA logadas NESTA máquina (definido em 2026-10-13, ADR-102), sem Electron: o motor da VM usa, e o app do
  * Mac pode usar. Uma pasta por conta (CLAUDE_CONFIG_DIR/CODEX_HOME, ADR-101, contas-mac.ts); a conta de sempre ("padrao")
  * é a pasta padrão (~/.claude, ~/.codex). Quem diz qual conta está em cada pasta é o CLI (`claude auth status`, o
- * `account/read` do Codex): o e-mail e a organização viram a impressão (sha256 com a pessoa) e nunca saem da máquina
- * (ADR-019). O que vai ao servidor é `anuncio()`.
+ * `account/read` do Codex): o e-mail e a organização viram a impressão (sha256 com a pessoa), a chave da conta. Desde
+ * 2026-10-15 (ADR-105) eles também vão no anúncio, só para a tela; o arquivo continua sem eles. O que vai ao servidor é
+ * `anuncio()`.
  *
  * R11 da revisão: a identidade é lida depois de um login ou logout e, fora isso, no máximo a cada 10 min por conta.
  */
@@ -32,7 +33,7 @@ export type ContaLocal = {
 
 export type IdentidadeDaConta = { logado: boolean; email: string | null; orgId: string | null; plano: string | null; organizacao?: string | null };
 
-/** O que a tela do Mac mostra de cada conta (e-mail, organização): só na memória e só pela ponte do app (ADR-019). */
+/** O que o CLI disse de cada conta (e-mail, organização): na memória, pela ponte do app e no anúncio (ADR-105). */
 export type DetalheDaContaLocal = DetalheDaConta;
 
 export type DepsContasLocais = {
@@ -74,7 +75,7 @@ export type ContasLocais = ReturnType<typeof criarContasLocais>;
 
 export function criarContasLocais(d: DepsContasLocais) {
   let contas: ContaLocal[] = [];
-  /** E-mail e organização por impressão: nunca vão ao arquivo nem ao anúncio. */
+  /** E-mail e organização por impressão: vão ao anúncio (ADR-105), nunca ao arquivo. */
   const detalhes = new Map<string, DetalheDaContaLocal>();
 
   const padraoDe = (ia: IaDesktop): ContaLocal => ({ id: ID_CONTA_PADRAO, ia, apelido: null, logadaEm: 0, impressao: null, plano: null, estado: "sem_login", lidaEm: 0 });
@@ -125,6 +126,11 @@ export function criarContasLocais(d: DepsContasLocais) {
     const d = c.impressao ? detalhes.get(c.impressao) : undefined;
     const igual = (x: string | null | undefined) => !!x && x.trim().toLowerCase().slice(0, 40) === c.apelido!.trim().toLowerCase();
     return !d || !(igual(d.organizacao) || igual(d.email));
+  };
+
+  const identidade = (c: ContaLocal): Pick<ContaAnunciada, "email" | "organizacao"> => {
+    const x = c.impressao ? detalhes.get(c.impressao) : undefined;
+    return { ...(x?.email ? { email: x.email } : {}), ...(x?.organizacao ? { organizacao: x.organizacao } : {}) };
   };
 
   return {
@@ -265,12 +271,15 @@ export function criarContasLocais(d: DepsContasLocais) {
       return sairam;
     },
 
-    /** E-mail, organização e plano de cada conta lida nesta máquina (para a tela; nunca ao servidor). */
+    /** E-mail, organização e plano de cada conta lida nesta máquina (para a tela do app). */
     detalhes(): DetalheDaContaLocal[] {
       return contas.flatMap((c) => (c.impressao && c.estado === "pronta" && detalhes.has(c.impressao) ? [detalhes.get(c.impressao)!] : []));
     },
 
-    /** O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`), uma vez cada. */
+    /**
+     * O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`), uma vez cada. O e-mail
+     * e a organização vão quando esta máquina os leu do CLI desde que abriu (ADR-105); sem eles, o servidor mantém os seus.
+     */
     anuncio(): ContaAnunciada[] {
       const vistas = new Set<string>();
       const escolhidas = new Set<ContaLocal>();
@@ -289,6 +298,7 @@ export function criarContasLocais(d: DepsContasLocais) {
         corporativa: contaCorporativa({ id: c.id, plano: c.plano?.toLowerCase() ?? null }),
         logadaEm: c.logadaEm,
         ...(apelidoQuePodeSair(c) ? { apelidoSugerido: c.apelido! } : {}),
+        ...identidade(c),
       }));
     },
 

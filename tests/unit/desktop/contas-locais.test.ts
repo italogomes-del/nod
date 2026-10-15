@@ -1,6 +1,6 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { criarContasLocais, inventariosComContas, type IdentidadeDaConta } from "../../../desktop/contas-locais.ts";
 import { iniciarContasNoServidor } from "../../../desktop/contas-no-servidor.ts";
@@ -11,7 +11,7 @@ import { estadoDaMaquina } from "../../../src/domain/harness.ts";
 
 /**
  * ADR-102 no app do Mac (2026-10-13): a lista que vai ao servidor segue a do app (contas.json, ADR-101), o e-mail e a
- * organização ficam só na memória (para a tela, pela ponte do app) e a puxada atende "Sair do Mac" e "Desconectar".
+ * organização ficam na memória (para a tela e, ADR-105, para o anúncio), nunca no arquivo, e a puxada atende "Sair do Mac" e "Desconectar".
  */
 async function montar(identidades: Record<string, IdentidadeDaConta>, aoLogout: (env: Record<string, string>) => void = () => undefined) {
   const raiz = await mkdtemp(join(tmpdir(), "nod-contas-locais-"));
@@ -45,14 +45,27 @@ describe("contas locais no app do Mac (ADR-102)", () => {
     expect(m.contas.anuncio()).toHaveLength(1);
   });
 
-  it("e-mail e organização só nos detalhes (memória), nunca no arquivo nem no anúncio", async () => {
+  it("ADR-105: e-mail e organização vão nos detalhes e no anúncio, nunca no arquivo", async () => {
     const m = await montar({ "claude-cli:c-1": LEAPY });
     await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
     await m.contas.ler();
     expect(m.contas.detalhes()).toEqual([expect.objectContaining({ ia: "claude-cli", email: "marlon@leapy.com.br", organizacao: "Leapy", plano: "Team" })]);
     expect(m.contas.detalhes()[0]!.impressao).toBe(m.contas.anuncio()[0]!.impressao);
-    expect(JSON.stringify(m.contas.anuncio())).not.toContain("leapy.com.br");
+    expect(m.contas.anuncio()[0]).toMatchObject({ email: "marlon@leapy.com.br", organizacao: "Leapy" });
     expect(await readFile(m.arquivo, "utf8")).not.toContain("leapy.com.br");
+  });
+
+  it("ADR-105: a conta carregada do arquivo e ainda não relida vai sem e-mail (o servidor mantém o que tinha)", async () => {
+    const m = await montar({ "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: null }]);
+    await m.contas.ler();
+    // O app reaberto: carrega o arquivo e anuncia antes de reler o CLI.
+    const raiz = dirname(m.arquivo);
+    const reaberta = criarContasLocais({ base: raiz, arquivo: m.arquivo, pessoaId: "pessoa-1", padrao: (ia) => join(raiz, ia), lerIdentidade: async () => LEAPY, logout: async () => true, agora: Date.now });
+    await reaberta.carregar();
+    expect(reaberta.anuncio()[0]).toMatchObject({ impressao: m.contas.anuncio()[0]!.impressao });
+    expect(reaberta.anuncio()[0]).not.toHaveProperty("email");
+    expect(reaberta.anuncio()[0]).not.toHaveProperty("organizacao");
   });
 
   it("red team do PR #306: entre duas cópias da mesma conta, vale a pronta (a vencida não esconde o login novo)", async () => {

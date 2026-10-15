@@ -120,7 +120,9 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   }
   const ponte: PonteInterna & Required<Pick<PonteInterna, "anunciarInventario">> = {
     // NOD-214: este cliente (com o laço) atravessa o reinício do servidor — o anúncio diz isso, e a drenagem deixa de esperá-lo.
-    async conectar(m) { anuncio = { ...m, sobreviveReinicio: true }; await chamar("conectar", anuncio); conectado = true; conexoes++; },
+    // Auditoria A4 (definido em 2026-10-15): os turnos que este processo roda vão junto — o servidor descarta o plano que
+    // ele não conhece (de um processo anterior que morreu sem `desconectar`) em vez de recusar o `conectar` por 90 s.
+    async conectar(m) { anuncio = { ...m, sobreviveReinicio: true }; await chamar("conectar", { ...anuncio, turnosEmAndamento: [...emAndamento] }); conectado = true; conexoes++; },
     /**
      * NOD-199: o anúncio da vigia. Antes do primeiro `conectar` aceito vai pelo `conectar`; o 409 da rota de inventário
      * (servidor sem esta conexão) também cai nele, que é a recuperação. Conectado, vai pela rota só de inventário e guarda o anúncio, para um `reconectar` depois não
