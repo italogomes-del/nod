@@ -28,4 +28,17 @@ describe("VM sem HTTP/3 (NOD-254)", () => {
     expect(compose).toMatch(/"443:443"/);
     expect(compose).not.toMatch(/\/udp/i);
   });
+
+  it("provisionar.sh abre só TCP 80/443 na regra nod-web e fecha o UDP de uma regra já criada", () => {
+    const linhas = semComentarios(ler("infra/gcp/provisionar.sh"))
+      .split("\n")
+      .filter((l) => /firewall-rules (create|update) nod-web\s/.test(l));
+    expect(linhas.length).toBeGreaterThanOrEqual(2);
+    for (const l of linhas) {
+      expect(l).toMatch(/--allow=tcp:80,tcp:443(\s|$)/);
+      expect(l).not.toMatch(/udp/i);
+    }
+    expect(linhas.some((l) => /firewall-rules update nod-web/.test(l))).toBe(true);
+    expect(linhas.some((l) => /firewall-rules create nod-web/.test(l))).toBe(true);
+  });
 });
