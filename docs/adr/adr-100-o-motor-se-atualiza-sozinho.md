@@ -75,3 +75,21 @@ turno.
   regra de drenar falhou: desligar a marca e rever.
 - Uma máquina ficar drenada (sem puxar) por mais de 2 h seguidas por causa da atualização. Os 30 min de janela
   ociosa não bastam: rever a janela ou drenar só à noite.
+
+## Emenda de 2026-10-15 — a drenagem tem teto
+
+**O gatilho disparou.** Em 2026-10-15, a VM `nod-motor-teste` passou a drenar às 20:52 UTC. Na hora, rodava o turno de
+delegação do Eng 1, ativo desde as 18:17 UTC (três issues em paralelo, horas de trabalho). A VM ficou 2h15 sem pegar
+nenhum turno novo e só voltou quando o motor foi reiniciado à mão, às 23:07 UTC, o que interrompeu o turno do Eng 1.
+Nesse meio-tempo, a fala do Marlon para a Ada e outros quatro turnos dela ficaram na fila. Com bots que trabalham por
+horas, esperar o turno mais longo acabar trava todos os outros bots da máquina.
+
+**O que muda no item 2.** A drenagem dura no máximo `DRENAGEM_MAXIMA_MS` (10 min). Passado esse tempo, se ainda houver
+turno rodando, o motor volta a pegar trabalho (`motor_atualizacao` `drenagem_desistiu`, nível aviso) e drena de novo
+depois de `ESPERA_DEPOIS_DE_DESISTIR_MS` (1 h). Se a máquina ficar sem nenhum turno antes disso, o motor pede a
+atualização na hora. No pior caso, com um turno de horas na máquina, o atraso imposto pela atualização é de 10 min a
+cada 70 min. A regra "nenhum turno é interrompido" continua valendo.
+
+**Gatilho de reversão desta emenda.** O motor não se atualizar em 24 h numa máquina que nunca fica ociosa (o
+`drenagem_desistiu` se repetindo o dia todo). Nesse caso, a saída é deixar a fala da pessoa passar durante a drenagem,
+ou drenar só à noite.

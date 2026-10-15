@@ -85,7 +85,7 @@ export function iniciarAtualizacao(o: {
       if (p.estado.drenando !== estado.drenando) o.drenar(p.estado.drenando);
       estado = p.estado;
       if (p.motivo !== ultimoMotivo) {
-        log(p.motivo === "pedido_falhou" ? "aviso" : "info", "motor_atualizacao", { motivo: p.motivo, versao_servidor: manifesto.versao ?? null, turnos: o.turnosRodando() });
+        log(p.motivo === "pedido_falhou" || p.motivo === "drenagem_desistiu" ? "aviso" : "info", "motor_atualizacao", { motivo: p.motivo, versao_servidor: manifesto.versao ?? null, turnos: o.turnosRodando() });
         ultimoMotivo = p.motivo;
       }
       if (!p.pedir) return;
