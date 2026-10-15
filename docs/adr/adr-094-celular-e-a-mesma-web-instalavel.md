@@ -50,8 +50,10 @@ no toque, sem 🐞 fixo e sem •••.
    - fontes: uma semana, como antes;
    - tudo com `nosniff`.
    Um `.js` que não existe continua 404 e nunca recebe o HTML do app.
-6. **Reconexão só quando caiu.** Voltar ao app (aba à frente, `online`, `pageshow`) chama `live.retomar()`. Com o stream
-   aberto, não faz nada. Caído e esperando o backoff, que chega a 30 s, reabre na hora com o `since`. Quando o servidor
+6. **Reconexão só quando caiu ou ficou muda.** Voltar ao app (aba à frente, `focus`, `online`, `pageshow`) chama
+   `live.retomar()`. Com o stream aberto e com sinal nos últimos 45 s (`PRAZO_SILENCIO_MS`, 3 pings), não faz nada.
+   Aberto e mudo além do prazo, fecha e reabre na hora com o `since`. Caído e esperando o backoff, que chega a 30 s,
+   reabre na hora com o `since`. (Emenda 2026-10-15, NOD-254.) Quando o servidor
    não consegue retomar (`resumed:false`), a web relê tudo o que já tinha carregado (`invalidacoesAoRetomar`): não lidos,
    Sua vez, trabalhos, todas as conversas e, com o "A fazer" ligado, as pendências.
 7. **Login no celular.** Continua o OAuth Google por navegação na mesma janela (`/api/sessao/google`), sem `window.open`.

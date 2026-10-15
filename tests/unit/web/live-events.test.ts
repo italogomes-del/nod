@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FrameSse } from "../../../src/contracts/frame.ts";
-import { calcularBackoffMs, criarLiveEvents, interpretarFrame, urlComSince, type EventoLive, type FonteSse } from "../../../web/lib/live-events.ts";
+import { calcularBackoffMs, criarLiveEvents, interpretarFrame, PRAZO_SILENCIO_MS, urlComSince, type EventoLive, type FonteSse } from "../../../web/lib/live-events.ts";
 
 type Ouvinte = (ev: { data?: unknown; lastEventId?: string }) => void;
 
@@ -31,6 +31,20 @@ function montar(aleatorio = () => 0.5) {
   const timers: { fn: () => void; ms: number; cancelado: boolean }[] = [];
   const eventos: EventoLive[] = [];
   let reidratacoes = 0;
+  // Relógio do vigia (NOD-254), separado dos timers do backoff: `avancar` anda o tempo e dispara o que venceu.
+  let agora = 1_000_000;
+  const vigias: { fn: () => void; vence: number; cancelado: boolean }[] = [];
+  const avancar = (ms: number): void => {
+    const alvo = agora + ms;
+    for (;;) {
+      const prox = vigias.filter((v) => !v.cancelado && v.vence <= alvo).sort((a, b) => a.vence - b.vence)[0];
+      if (!prox) break;
+      agora = Math.max(agora, prox.vence);
+      prox.cancelado = true;
+      prox.fn();
+    }
+    agora = alvo;
+  };
   const live = criarLiveEvents("/api/t/t1/eventos", {
     aoReidratar: () => {
       reidratacoes += 1;
@@ -49,9 +63,32 @@ function montar(aleatorio = () => 0.5) {
       (id as { cancelado: boolean }).cancelado = true;
     },
     aleatorio,
+    relogio: {
+      agora: () => agora,
+      agendar: (fn, ms) => {
+        const v = { fn, vence: agora + ms, cancelado: false };
+        vigias.push(v);
+        return v;
+      },
+      cancelar: (id) => {
+        (id as { cancelado: boolean }).cancelado = true;
+      },
+    },
   });
   live.subscribe((ev) => eventos.push(ev));
-  return { live, fontes, timers, eventos, reidratacoes: () => reidratacoes };
+  return {
+    live,
+    fontes,
+    timers,
+    eventos,
+    vigias,
+    avancar,
+    /** Muda o relógio sem disparar nada (NTP, Mac que dormiu). */
+    pularRelogio: (ms: number) => {
+      agora += ms;
+    },
+    reidratacoes: () => reidratacoes,
+  };
 }
 
 const frame = (seq: number, tipo: FrameSse["tipo"] = "mensagem.nova", streamId = "s1"): FrameSse => ({ streamId, seq, pessoaId: "p", tipo, dados: { seq } });
@@ -132,12 +169,15 @@ describe("live-events: interface de 4 campos sobre EventSource (ADR-016)", () =>
     expect(() => m.live.send({})).toThrow(/REST/);
   });
 
-  it("retomar (ADR-094): com a conexão aberta não faz nada; caída, reabre na hora sem esperar o backoff", () => {
+  it("retomar (ADR-094): com a conexão aberta e viva não faz nada; caída, reabre na hora sem esperar o backoff", () => {
     const m = montar();
     m.live.connect();
     m.fontes[0]?.disparar("open");
     m.fontes[0]?.frame(frame(4));
-    // Trocar de aba / voltar ao app com o stream vivo: nenhuma fonte nova, nenhum timer, nenhuma reidratação.
+    // Trocar de aba / voltar ao app com o stream vivo (ping recente): nenhuma fonte nova, nenhum timer, nenhuma reidratação.
+    m.avancar(40_000);
+    m.fontes[0]?.disparar("ping", { data: "{}" });
+    m.avancar(40_000);
     m.live.retomar();
     m.live.retomar();
     expect(m.fontes).toHaveLength(1);
@@ -162,6 +202,143 @@ describe("live-events: interface de 4 campos sobre EventSource (ADR-016)", () =>
     m.live.disconnect();
     m.live.retomar();
     expect(m.fontes).toHaveLength(antes + 1);
+  });
+
+  const estados = (m: ReturnType<typeof montar>) => m.eventos.filter((e) => e.tipo === "conexao").map((e) => (e.tipo === "conexao" ? e.estado : ""));
+
+  describe("vigia de silêncio (NOD-254)", () => {
+    it("prazo é 45 s (3 × o ping de 15 s do servidor)", () => {
+      expect(PRAZO_SILENCIO_MS).toBe(45_000);
+    });
+
+    it("sem nenhum sinal além do prazo: fecha a fonte, emite reconectando e reabre com ?since=<último id>", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      m.fontes[0]?.frame(frame(4));
+      m.avancar(44_999);
+      expect(m.fontes[0]?.fechada).toBe(false);
+      m.avancar(1);
+      expect(m.fontes[0]?.fechada).toBe(true);
+      expect(estados(m)).toEqual(["conectando", "aberto", "reconectando"]);
+      expect(m.eventos.at(-1)).toMatchObject({ tipo: "conexao", estado: "reconectando", tentativa: 1, proximaEmMs: 1000 });
+      expect(m.timers).toHaveLength(1);
+      m.timers[0]?.fn();
+      expect(m.fontes).toHaveLength(2);
+      expect(m.fontes[1]?.url).toBe("/api/t/t1/eventos?since=s1%3A4");
+      // Frame tardio da fonte derrubada não conta nem como frame nem como sinal.
+      m.fontes[0]?.frame(frame(9));
+      expect(m.eventos.filter((e) => e.tipo === "frame")).toHaveLength(1);
+    });
+
+    it("um ping antes do prazo não reabre; 45 s de silêncio depois do último ping reabre", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      m.fontes[0]?.frame(frame(4));
+      m.avancar(30_000);
+      m.fontes[0]?.disparar("ping", { data: "{}" });
+      m.avancar(15_000); // 45 s desde o open: o vigia dispara, vê 15 s de silêncio e rearma
+      expect(m.fontes).toHaveLength(1);
+      expect(m.fontes[0]?.fechada).toBe(false);
+      expect(estados(m)).toEqual(["conectando", "aberto"]);
+      m.avancar(29_999);
+      expect(m.fontes[0]?.fechada).toBe(false);
+      m.avancar(1); // 75 s: 45 s depois do ping
+      expect(m.fontes[0]?.fechada).toBe(true);
+      expect(estados(m).at(-1)).toBe("reconectando");
+    });
+
+    it("frame (mesmo duplicado) também conta como sinal; o vigia não reagenda a cada frame", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      for (let i = 1; i <= 40; i += 1) {
+        m.avancar(1_000);
+        m.fontes[0]?.frame(frame(1, "turno.delta"));
+      }
+      // 40 frames, um só timer de vigia vivo (o primeiro, ainda não vencido).
+      expect(m.vigias.filter((v) => !v.cancelado)).toHaveLength(1);
+      m.avancar(44_000);
+      expect(m.fontes[0]?.fechada).toBe(false);
+      m.avancar(1_000);
+      expect(m.fontes[0]?.fechada).toBe(true);
+    });
+
+    it("conexão que nunca abre (nem open nem error) é derrubada depois do prazo", () => {
+      const m = montar();
+      m.live.connect();
+      m.avancar(45_000);
+      expect(m.fontes[0]?.fechada).toBe(true);
+      expect(estados(m)).toEqual(["conectando", "reconectando"]);
+      m.timers[0]?.fn();
+      expect(m.fontes).toHaveLength(2);
+    });
+
+    it("error e vigia na mesma fonte não agendam dois backoffs", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      expect(m.vigias.filter((v) => !v.cancelado)).toHaveLength(1);
+      m.fontes[0]?.disparar("error");
+      expect(m.vigias.filter((v) => !v.cancelado)).toHaveLength(0); // cair cancela o vigia da fonte derrubada
+      m.avancar(60_000);
+      expect(m.timers).toHaveLength(1);
+      expect(estados(m)).toEqual(["conectando", "aberto", "reconectando"]);
+    });
+
+    it("retomar() com fonte aberta e silenciosa além do prazo reabre na hora com since, emitindo reconectando", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      m.fontes[0]?.frame(frame(4));
+      // Mac dormiu: o relógio pulou 2 min sem o timer do vigia rodar (timers atrasados).
+      m.pularRelogio(120_000);
+      m.live.retomar();
+      expect(m.fontes[0]?.fechada).toBe(true);
+      expect(m.fontes).toHaveLength(2);
+      expect(m.fontes[1]?.url).toBe("/api/t/t1/eventos?since=s1%3A4");
+      expect(m.timers).toHaveLength(0); // na hora, sem backoff
+      expect(estados(m)).toEqual(["conectando", "aberto", "reconectando"]);
+      // retomar repetido logo depois, com a fonte nova recém-criada: não reabre de novo.
+      m.live.retomar();
+      expect(m.fontes).toHaveLength(2);
+      // Ao abrir, volta a "aberto" (o main.ts relê por invalidacoesAoReconectar).
+      m.fontes[1]?.disparar("open");
+      expect(estados(m).at(-1)).toBe("aberto");
+      // O vigia da fonte velha não derruba a nova.
+      m.avancar(44_000);
+      expect(m.fontes[1]?.fechada).toBe(false);
+    });
+
+    it("disconnect() cancela o vigia: nenhuma fonte nova depois", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      expect(m.vigias.filter((v) => !v.cancelado)).toHaveLength(1); // armado na abertura
+      m.live.disconnect();
+      expect(m.vigias.every((v) => v.cancelado)).toBe(true);
+      // Mesmo rodando à força o timer do vigia, nada reabre.
+      for (const v of m.vigias) v.fn();
+      m.avancar(300_000);
+      expect(m.fontes).toHaveLength(1);
+      expect(m.timers).toHaveLength(0);
+      expect(m.eventos.at(-1)).toMatchObject({ tipo: "conexao", estado: "parado" });
+    });
+
+    it("relógio que volta (NTP) não reabre nem agenda timer gigante", () => {
+      const m = montar();
+      m.live.connect();
+      m.fontes[0]?.disparar("open");
+      m.pularRelogio(-3_600_000);
+      m.avancar(45_000 + 3_600_000 - 1);
+      expect(m.fontes).toHaveLength(1);
+      expect(m.fontes[0]?.fechada).toBe(false);
+      const vivo = m.vigias.filter((v) => !v.cancelado);
+      expect(vivo).toHaveLength(1);
+      m.live.retomar();
+      expect(m.fontes).toHaveLength(1);
+    });
   });
 
   it("backoff: 1s → 30s com jitter ±30%", () => {

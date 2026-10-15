@@ -4,7 +4,10 @@ import { criarMetricas } from "../../src/obs/metricas.ts";
 import { criarBarramento } from "../../src/services/barramento.ts";
 import { servidorDeTeste, type ServidorDeTeste } from "../helpers/servidor-de-teste.ts";
 
-/** Leitor mínimo de SSE sobre fetch: separa blocos por linha vazia e entrega {id, event, data}. */
+/**
+ * Leitor mínimo de SSE sobre fetch: separa blocos por linha vazia e entrega {id, event, data}. O `event: ping`
+ * (NOD-254) vai para a lista `pings`, como o `retry` vai para `retries`: não é frame e não sai em `proximo()`.
+ */
 type EventoSse = { id: string | null; event: string | null; data: string };
 
 async function abrirSse(url: string, headers: Record<string, string>) {
@@ -13,6 +16,7 @@ async function abrirSse(url: string, headers: Record<string, string>) {
   const fila: EventoSse[] = [];
   const esperando: ((e: EventoSse) => void)[] = [];
   const retries: number[] = [];
+  const pings: EventoSse[] = [];
   const entregar = (e: EventoSse): void => {
     const w = esperando.shift();
     if (w) w(e);
@@ -34,7 +38,8 @@ async function abrirSse(url: string, headers: Record<string, string>) {
         temDados = true;
       }
     }
-    if (temDados) entregar(ev);
+    if (ev.event === "ping") pings.push(ev);
+    else if (temDados) entregar(ev);
   };
   void (async () => {
     const reader = res.body?.getReader();
@@ -60,6 +65,7 @@ async function abrirSse(url: string, headers: Record<string, string>) {
   return {
     res,
     retries,
+    pings,
     proximo(timeoutMs = 2_000): Promise<EventoSse> {
       const pronto = fila.shift();
       if (pronto) return Promise.resolve(pronto);
@@ -174,6 +180,24 @@ describe("SSE: replay por pessoa e contrato de resume", () => {
       expect(dados(await deAna.proximo())).toMatchObject({ pessoaId: ana.pessoaId, tipo: "agente.mudou" });
     } finally {
       for (const s of abertos) s.fechar();
+    }
+  });
+
+  it("ping (NOD-254): a cada pingMs chega `event: ping` com `data: {}` e sem `id`, fora da sequência de frames", async () => {
+    const s = await abrirSse(url(), { cookie: marlon.cookie });
+    try {
+      const primeiro = await s.proximo();
+      expect(primeiro.event).toBe("resumed");
+      for (let i = 0; i < 100 && s.pings.length < 2; i += 1) await new Promise((r) => setTimeout(r, 20));
+      expect(s.pings.length).toBeGreaterThanOrEqual(2);
+      for (const p of s.pings) expect(p).toEqual({ id: null, event: "ping", data: "{}" });
+      // O ping não gasta seq: o próximo frame segue a cabeça do stream.
+      const antes = barramento.posicao(marlon.pessoaId);
+      barramento.publicar(marlon.pessoaId, "agente.mudou", { depoisDoPing: true });
+      const depois = await s.proximo();
+      expect(depois.id).toBe(`${antes.streamId}:${antes.seq + 1}`);
+    } finally {
+      s.fechar();
     }
   });
 

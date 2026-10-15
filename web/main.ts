@@ -3261,8 +3261,9 @@ function aoVoltarParaFrente(): void {
 }
 window.addEventListener("focus", aoVoltarParaFrente);
 document.addEventListener("visibilitychange", aoVoltarParaFrente);
-// ADR-094: voltar ao app (celular desbloqueado, aba à frente, rede de volta) só reabre o stream se ele caiu de fato; o
-// que se perdeu chega pelo replay do `since` ou, sem replay possível, pela releitura do aoReidratar.
+// ADR-094: voltar ao app (celular desbloqueado, aba à frente, janela em foco, rede de volta) só reabre o stream se ele
+// caiu de fato ou ficou mudo além do prazo (NOD-254); o que se perdeu chega pelo replay do `since` ou, sem replay
+// possível, pela releitura do aoReidratar. `focus` porque no Mac a janela coberta pode voltar sem `visibilitychange`.
 function retomarStream(): void {
   if (document.visibilityState === "visible" && navigator.onLine) live?.retomar();
 }
@@ -3275,6 +3276,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", retomarStream);
 window.addEventListener("pageshow", retomarStream);
+window.addEventListener("focus", retomarStream);
 // Outra aba recolheu ou abriu uma seção: esta acompanha (definido em 2026-10-04).
 window.addEventListener("storage", (ev) => {
   if (ev.key !== CHAVE_SECOES_RECOLHIDAS) return;
