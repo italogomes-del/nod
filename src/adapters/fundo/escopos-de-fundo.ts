@@ -12,6 +12,8 @@ export interface OpcoesLaco {
   listarPessoas?: () => Promise<Pick<Pessoa, "tenantId" | "id">[]>;
   /** Uma pessoa que falha não impede as outras. Default: log sem `message` (ADR-002/004). */
   aoFalhar?: (escopo: Escopo, erro: unknown) => void;
+  /** Índice da primeira pessoa da volta, dado o total. Default: sorteado. Injetável só para o teste fixar a ordem. */
+  sortearInicio?: (total: number) => number;
 }
 
 const logarFalha = (escopo: Escopo, erro: unknown): void => {
@@ -32,6 +34,8 @@ const logarFalha = (escopo: Escopo, erro: unknown): void => {
  *
  * definido em 2026-10-15 (NOD-266): o primeiro `banco_ocupado` encerra a volta — com o pool esgotado, tentar a próxima
  * pessoa só põe mais um na fila e multiplica o log; a próxima volta do laço tenta de novo. A listagem também tem prazo.
+ * Revisão do PR #321: como a volta pode parar no meio, ela começa num ponto sorteado da lista (e dá a volta) — senão,
+ * com pressão intermitente, quem está no fim da lista nunca seria atendido.
  */
 export async function paraCadaPessoa(
   db: Db,
@@ -40,7 +44,10 @@ export async function paraCadaPessoa(
 ): Promise<void> {
   const listar = opcoes.listarPessoas ?? (() => comPrazoDeConexao(listarTodas(db)));
   const aoFalhar = opcoes.aoFalhar ?? logarFalha;
-  const pessoas = await listar();
+  const lista = await listar();
+  const sortear = opcoes.sortearInicio ?? ((total: number) => Math.floor(Math.random() * total));
+  const inicio = lista.length > 0 ? sortear(lista.length) % lista.length : 0;
+  const pessoas = [...lista.slice(inicio), ...lista.slice(0, inicio)];
   for (const p of pessoas) {
     const escopo: Escopo = { tenantId: p.tenantId, pessoaId: p.id };
     try {

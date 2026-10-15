@@ -2,7 +2,6 @@ import net from "node:net";
 import { afterEach, beforeAll, expect, it } from "vitest";
 import { criarDb } from "../../src/db/client.ts";
 import type { Db } from "../../src/shared/types.ts";
-// @ts-expect-error — script .mjs sem tipos; só as duas funções exportadas são usadas aqui.
 import { remendado } from "../../scripts/remendar-postgres.mjs";
 import { describeIntegracao } from "../helpers/integracao.ts";
 

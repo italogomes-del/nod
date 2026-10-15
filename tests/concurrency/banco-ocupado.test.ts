@@ -33,15 +33,23 @@ describeIntegracao("banco ocupado: prazo para pegar conexão e kill por idle (NO
   it("critério 1: pool max 2 com duas tx em pg_sleep → a 3ª falha com banco_ocupado no prazo, e a fn dela nunca roda", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const dois = pool(2);
-    const presas = [1, 2].map(() => abrirTxEscopada(dois, ESCOPO)((trx) => trx`select pg_sleep(2)`));
-    await esperar(200);
+    const PRAZO_MS = 500;
+    // As duas pegam conexão de verdade antes da 3ª pedir (sinal explícito, não um sleep chutado).
+    let pegaram = 0;
+    let ambasPegaram: () => void = () => {};
+    const ambas = new Promise<void>((r) => (ambasPegaram = r));
+    const presas = [1, 2].map(() => abrirTxEscopada(dois, ESCOPO)(async (trx) => {
+      if (++pegaram === 2) ambasPegaram();
+      return trx`select pg_sleep(${(4 * PRAZO_MS) / 1_000})`;
+    }));
+    await ambas;
     const fn = vi.fn(async () => "rodou");
     const inicio = Date.now();
-    const erro = await abrirTxEscopada(dois, ESCOPO, { prazoConexaoMs: 500 })(fn).catch((e: unknown) => e);
+    const erro = await abrirTxEscopada(dois, ESCOPO, { prazoConexaoMs: PRAZO_MS })(fn).catch((e: unknown) => e);
     const espera = Date.now() - inicio;
     expect(erro).toBeInstanceOf(ErroBancoOcupado);
-    expect(espera).toBeGreaterThanOrEqual(450);
-    expect(espera).toBeLessThan(1_500);
+    expect(espera).toBeGreaterThanOrEqual(PRAZO_MS - 5);
+    expect(espera).toBeLessThan(2 * PRAZO_MS);
     await Promise.all(presas);
     // As conexões liberaram e a conexão que chegou tarde para a 3ª já passou por ela: fn segue sem rodar.
     await esperar(300);
@@ -58,9 +66,10 @@ describeIntegracao("banco ocupado: prazo para pegar conexão e kill por idle (NO
       let fnTerminou: () => void = () => {};
       const terminou = new Promise<void>((r) => (fnTerminou = r));
       const inicio = Date.now();
+      const SONO_MS = 2_500;
       const erroTx = await abrirTxEscopada(p, ESCOPO, { timeouts: { idleNaTx: "1s" } })(async (trx) => {
         fim.pid = (await trx<{ pid: number }[]>`select pg_backend_pid() as pid`)[0]?.pid;
-        await esperar(2_500);
+        await esperar(SONO_MS);
         try {
           fim.rodouDepois = (await trx`select current_setting('nod.tenant_id', true) as t, pg_backend_pid() as pid`)[0];
         } catch (e) {
@@ -70,7 +79,7 @@ describeIntegracao("banco ocupado: prazo para pegar conexão e kill por idle (NO
       }).catch((e: unknown) => e);
       // O Postgres encerrou a sessão (FATAL 25P03) e o begin rejeitou bem antes de fn acordar.
       expect(erroTx).toMatchObject({ code: "CONNECTION_CLOSED" });
-      expect(Date.now() - inicio).toBeLessThan(2_400);
+      expect(Date.now() - inicio).toBeLessThan(SONO_MS);
       await terminou;
       expect(fim.rodouDepois).toBeUndefined();
       expect(fim.erroDepois).toBeInstanceOf(ErroTxEncerrada);
@@ -87,6 +96,27 @@ describeIntegracao("banco ocupado: prazo para pegar conexão e kill por idle (NO
       expect(pids.map((r) => r?.pid)).not.toContain(fim.pid);
     },
   );
+
+  it("revisão do PR #321: a consulta MONTADA com a tx viva e aguardada depois do kill também lança (o postgres.js é preguiçoso)", async () => {
+    const p = pool(1);
+    const fim: { rodou?: unknown; erro?: unknown } = {};
+    let fnTerminou: () => void = () => {};
+    const terminou = new Promise<void>((r) => (fnTerminou = r));
+    const erroTx = await abrirTxEscopada(p, ESCOPO, { timeouts: { idleNaTx: "1s" } })(async (trx) => {
+      const montada = trx`select current_setting('nod.tenant_id', true) as t`;
+      await esperar(2_000);
+      try {
+        fim.rodou = (await montada)[0];
+      } catch (e) {
+        fim.erro = e;
+      }
+      fnTerminou();
+    }).catch((e: unknown) => e);
+    expect(erroTx).toMatchObject({ code: "CONNECTION_CLOSED" });
+    await terminou;
+    expect(fim.rodou).toBeUndefined();
+    expect(fim.erro).toBeInstanceOf(ErroTxEncerrada);
+  });
 
   it("remendo nod:remendo-vaga-do-pool: o COMMIT que o begin cru manda depois do kill não tira a única vaga do pool", async () => {
     // Sem abrirTxEscopada (que segura o callback): o begin do postgres.js direto, como faria qualquer outro chamador.

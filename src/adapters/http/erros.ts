@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { ehErroDeDominio, ErroDeDominio, type CodigoErro } from "../../domain/erro.ts";
 import { redigirECortar } from "../../domain/segredos.ts";
-import { ErroBancoOcupado } from "../../db/tx.ts";
+import { ehTimeoutDaTx, ErroBancoOcupado } from "../../db/tx.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { json } from "./util.ts";
@@ -96,6 +96,13 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
     return;
   }
   const correlationId = contextoAtual()?.correlationId ?? null;
+  if (ehTimeoutDaTx(err)) {
+    // Revisão do PR #321: timeout da tx (57014/55P03/25P02) é o banco sob pressão, não erro de programa: 503 como o
+    // banco_ocupado do prazo de conexão. O sqlstate vai para o log (a causa), nunca a mensagem do driver.
+    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"), causa: String(Reflect.get(Object(err), "code")), correlation_id: correlationId });
+    json(res, 503, { codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: correlationId } satisfies ErroDto);
+    return;
+  }
   log("erro", "falha_interna", {
     erro: err instanceof Error ? err.name : "desconhecido",
     correlation_id: correlationId,

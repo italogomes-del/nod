@@ -287,7 +287,8 @@ describe("txEscopadaOuDoContexto: reusa a tx viva da mesma pessoa (NOD-266, tx a
     const f = dbFalso();
     const outro = dbFalso();
     const p = abrirTxEscopada(f.db, ESCOPO)(async (trx) => {
-      const mesma = await txEscopadaOuDoContexto(f.db, ESCOPO)(async (t) => t === trx);
+      // Mesma pessoa: nem toca o pool (o db aqui lança em qualquer acesso) — roda num savepoint da trx de fora.
+      const mesma = await txEscopadaOuDoContexto(dbQueNaoPodeSerTocado, ESCOPO)(async (t) => t !== trx && typeof t === "function");
       const q = txEscopadaOuDoContexto(outro.db, { tenantId: "t1", pessoaId: "p2" })(async (t) => t === trx);
       await outro.entregar();
       return { mesma, outraPessoa: await q };

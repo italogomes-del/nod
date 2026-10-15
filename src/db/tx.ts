@@ -32,7 +32,7 @@ export interface TimeoutsTx {
   /**
    * idle_in_transaction_session_timeout: a sessão ociosa dentro da tx além disto é ENCERRADA pelo Postgres (FATAL 25P03).
    * definido em 2026-10-15 (NOD-266): 660 s, acima do caminho legítimo mais longo de hoje — o conector roda dentro da tx e a
-   * chamada com arquivo vai até 600 s (CHAMADA_COM_ARQUIVO_MS). Baixa para 60 s quando a NOD-263 tirar o conector da tx.
+   * chamada com arquivo vai até 600 s (CHAMADA_COM_ARQUIVO_MS, src/services/conectores-vivos.ts; tests/unit/db/pool-max.test.ts trava a folga). Baixa para 60 s quando a NOD-263 tirar o conector da tx.
    * Só é seguro ligar porque a `trx` entregue a `fn` é guardada (`guardarTrx`): ver o spike no comentário dela.
    */
   idleNaTx: string;
@@ -77,9 +77,19 @@ export class ErroTxEncerrada extends Error {
   }
 }
 
+/**
+ * Revisão do PR #321: o Postgres aplicando os timeouts da tx — 57014 (statement_timeout), 55P03 (lock_timeout, inclusive
+ * na espera de um pg_advisory_xact_lock) — e a transação que já abortou por eles (25P02). Não é falha do app nem da
+ * pessoa: o HTTP responde 503 banco_ocupado, e quem trata falha de app não grava nada (a tx abortou; gravar daria 25P02).
+ */
+const SQLSTATES_DE_TIMEOUT_DA_TX: ReadonlySet<unknown> = new Set(["57014", "55P03", "25P02"]);
+export function ehTimeoutDaTx(e: unknown): boolean {
+  return typeof e === "object" && e !== null && SQLSTATES_DE_TIMEOUT_DA_TX.has(Reflect.get(e, "code"));
+}
+
 /** Os erros de infra desta camada: quem trata falha de app (ex.: marcarFalha do conector) os relança sem mexer. */
-export function ehErroDeInfraDaTx(e: unknown): e is ErroBancoOcupado | ErroTxEncerrada {
-  return e instanceof ErroBancoOcupado || e instanceof ErroTxEncerrada;
+export function ehErroDeInfraDaTx(e: unknown): boolean {
+  return e instanceof ErroBancoOcupado || e instanceof ErroTxEncerrada || ehTimeoutDaTx(e);
 }
 
 function exigirEscopo(escopo: Escopo): void {
@@ -136,7 +146,7 @@ function guardarTrx(trx: Tx, encerrada: () => boolean): Tx {
   return new Proxy(trx, {
     apply(alvo, este, args: unknown[]) {
       exigirViva();
-      return Reflect.apply(alvo, este, args);
+      return guardarEnvio(Reflect.apply(alvo, este, args), encerrada);
     },
     get(alvo, prop) {
       const valor: unknown = Reflect.get(alvo, prop, alvo);
@@ -144,7 +154,7 @@ function guardarTrx(trx: Tx, encerrada: () => boolean): Tx {
       if (prop === "unsafe" || prop === "file") {
         return (...args: unknown[]) => {
           exigirViva();
-          return Reflect.apply(valor, alvo, args);
+          return guardarEnvio(Reflect.apply(valor, alvo, args), encerrada);
         };
       }
       if (prop === "savepoint") {
@@ -161,6 +171,26 @@ function guardarTrx(trx: Tx, encerrada: () => boolean): Tx {
       return valor;
     },
   });
+}
+
+/**
+ * Revisão do PR #321: a consulta do postgres.js é preguiçosa — `trx\`...\`` só MONTA; ela vai ao handler da conexão
+ * quando alguém a aguarda (`then`/`execute`). Uma consulta montada com a tx viva e aguardada depois do kill passaria pela
+ * checagem da montagem e rodaria na conexão reaberta, fora de transação (tests/concurrency/banco-ocupado.test.ts). A
+ * checagem vale também no ENVIO: o handler da consulta é trocado por um que rejeita com ErroTxEncerrada se a tx acabou.
+ * Fragmentos (`trx\`...\`` dentro de outra consulta) nunca são enviados sozinhos; para eles a troca não tem efeito.
+ */
+function guardarEnvio(consulta: unknown, encerrada: () => boolean): unknown {
+  if (typeof consulta !== "object" || consulta === null) return consulta;
+  const handler: unknown = Reflect.get(consulta, "handler");
+  if (typeof handler !== "function") return consulta;
+  Reflect.set(consulta, "handler", (q: unknown) => {
+    if (!encerrada()) return Reflect.apply(handler, undefined, [q]);
+    const rejeitar: unknown = Reflect.get(consulta, "reject");
+    if (typeof rejeitar === "function") Reflect.apply(rejeitar, consulta, [new ErroTxEncerrada()]);
+    return undefined;
+  });
+  return consulta;
 }
 
 interface TxDoContexto {
@@ -265,12 +295,22 @@ export function abrirTxEscopada(db: Db, escopo: Escopo, opcoes: OpcoesTx = {}): 
  * dentro do caso de uso): reusa a `trx` do contexto em vez de abrir outra. NOD-266: abrir uma segunda tx com a primeira
  * segurando conexão é deadlock de pool quando ele está cheio — a de fora espera a de dentro, que espera uma conexão que
  * a de fora não solta. Escopo diferente (ou fora de tx, ou com a tx do contexto já encerrada) abre a própria, como antes.
+ * O reuso roda num savepoint da trx do contexto.
  */
 export function txEscopadaOuDoContexto(db: Db, escopo: Escopo, opcoes: OpcoesTx = {}): Transacao {
   exigirEscopo(escopo);
   return async <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => {
     const atual = txDoContexto.getStore();
-    if (atual && atual.viva() && atual.escopo.tenantId === escopo.tenantId && atual.escopo.pessoaId === escopo.pessoaId) return fn(atual.trx);
+    if (atual && atual.viva() && atual.escopo.tenantId === escopo.tenantId && atual.escopo.pessoaId === escopo.pessoaId) {
+      // Revisão do PR #321: num SAVEPOINT, para um erro de quem reusa (ex.: o carregador do conector) desfazer só o
+      // trecho dele, sem abortar (25P02) a transação do caso de uso. Não há set_config aqui: o problema do SET LOCAL
+      // que persiste depois do RELEASE (abrirTxEscopada) não se aplica.
+      const caixa: { valor?: T } = {};
+      await atual.trx.savepoint(async (s) => {
+        caixa.valor = await fn(s);
+      });
+      return caixa.valor as T;
+    }
     return abrirTxEscopada(db, escopo, opcoes)(fn);
   };
 }

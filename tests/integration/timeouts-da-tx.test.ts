@@ -1,6 +1,6 @@
 import { afterAll, expect, it } from "vitest";
 import { criarDb } from "../../src/db/client.ts";
-import { abrirTxEscopada, TIMEOUTS_TX } from "../../src/db/tx.ts";
+import { abrirTxEscopada, TIMEOUTS_TX, txEscopadaOuDoContexto } from "../../src/db/tx.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 
@@ -24,6 +24,16 @@ afterAll(async () => {
 const codigoDe = (e: unknown): unknown => (typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined);
 
 describeIntegracao("timeouts da tx escopada (NOD-266)", () => {
+  it("revisão do PR #321: o erro de quem reusa a tx do contexto não envenena a tx de fora (savepoint)", async () => {
+    const resultado = await abrirTxEscopada(umaConexao, ESCOPO)(async (trx) => {
+      const erro = await txEscopadaOuDoContexto(umaConexao, ESCOPO)((t) => t`select 1/0`).catch((e: unknown) => e);
+      // Sem o savepoint, a transação de fora estaria abortada (25P02) e esta consulta falharia.
+      const [r] = await trx<{ t: string }[]>`select current_setting('nod.tenant_id') as t`;
+      return { codigo: codigoDe(erro), tenant: r?.t };
+    });
+    expect(resultado).toEqual({ codigo: "22012", tenant: ESCOPO.tenantId });
+  });
+
   it("critério 3: consulta acima do statement_timeout é cancelada pelo Postgres (57014)", async () => {
     const inicio = Date.now();
     const erro = await abrirTxEscopada(umaConexao, ESCOPO, { timeouts: { statement: "200ms" } })((trx) => trx`select pg_sleep(5)`).catch((e: unknown) => e);

@@ -73,6 +73,16 @@ describe("responderErro registra a recusa no log", () => {
     expect(linhas()).toEqual([expect.objectContaining({ nivel: "aviso", evento: "requisicao_recusada", codigo: "banco_ocupado", status: 503, rota: "/api/t/:id/conversas", correlation_id: cid })]);
   });
 
+  it.each(["57014", "55P03", "25P02"])("revisão do PR #321: timeout da tx (%s) vira 503 banco_ocupado, sem a mensagem do driver", (code) => {
+    const r = resposta();
+    responderErro(r.res, Object.assign(new Error("canceling statement due to lock timeout: segredo-da-linha"), { code }), { metodo: "POST", caminho: "/api/x" });
+    expect(r.status()).toBe(503);
+    expect(r.corpo()).toMatchObject({ codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA });
+    expect(linhas()).toEqual([expect.objectContaining({ nivel: "aviso", evento: "requisicao_recusada", codigo: "banco_ocupado", status: 503, causa: code })]);
+    expect(JSON.stringify(linhas())).not.toContain("segredo-da-linha");
+    expect(JSON.stringify(r.corpo())).not.toContain("segredo-da-linha");
+  });
+
   it("NOD-266: tx_encerrada é falha interna (500), não banco ocupado", () => {
     const r = resposta();
     responderErro(r.res, new ErroTxEncerrada());

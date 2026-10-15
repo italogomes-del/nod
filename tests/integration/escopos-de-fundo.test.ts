@@ -120,7 +120,7 @@ describeIntegracao("paraCadaPessoa com o banco ocupado (NOD-266)", () => {
         visitadas.push(escopo.pessoaId);
         if (escopo.pessoaId === "b") throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000);
       },
-      { listarPessoas: async () => pessoas, aoFalhar: (escopo, e) => falhas.push(`${escopo.pessoaId}:${e instanceof Error ? e.name : "?"}`) },
+      { listarPessoas: async () => pessoas, aoFalhar: (escopo, e) => falhas.push(`${escopo.pessoaId}:${e instanceof Error ? e.name : "?"}`), sortearInicio: () => 0 },
     );
     expect(visitadas).toEqual(["a", "b"]);
     expect(falhas).toEqual(["b:ErroBancoOcupado"]);
@@ -135,8 +135,29 @@ describeIntegracao("paraCadaPessoa com o banco ocupado (NOD-266)", () => {
         visitadas.push(escopo.pessoaId);
         if (escopo.pessoaId === "b") throw new Error("qualquer");
       },
-      { listarPessoas: async () => pessoas, aoFalhar: () => {} },
+      { listarPessoas: async () => pessoas, aoFalhar: () => {}, sortearInicio: () => 0 },
     );
     expect(visitadas).toEqual(["a", "b", "c"]);
+  });
+
+  it("revisão do PR #321: a volta começa num ponto sorteado e dá a volta — quem está no fim da lista não fica sempre de fora", async () => {
+    const pessoas = ["a", "b", "c"].map((id) => ({ tenantId: TENANT_PADRAO, id }));
+    const visitadas: string[] = [];
+    await paraCadaPessoa(
+      db,
+      async (escopo) => {
+        visitadas.push(escopo.pessoaId);
+        if (escopo.pessoaId === "a") throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000);
+      },
+      { listarPessoas: async () => pessoas, aoFalhar: () => {}, sortearInicio: () => 2 },
+    );
+    // Começou em "c" (o último), deu a volta e parou no banco_ocupado de "a".
+    expect(visitadas).toEqual(["c", "a"]);
+    // O default sorteia: em várias voltas, todas as posições aparecem como início.
+    const inicios = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      await paraCadaPessoa(db, async (escopo) => { inicios.add(escopo.pessoaId); throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 1); }, { listarPessoas: async () => pessoas, aoFalhar: () => {} });
+    }
+    expect([...inicios].sort()).toEqual(["a", "b", "c"]);
   });
 });

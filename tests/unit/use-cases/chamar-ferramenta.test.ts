@@ -284,6 +284,8 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
   it.each([
     ["banco_ocupado", () => new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000)],
     ["tx_encerrada", () => new ErroTxEncerrada()],
+    ["statement_timeout (57014)", () => Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
+    ["lock_timeout (55P03)", () => Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })],
   ])("NOD-266: %s durante a chamada é falha nossa, não do app — relança sem marcarFalha nem negação", async (_nome, erro) => {
     const c = await cenario({ responder: () => { throw erro(); } });
     const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
