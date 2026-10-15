@@ -55,7 +55,7 @@ export type EntradaDespacharTurno = {
   cota?: readonly CotaDaIa[];
 };
 
-export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel";
+export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel" | "ligacao_encerrada";
 export type SaidaDespacharTurno = { plano: PlanoTurno; turno: Turno; motivo: null } | { plano: null; turno: Turno | null; motivo: MotivoSemPlano };
 
 /**
@@ -84,6 +84,22 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
   const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
+
+  // Auditoria A3 (definido em 2026-10-15): o turno-cérebro de uma ligação que já acabou (a pessoa desligou, o prazo do
+  // primeiro cérebro venceu, o deploy encerrou) antes de alguma máquina pegá-lo. O plano recusaria com estado_invalido,
+  // a ponte desfaria a reivindicação e o mesmo turno voltaria a cada puxar — a ligação passa na frente de tudo, então a
+  // máquina com voz não recebia mais nada. Assenta aqui, na mesma tx, e o próximo puxar segue a fila. Só este caso: um
+  // erro de domínio qualquer no plano continua desfazendo a reivindicação.
+  if (turno.origem === "ligacao") {
+    const ligacao = turno.ligacaoId ? await deps.repos.ligacoes.buscar(turno.ligacaoId) : null;
+    if (!ligacao || (ligacao.estado !== "chamando" && ligacao.estado !== "em_curso")) {
+      const assentado = await encerrarCerebroSemLigacao(deps, turno, executor, agora);
+      // Revisão do PR #316: sem o `interromper` assentar, devolver `plano: null` comitaria a reivindicação e o turno
+      // ficaria `despachando` nesta máquina sem plano até o varredor de lease. Lança: a tx desfaz, como antes da A3.
+      if (assentado.events.length === 0) throw new ErroDeDominio("estado_invalido", { cause: "turno-cérebro sem ligação não assentou depois da reivindicação" });
+      return assentado;
+    }
+  }
 
   const paradaConversa = await deps.repos.paradas.ativa(pessoaId, turno.conversaId);
   if (paradaConversa === null) throw new ErroDeDominio("estado_invalido", { cause: "consulta de parada falhou depois da reivindicação" });
@@ -140,6 +156,27 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     throw e;
   }
 };
+
+/** Auditoria A3: a regra que assenta o turno-cérebro de uma ligação que já acabou (autoria do evento). */
+export const REGRA_CEREBRO_SEM_LIGACAO = "regra:cerebro-sem-ligacao" as const;
+
+/**
+ * Auditoria A3: o turno-cérebro sem ligação viva sai `interrompido`. `parado_pela_pessoa` porque o enum de motivos não
+ * tem outro que sirva (o mesmo critério do varredor de órfãos, NOD-219); a causa vai no evento. Sem mensagem na conversa:
+ * a linha "Chat de voz" já diz como a ligação terminou.
+ */
+export async function encerrarCerebroSemLigacao(deps: Deps, turno: Turno, executor: Executor, agora: number): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] }> {
+  // Revisão do PR #316: no despacho o turno já foi reivindicado (`despachando`); no fim da ligação, `pendente`. Lido antes
+  // do `interromper` (o repo em memória muda o mesmo objeto).
+  const estava = turno.estado;
+  const interrompido = await deps.repos.turnos.interromper(turno.id, "parado_pela_pessoa");
+  log("info", "cerebro_sem_ligacao", { turno_id: turno.id, ligacao_id: turno.ligacaoId ?? null });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor, decididoPor: REGRA_CEREBRO_SEM_LIGACAO });
+  return {
+    data: { plano: null, turno: interrompido ?? turno, motivo: "ligacao_encerrada" },
+    events: interrompido ? [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", causa: "ligacao_encerrada", estava, ligacao_id: turno.ligacaoId ?? null } })] : [],
+  };
+}
 
 async function semContaNaMaquina(
   deps: Deps,

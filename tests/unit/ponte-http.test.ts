@@ -459,6 +459,59 @@ describe("NOD-199: anúncio só de inventário no servidor", () => {
     await chamar("conectar", { ...base, harnesses: { "claude-cli": pronto } });
     expect(plataformas).toEqual([["m1", "linux"], ["m1", "darwin"]]);
   });
+  it("auditoria A2: a máquina que volta entre 60 e 90 s de silêncio recebe 409 no puxar (o cliente reconecta) e, reanunciada, volta a receber turno", async () => {
+    const { p, chamar, relogio } = montar();
+    await chamar("conectar", base);
+    relogio.agora += 61_000;
+    await p.varrer();
+    // O varredor rebaixou o inventário; a conexão só some aos 90 s. Antes, o puxar respondia 200 sem nunca reservar.
+    expect(p.inventario(escopo.pessoaId).estado).toBe("ausente");
+    await expect(chamar("puxar")).rejects.toThrow("estado_invalido");
+    relogio.agora += 5_000;
+    await expect(chamar("puxar")).rejects.toThrow("estado_invalido");
+    // O 409 vira `reconectar` no cliente, que manda o anúncio pelo `conectar`: o inventário volta e o puxar reserva.
+    expect(await chamar("conectar", base)).toMatchObject({ status: 200 });
+    expect(p.inventario(escopo.pessoaId).estado).toBe("pronto");
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: { turnoId } } });
+  });
+
+  it("auditoria A2: o anúncio pela rota de inventário também devolve a conexão rebaixada; com menos de 60 s nada muda", async () => {
+    const { p, chamar, relogio } = montar();
+    await chamar("conectar", base);
+    relogio.agora += 59_000;
+    await p.varrer();
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: { turnoId } } });
+    await chamar("entregar", entregaDe);
+    relogio.agora += 61_000;
+    await p.varrer();
+    await expect(chamar("puxar")).rejects.toThrow("estado_invalido");
+    expect(await chamar("inventario", base)).toEqual({ status: 200, body: { ok: true } });
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: { turnoId } } });
+  });
+
+  it("auditoria A4: o processo que voltou em menos de 90 s com planos órfãos conecta — o servidor descarta o que ele não roda", async () => {
+    const { p, chamar, relogio } = montar();
+    await chamar("conectar", base);
+    expect(await chamar("puxar")).toEqual({ status: 200, body: { plano: { turnoId } } });
+    // O processo morreu sem `desconectar` (SIGKILL) e o novo conecta logo: lista vazia = não roda nada.
+    relogio.agora += 5_000;
+    expect(await chamar("conectar", { ...base, turnosEmAndamento: [] })).toMatchObject({ status: 200 });
+    // O plano órfão saiu: a entrega dele (sem token de adoção) é recusada, e o próximo conectar não recusa mais.
+    await expect(chamar("entregar", entregaDe)).rejects.toThrow("nao_permitido");
+    expect(await chamar("conectar", base)).toMatchObject({ status: 200 });
+    expect(p.inventario(escopo.pessoaId).estado).toBe("pronto");
+  });
+
+  it("auditoria A4: o turno que o cliente ainda roda fica no conectar (a entrega casa); lista fora do formato segue a regra antiga", async () => {
+    const { chamar, entregues } = montar();
+    await chamar("conectar", base);
+    await chamar("puxar");
+    expect(await chamar("conectar", { ...base, turnosEmAndamento: [turnoId] })).toMatchObject({ status: 200 });
+    expect(await chamar("entregar", entregaDe)).toEqual({ status: 200, body: { ok: true } });
+    expect(entregues).toEqual([turnoId]);
+    await chamar("puxar");
+    for (const lixo of ["x", ["nao-uuid"], Array.from({ length: 65 }, () => turnoId)]) await expect(chamar("conectar", { ...base, turnosEmAndamento: lixo })).rejects.toThrow("estado_invalido");
+  });
 });
 
 describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
