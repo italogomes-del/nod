@@ -3,6 +3,9 @@ import { CORES_AGENTE, FORMAS_AGENTE, type CorAgente, type FormaAgente } from ".
 export const FORMAS: readonly FormaAgente[] = FORMAS_AGENTE;
 export const CORES: readonly CorAgente[] = CORES_AGENTE;
 
+/** EMENDA 17: o nome de quem nasce sem nome; o modelo propõe outro pelo atualizar_perfil (bot com ele não está confirmado). */
+export const NOME_INICIAL = "Novo agente";
+
 /** Round-robin sem repetir enquanto houver forma livre. */
 export function proximaForma(usadas: readonly FormaAgente[]): FormaAgente {
   return FORMAS.find((f) => !usadas.includes(f)) ?? "shape-square";

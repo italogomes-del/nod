@@ -273,6 +273,16 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraAgente(l) : null;
     },
 
+    /**
+     * definido em 2026-10-13 (revisão do PR #309, ADR-104): a trava dos NOMES de bot do tenant até o fim da transação.
+     * O criar_bots confere a unicidade lendo os nomes e só depois cria; dois pedidos juntos (duas conversas, ou a pessoa e
+     * um bot) leriam o mesmo antes e criariam o mesmo nome duas vezes. Com a trava, o segundo espera o primeiro commitar
+     * e já vê os nomes dele. Sem índice único: nomes legados repetidos existem e o criarAgente da tela não confere.
+     */
+    async travarNomesDeBots(): Promise<void> {
+      await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext('nomes_de_bot'))`;
+    },
+
     /** O Nod da pessoa (sem trava), excluído ou não; null = ainda não existe. */
     async buscarNod(): Promise<Agente | null> {
       const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from agentes

@@ -19,7 +19,16 @@ export function ehNod(a: Pick<Agente, "papel"> | null | undefined): boolean {
   return a?.papel === "nod";
 }
 
-/** O nome "Nod" é do bot fixo: nenhum outro bot da pessoa pode se chamar assim (sem diferenciar maiúsculas). */
+/**
+ * O nome comparado como a pessoa lê: NFKC (letras de largura cheia e afins viram as comuns), sem os caracteres
+ * invisíveis de formato (largura zero, marcas de direção), sem caixa e com os espaços colapsados. revisto em 2026-10-13
+ * (revisão do PR #309): era só trim + minúsculas, e "Ｎｏｄ" ou "N\u200Bod" passavam pela reserva e pela unicidade.
+ */
+export function chaveDoNome(nome: string): string {
+  return nome.normalize("NFKC").replace(/\p{Cf}/gu, "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** O nome "Nod" é do bot fixo: nenhum outro bot da pessoa pode se chamar assim (comparado por chaveDoNome). */
 export function nomeReservadoAoNod(nome: string): boolean {
-  return nome.trim().toLowerCase() === NOME_DO_NOD.toLowerCase();
+  return chaveDoNome(nome) === chaveDoNome(NOME_DO_NOD);
 }

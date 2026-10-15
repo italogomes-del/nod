@@ -57,7 +57,7 @@ const rotinas = [
 /** O kit de um bot de conversa completo: colegas, rotinas, apps, computador, pasta, artefato e pendência. */
 const kitConversa = [
   f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"),
-  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"),
+  f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"), f("criar_bots"),
   daOrigem("computador_observar", "computador"), daOrigem("workspace_propor_pasta", "workspace"),
   doConector(conectorTarefas, "TAREFAS_LISTAR"),
 ];
@@ -135,7 +135,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 5. Criação de bot (ADR-050): perfil vazio.
   "criacao-de-bot": {
     agente: { nome: "Novo agente", titulo: "", descricao: "" },
-    ferramentas: [f("atualizar_perfil"), f("ver_colegas"), f("pedir_a_bot"), f("criar_rotina"), f("pedir_acesso"), f("pedir_aprovacao")],
+    ferramentas: [f("atualizar_perfil"), f("ver_colegas"), f("pedir_a_bot"), f("criar_rotina"), f("pedir_acesso"), f("pedir_aprovacao"), f("criar_bots")],
     pessoaNome: "Pessoa Exemplo",
     modo: "criacao",
     colegas,

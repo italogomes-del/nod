@@ -33,6 +33,8 @@ const NOD: Record<string, string> = {
   devolver_resumo: "Devolveu o resumo",
   // ADR-099 (parte 2): o Nod roda o comando e acorda o bot quando ele termina.
   esperar_comando: "Deixou um comando esperando por ele",
+  // NOD-210 (ADR-104): um bot comum cria outros bots quando a pessoa pede.
+  criar_bots: "Criou bots",
 };
 
 /**

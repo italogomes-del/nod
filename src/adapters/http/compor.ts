@@ -134,6 +134,7 @@ import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTa
 import { meChameAs } from "../../use-cases/me-chame-as.ts";
 import { esperarComando } from "../../use-cases/esperar-comando.ts";
 import { gerirBots } from "../../use-cases/gerir-bots.ts";
+import { criarBots } from "../../use-cases/criar-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../use-cases/nod.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { IaNoMac } from "../../contracts/onboarding.ts";
@@ -264,6 +265,8 @@ export function comporApp(o: OpcoesCompor): App {
   const aFazer = aFazerLigado(env.NOD_PENDENCIAS);
   // definido em 2026-10-07 (ADR-082): as mãos do Nod ligadas por padrão; NOD_GERIR_BOTS=0 as tira do catálogo sem deploy de código.
   const semFerramentasDoNod = env.NOD_GERIR_BOTS?.trim() === "0";
+  // definido em 2026-10-13 (ADR-104, revisão do PR #309): o mesmo interruptor para o criar_bots dos bots comuns.
+  const semCriarBots = env.NOD_CRIAR_BOTS?.trim() === "0";
   const compartilhado = env.NOD_MODO === "compartilhado";
   const relogio: Relogio = o.relogio ?? (() => Date.now());
   // Executor da máquina: nasce de NOD_EXECUTOR e muda pelo interruptor (trocarExecutor). Quem precisa dele lê o valor VIVO
@@ -321,7 +324,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -440,7 +443,7 @@ export function comporApp(o: OpcoesCompor): App {
         const daPonte = compartilhado || maquinaDaPonte(d.escopo, machineIdDoPlano);
         const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: !daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
-          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod,
+          harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod, semCriarBots,
           maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
           ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(d.escopo, machineIdDoPlano) } : {}) });
         if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
@@ -479,7 +482,7 @@ export function comporApp(o: OpcoesCompor): App {
       const inventario: Inventario = visto?.estado === "pronto" ? visto : { estado: "pronto", versao: "adotado", em: relogio() };
       const r = await emitirPlanoTurno(d, {
         turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
-        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, aFazer, semFerramentasDoNod,
+        harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, aFazer, semFerramentasDoNod, semCriarBots,
         maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
         ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(escopo, t.machineId) } : {}),
         recompor: { tokenDeTurno: token, harness: c.harness },

@@ -469,6 +469,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         a.oculto = oculto;
         return a;
       },
+      // ADR-104: sem concorrência na memória, a trava dos nomes não faz nada.
+      async travarNomesDeBots() {},
       // ADR-081: sem concorrência na memória, travar é só buscar.
       async travarNod() {
         return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;

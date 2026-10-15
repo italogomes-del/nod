@@ -129,6 +129,13 @@ export const FERRAMENTAS_NOD_ONBOARDING: readonly NomeFerramentaNod[] = ["anotar
 export const FERRAMENTAS_DO_NOD: readonly NomeFerramentaNod[] = ["gerir_bots", "ver_apps_conectados", "registrar_relato"];
 const MODOS_DAS_MAOS_DO_NOD: readonly ModoTurno[] = ["conversa", "criacao"];
 
+/**
+ * definido em 2026-10-13 (NOD-210, ADR-104): criar_bots é dos bots comuns, nos mesmos modos em que a pessoa fala com o
+ * bot (conversa, criação). O Nod fica com gerir_bots, que já cria; rotina, sala, ligação e pedido de colega não criam
+ * bots. O caso de uso confere de novo (criar-bots.ts).
+ */
+export const FERRAMENTA_CRIAR_BOTS: NomeFerramentaNod = "criar_bots";
+
 export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
 export const REGRA_MONTAGEM = "regra:montagem-ferramentas" as const;
@@ -229,6 +236,8 @@ export type EntradaPlano = {
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
   /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
   semFerramentasDoNod?: boolean;
+  /** ADR-104 (revisão do PR #309): NOD_CRIAR_BOTS=0 tira criar_bots do catálogo dos bots comuns, o mesmo interruptor. */
+  semCriarBots?: boolean;
   agora: number;
 };
 
@@ -248,13 +257,14 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
   const doNod = ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semFerramentasDoNod ? FERRAMENTAS_DO_NOD : [];
+  const criaBots: readonly NomeFerramentaNod[] = !ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semCriarBots ? [FERRAMENTA_CRIAR_BOTS] : [];
   const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true, harness: entrada.harness ?? null });
   // definido em 2026-10-12 (ADR-099, parte 2): esperar_comando entra onde o bot espera com tempo (os modos do me_chame_as)
   // E tem terminal — o comando roda pelas regras do Bash dele, na máquina e na pasta do turno. Sem terminal (Codex, sala,
   // ligação), não há onde rodar: fica o me_chame_as.
   const esperaComando: readonly NomeFerramentaNod[] = nativas.includes("Bash") && FERRAMENTAS_NOD_POR_MODO[modo].includes("me_chame_as") ? ["esperar_comando"] : [];
   const frente = ehFrente(entrada.trabalho);
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod]
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots]
     .filter((n) => entrada.aFazer === true || !FERRAMENTAS_PENDENCIA.includes(n))
     .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
     .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))

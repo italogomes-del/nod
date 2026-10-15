@@ -16,6 +16,7 @@ import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-c
 import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../src/use-cases/frentes.ts";
 import { meChameAs } from "../../src/use-cases/me-chame-as.ts";
 import { esperarComando } from "../../src/use-cases/esperar-comando.ts";
+import { criarBots } from "../../src/use-cases/criar-bots.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
@@ -136,6 +137,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     mandarParaFrente,
     devolverResumo,
     esperarComando,
+    criarBots,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

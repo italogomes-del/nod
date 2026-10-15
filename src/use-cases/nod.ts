@@ -25,14 +25,23 @@ export const MENSAGENS_NO_RELATO_DO_NOD = 10;
 
 const MODOS_DA_PESSOA = new Set(["conversa", "criacao"]);
 
-/** O turno é do Nod da pessoa e é a pessoa falando com ele; null = a ferramenta recusa com `fora_da_conversa`. */
-export async function turnoDoNodComAPessoa(deps: Deps, ctx: ContextoFerramenta): Promise<{ agente: Agente; turno: Turno } | null> {
+/**
+ * O turno é de um bot da pessoa (o Nod, com `nod`; um bot comum, sem) e é a pessoa falando com ele (conversa ou
+ * criação); null = a ferramenta recusa com `fora_da_conversa`. revisto em 2026-10-13 (revisão do PR #309): o mesmo
+ * portão serve ao criar_bots dos bots comuns, em vez de uma cópia.
+ */
+export async function turnoComAPessoa(deps: Deps, ctx: ContextoFerramenta, quem: "nod" | "bot_comum"): Promise<{ agente: Agente; turno: Turno } | null> {
   const [agente, turno] = await Promise.all([deps.repos.agentes.buscar(ctx.agenteId), deps.repos.turnos.buscar(ctx.turnoId)]);
-  if (!agente || !ehNod(agente) || agente.ownerId !== deps.escopo.pessoaId) return null;
+  if (!agente || ehNod(agente) !== (quem === "nod") || agente.ownerId !== deps.escopo.pessoaId) return null;
   if (!turno || turno.agenteId !== agente.id) return null;
   const modo = ctx.plano?.modoTurno ?? (turno.origem === "conversa" ? "conversa" : null);
   if (!modo || !MODOS_DA_PESSOA.has(modo)) return null;
   return { agente, turno };
+}
+
+/** O turno é do Nod da pessoa e é a pessoa falando com ele; null = a ferramenta recusa com `fora_da_conversa`. */
+export function turnoDoNodComAPessoa(deps: Deps, ctx: ContextoFerramenta): Promise<{ agente: Agente; turno: Turno } | null> {
+  return turnoComAPessoa(deps, ctx, "nod");
 }
 
 /** Os apps que a PESSOA conectou (conector dela, habilitado) e os níveis de acesso que cada um permite. */

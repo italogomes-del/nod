@@ -60,6 +60,8 @@ export type EntradaEmitirPlano = {
   aFazer?: boolean;
   /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
   semFerramentasDoNod?: boolean;
+  /** ADR-104: NOD_CRIAR_BOTS=0 tira criar_bots do catálogo. */
+  semCriarBots?: boolean;
   /** ADR-090: nome e plataforma da máquina do turno, do anúncio dela (só no modo compartilhado). Ausente = Mac. */
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   /**
@@ -338,6 +340,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pendencias,
     aFazer: input.aFazer === true,
     semFerramentasDoNod: input.semFerramentasDoNod === true,
+    semCriarBots: input.semCriarBots === true,
     pastasAutorizadas: pastas !== null,
     // ADR-052: o kit do terminal é do Claude Code real (o driver do Codex não tem hook do nod).
     // ADR-072: a ligação não tem terminal (fala com a pessoa ao vivo; trabalho pesado vai por iniciar_tarefa).
