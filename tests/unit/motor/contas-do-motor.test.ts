@@ -83,9 +83,9 @@ describe("contas do motor (ADR-102)", { timeout: 20_000 }, () => {
     expect(m.reanuncios).toBeGreaterThan(0);
     // A conta entrou na pasta de sempre (a primeira do Claude nesta máquina), com o apelido para o anúncio.
     expect(m.contas.anuncio()).toEqual([expect.objectContaining({ impressao: impressaoEsperada, ia: "claude-cli", estado: "pronta", apelidoSugerido: "Leapy" })]);
-    // O e-mail nunca vai ao anúncio nem ao arquivo da lista.
-    expect(JSON.stringify(m.contas.anuncio())).not.toContain("leapy.com.br");
-    expect(await readFile(m.arquivo, "utf8")).not.toContain("leapy.com.br");
+    // ADR-105: o e-mail vai no anúncio (para a tela de Provedores), nunca ao arquivo da lista.
+    expect(m.contas.anuncio()[0]!.email?.toLowerCase()).toContain("leapy.com.br");
+    expect((await readFile(m.arquivo, "utf8")).toLowerCase()).not.toContain("leapy.com.br");
   });
 
   it("código errado: o login falha com a causa do CLI e nada fica pela metade", async () => {

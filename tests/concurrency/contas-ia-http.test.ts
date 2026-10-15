@@ -50,6 +50,21 @@ describeIntegracao("contas de IA pela ponte e pela tela (ADR-102, HTTP real)", (
     expect(JSON.stringify(lista)).not.toContain("@");
   });
 
+  it("ADR-105: a conta que já existia ganha o e-mail no anúncio seguinte; anúncio sem e-mail não apaga; organização nova vale", async () => {
+    const anunciar = (a: Record<string, unknown>) => pedir("conectar", { nome: "vm-bots", plataforma: "linux", versaoContrato: 1, inventario, contas: [conta(IMP_A, a), conta(IMP_B, { ia: "codex-cli", plano: "x@y.com" })] });
+    const daA = async () => (await srv.json<ContasIaDto>("GET", "contas-ia")).contas.find((c) => c.impressao === IMP_A)!;
+    expect(await daA()).toMatchObject({ email: null, organizacao: null });
+    expect((await anunciar({ email: "marlon@leapy.com.br", organizacao: "Leapy" })).status).toBe(200);
+    expect(await daA()).toMatchObject({ apelido: "Pessoal", email: "marlon@leapy.com.br", organizacao: "Leapy" });
+    // Máquina antiga, ou conta ainda não relida: sem os campos, o servidor mantém.
+    expect((await anunciar({})).status).toBe(200);
+    expect(await daA()).toMatchObject({ email: "marlon@leapy.com.br", organizacao: "Leapy" });
+    expect((await anunciar({ email: "marlon@leapy.com.br", organizacao: "Leapy SA" })).status).toBe(200);
+    expect(await daA()).toMatchObject({ email: "marlon@leapy.com.br", organizacao: "Leapy SA" });
+    const outra = (await srv.json<ContasIaDto>("GET", "contas-ia")).contas.find((c) => c.impressao === IMP_B)!;
+    expect(outra).toMatchObject({ email: null, organizacao: null });
+  });
+
   it("as rotas da lista validam a entrada e não deixam outra pessoa mexer", async () => {
     const { contas } = await srv.json<ContasIaDto>("GET", "contas-ia");
     const [a, b] = contas;

@@ -11,7 +11,7 @@ import { planoNaTela } from "./contas-ia.ts";
  * Seu espaço › Provedores de IA, a lista única (definido em 2026-10-13, ADR-102; protótipos G1 e CM1-A aprovados pelo
  * Marlon). Uma linha por conta, sem agrupar por provedor, na ordem de uso (arrasta-se pela alça; a ordem vai a
  * `PUT contas-ia/ordem`). Cada linha: o logo, "Claude · apelido", o plano, o selo Corporativa, o e-mail e a organização
- * (só quando a página roda no app do Mac que conhece a conta, ADR-019) e uma pílula por máquina: logada, ou "Entrar na
+ * (do servidor desde 2026-10-15, ADR-105, em qualquer máquina) e uma pílula por máquina: logada, ou "Entrar na
  * <máquina>" tracejada. O ⋯ abre Renomear, Detalhes, Sair de cada máquina e Remover de todas. Os cliques
  * (`data-act="cl-…"`) são de web/lib/contas-da-pessoa.ts; o render não guarda nada.
  */
@@ -73,9 +73,13 @@ const ehEsteMac = (m: MaquinaDto, x: ContextoContas) => x.noApp && x.detalhes?.m
 const noLimite = (c: ContaIa, agora: number) => c.noLimiteAte !== null && c.noLimiteAte > agora;
 const prontaEm = (c: ContaIa, maquinaId: string) => c.maquinas.some((v) => v.maquinaId === maquinaId && v.estado === "pronta");
 
-/** O e-mail e a organização da conta, se este Mac a conhece (pela impressão). */
-function detalheDe(c: ContaIa, x: ContextoContas): DetalheDaConta | null {
-  return x.detalhes?.contas.find((d) => d.impressao === c.impressao && d.ia === c.ia) ?? null;
+/**
+ * O e-mail e a organização da conta. ADR-105: vêm do servidor, que guarda o último que alguma máquina anunciou; o app do
+ * Mac que conhece a conta tem o que o CLI disse agora (pela impressão) e ganha, por ser o mais novo.
+ */
+function identidadeDe(c: ContaIa, x: ContextoContas): { email: string | null; organizacao: string | null } {
+  const d: DetalheDaConta | undefined = x.detalhes?.contas.find((y) => y.impressao === c.impressao && y.ia === c.ia);
+  return d ? { email: d.email, organizacao: d.organizacao } : { email: c.email, organizacao: c.organizacao };
 }
 
 /** A conta que os bots usam agora: a primeira fora do limite (na máquina do filtro, se há filtro). */
@@ -192,7 +196,7 @@ function menu(c: ContaIa, x: ContextoContas): string {
     </div>`;
 }
 
-function detalhes(c: ContaIa, x: ContextoContas, d: DetalheDaConta | null): string {
+function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; organizacao: string | null }): string {
   const maqs = c.maquinas.map((v) => {
     const m = x.maquinas.find((y) => y.id === v.maquinaId);
     const estado = v.estado === "pronta" ? "logada" : v.estado === "sem_login" ? "o login venceu" : "sem acesso";
@@ -205,7 +209,7 @@ function detalhes(c: ContaIa, x: ContextoContas, d: DetalheDaConta | null): stri
       <dl>
         <dt>Provedor</dt><dd>${esc(PROVEDOR[c.ia].nome)}, pelo ${esc(PROVEDOR[c.ia].cli)}</dd>
         <dt>Plano</dt><dd>${esc(c.plano ? planoNaTela(c.plano) : "o CLI não disse")}${c.corporativa ? " · corporativa" : ""}</dd>
-        ${d ? `<dt>Conta</dt><dd>${esc([d.email, d.organizacao].filter(Boolean).join(" · "))}</dd>` : ""}
+        ${d.email || d.organizacao ? `<dt>Conta</dt><dd>${esc([d.email, d.organizacao].filter(Boolean).join(" · "))}</dd>` : ""}
         <dt>Máquinas</dt><dd>${maqs ? `<ul>${maqs}</ul>` : "nenhuma ainda"}</dd>
       </dl>
       ${optin}
@@ -216,7 +220,7 @@ function detalhes(c: ContaIa, x: ContextoContas, d: DetalheDaConta | null): stri
 function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null): string {
   const filtro = x.ui.filtro;
   const fora = filtro !== null && !prontaEm(c, filtro);
-  const d = detalheDe(c, x);
+  const d = identidadeDe(c, x);
   const nome = nomeDaContaNaTela(c);
   const [classe, estado] = noLimite(c, x.agora)
     ? ["e-limite", `No limite até ${hora(c.noLimiteAte!)}`]

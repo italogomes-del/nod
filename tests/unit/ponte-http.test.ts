@@ -667,6 +667,16 @@ describe("validação das contas anunciadas (ADR-102, revisão do PR #306)", () 
     expect(contasAnunciadas(Array.from({ length: 40 }, (_, i) => ({ impressao: i.toString(16).padStart(64, "0"), ia: "claude-cli", estado: "pronta" })), AGORA_V)).toHaveLength(CONTAS_ANUNCIADAS_MAX);
   });
 
+  it("ADR-105: e-mail e organização passam pelos normalizadores da máquina; fora do formato, o campo some (a conta fica)", () => {
+    const r = contasAnunciadas([
+      { impressao: imp, ia: "claude-cli", estado: "pronta", email: "  marlon@leapy.com.br ", organizacao: "Leapy\n  SA" },
+      { impressao: "b".repeat(64), ia: "codex-cli", estado: "pronta", email: "sem arroba", organizacao: "x".repeat(81) },
+      { impressao: "c".repeat(64), ia: "codex-cli", estado: "pronta", email: `${"a".repeat(250)}@y.com`, organizacao: 42 },
+    ], AGORA_V)!;
+    expect(r.map((c) => [c.email, c.organizacao])).toEqual([["marlon@leapy.com.br", "Leapy SA"], [undefined, undefined], [undefined, undefined]]);
+    expect(r[1]).not.toHaveProperty("email");
+  });
+
   it("progresso do login e impressões: formato fechado", () => {
     const loginId = "11111111-1111-4111-8111-111111111111";
     expect(progressoDoLogin({ loginId, fase: "pronto", impressao: imp })).toEqual({ loginId, fase: "pronto", impressao: imp });

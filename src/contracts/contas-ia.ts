@@ -2,8 +2,9 @@ import type { EpochMs } from "./ids.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102). O servidor guarda a lista (apelido,
- * plano, ordem, limite) e, por máquina, se a conta está logada nela. E-mail e organização nunca chegam aqui: a máquina
- * manda só a impressão (sha256) da conta (ADR-019, ADR-102 item 4).
+ * plano, ordem, limite) e, por máquina, se a conta está logada nela. A chave da conta é a impressão (sha256, ADR-102
+ * item 4). Desde 2026-10-15 (ADR-105) o e-mail e a organização também chegam, só para a tela dizer qual conta é qual:
+ * nada autoriza nem casa conta por eles (ADR-019 regra 2).
  */
 
 /** As IAs que têm conta (as do Mac e da VM). */
@@ -27,6 +28,12 @@ export type ContaAnunciada = {
   logadaEm: EpochMs;
   /** O apelido que a máquina conhece (o do `contas.json` do Mac), usado só quando a conta é nova no servidor. */
   apelidoSugerido?: string;
+  /**
+   * ADR-105: o que o CLI disse da conta. Ausente = a máquina não sabe agora (app ou motor anterior a 2026-10-15, ou a
+   * conta ainda não relida) e o servidor mantém o que já tinha. O Codex não informa organização.
+   */
+  email?: string;
+  organizacao?: string;
 };
 
 /** Teto do anúncio: 6 contas por IA (CONTAS_POR_IA_MAX) nas duas IAs. */
@@ -42,9 +49,12 @@ export type MaquinaDaConta = { maquinaId: string; nome: string; estado: EstadoCo
 export type ContaIa = {
   id: string;
   ia: IaComConta;
-  /** A impressão, para a máquina local casar com o que ela sabe (o e-mail no app do Mac). */
+  /** A impressão, para a máquina local casar com o que ela sabe (qual pasta do Mac é esta conta). */
   impressao: string;
   apelido: string;
+  /** ADR-105: o último e-mail e a organização que alguma máquina anunciou; null = nenhuma disse ainda. */
+  email: string | null;
+  organizacao: string | null;
   plano: string | null;
   corporativa: boolean;
   posicao: number;
