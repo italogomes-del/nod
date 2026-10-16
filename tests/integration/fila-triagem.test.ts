@@ -137,6 +137,33 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     });
   });
 
+  it("NOD-259: o mesmo pedido ainda aberto é recusado (ja_pedido); no teto do par também; abertos({ de }) traz só os do bot, com texto e tarefa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const nDev = await m.nome(m.dev.agenteId);
+      const nLivre = await m.nome(m.livre.agenteId);
+      const t1 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico, { origem: "rotina" })).id, nDev, "Status da NOD-12?")).data);
+      // Outra janela da rotina: o mesmo pedido, com caixa e espaços diferentes.
+      const repetido = await m.pedir(m.chico, (await m.turnoDe(m.chico, { origem: "rotina" })).id, nDev, "status da  nod-12? ");
+      expect(repetido.data).toEqual({ ok: false, erro: "ja_pedido", instrucao: expect.stringContaining(`Você já pediu isso a ${nDev}`) });
+      expect((await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.kind === "handoff")).toHaveLength(1);
+      const t2 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 43.")).data);
+      tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 44.")).data);
+      expect((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 45.")).data).toMatchObject({ ok: false, erro: "ja_pedido" });
+      // Ao Livre passa; e o Livre pedindo ao Dev não entra na lista do Chico.
+      const t5 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nLivre, "Revise o PR 45.")).data);
+      tarefaDoPedido((await m.pedir(m.livre, t5, nDev, "qual branch?")).data);
+      const doChico = await m.repos.pedidosDeColega.abertos(Date.now() - 3_600_000, { de: m.chico.agenteId });
+      expect(doChico.map((p) => p.texto).sort()).toEqual(["Revise o PR 43.", "Revise o PR 44.", "Revise o PR 45.", "Status da NOD-12?"]);
+      expect(doChico.every((p) => p.de === m.chico.agenteId && p.tarefaId !== null && typeof p.criadoEm === "number")).toBe(true);
+      // Respondido um, o par sai do teto.
+      await m.repos.turnos.assentar(t2, { estado: "concluido" });
+      await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "PR 43 ok." });
+      expect((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 45.")).data).toMatchObject({ ok: true, instrucao: expect.stringContaining(`Você já tem 2 pedidos abertos a ${nDev}`) });
+      expect(t1).toBeTruthy();
+    });
+  });
+
   it("rotina vira um turno de triagem na conversa do dono (sem trabalho); as frentes que ela abrir são da rotina, a execução espera o lote e a próxima janela é pulada", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

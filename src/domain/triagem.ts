@@ -38,8 +38,102 @@ export function pessoaEsperaOPedido(deQuemPediu: TurnoDaFaixa | null): boolean {
   return deQuemPediu !== null && !deQuemPediu.trabalhoId && ["conversa", "sala", "ligacao"].includes(deQuemPediu.origem);
 }
 
-/** Um pedido de colega ainda sem resposta: `de` pediu a `para`. */
-export type PedidoAberto = { de: string; para: string };
+/**
+ * Um pedido de colega ainda sem resposta: `de` pediu a `para`. revisto em 2026-10-15 (NOD-259): com o pedido em si —
+ * `tarefaId` (o turno de triagem do `handoff`), `criadoEm` e `texto` (o pedido, sem o contexto). A frente aberta para o
+ * pedido de um colega (a outra fonte da espera circular) não tem pedido próprio: `tarefaId` e `texto` null — ela é o
+ * mesmo pedido que o handoff já conta, e não entra na contagem por par (`pedidosDoPar`).
+ */
+export type PedidoAberto = { de: string; para: string; tarefaId: string | null; criadoEm: number; texto: string | null };
+
+/**
+ * NOD-259: quantos pedidos sem resposta de um bot ao MESMO colega bastam para recusar o próximo (`ja_pedido`). Abaixo
+ * disso o pedido passa com o aviso dos que já estão abertos: pedidos distintos e legítimos ao mesmo colega não travam.
+ */
+export const TETO_PEDIDOS_ABERTOS_POR_PAR = 3;
+
+/** Fuso do horário dos avisos de pedidos abertos quando quem lê não tem outro (NOD-259, suposição da issue). */
+export const FUSO_PEDIDOS_ABERTOS = "America/Sao_Paulo";
+
+/** Quantos pedidos abertos o prompt da rotina e da retomada lista, os mais recentes (NOD-259: lista longa não ajuda). */
+export const MAX_PEDIDOS_NO_PROMPT = 5;
+
+/** NOD-259: "o mesmo pedido" = o mesmo texto em minúsculas, sem espaço nas pontas e com os espaços de dentro colapsados. */
+export function normalizarPedido(texto: string): string {
+  return texto.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Os pedidos de verdade (do handoff) ainda abertos de `de` a `para`, do mais antigo ao mais recente. */
+export function pedidosDoPar(abertos: readonly PedidoAberto[], de: string, para: string): PedidoAberto[] {
+  return abertos.filter((p) => p.tarefaId !== null && p.de === de && p.para === para).sort((a, b) => a.criadoEm - b.criadoEm);
+}
+
+/**
+ * A guarda contra o mesmo pedido repetido (NOD-259): dos pedidos ainda abertos de quem pede ao mesmo alvo, `recusa` se um
+ * tem o mesmo texto (normalizado) ou se já são `TETO_PEDIDOS_ABERTOS_POR_PAR`; `aviso` com 1 ou 2 abertos; `livre` sem
+ * nenhum. `desde` é o mais antigo dos abertos. A espera circular é checada antes e tem precedência.
+ */
+export type RepeticaoDoPedido =
+  | { tipo: "livre" }
+  | { tipo: "aviso"; abertos: number; desde: number }
+  | { tipo: "recusa"; porque: "mesmo_texto" | "teto"; abertos: number; desde: number };
+
+export function repeticaoDoPedido(abertos: readonly PedidoAberto[], remetente: string, alvo: string, texto: string): RepeticaoDoPedido {
+  const doPar = pedidosDoPar(abertos, remetente, alvo);
+  const primeiro = doPar[0];
+  if (!primeiro) return { tipo: "livre" };
+  const base = { abertos: doPar.length, desde: primeiro.criadoEm };
+  const normal = normalizarPedido(texto);
+  if (doPar.some((p) => p.texto !== null && normalizarPedido(p.texto) === normal)) return { tipo: "recusa", porque: "mesmo_texto", ...base };
+  if (doPar.length >= TETO_PEDIDOS_ABERTOS_POR_PAR) return { tipo: "recusa", porque: "teto", ...base };
+  return { tipo: "aviso", ...base };
+}
+
+/** "10:02" no mesmo dia de `agora` (no fuso); "14/10 10:02" em outro dia — um "desde 10:02" de ontem engana. */
+export function horarioDoPedido(instante: number, agora: number, fusoIana: string = FUSO_PEDIDOS_ABERTOS): string {
+  const hora = new Intl.DateTimeFormat("pt-BR", { timeZone: fusoIana, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(instante));
+  const dia = (t: number) => new Intl.DateTimeFormat("pt-BR", { timeZone: fusoIana, day: "2-digit", month: "2-digit" }).format(new Date(t));
+  return dia(instante) === dia(agora) ? hora : `${dia(instante)} ${hora}`;
+}
+
+function quantosPedidos(n: number): string {
+  return n === 1 ? "1 pedido aberto" : `${n} pedidos abertos`;
+}
+
+/** O aviso que vai junto do pedido aceito (NOD-259) quando o mesmo colega já tem pedidos seus sem resposta. */
+export function instrucaoPedidosAbertos(alvoNome: string, abertos: number, desde: string): string {
+  return `Você já tem ${quantosPedidos(abertos)} a ${alvoNome} desde ${desde}, ainda sem resposta; não peça de novo o mesmo — a resposta chega a você num novo turno.`;
+}
+
+/** O que o bot lê quando o pedido é recusado por repetição (NOD-259, `ja_pedido`): nada saiu; o que fazer no lugar. */
+export function instrucaoJaPedido(alvoNome: string, r: { porque: "mesmo_texto" | "teto"; abertos: number }, desde: string): string {
+  const motivo = r.porque === "mesmo_texto"
+    ? `Você já pediu isso a ${alvoNome} (desde ${desde}) e o pedido ainda está sem resposta.`
+    : `Você já tem ${quantosPedidos(r.abertos)} a ${alvoNome} desde ${desde}, ainda sem resposta — o limite é ${TETO_PEDIDOS_ABERTOS_POR_PAR}.`;
+  return `${motivo} Este pedido não foi enviado. Não peça de novo: as respostas chegam a você em novos turnos. Siga com o que você já tem e, se precisar, diga em uma frase o que está esperando de ${alvoNome}.`;
+}
+
+/** Um pedido aberto já com o nome de quem recebe, para o prompt. */
+export type PedidoAbertoNoPrompt = { alvoNome: string; criadoEm: number; texto: string | null };
+
+function resumoDoPedido(texto: string | null): string {
+  if (!texto) return "";
+  const uma = texto.replace(/\s+/g, " ").trim();
+  return uma.length > 80 ? `: ${uma.slice(0, 79)}…` : `: ${uma}`;
+}
+
+/**
+ * O bloco do prompt da rotina e da retomada (NOD-259): os pedidos que este bot fez a colegas e ainda esperam resposta,
+ * com o horário, para ele não pedir de novo o mesmo a cada execução (cada janela da rotina é um fio novo e não via os
+ * pedidos das anteriores). Até `MAX_PEDIDOS_NO_PROMPT`, os mais recentes; sem pedidos, nada (string vazia).
+ */
+export function blocoPedidosAbertos(pedidos: readonly PedidoAbertoNoPrompt[], agora: number, fusoIana: string = FUSO_PEDIDOS_ABERTOS): string {
+  if (pedidos.length === 0) return "";
+  const recentes = [...pedidos].sort((a, b) => b.criadoEm - a.criadoEm).slice(0, MAX_PEDIDOS_NO_PROMPT).reverse();
+  const linhas = recentes.map((p) => `- a ${p.alvoNome}, às ${horarioDoPedido(p.criadoEm, agora, fusoIana)}${resumoDoPedido(p.texto)}`);
+  const mais = pedidos.length > recentes.length ? [`- e mais ${pedidos.length - recentes.length} mais antigos`] : [];
+  return [`Pedidos seus a colegas ainda sem resposta (a resposta chega em um novo turno; não peça de novo o mesmo):`, ...linhas, ...mais].join("\n");
+}
 
 /**
  * Espera circular (ADR-099 item 8): o pedido novo `remetente → alvo` fecha um ciclo se, pelos pedidos abertos, o alvo já

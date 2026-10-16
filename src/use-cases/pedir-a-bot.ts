@@ -5,9 +5,9 @@ import type { Turno } from "../contracts/turno.ts";
 import { entradaDoPedido } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
-import { cicloDoPedido, instrucaoEsperaCircular, instrucaoPedidoRecebido } from "../domain/triagem.ts";
+import { cicloDoPedido, horarioDoPedido, instrucaoEsperaCircular, instrucaoJaPedido, instrucaoPedidoRecebido, instrucaoPedidosAbertos, repeticaoDoPedido } from "../domain/triagem.ts";
 import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, resolverAlvo } from "./apoio-l7.ts";
-import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { JANELA_PEDIDOS_ABERTOS_MS } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 import { ehColega } from "./ver-colegas.ts";
 
@@ -44,11 +44,8 @@ async function mensagensDaPessoa(deps: Deps, turno: Turno): Promise<Mensagem[]> 
   return [principal, ...outras].sort((a, b) => a.criadoEm - b.criadoEm);
 }
 
-/**
- * definido em 2026-10-12 (ADR-099 item 8, I7 revista): só os pedidos deste prazo para cá contam na espera circular — o
- * mesmo do varredor de pedidos parados (24 h). Um handoff mais velho sem resposta não segura ninguém.
- */
-export const JANELA_PEDIDOS_ABERTOS_MS = PRAZO_DECISAO_PADRAO_MS;
+/** A janela dos pedidos abertos (ADR-099 item 8): mora em pedidos-abertos.ts desde o NOD-259, que a usa também no prompt. */
+export { JANELA_PEDIDOS_ABERTOS_MS };
 
 /** Os colegas de quem pediu que estão livres agora (sem turno vivo nem pronto na fila), fora o alvo. */
 async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agora: number): Promise<Agente[]> {
@@ -92,10 +89,19 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   // cruzados (A→B e B→A ao mesmo tempo): o segundo espera o primeiro gravar o handoff e então enxerga o ciclo.
   const agora = deps.agora();
   await deps.repos.pedidosDeColega.travar();
-  const ciclo = cicloDoPedido(await deps.repos.pedidosDeColega.abertos(agora - JANELA_PEDIDOS_ABERTOS_MS), remetente.id, alvo.id);
+  const abertos = await deps.repos.pedidosDeColega.abertos(agora - JANELA_PEDIDOS_ABERTOS_MS);
+  const ciclo = cicloDoPedido(abertos, remetente.id, alvo.id);
   if (ciclo) {
     const nomes = await Promise.all(ciclo.map(async (id) => (id === remetente.id ? remetente.nome : (await deps.repos.agentes.buscar(id))?.nome ?? "um colega")));
     return { data: { ok: false, erro: "espera_circular", instrucao: instrucaoEsperaCircular(nomes) } };
+  }
+  // definido em 2026-10-15 (NOD-259): o mesmo pedido repetido. Cada janela de uma rotina é um fio novo e pedia de novo ao
+  // mesmo colega (19–22 pendentes do Leonardo ao Ze 1 em 24 h, 9 num turno só em 3 s). Ainda dentro da trava, que
+  // serializa os pedidos simultâneos: o mesmo texto de um aberto, ou o teto do par, é recusado (`ja_pedido`); abaixo do
+  // teto o pedido passa com o aviso dos que já esperam resposta.
+  const repeticao = repeticaoDoPedido(abertos, remetente.id, alvo.id, pedido);
+  if (repeticao.tipo === "recusa") {
+    return { data: { ok: false, erro: "ja_pedido", instrucao: instrucaoJaPedido(alvo.nome, repeticao, horarioDoPedido(repeticao.desde, agora)) } };
   }
   const pessoaId = deps.escopo.pessoaId;
   const pessoaNome = (await deps.repos.pessoas.buscar(pessoaId))?.nome ?? "a pessoa";
@@ -141,8 +147,9 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     confianca: "nao_confiavel",
   });
   const livres = await colegasLivres(deps, remetente, alvo.id, agora);
+  const aviso = repeticao.tipo === "aviso" ? instrucaoPedidosAbertos(alvo.nome, repeticao.abertos, horarioDoPedido(repeticao.desde, agora)) : "";
   return {
-    data: { ok: true, tarefa_id: turno.id, instrucao: instrucaoPedidoRecebido(alvo.nome, livres.map((a) => a.nome)), livres: livres.map((a) => ({ id: a.id, nome: a.nome })) },
+    data: { ok: true, tarefa_id: turno.id, instrucao: [aviso, instrucaoPedidoRecebido(alvo.nome, livres.map((a) => a.nome))].filter(Boolean).join(" "), livres: livres.map((a) => ({ id: a.id, nome: a.nome })) },
     events: [
       evento(deps, "mensagem_criada", autoria, { mensagemId: handoff?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
       evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: alvo.id, origem: "delegacao", profundidade: turno.profundidade, remetenteAgenteId: remetente.id, mensagemId: mensagem?.id ?? null }, { conversaId: conversaAlvo.id, turnoId: turno.id }),

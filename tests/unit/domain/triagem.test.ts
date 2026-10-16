@@ -3,7 +3,7 @@ import type { Agente } from "../../../src/contracts/agente.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
-import { cicloDoPedido, ehTriagemDeColega, emTriagem, instrucaoEsperaCircular, instrucaoPedidoRecebido, linhaDaTriagem, pessoaEsperaOPedido } from "../../../src/domain/triagem.ts";
+import { blocoPedidosAbertos, cicloDoPedido, ehTriagemDeColega, emTriagem, horarioDoPedido, instrucaoEsperaCircular, instrucaoJaPedido, instrucaoPedidoRecebido, instrucaoPedidosAbertos, linhaDaTriagem, MAX_PEDIDOS_NO_PROMPT, normalizarPedido, pedidosDoPar, pessoaEsperaOPedido, repeticaoDoPedido, TETO_PEDIDOS_ABERTOS_POR_PAR, type PedidoAberto } from "../../../src/domain/triagem.ts";
 
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Vera", titulo: "", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
@@ -11,6 +11,7 @@ const turno: Turno = { executor: "catcher", tenantId: "t", id: "t1", conversaId:
 const base: EntradaPlano = { turno, agente, memorias: [], concessoes: [], conectores: [], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, aFazer: true, delegacao: { pessoaNome: "Marlon", remetenteNome: "Chico" } };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 const prompt = (e: EntradaPlano) => montarPlano(e).promptSistema;
+const pa = (de: string, para: string, extra: Partial<PedidoAberto> = {}): PedidoAberto => ({ de, para, tarefaId: null, criadoEm: 0, texto: null, ...extra });
 
 describe("triagem na entrada (ADR-099 itens 1a e 8, I7 revista)", () => {
   it("é triagem de colega o turno `delegacao` fora de trabalho; o pedido de antes (task de colega) não é", () => {
@@ -39,18 +40,18 @@ describe("triagem na entrada (ADR-099 itens 1a e 8, I7 revista)", () => {
 
   describe("espera circular", () => {
     it("direta: B já pediu a A, e A pede a B → [B, A]", () => {
-      expect(cicloDoPedido([{ de: "B", para: "A" }], "A", "B")).toEqual(["B", "A"]);
+      expect(cicloDoPedido([pa("B", "A")], "A", "B")).toEqual(["B", "A"]);
     });
     it("em qualquer profundidade: B pediu a C, C pediu a A → [B, C, A]", () => {
-      expect(cicloDoPedido([{ de: "B", para: "C" }, { de: "C", para: "A" }, { de: "X", para: "B" }], "A", "B")).toEqual(["B", "C", "A"]);
+      expect(cicloDoPedido([pa("B", "C"), pa("C", "A"), pa("X", "B")], "A", "B")).toEqual(["B", "C", "A"]);
     });
     it("sem caminho de volta não há ciclo: A já pediu a B (mesmo sentido) e pede de novo", () => {
-      expect(cicloDoPedido([{ de: "A", para: "B" }], "A", "B")).toBeNull();
-      expect(cicloDoPedido([{ de: "B", para: "C" }, { de: "C", para: "D" }], "A", "B")).toBeNull();
+      expect(cicloDoPedido([pa("A", "B")], "A", "B")).toBeNull();
+      expect(cicloDoPedido([pa("B", "C"), pa("C", "D")], "A", "B")).toBeNull();
       expect(cicloDoPedido([], "A", "B")).toBeNull();
     });
     it("um ciclo antigo entre outros bots não trava o pedido (busca só a partir do alvo) e não entra em laço", () => {
-      expect(cicloDoPedido([{ de: "C", para: "D" }, { de: "D", para: "C" }, { de: "B", para: "C" }], "A", "B")).toBeNull();
+      expect(cicloDoPedido([pa("C", "D"), pa("D", "C"), pa("B", "C")], "A", "B")).toBeNull();
     });
     it("a instrução nomeia a corrente e diz o que fazer em vez de pedir", () => {
       expect(instrucaoEsperaCircular(["Dev 1", "Chico"])).toBe("Espera circular: Dev 1 pediu algo a você e ainda espera a sua resposta. Se você pedir a Dev 1 agora, um fica esperando o outro. Não peça: termine o que der com o que você já tem e, na sua resposta, diga o que falta e o que precisa de Dev 1 — a pergunta vai junto com a resposta.");
@@ -99,5 +100,55 @@ describe("triagem na entrada (ADR-099 itens 1a e 8, I7 revista)", () => {
       expect(secaoDaLinha(linhaDaTriagem("delegacao", "Chico"))).toBe("ferramentas");
       expect(secaoDaLinha(linhaDaTriagem("rotina", null))).toBe("ferramentas");
     });
+  });
+});
+
+describe("pedido repetido ao mesmo colega (NOD-259)", () => {
+  // 15/10/2026 10:02 em São Paulo (13:02 UTC).
+  const t0 = Date.UTC(2026, 9, 15, 13, 2);
+  const h = (id: string, texto: string, min = 0, de = "L", para = "Z") => pa(de, para, { tarefaId: id, criadoEm: t0 + min * 60_000, texto });
+
+  it("normaliza caixa e espaços", () => {
+    expect(normalizarPedido("  Revise o PR #12\n  agora ")).toBe("revise o pr #12 agora");
+  });
+
+  it("conta só os handoffs do par, do mais antigo ao mais recente; a frente (sem tarefa) não conta", () => {
+    const abertos = [h("t2", "b", 5), h("t1", "a", 0), h("t3", "c", 1, "L", "X"), h("t4", "d", 2, "Z", "L"), pa("L", "Z", { criadoEm: t0 })];
+    expect(pedidosDoPar(abertos, "L", "Z").map((p) => p.tarefaId)).toEqual(["t1", "t2"]);
+  });
+
+  it("livre sem abertos; aviso com 1 ou 2 distintos; recusa no mesmo texto ou no teto", () => {
+    expect(repeticaoDoPedido([], "L", "Z", "x")).toEqual({ tipo: "livre" });
+    expect(repeticaoDoPedido([pa("L", "Z", { criadoEm: t0 })], "L", "Z", "x")).toEqual({ tipo: "livre" });
+    expect(repeticaoDoPedido([h("t1", "status do PR", 0)], "L", "Z", "outra coisa")).toEqual({ tipo: "aviso", abertos: 1, desde: t0 });
+    expect(repeticaoDoPedido([h("t1", "Status do  PR", 0)], "L", "Z", "status do pr")).toEqual({ tipo: "recusa", porque: "mesmo_texto", abertos: 1, desde: t0 });
+    const teto = Array.from({ length: TETO_PEDIDOS_ABERTOS_POR_PAR }, (_, i) => h(`t${i}`, `pedido ${i}`, i));
+    expect(repeticaoDoPedido(teto, "L", "Z", "novo")).toEqual({ tipo: "recusa", porque: "teto", abertos: TETO_PEDIDOS_ABERTOS_POR_PAR, desde: t0 });
+    // Outro alvo, ou o mesmo par no sentido contrário, não conta.
+    expect(repeticaoDoPedido(teto, "L", "X", "novo")).toEqual({ tipo: "livre" });
+  });
+
+  it("horário: só a hora no mesmo dia; dia e hora em outro dia", () => {
+    expect(horarioDoPedido(t0, t0 + 3_600_000)).toBe("10:02");
+    expect(horarioDoPedido(t0, t0 + 86_400_000)).toBe("15/10 10:02");
+  });
+
+  it("instruções do aviso e da recusa", () => {
+    expect(instrucaoPedidosAbertos("Ze 1", 1, "10:02")).toBe("Você já tem 1 pedido aberto a Ze 1 desde 10:02, ainda sem resposta; não peça de novo o mesmo — a resposta chega a você num novo turno.");
+    expect(instrucaoJaPedido("Ze 1", { porque: "mesmo_texto", abertos: 1 }, "10:02")).toContain("Você já pediu isso a Ze 1 (desde 10:02)");
+    expect(instrucaoJaPedido("Ze 1", { porque: "teto", abertos: 3 }, "10:02")).toContain("Você já tem 3 pedidos abertos a Ze 1 desde 10:02");
+    expect(instrucaoJaPedido("Ze 1", { porque: "teto", abertos: 3 }, "10:02")).toContain("Este pedido não foi enviado.");
+  });
+
+  it("bloco do prompt: vazio sem pedidos; os mais recentes em ordem, resumo curto e o resto contado", () => {
+    expect(blocoPedidosAbertos([], t0)).toBe("");
+    const um = blocoPedidosAbertos([{ alvoNome: "Ze 1", criadoEm: t0, texto: "Status da\nNOD-1" }], t0 + 60_000);
+    expect(um).toBe("Pedidos seus a colegas ainda sem resposta (a resposta chega em um novo turno; não peça de novo o mesmo):\n- a Ze 1, às 10:02: Status da NOD-1");
+    const muitos = Array.from({ length: MAX_PEDIDOS_NO_PROMPT + 2 }, (_, i) => ({ alvoNome: `B${i}`, criadoEm: t0 + i * 60_000, texto: i === 6 ? "x".repeat(200) : null }));
+    const linhas = blocoPedidosAbertos(muitos, t0).split("\n");
+    expect(linhas).toHaveLength(MAX_PEDIDOS_NO_PROMPT + 2);
+    expect(linhas[1]).toBe("- a B2, às 10:04");
+    expect(linhas[MAX_PEDIDOS_NO_PROMPT]).toMatch(/^- a B6, às 10:08: x{79}…$/);
+    expect(linhas.at(-1)).toBe("- e mais 2 mais antigos");
   });
 });

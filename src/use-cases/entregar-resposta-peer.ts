@@ -6,6 +6,7 @@ import { proximaProfundidade } from "../domain/profundidade.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { perguntaDaTarefa } from "./pedido-de-colega.ts";
+import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
@@ -192,7 +193,8 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // da tarefa), e não mais 1 fixo: abaixo do limite, quem recebeu a resposta ainda pede a outro colega. Quem pediu
   // cumprindo um pedido (delegação) mantém a procuração — o modo, a trava e o aviso de falha seguem a cadeia.
   const pediu = delegada && origem ? await deps.repos.turnos.buscar(origem.turnoOrigemId) : null;
-  const fecho = pediu ? await fechoDaContinuacao(deps, pediu, tarefa.id) : "";
+  // NOD-259: e os pedidos dele a colegas ainda sem resposta, de qualquer fio — fora o que está sendo entregue agora.
+  const fecho = pediu ? `${await fechoDaContinuacao(deps, pediu, tarefa.id)}${await notaPedidosAbertos(deps, remetente.id, agora, { exceto: [tarefa.id] })}` : "";
   const entradaTexto = !delegada
     ? `${moldurarResposta(alvo.nome, e.texto)}\nConsolide a resposta para a pessoa, citando a contribuição do colega e retomando a tarefa original indicada no contexto.`
     : e.falha

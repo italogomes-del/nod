@@ -176,7 +176,7 @@ export type ResultadoPedirAprovacao =
   | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
-export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular"; instrucao: string }; // ADR-099 (I7 revista): triagem do dono ou espera circular
+export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido"; instrucao: string }; // ADR-099 (I7 revista): triagem do dono ou espera circular; NOD-259: ja_pedido
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
 export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & {

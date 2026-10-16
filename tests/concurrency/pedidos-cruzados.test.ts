@@ -85,11 +85,20 @@ describeIntegracao("pedidos cruzados entre bots (ADR-099 item 8, I7 revista)", (
     expect(handoffs[0]?.n).toBe(1);
   });
 
-  it("pedidos no mesmo sentido ao mesmo tempo (A→B duas vezes) passam os dois: a trava só serializa", async () => {
+  it("pedidos distintos no mesmo sentido ao mesmo tempo (A→B duas vezes) passam os dois: a trava só serializa", async () => {
+    const a = await bot("Ana");
+    const b = await bot("Beto");
+    const pedir = (pedido: string) => (trx: Tx) => pedirABot(deps(trx), { turnoId: a.turnoId, agenteId: a.agenteId, conversaId: a.conversaId, agente: b.nome, pedido });
+    const [r1, r2] = await Promise.all([escopado(pedir("revise o PR 42")), escopado(pedir("revise o PR 43"))]);
+    expect([r1.data.ok, r2.data.ok]).toEqual([true, true]);
+  });
+
+  it("NOD-259: o MESMO pedido A→B duas vezes ao mesmo tempo passa um só — o segundo espera a trava e vê o primeiro (ja_pedido)", async () => {
     const a = await bot("Ana");
     const b = await bot("Beto");
     const pedir = (trx: Tx) => pedirABot(deps(trx), { turnoId: a.turnoId, agenteId: a.agenteId, conversaId: a.conversaId, agente: b.nome, pedido: "revise o PR" });
-    const [r1, r2] = await Promise.all([escopado(pedir), escopado(pedir)]);
-    expect([r1.data.ok, r2.data.ok]).toEqual([true, true]);
+    const rs = await Promise.all([escopado(pedir), escopado(pedir)]);
+    expect(rs.map((r) => r.data.ok).sort()).toEqual([false, true]);
+    expect(rs.find((r) => !r.data.ok)?.data).toMatchObject({ ok: false, erro: "ja_pedido" });
   });
 });

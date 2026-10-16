@@ -1,5 +1,6 @@
 import type { Executor } from "../contracts/evento.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 
 export type NovaRetomada = {
@@ -29,13 +30,16 @@ export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{
     const juntada = await deps.repos.turnos.juntarEntrada(naFila.id, r.entradaTexto);
     if (juntada) return { turno: juntada, nova: false };
   }
+  // NOD-259: a retomada nova lista os pedidos do bot a colegas ainda sem resposta, de qualquer fio (a de uma rotina não via
+  // os das outras janelas e pedia de novo). A que se junta a uma da fila não repete: a da fila já tem a lista.
+  const pedidos = await notaPedidosAbertos(deps, r.original.agenteId, deps.agora());
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: r.original.conversaId,
     agenteId: r.original.agenteId,
     origem: "retomada",
     prazoEm: r.prazoEm,
     profundidade: r.original.profundidade,
-    entradaTexto: r.entradaTexto,
+    entradaTexto: `${r.entradaTexto}${pedidos}`,
     entradaConfianca: r.original.entradaConfianca,
     modelo: r.original.modelo,
     harness: r.original.harness,

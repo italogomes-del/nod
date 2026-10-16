@@ -28,18 +28,24 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      *   a task de colega de antes já acabada — cobre o pedido de antes (task de colega) e o que entra pela triagem do dono;
      * - a frente aberta para o pedido de um colega (`pedido_por_agente_id`), enquanto ela não acaba.
      */
-    async abertos(desde: number): Promise<PedidoAberto[]> {
-      const linhas = await conn<{ de: string; para: string }[]>`
-        select m.payload->>'de' as de, m.payload->>'para' as para from mensagens m
+    async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
+      // NOD-259: com o pedido em si (tarefaId, criadoEm, texto = `motivo` do handoff) e, opcional, só os de um bot.
+      const de = filtro.de ?? null;
+      const linhas = await conn<{ de: string; para: string; tarefa_id: string | null; criado_em: Date; texto: string | null }[]>`
+        select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em, m.payload->>'motivo' as texto from mensagens m
         where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null and m.criado_em >= ${data(desde)}
+          and (${de}::text is null or m.payload->>'de' = ${de}::text)
           and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = m.payload->>'tarefaId')
           and not exists (select 1 from trabalhos k where k.tenant_id = m.tenant_id and k.id::text = m.payload->>'trabalhoId'
             and k.estado in ('terminado', 'parado', 'falhou'))
         union
-        select w.pedido_por_agente_id::text, w.agente_id::text from trabalhos w
-        where w.tenant_id = ${escopo.tenantId} and w.pedido_por_agente_id is not null and w.estado = any(${[...ABERTOS]}::text[])`;
-      return linhas.filter((l) => l.de && l.para).map((l) => ({ de: l.de, para: l.para }));
+        select w.pedido_por_agente_id::text, w.agente_id::text, null, w.criado_em, null from trabalhos w
+        where w.tenant_id = ${escopo.tenantId} and w.pedido_por_agente_id is not null and w.estado = any(${[...ABERTOS]}::text[])
+          and (${de}::text is null or w.pedido_por_agente_id::text = ${de}::text)`;
+      return linhas
+        .filter((l) => l.de && l.para)
+        .map((l) => ({ de: l.de, para: l.para, tarefaId: l.tarefa_id, criadoEm: l.criado_em.getTime(), texto: l.texto }));
     },
 
     /**
