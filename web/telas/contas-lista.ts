@@ -400,7 +400,6 @@ export function renderListaDeContas(x: ContextoContas): string {
   const nota = x.ui.nota ? `<p class="cl-nota" role="status">${esc(x.ui.nota)}</p>` : "";
   return `${abas}
     ${vazio}
-    ${n > 0 && !filtro ? '<p class="cl-fila-intro">Suas contas de IA numa fila só. Quando uma acaba, o Nod passa para a próxima ligada. Arraste para mudar a ordem; desligue a que não deve entrar sozinha.</p>' : ""}
     ${n > 0 || x.ui.logins.length > 0 ? `<div class="prov-ordem"><span>${n} ${n === 1 ? "conta" : "contas"} · em ordem de uso</span><span>arraste para mudar</span></div>
     <ol class="espaco-cartao cl-lista" data-ordem-lista="contas" aria-label="Suas contas de IA, em ordem de uso">${linhas}${loginsSemConta(x)}</ol>` : ""}
     ${nota}

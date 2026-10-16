@@ -58,8 +58,9 @@ export function fraseDaTroca(p: {
 }): string {
   const volta = p.voltaEm !== null ? p.quando(p.voltaEm) : null;
   if (p.fixo) {
-    const ate = volta ? ` até ${volta.replace(/^às /, "")}` : "";
-    return `O ${p.nomeDoBot} está parado${ate}: as contas do ${p.nomeDe} da sua fila acabaram. Ele volta sozinho ${volta ?? "quando uma conta voltar"}.`;
+    const ate = volta ? ` até ${volta.replace(/^(às|em) /, "")}` : "";
+    // QA do PR 2 (16/10): sem artigo nem gênero para o nome do bot.
+    return `${p.nomeDoBot} parou${ate}: as contas do ${p.nomeDe} da sua fila acabaram. Volta sozinho ${volta ?? "quando uma conta voltar"}.`;
   }
   const tasks = p.tasks === 1 ? "a task" : `as ${p.tasks} tasks`;
   const quem = p.contaDe ? `A conta ${p.contaDe} do ${p.nomeDe}` : `O ${p.nomeDe}`;

@@ -735,8 +735,10 @@ const AVISOS_PARA_RECOLHER = 3;
 /**
  * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
  * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também.
+ * definido em 2026-10-16 (ADR-108, QA do PR 2): o aviso de troca de IA ainda sem decisão pede uma escolha — fica à vista.
  */
 function linhaDeSistema(m: Mensagem): boolean {
+  if (m.kind === "sistema" && m.payload?.kind === "troca_de_ia" && !m.payload.decisao) return false;
   return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
 }
 

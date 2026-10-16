@@ -218,7 +218,7 @@ describe("R6: o bot fixo sem conta da IA dele na fila", () => {
     expect(c.banco.mensagens.some((m) => m.payload?.kind === "limite_do_plano")).toBe(false);
     expect(c.payload()).toMatchObject({ kind: "troca_de_ia", fixo: true, iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "esperar", aplicarEm: null, conta: { id: c.contas.cLeapy.id, apelido: "Leapy", corporativa: true } });
     expect(c.avisos()[0]?.turnoId).toBe(t);
-    expect(c.avisos()[0]?.texto).toMatch(/^O Eng 1 está parado até .+ Ele volta sozinho/);
+    expect(c.avisos()[0]?.texto).toMatch(/^Eng 1 parou até .+ Volta sozinho/);
   });
 
   it("(b) 'Continuar no ChatGPT até a volta': o bot vai ao Automático, a fala é refeita, e o varredor devolve o fixo quando a conta volta", async () => {

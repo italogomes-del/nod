@@ -54,6 +54,6 @@ describe("fraseDaTroca", () => {
 
   it("fixo: o estado do bot e que ele volta sozinho (canvas C3)", () => {
     expect(fraseDaTroca({ nomeDe: "Claude", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "esperar", tasks: 0, fixo: true, voltaEm: AGORA, quando }))
-      .toBe("O Eng 1 está parado até 20:50: as contas do Claude da sua fila acabaram. Ele volta sozinho às 20:50.");
+      .toBe("Eng 1 parou até 20:50: as contas do Claude da sua fila acabaram. Volta sozinho às 20:50.");
   });
 });

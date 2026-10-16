@@ -64,8 +64,8 @@ describe("o aviso de troca de IA (R4, canvas C1/C2)", () => {
 describe("o aviso do bot fixo (R6, canvas C3)", () => {
   it("o estado, que ele volta sozinho, e os dois caminhos: a conta fora da fila e a outra IA até a volta", () => {
     const html = cartaoTrocaDeIa(aviso({ fixo: true, voltaEm: AGORA + 13 * 60 * MIN, conta: { id: "dddddddd-0000-4000-8000-000000000001", apelido: "Leapy", corporativa: true }, tasks: 19 }), { nomeDoBot: "Eng 1", agora: AGORA })!;
-    expect(html).toContain("O Eng 1 está parado até");
-    expect(html).toContain("Se você não fizer nada, ele volta sozinho");
+    expect(html).toContain("Eng 1 parou até");
+    expect(html).toContain("Se você não fizer nada, Eng 1 volta sozinho");
     expect(html).toContain('data-act="cl-seguir" data-id="dddddddd-0000-4000-8000-000000000001"');
     expect(html).toContain("Continuar na conta Claude · Leapy");
     expect(html).toContain("É a conta da empresa.");

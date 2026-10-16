@@ -316,13 +316,14 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
   const volta = t.voltaEm !== null ? quandoVolta(t.voltaEm, p.agora) : null;
   const dados = ` data-id="${esc(t.agenteId)}" data-conversa="${esc(m.conversaId)}" data-troca="${esc(t.trocaId)}"`;
   if (t.fixo) {
-    const ate = volta ? volta.replace(/^às /, "") : null;
+    const ate = volta ? volta.replace(/^(às|em) /, "") : null;
     const opcoes = [
       ...(t.conta ? [opcaoDaTroca({ act: "cl-seguir", dados: ` data-id="${esc(t.conta.id)}" data-conversa="${esc(m.conversaId)}"`, rotulo: `Continuar na conta ${de} · ${t.conta.apelido}`, consequencia: `Mesmo modelo, continua de onde parou.${t.conta.corporativa ? " É a conta da empresa." : ""}`, recomendada: false })] : []),
       ...(para ? [opcaoDaTroca({ act: "troca-outra-ia", dados, rotulo: `Continuar no ${para}${ate ? ` até ${ate}` : ""}`, consequencia: `Outro provedor: as tasks recomeçam do resumo.${volta ? ` ${volta[0]!.toUpperCase()}${volta.slice(1)} volta ao ${de}.` : ""}`, recomendada: false })] : []),
     ].join("");
-    const texto = `Ele usa só o ${de}, e as contas do ${de} da sua fila acabaram. Se você não fizer nada, ele volta sozinho${volta ? ` ${volta}` : ""}.${opcoes ? " Para continuar agora, escolha um caminho:" : ""}`;
-    return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>O ${esc(bot)} está parado${ate ? ` até ${esc(ate)}` : ""}</b><p>${esc(texto)}</p>${opcoes ? `<ul class="troca-opcoes">${opcoes}</ul>` : ""}</div></div>`;
+    // QA do PR 2 (16/10): sem artigo nem gênero para o nome do bot ("Vera parou", não "O Vera está parado").
+    const texto = `Este bot usa só o ${de}, e as contas do ${de} da sua fila acabaram. Se você não fizer nada, ${bot} volta sozinho${volta ? ` ${volta}` : ""}.${opcoes ? " Para continuar agora, escolha um caminho:" : ""}`;
+    return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>${esc(bot)} parou${ate ? ` até ${esc(ate)}` : ""}</b><p>${esc(texto)}</p>${opcoes ? `<ul class="troca-opcoes">${opcoes}</ul>` : ""}</div></div>`;
   }
   const tasks = t.tasks === 1 ? "a task" : `as ${t.tasks} tasks`;
   // Revisão do PR 2 (I1): no ChatGPT, a conta da sessão parou e "levar" é para outra conta dele (a sessão fica na que parou).
