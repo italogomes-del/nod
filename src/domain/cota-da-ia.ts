@@ -150,11 +150,36 @@ export function situacaoDaIa(cota: readonly CotaDaIa[], ia: string): SituacaoDaC
  */
 export type TipoParaCota = "conversa" | "fundo_novo" | "fundo_seguindo";
 
-export function tipoParaCota(t: { origem: OrigemTurno; trabalhoId?: string | null; acordarEm?: number | null }, trabalho: { iniciadoEm: number | null } | null): TipoParaCota {
+export function tipoParaCota(
+  t: { origem: OrigemTurno; trabalhoId?: string | null; acordarEm?: number | null; decididoPor?: string | null },
+  trabalho: { iniciadoEm: number | null } | null,
+): TipoParaCota {
   if (t.origem === "ligacao") return "conversa";
   if (t.trabalhoId) return trabalho && trabalho.iniciadoEm === null ? "fundo_novo" : "fundo_seguindo";
   if (t.origem === "rotina" || t.origem === "delegacao" || t.origem === "peer") return "fundo_novo";
+  // NOD-258: o retorno do lote é o fim de um trabalho de fundo que já rodou — passa na reserva, espera no limite.
+  if (t.decididoPor === RETORNO_DO_LOTE) return "fundo_seguindo";
   return t.acordarEm != null ? "fundo_seguindo" : "conversa";
+}
+
+/**
+ * definido em 2026-10-15 (NOD-258): a marca do retorno do lote em `turnos.decidido_por` (fechar-lote.ts, devolverAoDono).
+ * Sem coluna nova: o portão da cota (SQL do `reivindicar`) e `ehFundo` a leem; a volta da cota a herda.
+ */
+export const RETORNO_DO_LOTE = "regra:retorno-do-lote";
+
+/**
+ * definido em 2026-10-15 (NOD-274, NOD-258, NOD-269; decisão NOD-222): o turno é trabalho de fundo — espera a cota com
+ * `acordar_em` em vez de falhar, decidido pelo TIPO do turno e não pela origem. Fundo = tem task (de qualquer origem,
+ * inclusive a frente que a pessoa abriu na conversa), é rotina ou pedido de colega, ou é o retorno do lote. A ligação
+ * nunca é fundo (a pessoa está na linha). Substitui os testes por origem no despacho (semContaNaMaquina) e no
+ * assentamento (aposLimiteDaConta, aposLimiteNoFundo).
+ */
+export function ehFundo(t: { origem: OrigemTurno; trabalhoId?: string | null; decididoPor?: string | null }): boolean {
+  if (t.origem === "ligacao") return false;
+  if (t.trabalhoId) return true;
+  if (t.origem === "rotina" || t.origem === "delegacao" || t.origem === "peer") return true;
+  return t.decididoPor === RETORNO_DO_LOTE;
 }
 
 /** A regra: no limite, todo o fundo espera; na reserva, só o fundo novo. A conversa com a pessoa sempre passa. */
@@ -269,6 +294,17 @@ export function entradaDaVoltaDaCota(nomeDaIa: string): string {
  */
 export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number): string {
   return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de} no meio deste trabalho e o nod seguiu com a conta ${para}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+}
+
+/**
+ * definido em 2026-10-15 (NOD-269, G2): a entrada da volta da cota. Com sessão retomável (a task já rodou nesta IA), a
+ * entrada curta basta: a sessão tem o pedido. Sem ela — o trabalho nunca começou, a sessão é de outra IA, ou não há task
+ * (rotina, pedido de colega, retorno do lote) —, a volta acordaria só com "siga de onde parou": anexa o pedido original,
+ * lido da RAIZ da cadeia `retoma_turno_id` (nunca da volta anterior, para não aninhar o anexo).
+ */
+export function entradaDaVolta(p: { base: string; sessaoRetomavel: boolean; pedidoOriginal: string | null }): string {
+  if (p.sessaoRetomavel || !p.pedidoOriginal || p.pedidoOriginal.trim() === "") return p.base;
+  return `${p.base}\n\nPedido original da frente:\n${p.pedidoOriginal}`;
 }
 
 /**

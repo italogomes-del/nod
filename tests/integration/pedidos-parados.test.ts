@@ -311,4 +311,43 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       expect(await m.pecasDaAda()).toHaveLength(1);
     });
   });
+
+  /** A recusa no despacho como despachar-turno.ts a assenta: `executor_indisponivel` com o motivo da falha. */
+  const recusar = async (m: Awaited<ReturnType<typeof montar>>, trx: Tx, motivoFalha: string) => {
+    await m.cair(m.tarefa.id, "executor_indisponivel");
+    await trx`update turnos set motivo_falha = ${motivoFalha}::motivo_falha where id = ${m.tarefa.id}`;
+  };
+
+  for (const motivoFalha of ["motor_ausente", "nao_autenticado"]) {
+    it(`NOD-274 (C6): recusa por ${motivoFalha} — avisa quem pediu UMA vez, sem retomar e sem contar como queda`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        await recusar(m, trx, motivoFalha);
+        // Mesmo com as máquinas de volta: retomar só falharia de novo do mesmo jeito.
+        await m.sinalDeVida();
+        const [parado] = (await m.repos.trabalhos.pedidosAColegaParados(Date.now() - 86_400_000, Date.now())).filter((p) => p.tarefaId === m.tarefa.id);
+        expect(parado).toMatchObject({ ultimoMotivo: "executor_indisponivel", ultimoMotivoFalha: motivoFalha, quedas: 0 });
+
+        expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [m.tarefa.id], entregues: [] });
+        expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+        expect(await m.pecasDaAda()).toHaveLength(1);
+        expect((await m.turnosDoColega()).filter((x) => x.origem === "retomada")).toHaveLength(0);
+      });
+    });
+  }
+
+  for (const motivoFalha of ["limite_do_plano", "sem_conta"]) {
+    it(`NOD-274 (C6): recusa por ${motivoFalha} — espera a cota ou a conta, sem retomar nem avisar, mesmo com sinal de volta`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        await recusar(m, trx, motivoFalha);
+        await m.sinalDeVida();
+        const depois = { ...m.deps, agora: () => Date.now() + 3 * 3_600_000 };
+        expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+        expect((await cuidarDosPedidosParados(depois)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+        expect(await m.pecasDaAda()).toHaveLength(0);
+        expect((await m.turnosDoColega()).filter((x) => x.origem === "retomada")).toHaveLength(0);
+      });
+    });
+  }
 });

@@ -20,7 +20,7 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
+import { ehFundo, ENTRADA_DA_VOLTA_DA_COTA, entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVolta, entradaDaVoltaDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { fraseDaDecisao, PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { decidirLimiteDaConta, ehIaComConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
 import type { IaComConta } from "../contracts/contas-ia.ts";
@@ -31,7 +31,9 @@ import { avisarTrocaDeIa, contaForaDaFila, maquinaDasTasks, outraIaParaAsTasks, 
 import { adiarFala } from "./adiar-fala.ts";
 import { alvoDoBot } from "./alvo-do-bot.ts";
 import { log } from "../obs/log.ts";
-import { rotinaDoTurno } from "./apoio-l7.ts";
+import { rotinaDoTurno, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
+import { registrarDesfechoRotina } from "./disparar-rotina.ts";
+import { avisarEsperaAoRemetente } from "./entregar-resposta-peer.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
@@ -75,6 +77,11 @@ export type SaidaAssentarTurno = {
   tardia: boolean;
   /** 0068: a IA do turno entrou no limite ou saiu dele — a ponte esquece o que leu dos limites e avisa a tela. */
   limiteMudou?: boolean;
+  /**
+   * NOD-274: o trabalho de fundo parou na cota e não falhou — "espera" (nasceu a volta com `acordar_em`) ou "nao_rodou"
+   * (a janela da rotina já registrada). Quem assenta depois (compor) não grava "falhou" nem avisa falha a quem pediu.
+   */
+  esperaDaCota?: "espera" | "nao_rodou";
 };
 
 /** NOD-264 (E8): o "Retomar" do turno que a entrega tardia com sucesso promoveu fecha por esta regra. */
@@ -469,7 +476,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   events.push(...(await esperaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-083: o trabalho do turno muda de estado pelos fatos (terminado, precisa de você, parado, falhou ou segue).
   events.push(...(await sincronizarDoTurno(deps, assentado)));
-  return { data: { turno: assentado, mensagem, duplicada: false, tardia: false, ...(limiteMudou ? { limiteMudou } : {}) }, events };
+  const esperaDaCota = events.find((e) => e.kind === "turno_interrompido" && e.turnoId === turno.id && (e.dados.espera_da_cota === "espera" || e.dados.espera_da_cota === "nao_rodou"))?.dados.espera_da_cota as SaidaAssentarTurno["esperaDaCota"];
+  return { data: { turno: assentado, mensagem, duplicada: false, tardia: false, ...(limiteMudou ? { limiteMudou } : {}), ...(esperaDaCota ? { esperaDaCota } : {}) }, events };
 };
 
 /**
@@ -688,6 +696,9 @@ async function aposLimiteDaConta(
     }
     return aposLimiteNoFundo(deps, { ...fundo, renovaEm: segue ? agora : p.voltaEm });
   }
+  // NOD-274: todo fundo (não só a task) espera a conta voltar — a rotina e o pedido de colega também não ganham a nota.
+  // O fundo sem task nunca troca de IA (NOD-224): só a conta "na fila" da mesma IA (ADR-108) segue na hora.
+  if (await fundoNaCadeia(deps, turno)) return aposLimiteNoFundo(deps, { ...fundo, renovaEm: segue && decisao.tipo === "trocou" ? agora : p.voltaEm });
   const interrompido = evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_no_limite: p.conta.id, decisao: decisao.tipo, custo_usd: p.custoUsd } });
   // NOD-268: a troca já foi usada nesta fala — ela espera a conta voltar, com uma linha. Já esperou (revisão do PR #319):
   // o aviso do limite sem o "Seguindo com" da nota (a fala não segue).
@@ -982,7 +993,7 @@ export function esperarContaNaFrente(
   deps: Deps,
   p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; autoria: Autoria; agora: number },
 ): Promise<RuntimeEvent[] | null> {
-  return aposLimiteNoFundo(deps, { ...p, motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", custoUsd: null });
+  return aposLimiteNoFundo(deps, { ...p, motivoInterrupcao: "executor_indisponivel", motivoFalha: "sem_conta", custoUsd: null });
 }
 
 /**
@@ -1000,21 +1011,43 @@ async function aposLimiteNoFundo(
   const { turno, autoria, agora, conta } = p;
   // ADR-108 (R4): a task sem sessão na IA que parou segue na outra na hora — a entrada e a linha dizem isso, não "esperou".
   const levada = p.levadaPara && !conta ? p.levadaPara : null;
-  if (!turno.trabalhoId || turno.origem === "ligacao" || turno.pararSolicitadoEm !== null) return null;
-  const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
-  if (!trabalho || !trabalhoAberto(trabalho.estado)) return null;
+  // definido em 2026-10-15 (NOD-274, NOD-222): a espera vale para todo trabalho de FUNDO (ehFundo) — a frente, a rotina,
+  // o pedido de colega e o retorno do lote —, não só para a task. A conversa e a ligação ficam com o aviso de sempre.
+  if (turno.pararSolicitadoEm !== null || !(await fundoNaCadeia(deps, turno))) return null;
+  const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  if (turno.trabalhoId && (!trabalho || !trabalhoAberto(trabalho.estado))) return null;
   const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
+  // NOD-274: a rotina cuja cota só volta depois da próxima janela não espera — esta janela fica 'nao_rodou' (com a hora
+  // da volta, no histórico) e a rotina segue a agenda. Esperar empilharia a janela atrasada em cima da seguinte.
+  const daRotina = turno.trabalhoId ? null : await rotinaDoTurno(deps.repos, turno.id);
+  if (daRotina && conta?.tipo !== "trocou" && p.renovaEm >= daRotina.rotina.proximaExecucao) {
+    await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+    await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+    const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "nao_rodou", motivo: "cota_da_ia", voltaEm: p.renovaEm });
+    log("info", "cota_limite_rotina_nao_rodou", { turno_id: turno.id, rotina_id: daRotina.rotina.id, harness: p.ia, renova_em: p.renovaEm });
+    return [
+      evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, espera_da_cota: "nao_rodou", custo_usd: p.custoUsd } }),
+      ...(r.events ?? []),
+    ];
+  }
   await deps.repos.turnos.travarRetomadas(retomaTurnoId);
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  // NOD-269 (G2): sem sessão retomável (a frente nunca rodou, ou rodou noutra IA), a volta leva o pedido da raiz da cadeia
+  // — "siga de onde parou" sozinho acordava sem saber o quê. Com sessão, a entrada continua curta.
+  const raiz = await raizDaCadeia(deps, turno);
+  const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === p.ia) : false;
+  const base = conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia));
+  // Já é uma volta da cota (a cadeia esperou antes): o aviso a quem pediu já saiu — uma vez por cadeia.
+  const jaEsperou = turno.origem === "retomada" && turno.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
   const volta = await deps.repos.turnos.enfileirar({
     conversaId: turno.conversaId,
     agenteId: turno.agenteId,
     origem: "retomada",
     retomaTurnoId,
-    trabalhoId: turno.trabalhoId,
+    trabalhoId: turno.trabalhoId ?? null,
     prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
     profundidade: turno.profundidade,
-    entradaTexto: conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia)),
+    entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }),
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     // NOD-279 D7 revisto pelo ADR-108 (#358): a volta segue com a inteligência do turno. A task com sessão já fica na IA da
@@ -1024,17 +1057,30 @@ async function aposLimiteNoFundo(
     harness: turno.harness,
     executor: turno.executor,
     acordarEm: p.renovaEm,
+    // NOD-258: a volta do retorno do lote continua retorno do lote (portão da cota, refazer uma vez).
+    ...(turno.decididoPor === RETORNO_DO_LOTE ? { decididoPor: RETORNO_DO_LOTE, reenvios: turno.reenvios } : {}),
     // A marca de quem leu algo de fora (ADR-062) segue para a volta no mesmo INSERT (NOD-287).
     contaminadoDe: turno.id,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
+  // NOD-258: o lote passa a apontar para a volta — se ela cair, refazerRetornoDoLote acha o lote por ela.
+  if (turno.decididoPor === RETORNO_DO_LOTE) {
+    const lote = await deps.repos.frentes.loteDoRetorno(turno.id);
+    if (lote) await deps.repos.frentes.trocarRetorno(lote.id, volta.id);
+  }
   // A entrada de fora também marca a volta, como na volta marcada (me-chame-as.ts).
   if (turno.entradaConfianca !== "confiavel") await deps.repos.turnos.contaminar(volta.id, agora);
   const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, custo_usd: p.custoUsd } }),
-    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId, acordar_em: p.renovaEm } }),
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, espera_da_cota: "espera", custo_usd: p.custoUsd } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: p.renovaEm } }),
   ];
-  const linha = await deps.repos.mensagens.criar({
+  const quando = quandoDaFrase(p.renovaEm, agora);
+  // A frase diz o que espera: a frente (a de sempre), a execução da rotina ou o pedido (de colega, ou o retorno do lote).
+  const chave = turno.trabalhoId ? "" : daRotina ? "-rotina" : "-pedido";
+  // NOD-274 (critério 11) e NOD-258 (critério 6): sem task, a cadeia que já esperou a cota não ganha uma segunda linha
+  // de espera na conversa — a primeira já disse que volta sozinha. A troca de conta (ADR-101) diz outra coisa e sai.
+  // A frente (task) segue com a linha a cada batida: ela é o fio da própria task e leva a hora nova.
+  const linha = chave !== "" && jaEsperou && conta?.tipo !== "trocou" ? null : await deps.repos.mensagens.criar({
     conversaId: turno.conversaId,
     turnoId: turno.id,
     autoria,
@@ -1042,13 +1088,53 @@ async function aposLimiteNoFundo(
     // ADR-101: com outra conta, a linha diz só posições — "Seguindo com a conta 2" (troca) ou "A conta 1 … espera" (perguntar).
     ...(conta?.tipo === "trocou"
       ? { texto: fraseDaDecisao(conta, { ia: nomeDaIa(p.ia), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) }), payload: { kind: "conta_trocada" as const, harness: p.ia, de: conta.de, para: conta.para, voltaEm: conta.voltaEm, foraDaTroca: conta.foraDaTroca } }
-      : { texto: conta ? redigir("conta-no-limite-espera", agora, { de: String(conta.de), ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) : levada ? redigir("cota-no-limite-segue", agora, { ia: nomeDaIa(p.ia), para: nomeDaIa(levada) }) : redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) }),
+      : { texto: levada ? redigir("cota-no-limite-segue", agora, { ia: nomeDaIa(p.ia), para: nomeDaIa(levada) }) : conta && chave !== "-rotina" ? redigir(chave === "-pedido" ? "conta-no-limite-espera-pedido" : "conta-no-limite-espera", agora, { de: String(conta.de), ia: nomeDaIa(p.ia), quando }) : redigir(chave === "-rotina" ? "cota-no-limite-espera-rotina" : chave === "-pedido" ? "cota-no-limite-espera-pedido" : "cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando }) }),
     confianca: "confiavel",
   });
   if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   // Só códigos e ids: para medir o "pronto quando" da parte 7 (nenhuma frente falha por limite).
-  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId, harness: p.ia, renova_em: p.renovaEm, ...(conta ? { conta_tipo: conta.tipo, conta_de: conta.de } : {}) });
+  // NOD-274: quem pediu ao colega lê a espera na conversa de onde pediu (uma vez por cadeia).
+  if (!jaEsperou && conta?.tipo !== "trocou") {
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    events.push(...(await avisarEsperaAoRemetente(deps, { turno, texto: redigir("pedido-a-colega-espera-cota", agora, { agente: agente?.nome ?? "O colega", ia: nomeDaIa(p.ia), quando }) })));
+  }
+  log("info", "cota_limite_task_espera", { turno_id: turno.id, volta_turno_id: volta.id, trabalho_id: turno.trabalhoId ?? null, fundo: chave || "frente", harness: p.ia, renova_em: p.renovaEm, ...(conta ? { conta_tipo: conta.tipo, conta_de: conta.de } : {}) });
   return events;
+}
+
+/**
+ * NOD-274: o turno é trabalho de fundo pelo tipo dele (ehFundo) ou, sendo uma retomada, pelo da raiz da cadeia — a volta
+ * de uma rotina ou de um pedido de colega tem origem 'retomada' e continua sendo fundo. A retomada de uma conversa não.
+ */
+export async function fundoNaCadeia(deps: Deps, turno: Turno): Promise<boolean> {
+  if (ehFundo(turno)) return true;
+  if (turno.origem !== "retomada" || !turno.retomaTurnoId) return false;
+  return ehFundo(await raizDaCadeia(deps, turno));
+}
+
+/**
+ * NOD-269 (G2): a entrada da volta do fundo. O pedido vem da raiz da cadeia (o da frente, da rotina, do colega); o
+ * retorno do lote é ele mesmo o pedido (os resumos das frentes), e a volta de uma volta reaproveita a entrada dela, que
+ * já leva o pedido — nunca "Pedido original" aninhado.
+ */
+function entradaDaVoltaDoFundo(p: { turno: Turno; raiz: Turno; base: string; sessaoRetomavel: boolean }): string {
+  const { turno } = p;
+  if (turno.origem === "retomada" && turno.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)) {
+    return p.sessaoRetomavel ? p.base : turno.entradaTexto.includes("\n\nPedido original da frente:\n") ? `${p.base}${turno.entradaTexto.slice(turno.entradaTexto.indexOf("\n\nPedido original da frente:\n"))}` : p.base;
+  }
+  const pedido = turno.decididoPor === RETORNO_DO_LOTE ? turno.entradaTexto : p.raiz.origem === "retomada" ? null : p.raiz.entradaTexto;
+  return entradaDaVolta({ base: p.base, sessaoRetomavel: p.sessaoRetomavel, pedidoOriginal: pedido });
+}
+
+/** NOD-269: o primeiro turno da cadeia de retomadas (o que trouxe o pedido). Mesmo teto de saltos de rotinaDoTurno. */
+async function raizDaCadeia(deps: Deps, turno: Turno): Promise<Turno> {
+  let atual = turno;
+  for (let saltos = 0; atual.origem === "retomada" && atual.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
+    const anterior = await deps.repos.turnos.buscar(atual.retomaTurnoId);
+    if (!anterior) break;
+    atual = anterior;
+  }
+  return atual;
 }
 
 /**

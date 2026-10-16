@@ -192,7 +192,7 @@ function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
     ? '<p class="mudo">carregando…</p>'
     : !exec.length
       ? '<p class="mudo">nunca executou</p>'
-      : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e))}</span></li>`).join("")}</ul>`;
+      : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e, r.fusoIana))}</span></li>`).join("")}</ul>`;
   const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
   const detalhe = (rotulo: string, valor: string) => (valor ? `<dt>${esc(rotulo)}</dt><dd>${esc(valor)}</dd>` : "");
   const corpo = `${parada}

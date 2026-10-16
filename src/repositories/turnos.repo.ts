@@ -5,7 +5,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
-import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
@@ -54,6 +54,7 @@ interface Linha {
   ligacao_id: string | null;
   trabalho_id: string | null;
   acordar_em: Date | null;
+  decidido_por: string;
   despachado_em?: Date | null;
 }
 
@@ -62,7 +63,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, despachado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, decidido_por, despachado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -98,6 +99,7 @@ function paraTurno(l: Linha): Turno {
     ligacaoId: l.ligacao_id,
     trabalhoId: l.trabalho_id,
     acordarEm: msOuNull(l.acordar_em),
+    decididoPor: l.decidido_por,
     despachadoEm: msOuNull(l.despachado_em ?? null),
   };
 }
@@ -322,7 +324,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                 (((t.trabalho_id is null and t.origem in ('rotina', 'delegacao', 'peer'))
                     or exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null))
                   and ${naCota(cota.reserva, cota.autoReserva)})
-                or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null)
+                -- NOD-258: o retorno do lote (decidido_por = RETORNO_DO_LOTE) é fundo que já começou: espera no limite.
+                or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null
+                    or t.decidido_por = ${RETORNO_DO_LOTE})
                   and ${naCota(cota.limite, cota.autoLimite)})))`}
             -- Ligação primeiro; depois a fala da pessoa; depois o que não é rotina nem pedido de colega (o turno ou o trabalho
             -- dele); depois a ordem.
@@ -1072,13 +1076,17 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * definido em 2026-10-05: as falas da pessoa barradas por falta de IA desde `desde`, uma por conversa — só a mais
-     * nova, e só quando nada veio depois dela na conversa (repetir-barrados-por-ia.ts).
+     * nova, e só quando nada veio depois dela na conversa (repetir-barrados-por-ia.ts). NOD-269: a frente (com trabalho)
+     * fica de fora — ela espera a conta pela própria volta, e a repetição sairia sem o vínculo com a task.
      */
     async barradosPorFaltaDeIa(desde: number): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos t
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.origem = 'conversa' and t.estado = 'interrompido'
-          and t.motivo_interrupcao = 'executor_indisponivel' and t.criado_em >= ${data(desde)}
+          and t.trabalho_id is null and t.motivo_interrupcao = 'executor_indisponivel' and t.criado_em >= ${data(desde)}
+          -- NOD-269 (B5): a recusa por conta (despacho, 'sem_conta') e o limite ('limite_do_plano', inclusive os antigos
+          -- gravados pelo despacho) já esperam a hora ou têm a nota de contas: repeti-los duplicava a nota a cada conexão.
+          and t.motivo_falha is distinct from 'sem_conta' and t.motivo_falha is distinct from 'limite_do_plano'
           and not exists (select 1 from turnos n where n.tenant_id = t.tenant_id and n.conversa_id = t.conversa_id and n.criado_em > t.criado_em)
         order by t.criado_em`;
       return linhas.map(paraTurno);

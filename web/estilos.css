@@ -390,6 +390,8 @@ body.ocupado { cursor: progress; }
 /* interrompida (ADR-045): a máquina parou no meio — não é erro da rotina (vermelho) nem falta de
    resposta (âmbar). Cinza como sem_novidade: é registro; o aviso único já contou o que houve. */
 .exec-interrompida, .exec-interrompida b { color: var(--ink-3); }
+/* nao_rodou (NOD-274): a janela que a cota da IA (ou a execução anterior aberta) pulou. Registro, não erro: cinza. */
+.exec-nao_rodou, .exec-nao_rodou b { color: var(--ink-3); }
 /* bloqueada (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem gastar turno. Âmbar
    como passou_em_branco — espera por você (o card de acesso) —, sem o vermelho de erro. */
 .exec-bloqueada b { color: var(--warning); }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
 import type { ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
-import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
+import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
 
 const AGORA = Date.UTC(2026, 9, 12, 15, 0);
 const HORA = 3_600_000;
@@ -133,6 +133,32 @@ describe("a tela", () => {
 
   it("as IAs conhecidas: as que têm leitura ou limite gravado", () => {
     expect(iasConhecidas([uso(0.1)], { "codex-cli": { renovaEm: AGORA, desde: AGORA } })).toEqual(["claude-cli", "codex-cli"]);
+  });
+});
+
+describe("NOD-274/258/269: o fundo espera a cota, e a volta sabe o pedido", () => {
+  it("ehFundo decide pelo tipo: task, rotina, pedido de colega e retorno do lote; nunca a conversa nem a ligação", () => {
+    expect(ehFundo({ origem: "conversa", trabalhoId: "t1" })).toBe(true);
+    expect(ehFundo({ origem: "rotina" })).toBe(true);
+    expect(ehFundo({ origem: "delegacao" })).toBe(true);
+    expect(ehFundo({ origem: "peer" })).toBe(true);
+    expect(ehFundo({ origem: "retomada", decididoPor: RETORNO_DO_LOTE })).toBe(true);
+    expect(ehFundo({ origem: "conversa" })).toBe(false);
+    expect(ehFundo({ origem: "retomada", decididoPor: "regra:localidade" })).toBe(false);
+    expect(ehFundo({ origem: "ligacao", trabalhoId: "t1" })).toBe(false);
+  });
+
+  it("o retorno do lote passa no portão como fundo (paridade com o SQL do reivindicar)", () => {
+    expect(tipoParaCota({ origem: "retomada", decididoPor: RETORNO_DO_LOTE }, null)).toBe("fundo_seguindo");
+  });
+
+  it("volta sem sessão retomável leva o pedido original da raiz", () => {
+    expect(entradaDaVolta({ base: "[nod] A cota voltou.", sessaoRetomavel: false, pedidoOriginal: "Frente: revisar o #861" })).toBe("[nod] A cota voltou.\n\nPedido original da frente:\nFrente: revisar o #861");
+  });
+
+  it("volta com sessão retomável (ou sem pedido) continua curta", () => {
+    expect(entradaDaVolta({ base: "[nod] A cota voltou.", sessaoRetomavel: true, pedidoOriginal: "Frente: revisar" })).toBe("[nod] A cota voltou.");
+    expect(entradaDaVolta({ base: "[nod] A cota voltou.", sessaoRetomavel: false, pedidoOriginal: "  " })).toBe("[nod] A cota voltou.");
   });
 });
 

@@ -1039,8 +1039,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async abertosDoAgente(agenteId) {
         return doTenant(b.trabalhos).filter((t) => t.agenteId === agenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoTrabalho);
       },
-      async filhaAbertaDaRotina(rotinaId) {
-        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && (x.trabalhoMaeId !== null || x.forma === "frente") && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado));
+      async filhaAbertaDaRotina(rotinaId, colegaAntesDe = null) {
+        // NOD-274 (C9): a frente 'rodando' sem turno vivo cujo único fato aberto é o colega pedido antes do prazo não segura.
+        const soColegaAntigo = (w: Trabalho): boolean => {
+          if (colegaAntesDe === null || w.estado !== "rodando") return false;
+          const dele = doTenant(b.turnos).filter((t) => t.trabalhoId === w.id);
+          const ids = new Set(dele.map((t) => t.id));
+          if (dele.some((t) => t.estado === "pendente" || t.estado === "despachando")) return false;
+          if (b.esperas.some((e) => e.tenantId === escopo.tenantId && e.trabalhoId === w.id && e.estado === "rodando")) return false;
+          if (doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta"))) return false;
+          return doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
+            && h.criadoEm < colegaAntesDe
+            && !doTenant(b.mensagens).some((r) => r.conversaId === h.conversaId && r.payload?.kind === "peer_ask" && h.payload?.kind === "handoff" && r.payload.tarefaId === h.payload.tarefaId)
+            && !doTenant(b.trabalhos).some((c) => h.payload?.kind === "handoff" && c.id === h.payload.trabalhoId && ["terminado", "parado", "falhou"].includes(c.estado)));
+        };
+        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && (x.trabalhoMaeId !== null || x.forma === "frente") && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado) && !soColegaAntigo(x));
         return t ? semDonoTrabalho(t) : null;
       },
       async filhos(maeId) {
@@ -1607,7 +1620,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async barradosPorFaltaDeIa(desde) {
         const meus = doTenant(b.turnos);
         return meus
-          .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.criadoEm >= desde)
+          .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && !t.trabalhoId && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.motivoFalha !== "sem_conta" && t.motivoFalha !== "limite_do_plano" && t.criadoEm >= desde)
           .filter((t) => !meus.some((n) => n.conversaId === t.conversaId && n.criadoEm > t.criadoEm))
           .sort((x, y) => x.criadoEm - y.criadoEm);
       },
@@ -1934,6 +1947,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async travar(rotinaId, instanteAgendado) {
         return doTenant(b.janelas).some((j) => j.rotinaId === rotinaId && j.instanteAgendado === instanteAgendado);
       },
+      async esperaDaCotaDe(raizId, prefixo, agora) {
+        const cadeia = new Set([raizId]);
+        for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+        const v = doTenant(b.turnos).filter((x) => x.id !== raizId && cadeia.has(x.id) && x.estado === "pendente" && x.acordarEm !== null && x.acordarEm !== undefined && x.acordarEm > agora && x.entradaTexto.startsWith(prefixo))
+          .sort((x, y) => (x.acordarEm ?? 0) - (y.acordarEm ?? 0))[0];
+        return v ? { voltaEm: v.acordarEm as number, entrada: v.entradaTexto, harness: v.harness ?? null } : null;
+      },
       async retomadaPendenteDe(raizId, exceto) {
         const cadeia = new Set([raizId]);
         for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
@@ -1963,15 +1983,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
 
     rotinaExecucoes: {
       async registrar(e) {
-        const exec: ExecucaoRotina = { tenantId: escopo.tenantId, id: e.id ?? randomUUID(), rotinaId: e.rotinaId, instanteAgendado: e.instanteAgendado, turnoId: e.turnoId ?? null, desfecho: e.desfecho, motivo: e.motivo ?? null, em: e.em };
+        const exec: ExecucaoRotina = { tenantId: escopo.tenantId, id: e.id ?? randomUUID(), rotinaId: e.rotinaId, instanteAgendado: e.instanteAgendado, turnoId: e.turnoId ?? null, desfecho: e.desfecho, motivo: e.motivo ?? null, em: e.em, voltaEm: e.voltaEm ?? null };
         b.execucoes.push(exec);
         return exec;
       },
-      async atualizarDesfecho(id, desfecho, motivo = null, em) {
+      async atualizarDesfecho(id, desfecho, motivo = null, em, voltaEm = null) {
         const e = doTenant(b.execucoes).find((x) => x.id === id);
         if (!e) return null;
         e.desfecho = desfecho;
         e.motivo = motivo;
+        e.voltaEm = voltaEm;
         if (em !== undefined) e.em = em;
         return e;
       },
@@ -2786,6 +2807,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           l.devolvidoEm = em;
           l.retornoTurnoId = retornoTurnoId;
           return semDonoLote(l);
+        },
+        async loteDoRetorno(retornoTurnoId: string) {
+          const l = meus().find((x) => x.retornoTurnoId === retornoTurnoId);
+          return l ? semDonoLote(l) : null;
+        },
+        async trocarRetorno(loteId: string, retornoTurnoId: string) {
+          const l = meus().find((x) => x.id === loteId && x.devolvidoEm !== null);
+          if (!l) return false;
+          l.retornoTurnoId = retornoTurnoId;
+          return true;
         },
       };
     })(),

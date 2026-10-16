@@ -10,6 +10,23 @@ import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 /** Motivos de infraestrutura: o bot não errou, a máquina ou a IA saiu do ar no meio do pedido. */
 export const MOTIVOS_DE_QUEDA = ["maquina_sem_contato", "executor_indisponivel", "reinicio_servidor"] as const;
 
+/**
+ * NOD-274 (C6, QA do PR #340): a recusa no despacho também chega como `executor_indisponivel`, mas não é queda — o
+ * `motivo_falha` diz por quê. Cota no limite (`limite_do_plano`) ou nenhuma conta da IA na máquina (`sem_conta`): o colega
+ * ESPERA a volta da cota ou a conta (assentar-turno.ts, despachar-turno.ts), e quem pediu já recebeu a linha de espera.
+ */
+export const MOTIVOS_FALHA_DE_ESPERA = ["limite_do_plano", "sem_conta"] as const;
+
+/**
+ * NOD-274 (C6): a IA não está instalada ou a conta dela não está conectada na máquina. Retomar não adianta — falha de novo
+ * do mesmo jeito até a pessoa agir —, então o varredor AVISA quem pediu uma vez só (o aviso grava o peer_ask, e a consulta
+ * não pega mais o pedido) e não conta como queda.
+ */
+export const MOTIVOS_FALHA_DE_AVISO_UNICO = ["motor_ausente", "nao_autenticado"] as const;
+
+/** As recusas que ficam fora da contagem de quedas nas consultas (trabalhos, pedidos-de-colega e frentes .repo.ts). */
+export const MOTIVOS_FALHA_SEM_QUEDA = [...MOTIVOS_FALHA_DE_ESPERA, ...MOTIVOS_FALHA_DE_AVISO_UNICO] as const;
+
 /** definido em 2026-10-08: até 3 quedas por pedido (2 retomadas automáticas); a terceira avisa quem pediu. */
 export const MAX_QUEDAS_POR_PEDIDO = 3;
 
@@ -43,6 +60,8 @@ export type PedidoParado = {
   /** O último turno assentado do trabalho do colega (concluído ou interrompido; o absorvido não conta). */
   ultimoTurnoId: string | null;
   ultimoMotivo: string | null;
+  /** O `motivo_falha` do último turno (NOD-274, C6): separa a recusa no despacho da queda de verdade. */
+  ultimoMotivoFalha: string | null;
   /**
    * Quando o último turno caiu (NOD-241, emenda da ADR-084): o último sinal do turno (`turnos.ultimo_sinal_em`); sem ele
    * (turno de antes da 0076), o lease ou a criação.
@@ -86,6 +105,8 @@ export function ehQueda(motivo: string | null): boolean {
  * - Caiu por infraestrutura, com o card "Retomar" ainda aberto ou sem card: retoma sozinho quando as máquinas voltam,
  *   até MAX_QUEDAS_POR_PEDIDO e só nas últimas RETOMAR_ATE_MS; esgotado, mais velho, ou sem sinal de volta em
  *   DESISTIR_SEM_SINAL_MS, avisa.
+ * - Recusado no despacho (NOD-274, C6): esperando a cota ou a conta, espera; sem a IA ou sem login na máquina, avisa
+ *   uma vez, sem esperar e sem contar como queda.
  * - "Precisa de você" por outra razão (uma decisão da pessoa): espera — o vencimento de 24 h já avisa.
  * - Falhou por qualquer outro motivo: avisa com o motivo.
  */
@@ -95,6 +116,10 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
     return { tipo: "avisar_falha", motivo: "terminou sem resposta" };
   }
   if (p.estadoColega === "parado") return { tipo: "avisar_falha", motivo: "a task foi parada antes de terminar", semEsperar: true };
+  if (p.ultimoMotivo === "executor_indisponivel" && p.ultimoMotivoFalha) {
+    if ((MOTIVOS_FALHA_DE_ESPERA as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "esperar" };
+    if ((MOTIVOS_FALHA_DE_AVISO_UNICO as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "avisar_falha", motivo: motivoLegivel(p.ultimoMotivoFalha), semEsperar: true };
+  }
   const caiu = ehQueda(p.ultimoMotivo) && p.ultimoTurnoId !== null;
   // Card do "Retomar" já resolvido (a pessoa retomou, dispensou ou ele venceu): a decisão é dela, não da regra.
   const cardDecidido = p.cardRetomar !== null && !p.cardRetomar.aberto;

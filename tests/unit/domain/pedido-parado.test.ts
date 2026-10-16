@@ -10,6 +10,7 @@ const base: PedidoParado = {
   estadoColega: "falhou",
   ultimoTurnoId: "ultimo",
   ultimoMotivo: "executor_indisponivel",
+  ultimoMotivoFalha: null,
   quedaEm: AGORA - 60_000,
   quedas: 1,
   cardRetomar: null,
@@ -55,6 +56,23 @@ describe("decidirPedidoParado", () => {
   it("precisa de você por outra decisão: espera (o vencimento de 24 h já avisa); falhou por outro motivo: avisa com o motivo", () => {
     expect(decidir({ estadoColega: "precisa_de_voce", ultimoMotivo: null })).toEqual({ tipo: "esperar" });
     expect(decidir({ ultimoMotivo: "trabalho_incompleto" })).toEqual({ tipo: "avisar_falha", motivo: "<trabalho_incompleto>" });
+  });
+
+  it("NOD-274 (C6): recusado esperando a cota ou a conta — espera, mesmo com sinal de volta, sem retomar nem avisar", () => {
+    for (const ultimoMotivoFalha of ["limite_do_plano", "sem_conta"]) {
+      expect(decidir({ ultimoMotivoFalha, sinalDepoisDaQueda: true })).toEqual({ tipo: "esperar" });
+      expect(decidir({ ultimoMotivoFalha, quedas: MAX_QUEDAS_POR_PEDIDO, quedaEm: AGORA - RETOMAR_ATE_MS - 1 })).toEqual({ tipo: "esperar" });
+      expect(decidir({ ultimoMotivoFalha, estadoColega: "precisa_de_voce", cardRetomar: { id: "c", aberto: true }, sinalDepoisDaQueda: true })).toEqual({ tipo: "esperar" });
+    }
+  });
+
+  it("NOD-274 (C6): sem a IA ou sem login na máquina — avisa na hora, com o motivo da falha, sem esperar sinal nem contar queda", () => {
+    for (const ultimoMotivoFalha of ["motor_ausente", "nao_autenticado"]) {
+      expect(decidir({ ultimoMotivoFalha, quedas: 0 })).toEqual({ tipo: "avisar_falha", motivo: `<${ultimoMotivoFalha}>`, semEsperar: true });
+      expect(decidir({ ultimoMotivoFalha, sinalDepoisDaQueda: true })).toEqual({ tipo: "avisar_falha", motivo: `<${ultimoMotivoFalha}>`, semEsperar: true });
+    }
+    // O mesmo `executor_indisponivel` sem motivo de recusa continua sendo queda (retoma com sinal).
+    expect(decidir({ ultimoMotivoFalha: null, sinalDepoisDaQueda: true })).toMatchObject({ tipo: "retomar" });
   });
 });
 

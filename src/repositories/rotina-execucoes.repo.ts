@@ -13,9 +13,10 @@ interface Linha {
   desfecho: DesfechoRotina;
   motivo: string | null;
   em: Date;
+  volta_em: Date | null;
 }
 
-const COLUNAS = "tenant_id, id, rotina_id, instante_agendado, turno_id, desfecho, motivo, em";
+const COLUNAS = "tenant_id, id, rotina_id, instante_agendado, turno_id, desfecho, motivo, em, volta_em";
 
 const paraExecucao = (l: Linha): ExecucaoRotina => ({
   tenantId: l.tenant_id,
@@ -26,6 +27,7 @@ const paraExecucao = (l: Linha): ExecucaoRotina => ({
   desfecho: l.desfecho,
   motivo: l.motivo,
   em: ms(l.em),
+  voltaEm: l.volta_em ? ms(l.volta_em) : null,
 });
 
 export type NovaExecucao = {
@@ -37,6 +39,8 @@ export type NovaExecucao = {
   /** Só snake_case minúsculo (CHECK): ex. 'ninguem_respondeu_o_gate'. */
   motivo?: string | null;
   em: number;
+  /** NOD-274 (0087): 'nao_rodou' por cota — quando a cota volta. */
+  voltaEm?: number | null;
 };
 
 /** Últimas 20 execuções por rotina (Grok Bot); passou_em_branco ≠ falhou (E7.3). */
@@ -44,17 +48,17 @@ export function rotinaExecucoesRepo(conn: Conn, escopo: Escopo) {
   return {
     async registrar(e: NovaExecucao): Promise<ExecucaoRotina | null> {
       const [l] = await conn<Linha[]>`
-        insert into rotina_execucoes (tenant_id, id, owner_id, rotina_id, instante_agendado, turno_id, desfecho, motivo, em)
+        insert into rotina_execucoes (tenant_id, id, owner_id, rotina_id, instante_agendado, turno_id, desfecho, motivo, em, volta_em)
         values (${escopo.tenantId}, ${e.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${e.rotinaId}, ${data(e.instanteAgendado)}, ${e.turnoId ?? null},
-          ${e.desfecho}, ${e.motivo ?? null}, ${data(e.em)})
+          ${e.desfecho}, ${e.motivo ?? null}, ${data(e.em)}, ${e.voltaEm == null ? null : data(e.voltaEm)})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraExecucao(l) : null;
     },
 
     /** `em` ausente = mantém o instante do registro; presente = o desfecho novo é de agora (ADR-045). */
-    async atualizarDesfecho(id: string, desfecho: DesfechoRotina, motivo: string | null = null, em?: number): Promise<ExecucaoRotina | null> {
+    async atualizarDesfecho(id: string, desfecho: DesfechoRotina, motivo: string | null = null, em?: number, voltaEm: number | null = null): Promise<ExecucaoRotina | null> {
       const [l] = await conn<Linha[]>`
-        update rotina_execucoes set desfecho = ${desfecho}, motivo = ${motivo}, em = coalesce(${em === undefined ? null : data(em)}, em)
+        update rotina_execucoes set desfecho = ${desfecho}, motivo = ${motivo}, em = coalesce(${em === undefined ? null : data(em)}, em), volta_em = ${voltaEm === null ? null : data(voltaEm)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraExecucao(l) : null;
     },

@@ -1,5 +1,5 @@
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
-import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { PedidoAberto } from "../domain/triagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
@@ -115,7 +115,7 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      */
     async triagensParadas(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
-        tarefa_id: string; ultimo_id: string; ultimo_motivo: string | null; queda_em: Date | null; quedas: number;
+        tarefa_id: string; ultimo_id: string; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null; quedas: number;
         card_id: string | null; card_estado: string | null; sinal: boolean;
       }[]>`
         with recursive pedidos as (
@@ -136,16 +136,17 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
           where c.n < 10
         )
-        select p.tarefa_id, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+        select p.tarefa_id, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
-            where c.raiz = p.tarefa_id and q.estado = 'interrompido' and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
+            where c.raiz = p.tarefa_id and q.estado = 'interrompido' and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = ${escopo.tenantId} and v.owner_id = p.owner_id
             and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal
         from pedidos p
         join lateral (
-          select q.id, q.estado, q.motivo_interrupcao, q.ultimo_sinal_em, q.lease_ate, q.criado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          select q.id, q.estado, q.motivo_interrupcao, q.motivo_falha, q.ultimo_sinal_em, q.lease_ate, q.criado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
           where c.raiz = p.tarefa_id and coalesce(q.motivo_interrupcao::text, '') <> 'absorvido'
           order by q.criado_em desc, q.id desc limit 1
         ) u on true
@@ -175,6 +176,7 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           estadoColega: cardAberto ? "precisa_de_voce" : "falhou",
           ultimoTurnoId: l.ultimo_id,
           ultimoMotivo: l.ultimo_motivo,
+        ultimoMotivoFalha: l.ultimo_motivo_falha,
           quedaEm: msOuNull(l.queda_em),
           quedas: l.quedas,
           cardRetomar: l.card_id ? { id: l.card_id, aberto: cardAberto } : null,

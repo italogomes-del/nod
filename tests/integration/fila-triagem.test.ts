@@ -218,6 +218,19 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     });
   });
 
+  for (const motivoFalha of ["limite_do_plano", "motor_ausente"]) {
+    it(`NOD-274 (C6, QA do PR #340): a triagem recusada por ${motivoFalha} não conta como queda`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+        await m.repos.turnos.interromper(triagem, "executor_indisponivel");
+        await trx`update turnos set motivo_falha = ${motivoFalha}::motivo_falha where id = ${triagem}`;
+        const parada = (await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem);
+        expect(parada).toMatchObject({ ultimoMotivo: "executor_indisponivel", ultimoMotivoFalha: motivoFalha, quedas: 0 });
+      });
+    });
+  }
+
   it("NOD-241 (CA2): a triagem que rodava havia 3 h e caiu no reinício do servidor é retomada quando as máquinas voltam", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

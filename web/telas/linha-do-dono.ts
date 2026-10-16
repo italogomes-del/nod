@@ -257,7 +257,9 @@ function frentesAbertasDoBot(estado: Estado, x: LinhaDoBot, todos: readonly Trab
   const { abertas, terminadas } = frentesDoBot(todos, x.bot.id, meiaNoiteDe(estado.agora));
   const frente = (t: TrabalhoDto): string => {
     const fim = aberto(t) ? (t.estado === "na_fila" ? "na fila" : `frente · ${tempoDe(t, estado.agora)}`) : hora(t.terminadoEm ?? t.criadoEm);
-    return `<button type="button" class="tb-frente" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, x.bot.cor)}<span class="tb-frente-titulo">${esc(tituloCurto(t.titulo))}</span><span class="tb-frente-passo">${esc(aberto(t) ? situacaoDe(t, todos, false, estado.agora) : "")}</span><span class="tb-frente-fim">${esc(fim)}</span></button>`;
+    // Revisão do Gil no #340: a linha corta com reticências e o fim (a hora da volta) some primeiro — o title mostra a frase inteira.
+    const passo = aberto(t) ? situacaoDe(t, todos, false, estado.agora) : "";
+    return `<button type="button" class="tb-frente" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, x.bot.cor)}<span class="tb-frente-titulo">${esc(tituloCurto(t.titulo))}</span><span class="tb-frente-passo"${passo ? ` title="${esc(passo)}"` : ""}>${esc(passo)}</span><span class="tb-frente-fim">${esc(fim)}</span></button>`;
   };
   const daConversa = x.dono.esperas.filter((e) => e.trabalhoId === null).map((e) => {
     const v = esperaNaTela(e, estado.agora);

@@ -67,6 +67,8 @@ export type ExecucaoRotina = {
   desfecho: DesfechoRotina;
   motivo: string | null;
   em: EpochMs;
+  /** NOD-274 (0087): na janela 'nao_rodou' por cota, quando a cota volta; null nas demais. */
+  voltaEm?: EpochMs | null;
 };
 
 /**

@@ -76,6 +76,20 @@ export function quandoCurto(instante: EpochMs, agora: number, fusoIana = "UTC"):
 }
 
 /**
+ * definido em 2026-10-16 (NOD-274 C7, revisão do Gil no #340): a regra de `quandoVolta` (web/lib/trabalhos.ts, ADR-086)
+ * no fuso dado — "às 14:00" hoje, "amanhã às 14:00" no dia seguinte, "em 18/10 às 14:00" depois. A cota semanal pode
+ * voltar dias à frente, e "volta às 14:00" sem o dia lia como hoje.
+ */
+export function quandoVoltaNoFuso(instante: EpochMs, agora: number, fusoIana = "UTC"): string {
+  const dia = diaNoFuso(instante, fusoIana);
+  const hora = horaMinuto(instante, fusoIana);
+  if (dia === diaNoFuso(agora, fusoIana)) return `às ${hora}`;
+  if (dia === diaNoFuso(agora + DIA, fusoIana)) return `amanhã às ${hora}`;
+  const [, mes = "", d = ""] = dia.split("-");
+  return `em ${d}/${mes} às ${hora}`;
+}
+
+/**
  * 'mudou hoje', 'mudou ontem', 'há 5 dias', 'há 3 semanas', 'há 4 meses' — o último uso de uma pasta no
  * card de pasta, em dias de calendário no fuso dado, como `quandoCurto`. definido em 2026-09-25: dias até
  * duas semanas, semanas até dois meses, meses até um ano — o bastante para separar a cópia em uso do clone

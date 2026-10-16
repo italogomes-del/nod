@@ -1,6 +1,7 @@
+import type { EsperaDaCotaDaRotina } from "../../src/contracts/cota.ts";
 import type { BloqueioRotina, ExecucaoRotina, ParadaDaRotina, PerguntaPendenteDaRotina } from "../../src/contracts/rotina.ts";
 import { botao, esc } from "./render.ts";
-import { desdeQuando, listaDeJanelas } from "./relogio.ts";
+import { desdeQuando, horaMinuto, listaDeJanelas, quandoVoltaNoFuso } from "./relogio.ts";
 
 /**
  * definido em 2026-09-24 (ADR-045): quem parou a execução interrompida, em palavras — o Mac da pessoa
@@ -15,6 +16,9 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
   // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
   sem_pendencia: "sem pendência aberta, nenhum turno rodou",
+  // definido em 2026-10-15 (NOD-274): a janela que não rodou (desfecho 'nao_rodou', MOTIVOS_NAO_RODOU_ROTINA).
+  cota_da_ia: "cota",
+  execucao_anterior_aberta: "a execução anterior ainda estava aberta",
   // definido em 2026-10-15 (NOD-270): a pergunta das voltas sem novidade ficou sem resposta e a janela seguinte seguiu.
   voltas_sem_novidade: "pergunta sem resposta, fechada pela janela seguinte",
   // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.
@@ -46,7 +50,13 @@ export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | nu
  * "interrompida · seu Mac parou de responder", "parada (sem acesso)", "sem novidade · sem pendência aberta, nenhum turno
  * rodou" (a janela que o servidor passou sem turno, item 7 da ADR-066); os outros desfechos seguem só com o nome.
  */
-export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo">): string {
+export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & { voltaEm?: ExecucaoRotina["voltaEm"] }, fusoIana = "UTC"): string {
+  // NOD-274: "não rodou · cota, volta 14:00" — a janela que a cota da IA pulou fica visível no histórico.
+  if (e.desfecho === "nao_rodou") {
+    const motivo = motivoDaExecucao(e);
+    const volta = e.motivo === "cota_da_ia" && e.voltaEm ? `, volta ${horaMinuto(e.voltaEm, fusoIana)}` : "";
+    return motivo ? `não rodou · ${motivo}${volta}` : "não rodou";
+  }
   if (e.desfecho === "bloqueada") {
     const motivo = e.motivo !== null && Object.hasOwn(MOTIVO_DA_PARADA, e.motivo) ? MOTIVO_DA_PARADA[e.motivo as keyof typeof MOTIVO_DA_PARADA] : e.motivo;
     return motivo ? `parada (${motivo})` : "parada";
@@ -116,4 +126,31 @@ export function tagParadaPergunta(p: PerguntaPendenteDaRotina): string {
 /** O atalho ao balão: "Ver pergunta" ou "Ver aprovação" (o mesmo rótulo de web/telas/pergunta.ts). */
 export function rotuloVerPendencia(p: PerguntaPendenteDaRotina): string {
   return `Ver ${nomeDaPendencia(p)}`;
+}
+
+/**
+ * definido em 2026-10-16 (NOD-274, C7; revisão do Gil): a rotina cuja execução espera a cota da IA renovar — "esperando a
+ * cota do Claude Code · volta às 14:00", no fuso da rotina. Não é parada: a volta acontece sozinha. Revisão do Gil no #340:
+ * a volta diz o dia ("amanhã às 14:00", "em 18/10 às 14:00"), como `quandoVolta`.
+ */
+export function rotuloEsperaDaCota(e: EsperaDaCotaDaRotina, fusoIana: string, agora: number): string {
+  return `esperando ${cotaDaIa(e.ia)} · volta ${quandoVoltaNoFuso(e.voltaEm, agora, fusoIana)}`;
+}
+
+/**
+ * definido em 2026-10-16 (NOD-274 C7/C10, revisão de microcopy do Gil): "a cota do Claude Code", "a cota do Codex" — e,
+ * sem o nome da IA, "a cota da IA" (o genérico é feminino; "a cota do IA" era erro de concordância).
+ */
+export function cotaDaIa(ia: string): string {
+  return ia === "IA" ? "a cota da IA" : `a cota do ${ia}`;
+}
+
+/**
+ * A tag da espera da cota no cabeçalho da rotina (cinza: nada a fazer, a volta é sozinha). Revisão do Gil no #340: passada
+ * a hora da volta com a tela aberta, a tag some (vale o estado normal da rotina); o "nada a fazer" vai também em texto
+ * para o leitor de tela (o `title` não aparece no toque nem é lido sempre).
+ */
+export function tagEsperaDaCota(e: EsperaDaCotaDaRotina, fusoIana: string, agora: number): string {
+  if (e.voltaEm <= agora) return "";
+  return `<span class="tag tag-cinza" title="a execução volta sozinha quando a cota renovar; nada a fazer">${esc(rotuloEsperaDaCota(e, fusoIana, agora))}<span class="sr-only"> (volta sozinha; nada a fazer)</span></span>`;
 }

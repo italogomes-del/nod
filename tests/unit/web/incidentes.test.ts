@@ -59,3 +59,12 @@ describe("aviso de queda do Mac (ADR-045): incidente não é decisão", () => {
     expect(html).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot</);
   });
 });
+
+describe("NOD-274: a janela que não rodou aparece no histórico da rotina", () => {
+  it("cota da IA com a hora da volta, no fuso da rotina", () => {
+    const volta = Date.UTC(2026, 9, 15, 17, 0);
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "cota_da_ia", voltaEm: volta }, "America/Sao_Paulo")).toBe("não rodou · cota, volta 14:00");
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "cota_da_ia", voltaEm: null })).toBe("não rodou · cota");
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "execucao_anterior_aberta" })).toBe("não rodou · a execução anterior ainda estava aberta");
+  });
+});

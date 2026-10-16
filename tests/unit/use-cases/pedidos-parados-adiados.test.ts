@@ -14,7 +14,7 @@ const AGORA = 1_700_000_000_000;
 function montar() {
   const { deps } = depsFalsos({ agora: AGORA });
   // Um pedido cuja tarefa não existe (nunca foi uma delegação): o aviso responde `nao_e_tarefa_peer` e não grava.
-  const pedido: PedidoParado = { tarefaId: randomUUID(), trabalhoColegaId: randomUUID(), estadoColega: "falhou", ultimoTurnoId: null, ultimoMotivo: "trabalho_incompleto", quedaEm: null, quedas: 0, cardRetomar: null, sinalDepoisDaQueda: false, textoFinal: null, turnoDoTextoFinal: null };
+  const pedido: PedidoParado = { tarefaId: randomUUID(), trabalhoColegaId: randomUUID(), estadoColega: "falhou", ultimoTurnoId: null, ultimoMotivo: "trabalho_incompleto", ultimoMotivoFalha: null, quedaEm: null, quedas: 0, cardRetomar: null, sinalDepoisDaQueda: false, textoFinal: null, turnoDoTextoFinal: null };
   let buscas = 0;
   const repos = {
     ...deps.repos,

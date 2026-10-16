@@ -1,6 +1,6 @@
 import type { Estado } from "../estado/reducer.ts";
 import { avatarAgente, botao, dataHora, esc } from "../lib/render.ts";
-import { botaoDaParada, desdeDaParada, linhaNaoRodaram, linhaPerguntaPendente, motivoDaExecucao, rotuloExecucao, rotuloVerPendencia, TAG_SO_COM_PENDENCIA, tagDaParada, tagParadaPergunta } from "../lib/execucao.ts";
+import { botaoDaParada, desdeDaParada, linhaNaoRodaram, linhaPerguntaPendente, motivoDaExecucao, rotuloExecucao, rotuloVerPendencia, TAG_SO_COM_PENDENCIA, tagDaParada, tagEsperaDaCota, tagParadaPergunta } from "../lib/execucao.ts";
 import { interpolar } from "../lib/relogio.ts";
 
 /**
@@ -20,19 +20,19 @@ export function avisoDasJanelasPuladas(n: number | undefined): string {
  */
 export function renderRotinas(estado: Estado): string {
   const linhas = estado.rotinas
-    .map(({ rotina: r, proximaExecucao, bloqueio, perguntaPendente, janelasPuladas }) => {
+    .map(({ rotina: r, proximaExecucao, bloqueio, perguntaPendente, esperaDaCota, janelasPuladas }) => {
       const a = estado.frota?.agentes.find((x) => x.id === r.agenteId);
       const exec = estado.execucoes[r.id];
       // definido em 2026-09-24 (emenda da ADR-044): a janela parada lê "parada (sem acesso)", sem o motivo cru ao lado.
-      const rotulo = (e: NonNullable<typeof exec>[number]) => (e.desfecho === "bloqueada" ? rotuloExecucao(e) : e.desfecho.replaceAll("_", " "));
-      const motivo = (e: NonNullable<typeof exec>[number]) => (e.motivo && e.desfecho !== "bloqueada" ? ` · ${esc(motivoDaExecucao(e) ?? e.motivo)}` : "");
+      const rotulo = (e: NonNullable<typeof exec>[number]) => (e.desfecho === "bloqueada" || e.desfecho === "nao_rodou" ? rotuloExecucao(e, r.fusoIana) : e.desfecho.replaceAll("_", " "));
+      const motivo = (e: NonNullable<typeof exec>[number]) => (e.motivo && e.desfecho !== "bloqueada" && e.desfecho !== "nao_rodou" ? ` · ${esc(motivoDaExecucao(e) ?? e.motivo)}` : "");
       const execucoes = exec
         ? exec.length
           ? `<ul class="execucoes">${exec.map((e) => `<li class="exec exec-${esc(e.desfecho)}"><b>${esc(rotulo(e))}</b> · agendada ${esc(dataHora(e.instanteAgendado, r.fusoIana))} · registrada ${esc(dataHora(e.em, r.fusoIana))}${motivo(e)}</li>`).join("")}</ul>`
           : '<p class="mudo">nunca executou</p>'
         : "";
       return `<li class="rotina rotina-${esc(r.estado)}${bloqueio || perguntaPendente ? " rotina-parada" : ""}" data-rotina="${esc(r.id)}">
-        <div class="rt-cab">${a ? avatarAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "agente")}</b> · <code>${esc(r.cron)}</code> (${esc(r.fusoIana)}) <span class="tag ${r.estado === "ativa" ? "tag-ok" : "tag-cinza"}">${esc(r.estado)}</span>${bloqueio ? tagDaParada(bloqueio) : perguntaPendente ? tagParadaPergunta(perguntaPendente) : ""}${r.soComPendencia ? TAG_SO_COM_PENDENCIA : ""}${r.exigeAprovacao ? '<span class="tag tag-ambar" title="efeito externo só por item aprovado (E7.3)">gate de aprovação ligado</span>' : ""}</div>
+        <div class="rt-cab">${a ? avatarAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "agente")}</b> · <code>${esc(r.cron)}</code> (${esc(r.fusoIana)}) <span class="tag ${r.estado === "ativa" ? "tag-ok" : "tag-cinza"}">${esc(r.estado)}</span>${bloqueio ? tagDaParada(bloqueio) : perguntaPendente ? tagParadaPergunta(perguntaPendente) : esperaDaCota ? tagEsperaDaCota(esperaDaCota, r.fusoIana, estado.agora) : ""}${r.soComPendencia ? TAG_SO_COM_PENDENCIA : ""}${r.exigeAprovacao ? '<span class="tag tag-ambar" title="efeito externo só por item aprovado (E7.3)">gate de aprovação ligado</span>' : ""}</div>
         <div class="rt-linha"><b>próxima execução:</b> ${esc(dataHora(proximaExecucao, r.fusoIana))} (${esc(r.fusoIana)}) · ${esc(interpolar(proximaExecucao, estado.agora))}</div>
         ${avisoDasJanelasPuladas(r.estado === "ativa" ? janelasPuladas : undefined)}
         <div class="rt-linha"><b>instrução:</b> ${esc(r.instrucao)}</div>

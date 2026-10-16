@@ -75,10 +75,14 @@ describe("assentarTurno: a conta da IA chegou ao limite (várias contas)", () =>
     expect(novas[0]?.texto).toMatch(/^Todas as contas do Claude Code estão no limite\. A primeira volta (às|em \d\d\/\d\d às) \d\d:\d\d\.$/);
   });
 
-  it("rotina com troca feita no Mac: não repete (só a conversa repete); fica o aviso com a frase", async () => {
+  // NOD-274 (2026-10-15): a rotina é fundo — com a troca feita no Mac ela segue já na conta nova, como a task; antes a
+  // janela morria ali ("só a conversa repete").
+  it("rotina com troca feita no Mac: segue já na conta nova (NOD-274); fica o aviso com a frase", async () => {
     const c = await cenario({ origem: "rotina" });
     await c.entregar(comConta({ tipo: "trocou", de: 1, para: 2, voltaEm: null, foraDaTroca: [] }), "claude-cli");
-    expect(c.banco.turnos).toHaveLength(1);
+    const volta = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+    expect(volta).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 }]);
+    expect(volta[0]?.entradaTexto).toMatch(/seguiu com a conta 2\./);
     expect(c.banco.mensagens.slice(c.antes)[0]?.texto).toBe("Conta 1 do Claude Code no limite. Seguindo com a conta 2.");
   });
 

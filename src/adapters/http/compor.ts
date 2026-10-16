@@ -59,6 +59,7 @@ import { registrarDesfechoDaEntrega, repetidoSemResume } from "../../use-cases/d
 import { emitirPlanoTurno } from "../../use-cases/emitir-plano-turno.ts";
 import { encaminhar } from "../../use-cases/encaminhar.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
+import { refazerRetornoDoLote } from "../../use-cases/fechar-lote.ts";
 import { motivoEmPortugues } from "../../domain/redacao.ts";
 import { lembrar } from "../../use-cases/lembrar.ts";
 import { passar } from "../../use-cases/passar.ts";
@@ -583,6 +584,12 @@ export function comporApp(o: OpcoesCompor): App {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
       const events: RuntimeEvent[] = [];
+      // NOD-274: o fundo que parou na cota não falhou — a volta espera a hora (ou a janela já ficou 'nao_rodou'). Gravar
+      // "falhou" aqui ou avisar falha a quem pediu desmentiria a linha "espera e volta sozinho".
+      if (saida.esperaDaCota) return [];
+      // NOD-258: o retorno do lote que caiu é refeito uma vez (e, na segunda, a linha diz onde ficaram os resumos).
+      // A regra (só o interrompido, sem Parar, fora a queda da máquina) fica em refazerRetornoDoLote, onde tem teste.
+      events.push(...(await refazerRetornoDoLote(d, turno)));
       // A rotina (ou a retomada dela) registra o desfecho da janela; a regra mora em registrarDesfechoDaEntrega (NOD-251).
       events.push(...(await registrarDesfechoDaEntrega(d, turno)));
       // definido em 2026-09-24 (ADR-047): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)

@@ -2,6 +2,7 @@ import type { EsperaDaConta } from "../../src/contracts/cota.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../../src/contracts/maquina.ts";
 import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
+import { cotaDaIa } from "./execucao.ts";
 import { duracaoCurta, quandoCurto } from "./relogio.ts";
 import { esc, hora } from "./render.ts";
 
@@ -76,7 +77,7 @@ export function tempoDe(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "termin
  * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): a task rodando sem turno vivo e com pedido a colega
  * em aberto está ESPERANDO esse colega, não trabalhando. A frase base é "esperando X" (combinada com o protótipo do Ritmo).
  */
-export function esperandoColega(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega">): { nome: string; desde: number; trabalhoId: string | null } | null {
+export function esperandoColega(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega">): NonNullable<TrabalhoDto["esperandoColega"]> | null {
   return t.estado === "rodando" && !t.turnoVivoId && t.esperandoColega ? t.esperandoColega : null;
 }
 
@@ -187,7 +188,9 @@ export function textoDaEsperaDaConta(e: EsperaDaConta, agora: number): string {
 export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], segurando = false, agora = Date.now()): string {
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
-  if (colega) return `esperando ${colega.nome}`;
+  // definido em 2026-10-16 (NOD-274, C10): a cota da IA do colega acabou — diz qual e quando ele volta, com o dia
+  // (`quandoVolta`: "às 14:00", "amanhã às 14:00", "em 18/10 às 14:00"; revisão do Gil no #340).
+  if (colega) return colega.cota ? `esperando ${colega.nome} · ${cotaDaIa(colega.cota.ia)} acabou, volta ${quandoVolta(colega.cota.voltaEm, agora)}` : `esperando ${colega.nome}`;
   const daConta = esperaDaContaDe(t, agora);
   if (daConta) return textoDaEsperaDaConta(daConta, agora);
   // definido em 2026-10-12 (ADR-099 §7): a cota da IA segura a task (o servidor decide, a mesma regra do `reivindicar`); a

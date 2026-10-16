@@ -3,6 +3,8 @@ import type { Concessao } from "../contracts/concessao.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import { TIPOS_GATE_ROTINA } from "../contracts/pedido.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
+import { iaDaVoltaDaCota } from "../domain/espera-da-cota.ts";
 import { avisoDeJanelasPuladas, janelasPuladas } from "../domain/janelas-puladas.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
@@ -25,13 +27,15 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
   for (const rotina of rotinas) {
     let bloqueio: RotinaDto["bloqueio"] = null;
     let perguntaPendente: RotinaDto["perguntaPendente"];
+    let esperaDaCota: RotinaDto["esperaDaCota"];
     if (minhas.includes(rotina)) {
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
       perguntaPendente = await perguntaQueParou(deps.repos, rotina);
+      esperaDaCota = await esperaDaCotaDaRotina(deps.repos, rotina, deps.agora());
     }
     const puladas = await puladasDe(deps, rotina);
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
@@ -57,6 +61,16 @@ async function perguntaQueParou(repos: Repos, rotina: Rotina): Promise<RotinaDto
   if (ultima?.desfecho !== "bloqueada" || ultima.motivo !== "aguardando_resposta") return undefined;
   const d = await pendenciaAbertaDaRotina(repos, rotina);
   return d ? { decisaoId: d.id, desde: Date.parse(d.criadoEm), tipo: TIPOS_GATE_ROTINA.has(d.tipo) ? "aprovacao" : "pergunta" } : undefined;
+}
+
+/**
+ * definido em 2026-10-16 (NOD-274, C7; revisão do Gil): a execução aberta da rotina cuja volta espera a cota da IA
+ * renovar — a lista mostra "esperando a cota do <IA> · volta às HH:MM" em vez de parecer travada.
+ */
+async function esperaDaCotaDaRotina(repos: Repos, rotina: Rotina, agora: number): Promise<RotinaDto["esperaDaCota"]> {
+  const raiz = await repos.rotinaJanelas.turnoAberto(rotina.id);
+  const volta = raiz ? await repos.rotinaJanelas.esperaDaCotaDe(raiz, ENTRADA_DA_VOLTA_DA_COTA, agora) : null;
+  return volta ? { ia: iaDaVoltaDaCota(volta.entrada, volta.harness), voltaEm: volta.voltaEm } : undefined;
 }
 
 /** Um cron que o parser não aceita (linha antiga, gravada à mão) não derruba a lista: fica o cron cru. */

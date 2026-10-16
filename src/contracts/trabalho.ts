@@ -103,7 +103,7 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
    * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
    * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.
    */
-  esperandoColega?: { nome: string; desde: number; trabalhoId: string | null } | null;
+  esperandoColega?: { nome: string; desde: number; trabalhoId: string | null; cota?: { ia: string; voltaEm: number } } | null;
   /** Quanto os turnos do trabalho de fato rodaram (do começo ao último sinal de cada um, o que roda até agora), em ms. */
   trabalhouMs?: number;
   /** definido em 2026-10-08 (ADR-086): o bot volta a esta hora ("me chame às 16:00"); ausente ou null: nenhuma volta. */

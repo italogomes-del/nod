@@ -19,7 +19,7 @@ import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
 import { contasDaMaquinaDe, criarNotaDeContas, escolherContaDoTurno, lerContas, notaIgualAberta, semContaParaOTurno, voltaDaNota, type LeituraDasContas } from "./contas-do-turno.ts";
-import { esperarContaNaFrente } from "./assentar-turno.ts";
+import { esperarContaNaFrente, fundoNaCadeia } from "./assentar-turno.ts";
 import { registrarRecusaDaRotina } from "./disparar-rotina.ts";
 import { adiarFala, vigiarLaco } from "./adiar-fala.ts";
 import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
@@ -251,9 +251,13 @@ async function semContaNaMaquina(
   const fixo = harnessFixado(turno.harness, turno.modelo);
   const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, { iaFixa: fixo && ehIaComConta(fixo) ? fixo : null, ordemDoBot });
   if (!sem) return null;
-  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", ultimoSinalEm: agora });
+  // NOD-269: motivo próprio ('sem_conta'), não 'limite_do_plano' — a recusa no despacho não se confunde com o limite visto
+  // no meio da rodada, e a repetição dos barrados por IA (barradosPorFaltaDeIa) a deixa de fora.
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "sem_conta", ultimoSinalEm: agora });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
-  if (turno.origem !== "conversa") {
+  // NOD-269 (NOD-222): a espera é decidida pelo TIPO do turno — a frente que a pessoa abriu na conversa (origem
+  // 'conversa' + trabalho) também espera; antes ela caía na nota, virava "falhou" e fechava o lote.
+  if (await fundoNaCadeia(deps, turno)) {
     // ADR-099 §7: nenhuma frente falha por limite — a task espera a conta voltar (1 h sem horário do fornecedor).
     const volta = sem.voltaEm !== null && sem.voltaEm > agora ? sem.voltaEm : agora + PRAZO_SEM_HORARIO_MS;
     const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia: sem.de.ia, renovaEm: volta, autoria, agora });
@@ -271,7 +275,7 @@ async function semContaNaMaquina(
   // igual aberta, ela assenta calada (só log); a nota já diz a hora. A fala da conversa que já esperou ganha a nota de novo.
   const calada = repetida && (adiada !== null || turno.origem !== "conversa");
   const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "limite_do_plano", sem_conta: true } }),
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "sem_conta", sem_conta: true } }),
     // Revisão do PR #319: a fala que já esperou não espera de novo — sem a nota, ela sumiria calada (nunca silêncio).
     ...(calada ? [] : await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
     ...(adiada ?? []),

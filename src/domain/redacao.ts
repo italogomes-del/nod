@@ -27,6 +27,12 @@ export type ChaveRedacao =
   | "cota-no-limite-espera"
   | "cota-no-limite-segue"
   | "conta-no-limite-espera"
+  | "cota-no-limite-espera-pedido"
+  | "conta-no-limite-espera-pedido"
+  | "cota-no-limite-espera-rotina"
+  | "cota-no-limite-rotina-nao-rodou"
+  | "pedido-a-colega-espera-cota"
+  | "retorno-do-lote-caiu"
   | "fala-no-limite-espera"
   | "ia-pronta-noutra-maquina"
   | "conta-fora-da-maquina"
@@ -81,6 +87,17 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-10-16 (ADR-108 R4): a task SEM sessão na IA que parou segue na outra IA na hora (não há o que perder).
   "cota-no-limite-segue": "A cota do {ia} chegou ao limite. Esta task segue no {para}, de onde parou.",
   "conta-no-limite-espera": "A conta {de} do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
+  // definido em 2026-10-15 (NOD-274, NOD-269): o mesmo, no trabalho de fundo sem task — rotina, pedido de colega,
+  // retorno do lote e a frente sem task. "Esta task" não servia: a pessoa lia uma task que não existe.
+  "cota-no-limite-espera-pedido": "A cota do {ia} chegou ao limite. Este pedido espera e volta sozinho {quando}, de onde parou.",
+  "conta-no-limite-espera-pedido": "A conta {de} do {ia} chegou ao limite. Este pedido espera e volta sozinho {quando}, de onde parou.",
+  "cota-no-limite-espera-rotina": "A cota do {ia} chegou ao limite. Esta execução da rotina espera e roda sozinha {quando}.",
+  // NOD-274: a cota só volta depois da próxima janela; a execução fica 'nao_rodou' e a rotina segue a agenda.
+  "cota-no-limite-rotina-nao-rodou": "A cota do {ia} chegou ao limite e só volta {quando}, depois da próxima execução: esta janela não rodou. A rotina segue a agenda.",
+  // NOD-274: o colega que recebeu o pedido está sem cota; quem pediu lê a hora uma vez só, não um erro.
+  "pedido-a-colega-espera-cota": "{agente} está sem cota do {ia}. Seu pedido espera e volta sozinho {quando}.",
+  // definido em 2026-10-15 (NOD-258): o retorno do lote caiu de novo depois de refeito uma vez; os resumos não somem.
+  "retorno-do-lote-caiu": "O retorno do lote caiu duas vezes e não foi refeito de novo. Os resumos ficaram em cada frente: {frentes}.",
   // definido em 2026-10-15 (NOD-268): a fala da pessoa passou do teto de reenvios (ou todas as IAs da máquina do bot estão
   // no limite) e espera a hora do limite, com UMA linha, em vez de girar de IA em IA.
   "fala-no-limite-espera": "O {ia} está no limite da assinatura. Sua mensagem espera e volta sozinha {quando}.",
@@ -137,6 +154,8 @@ const MOTIVO_EM_PORTUGUES: Readonly<Record<MotivoFalha | MotivoInterrupcao, stri
   nao_autenticado: "a conta da IA não está conectada neste Mac",
   // NOD-171: sem a hora. O aviso do turno usa fraseDoLimiteDoPlano (erro-fornecedor.ts), que diz quando volta.
   limite_do_plano: "o plano da IA atingiu o limite de uso; espere o uso renovar e tente de novo",
+  // NOD-269: nenhuma conta livre na máquina na hora do despacho; o trabalho de fundo espera sozinho.
+  sem_conta: "todas as contas da IA neste computador estão no limite; o pedido espera a cota voltar",
 };
 
 /** Aceita string: o banco guarda motivos que saíram do enum. Motivo legado sem tradução sai como está, sem quebrar. */

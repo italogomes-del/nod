@@ -1,6 +1,6 @@
 import type { LoteDeFrentes, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
-import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb, ms, msOuNull } from "./conversao.ts";
 
@@ -119,7 +119,8 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
             where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('concluido', 'interrompido')
             order by x.criado_em desc, x.id desc limit 1) end as motivo,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas
         from trabalhos w
         where w.tenant_id = ${escopo.tenantId} and w.lote_id = ${loteId}
         order by w.criado_em, w.id`;
@@ -137,6 +138,22 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and aberto_por_turno_id = any(${[...turnoIds]}::uuid[])
         order by criado_em, id`;
       return linhas.map(paraLote);
+    },
+
+    /** NOD-258: o lote cujo retorno é este turno (null = nenhum). */
+    async loteDoRetorno(retornoTurnoId: string): Promise<LoteDeFrentes | null> {
+      const [l] = await conn<LinhaLote[]>`
+        select ${conn.unsafe(COLUNAS_LOTE)} from lotes_de_frentes
+        where tenant_id = ${escopo.tenantId} and retorno_turno_id = ${retornoTurnoId} for update`;
+      return l ? paraLote(l) : null;
+    },
+
+    /** NOD-258: o retorno refeito passa a ser o do lote (o UNIQUE de um retorno por lote continua valendo). */
+    async trocarRetorno(loteId: string, retornoTurnoId: string): Promise<boolean> {
+      const r = await conn`
+        update lotes_de_frentes set retorno_turno_id = ${retornoTurnoId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${loteId} and devolvido_em is not null`;
+      return r.count > 0;
     },
 
     /**
@@ -163,12 +180,13 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
      */
     async frentesCaidas(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
-        id: string; estado: EstadoTrabalho; ultimo_id: string; ultimo_motivo: string | null; queda_em: Date | null; quedas: number;
+        id: string; estado: EstadoTrabalho; ultimo_id: string; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null; quedas: number;
         card_id: string | null; card_estado: string | null; sinal: boolean;
       }[]>`
-        select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+        select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = w.tenant_id and v.owner_id = w.owner_id
             and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
@@ -176,7 +194,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         from trabalhos w
         join lotes_de_frentes l on l.tenant_id = w.tenant_id and l.id = w.lote_id and l.devolvido_em is null
         join lateral (
-          select t.id, t.estado, t.motivo_interrupcao, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.estado, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
           where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -198,6 +216,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         estadoColega: l.estado,
         ultimoTurnoId: l.ultimo_id,
         ultimoMotivo: l.ultimo_motivo,
+        ultimoMotivoFalha: l.ultimo_motivo_falha,
         quedaEm: msOuNull(l.queda_em),
         quedas: l.quedas,
         cardRetomar: l.card_id ? { id: l.card_id, aberto: l.card_estado === "pendente" || l.card_estado === "reaberta" } : null,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duracaoCurta, emQuanto, foraDoArDesde, haQuanto, horaMinuto, interpolar, nadaEsperando } from "../../../web/lib/relogio.ts";
+import { duracaoCurta, emQuanto, foraDoArDesde, haQuanto, horaMinuto, interpolar, nadaEsperando, quandoVoltaNoFuso } from "../../../web/lib/relogio.ts";
 
 const H = 3_600_000;
 const AGORA = Date.UTC(2026, 8, 16, 14, 0, 0);
@@ -40,5 +40,20 @@ describe("relógio do cliente: só interpola instantes absolutos em UTC (ADR-007
     expect(foraDoArDesde("claude-cli", desde, "America/Sao_Paulo")).toBe("claude-cli fora do ar desde 11:03");
     expect(nadaEsperando(null, AGORA)).toBe("Nada esperando por você · nenhuma decisão até agora");
     expect(nadaEsperando(new Date(AGORA - 2 * H).toISOString(), AGORA)).toBe("Nada esperando por você · última decisão há 2h");
+  });
+});
+
+describe("quandoVoltaNoFuso (NOD-274 C7, revisão do Gil no #340)", () => {
+  const TZ = "America/Sao_Paulo";
+  const agora = Date.parse("2026-10-16T10:00:00-03:00");
+  it("hoje, amanhã e depois, no fuso dado", () => {
+    expect(quandoVoltaNoFuso(Date.parse("2026-10-16T14:00:00-03:00"), agora, TZ)).toBe("às 14:00");
+    expect(quandoVoltaNoFuso(Date.parse("2026-10-17T14:00:00-03:00"), agora, TZ)).toBe("amanhã às 14:00");
+    expect(quandoVoltaNoFuso(Date.parse("2026-10-18T14:00:00-03:00"), agora, TZ)).toBe("em 18/10 às 14:00");
+  });
+  it("o dia é o do fuso, não o de UTC", () => {
+    const noite = Date.parse("2026-10-16T23:30:00-03:00"); // 02:30 UTC do dia 17
+    expect(quandoVoltaNoFuso(noite, agora, TZ)).toBe("às 23:30");
+    expect(quandoVoltaNoFuso(noite, agora, "UTC")).toBe("amanhã às 02:30");
   });
 });

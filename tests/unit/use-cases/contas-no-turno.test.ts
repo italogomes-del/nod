@@ -147,7 +147,8 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
     const r = await c.despachar();
     expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
-    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "limite_do_plano" });
+    // NOD-269: a recusa por conta no despacho tem motivo próprio.
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "sem_conta" });
     const nota = c.banco.mensagens.slice(c.antes)[0];
     expect(nota?.payload).toMatchObject({ kind: "limite_do_plano", contas: { de: { id: c.contas.cPessoal.id }, livres: [{ id: c.contas.cLeapy.id, naMaquina: true }] } });
   });
@@ -164,19 +165,37 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
     const r = await c.despachar();
     expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
-    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "limite_do_plano" });
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "sem_conta" });
     expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 + 2 * HORA }]);
   });
 
-  it("fundo sem task (rotina antiga): a nota com a espera fica na conversa, nada refeito", async () => {
+  it("NOD-269: frente aberta pela pessoa na conversa espera, não falha e não ganha a nota", async () => {
+    const c = await cenario({ origem: "conversa", comTask: true });
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + 2 * HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, T0 + 4 * HORA);
+    const r = await c.despachar();
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "sem_conta" });
+    const volta = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+    expect(volta).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 + 2 * HORA }]);
+    // A frente nunca rodou (sem sessão): a volta leva o pedido original da raiz.
+    expect(volta[0]?.entradaTexto).toContain("Pedido original da frente:\nrevisa o #861");
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas.map((m) => m.payload?.kind)).not.toContain("limite_do_plano");
+    expect(novas.filter((m) => m.kind === "sistema").map((m) => m.texto)).toEqual([expect.stringMatching(/^A cota do Claude Code chegou ao limite/)]);
+    expect((await c.deps.repos.trabalhos.buscar(volta[0]!.trabalhoId!))?.estado).not.toBe("falhou");
+  });
+
+  it("NOD-274: fundo sem task (rotina, pedido) também espera a conta voltar, sem a nota", async () => {
     const c = await cenario({ origem: "rotina" });
     await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + 2 * HORA);
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
     await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, T0 + 4 * HORA);
     const r = await c.despachar();
     expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
-    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
-    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toMatchObject([{ origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 + 2 * HORA }]);
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).not.toContain("limite_do_plano");
   });
 
   it("'Seguir com' grava a escolhida da IA e refaz a fala que parou no limite", async () => {
@@ -322,20 +341,22 @@ describe("NOD-268: regressão de 15/10 (a conversa inundada de notas e reenvios)
 
   // Regression: ISSUE-001 — rotina sem task escrevia a mesma nota de contas a cada execução
   // Found by /qa on 2026-10-15 (QA do NOD-268, PR #319)
-  it("QA do NOD-268: rotina sem task executada de novo com a nota igual aberta não escreve outra nota", async () => {
+  it("QA do NOD-268: rotina sem task executada de novo não escreve nota de contas (NOD-274: espera, sem a nota)", async () => {
     const c = await cenario({ origem: "rotina" });
     await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
     await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, AS_14_50 + 2 * HORA);
     await c.despachar();
-    expect(notas(c)).toHaveLength(1);
+    // Integração da main no #340: com o NOD-274 a rotina sem task espera a conta voltar sem a nota — nenhuma nota, nem a primeira.
+    expect(notas(c)).toHaveLength(0);
     // Cada execução da rotina é um turno novo, sem mensagem de origem (o teto por mensagem_origem_id não a pega).
     for (let i = 0; i < 4; i++) {
       await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "revisa o #861", mensagemOrigemId: null, entradaConfianca: "confiavel", modelo: "auto", harness: "auto", executor: "local" });
       expect((await c.despachar()).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
     }
-    expect(notas(c)).toHaveLength(1);
-    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+    expect(notas(c)).toHaveLength(0);
+    // Cada execução espera numa retomada só dela — nenhuma volta para a fila sem hora.
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente").every((t) => t.origem === "retomada" && t.acordarEm !== null)).toBe(true);
   });
 
   it("'Seguir com' numa conta pronta na máquina do bot refaz como antes", async () => {

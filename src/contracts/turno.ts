@@ -78,6 +78,11 @@ export type Turno = {
   trabalhoId?: string | null; // ADR-083: o trabalho deste turno; null = turno da conversa
   acordarEm?: number | null; // ADR-086: a volta marcada ("me chame às 16:00") — a fila só a entrega a partir daqui
   /**
+   * definido em 2026-10-15 (NOD-258): a regra que criou o turno (`turnos.decidido_por`). Só uma é lida hoje: o retorno do
+   * lote (RETORNO_DO_LOTE, domain/cota-da-ia.ts), que é fundo para a cota sem coluna nova. Ausente = não lido.
+   */
+  decididoPor?: string;
+  /**
    * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
    */

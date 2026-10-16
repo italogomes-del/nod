@@ -61,16 +61,34 @@ describe("NOD-275: o despacho recusado registra a janela da rotina como 'interro
     expect((await c.execucoes()).map((e) => [e.desfecho, e.motivo])).toEqual([["interrompida", "nao_autenticado"]]);
   });
 
-  it("toda conta no limite e nada a esperar (rotina sem task): interrompida · limite_do_plano, a nota segue sozinha na conversa", async () => {
-    const c = await cenario();
+  // revisto em 2026-10-16 (NOD-274 C3, decisão NOD-222): a rotina sem task barrada no despacho por falta de conta não é mais
+  // 'interrompida' — ela espera a conta voltar (antes da próxima janela) ou a janela fica 'nao_rodou' (depois dela).
+  async function semContaLivre(c: Awaited<ReturnType<typeof cenario>>, voltaEm: number) {
     const imp = (n: number) => n.toString(16).padStart(64, "0");
     const anuncio = (n: number, ia: ContaAnunciada["ia"]): ContaAnunciada => ({ impressao: imp(n), ia, estado: "pronta", plano: "Max", corporativa: false, logadaEm: T0 - HORA, apelidoSugerido: "Pessoal" });
     await c.deps.repos.contasIa.doAnuncio(c.vm, [anuncio(1, "claude-cli"), anuncio(2, "codex-cli")], T0);
-    for (const conta of (await c.deps.repos.contasIa.listar()).contas) await c.deps.repos.contasIa.marcarLimite(conta.id, T0 + 2 * HORA);
+    for (const conta of (await c.deps.repos.contasIa.listar()).contas) await c.deps.repos.contasIa.marcarLimite(conta.id, voltaEm);
+  }
+
+  it("toda conta no limite, volta antes da próxima janela (rotina sem task): espera com acordar_em, sem desfecho nem nota", async () => {
+    const c = await cenario();
+    await semContaLivre(c, T0 + 2 * HORA);
     const r = await c.despachar();
     expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
-    expect((await c.execucoes()).map((e) => [e.desfecho, e.motivo])).toEqual([["interrompida", "limite_do_plano"]]);
-    expect(c.novas().map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
+    expect(await c.execucoes()).toEqual([]);
+    const volta = c.banco.turnos.find((t) => t.retomaTurnoId === c.turnoId);
+    expect(volta).toMatchObject({ origem: "retomada", acordarEm: T0 + 2 * HORA });
+    expect(c.novas().map((m) => m.payload?.kind)).not.toContain("limite_do_plano");
+  });
+
+  it("toda conta no limite, volta depois da próxima janela: a janela fica 'nao_rodou' · cota_da_ia, sem volta", async () => {
+    const c = await cenario();
+    await semContaLivre(c, T0 + 30 * HORA);
+    const r = await c.despachar();
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect((await c.execucoes()).map((e) => [e.desfecho, e.motivo])).toEqual([["nao_rodou", "cota_da_ia"]]);
+    expect(c.banco.turnos.find((t) => t.retomaTurnoId === c.turnoId)).toBeUndefined();
+    expect(kinds(r.events).filter((k) => k === "rotina_executou")).toHaveLength(1);
   });
 
   it("turno de conversa recusado: nada em rotina_execucoes e os mesmos eventos de antes", async () => {

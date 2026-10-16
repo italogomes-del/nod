@@ -301,3 +301,24 @@ export const avisarFalhaDelegacao: CasoDeUso<{ turnoId: string; motivo: string; 
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.motivo, falha: true });
 };
+
+/**
+ * definido em 2026-10-15 (NOD-274): o colega que cumpre um pedido ficou sem cota e o pedido espera (retomada com
+ * `acordar_em`). Quem pediu lê, na conversa de onde pediu, UMA linha de sistema com a hora da volta — antes ele não
+ * sabia de nada até o aviso de falha. Não é o resultado nem a falha: o aviso de falha continua segurado pela volta
+ * (aindaNaoEntrega → aguardando_volta). `texto` é frase do servidor (redigir). Quem chama garante "uma vez por cadeia".
+ */
+export async function avisarEsperaAoRemetente(deps: DepsEntrega, p: { turno: Turno; texto: string }): Promise<RuntimeEvent[]> {
+  const tarefa = await delegacaoDoTurno(deps.repos, p.turno);
+  if (!tarefa) return [];
+  const pergunta = await perguntaDaTarefa(deps, tarefa);
+  if (!pergunta) return [];
+  const remetente = await deps.repos.agentes.buscar(pergunta.autoria.autor_id);
+  if (!remetente) return [];
+  const origem = pergunta.payload?.kind === "peer_pedido" ? pergunta.payload : null;
+  const conversa = origem ? await deps.repos.conversas.buscar(origem.conversaOrigemId) : await deps.repos.conversas.buscarPropriaDoAgente(remetente.id);
+  if (!conversa) return [];
+  const autoria = autoriaAgente(tarefa.agenteId, deps.escopo.pessoaId, tarefa.sobProcuracaoDe ?? null);
+  const linha = await deps.repos.mensagens.criar({ conversaId: conversa.id, turnoId: origem?.turnoOrigemId ?? null, autoria, kind: "sistema", texto: p.texto, confianca: "confiavel" });
+  return linha ? [evento(deps, "mensagem_criada", autoria, { mensagem_id: linha.id, kind: "sistema" }, { conversaId: conversa.id, turnoId: origem?.turnoOrigemId ?? null })] : [];
+}

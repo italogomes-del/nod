@@ -65,3 +65,12 @@ export type CustoDoBotHoje = {
 /** `GET custo-hoje?fuso=`: os bots com gasto hoje (ou fora do ritmo), do que mais gastou ao que menos. */
 /** NOD-276 (D10): `parcial` = algum turno de hoje gastou sem custo conhecido; o total soma só os que têm. */
 export type CustoDoDiaDto = { fuso: string; desde: EpochMs; ate: EpochMs; totalUsd: number; bots: CustoDoBotHoje[]; foraDoRitmo: boolean; parcial?: boolean };
+
+/** esperaDaCota da rotina (RotinaDto em api.ts, mesmo formato; definido em 2026-10-16, NOD-274 C7): a execução aberta espera a cota da IA renovar; `ia` é o nome (ex.: "Claude Code"). */
+export type EsperaDaCotaDaRotina = { ia: string; voltaEm: EpochMs };
+
+/**
+ * definido em 2026-10-16 (NOD-274, C10; o formato de TrabalhoDto.esperandoColega.cota): a cota da IA do colega segura o pedido — a volta dele está marcada para
+ * `voltaEm`. A linha da frente diz "esperando <colega> · a cota do <IA> acabou, volta às HH:MM" ("a cota da IA" sem o nome).
+ */
+export type CotaQueSeguraOColega = { ia: string; voltaEm: EpochMs };

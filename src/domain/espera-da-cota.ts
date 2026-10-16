@@ -55,3 +55,15 @@ export function esperaDaConta(r: RetomadaDaCota, livres: readonly ContaLivreDaIa
     livres: ia ? livres.filter((c) => c.ia === ia && c.id !== r.conta?.id).map((c) => ({ id: c.id, nome: nomeDaConta(c) })) : [],
   };
 }
+
+
+/**
+ * definido em 2026-10-16 (NOD-274, C7/C10): o nome da IA cuja cota segura a volta. A entrada da volta já diz qual foi
+ * ("[nod] A cota do <IA> chegou ao limite…"); sem casar o texto, vale o harness fixado da volta. Puro.
+ */
+export function iaDaVoltaDaCota(entrada: string, harness: string | null): string {
+  const resto = entrada.startsWith(ENTRADA_DA_VOLTA_DA_COTA) ? entrada.slice(ENTRADA_DA_VOLTA_DA_COTA.length) : "";
+  const pelaEntrada = [...HARNESSES].sort((a, b) => b.nome.length - a.nome.length).find((h) => resto.startsWith(`${h.nome} `));
+  if (pelaEntrada) return pelaEntrada.nome;
+  return HARNESSES.find((h) => h.id === harness)?.nome ?? "IA";
+}

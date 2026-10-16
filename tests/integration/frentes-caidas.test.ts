@@ -73,6 +73,22 @@ async function montar(trx: Trx) {
 }
 
 describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda, o dono pergunta (ADR-099, I9)", () => {
+  for (const motivoFalha of ["limite_do_plano", "nao_autenticado"]) {
+    it(`NOD-274 (C6, QA do PR #340): a frente recusada por ${motivoFalha} não conta como queda`, async () => {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const { ids } = await m.abrir(await m.turnoDaConversa());
+        const t = await m.turnoVivo(ids[0]!);
+        await m.repos.turnos.interromper(t.id, "executor_indisponivel");
+        await trx`update turnos set motivo_falha = ${motivoFalha}::motivo_falha where id = ${t.id}`;
+        await m.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: t.agenteId, conversaId: t.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() + 86_400_000, frase: "O turno parou." });
+        await sincronizarTrabalho(m.deps, ids[0]!);
+        const caida = (await m.repos.frentes.frentesCaidas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === ids[0]);
+        expect(caida).toMatchObject({ ultimoMotivo: "executor_indisponivel", ultimoMotivoFalha: motivoFalha, quedas: 0 });
+      });
+    });
+  }
+
   it("cai 3 vezes → 2 retomadas sozinhas → a frente fecha falhou, o lote fecha e o dono acorda com o motivo e a pergunta", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

@@ -18,6 +18,7 @@ import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
+import { colegaComCota } from "./cota-do-colega.ts";
 import { donosDosBots } from "./estado-do-dono.ts";
 import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
@@ -171,6 +172,8 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
  */
 export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "agora">, trabalhos: readonly Trabalho[], alemDisso?: (t: TrabalhoDto, e: ExtrasTrabalho | undefined) => Partial<TrabalhoDto>): Promise<TrabalhoDto[]> {
   const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id), deps.agora());
+  const colegas = new Map<string, TrabalhoDto["esperandoColega"]>();
+  for (const [id, e] of extras) if (e.esperandoColega) colegas.set(id, await colegaComCota(deps.repos, e.esperandoColega, deps.agora()));
   const esperasDaCota = await esperasDaCotaDe(deps, trabalhos);
   return trabalhos.map((t): TrabalhoDto => {
     const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
@@ -189,7 +192,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       memoriaMb: vivo ? t.memoriaMb : null,
       seguravel: t.estado === "na_fila" && seguravelPeloMac(t, deps.agora()),
       deFora: e?.deFora ?? false,
-      esperandoColega: e?.esperandoColega ?? null,
+      esperandoColega: colegas.get(t.id) ?? null,
       trabalhouMs: e?.trabalhouMs ?? 0,
       acordaEm: e?.acordaEm ?? null,
       esperandoComando: e?.esperandoComando ?? null,

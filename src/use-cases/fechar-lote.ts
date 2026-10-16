@@ -5,6 +5,8 @@ import type { Turno } from "../contracts/turno.ts";
 import { ehFrente } from "../domain/frente.ts";
 import { decidirFecho, destinoDoLote, entradaDoRetorno, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
 import { trabalhoFinal } from "../domain/trabalho.ts";
+import { RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { redigir } from "../domain/redacao.ts";
 import { delegacaoDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { cadeiaDaDelegacao, entregarRespostaPeer } from "./entregar-resposta-peer.ts";
@@ -63,6 +65,9 @@ function trabalhoDoRetorno(lote: LoteDeFrentes, frentes: readonly FrenteNoFecho[
 async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoPor: Turno; frentes: FrenteNoFecho[]; fechaLote: boolean; cuidado: boolean; faltam: number; total: number; trabalhoDoRetorno: string | null }): Promise<RuntimeEvent[]> {
   const agora = deps.agora();
   const { abertoPor } = p;
+  // NOD-258: o retorno roda na IA ATUAL do bot (a do turno que abriu o lote pode ter sido trocada depois, ou estar no
+  // limite) e leva a marca do retorno do lote — o portão da cota o trata como fundo e ele espera a cota em vez de cair.
+  const agente = await deps.repos.agentes.buscar(abertoPor.agenteId);
   const retorno = await deps.repos.turnos.enfileirar({
     conversaId: abertoPor.conversaId,
     agenteId: abertoPor.agenteId,
@@ -75,9 +80,10 @@ async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoP
     entradaTexto: entradaDoRetorno({ frentes: p.frentes, faltam: p.faltam, total: p.total }),
     entradaConfianca: abertoPor.entradaConfianca,
     sobProcuracaoDe: abertoPor.sobProcuracaoDe ?? null,
-    modelo: abertoPor.modelo,
-    harness: abertoPor.harness,
+    modelo: agente?.modelo ?? abertoPor.modelo,
+    harness: agente ? agente.harness : abertoPor.harness,
     executor: abertoPor.executor,
+    decididoPor: RETORNO_DO_LOTE,
   });
   if (!retorno) return [];
   if (p.cuidado || (await deps.repos.turnos.contaminado(abertoPor.id))) await deps.repos.turnos.contaminar(retorno.id, agora);
@@ -145,4 +151,48 @@ async function linhaFrentesTerminadas(deps: DepsFecho, p: { lote: LoteDeFrentes;
     confianca: "confiavel",
   });
   return m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: deps.agora(), conversaId: p.conversaId, turnoId: p.turnoId, dados: { mensagem_id: m.id, kind: "sistema", lote_id: p.lote.id } })] : [];
+}
+
+/**
+ * NOD-258 (definido em 2026-10-15): o retorno do lote caiu (interrompido sem espera da cota e sem Parar). Antes o
+ * resultado do lote se perdia: o lote já estava devolvido e nada acordava o dono de novo. Agora o retorno é refeito UMA
+ * vez (a mesma entrada, na IA atual do bot, `reenvios` + 1) e o lote passa a apontar para a cópia; na segunda queda, uma
+ * linha ao dono diz onde ficaram os resumos. `devolvido_em` nunca volta a null (o UNIQUE de um retorno por lote fica).
+ */
+export async function refazerRetornoDoLote(deps: DepsFecho, turno: Turno): Promise<RuntimeEvent[]> {
+  // A queda da máquina (maquina_sem_contato) já tem o caminho dela (interromper-por-maquina.ts): refazer aqui duplicaria.
+  if (turno.decididoPor !== RETORNO_DO_LOTE || turno.estado !== "interrompido" || turno.pararSolicitadoEm !== null || turno.motivoInterrupcao === "maquina_sem_contato") return [];
+  // A volta da cota de um retorno passa o lote para ela (aposLimiteNoFundo): o lote aponta sempre para o último.
+  const raiz = turno;
+  const lote = await deps.repos.frentes.loteDoRetorno(raiz.id);
+  if (!lote) return [];
+  const agora = deps.agora();
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
+  if (turno.reenvios >= 1) {
+    const frentes = await deps.repos.frentes.frentesDoLote(lote.id);
+    const m = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: redigir("retorno-do-lote-caiu", agora, { frentes: frentes.map((f) => f.titulo).join(", ") || "nenhuma" }), confianca: "confiavel" });
+    return m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: m.id, kind: "sistema" } })] : [];
+  }
+  const agente = await deps.repos.agentes.buscar(turno.agenteId);
+  const copia = await deps.repos.turnos.enfileirar({
+    conversaId: raiz.conversaId,
+    agenteId: raiz.agenteId,
+    origem: "retomada",
+    retomaTurnoId: raiz.retomaTurnoId,
+    trabalhoId: raiz.trabalhoId ?? null,
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: raiz.profundidade,
+    entradaTexto: raiz.entradaTexto,
+    entradaConfianca: raiz.entradaConfianca,
+    sobProcuracaoDe: raiz.sobProcuracaoDe ?? null,
+    modelo: agente?.modelo ?? raiz.modelo,
+    harness: agente ? agente.harness : raiz.harness,
+    executor: raiz.executor,
+    reenvios: turno.reenvios + 1,
+    decididoPor: RETORNO_DO_LOTE,
+  });
+  if (!copia) return [];
+  if (raiz.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(raiz.id))) await deps.repos.turnos.contaminar(copia.id, agora);
+  await deps.repos.frentes.trocarRetorno(lote.id, copia.id);
+  return [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: raiz.conversaId, turnoId: copia.id, dados: { origem: copia.origem, agente_id: raiz.agenteId, lote_id: lote.id, repete_turno_id: turno.id } })];
 }

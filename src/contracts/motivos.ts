@@ -52,6 +52,8 @@ export const MOTIVOS_FALHA = [
    * só a frase muda (src/domain/erro-fornecedor.ts).
    */
   "limite_do_plano",
+  /** definido em 2026-10-15 (NOD-269, 0087): no despacho, nenhuma conta da IA livre na máquina; o fundo espera. */
+  "sem_conta",
 ] as const;
 export type MotivoFalha = (typeof MOTIVOS_FALHA)[number];
 
@@ -107,8 +109,19 @@ export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[
  * bloqueada ≠ falhou (definido em 2026-09-24, emenda da ADR-044): a janela foi reivindicada e NÃO virou
  * turno — o pré-voo viu que falta conexão ou acesso, ou que a pergunta anterior segue sem resposta
  * (MOTIVOS_BLOQUEIO_ROTINA). Nenhum modelo rodou; não escreve no chat: o card de acesso já está lá.
+ * nao_rodou ≠ falhou (definido em 2026-10-15, NOD-274, 0087): a janela passou sem rodar — a cota da IA só volta
+ * depois da próxima execução (motivo cota_da_ia, com volta_em), ou a execução anterior ainda estava aberta (motivo
+ * execucao_anterior_aberta). Não escreve no chat: a janela fica visível no histórico da rotina.
  */
-export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida", "bloqueada"] as const;
+export const DESFECHOS_ROTINA = [
+  "executou",
+  "passou_em_branco",
+  "sem_novidade",
+  "falhou",
+  "interrompida",
+  "bloqueada",
+  "nao_rodou",
+] as const;
 export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
 
 /**
@@ -119,6 +132,10 @@ export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
  */
 export const MOTIVOS_BLOQUEIO_ROTINA = ["sem_conexao", "sem_acesso", "aguardando_resposta"] as const;
 export type MotivoBloqueioRotina = (typeof MOTIVOS_BLOQUEIO_ROTINA)[number];
+
+/** Por que a janela ficou 'nao_rodou' (NOD-274): vai em rotina_execucoes.motivo, como MOTIVOS_BLOQUEIO_ROTINA. */
+export const MOTIVOS_NAO_RODOU_ROTINA = ["cota_da_ia", "execucao_anterior_aberta"] as const;
+export type MotivoNaoRodouRotina = (typeof MOTIVOS_NAO_RODOU_ROTINA)[number];
 
 /**
  * Por que a execução não rendeu notícia. Campo TIPADO vindo da ferramenta `sem_novidade` —

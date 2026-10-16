@@ -110,6 +110,23 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return l?.id ?? null;
     },
 
+    /**
+     * definido em 2026-10-16 (NOD-274, C7/C10): a volta da cota que ainda espera na cadeia de retomadas de `raizId` (a
+     * execução da rotina, ou o turno de delegação do pedido ao colega) — a retomada pendente com hora marcada no futuro
+     * cuja entrada é a da volta da cota (ENTRADA_DA_VOLTA_DA_COTA). null = nada esperando a cota.
+     */
+    async esperaDaCotaDe(raizId: string, prefixo: string, agora: number): Promise<{ voltaEm: number; entrada: string; harness: string | null } | null> {
+      const [l] = await conn<{ acordar_em: Date; entrada_texto: string; harness: string | null }[]>`
+        with recursive c(id, n) as (
+          select ${raizId}::uuid, 0
+          union all
+          select r.id, c.n + 1 from c join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
+        ) select v.acordar_em, v.entrada_texto, v.harness from c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
+        where c.n > 0 and v.estado = 'pendente' and v.acordar_em > ${data(agora)} and starts_with(v.entrada_texto, ${prefixo})
+        order by v.acordar_em limit 1`;
+      return l ? { voltaEm: ms(l.acordar_em), entrada: l.entrada_texto, harness: l.harness } : null;
+    },
+
     /** A janela que ligou este turno à rotina (índice rotina_janelas_turno_idx, 0004) — pendência L7 §5. */
     async buscarPorTurno(turnoId: string): Promise<JanelaRotina | null> {
       const [l] = await conn<Linha[]>`

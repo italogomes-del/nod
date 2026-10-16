@@ -76,14 +76,21 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     }
   });
 
-  it("Uma IA só e turno de rotina não trocam de IA sozinhos (o limite fica gravado para os outros bots)", async () => {
-    for (const o of [{ pedido: { modo: "fixa", fixa: "claude-cli" } }, { origem: "rotina" as const }]) {
-      const c = await cenario(o);
-      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
-      expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind), JSON.stringify(o)).toEqual(["limite_do_plano"]);
-      expect(c.banco.turnos, JSON.stringify(o)).toHaveLength(1);
-      expect((await c.deps.repos.preferencias.buscar()).iasNoLimite?.["claude-cli"], JSON.stringify(o)).toBeDefined();
-    }
+  it("Uma IA só não troca de IA sozinha (o limite fica gravado para os outros bots)", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
+    await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
+    expect(c.banco.turnos).toHaveLength(1);
+    expect((await c.deps.repos.preferencias.buscar()).iasNoLimite?.["claude-cli"]).toBeDefined();
+  });
+
+  it("NOD-274: o turno de rotina no limite não troca de IA nem falha — espera a cota e volta sozinho", async () => {
+    const c = await cenario({ origem: "rotina" });
+    const r = await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+    expect(r.data.esperaDaCota).toBe("espera");
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", origem: "retomada", retomaTurnoId: c.turnoId, acordarEm: T0 + DUAS_HORAS }]);
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind ?? null)).toEqual([null]);
+    expect((await c.deps.repos.preferencias.buscar()).iasNoLimite?.["claude-cli"]).toBeDefined();
   });
 
   it("um turno que dá certo na IA a tira do limite antes do prazo", async () => {

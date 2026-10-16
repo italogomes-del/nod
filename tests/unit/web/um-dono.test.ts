@@ -269,6 +269,11 @@ describe("Trabalhos com uma linha por bot (quadro 05)", () => {
     expect(html).toContain('<span class="tb-frente-fim">frente · 22 min</span>');
     expect(html).toContain("GFK-1868 · preservar Ferons");
     expect(html).toContain("Na fila: pedido do Leonardo");
+    // Revisão do Gil no #340: a linha corta com reticências; o title traz a frase inteira (e some sem frase).
+    const passos = [...html.matchAll(/<span class="tb-frente-passo"( title="([^"]*)")?>([^<]*)<\/span>/g)];
+    expect(passos.length).toBeGreaterThan(0);
+    for (const [, temTitle, title, texto] of passos) expect(temTitle ? title : "").toBe(texto);
+    expect(passos.some(([, temTitle]) => temTitle)).toBe(true);
     expect(reduzir(e, { tipo: "bot-trabalhos", agenteId: null }).botAbertoEmTrabalhos).toBeNull();
   });
 

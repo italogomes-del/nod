@@ -1,5 +1,5 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoNaoRodouRotina, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
 import { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -10,6 +10,7 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
+import { prazoDoColega, registrarJanelaPulada } from "./janela-pulada.ts";
 import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
 import { pendenciasDaRotina, preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -152,11 +153,14 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
     // não acabou — a execução seguinte, sem ver a anterior, abria a mesma task de novo, a cada janela. revisto em
     // 2026-10-12 (ADR-099, I7 revista): e enquanto uma frente que o dono abriu para a rotina não acabou.
-    const filha = turnoAbertoId ? null : await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id);
+    // revisto em 2026-10-16 (NOD-274, C9): a frente sem turno vivo que só espera um colega há mais de 2 períodos do cron
+    // (mín. 2 h) não segura; a janela pulada fica no histórico ('nao_rodou'/'execucao_anterior_aberta').
+    const filha = turnoAbertoId ? null : await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id, deps.agora() - prazoDoColega(rotina, instanteAgendado));
     if (turnoAbertoId || filha) {
       const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(deps.agora(), instanteAgendado) });
       await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
-      return { data: { pulada: true, turnoAbertoId, ...(filha ? { trabalhoAbertoId: filha.id } : {}), proximaExecucao } };
+      const events = await registrarJanelaPulada(deps, input);
+      return { data: { pulada: true, turnoAbertoId, ...(filha ? { trabalhoAbertoId: filha.id } : {}), proximaExecucao }, events };
     }
   }
   const ganhou = await deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina.id, instanteAgendado, machineId: input.machineId, executor: input.executor });
@@ -224,9 +228,11 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | MotivoNaoRodouRotina | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
+  /** NOD-274: 'nao_rodou' por cota — quando a cota volta (vai para o histórico). */
+  voltaEm?: number | null;
 };
 
 /** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
@@ -239,9 +245,10 @@ const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
 /**
  * Desfechos que NÃO escrevem na conversa: a execução fica só no histórico da rotina. sem_novidade
  * (definido em 2026-09-21): rodou e não tinha nada; interrompida (definido em 2026-09-24, ADR-045): a
- * máquina parou no meio — quem avisa é o aviso único do incidente, não uma linha por execução.
+ * máquina parou no meio — quem avisa é o aviso único do incidente, não uma linha por execução. nao_rodou (definido em
+ * 2026-10-15, NOD-274): a janela não rodou (cota ou execução anterior aberta) — fica no histórico, com a hora da volta.
  */
-const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_novidade", "interrompida"]);
+const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_novidade", "interrompida", "nao_rodou"]);
 
 /** Moram em contracts/pedido.ts desde a NOD-255 (o pré-voo também as lê); reexportadas para quem já importava daqui. */
 export { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO };
@@ -296,7 +303,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   if (anterior && anterior.desfecho === desfecho) return { data: { execucao: anterior, rotina, podadas: 0, inalterado: true }, events: [] };
   const motivo = desfecho === input.desfecho ? (input.motivo ?? null) : anterior?.motivo ?? null;
   const execucao = anterior
-    ? await deps.repos.rotinaExecucoes.atualizarDesfecho(anterior.id, desfecho, motivo, agora)
+    ? await deps.repos.rotinaExecucoes.atualizarDesfecho(anterior.id, desfecho, motivo, agora, input.voltaEm ?? null)
     : await deps.repos.rotinaExecucoes.registrar({
         rotinaId: rotina.id,
         instanteAgendado,
@@ -304,6 +311,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
         desfecho,
         motivo,
         em: agora,
+        voltaEm: input.voltaEm ?? null,
       });
   if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução não registrada" });
   const podadas = await deps.repos.rotinaExecucoes.podar(rotina.id);

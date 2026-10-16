@@ -5,7 +5,7 @@ import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
-import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -113,7 +113,7 @@ export type ExtrasTrabalho = {
   turnosAbertos: string[];
   deFora: boolean;
   /** O pedido a colega mais antigo ainda sem volta (a mesma regra de `fatos.colega`): de quem, desde quando e a task dele. */
-  esperandoColega: { nome: string; desde: number; trabalhoId: string | null } | null;
+  esperandoColega: { nome: string; desde: number; trabalhoId: string | null; tarefaId?: string | null } | null;
   /** Soma, por turno com Raio-X, do começo ao último sinal (o que roda conta até agora), em ms. */
   trabalhouMs: number;
   /** ADR-086: a volta marcada ("me chame às 16:00") ainda por vir — a mais próxima; null = nenhuma. */
@@ -205,12 +205,27 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * ainda não acabou. Enquanto houver, a próxima execução do agendador é pulada. revisto em 2026-10-12 (ADR-099, I7
      * revista): também a frente que o dono abriu na triagem da rotina (sem mãe: o lote é do dono). revisto na I10: a
      * execução de rotina de antes, migrada pela 0072 para `frente` sem lote, não segura a próxima (como antes).
+     * revisto em 2026-10-16 (NOD-274, C9): com `colegaAntesDe`, a frente 'rodando' sem turno vivo cujo único fato aberto é
+     * um pedido a colega feito antes desse instante (a regra de fatos.colega) não segura a rotina — não devolve a frente,
+     * só destrava a rotina. Quem chama passa agora − 2 períodos do cron (mín. 2 h).
      */
-    async filhaAbertaDaRotina(rotinaId: string): Promise<Trabalho | null> {
+    async filhaAbertaDaRotina(rotinaId: string, colegaAntesDe: number | null = null): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
-        select ${conn.unsafe(COLUNAS)} from trabalhos
+        select ${conn.unsafe(COLUNAS)} from trabalhos w
         where tenant_id = ${escopo.tenantId} and rotina_id = ${rotinaId} and (trabalho_mae_id is not null or (forma = 'frente' and lote_id is not null))
           and estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')
+          and not (${colegaAntesDe === null ? null : data(colegaAntesDe)}::timestamptz is not null and w.estado = 'rodando'
+            and not exists (select 1 from turnos v where v.tenant_id = w.tenant_id and v.trabalho_id = w.id and v.estado in ('pendente', 'despachando'))
+            and not exists (select 1 from esperas e where e.tenant_id = w.tenant_id and e.trabalho_id = w.id and e.estado = 'rodando')
+            and not exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+              where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.estado in ('pendente', 'reaberta'))
+            and exists (select 1 from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
+              where h.tenant_id = w.tenant_id and t.trabalho_id = w.id and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
+                and h.criado_em < ${colegaAntesDe === null ? null : data(colegaAntesDe)}::timestamptz
+                and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
+                  and r.payload->>'tarefaId' = h.payload->>'tarefaId')
+                and not exists (select 1 from trabalhos c where c.tenant_id = h.tenant_id and c.id::text = h.payload->>'trabalhoId'
+                  and c.estado in ('terminado', 'parado', 'falhou'))))
         order by criado_em limit 1`;
       return l ? paraTrabalho(l) : null;
     },
@@ -400,14 +415,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       const linhas = await conn<{
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
         maquina_viva_id: string | null; maquina_alvo_id: string | null; pendente_harness: string | null; pendente_modelo: string | null;
-        colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
+        colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; colega_tarefa_id?: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
         espera_motivo: string | null; espera_desde: Date | null; acorda_motivo: string | null;
         lote_id: string | null; lote_criado_em: Date | null; lote_frentes: number | null; lote_abertas: number | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
           pe.harness as pendente_harness, pe.modelo as pendente_modelo,
-          c.nome as colega_nome, c.desde as colega_desde, c.trabalho_id as colega_trabalho_id,
+          c.nome as colega_nome, c.desde as colega_desde, c.trabalho_id as colega_trabalho_id, c.tarefa_id as colega_tarefa_id,
           -- definido em 2026-10-08 (tempo da task): o tempo trabalhado é o dos turnos (Raio-X: começo → último sinal); o
           -- resto do "aberta há" é espera. O turno que roda conta até agora.
           (select coalesce(sum(extract(epoch from ((case when t.estado = 'despachando' then clock_timestamp() else x.atualizado_em end) - x.criado_em)) * 1000), 0)
@@ -451,7 +466,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         ) es on true
         left join lateral (
           -- O pedido a colega em aberto mais antigo, pela regra de fatos.colega (sem peer_ask da tarefa, task do colega não final).
-          select g.nome, h.criado_em as desde, h.payload->>'trabalhoId' as trabalho_id
+          select g.nome, h.criado_em as desde, h.payload->>'trabalhoId' as trabalho_id, h.payload->>'tarefaId' as tarefa_id
           from mensagens h join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
           left join agentes g on g.tenant_id = h.tenant_id and g.id::text = h.payload->>'para'
           where h.tenant_id = w.tenant_id and t.trabalho_id = w.id and h.kind = 'handoff' and h.payload->>'tarefaId' is not null
@@ -487,7 +502,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             turnoVivoId: l.turno_vivo_id,
             turnosAbertos: l.abertos ?? [],
             deFora: l.de_fora,
-            esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id } : null,
+            esperandoColega: l.colega_desde ? { nome: l.colega_nome ?? "um colega", desde: ms(l.colega_desde), trabalhoId: l.colega_trabalho_id, tarefaId: l.colega_tarefa_id ?? null } : null,
             trabalhouMs: Math.max(0, Math.round(Number(l.trabalhou_ms ?? 0))),
             acordaEm: l.acorda_em ? ms(l.acorda_em) : null,
             esperandoComando: l.espera_motivo !== null && l.espera_desde ? { motivo: l.espera_motivo, desde: ms(l.espera_desde) } : null,
@@ -510,13 +525,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     /** `adiados` (#218): tarefas que o varredor deixou para depois — fora do `limit 20`, para não segurar os pedidos novos. */
     async pedidosAColegaParados(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
-        tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; queda_em: Date | null;
+        tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null;
         quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
       }[]>`
         select h.payload->>'tarefaId' as tarefa_id, c.id as colega_id, c.estado as colega_estado,
-          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = c.tenant_id and q.trabalho_id = c.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = c.tenant_id and v.owner_id = c.owner_id and u.id is not null
             and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
@@ -527,7 +543,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         left join turnos tp on tp.tenant_id = h.tenant_id and tp.id = h.turno_id
         left join trabalhos rp on rp.tenant_id = h.tenant_id and rp.id = tp.trabalho_id
         left join lateral (
-          select t.id, t.motivo_interrupcao, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
           where t.tenant_id = c.tenant_id and t.trabalho_id = c.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -569,6 +585,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         estadoColega: l.colega_estado,
         ultimoTurnoId: l.ultimo_id,
         ultimoMotivo: l.ultimo_motivo,
+        ultimoMotivoFalha: l.ultimo_motivo_falha,
         quedaEm: msOuNull(l.queda_em),
         quedas: l.quedas,
         cardRetomar: l.card_id ? { id: l.card_id, aberto: l.card_estado === "pendente" || l.card_estado === "reaberta" } : null,
