@@ -88,4 +88,17 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(execucoes[0]?.em).toBe(relogio - 5 * 60_000);
     });
   });
+
+  // Incidente de 2026-10-16 (0086): sem índice em retoma_turno_id, turnoAberto varria `turnos` uma vez por janela e o
+  // disparo de uma rotina de 10 em 10 min passou dos 60 s da tx. O planejador precisa ter o índice para descer a cadeia.
+  it("a descida da cadeia de retomadas (retoma_turno_id = X) tem índice: turnos_por_retoma", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const [indice] = await trx<{ indexdef: string }[]>`select indexdef from pg_indexes where tablename = 'turnos' and indexname = 'turnos_por_retoma'`;
+      expect(indice?.indexdef).toContain("(tenant_id, retoma_turno_id)");
+      expect(indice?.indexdef).toContain("WHERE (retoma_turno_id IS NOT NULL)");
+      await trx`set local enable_seqscan = off`;
+      const plano = await trx<{ "QUERY PLAN": string }[]>`explain select id from turnos where tenant_id = ${TENANT_PADRAO} and retoma_turno_id = ${randomUUID()}`;
+      expect(plano.map((l) => l["QUERY PLAN"]).join("\n")).toContain("turnos_por_retoma");
+    });
+  });
 });
