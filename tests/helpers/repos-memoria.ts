@@ -1023,7 +1023,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           aguardandoDespertar: dele.some((t) => t.estado === "pendente" && (t.acordarEm ?? 0) > agora()),
           aguardandoComando: b.esperas.some((e) => e.tenantId === escopo.tenantId && e.trabalhoId === id && e.estado === "rodando"),
           esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
-          decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
+          decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta") && (d.tipo !== "retomar_turno" || d.turnoId === ultimo?.id)),
+          ...((() => {
+            const pergunta = doTenant(b.decisoes).filter((d) => d.turnoId !== null && ids.has(d.turnoId) && d.tipo !== "retomar_turno").sort((x, y) => Date.parse(y.criadoEm) - Date.parse(x.criadoEm))[0];
+            return pergunta && pergunta.estado === "vencida" && pergunta.turnoId === ultimo?.id ? { perguntaVencida: true } : {};
+          })()),
           aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
             && !doTenant(b.mensagens).some((r) => r.conversaId === h.conversaId && r.payload?.kind === "peer_ask" && h.payload?.kind === "handoff" && r.payload.tarefaId === h.payload.tarefaId)
             && !doTenant(b.trabalhos).some((c) => h.payload?.kind === "handoff" && c.id === h.payload.trabalhoId && ["terminado", "parado", "falhou"].includes(c.estado))),
@@ -1232,9 +1236,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async renovarLease(id, machineId, sinais, em, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.machineId === machineId);
-        if (!t) return { ativo: false };
+        if (!t) return { ativo: false, motivo: "lease_vencido" as const };
         // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
-        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false };
+        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false, motivo: "lease_vencido" as const };
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,
@@ -1243,7 +1247,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
         const ativo = t.estado === "despachando" && t.pararSolicitadoEm === null;
         if (ativo) t.leaseAte = em + LEASE_MS;
-        return { ativo };
+        return ativo ? { ativo } : { ativo, motivo: "parado" as const };
       },
       async marcarSinal(id, sinal) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
@@ -1278,6 +1282,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async totalAnteriorDaSessao(sessaoCli, turnoId) {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
         return totais.length === 0 ? null : Math.max(...totais);
+      },
+      async concluirTardia(id, a) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
+        if (!t || doTenant(b.turnos).some((r) => r.retomaTurnoId === id)) return null;
+        t.estado = "concluido";
+        t.motivoInterrupcao = null;
+        t.motivoFalha = null;
+        t.sinais = {
+          attempted: t.sinais.attempted || !!a.sinais?.attempted,
+          rejected: t.sinais.rejected || !!a.sinais?.rejected,
+          promptSubmitted: t.sinais.promptSubmitted || !!a.sinais?.promptSubmitted,
+          producedOutput: t.sinais.producedOutput || !!a.sinais?.producedOutput,
+        };
+        if (a.custoUsd !== undefined && a.custoUsd !== null) t.custoUsd = a.custoUsd;
+        t.leaseAte = null;
+        return t;
+      },
+      async temRetomada(retomaTurnoId) {
+        return doTenant(b.turnos).some((r) => r.retomaTurnoId === retomaTurnoId);
       },
       async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
@@ -1557,6 +1580,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
         d.decididaEm = p.agora;
         return d;
+      },
+      async fecharRetomarAnteriores(trabalhoId, turnoIdAtual, p) {
+        const atual = doTenant(b.turnos).find((t) => t.id === turnoIdAtual);
+        if (!atual) return [];
+        const anteriores = new Set(doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && t.id !== atual.id && (t.criadoEm < atual.criadoEm || (t.criadoEm === atual.criadoEm && t.id < atual.id))).map((t) => t.id));
+        const fechadas: Decisao[] = [];
+        for (const d of doTenant(b.decisoes)) {
+          if (d.tipo !== "retomar_turno" || (d.estado !== "pendente" && d.estado !== "reaberta") || d.turnoId === null || !anteriores.has(d.turnoId)) continue;
+          d.estado = "decidida";
+          d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
+          d.decididaEm = p.agora;
+          fechadas.push(d);
+        }
+        return fechadas;
       },
 
       async ultimaDecisaoEm() {

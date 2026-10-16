@@ -108,9 +108,16 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         select w.id, w.titulo, w.estado, w.resumo, w.terminado_em,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
-          (select coalesce(x.motivo_falha::text, x.motivo_interrupcao::text) from turnos x
+          -- NOD-264 (C21): a frente que falhou porque a pergunta à pessoa venceu leva esse motivo (nunca a pergunta).
+          case when w.estado = 'falhou' and coalesce((select d.estado = 'vencida' and d.turno_id = (select u.id from turnos u
+                where u.tenant_id = w.tenant_id and u.trabalho_id = w.id and u.estado in ('concluido', 'interrompido')
+                  and coalesce(u.motivo_interrupcao::text, '') <> 'absorvido' order by u.criado_em desc, u.id desc limit 1)
+              from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+              where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.tipo <> 'retomar_turno'
+              order by d.criado_em desc, d.id desc limit 1), false) then 'pergunta_vencida'
+          else (select coalesce(x.motivo_falha::text, x.motivo_interrupcao::text) from turnos x
             where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('concluido', 'interrompido')
-            order by x.criado_em desc, x.id desc limit 1) as motivo,
+            order by x.criado_em desc, x.id desc limit 1) end as motivo,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas
         from trabalhos w

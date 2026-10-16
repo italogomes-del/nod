@@ -122,7 +122,8 @@ describeIntegracao("revisão #188 — estados do trabalho", () => {
       expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).not.toBe(tb.id);
       await varrerPessoa(MARLON, (fn) => fn(trx), { services: m.deps.services, useCases: m.deps.useCases, agora: () => Date.now() });
       expect((await m.repos.decisoes.buscar(venceu.id))?.estado).toBe("vencida");
-      expect(await m.estado(a.id)).toBe("terminado");
+      // A pergunta venceu sem resposta: `falhou`, não `terminado` (NOD-264, C21); o depois_de anda igual.
+      expect(await m.estado(a.id)).toBe("falhou");
       expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(tb.id);
 
       // Dispensada.

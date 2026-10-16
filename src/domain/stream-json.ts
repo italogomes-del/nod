@@ -1,6 +1,6 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
 import { motivoDoHookDoNod } from "./negacao-nativa.ts";
-import { redigirECortar } from "./segredos.ts";
+import { redigirECortar, redigirSegredos } from "./segredos.ts";
 
 /** Os blocos de resposta a mensagens do meio (criarFalaDoMeio em mensagem-no-meio.ts), pelo próprio objeto do evento. */
 export type FalaDoMeioNoTurno = { falados: ReadonlySet<EventoStream>; obrigatorios: ReadonlySet<EventoStream> };
@@ -374,7 +374,9 @@ export function classificarResultado(entrada: {
   }
 
   const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
-  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}) };
+  // NOD-264 (C20): a causa da entrega sem result, só em código — o driver interrompeu, o sinal que chegou ou o exit.
+  const causa = entrada.interrompidoPeloDriver === true ? "interrompido_pelo_driver" : entrada.signal !== null ? `sinal:${entrada.signal}` : entrada.exitCode !== null && entrada.exitCode !== 0 ? `exit:${entrada.exitCode}` : null;
+  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };
@@ -383,6 +385,26 @@ export function classificarResultado(entrada: {
     return { desfecho: "interrompido", motivoInterrupcao: "sessao_rejeitada", ...base, sinais: { ...sinais, rejected: true } };
   }
   return { desfecho: "interrompido", motivoInterrupcao: "sem_progresso", ...base, sinais };
+}
+
+/**
+ * NOD-264 (C20): a causa do turno sem result, só se tiver a forma de código (`renovacao_negada:sem_plano`,
+ * `sinal:SIGTERM`, `exit:1`…). Texto livre (stderr, frase do CLI) nunca atravessa a ponte nem entra no evento.
+ */
+export function causaDaEntrega(causa: unknown): string | null {
+  return typeof causa === "string" && causa.length <= 64 && /^[a-z_]+(:[A-Za-z0-9_-]{1,32})?$/.test(causa) ? causa : null;
+}
+
+/** NOD-264 (C20): quantas linhas do fim do stderr vão para o log local quando o turno acaba sem result. */
+export const LINHAS_DO_STDERR = 20;
+
+/**
+ * NOD-264 (C20): as últimas `LINHAS_DO_STDERR` linhas do stderr, com os segredos redigidos ANTES de cortar (segredos.ts).
+ * Só para o log da máquina — nunca atravessa a ponte. Vazio vira null.
+ */
+export function fimDoStderr(stderr: string, linhas: number = LINHAS_DO_STDERR): string | null {
+  const ultimas = redigirSegredos(stderr).split("\n").map((l) => l.trimEnd()).filter((l) => l !== "").slice(-linhas);
+  return ultimas.length > 0 ? ultimas.join("\n").slice(-4000) : null;
 }
 
 /** Uma rodada da sessão viva: os eventos até um `result`, inclusive. */

@@ -178,7 +178,7 @@ export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovac
   ].join("\n");
 }
 
-function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
+function turnoCriado(deps: DepsContinuacao, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
   return { tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId, dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id } };
 }
 
@@ -187,9 +187,22 @@ function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: Run
  * decidida — a espera do proxy acabou um instante antes do clique, ou o turno caiu. Chamado pelo
  * assentamento do turno, sob a mesma trava da fase 2. Item ainda executando fica para a fase 2.
  */
-export async function continuarAprovacoesDoTurno(deps: Deps, turno: Turno): Promise<RuntimeEvent[]> {
+export async function continuarAprovacoesDoTurno(deps: DepsContinuacao, turno: Turno): Promise<RuntimeEvent[]> {
+  return (await continuarAprovacoes(deps, turno)).events;
+}
+
+/** O que a continuação de uma aprovação usa de Deps: o varredor de lease (laço de fundo) também a chama (NOD-261). */
+export type DepsContinuacao = Pick<Deps, "repos" | "escopo" | "agora">;
+
+/**
+ * definido em 2026-10-15 (NOD-261, E2): como continuarAprovacoesDoTurno, dizendo quantas aprovações ESTA chamada
+ * continuou (a retomada nova ou a juntada à que já estava na fila). O varredor usa a contagem para fechar o "Retomar" do
+ * mesmo turno: a continuação já o retoma, e duas retomadas refariam o efeito externo.
+ */
+export async function continuarAprovacoes(deps: DepsContinuacao, turno: Turno): Promise<{ events: RuntimeEvent[]; continuadas: number }> {
   const agora = deps.agora();
   const events: RuntimeEvent[] = [];
+  let continuadas = 0;
   for (const decisao of await deps.repos.decisoes.aContinuarDoTurno(turno.id)) {
     const itens = await deps.repos.itensAprovacao.listar(decisao.id);
     if (itens.some((i) => i.selecionado && i.desfecho === null)) continue;
@@ -197,9 +210,10 @@ export async function continuarAprovacoesDoTurno(deps: Deps, turno: Turno): Prom
     const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
     const texto = redigirDesfechoAprovacao({ itens, aprovadorNome: pessoa?.nome ?? "A pessoa", agora });
     const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+    if (r.turno) continuadas += 1;
     if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoriaDaPessoa(deps.escopo), agora));
   }
-  return events;
+  return { events, continuadas };
 }
 
 export type EntradaAssentarAprovacao = { decisaoId: string; desfechos: readonly DesfechoExecutado[] };

@@ -107,7 +107,7 @@ describeIntegracao("concorrência: reivindicação de turno (advisory lock por p
     expect(ganho?.id).toBe(turnoId);
     expect(await criarRepos(db, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() })).toBeNull();
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))).toBeNull();
-    expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false });
+    expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false, motivo: "lease_vencido" });
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, maquinaA, { promptSubmitted: true }, Date.now()))).toEqual({ ativo: true });
   });
 

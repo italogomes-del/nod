@@ -1,3 +1,4 @@
+import type { MotivoRenovacaoNegada } from "../contracts/ponte.ts";
 import { HARNESS_LEGADO, type PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
@@ -333,8 +334,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * só na adoção dentro da carência do boot: o lease venceu enquanto o servidor estava fora, mas o turno segue
      * `despachando` (o varredor não o assentou).
      */
-    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean }> {
-      const [l] = await conn<{ ativo: boolean }[]>`
+    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean; motivo?: Exclude<MotivoRenovacaoNegada, "sem_plano"> }> {
+      const [l] = await conn<{ ativo: boolean; parado: boolean }[]>`
         update turnos set
           lease_ate = case when estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao) then ${data(agora + LEASE_MS)} else lease_ate end,
           attempted = attempted or ${sinais.attempted ?? false},
@@ -344,8 +345,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           sessao_cli = coalesce(${o.sessaoCli ?? null}, sessao_cli)
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
           and (lease_ate > ${data(agora)} or (${o.aceitaVencido === true} and estado = 'despachando'))
-        returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo`;
-      return { ativo: l?.ativo === true };
+        returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo,
+          (estado <> 'despachando' or parar_solicitado_em is not null) as parado`;
+      // NOD-264 (C20): por que negou, em código (vira a causa do turno_interrompido).
+      if (!l) return { ativo: false, motivo: "lease_vencido" };
+      if (l.ativo) return { ativo: true };
+      return { ativo: false, motivo: l.parado ? "parado" : "agente_excluido" };
     },
 
     /** Write-ahead (ADR-009): promptSubmitted é gravado ANTES de escrever no stdin. Só liga, nunca desliga. */
@@ -543,6 +548,42 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         select max(custo_sessao_usd) as total from turnos
         where tenant_id = ${escopo.tenantId} and sessao_cli = ${sessaoCli} and id <> ${turnoId} and custo_sessao_usd is not null`;
       return l?.total === null || l?.total === undefined ? null : Number(l.total);
+    },
+
+    /**
+     * definido em 2026-10-15 (NOD-264, E8; emenda da ADR-045 sobre a ADR-010): a entrega tardia com SUCESSO de um turno que
+     * a queda assentou (`maquina_sem_contato`/`reinicio_servidor`) promove o turno a `concluido` — o trabalho terminou, só
+     * a máquina sumiu antes de entregar. Condicional: só o interrompido por queda muda (o UPDATE decide a corrida com a
+     * retomada automática), e nunca para 'pendente' (sem requeue). Quem chama já conferiu que não há retomada criada.
+     */
+    async concluirTardia(id: string, a: Omit<Assentamento, "estado" | "motivoInterrupcao" | "motivoFalha">): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set
+          estado = 'concluido',
+          motivo_interrupcao = null,
+          motivo_falha = null,
+          attempted = attempted or ${a.sinais?.attempted ?? false},
+          rejected = rejected or ${a.sinais?.rejected ?? false},
+          prompt_submitted = prompt_submitted or ${a.sinais?.promptSubmitted ?? false},
+          produced_output = produced_output or ${a.sinais?.producedOutput ?? false},
+          custo_usd = coalesce(${a.custoUsd ?? null}, custo_usd),
+          tokens_entrada = coalesce(${a.tokensEntrada ?? null}, tokens_entrada),
+          tokens_saida = coalesce(${a.tokensSaida ?? null}, tokens_saida),
+          sessao_cli = coalesce(${a.sessaoCli ?? null}, sessao_cli),
+          custo_sessao_usd = coalesce(${a.custoSessaoUsd ?? null}, custo_sessao_usd),
+          lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'interrompido'
+          and motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor')
+          and not exists (select 1 from turnos r where r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = ${id})
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /** NOD-264 (E8): algum turno já retoma este (na fila, rodando ou acabado)? */
+    async temRetomada(retomaTurnoId: string): Promise<boolean> {
+      const [l] = await conn<{ tem: boolean }[]>`
+        select exists (select 1 from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId}) as tem`;
+      return l?.tem ?? false;
     },
 
     /**

@@ -5,6 +5,7 @@ import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type M
 import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { continuarAprovacoes } from "./decidir.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
@@ -15,6 +16,12 @@ export type DepsQueda = Pick<Deps, "repos" | "escopo" | "agora">;
 
 /** A retomada anterior da mesma conversa sai quando uma queda nova abre outra (ADR-045). */
 export const REGRA_RETOMADA_SUBSTITUIDA = "regra:retomada_substituida" as const;
+
+/**
+ * definido em 2026-10-15 (NOD-261, E2): o "Retomar" do turno caído fecha quando a continuação de uma aprovação já
+ * decidida o retoma — duas retomadas do mesmo turno refariam o efeito externo que a pessoa aprovou.
+ */
+export const REGRA_APROVACAO_CONTINUADA = "regra:aprovacao_continuada" as const;
 
 export type SaidaQuedaDaMaquina = {
   interrompidos: string[];
@@ -87,6 +94,18 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
   const quedas: QuedaDeMaquina[] = [];
   for (const c of emOrdem) {
     const r = await consequencias(deps, c, prazoMs, events);
+    // NOD-261 (E2): a aprovação decidida enquanto o turno ainda aparecia "despachando" (assentarAprovacao confiou no turno
+    // vivo) segue agora, numa continuação só: reivindicarContinuacao dá a decisão a uma chamada, e a entrega tardia
+    // depois disto não continua de novo. Com a continuação na fila, o "Retomar" deste turno sai por regra.
+    const continuacao = await continuarAprovacoes(deps, c.turno);
+    events.push(...continuacao.events);
+    if (continuacao.continuadas > 0 && r.decisaoId) {
+      const fechada = await deps.repos.decisoes.fecharPorRegra(r.decisaoId, { regra: REGRA_APROVACAO_CONTINUADA, regraVersao: 1, agora: deps.agora() });
+      if (fechada) {
+        const autoria = autoriaAgente({ agenteId: c.turno.agenteId, contaDeExecucao: c.turno.ownerId, executor: "catcher", machineId: c.turno.machineId, decididoPor: REGRA_APROVACAO_CONTINUADA });
+        events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora: deps.agora(), conversaId: fechada.conversaId, turnoId: fechada.turnoId, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_APROVACAO_CONTINUADA } }));
+      }
+    }
     // ADR-083: o trabalho do turno caído vira "precisa de você" (o card Retomar) ou "falhou" (rotina, sem retomada).
     events.push(...(await sincronizarDoTurno(deps, c.turno)));
     saida.interrompidos.push(c.turno.id);

@@ -402,7 +402,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     async renovar(p: PedidoRenovar): Promise<RespostaRenovar> {
       esquecerVencidos();
       const escopo = escopos.get(p.turnoId);
-      if (!escopo) return { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP };
+      if (!escopo) return { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP, motivo: "sem_plano" };
       const executor = executores.get(p.turnoId) ?? executorAtual();
       // ADR-067: cada fala da sessão viva entra uma vez — a renovação que falhou na volta é repetida com as mesmas.
       const novas = (p.falas ?? []).filter((f) => f.seq > (falasGravadas.get(p.turnoId) ?? 0)).sort((a, b) => a.seq - b.seq);
@@ -410,7 +410,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, motivo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         // NOD-214: a sessão do CLI fica no turno já na renovação — a entrega pode se perder num reinício.
         const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora(), p.sessaoCli ? { sessaoCli: p.sessaoCli } : {});
@@ -463,7 +463,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (mudanca) deps.desfazerMemoria?.(escopo.pessoaId, mudanca);
           throw e;
         }
-        return { ativo: r.ativo, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
+        return { ativo: r.ativo, motivo: r.motivo, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
       if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
@@ -492,7 +492,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         for (const id of ids) jaOferecidas.add(id);
         oferecidas.set(p.turnoId, jaOferecidas);
       }
-      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}) };
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(!ativo && motivo ? { motivo } : {}), ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}) };
     },
 
     async entregar(e: Entrega) {

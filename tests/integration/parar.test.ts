@@ -33,7 +33,7 @@ describeIntegracao("parar (E5.4/E8) no Postgres: estado persistido, faixa e bloq
       expect(sigterm).toHaveBeenCalledTimes(1);
       expect(await deps.repos.turnos.buscar(esperando.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
       expect(await deps.repos.turnos.buscar(rodando.id)).toMatchObject({ estado: "despachando" });
-      expect(await deps.repos.turnos.renovarLease(rodando.id, maquina, {}, Date.now())).toEqual({ ativo: false });
+      expect(await deps.repos.turnos.renovarLease(rodando.id, maquina, {}, Date.now())).toEqual({ ativo: false, motivo: "parado" });
       expect(events.map((e) => e.kind)).toEqual(["turno_interrompido", "parada"]);
       const paradas = await trx<{ n: number }[]>`select count(*)::int as n from paradas where pessoa_id = ${MARLON.pessoaId} and encerrada_em is null and conversa_id is null`;
       expect(paradas[0]?.n).toBe(1);

@@ -35,7 +35,7 @@ describe("parar (E5.4/E8.1/E8.2/E8.3): estado persistido, faixa honesta, nunca c
     const { data: faixa } = await executar(deps, parar, { conversaId: null });
     expect(sigterm).toHaveBeenCalledTimes(1);
     expect(faixa).toMatchObject({ interrompidas: 1, naoInterrompidas: [], nadaRodando: false });
-    expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, Date.now())).toEqual({ ativo: false });
+    expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, Date.now())).toEqual({ ativo: false, motivo: "parado" });
     expect((await deps.repos.turnos.buscar(turnoId))?.pararSolicitadoEm).not.toBeNull();
     expect(deps.services.interruptor.registrados()).toEqual([]);
   });

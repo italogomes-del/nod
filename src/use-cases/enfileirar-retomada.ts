@@ -23,7 +23,7 @@ export type NovaRetomada = {
  * Profundidade, confiança, harness, modelo, `sob_procuracao_de` e o trabalho (ADR-083) são sempre os do turno de origem
  * (revisão da ADR-047: uma retomada nunca lava a marca nem sai do salto).
  */
-export async function enfileirarRetomada(deps: Deps, r: NovaRetomada): Promise<{ turno: Turno | null; nova: boolean }> {
+export async function enfileirarRetomada(deps: Pick<Deps, "repos" | "agora">, r: NovaRetomada): Promise<{ turno: Turno | null; nova: boolean }> {
   await deps.repos.turnos.travarRetomadas(r.original.id);
   const naFila = await deps.repos.turnos.retomadaNaFila(r.original.id);
   if (naFila) {

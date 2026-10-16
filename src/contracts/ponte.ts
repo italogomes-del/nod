@@ -114,7 +114,14 @@ export type PedidoRenovar = {
  * `ativo: "indefinido"` (NOD-214): só o cliente HTTP devolve — o servidor não respondeu (fora, 5xx, 409 sem reconexão) e
  * ainda está dentro de `TOLERANCIA_REINICIO_MS`. O laço segue o turno; só `false` interrompe. O servidor nunca o manda.
  */
-export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: string; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
+/**
+ * `motivo` (NOD-264, C20): com `ativo: false`, por que o servidor negou — `sem_plano` (o processo não conhece o turno),
+ * `parado` (o turno não está mais despachando ou o Parar foi pedido), `agente_excluido` (o bot saiu ou trocou de
+ * geração), `lease_vencido` (o lease venceu ou o turno é de outra máquina). Só código; vira a causa do `turno_interrompido`.
+ */
+export const MOTIVOS_RENOVACAO_NEGADA = ["sem_plano", "parado", "agente_excluido", "lease_vencido"] as const;
+export type MotivoRenovacaoNegada = (typeof MOTIVOS_RENOVACAO_NEGADA)[number];
+export type RespostaRenovar = { ativo: boolean | "indefinido"; versaoMinimaApp: string; motivo?: MotivoRenovacaoNegada; mensagens?: string[]; mensagensIds?: string[]; mensagensSemMoldura?: string[]; ligacaoEncerrada?: boolean };
 
 /**
  * O que o app desktop viu do turno vivo desde a última renovação, NA ORDEM: texto do modelo e nomes

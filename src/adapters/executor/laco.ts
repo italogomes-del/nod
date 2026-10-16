@@ -119,6 +119,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   let parado = false;
   let acordar: (() => void) | null = null;
   let adapterAtual: Adapter | null = null;
+  /** NOD-264 (C20): o motor parando (parar()) no meio do turno — a causa da entrega é o reinício do motor. */
+  let causaDoTurno: string | null = null;
   let turnoAtual: string | null = null;
   let seqLocal = 0;
 
@@ -154,6 +156,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     const aConfirmar = () => entregues.length > 0 || devolvidas.length > 0;
     // X5 (revisto em 2026-10-08): a última leitura de memória que o servidor confirmou (o número da amostra e quando).
     let memoriaEnviada: { amostra: number; em: number } | null = null;
+    // NOD-264 (C20): por que o laço mandou o CLI parar (renovação negada ou o motor parando); vira a causa da entrega.
+    let causaDoLaco: string | null = null;
+    causaDoTurno = null;
 
     const renovar = async (): Promise<void> => {
       if (entregue) return;
@@ -228,7 +233,11 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             }
           }
           // NOD-214: só `false` (o servidor disse, ou a tolerância ao reinício acabou) para o CLI; `indefinido` segue.
-          if (r.ativo === false && adapterAtual) await adapterAtual.interromper();
+          if (r.ativo === false) {
+            causaDoLaco ??= `renovacao_negada:${r.motivo ?? "desconhecido"}`;
+            log("aviso", "renovacao_negada", { turno_id: plano.turnoId, motivo: r.motivo ?? "desconhecido" });
+            if (adapterAtual) await adapterAtual.interromper();
+          }
         } catch (erro) {
           log("aviso", "laco_renovar_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
         } finally {
@@ -319,7 +328,10 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
       o.aoIniciarTurno?.(plano, adapter);
-      if (parado) await adapter.interromper();
+      if (parado) {
+        causaDoTurno = "reinicio_do_motor";
+        await adapter.interromper();
+      }
       const resultado = await adapter.rodarTurno({
         async sinal(s) {
           sinais = { ...sinais, [s]: true };
@@ -362,7 +374,9 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       });
       // QA do NOD-211: pode ser assíncrono (a troca de conta espera o registry novo); o batimento segue até o finally.
       const anotado = (await o.aoResultado?.(plano, resultado)) ?? resultado;
-      await entregar({ ...anotado, sinais: { ...anotado.sinais, ...sinais } });
+      // NOD-264 (C20): o laço sabe mais que o driver (que só vê "interrompi"): a causa dele vale quando o turno parou.
+      const causa = anotado.desfecho === "interrompido" ? (causaDoLaco ?? causaDoTurno ?? anotado.causa) : anotado.causa;
+      await entregar({ ...anotado, sinais: { ...anotado.sinais, ...sinais }, ...(causa ? { causa } : {}) });
     } catch (erro) {
       log("erro", "laco_turno_excecao", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
       await entregar(resultadoDeExcecao(erro, sinais));
@@ -414,6 +428,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     async parar() {
       parado = true;
       acordar?.();
+      if (turnoAtual) causaDoTurno = "reinicio_do_motor";
       if (adapterAtual) await adapterAtual.interromper();
       await corrida;
     },

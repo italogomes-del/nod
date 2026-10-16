@@ -72,7 +72,7 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora());
   if (!mudou) return [];
   // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
-  await resumoSeFaltar(deps, mudou);
+  await resumoSeFaltar(deps, mudou, { perguntaVencida: fatos.perguntaVencida === true });
   // ADR-099 (I3): e fecha o lote dela, se era a vez (o trabalho já está travado; o lote trava por último).
   return [eventoTrabalhoMudou(deps, mudou), ...(await fecharLoteSePronto(deps, mudou))];
 }

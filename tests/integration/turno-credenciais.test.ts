@@ -91,8 +91,8 @@ describeIntegracao("NOD-214: turno_credenciais (hash do token de turno no banco)
       const sessao = randomUUID();
       expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, agora + 1, { sessaoCli: sessao })).toEqual({ ativo: true });
       const vencido = agora + 1 + LEASE_MS + 1;
-      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, vencido)).toEqual({ ativo: false });
-      expect(await deps.repos.turnos.renovarLease(turnoId, randomUUID(), {}, vencido, { aceitaVencido: true })).toEqual({ ativo: false });
+      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, vencido)).toEqual({ ativo: false, motivo: "lease_vencido" });
+      expect(await deps.repos.turnos.renovarLease(turnoId, randomUUID(), {}, vencido, { aceitaVencido: true })).toEqual({ ativo: false, motivo: "lease_vencido" });
       expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, vencido, { aceitaVencido: true })).toEqual({ ativo: true });
       // Renovar sem sessão não apaga a que já está lá.
       expect(await deps.repos.turnos.sessaoDoTurno(turnoId)).toMatchObject({ sessaoCli: sessao });

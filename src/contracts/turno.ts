@@ -106,6 +106,11 @@ export type ResultadoTurno = {
   /** permission_denials[].tool_name (negar NÃO é erro no CLI, s4b); `negacoesDoNod` (2026-10-11): o motivo do hook do nod. */
   negacoesPermissao: string[];
   negacoesDoNod?: { nome: string; motivo: string }[];
+  /**
+   * NOD-264 (C20): por que o turno acabou sem `result` — `renovacao_negada:<motivo>`, `interrompido_pelo_driver`,
+   * `reinicio_do_motor`, `sinal:<SIG>` ou `exit:<n>`. Só código (nunca texto do CLI); vai em `turno_interrompido.dados.causa`.
+   */
+  causa?: string;
   /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */
   erroCru?: string | null;
   /**
