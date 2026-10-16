@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { autoriaPessoa } from "../../../src/use-cases/autoria-evento.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
 import { enviarMensagem } from "../../../src/use-cases/enviar-mensagem.ts";
@@ -100,5 +101,28 @@ describe("parar (E5.4/E8.1/E8.2/E8.3): estado persistido, faixa honesta, nunca c
     expect(pendentes.map((p) => p.tipo).sort()).toEqual(["mensagem_criada", "parada"]);
     expect(banco.outbox.filter((o) => o.canceladoEm !== null)).toHaveLength(2);
     expect(events.find((e) => e.kind === "parada")?.dados).toMatchObject({ frames_cancelados: 2, nada_rodando: true });
+  });
+
+  it("NOD-265: parar A cancela só os frames de A; B e o frame sem conversa seguem pendentes; sem conversa cancela todos", async () => {
+    const { deps, banco } = depsEmMemoria();
+    const a = (await executar(deps, criarAgente, { dono: "pessoa" })).data;
+    const b = (await executar(deps, criarAgente, { dono: "pessoa" })).data;
+    await deps.repos.events.gravarComOutbox([{ kind: "agente_atualizado", autoria: autoriaPessoa(deps.escopo), pessoaDestinoId: deps.escopo.pessoaId, dados: {} }]);
+    const conversaDe = (o: { eventoId: string }) => banco.events.find((e) => e.id === o.eventoId)?.conversaId ?? null;
+    const deA = banco.outbox.filter((o) => conversaDe(o) === a.conversa.id).map((o) => o.id);
+    const resto = banco.outbox.filter((o) => conversaDe(o) !== a.conversa.id).map((o) => o.id);
+    expect(deA.length).toBeGreaterThan(0);
+    expect(banco.outbox.filter((o) => conversaDe(o) === b.conversa.id).length).toBeGreaterThan(0);
+    expect(banco.outbox.filter((o) => conversaDe(o) === null)).toHaveLength(1);
+
+    const { events } = await executar(deps, parar, { conversaId: a.conversa.id });
+    expect(banco.outbox.filter((o) => o.canceladoEm !== null).map((o) => o.id).sort()).toEqual([...deA].sort());
+    expect(events.find((e) => e.kind === "parada")?.dados).toMatchObject({ frames_cancelados: deA.length });
+    const pendentes = (await deps.repos.outbox.pendentes()).map((p) => p.id);
+    for (const id of resto) expect(pendentes).toContain(id);
+
+    const tudo = await executar(deps, parar, { conversaId: null });
+    expect(banco.outbox.filter((o) => o.canceladoEm === null).map((o) => o.tipo)).toEqual(["parada"]);
+    expect(tudo.events.find((e) => e.kind === "parada")?.dados).toMatchObject({ frames_cancelados: pendentes.length });
   });
 });

@@ -332,9 +332,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contarAbandonados() {
         return doTenant(b.outbox).filter((o) => o.ownerId === escopo.pessoaId && o.abandonadoEm !== null).length;
       },
-      async cancelarPendentesDaPessoa(em: number) {
+      async cancelarPendentesDaPessoa(em: number, conversaId: string | null = null) {
         let n = 0;
         for (const o of doTenant(b.outbox)) {
+          if (conversaId !== null && b.events.find((e) => e.id === o.eventoId)?.conversaId !== conversaId) continue;
           if (o.ownerId === escopo.pessoaId && o.entregueEm === null && o.abandonadoEm === null && o.canceladoEm === null) {
             o.canceladoEm = em;
             n += 1;
