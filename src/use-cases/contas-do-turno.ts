@@ -1,4 +1,4 @@
-import type { ContaDoPlano, ContasNoLimite, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
+import type { ContaDoPlano, ContasNoLimite, IaComConta } from "../contracts/contas-ia.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
@@ -18,7 +18,6 @@ import type { Deps } from "./tipos.ts";
 export type ContasDaMaquina = {
   contas: ContaGuardadaNoServidor[];
   vinculos: VinculoDaConta[];
-  modo: ModoDasContas;
   escolhidas: Partial<Record<IaComConta, string>>;
   /** As contas `pronta` na máquina do turno, sem saída pedida. */
   naMaquina: Set<string>;
@@ -34,20 +33,37 @@ export type ContasDaMaquina = {
  */
 export const CONTATO_RECENTE_MS = 2 * 60_000;
 
-export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
-  const [{ contas, vinculos }, { modo, escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
-  const agora = deps.agora();
-  const nomes = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
-  const vivas = new Map(chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
-  const prontas = vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
+/** O que `lerContasDaMaquina` lê do banco (uma leitura serve para várias máquinas: o varredor lê uma vez por pessoa, I5). */
+export type LeituraDasContas = {
+  contas: ContaGuardadaNoServidor[];
+  vinculos: VinculoDaConta[];
+  escolhidas: Partial<Record<IaComConta, string>>;
+  chaves: readonly { id: string; nome: string; revogadaEm: number | null; ultimoUsoEm: number | null }[];
+};
+
+export async function lerContas(deps: Pick<Deps, "repos">): Promise<LeituraDasContas> {
+  // ADR-108: o "Perguntar antes"/"Trocar sozinho" (preferencias.contas_modo) não decide mais nada; só a escolhida vale.
+  const [{ contas, vinculos }, { escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
+  return { contas, vinculos, escolhidas, chaves };
+}
+
+/** As contas vistas pela máquina `machineId`, a partir de uma leitura já feita. */
+export function contasDaMaquinaDe(l: LeituraDasContas, machineId: string, agora: number): ContasDaMaquina {
+  const nomes = new Map(l.chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
+  const vivas = new Map(l.chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
+  const prontas = l.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
   const naMaquina = new Set(prontas.filter((v) => v.maquinaId === machineId).map((v) => v.contaId));
   const noutraMaquina = new Map<string, { id: string; nome: string }>();
   for (const v of prontas) if (v.maquinaId !== machineId && vivas.has(v.maquinaId) && !noutraMaquina.has(v.contaId)) noutraMaquina.set(v.contaId, { id: v.maquinaId, nome: vivas.get(v.maquinaId)! });
-  return { contas, vinculos, modo, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+  return { contas: l.contas, vinculos: l.vinculos, escolhidas: l.escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+}
+
+export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
+  return contasDaMaquinaDe(await lerContas(deps), machineId, deps.agora());
 }
 
 export function escolherContaDoTurno(c: ContasDaMaquina, ordemDoBot: readonly IdHarness[] | null, agora: number): ContaDoTurno<ContaGuardadaNoServidor> | null {
-  return contaDoTurno({ contas: c.contas, naMaquina: c.naMaquina, modo: c.modo, escolhidas: c.escolhidas, ordemDoBot, agora });
+  return contaDoTurno({ contas: c.contas, naMaquina: c.naMaquina, escolhidas: c.escolhidas, ordemDoBot, agora });
 }
 
 export const contaDoPlano = (c: Pick<ContaGuardadaNoServidor, "id" | "impressao" | "apelido">): ContaDoPlano => ({ id: c.id, impressao: c.impressao, apelido: c.apelido });
@@ -56,8 +72,9 @@ export const contaDoPlano = (c: Pick<ContaGuardadaNoServidor, "id" | "impressao"
  * O turno não tem conta para usar nesta máquina sem a pessoa decidir? `iasDoTurno` são as IAs que podem pegá-lo (a fixa,
  * ou as prontas na máquina no Automático); IA sem conta anunciada aqui segue o caminho de antes (não segura o turno).
  * Devolve a conta "de" (a primeira da lista nesta máquina, a que parou) e a decisão para a nota; null = segue.
+ * ADR-108 (R2): com `iaFixa`, a decisão só olha as contas dela (nunca oferece conta de outra IA).
  */
-export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuardadaNoServidor> | null, iasDoTurno: readonly string[], agora: number): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
+export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuardadaNoServidor> | null, iasDoTurno: readonly string[], agora: number, iaFixa: IaComConta | null = null): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
   if (!r) return null;
   const governadas = iasDoTurno.filter((ia): ia is IaComConta => ia in r.porIa);
   const livresSemConta = iasDoTurno.filter((ia) => !(ia in r.porIa));
@@ -65,7 +82,7 @@ export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuar
   const naOrdem = c.contas.filter((x) => x.removidaEm === null && c.naMaquina.has(x.id) && governadas.includes(x.ia)).sort((a, b) => a.posicao - b.posicao);
   const de = naOrdem.find((x) => x.noLimiteAte !== null && x.noLimiteAte > agora) ?? naOrdem[0];
   if (!de) return null;
-  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, modo: "perguntar", escolhidas: {}, ordemDoBot: null, contaId: de.id, ate: de.noLimiteAte, agora });
+  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, escolhidas: {}, ordemDoBot: null, iaFixa, contaId: de.id, ate: de.noLimiteAte, agora });
   return { de, decisao, voltaEm: de.noLimiteAte };
 }
 
@@ -79,8 +96,10 @@ export function contasDaNota(de: ContaDaPessoa, d: DecisaoDoLimiteDaConta, maqui
  * do bot nem um "Seguindo com" (`conta_escolhida`, `conta_seguiu`). Uma regra só (NOD-268) para o "Seguir com" não refazer
  * duas vezes e para o despacho não escrever a mesma nota de novo.
  */
-export function notaDeLimite(mensagens: readonly Mensagem[]): { nota: Mensagem; pos: number; aberta: boolean } | null {
-  const pos = mensagens.map((m) => m.payload?.kind === "limite_do_plano" && m.turnoId !== null).lastIndexOf(true);
+export function notaDeLimite(mensagens: readonly Mensagem[], comTrocaDeIa = false): { nota: Mensagem; pos: number; aberta: boolean } | null {
+  // ADR-108 (R6 a): o "Continuar na conta" do aviso do bot fixo (`troca_de_ia` com o turno da fala) refaz como o "Seguir com".
+  const ehNota = (m: Mensagem) => m.payload?.kind === "limite_do_plano" || (comTrocaDeIa && m.payload?.kind === "troca_de_ia");
+  const pos = mensagens.map((m) => ehNota(m) && m.turnoId !== null).lastIndexOf(true);
   if (pos < 0) return null;
   const respondida = mensagens.slice(pos + 1).some((m) => m.autoria.autor_tipo === "agente" || m.payload?.kind === "conta_escolhida" || m.payload?.kind === "conta_seguiu");
   return { nota: mensagens[pos]!, pos, aberta: !respondida };

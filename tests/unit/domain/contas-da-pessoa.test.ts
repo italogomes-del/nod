@@ -6,6 +6,7 @@ import {
   fraseDoLimiteDaConta,
   ordemIasDaLista,
   textoDaImpressaoDaConta,
+  voltaDaIa,
   type ContaDaPessoa,
 } from "../../../src/domain/contas-da-pessoa.ts";
 
@@ -14,16 +15,19 @@ const HORA = 3_600_000;
 const conta = (id: string, ia: ContaDaPessoa["ia"], posicao: number, extra: Partial<ContaDaPessoa> = {}): ContaDaPessoa => ({
   id, ia, apelido: id, plano: "Max", corporativa: false, posicao, entraNaTrocaAutomatica: false, noLimiteAte: null, removidaEm: null, ...extra,
 });
-/** O exemplo do Marlon (13/10): Claude · Pessoal, ChatGPT · Pessoal, Claude · Leapy (Team), Claude · Pessoal Leapy. */
+/**
+ * O exemplo do Marlon (13/10): Claude · Pessoal, ChatGPT · Pessoal, Claude · Leapy (Team), Claude · Pessoal Leapy. Como a
+ * 0080 deixa (ADR-108): a 1ª pessoal de cada IA na fila; a 2ª pessoal e a corporativa fora.
+ */
 const lista = (extra: Record<string, Partial<ContaDaPessoa>> = {}): ContaDaPessoa[] => [
-  conta("c-pessoal", "claude-cli", 1, extra["c-pessoal"]),
-  conta("g-pessoal", "codex-cli", 2, extra["g-pessoal"]),
+  conta("c-pessoal", "claude-cli", 1, { entraNaTrocaAutomatica: true, ...extra["c-pessoal"] }),
+  conta("g-pessoal", "codex-cli", 2, { entraNaTrocaAutomatica: true, ...extra["g-pessoal"] }),
   conta("c-leapy", "claude-cli", 3, { corporativa: true, plano: "Team", ...extra["c-leapy"] }),
   conta("c-pessoal-leapy", "claude-cli", 4, extra["c-pessoal-leapy"]),
 ];
 const todas = new Set(["c-pessoal", "g-pessoal", "c-leapy", "c-pessoal-leapy"]);
 const turno = (contas: ContaDaPessoa[], extra: Partial<Parameters<typeof contaDoTurno>[0]> = {}) =>
-  contaDoTurno({ contas, naMaquina: todas, modo: "perguntar", escolhidas: {}, ordemDoBot: null, agora: AGORA, ...extra });
+  contaDoTurno({ contas, naMaquina: todas, escolhidas: {}, ordemDoBot: null, agora: AGORA, ...extra });
 
 describe("textoDaImpressaoDaConta", () => {
   it("a mesma conta dá o mesmo texto com e-mail em outra caixa; outra pessoa ou outra organização mudam o texto", () => {
@@ -48,7 +52,7 @@ describe("contaDoTurno", () => {
     expect(r.iasSemConta).toEqual([]);
   });
 
-  it("a 1ª do Claude no limite com 'Perguntar antes': o Claude fica sem conta e o ChatGPT assume (troca de provedor é automática)", () => {
+  it("a 1ª do Claude no limite sem outra do Claude na fila: o Claude fica sem conta e o ChatGPT assume (outra IA, no Automático)", () => {
     const r = turno(lista({ "c-pessoal": { noLimiteAte: AGORA + HORA } }))!;
     expect(r.porIa["claude-cli"]).toBeNull();
     expect(r.ordemIas).toEqual(["codex-cli"]);
@@ -61,14 +65,29 @@ describe("contaDoTurno", () => {
     expect(turno(lista({ "c-pessoal": { noLimiteAte: AGORA - 1 } }), { escolhidas: { "claude-cli": "c-pessoal-leapy" } })!.porIa["claude-cli"]?.id).toBe("c-pessoal");
   });
 
-  it("'Trocar sozinho' pula a corporativa não marcada e usa a próxima pessoal; marcada, usa a corporativa", () => {
-    const noLimite = lista({ "c-pessoal": { noLimiteAte: AGORA + HORA } });
-    expect(turno(noLimite, { modo: "automatico" })!.porIa["claude-cli"]?.id).toBe("c-pessoal-leapy");
-    const marcada = lista({ "c-pessoal": { noLimiteAte: AGORA + HORA }, "c-leapy": { entraNaTrocaAutomatica: true } });
-    expect(turno(marcada, { modo: "automatico" })!.porIa["claude-cli"]?.id).toBe("c-leapy");
+  it("ADR-108 (R1): a lista é a fila — passa sozinho para a próxima NA FILA, em ordem; a fora da fila (pessoal ou corporativa) é pulada", () => {
+    const noLimite = lista({ "c-pessoal": { noLimiteAte: AGORA + HORA }, "c-pessoal-leapy": { entraNaTrocaAutomatica: true } });
+    expect(turno(noLimite)!.porIa["claude-cli"]?.id).toBe("c-pessoal-leapy");
+    const corporativaNaFila = lista({ "c-pessoal": { noLimiteAte: AGORA + HORA }, "c-leapy": { entraNaTrocaAutomatica: true }, "c-pessoal-leapy": { entraNaTrocaAutomatica: true } });
+    expect(turno(corporativaNaFila)!.porIa["claude-cli"]?.id).toBe("c-leapy");
+    // Fora da fila, nunca sozinha (nem a pessoal): sem outra na fila, o Claude fica sem conta.
+    expect(turno(lista({ "c-pessoal": { noLimiteAte: AGORA + HORA } }))!.porIa["claude-cli"]).toBeNull();
   });
 
-  it("só as contas logadas na máquina contam: a 1ª do Claude NESTA máquina é a preferida dela", () => {
+  it("ADR-108 (E4): a 1ª da fila livre vale mesmo que outra da IA venha antes na lista fora da fila", () => {
+    const l = [conta("c-fora", "claude-cli", 1), conta("c-fila", "claude-cli", 2, { entraNaTrocaAutomatica: true })];
+    expect(turno(l, { naMaquina: new Set(["c-fora", "c-fila"]) })!.porIa["claude-cli"]?.id).toBe("c-fila");
+  });
+
+  it("ADR-108 (E4): nenhuma conta da IA na fila nesta máquina — a 1ª dela aqui, para a pessoa nunca ficar sem IA; a escolhida vem antes", () => {
+    const l = [conta("c-a", "claude-cli", 1), conta("c-b", "claude-cli", 2)];
+    expect(turno(l, { naMaquina: new Set(["c-a", "c-b"]) })!.porIa["claude-cli"]?.id).toBe("c-a");
+    expect(turno(l, { naMaquina: new Set(["c-a", "c-b"]), escolhidas: { "claude-cli": "c-b" } })!.porIa["claude-cli"]?.id).toBe("c-b");
+    // A 1ª no limite: a 2ª (fora da fila) não entra sozinha.
+    expect(turno([conta("c-a", "claude-cli", 1, { noLimiteAte: AGORA + HORA }), conta("c-b", "claude-cli", 2)], { naMaquina: new Set(["c-a", "c-b"]) })!.porIa["claude-cli"]).toBeNull();
+  });
+
+  it("só as contas logadas na máquina contam: sem a da fila aqui, a 1ª do Claude NESTA máquina é a preferida dela", () => {
     const r = turno(lista(), { naMaquina: new Set(["g-pessoal", "c-leapy"]) })!;
     expect(r.porIa["claude-cli"]?.id).toBe("c-leapy");
     expect(r.ordemIas).toEqual(["codex-cli", "claude-cli"]);
@@ -82,20 +101,34 @@ describe("contaDoTurno", () => {
 });
 
 describe("decidirLimiteDaConta", () => {
-  const base = { naMaquina: todas, noutraMaquina: new Map(), modo: "perguntar" as const, escolhidas: {}, ordemDoBot: null, agora: AGORA };
+  const base = { naMaquina: todas, noutraMaquina: new Map(), escolhidas: {}, ordemDoBot: null, agora: AGORA };
 
-  it("com outra IA em uso na máquina, troca de provedor sozinha (como o Automático de hoje)", () => {
+  it("sem outra conta do Claude na fila e com outra IA em uso na máquina, troca de provedor sozinha (no Automático)", () => {
     const r = decidirLimiteDaConta({ ...base, contas: lista(), contaId: "c-pessoal", ate: AGORA + 2 * HORA });
     expect(r.decisao).toMatchObject({ tipo: "outra_ia", para: { id: "g-pessoal" } });
     expect(r.contas.find((c) => c.id === "c-pessoal")?.noLimiteAte).toBe(AGORA + 2 * HORA);
   });
 
-  it("'Trocar sozinho' troca para a próxima conta elegível do MESMO provedor antes de mudar de IA", () => {
-    const r = decidirLimiteDaConta({ ...base, modo: "automatico", contas: lista(), contaId: "c-pessoal", ate: AGORA + HORA });
+  it("ADR-108 (R1): com outra conta do MESMO provedor na fila, segue nela sem perguntar, antes de mudar de IA", () => {
+    const r = decidirLimiteDaConta({ ...base, contas: lista({ "c-pessoal-leapy": { entraNaTrocaAutomatica: true } }), contaId: "c-pessoal", ate: AGORA + HORA });
     expect(r.decisao).toMatchObject({ tipo: "trocou", para: { id: "c-pessoal-leapy" } });
   });
 
-  it("sem outra IA e com 'Perguntar antes': pergunta com as livres, dizendo onde cada uma está", () => {
+  it("ADR-108 (R2): com a IA fixa, nunca devolve outra_ia — segue na fila dela ou pergunta só com as contas dela", () => {
+    const comFila = decidirLimiteDaConta({ ...base, iaFixa: "claude-cli", contas: lista({ "c-pessoal-leapy": { entraNaTrocaAutomatica: true } }), contaId: "c-pessoal", ate: AGORA + HORA });
+    expect(comFila.decisao).toMatchObject({ tipo: "trocou", para: { id: "c-pessoal-leapy" } });
+    const semFila = decidirLimiteDaConta({ ...base, iaFixa: "claude-cli", contas: lista(), contaId: "c-pessoal", ate: AGORA + HORA });
+    expect(semFila.decisao.tipo).toBe("perguntar");
+    if (semFila.decisao.tipo === "perguntar") expect(semFila.decisao.livres.map((c) => c.ia)).toEqual(["claude-cli", "claude-cli"]);
+    // Todas do Claude no limite, com o ChatGPT livre: todas no limite (a volta do Claude), nunca o ChatGPT.
+    const todasDoClaude = lista({ "c-leapy": { noLimiteAte: AGORA + 2 * HORA }, "c-pessoal-leapy": { noLimiteAte: AGORA + 3 * HORA } });
+    const r = decidirLimiteDaConta({ ...base, iaFixa: "claude-cli", contas: todasDoClaude, contaId: "c-pessoal", ate: AGORA + HORA });
+    expect(r.decisao).toEqual({ tipo: "todas_no_limite", voltaEm: AGORA + HORA });
+    // Sem a IA fixa, as mesmas contas trocam de IA.
+    expect(decidirLimiteDaConta({ ...base, contas: todasDoClaude, contaId: "c-pessoal", ate: AGORA + HORA }).decisao.tipo).toBe("outra_ia");
+  });
+
+  it("sem outra IA e sem outra conta na fila: pergunta com as livres (fora da fila), dizendo onde cada uma está", () => {
     const contas = lista({ "g-pessoal": { noLimiteAte: AGORA + HORA } });
     const r = decidirLimiteDaConta({ ...base, contas, naMaquina: new Set(["c-pessoal", "g-pessoal", "c-leapy"]), noutraMaquina: new Map([["c-pessoal-leapy", { id: "m-mac", nome: "MacBook" }]]), contaId: "c-pessoal", ate: AGORA + HORA });
     expect(r.decisao).toEqual({
@@ -135,6 +168,18 @@ describe("ordemIasDaLista e decidirAnuncio", () => {
   });
 });
 
+describe("voltaDaIa (ADR-108 R4)", () => {
+  it("a volta é a da primeira conta da fila que sai do limite; com uma livre (ou sem conta da IA), null", () => {
+    const l = lista({ "c-pessoal": { noLimiteAte: AGORA + 3 * HORA }, "c-pessoal-leapy": { entraNaTrocaAutomatica: true, noLimiteAte: AGORA + 2 * HORA } });
+    // A corporativa fora da fila e livre não conta: a IA "volta" quando a fila volta.
+    expect(voltaDaIa(l, "claude-cli", AGORA)).toBe(AGORA + 2 * HORA);
+    expect(voltaDaIa(lista(), "claude-cli", AGORA)).toBeNull();
+    expect(voltaDaIa([conta("g", "codex-cli", 1)], "claude-cli", AGORA)).toBeNull();
+    // Sem conta da IA na fila: vale qualquer uma dela.
+    expect(voltaDaIa([conta("c-a", "claude-cli", 1, { noLimiteAte: AGORA + HORA })], "claude-cli", AGORA)).toBe(AGORA + HORA);
+  });
+});
+
 describe("fraseDoLimiteDaConta", () => {
   const p = { maquina: "vm-bots", quando: () => "14:00", quandoVolta: () => "às 14:00", voltaEm: AGORA + HORA };
   const de = { ia: "claude-cli" as const, apelido: "Pessoal" };
@@ -143,5 +188,10 @@ describe("fraseDoLimiteDaConta", () => {
     expect(fraseDoLimiteDaConta(de, { tipo: "perguntar", livres: [{ id: "x", apelido: "Leapy", ia: "claude-cli", naMaquina: true, outraMaquina: null }] }, p)).toBe("Claude · Pessoal no limite na vm-bots até 14:00. Seguir com Claude · Leapy?");
     expect(fraseDoLimiteDaConta(de, { tipo: "perguntar", livres: [{ id: "x", apelido: "Freela", ia: "claude-cli", naMaquina: false, outraMaquina: null }] }, p)).toBe("Claude · Pessoal no limite na vm-bots até 14:00. Claude · Freela está livre, mas não está na vm-bots.");
     expect(fraseDoLimiteDaConta(de, { tipo: "todas_no_limite", voltaEm: AGORA + HORA }, p)).toBe("Todas as suas contas estão no limite. A primeira volta às 14:00.");
+  });
+
+  it("ADR-108 (R7): na mesma IA a linha é leve — quem acabou, quando, e com quem seguiu no mesmo modelo", () => {
+    const d = { tipo: "trocou" as const, para: conta("Marlon 20x", "claude-cli", 4) };
+    expect(fraseDoLimiteDaConta({ ia: "claude-cli", apelido: "marlonwlv (20x)" }, d, { ...p, quando: () => "20:39", acabouEm: AGORA })).toBe("marlonwlv (20x) acabou às 20:39 → seguindo no Claude · Marlon 20x · mesmo modelo");
   });
 });

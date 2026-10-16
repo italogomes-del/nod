@@ -32,7 +32,7 @@ import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
@@ -217,6 +217,8 @@ function linhaDeIa(m: Mensagem, estado: Estado): string | null {
   const p = m.payload;
   if (p?.kind === "conta_trocada") return linhaContaTrocada(m);
   if (p?.kind === "conta_seguiu" || p?.kind === "conta_escolhida") return linhaContaSeguiu(m);
+  // ADR-108 (R4/R6): o aviso de troca de IA do bot (o bot vem do payload: a linha pode ter nascido do despacho).
+  if (p?.kind === "troca_de_ia") return cartaoTrocaDeIa(m, { nomeDoBot: agenteDe(estado, p.agenteId)?.nome ?? null, agora: estado.agora });
   if (p?.kind !== "ia_trocada" && p?.kind !== "limite_do_plano") return null;
   const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
   const ias = iasDaTela(estado);
@@ -752,8 +754,10 @@ const AVISOS_PARA_RECOLHER = 3;
 /**
  * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
  * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também.
+ * definido em 2026-10-16 (ADR-108, QA do PR 2): o aviso de troca de IA ainda sem decisão pede uma escolha — fica à vista.
  */
 function linhaDeSistema(m: Mensagem): boolean {
+  if (m.kind === "sistema" && m.payload?.kind === "troca_de_ia" && !m.payload.decisao) return false;
   return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
 }
 

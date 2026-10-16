@@ -147,6 +147,18 @@ body.ocupado { cursor: progress; }
 .tom-erro .bt.pri { background: var(--danger); border-color: var(--danger); color: var(--on-status); }
 .tom-alerta .bt.pri { background: var(--action); border-color: var(--action); color: var(--on-action); }
 .tom-ok .bt.pri { background: var(--success); border-color: var(--success); color: var(--on-status); }
+/* ADR-108 (R4/R6, canvas C1–C3): o aviso de troca de IA — cartão neutro com as opções em lista, a recomendada marcada. */
+.aviso-troca { align-items: flex-start; padding: 14px 16px; background: var(--surface); font-size: 14px; line-height: 21px; }
+.aviso-troca p { margin: 4px 0 10px; color: var(--ink-2); }
+.troca-opcoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.troca-opcao { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.troca-opcao:hover, .troca-opcao:focus-visible { border-color: var(--ink); }
+.troca-opcao.recomendada { border-color: var(--ink-2); }
+.troca-opcao small { color: var(--ink-3); font-size: 12.5px; line-height: 18px; }
+.troca-opcao-tit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 500; }
+.troca-reco { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); font-weight: 400; }
+.troca-rodape { display: block; margin-top: 10px; color: var(--ink-3); font-size: 12.5px; }
 .aviso-estado-detalhes { margin-top: 4px; color: var(--ink-2); font-size: 12px; }
 .aviso-estado-detalhes > summary { cursor: pointer; width: fit-content; color: var(--ink-3); }
 .aviso-estado-detalhes[open] > summary { margin-bottom: 4px; }

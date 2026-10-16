@@ -29,8 +29,12 @@ export type InteligenciaBot = {
   escolhas: EscolhasIa;
 };
 
-/** O que a web manda em `PUT /agentes/:id/inteligencia`. Campo ausente = não muda; `ordem: null` volta à da pessoa. */
-export type PedidoInteligencia = { modo?: ModoInteligencia; fixa?: IdHarness | null; ordem?: IdHarness[] | null; escolhas?: EscolhasIa };
+/**
+ * O que a web manda em `PUT /agentes/:id/inteligencia`. Campo ausente = não muda; `ordem: null` volta à da pessoa.
+ * `levarTasks` (ADR-108 R5): true leva também as tasks em andamento do bot para a inteligência nova; ausente = só daqui
+ * em diante. Sai do pedido no caso de uso, antes da validação estrita.
+ */
+export type PedidoInteligencia = { modo?: ModoInteligencia; fixa?: IdHarness | null; ordem?: IdHarness[] | null; escolhas?: EscolhasIa; levarTasks?: boolean };
 
 /**
  * Os nomes e as frases dos níveis de raciocínio, para a pílula "Modelo · Raciocínio" da tela 2B. Frases do protótipo

@@ -20,6 +20,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from turno_diagnosticos where owner_id = ${p}`;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
     await trx`delete from esperas where owner_id = ${p}`;
+    // ADR-108 (0080): o aviso de troca aponta para agente e conversa — sai antes deles.
+    await trx`delete from trocas_de_ia where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
     await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from computador_acoes where owner_id = ${p}`;

@@ -462,6 +462,14 @@ export function criarPonteHttpServidor(d: {
     }
     return todos;
   }
+  /** ADR-108 (revisão do PR 2, C5/C6): as IAs prontas de cada máquina viva da pessoa, por máquina. */
+  function prontosPorMaquinaDaPessoa(pessoaId: string): Record<string, IdHarness[]> {
+    const porMaquina: Record<string, IdHarness[]> = {};
+    for (const [id, c] of conexoes) if (c.escopo.pessoaId === pessoaId) {
+      porMaquina[id] = (Object.entries(harnesses(c.escopo, id)) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h);
+    }
+    return porMaquina;
+  }
   /** Último contato da máquina pela ponte (conectar/puxar/renovar/entregar); null = não está conectada. */
   function ultimoContato(machineId: string): number | null {
     return conexoes.get(machineId)?.ultimo ?? null;
@@ -519,5 +527,5 @@ export function criarPonteHttpServidor(d: {
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, maquina, capacidadesDaMaquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, prontosPorMaquinaDaPessoa, maquina, capacidadesDaMaquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

@@ -18,12 +18,16 @@ import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
 import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
-import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, notaIgualAberta, semContaParaOTurno, voltaDaNota } from "./contas-do-turno.ts";
+import { contasDaMaquinaDe, criarNotaDeContas, escolherContaDoTurno, lerContas, notaIgualAberta, semContaParaOTurno, voltaDaNota, type LeituraDasContas } from "./contas-do-turno.ts";
 import { esperarContaNaFrente } from "./assentar-turno.ts";
 import { adiarFala, vigiarLaco } from "./adiar-fala.ts";
 import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { redigir } from "../domain/redacao.ts";
-
+import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
+import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
+import { trabalhoAberto } from "../domain/trabalho.ts";
+import { avisarTrocaDeIa, estadoDaIa, maquinaDasTasks, outraIaParaAsTasks, type LeituraDasIas } from "./trocas-de-ia.ts";
+import { tipoParaCota } from "../domain/cota-da-ia.ts";
 
 export type EntradaDespacharTurno = {
   machineId: string;
@@ -36,6 +40,11 @@ export type EntradaDespacharTurno = {
    * harness que não está pronto em nenhuma delas, e o despacho o recusa nomeando o harness, em vez de deixá-lo pendente.
    */
   harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>;
+  /**
+   * NOD-268 / revisão do PR 2 (C5): as IAs prontas em cada máquina conectada da pessoa. A guarda da task (E1) oferece
+   * "levar" só para uma IA pronta na máquina-alvo do bot.
+   */
+  prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>>;
   /** ADR-072: a máquina anunciou o laço de voz; só então recebe o turno da ligação. */
   aceitaLigacao?: boolean;
   /** ADR-085: o Mac está apertado pelo "uso do Mac" da pessoa — trabalho novo em segundo plano espera. */
@@ -137,8 +146,13 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   // ADR-102 (2026-10-13): a máquina tem contas anunciadas e nenhuma serve sem a pessoa decidir — na conversa, a nota com
   // as contas livres (sem gastar turno pago); no fundo (task, rotina), o turno volta à fila até a primeira conta renovar.
   if (executor !== "catcher" && turno.origem !== "ligacao") {
-    const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, agora });
+    // Revisão do PR 2 (I8): as contas são lidas UMA vez para as duas guardas.
+    const contas = (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContas(deps) : null;
+    const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, contas, agora });
     if (semConta) return semConta;
+    // ADR-108 (E1): a task do Automático com sessão na IA que está no limite não sai noutra IA pelo plano — espera a volta.
+    const segura = await segurarTaskNaIaDaSessao(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, harnessesDaPessoa: input.harnessesDaPessoa, prontosPorMaquina: input.prontosPorMaquina, contas, agora });
+    if (segura) return segura;
   }
 
   // Fila lida junta (definido em 2026-09-24), só depois dos gates: um turno recusado não arrasta as outras
@@ -222,16 +236,16 @@ export async function encerrarCerebroSemLigacao(deps: Deps, turno: Turno, execut
 
 async function semContaNaMaquina(
   deps: Deps,
-  p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; agora: number },
+  p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; contas: LeituraDasContas | null; agora: number },
 ): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
   const { turno, agora } = p;
-  if (!(await deps.repos.contasIa.temContaNaMaquina(p.machineId))) return null;
-  const c = await lerContasDaMaquina(deps, p.machineId);
+  if (!p.contas) return null;
+  const c = contasDaMaquinaDe(p.contas, p.machineId, agora);
   if (c.naMaquina.size === 0) return null;
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const r = escolherContaDoTurno(c, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
   const fixo = harnessFixado(turno.harness, turno.modelo);
-  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora);
+  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, fixo && ehIaComConta(fixo) ? fixo : null);
   if (!sem) return null;
   const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", ultimoSinalEm: agora });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
@@ -261,6 +275,59 @@ async function semContaNaMaquina(
   ];
   log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo, nota_repetida: calada });
   return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events };
+}
+
+/**
+ * ADR-108 (E1, guarda do despacho): o plano põe a IA sem conta (ou no limite, ou segurada pela cota) em `noLimite` e
+ * entregaria a task pendente de um bot no Automático à outra IA — e a task recomeçaria do resumo, sem a pessoa decidir.
+ * Aqui, o turno de uma task cuja sessão (`trabalhos.sessao_cli` + `sessao_harness`) é de uma IA que parou na máquina-alvo
+ * do bot volta a esperar a volta dela (a retomada com `acordar_em`), e o bot ganha ou atualiza o aviso de troca. Depois do
+ * "levar" o turno já vem fixo na IA nova (harness ≠ auto) e passa direto. null = segue.
+ * Revisão do PR 2: "parou" é `estadoDaIa` — a mesma regra do varredor, na mesma máquina (C2), com a cota medida do plano
+ * (C1: o Claude em 100% medido segura a task com sessão nele, em vez de ela sair no ChatGPT). No ChatGPT (I1), a conta da
+ * sessão no limite também segura, mesmo com outra conta do ChatGPT livre: trocar de conta perde a sessão. A outra IA do
+ * aviso é a pronta na máquina-alvo (C5).
+ */
+async function segurarTaskNaIaDaSessao(
+  deps: Deps,
+  p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>>; contas: LeituraDasContas | null; agora: number },
+): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
+  const { turno, agora } = p;
+  if (!turno.trabalhoId || turno.pararSolicitadoEm !== null || harnessFixado(turno.harness, turno.modelo) !== null) return null;
+  const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+  const ia = trabalho?.sessaoHarness ?? null;
+  if (!trabalho || !trabalhoAberto(trabalho.estado) || !ia || !temSessaoNaIa(trabalho, ia) || !ehIaComConta(ia)) return null;
+  const [agente, preferencias, usos] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar()]);
+  const l: LeituraDasIas = { ...(p.contas ?? (await lerContas(deps))), preferencias, usos };
+  const alvo = await maquinaDasTasks(deps, turno.agenteId, p.machineId);
+  const ordemDoBot = agente ? inteligenciaDoAgente(agente).ordem : null;
+  const geral = estadoDaIa(l, { ia, machineId: alvo, ordemDoBot, agora, tipo: tipoParaCota(turno, trabalho) });
+  const contaDaSessao = !geral.parou && ia === "codex-cli" ? await deps.repos.trabalhos.contaDaSessao(trabalho.id) : null;
+  const pelaConta = contaDaSessao ? estadoDaIa(l, { ia, machineId: alvo, ordemDoBot, agora, contaDe: contaDaSessao }) : null;
+  if (!geral.parou && !pelaConta?.parou) return null;
+  const voltaEm = (pelaConta?.parou ? pelaConta.voltaEm : geral.voltaEm) ?? null;
+  const volta = voltaEm !== null && voltaEm > agora ? voltaEm : null;
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
+  // A espera da task tenta de novo em 1 h quando ninguém disse a hora; o aviso grava a volta vazia (I6).
+  const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia, renovaEm: volta ?? agora + PRAZO_SEM_HORARIO_MS, autoria, agora });
+  if (!espera) throw new ErroDeDominio("estado_invalido", { cause: "task com sessão na IA no limite sem retomada" });
+  const daMaquina = alvo ? contasDaMaquinaDe(l, alvo, agora) : null;
+  let aviso: RuntimeEvent[] = [];
+  let para: IdHarness | null = null;
+  if (pelaConta?.parou && contaDaSessao) {
+    const conta = l.contas.find((c) => c.id === contaDaSessao);
+    para = ia;
+    aviso = await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: ia, iaPara: ia, contaDe: { id: contaDaSessao, apelido: conta?.apelido ?? "" }, voltaEm: volta, fixo: false, machineId: alvo, autoria, agora });
+  } else {
+    const prontosDoAlvo = !alvo || alvo === p.machineId ? (p.harnessesProntos ?? []) : (p.prontosPorMaquina?.[alvo] ?? []);
+    const prontosDaPessoa = (Object.entries(p.harnessesDaPessoa ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h);
+    const outra = await outraIaParaAsTasks(deps, { agenteId: turno.agenteId, iaDe: ia, prontosDoAlvo, prontosDaPessoa: prontosDaPessoa.length ? prontosDaPessoa : prontosDoAlvo, daMaquina, agora });
+    para = outra.ia;
+    if (outra.ia || outra.noutraMaquina) aviso = await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: ia, iaPara: outra.ia, voltaEm: volta, fixo: false, machineId: alvo, foraDaMaquina: outra.ia ? null : { ia: outra.noutraMaquina!, maquina: daMaquina?.nomeDaMaquina ?? null }, autoria, agora });
+  }
+  log("info", "task_espera_ia_da_sessao", { turno_id: turno.id, trabalho_id: turno.trabalhoId, ia, acordar_em: volta, para, machine_id: alvo, pela_conta: pelaConta?.parou === true });
+  return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...aviso, ...(await sincronizarDoTurno(deps, turno))] };
 }
 
 async function recusarPorExecutor(

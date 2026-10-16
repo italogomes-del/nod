@@ -8,6 +8,7 @@ import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaNativa } from "./negacao.ts";
 import type { EstadoTrabalho, OrigemTrabalho } from "./trabalho.ts";
 import type { ContaNoLimite, OrigemTurno } from "./turno.ts";
+import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -78,6 +79,11 @@ export type PayloadMensagem =
    * sozinho", ou outra IA). A conta pelo apelido (o servidor guarda a lista).
    */
   | { kind: "conta_seguiu"; de: { id: string; apelido: string; ia: IaComConta }; para: { id: string; apelido: string; ia: IaComConta }; voltaEm: EpochMs | null }
+  /**
+   * definido em 2026-10-16 (ADR-108 R4/R6): a IA das tasks do bot chegou ao limite e elas esperam — o aviso com a
+   * recomendação ("esperar" ou "levar") e, no bot fixo, os dois caminhos. Um por bot; aberto, é atualizado.
+   */
+  | PayloadTrocaDeIa
   /** ADR-102: a pessoa escolheu "Seguir com <conta>" e o turno foi refeito nela. */
   | { kind: "conta_escolhida"; contaId: string; apelido: string; ia: IaComConta }
   /**

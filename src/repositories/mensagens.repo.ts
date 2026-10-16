@@ -233,6 +233,17 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * ADR-108: o aviso de troca de IA é UM por bot — a segunda task que para atualiza a linha de sistema dele (texto e
+     * payload), e a decisão grava o desfecho nela. Só linha de sistema da dona. `turnoId` liga a linha sem turno à fala da
+     * conversa que parou depois (o "Continuar na conta" refaz essa fala); a que já tem turno fica com ele.
+     */
+    async atualizarSistema(id: string, m: { texto: string; payload: NonNullable<NovaMensagem["payload"]>; turnoId?: string | null }): Promise<boolean> {
+      const r = await conn`update mensagens set texto = ${m.texto}, payload = ${conn.json(m.payload)}, turno_id = coalesce(turno_id, ${m.turnoId ?? null})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and kind = 'sistema'`;
+      return r.count === 1;
+    },
+
     /** Turno interrompido no meio do streaming: a fala já gravada fica marcada como parcial (ADR-010). */
     async marcarParciaisDoTurno(turnoId: string): Promise<number> {
       const r = await conn`update mensagens set parcial = true where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and turno_id = ${turnoId} and autor_tipo = 'agente'`;

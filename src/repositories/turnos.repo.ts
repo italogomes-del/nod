@@ -1,5 +1,5 @@
 import type { MotivoRenovacaoNegada } from "../contracts/ponte.ts";
-import { HARNESS_LEGADO, type PreferenciaHarness } from "../contracts/harness.ts";
+import { HARNESS_LEGADO, type IdHarness, type PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
@@ -167,6 +167,12 @@ export type Assentamento = {
    */
   ultimoSinalEm?: number;
 };
+
+/** ADR-108: o turno da task está na IA `ia` — fixado nela, ou no Automático com a sessão da task nela. null = qualquer. */
+function daIa(conn: Conn, ia: IdHarness | null) {
+  if (ia === null) return conn`true`;
+  return conn`(t.harness = ${ia} or (t.harness = 'auto' and exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.sessao_harness = ${ia})))`;
+}
 
 /**
  * Fila de turnos no Postgres (ADR-010 revisado). O ÚNICO lugar que escreve estado 'pendente' é o
@@ -443,6 +449,59 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
         order by t.criado_em desc, t.id desc limit ${limite}`;
       return linhas.map((l) => ({ estado: l.estado, marcouVolta: l.marcou_volta, perguntou: l.perguntou, pediuAColega: l.pediu_a_colega, porCota: l.por_cota }));
+    },
+
+    /**
+     * ADR-108 (R4/R5/R6): as tasks pendentes do bot que estão na IA `iaDe` — o turno fixado nela, ou o do Automático cuja
+     * task tem a sessão nela (null = todas as tasks pendentes do bot). Só turnos com `trabalho_id`: a conversa não muda.
+     */
+    async contarTasksNaIa(agenteId: string, iaDe: IdHarness | null): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        select count(distinct t.trabalho_id)::int as n from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
+          and ${daIa(conn, iaDe)}`;
+      return l?.n ?? 0;
+    },
+
+    /**
+     * "Levar as tasks" (ADR-108 R4/R5): os turnos pendentes das tasks do bot na IA `iaDe` passam a rodar em `harness`/
+     * `modelo` (fixos naquele turno, como a conversa no #319), e só as esperas da COTA (entrada que começa com
+     * ENTRADA_DA_VOLTA_DA_COTA) acordam agora, com a entrada nova — o "me chame às" do bot (ADR-086) segue com a hora dele.
+     * Devolve os ids reescritos.
+     */
+    async levarTasksDoBot(p: { agenteId: string; iaDe: IdHarness | null; harness: string; modelo: string; entradaDaVolta: string }): Promise<string[]> {
+      const linhas = await conn<{ id: string }[]>`
+        update turnos t set harness = ${p.harness}, modelo = ${p.modelo},
+          acordar_em = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then null else t.acordar_em end,
+          entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta} else t.entrada_texto end
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
+          and ${daIa(conn, p.iaDe)}
+        returning t.id`;
+      return linhas.map((l) => l.id);
+    },
+
+    /**
+     * ADR-108 (R6 b, revisão do PR 2, I3): o bot fixo voltou à IA dele — os turnos pendentes das tasks dele que o "Continuar
+     * no <outra> até a volta" fixou na outra IA (`harness = de`) voltam à inteligência do bot (`harness`/`modelo`). Não
+     * mexe em `acordar_em` nem na entrada. Devolve os ids.
+     */
+    async trazerTasksDeVolta(p: { agenteId: string; de: IdHarness; harness: string; modelo: string }): Promise<string[]> {
+      const linhas = await conn<{ id: string }[]>`
+        update turnos t set harness = ${p.harness}, modelo = ${p.modelo}
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
+          and t.harness = ${p.de}
+        returning t.id`;
+      return linhas.map((l) => l.id);
+    },
+
+    /** ADR-108 (R6 a, voltou): as esperas da cota das tasks do bot na IA `iaDe` acordam agora (a conta já serve). */
+    async acordarEsperasDaCota(agenteId: string, iaDe: IdHarness | null): Promise<number> {
+      const linhas = await conn`
+        update turnos t set acordar_em = null
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
+          and t.acordar_em is not null and starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) and ${daIa(conn, iaDe)}
+        returning t.id`;
+      return linhas.length;
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */

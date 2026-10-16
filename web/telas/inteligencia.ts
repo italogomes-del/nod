@@ -327,3 +327,32 @@ export function motivoDoInventario(nome: string, inv: Inventario): string {
   if (inv.motivo && !/\b[a-z0-9]+(?:_[a-z0-9]+)+\b/.test(inv.motivo)) return inv.motivo;
   return inv.estado === "ausente" ? `Não encontramos o ${nome} neste Mac. Instale e entre na sua conta para usá-lo no nod.` : `Entre na sua conta do ${nome} neste Mac e tente de novo.`;
 }
+
+// ---- R5 (ADR-108, canvas D1): trocar a IA do bot com tasks em andamento ------------------------------------------------
+
+/** O pedido troca a IA do bot (o modo, ou a IA fixa)? Mudar só o modelo ou o raciocínio da mesma IA não pergunta nada. */
+export function mudaAIaDoBot(a: Pick<Agente, "harness" | "modelo" | "esforco" | "inteligencia">, pedido: PedidoInteligencia): boolean {
+  const antes = inteligenciaDoBot(a);
+  const modo = pedido.modo ?? antes.modo;
+  const fixa = modo === "fixa" ? (pedido.fixa === undefined ? antes.fixa : pedido.fixa) : null;
+  return modo !== antes.modo || fixa !== (antes.modo === "fixa" ? antes.fixa : null);
+}
+
+/** O destino do pedido como a prévia o diz: "o Automático" ou "o ChatGPT". */
+export function destinoDoPedido(pedido: PedidoInteligencia): string {
+  if (pedido.modo === "auto") return "o Automático";
+  return pedido.fixa && ehIaMac(pedido.fixa) ? `o ${PROVEDOR[pedido.fixa].nome}` : "a IA nova";
+}
+
+/**
+ * A prévia (D1): o que muda agora e o que acontece com as tasks em andamento. "Só daqui em diante" é o padrão (o foco);
+ * "Levar as tasks também" manda `levarTasks: true`.
+ */
+export function htmlDaPreviaDaTroca(p: { nomeDoBot: string; destino: string; tasks: number }): string {
+  const uma = p.tasks === 1;
+  const tasks = uma ? "A task em andamento fica" : `As ${p.tasks} tasks em andamento ficam`;
+  return `<h2 id="previa-troca-titulo">Passar ${esc(p.nomeDoBot)} para ${esc(p.destino)}?</h2>
+    <p>Muda agora: a conversa e o que ${esc(p.nomeDoBot)} começar daqui em diante.</p>
+    <p>${tasks} na IA de agora e ${uma ? "continua de onde parou" : "continuam de onde pararam"}. Se ${uma ? "for junto, recomeça" : "forem junto, recomeçam"} do resumo.</p>
+    <div class="acoes"><button class="bt" data-levar type="button">Levar as tasks também</button> <button class="bt pri" data-so-daqui type="button" autofocus>Só daqui em diante</button></div>`;
+}

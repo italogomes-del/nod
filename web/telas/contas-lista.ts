@@ -14,6 +14,9 @@ import { planoNaTela } from "./contas-ia.ts";
  * (do servidor desde 2026-10-15, ADR-105, em qualquer máquina) e uma pílula por máquina: logada, ou "Entrar na
  * <máquina>" tracejada. O ⋯ abre Renomear, Detalhes, Sair de cada máquina e Remover de todas. Os cliques
  * (`data-act="cl-…"`) são de web/lib/contas-da-pessoa.ts; o render não guarda nada.
+ * ADR-108 (2026-10-16, canvas Main): a lista é a FILA. Cada linha tem o liga/desliga "na fila" (o opt-in de antes, que
+ * era só da corporativa, agora vale para toda conta) e o "Perguntar antes / Trocar sozinho" saiu: no lugar, as três
+ * linhas que dizem como o Nod age quando uma conta acaba.
  */
 
 export type ConfirmacaoContas =
@@ -82,18 +85,24 @@ function identidadeDe(c: ContaIa, x: ContextoContas): { email: string | null; or
   return d ? { email: d.email, organizacao: d.organizacao } : { email: c.email, organizacao: c.organizacao };
 }
 
-/** A conta que os bots usam agora: a primeira fora do limite (na máquina do filtro, se há filtro). */
+/**
+ * A conta que os bots usam agora: a primeira da fila fora do limite (na máquina do filtro, se há filtro). ADR-108 (E4):
+ * sem nenhuma conta na fila, a primeira da lista.
+ */
 function emUso(x: ContextoContas): string | null {
   return contaEmUso(x.contas.contas, x.agora, { filtro: x.ui.filtro })?.id ?? null;
 }
 
 /**
- * A conta em uso, pura (extraída em 2026-10-16 para o seletor de IA do campo, plano "tela limpa", T6): a primeira da lista
- * fora do limite e logada em alguma máquina (na do filtro, se há filtro); com `ia`, só entre as contas daquela IA.
+ * A conta em uso, pura (extraída em 2026-10-16 para o seletor de IA do campo, plano "tela limpa", T6): por IA, a primeira
+ * da fila fora do limite e logada em alguma máquina (na do filtro, se há filtro); sem conta da IA na fila, a primeira dela
+ * (ADR-108, E4). Com `ia`, só entre as contas daquela IA.
  * QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
  */
 export function contaEmUso(contas: readonly ContaIa[], agora: number, p: { filtro?: string | null; ia?: ContaIa["ia"] } = {}): ContaIa | null {
-  return contas.find((c) => (p.ia === undefined || c.ia === p.ia) && !noLimite(c, agora) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta"))) ?? null;
+  const logadas = contas.filter((c) => (p.ia === undefined || c.ia === p.ia) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
+  const temFila = (ia: ContaIa["ia"]) => logadas.some((c) => c.ia === ia && c.entraNaTrocaAutomatica);
+  return logadas.find((c) => !noLimite(c, agora) && (c.entraNaTrocaAutomatica || !temFila(c.ia))) ?? null;
 }
 
 function pilulas(c: ContaIa, x: ContextoContas): string {
@@ -209,9 +218,6 @@ function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; orga
     const estado = v.estado === "pronta" ? "logada" : v.estado === "sem_login" ? "o login venceu" : "sem acesso";
     return `<li>${esc(m ? nomeCurto(m, x.maquinas) : v.nome)}: ${esc(estado)}</li>`;
   }).join("");
-  const optin = c.corporativa && x.contas.modo === "automatico"
-    ? `<label class="contas-optin"><input type="checkbox" data-cl-optin="${esc(c.id)}"${c.entraNaTrocaAutomatica ? " checked" : ""}><span>Pode entrar na troca automática<small>Desmarcada, o nod nunca troca sozinho para esta conta; ela só é usada quando você escolhe. Confira a política da empresa antes de marcar.</small></span></label>`
-    : "";
   return `<div class="cl-detalhes">
       <dl>
         <dt>Provedor</dt><dd>${esc(PROVEDOR[c.ia].nome)}, pelo ${esc(PROVEDOR[c.ia].cli)}</dd>
@@ -219,7 +225,6 @@ function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; orga
         ${d.email || d.organizacao ? `<dt>Conta</dt><dd>${esc([d.email, d.organizacao].filter(Boolean).join(" · "))}</dd>` : ""}
         <dt>Máquinas</dt><dd>${maqs ? `<ul>${maqs}</ul>` : "nenhuma ainda"}</dd>
       </dl>
-      ${optin}
       <button type="button" class="ob-link" data-act="cl-detalhe" data-id="${esc(c.id)}">Fechar detalhes</button>
     </div>`;
 }
@@ -231,7 +236,8 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
   const nome = nomeDaContaNaTela(c);
   const [classe, estado] = noLimite(c, x.agora)
     ? ["e-limite", `No limite até ${hora(c.noLimiteAte!)}`]
-    : c.id === usada ? ["e-uso", filtro ? `Em uso na ${nomeCurto(x.maquinas.find((m) => m.id === filtro)!, x.maquinas)}` : "Em uso"] : ["e-disp", "Disponível"];
+    : c.id === usada ? ["e-uso", filtro ? `Em uso na ${nomeCurto(x.maquinas.find((m) => m.id === filtro)!, x.maquinas)}` : "Em uso"]
+    : c.entraNaTrocaAutomatica ? ["e-disp", "Disponível"] : ["e-fora", "Fora da fila"];
   const ident = [d?.email, d?.organizacao ? `organização ${d.organizacao}` : null, `pelo ${PROVEDOR[c.ia].cli}`].filter(Boolean).join(" · ");
   const renomear = x.ui.renomear === c.id
     ? `<form class="cl-renomear" data-form="cl-renomear" data-id="${esc(c.id)}"><input name="apelido" maxlength="40" value="${esc(c.apelido)}" aria-label="Apelido de ${esc(nome)}" data-cl-autofoco data-manter-foco="cl-renomear"><button type="submit" class="bt pri sm">Salvar</button><button type="button" class="bt sm" data-act="cl-renomear-fechar">Cancelar</button></form>`
@@ -240,7 +246,7 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
   // No filtro, a conta que não está na máquina vira um botão grande (G2-M2).
   const direita = fora && x.maquinas.find((m) => m.id === filtro)?.conectada && !logins
     ? `<button type="button" class="bt sm" data-act="cl-entrar" data-id="${esc(c.id)}" data-maquina="${esc(filtro!)}">Entrar na ${esc(nomeCurto(x.maquinas.find((m) => m.id === filtro)!, x.maquinas))}</button>`
-    : `<span class="contas-estado ${classe}">${esc(estado)}</span>`;
+    : `<span class="contas-estado ${classe}">${esc(estado)}</span>${chaveDaFila(c)}`;
   return `<li class="cl-linha${fora ? " fora" : ""}${logins ? " entrando" : ""}" data-ordem-item="${esc(c.id)}">
       <button type="button" class="cl-alca" data-alca-ordem aria-label="Mover ${esc(nome)} (setas para cima e para baixo)">${ICONE.alca}</button>
       <span class="cl-pos" aria-hidden="true">${pos}</span>
@@ -257,6 +263,23 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
       <div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="cl-menu" data-id="${esc(c.id)}" aria-expanded="${x.ui.menu === c.id}" aria-label="Mais ações de ${esc(nome)}">${ICONE.pontos}</button>${x.ui.menu === c.id ? menu(c, x) : ""}</div>
     </li>`;
 }
+
+/**
+ * ADR-108 (R8): o liga/desliga "na fila" da conta. Ligado, o Nod pode passar sozinho para ela quando a anterior da mesma
+ * IA acaba; desligado, ela só é usada quando você escolhe ("Seguir com"). Ligar a 2ª da mesma IA ou a corporativa mostra
+ * os termos de uso antes (web/lib/contas-da-pessoa.ts).
+ */
+function chaveDaFila(c: ContaIa): string {
+  const nome = nomeDaContaNaTela(c);
+  return `<button type="button" class="chave cl-fila" role="switch" aria-checked="${c.entraNaTrocaAutomatica}" data-act="cl-fila" data-id="${esc(c.id)}" aria-label="${esc(`${nome} na fila`)}" title="${c.entraNaTrocaAutomatica ? "Na fila: o Nod pode passar sozinho para ela" : "Fora da fila: só quando você escolher"}"><span></span></button>`;
+}
+
+/** ADR-108 (R8, canvas Main): não há regra para configurar — só como o Nod age quando uma conta acaba. */
+export const REGRAS_DA_FILA: readonly { titulo: string; texto: string }[] = [
+  { titulo: "Mesma IA", texto: "passa sozinho para a próxima conta ligada na fila. No Claude, nada se perde. No ChatGPT, a task com sessão recomeçaria do resumo noutra conta: o Nod recomenda esperar ou seguir, e você decide." },
+  { titulo: "Outra IA", texto: "só nos bots em Automático. A conversa segue na hora." },
+  { titulo: "Tasks em andamento", texto: "trocar de IA faz a task recomeçar do resumo. Por isso o Nod recomenda esperar ou trocar, pela hora em que a conta volta, e você decide." },
+];
 
 /** O formulário "Adicionar conta" (G1-P2): provedor, apelido e em quais máquinas entrar. */
 function formNova(x: ContextoContas): string {
@@ -371,8 +394,8 @@ export function renderListaDeContas(x: ContextoContas): string {
   const vazio = n === 0 && x.ui.logins.length === 0
     ? `<div class="espaco-cartao cl-vazio"><p>Nenhuma conta de IA ainda.${x.maquinas.length === 0 ? " Conecte o app do Mac ou uma VM em Máquinas e entre numa conta nela." : " Adicione uma conta e escolha em quais máquinas entrar."}</p></div>`
     : "";
-  const modo = n > 1
-    ? `<div class="espaco-cartao cl-modo"><div><b>Quando uma conta bate no limite</b><small>${x.contas.modo === "perguntar" ? "O nod pergunta na conversa e oferece a próxima livre do mesmo provedor." : "O nod segue sozinho na próxima livre do mesmo provedor. Contas corporativas não marcadas ficam de fora."} Entre Claude e ChatGPT a troca é sempre automática.</small></div><div class="segmentado" role="group" aria-label="Quando uma conta bate no limite">${(["perguntar", "automatico"] as const).map((m) => `<button type="button" class="seg${x.contas.modo === m ? " ativo" : ""}" aria-pressed="${x.contas.modo === m}" data-act="cl-modo" data-modo="${m}">${m === "perguntar" ? "Perguntar antes" : "Trocar sozinho"}</button>`).join("")}</div></div>`
+  const regras = n > 0
+    ? `<div class="espaco-cartao cl-regras"><b>Quando uma conta acabar</b><small>Não há nada para configurar aqui. É assim que o Nod age:</small><ul>${REGRAS_DA_FILA.map((r) => `<li><b>${esc(r.titulo)}:</b> ${esc(r.texto)}</li>`).join("")}</ul></div>`
     : "";
   const nota = x.ui.nota ? `<p class="cl-nota" role="status">${esc(x.ui.nota)}</p>` : "";
   return `${abas}
@@ -381,7 +404,7 @@ export function renderListaDeContas(x: ContextoContas): string {
     <ol class="espaco-cartao cl-lista" data-ordem-lista="contas" aria-label="Suas contas de IA, em ordem de uso">${linhas}${loginsSemConta(x)}</ol>` : ""}
     ${nota}
     ${filtro ? "" : formNova(x)}
-    ${modo}
+    ${regras}
     <p class="contas-privado">E-mail e organização ficam só nas suas máquinas: o servidor do nod recebe o apelido, o plano e uma impressão da conta, nunca o e-mail.</p>
     ${confirmacao(x)}`;
 }

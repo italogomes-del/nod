@@ -581,7 +581,8 @@ export function comporApp(o: OpcoesCompor): App {
     },
   };
 
-  const ponte = criarPonteInterna(db, depsPonte);
+  // ADR-108 (revisão do PR 2, C5): as IAs prontas nas máquinas da ponte HTTP (as VMs, no modo local) contam por máquina.
+  const ponte = criarPonteInterna(db, { ...depsPonte, prontosPorMaquina: (pessoaId) => ponteHttp.prontosPorMaquinaDaPessoa(pessoaId) });
   const autorizarMaquina = (token: string) => autorizarChaveMaquina(db, token, relogio());
   // ADR-102 (2026-10-13): os logins de contas pela tela e o pareamento por código/convite (em memória, src/services).
   const logins = criarLoginsNaMaquina(relogio);
@@ -595,6 +596,7 @@ export function comporApp(o: OpcoesCompor): App {
    */
   const ponteHttp = criarPonteHttpServidor({
     criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }], harnessesDaPessoa: (pessoaId) => ponteHttp.harnessesDaPessoa(pessoaId),
+      prontosPorMaquina: (pessoaId) => ponteHttp.prontosPorMaquinaDaPessoa(pessoaId),
       ...(compartilhado ? {} : { executor: "local" as const, soComoAlvo: true }) }),
     persistir: compartilhado ? (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }) : async () => undefined,
     ...(compartilhado ? {} : { descartarSessao: true }),
@@ -1073,7 +1075,10 @@ export function comporApp(o: OpcoesCompor): App {
       } } satisfies Rota,
     ] : criarRotasExecutor({ estado: estadoExecutor, trocar: trocarExecutor })),
     ...criarRotasIas({ ...depsRotas, inventarios: (escopo) => Object.fromEntries(catalogoHarness(escopo.pessoaId).opcoes.map((h) => [h.id, h.inventario])) }),
-    ...criarRotasAgentes(depsRotas, computadores.desligarExcluido),
+    ...criarRotasAgentes(depsRotas, computadores.desligarExcluido, (escopo) => ({
+      ...ponteHttp.prontosPorMaquinaDaPessoa(escopo.pessoaId),
+      ...(compartilhado ? {} : Object.fromEntries(ponte.maquinasConectadas().map((m) => [m.machineId, (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([h]) => h)]))),
+    })),
     ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),
     ...criarRotasTrabalhos(depsRotas),

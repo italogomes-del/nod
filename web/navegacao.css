@@ -741,9 +741,14 @@ div.mac-medidor { padding-right: 36px; }
 .cl-maq span { display: flex; flex-direction: column; }
 .cl-maq.mudo { color: var(--ink-3); }
 .cl-nova-acoes { display: flex; justify-content: flex-end; gap: 10px; }
-.cl-modo { margin-top: 16px; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.cl-modo b { display: block; font-size: 14px; font-weight: 500; }
-.cl-modo small { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+/* ADR-108 (R8): a fila — o liga/desliga na linha e as três regras do Nod no lugar do "Perguntar antes / Trocar sozinho". */
+.cl-dir { gap: 10px; align-items: center; }
+.contas-estado.e-fora { color: var(--ink-3); }
+.cl-regras { margin-top: 16px; padding: 14px 18px; }
+.cl-regras b { display: block; font-size: 14px; font-weight: 500; }
+.cl-regras small { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+.cl-regras ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
+.cl-regras li b { display: inline; font-weight: 500; color: var(--ink); }
 .cl-filtro { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .cl-vazio p { margin: 0; padding: 16px 18px; font-size: 14px; color: var(--ink-3); }
 .cl-nota { margin: 10px 2px 0; font-size: 13px; color: var(--warning); }
@@ -780,6 +785,6 @@ div.mac-medidor { padding-right: 36px; }
   .cl-dir { grid-column: 3; justify-content: flex-start; }
   .cl-mais { grid-row: 1; grid-column: 4; }
   .cl-provs { grid-template-columns: 1fr; }
-  .cl-modo { flex-direction: column; align-items: stretch; }
+  .cl-regras ul { padding-left: 16px; }
   .maq-contas { padding-left: 18px; flex-wrap: wrap; }
 }

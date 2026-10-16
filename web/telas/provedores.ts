@@ -63,7 +63,7 @@ function renderProvedoresContas(estado: Estado): string {
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
   const intro = filtro
     ? `Mostrando as contas d${filtro.plataforma === "darwin" ? "o" : "a"} ${esc(nomeCurto(filtro, maquinas))}. A ordem é a mesma em todas as máquinas: os bots dela pulam as que não estão logadas lá.`
-    : "Suas contas de IA, numa lista só. Os bots usam a primeira livre, de cima para baixo, na máquina onde trabalham. Arraste para mudar a ordem; cada bot pode ter a dele.";
+    : "Suas contas de IA numa fila só. Quando uma acaba, o Nod passa para a próxima ligada, na máquina onde o bot trabalha. Arraste para mudar a ordem; desligue a que não deve entrar sozinha.";
   return `<section class="espaco-secao provedores prov-contas">
       <h2 class="prov-titulo">${pilhaDeAvatares()}Provedores de IA</h2>
       <p class="intro">${intro}</p>

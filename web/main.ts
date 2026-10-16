@@ -5,7 +5,8 @@ import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/ca
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
-import { iasDaTela, mudarRascunho, ordemDaPessoa, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
+import { iasDaTela, mudarRascunho, ordemDaPessoa, destinoDoPedido, mudaAIaDoBot, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
+import { abrirPreviaDaTroca } from "./telas/previa-troca-dialogo.ts";
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
 import { abrirAvisoDosTermos } from "./telas/aviso-termos-dialogo.ts";
 import { criarContasDoMac } from "./lib/contas-do-mac.ts";
@@ -21,6 +22,7 @@ import { abrirMenuIa } from "./lib/menu-ia.ts";
 import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa } from "./telas/seletor-ia.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
+import type { PedidoInteligencia } from "../src/contracts/inteligencia.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
@@ -501,6 +503,34 @@ observarRede({
     if (devolver.length > 0) dispatch({ tipo: "invalidar", quais: devolver });
   },
 });
+
+/**
+ * ADR-108 (R5, canvas D1): trocar a IA de um bot com tasks em andamento pergunta antes se elas vão junto ("Só daqui em
+ * diante" é o padrão). Fechar a prévia sem escolher não grava nada.
+ */
+async function gravarInteligenciaComPrevia(a: NonNullable<Estado["frota"]>["agentes"][number], pedido: PedidoInteligencia, depois?: () => void): Promise<void> {
+  const tasks = abertosDoBot(estado, a.id).length;
+  let levarTasks = false;
+  if (tasks > 0 && mudaAIaDoBot(a, pedido)) {
+    const escolha = await abrirPreviaDaTroca({ nomeDoBot: a.nome, destino: destinoDoPedido(pedido), tasks });
+    if (escolha === null) return;
+    levarTasks = escolha;
+  }
+  await agir(async () => {
+    await api!.gravarInteligencia(a.id, levarTasks ? { ...pedido, levarTasks: true } : pedido);
+    dispatch({ tipo: "invalidar", quais: ["frota", "gestao", ...(levarTasks ? (["trabalhos"] as const) : [])] });
+    depois?.();
+  });
+}
+
+/** ADR-108: a escolha no aviso de troca de IA; a linha relê pela conversa (o servidor grava o desfecho nela). */
+function decidirTroca(el: HTMLElement, decisao: "esperar" | "levar" | "outra_ia"): Promise<void> {
+  return agir(async () => {
+    await api!.decidirTrocaDeIa(el.dataset.id ?? "", decisao, el.dataset.troca || undefined);
+    const conversaId = el.dataset.conversa;
+    dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "trabalhos", "frota"] });
+  });
+}
 
 /** Roda uma mutação: marca ocupado, traduz o erro em código fechado (nunca err.message cru). */
 async function agir(fn: () => Promise<void>): Promise<void> {
@@ -2400,10 +2430,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const pedido = el.dataset.modo === "auto" ? pedidoDoMenu(a, { modo: "auto" }) : ehIaMac(ia) && el.dataset.modelo ? pedidoDoMenu(a, { ia, modelo: el.dataset.modelo }) : null;
     if (!pedido) return;
     dispatch({ tipo: "menu-ia", agenteId: null });
-    void agir(async () => {
-      await api!.gravarInteligencia(a.id, pedido);
-      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
-    });
+    void gravarInteligenciaComPrevia(a, pedido);
   },
   // 2B: o rascunho muda a cada clique; Salvar é o submit do formulário da gaveta.
   "int-modo": (el) => mudarInteligencia(undefined, () => ({ tipo: "modo", modo: el.dataset.modo === "fixa" ? "fixa" : "auto" })),
@@ -2870,7 +2897,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-conectar-vm": (el) => { contasDaPessoa.fecharNova(); abrirEspaco("maquinas"); return ACOES["conectar-maquina"]!(el); },
   "cl-nova-fechar": () => contasDaPessoa.fecharNova(),
   "cl-nova-na-maquina": (el) => { const ia = el.dataset.ia; if (ehIa(ia)) void contasDaPessoa.novaNaMaquina(ia, el.dataset.maquina ?? ""); },
-  "cl-modo": (el) => { const m = el.dataset.modo; if (m === "perguntar" || m === "automatico") void contasDaPessoa.modo(m); },
+  // ADR-108 (R8): o liga/desliga "na fila" de cada conta (a 2ª da mesma IA e a corporativa pedem os termos antes).
+  "cl-fila": (el) => { void contasDaPessoa.naFila(el.dataset.id ?? "", el.getAttribute("aria-checked") !== "true"); },
   "cl-filtro": (el) => contasDaPessoa.filtro(el.dataset.maquina || null),
   "cl-gerenciar": (el) => { dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } }); abrirEspaco("conexao"); contasDaPessoa.filtro(el.dataset.maquina || null); },
   "cl-login-cancelar": (el) => contasDaPessoa.cancelarLogin(el.dataset.login ?? ""),
@@ -2878,6 +2906,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-login-de-novo": (el) => contasDaPessoa.deNovo(el.dataset.login ?? ""),
   "cl-terminal": (el) => contasDaPessoa.terminal(el.dataset.login ?? ""),
   // ADR-102: os passos da linha "conta no limite" do chat (o login abre em Provedores de IA, onde a linha mostra os passos).
+  // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot. A linha relê pela conversa (o servidor grava o desfecho nela).
+  "troca-esperar": (el) => decidirTroca(el, "esperar"),
+  "troca-levar": (el) => decidirTroca(el, "levar"),
+  "troca-outra-ia": (el) => decidirTroca(el, "outra_ia"),
   "cl-seguir": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
     await api!.seguirComConta(el.dataset.id ?? "", conversaId);
@@ -3054,11 +3086,7 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     const a = estado.frota?.agentes.find((b) => b.id === form.dataset.id);
     if (!a) return Promise.resolve();
     const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
-    return agir(async () => {
-      await api!.gravarInteligencia(a.id, pedidoDoRascunho(r));
-      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
-      fecharNivel();
-    });
+    return gravarInteligenciaComPrevia(a, pedidoDoRascunho(r), fecharNivel);
   },
   // Tela 1/5: o código que a página da Anthropic mostrou vai ao login do Claude Code aberto no app (só a forma de um código).
   "ia-colar-codigo": (form) => {
@@ -3201,7 +3229,6 @@ document.addEventListener("change", (ev) => {
     return;
   }
   if (cb.matches("[data-cl-nova-apelido]")) { contasDaPessoa.mudarNova({ apelido: cb.value }); return; }
-  if (cb.matches("[data-cl-optin]")) { void contasDaPessoa.optin(cb.dataset.clOptin ?? "", cb.checked); return; }
   if (cb.matches("[data-maq-sair-contas]")) {
     const q = estado.contasUi.desconectar;
     if (q) dispatch({ tipo: "contas-ui", mudanca: { desconectar: { ...q, sair: cb.checked } } });

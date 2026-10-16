@@ -65,6 +65,11 @@ export type DepsPonte = {
    * Somados aos das máquinas desta ponte, deixam o despacho recusar o turno fixado num harness que nenhuma tem pronto.
    */
   harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
+  /**
+   * NOD-268 / ADR-108 (revisão do PR 2, C5): as IAs prontas em cada máquina da pessoa conectada noutras pontes (no modo
+   * compartilhado cada máquina tem a sua). Somadas às máquinas desta ponte.
+   */
+  prontosPorMaquina?: (pessoaId: string) => Readonly<Record<string, readonly IdHarness[]>>;
   /** ADR-083 (#193): o turno já chamou alguma ferramenta? (o compositor sabe pelo `turno.atividade`). Ausente = não. */
   fezFerramenta?: (turnoId: string) => boolean;
   /** ADR-083 (#194): guarda a leitura de memória do Mac e diz se o nível que a pessoa vê mudou. */
@@ -208,6 +213,13 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const id = h as IdHarness;
       if (inv && todos[id]?.estado !== "pronto") todos[id] = inv;
     }
+    return todos;
+  }
+
+  /** NOD-268 / revisão do PR 2 (C5): as IAs prontas de cada máquina conectada da pessoa (as desta ponte e as das outras). */
+  function prontosPorMaquina(pessoaId: string): Record<string, IdHarness[]> {
+    const todos: Record<string, IdHarness[]> = Object.fromEntries(Object.entries(deps.prontosPorMaquina?.(pessoaId) ?? {}).map(([id, ias]) => [id, [...ias]]));
+    for (const m of maquinas.values()) todos[m.machineId] = (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id);
     return todos;
   }
 
@@ -358,7 +370,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, prontosPorMaquina: prontosPorMaquina(pessoaId), ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
@@ -520,7 +532,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // 0068: as IAs prontas da pessoa (todas as máquinas vivas), para o limite repetir o turno na próxima da ordem.
       const prontosDaPessoa = (Object.entries(harnessesDaPessoa(escopo.pessoaId)) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id);
       // NOD-268: as prontas de cada máquina conectada — com o bot preso a uma, a troca só vai para uma IA dela.
-      const prontosPorMaquina = Object.fromEntries([...maquinas.values()].map((m) => [m.machineId, (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)]));
+      const porMaquina = prontosPorMaquina(escopo.pessoaId);
       let limiteMudou = false;
       // Revisão do épico (S20, 2026-10-08): o assentar é repetido quando o Postgres o escolhe como vítima de um impasse
       // (40P01) ou de serialização (40001) — a transação inteira volta, inclusive o registro da entrega (idempotência
@@ -528,7 +540,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina: porMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
