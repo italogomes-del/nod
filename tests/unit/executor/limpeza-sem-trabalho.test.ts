@@ -218,4 +218,20 @@ describe("limparAgora: a passada só da frente que acabou de terminar (ADR-099, 
     limpeza.parar();
     expect(await limpeza.limparAgora([semTrabalho("Dev 1/x-qqqqqq")])).toBeNull();
   });
+
+  it("ADR-106: a frente com a worktree cujo clone dentro de ~/nod foi apagado não prova e fica (`sem_prova`)", async () => {
+    const clone = pastaDe("Ada/outra-555555/nod");
+    await mkdir(clone, { recursive: true });
+    git(clone, "init", "-q", "-b", "main");
+    await writeFile(join(clone, "README.md"), "x\n");
+    git(clone, "add", ".");
+    git(clone, "commit", "-q", "-m", "inicio");
+    const wt = pastaDe("Ada/frente-666666/nod");
+    await mkdir(join(wt, ".."), { recursive: true });
+    git(clone, "worktree", "add", wt, "-b", "frente/z");
+    await rm(join(clone, ".."), { recursive: true, force: true });
+    const r = await limparPastas([semTrabalho("Ada/frente-666666")], opcoes());
+    expect(r).toMatchObject({ removidas: 0, puladas: { sem_prova: 1 } });
+    expect(existsSync(wt)).toBe(true);
+  });
 });

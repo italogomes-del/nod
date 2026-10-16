@@ -1,16 +1,16 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, unlink, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
 import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
 import { orfaSai } from "../../domain/guardado.ts";
-import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, PASTAS_DA_MAQUINA_MAX, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
 import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
-import { guardarEApagar, vencerGuardados } from "./guardar-antes-de-apagar.ts";
+import { cloneSumiu, guardarEApagar, vencerGuardados } from "./guardar-antes-de-apagar.ts";
 
 /**
  * A limpeza das pastas de task no Mac (definido em 2026-10-09, ADR-088, issue #216). O servidor diz quais tasks
@@ -161,8 +161,11 @@ export type OpcoesLimpeza = {
   agora?: () => number;
 };
 
-/** ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). */
-const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado"]);
+/**
+ * ADR-096 §4: o que a worktree tem que só sai guardando antes (os outros motivos seguram a pasta). ADR-106: a worktree
+ * cujo clone sumiu (`clone_sumiu`) também — antes ela dava `erro` e segurava a pasta para sempre.
+ */
+const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado", "clone_sumiu"]);
 
 type Achados = { worktrees: string[]; clones: number };
 
@@ -335,11 +338,12 @@ async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string,
  * Devolve o dir comum de cada worktree provada, ou o porquê da dúvida (só para o log). Na dúvida nada sai: a pasta fica
  * para o caminho da ADR-088/096 (vira `encerrada` em 3 dias, ou em 2 h com o disco apertado, e é guardada antes).
  */
-async function provarSemTrabalho(base: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string> } | { duvida: string }> {
+async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string> } | { duvida: string }> {
   if (achados.clones > 0) return { duvida: "clone" };
   if (!(await ficariaVazia(base, 0, new Set(achados.worktrees), montagens, false))) return { duvida: "sobras" };
   const provadas = new Map<string, string>();
   for (const wt of achados.worktrees) {
+    if (await cloneSumiu(wt, raiz)) return { duvida: "clone_sumiu" };
     const comum = await executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
     const dirComum = comum.stdout.trim();
     if (comum.codigo !== 0 || !isAbsolute(dirComum)) return { duvida: "erro" };
@@ -403,7 +407,7 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     // ADR-099 (I5): a frente sem trabalho só passa daqui com a prova inteira; a dúvida conta uma vez, como `sem_prova`.
     let provadas: Map<string, string> | null = null;
     if (p.quando === "sem_trabalho") {
-      const prova = await provarSemTrabalho(base, p, achados, montagens, o.executar);
+      const prova = await provarSemTrabalho(base, raiz, p, achados, montagens, o.executar);
       if ("duvida" in prova) {
         pular("sem_prova");
         log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: "fica", motivo: prova.duvida });
@@ -423,7 +427,9 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       // A worktree provada sem trabalho (ADR-099, I5) já passou pelas conferências: não se repete o `git status`.
       let dirComum = provadas?.get(wt) ?? "";
       let motivo: MotivoPuladaLimpeza | null = null;
-      if (!provadas) {
+      if (!provadas && (await cloneSumiu(wt, raiz))) {
+        motivo = "clone_sumiu";
+      } else if (!provadas) {
         const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
         dirComum = comum.stdout.trim();
         motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, p, dirComum, montagens, o.executar);
@@ -473,7 +479,9 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
       if (!confirmada) { pular("nao_reconfirmada"); continue; }
     }
-    const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now });
+    // ADR-106 (revisão do #320): de novo logo antes de apagar — a compactação pode levar 20 min.
+    const antesDeApagar = async (): Promise<MotivoPuladaLimpeza | null> => (o.emUso?.(rel) ? "em_uso" : o.reconfirmar && !(await o.reconfirmar(p)) ? "nao_reconfirmada" : null);
+    const g = await guardarEApagar(base, p.trabalhoId, { raiz, executar: o.executar, montagens, simular, livre, agora: o.agora ?? Date.now, antesDeApagar });
     if (g.motivo) {
       pular(g.motivo);
       log("aviso", "limpeza_pasta_pulada", { trabalho_id: p.trabalhoId, motivo: g.motivo });
@@ -560,10 +568,14 @@ export async function limparOrfas(o: OpcoesLimpeza, agora: number, apertado: boo
       }
       if (montagens === null) return relato; // Docker mudo: nada sai (ADR-088, segunda revisão do #225)
       if (o.emUso?.(b.name)) break; // um turno do bot começou no meio
-      const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
-      const dirComum = comum.stdout.trim();
       const pasta = { trabalhoId: "orfa", pasta: `${b.name}/${i.name}`, quando: "encerrada" } as const;
-      const motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, pasta, dirComum, montagens, o.executar);
+      let motivo: MotivoPuladaLimpeza | null = "clone_sumiu";
+      let dirComum = "";
+      if (!(await cloneSumiu(wt, raiz))) {
+        const comum = await o.executar("git", ["-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+        dirComum = comum.stdout.trim();
+        motivo = comum.codigo !== 0 || !isAbsolute(dirComum) ? "erro" : await motivoParaFicar(wt, pasta, dirComum, montagens, o.executar);
+      }
       if (motivo !== null && !SAI_GUARDANDO.has(motivo)) { pular(motivo); continue; }
       if (motivo === null) {
         if (o.simular) { relato.removidas++; log("info", "limpeza_simulada_orfa", { caminho: relative(raiz, wt) }); continue; }
@@ -577,7 +589,7 @@ export async function limparOrfas(o: OpcoesLimpeza, agora: number, apertado: boo
         log("info", "limpeza_orfa_removida", { caminho: relative(raiz, wt), liberado_mb: Math.round(liberado / 1_048_576) });
         continue;
       }
-      const g = await guardarEApagar(wt, "orfa", { raiz, executar: o.executar, montagens, simular: o.simular, livre, agora: () => agora });
+      const g = await guardarEApagar(wt, "orfa", { raiz, executar: o.executar, montagens, simular: o.simular, livre, agora: () => agora, antesDeApagar: async () => (o.emUso?.(b.name) ? "em_uso" : null) });
       if (g.motivo) { pular(g.motivo); continue; }
       relato.guardadas++;
       relato.guardadoBytes += g.guardadoBytes;
@@ -693,9 +705,51 @@ const discoPadrao = async (caminho: string): Promise<LeituraDisco | null> => dis
  */
 export type LimpezaDasTasks = { parar(): void; passada(o?: { apertado?: boolean }): Promise<RelatoLimpeza | null>; limparAgora(pastas: readonly PastaParaLimpar[]): Promise<RelatoLimpeza | null> };
 
-/** Revisão do #225: logo antes de apagar, o servidor ainda oferece a pasta (a mesma, ou já como `encerrada`). */
+/**
+ * Revisão do #225: logo antes de apagar, o servidor ainda oferece a pasta (a mesma, ou já como `encerrada`). ADR-106: a
+ * pergunta leva só o código daquela pasta — com a lista inteira, a pasta que caía fora das 500 da resposta não se
+ * reconfirmava.
+ */
 const reconfirmarPela = (pastasParaLimpar: NonNullable<PonteInterna["pastasParaLimpar"]>, pessoaId: string, pedido?: { apertado?: boolean }) => async (p: PastaParaLimpar) =>
-  (await pastasParaLimpar(pessoaId, pedido)).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando));
+  (await pastasParaLimpar(pessoaId, { ...pedido, codigos: [codigoDaPasta(p.pasta)] })).some((x) => x.trabalhoId === p.trabalhoId && x.pasta === p.pasta && (x.quando === "encerrada" || x.quando === p.quando));
+
+/**
+ * ADR-106 (definido em 2026-10-15): o código de uma pasta (`<bot>/<slug>`) no pedido da limpeza — o sha256 em
+ * hexadecimal do nome em NFC. O nome não sai da máquina: em `~/nod/<bot>/` moram também clones, órfãs e pastas criadas
+ * à mão, com nome que pode citar cliente ou jovem. O servidor calcula o mesmo código das pastas que já guarda
+ * (`trabalhos.pasta`) e só reconhece essas. NFC porque o APFS do Mac pode devolver o nome com o acento decomposto.
+ */
+export function codigoDaPasta(rel: string): string {
+  return createHash("sha256").update(rel.normalize("NFC"), "utf8").digest("hex");
+}
+
+/**
+ * ADR-106: as pastas de task (`<bot>/<slug>`) que existem em `~/nod`, para o servidor só responder sobre elas. Só lê
+ * nomes (dois `readdir`), nunca mede: em 15/10 a VM dos bots tinha ~300. Pasta escondida (`.guardado`) fica de fora; o
+ * que mora na raiz do bot (clones, órfãs, pastas à mão) entra como pasta qualquer, só como código — nenhuma task aponta
+ * para essas, e o servidor não as reconhece. Passou de `PASTAS_DA_MAQUINA_MAX`, as seguintes só se contam (`cortadas`,
+ * no relato).
+ */
+export async function pastasNoDisco(home: string): Promise<{ pastas: string[]; cortadas: number }> {
+  const raiz = join(home, "nod");
+  const pastas: string[] = [];
+  let cortadas = 0;
+  let bots;
+  try { bots = await readdir(raiz, { withFileTypes: true }); } catch { return { pastas, cortadas }; }
+  for (const b of bots) {
+    if (!b.isDirectory() || b.name.startsWith(".")) continue;
+    let itens;
+    try { itens = await readdir(join(raiz, b.name), { withFileTypes: true }); } catch { continue; }
+    for (const i of itens) {
+      if (!i.isDirectory() || i.name.startsWith(".")) continue;
+      const rel = `${b.name}/${i.name}`.normalize("NFC");
+      if (pastaDeTask(`~/nod/${rel}`) !== rel) continue;
+      if (pastas.length < PASTAS_DA_MAQUINA_MAX) pastas.push(rel);
+      else cortadas++;
+    }
+  }
+  return { pastas, cortadas };
+}
 
 /**
  * A limpeza periódica de uma pessoa neste Mac: pede a lista à ponte, limpa e relata. Uma passada por vez (fila do
@@ -706,7 +760,7 @@ const reconfirmarPela = (pastasParaLimpar: NonNullable<PonteInterna["pastasParaL
  * passada apertada (no máximo uma a cada 30 min): o servidor oferece também as tasks encerradas há mais de 2 h, e os
  * caches de pacote saem no fim. `disco` é injetável nos testes.
  */
-export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number; disco?: (caminho: string) => Promise<LeituraDisco | null>; vigiaDoDiscoMs?: number }): LimpezaDasTasks {
+export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInterna, "pastasParaLimpar" | "relatarLimpeza">; pessoaId: string; machineId?: string; agora?: () => number; primeiraMs?: number; intervaloMs?: number; disco?: (caminho: string) => Promise<LeituraDisco | null>; vigiaDoDiscoMs?: number }): LimpezaDasTasks {
   const agora = o.agora ?? Date.now;
   let rodando = false;
   let parado = false;
@@ -718,7 +772,9 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
     const inicio = agora();
     const pedido = apertado ? { apertado: true } : undefined;
     try {
-      const pastas = await pastasParaLimpar(o.pessoaId, pedido);
+      // ADR-106: o servidor só responde sobre as pastas que este disco tem, e só pelo código delas.
+      const noDisco = await pastasNoDisco(o.home);
+      const pastas = await pastasParaLimpar(o.pessoaId, { ...pedido, codigos: noDisco.pastas.map(codigoDaPasta) });
       const reconfirmar = o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId, pedido);
       const relato = await limparPastas(pastas, { ...o, reconfirmar, agora });
       if (!relato.adiada) {
@@ -738,8 +794,11 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
       const { orfas, paradas } = await contarOrfas(o.home, agora());
       relato.orfas = orfas;
       relato.orfasParadas = paradas;
+      relato.pastasEnviadas = noDisco.pastas.length;
+      relato.pastasCortadas = noDisco.cortadas;
+      relato.candidatos = pastas.length;
       relato.duracaoMs = Math.max(0, agora() - inicio);
-      await o.ponte.relatarLimpeza?.(o.pessoaId, relato);
+      await o.ponte.relatarLimpeza?.(o.pessoaId, relato, o.machineId);
       return relato;
     } finally {
       await soltar();
@@ -759,7 +818,7 @@ export function iniciarLimpezaDasTasks(o: OpcoesLimpeza & { ponte: Pick<PonteInt
           const relato = await limparPastas(so, { ...o, reconfirmar: o.reconfirmar ?? reconfirmarPela(pastasParaLimpar, o.pessoaId), agora });
           relato.imediata = true;
           relato.duracaoMs = Math.max(0, agora() - inicio);
-          await o.ponte.relatarLimpeza?.(o.pessoaId, relato);
+          await o.ponte.relatarLimpeza?.(o.pessoaId, relato, o.machineId);
           return relato;
         } finally {
           await soltar();

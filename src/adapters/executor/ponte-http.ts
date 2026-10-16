@@ -4,6 +4,7 @@ import type { EsperaParaRodar } from "../../contracts/espera.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { TarefaDoBot } from "../../contracts/turno.ts";
 import { versaoAceita } from "../../domain/versao-app.ts";
+import { log } from "../../obs/log.ts";
 import { ENTREGA_ESPERA_INICIAL_MS, ENTREGA_ESPERA_MAX_MS, ENTREGA_PERSISTENCIA_MS, LEASE_MS, TOLERANCIA_REINICIO_MS } from "../../shared/constantes.ts";
 
 // NOD-214: a máquina desiste do turno sem resposta ANTES de o lease vencer no servidor — nunca roda o que ele já deu por perdido.
@@ -221,12 +222,17 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
-    /** ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. */
+    /**
+     * ADR-088: servidor antigo (404) ou fora do ar devolve lista vazia — a próxima passada tenta de novo. ADR-106: os
+     * códigos das pastas que a máquina tem vão junto; servidor antigo os ignora e responde como antes.
+     */
     async pastasParaLimpar(_pessoaId, op) {
       try {
-        const r = await chamar<{ pastas?: unknown }>("limpeza", op?.apertado === true ? { apertado: true } : {});
+        const r = await chamar<{ pastas?: unknown }>("limpeza", { ...(op?.apertado === true ? { apertado: true } : {}), ...(op?.codigos ? { codigos: op.codigos } : {}) });
         return Array.isArray(r.pastas) ? r.pastas.filter(pastaParaLimparValida) : [];
-      } catch {
+      } catch (e) {
+        // ADR-106: a lista vazia por erro parece "nada a limpar" — sem este log a limpeza pararia calada.
+        log("aviso", "limpeza_pedido_falhou", { erro: e instanceof Error ? e.name : "desconhecido", codigos: op?.codigos?.length ?? null });
         return [];
       }
     },

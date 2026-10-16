@@ -655,7 +655,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
     async pastasParaLimpar(pessoaId, o): Promise<PastaParaLimpar[]> {
       const escopo = await resolverEscopo(pessoaId);
       if (!escopo) return [];
-      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true }));
+      return abrirTxEscopada(db, escopo)((trx) => pastasParaLimpar(depsDe(trx, escopo), { apertado: o?.apertado === true, ...(o?.codigos ? { codigos: o.codigos } : {}) }));
     },
 
     /** ADR-099 (I5, 2026-10-12): a frente que terminou com este turno e já vale `sem_trabalho`, para o Mac limpar na hora. */
@@ -665,12 +665,15 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       return abrirTxEscopada(db, escopo)((trx) => pastaSemTrabalhoDoTurno(depsDe(trx, escopo), turnoId));
     },
 
-    /** ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). */
-    async relatarLimpeza(pessoaId, relato: RelatoLimpeza) {
+    /**
+     * ADR-088: o resumo da passada vira o log `limpeza_feita` (só números; nunca caminho). ADR-106: com a máquina que
+     * limpou — em 15/10 o Mac e a VM da mesma pessoa se misturavam no log, e os 24,7 GB liberados no Mac pareciam da VM.
+     */
+    async relatarLimpeza(pessoaId, relato: RelatoLimpeza, machineId?: string) {
       const r = relatoValido(relato);
       // Revisão do #225: a passada simulada não apagou nada — o log diz o que sairia, com outro nome para não somar.
       // Segunda revisão do #225: com o Docker instalado e mudo a passada não mexe em nada — `limpeza_adiada`.
-      log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...camposDoRelato(r) });
+      log(r.adiada ? "aviso" : "info", r.adiada ? "limpeza_adiada" : r.simulada ? "limpeza_simulada" : "limpeza_feita", { pessoa_id: pessoaId, ...(machineId ? { machine_id: machineId } : {}), ...camposDoRelato(r) });
     },
 
     /** ADR-099 (parte 2): as esperas que a máquina deve rodar; ler é a notícia dela (`visto_em`). */

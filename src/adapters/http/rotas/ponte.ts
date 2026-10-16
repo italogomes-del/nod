@@ -10,6 +10,7 @@ import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { estadoDaMaquina } from "../../../domain/harness.ts";
+import { codigosDaMaquina } from "../../../domain/limpeza-das-tasks.ts";
 import { log } from "../../../obs/log.ts";
 import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.ts";
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
@@ -399,17 +400,20 @@ export function criarPonteHttpServidor(d: {
     /**
      * ADR-088 (2026-10-09): o Mac PUXA as pastas de task encerradas que pode limpar (o servidor nunca disca, ADR-021) e
      * relata o resumo. A pessoa é a da chave; o relato só vira log (relatoValido descarta o que não é número conhecido).
-     * ADR-096: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho.
+     * ADR-096: `apertado: true` (só o booleano conta) = o disco da máquina está amarelo ou vermelho. ADR-106: `codigos` =
+     * o sha256 das pastas que a máquina tem no disco (validados por `codigosDaMaquina`), nunca os nomes; ausente = app
+     * antigo.
      */
     rota("limpeza", async (ctx, b) => {
       const c = conexao(ctx);
       c.ultimo = d.agora();
-      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId, { apertado: b.apertado === true })) ?? [] });
+      const codigos = codigosDaMaquina(b.codigos);
+      ctx.json(200, { pastas: (await c.ponte.pastasParaLimpar?.(ctx.escopo.pessoaId, { apertado: b.apertado === true, ...(codigos ? { codigos } : {}) })) ?? [] });
     }),
     rota("limpeza/resultado", async (ctx, b) => {
       const c = conexao(ctx);
       c.ultimo = d.agora();
-      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato));
+      await c.ponte.relatarLimpeza?.(ctx.escopo.pessoaId, relatoValido(b.relato), ctx.params.chaveId);
       ctx.json(200, { ok: true });
     }),
     /**

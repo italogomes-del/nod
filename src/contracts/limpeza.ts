@@ -49,6 +49,13 @@ export type RelatoLimpeza = {
   guardadoBytes?: number;
   guardadosVencidos?: number;
   orfasRemovidas?: number;
+  /**
+   * ADR-106: quantas pastas a máquina mandou (como código), quantas ficaram de fora pelo teto e quantas o servidor
+   * ofereceu. O bug de 15/10 passou 3 dias calado ("1 pasta"); com estes números o log mostra o corte.
+   */
+  pastasEnviadas?: number;
+  pastasCortadas?: number;
+  candidatos?: number;
 };
 /**
  * Revisão do #225: `aninhado` (outra worktree ou repositório dentro dela), `ignorado_valioso` (arquivo ignorado que não
@@ -56,5 +63,8 @@ export type RelatoLimpeza = {
  * `nao_reconfirmada` (o servidor não confirmou de novo logo antes de apagar). ADR-096 §4: `processo_vivo` (um `*.pid`
  * da pasta aponta para um processo vivo, como um Postgres de teste) e `grande_demais` (o guardado passaria de 2 GB).
  * ADR-099 (I5): `sem_prova` (a pasta `sem_trabalho` não provou que não há trabalho; fica, o detalhe vai no log).
+ * ADR-106: `clone_sumiu` (a worktree aponta para um clone dentro de `~/nod` que já foi apagado; o git não a enxerga mais
+ * e ela só sai guardando antes) e `clone_em_uso` (a pasta tem um clone com worktree viva, travada ou num disco que não
+ * está montado fora dela; a pasta fica). `clone` segue sendo a contagem de clones achados na pasta, saiam ou não.
  */
-export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova";
+export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova" | "clone_sumiu" | "clone_em_uso";

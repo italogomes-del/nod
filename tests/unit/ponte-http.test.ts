@@ -10,6 +10,7 @@ import { versaoAceita } from "../../src/domain/versao-app.ts";
 import { contasAnunciadas, entrega, falas, impressoes, inventario, memoria, progressoDoLogin, relatoEspera, sinais, trechos } from "../../src/adapters/http/rotas/ponte-validacao.ts";
 import { CONTAS_ANUNCIADAS_MAX } from "../../src/contracts/contas-ia.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../src/shared/constantes.ts";
+import { camposDoRelato, relatoValido } from "../../src/use-cases/limpeza-das-tasks.ts";
 
 describe("ADR-099 (parte 2): as esperas pela ponte HTTP", () => {
   const ID = "3f6b0d1e-2a4c-4b5d-8e9f-0a1b2c3d4e5f";
@@ -542,22 +543,40 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: true });
     await chamar("limpeza", { apertado: "sim" });
     expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
+    // ADR-106: os códigos das pastas atravessam validados — só sha256 em hex minúsculo, sem repetir; lista vazia é
+    // lista. Nome de pasta não passa (nunca sai da máquina).
+    const a = "a".repeat(64);
+    const b = "0123456789abcdef".repeat(4);
+    await chamar("limpeza", { codigos: [a, "Vera/a-111111", "A".repeat(64), "a".repeat(63), 3, a, b] });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false, codigos: [a, b] });
+    await chamar("limpeza", { codigos: [] });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false, codigos: [] });
+    await chamar("limpeza", { codigos: a, pastas: ["Vera/a-111111"] });
+    expect(pastasParaLimpar).toHaveBeenLastCalledWith(escopo.pessoaId, { apertado: false });
     await chamar("limpeza/resultado", { relato: { pastas: 2, removidas: 1, liberadoBytes: 1_048_576, puladas: { suja: 1, inventado: 9 }, caminho: "/Users/m/nod/x", orfas: -3 } });
-    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 });
+    // ADR-106: o relato leva a máquina que limpou.
+    expect(relatarLimpeza).toHaveBeenCalledWith(escopo.pessoaId, { pastas: 2, removidas: 1, pastasApagadas: 0, liberadoBytes: 1_048_576, puladas: { suja: 1 }, orfas: 0, orfasParadas: 0, duracaoMs: 0 }, "m1");
     // Revisão do #225: a passada simulada atravessa marcada, com o tamanho estimado.
     await chamar("limpeza/resultado", { relato: { removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ removidas: 3, simulada: true, estimadoBytes: 2048, puladas: { aninhado: 1, head_solto: 2 } }), "m1");
     // 2ª revisão: a passada adiada (Docker mudo) também atravessa marcada.
     await chamar("limpeza/resultado", { relato: { adiada: true } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ adiada: true, removidas: 0 }), "m1");
     // ADR-096: a passada apertada atravessa marcada, com o que os caches liberaram.
     await chamar("limpeza/resultado", { relato: { apertada: true, cachesBytes: 4096, removidas: 2 } });
-    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }));
+    expect(relatarLimpeza).toHaveBeenLastCalledWith(escopo.pessoaId, expect.objectContaining({ apertada: true, cachesBytes: 4096, removidas: 2 }), "m1");
     // ADR-096 §4: os guardados, os vencidos, as órfãs e os motivos novos atravessam; número inválido some.
-    await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1 } } });
+    await chamar("limpeza/resultado", { relato: { guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, orfasRemovidas: -1, puladas: { processo_vivo: 1, grande_demais: 1, clone_sumiu: 1 } } });
     const ultimo = relatarLimpeza.mock.lastCall?.[1];
-    expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1 } });
+    expect(ultimo).toMatchObject({ guardadas: 3, guardadoBytes: 1_048_576, guardadosVencidos: 2, puladas: { processo_vivo: 1, grande_demais: 1, clone_sumiu: 1 } });
     expect(ultimo).not.toHaveProperty("orfasRemovidas");
+    expect(ultimo).not.toHaveProperty("pastasEnviadas");
+    // ADR-106: os contadores da lista atravessam (zero também); a máquina antiga não manda e eles não aparecem.
+    await chamar("limpeza/resultado", { relato: { pastasEnviadas: 300, pastasCortadas: 0, candidatos: -2 } });
+    expect(relatarLimpeza.mock.lastCall?.[1]).toMatchObject({ pastasEnviadas: 300, pastasCortadas: 0, candidatos: 0 });
+    // E viram campos do `limpeza_feita`, zero inclusive; sem eles (máquina antiga), os campos não aparecem.
+    expect(camposDoRelato(relatoValido({ pastasEnviadas: 300, pastasCortadas: 2, candidatos: 0 }))).toMatchObject({ pastas_enviadas: 300, pastas_cortadas: 2, candidatos: 0 });
+    expect(camposDoRelato(relatoValido({}))).not.toHaveProperty("pastas_enviadas");
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {
@@ -570,8 +589,27 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({});
     await novo.ponte.pastasParaLimpar!("p", { apertado: true });
     expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ apertado: true });
+    // ADR-106: os códigos das pastas do disco vão no corpo, sozinhos ou com o aperto; lista vazia também vai.
+    await novo.ponte.pastasParaLimpar!("p", { codigos: ["a".repeat(64)] });
+    expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ codigos: ["a".repeat(64)] });
+    await novo.ponte.pastasParaLimpar!("p", { apertado: true, codigos: [] });
+    expect(JSON.parse(String(f.mock.lastCall?.[1]?.body))).toEqual({ apertado: true, codigos: [] });
     await novo.ponte.relatarLimpeza!("p", { pastas: 1, removidas: 0, pastasApagadas: 0, liberadoBytes: 0, puladas: {}, orfas: 0, orfasParadas: 0, duracaoMs: 5 });
     expect(f).toHaveBeenLastCalledWith("https://nod.example/api/maquina/limpeza/resultado", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("ADR-106: o pedido que falha não vira um 'nada a limpar' calado — fica no log, só com a contagem dos códigos", async () => {
+    const saida = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const fora = criarPonteHttp({ url: "https://nod.example", chave: "k", versao: "0.1.0", fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed")) });
+      expect(await fora.ponte.pastasParaLimpar!("p", { codigos: ["b".repeat(64)] })).toEqual([]);
+      const linhas = saida.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("limpeza_pedido_falhou"));
+      expect(linhas).toHaveLength(1);
+      expect(JSON.parse(linhas[0]!)).toMatchObject({ nivel: "aviso", codigos: 1 });
+      expect(linhas[0]).not.toContain("b".repeat(64));
+    } finally {
+      saida.mockRestore();
+    }
   });
 });
 
