@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { criarDb, lerPoolMax } from "../../db/client.ts";
 import { log } from "../../obs/log.ts";
+import { LEASE_MS } from "../../shared/constantes.ts";
 import { admitirPorDominio, buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
@@ -20,18 +21,20 @@ import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despa
 import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-turnos.ts";
 import { garantirParticoes } from "../fundo/particoes.ts";
 import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
-import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
+import { INTERVALO_SCHEDULER_MS, iniciarScheduler } from "../fundo/scheduler-rotina.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
-import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
+import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { lerDominiosAdmitidos } from "../../domain/dominios-admitidos.ts";
 import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
+import { criarBatimentos, criarVerificacaoSaude, INTERVALOS_ATE_LACO_PARADO } from "./rotas/saude.ts";
 import { listen } from "./servidor.ts";
+import { iniciarWatchdog, type Watchdog } from "./watchdog.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
 
 /**
@@ -65,6 +68,11 @@ export type OpcoesBoot = {
    * órfãos. Uma segunda cópia da mesma instância não pega a porta e nunca chega aqui, então nunca mata os bots da primeira.
    */
   aposEscutar?: () => Promise<void>;
+  /**
+   * Só em teste (NOD-267): o watchdog do modo compartilhado com intervalo, carência e saída injetados. Default: 15 s,
+   * a carência do lease (90 s) e `process.exit`.
+   */
+  watchdog?: { intervaloMs?: number; carenciaMs?: number; sair?: (codigo: number) => void; lacoParadoMinimoMs?: number };
 };
 
 export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean };
@@ -147,6 +155,11 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
   const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso });
+  // NOD-267 (emenda à ADR-017): a saúde olha o banco e, só no compartilhado, o batimento do agendador e do varredor de
+  // lease — no Mac, acordar do sono deixaria o batimento velho e daria 503 falso. A rota e o watchdog usam a MESMA
+  // verificação, para compartilharem o `select 1` em voo.
+  const batimentos = criarBatimentos({ agora, minimoMs: o.watchdog?.lacoParadoMinimoMs });
+  const verificarSaude = criarVerificacaoSaude({ verificarBanco: () => db`select 1`, ...(app.compartilhado ? { batimentos } : {}) });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
@@ -156,13 +169,28 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
     autorizarMaquina: app.autorizarMaquina,
     sessao,
-    verificarBanco: () => db`select 1`,
+    verificarSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
     upgrade: (server, resolverEscopo) => {
       canaisVoz = app.anexarVoz(server, resolverEscopo);
     },
   });
   const url = `http://127.0.0.1:${srv.port}`;
+  // NOD-267: o Docker só reinicia processo morto; travado, o processo do compartilhado se derruba (exit 1) e o
+  // `unless-stopped` sobe outro. Liga logo depois do listen (revisão do PR): o registry, o inventário e o fechamento das
+  // ligações abaixo vão ao banco, e um boot pendurado no pool esgotado também precisa reiniciar. O próprio boot é um
+  // "laço" até os laços de verdade subirem: bate ao começar e sai da conta no fim do passo 5 — pendurado além da
+  // carência (o piso de laço parado), vira 503 e o watchdog age. Fora da carência (NOD-214) e parado na drenagem (ADR-071).
+  if (app.compartilhado) batimentos.registrar("boot", (o.watchdog?.carenciaMs ?? LEASE_MS) / INTERVALOS_ATE_LACO_PARADO);
+  const watchdog: Watchdog = app.compartilhado
+    ? iniciarWatchdog({
+        verificar: verificarSaude,
+        agora,
+        carenciaAte: inicioDoProcesso + (o.watchdog?.carenciaMs ?? LEASE_MS),
+        intervaloMs: o.watchdog?.intervaloMs,
+        sair: o.watchdog?.sair ?? ((codigo) => process.exit(codigo)),
+      })
+    : { parar: () => undefined };
   await o.aposEscutar?.();
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
@@ -206,6 +234,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     });
   }
 
+  batimentos.soltar("boot");
+
   // 6. laços de fundo, todos por paraCadaPessoa (EMENDA 3).
   const iv = o.intervalos ?? {};
   const orquestrador: Pick<Orquestrador, "parar"> = app.compartilhado ? { parar: async () => undefined } : await iniciarOrquestrador({
@@ -240,6 +270,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       agora,
       aFazer: aFazerLigado(env.NOD_PENDENCIAS),
       intervaloMs: iv.schedulerMs,
+      aoBater: batimentos.registrar("agendador", iv.schedulerMs ?? INTERVALO_SCHEDULER_MS),
     },
     { listarPessoas: o.listarPessoas },
   );
@@ -255,6 +286,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
     // ADR-067: o token sem relógio some junto com o turno que o lease encerrou.
     aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
+    aoBater: batimentos.registrar("varredor_lease", iv.leaseMs ?? INTERVALO_VARREDOR_LEASE_MS),
   });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
   // NOD-170: só com computadores ligados; NOD_COMPUTADOR_OCIOSO_MIN=0 não sobe o laço.
@@ -275,6 +307,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     inventario,
     async drenar({ prazoMs, intervaloMs = 1_000 }) {
       const inicio = agora();
+      // NOD-267: um SIGTERM nunca vira exit(1) no meio da drenagem — o watchdog para antes de esperar.
+      watchdog.parar();
       app.voz.iniciarDrenagem();
       app.drenarPonte();
       // definido em 2026-10-05 (NOD-175): só o compartilhado espera tokens — no modo local o turno roda neste processo e
@@ -294,6 +328,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     async fechar() {
       if (fechado) return;
       fechado = true;
+      watchdog.parar();
       scheduler.parar();
       varredorLease.parar();
       varredorExpiracao.parar();

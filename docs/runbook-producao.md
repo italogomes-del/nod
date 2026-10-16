@@ -120,4 +120,31 @@ Preencha uma linha por ensaio com os números do resumo do run.
 |---|---|---|---|---|---|---|---|---|
 | | | | | | | | | |
 
+## 7. Monitor externo e reinício automático
+
+Definido na NOD-267 (ADR-017, refinamento de 2026-10-15).
+
+**O que reinicia sozinho.** No modo compartilhado, o watchdog dentro do processo roda a verificação de saúde a cada
+15 s. Com 4 falhas seguidas (~1 min) ele loga `watchdog_reiniciando {motivo, falhas}` e sai com código 1; o Docker
+(`restart: unless-stopped`) sobe o processo de novo. A verificação falha quando o `select 1` passa de 2 s ou dá erro,
+ou quando o agendador ou o varredor de lease ficam mais de 3 intervalos (no mínimo 60 s) sem terminar um tick (pool
+esgotado, tick pendurado), ou quando o próprio boot passa de 90 s sem terminar. Nos primeiros 90 s do processo e
+durante a drenagem do deploy ele não age.
+
+Logs para procurar no Cloud Logging: `saude_falhou` (com o `motivo`), `watchdog_falha`, `watchdog_reiniciando`,
+`laco_tick_lento` e `varredor_lease_tick_falhou`.
+
+**O que avisa uma pessoa: o monitor externo.** Se o processo reinicia em laço, ou a VM cai, o watchdog não resolve.
+O cadastro é manual e fica com o dono da conta (não faz parte da NOD-267):
+
+1. No UptimeRobot, *New monitor* → tipo **HTTP(s)**, URL `https://34-39-164-139.sslip.io/api/saude`.
+2. Intervalo de **1 min**; alerta só depois de **2 falhas seguidas** (evita aviso por um deploy).
+3. Contato de alerta: e-mail do Marlon.
+4. Status esperado: 200. Qualquer outro (o 503 `{ok:false}` incluso) é queda.
+
+**Como testar o monitor.** Pare o container por 3 min (`sudo docker compose -f /opt/nod/compose.yml stop nod`), confira
+que o e-mail chegou depois da 2ª falha e suba de novo (`... start nod`). Para ver o watchdog agir sem derrubar a VM,
+os testes `tests/concurrency/watchdog-boot.test.ts` e `tests/integration/servidor-saude.test.ts` (pool esgotado)
+reproduzem o tick travado e o pool esgotado.
+
 ## Rollback de código: definido na NOD-173

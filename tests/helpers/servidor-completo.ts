@@ -46,6 +46,10 @@ export type OpcoesServidorCompleto = {
   voz?: OpcoesBoot["voz"];
   /** O prazo da rede de 2 min (ADR-083 §2) para o e2e da #193 não esperar 120 s; ausente = REDE_MS. */
   redeMs?: number;
+  /** NOD-267: envolve a fonte das pessoas dos laços (o teste do tick travado a pendura depois do boot). */
+  envolverListarPessoas?: (listar: () => Promise<{ tenantId: string; id: string }[]>) => () => Promise<{ tenantId: string; id: string }[]>;
+  /** NOD-267: o watchdog do compartilhado com intervalo, carência e saída de teste. */
+  watchdog?: OpcoesBoot["watchdog"];
 };
 
 /**
@@ -90,12 +94,14 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     dbDono,
     porta: 0,
     intervalos: { orquestradorMs: 50, schedulerMs: 200, leaseMs: 200, expiracaoMs: 200, outboxMs: 40, ociosidadeMs: 3_600_000, ...(o.intervalos ?? {}) },
-    listarPessoas: async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId })),
+    listarPessoas: (o.envolverListarPessoas ?? ((l) => l))(async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId }))),
     segredoSessao: SEGREDO_DE_TESTE,
     drivers: o.drivers,
     computador: o.computador,
     voz: o.voz,
     redeMs: o.redeMs,
+    // NOD-267: o `process.exit` do watchdog derrubaria o worker do vitest numa suíte lenta; o teste que quer ver a saída injeta.
+    watchdog: { sair: () => undefined, ...o.watchdog },
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

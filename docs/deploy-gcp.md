@@ -168,7 +168,8 @@ sudo bash -c 'cd /opt/nod && export NOD_DOMINIO=34-39-164-139.sslip.io \
 Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md).
 
 O monitor de disponibilidade fica fora da GCP (ADR-017): cadastre `https://<domínio>/api/saude`
-num serviço externo (Better Stack, UptimeRobot).
+num serviço externo (UptimeRobot, Better Stack). O passo a passo e o reinício automático pelo watchdog (NOD-267) estão
+em [runbook-producao.md](runbook-producao.md#7-monitor-externo-e-reinício-automático).
 
 Custo esperado, coberto pelos créditos do programa GFS: VM `e2-medium`, Cloud SQL `db-custom-1-3840`
 com 10 GB SSD, IP fixo e tráfego baixo, mais o runner do CI (`e2-standard-4`, disco de 100 GB).

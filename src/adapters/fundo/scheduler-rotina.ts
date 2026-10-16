@@ -6,7 +6,7 @@ import { criarRepos } from "../../repositories/index.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { dispararRotina } from "../../use-cases/disparar-rotina.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
-import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
+import { logarTickLento, paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: tick a cada 30 s — o cron tem granularidade de minuto e o Grok Bot promete "em até um minuto". */
 export const INTERVALO_SCHEDULER_MS = 30_000;
@@ -90,8 +90,10 @@ export async function tick(db: Db, opcoes: OpcoesTick, laco: OpcoesLaco = {}): P
  * definido em 2026-09-24 (ADR-045): o relógio que salta mais de 3 intervalos entre dois ticks é o Mac
  * que acordou (o processo ficou suspenso); o laço espera 3 min antes de disparar, para uma rotina não
  * nascer num "dark wake" de segundos e morrer no sono seguinte. Corta a cadeia na origem.
+ * definido em 2026-10-15 (NOD-267): `aoBater` ao TERMINAR cada tick (sucesso ou erro) e no tick que só espera a
+ * ADR-045 — o tick pulado por `rodando` não bate: é o laço preso que a saúde precisa ver.
  */
-export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: number; aoBater?: () => void }, laco: OpcoesLaco = {}): { parar(): void } {
   let rodando = false;
   let relogio: RelogioDoAgendador = { ultimoTick: null, esperarAte: 0 };
   const intervaloMs = opcoes.intervaloMs ?? INTERVALO_SCHEDULER_MS;
@@ -100,12 +102,19 @@ export function iniciarScheduler(db: Db, opcoes: OpcoesTick & { intervaloMs?: nu
     const passo = passoDoAgendador(relogio, opcoes.agora(), intervaloMs);
     relogio = passo.estado;
     if (passo.paradoMs !== null) log("aviso", "processo_acordou", { parado_ms: passo.paradoMs, espera_ms: relogio.esperarAte - (relogio.ultimoTick ?? 0) });
-    if (rodando || !passo.disparar) return;
+    if (rodando) return;
+    if (!passo.disparar) {
+      opcoes.aoBater?.();
+      return;
+    }
     rodando = true;
+    const inicio = opcoes.agora();
     tick(db, opcoes, laco)
       .catch((e: unknown) => log("erro", "scheduler_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }))
       .finally(() => {
         rodando = false;
+        logarTickLento("agendador", opcoes.agora() - inicio, intervaloMs);
+        opcoes.aoBater?.();
       });
   }, intervaloMs);
   timer.unref();

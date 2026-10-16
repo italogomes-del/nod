@@ -6,7 +6,7 @@ import { LEASE_MS } from "../../shared/constantes.ts";
 import type { Db, Escopo, Relogio, Transacao } from "../../shared/types.ts";
 import { interromperPorMaquina, registrarVoltaDasMaquinas, type SaidaQuedaDaMaquina } from "../../use-cases/interromper-por-maquina.ts";
 import { varrerEsperasSemNoticia } from "../../use-cases/esperar-comando.ts";
-import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
+import { logarTickLento, paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: um sexto do lease (90 s) — um turno órfão fica no máximo 15 s a mais como 'despachando' (ADR-010). */
 export const INTERVALO_VARREDOR_LEASE_MS = 15_000;
@@ -85,20 +85,31 @@ export function iniciarVarredorLease(p: {
    * encerrou tem o token revogado aqui — senão ele ficaria vivo em memória até o servidor reiniciar.
    */
   aoInterromper?: (turnoIds: string[]) => void;
+  /** NOD-267: chamado ao TERMINAR cada tick (sucesso ou erro); o tick pulado por `rodando` não bate. */
+  aoBater?: () => void;
 }): { parar(): void } {
   const relogio = p.relogio ?? (() => Date.now());
+  const intervaloMs = p.intervaloMs ?? INTERVALO_VARREDOR_LEASE_MS;
   let rodando = false;
   const tick = async () => {
     if (rodando) return;
     rodando = true;
+    const inicio = relogio();
     try {
-      const r = await varrer(p.db, relogio(), p.opcoes);
+      const r = await varrer(p.db, inicio, p.opcoes);
       const interrompidos = Object.values(r).flatMap((x) => x.interrompidos);
       if (interrompidos.length) p.aoInterromper?.(interrompidos);
     } finally {
       rodando = false;
+      logarTickLento("varredor_lease", relogio() - inicio, intervaloMs);
+      p.aoBater?.();
     }
   };
-  const timer = setInterval(() => void tick(), p.intervaloMs ?? INTERVALO_VARREDOR_LEASE_MS);
+  // NOD-267: sem o catch, um erro do tick (listarPessoas com o banco fora, por exemplo) virava unhandledRejection e
+  // derrubava o processo — o agendador e o varredor de expiração já logam e seguem.
+  const timer = setInterval(() => {
+    tick().catch((e: unknown) => log("erro", "varredor_lease_tick_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }));
+  }, intervaloMs);
+  timer.unref();
   return { parar: () => clearInterval(timer) };
 }

@@ -114,7 +114,9 @@ reserva feita nunca é desfeita, e a drenagem só termina com esse contador em z
 padrão do Node (`process.once`).
 
 **Saúde.** `/api/saude` faz `select 1` com prazo de 2 s. Se falhar, devolve 503 `{ok:false}`, sem detalhe (log
-`saude_banco_falhou {motivo}`). Na drenagem continua 200: o banco segue no ar e o container só deve sair pelo SIGTERM.
+`saude_falhou {motivo}`, nome desde a NOD-267, que somou o batimento dos laços — ADR-017, refinamento de 2026-10-15).
+Na drenagem continua 200: o banco segue no ar, os laços seguem batendo e o container só deve sair pelo SIGTERM (o
+watchdog da NOD-267 para no começo de `drenar()`).
 
 **Custo aceito.** Um deploy com uma sessão viva longa congela a entrega de turnos novos por até 10 min. Um token órfão
 (rollback depois do `cunhar`) segura a drenagem até o prazo, sem perder turno. A medida é

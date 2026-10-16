@@ -66,3 +66,8 @@ export async function paraCadaPessoa(
     }
   }
 }
+
+/** NOD-267: um tick mais longo que o intervalo fica no log, para calibrar os 3 intervalos da saúde. */
+export function logarTickLento(laco: string, duracaoMs: number, intervaloMs: number): void {
+  if (duracaoMs > intervaloMs) log("aviso", "laco_tick_lento", { laco, duracao_ms: duracaoMs, intervalo_ms: intervaloMs });
+}
