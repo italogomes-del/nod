@@ -18,6 +18,7 @@ import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { IasDaPessoa, InteligenciaBot, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
 import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
+import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
@@ -193,6 +194,8 @@ export function criarApi(escopo: Escopo) {
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
     // Plano das IAs (2026-10-10): a ordem do Automático da pessoa, o estado com o limite e os modelos; e a escolha do bot.
     ias: () => get<IasDaPessoa>("ias"),
+    // definido em 2026-10-16 (plano "tela limpa", decisão E6): o anel de uso do seletor de IA no campo.
+    usoDoPlano: () => get<UsoDoPlanoDto>("uso-do-plano"),
     gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
     gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),

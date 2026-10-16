@@ -4,6 +4,7 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { RaioXConversa } from "../../../src/contracts/raio-x.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
+import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { mil, renderFaixaDev, usd } from "../../../web/telas/modo-dev.ts";
 
 const C = "c1";
@@ -21,7 +22,7 @@ function comConversa(mensagens: Mensagem[]): Estado {
     mensagens, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [], fios: [],
   };
   const e = reduzir(estadoInicial, { tipo: "hidratar-conversa", conversa, agora: 1 });
-  return { ...e, frota: { agentes: [{ id: "a", nome: "Clarice", conversaId: C }] } as never };
+  return { ...e, tela: { tipo: "conversa", conversaId: C, agenteId: "a" }, frota: { agentes: [{ id: "a", nome: "Clarice", conversaId: C }] } as never };
 }
 
 describe("modo dev na web", () => {
@@ -44,16 +45,20 @@ describe("modo dev na web", () => {
     expect(html).toContain('data-act="abrir-raio-x" data-id="t1"');
   });
 
-  it("desligado, nada; ligado, só na ÚLTIMA mensagem do turno, e o selo com o total de hoje no cabeçalho", () => {
+  // Plano "tela limpa" (2026-10-16, T2): o selo e o "Hoje com" saíram do topo e moram numa seção da gaveta do bot.
+  it("desligado, nada; ligado, só na ÚLTIMA mensagem do turno, e o selo com o total de hoje na gaveta", () => {
     const base = comConversa([bot("m1", "t1"), bot("m2", "t1", "sistema"), bot("m3", null)]);
     expect(renderMensagem(bot("m1", "t1"), base)).not.toContain("faixa-dev");
-    expect(renderCabecalhoConversa(base, "a")).not.toContain("MODO DEV");
+    expect(renderDetalhes(base)).not.toContain("MODO DEV");
 
     const ligado = reduzir(reduzir(base, { tipo: "modo-dev", ligado: true }), { tipo: "hidratar-raio-x", conversaId: C, raioX: RAIO_X });
     expect(renderMensagem(bot("m1", "t1"), ligado)).not.toContain("faixa-dev");
     expect(renderMensagem(bot("m2", "t1", "sistema"), ligado)).toContain("faixa-dev");
     expect(renderMensagem(bot("m3", null), ligado)).not.toContain("faixa-dev");
-    expect(renderCabecalhoConversa(ligado, "a")).toContain("Hoje com Clarice: <b>US$ 22,67</b> · 66 turnos");
+    expect(renderDetalhes(ligado)).toContain("Hoje com Clarice: <b>US$ 22,67</b> · 66 turnos");
+    expect(renderDetalhes(ligado)).toContain("MODO DEV");
+    expect(renderCabecalhoConversa(ligado, "a")).not.toContain("MODO DEV");
+    expect(renderCabecalhoConversa(ligado, "a")).not.toContain("Hoje com");
 
     // Desligar esquece os resumos; religar busca de novo.
     expect(reduzir(ligado, { tipo: "modo-dev", ligado: false }).modoDev).toEqual({ ligado: false, raioX: {} });

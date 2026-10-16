@@ -18,6 +18,8 @@ import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo, avisoFechado, fecharAviso, hidratarAvisosFechados } from "./lib/menu-modo.ts";
+import { abrirMenuIa } from "./lib/menu-ia.ts";
+import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa } from "./telas/seletor-ia.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { PedidoInteligencia } from "../src/contracts/inteligencia.ts";
@@ -60,7 +62,7 @@ import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
-import { blocosAoVivo, blocosDoHistorico, htmlComposer, renderCabecalhoConversa, renderTimeline, type BlocoDaTimeline } from "./telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso, motorDesatualizado, situacaoMotorFora } from "./telas/frota.ts";
@@ -199,6 +201,23 @@ function painelOculto(): boolean {
   return !painelAberto && !painelAbertoNaHora;
 }
 
+/** O painel do bot está à vista? Estreita, ele é sobreposto (`detalhes-abertos`); larga, é a preferência guardada. */
+function painelVisivel(): boolean {
+  if (window.matchMedia("(max-width: 1099px)").matches) return document.querySelector(".app")?.classList.contains("detalhes-abertos") ?? false;
+  return !painelOculto();
+}
+
+/**
+ * A pílula do cabeçalho diz se o painel está aberto. O HTML dela não depende do painel (revisão do PR 1, 2026-10-16): o
+ * atributo é posto aqui depois de cada desenho do cabeçalho, a cada clique que muda as classes sem redesenhar e quando a
+ * janela cruza a largura em que o painel passa de lado a sobreposto.
+ */
+function marcarPainelNaPilula(): void {
+  const aberto = painelVisivel();
+  document.querySelector<HTMLElement>("#cabecalho .pilula-bot")?.setAttribute("aria-expanded", String(aberto));
+}
+window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainelNaPilula);
+
 /**
  * Avisos (definido em 2026-09-24, "aviso no Mac"): depois de cada leitura de "Sua vez" o avisador decide
  * se chama a pessoa (web/lib/avisador.ts) e o canal mostra — notificação do macOS e Dock no app,
@@ -257,7 +276,7 @@ const ditado = criarControleDitado({
   aoTexto: (texto, destino) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (!ta) return;
-    ta.value = juntarAoCampo(ta.value, texto);
+    escreverNoCampo(ta, juntarAoCampo(ta.value, texto));
     ajustarAltura(ta);
     if (composerDe) rascunhos.guardar(composerDe, ta.value);
     if (destino === "enviar") return void enviarComposer();
@@ -545,6 +564,13 @@ async function semConflito(fn: () => Promise<unknown>): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 // Reidratação: o reducer diz O QUE mudou; aqui busca-se por REST e despacha o hidratar.
 
+/**
+ * A última leitura de contas que falhou na conversa (revisão do PR 1, 2026-10-16). Sem ela, a falta de `contasIa` voltaria
+ * a pedir a cada frame. definido em 2026-10-16: 60 s entre tentativas — o cabeçalho do menu fica sem a conta enquanto isso.
+ */
+let contasFalharamEm: number | null = null;
+const ESPERA_CONTAS_MS = 60_000;
+
 async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (!api) return null;
   const agora = Date.now();
@@ -554,6 +580,10 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
   // Plano das IAs (2026-10-10): servidor sem a rota (404, versão anterior) fica sem `ias`; a tela usa o catálogo do executor.
   if (q === "ias") return { tipo: "hidratar-ias", ias: await api.ias().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
+  // Plano "tela limpa" (2026-10-16, E6): o anel é informativo — falha fechada, como o onboarding (revisão do PR 1): servidor
+  // sem a rota (404) ou erro fica sem o anel (o seletor mostra só o logo), sem faixa vermelha; com null os frames não
+  // pedem de novo (reducer.ts, `usoPlano`), só a volta da janela ou da rede.
+  if (q === "uso-plano") return { tipo: "hidratar-uso-plano", usoDoPlano: await api.usoDoPlano().catch(() => null) };
   if (q === "sua-vez") {
     // definido em 2026-09-24 ("aviso no Mac"): atrás, a leitura serve ao Dock e ao aviso, e não conta como vista.
     const ver = naFrente();
@@ -581,7 +611,17 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-102: servidor sem a rota (404, versão anterior) fica com a tela de antes.
   if (q === "contas") {
-    const contas = await api.contasIa().catch((e: unknown): ContasIaDto => { if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] }; throw e; });
+    // Revisão do PR 1 (2026-10-16): na conversa a lista só serve ao cabeçalho do seletor de IA (informativo) — a falha fica
+    // fechada, sem faixa vermelha, e a conversa só tenta de novo depois de ESPERA_CONTAS_MS (`relevante`). Em Máquinas e
+    // em Provedores de IA o erro continua aparecendo.
+    const naTelaDeContas = estado.espaco?.secao === "maquinas" || estado.espaco?.secao === "conexao";
+    const contas = await api.contasIa().catch((e: unknown): ContasIaDto | null => {
+      if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] };
+      if (naTelaDeContas) throw e;
+      return null;
+    });
+    if (!contas) { contasFalharamEm = Date.now(); return null; }
+    contasFalharamEm = null;
     const ponte = window.nodDesktop?.contas;
     const detalhes = ponte?.detalhes ? await ponte.detalhes().catch(() => null) : null;
     window.setTimeout(() => contasDaPessoa.aoHidratar(contas), 0);
@@ -699,6 +739,7 @@ async function reidratar(): Promise<void> {
 
 function relevante(q: Invalidacao): boolean {
   const t = estado.tela;
+  if (q === "uso-plano") return t.tipo === "conversa";
   if (q === "frota" || q === "inventario" || q === "executor" || q === "ias" || q === "sua-vez" || q === "salas" || q === "nao-lidos" || q === "ligacao" || q === "trabalhos" || q.startsWith("vivos:")) return true;
   if (q.startsWith("trabalho:")) return t.tipo === "trabalho" && t.id === q.slice(9);
   if (q === "custo") return t.tipo === "trabalhos";
@@ -709,7 +750,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
   if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
-  if (q === "contas") return secao === "maquinas" || secao === "conexao";
+  if (q === "contas") return secao === "maquinas" || secao === "conexao" || (t.tipo === "conversa" && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -927,7 +968,7 @@ function renderPrincipal(): void {
       cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       partes = partesDaTimeline();
       corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true }) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true, bot: botGerido(t.agenteId)?.nome }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -944,6 +985,9 @@ function renderPrincipal(): void {
   regiao("cabecalho", botaoAbrirBots() + cabecalho);
   document.getElementById("cabecalho")?.classList.toggle("so-menu", cabecalho === "");
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
+  // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
+  document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
+  marcarPainelNaPilula();
   regiao("erro", erro);
   // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
   // ADR-099 (parte 5): virou a linha do dono — uma linha só, com o estado de maior prioridade; some com o bot livre.
@@ -956,6 +1000,8 @@ function renderPrincipal(): void {
   if (composer?.chave !== composerDe) {
     // ADR-095: a gravação é do campo que sai; o texto dela nunca cai no campo de outra conversa.
     ditado.descartar();
+    // Revisão do PR 1 (2026-10-16): o menu do seletor de IA é do bot do campo que sai; um clique nele nunca grava noutro.
+    fecharMenuIa();
     const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
     composerDe = composer?.chave ?? null;
@@ -1111,9 +1157,8 @@ function atualizarComposer(): void {
   const placeholder = celular.ativo() ? (a.resposta ? "Sua resposta" : "Mensagem") : a.placeholder;
   if (ta.placeholder !== placeholder) ta.placeholder = placeholder;
   if (ta.getAttribute("aria-label") !== a.placeholder) ta.setAttribute("aria-label", a.placeholder);
+  // Plano "tela limpa" (2026-10-16, T5): a dica "Enter envia…" saiu; a nota só tem texto no modo resposta (vazia, some).
   if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
-  // A dica de sempre ("Enter envia · Shift+Enter…") é de teclado de computador; o celular a esconde (web/mobile.css).
-  nota?.classList.toggle("nota-padrao", a.nota === (nota.dataset.padrao ?? ""));
   const clipe = caixa.querySelector<HTMLButtonElement>('[data-act="anexar"]');
   if (clipe) {
     clipe.disabled = a.anexoBloqueado !== null;
@@ -1122,6 +1167,98 @@ function atualizarComposer(): void {
     else clipe.removeAttribute("title");
   }
   atualizarModoNoComposer();
+  atualizarSeletorIa();
+  atualizarParar();
+}
+
+/**
+ * O Parar do campo (plano "tela limpa", 2026-10-16, decisão E11; revisão do PR 1): enquanto há turno vivo ou task aberta
+ * do bot, o Parar fica à vista como botão secundário ao lado do Enviar — mesmo com rascunho, anexo ou o ditado gravando,
+ * quando o Enviar também aparece. Com o campo vazio, só o Parar. Quem decide é `botoesDoCampo` (web/telas/conversa.ts).
+ */
+function atualizarParar(): void {
+  const t = estado.tela;
+  const parar = document.querySelector<HTMLButtonElement>('#composer .parar-envio[data-act="parar-conversa"]');
+  const enviar = document.querySelector<HTMLButtonElement>('#composer .send[data-act="enviar"]');
+  const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
+  if (!parar || !enviar || !ta) return;
+  const alvo = conversaAtual();
+  const anexos = alvo && !alvo.salaId ? (anexosPendentes.get(alvo.conversaId) ?? []).length : 0;
+  const b = botoesDoCampo({ trabalhando: t.tipo === "conversa" && mostraPararNoCampo(estado, t.agenteId), temConteudo: ta.value.trim() !== "" || anexos > 0, ditando: ditado.ativo() });
+  if (parar.hidden !== !b.parar) parar.hidden = !b.parar;
+  if (enviar.hidden !== !b.enviar) enviar.hidden = !b.enviar;
+  if (b.parar && t.tipo === "conversa") {
+    const titulo = tituloDoParar(estado, t.agenteId);
+    const rotulo = rotuloDoParar(botGerido(t.agenteId)?.nome);
+    if (parar.title !== titulo) parar.title = titulo;
+    if (parar.getAttribute("aria-label") !== rotulo) parar.setAttribute("aria-label", rotulo);
+  }
+}
+
+/**
+ * Escreve no campo por código (ditado, sugestão, limpar depois de enviar) e reavalia o Enviar/Parar: o evento "input" só
+ * dispara quando a pessoa digita, e sem isto o botão ficava o de antes (revisão do PR 1, 2026-10-16).
+ */
+function escreverNoCampo(ta: HTMLTextAreaElement, valor: string): void {
+  ta.value = valor;
+  atualizarParar();
+}
+
+/**
+ * O seletor de IA do campo (plano "tela limpa", 2026-10-16, T6): o miolo segue o bot e o uso da janela sem regravar o
+ * campo (ADR-020) — como o chip de aprovações, só troca o que mudou.
+ */
+function atualizarSeletorIa(): void {
+  const bt = document.getElementById("composer-ia") as HTMLButtonElement | null;
+  if (!bt) return;
+  const t = estado.tela;
+  const d = t.tipo === "conversa" ? dadosDoSeletor(estado, t.agenteId) : null;
+  if (!d) { bt.hidden = true; return; }
+  bt.hidden = false;
+  const m = mioloDoSeletor(d, bt.getAttribute("aria-expanded") === "true");
+  if (bt.dataset.miolo !== m.html) { bt.innerHTML = m.html; bt.dataset.miolo = m.html; }
+  if (bt.title !== m.titulo) { bt.title = m.titulo; bt.setAttribute("aria-label", m.titulo); }
+  bt.setAttribute("aria-disabled", String(!d.dona));
+}
+
+/** O menu do seletor de IA aberto (um por vez) e se um clique dele ainda está gravando. */
+let menuIa: HTMLDialogElement | null = null;
+let gravandoIa = false;
+
+function fecharMenuIa(): void {
+  if (menuIa?.open) menuIa.close();
+  menuIa = null;
+}
+
+/**
+ * Revisão do PR 1 (2026-10-16): o clique grava só o que muda (`pedidoDoSeletor`), um por vez (o próximo clique espera o
+ * PUT voltar), e o agente devolvido entra na frota e na gestão na hora (`agente-gravado`), antes do refetch. O clique que
+ * chega depois de a conversa trocar (o menu é fechado por `fecharMenuIa`, mas o PUT pode estar no ar) não grava.
+ */
+function abrirSeletorIa(el: HTMLElement): void {
+  const t = estado.tela;
+  const a = t.tipo === "conversa" ? estado.frota?.agentes.find((b) => b.id === t.agenteId) : undefined;
+  const d = t.tipo === "conversa" ? dadosDoSeletor(estado, t.agenteId) : null;
+  if (!a || !d || !d.dona || gravandoIa || estado.ocupado) return;
+  const chave = composerDe;
+  menuIa = abrirMenuIa(el, renderMenuIa(d), (escolha) => {
+    menuIa = null;
+    if (escolha.tipo === "provedores") { abrirEspaco("conexao"); return; }
+    if (composerDe !== chave || gravandoIa) return;
+    const atual = estado.frota?.agentes.find((b) => b.id === a.id) ?? a;
+    const pedido = pedidoDoSeletor(atual, escolha, contextoInteligencia(estado));
+    if (!pedido) return;
+    gravandoIa = true;
+    void agir(async () => {
+      try {
+        const { agente } = await api!.gravarInteligencia(a.id, pedido);
+        dispatch({ tipo: "agente-gravado", agente });
+        dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+      } finally {
+        gravandoIa = false;
+      }
+    });
+  }, atualizarSeletorIa);
 }
 
 /**
@@ -1212,6 +1349,8 @@ function render(): void {
     regiao("detalhes", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
+    // Revisão do PR 1 (2026-10-16): sem sessão não há pílula — a classe deixava o cabeçalho vazio flutuando sobre a entrada.
+    document.getElementById("cabecalho")?.classList.remove("cabecalho-pilula");
     regiao("timeline", renderEntrada());
     regiao("composer", "");
     rolagem.depoisDeDesenhar(null, true);
@@ -1794,7 +1933,7 @@ function ajustarAltura(ta: HTMLTextAreaElement): void {
 function limparDepoisDeEnviar(ta: HTMLTextAreaElement, chave: string | null, texto: string): void {
   const naTela = ta.isConnected && composerDe === chave;
   if (naTela && ta.value.trim() === texto) {
-    ta.value = "";
+    escreverNoCampo(ta, "");
     ta.style.height = "auto";
     atualizarBarra(ta);
   }
@@ -1888,6 +2027,7 @@ function redesenharAnexos(): void {
   fila.hidden = itens.length === 0;
   const r = document.getElementById("composer-resumo");
   if (r) r.textContent = resumoAnexos(itens);
+  atualizarParar();
 }
 
 function limparAnexos(conversaId: string): void {
@@ -2412,7 +2552,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "escolher-missao": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
+    if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); return enviarComposer(); }
   },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
@@ -2461,16 +2601,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const app = document.querySelector(".app");
     if (!app) return;
     // Estreita, o painel é sobreposto e abre/fecha a cada vez; larga, esconder é preferência que fica.
-    if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); return; }
+    if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); marcarPainelNaPilula(); return; }
     const oculto = !app.classList.contains("detalhes-ocultos");
     app.classList.toggle("detalhes-ocultos", oculto);
     painelAberto = !oculto;
     painelAbertoNaHora = false;
+    marcarPainelNaPilula();
     try { localStorage.setItem(CHAVE_PAINEL_ABERTO, oculto ? "0" : "1"); } catch { /* sem storage, vale só nesta aba */ }
   },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
+    if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
@@ -2493,6 +2634,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
   // ADR-059: o chip do campo abre os três modos; o × do aviso o fecha para este bot e este modo.
   "modo-aprovacao": (el) => abrirModoAprovacao(el),
+  // Plano "tela limpa" (2026-10-16, T6): o seletor de IA do campo.
+  "seletor-ia": (el) => abrirSeletorIa(el),
   // Prévia da voz do bot (Editar perfil): toca a amostra do provedor das ligações.
   "ouvir-voz": (el) => {
     const tenant = estado.sessao?.tenantId;
@@ -3242,6 +3385,7 @@ document.addEventListener("input", (ev) => {
   if (ta.id === "busca-bots" || ta.id === "busca-destinatario") { filtrarBots(ta.value, ta.id === "busca-bots" ? "#sidebar" : ".contact-picker"); return; }
   if (ta.id !== "composer-texto") return;
   ajustarAltura(ta);
+  atualizarParar();
   if (composerDe) rascunhos.guardar(composerDe, ta.value);
   atualizarBarra(ta);
   const caixa = document.getElementById("autocomplete");

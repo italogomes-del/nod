@@ -166,14 +166,14 @@ export function avisoDoEstadoLocal(estado: EstadoLocalLigacao, noApp: boolean): 
   }
 }
 
-// ---- o botão "Ligar" no cabeçalho -----------------------------------------------------------------------------------
+// ---- o "Ligar" (na gaveta do bot desde 2026-10-16) -----------------------------------------------------------------------------------
 /** Motivos de recusa que dizem "este recurso não é para você aqui": o botão nem aparece. */
 const ESCONDE_BOTAO: ReadonlySet<MotivoRecusaLigacao> = new Set(["desligada", "sem_permissao", "sala", "conversa_de_equipe"]);
 
 export type BotaoLigar = "ligar" | "em-ligacao" | null;
 
 /**
- * Mostra "Ligar" no cabeçalho da conversa com um bot? (definido em 2026-10-04) Só bot da própria pessoa, só com a
+ * Mostra "Ligar" na gaveta do bot? (definido em 2026-10-04) Só bot da própria pessoa, só com a
  * disponibilidade já lida (`undefined` = ainda lendo; `null` = a leitura falhou ou a rota não existe: some, falha
  * fechada) e nunca com outra ligação aberta. Com a ligação deste bot aberta nesta página, vira "Em ligação" (volta à
  * tela cheia).
@@ -190,9 +190,13 @@ export function botaoLigar(p: { agente: Pick<Agente, "id" | "ownerId"> | undefin
   return "ligar";
 }
 
-export function htmlBotaoLigar(b: BotaoLigar, nome: string): string {
-  if (b === "ligar") return botao("iniciar-ligacao", `${ICONE_LIGACAO.fone(16)}<span>Ligar</span>`, { classe: "ligar", titulo: `Ligar para ${nome}`, aria: `Ligar para ${nome}` });
-  if (b === "em-ligacao") return botao("ligacao-expandir", `${ICONE_LIGACAO.fone(16)}<span>Em ligação</span>`, { classe: "ligar em-ligacao", titulo: "Voltar à ligação" });
+/**
+ * O Ligar na gaveta do bot (definido em 2026-10-16, plano "tela limpa", T2): saiu do topo da conversa e virou uma linha
+ * dos Atalhos, com as mesmas ações (`iniciar-ligacao`, `ligacao-expandir`) e a mesma regra de quando aparece (`botaoLigar`).
+ */
+export function htmlLinhaLigar(b: BotaoLigar, nome: string): string {
+  if (b === "ligar") return `<button type="button" class="gv-linha" data-act="iniciar-ligacao" aria-label="${esc(`Ligar para ${nome}`)}">${ICONE_LIGACAO.fone(17)}<span class="gv-linha-txt">Ligar para ${esc(nome)}</span></button>`;
+  if (b === "em-ligacao") return `<button type="button" class="gv-linha em-ligacao" data-act="ligacao-expandir">${ICONE_LIGACAO.fone(17)}<span class="gv-linha-txt">Em ligação</span><span class="gv-meta">voltar</span></button>`;
   return "";
 }
 

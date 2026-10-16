@@ -76,8 +76,8 @@ export function raciocinioValido(ia: IaDaPessoa, modelo: string, pedido?: Esforc
   return niveis.includes(r) ? r : niveis.includes(RACIOCINIO_PADRAO) ? RACIOCINIO_PADRAO : niveis.at(-1) ?? null;
 }
 
-const nomeDoModelo = (ia: IaDaPessoa, modelo: string): string => ia.modelos.find((m) => m.id === modelo)?.nome ?? modelo;
-const nomeDoNivel = (r: EsforcoAgente | null): string => NIVEIS.find((n) => n.id === r)?.nome ?? "";
+export const nomeDoModelo = (ia: IaDaPessoa, modelo: string): string => ia.modelos.find((m) => m.id === modelo)?.nome ?? modelo;
+export const nomeDoNivel = (r: EsforcoAgente | null): string => NIVEIS.find((n) => n.id === r)?.nome ?? "";
 
 /** Os modelos na ordem da tela: o recomendado primeiro, depois o catálogo. */
 function modelosNaOrdem(ia: IaDaPessoa): IaDaPessoa["modelos"] {
@@ -85,7 +85,7 @@ function modelosNaOrdem(ia: IaDaPessoa): IaDaPessoa["modelos"] {
 }
 
 /** As IAs que a tela oferece: as do Mac que o catálogo integra, na ordem que vale para o bot. */
-function iasDoBot(ias: readonly IaDaPessoa[], ordem: readonly IdHarness[] | null): IaDaPessoa[] {
+export function iasDoBot(ias: readonly IaDaPessoa[], ordem: readonly IdHarness[] | null): IaDaPessoa[] {
   const porId = new Map(ias.filter((i) => i.integrado && ehIaMac(i.id)).map((i) => [i.id, i]));
   const ids = [...(ordem ?? []).filter((id) => porId.has(id)), ...ordemDasIas(ias).filter((id) => !(ordem ?? []).includes(id))];
   return ids.map((id) => porId.get(id)).filter((i): i is IaDaPessoa => i !== undefined);
@@ -106,12 +106,12 @@ export function iasDaTela(e: { ias?: IasDaPessoa | null; executor: EstadoExecuto
 export type ContextoInteligencia = { ias: readonly IaDaPessoa[]; ui: UiIas; agora: number };
 
 /** A IA serve agora? Pronta, ou no limite (conectada, volta sozinha). As outras pedem "Conectar" em Provedores de IA. */
-function conectada(ia: IaDaPessoa, c: ContextoInteligencia): boolean {
+export function conectada(ia: IaDaPessoa, c: ContextoInteligencia): boolean {
   if (!ehIaMac(ia.id)) return false;
   const e = estadoNaTela(ia.id, ia, c.ui, c.agora).estado;
   return e === "pronta" || e === "no_limite";
 }
-const noLimite = (ia: IaDaPessoa, c: ContextoInteligencia): boolean => ehIaMac(ia.id) && estadoNaTela(ia.id, ia, c.ui, c.agora).estado === "no_limite";
+export const noLimite = (ia: IaDaPessoa, c: ContextoInteligencia): boolean => ehIaMac(ia.id) && estadoNaTela(ia.id, ia, c.ui, c.agora).estado === "no_limite";
 
 /** A IA que o Automático usaria agora: a primeira pronta da ordem fora do limite (a mesma regra de `iaDoAutomatico`). */
 export function iaEmUso(i: InteligenciaBot, c: ContextoInteligencia): IaDaPessoa | null {
@@ -145,7 +145,7 @@ const SETA_BAIXO = (t = 14, classe = "ia-seta"): string => `<svg class="${classe
 const avatar = (ia: IaMac | null): string => (ia ? logoDaIa(ia, "ia-av") : "");
 
 /** Até três modelos por IA no menu rápido: o recomendado, os do catálogo e, se for outro, o escolhido. */
-function modelosDoMenu(ia: IaDaPessoa, escolhido: string | null): IaDaPessoa["modelos"] {
+export function modelosDoMenu(ia: IaDaPessoa, escolhido: string | null): IaDaPessoa["modelos"] {
   const ordem = modelosNaOrdem(ia);
   const tres = ordem.slice(0, 3);
   const extra = escolhido && !tres.some((m) => m.id === escolhido) ? ordem.filter((m) => m.id === escolhido) : [];

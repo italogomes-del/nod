@@ -90,10 +90,19 @@ function identidadeDe(c: ContaIa, x: ContextoContas): { email: string | null; or
  * sem nenhuma conta na fila, a primeira da lista.
  */
 function emUso(x: ContextoContas): string | null {
-  // QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
-  const lista = x.contas.contas.filter((c) => !noLimite(c, x.agora) && (x.ui.filtro ? prontaEm(c, x.ui.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
-  const temFila = x.contas.contas.some((c) => c.entraNaTrocaAutomatica);
-  return (temFila ? lista.find((c) => c.entraNaTrocaAutomatica) : lista[0])?.id ?? null;
+  return contaEmUso(x.contas.contas, x.agora, { filtro: x.ui.filtro })?.id ?? null;
+}
+
+/**
+ * A conta em uso, pura (extraída em 2026-10-16 para o seletor de IA do campo, plano "tela limpa", T6): por IA, a primeira
+ * da fila fora do limite e logada em alguma máquina (na do filtro, se há filtro); sem conta da IA na fila, a primeira dela
+ * (ADR-108, E4). Com `ia`, só entre as contas daquela IA.
+ * QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
+ */
+export function contaEmUso(contas: readonly ContaIa[], agora: number, p: { filtro?: string | null; ia?: ContaIa["ia"] } = {}): ContaIa | null {
+  const logadas = contas.filter((c) => (p.ia === undefined || c.ia === p.ia) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
+  const temFila = (ia: ContaIa["ia"]) => logadas.some((c) => c.ia === ia && c.entraNaTrocaAutomatica);
+  return logadas.find((c) => !noLimite(c, agora) && (c.entraNaTrocaAutomatica || !temFila(c.ia))) ?? null;
 }
 
 function pilulas(c: ContaIa, x: ContextoContas): string {
