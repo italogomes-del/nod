@@ -185,3 +185,12 @@ export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number
 export function entradaDaTrocaDeIa(nomeDe: string, nomePara: string): string {
   return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDe} chegou ao limite no meio deste trabalho e o nod passou este trabalho para o ${nomePara}. A sessão anterior ficou no ${nomeDe}: confira o estado (arquivos, branch, o que já saiu) e siga de onde parou.`;
 }
+
+/**
+ * definido em 2026-10-16 (ADR-108, revisão do PR 2, I1): a entrada da volta da task que o nod levou para OUTRA CONTA da
+ * mesma IA no ChatGPT — a sessão do Codex mora na pasta da conta, então a task recomeça do histórico. Começa com
+ * ENTRADA_DA_VOLTA_DA_COTA, como as outras voltas da cota.
+ */
+export function entradaDaTrocaDeContaSemSessao(nomeDaIa: string): string {
+  return `${ENTRADA_DA_VOLTA_DA_COTA}A conta do ${nomeDaIa} deste trabalho chegou ao limite e o nod passou este trabalho para outra conta do ${nomeDaIa}. A sessão anterior ficou na outra conta: confira o estado (arquivos, branch, o que já saiu) e siga de onde parou.`;
+}

@@ -6,9 +6,11 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { inventarioHarnessSemSonda } from "../domain/harness.ts";
 import { aplicarPedidoInteligencia, derivadosDa, iasDaPessoa, inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { nomeDoProvedor } from "../domain/troca-de-ia.ts";
+import type { RuntimeEvent } from "../contracts/evento.ts";
+import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
-import type { CasoDeUso } from "./tipos.ts";
-import { levarTasksParaAInteligencia } from "./trocas-de-ia.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
+import { iaDoAutomaticoNaMaquina, levarTasksParaAInteligencia } from "./trocas-de-ia.ts";
 
 /**
  * `GET /agentes/:id/inteligencia` (definido em 2026-10-10, emenda da ADR-036): o modo, a IA fixa, a ordem própria e as
@@ -28,8 +30,11 @@ export const lerInteligenciaDoBot: CasoDeUso<{ agenteId: string }, { inteligenci
  * ADR-108 (R5, E8): `levarTasks: true` leva também as tasks pendentes do bot para a inteligência nova (e acorda as que
  * esperavam a cota); ausente ou false = só daqui em diante. O campo sai do pedido ANTES de `aplicarPedidoInteligencia`,
  * que recusa chave desconhecida.
+ * Revisão do PR 2 (C6): com destino Automático, cada turno levado fica fixo na IA que o Automático escolheria AGORA na
+ * máquina do bot (`iaDoAutomaticoNaMaquina`, pelas prontas de `prontosPorMaquina`, fora a IA que parou) — "auto" de novo
+ * deixaria a task presa na guarda da sessão. Sem nenhuma, nada é levado e a conversa do bot ganha a linha que diz isso.
  */
-export const definirInteligenciaDoBot: CasoDeUso<{ agenteId: string; pedido: unknown }, { agente: Agente; tasksLevadas?: number }> = async (deps, input) => {
+export const definirInteligenciaDoBot: CasoDeUso<{ agenteId: string; pedido: unknown; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> }, { agente: Agente; tasksLevadas?: number; semIaParaLevar?: true }> = async (deps, input) => {
   const existente = await deps.repos.agentes.buscar(input.agenteId);
   if (!existente) throw new ErroDeDominio("nao_encontrado");
   if (existente.ownerId !== deps.escopo.pessoaId) throw new ErroDeDominio("nao_permitido");
@@ -46,14 +51,34 @@ export const definirInteligenciaDoBot: CasoDeUso<{ agenteId: string; pedido: unk
     if (conversa) await deps.repos.conversas.atualizarSessaoCli(conversa.id, null);
   }
   const autoria = autoriaPessoa(deps.escopo);
-  const tasksLevadas = levarTasks
-    ? await levarTasksParaAInteligencia(deps, { agenteId: agente.id, harness: para.harness, modelo: para.modelo, nomeDe: nomeDaInteligencia(de.harness), nomePara: nomeDaInteligencia(para.harness), agora: deps.agora() })
-    : undefined;
-  return {
-    data: { agente, ...(tasksLevadas !== undefined ? { tasksLevadas } : {}) },
-    events: [evento(deps.escopo, { kind: "agente_atualizado", autoria, agora: deps.agora(), dados: { agente_id: agente.id, acao: "inteligencia", modo: nova.modo, fixa: nova.fixa, nome: agente.nome, ...(tasksLevadas !== undefined ? { tasks_levadas: tasksLevadas } : {}) } })],
-  };
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  let tasksLevadas: number | undefined;
+  let semIaParaLevar = false;
+  if (levarTasks) {
+    const destino = para.harness === "auto" ? await iaDoAutomaticoNaMaquina(deps, { agenteId: agente.id, inteligencia: nova, prontosPorMaquina: input.prontosPorMaquina ?? {}, agora }) : para.harness;
+    if (destino) {
+      tasksLevadas = await levarTasksParaAInteligencia(deps, { agenteId: agente.id, harness: destino, modelo: para.harness === "auto" ? "auto" : para.modelo, nomeDe: nomeDaInteligencia(de.harness), nomePara: nomeDaInteligencia(destino), agora });
+    } else {
+      tasksLevadas = 0;
+      semIaParaLevar = true;
+      events.push(...(await avisarSemIaParaLevar(deps, { agenteId: agente.id, nomeDoBot: agente.nome, agora })));
+    }
+  }
+  events.unshift(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, dados: { agente_id: agente.id, acao: "inteligencia", modo: nova.modo, fixa: nova.fixa, nome: agente.nome, ...(tasksLevadas !== undefined ? { tasks_levadas: tasksLevadas } : {}) } }));
+  return { data: { agente, ...(tasksLevadas !== undefined ? { tasksLevadas } : {}), ...(semIaParaLevar ? { semIaParaLevar: true as const } : {}) }, events };
 };
+
+/** C6: o "Levar as tasks também" para o Automático sem IA pronta na máquina do bot — uma linha na conversa dele. */
+async function avisarSemIaParaLevar(deps: Deps, p: { agenteId: string; nomeDoBot: string; agora: number }): Promise<RuntimeEvent[]> {
+  const conversa = await deps.repos.conversas.buscarPropriaDoAgente(p.agenteId);
+  if (!conversa) return [];
+  const autoria = autoriaPessoa(deps.escopo);
+  const texto = `Nenhuma IA está pronta agora na máquina do ${p.nomeDoBot}: as tasks em andamento ficaram onde estavam. Daqui em diante ele usa o Automático.`;
+  const linha = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "sistema", texto, confianca: "confiavel" });
+  log("info", "inteligencia_sem_ia_para_levar", { agente_id: p.agenteId });
+  return linha ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: p.agora, conversaId: conversa.id, dados: { mensagem_id: linha.id, kind: "sistema" } })] : [];
+}
 
 const nomeDaInteligencia = (harness: string): string => (harness === "auto" ? "Automático" : nomeDoProvedor(harness));
 

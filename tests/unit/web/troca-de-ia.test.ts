@@ -114,3 +114,32 @@ describe("a prévia ao trocar a IA do bot (R5, canvas D1)", () => {
     expect(html).toContain("data-levar");
   });
 });
+
+describe("revisão do PR 2: o aviso de troca de IA", () => {
+  it("I2: cada botão leva o aviso (data-troca), porque o bot pode ter um aviso por IA", () => {
+    const html = cartaoTrocaDeIa(aviso(), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain(`data-id="${AGENTE}" data-conversa="${CONVERSA}" data-troca="t1"`);
+  });
+
+  it("I6: sem a hora do fornecedor, recomenda levar e diz que o Claude não disse quando volta", () => {
+    const html = cartaoTrocaDeIa(aviso({ recomendacao: "levar", voltaEm: null, aplicarEm: AGORA + 10 * MIN }), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain("<b>O Claude chegou ao limite</b>");
+    expect(html).toContain("recomendo levar para o ChatGPT: o Claude não disse quando volta.");
+  });
+
+  it("C5: a outra IA não está na máquina do bot — só esperar, e o cartão diz por quê", () => {
+    const html = cartaoTrocaDeIa(aviso({ iaPara: null, foraDaMaquina: { ia: "codex-cli", maquina: "vm-bots" } }), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain("O ChatGPT não está em vm-bots, a máquina do Eng 1.");
+    expect(html).not.toContain('data-act="troca-levar"');
+    expect(html).not.toContain("A conversa segue no");
+  });
+
+  it("I1: no ChatGPT, a conta da sessão parou — 'levar' é seguir noutra conta do ChatGPT, do resumo", () => {
+    const html = cartaoTrocaDeIa(aviso({ iaDe: "codex-cli", iaPara: "codex-cli", contaDe: { id: "c1", apelido: "Pessoal" }, recomendacao: "levar", voltaEm: AGORA + 16 * 60 * MIN, aplicarEm: AGORA + 10 * MIN }), { nomeDoBot: "Eng 1", agora: AGORA })!;
+    expect(html).toContain("A conta Pessoal do ChatGPT chegou ao limite");
+    expect(html).toContain("recomendo levar para outra conta do ChatGPT");
+    expect(html).toContain("Seguir noutra conta do ChatGPT");
+    expect(html).toContain("a sessão fica na conta que parou");
+    expect(html).not.toContain("A conversa segue no");
+  });
+});

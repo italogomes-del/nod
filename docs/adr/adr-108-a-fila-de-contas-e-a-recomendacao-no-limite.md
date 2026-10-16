@@ -36,7 +36,8 @@ apareceram juntos:
    2ª em diante e a corporativa nascem fora. Ligar uma delas na tela mostra o aviso dos termos que já existia ao ligar
    "Trocar sozinho" (o mesmo texto, `TERMOS_DA_TROCA`); a pessoa consente uma vez por conta. Desligar nunca pergunta. A
    migração **0080** liga, por pessoa e IA, a conta pessoal não removida de menor posição; quem já usava "Trocar
-   sozinho" já tinha consentido, então todas as pessoais dele entram. A corporativa fica como a pessoa deixou.
+   sozinho" já tinha consentido, então todas as pessoais dele entram. A corporativa só continua na fila para quem estava
+   no "Trocar sozinho" e a tinha marcado (revisão do PR 2, C4).
    **A leitura jurídica dos termos (Anthropic: "ordinary, individual usage"; OpenAI: "circumvent rate limits") não foi
    validada: fica sinalizada para o Marlon/jurídico antes de a fila virar padrão para clientes.**
 3. **Outra IA só no Automático (R2).** Bot com IA fixa nunca troca de IA: `decidirLimiteDaConta({ iaFixa })` e
@@ -44,7 +45,7 @@ apareceram juntos:
 4. **Conversa no Automático troca de IA na hora (R3).** Sem mudança.
 5. **Task com sessão na IA que parou não troca de IA sozinha (R4, E1).** "Tem sessão" = `trabalhos.sessao_cli` não nulo
    e `sessao_harness` = a IA que parou. Ela espera a volta da conta (a retomada com `acordar_em` = a primeira conta da
-   fila que sai do limite) e o bot ganha **um** aviso de troca (`trocas_de_ia`, um aberto por bot; a task seguinte que
+   fila que sai do limite) e o bot ganha **um** aviso de troca (`trocas_de_ia`, um aberto por bot e IA; a task seguinte que
    para atualiza o mesmo) com a recomendação `recomendacaoDaTroca`:
    - volta em até 30 min → **esperar**; sem resposta, nada acontece;
    - mais de 30 min, ou o fornecedor não disse quando → **levar** para a outra IA; sem resposta, o varredor aplica
@@ -64,7 +65,7 @@ apareceram juntos:
    no <outra IA> até HH:MM" — guarda a inteligência em `trocas_de_ia.volta_ao_fixo`, passa o bot ao Automático, leva as
    tasks e refaz a fala; o varredor devolve a inteligência fixa quando a conta volta (se a pessoa não mexeu nela
    depois). Sem nenhum caminho, fica a nota de sempre.
-8. **Mesma IA, só troca de conta (R7, E3):** linha leve, sem cartão ("marlonwlv (20x) acabou às 20:39 → seguindo no
+8. **Mesma IA, só troca de conta (R7, E3; no ChatGPT, emendado pela revisão do PR 2, I1):** linha leve, sem cartão ("marlonwlv (20x) acabou às 20:39 → seguindo no
    Claude · Marlon 20x · mesmo modelo"); as tasks seguem na hora em qualquer provedor (no Codex, pelo histórico).
 9. **Provedores (R8):** um liga/desliga "na fila" por conta, na própria linha, e três linhas fixas que dizem como o Nod
    age (mesma IA, outra IA, tasks em andamento). Nada para configurar.
@@ -73,8 +74,9 @@ apareceram juntos:
 
 - **E4 por máquina.** "Nenhuma conta da IA na fila" é avaliado entre as contas logadas na máquina do turno, não na lista
   inteira: senão uma VM com só a 2ª conta (fora da fila) pararia com a nota dizendo que ela está "no limite" sem estar.
-- **A volta da IA** é a primeira conta da fila que sai do limite (sem fila, qualquer conta da IA); sem lista de contas,
-  o limite da IA em `preferencias.ias_no_limite`; sem nada, 1 h.
+- **A volta da IA** (revista no PR 2) é a primeira conta que volta a servir pela regra da conta em uso, na máquina-alvo do
+  bot (a da fila, a escolhida ou, sem fila, a primeira da IA lá); sem lista de contas,
+  o limite da IA em `preferencias.ias_no_limite`; sem nada, vazia (I6: a espera da task tenta de novo em 1 h).
 - **Caminho sem lista de contas** (motor ou app anterior à ADR-102): a mesma regra R4 vale para a task do Automático
   quando outra IA está pronta (`aposLimiteDaIaNoFundo`).
 - **O aviso mora na conversa do bot, sem turno**, quando nasce de uma task (a linha de um turno de task iria para a tela
@@ -82,6 +84,58 @@ apareceram juntos:
 - **Fechamentos novos além do pedido:** `conta` (R6 a) e `outra_ia` (R6 b) entram no CHECK de `trocas_de_ia.decisao`.
 - **"Voltou"** fecha o aviso aberto e acorda as esperas da cota da IA daquele bot, também quando o limite saiu antes do
   prazo (um turno que deu certo).
+
+## Revisão do PR 2 (16/10/2026, autônoma, sob a autorização do Marlon)
+
+A revisão de engenharia do PR 2 achou seis falhas de regra (C1–C6) e oito pontos menores (I1–I8). Todos foram corrigidos
+com teste; as decisões abaixo foram tomadas sem o Marlon e ficam para ele confirmar.
+
+- **Máquina-alvo (C2, C5).** O aviso grava `trocas_de_ia.machine_id`: a máquina das tasks do bot (a dele, senão a
+  padrão da pessoa, com a chave viva; senão a que pegou ou entregou o turno). "Parou", "voltou" e "volta em" são UMA
+  regra (`estadoDaIa`): a conta em uso da IA entre as contas logadas NAQUELA máquina (`contaDoTurno`), a volta pela mesma
+  regra (`voltaDaIa` com `naMaquina` e a escolhida). Uma conta livre só noutra máquina não fecha o aviso — era o laço de
+  avisos a cada 30 s. A outra IA do aviso ("levar") precisa estar pronta na máquina-alvo (`prontosPorMaquina`, agora
+  também no despacho e nas pontes HTTP). Sem nenhuma pronta lá, a recomendação vira "esperar", sem prazo, e o cartão diz
+  "O ChatGPT não está em <máquina>, a máquina do <bot>" (`payload.foraDaMaquina`); a task sem sessão também espera.
+- **A cota medida (C1).** `estadoDaIa` põe por cima a cota do uso do plano (`cotaDasIas` + `cotaSegura`): a task com
+  sessão é `fundo_seguindo`, então só o limite medido (100%) a segura — ela espera a janela renovar com o aviso, em vez de
+  sair no ChatGPT. Na reserva (99%), a task que já começou segue na IA da sessão: o plano não põe essa IA no "no limite"
+  dela (`emitir-plano-turno.ts`).
+- **O aviso reaberto (C2).** Reabrir o aviso do mesmo bot e da mesma IA até 30 min depois de fechar reaproveita a linha
+  do anterior na conversa (`JANELA_DO_AVISO_MS`), só no aviso das tasks.
+- **Herança do "esperar" (C3).** A pessoa escolheu "esperar" para (bot, IA) e a IA não voltou: a task seguinte que para
+  herda a escolha — nenhum aviso, nenhum prazo novo; só a contagem da linha sobe. O aviso fechado com "esperar" ou
+  "conta" espera a IA voltar (`voltou_em`); quando ela volta, o varredor acorda as esperas da cota. A espera decidida vale
+  no máximo 1 dia (`ESPERA_DECIDIDA_VALE_MS`), para não ficar no varredor para sempre se a máquina saiu da conta.
+- **Consentimento da corporativa (C4).** Backfill da 0080: a corporativa marcada sai da fila para quem não estava no
+  "Trocar sozinho" — no "Perguntar antes" a marca não trocava nada sozinha, e agora trocaria. A conta que vira corporativa
+  sai da fila; a que volta depois de removida segue a regra de nascimento (1ª pessoal da IA na fila, senão fora). Duas
+  contas nascendo juntas já esperavam uma pela outra no lock da pessoa do anúncio (`pg_advisory_xact_lock`, antes da
+  leitura); ficou provado por um teste de concorrência.
+- **Levar ao Automático (C6).** "Levar as tasks também" com destino Automático fixa cada turno na IA que o Automático
+  escolheria AGORA na máquina do bot, fora a IA que parou. Sem nenhuma, nada é levado e a conversa do bot ganha a linha
+  "Nenhuma IA está pronta agora na máquina do <bot>…".
+- **Codex (I1).** A sessão do Codex mora na pasta da conta: trocar de conta no ChatGPT perde a sessão. Por isso a task
+  com sessão no ChatGPT cuja conta da sessão parou NÃO segue na hora noutra conta: espera e ganha o aviso, cujo "levar" é
+  "seguir noutra conta do ChatGPT" (`ia_para = ia_de` com `conta_de`; o CHECK só aceita assim). O "voltou" desse aviso é
+  a conta da sessão sair do limite. A guarda do despacho segura o turno do Automático pela mesma regra. No Claude, nada
+  muda (a sessão é compartilhada entre as contas). Provedores: "No Claude, nada se perde. No ChatGPT, a task com sessão
+  recomeçaria do resumo noutra conta: o Nod recomenda esperar ou seguir, e você decide."
+- **Um aviso por bot e IA (I2).** O índice único parcial é `(tenant, agente, ia_de)`; a decisão leva `trocaId` (a web
+  manda; sem ele, com dois avisos abertos, é entrada inválida).
+- **Volta do bot fixo (I3).** O varredor devolve só o modo e a IA fixa, e só se a inteligência ainda for a que o
+  "Continuar no <outra> até a volta" gravou; as tasks que esse caminho fixou na outra IA voltam à inteligência do bot
+  (`trazerTasksDeVolta`). Limite conhecido: um turno de task fixado na outra IA por outro motivo no meio do caminho também
+  volta.
+- **A escolhida fora da fila (I4).** O "Seguir com"/"Continuar na conta" grava a escolhida da pessoa inteira; quando a
+  fila daquela IA volta a ter conta livre na máquina do bot, o varredor a solta, se ela estiver fora da fila (a
+  corporativa não vira caminho silencioso).
+- **Varredor (I5).** Cada aviso roda num SAVEPOINT (o padrão dos órfãos), e contas, preferências e uso são lidos uma vez
+  por pessoa no tique.
+- **Sem hora do fornecedor (I6).** O aviso grava `volta_em` nulo (nada de +1 h inventada): a recomendação é "levar" e o
+  texto diz que o fornecedor não disse quando volta. A espera da task continua tentando de novo em 1 h. Limite conhecido:
+  a guarda do despacho lê a volta pela conta marcada no limite, e a conta sem hora fica marcada com 1 h — nesse caminho a
+  volta do aviso pode virar essa hora.
 
 ## Alternativas descartadas
 

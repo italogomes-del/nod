@@ -46,10 +46,12 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
           e.contas.push(conta);
           mudou = true;
         } else if (decisao === "voltar") {
-          Object.assign(conta!, { removidaEm: null, noLimiteAte: null, posicao: proximaPosicao(), plano: a.plano ?? conta!.plano, corporativa: a.corporativa });
+          // Revisão do PR 2 (C4): volta com a regra de nascimento, não com a marca antiga.
+          const naFila = !a.corporativa && !minhas().some((c) => c.ia === a.ia && c.removidaEm === null && !c.corporativa);
+          Object.assign(conta!, { removidaEm: null, noLimiteAte: null, posicao: proximaPosicao(), plano: a.plano ?? conta!.plano, corporativa: a.corporativa, entraNaTrocaAutomatica: naFila });
           mudou = true;
         } else if (decisao === "atualizar" && a.plano !== null && (a.plano !== conta!.plano || a.corporativa !== conta!.corporativa)) {
-          Object.assign(conta!, { plano: a.plano, corporativa: a.corporativa });
+          Object.assign(conta!, { plano: a.plano, corporativa: a.corporativa, ...(a.corporativa && !conta!.corporativa ? { entraNaTrocaAutomatica: false } : {}) });
           mudou = true;
         }
         // ADR-105: como o repositório, ausente não apaga.

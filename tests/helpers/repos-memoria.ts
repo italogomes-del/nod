@@ -874,18 +874,37 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       const sem = ({ tenantId: _t, ownerId: _o, ...t }: TrocaDeIa & { tenantId: string; ownerId: string }): TrocaDeIa => ({ ...t });
       return {
         async abrir(n) {
-          const aberta = minhas().find((x) => x.agenteId === n.agenteId && x.decididoEm === null);
+          // Revisão do PR 2 (I2): um aberto por bot E IA que parou.
+          const aberta = minhas().find((x) => x.agenteId === n.agenteId && x.iaDe === n.iaDe && x.decididoEm === null);
           if (aberta) {
-            Object.assign(aberta, { iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, fixo: n.fixo, aplicarEm: n.recomendacao === "levar" ? aberta.aplicarEm ?? n.aplicarEm : null });
+            Object.assign(aberta, { iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, fixo: n.fixo, machineId: n.machineId, contaDe: n.contaDe ?? aberta.contaDe, aplicarEm: n.recomendacao === "levar" ? aberta.aplicarEm ?? n.aplicarEm : null });
             return { troca: sem(aberta), nova: false };
           }
-          const t = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, conversaId: n.conversaId, iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, criadaEm: n.agora, aplicarEm: n.aplicarEm, decididoEm: null, decisao: null, mensagemId: null, fixo: n.fixo, voltaAoFixo: null, restauradoEm: null };
+          const t = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, conversaId: n.conversaId, iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, criadaEm: n.agora, aplicarEm: n.aplicarEm, decididoEm: null, decisao: null, mensagemId: null, fixo: n.fixo, voltaAoFixo: null, restauradoEm: null, machineId: n.machineId, contaDe: n.contaDe ?? null, voltouEm: null };
           b.trocasDeIa.push(t);
           return { troca: sem(t), nova: true };
         },
         async definirMensagem(id, mensagemId) { const t = minhas().find((x) => x.id === id); if (t) t.mensagemId = mensagemId; },
         async buscar(id) { const t = minhas().find((x) => x.id === id); return t ? sem(t) : null; },
-        async abertaDoAgente(agenteId) { const t = minhas().find((x) => x.agenteId === agenteId && x.decididoEm === null); return t ? sem(t) : null; },
+        async abertaDoAgente(agenteId, iaDe) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.decididoEm === null && (!iaDe || x.iaDe === iaDe)).sort((x, y) => x.criadaEm - y.criadaEm)[0];
+          return t ? sem(t) : null;
+        },
+        async abertasDoAgente(agenteId) { return minhas().filter((x) => x.agenteId === agenteId && x.decididoEm === null).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
+        async esperaDecidida(agenteId, iaDe) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.iaDe === iaDe && x.decisao === "esperar" && x.voltouEm === null).sort((x, y) => (y.decididoEm ?? 0) - (x.decididoEm ?? 0))[0];
+          return t ? sem(t) : null;
+        },
+        async fechadaRecente(agenteId, iaDe, desde) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.iaDe === iaDe && x.decididoEm !== null && x.decididoEm >= desde && x.mensagemId !== null).sort((x, y) => (y.decididoEm ?? 0) - (x.decididoEm ?? 0))[0];
+          return t ? sem(t) : null;
+        },
+        async marcarVoltou(id, em) {
+          const t = minhas().find((x) => x.id === id && (x.decisao === "esperar" || x.decisao === "conta") && x.voltouEm === null);
+          if (!t) return false;
+          t.voltouEm = em;
+          return true;
+        },
         async fechar(id, decisao, em, voltaAoFixo) {
           const t = minhas().find((x) => x.id === id && x.decididoEm === null);
           if (!t) return null;
@@ -898,7 +917,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           t.restauradoEm = em;
           return true;
         },
-        async paraVarrer() { return minhas().filter((x) => x.decididoEm === null || (x.voltaAoFixo !== null && x.restauradoEm === null)).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
+        async paraVarrer() { return minhas().filter((x) => x.decididoEm === null || (x.voltaAoFixo !== null && x.restauradoEm === null) || ((x.decisao === "esperar" || x.decisao === "conta") && x.voltouEm === null)).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
       };
     })(),
 
@@ -1165,6 +1184,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (const t of tasksNaIa(p.agenteId, p.iaDe)) {
           const daCota = t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
           Object.assign(t, { harness: p.harness, modelo: p.modelo, ...(daCota ? { acordarEm: null, entradaTexto: p.entradaDaVolta } : {}) });
+          ids.push(t.id);
+        }
+        return ids;
+      },
+      async trazerTasksDeVolta(p) {
+        const ids: string[] = [];
+        for (const t of doTenant(b.turnos).filter((x) => x.ownerId === escopo.pessoaId && x.agenteId === p.agenteId && x.estado === "pendente" && x.trabalhoId && x.harness === p.de)) {
+          Object.assign(t, { harness: p.harness, modelo: p.modelo });
           ids.push(t.id);
         }
         return ids;

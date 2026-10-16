@@ -526,7 +526,7 @@ async function gravarInteligenciaComPrevia(a: NonNullable<Estado["frota"]>["agen
 /** ADR-108: a escolha no aviso de troca de IA; a linha relê pela conversa (o servidor grava o desfecho nela). */
 function decidirTroca(el: HTMLElement, decisao: "esperar" | "levar" | "outra_ia"): Promise<void> {
   return agir(async () => {
-    await api!.decidirTrocaDeIa(el.dataset.id ?? "", decisao);
+    await api!.decidirTrocaDeIa(el.dataset.id ?? "", decisao, el.dataset.troca || undefined);
     const conversaId = el.dataset.conversa;
     dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "trabalhos", "frota"] });
   });

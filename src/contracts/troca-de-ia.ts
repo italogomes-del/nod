@@ -42,6 +42,15 @@ export type TrocaDeIa = {
   /** R6 (b): a inteligência do bot antes de ir ao Automático; o varredor a devolve quando a conta volta. */
   voltaAoFixo: InteligenciaBot | null;
   restauradoEm: EpochMs | null;
+  /**
+   * A máquina-alvo das tasks do bot (revisão do PR 2, C2/C5): a do bot, a padrão da pessoa ou a que pegou o turno. "Parou"
+   * e "voltou" se medem pelas contas logadas nela; null = sem máquina (vale o limite da IA, `preferencias.ias_no_limite`).
+   */
+  machineId: string | null;
+  /** I1: no ChatGPT, a conta da sessão que parou — "levar" é para outra conta da mesma IA (`iaPara = iaDe`). */
+  contaDe: string | null;
+  /** C3/I4: o aviso fechado com "esperar" ou "conta" espera a IA voltar até aqui (null = ainda não voltou). */
+  voltouEm: EpochMs | null;
 };
 
 /** A conta fora da fila que o aviso do bot fixo oferece ("Continuar na conta Claude · Leapy"). */
@@ -63,6 +72,13 @@ export type PayloadTrocaDeIa = {
   fixo?: true;
   /** R6 (a): a conta livre da mesma IA fora da fila, na máquina do turno. */
   conta?: ContaDaTroca | null;
+  /**
+   * C5: nenhuma outra IA está pronta na máquina do bot, mas `ia` está noutra máquina da pessoa — o cartão diz por que não
+   * oferece "levar" (`maquina` = o nome da máquina do bot, quando se sabe).
+   */
+  foraDaMaquina?: { ia: IdHarness; maquina: string | null };
+  /** I1: a conta do ChatGPT que parou (a sessão mora nela); "levar" segue noutra conta do ChatGPT, do resumo. */
+  contaDe?: { id: string; apelido: string };
   /** Preenchidos quando a troca fecha (a tela troca os botões pela linha do que aconteceu). */
   decisao?: DecisaoDaTroca;
   decididoEm?: EpochMs;

@@ -40,7 +40,9 @@ export function temSessaoNaIa(trabalho: { sessaoCli: string | null; sessaoHarnes
 
 /**
  * A frase gravada com o aviso (a tela desenha o cartão pelo payload; o texto é o que o histórico, o Raio-X e o app antigo
- * leem). Canvas C1/C2 (não fixo) e C3 (fixo). `quando` dá "às 20:50" (ou "em 17/10 às 13:00").
+ * leem). Canvas C1/C2 (não fixo) e C3 (fixo). `quando` dá "às 20:50" (ou "em 17/10 às 13:00"). Revisão do PR 2: sem a
+ * hora do fornecedor, a frase diz que ele não disse quando volta (I6); `contaDe` = no ChatGPT, a conta que parou e "levar"
+ * é para outra conta dele (I1); `foraDaMaquina` = a outra IA existe, mas não na máquina do bot (C5).
  */
 export function fraseDaTroca(p: {
   nomeDe: string;
@@ -51,6 +53,8 @@ export function fraseDaTroca(p: {
   fixo: boolean;
   voltaEm: EpochMs | null;
   quando: (t: EpochMs) => string;
+  contaDe?: string | null;
+  foraDaMaquina?: { nome: string; maquina: string | null } | null;
 }): string {
   const volta = p.voltaEm !== null ? p.quando(p.voltaEm) : null;
   if (p.fixo) {
@@ -58,8 +62,12 @@ export function fraseDaTroca(p: {
     return `O ${p.nomeDoBot} está parado${ate}: as contas do ${p.nomeDe} da sua fila acabaram. Ele volta sozinho ${volta ?? "quando uma conta voltar"}.`;
   }
   const tasks = p.tasks === 1 ? "a task" : `as ${p.tasks} tasks`;
+  const quem = p.contaDe ? `A conta ${p.contaDe} do ${p.nomeDe}` : `O ${p.nomeDe}`;
+  const quandoVolta = volta ? ` · volta ${volta}` : ` · o ${p.nomeDe} não disse quando volta`;
+  const fora = p.foraDaMaquina ? ` O ${p.foraDaMaquina.nome} não está ${p.foraDaMaquina.maquina ? `em ${p.foraDaMaquina.maquina}, ` : "n"}a máquina do ${p.nomeDoBot}.` : "";
+  const destino = p.contaDe ? `outra conta do ${p.nomeDe}` : `o ${p.nomePara}`;
   const recomenda = p.recomendacao === "esperar" || !p.nomePara
     ? `Para ${tasks}, recomendo esperar o ${p.nomeDe}: continuam de onde pararam.`
-    : `Para ${tasks}, recomendo levar para o ${p.nomePara}: recomeçam do resumo, mas não ficam paradas.`;
-  return `O ${p.nomeDe} chegou ao limite${volta ? ` · volta ${volta}` : ""}. ${recomenda}`;
+    : `Para ${tasks}, recomendo levar para ${destino}: recomeçam do resumo, mas não ficam paradas.`;
+  return `${quem} chegou ao limite${quandoVolta}.${fora} ${recomenda}`;
 }

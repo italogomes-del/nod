@@ -46,7 +46,7 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
   it("um aviso aberto por bot: abrir de novo atualiza o mesmo; o fechar é condicional (o segundo não fecha); fechado, nasce outro", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const nova = { agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli" as const, iaPara: "codex-cli" as const, recomendacao: "levar" as const, voltaEm: AGORA + 16 * HORA, aplicarEm: AGORA + 600_000, fixo: false, agora: AGORA };
+      const nova = { agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli" as const, iaPara: "codex-cli" as const, recomendacao: "levar" as const, voltaEm: AGORA + 16 * HORA, aplicarEm: AGORA + 600_000, fixo: false, machineId: null, agora: AGORA };
       const a = await m.repos.trocasDeIa.abrir(nova);
       expect(a.nova).toBe(true);
       const b = await m.repos.trocasDeIa.abrir({ ...nova, voltaEm: AGORA + 17 * HORA, aplicarEm: AGORA + 900_000, agora: AGORA + 60_000 });
@@ -67,10 +67,84 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
     });
   });
 
+  it("revisão do PR 2 (I2): um aberto por bot E IA — o Claude e o ChatGPT no limite no mesmo bot são dois avisos", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = { agenteId: m.agenteId, conversaId: m.conversaId, recomendacao: "esperar" as const, voltaEm: null, aplicarEm: null, fixo: false, machineId: null, agora: AGORA };
+      const claude = await m.repos.trocasDeIa.abrir({ ...base, iaDe: "claude-cli", iaPara: "codex-cli" });
+      const codex = await m.repos.trocasDeIa.abrir({ ...base, iaDe: "codex-cli", iaPara: "claude-cli" });
+      expect([claude.nova, codex.nova]).toEqual([true, true]);
+      expect((await m.repos.trocasDeIa.abertasDoAgente(m.agenteId)).map((t) => t.iaDe)).toEqual(["claude-cli", "codex-cli"]);
+      expect((await m.repos.trocasDeIa.abertaDoAgente(m.agenteId, "codex-cli"))?.id).toBe(codex.troca.id);
+      expect((await m.repos.trocasDeIa.abrir({ ...base, iaDe: "codex-cli", iaPara: null })).troca.id).toBe(codex.troca.id);
+      // I1: "levar" para a mesma IA só com a conta da sessão (CHECK troca_ia_para).
+      await expect(trx.savepoint((s) => s`insert into trocas_de_ia (tenant_id, owner_id, agente_id, conversa_id, ia_de, ia_para, recomendacao, decidido_em, decisao) values (${MARLON.tenantId}, ${MARLON.pessoaId}, ${m.agenteId}, ${m.conversaId}, 'codex-cli', 'codex-cli', 'levar', now(), 'levar')`)).rejects.toMatchObject({ code: "23514" });
+      const vm = (await m.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
+      await m.repos.contasIa.doAnuncio(vm, [anuncio(1, "codex-cli", "Pessoal")], AGORA);
+      const [conta] = (await m.repos.contasIa.listar()).contas;
+      const mesma = await m.repos.trocasDeIa.abrir({ ...base, agenteId: (await agenteComConversa(trx, MARLON, { nome: "Eng 2" })).agenteId, iaDe: "codex-cli", iaPara: "codex-cli", contaDe: conta!.id, machineId: vm, recomendacao: "levar", aplicarEm: AGORA + 600_000 });
+      expect(mesma.troca).toMatchObject({ iaPara: "codex-cli", contaDe: conta!.id, machineId: vm });
+    });
+  });
+
+  it("revisão do PR 2 (C3/C2): a decisão 'esperar' espera a IA voltar (paraVarrer vê até marcarVoltou); o fechado recente reaproveita a linha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const base = { agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli" as const, iaPara: "codex-cli" as const, recomendacao: "esperar" as const, voltaEm: AGORA + HORA, aplicarEm: null, fixo: false, machineId: null, agora: AGORA };
+      const { troca } = await m.repos.trocasDeIa.abrir(base);
+      const linha = await m.repos.mensagens.criar({ conversaId: m.conversaId, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "sistema", texto: "aviso", confianca: "confiavel" });
+      await m.repos.trocasDeIa.definirMensagem(troca.id, linha!.id);
+      expect(await m.repos.trocasDeIa.esperaDecidida(m.agenteId, "claude-cli")).toBeNull();
+      await m.repos.trocasDeIa.fechar(troca.id, "esperar", AGORA + 60_000);
+      expect((await m.repos.trocasDeIa.esperaDecidida(m.agenteId, "claude-cli"))?.id).toBe(troca.id);
+      expect(await m.repos.trocasDeIa.esperaDecidida(m.agenteId, "codex-cli")).toBeNull();
+      expect((await m.repos.trocasDeIa.paraVarrer()).map((t) => t.id)).toEqual([troca.id]);
+      expect((await m.repos.trocasDeIa.fechadaRecente(m.agenteId, "claude-cli", AGORA))?.mensagemId).toBe(linha!.id);
+      expect(await m.repos.trocasDeIa.fechadaRecente(m.agenteId, "claude-cli", AGORA + 120_000)).toBeNull();
+      expect(await m.repos.trocasDeIa.marcarVoltou(troca.id, AGORA + HORA)).toBe(true);
+      expect(await m.repos.trocasDeIa.marcarVoltou(troca.id, AGORA + HORA)).toBe(false);
+      expect(await m.repos.trocasDeIa.esperaDecidida(m.agenteId, "claude-cli")).toBeNull();
+      expect(await m.repos.trocasDeIa.paraVarrer()).toEqual([]);
+      // "voltou" numa decisão "levar" não se marca (só "esperar"/"conta" esperam a volta).
+      const outro = await m.repos.trocasDeIa.abrir(base);
+      await m.repos.trocasDeIa.fechar(outro.troca.id, "levar", AGORA);
+      expect(await m.repos.trocasDeIa.marcarVoltou(outro.troca.id, AGORA)).toBe(false);
+    });
+  });
+
+  it("revisão do PR 2 (I3): trazer as tasks de volta só mexe nos pendentes do bot fixados na outra IA", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const levada = await m.task({ harness: "codex-cli" });
+      const noAuto = await m.task();
+      const ids = await m.repos.turnos.trazerTasksDeVolta({ agenteId: m.agenteId, de: "codex-cli", harness: "claude-cli", modelo: "auto" });
+      expect(ids).toEqual([levada.turnoId]);
+      expect(await m.repos.turnos.buscar(levada.turnoId)).toMatchObject({ harness: "claude-cli", modelo: "auto", acordarEm: AGORA + HORA });
+      expect(await m.repos.turnos.buscar(noAuto.turnoId)).toMatchObject({ harness: "auto" });
+    });
+  });
+
+  it("revisão do PR 2 (C1): o Claude em 100% medido segura a task com sessão nele — no Postgres, o despacho não a entrega ao Codex", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.inventario.registrar("claude-cli", pronto);
+      const vm = (await m.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
+      await m.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal")], AGORA);
+      await m.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "esgotado", cincoHoras: { utilizacao: 1, renovaEm: AGORA + 3 * HORA }, semana: null, medidoEm: AGORA }, vm);
+      const t = await m.task({ entrada: "faz a A1", acordarEm: null });
+      await trx`update trabalhos set iniciado_em = ${new Date(AGORA - HORA)} where id = ${t.trabalhoId}`;
+      const r = await despacharTurno(m.deps, { machineId: vm, executor: "local", inventario: pronto, harnessesProntos: ["claude-cli", "codex-cli"] });
+      expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+      const volta = (await m.repos.turnos.doTrabalho(t.trabalhoId)).find((x) => x.retomaTurnoId === t.turnoId);
+      expect(volta).toMatchObject({ estado: "pendente", acordarEm: AGORA + 3 * HORA });
+      expect(await m.repos.trocasDeIa.abertaDoAgente(m.agenteId)).toMatchObject({ iaDe: "claude-cli", iaPara: "codex-cli", machineId: vm, voltaEm: AGORA + 3 * HORA });
+    });
+  });
+
   it("volta_ao_fixo vai com o fechar e a restauração acontece uma vez; paraVarrer vê abertos e os que ainda devolvem o fixo", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      const { troca } = await m.repos.trocasDeIa.abrir({ agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "esperar", voltaEm: null, aplicarEm: null, fixo: true, agora: AGORA });
+      const { troca } = await m.repos.trocasDeIa.abrir({ agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "esperar", voltaEm: null, aplicarEm: null, fixo: true, machineId: null, agora: AGORA });
       const fixa = { ...INTELIGENCIA_PADRAO, modo: "fixa" as const, fixa: "claude-cli" as const };
       expect((await m.repos.trocasDeIa.fechar(troca.id, "outra_ia", AGORA, fixa))?.voltaAoFixo).toEqual(fixa);
       expect((await m.repos.trocasDeIa.paraVarrer()).map((t) => t.id)).toEqual([troca.id]);

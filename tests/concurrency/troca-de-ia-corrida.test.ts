@@ -47,7 +47,7 @@ async function fixture(): Promise<{ agenteId: string; turnoId: string }> {
     await repos.turnos.enfileirar({ executor: "local", id: turnoId, conversaId, agenteId, origem: "retomada", trabalhoId: t!.id, prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: entradaDaVoltaDaCota("Claude Code"), entradaConfianca: "confiavel", modelo: "auto", harness: "auto", acordarEm: T0 + 16 * 60 * MIN });
     // Sem lista de contas: a IA está no limite pela preferência (o varredor não fecha como "voltou").
     await repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 16 * 60 * MIN, desde: T0 });
-    await repos.trocasDeIa.abrir({ agenteId, conversaId, iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "levar", voltaEm: T0 + 16 * 60 * MIN, aplicarEm: T0 + 10 * MIN, fixo: false, agora: T0 });
+    await repos.trocasDeIa.abrir({ agenteId, conversaId, iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "levar", voltaEm: T0 + 16 * 60 * MIN, aplicarEm: T0 + 10 * MIN, fixo: false, machineId: null, agora: T0 });
   });
   criados.agentes.push(agenteId);
   criados.conversas.push(conversaId);

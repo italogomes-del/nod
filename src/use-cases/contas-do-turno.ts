@@ -33,17 +33,33 @@ export type ContasDaMaquina = {
  */
 export const CONTATO_RECENTE_MS = 2 * 60_000;
 
-export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
+/** O que `lerContasDaMaquina` lê do banco (uma leitura serve para várias máquinas: o varredor lê uma vez por pessoa, I5). */
+export type LeituraDasContas = {
+  contas: ContaGuardadaNoServidor[];
+  vinculos: VinculoDaConta[];
+  escolhidas: Partial<Record<IaComConta, string>>;
+  chaves: readonly { id: string; nome: string; revogadaEm: number | null; ultimoUsoEm: number | null }[];
+};
+
+export async function lerContas(deps: Pick<Deps, "repos">): Promise<LeituraDasContas> {
   // ADR-108: o "Perguntar antes"/"Trocar sozinho" (preferencias.contas_modo) não decide mais nada; só a escolhida vale.
   const [{ contas, vinculos }, { escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
-  const agora = deps.agora();
-  const nomes = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
-  const vivas = new Map(chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
-  const prontas = vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
+  return { contas, vinculos, escolhidas, chaves };
+}
+
+/** As contas vistas pela máquina `machineId`, a partir de uma leitura já feita. */
+export function contasDaMaquinaDe(l: LeituraDasContas, machineId: string, agora: number): ContasDaMaquina {
+  const nomes = new Map(l.chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
+  const vivas = new Map(l.chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
+  const prontas = l.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
   const naMaquina = new Set(prontas.filter((v) => v.maquinaId === machineId).map((v) => v.contaId));
   const noutraMaquina = new Map<string, { id: string; nome: string }>();
   for (const v of prontas) if (v.maquinaId !== machineId && vivas.has(v.maquinaId) && !noutraMaquina.has(v.contaId)) noutraMaquina.set(v.contaId, { id: v.maquinaId, nome: vivas.get(v.maquinaId)! });
-  return { contas, vinculos, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+  return { contas: l.contas, vinculos: l.vinculos, escolhidas: l.escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+}
+
+export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
+  return contasDaMaquinaDe(await lerContas(deps), machineId, deps.agora());
 }
 
 export function escolherContaDoTurno(c: ContasDaMaquina, ordemDoBot: readonly IdHarness[] | null, agora: number): ContaDoTurno<ContaGuardadaNoServidor> | null {

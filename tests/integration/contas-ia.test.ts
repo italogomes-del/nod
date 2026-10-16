@@ -65,6 +65,30 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
     });
   });
 
+  it("ADR-108 (revisão do PR 2, C4): a conta que volta segue a regra de nascimento; a que vira corporativa sai da fila", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(2)], AGORA - 3_600_000);
+      const [a, b] = (await repos.contasIa.listar()).contas;
+      expect([a!.entraNaTrocaAutomatica, b!.entraNaTrocaAutomatica]).toEqual([true, false]);
+      // A 2ª entra na fila (a pessoa ligou, com o aviso dos termos) e depois a 1ª é removida e volta com um login novo:
+      // volta FORA da fila (a 2ª é agora a pessoal ativa), não com a marca antiga.
+      await repos.contasIa.definirTrocaAutomatica(b!.id, true);
+      await repos.contasIa.remover(a!.id, AGORA);
+      await repos.contasIa.doAnuncio(vm, [anuncio(1, { logadaEm: AGORA + 5_000 }), anuncio(2)], AGORA + 10_000);
+      expect((await repos.contasIa.buscar(a!.id))?.entraNaTrocaAutomatica).toBe(false);
+      // Removida a única pessoal e devolvida sozinha: volta na fila (é de novo a 1ª pessoal da IA).
+      await repos.contasIa.remover(a!.id, AGORA + 20_000);
+      await repos.contasIa.remover(b!.id, AGORA + 20_000);
+      await repos.contasIa.doAnuncio(vm, [anuncio(2, { logadaEm: AGORA + 30_000 })], AGORA + 40_000);
+      expect((await repos.contasIa.buscar(b!.id))?.entraNaTrocaAutomatica).toBe(true);
+      // A mesma conta anunciada agora como corporativa (o plano mudou para Team): sai da fila.
+      await repos.contasIa.doAnuncio(vm, [anuncio(2, { logadaEm: AGORA + 30_000, plano: "Team", corporativa: true })], AGORA + 50_000);
+      expect(await repos.contasIa.buscar(b!.id)).toMatchObject({ corporativa: true, entraNaTrocaAutomatica: false });
+    });
+  });
+
   it("reordenar exige exatamente as contas da lista; renomear, limite, na fila e a escolhida (o modo antigo só guardado)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos } = depsSobre(trx, MARLON);

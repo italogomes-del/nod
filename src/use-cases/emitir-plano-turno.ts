@@ -18,6 +18,7 @@ import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva } from "../domain/inteligencia.ts";
 import { cotaDasIas, tipoParaCota } from "../domain/cota-da-ia.ts";
+import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
 import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
@@ -157,7 +158,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // definido em 2026-10-12 (ADR-099 §7): no trabalho de fundo, o Automático também pula a IA que a cota segura (reserva ou
   // limite) — o 1% que sobra dela fica para a conversa com a pessoa. Todas seguradas: a primeira pronta (iaDoAutomatico).
   const fundo = !input.recompor && executor !== "catcher" && input.harnesses && turno.harness === "auto" && turno.modelo === "auto" && tipoParaCota(turno, null) !== "conversa";
-  const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia) : [];
+  // ADR-108 (revisão do PR 2, C1): a IA da sessão da task não entra aqui — trocar de IA por cota é decisão da pessoa (o
+  // aviso de troca). Se a cota a segura de verdade (o limite medido segura o fundo que já começou), a guarda do despacho
+  // (despachar-turno.ts, segurarTaskNaIaDaSessao) já devolveu o turno à espera; na reserva, a task que já começou segue nela.
+  const daSessao = fundo && turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia).filter((ia) => !temSessaoNaIa(daSessao, ia)) : [];
   // ADR-102 (2026-10-13): a conta do turno, pela lista da pessoa e pelo que a máquina do turno tem logado. Com conta
   // anunciada na máquina, a posição da conta em uso de cada IA decide a ordem, e a IA sem conta utilizável entra no
   // "no limite" (o limite é da conta, não mais da IA); sem conta anunciada (motor ou app antigo), nada muda.

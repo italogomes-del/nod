@@ -154,17 +154,17 @@ export type Assentamento = {
   custoSessaoUsd?: number | null;
 };
 
-/**
- * Fila de turnos no Postgres (ADR-010 revisado). O ÚNICO lugar que escreve estado 'pendente' é o
- * INSERT de `enfileirar` (DEFAULT da coluna): tests/conformidade/sem-requeue.test.ts varre src/
- * por UPDATE que volte a 'pendente'. Retomar é turno NOVO com retoma_turno_id (ADR-009).
- */
 /** ADR-108: o turno da task está na IA `ia` — fixado nela, ou no Automático com a sessão da task nela. null = qualquer. */
 function daIa(conn: Conn, ia: IdHarness | null) {
   if (ia === null) return conn`true`;
   return conn`(t.harness = ${ia} or (t.harness = 'auto' and exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.sessao_harness = ${ia})))`;
 }
 
+/**
+ * Fila de turnos no Postgres (ADR-010 revisado). O ÚNICO lugar que escreve estado 'pendente' é o
+ * INSERT de `enfileirar` (DEFAULT da coluna): tests/conformidade/sem-requeue.test.ts varre src/
+ * por UPDATE que volte a 'pendente'. Retomar é turno NOVO com retoma_turno_id (ADR-009).
+ */
 export function turnosRepo(conn: Conn, escopo: Escopo) {
   return {
     async enfileirar(t: NovoTurno): Promise<Turno | null> {
@@ -457,6 +457,20 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta} else t.entrada_texto end
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
           and ${daIa(conn, p.iaDe)}
+        returning t.id`;
+      return linhas.map((l) => l.id);
+    },
+
+    /**
+     * ADR-108 (R6 b, revisão do PR 2, I3): o bot fixo voltou à IA dele — os turnos pendentes das tasks dele que o "Continuar
+     * no <outra> até a volta" fixou na outra IA (`harness = de`) voltam à inteligência do bot (`harness`/`modelo`). Não
+     * mexe em `acordar_em` nem na entrada. Devolve os ids.
+     */
+    async trazerTasksDeVolta(p: { agenteId: string; de: IdHarness; harness: string; modelo: string }): Promise<string[]> {
+      const linhas = await conn<{ id: string }[]>`
+        update turnos t set harness = ${p.harness}, modelo = ${p.modelo}
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
+          and t.harness = ${p.de}
         returning t.id`;
       return linhas.map((l) => l.id);
     },

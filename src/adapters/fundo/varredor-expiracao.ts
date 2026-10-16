@@ -95,11 +95,19 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     log("erro", "turnos_orfaos_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-10-16 (ADR-108 R4/R6): os avisos de troca de IA (trocas-de-ia.ts), em transação própria — aplica o
-  // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta.
+  // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta. Revisão do
+  // PR 2 (I5): cada aviso num SAVEPOINT desta tx (o padrão dos órfãos) — o que lança volta sozinho e os outros saem.
   try {
     await tx(async (trx) => {
       const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
-      const r = await varrerTrocasDeIa(deps);
+      const isolar = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const caixa: { valor?: T } = {};
+        await trx.savepoint(async () => {
+          caixa.valor = await fn();
+        });
+        return caixa.valor as T;
+      };
+      const r = await varrerTrocasDeIa(deps, { isolar });
       if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
     });
   } catch (e) {

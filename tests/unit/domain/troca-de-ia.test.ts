@@ -42,7 +42,14 @@ describe("fraseDaTroca", () => {
     expect(fraseDaTroca({ nomeDe: "Claude", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "esperar", tasks: 19, fixo: false, voltaEm: AGORA, quando }))
       .toBe("O Claude chegou ao limite · volta às 20:50. Para as 19 tasks, recomendo esperar o Claude: continuam de onde pararam.");
     expect(fraseDaTroca({ nomeDe: "Claude", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "levar", tasks: 1, fixo: false, voltaEm: null, quando }))
-      .toBe("O Claude chegou ao limite. Para a task, recomendo levar para o ChatGPT: recomeçam do resumo, mas não ficam paradas.");
+      .toBe("O Claude chegou ao limite · o Claude não disse quando volta. Para a task, recomendo levar para o ChatGPT: recomeçam do resumo, mas não ficam paradas.");
+  });
+
+  it("revisão do PR 2: a conta do ChatGPT que parou (I1) e a outra IA fora da máquina do bot (C5)", () => {
+    expect(fraseDaTroca({ nomeDe: "ChatGPT", nomePara: "ChatGPT", nomeDoBot: "Eng 1", recomendacao: "levar", tasks: 2, fixo: false, voltaEm: null, quando, contaDe: "Pessoal" }))
+      .toBe("A conta Pessoal do ChatGPT chegou ao limite · o ChatGPT não disse quando volta. Para as 2 tasks, recomendo levar para outra conta do ChatGPT: recomeçam do resumo, mas não ficam paradas.");
+    expect(fraseDaTroca({ nomeDe: "Claude", nomePara: null, nomeDoBot: "Eng 1", recomendacao: "esperar", tasks: 1, fixo: false, voltaEm: AGORA, quando, foraDaMaquina: { nome: "ChatGPT", maquina: "vm-bots" } }))
+      .toBe("O Claude chegou ao limite · volta às 20:50. O ChatGPT não está em vm-bots, a máquina do Eng 1. Para a task, recomendo esperar o Claude: continuam de onde pararam.");
   });
 
   it("fixo: o estado do bot e que ele volta sozinho (canvas C3)", () => {

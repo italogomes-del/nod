@@ -1,5 +1,6 @@
 import type { PreferenciaHarness } from "../../../contracts/harness.ts";
 import type { Escopo } from "../../../shared/types.ts";
+import type { IdHarness } from "../../../contracts/harness.ts";
 import { gerirAgente } from "../../../use-cases/gerir-agente.ts";
 import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agente.ts";
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
@@ -22,7 +23,7 @@ const ID = "(?<id>[^/]+)";
  * (dono no corpo → 403 dono_imutavel), Pin/Hide/Duplicate e memória. Cada handler: valida a forma,
  * chama o caso de uso, responde. Mutação devolve o que criou/alterou; o estado vivo chega por SSE.
  */
-export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>): Rota[] {
+export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>, prontosPorMaquina?: (escopo: Escopo) => Readonly<Record<string, readonly IdHarness[]>>): Rota[] {
   const executar = criarExecutor(d);
   return [
     { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
@@ -82,7 +83,8 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       metodo: "PUT",
       padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
       async handler(ctx) {
-        ctx.json(200, await executar(ctx.escopo, definirInteligenciaDoBot, { agenteId: ctx.params.id ?? "", pedido: await ctx.corpo() }));
+        // ADR-108 (revisão do PR 2, C6): as IAs prontas por máquina, para "levar as tasks" ao Automático.
+        ctx.json(200, await executar(ctx.escopo, definirInteligenciaDoBot, { agenteId: ctx.params.id ?? "", pedido: await ctx.corpo(), prontosPorMaquina: prontosPorMaquina?.(ctx.escopo) ?? {} }));
       },
     },
     {
@@ -92,7 +94,7 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       padrao: new RegExp(`^/agentes/${ID}/troca-de-ia$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, decidirTrocaDeIa, { agenteId: ctx.params.id ?? "", decisao: corpo.decisao }));
+        ctx.json(200, await executar(ctx.escopo, decidirTrocaDeIa, { agenteId: ctx.params.id ?? "", decisao: corpo.decisao, ...(corpo.trocaId !== undefined ? { trocaId: corpo.trocaId } : {}) }));
       },
     },
     {

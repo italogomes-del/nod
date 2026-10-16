@@ -158,14 +158,25 @@ export function decidirLimiteDaConta(p: {
 }
 
 /**
- * ADR-108 (R4): quando a IA `ia` volta a servir pela lista — a primeira conta dela na fila (ou, sem fila, qualquer uma)
- * que sai do limite. null = alguma já está livre, ou a IA não tem conta na lista (quem decide é o limite da IA).
+ * ADR-108 (R4): quando a IA `ia` volta a servir pela lista — pela MESMA regra da conta em uso (`contaEmUsoDaIa`): a
+ * primeira conta dela na fila que sai do limite, a escolhida, ou, sem conta da IA na fila, a primeira dela. Revisão do PR
+ * 2 (C2): com `naMaquina`, só as contas logadas na máquina-alvo contam (uma conta livre só noutra máquina não traz a IA de
+ * volta para o bot). null = alguma já serve, ou nenhuma das que contam diz quando volta, ou a IA não tem conta ali.
  */
-export function voltaDaIa(contas: readonly ContaDaPessoa[], ia: IaComConta, agora: EpochMs): EpochMs | null {
-  const daIa = emOrdem(contas).filter((c) => c.ia === ia);
-  const fila = daIa.some(naFila) ? daIa.filter(naFila) : daIa;
-  if (fila.length === 0 || fila.some((c) => livre(c, agora))) return null;
-  return Math.min(...fila.map((c) => c.noLimiteAte!));
+export function voltaDaIa(contas: readonly ContaDaPessoa[], ia: IaComConta, agora: EpochMs, p: { naMaquina?: ReadonlySet<string>; escolhida?: string | null } = {}): EpochMs | null {
+  const daIa = emOrdem(contas).filter((c) => c.ia === ia && (!p.naMaquina || p.naMaquina.has(c.id)));
+  if (daIa.length === 0 || contaEmUsoDaIa(daIa, { escolhida: p.escolhida ?? null, agora }) !== null) return null;
+  const candidatas = [...(daIa.some(naFila) ? daIa.filter(naFila) : daIa.slice(0, 1)), ...daIa.filter((c) => c.id === p.escolhida)];
+  const voltas = candidatas.map((c) => c.noLimiteAte).filter((t): t is number => t !== null && t > agora);
+  return voltas.length > 0 ? Math.min(...voltas) : null;
+}
+
+/**
+ * Revisão do PR 2 (I4): a fila da IA voltou a ter conta livre entre as contas dadas (com `naMaquina`, só as logadas nela)?
+ * Sem conta da IA na fila, false (a escolhida fora da fila é o único caminho, e fica).
+ */
+export function filaLivre(contas: readonly ContaDaPessoa[], ia: IaComConta, agora: EpochMs, naMaquina?: ReadonlySet<string>): boolean {
+  return emOrdem(contas).some((c) => c.ia === ia && naFila(c) && livre(c, agora) && (!naMaquina || naMaquina.has(c.id)));
 }
 
 /** A ordem das IAs da pessoa derivada da lista (suposição 3 da ADR-102): a primeira aparição de cada IA, depois as outras. */

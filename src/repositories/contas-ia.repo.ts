@@ -53,6 +53,12 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
   const doDono = () => conn`tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
   const travarPessoa = () => conn`select pg_advisory_xact_lock(hashtext(${`contas_ia:${escopo.tenantId}:${escopo.pessoaId}`}))`;
 
+  /** ADR-108 (termos de uso): a 1ª conta pessoal ativa de cada IA nasce na fila; a 2ª em diante e a corporativa, fora. */
+  async function nasceNaFila(a: ContaAnunciada): Promise<boolean> {
+    if (corporativaDe(a)) return false;
+    return (await conn`select 1 from contas_ia where ${doDono()} and ia = ${a.ia} and removida_em is null and not corporativa limit 1`).length === 0;
+  }
+
   async function proximaPosicao(): Promise<number> {
     const [l] = await conn<{ max: number | null }[]>`select max(posicao) as max from contas_ia where ${doDono()} and removida_em is null`;
     return (l?.max ?? 0) + 1;
@@ -113,8 +119,10 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         if (decisao === "criar") {
           const posicao = await proximaPosicao();
           // ADR-108 (termos de uso, ADR-101 §4): só a 1ª conta pessoal de cada IA nasce na fila; a 2ª em diante e a
-          // corporativa nascem fora, e a pessoa as liga em Provedores (com o aviso dos termos).
-          const naFila = !corporativaDe(a) && (await conn`select 1 from contas_ia where ${doDono()} and ia = ${a.ia} and removida_em is null and not corporativa limit 1`).length === 0;
+          // corporativa nascem fora, e a pessoa as liga em Provedores (com o aviso dos termos). Duas máquinas anunciando ao
+          // mesmo tempo esperam uma pela outra no lock da pessoa (`travarPessoa`, no começo do anúncio), e esta leitura vem
+          // depois dele: nunca nascem duas pessoais na fila sem o aviso (revisão do PR 2, C4; teste de concorrência).
+          const naFila = await nasceNaFila(a);
           const [l] = await conn<{ id: string }[]>`
             insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao, email, organizacao, entra_na_troca_automatica)
             values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao}, ${a.email ?? null}, ${a.organizacao ?? null}, ${naFila})
@@ -125,14 +133,20 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
           mudou = true;
         } else if (decisao === "voltar") {
           const posicao = await proximaPosicao();
+          // Revisão do PR 2 (C4): a conta que volta depois de removida segue a regra de nascimento, não a marca antiga.
+          const naFila = await nasceNaFila(a);
           await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)},
+            entra_na_troca_automatica = ${naFila},
             email = coalesce(${a.email ?? null}, email), organizacao = coalesce(${a.organizacao ?? null}, organizacao) where ${doDono()} and id = ${existente!.id}`;
           id = existente!.id;
           mudou = true;
         } else {
           id = existente!.id;
           if (a.plano !== null && (a.plano !== existente!.plano || corporativaDe(a) !== existente!.corporativa)) {
-            await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)} where ${doDono()} and id = ${id}`;
+            // Revisão do PR 2 (C4): a conta que passa a ser corporativa sai da fila (o consentimento dela é outro: a pessoa
+            // a liga de novo em Provedores, com o aviso dos termos). A que deixa de ser corporativa fica como estava.
+            const saiDaFila = corporativaDe(a) && !existente!.corporativa;
+            await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)}${saiDaFila ? conn`, entra_na_troca_automatica = false` : conn``} where ${doDono()} and id = ${id}`;
             mudou = true;
           }
           // ADR-105: preenche as contas criadas antes de 2026-10-15 e acompanha a troca de organização. Ausente não apaga.

@@ -285,8 +285,8 @@ function desfechoDaTroca(p: PayloadTrocaDeIa, nomeDoBot: string): string {
   const tasks = p.tasks === 1 ? "A task" : "As tasks";
   switch (p.decisao) {
     case "esperar": return `${tasks} esperam o ${de}, como você escolheu.`;
-    case "levar": return `${tasks} foram para o ${para}.`;
-    case "expirou": return `Sem escolha em 10 min: ${tasks.toLowerCase()} foram para o ${para}, como recomendado.`;
+    case "levar": return p.contaDe ? `${tasks} seguiram noutra conta do ${de}.` : `${tasks} foram para o ${para}.`;
+    case "expirou": return `Sem escolha em 10 min: ${tasks.toLowerCase()} ${p.contaDe ? `seguiram noutra conta do ${de}` : `foram para o ${para}`}, como recomendado.`;
     case "voltou": return `O ${de} voltou: ${p.fixo ? `o ${nomeDoBot} seguiu` : `${tasks.toLowerCase()} seguiram`} de onde parou.`;
     case "outra_ia": return `O ${nomeDoBot} segue no ${para} até o ${de} voltar.`;
     case "conta": return `O ${nomeDoBot} seguiu ${p.conta ? `na conta ${de} · ${p.conta.apelido}` : "noutra conta"}.`;
@@ -314,7 +314,7 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
   const de = nomeDaIa(t.iaDe);
   const para = t.iaPara ? nomeDaIa(t.iaPara) : null;
   const volta = t.voltaEm !== null ? quandoVolta(t.voltaEm, p.agora) : null;
-  const dados = ` data-id="${esc(t.agenteId)}" data-conversa="${esc(m.conversaId)}"`;
+  const dados = ` data-id="${esc(t.agenteId)}" data-conversa="${esc(m.conversaId)}" data-troca="${esc(t.trocaId)}"`;
   if (t.fixo) {
     const ate = volta ? volta.replace(/^às /, "") : null;
     const opcoes = [
@@ -325,15 +325,22 @@ export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agor
     return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>O ${esc(bot)} está parado${ate ? ` até ${esc(ate)}` : ""}</b><p>${esc(texto)}</p>${opcoes ? `<ul class="troca-opcoes">${opcoes}</ul>` : ""}</div></div>`;
   }
   const tasks = t.tasks === 1 ? "a task" : `as ${t.tasks} tasks`;
+  // Revisão do PR 2 (I1): no ChatGPT, a conta da sessão parou e "levar" é para outra conta dele (a sessão fica na que parou).
+  const mesmaIa = t.contaDe !== undefined && t.iaPara === t.iaDe;
+  const destino = mesmaIa ? `outra conta do ${de}` : `o ${para}`;
   const levar = t.recomendacao === "levar" && para !== null;
   const falta = t.voltaEm !== null ? t.voltaEm - p.agora : null;
   const frase = levar
-    ? `Para ${tasks}, recomendo levar para o ${para}: ${falta !== null ? `esperar seriam ${quantoFalta(falta)} paradas` : `o ${de} não disse quando volta`}.`
+    ? `Para ${tasks}, recomendo levar para ${destino}: ${falta !== null ? `esperar seriam ${quantoFalta(falta)} paradas` : `o ${de} não disse quando volta`}.`
     : `Para ${tasks}, recomendo esperar: ${falta !== null ? `o ${de} volta em ${quantoFalta(falta)} e ` : ""}elas continuam de onde pararam.`;
+  // C5: a outra IA existe, mas não na máquina do bot — o cartão diz por que não oferece "levar".
+  const fora = !para && t.foraDaMaquina ? `O ${nomeDaIa(t.foraDaMaquina.ia)} não está ${t.foraDaMaquina.maquina ? `em ${t.foraDaMaquina.maquina}, ` : "n"}a máquina do ${bot}. ` : "";
   const esperar = opcaoDaTroca({ act: "troca-esperar", dados, rotulo: `Esperar o ${de}`, consequencia: volta ? `Voltam ${volta} com tudo o que já fizeram.` : "Voltam quando a conta voltar, com tudo o que já fizeram.", recomendada: !levar });
-  const levarOp = para ? opcaoDaTroca({ act: "troca-levar", dados, rotulo: `Levar as tasks para o ${para}`, consequencia: "Seguem agora, mas recomeçam do resumo de cada frente.", recomendada: levar }) : "";
+  const levarOp = para ? opcaoDaTroca({ act: "troca-levar", dados, rotulo: mesmaIa ? `Seguir noutra conta do ${de}` : `Levar as tasks para o ${para}`, consequencia: mesmaIa ? "Seguem agora, mas recomeçam do resumo: a sessão fica na conta que parou." : "Seguem agora, mas recomeçam do resumo de cada frente.", recomendada: levar }) : "";
   const rodape = levar ? "Se você não escolher em 10 min, eu sigo a recomendação." : "Se você não escolher, eu sigo a recomendação.";
-  return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>O ${esc(de)} chegou ao limite${volta ? ` · volta ${esc(volta)}` : ""}</b><p>${para ? `A conversa segue no ${esc(para)}. ` : ""}${esc(frase)}</p><ul class="troca-opcoes">${levar ? levarOp + esperar : esperar + levarOp}</ul><small class="troca-rodape">${esc(rodape)}</small></div></div>`;
+  const titulo = mesmaIa ? `A conta ${t.contaDe!.apelido} do ${de} chegou ao limite` : `O ${de} chegou ao limite`;
+  const conversa = para && !mesmaIa ? `A conversa segue no ${para}. ` : "";
+  return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>${esc(titulo)}${volta ? ` · volta ${esc(volta)}` : ""}</b><p>${esc(conversa)}${esc(fora)}${esc(frase)}</p><ul class="troca-opcoes">${levar ? levarOp + esperar : esperar + levarOp}</ul><small class="troca-rodape">${esc(rodape)}</small></div></div>`;
 }
 
 /**

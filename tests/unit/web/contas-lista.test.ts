@@ -147,6 +147,9 @@ describe("lista única de contas (ADR-102)", () => {
     expect(html).toContain(`role="switch" aria-checked="false" data-act="cl-fila" data-id="${LEAPY.id}"`);
     expect(html).toContain("Quando uma conta acabar");
     for (const r of REGRAS_DA_FILA) expect(html).toContain(`<b>${r.titulo}:</b>`);
+    // Revisão do PR 2 (I1): só no Claude nada se perde; no ChatGPT a task com sessão recomeçaria do resumo noutra conta.
+    expect(REGRAS_DA_FILA[0]?.texto).toContain("No Claude, nada se perde.");
+    expect(REGRAS_DA_FILA[0]?.texto).toContain("No ChatGPT, a task com sessão recomeçaria do resumo noutra conta");
     expect(html).toContain("Outra IA:</b> só nos bots em Automático");
     expect(html).toContain("o Nod recomenda esperar ou trocar");
     // Fora da fila e livre: a linha diz isso (no lugar de "Disponível").

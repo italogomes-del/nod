@@ -276,7 +276,7 @@ function chaveDaFila(c: ContaIa): string {
 
 /** ADR-108 (R8, canvas Main): não há regra para configurar — só como o Nod age quando uma conta acaba. */
 export const REGRAS_DA_FILA: readonly { titulo: string; texto: string }[] = [
-  { titulo: "Mesma IA", texto: "passa sozinho para a próxima conta ligada na fila. Nada se perde, nem nas tasks." },
+  { titulo: "Mesma IA", texto: "passa sozinho para a próxima conta ligada na fila. No Claude, nada se perde. No ChatGPT, a task com sessão recomeçaria do resumo noutra conta: o Nod recomenda esperar ou seguir, e você decide." },
   { titulo: "Outra IA", texto: "só nos bots em Automático. A conversa segue na hora." },
   { titulo: "Tasks em andamento", texto: "trocar de IA faz a task recomeçar do resumo. Por isso o Nod recomenda esperar ou trocar, pela hora em que a conta volta, e você decide." },
 ];
