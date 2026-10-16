@@ -142,3 +142,23 @@ describe("NOD-171 (revisão): a IA 'atual' do modo compartilhado", () => {
     expect(iaAtualDoCatalogo(catalogo(null, {}))).toBe("claude-cli");
   });
 });
+
+describe("o anexo decide a IA do Automático (NOD-285)", () => {
+  const ordem = ["codex-cli", "claude-cli"] as const;
+  it("só considera a IA pronta que lê todos os tipos; o limite continua valendo entre elas", () => {
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"], ordem, tiposDeAnexo: ["pdf"] }).harness).toBe("claude-cli");
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli"], ordem, tiposDeAnexo: ["imagem", "texto"] }).harness).toBe("codex-cli");
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"], ordem, tiposDeAnexo: [] }).harness).toBe("codex-cli");
+    // A única que lê está no limite: vale a regra de "todas no limite" (a primeira pronta entre as que leem).
+    expect(resolverHarness({ modelo: "auto", prontos: ["codex-cli", "claude-cli"], ordem, noLimite: ["claude-cli"], tiposDeAnexo: ["pdf"] }).harness).toBe("claude-cli");
+  });
+  it("nenhuma pronta lê: executor_indisponivel com anexo_nao_lido, o tipo e a IA que o Automático pegaria", () => {
+    let erro: unknown;
+    try { resolverHarness({ modelo: "auto", prontos: ["codex-cli"], ordem, tiposDeAnexo: ["imagem", "pdf"] }); } catch (e) { erro = e; }
+    expect(causaHarnessIndisponivel(erro)).toEqual({ harness: "codex-cli", motivo: "anexo_nao_lido", tipo: "pdf" });
+    expect(motivoHarnessIndisponivel("codex-cli", { estado: "pronto", versao: "x", em: 0 }, undefined, "pdf")).toBe("nenhuma IA pronta agora lê PDF; deixe o Claude Code pronto ou cole o conteúdo como texto");
+  });
+  it("a IA fixa segue a regra de antes (quem confere é a entrada)", () => {
+    expect(resolverHarness({ harness: "codex-cli", modelo: "auto", prontos: ["codex-cli"], tiposDeAnexo: ["pdf"] }).harness).toBe("codex-cli");
+  });
+});

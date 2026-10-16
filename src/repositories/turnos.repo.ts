@@ -1,3 +1,4 @@
+import type { MotivoRenovacaoNegada } from "../contracts/ponte.ts";
 import { HARNESS_LEGADO, type IdHarness, type PreferenciaHarness } from "../contracts/harness.ts";
 import type { TurnoPendenteDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
@@ -7,6 +8,7 @@ import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from 
 import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
+import { porChegada } from "../domain/ordem-das-falas.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
@@ -139,6 +141,13 @@ export type NovoTurno = {
   trabalhoId?: string | null;
   /** ADR-086: "me chame às 16:00" — a fila só entrega este turno a partir daqui. Ausente/null = na hora. */
   acordarEm?: number | null;
+  /**
+   * NOD-287 (2026-10-15): o turno que este repete ou continua. A marca da web (0033, ADR-062 §6) dele vem junto no
+   * MESMO INSERT — a repetição por limite, troca de conta/IA ou conta ausente retoma a fala com a página no contexto e
+   * não pode ganhar as aprovações de um turno limpo. A marca é lida no INSERT: se a origem for marcada depois, a
+   * cópia já nasceu (o `contaminar` posterior vale só para a origem).
+   */
+  contaminadoDe?: string | null;
 };
 
 export type Assentamento = {
@@ -176,13 +185,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, contaminado_em)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
-          ${dataOuNull(t.acordarEm)})
+          ${dataOuNull(t.acordarEm)},
+          ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },
@@ -339,8 +349,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * só na adoção dentro da carência do boot: o lease venceu enquanto o servidor estava fora, mas o turno segue
      * `despachando` (o varredor não o assentou).
      */
-    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean }> {
-      const [l] = await conn<{ ativo: boolean }[]>`
+    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean; motivo?: Exclude<MotivoRenovacaoNegada, "sem_plano"> }> {
+      const [l] = await conn<{ ativo: boolean; parado: boolean }[]>`
         update turnos set
           lease_ate = case when estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao) then ${data(agora + LEASE_MS)} else lease_ate end,
           attempted = attempted or ${sinais.attempted ?? false},
@@ -350,8 +360,12 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           sessao_cli = coalesce(${o.sessaoCli ?? null}, sessao_cli)
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
           and (lease_ate > ${data(agora)} or (${o.aceitaVencido === true} and estado = 'despachando'))
-        returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo`;
-      return { ativo: l?.ativo === true };
+        returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo,
+          (estado <> 'despachando' or parar_solicitado_em is not null) as parado`;
+      // NOD-264 (C20): por que negou, em código (vira a causa do turno_interrompido).
+      if (!l) return { ativo: false, motivo: "lease_vencido" };
+      if (l.ativo) return { ativo: true };
+      return { ativo: false, motivo: l.parado ? "parado" : "agente_excluido" };
     },
 
     /** Write-ahead (ADR-009): promptSubmitted é gravado ANTES de escrever no stdin. Só liga, nunca desliga. */
@@ -491,9 +505,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /** Junta mais uma entrada à retomada que ainda está na fila. Não toca no estado (sem-requeue segue valendo). */
-    async juntarEntrada(id: string, texto: string): Promise<Turno | null> {
+    /** NOD-285 (2026-10-15): com `anexos`, eles se somam aos da retomada na fila (união, sem repetir, na ordem). */
+    async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
-        update turnos set entrada_texto = entrada_texto || ${`\n\n${texto}`}
+        update turnos set entrada_texto = entrada_texto || ${`\n\n${texto}`},
+          entrada_anexos = array(select a from unnest(entrada_anexos || ${anexos as string[]}::uuid[]) with ordinality as u(a, i) group by a order by min(i))
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente'
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
@@ -605,6 +621,42 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-15 (NOD-264, E8; emenda da ADR-045 sobre a ADR-010): a entrega tardia com SUCESSO de um turno que
+     * a queda assentou (`maquina_sem_contato`/`reinicio_servidor`) promove o turno a `concluido` — o trabalho terminou, só
+     * a máquina sumiu antes de entregar. Condicional: só o interrompido por queda muda (o UPDATE decide a corrida com a
+     * retomada automática), e nunca para 'pendente' (sem requeue). Quem chama já conferiu que não há retomada criada.
+     */
+    async concluirTardia(id: string, a: Omit<Assentamento, "estado" | "motivoInterrupcao" | "motivoFalha">): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set
+          estado = 'concluido',
+          motivo_interrupcao = null,
+          motivo_falha = null,
+          attempted = attempted or ${a.sinais?.attempted ?? false},
+          rejected = rejected or ${a.sinais?.rejected ?? false},
+          prompt_submitted = prompt_submitted or ${a.sinais?.promptSubmitted ?? false},
+          produced_output = produced_output or ${a.sinais?.producedOutput ?? false},
+          custo_usd = coalesce(${a.custoUsd ?? null}, custo_usd),
+          tokens_entrada = coalesce(${a.tokensEntrada ?? null}, tokens_entrada),
+          tokens_saida = coalesce(${a.tokensSaida ?? null}, tokens_saida),
+          sessao_cli = coalesce(${a.sessaoCli ?? null}, sessao_cli),
+          custo_sessao_usd = coalesce(${a.custoSessaoUsd ?? null}, custo_sessao_usd),
+          lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'interrompido'
+          and motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor')
+          and not exists (select 1 from turnos r where r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = ${id})
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /** NOD-264 (E8): algum turno já retoma este (na fila, rodando ou acabado)? */
+    async temRetomada(retomaTurnoId: string): Promise<boolean> {
+      const [l] = await conn<{ tem: boolean }[]>`
+        select exists (select 1 from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId}) as tem`;
+      return l?.tem ?? false;
+    },
+
+    /**
      * Transição terminal e idempotente (ADR-010/021): só o que está vivo vira 'interrompido'.
      * NOD-241 (0076): `ultimoSinalEm` grava o último sinal de vida (o primeiro valor vence). `leaseVencidoEm` é a guarda
      * do varredor: `vencidos()` lê sem trava, e o turno que renovou o lease entre a leitura e este UPDATE não é
@@ -663,7 +715,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * Mensagem nova no meio do trabalho (definido em 2026-10-01, ADR-067): as falas da pessoa que esperavam na fila
      * desta conversa e deste agente entram no turno VIVO — saem interrompido/'absorvido' apontando para ele, como na
      * fila lida junta, mas o texto vai à sessão do CLI em vez de mudar a entrada. Só fala da pessoa (conversa), e só
-     * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. Quem decide se o turno vivo aceita
+     * sem anexo: o anexo espera o próximo turno, que o baixa e o entrega inteiro. NOD-286 (2026-10-15): e só as que
+     * vieram ANTES da primeira fala pendente com anexo — a que veio depois do print espera com ele, para o bot responder
+     * na ordem em que a pessoa mandou (desempate por id, como `porChegada`). Quem decide se o turno vivo aceita
      * é o caso de uso (absorverNaSessao).
      * definido em 2026-10-07 (#189): com `ids`, só estas — as que o app confirmou ter escrito na sessão
      * (confirmarNaSessao); sem, todas as da fila, como antes (app que não confirma).
@@ -676,14 +730,20 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           and estado = 'pendente' and origem = 'conversa' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
           and trabalho_id is null
           ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
+          and not exists (
+            select 1 from turnos a
+            where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.conversa_id = ${turno.conversaId} and a.agente_id = ${turno.agenteId}
+              and a.estado = 'pendente' and a.origem = 'conversa' and a.mensagem_origem_id is not null and a.trabalho_id is null and a.id <> ${turno.id}
+              and cardinality(a.entrada_anexos) > 0 and (a.criado_em, a.id) < (turnos.criado_em, turnos.id))
         returning ${conn.unsafe(COLUNAS)}`;
-      return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+      return linhas.map(paraTurno).sort(porChegada);
     },
 
     /**
      * definido em 2026-10-07 (ADR-083, #193): as falas que esperam na faixa DESTE trabalho (a da pessoa na tela da task
      * e o recado da conversa, os dois com mensagem de origem) entram no turno vivo dele, como absorverNaSessao faz com a
-     * conversa. Sem anexo, e nunca a retomada de uma decisão (que não tem mensagem de origem).
+     * conversa. Sem anexo, e nunca a retomada de uma decisão (que não tem mensagem de origem). NOD-286: também para na
+     * primeira fala pendente com anexo da faixa (a posterior espera com ela).
      * revisto em 2026-10-08 (revisão do épico, S18): com `ids`, só estas — as que o app confirmou (confirmarNaSessao).
      */
     async absorverDoTrabalho(turno: Turno, ids?: readonly string[]): Promise<Turno[]> {
@@ -693,8 +753,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${turno.trabalhoId}
           and estado = 'pendente' and mensagem_origem_id is not null and cardinality(entrada_anexos) = 0 and id <> ${turno.id}
           ${ids ? conn`and id = any(${ids as string[]}::uuid[])` : conn``}
+          and not exists (
+            select 1 from turnos a
+            where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.trabalho_id = ${turno.trabalhoId}
+              and a.estado = 'pendente' and a.mensagem_origem_id is not null and a.id <> ${turno.id}
+              and cardinality(a.entrada_anexos) > 0 and (a.criado_em, a.id) < (turnos.criado_em, turnos.id))
         returning ${conn.unsafe(COLUNAS)}`;
-      return linhas.map(paraTurno).sort((a, b) => a.criadoEm - b.criadoEm);
+      return linhas.map(paraTurno).sort(porChegada);
     },
 
     /**
@@ -819,7 +884,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         select ${conn.unsafe(COLUNAS)} from turnos
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente'
           ${conversaId ? conn`and conversa_id = ${conversaId}` : conn``}
-        order by criado_em`;
+        order by criado_em, id`;
       return linhas.map(paraTurno);
     },
 

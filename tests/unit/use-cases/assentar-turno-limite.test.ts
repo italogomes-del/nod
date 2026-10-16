@@ -202,3 +202,25 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     });
   });
 });
+
+describe("NOD-287: a fala repetida no limite leva a marca da web", () => {
+  for (const suja of [true, false]) {
+    it(`conversa no Automático, origem ${suja ? "contaminada ⇒ repetida contaminada" : "limpa ⇒ repetida limpa"}`, async () => {
+      const c = await cenario();
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+      const [repetido] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(repetido).toBeDefined();
+      expect(await c.deps.repos.turnos.contaminado(repetido!.id)).toBe(suja);
+    });
+
+    it(`task de fundo no limite, origem ${suja ? "contaminada ⇒ volta contaminada" : "limpa ⇒ volta limpa"}`, async () => {
+      const c = await cenario({ task: true });
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli"]);
+      const [volta] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(volta).toMatchObject({ origem: "retomada", trabalhoId: c.trabalhoId });
+      expect(await c.deps.repos.turnos.contaminado(volta!.id)).toBe(suja);
+    });
+  }
+});

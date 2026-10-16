@@ -7,6 +7,7 @@ import type { Entrega } from "../contracts/ponte.ts";
 import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
+import { causaDaEntrega } from "../domain/stream-json.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
 import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
@@ -75,6 +76,32 @@ export type SaidaAssentarTurno = {
   /** 0068: a IA do turno entrou no limite ou saiu dele — a ponte esquece o que leu dos limites e avisa a tela. */
   limiteMudou?: boolean;
 };
+
+/** NOD-264 (E8): o "Retomar" do turno que a entrega tardia com sucesso promoveu fecha por esta regra. */
+export const REGRA_ENTREGA_TARDIA = "regra:entrega_tardia_com_sucesso" as const;
+/** NOD-261 (G3): um turno posterior do mesmo trabalho concluiu; os "Retomar" dos anteriores fecham por esta regra. */
+export const REGRA_RETOMAR_SUPERADO = "regra:retomar_superado" as const;
+
+function decididaPorRegra(deps: Deps, d: { id: string; tipo: string; agenteId: string; conversaId: string; turnoId: string | null }, regra: `regra:${string}`, agora: number): RuntimeEvent {
+  const autoria = autoriaAgente({ agenteId: d.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: regra });
+  return evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { decisao_id: d.id, tipo: d.tipo, regra } });
+}
+
+async function fecharRetomarDoTurno(deps: Deps, turno: Turno, regra: typeof REGRA_ENTREGA_TARDIA, agora: number): Promise<RuntimeEvent[]> {
+  const events: RuntimeEvent[] = [];
+  for (const d of await deps.repos.decisoes.doTurno(turno.id)) {
+    if (d.tipo !== "retomar_turno" || (d.estado !== "pendente" && d.estado !== "reaberta")) continue;
+    const fechada = await deps.repos.decisoes.fecharPorRegra(d.id, { regra, regraVersao: 1, agora });
+    if (fechada) events.push(decididaPorRegra(deps, fechada, regra, agora));
+  }
+  return events;
+}
+
+async function fecharRetomarSuperados(deps: Deps, turno: Turno, agora: number): Promise<RuntimeEvent[]> {
+  if (!turno.trabalhoId) return [];
+  const fechadas = await deps.repos.decisoes.fecharRetomarAnteriores(turno.trabalhoId, turno.id, { regra: REGRA_RETOMAR_SUPERADO, regraVersao: 1, agora });
+  return fechadas.map((d) => decididaPorRegra(deps, d, REGRA_RETOMAR_SUPERADO, agora));
+}
 
 /** Código do erro para o log (SQLSTATE ou nome); nunca a mensagem, que pode carregar dado. */
 function motivoDoErro(e: unknown): string {
@@ -159,7 +186,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // Com a linha do turno já travada (a ordem de sempre: turno, depois os recados, depois o trabalho).
   const confirmadas = entrega.mensagensEntregues?.length && !tardia ? await confirmarNaSessao(deps, { turnoId: turno.id, executor, ids: entrega.mensagensEntregues }) : null;
   const desfecho = desfechoDaEntrega(turno, resultado, agora);
-  const interrompido = tardia || desfecho.estado === "interrompido";
+  // NOD-264 (E8, emenda da ADR-045 sobre a ADR-010): o trabalho terminou com sucesso e só a máquina sumiu antes de
+  // entregar; sem retomada criada, a entrega promove o turno a `concluido` (a fala entra inteira, não parcial).
+  const promoverTardia = tardia && turno.estado === "interrompido" && resultado.desfecho === "sucesso" && !resultado.causaSemIa
+    && (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor")
+    && !(await deps.repos.turnos.temRetomada(turno.id));
+  const interrompido = (tardia && !promoverTardia) || desfecho.estado === "interrompido";
   // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia).
   const quedaDaMaquina = !tardia && desfecho.motivoInterrupcao === "maquina_sem_contato";
   // Lido AGORA: assentar zera lease_ate, e o último sinal de vida (lease − LEASE_MS) é o começo do aviso.
@@ -281,6 +313,25 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(evento(deps.escopo, { kind: "negacao", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { nome, motivo: negacao.motivo, classe: negacao.classe, terminal: false, mensagem_id: m?.id ?? null, ...(causa ? { causa_nativa: causa, vezes } : {}) } }));
   }
 
+  if (tardia && promoverTardia) {
+    const promovido = await deps.repos.turnos.concluirTardia(turno.id, {
+      sinais: resultado.sinais,
+      custoUsd,
+      tokensEntrada: resultado.tokens.entrada,
+      tokensSaida: resultado.tokens.saida,
+      sessaoCli: resultado.sessaoCli,
+      custoSessaoUsd: resultado.custoUsd,
+    });
+    if (promovido) {
+      events.push(...(await fecharRetomarDoTurno(deps, promovido, REGRA_ENTREGA_TARDIA, agora)));
+      events.push(...(await fecharRetomarSuperados(deps, promovido, agora)));
+      events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: custoUsd, ferramentas: resultado.ferramentasChamadas.length, regra: REGRA_ENTREGA_TARDIA } }));
+      events.push(...(await sincronizarDoTurno(deps, promovido)));
+      return { data: { turno: promovido, mensagem, duplicada: false, tardia: true }, events };
+    }
+    // A retomada chegou antes (corrida com o varredor): a fala volta a ser anexo parcial, como hoje.
+    await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  }
   if (tardia) {
     // Entrega depois do varredor/parar: aceita como anexo parcial, sem reabrir (ADR-010).
     events.push(...(await sincronizarDoTurno(deps, turno)));
@@ -393,7 +444,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: "confiavel",
     });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
-    events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, custo_usd: custoUsd } }));
+    events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, custo_usd: custoUsd, ...(causaDaEntrega(resultado.causa) ? { causa: causaDaEntrega(resultado.causa) } : {}) } }));
   } else {
     events.push(evento(deps.escopo, { kind: "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: "concluido", custo_usd: custoUsd, ferramentas: resultado.ferramentasChamadas.length } }));
   }
@@ -401,6 +452,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // definido em 2026-09-28 (0032): aprovação já decidida que este turno não chegou a receber (a espera acabou
   // um instante antes do clique) vira UMA retomada — nunca duas, e nunca nenhuma.
   events.push(...(await continuarAprovacoesDoTurno(deps, assentado)));
+  // NOD-261 (G3): o trabalho concluiu neste turno — os "Retomar" de turnos anteriores dele ficaram sem objeto.
+  if (desfecho.estado === "concluido") events.push(...(await fecharRetomarSuperados(deps, assentado, agora)));
   // ADR-086: o turno marcou uma volta ("me chame às 16:00") — ela nasce agora, antes de o trabalho reler o estado.
   events.push(...(await voltaMarcadaAoAssentar(deps, turno, desfecho.estado === "concluido")));
   // ADR-099 (parte 2): o comando que o turno deixou esperando — se já acabou, a volta nasce agora; se o turno terminou
@@ -481,6 +534,7 @@ async function aposLimite(
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   // Só códigos e ids (o Marlon lê `ia_trocada` no log de produção depois do deploy).
@@ -534,6 +588,7 @@ async function aposTrocaDeConta(
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   log("info", "conta_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, harness: p.ia, de: troca.de, para: troca.para });
@@ -755,6 +810,7 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   return novo ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } })] : [];
 }
@@ -842,10 +898,12 @@ async function aposLimiteNoFundo(
     harness: turno.harness,
     executor: turno.executor,
     acordarEm: p.renovaEm,
+    // A marca de quem leu algo de fora (ADR-062) segue para a volta no mesmo INSERT (NOD-287).
+    contaminadoDe: turno.id,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
-  // A marca de quem leu algo de fora (ADR-062) segue para a volta, como na volta marcada (me-chame-as.ts).
-  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
+  // A entrada de fora também marca a volta, como na volta marcada (me-chame-as.ts).
+  if (turno.entradaConfianca !== "confiavel") await deps.repos.turnos.contaminar(volta.id, agora);
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, custo_usd: p.custoUsd } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId, acordar_em: p.renovaEm } }),
@@ -917,6 +975,7 @@ async function aposContaSemAcesso(
       reenvios: turno.reenvios + 1,
       executor: p.executor,
       trabalhoId: turno.trabalhoId ?? null,
+      contaminadoDe: turno.id,
     });
     if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
     return events;

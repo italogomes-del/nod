@@ -335,7 +335,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; pergunta_vencida: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
@@ -346,8 +346,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           exists (select 1 from esperas e where e.tenant_id = ${escopo.tenantId} and e.trabalho_id = ${id} and e.estado = 'rodando') as comando,
           exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
             where x.tenant_id = ${escopo.tenantId} and x.id = ${id} and dep.estado not in ('terminado', 'parado', 'falhou')) as esperando,
+          -- NOD-261: o "Retomar" só conta se for do último turno terminal; o de um turno anterior ficou superado.
           exists (select 1 from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
-            where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')) as decisao,
+            where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')
+              and (d.tipo <> 'retomar_turno' or t.id = u.id)) as decisao,
+          -- NOD-264 (C21): a última pergunta do trabalho venceu sem resposta e foi feita pelo último turno terminal.
+          coalesce((select d.estado = 'vencida' and d.turno_id = u.id from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+            where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.tipo <> 'retomar_turno'
+            order by d.criado_em desc, d.id desc limit 1), false) as pergunta_vencida,
           -- definido em 2026-10-08 (revisão do épico, S3): pedido a colega feito por um turno do trabalho que não voltou —
           -- handoff com tarefaId sem peer_ask da mesma tarefa (a regra de pedidosEmAberto). O trabalho do colega já
           -- acabado sem peer_ask (a pessoa o parou) não segura este: senão ele ficaria rodando para sempre.
@@ -360,12 +366,12 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           u.estado as ultimo_estado, u.motivo_interrupcao as ultimo_motivo
         from (select 1) um
         left join lateral (
-          select estado, motivo_interrupcao from turnos t
+          select id, estado, motivo_interrupcao from turnos t
           where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ...(l.pergunta_vencida ? { perguntaVencida: true } : {}), ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */

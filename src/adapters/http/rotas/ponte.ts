@@ -311,7 +311,7 @@ export function criarPonteHttpServidor(d: {
       exigir(b.eventos === undefined || (Array.isArray(b.eventos) && b.eventos.length === 0));
       const s = sinais(b.sinais);
       const plano = c.planos.get(turnoId) ?? await adotado(ctx, c, turnoId);
-      if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP }); return; }
+      if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP, motivo: "sem_plano" }); return; }
       c.ultimo = d.agora();
       const sessaoCli = d.descartarSessao ? undefined : sessaoDaRenovacao(b.sessaoCli);
       // ADR-067: as falas da sessão viva e o pedido de mensagens novas viajam na renovação.

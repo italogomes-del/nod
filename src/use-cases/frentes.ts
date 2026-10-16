@@ -88,6 +88,8 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
       profundidade: turno.profundidade,
       entradaTexto: entradaDaFrente({ titulo: trabalho.titulo, pedido: f.pedido, deRotina: deRotina || de?.origem === "rotina", pedidoDe: de?.pedidoPorNome ?? null, repo: f.repo, branchBase: f.branch_base, podeEmpurrar: f.pode_empurrar }),
+      // NOD-285 (2026-10-15): o arquivo que a pessoa anexou ao pedido vai junto para cada frente, que é quem faz o trabalho.
+      entradaAnexos: turno.entradaAnexos,
       entradaConfianca: turno.entradaConfianca,
       sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
       modelo: agente?.modelo ?? turno.modelo,

@@ -1,3 +1,4 @@
+import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { ConversaDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
 import type { IdHarness } from "../contracts/harness.ts";
@@ -152,23 +153,26 @@ async function envioRepetido(deps: Deps, existente: Mensagem, texto: string, ane
  */
 export async function mensagemExecutorIndisponivel(
   deps: Deps,
-  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; semIaOnde?: "maquinas" | "maquina_do_bot" },
+  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; anexoNaoLido?: TipoAnexo; semIaOnde?: "maquinas" | "maquina_do_bot" },
 ): Promise<Mensagem | null> {
   // NOD-171: o harness escolhido e o inventário DELE; sem harness (turno antigo, catcher), o do motor.
   const nome = p.harness ?? motorDe(p.executor);
   // #313: sem IA para nomear, quem chama diz onde faltou (envio: nas máquinas; despacho: na máquina do bot).
-  const motivo = !p.harness && p.semIaOnde ? motivoSemIaPronta(p.semIaOnde, p.inventario) : motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido);
+  const motivo = !p.harness && p.semIaOnde ? motivoSemIaPronta(p.semIaOnde, p.inventario) : motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido, p.anexoNaoLido);
   // NOD-220: a IA que negou vai no payload; a web decide "já voltou" pela sonda DELA, nunca pela do motor em uso.
   // Só o harness do turno é IA que negou: sem ele, quem faltou foi o executor (motorDe), e `nome` "claude-cli" é o motor
   // local, não a IA. Gravar `ia` aí prenderia a web esperando o Claude Code num bot que roda no Codex (revisão do #303).
-  const ia = iaDaNegacao(p.harness);
+  // NOD-285: na negação por anexo a IA nomeada está pronta (só não lê o arquivo); com `ia`, a web ofereceria tentar de novo
+  // assim que ela "voltasse", e a fala cairia na mesma negação. Sem `ia`, a negação é só a frase.
+  const ia = p.anexoNaoLido ? undefined : iaDaNegacao(p.harness);
   return deps.repos.mensagens.criar({
     conversaId: p.conversaId,
     turnoId: p.turnoId,
     autoria: autoriaAgente({ agenteId: p.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
-    texto: redigir("executor-indisponivel", p.agora, { motivo, desde: horaDaFrase(p.inventario.em, p.agora) }),
-    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(ia ? { ia } : {}), ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}) },
+    // NOD-285 (revisão do Gil no #345): o tipo do arquivo vai no payload para a web dar à negação o aviso próprio.
+    texto: p.anexoNaoLido ? redigir("anexo-nao-lido", p.agora, { motivo }) : redigir("executor-indisponivel", p.agora, { motivo, desde: horaDaFrase(p.inventario.em, p.agora) }),
+    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(ia ? { ia } : {}), ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}), ...(p.anexoNaoLido ? { anexo: p.anexoNaoLido } : {}) },
     confianca: "confiavel",
   });
 }

@@ -151,7 +151,7 @@ describeIntegracao("revisão #188 — travas com duas conexões", () => {
     expect((await ler((r) => r.trabalhos.buscar(m.trabalhoId)))?.estado).toBe("parado");
   });
 
-  it("S2: duas decisões da mesma task fechando juntas (dispensa e vencimento) deixam a task terminada, não presa", async () => {
+  it("S2: duas decisões da mesma task fechando juntas (dispensa e vencimento) fecham a task, não presa — a vencida a deixa falhou (NOD-264, C21)", async () => {
     const m = await montar();
     const [d1, d2] = await escopado(async (trx) => {
       const d = deps(trx);
@@ -171,7 +171,7 @@ describeIntegracao("revisão #188 — travas com duas conexões", () => {
     expect(dispensa.status).toBe("fulfilled");
     expect(varredura.status).toBe("fulfilled");
     expect((await ler((r) => r.decisoes.buscar(d2.id)))?.estado).toBe("vencida");
-    expect((await ler((r) => r.trabalhos.buscar(m.trabalhoId)))?.estado).toBe("terminado");
+    expect((await ler((r) => r.trabalhos.buscar(m.trabalhoId)))?.estado).toBe("falhou");
   });
 
   it("S3: a resposta do colega chegando durante a entrega de quem pediu deixa a task rodando (nunca terminada)", async () => {

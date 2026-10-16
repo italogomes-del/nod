@@ -29,6 +29,7 @@ import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts"
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
@@ -339,9 +340,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contarAbandonados() {
         return doTenant(b.outbox).filter((o) => o.ownerId === escopo.pessoaId && o.abandonadoEm !== null).length;
       },
-      async cancelarPendentesDaPessoa(em: number) {
+      async cancelarPendentesDaPessoa(em: number, conversaId: string | null = null) {
         let n = 0;
         for (const o of doTenant(b.outbox)) {
+          if (conversaId !== null && b.events.find((e) => e.id === o.eventoId)?.conversaId !== conversaId) continue;
           if (o.ownerId === escopo.pessoaId && o.entregueEm === null && o.abandonadoEm === null && o.canceladoEm === null) {
             o.canceladoEm = em;
             n += 1;
@@ -1086,7 +1088,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           aguardandoDespertar: dele.some((t) => t.estado === "pendente" && (t.acordarEm ?? 0) > agora()),
           aguardandoComando: b.esperas.some((e) => e.tenantId === escopo.tenantId && e.trabalhoId === id && e.estado === "rodando"),
           esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
-          decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta")),
+          decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta") && (d.tipo !== "retomar_turno" || d.turnoId === ultimo?.id)),
+          ...((() => {
+            const pergunta = doTenant(b.decisoes).filter((d) => d.turnoId !== null && ids.has(d.turnoId) && d.tipo !== "retomar_turno").sort((x, y) => Date.parse(y.criadoEm) - Date.parse(x.criadoEm))[0];
+            return pergunta && pergunta.estado === "vencida" && pergunta.turnoId === ultimo?.id ? { perguntaVencida: true } : {};
+          })()),
           aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
             && !doTenant(b.mensagens).some((r) => r.conversaId === h.conversaId && r.payload?.kind === "peer_ask" && h.payload?.kind === "handoff" && r.payload.tarefaId === h.payload.tarefaId)
             && !doTenant(b.trabalhos).some((c) => h.payload?.kind === "handoff" && c.id === h.payload.trabalhoId && ["terminado", "parado", "falhou"].includes(c.estado))),
@@ -1202,10 +1208,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (const t of alvo) t.acordarEm = null;
         return alvo.length;
       },
-      async juntarEntrada(id: string, texto: string) {
+      async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
         if (!t) return null;
         t.entradaTexto = `${t.entradaTexto}\n\n${texto}`;
+        t.entradaAnexos = [...new Set([...t.entradaAnexos, ...anexos])];
         return t;
       },
       async raizDaCadeia(id: string) {
@@ -1285,6 +1292,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           acordarEm: t.acordarEm ?? null,
         };
         b.turnos.push(turno);
+        // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
+        if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         return turno;
       },
       async buscar(id) {
@@ -1320,9 +1329,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async renovarLease(id, machineId, sinais, em, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.machineId === machineId);
-        if (!t) return { ativo: false };
+        if (!t) return { ativo: false, motivo: "lease_vencido" as const };
         // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
-        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false };
+        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false, motivo: "lease_vencido" as const };
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,
@@ -1331,7 +1340,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
         const ativo = t.estado === "despachando" && t.pararSolicitadoEm === null;
         if (ativo) t.leaseAte = em + LEASE_MS;
-        return { ativo };
+        return ativo ? { ativo } : { ativo, motivo: "parado" as const };
       },
       async marcarSinal(id, sinal) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
@@ -1366,6 +1375,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async totalAnteriorDaSessao(sessaoCli, turnoId) {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
         return totais.length === 0 ? null : Math.max(...totais);
+      },
+      async concluirTardia(id, a) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
+        if (!t || doTenant(b.turnos).some((r) => r.retomaTurnoId === id)) return null;
+        t.estado = "concluido";
+        t.motivoInterrupcao = null;
+        t.motivoFalha = null;
+        t.sinais = {
+          attempted: t.sinais.attempted || !!a.sinais?.attempted,
+          rejected: t.sinais.rejected || !!a.sinais?.rejected,
+          promptSubmitted: t.sinais.promptSubmitted || !!a.sinais?.promptSubmitted,
+          producedOutput: t.sinais.producedOutput || !!a.sinais?.producedOutput,
+        };
+        if (a.custoUsd !== undefined && a.custoUsd !== null) t.custoUsd = a.custoUsd;
+        t.leaseAte = null;
+        return t;
+      },
+      async temRetomada(retomaTurnoId) {
+        return doTenant(b.turnos).some((r) => r.retomaTurnoId === retomaTurnoId);
       },
       async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
@@ -1407,9 +1435,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { turno: alvo, absorvidos };
       },
       async absorverNaSessao(turno, ids) {
-        const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0 && (!ids || ids.includes(t.id)))
-          .sort((x, y) => x.criadoEm - y.criadoEm);
+        // NOD-286: como o SQL — fora de trabalho, e só até a primeira fala pendente com anexo do mesmo escopo.
+        const escopoDaFala = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && !t.trabalhoId);
+        const absorvidos = ateOPrimeiroAnexo(escopoDaFala).filter((t) => !ids || ids.includes(t.id));
         for (const t of absorvidos) {
           t.estado = "interrompido";
           t.motivoInterrupcao = "absorvido";
@@ -1420,9 +1448,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async absorverDoTrabalho(turno, ids) {
         if (!turno.trabalhoId || (ids && ids.length === 0)) return [];
-        const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId && t.entradaAnexos.length === 0 && (!ids || ids.includes(t.id)))
-          .sort((x, y) => x.criadoEm - y.criadoEm);
+        const daFaixa = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId);
+        const absorvidos = ateOPrimeiroAnexo(daFaixa).filter((t) => !ids || ids.includes(t.id));
         for (const t of absorvidos) {
           t.estado = "interrompido";
           t.motivoInterrupcao = "absorvido";
@@ -1463,7 +1490,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "despachando");
       },
       async pendentesDaPessoa(conversaId) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId));
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId)).sort(porChegada);
       },
       async vivosDaConversa(conversaId) {
         return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando") && (t.acordarEm ?? 0) <= agora());
@@ -1645,6 +1672,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
         d.decididaEm = p.agora;
         return d;
+      },
+      async fecharRetomarAnteriores(trabalhoId, turnoIdAtual, p) {
+        const atual = doTenant(b.turnos).find((t) => t.id === turnoIdAtual);
+        if (!atual) return [];
+        const anteriores = new Set(doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && t.id !== atual.id && (t.criadoEm < atual.criadoEm || (t.criadoEm === atual.criadoEm && t.id < atual.id))).map((t) => t.id));
+        const fechadas: Decisao[] = [];
+        for (const d of doTenant(b.decisoes)) {
+          if (d.tipo !== "retomar_turno" || (d.estado !== "pendente" && d.estado !== "reaberta") || d.turnoId === null || !anteriores.has(d.turnoId)) continue;
+          d.estado = "decidida";
+          d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
+          d.decididaEm = p.agora;
+          fechadas.push(d);
+        }
+        return fechadas;
       },
 
       async ultimaDecisaoEm() {

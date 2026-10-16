@@ -194,6 +194,44 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
   });
 });
 
+describe("NOD-287: conta do turno no limite, conta ausente e 'Seguir com' levam a marca da web", () => {
+  for (const suja of [true, false]) {
+    const marca = suja ? "contaminada ⇒ refeita contaminada" : "limpa ⇒ refeita limpa";
+    it(`segue no ChatGPT, origem ${marca}`, async () => {
+      const c = await cenario();
+      await c.reivindicar();
+      await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar(limite(T0 + 2 * HORA), "claude-cli");
+      const [refeita] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(refeita).toBeDefined();
+      expect(await c.deps.repos.turnos.contaminado(refeita!.id)).toBe(suja);
+    });
+
+    it(`conta ausente (R6), origem ${marca}`, async () => {
+      const c = await cenario();
+      await c.reivindicar();
+      await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar({ ...base, desfecho: "interrompido", motivoInterrupcao: "executor_indisponivel", contaAusente: true }, "claude-cli");
+      const [refeita] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(refeita).toBeDefined();
+      expect(await c.deps.repos.turnos.contaminado(refeita!.id)).toBe(suja);
+    });
+
+    it(`'Seguir com', origem ${marca}`, async () => {
+      const c = await cenario();
+      await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + 2 * HORA);
+      await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
+      await c.despachar();
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+      expect(r.data.turnoId).not.toBeNull();
+      expect(await c.deps.repos.turnos.contaminado(r.data.turnoId!)).toBe(suja);
+    });
+  }
+});
+
 /** 14:50 de Brasília (UTC−3, sem horário de verão) de hoje ou de amanhã — a hora da nota de 15/10. */
 const AS_14_50 = (() => { const d = new Date(T0); d.setUTCHours(17, 50, 0, 0); return d.getTime() <= T0 ? d.getTime() + 24 * HORA : d.getTime(); })();
 const ESPERA = /^O (Claude Code|Codex) está no limite da assinatura\. Sua mensagem espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d\.$/;

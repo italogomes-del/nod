@@ -92,12 +92,12 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
       const t = await repos.turnos.reivindicar({ machineId: MAQUINA, agora: Date.now() });
       const id = t?.id ?? "";
       expect(await repos.turnos.renovarLease(id, MAQUINA, { promptSubmitted: true }, Date.now())).toEqual({ ativo: true });
-      expect(await repos.turnos.renovarLease(id, randomUUID(), {}, Date.now())).toEqual({ ativo: false });
+      expect(await repos.turnos.renovarLease(id, randomUUID(), {}, Date.now())).toEqual({ ativo: false, motivo: "lease_vencido" });
       expect(await repos.turnos.marcarSinal(id, "producedOutput")).toBe(true);
       expect((await repos.turnos.buscar(id))?.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: true });
 
       expect(await repos.turnos.pedirInterrupcao([id], Date.now())).toBe(1);
-      expect(await repos.turnos.renovarLease(id, MAQUINA, {}, Date.now())).toEqual({ ativo: false });
+      expect(await repos.turnos.renovarLease(id, MAQUINA, {}, Date.now())).toEqual({ ativo: false, motivo: "parado" });
       expect((await repos.turnos.despachandoDaPessoa()).map((x) => x.id)).toContain(id);
     });
   });
@@ -108,7 +108,7 @@ describeIntegracao("turnosRepo: fila por conversa (ADR-010), prioridade humana (
       await repos.turnos.enfileirar(base(conversaId, agenteId));
       const agora = Date.now();
       const t = await repos.turnos.reivindicar({ machineId: MAQUINA, agora });
-      expect(await repos.turnos.renovarLease(t!.id, MAQUINA, { promptSubmitted: true }, agora + LEASE_MS + 1)).toEqual({ ativo: false });
+      expect(await repos.turnos.renovarLease(t!.id, MAQUINA, { promptSubmitted: true }, agora + LEASE_MS + 1)).toEqual({ ativo: false, motivo: "lease_vencido" });
       expect((await repos.turnos.buscar(t!.id))?.leaseAte).toBe(agora + LEASE_MS);
     });
   });

@@ -82,6 +82,8 @@ export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: 
     // NOD-206: o do último turno da task; sem ele, o do bot que repassa (o da pessoa é só palpite — o plano corrige).
     executor: ultimo?.executor ?? (p.deQuem === "pessoa" ? "catcher" : p.deQuem.turno.executor),
     mensagemOrigemId: mensagem.id,
+    // NOD-285: o recado que o bot repassa à frente dele leva o arquivo da fala da pessoa (a frente é o próprio bot).
+    entradaAnexos: p.deQuem === "pessoa" ? [] : p.deQuem.turno.entradaAnexos,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do recado não criado" });
   if (ultimo && (await deps.repos.turnos.contaminado(ultimo.id))) await deps.repos.turnos.contaminar(turno.id, agora);
@@ -234,6 +236,8 @@ export const fazerAqui: CasoDeUso<{ trabalhoId: string }, { trabalho: TrabalhoDt
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
     profundidade: 0,
     entradaTexto: `[nod] A pessoa pediu para fazer aqui, na conversa, o que ia virar a task "${t.titulo}". Faça agora:\n${pedido}`,
+    // NOD-285: o pedido que volta para a conversa leva o arquivo que a task tinha recebido.
+    entradaAnexos: primeiro?.entradaAnexos ?? [],
     entradaConfianca: primeiro?.entradaConfianca ?? "confiavel",
     modelo: agente?.modelo ?? primeiro?.modelo ?? "auto",
     harness: agente?.harness ?? primeiro?.harness,

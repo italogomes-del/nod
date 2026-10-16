@@ -20,12 +20,13 @@ const semAcesso: ResultadoTurno = {
  * definido em 2026-10-05 (medido em produção nesse dia): o turno voltou porque a CONTA da IA não serve. A conversa não
  * pode ganhar a recusa do fornecedor como fala do bot nem "Turno interrompido: erro_execucao".
  */
-async function cenario(o: { harness?: "auto" | "claude-cli" | "codex-cli"; modelo?: string; origem?: "conversa" | "rotina" } = {}) {
+async function cenario(o: { harness?: "auto" | "claude-cli" | "codex-cli"; modelo?: string; origem?: "conversa" | "rotina"; pdf?: boolean } = {}) {
   let agora = T0;
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => agora });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Assistente pessoal" });
   const origem = await deps.repos.mensagens.criar({ conversaId: bot.conversa.id, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "texto", texto: "oi", confianca: "confiavel" });
-  const t = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "oi", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: o.modelo ?? "auto", harness: o.harness ?? "auto" });
+  const anexo = o.pdf ? await deps.repos.anexos.criar({ conversaId: bot.conversa.id, nome: "contrato.pdf", mime: "application/pdf", conteudo: new Uint8Array([37, 80, 68, 70]) }) : null;
+  const t = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: o.origem ?? "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "oi", mensagemOrigemId: origem!.id, entradaConfianca: "confiavel", modelo: o.modelo ?? "auto", harness: o.harness ?? "auto", ...(anexo ? { entradaAnexos: [anexo.id] } : {}) });
   const maquina = randomUUID();
   await deps.repos.turnos.reivindicar({ machineId: maquina, agora: T0 });
   const antes = banco.mensagens.length;
@@ -104,12 +105,47 @@ describe("repetirBarradosPorIa: uma IA ficou pronta", () => {
     expect((await executar(auto.deps, repetirBarradosPorIa, { executor: "local", prontos: ["codex-cli"] })).data).toEqual({ repetidos: 1 });
   });
 
+  it("NOD-285: fala com PDF fica onde está enquanto nenhuma IA pronta lê PDF (sem negação a cada anúncio)", async () => {
+    const c = await cenario({ pdf: true });
+    await c.entregar(null);
+    c.passar(60_000);
+    expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local", prontos: ["codex-cli"] })).data).toEqual({ repetidos: 0 });
+    c.passar(120_000);
+    expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local", prontos: ["codex-cli"] })).data).toEqual({ repetidos: 0 });
+    expect(c.banco.turnos).toHaveLength(1);
+    // Quando uma IA que lê PDF fica pronta, a fala volta uma vez.
+    expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local", prontos: ["codex-cli", "claude-cli"] })).data).toEqual({ repetidos: 1 });
+  });
+
   it("fala barrada há mais de meia hora não é repetida", async () => {
     const c = await cenario();
     await c.entregar(null);
     c.passar(JANELA_REPETIR_BARRADOS_MS + 60_000);
     expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local" })).data).toEqual({ repetidos: 0 });
   });
+});
+
+describe("NOD-287: conta sem acesso e barrados por IA levam a marca da web", () => {
+  for (const suja of [true, false]) {
+    it(`troca de IA na hora, origem ${suja ? "contaminada ⇒ repetida contaminada" : "limpa ⇒ repetida limpa"}`, async () => {
+      const c = await cenario();
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar("codex-cli", RECUSA);
+      const [repetido] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(repetido).toBeDefined();
+      expect(await c.deps.repos.turnos.contaminado(repetido!.id)).toBe(suja);
+    });
+
+    it(`repetirBarradosPorIa, origem ${suja ? "contaminada ⇒ repetida contaminada" : "limpa ⇒ repetida limpa"}`, async () => {
+      const c = await cenario();
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar(null);
+      c.passar(60_000);
+      expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local" })).data).toEqual({ repetidos: 1 });
+      const [repetido] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(await c.deps.repos.turnos.contaminado(repetido!.id)).toBe(suja);
+    });
+  }
 });
 
 describe("NOD-268: conta sem acesso no teto de reenvios", () => {

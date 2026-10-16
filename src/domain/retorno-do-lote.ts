@@ -3,7 +3,8 @@ import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import { ehQueda } from "./pedido-parado.ts";
 import { motivoEmPortugues } from "./redacao.ts";
-import { trabalhoFinal } from "./trabalho.ts";
+import { TEXTO_PERGUNTA_VENCIDA } from "./frente.ts";
+import { MOTIVO_PERGUNTA_VENCIDA, trabalhoFinal } from "./trabalho.ts";
 
 /**
  * O retorno do lote de frentes (definido em 2026-10-12, ADR-099, partes 3/4, issue I3): quando as frentes de um pedido
@@ -93,6 +94,7 @@ export function motivoDaFrente(f: Pick<FrenteNoFecho, "estado" | "motivo" | "que
   if (f.estado === "parado") return "parada pela pessoa";
   if (f.estado !== "falhou") return null;
   if (!f.motivo) return "a frente falhou";
+  if (f.motivo === MOTIVO_PERGUNTA_VENCIDA) return TEXTO_PERGUNTA_VENCIDA;
   const motivo = motivoEmPortugues(f.motivo);
   return caiuDeVez(f) && (f.quedas ?? 0) > 1 ? `${motivo} (caiu ${f.quedas} vezes)` : motivo;
 }

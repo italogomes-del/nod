@@ -1,6 +1,7 @@
 import type { EsforcoAgente } from "../contracts/agente.ts";
 import { CAPACIDADES_HARNESS, HARNESS_LEGADO, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
 import type { CapacidadesHarness, CatalogoHarness, IdHarness, OpcaoHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
@@ -26,8 +27,10 @@ export function validarInteligencia(harness: unknown, modelo: unknown): asserts 
  * usar o inventário DELE e nunca o do motor. `modelo_invalido` = o agente gravou um modelo que o harness não aceita:
  * vira recusa escrita no despacho, em vez de um `entrada_invalida` que desfazia a reivindicação a cada puxar.
  * `inventario` é anexado por quem conhece o inventário de cada harness (emitir-plano-turno).
+ * NOD-285 (2026-10-15): `anexo_nao_lido` = no Automático, nenhuma IA pronta lê um dos anexos da fala (`tipo`). Nega antes de
+ * rodar, em vez de o Codex trocar o PDF por "não pôde ser lido". `harness` é a IA que o Automático pegaria sem o anexo.
  */
-export type CausaHarnessIndisponivel = { harness: IdHarness; modelo?: string; motivo?: "modelo_invalido"; inventario?: Inventario };
+export type CausaHarnessIndisponivel = { harness: IdHarness; modelo?: string; motivo?: "modelo_invalido" | "anexo_nao_lido"; tipo?: TipoAnexo; inventario?: Inventario };
 
 export function causaHarnessIndisponivel(e: unknown): CausaHarnessIndisponivel | null {
   if (!(e instanceof ErroDeDominio) || e.codigo !== "executor_indisponivel") return null;
@@ -53,7 +56,7 @@ export function harnessFixado(harness: string | undefined, modelo: string): IdHa
  * vale a padrão com o `preferido` na frente. O modelo `auto` vira a escolha do bot para a IA, senão o recomendado
  * (Opus / GPT-5.6 Sol); o raciocínio vem da escolha, senão o médio, sempre um nível que o modelo aceita.
  */
-export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: string; prontos: readonly IdHarness[]; preferido?: IdHarness | null; ordem?: readonly IdHarness[]; noLimite?: readonly IdHarness[]; escolhas?: EscolhasIa }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
+export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: string; prontos: readonly IdHarness[]; preferido?: IdHarness | null; ordem?: readonly IdHarness[]; noLimite?: readonly IdHarness[]; escolhas?: EscolhasIa; tiposDeAnexo?: readonly TipoAnexo[] }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
   const pedido = p.harness ?? "auto";
   const fixo = harnessFixado(pedido, p.modelo);
   try {
@@ -64,7 +67,17 @@ export function resolverHarness(p: { harness?: PreferenciaHarness; modelo: strin
     }
     throw e;
   }
-  const escolhido = fixo ?? iaDoAutomatico({ ordem: p.ordem ?? ordemEfetiva({ preferido: p.preferido }), prontos: p.prontos, noLimite: p.noLimite });
+  const ordem = p.ordem ?? ordemEfetiva({ preferido: p.preferido });
+  // NOD-285 (K1): com anexo, o Automático só considera a IA pronta que lê TODOS os tipos (o `noLimite` continua valendo
+  // entre elas). A IA fixa já foi conferida na entrada (enviar-mensagem) e segue a regra de antes.
+  const tipos = [...new Set(p.tiposDeAnexo ?? [])];
+  const naoLido = (ia: IdHarness) => tipos.find((t) => !capacidadesDe(ia).anexos.includes(t));
+  const prontos = fixo || tipos.length === 0 ? p.prontos : p.prontos.filter((ia) => naoLido(ia) === undefined);
+  if (!fixo && tipos.length > 0 && prontos.length === 0) {
+    const semAnexo = iaDoAutomatico({ ordem, prontos: p.prontos, noLimite: p.noLimite }) ?? HARNESS_LEGADO;
+    throw new ErroDeDominio("executor_indisponivel", { cause: { harness: semAnexo, motivo: "anexo_nao_lido", tipo: naoLido(semAnexo) ?? tipos[0] } satisfies CausaHarnessIndisponivel });
+  }
+  const escolhido = fixo ?? iaDoAutomatico({ ordem, prontos, noLimite: p.noLimite });
   if (!escolhido || !p.prontos.includes(escolhido)) throw new ErroDeDominio("executor_indisponivel", { cause: escolhido ? ({ harness: escolhido } satisfies CausaHarnessIndisponivel) : undefined });
   return { harness: escolhido, ...modeloERaciocinio(escolhido, p.escolhas, p.modelo) };
 }
@@ -118,9 +131,10 @@ export function motivoSemIaPronta(onde: "maquinas" | "maquina_do_bot", inventari
  * Nunca "motor pronto": um harness pronto só chega aqui se outra regra o recusou, e então diz só que está indisponível.
  * Sem sonda do harness não afirma "não instalado": diz só que nenhum computador conectado o tem pronto.
  */
-export function motivoHarnessIndisponivel(harness: string, inventario: Inventario, modeloInvalido?: string): string {
+export function motivoHarnessIndisponivel(harness: string, inventario: Inventario, modeloInvalido?: string, anexoNaoLido?: TipoAnexo): string {
   const nome = HARNESSES.find((h) => h.id === harness)?.nome ?? harness;
   if (modeloInvalido !== undefined) return `${nome}: o modelo ${modeloInvalido} não é aceito; escolha outro modelo no agente`;
+  if (anexoNaoLido !== undefined) return fraseAnexoNaoLido(anexoNaoLido);
   if (inventario.estado === "pronto") return `${nome} indisponível`;
   if (inventario.estado === "ausente" && inventario.motivo === SEM_SONDA_DO_HARNESS) return `${nome} ${SEM_SONDA_DO_HARNESS}`;
   const estado = inventario.estado === "nao_autenticado" ? (inventario.causa === "limite" ? "no limite da assinatura" : "sem conta conectada")
@@ -130,6 +144,24 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
     : inventario.causa === "sonda_lenta" ? "sem resposta"
     : "não instalado";
   return `${nome} ${estado}: ${inventario.motivo}`;
+}
+
+const NOME_DO_TIPO: Readonly<Record<TipoAnexo, string>> = { pdf: "PDF", imagem: "imagem", texto: "arquivo de texto" };
+
+/** NOD-285: os nomes das IAs integradas que leem o tipo de arquivo (a web e a frase do servidor dizem quais deixar prontas). */
+export function iasQueLeem(tipo: TipoAnexo): string[] {
+  return HARNESSES.filter((h) => h.integrado && capacidadesDe(h.id).anexos.includes(tipo)).map((h) => h.nome);
+}
+
+/**
+ * NOD-285: a frase da negação `anexo_nao_lido` (revisão do Gil no PR). Diz o que falta e o que a pessoa pode fazer, sem
+ * nomear a IA que não lê: o Automático não escolheu nenhuma.
+ */
+export function fraseAnexoNaoLido(tipo: TipoAnexo): string {
+  const leem = iasQueLeem(tipo);
+  return leem.length > 0
+    ? `nenhuma IA pronta agora lê ${NOME_DO_TIPO[tipo]}; deixe o ${leem.join(" ou o ")} pronto ou cole o conteúdo como texto`
+    : `nenhuma IA pronta agora lê ${NOME_DO_TIPO[tipo]}; cole o conteúdo como texto`;
 }
 
 /**

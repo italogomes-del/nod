@@ -133,7 +133,12 @@ function cortar(texto: string): string {
  * definido em 2026-10-12 (ADR-099, I2): a frente acabou sem chamar `devolver_resumo` — o servidor monta o resumo com a
  * última fala dela (cortada) e o estado, para o dono nunca receber um lote com buraco. Só para estado final.
  */
-export function resumoSemChamada(p: { estado: EstadoTrabalho; ultimaFala: string | null }): ResumoFrente {
+/** NOD-264 (C21): o texto do motivo `pergunta_vencida`, no resumo e no retorno do lote. */
+export const TEXTO_PERGUNTA_VENCIDA = "a pergunta à pessoa venceu sem resposta";
+
+export function resumoSemChamada(p: { estado: EstadoTrabalho; ultimaFala: string | null; perguntaVencida?: boolean }): ResumoFrente {
+  // NOD-264 (C21): a pergunta venceu sem resposta — o resumo leva o motivo, nunca a pergunta (a última fala é ela).
+  if (p.estado === "falhou" && p.perguntaVencida) return { feito: `A frente parou: ${TEXTO_PERGUNTA_VENCIDA}.`, falta: "Decidir com a pessoa se abre a frente de novo." };
   const fala = p.ultimaFala && p.ultimaFala.trim() !== "" ? cortar(p.ultimaFala) : null;
   if (p.estado === "falhou") {
     return { feito: fala ? `A frente falhou antes de devolver o resumo. Última fala: ${fala}` : "A frente falhou antes de devolver o resumo.", falta: "Conferir o que ficou pela metade e decidir se abre de novo." };

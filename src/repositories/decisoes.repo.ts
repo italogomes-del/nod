@@ -201,6 +201,25 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-15 (NOD-261, G3): um turno do trabalho concluiu — os "Retomar" ainda abertos de turnos ANTERIORES
+     * do mesmo trabalho fecham por regra (`regra:retomar_superado`). Sem isso o card do turno caído segurava a frente em
+     * "Sua vez" depois que um recado posterior já a tinha concluído, e o lote nunca fechava. Anterior = criado antes do
+     * turno que concluiu; o "Retomar" de um turno posterior (que caiu depois) segue valendo. Pela dona, como fecharPorRegra.
+     */
+    async fecharRetomarAnteriores(trabalhoId: string, turnoIdAtual: string, p: { regra: `regra:${string}`; regraVersao: number; agora: number }): Promise<Decisao[]> {
+      const desfecho: DesfechoDecisao = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: iso(p.agora) };
+      const linhas = await conn<Linha[]>`
+        update decisoes d set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}
+        from turnos t, turnos atual
+        where d.tenant_id = ${escopo.tenantId} and d.owner_id = ${escopo.pessoaId} and d.tipo = 'retomar_turno' and d.estado in ('pendente', 'reaberta')
+          and t.tenant_id = d.tenant_id and t.id = d.turno_id and t.trabalho_id = ${trabalhoId}
+          and atual.tenant_id = d.tenant_id and atual.id = ${turnoIdAtual} and t.id <> atual.id
+          and (t.criado_em, t.id) < (atual.criado_em, atual.id)
+        returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `d.${c}`).join(", "))}`;
+      return linhas.map(paraDecisao);
+    },
+
+    /**
      * Dispensar (definido em 2026-09-24): fecha como 'decidida' com desfecho 'dispensada'. Vale para
      * vencida de qualquer tipo e para aberta só de TIPOS_DISPENSAVEIS_ABERTOS (os que se respondem com
      * texto e o retomar_turno, ADR-045) — os outros têm botão de recusar próprio, e dispensar uma

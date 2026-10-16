@@ -192,7 +192,7 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
     });
   });
 
-  it("entrega tardia de turno já interrompido entra como anexo parcial, sem reabrir", async () => {
+  it("entrega tardia com sucesso de turno caído e sem retomada: conclui o turno, a fala inteira (NOD-264, E8)", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
@@ -201,8 +201,8 @@ describeIntegracao("fila de turnos (ADR-010): enviar → despachar → assentar,
       const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
       await deps.repos.turnos.interromper(turnoId, "maquina_sem_contato");
       const { data } = await executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "cheguei tarde" }, resultado: sucesso("cheguei tarde") });
-      expect(data).toMatchObject({ tardia: true, mensagem: { texto: "cheguei tarde", parcial: true } });
-      expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+      expect(data).toMatchObject({ tardia: true, mensagem: { texto: "cheguei tarde", parcial: false } });
+      expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ estado: "concluido" });
     });
   });
 

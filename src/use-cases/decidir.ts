@@ -161,24 +161,33 @@ export async function executarItens(services: Pick<Services, "conectores" | "com
   return desfechos;
 }
 
+/**
+ * NOD-285 (K2): a retomada leva os anexos da fala de origem (enfileirar-retomada), então "nada foi reenviado" seria falso
+ * quando há arquivo — e, sem sessão, fazia o modelo achar que já tinha visto o anexo. Sem anexo, o texto de antes.
+ */
+export function fraseDoReenvio(comAnexos: boolean): string {
+  return comAnexos ? "os arquivos da fala de origem seguem anexados" : "nada foi reenviado";
+}
+
 /** A entrada da retomada que continua uma aprovação: o desfecho por item, em texto fixo do servidor. */
-export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string): string {
+export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string, comAnexos = false): string {
+  const reenvio = fraseDoReenvio(comAnexos);
   const linhas = itens.map((i) => `- item ${i.idx + 1} (${i.destino.conector}.${i.destino.ferramenta}): ${i.desfecho ?? "sem desfecho"} — ${i.textoFinal}`);
   const noComputador = itens.some((i) => i.destino.conector === "computador" && i.desfecho === "executado");
   // ADR-055: o comando aprovado depois de a espera no turno acabar ainda não rodou — o turno anterior foi negado.
   const noTerminal = itens.some((i) => i.destino.conector === "terminal" && i.desfecho === "executado");
   return [
     // definido em 2026-09-28: não é "turno interrompido" — o turno que pediu concluiu; esta é a continuação dele.
-    "Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; nada foi reenviado.",
+    `Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; ${reenvio}.`,
     `Resultado da aprovação "${decisao.frase}" (${texto}):`,
     ...linhas,
     ...(noComputador ? ["O resultado da ação no computador não veio junto: observe a tela ou os arquivos antes de seguir."] : []),
     ...(noTerminal ? ["O comando aprovado ainda NÃO rodou: rode exatamente o mesmo comando agora — ele passa sem novo pedido."] : []),
-    "Continue a partir daqui; nada foi reenviado.",
+    `Continue a partir daqui; ${reenvio}.`,
   ].join("\n");
 }
 
-function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
+function turnoCriado(deps: DepsContinuacao, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
   return { tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId, dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id } };
 }
 
@@ -187,19 +196,33 @@ function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: Run
  * decidida — a espera do proxy acabou um instante antes do clique, ou o turno caiu. Chamado pelo
  * assentamento do turno, sob a mesma trava da fase 2. Item ainda executando fica para a fase 2.
  */
-export async function continuarAprovacoesDoTurno(deps: Deps, turno: Turno): Promise<RuntimeEvent[]> {
+export async function continuarAprovacoesDoTurno(deps: DepsContinuacao, turno: Turno): Promise<RuntimeEvent[]> {
+  return (await continuarAprovacoes(deps, turno)).events;
+}
+
+/** O que a continuação de uma aprovação usa de Deps: o varredor de lease (laço de fundo) também a chama (NOD-261). */
+export type DepsContinuacao = Pick<Deps, "repos" | "escopo" | "agora">;
+
+/**
+ * definido em 2026-10-15 (NOD-261, E2): como continuarAprovacoesDoTurno, dizendo quantas aprovações ESTA chamada
+ * continuou (a retomada nova ou a juntada à que já estava na fila). O varredor usa a contagem para fechar o "Retomar" do
+ * mesmo turno: a continuação já o retoma, e duas retomadas refariam o efeito externo.
+ */
+export async function continuarAprovacoes(deps: DepsContinuacao, turno: Turno): Promise<{ events: RuntimeEvent[]; continuadas: number }> {
   const agora = deps.agora();
   const events: RuntimeEvent[] = [];
+  let continuadas = 0;
   for (const decisao of await deps.repos.decisoes.aContinuarDoTurno(turno.id)) {
     const itens = await deps.repos.itensAprovacao.listar(decisao.id);
     if (itens.some((i) => i.selecionado && i.desfecho === null)) continue;
     if ((await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) !== "minha") continue;
     const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
     const texto = redigirDesfechoAprovacao({ itens, aprovadorNome: pessoa?.nome ?? "A pessoa", agora });
-    const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+    const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto, turno.entradaAnexos.length > 0) });
+    if (r.turno) continuadas += 1;
     if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoriaDaPessoa(deps.escopo), agora));
   }
-  return events;
+  return { events, continuadas };
 }
 
 export type EntradaAssentarAprovacao = { decisaoId: string; desfechos: readonly DesfechoExecutado[] };
@@ -257,7 +280,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
     const original = await deps.repos.turnos.buscarTravado(decisao.turnoId);
     const vivo = original?.estado === "despachando";
     if (original && !vivo && (await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) === "minha") {
-      const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+      const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto, original.entradaAnexos.length > 0) });
       turnoRetomadaId = r.turno?.id ?? null;
       if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoria, agora));
     }

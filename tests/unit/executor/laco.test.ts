@@ -163,6 +163,44 @@ describe("laço puxar → rodar → renovar → entregar (ADR-021, ADR-009)", ()
     expect(ponte.renovacoes.some((r) => r.sinais.producedOutput)).toBe(true);
   });
 
+  // NOD-264 (C20): o `trabalho_incompleto` passa a dizer por quê — a causa vem do laço, que sabe mais que o driver.
+  it("renovação negada com motivo: a entrega leva causa renovacao_negada:<motivo> (e sem motivo, :desconhecido)", async () => {
+    const muitosDeltas = Array.from({ length: 200 }, (_, i) => `[[delta: ${i}]]`).join(" ");
+    for (const [motivo, esperado] of [["sem_plano", "renovacao_negada:sem_plano"], [undefined, "renovacao_negada:desconhecido"]] as const) {
+      const ponte = ponteFalsa([planoDeTeste(randomUUID(), muitosDeltas)]);
+      ponte.renovar = async (p) => {
+        ponte.renovacoes.push(p);
+        const ativo = p.sinais.producedOutput !== true;
+        return { ativo, versaoMinimaApp: "0.1.0", ...(!ativo && motivo ? { motivo } : {}) };
+      };
+      const laco = iniciarLaco({ ponte, registry: await registryCom(driverFalso({ atrasoMs: 5 })), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 20, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+      await esperarAte(() => ponte.entregas.length === 1, 10_000);
+      await laco.parar();
+      expect(ponte.entregas[0]?.resultado).toMatchObject({ desfecho: "interrompido", causa: esperado });
+      // A causa passa na validação da rota (só código, curta).
+      expect(validarEntrega(JSON.parse(JSON.stringify(ponte.entregas[0])), "m1").resultado.causa).toBe(esperado);
+    }
+  });
+
+  it("o motor parou no meio do turno: a entrega leva causa reinicio_do_motor", async () => {
+    const muitosDeltas = Array.from({ length: 400 }, (_, i) => `[[delta: ${i}]]`).join(" ");
+    const ponte = ponteFalsa([planoDeTeste("t-reinicio", muitosDeltas)]);
+    const laco = iniciarLaco({ ponte, registry: await registryCom(driverFalso({ atrasoMs: 5 })), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 20, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => laco.turnoAtual() !== null && ponte.renovacoes.length > 0);
+    await laco.parar();
+    expect(ponte.entregas).toHaveLength(1);
+    expect(ponte.entregas[0]?.resultado).toMatchObject({ desfecho: "interrompido", causa: "reinicio_do_motor" });
+  });
+
+  it("turno que termina com sucesso não leva causa, mesmo depois de uma renovação negada sem efeito", async () => {
+    const ponte = ponteFalsa([planoDeTeste("t-ok", "[[texto: pronto]]")]);
+    const laco = iniciarLaco({ ponte, registry: await registryCom(driverFalso()), pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10_000, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(ponte.entregas[0]?.resultado.desfecho).toBe("sucesso");
+    expect(ponte.entregas[0]?.resultado.causa).toBeUndefined();
+  });
+
   it("exceção do adapter vira Entrega 'falha' erro_execucao e o laço continua vivo para o próximo plano", async () => {
     let chamadas = 0;
     const explosivo: Driver = {

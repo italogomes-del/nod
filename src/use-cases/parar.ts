@@ -15,7 +15,8 @@ export type EntradaParar = { conversaId: string | null };
  * até a pessoa falar de novo — definido em 2026-09-16: "Stop now" do Grok Bot; nova mensagem chama
  * encerrarAbertas), interrompe os pendentes na hora, pede interrupção dos despachando (a próxima
  * renovação devolve {ativo:false}) e tenta o SIGTERM pelo interruptor — falha vira `naoInterrompidas`
- * com motivo, NUNCA catch vazio. Cancela frames ainda não entregues do outbox e devolve a faixa.
+ * com motivo, NUNCA catch vazio. Cancela frames ainda não entregues do outbox (da conversa parada, ou todos sem
+ * conversa) e devolve a faixa.
  */
 export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) => {
   const conversaId = input.conversaId;
@@ -62,7 +63,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
   // ADR-099 (parte 2): o Parar cancela os comandos que o bot deixou esperando, como cancela a volta marcada (o pendente
   // acima). Na conversa, todos os do bot dela, tasks inclusive; sem conversa, todos da pessoa.
   await cancelarEsperas(deps, conversaId === null ? { todas: true } : { conversaId });
-  const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora);
+  // NOD-265: na conversa, só os frames dela; os de outro bot da pessoa seguem saindo (a fala final dele não some da tela).
+  const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora, conversaId);
   // definido em 2026-09-16: nesta rodada o único efeito externo é item aprovado (L5) e ele é síncrono ao
   // decidir; não há emissão "a caminho" para listar como já entregue — a lista nasce vazia e honesta.
   const faixa: FaixaParada = { ...montarFaixaParada({ pendentesInterrompidos, despachando: tentativas, entregues: [] }), ...(abertos.length > 0 ? { trabalhosParados: abertos.map((t) => ({ id: t.id, titulo: t.titulo })) } : {}) };

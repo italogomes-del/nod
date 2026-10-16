@@ -63,7 +63,7 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       const segunda = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000);
       expect(segunda).toEqual({ interrompidos: [], decisoes: [] });
       expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toHaveLength(1);
-      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, agora + LEASE_MS + 5000)).toEqual({ ativo: false });
+      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, agora + LEASE_MS + 5000)).toEqual({ ativo: false, motivo: "lease_vencido" });
       expect(await deps.repos.turnos.reivindicar({ machineId: maquina, agora: agora + LEASE_MS + 5000 })).toBeNull();
       const estados = await trx<{ estado: string }[]>`select estado from turnos where conversa_id = ${criado.conversa.id}`;
       expect(estados.map((e) => e.estado)).toEqual(["interrompido"]);

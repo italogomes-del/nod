@@ -189,10 +189,10 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
     expect(varrido[PESSOA.pessoaId]?.interrompidos).toEqual([plano2?.turnoId]);
     const decisaoId = varrido[PESSOA.pessoaId]?.decisoes[0] ?? "";
     expect((await ponteB.renovar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, sinais: SINAIS_ZERADOS, eventos: [] })).ativo).toBe(false);
-    // entrega tardia da B: anexo, sem reabrir
-    await ponteB.entregar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, seqLocal: 1, fala: { tipo: "texto", texto: "tarde" }, resultado: { ...(primeiro?.resultado as ResultadoTurno), texto: "tarde" } });
-
     const retomado = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), retomarTurno, { decisaoId, texto: "[[texto: continuei]]" })).data);
+    // entrega tardia da B com a retomada já na fila: anexo parcial, sem reabrir (sem retomada, a tardia com sucesso
+    // concluiria o turno e fecharia o "Retomar" — NOD-264, E8)
+    await ponteB.entregar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, seqLocal: 1, fala: { tipo: "texto", texto: "tarde" }, resultado: { ...(primeiro?.resultado as ResultadoTurno), texto: "tarde" } });
     expect(retomado.turno).toMatchObject({ origem: "retomada", retomaTurnoId: plano2?.turnoId, reenvios: 1 });
     const terceiro = await rodarUmCiclo(ponteA, maquinaA);
     expect(terceiro?.plano).toMatchObject({ turnoId: retomado.turno.id, entrada: { texto: "[[texto: continuei]]", sessaoCli: sessao } });

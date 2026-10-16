@@ -112,6 +112,19 @@ describe("assentarTurno: a conta da IA chegou ao limite (várias contas)", () =>
   }
 });
 
+describe("NOD-287: troca de conta leva a marca da web", () => {
+  for (const suja of [true, false]) {
+    it(`Trocar sozinho, origem ${suja ? "contaminada ⇒ repetida contaminada" : "limpa ⇒ repetida limpa"}`, async () => {
+      const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
+      if (suja) await c.deps.repos.turnos.contaminar(c.turnoId, T0);
+      await c.entregar(comConta({ tipo: "trocou", de: 1, para: 3, voltaEm: T0 + DUAS_HORAS, foraDaTroca: [2] }), "claude-cli");
+      const [repetido] = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(repetido).toBeDefined();
+      expect(await c.deps.repos.turnos.contaminado(repetido!.id)).toBe(suja);
+    });
+  }
+});
+
 describe("NOD-268: o teto de reenvios na troca de conta", () => {
   it("Trocar sozinho com a fala já reenviada uma vez: não repete — espera a conta voltar, com UMA linha", async () => {
     const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });

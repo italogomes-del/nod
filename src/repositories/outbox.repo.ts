@@ -69,12 +69,19 @@ export function outboxRepo(conn: Conn, escopo: Escopo) {
       return l?.n ?? 0;
     },
 
-    /** Parar (E5.4): frames ainda não entregues da pessoa deixam de sair. */
-    async cancelarPendentesDaPessoa(agora: number): Promise<number> {
+    /**
+     * Parar (E5.4): frames ainda não entregues da pessoa deixam de sair. Com `conversaId` (NOD-265), só os da conversa
+     * parada — o outbox não guarda a conversa, ela vem do evento (mesmo join de `pendentes()`); frame cujo evento não
+     * tem conversa não é cancelado. Sem conversa ("Parar tudo"), todos da pessoa.
+     */
+    async cancelarPendentesDaPessoa(agora: number, conversaId: string | null = null): Promise<number> {
+      const daConversa = conversaId === null
+        ? conn``
+        : conn`and exists (select 1 from events e where e.tenant_id = o.tenant_id and e.id = o.evento_id and e.conversa_id = ${conversaId})`;
       const r = await conn`
-        update events_outbox set cancelado_em = ${new Date(agora)}
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
-          and entregue_em is null and abandonado_em is null and cancelado_em is null`;
+        update events_outbox o set cancelado_em = ${new Date(agora)}
+        where o.tenant_id = ${escopo.tenantId} and o.owner_id = ${escopo.pessoaId}
+          and o.entregue_em is null and o.abandonado_em is null and o.cancelado_em is null ${daConversa}`;
       return r.count;
     },
   };

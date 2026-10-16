@@ -91,7 +91,15 @@ export type FatosTrabalho = {
    */
   aguardandoComando?: boolean;
   ultimo: { estado: EstadoTurno; motivo: MotivoInterrupcao | null } | null;
+  /**
+   * NOD-264 (C21): a última pergunta à pessoa (decisão que não é "Retomar") venceu sem resposta e foi feita pelo último
+   * turno terminal. Sem turno vivo, o trabalho falhou com o motivo `pergunta_vencida` — não "terminou" com a pergunta.
+   */
+  perguntaVencida?: boolean;
 };
+
+/** NOD-264 (C21): o motivo da frente que acabou porque a pergunta à pessoa venceu sem resposta. */
+export const MOTIVO_PERGUNTA_VENCIDA = "pergunta_vencida" as const;
 
 /**
  * A tabela de estados da #192, derivada dos fatos (definido em 2026-10-07). Derivar em vez de transicionar evento a
@@ -117,6 +125,7 @@ export function estadoDoTrabalho(f: FatosTrabalho): EstadoTrabalho {
   if (f.pendentes > 0) return f.iniciado && !f.esperandoOutro ? "rodando" : "na_fila";
   if (f.estadoAtual === "parado") return "parado";
   if (f.decisaoPendente) return f.estadoAtual === "fechado_ocioso" ? "fechado_ocioso" : "precisa_de_voce";
+  if (f.perguntaVencida) return "falhou";
   if (f.aguardandoColega || f.aguardandoDespertar || f.aguardandoComando) return "rodando";
   if (f.ultimo === null) return "na_fila";
   if (f.ultimo.estado === "concluido") return "terminado";

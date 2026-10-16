@@ -16,7 +16,7 @@ import { lerCatalogoDoMac } from "../catalogo-comandos.ts";
 import { log } from "../../../obs/log.ts";
 import { baixarAnexos, mensagemClaude } from "../anexos-turno.ts";
 import { rodarLigacaoClaude } from "./claude-ligacao.ts";
-import { classificarSessao, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
+import { classificarSessao, fimDoStderr, interpretarLinhaStreamJson, reduzirSinais, SINAIS_ZERADOS, textoDaRodada } from "../../../domain/stream-json.ts";
 import { capacidadesDe } from "../../../domain/harness.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { caminhoAumentado, resolverBinario } from "../caminho.ts";
@@ -664,7 +664,10 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                 await Promise.all(pendentes);
                 const exitCode = fim.erroSpawn ? null : fim.exitCode;
                 const signal = fim.erroSpawn ? null : fim.signal;
-                return finalizar(classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), rodadasJaFaladas: rodadasFaladas, falaDoMeio: meio }));
+                const classificado = classificarSessao({ eventos, exitCode, signal, stderr: fim.stderr, sinais, interrompidoPeloDriver: proc.interrompido(), rodadasJaFaladas: rodadasFaladas, falaDoMeio: meio });
+                // NOD-264 (C20): sem result, o log da máquina guarda a causa e o fim do stderr (redigido); a ponte só leva a causa.
+                if (classificado.desfecho === "interrompido") log("aviso", "turno_sem_result", { turno_id: plano.turnoId, causa: classificado.causa ?? null, stderr: fimDoStderr(fim.stderr) });
+                return finalizar(classificado);
               } finally {
                 processo = null;
                 entradaAberta = false;

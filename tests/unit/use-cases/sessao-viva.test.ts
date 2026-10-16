@@ -103,6 +103,63 @@ describe("absorverNaSessao (ADR-067)", () => {
   });
 });
 
+describe("ordem das falas com print no meio (NOD-286)", () => {
+  it("[A, print B, C] ⇒ absorve só A; B e C ficam pendentes, nessa ordem", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const a = await turno(d, agenteId, conversaId, { texto: "A" });
+    const b = await turno(d, agenteId, conversaId, { texto: "olha esse erro", anexos: [randomUUID()] });
+    const c = await turno(d, agenteId, conversaId, { texto: "ignora, já resolvi" });
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data.ids).toEqual([a.id]);
+    expect([a.estado, b.estado, c.estado]).toEqual(["interrompido", "pendente", "pendente"]);
+    expect((await d.deps.repos.turnos.pendentesDaPessoa(conversaId)).map((t) => t.id)).toEqual([b.id, c.id]);
+  });
+
+  it("[print B, C] ⇒ nada absorvido; [A, C] sem anexo ⇒ absorve os dois", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const b = await turno(d, agenteId, conversaId, { texto: "print", anexos: [randomUUID()] });
+    const c = await turno(d, agenteId, conversaId, { texto: "C" });
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true })).data.ids).toEqual([]);
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data.ids).toEqual([]);
+    expect([b.estado, c.estado]).toEqual(["pendente", "pendente"]);
+
+    const outro = await cenario();
+    const vivo2 = await turno(outro.d, outro.agenteId, outro.conversaId, { estado: "despachando" });
+    const a2 = await turno(outro.d, outro.agenteId, outro.conversaId, { texto: "A" });
+    const c2 = await turno(outro.d, outro.agenteId, outro.conversaId, { texto: "C" });
+    expect((await absorverNaSessao(outro.d.deps, { turnoId: vivo2.id, executor: "local" })).data.ids).toEqual([a2.id, c2.id]);
+  });
+
+  it("com confirmação (#189): oferece só até o print, e confirmar o C posterior não o tira da fila", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    const a = await turno(d, agenteId, conversaId, { texto: "A" });
+    await turno(d, agenteId, conversaId, { texto: "print", anexos: [randomUUID()] });
+    const c = await turno(d, agenteId, conversaId, { texto: "C" });
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local", confirma: true })).data.ids).toEqual([a.id]);
+    expect((await confirmarNaSessao(d.deps, { turnoId: vivo.id, executor: "local", ids: [a.id, c.id] })).data.confirmadas).toBe(1);
+    expect(c.estado).toBe("pendente");
+  });
+
+  it("print de outro agente na mesma conversa não corta; na faixa do trabalho, o print corta a fala posterior", async () => {
+    const { d, agenteId, conversaId } = await cenario();
+    const outroAgente = await d.deps.repos.agentes.criar({ nome: "Outro", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+    const vivo = await turno(d, agenteId, conversaId, { estado: "despachando" });
+    await turno(d, outroAgente?.id ?? "", conversaId, { texto: "print do outro", anexos: [randomUUID()] });
+    const a = await turno(d, agenteId, conversaId, { texto: "A" });
+    expect((await absorverNaSessao(d.deps, { turnoId: vivo.id, executor: "local" })).data.ids).toEqual([a.id]);
+
+    const trabalhoId = randomUUID();
+    const vivoT = await turno(d, agenteId, conversaId, { estado: "despachando", trabalhoId });
+    const antes = await turno(d, agenteId, conversaId, { texto: "antes", trabalhoId });
+    await turno(d, agenteId, conversaId, { texto: "print", anexos: [randomUUID()], trabalhoId });
+    const depois = await turno(d, agenteId, conversaId, { texto: "depois", trabalhoId });
+    expect((await d.deps.repos.turnos.absorverDoTrabalho(vivoT, [antes.id, depois.id])).map((t) => t.id)).toEqual([antes.id]);
+    expect(depois.estado).toBe("pendente");
+  });
+});
+
 describe("mensagem no meio só em turno de conversa (ADR-083 §6, #189)", () => {
   it("rotina, retomada de rotina e turno de trabalho não absorvem: a mensagem fica pendente e vira turno próprio", async () => {
     const { d, agenteId, conversaId } = await cenario();

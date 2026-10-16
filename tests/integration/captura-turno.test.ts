@@ -114,14 +114,15 @@ describeIntegracao("captura de tela no transcript (NOD-200)", () => {
     });
   });
 
-  it("entrega tardia (turno já interrompido): a fala entra parcial, sem anexo", async () => {
+  it("entrega tardia sem sucesso (turno já interrompido): a fala entra parcial, sem anexo", async () => {
     await withRollback(MARLON, async (trx) => {
       const g = guardadorDeTelas(MARLON);
       const { conversaId, turnoId } = await turnoDeConversa(trx);
       const { deps, repos } = comCapturas(trx, g.capturas);
       await g.observar(turnoId, tela(1));
       await repos.turnos.interromper(turnoId, "maquina_sem_contato");
-      const r = await assentar(deps, turnoId);
+      // Com sucesso e sem retomada, a tardia vira `concluido` (NOD-264, E8); sem sucesso segue parcial.
+      const r = await assentar(deps, turnoId, { resultado: FALHA });
       expect(r.data).toMatchObject({ tardia: true, mensagem: { parcial: true } });
       expect(await anexosDaConversa(trx, conversaId)).toHaveLength(0);
     });

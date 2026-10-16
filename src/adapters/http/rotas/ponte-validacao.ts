@@ -1,3 +1,4 @@
+import { causaDaEntrega } from "../../../domain/stream-json.ts";
 import { apelidoValido, contaNoLimiteValida } from "../../../domain/contas-da-ia.ts";
 import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, type EstadoContaNaMaquina, type ProgressoDoLogin } from "../../../contracts/contas-ia.ts";
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
@@ -325,6 +326,8 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   // com `limite_do_plano`: o limite do Codex chega como `erro_execucao` com o texto do fornecedor, e o servidor só a usa
   // quando ele mesmo classifica o turno como limite (assentar-turno).
   const contaNoLimite = typeof r.motivoFalha === "string" ? contaNoLimiteValida(r.contaNoLimite, agora) : undefined;
+  // NOD-264 (C20): a causa do turno sem result, só em forma de código; fora disso some e a entrega segue.
+  const causaDoFim = r.desfecho === "interrompido" ? causaDaEntrega(r.causa) : null;
   // Revisão do épico (S19, 2026-10-08): o que o CLI recebeu e não foi confirmado numa renovação.
   const entregues = idsDeMensagens(e.mensagensEntregues);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
@@ -335,6 +338,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
     ...(raioX ? { execucao: raioX } : {}),
     ...(catalogo ? { comandos: catalogo } : {}),
     ...(erroCru ? { erroCru } : {}),
+    ...(causaDoFim ? { causa: causaDoFim } : {}),
     ...(causa ? { causaSemIa: causa } : {}),
     ...(doNod ? { negacoesDoNod: doNod } : {}),
     ...(uso ? { usoDoPlano: uso } : {}),
