@@ -39,7 +39,8 @@
 .cab-acoes .bt { padding: 6px 9px; border-color: transparent; background: transparent; }
 .cab-acoes .perigo { color: var(--danger); }
 .timeline-wrap { padding: 24px 30px; }
-.timeline { max-width: 900px; }
+/* Plano "tela limpa" (2026-10-16, T4): a coluna e o campo com a mesma largura, 760 px, como no Grok. */
+.timeline { max-width: 760px; }
 .time-sep { font-size: 11px; margin: 0 0 26px; }
 .message { margin: 0 0 25px; gap: 14px; align-items: flex-start; }
 .message > .icon { margin-top: 5px; }
@@ -66,11 +67,15 @@
 /* definido em 2026-09-24 (ADR-047): o contexto do remetente fica fora do balão da pessoa, rotulado. */
 .msg-contexto-delegado { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin: 6px 0 0; overflow-wrap: anywhere; }
 .msg-contexto-delegado p { margin: 4px 0; font-size: 13px; color: var(--ink-2); }
-.composer-wrap { border-top: 0; padding: 12px 24px 17px; }
-.composer .box { border-radius: 28px; padding: 8px 10px 8px 19px; background: var(--surface); border-color: var(--line-strong); min-height: 52px; }
+.composer-wrap { border-top: 0; padding: 12px 30px 17px; }
+.composer-wrap > .composer { max-width: 760px; margin: 0 auto; }
+/* T4 (2026-10-16): sai a borda forte de ponta a ponta; borda fina e sombra leve. O foco segue em --ink (estilos.css). */
+.composer .box { border-radius: 28px; padding: 8px 10px 8px 19px; background: var(--surface); border-color: var(--line); box-shadow: var(--shadow-composer); min-height: 52px; }
 .composer textarea { padding: 8px 0; font-size: 13px; min-width: 0; }
 .composer .send { width: 35px; height: 35px; font-size: 18px; background: var(--action); color: var(--on-action); margin: 0; }
 .composer .nota { text-align: center; padding-top: 7px; font-size: 10px; color: var(--ink-3); }
+/* T5 (2026-10-16): sem a dica "Enter envia…", a nota só existe no modo resposta. */
+.composer .nota:empty { display: none; }
 .detalhes { display: none; border-left: 1px solid var(--line); overflow: auto; padding: 33px 26px; background: var(--surface-side); }
 .com-detalhes .detalhes { display: block; }
 .detalhes-identidade { display: flex; align-items: center; gap: 15px; }
@@ -496,9 +501,6 @@
 
 /* definido em 2026-09-24 (revisão da interface): o chat é a tela principal. Cabeçalho só com o bot e o
    botão do painel; o painel pode ficar escondido; o que espera a pessoa vira um sino, não uma faixa. */
-.cab-acoes .toggle-detalhes { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0;
-  border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink-2); }
-.cab-acoes .toggle-detalhes:hover, .cab-acoes .toggle-detalhes:focus-visible { background: var(--surface-raised); }
 @media (min-width: 1100px) {
   .app.com-detalhes.detalhes-ocultos { grid-template-columns: 340px minmax(360px, 1fr); }
   .com-detalhes.detalhes-ocultos .detalhes { display: none; }
@@ -545,7 +547,7 @@
 .acesso-grupo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .acesso-grupo small { margin: 0; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
 .acesso-grupo + .acesso-acoes { margin-top: 2px; padding-top: 0; border-top: 0; }
-.acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--line-strong); }
+.acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: color-mix(in srgb, var(--line-strong) 40%, var(--line)); }
 .acesso-rodape summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
 .acesso-rodape summary:focus:not(:focus-visible) { outline: none; }
 .detalhes .bt.link.perigo { color: var(--danger); }
@@ -895,10 +897,11 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
    sem aprovações, âmbar — a cor diz o risco sem precisar abrir o menu. */
 .composer .box.com-modo { padding-left: 8px; }
 .composer .box.com-modo textarea { padding-left: 6px; }
-.modo-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 9px; border: 0; border-radius: 16px; background: var(--surface-raised); color: var(--ink); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
-.modo-chip:hover, .modo-chip:focus-visible { background: var(--surface-selected); }
-.modo-chip[data-modo="automatico"] { background: var(--surface-selected); color: var(--ink); font-weight: 500; }
-.modo-chip[data-modo="total"] { background: var(--warning-soft); color: var(--warning); font-weight: 500; }
+/* Revisto em 2026-10-16 (plano "tela limpa", T6): sem fundo, igual ao seletor de IA ao lado; o fundo só no hover. */
+.modo-chip { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; border: 0; border-radius: 16px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
+.modo-chip:hover, .modo-chip:focus-visible, .modo-chip[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.modo-chip[data-modo="automatico"] { color: var(--ink); font-weight: 500; }
+.modo-chip[data-modo="total"] { color: var(--warning); font-weight: 500; }
 .modo-chip[aria-disabled="true"] { cursor: default; }
 @media (max-width: 560px) { .modo-chip > span { display: none; } .modo-chip { padding: 0 8px; } }
 .composer-aviso:empty { display: none; }
@@ -1139,7 +1142,7 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
   background: var(--action); color: var(--on-action); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; }
 
 /* A faixa de Trabalhos colada em cima do campo (K1) e a pílula recolhida (K6). */
-.lugar-faixa-trabalhos { flex: none; padding: 0 24px; }
+.lugar-faixa-trabalhos { flex: none; padding: 0 30px; }
 .lugar-faixa-trabalhos:empty { display: none; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap { padding-top: 0; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap .composer .box { border-top-left-radius: 0; border-top-right-radius: 0; }
@@ -1406,8 +1409,118 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .linha-link { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .linha-ia-detalhe .linha-link { color: var(--ink-2); font-weight: 400; }
 .linha-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
-.linha-espera .linha-centro { flex-wrap: wrap; color: var(--ink-2); background: var(--warning-soft); box-shadow: inset 0 0 0 1px var(--warning-line); }
-.linha-espera .linha-centro.estatica:hover { background: var(--warning-soft); color: var(--ink-2); }
+/* Revisto em 2026-10-16 (plano "tela limpa", T7): sem bege — pílula --surface com borda fina; o âmbar só no ícone. */
+.linha-espera .linha-centro { flex-wrap: wrap; color: var(--ink-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.linha-espera .linha-centro.estatica:hover { background: var(--surface); color: var(--ink-2); }
 .linha-espera .linha-ic { color: var(--warning); }
 .linha-espera .ob-gira { width: 11px; height: 11px; }
 .linha-codigo { font-family: var(--font-mono); font-weight: 600; letter-spacing: .06em; color: var(--ink); user-select: all; }
+
+/* ---- Plano "tela limpa" (definido em 2026-10-16; protótipos A1, A2, B1 e B2 do canvas "limite e troca") ----------------
+   T1: o cabeçalho da conversa é uma pílula flutuante centrada sobre o chat, fora da área que rola (como a pílula de
+   novas). Embaixo dela o texto esmaece (--surface → transparente, 104 px). No hover e no foco, borda --ink e "›": o azul
+   (--signal) é só do que é novo (tokens.css).
+   Revisão do PR 1 (2026-10-16): o padding do topo da rolagem é a altura do véu, então a primeira mensagem nunca começa
+   embaixo dele; com #erro à vista (62 px de margem + a faixa, no fluxo), a rolagem completa só o que falta (104 − 62). */
+.cabecalho.cabecalho-pilula { position: absolute; top: 0; left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  min-height: 0; padding: 14px 16px 0; border: 0; background: transparent; pointer-events: none; }
+.cabecalho.cabecalho-pilula::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 104px; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 94%, transparent) 34%, color-mix(in srgb, var(--surface) 0%, transparent) 100%); }
+.cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: 104px; }
+.cabecalho.cabecalho-pilula + #erro:not(:empty) { position: relative; z-index: 5; margin-top: 62px; }
+.cabecalho.cabecalho-pilula + #erro:not(:empty) + .timeline-wrap { padding-top: 42px; }
+.pilula-bot { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; height: 38px; max-width: min(420px, 100%); box-sizing: border-box;
+  padding: 0 16px 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-pop);
+  color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.pilula-bot .icon.sm { width: 26px; height: 26px; min-width: 26px; border-radius: 9px; }
+.pilula-bot .icon.sm svg { width: 22px; height: 22px; }
+.pilula-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pilula-bot .presenca { display: inline-flex; margin: 0; font-size: 0; line-height: 0; }
+.pilula-bot .presenca::before { margin: 0; }
+.pilula-seta { display: none; margin: 0 0 1px -2px; font-size: 17px; font-weight: 500; line-height: 1; }
+.pilula-bot:hover, .pilula-bot:focus-visible { border-color: var(--ink); padding-right: 10px; }
+.pilula-bot:hover .pilula-seta, .pilula-bot:focus-visible .pilula-seta { display: inline; }
+/* O subtítulo da presença só aparece no hover/foco da pílula (revisão do PR 1, 2026-10-16): em repouso ele colidia com a
+   linha "Novas" no topo da rolagem; a presença inteira já vai no title e no aria-label. */
+.pilula-sub { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 6px;
+  background: var(--surface); font-size: 11.5px; color: var(--ink-3); }
+.pilula-bot:hover + .pilula-sub, .pilula-bot:focus-visible + .pilula-sub { display: block; }
+.pilula-sub b { font-weight: 600; color: var(--ink-2); }
+.pilula-sub .presenca-sep { color: var(--ink-3); }
+
+/* T4: a linha do dono e a faixa de Trabalhos acima do campo acompanham os 760 px da coluna. */
+.lugar-faixa-trabalhos > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+
+/* E11 (revisão do PR 1, 2026-10-16): com o bot trabalhando, o Parar fica à vista como botão secundário, redondo, logo
+   antes do Enviar (main.ts, atualizarParar → botoesDoCampo); com o campo vazio, só ele. O ditado gravando sempre usa o
+   Enviar (para e manda). */
+.composer .send[hidden], .composer .parar-envio[hidden] { display: none; }
+.composer .parar-envio { width: 35px; height: 35px; border-radius: 50%; border: 1px solid var(--line); padding: 0; background: var(--surface); color: var(--ink);
+  display: grid; place-items: center; flex: none; cursor: pointer; }
+.composer .parar-envio:hover, .composer .parar-envio:focus-visible { background: var(--surface-raised); border-color: var(--line-strong); }
+.composer .box.gravando .send[hidden] { display: grid; }
+
+/* T6: o seletor de IA no campo, entre o texto e o microfone — sem fundo, como o chip de aprovações; o anel de 20 px mostra
+   o uso da janela de 5 h em volta do logo e fica âmbar a partir de 90%. */
+.seletor-ia { display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-bottom: 2px; padding: 0 8px 0 6px; border: 0; border-radius: 16px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
+.seletor-ia[hidden] { display: none; }
+.seletor-ia:hover, .seletor-ia:focus-visible, .seletor-ia[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.seletor-ia[aria-disabled="true"] { cursor: default; }
+.seletor-ia[aria-disabled="true"]:hover { background: transparent; color: var(--ink-2); }
+.seletor-pct { color: var(--warning); font-variant-numeric: tabular-nums; }
+.anel { position: relative; display: grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.anel > svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.anel-trilho { color: var(--line); }
+.anel-uso { color: var(--line-strong); }
+.anel-alerta .anel-uso { color: var(--warning); }
+.anel-logo { position: relative; display: grid; place-items: center; width: 11px; height: 11px; color: var(--ink); }
+.anel-logo svg { display: block; width: 11px; height: 11px; }
+@media (max-width: 560px) { .seletor-rotulo { display: none; } }
+
+/* O menu do seletor (B1): acima do campo, 336 px; cabeçalho com a conta e o uso, Automático, os modelos por IA, a régua
+   de raciocínio e o link para a fila de contas. */
+.bot-menu.ia-sel-menu { width: min(336px, calc(100vw - 24px)); padding: 6px; border-radius: 14px; }
+.ia-sel-cab { display: flex; flex-direction: column; gap: 7px; padding: 10px; }
+.ia-sel-conta { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ia-sel-conta b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ia-sel-logo { display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--ink); }
+.ia-sel-logo svg { display: block; width: 14px; height: 14px; }
+.ia-sel-conta b.ia-sel-pct { font-variant-numeric: tabular-nums; }
+.ia-sel-alerta .ia-sel-pct { color: var(--warning); }
+.ia-sel-quem { margin: 0; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-sel-barra { height: 4px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
+.ia-sel-barra > span { display: block; height: 100%; background: var(--line-strong); }
+.ia-sel-alerta .ia-sel-barra > span { background: var(--warning); }
+.ia-sel-frase { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.ia-sel-forte { color: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-op { align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 13.5px; }
+.bot-menu.ia-sel-menu button.ia-sel-op[aria-checked="true"] { background: var(--surface-raised); }
+.bot-menu.ia-sel-menu button.ia-sel-op:disabled { color: var(--ink-3); cursor: default; }
+.bot-menu.ia-sel-menu button.ia-sel-op > svg { width: 14px; height: 14px; margin-top: 3px; }
+.bot-menu.ia-sel-menu button > span.ia-sel-txt { flex: 1; width: auto; display: flex; flex-direction: column; gap: 1px; font-size: inherit; }
+.ia-sel-txt small { font-size: 12px; color: var(--ink-3); }
+.ia-sel-grupo { margin: 8px 10px 4px; font-size: 12px; color: var(--ink-3); }
+.ia-sel-grupo span { color: var(--line-strong); }
+.ia-sel-regua { display: flex; flex-direction: column; gap: 8px; padding: 6px 10px 10px; font-size: 13px; }
+.ia-sel-regua-cab { display: flex; align-items: baseline; gap: 8px; }
+.ia-sel-regua-cab > span { flex: 1; }
+.ia-sel-regua-cab b { font-weight: 500; }
+.ia-sel-regua-cab small { font-size: 11.5px; color: var(--ink-3); }
+.ia-sel-trilho { position: relative; display: grid; align-items: center; height: 22px; }
+.ia-sel-linha { position: absolute; top: 10px; height: 2px; border-radius: 2px; background: var(--line); }
+.ia-sel-linha.feita { background: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto { position: relative; justify-self: center; display: block; width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--line-strong) 40%, var(--line)); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.feito { background: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.atual { width: 18px; height: 18px; border: 2px solid var(--ink); background: var(--surface); box-shadow: var(--shadow-knob); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto:hover { background: var(--ink-3); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.atual:hover { background: var(--surface); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ia-sel-nomes { display: grid; font-size: 10.5px; color: var(--ink-3); text-align: center; }
+.ia-sel-nomes .atual { color: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-link { gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 13px; color: var(--ink-2); }
+.bot-menu.ia-sel-menu button.ia-sel-link > span { flex: 1; width: auto; font-size: inherit; }
+
+/* A gaveta: a seção Modo dev (o selo, "Hoje com" e as linhas abertas, que saíram do topo da conversa). */
+.gv-dev-corpo { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.gv-dev-corpo .dev-hoje { white-space: normal; }

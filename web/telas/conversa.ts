@@ -25,15 +25,16 @@ import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
 import { renderCardLote } from "./card-lote.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
-import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
+import { faixaDaMensagem } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
+import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
-import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
+import { renderLinhaLigacao } from "./ligacao.ts";
 import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 
@@ -570,7 +571,7 @@ export function renderAvisoDoVigia(a: AtividadeTurno, agora: number, parar: stri
   return `<div class="atividade-vigia" role="status">${linhas}${parar}</div>`;
 }
 
-/** O Parar do aviso: a mesma ação do cabeçalho (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
+/** O Parar do aviso: a mesma ação do Parar do campo (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
 function pararDoVigia(c: ConversaEstado): string {
   const salaId = c.conversa.salaId;
   return salaId
@@ -877,50 +878,92 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
   return { blocos: saida, ancoradas };
 }
 
-const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.5v13"/></svg>';
-
 /**
- * Cabeçalho da conversa própria: só quem é o bot e o botão do painel. definido em 2026-09-24 (revisão da
- * interface): a barra de ações (Computador, Pasta, Inteligência, Perfil, Memória, •••) competia com o
- * chat; o que é do bot mora no painel (web/telas/detalhes.ts) e o ••• no clique direito da sidebar.
- * Parar só aparece enquanto há turno vivo, que é quando ele serve.
+ * O cabeçalho da conversa própria é uma pílula flutuante (definido em 2026-10-16, plano "tela limpa", T1; protótipo A1/A2
+ * do canvas "limite e troca"): mascote, nome e o ponto de presença, centrada sobre o chat. O clique alterna o painel do
+ * bot (`alternar-detalhes`). A presença inteira ("Trabalhando · 2 esperam você", "sem novidade há N min") vai no
+ * `title`/`aria-label` e num subtítulo curto embaixo da pílula, só quando não é "Disponível" — e o CSS só o mostra no
+ * hover/foco da pílula (em repouso ele colidia com a pílula "Novas", revisão do PR 1).
+ *
+ * O HTML não depende do painel (revisão do PR 1, 2026-10-16): o rótulo é fixo ("Painel de <nome> · <presença>") e o
+ * `aria-expanded` é posto pelo main depois de desenhar (`marcarPainelNaPilula`), que também o acompanha quando a
+ * largura da janela troca o painel de lado ou de sobreposto.
+ *
+ * O que morava no topo saiu (definido em 2026-10-16, decisões E11 e T2 do plano): MODO DEV, "Hoje com" e "Linhas
+ * abertas" e o Ligar foram para a gaveta (web/telas/detalhes.ts); o Parar foi para o campo, ao lado do Enviar
+ * (`botoesDoCampo`).
  */
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
-  // NOD-216: o cabeçalho lê a mesma fonte do mascote da barra (turnosVivosDaConversa + estadoMascoteNaConversa). Antes
-  // qualquer turno vivo da conversa — na fila há horas, ou de uma task — dizia "Trabalhando".
+  const { html, ativa } = presencaDoBot(estado, agenteId);
+  const texto = html.replace(/<[^>]+>/g, "");
+  const disponivel = texto === "Disponível";
+  const rotulo = `${nome} · ${texto}`;
+  const sub = disponivel ? "" : `<span class="pilula-sub" aria-hidden="true">${html}</span>`;
+  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span></button>${sub}`;
+}
+
+/**
+ * A presença do bot na conversa, em HTML curto (os separadores e a contagem em negrito) e se o ponto fica verde.
+ * NOD-216: lê a mesma fonte do mascote da barra (turnosVivosDaConversa + estadoMascoteNaConversa). Antes qualquer turno
+ * vivo da conversa — na fila há horas, ou de uma task — dizia "Trabalhando".
+ */
+function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa: boolean } {
+  const a = agenteDe(estado, agenteId);
   const vivos = a?.conversaId ? turnosVivosDaConversa(estado, a.conversaId) : [];
-  const vivo = vivos[0];
   const rodando = vivos.find((v) => v.estado === "rodando");
   const mascote = a ? estadoMascoteNaConversa(estado, a.conversaId) : "disponivel";
   // NOD-73: "Trabalhando · sem novidade há N min" quando o vigia avisou silêncio.
   const mudo = rodando && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[rodando.turnoId], estado.agora) : null;
-  const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
-  // ADR-083 (#195): com task aberta o Parar fica no cabeçalho mesmo sem turno da conversa — ele para tudo do bot.
-  const tasks = abertosDoBot(estado, agenteId, a?.conversaId).length;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
   // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
   const esperam = new Set((estado.suaVez?.itens ?? []).filter((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido").map(chaveDoItem)).size;
   const sep = ` <span class="presenca-sep" aria-hidden="true">·</span> `;
   const comEsperam = esperam ? `${sep}<b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : "";
-  const presenca = emLigacao
+  const html = emLigacao
     ? "Em ligação"
     : mascote === "trabalhando"
     ? `Trabalhando${mudo !== null ? `${sep}sem novidade há ${mudo} min` : ""}${comEsperam}`
     : mascote === "pensando"
     ? `Pensando${comEsperam}`
     : esperam ? "Aguardando você" : mascote === "na_fila" ? "Na fila" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", mascote) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${mascoteAnimado(mascote) || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
-    <div class="cab-acoes">
-      ${renderSeloModoDev(estado, a?.conversaId, nome)}
-      ${ligar}
-      ${vivo || tasks ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: tasks ? "para a conversa e as tasks deste bot (mostra a lista antes)" : "interrompe agora o que está rodando nesta conversa" }) : ""}
-      <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
-    </div>`;
+  return { html, ativa: mascoteAnimado(mascote) || emLigacao };
 }
+
+/**
+ * O bot da conversa está trabalhando (definido em 2026-10-16, decisão E11 do plano "tela limpa"): há turno vivo da
+ * conversa ou task aberta do bot (ADR-083: com task aberta o Parar para tudo do bot e mostra a lista antes). O turno do
+ * cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
+ */
+export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
+  const a = agenteDe(estado, agenteId);
+  if (!a?.conversaId) return false;
+  return turnosVivosDaConversa(estado, a.conversaId).length > 0 || abertosDoBot(estado, agenteId, a.conversaId).length > 0;
+}
+
+/**
+ * Quais botões o campo mostra (revisão do PR 1, 2026-10-16): o Parar fica SEMPRE alcançável enquanto o bot trabalha —
+ * antes ele trocava de lugar com o Enviar e sumia assim que havia rascunho ou anexo. Agora é um botão secundário ao lado
+ * do Enviar: com o bot trabalhando e o campo vazio, só o Parar; com texto, anexo ou o ditado gravando (o Enviar para e
+ * manda), os dois. Sem trabalho, só o Enviar.
+ */
+export function botoesDoCampo(p: { trabalhando: boolean; temConteudo: boolean; ditando: boolean }): { enviar: boolean; parar: boolean } {
+  return { enviar: !p.trabalhando || p.temConteudo || p.ditando, parar: p.trabalhando };
+}
+
+/** O título do Parar do campo: com task aberta ele para tudo do bot (e mostra a lista antes). */
+export function tituloDoParar(estado: Estado, agenteId: string): string {
+  const a = agenteDe(estado, agenteId);
+  return abertosDoBot(estado, agenteId, a?.conversaId).length ? "Parar a conversa e as tasks deste bot (mostra a lista antes)" : "Parar o que está rodando nesta conversa";
+}
+
+/** O nome que o leitor de tela ouve no Parar do campo. */
+export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Parar ${nome}` : "Parar");
+
+const QUADRADO = '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg>';
 
 const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
@@ -935,8 +978,13 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  *
  * definido em 2026-10-11 (ADR-095): o 🎤 do ditado e a pílula da gravação entram em todo composer, escondidos; quem os
  * mostra é web/telas/ditado.ts, quando o servidor diz que o ditado está disponível.
+ *
+ * definido em 2026-10-16 (plano "tela limpa", T5/T6/E11): sai a dica "Enter envia · Shift+Enter…" — a nota nasce vazia
+ * e só mostra a do modo resposta; na conversa própria (`aprovacao`) entram o seletor de IA (web/telas/seletor-ia.ts),
+ * entre o texto e o microfone, e o Parar (secundário, redondo, escondido) logo antes do Enviar — o Enviar continua na
+ * ponta, onde a pessoa o procura; o main mostra cada um pelo `botoesDoCampo`. `bot` dá o nome do Parar ("Parar Eng 1").
  */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean } = {}): string {
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean; bot?: string } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
@@ -945,13 +993,13 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
     ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${tituloClipe ? ` title="${esc(tituloClipe)}" data-titulo="${esc(tituloClipe)}"` : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
     : "";
   const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
-  const dica = [opcoes.comandos ? " · / para comandos" : "", aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : ""].join("");
   // O "/" (definido em 2026-09-28): a lista abre acima do campo; a dica diz o que o comando escrito faz.
   const barra = opcoes.comandos ? '<div class="barra-lista" id="barra-lista" role="listbox" aria-label="Comandos" hidden></div><div class="barra-dica" id="barra-dica" hidden></div>' : "";
-  const nota = `Enter envia · Shift+Enter quebra linha${dica}`;
   // ADR-059: o chip do modo de aprovação (só na conversa própria) e o aviso acima do campo; main.ts troca o miolo.
   const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
-  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${htmlPilulaDitado()}${htmlBotaoDitado()}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
-  <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
+  const seletor = opcoes.aprovacao ? HTML_SELETOR_IA : "";
+  const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="${esc(rotuloDoParar(opcoes.bot))}" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
+  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

@@ -66,7 +66,8 @@ function cenario(mensagens: Mensagem[], itens: Item[]): Estado {
 const PERGUNTA = "Posso arquivar o PR 7? Ele está parado há duas semanas e sem revisão.";
 const umaAberta = (): Estado => cenario([fala("m1", "d1", PERGUNTA)], [item("d1")]);
 const timeline = (e: Estado): string => renderTimeline(e.conversas.c ?? null, e);
-const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "Enter envia · Shift+Enter quebra linha" };
+// Plano "tela limpa" (2026-10-16, T5): a nota padrão do campo é vazia; só o modo resposta tem nota.
+const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "" };
 
 describe("a pergunta é a fala do agente, não um card", () => {
   it("aberta vira balão de pergunta com 'Parei aqui até você responder' — sem card, sem caixa de texto, e a frase aparece uma vez", () => {
@@ -179,10 +180,19 @@ describe("a faixa e o campo em modo resposta", () => {
     expect(MOTIVO_SEM_ANEXO).toContain("Outro assunto");
     const normal = aparenciaDoComposer(modoDoComposer(cenario([], []), "c"), cenario([], []), PADRAO);
     expect(normal).toEqual({ topo: "", resposta: false, placeholder: PADRAO.placeholder, nota: PADRAO.nota, anexoBloqueado: null });
-    // O campo nasce com a região da faixa e guarda a dica de sempre para voltar a ela.
+    // O campo nasce com a região da faixa. Plano "tela limpa" (2026-10-16, T5): sem a dica "Enter envia…" — a nota nasce
+    // vazia (o CSS a esconde) e só ganha texto no modo resposta.
     const html = htmlComposer("x", [], { anexos: "tudo" });
     expect(html).toContain('id="composer-pergunta"');
-    expect(html).toContain('id="composer-nota" data-padrao="Enter envia · Shift+Enter quebra linha · arraste ou cole imagens e PDFs"');
+    expect(html).toContain('<p class="nota" id="composer-nota" data-padrao=""></p>');
+    expect(html).not.toContain("Enter envia");
+    // definido em 2026-10-16: as dicas "@ menciona um bot", "/ para comandos" e "arraste ou cole imagens e PDFs" saíram de
+    // propósito junto com "Enter envia" (decisão do Marlon no plano "tela limpa", T5: a nota do campo some fora do modo
+    // resposta). Se uma delas voltar, é decisão nova, não regressão.
+    for (const opcoes of [{ anexos: "tudo" as const, comandos: true }, {}]) {
+      const campo = htmlComposer("x", ["Vera"], opcoes);
+      for (const dica of ["@ menciona um bot", "/ para comandos", "arraste ou cole"]) expect(campo).not.toContain(dica);
+    }
   });
 
   it("duas perguntas: o campo cita a mais antiga — 'Respondendo à Nina · “…” · 1 de 2' com × — e 'Responder a esta' troca a citada", () => {

@@ -175,10 +175,8 @@
 .tr-vazia { font-size: 14px; color: var(--ink-3); }
 
 /* ---- na conversa ---- */
-/* O "Ligar" do cabeçalho: um botão com o fone, discreto como as outras ações do cabeçalho. */
-.cab-acoes .bt.ligar { display: inline-flex; align-items: center; gap: 6px; border-color: var(--line); background: var(--surface); }
-.cab-acoes .bt.ligar:hover { background: var(--surface-raised); }
-.cab-acoes .bt.em-ligacao { border-color: var(--success); color: var(--success); }
+/* O "Ligar" mora na gaveta do bot desde 2026-10-16 (plano "tela limpa"): a linha em ligação diz o estado em verde. */
+.gv-linha.em-ligacao { color: var(--success); }
 
 /* A linha "Chat de voz · 03:12": uma linha de sistema com o fone e as ações da transcrição. */
 .linha-ligacao { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px 8px; margin: 6px auto 14px; max-width: 620px; font-size: 12.5px; color: var(--ink-3); }
