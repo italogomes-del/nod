@@ -417,6 +417,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...trocou);
   } else if (limite && (trocou = await aposLimiteDaIaNoFundo(deps, { turno: assentado, executor, ...limite, machineId: entrega.machineId, prontos: entrega.prontosDaPessoa ?? [], prontosPorMaquina: entrega.prontosPorMaquina ?? null, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
+  } else if (desfecho.motivoInterrupcao === "sessao_rejeitada" && (trocou = await aposSessaoRejeitada(deps, { turno, executor, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
@@ -786,6 +788,83 @@ async function aposContaAusente(
   return [
     evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_ausente: p.contaId, custo_usd: p.custoUsd } }),
     ...(await repetirNaConversa(deps, { turno: p.turno, executor: p.executor, agora: p.agora })),
+  ];
+}
+
+/**
+ * ADR-107 (NOD-281): o CLI recusou a sessão antes de começar (`sessao_rejeitada`: o `--resume` de uma sessão que não existe
+ * nesta máquina, nesta conta ou neste CLI). A sessão sai de onde ela seria retomada e, na conversa, a fala da pessoa é
+ * repetida UMA vez — o plano novo vai sem resume, com o histórico. Antes o turno ficava "falhou" e a mensagem se perdia.
+ * Na segunda recusa (ou sem sessão para largar, ou com a pessoa pedindo para parar), vale o aviso de sempre.
+ */
+async function aposSessaoRejeitada(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno } = p;
+  if (turno.trabalhoId) {
+    // A retomada do trabalho (pedidos parados) volta sem resume; aqui segue o aviso de sempre.
+    const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+    if (trabalho?.sessaoCli) await deps.repos.trabalhos.largarSessao(turno.trabalhoId);
+    return null;
+  }
+  if (turno.pararSolicitadoEm !== null || turno.reenvios >= 1) return null;
+  // Critério 4 (QA do PR #332): a retomada de rotina ou de pedido de colega continua a sessão DO TURNO da cadeia (ADR-066).
+  // Recusada, ela também larga a sessão e repete uma vez sem resume — antes devolvia null e a rotina gravava "falhou".
+  if (turno.origem === "retomada" && turno.retomaTurnoId) return await repetirRetomadaSemSessao(deps, { ...p, retomaTurnoId: turno.retomaTurnoId });
+  if (turno.origem !== "conversa") return null;
+  const conversa = await deps.repos.conversas.buscar(turno.conversaId);
+  if (!conversa?.sessaoCli) return null;
+  await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, null);
+  log("aviso", "sessao_rejeitada_repete_sem_resume", { turno_id: turno.id, conversa_id: turno.conversaId, machine_id: turno.machineId });
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  return [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "sessao_rejeitada", motivo_falha: null, repete_sem_resume: true, custo_usd: p.custoUsd } }),
+    ...(await repetirNaConversa(deps, { turno, executor: p.executor, agora: p.agora })),
+  ];
+}
+
+/**
+ * ADR-107 (NOD-281, critério 4): a retomada da cadeia cujo `--resume` o CLI recusou. A sessão sai do turno que ela
+ * continuava (nenhuma retomada dele volta a pedir o mesmo resume) e a MESMA entrada volta à fila UMA vez (`reenvios` + 1),
+ * continuando o turno recusado — que não tem sessão, então o plano vai com o histórico. A cadeia segue (rotina, delegação,
+ * procuração e marca de fora são as do turno), e a execução da rotina não fecha como "falhou": a repetição a registra
+ * (registrarDesfechoRotina). null = o turno da cadeia não tinha sessão (a recusa não foi do resume): vale o aviso de sempre.
+ */
+async function repetirRetomadaSemSessao(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; autoria: Autoria; agora: number; custoUsd: number | null; retomaTurnoId: string },
+): Promise<RuntimeEvent[] | null> {
+  const { turno } = p;
+  if (!(await deps.repos.turnos.sessaoDoTurno(p.retomaTurnoId))) return null;
+  await deps.repos.turnos.largarSessao(p.retomaTurnoId);
+  log("aviso", "sessao_rejeitada_repete_sem_resume", { turno_id: turno.id, conversa_id: turno.conversaId, machine_id: turno.machineId, retoma_turno_id: p.retomaTurnoId });
+  await deps.repos.turnos.travarRetomadas(turno.id);
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const novo = await deps.repos.turnos.enfileirar({
+    conversaId: turno.conversaId,
+    agenteId: turno.agenteId,
+    origem: "retomada",
+    retomaTurnoId: turno.id,
+    prazoEm: turno.prazoEm,
+    profundidade: turno.profundidade,
+    entradaTexto: turno.entradaTexto,
+    mensagemOrigemId: turno.mensagemOrigemId,
+    entradaAnexos: turno.entradaAnexos,
+    entradaConfianca: turno.entradaConfianca,
+    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
+    modelo: turno.modelo,
+    harness: turno.harness,
+    reenvios: turno.reenvios + 1,
+    executor: p.executor,
+    trabalhoId: null,
+  });
+  if (!novo) return null;
+  // A marca de quem leu algo de fora (ADR-062) não se lava na repetição, como em toda retomada (enfileirar-retomada.ts).
+  if (await deps.repos.turnos.contaminado(turno.id)) await deps.repos.turnos.contaminar(novo.id, p.agora);
+  return [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "sessao_rejeitada", motivo_falha: null, repete_sem_resume: true, custo_usd: p.custoUsd } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria: p.autoria, agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "retomada", agente_id: turno.agenteId, retoma_turno_id: turno.id, repete_turno_id: turno.id, reenvios: novo.reenvios } }),
   ];
 }
 

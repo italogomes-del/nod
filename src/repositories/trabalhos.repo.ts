@@ -230,9 +230,9 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
      * A sessão do CLI do trabalho (nunca a da conversa), o harness e o executor que a criaram, como conversas.sessao_harness
      * (0030) e conversas.sessao_executor (0005).
      */
-    async atualizarSessao(id: string, sessaoCli: string, harness: string | null, executor: Executor | null = null): Promise<boolean> {
+    async atualizarSessao(id: string, sessaoCli: string, harness: string | null, executor: Executor | null = null, maquinaId: string | null = null): Promise<boolean> {
       const r = await conn`
-        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}, sessao_conta_id = null
+        update trabalhos set sessao_cli = ${sessaoCli}, sessao_harness = ${harness}, sessao_executor = ${executor}, sessao_conta_id = null, sessao_maquina_id = ${maquinaId}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return r.count === 1;
     },
@@ -245,6 +245,20 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async contaDaSessao(id: string): Promise<string | null> {
       const [l] = await conn<{ sessao_conta_id: string | null }[]>`select sessao_conta_id from trabalhos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return l?.sessao_conta_id ?? null;
+    },
+
+    /** ADR-107 (NOD-281): o CLI recusou a sessão; a próxima volta do trabalho vai sem resume, com o histórico. */
+    async largarSessao(id: string): Promise<boolean> {
+      const r = await conn`
+        update trabalhos set sessao_cli = null, sessao_harness = null, sessao_executor = null, sessao_conta_id = null, sessao_maquina_id = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return r.count === 1;
+    },
+
+    /** ADR-107 (NOD-281): a máquina em que a sessão do trabalho foi criada. */
+    async maquinaDaSessao(id: string): Promise<string | null> {
+      const [l] = await conn<{ sessao_maquina_id: string | null }[]>`select sessao_maquina_id from trabalhos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return l?.sessao_maquina_id ?? null;
     },
 
     async somarCusto(id: string, custoUsd: number): Promise<boolean> {

@@ -52,6 +52,9 @@ export type TokenTurno = ServicesNod<unknown>["tokenTurno"] & {
   planoOuRecompor(turnoId: string): Promise<PlanoTurno | null>;
 };
 
+/** NOD-288: o plano recomposto e se ele é provisório (a máquina ainda não reconectou). */
+export type PlanoRecomposto = { plano: PlanoTurno; provisorio: boolean };
+
 export type OpcoesTokenTurno = {
   agora: Relogio;
   /**
@@ -64,8 +67,12 @@ export type OpcoesTokenTurno = {
   identidadeDe?: (turnoId: string) => IdentidadeSemTurno | null;
   /** NOD-214: a credencial pelo hash do token, no escopo que o token alega (`turno_credenciais`, só turno `despachando`). */
   buscar?: (escopo: Escopo, hash: Buffer) => Promise<CredencialGuardada | null>;
-  /** NOD-214: recompõe o plano do turno adotado pelo caminho do emitir, com o token que já existe. */
-  recompor?: (identidade: IdentidadeDeTurno, token: string) => Promise<PlanoTurno | null>;
+  /**
+   * NOD-214: recompõe o plano do turno adotado pelo caminho do emitir, com o token que já existe.
+   * revisto em 2026-10-15 (NOD-288): `provisorio` = recomposto sem a máquina conectada (capacidades "não sei"); vale só
+   * para a chamada e não entra no cache, para a próxima, já com a máquina de volta, recompor com as capacidades reais.
+   */
+  recompor?: (identidade: IdentidadeDeTurno, token: string) => Promise<PlanoRecomposto | null>;
 };
 
 type Entrada = { hash: Buffer; epoch: number; expira: number; identidade: IdentidadeSemTurno; plano: PlanoTurno | null; sobrevive: boolean; token: string | null };
@@ -171,11 +178,12 @@ export function criarTokenTurno(opcoes: OpcoesTokenTurno): TokenTurno {
       if (emCurso) return emCurso;
       const token = e.token;
       const p = opcoes.recompor({ turnoId, ...e.identidade }, token)
-        .then((plano) => {
+        .then((r) => {
           // O token pode ter sido revogado (entrega, lease) ou trocado enquanto o plano era recomposto: não volta.
           const agora = porTurno.get(turnoId);
-          if (plano && agora && agora.token === token) agora.plano = plano;
-          return agora && agora.token === token ? plano : null;
+          // NOD-288: o provisório (máquina ainda sem conexão) não fica em cache; a próxima chamada recompõe.
+          if (r && !r.provisorio && agora && agora.token === token) agora.plano = r.plano;
+          return agora && agora.token === token ? (r?.plano ?? null) : null;
         })
         .finally(() => recompondo.delete(turnoId));
       recompondo.set(turnoId, p);

@@ -153,7 +153,7 @@ describe("NOD-214: o token de turno atravessa o reinício do servidor (hash no b
     let chamadas = 0;
     const novo = criarTokenTurno({
       agora: () => 1_000,
-      recompor: async (id, token) => { chamadas++; expect(token).toBe(t); await new Promise<void>((r) => { soltar = r; }); return { ...planoDeTeste(), turnoId: id.turnoId }; },
+      recompor: async (id, token) => { chamadas++; expect(token).toBe(t); await new Promise<void>((r) => { soltar = r; }); return { plano: { ...planoDeTeste(), turnoId: id.turnoId }, provisorio: false }; },
     });
     expect(await novo.planoOuRecompor("t1")).toBeNull();
     novo.adotar(t, c);
@@ -174,5 +174,29 @@ describe("NOD-214: o token de turno atravessa o reinício do servidor (hash no b
     soltar();
     expect(await d).toBeNull();
     expect(novo.planoDe("t1")).toBeNull();
+  });
+
+  it("planoOuRecompor (NOD-288): o plano provisório (máquina ainda sem conexão) não entra no cache; o definitivo entra", async () => {
+    const velho = criarTokenTurno({ agora: () => 1_000 });
+    const t = velho.cunhar("t1", identidade);
+    const c = { turnoId: "t1", ...velho.credencialDe("t1")!, sobreviveReinicio: true };
+    let conectada = false;
+    let chamadas = 0;
+    const novo = criarTokenTurno({
+      agora: () => 1_000,
+      recompor: async (id) => { chamadas++; return { plano: { ...planoDeTeste(), turnoId: id.turnoId }, provisorio: !conectada }; },
+    });
+    novo.adotar(t, c);
+    expect((await novo.planoOuRecompor("t1"))?.turnoId).toBe("t1");
+    expect(novo.planoDe("t1")).toBeNull();
+    expect((await novo.planoOuRecompor("t1"))?.turnoId).toBe("t1");
+    expect(chamadas).toBe(2);
+
+    conectada = true;
+    expect((await novo.planoOuRecompor("t1"))?.turnoId).toBe("t1");
+    expect(chamadas).toBe(3);
+    expect(novo.planoDe("t1")?.turnoId).toBe("t1");
+    await novo.planoOuRecompor("t1");
+    expect(chamadas).toBe(3);
   });
 });

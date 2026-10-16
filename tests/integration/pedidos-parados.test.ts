@@ -117,6 +117,8 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
 
       await m.sinalDeVida();
+      // NOD-281: o turno caído rodou no CLI real; a retomada e a linha dela levam esse executor (antes, "catcher" fixo).
+      await trx`update turnos set executor = 'local' where id = ${m.tarefa.id}`;
       const r = await cuidarDosPedidosParados(m.deps);
       expect(r.data.retomados).toEqual([m.tarefa.id]);
       const retomada = (await m.turnosDoColega()).find((x) => x.origem === "retomada");
@@ -126,6 +128,8 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       expect(await m.estado(m.colegaId)).not.toBe("precisa_de_voce");
       const linhas = (await m.repos.mensagens.listarDaConversa(m.dev.conversaId, 500)).filter((x) => x.kind === "sistema" && x.texto.includes("retomado sozinho"));
       expect(linhas).toHaveLength(1);
+      expect(linhas[0]!.autoria.executor).toBe("local");
+      expect(retomada?.executor).toBe("local");
       // Quem pediu segue esperando: nada voltou ainda.
       expect(await m.pecasDaAda()).toHaveLength(0);
       expect(await m.estado(m.w.id)).toBe("rodando");

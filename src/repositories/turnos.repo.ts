@@ -57,6 +57,10 @@ interface Linha {
   despachado_em?: Date | null;
 }
 
+
+/** ADR-066/ADR-107: a sessão que um turno deixou e onde ela vale (IA efetiva, conta, máquina). */
+export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
+
 const COLUNAS =
   "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, despachado_em";
 
@@ -557,15 +561,38 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       await conn`update turnos set conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and id = ${id}`;
     },
 
+    /**
+     * ADR-107 (NOD-281): a IA que de fato rodou o turno (`turnos.harness` guarda a preferência, muitas vezes 'auto') e a conta
+     * dela, numa escrita só — a retomada da cadeia (sessaoDoTurno) compara as duas com as do turno novo.
+     */
+    async registrarIa(id: string, harness: string, contaId: string | null): Promise<void> {
+      await conn`update turnos set harness_efetivo = ${harness}, conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and id = ${id}`;
+    },
+
     async contaDoTurno(id: string): Promise<string | null> {
       const [l] = await conn<{ conta_id: string | null }[]>`select conta_id from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
       return l?.conta_id ?? null;
     },
 
-    /** ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela. */
-    async sessaoDoTurno(id: string): Promise<{ sessaoCli: string; executor: string } | null> {
-      const [l] = await conn<{ sessao_cli: string | null; executor: string }[]>`select sessao_cli, executor from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
-      return l?.sessao_cli ? { sessaoCli: l.sessao_cli, executor: l.executor } : null;
+    /**
+     * ADR-066: a sessão do CLI que o turno abriu e o executor dele — a retomada de rotina ou de pedido de colega volta nela.
+     * ADR-107 (NOD-281): com a IA que de fato rodou, a conta e a máquina — a sessão só é retomada onde existe.
+     */
+    async sessaoDoTurno(id: string): Promise<SessaoDoTurno | null> {
+      const [l] = await conn<{ sessao_cli: string | null; executor: string; harness_efetivo: string | null; conta_id: string | null; machine_id: string | null }[]>`
+        select sessao_cli, executor, harness_efetivo, conta_id, machine_id from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.sessao_cli ? { sessaoCli: l.sessao_cli, executor: l.executor, harness: l.harness_efetivo, contaId: l.conta_id, machineId: l.machine_id } : null;
+    },
+
+    /**
+     * ADR-107 (NOD-281, critério 4): o CLI recusou a sessão que este turno deixou (sessao_rejeitada na retomada da cadeia).
+     * Ela sai do turno para nenhuma retomada dele voltar a pedir o mesmo --resume. Só a coluna da sessão — nunca o estado.
+     */
+    async largarSessao(id: string): Promise<boolean> {
+      const r = await conn`
+        update turnos set sessao_cli = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and sessao_cli is not null`;
+      return r.count === 1;
     },
 
     /** "Pode fazer e o resto desta tarefa" (0032): marca a RAIZ; vale para ela e as retomadas dela. */

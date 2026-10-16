@@ -80,6 +80,11 @@ export type EntradaEmitirPlano = {
    */
   capacidadesDaMaquina?: Partial<Record<IdHarness, CapacidadesHarness>>;
   /**
+   * ADR-107 (NOD-281): o turno roda numa máquina da ponte. A sessão só é retomada se nasceu NESTA máquina (a sessão sem
+   * máquina gravada, de antes da 0079, não). Ausente = o Mac do modo local: a máquina da sessão não é conferida.
+   */
+  sessaoPorMaquina?: boolean;
+  /**
    * definido em 2026-10-12 (NOD-214): RECOMPÕE o plano de um turno que a máquina continuou rodando durante o reinício do
    * servidor (a adoção). Mesmo caminho do despacho — catálogo e concessões lidos AGORA —, mas com o token que a máquina
    * já tem (nenhum token novo), a IA que o despacho escolheu e sem efeito: não regrava o executor, não grava o raio-x nem
@@ -191,7 +196,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const gravada = input.recompor ? await (async () => { const id = await deps.repos.turnos.contaDoTurno(turno.id); return id ? await deps.repos.contasIa.buscar(id) : null; })() : null;
   const conta = gravada && escolha && gravada.ia === escolha.harness ? gravada : daLista;
   // A coluna nasce nula: só grava quando há conta (o caso comum hoje não paga a escrita na tabela mais quente).
-  if (conta && conta.id !== gravada?.id) await deps.repos.turnos.registrarConta(turno.id, conta.id);
+  // ADR-107 (NOD-281): o despacho com IA escolhida grava a IA efetiva e a conta juntas (a retomada da cadeia compara as duas).
+  if (!input.recompor && escolha) await deps.repos.turnos.registrarIa(turno.id, escolha.harness, conta?.id ?? null);
+  else if (conta && conta.id !== gravada?.id) await deps.repos.turnos.registrarConta(turno.id, conta.id);
   const inventario: Inventario = escolha ? input.harnesses![escolha.harness]! : executor === "catcher" ? { estado: "pronto", versao: "catcher", em: agora } : (inventarioCli ?? { estado: "ausente", motivo: "inventário do claude-cli nunca registrado", em: agora });
 
   // A janela reivindicada liga o turno à rotina (rotina_janelas.turno_id, 0004 — pendência L5 §6
@@ -215,7 +222,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // revisto em 2026-10-07 (ADR-083, S3): quem retoma sessão é a capacidade do harness, nunca o nome dele. Sem escolha
   // (catcher, plano de antes dos harnesses) vale como antes.
   const caps = escolha ? capacidadesDe(escolha.harness) : null;
-  const retoma = caps ? caps.retomaSessao : true;
+  // ADR-107 (NOD-281): na ponte, a máquina diz se o driver dela retoma (o Codex só com o app-server). Sem anúncio daquela
+  // IA, o Codex não retoma (motor de antes) e o Claude segue retomando.
+  const retomaNaMaquina = !escolha || input.capacidadesDaMaquina === undefined || (input.capacidadesDaMaquina[escolha.harness]?.retomaSessao ?? escolha.harness !== "codex-cli");
+  const retoma = (caps ? caps.retomaSessao : true) && retomaNaMaquina;
   // definido em 2026-10-07 (ADR-083): o turno de um trabalho roda na sessão DO TRABALHO, nunca na da conversa nem na da
   // cadeia (a retomada dele herda o trabalho). Sem `retomaSessao`, recebe o histórico recente, como o Codex hoje.
   const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
@@ -223,9 +233,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // sessão do catcher não existe no CLI real, e a do CLI real não serve ao catcher.
   // ADR-102 (R1 da revisão): a sessão do Codex mora na pasta da conta (CODEX_HOME); com outra conta, não há o que retomar.
   // O Claude compartilha `projects/` entre as contas (contas-mac.ts), então retoma em qualquer uma.
-  const mesmaContaDaSessao = async (gravada: () => Promise<string | null>) => !conta || escolha?.harness !== "codex-cli" || (await gravada()) === conta.id;
-  const contaDoTrabalhoOk = trabalho ? await mesmaContaDaSessao(() => deps.repos.trabalhos.contaDaSessao(trabalho.id)) : true;
-  const contaDaConversaOk = await mesmaContaDaSessao(() => deps.repos.conversas.contaDaSessao(turno.conversaId));
+  // revisto em 2026-10-15 (ADR-107, NOD-281): igualdade estrita — a sessão criada na pasta padrão também não existe na
+  // pasta de uma conta, e vice-versa.
+  const mesmaConta = (gravada: string | null) => escolha?.harness !== "codex-cli" || (gravada ?? null) === (conta?.id ?? null);
+  // ADR-107 (NOD-281): na ponte, a sessão mora no disco da máquina onde nasceu; em outra, o resume falhava ("sessão
+  // rejeitada") e o bot perdia a mensagem. Só retoma a sessão gravada NESTA máquina (a sem máquina, de antes da 0079, não).
+  // No Mac do modo local, como antes; a sessão de uma VM recusada ali cai no reenvio sem resume (assentar-turno).
+  const mesmaMaquina = (gravada: string | null) => input.sessaoPorMaquina !== true || gravada === input.machineId;
+  const ondeOk = async (contaGravada: () => Promise<string | null>, maquinaGravada: () => Promise<string | null>) => mesmaConta(await contaGravada()) && mesmaMaquina(await maquinaGravada());
+  const contaDoTrabalhoOk = trabalho?.sessaoCli ? await ondeOk(() => deps.repos.trabalhos.contaDaSessao(trabalho.id), () => deps.repos.trabalhos.maquinaDaSessao(trabalho.id)) : true;
+  const contaDaConversaOk = conversa?.sessaoCli ? await ondeOk(() => deps.repos.conversas.contaDaSessao(turno.conversaId), () => deps.repos.conversas.maquinaDaSessao(turno.conversaId)) : true;
   const sessaoDoTrabalho = trabalho && retoma && contaDoTrabalhoOk && input.permitirResume !== false && trabalho.sessaoCli && trabalho.sessaoExecutor === executor && (!escolha || trabalho.sessaoHarness === null || trabalho.sessaoHarness === escolha.harness) ? trabalho.sessaoCli : null;
   const sessaoDoHarness = (escolha ? retoma && conversa?.sessaoHarness === escolha.harness : true) && contaDaConversaOk;
   const sessaoDaConversa = !trabalho && sessaoDoHarness && input.permitirResume !== false && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "ligacao" && ligacao === null && !ehDelegacao && conversa?.tipo !== "sala" && conversa?.sessaoCli && conversa.sessaoExecutor === executor ? conversa.sessaoCli : null;
@@ -235,7 +252,10 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // terminal fora da conversa, a sessão é o que guarda os arquivos mexidos e o resultado dos testes.
   const continuaCadeia = !trabalho && !sessaoDaConversa && turno.origem === "retomada" && turno.retomaTurnoId !== null && (ligacao !== null || ehDelegacao) && input.permitirResume !== false && retoma;
   const daCadeia = continuaCadeia && turno.retomaTurnoId ? await deps.repos.turnos.sessaoDoTurno(turno.retomaTurnoId) : null;
-  const sessaoDaCadeia = daCadeia && daCadeia.executor === executor ? daCadeia.sessaoCli : null;
+  // ADR-107 (NOD-281): a cadeia só retoma na mesma IA (a do Codex não existe no Claude), na mesma conta e na mesma máquina.
+  // Sem a IA gravada (turno de antes da 0079), como antes.
+  const sessaoDaCadeia = daCadeia && daCadeia.executor === executor && (daCadeia.harness === null || !escolha || daCadeia.harness === escolha.harness)
+    && mesmaConta(daCadeia.contaId) && mesmaMaquina(daCadeia.machineId) ? daCadeia.sessaoCli : null;
   const sessaoCli = sessaoDoTrabalho ?? sessaoDaConversa ?? sessaoDaCadeia;
   // A rede de 2 min (ADR-083 §2, #193): a sessão da conversa ficou com o trabalho promovido, que segue nela. A próxima
   // mensagem continua numa CÓPIA (`--fork-session` no Claude) e o id novo vira a sessão da conversa. Só com harness que

@@ -510,6 +510,16 @@ export function criarPonteHttpServidor(d: {
     if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return {};
     return c.ponte.maquinasConectadas().find((m) => m.machineId === machineId)?.capacidades ?? {};
   }
+  /**
+   * definido em 2026-10-15 (NOD-288): como `capacidadesDaMaquina`, mas `undefined` ("não sei") quando a máquina não está
+   * conectada a este processo — o servidor recém-reiniciado antes de ela reconectar. Quem recompõe o plano lê daqui para
+   * não tirar o terminal do Codex por falta de conexão; o despacho segue com `capacidadesDaMaquina`.
+   */
+  function capacidadesDaMaquinaConectada(escopo: Escopo, machineId: string): Partial<Record<IdHarness, CapacidadesHarness>> | undefined {
+    const c = conexoes.get(machineId);
+    if (!c || c.escopo.pessoaId !== escopo.pessoaId || c.escopo.tenantId !== escopo.tenantId) return undefined;
+    return capacidadesDaMaquina(escopo, machineId);
+  }
   /** ADR-090: as máquinas vivas da pessoa (último contato há menos de 60 s), para a tela "Máquinas". */
   function maquinasDaPessoa(escopo: Escopo): MaquinaConectada[] {
     return [...conexoes.entries()].flatMap(([id, c]) => {
@@ -527,5 +537,5 @@ export function criarPonteHttpServidor(d: {
   function iniciarDrenagem(): void { drenando = true; }
   /** NOD-175: quantos `ponte.puxar` estão em voo (reserva que pode virar token vivo). */
   function reservasEmVoo(): number { return reservando; }
-  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, prontosPorMaquinaDaPessoa, maquina, capacidadesDaMaquina, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
+  return { rotas, inventario: atual, varrer, harnesses, harnessesDaPessoa, prontosPorMaquinaDaPessoa, maquina, capacidadesDaMaquina, capacidadesDaMaquinaConectada, maquinasDaPessoa, renomear, ultimoContato, ghDaMaquina, ghDaPessoa, ligacaoDaPessoa, semLacoDeVozDaPessoa, iniciarDrenagem, reservasEmVoo };
 }

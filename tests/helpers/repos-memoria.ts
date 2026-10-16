@@ -86,6 +86,9 @@ export type BancoMemoria = {
   /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
   contaDoTurno: Map<string, string | null>;
   contaDaSessao: Map<string, string | null>;
+  /** ADR-107 (0079): conversas/trabalhos.sessao_maquina_id (mesmas chaves) e turnos.harness_efetivo. */
+  maquinaDaSessao: Map<string, string | null>;
+  harnessEfetivo: Map<string, string | null>;
   /** 0073 (NOD-214): as credenciais dos turnos despachados (o comportamento completo se prova no Postgres). */
   credenciais: (CredencialTurno & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
@@ -161,6 +164,8 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     trocasDeIa: [],
     contaDoTurno: new Map(),
     contaDaSessao: new Map(),
+    maquinaDaSessao: new Map(),
+    harnessEfetivo: new Map(),
     credenciais: [],
     entregas: new Set(),
     decisoes: [],
@@ -621,9 +626,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const c = doTenant(b.conversas).find((x) => x.id === id);
         if (!c) return false;
         Object.assign(c, { sessaoCli: null, sessaoExecutor: null, sessaoHarness: null, sessaoEm: null, recomecoEm: agora() });
+        b.maquinaDaSessao.delete(`conversa:${id}`);
         return true;
       },
-      async atualizarSessaoCli(id, sessaoCli, sessaoExecutor = null, sessaoHarness = null) {
+      async atualizarSessaoCli(id, sessaoCli, sessaoExecutor = null, sessaoHarness = null, maquinaId = null) {
         const c = doTenant(b.conversas).find((x) => x.id === id);
         if (!c) return false;
         c.sessaoCli = sessaoCli;
@@ -631,11 +637,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         c.sessaoHarness = sessaoCli ? sessaoHarness : null;
         c.sessaoEm = sessaoCli ? agora() : null;
         b.contaDaSessao.delete(`conversa:${id}`);
+        b.maquinaDaSessao.set(`conversa:${id}`, sessaoCli ? maquinaId : null);
         return true;
       },
       async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`conversa:${id}`, contaId); },
       async contaDaSessao(id) { return b.contaDaSessao.get(`conversa:${id}`) ?? null;
       },
+      async maquinaDaSessao(id) { return b.maquinaDaSessao.get(`conversa:${id}`) ?? null; },
     },
 
     anexos: {
@@ -1031,17 +1039,27 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.terminadoEm = estado === "terminado" || estado === "parado" || estado === "falhou" ? em : null;
         return semDonoTrabalho(t);
       },
-      async atualizarSessao(id, sessaoCli, harness, executor = null) {
+      async atualizarSessao(id, sessaoCli, harness, executor = null, maquinaId = null) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
         if (!t) return false;
         t.sessaoCli = sessaoCli;
         t.sessaoHarness = harness;
         t.sessaoExecutor = executor;
         b.contaDaSessao.delete(`trabalho:${id}`);
+        b.maquinaDaSessao.set(`trabalho:${id}`, maquinaId);
         return true;
       },
       async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`trabalho:${id}`, contaId); },
       async contaDaSessao(id) { return b.contaDaSessao.get(`trabalho:${id}`) ?? null;
+      },
+      async maquinaDaSessao(id) { return b.maquinaDaSessao.get(`trabalho:${id}`) ?? null; },
+      async largarSessao(id) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!t) return false;
+        Object.assign(t, { sessaoCli: null, sessaoHarness: null, sessaoExecutor: null });
+        b.contaDaSessao.delete(`trabalho:${id}`);
+        b.maquinaDaSessao.delete(`trabalho:${id}`);
+        return true;
       },
       async somarCusto(id, custoUsd) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
@@ -1252,12 +1270,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async sessaoDoTurno() {
         return null;
       },
+      async largarSessao() {
+        return false;
+      },
       async registrarExecutor(id, executor) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
         if (t) t.executor = executor;
       },
       async registrarConta(id, contaId) { b.contaDoTurno.set(id, contaId); },
       async contaDoTurno(id) { return b.contaDoTurno.get(id) ?? null; },
+      async registrarIa(id, harness, contaId) { b.harnessEfetivo.set(id, harness); b.contaDoTurno.set(id, contaId); },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,

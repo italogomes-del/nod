@@ -45,7 +45,7 @@ import { criarSubidaComposio } from "../integracoes/arquivo-composio.ts";
 import { criarCofreDeTokensDoApp, criarTokenDeInstalacao } from "../integracoes/github-app.ts";
 import { criarInterruptor, type InterruptorNod } from "../../services/interruptor.ts";
 import { criarInventario, type ServicoInventario } from "../../services/inventario.ts";
-import { criarTokenTurno, type TokenTurno } from "../../services/token-turno.ts";
+import { criarTokenTurno, type PlanoRecomposto, type TokenTurno } from "../../services/token-turno.ts";
 import { criarPareamentoMaquina } from "../../services/pareamento-maquina.ts";
 import { criarPareamentoDispositivo } from "../../services/pareamento-dispositivo.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
@@ -55,7 +55,7 @@ import { atualizarPerfil } from "../../use-cases/atualizar-perfil.ts";
 import { motorDe } from "../../use-cases/autoria-evento.ts";
 import { criarRotina } from "../../use-cases/criar-rotina.ts";
 import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../use-cases/rotinas-do-agente.ts";
-import { registrarDesfechoDaEntrega } from "../../use-cases/disparar-rotina.ts";
+import { registrarDesfechoDaEntrega, repetidoSemResume } from "../../use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../use-cases/emitir-plano-turno.ts";
 import { encaminhar } from "../../use-cases/encaminhar.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
@@ -453,9 +453,11 @@ export function comporApp(o: OpcoesCompor): App {
       async emitir(trx, turnoId, machineIdDoPlano) {
         const d = depsSobre(trx);
         // ADR-092: no modo local, o turno que uma máquina da ponte puxou (a VM) sai como no compartilhado — as IAs, o gh e
-        // o nome DELA, sem --resume (a sessão do Mac não existe lá) e sem as pastas do Mac. O resto roda neste Mac.
+        // o nome DELA e sem as pastas do Mac. O resto roda neste Mac.
+        // revisto em 2026-10-15 (ADR-107, NOD-281): com --resume quando a sessão nasceu nesta máquina, nesta IA e nesta
+        // conta (sessaoPorMaquina); antes a ponte nunca retomava e cada turno ia com o histórico.
         const daPonte = compartilhado || maquinaDaPonte(d.escopo, machineIdDoPlano);
-        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: !daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
+        const r = await emitirPlanoTurno(d, { turnoId, machineId: machineIdDoPlano, executor: daPonte ? "local" : executorAtual, permitirResume: true, sessaoPorMaquina: daPonte, ghNaMaquina: await ghDaPessoa(d.escopo, machineIdDoPlano),
           harnesses: daPonte ? ponteHttp.harnesses(d.escopo, machineIdDoPlano) : Object.fromEntries(HARNESSES.map((h) => [h.id, inventarioDe(h.id)])),
           harnessPreferido: !daPonte && driverPreferido !== "catcher" ? driverPreferido : null, modelosLigacao, aFazer, semFerramentasDoNod, semCriarBots,
           maquina: daPonte ? ponteHttp.maquina(d.escopo, machineIdDoPlano) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
@@ -484,7 +486,7 @@ export function comporApp(o: OpcoesCompor): App {
    * com o token que a máquina já tem e a IA que o despacho escolheu (`turno_credenciais`). null = o turno não está mais
    * despachando ou a credencial sumiu (entregue ou assentado pelo lease enquanto isso).
    */
-  async function recomporPlano(identidade: { tenantId: string; pessoaId: string; turnoId: string }, token: string): Promise<PlanoTurno | null> {
+  async function recomporPlano(identidade: { tenantId: string; pessoaId: string; turnoId: string }, token: string): Promise<PlanoRecomposto | null> {
     const escopo: Escopo = { tenantId: identidade.tenantId, pessoaId: identidade.pessoaId };
     return abrirTxEscopada(db, escopo)(async (trx) => {
       const d = depsDe(trx, escopo);
@@ -494,14 +496,17 @@ export function comporApp(o: OpcoesCompor): App {
       const visto = c.harness ? (daPonte ? ponteHttp.harnesses(escopo, t.machineId)[c.harness] : inventarioDe(c.harness)) : undefined;
       // A máquina já roda esta IA: o inventário que ainda não voltou depois do reinício não a tira do plano.
       const inventario: Inventario = visto?.estado === "pronto" ? visto : { estado: "pronto", versao: "adotado", em: relogio() };
+      // revisto em 2026-10-15 (NOD-288): a máquina que ainda não reconectou (servidor recém-reiniciado) dá "não sei"
+      // (undefined), não {} — o Codex com terminal não perde o Bash; o plano volta provisório e fica fora do cache.
+      const capacidades = daPonte ? ponteHttp.capacidadesDaMaquinaConectada(escopo, t.machineId) : undefined;
       const r = await emitirPlanoTurno(d, {
         turnoId: t.id, machineId: t.machineId, executor: c.executor, permitirResume: false, ghNaMaquina: await ghDaPessoa(escopo, t.machineId),
         harnesses: c.harness ? { [c.harness]: inventario } : undefined, harnessPreferido: c.harness, modelosLigacao, aFazer, semFerramentasDoNod, semCriarBots,
         maquina: daPonte ? ponteHttp.maquina(escopo, t.machineId) : null, ...(daPonte && !compartilhado ? { maquinaRemota: true } : {}),
-        ...(daPonte ? { capacidadesDaMaquina: ponteHttp.capacidadesDaMaquina(escopo, t.machineId) } : {}),
+        ...(capacidades ? { capacidadesDaMaquina: capacidades } : {}),
         recompor: { tokenDeTurno: token, harness: c.harness },
       });
-      return r.data;
+      return { plano: r.data, provisorio: daPonte && capacidades === undefined };
     });
   }
 
@@ -573,7 +578,8 @@ export function comporApp(o: OpcoesCompor): App {
       if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
         const r = await entregarRespostaPeer(d, { tarefaId: turno.id, texto: entrega.fala.texto });
         if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
-      } else if (turno.origem === "delegacao" || (turno.origem === "retomada" && turno.sobProcuracaoDe)) {
+      } else if ((turno.origem === "delegacao" || (turno.origem === "retomada" && turno.sobProcuracaoDe)) && !(await repetidoSemResume(d, turno.id))) {
+        // ADR-107 (NOD-281, critério 4): a retomada recusada pelo CLI que já voltou à fila sem resume não avisa falha.
         // Revisão da ADR-047: tarefa delegada que parou ou terminou calada avisa o remetente (uma vez por raiz).
         const motivo = turno.estado === "interrompido" ? motivoEmPortugues(turno.motivoFalha ?? turno.motivoInterrupcao ?? "sem_progresso") : "terminou sem resposta";
         const r = await avisarFalhaDelegacao(d, { turnoId: turno.id, motivo });

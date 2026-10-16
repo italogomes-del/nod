@@ -29,10 +29,12 @@ export async function propagarSessaoDoTurno(
   if (!sessaoCli) return;
   // ADR-102 (R1): a conta em que a sessão nasceu (o resume do Codex só vale na mesma conta).
   const contaId = await deps.repos.turnos.contaDoTurno(turno.id);
+  // ADR-107 (NOD-281): a máquina em que a sessão nasceu (no modo compartilhado o resume só vale nela).
+  const maquinaId = turno.machineId ?? null;
   const sessaoDaConversa = !turno.trabalhoId && turno.origem !== "rotina" && turno.origem !== "peer" && turno.origem !== "delegacao" && turno.origem !== "ligacao" && !turno.sobProcuracaoDe
     && !(turno.origem === "retomada" && ((await rotinaDoTurno(deps.repos, turno.id)) || (await delegacaoDoTurno(deps.repos, turno))));
   if (sessaoDaConversa) {
-    await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+    await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness, maquinaId);
     if (contaId) await deps.repos.conversas.definirContaDaSessao(turno.conversaId, contaId);
   }
   if (turno.trabalhoId) {
@@ -46,11 +48,11 @@ export async function propagarSessaoDoTurno(
     if (doTrabalho?.origem === "rede" && doTrabalho.sessaoCli === null && seguimentoNaRede(capacidadesDe(harness), p.maquinaBifurca) === "bifurcar") {
       const conversa = await deps.repos.conversas.buscar(turno.conversaId);
       if (conversa && (conversa.sessaoEm === null || conversa.sessaoEm === undefined || conversa.sessaoEm <= doTrabalho.criadoEm)) {
-        await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness);
+        await deps.repos.conversas.atualizarSessaoCli(turno.conversaId, sessaoCli, executor, harness, maquinaId);
         if (contaId) await deps.repos.conversas.definirContaDaSessao(turno.conversaId, contaId);
       }
     }
-    await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, sessaoCli, harness, executor);
+    await deps.repos.trabalhos.atualizarSessao(turno.trabalhoId, sessaoCli, harness, executor, maquinaId);
     if (contaId) await deps.repos.trabalhos.definirContaDaSessao(turno.trabalhoId, contaId);
   }
 }

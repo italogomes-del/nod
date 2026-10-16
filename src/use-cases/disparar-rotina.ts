@@ -227,7 +227,7 @@ export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(
  * a retomada segue sem perguntar de novo, 'passou_em_branco' quando a pergunta é deixada pra lá ou vence.
  */
 export const TIPOS_QUE_SEGURAM_A_EXECUCAO: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>([...TIPOS_GATE_ROTINA, ...TIPOS_PEDIDO_A_PESSOA]);
-export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" | "aguardando_frentes" };
+export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" | "aguardando_frentes" | "repetido_sem_resume" };
 
 /**
  * Assentamento de um turno de rotina (chamado pela L6 ao assentar turno origem 'rotina' ou sua
@@ -240,6 +240,9 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   const ligacao = await rotinaDoTurno(deps.repos, input.turnoId);
   if (!ligacao) return { data: { ignorado: "nao_e_rotina" } };
   const { rotina, turnoDisparado, instanteAgendado } = ligacao;
+  // ADR-107 (NOD-281, critério 4): o CLI recusou a sessão da cadeia e a retomada já está de novo na fila, sem resume
+  // (assentar-turno.ts, repetirRetomadaSemSessao). A execução não acabou: quem registra o desfecho é a repetição.
+  if (input.desfecho === "falhou" && (await repetidoSemResume(deps, input.turnoId))) return { data: { ignorado: "repetido_sem_resume" } };
   // 'sem_novidade' entra aqui junto com 'executou' (definido em 2026-09-21): se um gate deste turno
   // ainda espera resposta, a execução não terminou — registrá-la como silenciosa esconderia um
   // pedido de aprovação pendente. A rotina só encerra quando o efeito saiu.
@@ -301,6 +304,14 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     evento(deps, "rotina_executou", autoria, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
   ];
   return { data: { execucao, rotina, podadas }, events };
+}
+
+/** O turno recusado pelo CLI (sessao_rejeitada) cuja repetição sem resume ainda está na fila. */
+export async function repetidoSemResume(deps: Pick<Deps, "repos">, turnoId: string): Promise<boolean> {
+  const turno = await deps.repos.turnos.buscar(turnoId);
+  if (turno?.motivoInterrupcao !== "sessao_rejeitada") return false;
+  const repeticao = await deps.repos.turnos.retomadaNaFila(turnoId);
+  return repeticao !== null && repeticao.reenvios > turno.reenvios;
 }
 
 /** NOD-251/NOD-275: quem decidiu que a janela não rodou — a máquina recusou o turno no despacho, ou a pessoa pediu Parar. */

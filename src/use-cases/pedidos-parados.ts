@@ -39,7 +39,8 @@ export async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPed
   const original = await deps.repos.turnos.buscar(acao.turnoId);
   if (!original || original.estado !== "interrompido") return [];
   const agora = deps.agora();
-  const autoria = autoriaAgente({ agenteId: original.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: REGRA_RETOMADA_AUTOMATICA });
+  // NOD-281: a autoria leva o executor do turno pai (antes "catcher" fixo, e o relatório lia a retomada como do catcher).
+  const autoria = autoriaAgente({ agenteId: original.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: original.executor, decididoPor: REGRA_RETOMADA_AUTOMATICA });
   const events: RuntimeEvent[] = [];
   if (p.cardRetomar?.aberto) {
     const fechada = await deps.repos.decisoes.fecharPorRegra(p.cardRetomar.id, { regra: REGRA_RETOMADA_AUTOMATICA, regraVersao: 1, agora });
