@@ -136,7 +136,10 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
   for (const vencido of input.turnos) {
     if (naCarencia.has(vencido.id)) continue;
     const motivo = motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
-    const turno = await deps.repos.turnos.interromper(vencido.id, motivo);
+    // NOD-241 (emenda da ADR-084): o último sinal vai para a linha — é a régua da retomada automática. `leaseVencidoEm`:
+    // o turno que renovou o lease depois de `vencidos()` não é interrompido.
+    const perdidoDesde = ultimoSinalDoTurno(vencido, agora);
+    const turno = await deps.repos.turnos.interromper(vencido.id, motivo, { ultimoSinalEm: perdidoDesde, leaseVencidoEm: agora });
     if (!turno) continue;
     // NOD-214: a sessão que a renovação gravou no turno vale como a da entrega que não veio (a próxima mensagem a
     // retoma), e a credencial sai — o turno assentado não é mais adotável. Sem credencial (turno de antes da 0073), nada.
@@ -147,7 +150,7 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
       if (sessao) await propagarSessaoDoTurno(deps, { turno, sessaoCli: sessao.sessaoCli, executor: cred.executor, harness: cred.harness, maquinaBifurca: false });
       await deps.repos.turnoCredenciais.apagar(turno.id);
     }
-    caidos.push({ turno, motivo, perdidoDesde: ultimoSinalDoTurno(vencido, agora), maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
+    caidos.push({ turno, motivo, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
   }
   return aplicar(deps, caidos, input.prazoMs);
 }

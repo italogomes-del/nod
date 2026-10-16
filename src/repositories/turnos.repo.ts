@@ -152,6 +152,11 @@ export type Assentamento = {
   /** 0035: a sessão do CLI e o total que ele informou para ela — custoUsd é a diferença (custo-turno.ts). */
   sessaoCli?: string | null;
   custoSessaoUsd?: number | null;
+  /**
+   * NOD-241 (0076, emenda da ADR-084): o último sinal de vida do turno que caiu — a régua da retomada automática. Só
+   * no interrompido; gravado uma vez (o primeiro valor vence: não sobrescreve o que o varredor já gravou).
+   */
+  ultimoSinalEm?: number;
 };
 
 /**
@@ -522,6 +527,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           tokens_saida = coalesce(${a.tokensSaida ?? null}, tokens_saida),
           sessao_cli = coalesce(${a.sessaoCli ?? null}, sessao_cli),
           custo_sessao_usd = coalesce(${a.custoSessaoUsd ?? null}, custo_sessao_usd),
+          ultimo_sinal_em = coalesce(ultimo_sinal_em, ${a.estado === "interrompido" && a.ultimoSinalEm !== undefined ? data(a.ultimoSinalEm) : null}),
           lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'despachando')
         returning ${conn.unsafe(COLUNAS)}`;
@@ -539,11 +545,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.total === null || l?.total === undefined ? null : Number(l.total);
     },
 
-    /** Transição terminal e idempotente (ADR-010/021): só o que está vivo vira 'interrompido'. */
-    async interromper(id: string, motivo: MotivoInterrupcao): Promise<Turno | null> {
+    /**
+     * Transição terminal e idempotente (ADR-010/021): só o que está vivo vira 'interrompido'.
+     * NOD-241 (0076): `ultimoSinalEm` grava o último sinal de vida (o primeiro valor vence). `leaseVencidoEm` é a guarda
+     * do varredor: `vencidos()` lê sem trava, e o turno que renovou o lease entre a leitura e este UPDATE não é
+     * interrompido nem recebe um sinal velho (ADR-045) — devolve null e segue vivo.
+     */
+    async interromper(id: string, motivo: MotivoInterrupcao, o: { ultimoSinalEm?: number; leaseVencidoEm?: number } = {}): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
-        update turnos set estado = 'interrompido', motivo_interrupcao = ${motivo}, lease_ate = null
+        update turnos set estado = 'interrompido', motivo_interrupcao = ${motivo},
+          ultimo_sinal_em = coalesce(ultimo_sinal_em, ${o.ultimoSinalEm !== undefined ? data(o.ultimoSinalEm) : null}), lease_ate = null
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'despachando')
+          ${o.leaseVencidoEm !== undefined ? conn`and (lease_ate is null or lease_ate < ${data(o.leaseVencidoEm)})` : conn``}
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

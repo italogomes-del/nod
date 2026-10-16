@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
-import { MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS } from "../../src/domain/pedido-parado.ts";
+import { DESISTIR_SEM_SINAL_MS, MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS } from "../../src/domain/pedido-parado.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
+import type { PedidosAdiados } from "../../src/use-cases/pedidos-parados.ts";
 import { PERGUNTA_DA_QUEDA } from "../../src/domain/retorno-do-lote.ts";
 import { cuidarDasFrentesCaidas, REGRA_FRENTE_CAIU } from "../../src/use-cases/frentes-caidas.ts";
 import { abrirFrentes, devolverResumo } from "../../src/use-cases/frentes.ts";
@@ -48,9 +52,24 @@ async function montar(trx: Trx) {
     await repos.turnos.assentar(t.id, { estado: "concluido" });
     return sincronizarTrabalho(deps, trabalhoId);
   };
+  /**
+   * NOD-241: a frente rodando há `idadeMs` numa máquina cujo último sinal (a renovação do lease) foi em `sinalEm` — e o
+   * varredor de lease, de verdade, nota a queda em `sinalEm + LEASE_MS + 10`. Com `inicioDoProcesso`, é o reinício do
+   * servidor (modo compartilhado); sem, a máquina sem contato.
+   */
+  const cairRodando = async (trabalhoId: string, p: { idadeMs: number; sinalEm: number; inicioDoProcesso?: number }) => {
+    const t = await turnoVivo(trabalhoId);
+    await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, criado_em = ${new Date(Date.now() - p.idadeMs)},
+      lease_ate = ${new Date(p.sinalEm + LEASE_MS)} where id = ${t.id}`;
+    await trx`update trabalhos set criado_em = ${new Date(Date.now() - p.idadeMs)} where id = ${trabalhoId}`;
+    const r = await varrerPessoa(deps.tx, MARLON, p.sinalEm + LEASE_MS + 10, p.inicioDoProcesso !== undefined ? { inicioDoProcesso: p.inicioDoProcesso } : {});
+    expect(r.interrompidos).toContain(t.id);
+    return (await repos.turnos.buscar(t.id))!;
+  };
+  const ultimoSinal = async (turnoId: string) => (await trx<{ u: Date | null }[]>`select ultimo_sinal_em as u from turnos where id = ${turnoId}`)[0]!.u?.getTime() ?? null;
   const retomadasDoDono = async (dono: Turno) => (await repos.turnos.listarDaConversa(dono.conversaId, 500)).filter((t) => t.origem === "retomada" && t.retomaTurnoId === dono.id);
   const estado = async (id: string) => (await repos.trabalhos.buscar(id))?.estado;
-  return { ada, deps, repos, turnoDaConversa, abrir, cair, sinalDeVida, terminar, retomadasDoDono, estado, turnoVivo };
+  return { ada, deps, repos, turnoDaConversa, abrir, cair, cairRodando, ultimoSinal, sinalDeVida, terminar, retomadasDoDono, estado, turnoVivo };
 }
 
 describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda, o dono pergunta (ADR-099, I9)", () => {
@@ -111,9 +130,10 @@ describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda,
       const { loteId, ids } = await m.abrir(dono);
       await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
       const [login, ci] = ids as [string, string];
-      // Caiu e as máquinas não voltaram em 30 min: o varredor desiste já na primeira queda.
+      // Caiu e as máquinas não voltaram em 2 h (NOD-241: aos 31 min a frente ainda espera): o varredor desiste já na primeira queda.
       await m.cair(ci);
-      const depois = { ...m.deps, agora: () => Date.now() + 31 * 60_000 };
+      expect((await cuidarDasFrentesCaidas({ ...m.deps, agora: () => Date.now() + DESISTIR_SEM_SINAL_MS + 60_000 })).data).toEqual({ retomadas: [], fechadas: [] });
+      const depois = { ...m.deps, agora: () => Date.now() + RETOMAR_ATE_MS + 60_000 };
       expect((await cuidarDasFrentesCaidas(depois)).data).toEqual({ retomadas: [], fechadas: [ci] });
       const [agora] = await m.retomadasDoDono(dono);
       expect(agora!.entradaTexto).toContain('A frente "CI vermelha" deste pedido caiu; falta 1.');
@@ -142,6 +162,122 @@ describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda,
       expect((await cuidarDasFrentesCaidas(tarde)).data).toEqual({ retomadas: [], fechadas: [ci] });
       expect(await m.estado(login)).toBe("precisa_de_voce");
       expect(await m.estado(ci)).toBe("falhou");
+    });
+  });
+
+  it("NOD-241 (CA1): a frente que rodava havia 3 h e caiu no reinício do servidor volta sozinha quando as máquinas voltam", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const [, ci] = ids as [string, string];
+      // O último sinal é de agora (depois do turno do dono, que concluiu antes da queda e não conta como volta).
+      const sinalEm = Date.now();
+      const caido = await m.cairRodando(ci, { idadeMs: 3 * 3_600_000, sinalEm, inicioDoProcesso: sinalEm + 1 });
+      expect(caido).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor", leaseAte: null });
+      // A queda é o último sinal (lease_ate − LEASE_MS), não a criação do turno 3 h atrás.
+      expect(await m.ultimoSinal(caido.id)).toBe(sinalEm);
+      expect(await m.estado(ci)).toBe("precisa_de_voce");
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [] });
+      await m.sinalDeVida();
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [ci], fechadas: [] });
+      const retomada = await m.turnoVivo(ci);
+      expect(retomada).toMatchObject({ origem: "retomada", trabalhoId: ci, estado: "pendente" });
+      const card = (await m.repos.decisoes.doTurno(caido.id)).find((d) => d.tipo === "retomar_turno");
+      expect(card?.desfecho).not.toMatchObject({ regra: REGRA_FRENTE_CAIU });
+      const aviso = (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.turnoId === retomada.id && x.kind === "sistema");
+      expect(aviso[0]?.texto).toContain(`tentativa 2 de ${MAX_QUEDAS_POR_PEDIDO}`);
+    });
+  });
+
+  it("NOD-241 (CA3): a frente-irmã que concluiu antes da queda não é sinal de volta das máquinas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const [login, ci] = ids as [string, string];
+      // A CI rodava havia 10 min; o Login, aberto junto, concluiu enquanto a CI ainda renovava o lease.
+      await m.terminar(login, "Login corrigido");
+      const caido = await m.cairRodando(ci, { idadeMs: 10 * 60_000, sinalEm: Date.now() });
+      expect(caido.motivoInterrupcao).toBe("maquina_sem_contato");
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [] });
+      expect(await m.estado(ci)).toBe("precisa_de_voce");
+    });
+  });
+
+  it("NOD-241 (CA4b): a queda conta do último sinal — 2 h e 1 min sem sinal desiste, mesmo com o turno criado há 5 min", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const [, ci] = ids as [string, string];
+      const { turno } = await m.cair(ci);
+      await trx`update turnos set criado_em = now() - interval '5 minutes', ultimo_sinal_em = now() - interval '121 minutes' where id = ${turno.id}`;
+      await m.sinalDeVida();
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [ci] });
+      expect(await m.estado(ci)).toBe("falhou");
+    });
+  });
+
+  it("NOD-241 (CA4g): as frentes que esperam saem da consulta por 5 min — 20 delas não seguram a 21ª, que já pode voltar", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const frentes: string[] = [];
+      for (let i = 0; i < 11; i++) {
+        const dono = await m.turnoDaConversa();
+        frentes.push(...(await m.abrir(dono)).ids);
+        await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      }
+      const esperando = frentes.slice(0, 20);
+      const ultima = frentes[20]!;
+      // As 20 primeiras caíram antes e o "Retomar" delas já foi resolvido pela pessoa: esperam (a decisão é dela).
+      for (const [i, id] of esperando.entries()) {
+        const { turno, card } = await m.cair(id);
+        await trx`update turnos set ultimo_sinal_em = now() - make_interval(secs => ${600 - i}) where id = ${turno.id}`;
+        await trx`update decisoes set estado = 'vencida' where id = ${card.id}`;
+      }
+      await m.cair(ultima);
+      await m.sinalDeVida();
+      const adiados: PedidosAdiados = new Map();
+      expect((await cuidarDasFrentesCaidas(m.deps, { adiados })).data).toEqual({ retomadas: [], fechadas: [] });
+      expect([...adiados.keys()].sort()).toEqual([...esperando].sort());
+      expect((await cuidarDasFrentesCaidas(m.deps, { adiados })).data).toEqual({ retomadas: [ultima], fechadas: [] });
+    });
+  });
+
+  it("NOD-241 (revisão): o adiamento da frente que espera não passa do limite de 2 h — a desistência sai na hora, não 5 min depois", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const [, ci] = ids as [string, string];
+      const { turno } = await m.cair(ci);
+      const agora = Date.now();
+      const queda = agora - RETOMAR_ATE_MS + 2 * 60_000;
+      await trx`update turnos set ultimo_sinal_em = ${new Date(queda)} where id = ${turno.id}`;
+      // Sem sinal depois da queda: o turno do dono (concluído) fica antes dela, e nada mais concluiu.
+      await trx`update turnos set criado_em = ${new Date(queda - 60_000)} where estado = 'concluido'`;
+      const adiados: PedidosAdiados = new Map();
+      expect((await cuidarDasFrentesCaidas({ ...m.deps, agora: () => agora }, { adiados })).data).toEqual({ retomadas: [], fechadas: [] });
+      expect(adiados.get(ci)).toBe(queda + RETOMAR_ATE_MS + 1);
+      expect((await cuidarDasFrentesCaidas({ ...m.deps, agora: () => queda + RETOMAR_ATE_MS + 1 }, { adiados })).data).toEqual({ retomadas: [], fechadas: [ci] });
+    });
+  });
+
+  it("NOD-241 (CA4j): a janela de 24 h conta da queda — a frente aberta há 25 h que cai agora é retomada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const [, ci] = ids as [string, string];
+      await m.cairRodando(ci, { idadeMs: 25 * 3_600_000, sinalEm: Date.now() - 1_000 });
+      await m.sinalDeVida();
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [ci], fechadas: [] });
     });
   });
 });

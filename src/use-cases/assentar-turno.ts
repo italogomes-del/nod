@@ -294,6 +294,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     tokensSaida: resultado.tokens.saida,
     sessaoCli: resultado.sessaoCli,
     custoSessaoUsd: resultado.custoUsd,
+    // NOD-241 (emenda da ADR-084): o último sinal do turno que caiu — o da máquina (lease − LEASE_MS) ou agora.
+    ultimoSinalEm: desfecho.estado === "interrompido" ? (quedaDaMaquina ? perdidoDesde : agora) : undefined,
   });
   if (!assentado) throw new ErroDeDominio("estado_invalido", { cause: "turno mudou de estado durante a entrega" });
 

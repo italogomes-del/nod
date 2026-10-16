@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { JANELA_MESCLA_INCIDENTE_MS } from "../../src/domain/incidente.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import { dispensarIncidente } from "../../src/use-cases/dispensar-incidente.ts";
 import { interromperPorMaquina } from "../../src/use-cases/interromper-por-maquina.ts";
@@ -46,13 +47,14 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
       expect(mesclado).toMatchObject({ comecouEm: T0, voltouEm: T0 + 2 * H + 20 * 60_000, conversas: 2 });
 
       const longe = T0 + 2 * H + 20 * 60_000 + JANELA_MESCLA_INCIDENTE_MS + 60_000;
-      const c = await cair(longe, longe + 60_000);
+      // A queda é notada depois do lease (como o varredor: só lê vencidos). NOD-241: o lease vivo não é interrompido.
+      const c = await cair(longe, longe + LEASE_MS + 60_000);
       expect(c.data.incidenteId).not.toBe(a.data.incidenteId);
       expect((await repos.incidentes.visiveis(0)).map((i) => i.id)).toEqual([a.data.incidenteId, c.data.incidenteId]);
 
       // "Entendi" no aviso fechado: a queda seguinte, mesmo dentro de 3 h, abre aviso novo (visível).
-      await dispensarIncidente({ repos, agora: () => longe + 2 * 60_000 }, { incidenteId: c.data.incidenteId ?? "" });
-      const d = await cair(longe + 10 * 60_000, longe + 11 * 60_000);
+      await dispensarIncidente({ repos, agora: () => longe + 3 * 60_000 }, { incidenteId: c.data.incidenteId ?? "" });
+      const d = await cair(longe + 10 * 60_000, longe + 10 * 60_000 + LEASE_MS + 60_000);
       expect(d.data.incidenteId).not.toBe(c.data.incidenteId);
       expect((await repos.incidentes.visiveis(0)).map((i) => i.id)).toEqual([a.data.incidenteId, d.data.incidenteId]);
     });

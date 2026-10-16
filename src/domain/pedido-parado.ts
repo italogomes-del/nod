@@ -25,6 +25,14 @@ export const DESISTIR_SEM_SINAL_MS = 30 * 60_000;
  */
 export const RETOMAR_ATE_MS = 2 * 3_600_000;
 
+/**
+ * definido em 2026-10-15 (NOD-241, revisão do PR): o piso da idade do pedido nas consultas de pedido parado. A janela de
+ * 24 h conta da queda (o pedido de ontem que cai agora entra), mas sem piso as consultas montariam a cadeia de todo
+ * handoff da história da pessoa a cada passada do varredor. O pedido de mais de 7 dias que cai fica com a régua antiga:
+ * o "Retomar" e o vencimento de 24 h.
+ */
+export const IDADE_MAX_PEDIDO_RETOMAVEL_MS = 7 * 24 * 3_600_000;
+
 /** O que o repositório lê de um pedido parado (trabalhos.repo.ts, pedidosAColegaParados). */
 export type PedidoParado = {
   /** O turno de delegação que o handoff aponta (payload.tarefaId): a raiz do pedido. */
@@ -35,13 +43,19 @@ export type PedidoParado = {
   /** O último turno assentado do trabalho do colega (concluído ou interrompido; o absorvido não conta). */
   ultimoTurnoId: string | null;
   ultimoMotivo: string | null;
-  /** Quando o último turno caiu: o lease dele (último sinal) ou, recusado no despacho, a criação. */
+  /**
+   * Quando o último turno caiu (NOD-241, emenda da ADR-084): o último sinal do turno (`turnos.ultimo_sinal_em`); sem ele
+   * (turno de antes da 0076), o lease ou a criação.
+   */
   quedaEm: number | null;
   /** Quantos turnos do trabalho do colega caíram por infraestrutura. */
   quedas: number;
   /** O card "Retomar" do último turno, se houver. */
   cardRetomar: { id: string; aberto: boolean } | null;
-  /** Algum turno da pessoa concluiu, ou roda com lease vivo, depois da queda: as máquinas voltaram. */
+  /**
+   * Algum turno da pessoa criado depois da queda (o último sinal do turno, `turnos.ultimo_sinal_em`) concluiu ou roda com
+   * lease vivo: as máquinas voltaram. O turno que concluiu antes da queda não conta.
+   */
   sinalDepoisDaQueda: boolean;
   /** A última fala do colega na task (o resultado que não chegou a quem pediu). */
   textoFinal: string | null;
@@ -75,7 +89,7 @@ export function ehQueda(motivo: string | null): boolean {
  * - "Precisa de você" por outra razão (uma decisão da pessoa): espera — o vencimento de 24 h já avisa.
  * - Falhou por qualquer outro motivo: avisa com o motivo.
  */
-export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegivel: (motivo: string) => string): AcaoPedidoParado {
+export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegivel: (motivo: string) => string, o: { esperarSinalAteMs?: number } = {}): AcaoPedidoParado {
   if (p.estadoColega === "terminado") {
     if (p.textoFinal && p.turnoDoTextoFinal) return { tipo: "entregar_resultado", turnoId: p.turnoDoTextoFinal, texto: p.textoFinal };
     return { tipo: "avisar_falha", motivo: "terminou sem resposta" };
@@ -92,7 +106,7 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
   if (p.quedas >= MAX_QUEDAS_POR_PEDIDO) return { tipo: "avisar_falha", motivo: `${motivo} (caiu ${p.quedas} vezes)`, semEsperar: true };
   if (p.quedaEm !== null && agora - p.quedaEm > RETOMAR_ATE_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e já faz mais de 2 h`, semEsperar: true };
   if (p.ultimoTurnoId && p.sinalDepoisDaQueda) return { tipo: "retomar", turnoId: p.ultimoTurnoId, tentativa: p.quedas + 1 };
-  if (p.quedaEm !== null && agora - p.quedaEm > DESISTIR_SEM_SINAL_MS) return { tipo: "avisar_falha", motivo: `${motivo}, e as máquinas não voltaram em 30 min`, semEsperar: true };
+  if (p.quedaEm !== null && agora - p.quedaEm > (o.esperarSinalAteMs ?? DESISTIR_SEM_SINAL_MS)) return { tipo: "avisar_falha", motivo: `${motivo}, e as máquinas não voltaram em 30 min`, semEsperar: true };
   return { tipo: "esperar" };
 }
 
@@ -102,11 +116,14 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
  * voltam, até MAX_QUEDAS_POR_PEDIDO e só nas últimas RETOMAR_ATE_MS. Onde o pedido avisaria quem pediu, a frente
  * desiste: fecha `falhou` com o motivo, o lote dela fecha (I3) e o dono acorda para perguntar à pessoa como seguir.
  * Não há "resultado que ficou para trás": a frente que terminou já fechou o lote pelo caminho da I3.
+ * NOD-241 (P1, emenda da ADR-084/ADR-099): sem sinal de volta, a frente espera até RETOMAR_ATE_MS (2 h desde o último
+ * sinal), e não DESISTIR_SEM_SINAL_MS: o Mac que dormiu e voltou dentro de 2 h retoma sozinho. O "Retomar" aberto fica
+ * com a pessoa nesse tempo, e o dono só acorda na desistência. O pedido a colega mantém os 30 min.
  */
 export type AcaoFrenteCaida = { tipo: "esperar" } | { tipo: "retomar"; turnoId: string; tentativa: number } | { tipo: "desistir"; motivo: string };
 
 export function decidirFrenteCaida(p: PedidoParado, agora: number, motivoLegivel: (motivo: string) => string): AcaoFrenteCaida {
-  const acao = decidirPedidoParado(p, agora, motivoLegivel);
+  const acao = decidirPedidoParado(p, agora, motivoLegivel, { esperarSinalAteMs: RETOMAR_ATE_MS });
   if (acao.tipo === "retomar" || acao.tipo === "esperar") return acao;
   if (acao.tipo === "avisar_falha") return { tipo: "desistir", motivo: acao.motivo };
   return { tipo: "esperar" };

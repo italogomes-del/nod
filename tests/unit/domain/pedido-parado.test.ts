@@ -68,10 +68,16 @@ describe("decidirFrenteCaida (ADR-099, I9): a frente de lote que caiu", () => {
     expect(frente({ sinalDepoisDaQueda: true, quedas: 2 })).toEqual({ tipo: "retomar", turnoId: "ultimo", tentativa: 3 });
   });
 
-  it(`na ${MAX_QUEDAS_POR_PEDIDO}ª queda, com a queda velha ou sem sinal em 30 min, desiste com o motivo (a frente fecha falhou)`, () => {
+  it(`na ${MAX_QUEDAS_POR_PEDIDO}ª queda, ou com a queda de mais de 2 h, desiste com o motivo (a frente fecha falhou)`, () => {
     expect(frente({ quedas: MAX_QUEDAS_POR_PEDIDO, sinalDepoisDaQueda: true })).toEqual({ tipo: "desistir", motivo: `<maquina_sem_contato> (caiu ${MAX_QUEDAS_POR_PEDIDO} vezes)` });
     expect(frente({ quedaEm: AGORA - RETOMAR_ATE_MS - 1, sinalDepoisDaQueda: true })).toEqual({ tipo: "desistir", motivo: "<maquina_sem_contato>, e já faz mais de 2 h" });
-    expect(frente({ quedaEm: AGORA - DESISTIR_SEM_SINAL_MS - 1 })).toEqual({ tipo: "desistir", motivo: "<maquina_sem_contato>, e as máquinas não voltaram em 30 min" });
+    expect(frente({ quedaEm: AGORA - RETOMAR_ATE_MS - 1 })).toEqual({ tipo: "desistir", motivo: "<maquina_sem_contato>, e já faz mais de 2 h" });
+  });
+
+  it("NOD-241 (CA4c): sem sinal, a frente espera até 2 h, não 30 min — o pedido a colega segue desistindo aos 30 min", () => {
+    expect(frente({ quedaEm: AGORA - DESISTIR_SEM_SINAL_MS - 60_000 })).toEqual({ tipo: "esperar" });
+    expect(frente({ quedaEm: AGORA - RETOMAR_ATE_MS + 60_000 })).toEqual({ tipo: "esperar" });
+    expect(decidir({ quedaEm: AGORA - DESISTIR_SEM_SINAL_MS - 60_000 })).toMatchObject({ tipo: "avisar_falha", semEsperar: true });
   });
 
   it("o \"Retomar\" já decidido pela pessoa, ou a frente parada por outra pergunta: espera — a decisão é dela", () => {

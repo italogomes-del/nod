@@ -185,4 +185,37 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       expect(await deps2.repos.incidentes.visiveis(0)).toMatchObject([{ id: queda.incidenteId, voltouEm: agora2 + LEASE_MS + 30_000 }]);
     });
   });
+
+  it("NOD-241 (CA4f/CA4i): a queda grava o último sinal — o varredor, lease_ate − LEASE_MS; o despacho recusado, a hora da recusa; o primeiro valor vence", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const sinal = async (id: string) => (await trx<{ u: Date | null }[]>`select ultimo_sinal_em as u from turnos where id = ${id}`)[0]!.u?.getTime() ?? null;
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const turnoId = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const leaseAte = (await deps.repos.turnos.buscar(turnoId))!.leaseAte!;
+      // Notada 10 min depois (o Mac dormiu): o último sinal é a última renovação do lease, não a hora da varredura.
+      expect((await varrerPessoa(deps.tx, MARLON, leaseAte + 10 * 60_000)).interrompidos).toEqual([turnoId]);
+      expect(await sinal(turnoId)).toBe(leaseAte - LEASE_MS);
+
+      // O despacho recusado (sem IA pronta na máquina): o último sinal é a hora da recusa.
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "de novo", inventario: PRONTO });
+      const recusa = await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: { estado: "nao_autenticado", motivo: "faça login", em: agora } });
+      const recusado = recusa.data.turno?.id ?? "";
+      expect(await deps.repos.turnos.buscar(recusado)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
+      expect(await sinal(recusado)).toBe(agora);
+
+      // O primeiro valor vence (coalesce): um sinal já gravado não é trocado por quem interrompe ou assenta depois.
+      const primeiro = new Date(agora - 3_600_000);
+      for (const fim of ["interromper", "assentar"] as const) {
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: fim, inventario: PRONTO });
+        const id = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId ?? "";
+        await trx`update turnos set ultimo_sinal_em = ${primeiro} where id = ${id}`;
+        if (fim === "interromper") expect(await deps.repos.turnos.interromper(id, "maquina_sem_contato", { ultimoSinalEm: agora })).not.toBeNull();
+        else expect(await deps.repos.turnos.assentar(id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", ultimoSinalEm: agora })).not.toBeNull();
+        expect(await sinal(id)).toBe(primeiro.getTime());
+      }
+    });
+  });
 });

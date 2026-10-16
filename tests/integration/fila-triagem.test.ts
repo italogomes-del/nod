@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS } from "../../src/domain/pedido-parado.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -181,5 +184,37 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // Com a retomada na fila, a triagem não está mais parada.
       expect(await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).toEqual([]);
     });
+  });
+
+  it("NOD-241 (CA2): a triagem que rodava havia 3 h e caiu no reinício do servidor é retomada quando as máquinas voltam", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      const sinalEm = Date.now();
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, criado_em = now() - interval '3 hours',
+        lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${triagem}`;
+      const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1 });
+      expect(v.interrompidos).toContain(triagem);
+      expect((await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem)).toMatchObject({ ultimoMotivo: "reinicio_servidor", quedaEm: sinalEm, sinalDepoisDaQueda: false });
+      const outro = await m.turnoDe(m.livre);
+      await m.repos.turnos.assentar(outro.id, { estado: "concluido" });
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.retomados).toEqual([triagem]);
+      expect(r.data.avisados).toEqual([]);
+    });
+  });
+
+  it("NOD-241 (revisão): a triagem pedida há 25 h que cai agora entra; a pedida há mais de IDADE_MAX_PEDIDO_RETOMAVEL_MS fica fora (sem varrer o histórico)", async () => {
+    for (const [idadeMs, entra] of [[25 * 3_600_000, true], [IDADE_MAX_PEDIDO_RETOMAVEL_MS + 3_600_000, false]] as const) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+        await trx`update mensagens set criado_em = ${new Date(Date.now() - idadeMs)} where kind = 'handoff' and payload->>'tarefaId' = ${triagem}`;
+        await trx`update turnos set estado = 'despachando', lease_ate = now() - interval '1 minute' where id = ${triagem}`;
+        await m.repos.turnos.interromper(triagem, "maquina_sem_contato", { ultimoSinalEm: Date.now() - LEASE_MS });
+        const parada = (await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem);
+        expect(parada !== undefined).toBe(entra);
+      });
+    }
   });
 });

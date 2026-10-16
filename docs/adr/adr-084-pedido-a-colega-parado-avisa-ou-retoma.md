@@ -40,6 +40,22 @@ e a entrega tardia acabam a task do colega sem passar por ele. Ninguém relia o 
 4. **O aviso e a entrega** seguem `entregar()` de sempre: uma vez por tarefa, continuação na task de quem pediu, que
    relê o estado e sai do "rodando".
 
+## Emendas
+
+- **2026-10-15 (NOD-241): o que é "a queda".** O instante da queda é o **último sinal de vida do turno**
+  (`turnos.ultimo_sinal_em`, migração 0076): a última renovação do lease (`lease_ate − LEASE_MS`) quando o varredor ou a
+  entrega notam a máquina fora, ou a hora da recusa no despacho. Não é a criação do turno. As janelas de `RETOMAR_ATE_MS`
+  (2 h), `DESISTIR_SEM_SINAL_MS` (30 min) e a janela de varredura de 24 h contam a partir dele, e o sinal de volta é um
+  turno da pessoa **criado depois dele** que concluiu ou roda com lease vivo. Na janela de 24 h dos pedidos (triagem e
+  task de colega), a queda só vale quando o último turno caiu por um dos `MOTIVOS_DE_QUEDA`; o pedido antigo que terminou
+  de outro jeito segue contado pela hora do pedido, como antes. Turnos interrompidos antes desta emenda (coluna nula)
+  seguem a régua antiga até saírem da janela de 24 h. Antes, `interromper`/`assentar` zeravam `lease_ate` e a regra media
+  a idade do turno: toda frente ou pedido com mais de 30 min falhava num deploy. O varredor só interrompe o turno cujo
+  lease ainda está vencido no UPDATE (`leaseVencidoEm`): a renovação que chega entre ler os vencidos e interromper vence.
+  Piso: o pedido feito há mais de `IDADE_MAX_PEDIDO_RETOMAVEL_MS` (7 dias) não entra nas consultas de pedido parado,
+  mesmo caindo agora — sem ele, a janela pela queda faria a cadeia recursiva da triagem varrer todo o histórico de
+  handoffs a cada passada; esse pedido fica com o "Retomar" e o vencimento de 24 h.
+
 ## Alternativas rejeitadas
 
 - **Chamar o aviso em cada um dos sete caminhos.** Cada caminho novo precisaria lembrar dele; o defeito de 08/10 foi

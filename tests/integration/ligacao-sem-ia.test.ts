@@ -101,6 +101,9 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       // O resultado como o laço de voz do Claude o entrega (comContaSemAcesso, src/domain/conta-da-ia.ts).
       const r = await assentarTurno(deps, { turnoId: turno.id, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: { ...FALHA, motivoFalha: "nao_autenticado", causaSemIa: "conta_sem_acesso", erroCru: "Your organization has disabled Claude subscription access" }, executor: "local", harness: "claude-cli", outraIa: "codex-cli" });
       expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
+      // NOD-241: a entrega que interrompe grava o último sinal (a hora da entrega: a máquina estava aqui).
+      const [sinal] = await trx<{ u: Date | null }[]>`select ultimo_sinal_em as u from turnos where id = ${turno.id}`;
+      expect(sinal?.u?.getTime()).toBeGreaterThan(Date.now() - 60_000);
       // Um evento só para o turno, o da ligação (com `origem`): é ele que o orquestrador de voz lê.
       const eventos = r.events?.filter((e) => e.kind === "turno_interrompido") ?? [];
       expect(eventos).toHaveLength(1);

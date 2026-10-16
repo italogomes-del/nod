@@ -1277,9 +1277,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
         return totais.length === 0 ? null : Math.max(...totais);
       },
-      async interromper(id, motivo) {
+      async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
         if (!t) return null;
+        // NOD-241: a guarda do varredor, como o UPDATE do repo real (o lease renovado no meio não é interrompido).
+        if (o.leaseVencidoEm !== undefined && t.leaseAte !== null && t.leaseAte >= o.leaseVencidoEm) return null;
         t.estado = "interrompido";
         t.motivoInterrupcao = motivo;
         t.leaseAte = null;
