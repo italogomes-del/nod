@@ -1,10 +1,11 @@
+import { conviteValido } from "../../shared/convite.ts";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Escopo } from "../../shared/types.ts";
 import { log } from "../../obs/log.ts";
 import { criarEstatico } from "./estatico.ts";
 import { criarRoteador, type DepsRoteador, type Rota } from "./roteador.ts";
 import { responderMetricas } from "./rotas/metricas.ts";
-import { criarRotaSaude } from "./rotas/saude.ts";
+import { criarRotaSaude, type VerificacaoSaude } from "./rotas/saude.ts";
 import { criarSessao, exigirConfiguracaoSegura, segredoEfetivo, type OpcoesSessao } from "./sessao.ts";
 
 /**
@@ -30,14 +31,18 @@ export interface OpcoesServidor {
    * resolução de sessão do roteador. Sem isto, nenhum upgrade é aceito.
    */
   upgrade?: (server: Server, resolverEscopo: (req: IncomingMessage) => Escopo | null) => void;
-  /** definido em 2026-10-05 (NOD-175): o `select 1` do `/api/saude`. Sem isto, a saúde responde 200 sem olhar o banco. */
-  verificarBanco?: () => Promise<unknown>;
+  /**
+   * definido em 2026-10-05 (NOD-175), revisto em 2026-10-15 (NOD-267): a verificação do `/api/saude` (o `select 1` com
+   * prazo e, no compartilhado, o batimento dos laços), a mesma que o watchdog usa — o boot passa a de
+   * `criarVerificacaoSaude`. Sem isto, a saúde responde 200 sem olhar o banco.
+   */
+  verificarSaude?: VerificacaoSaude;
 }
 
 export function criarServidor(opcoes: OpcoesServidor = {}) {
   const opcoesSessao = opcoes.sessao ?? { modo: "stub" };
   const sessao = criarSessao(segredoEfetivo(opcoesSessao.modo, opcoes.segredoSessao ?? process.env.NOD_SESSAO_SEGREDO), opcoesSessao);
-  const rotas: Rota[] = [criarRotaSaude(opcoes.verificarBanco), ...sessao.rotas, ...(opcoes.rotas ?? [])];
+  const rotas: Rota[] = [criarRotaSaude(opcoes.verificarSaude), ...sessao.rotas, ...(opcoes.rotas ?? [])];
   const roteador = criarRoteador(rotas, {
     resolverEscopo: sessao.resolverEscopo,
     autorizarTokenTurno: opcoes.autorizarTokenTurno,
@@ -45,6 +50,15 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
     fallback: criarEstatico(opcoes.staticDir ?? process.env.NOD_STATIC_DIR),
   });
   const server = createServer((req, res) => {
+    // ADR-090: `curl -fsSL https://<nod>/motor | sh` — o endereço curto do script de instalação do motor (o -L segue).
+    // ADR-102: `/motor?convite=…` leva o convite junto (só o formato dele; qualquer outra coisa some).
+    const caminhoMotor = (req.url ?? "").split("?")[0];
+    if (req.method === "GET" && (caminhoMotor === "/motor" || caminhoMotor === "/motor/")) {
+      const convite = new URL(req.url ?? "/", "http://x").searchParams.get("convite");
+      res.writeHead(302, { location: `/api/motor/instalar${conviteValido(convite) ? `?convite=${convite}` : ""}`, "cache-control": "no-store" });
+      res.end();
+      return;
+    }
     if (req.method === "GET" && (req.url === "/metrics" || req.url?.startsWith("/metrics?"))) {
       responderMetricas(res);
       return;

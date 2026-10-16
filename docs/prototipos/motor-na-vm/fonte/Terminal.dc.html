@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Terminal da VM · instalação</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.t-l{white-space:pre;margin:0}
+</style>
+</helmet>
+<div style="width: 960px; height: 680px; box-sizing: border-box; padding: 40px; background: #e9e9ec; font-family: 'Geist', system-ui, sans-serif; display: flex;">
+<div style="flex: 1; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; background: #131315; box-shadow: 0 18px 50px rgba(24,24,27,.28), 0 1px 3px rgba(24,24,27,.2);">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: #1d1d21; border-bottom: 1px solid #2d2d32;">
+    <span style="width: 11px; height: 11px; border-radius: 50%; background: #3a3a40;"></span>
+    <span style="width: 11px; height: 11px; border-radius: 50%; background: #3a3a40;"></span>
+    <span style="width: 11px; height: 11px; border-radius: 50%; background: #3a3a40;"></span>
+    <span style="flex: 1; text-align: center; font: 12px 'Geist Mono', ui-monospace, monospace; color: #8e8e96;">marlon@vm-sp: ~</span>
+  </div>
+  <div style="flex: 1; padding: 20px 24px; font: 13.5px/1.6 'Geist Mono', ui-monospace, Menlo, monospace; color: #d6d6da; display: flex; flex-direction: column;">
+    <p class="t-l"><span style="color: #8e8e96;">$</span> curl -fsSL https://[seu-nod]/motor | sh</p>
+    <p class="t-l"> </p>
+    <p class="t-l"><span style="color: #ededef; font-weight: 600;">Nod · instalando o motor nesta máquina</span></p>
+    <p class="t-l"><span style="color: #4cc38a;">✓</span> usuário nod criado</p>
+    <p class="t-l"><span style="color: #4cc38a;">✓</span> Node, git e gh instalados</p>
+    <p class="t-l"><span style="color: #4cc38a;">✓</span> Claude Code instalado</p>
+    <p class="t-l"><span style="color: #4cc38a;">✓</span> serviço nod-motor ligado (volta sozinho se a máquina reiniciar)</p>
+    <p class="t-l"> </p>
+    <p class="t-l">Para conectar esta máquina ao seu Nod, abra Seu espaço › Máquinas › Conectar</p>
+    <p class="t-l">e digite o código:</p>
+    <p class="t-l"> </p>
+    <p class="t-l">        <span style="color: #ffffff; font-size: 22px; font-weight: 600; letter-spacing: .16em;">K7QM-4F2X</span></p>
+    <p class="t-l"> </p>
+    <p class="t-l"><span style="color: #8e8e96;">Ou abra: https://[seu-nod]/conectar?codigo=K7QM-4F2X  (vale por 10 min)</span></p>
+    <p class="t-l"> </p>
+    <p class="t-l"><span style="color: #4cc38a;">✓</span> Conectada como <span style="color: #ffffff;">vm-sp</span> na conta de Marlon.</p>
+    <p class="t-l"> </p>
+    <p class="t-l">Agora entre nas suas IAs, nesta máquina:</p>
+    <p class="t-l">  <span style="color: #4ea3f0;">nod-motor entrar claude</span></p>
+    <p class="t-l">  <span style="color: #4ea3f0;">nod-motor entrar codex</span>     <span style="color: #8e8e96;">(opcional)</span></p>
+    <p class="t-l">  <span style="color: #4ea3f0;">nod-motor entrar github</span>    <span style="color: #8e8e96;">(opcional)</span></p>
+    <p class="t-l"> </p>
+    <p class="t-l"><span style="color: #8e8e96;">$</span> <span style="display: inline-block; width: 8px; height: 16px; background: #d6d6da; vertical-align: -3px;"></span></p>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":960,"height":680}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

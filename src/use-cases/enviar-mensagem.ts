@@ -1,15 +1,21 @@
+import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { ConversaDto } from "../contracts/api.ts";
 import type { Executor } from "../contracts/evento.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
-import type { IdHarness } from "../contracts/harness.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { horaDaFrase } from "../domain/erro-fornecedor.ts";
+import { harnessFixado, iaDaNegacao, inventarioHarnessSemSonda, motivoHarnessIndisponivel, motivoSemIaPronta } from "../domain/harness.ts";
 import { resolverLocalidade } from "../domain/localidade-turno.ts";
 import { redigir } from "../domain/redacao.ts";
+import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
+import { donosDosBots } from "./estado-do-dono.ts";
+import { trabalhosParaDto } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaEnviarMensagem = {
@@ -24,6 +30,10 @@ export type EntradaEnviarMensagem = {
   executor?: Executor;
   /** Inventário do motor já sondado (ADR-019); ausente = lê o registrado; nenhum = 'ausente' (fail-closed). */
   inventario?: Inventario;
+  /** Chave de idempotência (UUID) que o compositor cria, uma por fala (NOD-156): o reenvio devolve a mesma mensagem e o mesmo turno. */
+  idEnvio?: string;
+  /** #313: as IAs de todas as máquinas vivas da pessoa (modo compartilhado) — a negação do bot fixado nomeia a IA DELE. */
+  harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>;
 };
 
 export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: Mensagem | null };
@@ -33,6 +43,11 @@ export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: M
  * o rollback derruba os três). Localidade via resolverLocalidade com o inventário (ADR-022): recusada →
  * o turno NASCE interrompido 'executor_indisponivel' com mensagem de negação renderizável (E9.3, ADR-029).
  * Falar de novo libera a fila: encerra as paradas abertas que cobrem a conversa (E5.4/E8.1).
+ *
+ * definido em 2026-10-06 (NOD-156): com `idEnvio`, a fala já gravada com a mesma chave volta como está (mesma
+ * mensagem, mesmo turno, sem eventos e sem mexer em paradas). Na corrida, o `on conflict do nothing` do insert
+ * faz a perdedora esperar o commit da vencedora e voltar sem linha; aí ela lê a vencedora. Pegar a violação do
+ * índice não serve: no Postgres ela aborta a transação inteira.
  */
 export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensagem> = async (deps, input) => {
   const texto = typeof input.texto === "string" ? input.texto.trim() : "";
@@ -48,17 +63,30 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const origem: OrigemTurno = conversa.tipo === "sala" ? "sala" : "conversa";
   const agora = deps.agora();
   const executor = input.executor ?? "catcher";
+  const idEnvio = input.idEnvio;
 
-  await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
+  if (idEnvio) {
+    const existente = await deps.repos.mensagens.buscarPorIdEnvio(conversa.id, idEnvio);
+    if (existente) return { data: await envioRepetido(deps, existente, texto, anexoIds), events: [] };
+  }
 
   const autoria = autoriaPessoa(deps.escopo, executor);
-  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel" });
+  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel", idEnvio });
+  if (!criada && idEnvio) {
+    // Perdeu a corrida: a outra transação gravou a mesma chave e já fez commit.
+    const vencedora = await deps.repos.mensagens.buscarPorIdEnvio(conversa.id, idEnvio);
+    if (vencedora) return { data: await envioRepetido(deps, vencedora, texto, anexoIds), events: [] };
+  }
   if (!criada) throw new ErroDeDominio("nao_permitido");
+  // Depois do insert (NOD-156): o reenvio de uma fala já gravada não pode encerrar uma parada aberta depois dela.
+  await deps.repos.paradas.encerrarAbertas({ conversaId: conversa.id, agora });
   // Prende só o que é solto, desta conversa e da dona; qualquer id que sobrar derruba a tx inteira.
   const anexos = await deps.repos.anexos.prender(anexoIds, { conversaId: conversa.id, mensagemId: criada.id });
   if (anexos.length !== anexoIds.length) throw new ErroDeDominio("entrada_invalida", { cause: "anexo de outra conversa, já enviado ou inexistente" });
-  // PDF para um agente cujo motor declarado não lê PDF: recusa escrita em vez de o modelo não ver o arquivo.
-  const naoLido = agente.harness && agente.harness !== "auto" ? anexos.find((a) => !motorLe(agente.harness as IdHarness, tipoDoAnexo(a.mime))) : undefined;
+  // PDF para um agente cujo motor declarado não lê PDF: recusa escrita em vez de o modelo não ver o arquivo. O bot `auto`
+  // (ou sem harness) não é conferido aqui: a IA só se decide no despacho (NOD-207 manteve assim).
+  const fixo = agente.harness && agente.harness !== "auto" ? agente.harness : null;
+  const naoLido = fixo ? anexos.find((a) => !motorLe(fixo, tipoDoAnexo(a.mime))) : undefined;
   if (naoLido) throw new ErroDeDominio("entrada_invalida", { cause: `${agente.harness} não lê ${tipoDoAnexo(naoLido.mime)}` });
   const mensagem: Mensagem = anexos.length > 0 ? { ...criada, anexos } : criada;
 
@@ -88,7 +116,12 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
   const events = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto" } })];
   let negacao: Mensagem | null = null;
   if (recusado) {
-    negacao = await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario, agora });
+    // #313: o bot fixado nomeia a IA dele, com o estado dela (como o despacho, NOD-171); o Automático diz que nenhuma IA
+    // está pronta — o `inventario` aqui é o da máquina, e chamá-lo de "Claude Code" confundia quem só tem o ChatGPT.
+    const fixo = harnessFixado(agente.harness, agente.modelo);
+    negacao = fixo
+      ? await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario: input.harnessesDaPessoa?.[fixo] ?? inventarioHarnessSemSonda(agora), agora, harness: fixo })
+      : await mensagemExecutorIndisponivel(deps, { conversaId: conversa.id, turnoId: turno.id, agenteId: agente.id, executor, inventario, agora, semIaOnde: "maquinas" });
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { motivo: "executor_indisponivel", inventario: inventario.estado } }));
     if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
   } else {
@@ -98,21 +131,48 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
 };
 
 /**
+ * A fala já gravada com a mesma chave (NOD-156). Texto ou anexos diferentes com a mesma chave são erro do cliente,
+ * não reenvio: recusa sem gravar nada (devolver a fala antiga perderia os anexos novos em silêncio). O turno se acha
+ * por `mensagemOrigemId`.
+ */
+async function envioRepetido(deps: Deps, existente: Mensagem, texto: string, anexoIds: readonly string[]): Promise<SaidaEnviarMensagem> {
+  if (existente.texto !== texto) throw new ErroDeDominio("estado_invalido", { cause: "id_envio_reusado" });
+  const anexos = (await deps.repos.anexos.daMensagens([existente.id])).get(existente.id) ?? [];
+  const gravados = anexos.map((a) => a.id).sort();
+  const pedidos = anexoIds.map((id) => id.toLowerCase()).sort();
+  if (gravados.length !== pedidos.length || gravados.some((id, i) => id !== pedidos[i])) throw new ErroDeDominio("estado_invalido", { cause: "id_envio_reusado" });
+  const turno = await deps.repos.turnos.buscarPorMensagemOrigem(existente.id);
+  if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "id_envio sem turno" });
+  log("info", "envio_repetido", { conversa_id: existente.conversaId, mensagem_id: existente.id });
+  return { mensagem: anexos.length > 0 ? { ...existente, anexos } : existente, turno, negacao: null };
+}
+
+/**
  * Negação renderizável de executor indisponível (ADR-029): classe 'plano_ausente' porque nenhum plano
  * pode ser emitido sem motor 'pronto'; o texto vem da redação fixa com motivo e instante.
  */
 export async function mensagemExecutorIndisponivel(
   deps: Deps,
-  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number },
+  p: { conversaId: string; turnoId: string; agenteId: string; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; anexoNaoLido?: TipoAnexo; semIaOnde?: "maquinas" | "maquina_do_bot" },
 ): Promise<Mensagem | null> {
-  const motivo = p.inventario.estado === "pronto" ? "motor pronto" : `${motorDe(p.executor)} ${p.inventario.estado}: ${p.inventario.motivo}`;
+  // NOD-171: o harness escolhido e o inventário DELE; sem harness (turno antigo, catcher), o do motor.
+  const nome = p.harness ?? motorDe(p.executor);
+  // #313: sem IA para nomear, quem chama diz onde faltou (envio: nas máquinas; despacho: na máquina do bot).
+  const motivo = !p.harness && p.semIaOnde ? motivoSemIaPronta(p.semIaOnde, p.inventario) : motivoHarnessIndisponivel(nome, p.inventario, p.modeloInvalido, p.anexoNaoLido);
+  // NOD-220: a IA que negou vai no payload; a web decide "já voltou" pela sonda DELA, nunca pela do motor em uso.
+  // Só o harness do turno é IA que negou: sem ele, quem faltou foi o executor (motorDe), e `nome` "claude-cli" é o motor
+  // local, não a IA. Gravar `ia` aí prenderia a web esperando o Claude Code num bot que roda no Codex (revisão do #303).
+  // NOD-285: na negação por anexo a IA nomeada está pronta (só não lê o arquivo); com `ia`, a web ofereceria tentar de novo
+  // assim que ela "voltasse", e a fala cairia na mesma negação. Sem `ia`, a negação é só a frase.
+  const ia = p.anexoNaoLido ? undefined : iaDaNegacao(p.harness);
   return deps.repos.mensagens.criar({
     conversaId: p.conversaId,
     turnoId: p.turnoId,
     autoria: autoriaAgente({ agenteId: p.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: p.executor, localityReason: "motor_ausente" }),
     kind: "negacao",
-    texto: redigir("executor-indisponivel", p.agora, { motivo, desde: new Date(p.inventario.em).toISOString() }),
-    payload: { kind: "negacao", classe: "plano_ausente", nome: motorDe(p.executor), motivo: "plano_ausente", terminal: true },
+    // NOD-285 (revisão do Gil no #345): o tipo do arquivo vai no payload para a web dar à negação o aviso próprio.
+    texto: p.anexoNaoLido ? redigir("anexo-nao-lido", p.agora, { motivo }) : redigir("executor-indisponivel", p.agora, { motivo, desde: horaDaFrase(p.inventario.em, p.agora) }),
+    payload: { kind: "negacao", classe: "plano_ausente", nome, motivo: "plano_ausente", terminal: true, ...(ia ? { ia } : {}), ...(p.modeloInvalido !== undefined ? { modelo: p.modeloInvalido } : {}), ...(p.anexoNaoLido ? { anexo: p.anexoNaoLido } : {}) },
     confianca: "confiavel",
   });
 }
@@ -120,17 +180,21 @@ export async function mensagemExecutorIndisponivel(
 /**
  * GET conversas/:id/mensagens (EMENDA 13): mensagens + turnos pendentes renderizáveis ("na fila — ocupado em …").
  * definido em 2026-09-24 (fio da pergunta): + os fios das perguntas com mensagem na janela, já com o estado.
+ * definido em 2026-10-07 (ADR-083, S2): cada mensagem leva `origemTurno`, `trabalhoId` e `fimDoTurno`, e a conversa, as
+ * tasks abertas do bot dela (a faixa). As falas do meio dos turnos de trabalho continuam na página: quem as esconde é a
+ * web, e elas contam no `limite` (documentado: uma task muito falante empurra as mais antigas para fora da janela).
  */
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
   const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
-    deps.repos.mensagens.listarDaConversa(conversa.id, input.limite),
+    deps.repos.mensagens.listarComTurno(conversa.id, input.limite),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),
   ]);
-  const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id));
+  // NOD-200: a fala do bot também pode ter anexo (a captura de tela do turno), e não só a mensagem da pessoa.
+  const anexos = await deps.repos.anexos.daMensagens(lidas.filter((m) => m.autoria.autor_tipo === "pessoa" || m.kind === "texto").map((m) => m.id));
   const mensagens = anexos.size === 0 ? lidas : lidas.map((m) => (anexos.has(m.id) ? { ...m, anexos: anexos.get(m.id) } : m));
   // Cancelado antes de rodar = interrompido pela pessoa sem nunca ter sido reivindicado (attempted
   // nasce false e só o reivindicar o liga). Um Parar no meio da execução não entra: aquele rodou.
@@ -139,7 +203,13 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
     .map((t) => ({ id: t.id, mensagemId: t.mensagemOrigemId as string }));
   const turnosEmCurso = vivos
     .filter((t): t is typeof t & { estado: "pendente" | "despachando" } => t.estado === "pendente" || t.estado === "despachando")
-    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null }));
+    .map((t) => ({ id: t.id, estado: t.estado, desde: t.criadoEm, mensagemId: t.mensagemOrigemId ?? null, trabalhoId: t.trabalhoId ?? null, origem: t.origem }));
   const fios = await fiosDaConversa(deps.repos, mensagens);
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios } };
+  const doBot = conversa.tipo === "propria" ? conversa.agenteId : null;
+  // Os abertos do bot da conversa (a faixa, ADR-083); conversa de sala não tem bot próprio: lista vazia.
+  const abertos = doBot ? await deps.repos.trabalhos.abertosDoAgente(doBot) : [];
+  const trabalhos = await trabalhosParaDto(deps, abertos);
+  // ADR-099 (I10): o dono do bot da conversa própria — a linha acima do campo (estado, esperas e fila).
+  const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos)).get(doBot) ?? null) : null;
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono } };
 };

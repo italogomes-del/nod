@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CapacidadeConector, Conector } from "../../../src/contracts/conector.ts";
 import type { Proposta } from "../../../src/contracts/conversa.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { appsParaLiberar, JANELA_LIBERAR_MS, oQuePodem, rotuloPermitir, type EntradaAppsParaLiberar } from "../../../web/telas/card-liberar.ts";
+import { appsParaLiberar, JANELA_LIBERAR_MS, oQuePodem, renderCardLiberar, rotuloPermitir, type EntradaAppsParaLiberar } from "../../../web/telas/card-liberar.ts";
 import { renderTimeline } from "../../../web/telas/conversa.ts";
 
 /**
@@ -141,8 +141,15 @@ describe("o desenho do cartão na conversa", () => {
     liberacoesDispensadas: { a1: {} },
   };
 
-  it("dois apps: título, subtítulo, uma linha por app com checkbox marcado, 'Conectado' e seletor em 'Ler', a lista e o rodapé", () => {
+  it("2026-10-06: a conversa não mostra mais o cartão sozinho (bot novo, reconexão) — o card de acesso nasce do pedido do bot", () => {
     const html = renderTimeline(conversa(), estado);
+    expect(html).not.toContain("liberar-card");
+    expect(html).not.toContain("no Marketplace.");
+  });
+
+  // O desenho fica guardado em renderCardLiberar, fora da timeline, para o dia em que a oferta voltar com outra regra.
+  it("dois apps: título, subtítulo, uma linha por app com checkbox marcado, 'Conectado' e seletor em 'Ler', a lista e o rodapé", () => {
+    const html = renderCardLiberar(conversa(), estado);
     expect(html).toContain('<div class="msg-sistema">Você conectou o Gmail e o Slack no Marketplace.</div>');
     expect(html).toContain('<section class="acesso-card liberar-card" data-liberar="a1" aria-label="Liberar apps para Assistente pessoal">');
     expect(html).toContain("<b>O Assistente pessoal ainda não pode usar esses apps</b><small>Conectar o app é o primeiro passo. Falta dizer o que este bot pode fazer neles.</small>");
@@ -161,7 +168,7 @@ describe("o desenho do cartão na conversa", () => {
 
   it("um app só: texto no singular, 'Permitir leitura', e o app sem 'Ler e alterar' mostra o nível sem deixar escolher", () => {
     const soLeitura = conector("gmail", "Gmail", { catalogo: [cap("LISTAR", "ler")] });
-    const html = renderTimeline(conversa(), { ...estado, conectores: [soLeitura] });
+    const html = renderCardLiberar(conversa(), { ...estado, conectores: [soLeitura] });
     expect(html).toContain("Você conectou o Gmail no Marketplace.");
     expect(html).toContain("<b>O Assistente pessoal ainda não pode usar esse app</b><small>Conectar o app é o primeiro passo. Falta dizer o que este bot pode fazer nele.</small>");
     expect(html).toContain('aria-label="Nível de acesso ao Gmail" disabled><option value="leitura" selected>Ler</option></select>');
@@ -171,18 +178,18 @@ describe("o desenho do cartão na conversa", () => {
 
   it("some quando o bot ganha acesso, quando a pessoa dispensa, numa sala e enquanto as concessões não carregaram", () => {
     const comAcesso = reduzir(estado, { tipo: "hidratar-concessoes", agenteId: "a1", concessoes: [{ conectorId: "k-gmail" }, { conectorId: "k-slack" }] as never, liberacoesDispensadas: {} });
-    expect(renderTimeline(conversa(), comAcesso)).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa(), comAcesso)).not.toContain("liberar-card");
     const dispensado = reduzir(estado, { tipo: "hidratar-concessoes", agenteId: "a1", concessoes: [], liberacoesDispensadas: { "k-gmail": AGORA, "k-slack": AGORA } });
-    expect(renderTimeline(conversa(), dispensado)).not.toContain("liberar-card");
-    expect(renderTimeline(conversa([], "sala"), estado)).not.toContain("liberar-card");
-    expect(renderTimeline(conversa(), { ...estado, concessoes: {} })).not.toContain("liberar-card");
-    expect(renderTimeline(conversa(), { ...estado, liberacoesDispensadas: {} })).not.toContain("liberar-card");
-    expect(renderTimeline(conversa(), { ...estado, carregado: { ...estado.carregado, conectores: false } })).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa(), dispensado)).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa([], "sala"), estado)).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa(), { ...estado, concessoes: {} })).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa(), { ...estado, liberacoesDispensadas: {} })).not.toContain("liberar-card");
+    expect(renderCardLiberar(conversa(), { ...estado, carregado: { ...estado.carregado, conectores: false } })).not.toContain("liberar-card");
   });
 
   it("com o card de pedido do bot aberto para o Gmail, o Gmail fica só nele e o cartão oferece o Slack", () => {
-    const html = renderTimeline(conversa([pedido("gmail")]), estado);
-    expect(html.match(/data-proposta="pr-gmail"/g)).toHaveLength(1);
+    expect(renderTimeline(conversa([pedido("gmail")]), estado).match(/data-proposta="pr-gmail"/g)).toHaveLength(1);
+    const html = renderCardLiberar(conversa([pedido("gmail")]), estado);
     expect(html).toContain('data-conectores="k-slack"');
     expect(html).not.toContain('data-liberar-app="k-gmail"');
   });

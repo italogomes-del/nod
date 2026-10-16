@@ -372,3 +372,229 @@ describe("nova tentativa nos conectores HTTP (NOD-157)", () => {
     expect(vivos.vivos()).toBe(0);
   });
 });
+
+// NOD-193: servidor MCP com sessão (Streamable HTTP). Cada initialize abre a sessão S<n>; `expirar` é quantas
+// requisições com sessão recebem 404 (a sessão "morreu"); `semSessao` imita servidor que não usa sessão.
+function mcpComSessao(opcoes: { expirar?: number; semSessao?: boolean; demoraMs?: number; initialize404?: boolean } = {}) {
+  let expirar = opcoes.expirar ?? 0;
+  let sessoes = 0;
+  let t = 0;
+  const pedidos: { metodo: string; id?: number; sessao: string | null; cursor?: string }[] = [];
+  const fetchImpl: typeof fetch = async (_u, init) => {
+    const q = JSON.parse(String(init?.body)) as { id?: number; method: string; params?: { cursor?: string } };
+    const sessao = new Headers(init?.headers).get("mcp-session-id");
+    pedidos.push({ metodo: q.method, ...(q.id !== undefined ? { id: q.id } : {}), sessao, ...(q.params?.cursor ? { cursor: q.params.cursor } : {}) });
+    t += opcoes.demoraMs ?? 0;
+    if (q.method === "initialize") {
+      if (opcoes.initialize404 && sessoes > 0) return new Response("x", { status: 404 });
+      sessoes++;
+      return Response.json({ jsonrpc: "2.0", id: q.id, result: {} }, { headers: opcoes.semSessao ? {} : { "mcp-session-id": `S${sessoes}` } });
+    }
+    if (!q.id) return new Response(null, { status: 202 });
+    if (expirar > 0) {
+      expirar--;
+      return new Response("sessão não encontrada", { status: 404 });
+    }
+    if (q.method === "tools/list") {
+      const result = q.params?.cursor ? { tools: [{ name: "t2" }] } : { tools: [{ name: "t1" }], nextCursor: "p2" };
+      return Response.json({ jsonrpc: "2.0", id: q.id, result });
+    }
+    return Response.json({ jsonrpc: "2.0", id: q.id, result: { content: [{ type: "text", text: `feito em ${sessao ?? "-"}` }] } });
+  };
+  const cliente = criarClienteMcp({ nome: "gmail", transporte: "http", url: "https://mcp.exemplo.com/mcp", fetchImpl, agora: () => t, dormir: async (ms) => { t += ms; }, aleatorio: () => 0.5 });
+  const de = (metodo: string) => pedidos.filter((p) => p.metodo === metodo);
+  return { cliente, pedidos, de, fetchImpl };
+}
+
+describe("sessão MCP expirada (404 com mcp-session-id) abre sessão nova e repete uma vez (NOD-193)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+  const logs = () => logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+  const renovacoes = () => logs().filter((l) => l["evento"] === "conector_sessao_renovada");
+
+  it("leitura: 404 em S1 → initialize SEM session id → S2 → reenvio com id novo dá sucesso", async () => {
+    const m = mcpComSessao({ expirar: 1 });
+    await m.cliente.iniciar();
+    expect(await m.cliente.chamar("GMAIL_FETCH_EMAILS", {}, { somenteLeitura: true })).toEqual({ conteudo: "feito em S2", isError: false });
+    expect(m.pedidos.map((p) => [p.metodo, p.sessao])).toEqual([
+      ["initialize", null],
+      ["notifications/initialized", "S1"],
+      ["tools/call", "S1"],
+      ["initialize", null],
+      ["notifications/initialized", "S2"],
+      ["tools/call", "S2"],
+    ]);
+    const ids = m.de("tools/call").map((p) => p.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(m.de("initialize")).toHaveLength(2);
+    expect(renovacoes()).toMatchObject([{ conector: "gmail", ferramenta: "GMAIL_FETCH_EMAILS", desfecho: "recuperou" }]);
+    expect(logs().some((l) => l["evento"] === "conector_nova_tentativa")).toBe(false);
+  });
+
+  it("escrita (somenteLeitura: false) também renova: o servidor não executou o pedido da sessão morta", async () => {
+    const m = mcpComSessao({ expirar: 1 });
+    await m.cliente.iniciar();
+    expect((await m.cliente.chamar("GMAIL_SEND_EMAIL", { para: "x" }, { somenteLeitura: false })).conteudo).toBe("feito em S2");
+    expect(m.de("tools/call")).toHaveLength(2);
+    expect(m.de("initialize")).toHaveLength(2);
+    // Sem opções = escrita, o lado seguro da NOD-157; a renovação vale do mesmo jeito.
+    const semHint = mcpComSessao({ expirar: 1 });
+    await semHint.cliente.iniciar();
+    expect((await semHint.cliente.chamar("GMAIL_SEND_EMAIL", {})).conteudo).toBe("feito em S2");
+  });
+
+  it("listar(): a sessão expira na 2ª página e a renovação repete a MESMA página com o mesmo cursor", async () => {
+    const m = mcpComSessao();
+    // A primeira página passa; a 2ª (com cursor) recebe 404 de sessão uma vez.
+    let primeira = true;
+    const f = m.fetchImpl;
+    const cliente = criarClienteMcp({
+      nome: "gmail",
+      transporte: "http",
+      url: "https://mcp.exemplo.com/mcp",
+      agora: () => 0,
+      dormir: async () => undefined,
+      fetchImpl: async (u, init) => {
+        const q = JSON.parse(String(init?.body)) as { method: string; params?: { cursor?: string } };
+        if (q.method === "tools/list" && q.params?.cursor && primeira) {
+          primeira = false;
+          return new Response("x", { status: 404 });
+        }
+        return f(u, init);
+      },
+    });
+    expect((await cliente.listar()).map((t) => t.name)).toEqual(["t1", "t2"]);
+    // O 404 da página 2 (em S1) não chega ao servidor falso; chega a página 2 repetida, com o mesmo cursor, em S2.
+    expect(m.de("tools/list").map((p) => [p.cursor ?? null, p.sessao])).toEqual([[null, "S1"], ["p2", "S2"]]);
+    expect(m.de("initialize").map((p) => p.sessao)).toEqual([null, null]);
+    expect(renovacoes()).toMatchObject([{ ferramenta: "tools/list", desfecho: "recuperou" }]);
+  });
+
+  it("404 SEM session id na requisição (servidor sem sessão) não renova: erro como hoje, 1 chamada só", async () => {
+    const m = mcpComSessao({ semSessao: true, expirar: 1 });
+    await expect(m.cliente.chamar("x", {}, { somenteLeitura: true })).rejects.toMatchObject({ motivo: "conector_indisponivel", status: 404 });
+    expect(m.de("tools/call")).toHaveLength(1);
+    expect(m.de("initialize")).toHaveLength(1);
+    expect(renovacoes()).toEqual([]);
+  });
+
+  it("404 de novo depois da renovação: erro sem laço, no máximo 1 renovação por operação", async () => {
+    const m = mcpComSessao({ expirar: 5 });
+    await expect(m.cliente.chamar("x", {}, { somenteLeitura: true })).rejects.toMatchObject({ motivo: "conector_indisponivel", status: 404, sessaoExpirada: true });
+    expect(m.de("tools/call")).toHaveLength(2);
+    expect(m.de("initialize")).toHaveLength(2);
+    expect(renovacoes()).toMatchObject([{ desfecho: "falhou" }]);
+  });
+
+  it("404 no próprio initialize da renovação sobe como erro (o initialize nunca renova)", async () => {
+    const m = mcpComSessao({ expirar: 1, initialize404: true });
+    await expect(m.cliente.chamar("x", {}, { somenteLeitura: true })).rejects.toMatchObject({ status: 404 });
+    expect(m.de("initialize")).toHaveLength(2);
+    expect(m.de("tools/call")).toHaveLength(1);
+    expect(renovacoes()).toMatchObject([{ desfecho: "falhou" }]);
+  });
+
+  it("orçamento: só renova se ainda cabe um prazo inteiro de requisição (8 s) nos 30 s", async () => {
+    // Cada requisição leva 7,5 s no relógio falso: initialize + notificação + tools/call = 22,5 s; sobram 7,5 s < 8 s.
+    const semTempo = mcpComSessao({ expirar: 1, demoraMs: 7_500 });
+    await expect(semTempo.cliente.chamar("x", {}, { somenteLeitura: true })).rejects.toMatchObject({ status: 404 });
+    expect(semTempo.de("tools/call")).toHaveLength(1);
+    expect(semTempo.de("initialize")).toHaveLength(1);
+    expect(renovacoes()).toEqual([]);
+    // Com 7 s por requisição sobram 9 s: renova, e o initialize da renovação consome o mesmo orçamento.
+    const comTempo = mcpComSessao({ expirar: 1, demoraMs: 7_000 });
+    expect((await comTempo.cliente.chamar("x", {}, { somenteLeitura: true })).conteudo).toBe("feito em S2");
+    expect(comTempo.de("initialize")).toHaveLength(2);
+  });
+
+  it("o reenvio depois da renovação não gasta tentativa: a política da NOD-157 recomeça (2 novas tentativas, esperas de 1 s e 3 s)", async () => {
+    const m = mcpComSessao({ expirar: 1 });
+    // Na sessão nova, o tools/call dá 503 duas vezes e passa na terceira.
+    let falhas503 = 2;
+    let t = 0;
+    const dormiu: number[] = [];
+    const cliente = criarClienteMcp({
+      nome: "gmail",
+      transporte: "http",
+      url: "https://mcp.exemplo.com/mcp",
+      agora: () => t,
+      dormir: async (ms) => { dormiu.push(ms); t += ms; },
+      aleatorio: () => 0.5,
+      fetchImpl: async (u, init) => {
+        const q = JSON.parse(String(init?.body)) as { method: string };
+        const sessao = new Headers(init?.headers).get("mcp-session-id");
+        if (q.method === "tools/call" && sessao === "S2" && falhas503 > 0) {
+          falhas503--;
+          return new Response("x", { status: 503 });
+        }
+        return m.fetchImpl(u, init);
+      },
+    });
+    await cliente.iniciar();
+    expect((await cliente.chamar("GMAIL_FETCH_EMAILS", {}, { somenteLeitura: true })).conteudo).toBe("feito em S2");
+    expect(m.de("initialize")).toHaveLength(2);
+    expect(dormiu).toEqual([1_000, 3_000]);
+    expect(logs().filter((l) => l["evento"] === "conector_nova_tentativa").map((l) => [l["tentativa"], l["desfecho"]])).toEqual([
+      [2, "repetindo"],
+      [3, "recuperou"],
+    ]);
+    expect(renovacoes()).toMatchObject([{ desfecho: "recuperou" }]);
+  });
+
+  it("conectores-vivos: renovação que dá certo mantém o cliente e não registra conector_chamada_falhou", async () => {
+    const m = mcpComSessao({ expirar: 1 });
+    const vivos = criarConectoresVivos({ agora: () => 0, fetchImpl: m.fetchImpl, carregar: async () => ({ nome: "gmail", transporte: "http", url: "https://mcp.exemplo.com/mcp" }) });
+    expect((await vivos.chamar("c1", "GMAIL_SEND_EMAIL", {}, { rotina: false, somenteLeitura: false })).conteudo).toBe("feito em S2");
+    expect(vivos.vivos()).toBe(1);
+    expect(logs().some((l) => l["evento"] === "conector_chamada_falhou")).toBe(false);
+    await vivos.fechar();
+  });
+});
+
+// NOD-208: catálogo vazio (só meta-executores do Composio) era falha em silêncio; agora loga o motivo e quantos meta vieram.
+describe("sonda: catálogo vazio do Composio", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+
+  it("só COMPOSIO_* → conector_indisponivel e log sonda_conector_falhou com motivo catalogo_vazio, sem URL nem chave", async () => {
+    const f: typeof fetch = async (_url, init) => {
+      const q = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      if (!q.id) return new Response(null, { status: 202 });
+      const result = q.method === "initialize" ? {} : { tools: [{ name: "COMPOSIO_SEARCH_TOOLS", inputSchema: { type: "object" } }, { name: "COMPOSIO_MULTI_EXECUTE_TOOL", inputSchema: { type: "object" } }] };
+      return Response.json({ jsonrpc: "2.0", id: q.id, result });
+    };
+    const url = "https://backend.composio.dev/tool_router/v3/trs_sessao_secreta/mcp";
+    const r = await sondarConector({ nome: "slack", transporte: "http", url, env: { "x-api-key": "ak_chave_secreta" } }, { fetchImpl: f });
+    expect(r).toEqual({ ok: false, motivo: "conector_indisponivel" });
+    const linhas = logSpy.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("sonda_conector_falhou"));
+    expect(linhas).toHaveLength(1);
+    expect(JSON.parse(linhas[0]!)).toMatchObject({ nivel: "aviso", conector: "slack", motivo: "catalogo_vazio", meta: 2, total: 2 });
+    const tudo = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(tudo).not.toContain("trs_sessao_secreta");
+    expect(tudo).not.toContain("ak_chave_secreta");
+  });
+});
+
+// Revisão do PR #264 (NOD-208): o `verificar` passa o que sobra do teto; a sonda não pode usar os 8 s por requisição
+// nem os 30 s do orçamento padrão quando o teto já está no fim.
+describe("sonda: orçamento vindo do verificar", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined); });
+  afterEach(() => { logSpy.mockRestore(); });
+
+  it("conectores vivos repassam orcamentoMs e a requisição é cortada nele", async () => {
+    // Composio que não responde: só o abort do prazo encerra a requisição.
+    const f: typeof fetch = (_url, init) => new Promise((_ok, falhar) => {
+      init?.signal?.addEventListener("abort", () => falhar(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+    const vivos = criarConectoresVivos({ agora: () => 0, fetchImpl: f, carregar: async () => ({ nome: "slack", transporte: "http", url: "https://backend.composio.dev/tool_router/v3/trs_x/mcp" }) });
+    const conector = { id: "c1", slug: "slack", transporte: "http", comando: null, args: [], url: "https://backend.composio.dev/tool_router/v3/trs_x/mcp" } as unknown as Parameters<typeof vivos.sondar>[0];
+    const inicio = Date.now();
+    const r = await vivos.sondar(conector, { orcamentoMs: 50 });
+    expect(r).toEqual({ ok: false, motivo: "timeout_transporte" });
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    await vivos.fechar();
+  });
+});

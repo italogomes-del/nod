@@ -2,20 +2,25 @@ import { fileURLToPath } from "node:url";
 import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
-import { prazoSondaDoEnv } from "../../../src/adapters/executor/sonda.ts";
+import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import { planoHarness } from "../../helpers/plano-harness.ts";
 import type { SinaisTurno } from "../../../src/contracts/turno.ts";
 import type { ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 let dir: string;
 let cfg: ConfigDriver;
-const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoEnv(process.env) };
+// NOD-198: prazo por arquivo (sobe o CLI falso de verdade); a medida sob carga está em prazo-falso.ts.
+vi.setConfig({ testTimeout: PRAZO_TESTE_FALSO_MS });
+
+const lig = { urlNod: "http://127.0.0.1:8888", proxyPath: fileURLToPath(new URL("../../../src/adapters/mcp-proxy/proxy.ts", import.meta.url)), sigtermParaSigkillMs: 50, prazoSondaMs: prazoSondaDoTeste() };
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "nod-codex-teste-"));
   const bin = join(dir, "codex");
   await writeFile(bin, `#!${process.execPath}\nawait import(${JSON.stringify(new URL("../../fixtures/codex-falso.mjs", import.meta.url).href)});\n`); await chmod(bin, 0o700);
-  cfg = { bins: { "codex-cli": bin }, env: { HOME: dir, PATH: process.env.PATH ?? "", TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar" }, cwdBase: join(dir, "turnos") };
+  // ADR-083 §6: com o app-server, o chat roda nele (codex-chat-falso.test.ts). Este arquivo cobre o `codex exec`, a
+  // reserva para Codex sem app-server.
+  cfg = { bins: { "codex-cli": bin }, env: { HOME: dir, PATH: process.env.PATH ?? "", TESTE_NOD_REGISTRO: join(dir, "registro.json"), OPENAI_API_KEY: "nao-herdar", DATABASE_URL: "nao-herdar", TESTE_NOD_SEM_APP_SERVER: "1" }, cwdBase: join(dir, "turnos") };
 });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 it("normaliza texto, ferramentas, sinais e tokens; isola configuração e apaga o token", async () => {
@@ -136,4 +141,30 @@ it("teste da conta sem login não gasta turno: devolve o estado da sonda", async
   const instance = await criarCodexCliDriver(lig).create(cfg);
   expect(await instance.testar!("Diga oi.")).toMatchObject({ inventario: { estado: "nao_autenticado" }, resposta: null });
   await expect(readFile(join(dir, "registro.json"), "utf8")).rejects.toThrow();
+});
+it("NOD-171: Codex abaixo do piso é 'ausente' com cli_antigo e as duas versões; o turno recusa com a causa, sem rodar", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.158.9";
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  expect(await instance.sondar()).toMatchObject({ estado: "ausente", causa: "cli_antigo", versao: "0.158.9", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.9) é mais antigo que o testado pelo nod. Atualize para a versão 0.159.0 ou mais nova." });
+  const sinais: (keyof SinaisTurno)[] = [];
+  await expect(instance.adapter(planoHarness()).rodarTurno({ sinal: async (s) => { sinais.push(s); }, delta: () => {}, evento: () => {} })).rejects.toMatchObject({ codigo: "executor_indisponivel", cause: "cli_antigo" });
+  expect(sinais).toEqual(["attempted"]);
+  await expect(readFile(join(dir, "registro.json"), "utf8")).rejects.toThrow();
+});
+it("NOD-171: o pré-release do piso fica abaixo dele (semver), e o piso exato passa com a versão limpa", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.159.0-alpha.3";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toMatchObject({ estado: "ausente", causa: "cli_antigo", versao: "0.159.0-alpha.3" });
+  cfg.env.TESTE_NOD_VERSAO = "0.159.0";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toEqual({ estado: "pronto", versao: "0.159.0", em: expect.any(Number) });
+});
+it("2026-10-09 (teste do Breno): sem node no PATH, o Codex do npm é 'sem_node', não 'Atualize o Codex'", async () => {
+  cfg.env.TESTE_NOD_SEM_NODE = "1";
+  const inv = await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar());
+  expect(inv).toMatchObject({ estado: "ausente", causa: "sem_node" });
+  expect("motivo" in inv ? inv.motivo : "").not.toContain("Atualize");
+});
+it("2026-10-09: config.toml quebrado é 'config_invalida' (ausente), não 'falta entrar'", async () => {
+  cfg.env.TESTE_NOD_VERSAO = "0.162.1";
+  cfg.env.TESTE_NOD_CONFIG_QUEBRADA = "1";
+  expect(await criarCodexCliDriver(lig).create(cfg).then((i) => i.sondar())).toMatchObject({ estado: "ausente", causa: "config_invalida" });
 });

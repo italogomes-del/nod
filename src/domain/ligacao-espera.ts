@@ -28,6 +28,11 @@ export const CATEGORIAS_ESPERA = [
   // definido em 2026-10-05: a frase da rede de segurança (a IA do Mac caiu no meio da ligação). Mora aqui para ser
   // gravada e cacheada como as esperas; quem a toca é o orquestrador (`falarSemIa`), como aviso, nunca `escolherFala`.
   "sem_ia",
+  // definido em 2026-10-05 (NOD-168): o aviso único do modo "só legenda" (o TTS falhou 2 frases seguidas). Só toca se o
+  // clipe já estiver no cache — é a voz ao vivo que caiu; sem clipe, o aviso sai só escrito. Quem toca é o orquestrador.
+  "voz_fora",
+  // NOD-167: a vez ficou sem nenhum trecho de resposta no prazo (o cérebro travou); o orquestrador avisa e interrompe.
+  "vez_sem_resposta",
 ] as const;
 export type CategoriaEspera = (typeof CATEGORIAS_ESPERA)[number];
 
@@ -56,8 +61,12 @@ export type FalaDeEspera = {
   ferramenta?: FerramentaComFala;
 };
 
-/** definido em 2026-10-04: versão da biblioteca inteira (sobe quando entra ou sai uma fala). 2 em 2026-10-05: `sem_ia`. */
-export const VERSAO_FALAS_DE_ESPERA = 2;
+/**
+ * definido em 2026-10-04: versão da biblioteca inteira (sobe quando entra ou sai uma fala). 2 em 2026-10-05: `sem_ia`.
+ * 3 em 2026-10-05 (NOD-168): `voz_fora`.
+ * 4 em 2026-10-06 (NOD-167): `vez_sem_resposta`.
+ */
+export const VERSAO_FALAS_DE_ESPERA = 4;
 
 type Grupo = { categoria: CategoriaEspera; ferramenta?: FerramentaComFala; textos: readonly string[] };
 
@@ -125,6 +134,9 @@ const GRUPOS: readonly Grupo[] = [
   { categoria: "despedida", textos: ["Até mais!", "Tchau, até mais!", "Falou! Até a próxima.", "Até logo!"] },
   // Uma frase só, a do protótipo aprovado em 2026-10-05: ela aponta para a tela, onde estão o motivo e as saídas.
   { categoria: "sem_ia", textos: ["Não consegui usar a IA deste Mac. As opções estão na tela."] },
+  { categoria: "voz_fora", textos: ["A voz falhou. Sigo por escrito, na legenda e no chat."] },
+  // NOD-167: a IA não mandou nada no prazo e a vez foi interrompida; a pessoa precisa saber que pode repetir.
+  { categoria: "vez_sem_resposta", textos: ["A IA não me respondeu. Pode repetir, por favor?", "Não veio resposta da IA. Fala de novo?", "Travou aqui e a IA não respondeu. Repete pra mim?"] },
 ];
 
 function montarFalas(): readonly FalaDeEspera[] {
@@ -168,6 +180,11 @@ export const TEMPOS_ESPERA = {
   intervaloMinimoMs: 2000,
   naoRepetirMs: 60000,
   reconhecimentoProporcao: 0.4,
+  /**
+   * NOD-167 (definido em 2026-10-05, começa em 20 s): a vez sem nenhum trecho de resposta e sem ferramenta neste
+   * prazo vira aviso falado (`vez_sem_resposta`) e interrupção dura do cérebro (no Codex, `turn/interrupt`).
+   */
+  vezSemRespostaMs: 20000,
 } as const;
 
 /** Uma espera que já tocou. */
@@ -289,7 +306,7 @@ export function sortearReconhecimento(p: { texto: string; onboarding: boolean; a
 }
 
 /** Categorias que avisam algo: tocam mesmo repetidas (melhor repetir que calar) e não esperam os 2 s. */
-const INFORMATIVAS: ReadonlySet<CategoriaEspera> = new Set(["ociosidade_final", "queda_cerebro", "queda_midia", "voltou", "limite_proximo", "saudacao_padrao", "despedida"]);
+const INFORMATIVAS: ReadonlySet<CategoriaEspera> = new Set(["ociosidade_final", "queda_cerebro", "queda_midia", "voltou", "limite_proximo", "saudacao_padrao", "despedida", "vez_sem_resposta"]);
 
 /** O grupo de falas para uma ferramenta: a dela, a de app (nome com "__") ou a genérica. */
 function grupoDaFerramenta(ferramenta: string | undefined): FerramentaComFala | undefined {

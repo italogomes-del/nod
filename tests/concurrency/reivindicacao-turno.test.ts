@@ -36,7 +36,7 @@ async function fixture(): Promise<{ turnoId: string }> {
     const repos = criarRepos(trx, MARLON);
     await repos.agentes.criar({ id: agenteId, nome: "Concorrente", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
-    await repos.turnos.enfileirar({ id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
   });
   criados.agentes.push(agenteId);
   criados.conversas.push(conversaId);
@@ -48,8 +48,12 @@ afterEach(async () => {
   await escopado(async (trx) => {
     await trx`set local lock_timeout = '2s'`;
     await trx`delete from turno_raio_x where turno_id in ${trx(criados.turnos)}`;
+    await trx`delete from esperas where turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turno_entregas where turno_id in ${trx(criados.turnos)}`;
+    await trx`delete from lotes_de_frentes where aberto_por_turno_id in ${trx(criados.turnos)} or retorno_turno_id in ${trx(criados.turnos)}`;
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
+    // ADR-083 (0060): os trabalhos apontam para a conversa (e a rotina) — saem antes dela.
+    await trx`delete from trabalhos where conversa_id in ${trx(criados.conversas)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     await trx`delete from agentes where id in ${trx(criados.agentes)}`;
   });
@@ -93,18 +97,44 @@ describeIntegracao("concorrência: reivindicação de turno (advisory lock por p
     expect(await segunda).toBeNull();
   });
 
-  it("commitada, a reivindicação vale para a outra conexão; renovar de outra máquina é {ativo:false}; sobre o POOL abre a própria tx", async () => {
+  it("commitada, a reivindicação vale para a outra conexão; renovar de outra máquina é {ativo:false}; sobre o POOL abre a própria tx escopada", async () => {
     const { turnoId } = await fixture();
     const maquinaA = randomUUID();
-    // Direto no pool (sem transação aberta): reivindicar abre a tx curta por conta própria — mas o pool
-    // não carrega escopo (set_config é LOCAL), então a policy falha FECHADO com erro do Postgres; o
-    // `null` do contrato é para "não achou", nunca para "sem escopo". O catch aqui só prova o fail-closed.
-    const ganho = await criarRepos(db, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() }).then(() => "reivindicou", () => "recusado");
-    expect(ganho).toBe("recusado");
-    const ganhoEscopado = await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() }));
-    expect(ganhoEscopado?.id).toBe(turnoId);
+    // Direto no pool (sem transação aberta): reivindicar abre a tx curta por conta própria. definido em 2026-10-15
+    // (NOD-266): ela é a escopada (abrirTxEscopada — escopo, prazo de conexão e timeouts), então reivindica de verdade.
+    // Antes era um `begin` cru: sem escopo, a policy falhava fechado; sem prazo, pendurava com o pool cheio.
+    const ganho = await criarRepos(db, MARLON).turnos.reivindicar({ machineId: maquinaA, agora: Date.now() });
+    expect(ganho?.id).toBe(turnoId);
+    expect(await criarRepos(db, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() })).toBeNull();
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))).toBeNull();
-    expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false });
+    expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, randomUUID(), {}, Date.now()))).toEqual({ ativo: false, motivo: "lease_vencido" });
     expect(await escopado(async (trx) => criarRepos(trx, MARLON).turnos.renovarLease(turnoId, maquinaA, { promptSubmitted: true }, Date.now()))).toEqual({ ativo: true });
+  });
+
+  it("ADR-083: dois turnos do MESMO trabalho, duas conexões ao mesmo tempo — sai um só; o do trabalho não espera a conversa", async () => {
+    const agenteId = randomUUID();
+    const conversaId = randomUUID();
+    const trabalhoId = randomUUID();
+    const doTrabalho = [randomUUID(), randomUUID()];
+    const daConversa = randomUUID();
+    await escopado(async (trx) => {
+      const repos = criarRepos(trx, MARLON);
+      await repos.agentes.criar({ id: agenteId, nome: "Faixas", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+      await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
+      await repos.trabalhos.criar({ id: trabalhoId, agenteId, conversaId, titulo: "Login do app", origem: "pessoa" });
+      for (const id of doTrabalho) await repos.turnos.enfileirar({ executor: "catcher", id, conversaId, agenteId, origem: "conversa", trabalhoId, prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    });
+    criados.agentes.push(agenteId);
+    criados.conversas.push(conversaId);
+    criados.turnos.push(...doTrabalho);
+    const disputa = () => escopado(async (trx) => criarRepos(trx, MARLON).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
+    const ganhos = (await Promise.all([disputa(), disputa()])).flatMap((t) => (t ? [t.id] : []));
+    expect(ganhos).toHaveLength(1);
+    expect(doTrabalho).toContain(ganhos[0]);
+    // Com o trabalho rodando, a mensagem da conversa do mesmo bot sai na hora.
+    await escopado(async (trx) => criarRepos(trx, MARLON).turnos.enfileirar({ executor: "catcher", id: daConversa, conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "m" }));
+    criados.turnos.push(daConversa);
+    expect((await disputa())?.id).toBe(daConversa);
+    expect(await disputa()).toBeNull();
   });
 });

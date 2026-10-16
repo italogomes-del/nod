@@ -1,6 +1,6 @@
 import type { CorAgente, FormaAgente } from "./agente.ts";
 import type { EpochMs } from "./ids.ts";
-import type { CausaInventario, CausaSemIa } from "./inventario.ts";
+import type { CausaDoMac, CausaInventario, CausaSemIa } from "./inventario.ts";
 import type { Ligacao, MotivoRecusaLigacao } from "./ligacao.ts";
 
 /**
@@ -64,8 +64,11 @@ export type PendentesOnboarding = {
   rotina: { decisaoId: string; resumo: string } | null;
 };
 
-/** `causa` (definido em 2026-10-05): a IA está logada, mas o teste de verdade a reprovou (src/contracts/inventario.ts). */
-export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa | CausaInventario };
+/**
+ * `causa` (definido em 2026-10-05): a IA está logada, mas o teste de verdade a reprovou (src/contracts/inventario.ts).
+ * NOD-171: com `cli_antigo`, `versao` (a instalada) e `minima` (o piso) vão juntas, para o card dizer "Atualizar".
+ */
+export type IaNoMac = { id: "claude-cli" | "codex-cli"; estado: "pronto" | "nao_autenticado" | "ausente"; motivo?: string; causa?: CausaSemIa | Exclude<CausaInventario, CausaDoMac>; versao?: string; minima?: string };
 
 /** GET /api/t/:tenant/onboarding. */
 export type EstadoOnboarding = {

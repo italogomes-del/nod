@@ -39,6 +39,8 @@ NOD_HOME=/data/nod
 NOD_FUSO_PADRAO=America/Sao_Paulo
 NOD_BANCO_AMBIENTE=persistente
 DATABASE_URL=postgres://nod_app:$(segredo nod-pg-senha-app)@$SQL_IP:5432/nod?sslmode=require
+# ADR-001 (emenda de 2026-10-15): pool da app direto no Cloud SQL (max_connections 100); 15 é o padrão do código.
+NOD_DB_POOL_MAX=15
 # O boot cria as partições de events dos próximos 12 meses como dono (ADR-006) e fecha a conexão;
 # as requisições usam só nod_app.
 DATABASE_URL_DONO=postgres://nod_dono:$(segredo nod-pg-senha-dono)@$SQL_IP:5432/nod?sslmode=require
@@ -56,6 +58,8 @@ NOD_ADMINS=${NOD_ADMINS:-}
 NOD_ONBOARDING_VOZ=${NOD_ONBOARDING_VOZ:-0}
 NOD_MODELO_LIGACAO_CLAUDE=${NOD_MODELO_LIGACAO_CLAUDE:-}
 NOD_MODELO_LIGACAO_CODEX=${NOD_MODELO_LIGACAO_CODEX:-}
+# NOD-167: sem a linha no config.env, produção fica com a ligação Codex DESLIGADA (o padrão do código é ligada).
+NOD_LIGACAO_CODEX=${NOD_LIGACAO_CODEX:-0}
 # Teto de pedidos de TTS por minuto deste processo, abaixo da cota de 200/min do projeto (emenda da ADR-071, NOD-166).
 NOD_VOZ_TTS_TETO_MIN=${NOD_VOZ_TTS_TETO_MIN:-180}
 NOD_DRENAGEM_MAX_MS=600000

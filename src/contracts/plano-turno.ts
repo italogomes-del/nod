@@ -1,3 +1,4 @@
+import type { ContaDoPlano } from "./contas-ia.ts";
 import type { AnexoMeta } from "./anexo.ts";
 import type { EsforcoAgente, ModoAprovacao } from "./agente.ts";
 import type { IdHarness } from "./harness.ts";
@@ -66,6 +67,11 @@ export type PlanoTurno = {
   machineId: string;
   executor: Executor;
   harness?: IdHarness;
+  /**
+   * ADR-102 (2026-10-13): a conta da lista da pessoa que este turno usa. A máquina acha a pasta dela pela impressão
+   * (CLAUDE_CONFIG_DIR/CODEX_HOME). Ausente = a pasta padrão da máquina (máquina que não anunciou contas).
+   */
+  conta?: ContaDoPlano;
   workspaceId?: string | null;
   /**
    * definido em 2026-09-18: onde o harness abre (pasta preparada do projeto ativo) e o que ele
@@ -92,10 +98,20 @@ export type PlanoTurno = {
   catalogo: { ferramentas: FerramentaPlano[]; servidores: ServidorPlano[] };
   promptSistema: string;
   /**
+   * definido em 2026-10-06 (NOD-183, ADR-080): as duas partes do `promptSistema` do turno de texto, para o driver do
+   * claude-cli pôr o marcador de cache entre elas no `--system-prompt`. Juntadas com "\n" dão o `promptSistema`.
+   * Ausente = só o `promptSistema` (ligação, planos antigos); quem não sabe usar ignora.
+   */
+  promptSistemaPartes?: { estavel: string; volatil: string };
+  /**
    * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */
-  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente };
+  /**
+   * `bifurcar` (definido em 2026-10-07, ADR-083, rede de 2 min): continuar `sessaoCli` numa CÓPIA (`--fork-session` no
+   * Claude), porque a original segue com o trabalho promovido. Só vem com harness que declara `bifurcaSessao`.
+   */
+  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente; bifurcar?: boolean };
   /**
    * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram o gate da rotina
    * (`efeitoExternoSoPorAprovacao`, EMENDA 15) e a trava herdada (ADR-058/059). Quem decide quando o bot para e

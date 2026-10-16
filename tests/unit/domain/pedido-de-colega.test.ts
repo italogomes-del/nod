@@ -19,20 +19,20 @@ import { modoDoTurno } from "../../../src/use-cases/emitir-plano-turno.ts";
  */
 const agora = 1_000_000;
 const agente: Agente = { tenantId: "t", id: "chico", ownerId: "p", visibility: "privado", nome: "Chico", titulo: "Tech Lead", descricao: "revisa PRs", dono: "pessoa", forma: "shape-square", cor: "c-red", fixado: false, oculto: false, confirmado: true, modelo: "claude-haiku-4-5-20251001", duplicadoDe: null, criadoEm: 0 };
-const turno: Turno = { tenantId: "t", id: "t1", conversaId: "c1", agenteId: "chico", ownerId: "p", origem: "delegacao", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 1, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "explique a busca", entradaAnexos: [], entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora, sobProcuracaoDe: "p" };
+const turno: Turno = { executor: "catcher", tenantId: "t", id: "t1", conversaId: "c1", agenteId: "chico", ownerId: "p", origem: "delegacao", estado: "despachando", sinais: { attempted: true, rejected: false, promptSubmitted: false, producedOutput: false }, machineId: null, leaseAte: null, prazoEm: agora + 86_400_000, motivoInterrupcao: null, motivoFalha: null, semNovidadeMotivo: null, retomaTurnoId: null, profundidade: 1, reenvios: 0, pararSolicitadoEm: null, entradaTexto: "explique a busca", entradaAnexos: [], entradaConfianca: "confiavel", custoUsd: null, modelo: "claude-haiku-4-5-20251001", criadoEm: agora, sobProcuracaoDe: "p" };
 const github: Conector = { tenantId: "t", id: "k1", ownerId: "p", visibility: "privado", nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", args: [], url: null, env: {}, declaracao: "nao-toca", habilitado: true, catalogo: [
   { nome: "pr_ver", descricao: "lê", schema: { type: "object" }, readOnlyHint: true },
   { nome: "pr_comentar", descricao: "comenta", schema: { type: "object" }, readOnlyHint: false },
   { nome: "pr_revisar", descricao: "revisa (pode aprovar)", schema: { type: "object" }, readOnlyHint: false },
 ], sondadoEm: agora, ultimaFalha: null, criadoEm: 0 };
 const concessoes: Concessao[] = ["pr_ver", "pr_comentar", "pr_revisar"].map((capacidade, i) => ({ tenantId: "t", id: `g${i}`, ownerId: "p", agenteId: "chico", conectorId: "k1", capacidade, mensagemId: "m", criadoEm: 0 }));
-const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice" } };
+const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [github], modo: "delegacao", confianca: "confiavel", profundidade: 1, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, delegacao: { pessoaNome: "Marlon", remetenteNome: "Clarice" }, aFazer: true };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("quem recebe um pedido de colega usa os acessos dele", () => {
   it("catálogo inteiro das concessões (leitura E escrita), mais pedir_acesso, os caminhos de aprovação, ver_colegas, o artefato, anotar o que fica para depois e o computador (ADR-066)", () => {
     const p = montarPlano({ ...base, computador: true, workspace: true, workspaceVinculado: true });
-    expect(p.catalogo.ferramentas.filter((f) => f.origem === "nod").map((f) => f.nome)).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia"]);
+    expect(p.catalogo.ferramentas.filter((f) => f.origem === "nod").map((f) => f.nome)).toEqual(["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"]);
     expect(nomes(p)).toEqual(expect.arrayContaining(["github__pr_ver", "github__pr_comentar", "github__pr_revisar", "ler_mais"]));
     expect(p.confiancaEntrada).toBe("confiavel");
     expect(p.politicaExecucao).toEqual({ prazoMs: 86_400_000, orcamentoResultadoChars: expect.any(Number) });

@@ -42,8 +42,11 @@ describe("proxy com o servidor fora do ar", () => {
 
     // Sem cache: a lista seguinte tenta o servidor de novo e falha fechado.
     expect((await proxy.pedir("tools/list")).result).toEqual({ tools: [] });
-    const depois = await proxy.pedir("tools/call", { name: "lembrar", arguments: { tipo: "fato", texto: "x" } });
-    expect(depois.error?.code).toBe(-32001);
-    expect((depois.error?.data as { classe: string }).classe).toBe("plano_ausente");
+    // revisto em 2026-10-12 (NOD-214): o plano sumiu porque o servidor caiu (o deploy), não porque o turno acabou —
+    // a chamada é "indisponível, tente de novo" (transitória), e não plano_ausente (terminal).
+    const depois = (await proxy.pedir("tools/call", { name: "lembrar", arguments: { tipo: "fato", texto: "x" } })).result as ConteudoTexto;
+    expect(depois.isError).toBe(true);
+    expect(depois.content[0]?.text).toContain("negado (transitório)");
+    expect(depois.content[0]?.text).toContain("conector lembrar indisponível: servidor fora há");
   });
 });

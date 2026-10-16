@@ -39,7 +39,8 @@
 .cab-acoes .bt { padding: 6px 9px; border-color: transparent; background: transparent; }
 .cab-acoes .perigo { color: var(--danger); }
 .timeline-wrap { padding: 24px 30px; }
-.timeline { max-width: 900px; }
+/* Plano "tela limpa" (2026-10-16, T4): a coluna e o campo com a mesma largura, 760 px, como no Grok. */
+.timeline { max-width: 760px; }
 .time-sep { font-size: 11px; margin: 0 0 26px; }
 .message { margin: 0 0 25px; gap: 14px; align-items: flex-start; }
 .message > .icon { margin-top: 5px; }
@@ -58,18 +59,23 @@
 .you .msg-autor { justify-content: flex-end; }
 .tag { font-size: 9px; text-transform: none; letter-spacing: 0; font-weight: 400; border-radius: 6px; }
 .meta-tags { opacity: .72; }
-.msg-handoff, .msg-peer { border: 1px solid var(--line); background: var(--surface-side); padding: 14px 18px; border-radius: 12px; margin: 12px 0 22px 52px; overflow-wrap: anywhere; }
+/* definido em 2026-10-07 (chat limpo, filha 03 do épico 188): o pedido a colega e a resposta dele ficam no centro, como toda linha que não é balão. */
+.msg-handoff, .msg-peer { border: 1px solid var(--line); background: var(--surface-side); padding: 14px 18px; border-radius: 12px; margin: 12px auto 22px; max-width: 620px; overflow-wrap: anywhere; }
 .handoff-titulo { display: flex; gap: 8px; align-items: center; color: var(--ink-2); font-size: 12px; flex-wrap: wrap; }
 .handoff-titulo span { color: var(--ink-3); font-size: 11px; }
 .msg-handoff p, .msg-peer p { margin: 8px 0; line-height: 1.6; }
 /* definido em 2026-09-24 (ADR-047): o contexto do remetente fica fora do balão da pessoa, rotulado. */
 .msg-contexto-delegado { border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin: 6px 0 0; overflow-wrap: anywhere; }
 .msg-contexto-delegado p { margin: 4px 0; font-size: 13px; color: var(--ink-2); }
-.composer-wrap { border-top: 0; padding: 12px 24px 17px; }
-.composer .box { border-radius: 28px; padding: 8px 10px 8px 19px; background: var(--surface); border-color: var(--line-strong); min-height: 52px; }
+.composer-wrap { border-top: 0; padding: 12px 30px 17px; }
+.composer-wrap > .composer { max-width: 760px; margin: 0 auto; }
+/* T4 (2026-10-16): sai a borda forte de ponta a ponta; borda fina e sombra leve. O foco segue em --ink (estilos.css). */
+.composer .box { border-radius: 28px; padding: 8px 10px 8px 19px; background: var(--surface); border-color: var(--line); box-shadow: var(--shadow-composer); min-height: 52px; }
 .composer textarea { padding: 8px 0; font-size: 13px; min-width: 0; }
 .composer .send { width: 35px; height: 35px; font-size: 18px; background: var(--action); color: var(--on-action); margin: 0; }
 .composer .nota { text-align: center; padding-top: 7px; font-size: 10px; color: var(--ink-3); }
+/* T5 (2026-10-16): sem a dica "Enter envia…", a nota só existe no modo resposta. */
+.composer .nota:empty { display: none; }
 .detalhes { display: none; border-left: 1px solid var(--line); overflow: auto; padding: 33px 26px; background: var(--surface-side); }
 .com-detalhes .detalhes { display: block; }
 .detalhes-identidade { display: flex; align-items: center; gap: 15px; }
@@ -210,7 +216,7 @@
 .novo-contato{max-width:820px;margin:30px auto}.novo-contato .search{padding:18px;font-size:19px}.contact-picker{margin-top:16px;padding:10px;border:1px solid var(--line);border-radius:22px;background:var(--surface);}
 .picker-row{display:flex!important;width:100%;align-items:center;gap:18px;border:0!important;background:transparent!important;padding:15px 18px!important;text-align:left;font-size:17px!important;border-radius:14px!important}.picker-row:hover{background:var(--surface-raised)!important}.picker-row small{display:block;font-size:13px;color:var(--ink-3);margin-top:5px}.picker-icon{width:44px;height:44px;background:var(--surface-raised);border-radius:50%;display:grid;place-items:center;font-size:25px}
 .welcome-options{margin:4px 0 28px 64px;max-width:580px;border:1px solid var(--line);border-radius:22px;padding:24px;background:var(--surface-side)}.welcome-options h2{font-size:19px;margin:0 0 8px}.welcome-options>p{color:var(--ink-3);font-size:14px;margin:0 0 20px}.welcome-option{display:flex!important;gap:16px;width:100%;text-align:left;padding:16px 8px!important;border:0!important;border-top:1px solid var(--line)!important;border-radius:0!important;background:transparent!important;align-items:center}.welcome-option:hover{background:var(--surface-raised)!important}.welcome-option>b,.welcome-option b{font-size:15px;font-weight:550}.welcome-option small{display:block;color:var(--ink-3);font-size:13px;margin-top:5px}.welcome-option>span:last-child{margin-left:auto;color:var(--ink-3)}.option-key{border:1px solid var(--line);background:var(--surface);color:var(--ink-3);border-radius:7px;padding:4px 7px;font-size:12px}
-.icon.sm{width:27px;height:27px;min-width:27px;border-radius:10px}.icon.sm svg{width:23px;height:23px}.collaboration{margin:12px 0 20px 64px;color:var(--ink-3);font-size:13px}.collaboration>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;width:fit-content}.collaboration summary::-webkit-details-marker{display:none}.avatar-stack{display:flex;margin-left:4px}.avatar-stack .icon+.icon{margin-left:-8px;border:2px solid var(--surface)}.chevron{font-size:16px}.collaboration-panel{max-width:580px;border:1px solid var(--line);background:var(--surface);border-radius:16px;margin-top:12px;padding:8px}.collaboration-panel>details>summary{display:flex;gap:10px;align-items:center;cursor:pointer;padding:12px;color:var(--ink)}.collaboration-panel small{margin-left:auto;color:var(--ink-3)}.collaboration-messages{padding:4px 14px 14px;color:var(--ink-2);line-height:1.6}.collaboration-messages>div{border-top:1px solid var(--line);padding:12px 0}.collaboration-messages small{display:block;font-size:11px;margin-bottom:8px}
+.icon.sm{width:27px;height:27px;min-width:27px;border-radius:10px}.icon.sm svg{width:23px;height:23px}.collaboration{margin:12px auto 20px;width:fit-content;color:var(--ink-3);font-size:13px}.collaboration>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;width:fit-content}.collaboration summary::-webkit-details-marker{display:none}.avatar-stack{display:flex;margin-left:4px}.avatar-stack .icon+.icon{margin-left:-8px;border:2px solid var(--surface)}.chevron{font-size:16px}.collaboration-panel{max-width:580px;border:1px solid var(--line);background:var(--surface);border-radius:16px;margin-top:12px;padding:8px}.collaboration-panel>details>summary{display:flex;gap:10px;align-items:center;cursor:pointer;padding:12px;color:var(--ink)}.collaboration-panel small{margin-left:auto;color:var(--ink-3)}.collaboration-messages{padding:4px 14px 14px;color:var(--ink-2);line-height:1.6}.collaboration-messages>div{border-top:1px solid var(--line);padding:12px 0}.collaboration-messages small{display:block;font-size:11px;margin-bottom:8px}
 .marketplace-link{display:flex;gap:14px;align-items:center;margin:0 18px 14px;padding:13px 15px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);text-align:left;font-size:14px}.marketplace-link span{font-size:24px}.marketplace-link:hover{background:var(--surface-raised)}
 .tela-conectores{max-width:1180px;margin:auto;padding:38px!important}.marketplace-title{display:flex;align-items:center;justify-content:space-between;gap:15px}.marketplace-title h1{font-size:32px;letter-spacing:-1px;margin:10px 0}.marketplace-search{margin:24px 0;padding:17px;border-radius:16px!important}.marketplace-search input{font-size:16px}.marketplace-heading{font-size:19px;margin:32px 0 20px}.apps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.app-card{border:1px solid var(--line);border-radius:20px;padding:23px;background:var(--surface);display:flex;flex-direction:column;min-width:0}.app-card.selected{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}.app-card-heading{display:flex;gap:14px;align-items:center}.app-card h3{font-size:17px;margin:0 0 4px}.app-card small{color:var(--ink-3);font-size:12px}.app-card>p{font-size:14px;line-height:1.6;color:var(--ink-3);flex:1}.app-card-actions{display:flex;gap:6px;flex-wrap:wrap}.app-card .bt{font-size:12px;border-radius:20px;padding:8px 14px}.app-logo{display:grid;place-items:center;width:48px;height:48px;min-width:48px;border-radius:14px;background:var(--surface-raised);color:var(--ink-2);font-weight:650;font-size:27px;border:1px solid var(--line);position:relative;overflow:hidden}.app-logo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:inherit}.connected-dot{margin-left:auto;color:var(--success)}.composio-setup{background:var(--surface-side);border:1px solid var(--line);border-radius:16px;padding:18px 22px;font-size:14px}.composio-setup>summary{cursor:pointer;font-weight:550}.composio-setup p{color:var(--ink-3)}.composio-setup small{display:block;color:var(--ink-3);font-size:12px;margin-top:14px}.composio-form{display:flex!important;gap:12px;align-items:end;max-width:640px;margin:16px 0}.composio-form label{flex:1}.composio-form .bt{white-space:nowrap;margin-bottom:2px}.connection-card{display:flex;gap:18px;border:1px solid var(--line);border-radius:20px;padding:22px;margin:12px 0 24px 64px;max-width:550px;background:var(--surface-side)}.connection-card b{font-size:17px}.connection-card p{font-size:14px;color:var(--ink-3);line-height:1.6}.connection-card .bt{border-radius:20px}.auth-pending{border-top:1px solid var(--line);margin-top:16px;padding-top:16px;font-size:12px}.auth-pending p{color:var(--ink-3);line-height:1.5}.connection-notice{padding:16px;border-radius:12px;background:var(--success-soft);color:var(--success);font-size:14px}.connection-error{color:var(--danger)!important;font-size:12px!important}
 @media(max-width:1150px){.apps-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tela-conectores{padding:24px!important}}@media(max-width:760px){.apps-grid{grid-template-columns:1fr}.welcome-options,.collaboration,.connection-card{margin-left:0}.composio-form{display:block!important}.composio-form .bt{margin-top:12px}.marketplace-title{align-items:start}.marketplace-title h1{font-size:26px}}
@@ -234,31 +240,7 @@
 .icon.mascote>svg{width:140%;height:140%;flex-shrink:0;max-width:none}
 .mascote-catalogo .icon.mascote>svg{width:100%;height:100%}
 
-/* definido em 2026-09-18: escolha automática em primeiro plano, detalhes técnicos sob demanda. */
-.inteligencia-card { border: 1px solid var(--line); border-radius: 18px; padding: 22px; background: var(--surface); margin: 10px 0 22px; color: var(--ink); }
-.inteligencia-topo { display: flex; align-items: center; gap: 12px; }
-.inteligencia-topo h3 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
-.inteligencia-topo p { margin: 0; color: var(--ink-3); font-size: 13px; }
-.inteligencia-simbolo { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--surface-raised); color: var(--ink-2); font-size: 22px; flex-shrink: 0; }
-.inteligencia-chip { margin-left: auto; border-radius: 20px; background: var(--surface-raised); color: var(--ink-2); padding: 6px 10px; font-size: 11px; font-weight: 600; }
-.inteligencia-contexto, .inteligencia-ajuda { color: var(--ink-3); line-height: 1.65; font-size: 12px; margin: 15px 0 0; }
-.inteligencia-personalizar { margin-top: 17px; border-top: 1px solid var(--line); padding-top: 15px; }
-.inteligencia-personalizar summary { cursor: pointer; font-size: 13px; font-weight: 600; }
-.inteligencia-personalizar summary span { margin-left: 8px; color: var(--ink-3); font-size: 11px; font-weight: 400; }
-.inteligencia-label { display: block; font-size: 12px; color: var(--ink-2); margin-top: 17px; }
-.inteligencia-label select { display: block; width: 100%; min-height: 47px; margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; padding: 10px 12px; cursor: pointer; }
-.inteligencia-card :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.inteligencia-avancado { margin-top: 17px; color: var(--ink-3); }
-.inteligencia-avancado summary { font-size: 12px; font-weight: 400; }
-.inteligencia-avancado p { font-size: 12px; line-height: 1.6; }
-.inteligencia-avancado ul { list-style: none; padding: 0; margin: 12px 0 0; }
-.inteligencia-avancado li { padding: 13px 0; border-top: 1px solid var(--line); }
-.inteligencia-avancado li div { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; }
-.inteligencia-avancado small { display: block; margin-top: 6px; line-height: 1.5; font-size: 11px; }
-.harness-status { color: var(--ink-3); font-size: 10px; }
-.harness-status.pronto { color: var(--success); }
-.bt.inteligencia-atalho { border-color: var(--line-strong); color: var(--ink); font-size: 12px; border-radius: 20px; background: var(--surface); }
-@media (max-width: 620px) { .inteligencia-card { padding: 16px; } .inteligencia-topo { flex-wrap: wrap; } .inteligencia-chip { margin-left: 50px; } }
+/* definido em 2026-09-18: detalhes técnicos sob demanda ("Configurar conexão", só no modo local). */
 .conexao-avancada { margin-top: 10px; }
 .conexao-avancada > summary { cursor: pointer; color: var(--ink-3); font-size: 12px; }
 .conexao-avancada[open] > summary { margin-bottom: 12px; }
@@ -393,6 +375,18 @@
 .atividade-cab b { font-weight: 600; color: var(--ink-2); }
 .atividade-pulso { width: 8px; height: 8px; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); flex: none; animation: pulsa 1.4s ease-in-out infinite; }
 .atividade-agora { margin: 6px 0 0; padding: 0 18px 14px 34px; font-size: 15px; line-height: 1.45; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Vigia do turno (2026-10-05, NOD-73, protótipo do Gil): só aviso, em âmbar, com o Parar; o ponto para de pulsar. */
+.atividade-pulso.parado { animation: none; background: var(--warning); }
+.atividade-vigia { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 18px 14px 34px; padding: 10px 12px; background: var(--warning-soft); border: 1px solid var(--warning-line); border-radius: 10px; color: var(--warning); font-size: 13px; line-height: 1.45; }
+.atividade-vigia p { flex: 1 1 100%; margin: 0; }
+.atividade-vigia p b:first-child { display: block; font-weight: 600; }
+.atividade-vigia p > span { color: var(--ink-2); }
+.vigia-ic { display: inline-flex; vertical-align: -1px; margin-right: 6px; }
+.atividade-vigia .bt { margin-left: auto; }
+.vigia-linha { color: var(--warning); }
+.vigia-linha .bt { margin-left: 4px; vertical-align: baseline; }
+.bt.aviso { color: var(--warning); border-color: var(--warning-line); background: var(--surface); }
+.bt.aviso:hover { border-color: var(--warning); background: var(--warning-soft); }
 .atividade-cartao details { border-top: 1px solid var(--line); background: var(--surface-raised); }
 .atividade-cartao summary { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; list-style: none; }
 .atividade-cartao summary::-webkit-details-marker { display: none; }
@@ -463,6 +457,23 @@
 .composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
 .composer .clipe:disabled:hover { background: transparent; color: var(--ink-2); }
 
+/* ---- ditado no campo (ADR-095, 2026-10-11; referência do Grok em docs/referencias/ditado-grok/) ----
+   O 🎤 fica antes do enviar, num círculo cinza. Gravando, ele dá lugar à pílula "■ 0:08 ||||" e o campo diz "Ouvindo…";
+   o enviar continua no lugar (↑ = para e envia). No celular (web/mobile.css) a linha inteira vira três pílulas. */
+.composer .mic { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--surface-raised); color: var(--ink-2); display: grid; place-items: center; flex: none; cursor: pointer; }
+.composer .mic:hover, .composer .mic:focus-visible { background: var(--surface-selected); color: var(--ink); }
+.composer .mic[hidden], .composer .ditado[hidden], .composer .box.gravando .mic { display: none; }
+.composer .ditado { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 5px; border-radius: 18px; background: var(--surface-raised); flex: none; }
+.ditado-parar { width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); display: grid; place-items: center; flex: none; cursor: pointer; }
+.ditado-parar:hover, .ditado-parar:focus-visible { background: var(--surface-selected); }
+.ditado-ouvindo { display: flex; align-items: center; gap: 8px; }
+.ditado-tempo { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink); min-width: 30px; }
+.ditado-nivel { display: flex; align-items: center; gap: 2px; height: 16px; }
+.ditado-nivel i { --nivel-ditado: 0; width: 2px; height: calc(3px + var(--nivel-ditado) * 13px); border-radius: 1px; background: var(--ink-3); transition: height 80ms linear; }
+.composer .box.gravando textarea { cursor: default; }
+.composer .box.transcrevendo .ditado-parar, .composer .box.transcrevendo .send { opacity: .45; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .ditado-nivel i { transition: none; } }
+
 /* Fio da pergunta (2026-09-24): aberto, um trilho fino junta as mensagens do fio sob "Pergunta
    aberta · N mensagens · Xª rodada"; enquanto o agente lê, a faixa acima do campo fica neutra, sem ações;
    resolvido, o fio recolhe num <details> verde e a linha "{agente} seguiu com a sua resposta" fica embaixo. */
@@ -490,9 +501,6 @@
 
 /* definido em 2026-09-24 (revisão da interface): o chat é a tela principal. Cabeçalho só com o bot e o
    botão do painel; o painel pode ficar escondido; o que espera a pessoa vira um sino, não uma faixa. */
-.cab-acoes .toggle-detalhes { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0;
-  border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink-2); }
-.cab-acoes .toggle-detalhes:hover, .cab-acoes .toggle-detalhes:focus-visible { background: var(--surface-raised); }
 @media (min-width: 1100px) {
   .app.com-detalhes.detalhes-ocultos { grid-template-columns: 340px minmax(360px, 1fr); }
   .com-detalhes.detalhes-ocultos .detalhes { display: none; }
@@ -539,7 +547,7 @@
 .acesso-grupo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .acesso-grupo small { margin: 0; text-transform: uppercase; letter-spacing: .04em; font-size: 10px; }
 .acesso-grupo + .acesso-acoes { margin-top: 2px; padding-top: 0; border-top: 0; }
-.acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--line-strong); }
+.acesso-acoes li::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: color-mix(in srgb, var(--line-strong) 40%, var(--line)); }
 .acesso-rodape summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
 .acesso-rodape summary:focus:not(:focus-visible) { outline: none; }
 .detalhes .bt.link.perigo { color: var(--danger); }
@@ -564,6 +572,25 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .icone-topo { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
   background: none; color: var(--ink-2); cursor: pointer; }
 .icone-topo:hover, .icone-topo:focus-visible { background: var(--surface-raised); }
+/* definido em 2026-10-07 (ADR-081, canvas "Nod — bot fixo", Alt E): o Nod discreto — o logo (fundo da ação, olhos do
+   texto sobre ela) e o nome, à esquerda da lupa. O ponto do aviso é o mesmo do mascote (âmbar decisão, azul pergunta). */
+.nod-topo { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-right: auto; padding: 0 10px 0 5px;
+  border: 0; border-radius: 10px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.nod-topo:hover, .nod-topo:focus-visible, .nod-topo[aria-current="true"] { background: var(--surface-raised); color: var(--ink); }
+.nod-topo .logo-fundo { fill: var(--action); }
+.nod-topo .logo-olhos { fill: var(--on-action); }
+.nod-topo-aviso { position: absolute; top: 4px; left: 21px; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 2px var(--surface-side); }
+.nod-topo-aviso[data-aviso="decisao"] { background: var(--warning); }
+.menu-nota { margin: 6px 12px 8px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
+/* ADR-082: o card do lote do Nod — uma linha por ação, a caixa à esquerda, o verbo num selo. */
+.lote-acoes { display: flex; flex-direction: column; margin: 4px 0 2px; border-top: 1px solid var(--line); }
+.lote-acao { display: flex; gap: 10px; align-items: flex-start; padding: 9px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.lote-acao input { margin: 3px 0 0; width: 15px; height: 15px; accent-color: var(--action); flex: none; }
+.lote-texto { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; line-height: 18px; }
+.lote-texto > span { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lote-texto small { color: var(--ink-3); font-size: 12px; line-height: 16px; overflow-wrap: anywhere; }
+.lote-verbo { font-style: normal; font-size: 11px; font-weight: 500; color: var(--ink-2); background: var(--surface-raised); border-radius: 6px; padding: 1px 6px; }
+.lote-texto .lote-motivo { color: var(--warning); }
 .search[hidden] { display: none; }
 .search { height: 36px; }
 
@@ -870,10 +897,11 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
    sem aprovações, âmbar — a cor diz o risco sem precisar abrir o menu. */
 .composer .box.com-modo { padding-left: 8px; }
 .composer .box.com-modo textarea { padding-left: 6px; }
-.modo-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 9px; border: 0; border-radius: 16px; background: var(--surface-raised); color: var(--ink); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
-.modo-chip:hover, .modo-chip:focus-visible { background: var(--surface-selected); }
-.modo-chip[data-modo="automatico"] { background: var(--surface-selected); color: var(--ink); font-weight: 500; }
-.modo-chip[data-modo="total"] { background: var(--warning-soft); color: var(--warning); font-weight: 500; }
+/* Revisto em 2026-10-16 (plano "tela limpa", T6): sem fundo, igual ao seletor de IA ao lado; o fundo só no hover. */
+.modo-chip { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; border: 0; border-radius: 16px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
+.modo-chip:hover, .modo-chip:focus-visible, .modo-chip[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.modo-chip[data-modo="automatico"] { color: var(--ink); font-weight: 500; }
+.modo-chip[data-modo="total"] { color: var(--warning); font-weight: 500; }
 .modo-chip[aria-disabled="true"] { cursor: default; }
 @media (max-width: 560px) { .modo-chip > span { display: none; } .modo-chip { padding: 0 8px; } }
 .composer-aviso:empty { display: none; }
@@ -1062,3 +1090,437 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .msg-linha > .negacao { width: fit-content; max-width: 620px; margin: 4px auto 12px; text-align: center; }
 .msg-linha > .pasta-aberta { margin: 4px auto 16px; }
 .msg-linha > .msg-computador-fora { max-width: 620px; margin: 4px auto 12px; }
+
+/* =====================================================================================================================
+   Chat limpo e Tasks (definido em 2026-10-07, ADR-083, épico 188; protótipo "Chat limpo", pranchas R1, B1, B2, K1–K9,
+   M1–M3). Tudo que não é balão fica no centro da conversa: as linhas de rotina, de bots entre si e de task, os passos
+   da task e as pílulas de memória. A cor do agente só aparece no ponto de "trabalhando" (tokens.css).
+   ===================================================================================================================== */
+
+/* Todo item da timeline que não é balão é uma .msg-linha (renderMensagem) ou uma .linha-centro-wrap: os dois no centro. */
+.msg-linha { margin-left: auto; margin-right: auto; max-width: 660px; }
+.linha-centro-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 2px auto 12px; max-width: 660px; text-align: center; }
+.linha-centro { display: inline-flex; align-items: center; justify-content: center; gap: 6px; max-width: 100%; padding: 6px 12px; border: 0; border-radius: 14px;
+  background: none; color: var(--ink-2); font: inherit; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.linha-centro:hover, .linha-centro:focus-visible { background: var(--surface-raised); color: var(--ink); }
+.linha-centro.estatica { cursor: default; }
+.linha-centro.estatica:hover { background: none; color: var(--ink-2); }
+.linha-centro b, .linha-nome { color: var(--ink); font-weight: 500; }
+.linha-centro .icon.sm { width: 18px; height: 18px; min-width: 18px; border-radius: 6px; }
+.linha-centro .icon.sm svg { width: 15px; height: 15px; }
+.linha-ic { display: grid; place-items: center; color: var(--ink-3); }
+.linha-ic svg { width: 14px; height: 14px; }
+.linha-seta { color: var(--ink-3); font-size: 15px; line-height: 1; }
+.linha-ok { color: var(--success); }
+.linha-acoes { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+.linha-acoes .bt { border-radius: 18px; padding: 0 14px; background: var(--surface); }
+.linha-acao-nota { font-size: 12px; color: var(--ink-3); }
+.etiqueta-origem { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 6px; background: var(--surface-raised); color: var(--ink-2); font-size: 11px; font-weight: 400; white-space: nowrap; }
+
+/* O ponto do trabalho: na cor do bot (classe c-*), azul quando espera a pessoa, vazado na fila, vazado âmbar fora do Mac.
+   revisto em 2026-10-09: o ✓, o ■ e o ! ganham caixa fixa de 14 px (antes `width: auto`, e a coluna do bot andava conforme
+   o glifo); nas linhas das listas o ponto de 8 px ganha 3 px de cada lado e ocupa os mesmos 14 px. */
+.ponto-trabalho { display: inline-block; flex: none; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; background: var(--mascote-cor, var(--ink-3)); }
+.ponto-trabalho.precisa { background: var(--signal); }
+.ponto-trabalho.na-fila { background: transparent; border: 1.5px solid var(--line-strong); }
+.ponto-trabalho.fora-do-mac { background: transparent; border: 1.5px solid var(--warning); }
+.ponto-trabalho.feito { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 0; background: none; color: var(--success); font-size: 12px; line-height: 1; }
+:is(.ft-linha, .tt-linha, .tr-linha, .pilula-trab) > .ponto-trabalho:not(.feito) { margin: 0 3px; }
+.ponto-trabalho.feito.parado { color: var(--ink-3); font-size: 9px; }
+.ponto-trabalho.feito.falhou { color: var(--danger); font-weight: 700; }
+/* K8, variante 3: o ponto pisca de leve (opacidade, 1,6 s) enquanto há task rodando; sem animação para quem pediu menos movimento. */
+@keyframes pulsa-trab { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.pulso-trab { animation: pulsa-trab 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pulso-trab { animation: none; } }
+
+/* Barra lateral: o chip com o número de tasks ao lado do nome, e o ícone "Trabalhos" do topo com a contagem. */
+.chip-trab { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; font-style: normal; color: var(--ink-2); line-height: 16px; }
+.chip-trab .ponto-trabalho { width: 6px; height: 6px; }
+.trabalhos-bt { position: relative; }
+.trabalhos-bt[aria-current="page"] { background: var(--surface-selected); color: var(--ink); }
+.contagem-topo { position: absolute; top: 1px; right: -1px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 8px;
+  background: var(--action); color: var(--on-action); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; }
+
+/* A faixa de Trabalhos colada em cima do campo (K1) e a pílula recolhida (K6). */
+.lugar-faixa-trabalhos { flex: none; padding: 0 30px; }
+.lugar-faixa-trabalhos:empty { display: none; }
+.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap { padding-top: 0; }
+.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap .composer .box { border-top-left-radius: 0; border-top-right-radius: 0; }
+/* definido em 2026-10-08 (QA do épico): com a faixa da pergunta no alto do campo ("Dev 1 está esperando sua resposta"), a
+   faixa de Trabalhos ficava em cima dela, aberta embaixo, e o campo perdia os cantos de cima sem nada colado nele. */
+.lugar-faixa-trabalhos:has(+ .composer-wrap .faixa-pergunta) .faixa-trab { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 16px; }
+.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap:has(.faixa-pergunta) .composer .box { border-top-left-radius: 28px; border-top-right-radius: 28px; }
+.faixa-trab { margin-top: 8px; padding: 4px 4px 4px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface-side); }
+.ft-cab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 12px; font-size: 12px; color: var(--ink-3); }
+.ft-n { margin-right: auto; font-variant-numeric: tabular-nums; }
+.ft-recolher { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ink-3); cursor: pointer; }
+.ft-recolher:hover, .ft-recolher:focus-visible { background: var(--surface-raised); color: var(--ink-2); }
+/* revisto em 2026-10-09 (pedido do Marlon, "dá uma caprichada"): toda linha com 36 px e as mesmas colunas — ponto (14 px),
+   título numa linha só, status curto discreto, seta. O título cede espaço antes do status; o detalhe só no hover/foco. */
+.ft-linha { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px 0 12px; border: 0; border-radius: 10px; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ft-linha:hover, .ft-linha:focus-visible { background: var(--surface-raised); }
+.ft-titulo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ft-passo { flex: 0 0 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.ft-seta { display: grid; flex: none; place-items: center; color: var(--ink-3); opacity: .6; }
+.ft-linha:hover .ft-seta, .ft-linha:focus-visible .ft-seta { opacity: 1; }
+.faixa-trab-lugar { display: flex; justify-content: flex-end; padding: 6px 16px 2px; }
+.pilula-trab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 9px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--surface-side); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.pilula-trab:hover, .pilula-trab:focus-visible { background: var(--surface-raised); }
+.pilula-trab b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.pilula-trab > svg { color: var(--ink-3); }
+.pt-precisa { color: var(--signal); }
+
+/* A linha do dono acima do campo (ADR-099, parte 5; protótipo "um dono por bot", quadros 02–08): uma linha só, com o estado
+   de maior prioridade em negrito e o resto em contagem; "detalhes" abre, embaixo da mesma linha, as frentes, as esperas e a
+   fila. Nunca uma pilha de cartões; no celular o detalhe vira uma folha (mobile.css). */
+.linha-dono { margin: 8px 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.ld-barra { display: flex; align-items: center; min-height: 36px; }
+.ld-principal { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 0 6px 0 14px; border: 0; border-radius: 14px 0 0 14px;
+  background: none; color: var(--ink-2); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ld-texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-texto b { color: var(--ink); font-weight: 500; }
+.ld-extras { color: var(--ink-3); }
+.ld-pontos { display: inline-flex; flex: none; align-items: center; gap: 3px; }
+.ld-pontos .ponto-trabalho { width: 7px; height: 7px; }
+.ld-num { min-width: 10px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ld-n { margin-left: 2px; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ld-detalhes { display: inline-flex; flex: none; align-items: center; gap: 4px; align-self: stretch; padding: 0 12px; border: 0; border-radius: 0 14px 14px 0; background: none;
+  color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ld-principal:hover, .ld-principal:focus-visible, .ld-detalhes:hover, .ld-detalhes:focus-visible { background: var(--surface-raised); }
+.ld-principal:hover b, .ld-detalhes:hover { color: var(--ink); }
+.linha-dono.aberta .ld-principal { border-bottom-left-radius: 0; }
+.linha-dono.aberta .ld-detalhes { border-bottom-right-radius: 0; }
+.ld-detalhe { max-height: min(52vh, 460px); overflow-y: auto; padding: 2px 6px 8px; border-top: 1px solid var(--line); overscroll-behavior: contain; }
+.ld-folha-cab, .ld-fundo { display: none; }
+.ld-secao h3 { margin: 10px 8px 4px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.ld-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ld-item:hover, .ld-item:focus-visible { background: var(--surface-raised); }
+.ld-item.estatico { cursor: default; }
+.ld-item.estatico:hover { background: none; }
+.ld-item > .ponto-trabalho:not(.feito) { margin: 0 3px; }
+.ld-item > svg { flex: none; color: var(--ink-3); }
+.ld-item-titulo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+b.ld-item-titulo { font-weight: 500; }
+.ld-passo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.ld-item-fim { flex: none; margin-left: auto; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ld-comando { min-width: 0; padding: 0; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; }
+.ld-sub { display: flex; align-items: center; gap: 8px; margin: 0 8px 2px 32px; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.ld-sub.mono { font-family: var(--font-mono); }
+.ld-espera { padding-bottom: 4px; }
+.ld-ordem { flex: none; width: 14px; font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.ld-passos { padding: 0 0 6px; }
+.ld-passos ul { display: flex; flex-direction: column; gap: 2px; margin: 0 8px 4px 32px; padding: 0; list-style: none; font-size: 12.5px; color: var(--ink-2); }
+.ld-passos li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ld-passos li > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-passos .passo-ok { width: 12px; }
+.ld-passos .ld-agora { color: var(--ink); font-family: var(--font-mono); font-size: 12px; }
+.ld-passos .ld-agora .ponto-trabalho { width: 7px; height: 7px; margin: 0 2px; }
+.ld-sem-passos { color: var(--ink-3); }
+.ld-vazio { margin: 10px 8px; font-size: 12.5px; color: var(--ink-3); }
+
+/* O sinal do bot na barra lateral (ADR-099, parte 5): um ponto — vivo, vazado ou azul — e o número de frentes se mais de uma. */
+.chip-trab.sinal-dono { justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; }
+.sinal-n { font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+/* Trabalhos com uma linha por bot (quadro 05): as frentes abrem embaixo do bot, recuadas, com um fio à esquerda. */
+.tb-linha > svg { flex: none; color: var(--ink-3); }
+.tb-frentes { display: flex; flex-direction: column; margin: 0 10px 8px 46px; padding-left: 12px; border-left: 1px solid var(--line); }
+.tb-frente { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.tb-frente:hover, .tb-frente:focus-visible { background: var(--surface-raised); }
+.tb-frente.estatica { cursor: default; }
+.tb-frente.estatica:hover { background: none; }
+.tb-frente > .ponto-trabalho:not(.feito) { margin: 0 3px; }
+.tb-frente-titulo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-frente-passo { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
+.tb-frente-fim { flex: none; margin-left: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tb-abrir-conversa { align-self: flex-start; margin: 4px 0 0; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tb-abrir-conversa:hover, .tb-abrir-conversa:focus-visible { background: var(--surface-raised); color: var(--ink-2); }
+.tb-sub { margin: 4px 8px; font-size: 12.5px; color: var(--ink-3); }
+.tb-livres { margin: 0; padding: 0 14px; font-size: 12.5px; color: var(--ink-3); }
+/* Estreito (celular, painel apertado): a frase do bot desce para a segunda linha, inteira, embaixo do nome. */
+@media (max-width: 760px) {
+  .tt-linha.tb-linha { flex-wrap: wrap; row-gap: 2px; height: auto; min-height: 44px; padding: 10px 14px; }
+  .tt-linha.tb-linha .tt-bot { flex: 1 1 auto; width: auto; }
+  .tt-linha.tb-linha .tt-meio { order: 5; flex-basis: 100%; padding-left: 26px; }
+  .tt-linha.tb-linha .tt-meio .tt-titulo { font-weight: 400; color: var(--ink-2); }
+  .tt-linha.tb-linha .tt-meio .tt-passo { display: none; }
+}
+
+/* As linhas das frentes na conversa (ADR-099, parte 5, quadros 02 e 06): "●●● Começou 3 frentes: A, B e C · 15:02",
+   "✓ 3 frentes terminaram · 17:55" e "↩ Respondi ao pedido de X". */
+.linha-frentes { flex-wrap: wrap; }
+.linha-pontos { display: inline-flex; align-items: center; gap: 3px; margin-right: 2px; }
+.linha-pontos .ponto-trabalho { width: 7px; height: 7px; }
+.linha-link { padding: 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.linha-link:hover, .linha-link:focus-visible { text-decoration-color: currentColor; }
+.linha-hora { color: var(--ink-3); }
+.linha-falhou { color: var(--danger); font-weight: 700; }
+.linha-parou { color: var(--ink-3); font-size: 9px; }
+
+/* A pílula de memória (M1/M2/M3): amarela é aviso, vermelha é alerta; o "Ver" abre "Todos os trabalhos". */
+.pilula-memoria { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; border: 1px solid; border-radius: 15px; font: inherit; font-size: 12.5px; cursor: pointer; }
+span.pilula-memoria { padding-right: 12px; cursor: default; }
+.pilula-memoria.amarela { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
+.pilula-memoria.vermelha { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.pilula-memoria b { font-weight: 500; }
+.pilula-memoria .pm-icone { flex: none; }
+.pm-detalhe { opacity: .85; }
+.pm-ver { padding: 3px 9px; border-radius: 11px; background: color-mix(in srgb, var(--surface) 70%, transparent); font-weight: 500; }
+
+/* A tela da task (K2/K7): o chip e a linha no lugar do cabeçalho, os passos no centro, o campo e Parar/Fechar embaixo. */
+.cabecalho.cabecalho-task { justify-content: center; min-height: 0; padding: 14px 24px 4px; border-bottom: 0; }
+.tk-topo { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; text-align: center; }
+.tk-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 7px 14px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); font-size: 13.5px; font-weight: 500; }
+.tk-chip .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tk-chip .icon.sm svg { width: 17px; height: 17px; }
+.tk-titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-seta { display: inline-flex; color: var(--ink-3); }
+.tk-seta svg { width: 12px; height: 12px; }
+.tk-tempo { color: var(--ink-3); font-weight: 400; white-space: nowrap; }
+.tk-linha { margin: 0; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.tk-espera { margin: 0; font-size: 12px; color: var(--warning); }
+/* Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): no topo, só o status curto; o tempo trabalhado e o de espera
+   ficam no cartão que ele abre. Esperando colega = ponto vazado âmbar, sem pulsar. */
+.tk-status { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
+  color: var(--ink-3); font: inherit; font-weight: 400; white-space: nowrap; cursor: pointer; }
+.tk-status:hover, .tk-status:focus-visible, .tk-status[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
+.tk-status.fora-do-mac { color: var(--warning); }
+.tk-pop { display: flex; flex-direction: column; gap: 10px; width: 280px; max-width: 100%; margin-top: 4px; padding: 16px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-pop); text-align: left; font-size: 13px; }
+.tk-pop-linha { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.tk-pop-linha b { margin-left: auto; color: var(--ink); font-weight: 500; }
+.tk-pop-total { color: var(--ink-3); }
+.tk-pop-barra { height: 4px; border-radius: 2px; background: var(--warning-soft); overflow: hidden; }
+.tk-pop-barra span { display: block; height: 100%; background: var(--success); }
+.tk-pop-ponto { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.tk-pop-ponto.trabalhou { background: var(--success); }
+.tk-pop-ponto.esperou { background: var(--warning); }
+.tk-pop-rodape { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+/* revisto em 2026-10-08 (QA visual no diário): "Ver a task do Eng 2" quebrava em duas linhas dentro dos detalhes. */
+.tk-pop-link, .pf-link { flex: none; margin-left: auto; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 12px; white-space: nowrap; text-decoration: underline;
+  text-underline-offset: 3px; cursor: pointer; }
+/* Na faixa, a origem e o tempo só no hover ou no foco do teclado (a linha não muda de altura: o título cede). */
+.ft-tempo { display: none; flex: none; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.ft-linha:hover .ft-tempo, .ft-linha:focus-visible .ft-tempo { display: inline; }
+/* O colega que não terminou: uma linha centrada; motivo e atalho atrás de "detalhes". */
+.msg-peer-falhou { max-width: 620px; margin: 10px auto 18px; text-align: center; font-size: 13px; color: var(--ink-3); }
+.msg-peer-falhou summary { display: inline-flex; gap: 8px; list-style: none; cursor: pointer; }
+.msg-peer-falhou summary::-webkit-details-marker { display: none; }
+.pf-detalhes { text-decoration: underline; text-underline-offset: 3px; }
+.msg-peer-falhou details[open] .pf-detalhes { color: var(--ink-2); }
+.pf-corpo { display: flex; align-items: center; gap: 10px; max-width: 420px; margin: 8px auto 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-side); text-align: left; font-size: 12px; color: var(--ink-2); }
+.tk-timeline .time-sep { margin: 6px 0 14px; }
+.tk-carregando { text-align: center; }
+.passo { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 3px 0; font-size: 13px; color: var(--ink-3); text-align: center; }
+.passo-ok { display: inline-grid; place-items: center; width: 16px; color: var(--success); }
+.passo-agora { color: var(--ink); }
+.tk-acoes { display: flex; justify-content: center; gap: 10px; padding: 10px 0 2px; }
+.tk-acoes .bt { min-height: 36px; padding: 0 20px; border-radius: 22px; }
+.tk-acoes .tk-fechar { background: var(--surface-raised); border-color: transparent; }
+.tk-acoes .bt[hidden] { display: none; }
+/* O Parar do chat com várias tasks (QA do épico, 2026-10-08): os títulos numa lista curta no corpo do diálogo. */
+.parar-lista { margin: 0 0 12px; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+.parar-lista li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* "Todos os trabalhos" (K9/M3). */
+.tela-trabalhos { display: flex; flex-direction: column; gap: 18px; max-width: 900px; margin: 0 auto; padding: 26px 24px; }
+.tt-cab { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.tt-cab h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.tt-cab p { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
+.tela-trabalhos > .linha-centro-wrap { margin: 0 auto; }
+/* ADR-099 §7 (2026-10-12): o custo de hoje, discreto embaixo do resumo; o detalhe por bot só no clique. */
+.tt-custo { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 -8px; padding: 2px 8px; border: 0; border-radius: 12px; background: none;
+  color: var(--ink-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tt-custo:hover, .tt-custo:focus-visible, .tt-custo[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink-2); }
+.tt-custo.fora { color: var(--warning); }
+.tt-custo-aviso { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.tt-custo-detalhe { width: 320px; max-width: 100%; margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  box-shadow: var(--shadow-pop); font-size: 13px; }
+.tt-custo-detalhe ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.tt-custo-bot { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.tt-custo-bot .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tt-custo-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-custo-bot small { color: var(--warning); font-size: 12px; white-space: nowrap; }
+.tt-custo-bot b { margin-left: auto; color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tt-custo-detalhe p { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.tt-filtros { display: flex; gap: 6px; }
+.tt-filtro { padding: 5px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.tt-filtro.ativo { border-color: var(--action); background: var(--action); color: var(--on-action); }
+.tt-grupo h2 { margin: 0 0 4px; padding: 0 14px; font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
+.tt-lista { display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line); border-radius: 14px; }
+/* revisto em 2026-10-09: toda linha com 44 px e as mesmas colunas (ponto de 14 px, bot, meio, fim) em todos os grupos. */
+.tt-linha { display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: none; color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer; }
+.tt-linha:hover, .tt-linha:focus-visible { background: var(--surface-raised); }
+.tt-bot { display: inline-flex; flex: none; align-items: center; gap: 6px; width: 120px; font-size: 13px; overflow: hidden; }
+.tt-bot .icon.sm { width: 20px; height: 20px; min-width: 20px; border-radius: 7px; }
+.tt-bot b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-meio { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+.tt-meio .etiqueta-origem { flex: none; margin-left: 0; }
+.tt-linha:hover .etiqueta-origem, .tt-linha:focus-visible .etiqueta-origem { background: var(--surface); }
+.tt-titulo { flex: 0 1 auto; min-width: 0; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-passo { flex: 0 0 auto; min-width: 0; max-width: 40%; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-fim { flex: none; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tt-vazio { margin: 20px 0; text-align: center; color: var(--ink-3); }
+.tr-grupo .gv-linha-txt b { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; white-space: normal; }
+.tr-grupo .etiqueta-origem { margin-left: 0; }
+/* No celular (revisto em 2026-10-09): a coluna do bot continua fixa (mais estreita) para os títulos alinharem, e a etiqueta
+   sai junto do passo — ela espremia o título até sumir ("pedido do Chico" comia a linha do Dev 1). */
+@media (max-width: 760px) {
+  .tt-bot { width: 88px; }
+  .tt-passo, .tt-meio .etiqueta-origem { display: none; }
+  .lugar-faixa-trabalhos { padding: 0 12px; }
+}
+
+/* 0062: o filtro por tipo da tela Relatos (data-filtro na seção, data-tipo em cada relato). */
+.filtros-relato { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 16px; }
+.filtro-relato { font: inherit; font-size: 13px; font-weight: 500; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.filtro-relato[aria-pressed="true"] { background: var(--surface-selected); border-color: var(--surface-selected); color: var(--ink); }
+.relatos[data-filtro="bug"] details[data-tipo]:not([data-tipo="bug"]),
+.relatos[data-filtro="melhoria"] details[data-tipo]:not([data-tipo="melhoria"]),
+.relatos[data-filtro="duvida"] details[data-tipo]:not([data-tipo="duvida"]) { display: none; }
+.lote-sua-vez { margin: 6px 0 10px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.lote-sua-vez li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lote-sua-vez small { color: var(--ink-3); font-size: 12px; }
+
+/* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
+   Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
+@media (forced-colors: active) {
+  .bot-menu button:focus-visible, .me:focus-visible, .rodape .me:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  /* O item atual/selecionado era só fundo (ou sombra, que o modo apaga): contorno em CanvasText, por dentro; o foco ganha dele. */
+  [aria-current="true"]:not(:focus-visible), [aria-current="page"]:not(:focus-visible), [aria-selected="true"]:not(:focus-visible),
+  [aria-pressed="true"]:not(:focus-visible), .app-card.selected { outline: 2px solid CanvasText; outline-offset: -2px; }
+}
+
+/* As linhas de IA no chat (definido em 2026-10-10, plano das IAs, telas 3 e 4): centralizadas e discretas, como as outras
+   linhas que não são balão. A troca de IA abre o porquê num clique; o limite sem outra IA ganha só um acento âmbar. */
+.linha-ia .ia-logo { width: 20px; height: 20px; border-radius: 6px; }
+.linha-ia .ia-logo svg { width: 12px; height: 12px; }
+.linha-ia-troca { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.linha-ia-troca > summary { list-style: none; }
+.linha-ia-troca > summary::-webkit-details-marker { display: none; }
+.linha-ia-troca > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.linha-ia-detalhe { margin: 0; max-width: 440px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.linha-link { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.linha-ia-detalhe .linha-link { color: var(--ink-2); font-weight: 400; }
+.linha-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+/* Revisto em 2026-10-16 (plano "tela limpa", T7): sem bege — pílula --surface com borda fina; o âmbar só no ícone. */
+.linha-espera .linha-centro { flex-wrap: wrap; color: var(--ink-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.linha-espera .linha-centro.estatica:hover { background: var(--surface); color: var(--ink-2); }
+.linha-espera .linha-ic { color: var(--warning); }
+.linha-espera .ob-gira { width: 11px; height: 11px; }
+.linha-codigo { font-family: var(--font-mono); font-weight: 600; letter-spacing: .06em; color: var(--ink); user-select: all; }
+
+/* ---- Plano "tela limpa" (definido em 2026-10-16; protótipos A1, A2, B1 e B2 do canvas "limite e troca") ----------------
+   T1: o cabeçalho da conversa é uma pílula flutuante centrada sobre o chat, fora da área que rola (como a pílula de
+   novas). Embaixo dela o texto esmaece (--surface → transparente, 104 px). No hover e no foco, borda --ink e "›": o azul
+   (--signal) é só do que é novo (tokens.css).
+   Revisão do PR 1 (2026-10-16): o padding do topo da rolagem é a altura do véu, então a primeira mensagem nunca começa
+   embaixo dele; com #erro à vista (62 px de margem + a faixa, no fluxo), a rolagem completa só o que falta (104 − 62). */
+.cabecalho.cabecalho-pilula { position: absolute; top: 0; left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  min-height: 0; padding: 14px 16px 0; border: 0; background: transparent; pointer-events: none; }
+.cabecalho.cabecalho-pilula::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 104px; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 94%, transparent) 34%, color-mix(in srgb, var(--surface) 0%, transparent) 100%); }
+.cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: 104px; }
+.cabecalho.cabecalho-pilula + #erro:not(:empty) { position: relative; z-index: 5; margin-top: 62px; }
+.cabecalho.cabecalho-pilula + #erro:not(:empty) + .timeline-wrap { padding-top: 42px; }
+.pilula-bot { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; height: 38px; max-width: min(420px, 100%); box-sizing: border-box;
+  padding: 0 16px 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-pop);
+  color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.pilula-bot .icon.sm { width: 26px; height: 26px; min-width: 26px; border-radius: 9px; }
+.pilula-bot .icon.sm svg { width: 22px; height: 22px; }
+.pilula-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pilula-bot .presenca { display: inline-flex; margin: 0; font-size: 0; line-height: 0; }
+.pilula-bot .presenca::before { margin: 0; }
+.pilula-seta { display: none; margin: 0 0 1px -2px; font-size: 17px; font-weight: 500; line-height: 1; }
+.pilula-bot:hover, .pilula-bot:focus-visible { border-color: var(--ink); padding-right: 10px; }
+.pilula-bot:hover .pilula-seta, .pilula-bot:focus-visible .pilula-seta { display: inline; }
+/* O subtítulo da presença só aparece no hover/foco da pílula (revisão do PR 1, 2026-10-16): em repouso ele colidia com a
+   linha "Novas" no topo da rolagem; a presença inteira já vai no title e no aria-label. */
+.pilula-sub { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 6px;
+  background: var(--surface); font-size: 11.5px; color: var(--ink-3); }
+.pilula-bot:hover + .pilula-sub, .pilula-bot:focus-visible + .pilula-sub { display: block; }
+.pilula-sub b { font-weight: 600; color: var(--ink-2); }
+.pilula-sub .presenca-sep { color: var(--ink-3); }
+
+/* T4: a linha do dono e a faixa de Trabalhos acima do campo acompanham os 760 px da coluna. */
+.lugar-faixa-trabalhos > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+
+/* E11 (revisão do PR 1, 2026-10-16): com o bot trabalhando, o Parar fica à vista como botão secundário, redondo, logo
+   antes do Enviar (main.ts, atualizarParar → botoesDoCampo); com o campo vazio, só ele. O ditado gravando sempre usa o
+   Enviar (para e manda). */
+.composer .send[hidden], .composer .parar-envio[hidden] { display: none; }
+.composer .parar-envio { width: 35px; height: 35px; border-radius: 50%; border: 1px solid var(--line); padding: 0; background: var(--surface); color: var(--ink);
+  display: grid; place-items: center; flex: none; cursor: pointer; }
+.composer .parar-envio:hover, .composer .parar-envio:focus-visible { background: var(--surface-raised); border-color: var(--line-strong); }
+.composer .box.gravando .send[hidden] { display: grid; }
+
+/* T6: o seletor de IA no campo, entre o texto e o microfone — sem fundo, como o chip de aprovações; o anel de 20 px mostra
+   o uso da janela de 5 h em volta do logo e fica âmbar a partir de 90%. */
+.seletor-ia { display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-bottom: 2px; padding: 0 8px 0 6px; border: 0; border-radius: 16px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
+.seletor-ia[hidden] { display: none; }
+.seletor-ia:hover, .seletor-ia:focus-visible, .seletor-ia[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.seletor-ia[aria-disabled="true"] { cursor: default; }
+.seletor-ia[aria-disabled="true"]:hover { background: transparent; color: var(--ink-2); }
+.seletor-pct { color: var(--warning); font-variant-numeric: tabular-nums; }
+.anel { position: relative; display: grid; place-items: center; width: 20px; height: 20px; flex: none; }
+.anel > svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.anel-trilho { color: var(--line); }
+.anel-uso { color: var(--line-strong); }
+.anel-alerta .anel-uso { color: var(--warning); }
+.anel-logo { position: relative; display: grid; place-items: center; width: 11px; height: 11px; color: var(--ink); }
+.anel-logo svg { display: block; width: 11px; height: 11px; }
+@media (max-width: 560px) { .seletor-rotulo { display: none; } }
+
+/* O menu do seletor (B1): acima do campo, 336 px; cabeçalho com a conta e o uso, Automático, os modelos por IA, a régua
+   de raciocínio e o link para a fila de contas. */
+.bot-menu.ia-sel-menu { width: min(336px, calc(100vw - 24px)); padding: 6px; border-radius: 14px; }
+.ia-sel-cab { display: flex; flex-direction: column; gap: 7px; padding: 10px; }
+.ia-sel-conta { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ia-sel-conta b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ia-sel-logo { display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--ink); }
+.ia-sel-logo svg { display: block; width: 14px; height: 14px; }
+.ia-sel-conta b.ia-sel-pct { font-variant-numeric: tabular-nums; }
+.ia-sel-alerta .ia-sel-pct { color: var(--warning); }
+.ia-sel-quem { margin: 0; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-sel-barra { height: 4px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
+.ia-sel-barra > span { display: block; height: 100%; background: var(--line-strong); }
+.ia-sel-alerta .ia-sel-barra > span { background: var(--warning); }
+.ia-sel-frase { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.ia-sel-forte { color: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-op { align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 13.5px; }
+.bot-menu.ia-sel-menu button.ia-sel-op[aria-checked="true"] { background: var(--surface-raised); }
+.bot-menu.ia-sel-menu button.ia-sel-op:disabled { color: var(--ink-3); cursor: default; }
+.bot-menu.ia-sel-menu button.ia-sel-op > svg { width: 14px; height: 14px; margin-top: 3px; }
+.bot-menu.ia-sel-menu button > span.ia-sel-txt { flex: 1; width: auto; display: flex; flex-direction: column; gap: 1px; font-size: inherit; }
+.ia-sel-txt small { font-size: 12px; color: var(--ink-3); }
+.ia-sel-grupo { margin: 8px 10px 4px; font-size: 12px; color: var(--ink-3); }
+.ia-sel-grupo span { color: var(--line-strong); }
+.ia-sel-regua { display: flex; flex-direction: column; gap: 8px; padding: 6px 10px 10px; font-size: 13px; }
+.ia-sel-regua-cab { display: flex; align-items: baseline; gap: 8px; }
+.ia-sel-regua-cab > span { flex: 1; }
+.ia-sel-regua-cab b { font-weight: 500; }
+.ia-sel-regua-cab small { font-size: 11.5px; color: var(--ink-3); }
+.ia-sel-trilho { position: relative; display: grid; align-items: center; height: 22px; }
+.ia-sel-linha { position: absolute; top: 10px; height: 2px; border-radius: 2px; background: var(--line); }
+.ia-sel-linha.feita { background: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto { position: relative; justify-self: center; display: block; width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--line-strong) 40%, var(--line)); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.feito { background: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.atual { width: 18px; height: 18px; border: 2px solid var(--ink); background: var(--surface); box-shadow: var(--shadow-knob); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto:hover { background: var(--ink-3); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto.atual:hover { background: var(--surface); }
+.bot-menu.ia-sel-menu button.ia-sel-ponto:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ia-sel-nomes { display: grid; font-size: 10.5px; color: var(--ink-3); text-align: center; }
+.ia-sel-nomes .atual { color: var(--ink); }
+.bot-menu.ia-sel-menu button.ia-sel-link { gap: 10px; padding: 8px 10px; border-radius: 9px; font-size: 13px; color: var(--ink-2); }
+.bot-menu.ia-sel-menu button.ia-sel-link > span { flex: 1; width: auto; font-size: inherit; }
+
+/* A gaveta: a seção Modo dev (o selo, "Hoje com" e as linhas abertas, que saíram do topo da conversa). */
+.gv-dev-corpo { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.gv-dev-corpo .dev-hoje { white-space: normal; }

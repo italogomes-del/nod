@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { JANELA_MESCLA_INCIDENTE_MS } from "../../src/domain/incidente.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import { dispensarIncidente } from "../../src/use-cases/dispensar-incidente.ts";
 import { interromperPorMaquina } from "../../src/use-cases/interromper-por-maquina.ts";
@@ -23,7 +24,7 @@ const T0 = Date.parse("2026-09-24T00:50:00-03:00");
 /** Um turno de conversa rodando numa máquina, com o lease até `ate` (a queda é notada depois). */
 async function turnoRodando(trx: Tx, agenteId: string, conversaId: string, maquina: string, desde: number): Promise<Turno> {
   const repos = criarRepos(trx, MARLON);
-  const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: desde + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+  const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: desde + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
   const r = await repos.turnos.reivindicar({ machineId: maquina, agora: desde });
   if (!t || r?.id !== t.id) throw new Error("turno não reivindicado");
   return r;
@@ -46,13 +47,14 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
       expect(mesclado).toMatchObject({ comecouEm: T0, voltouEm: T0 + 2 * H + 20 * 60_000, conversas: 2 });
 
       const longe = T0 + 2 * H + 20 * 60_000 + JANELA_MESCLA_INCIDENTE_MS + 60_000;
-      const c = await cair(longe, longe + 60_000);
+      // A queda é notada depois do lease (como o varredor: só lê vencidos). NOD-241: o lease vivo não é interrompido.
+      const c = await cair(longe, longe + LEASE_MS + 60_000);
       expect(c.data.incidenteId).not.toBe(a.data.incidenteId);
       expect((await repos.incidentes.visiveis(0)).map((i) => i.id)).toEqual([a.data.incidenteId, c.data.incidenteId]);
 
       // "Entendi" no aviso fechado: a queda seguinte, mesmo dentro de 3 h, abre aviso novo (visível).
-      await dispensarIncidente({ repos, agora: () => longe + 2 * 60_000 }, { incidenteId: c.data.incidenteId ?? "" });
-      const d = await cair(longe + 10 * 60_000, longe + 11 * 60_000);
+      await dispensarIncidente({ repos, agora: () => longe + 3 * 60_000 }, { incidenteId: c.data.incidenteId ?? "" });
+      const d = await cair(longe + 10 * 60_000, longe + 10 * 60_000 + LEASE_MS + 60_000);
       expect(d.data.incidenteId).not.toBe(c.data.incidenteId);
       expect((await repos.incidentes.visiveis(0)).map((i) => i.id)).toEqual([a.data.incidenteId, d.data.incidenteId]);
     });
@@ -93,10 +95,44 @@ describeIntegracao("incidentes (ADR-045): um aviso por queda do Mac, nunca um ca
     });
   });
 
+  it("2026-10-09: a queda da VM (motor Linux, 0067) nomeia a máquina na conversa e no aviso; o Mac, a chave sem sistema e o Mac sem chave ficam com \"seu Mac\"", async () => {
+    const chave = async (repos: ReturnType<typeof criarRepos>, nome: string, plataforma: "darwin" | "linux" | null) => {
+      const c = await repos.maquinaTokens.criar({ nome, prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) });
+      if (!c) throw new Error("chave");
+      if (plataforma) await repos.maquinaTokens.registrarPlataforma(c.id, plataforma);
+      return c.id;
+    };
+    const aviso = async (repos: ReturnType<typeof criarRepos>, conversaId: string) => (await repos.mensagens.listarDaConversa(conversaId, 50)).find((m) => m.kind === "sistema")?.texto;
+
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
+      const vm = await chave(repos, "nod-motor-teste", "linux");
+      await repos.maquinaTokens.registrarPlataforma(vm, "linux");
+      expect(await repos.maquinaTokens.identificar(vm)).toEqual({ nome: "nod-motor-teste", plataforma: "linux" });
+      const agora = T0 + 2 * H;
+      await interromperPorMaquina({ repos, escopo: MARLON, agora: () => agora }, { turnos: [await turnoRodando(trx, agenteId, conversaId, vm, T0)] });
+      expect(await aviso(repos, conversaId)).toBe("Turno interrompido: a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado). O que já saiu fica marcado como parcial; nada foi reenviado.");
+      const { data } = await listarSuaVez({ repos, escopo: MARLON, agora: () => agora, tx: (fn) => fn(trx) }, { marcarVista: false });
+      expect(data.incidentes).toMatchObject([{ maquina: "nod-motor-teste", conversas: 1, agentes: ["Ze 1"] }]);
+    });
+
+    for (const plataforma of ["darwin", null, "sem chave"] as const) {
+      await withRollback(MARLON, async (trx) => {
+        const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Taga" });
+        const maquina = plataforma === "sem chave" ? randomUUID() : await chave(repos, "MacBook de Marlon", plataforma);
+        const agora = T0 + 2 * H;
+        await interromperPorMaquina({ repos, escopo: MARLON, agora: () => agora }, { turnos: [await turnoRodando(trx, agenteId, conversaId, maquina, T0)] });
+        expect(await aviso(repos, conversaId), String(plataforma)).toContain("Turno interrompido: seu Mac parou de responder (repouso, sem rede ou nod fechado).");
+        const { data } = await listarSuaVez({ repos, escopo: MARLON, agora: () => agora, tx: (fn) => fn(trx) }, { marcarVista: false });
+        expect(data.incidentes[0], String(plataforma)).not.toHaveProperty("maquina");
+      });
+    }
+  });
+
   it("0021: as retomar_turno ABERTAS de turnos de rotina (e das retomadas deles) fecham por regra:rotina_nao_retoma; a da conversa fica", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
-      const novo = (origem: "rotina" | "conversa" | "retomada", retomaTurnoId?: string) => repos.turnos.enfileirar({ conversaId, agenteId, origem, retomaTurnoId, prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+      const novo = (origem: "rotina" | "conversa" | "retomada", retomaTurnoId?: string) => repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, retomaTurnoId, prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
       const rotina = await novo("rotina");
       const retomada = await novo("retomada", rotina?.id);
       const conversa = await novo("conversa");

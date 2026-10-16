@@ -23,7 +23,7 @@ describeIntegracao("nativas só em turno de conversa confiável (2026-09-28)", (
     return withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
       await repos.agentes.atualizarPerfil(agenteId, { confirmado: true });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "revise o PR", entradaConfianca: confianca, modelo: "sonnet" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "revise o PR", entradaConfianca: confianca, modelo: "sonnet" });
       const agora = () => Date.now();
       const workspaces = { id: async () => randomUUID(), pastasDoHarness: async () => PASTAS };
       const deps = depsSobre(repos, MARLON, { services: { ...servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), workspaces }, agora, trx });

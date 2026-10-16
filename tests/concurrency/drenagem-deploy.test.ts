@@ -1,9 +1,11 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import WebSocket from "ws";
+import { criarPonteHttp } from "../../src/adapters/executor/ponte-http.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
-import type { RespostaMutacao } from "../../src/contracts/api.ts";
+import type { ConversaDto, RespostaMutacao } from "../../src/contracts/api.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { Ligacao } from "../../src/contracts/ligacao.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
@@ -50,13 +52,16 @@ async function compartilhadoComMaquina(env: Record<string, string> = {}) {
     await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, criados);
     await srv.desligar();
   };
-  return { srv, machineId: dados.id, pedir, bot, limpar };
+  return { srv, machineId: dados.id, chave, pedir, bot, limpar };
 }
+
+/** O long-poll dos testes que medem "voltou na hora"; o puxar vazio na drenagem tem que voltar bem antes dele. */
+const LONGPOLL_MS = 5_000;
 
 describeIntegracao("NOD-175: drenagem com turno em execução", () => {
   let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
   beforeAll(async () => {
-    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "5000" });
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: String(LONGPOLL_MS) });
   });
   afterAll(async () => {
     await m?.limpar();
@@ -80,7 +85,7 @@ describeIntegracao("NOD-175: drenagem com turno em execução", () => {
     const enviadaB = await srv.json<RespostaMutacao>("POST", `conversas/${conversaB}/mensagens`, { texto: "Chegou no deploy" });
     const inicio = Date.now();
     const vazio = await pedir("puxar");
-    expect(Date.now() - inicio).toBeLessThan(500);
+    expect(Date.now() - inicio).toBeLessThan(LONGPOLL_MS / 2); // NOD-194: contra o próprio long-poll, não um número mágico
     expect(await vazio.json()).toEqual({ plano: null });
     expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${enviadaB.ids.turno}`)).turno.estado).toBe("pendente");
 
@@ -94,6 +99,44 @@ describeIntegracao("NOD-175: drenagem com turno em execução", () => {
     // /api/saude segue 200 durante a drenagem.
     expect((await fetch(`${srv.url}/api/saude`)).status).toBe(200);
   });
+});
+
+describeIntegracao("NOD-214 (PR 1): o cliente da máquina atravessa o servidor fora do ar", () => {
+  let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
+  beforeAll(async () => {
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "20" });
+  });
+  afterAll(async () => {
+    await m?.limpar();
+  });
+
+  it("a renovação sem resposta vira `indefinido` (o CLI segue) e a entrega insiste até o servidor voltar e concluir o turno", async () => {
+    const { srv, bot, machineId, chave } = m;
+    // O cliente de verdade do app; `fora` simula o servidor reiniciando (a conexão nem abre).
+    let fora = false;
+    const fetchImpl: typeof fetch = async (url, init) => {
+      if (fora) throw new TypeError("fetch failed");
+      return fetch(url, init);
+    };
+    const { ponte } = criarPonteHttp({ url: srv.url, chave, versao: "0.1.0", fetchImpl });
+    await ponte.conectar({ machineId, nome: "Mac", versaoContrato: 1, inventario: { estado: "pronto", versao: "fake-sem-custo", em: 0 } });
+    const conversa = await bot("Bot do deploy");
+    await srv.json<RespostaMutacao>("POST", `conversas/${conversa}/mensagens`, { texto: "Trabalho no deploy" });
+    const plano = await ponte.puxar("ignorado");
+    expect(plano).not.toBeNull();
+
+    fora = true;
+    // Antes: `{ativo:false}` na primeira renovação perdida, e o laço matava o CLI no meio do deploy.
+    expect((await ponte.renovar({ turnoId: plano!.turnoId, machineId, sinais, eventos: [] })).ativo).toBe("indefinido");
+
+    // O servidor volta ~3,5 s depois (o deploy leva ~10 s); antes, a entrega desistia em ~2 s (3 tentativas) e o turno se perdia.
+    const volta = setTimeout(() => { fora = false; }, 3_500);
+    try {
+      await ponte.entregar(entregaDe(plano!, machineId, 1));
+    } finally { clearTimeout(volta); }
+    expect(fora).toBe(false);
+    expect((await srv.json<{ turno: { estado: string } }>("GET", `turnos/${plano!.turnoId}`)).turno.estado).toBe("concluido");
+  }, 30_000);
 });
 
 describeIntegracao("NOD-175: drenagem com o prazo vencido", () => {
@@ -136,7 +179,7 @@ describeIntegracao("NOD-175: drenagem com o prazo vencido", () => {
 describeIntegracao("NOD-176: drenagem com uma reserva em voo", () => {
   let m: Awaited<ReturnType<typeof compartilhadoComMaquina>>;
   beforeAll(async () => {
-    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: "5000" });
+    m = await compartilhadoComMaquina({ NOD_LONGPOLL_MS: String(LONGPOLL_MS) });
   });
   afterAll(async () => {
     await m?.limpar();
@@ -207,7 +250,7 @@ describeIntegracao("NOD-175: modo local", () => {
     const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados.agentes.push(agente.id);
     criados.conversas.push(conversa.id);
-    await srv.json("POST", "voz/consentimento", { versao: 1 });
+    await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
 
     const host = new URL(srv.url).host;
@@ -235,6 +278,58 @@ describeIntegracao("NOD-175: modo local", () => {
 
     ws.send(JSON.stringify({ t: "tchau" }));
     expect(await drenagem).toMatchObject({ vivas: 0, turnos: 0, prazo_vencido: false });
+    ws.close();
+  });
+});
+
+describeIntegracao("NOD-168: ligação que passa do prazo da drenagem", () => {
+  let srv: ServidorCompleto;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  beforeAll(async () => {
+    srv = await servidorCompleto({ env: { NOD_LIGACAO: "todas" } });
+  });
+  afterAll(async () => {
+    if (!srv) return;
+    await srv.fechar();
+    await limparPessoaE2E(srv.db, srv.dbDono, srv.pessoa, criados);
+    await srv.desligar();
+  });
+
+  it("prazo vencido com a ligação viva: o fechar encerra com reinicio_servidor e deixa UMA linha na conversa", async () => {
+    const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    criados.agentes.push(agente.id);
+    criados.conversas.push(conversa.id);
+    await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
+    const { ligacao } = await srv.json<{ ligacao: Ligacao }>("POST", "ligacoes", { agenteId: agente.id });
+
+    const host = new URL(srv.url).host;
+    const ws = new WebSocket(`${srv.url.replace("http", "ws")}/api/t/${srv.pessoa.tenantId}/voz/v1/midia`, { headers: { cookie: srv.pessoa.cookie, origin: `http://${host}` } });
+    const textos: string[] = [];
+    ws.on("message", (dados, binario) => {
+      if (binario) {
+        ws.send(JSON.stringify({ t: "tocou-fim", utt: (dados as Buffer).readUInt16LE(5) }));
+        return;
+      }
+      textos.push(String(dados));
+    });
+    await new Promise<void>((r, j) => {
+      ws.once("open", () => r());
+      ws.once("error", j);
+    });
+    ws.send(JSON.stringify({ t: "ola", v: 1, ligacaoId: ligacao.id, entrada: "pcm16", saida: "pcm16" }));
+    await srv.esperar(async () => srv.app.voz.vivas() === 1, { nome: "ligação viva" });
+
+    // A pessoa não desliga: a drenagem vence o prazo com a ligação viva, e o SIGTERM segue para o fechar (server.ts).
+    expect(await srv.drenar({ prazoMs: 300, intervaloMs: 50 })).toMatchObject({ vivas: 1, prazo_vencido: true });
+    await srv.app.voz.fechar();
+    await srv.esperar(async () => textos.some((t) => t.includes('"reinicio_servidor"')), { nome: "fim na mídia" });
+
+    const linhas = async () => (await srv.json<ConversaDto>("GET", `conversas/${conversa.id}/mensagens`)).mensagens.filter((m) => m.kind === "sistema" && m.texto.startsWith("A ligação"));
+    await srv.esperar(async () => (await linhas()).length > 0, { nome: "linha do fim" });
+    expect((await linhas()).map((m) => m.texto)).toEqual(["A ligação caiu porque o nod foi atualizado. Ligue de novo."]);
+    // Fechar de novo (o fechar do servidor no afterAll) não duplica: o repo só encerra uma vez.
+    await srv.app.voz.fechar();
+    expect(await linhas()).toHaveLength(1);
     ws.close();
   });
 });
@@ -267,4 +362,104 @@ describeIntegracao("NOD-176: modo local com token vivo", () => {
       srv.app.tokens.revogar(turnoId);
     }
   });
+});
+
+describeIntegracao("NOD-214 (PR 2): deploy com uma frente longa na máquina que atravessa o reinício", () => {
+  // Dois processos sobre o mesmo banco e a mesma pessoa: o velho drena e fecha, o novo sobe e continua a fila.
+  let velho: ServidorCompleto | null = null;
+  let novo: ServidorCompleto | null = null;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  afterAll(async () => {
+    await novo?.fechar();
+    await velho?.fechar();
+    if (velho) {
+      const v = velho;
+      await v.db.begin(async (tx) => { await vincularEscopo(tx, v.pessoa); await tx`delete from maquina_tokens where owner_id = ${v.pessoa.pessoaId}`; });
+      await limparPessoaE2E(v.db, v.dbDono, v.pessoa, criados);
+    }
+    await novo?.desligar();
+    await velho?.desligar();
+  });
+
+  it("a drenagem não espera a frente; o processo novo despacha a fila e aceita renovar e entregar da frente antiga pelo token", async () => {
+    const env = { NOD_MODO: "compartilhado", NOD_LONGPOLL_MS: "20" };
+    velho = await servidorCompleto({ env });
+    const v = velho;
+    const { chave, dados } = await v.json<{ chave: string; dados: { id: string } }>("POST", "maquinas/chaves", { nome: "Mac" });
+    const machineId = dados.id;
+    const pedirEm = (srv: ServidorCompleto) => (nome: string, body: unknown = {}, token?: string) => fetch(`${srv.url}/api/maquina/${nome}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${chave}`, "content-type": "application/json", "x-nod-versao": "0.1.0", ...(token ? { "x-nod-token-turno": token } : {}) },
+      body: JSON.stringify(body),
+    });
+    const conectar = { nome: "Mac", versaoContrato: 1, inventario: { estado: "pronto", versao: "fake-sem-custo", em: 0 }, sobreviveReinicio: true };
+    const bot = async (srv: ServidorCompleto, nome: string) => {
+      const r = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome });
+      criados.agentes.push(r.agente.id);
+      criados.conversas.push(r.conversa.id);
+      return r.conversa.id;
+    };
+    const escopado = <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => v.db.begin(async (trx) => {
+      await vincularEscopo(trx, v.pessoa);
+      return fn(trx);
+    }) as Promise<T>;
+    const linhaDoTurno = async (id: string) => (await escopado((trx) => trx<{ estado: string; sessao_cli: string | null }[]>`select estado, sessao_cli from turnos where id = ${id}`))[0];
+    const credencial = async (id: string) => (await escopado((trx) => trx<{ linha: string }[]>`select row_to_json(c)::text as linha from turno_credenciais c where turno_id = ${id}`))[0]?.linha ?? null;
+
+    // A frente longa começa no processo velho.
+    const pedirV = pedirEm(v);
+    expect((await pedirV("conectar", conectar)).status).toBe(200);
+    const conversaA = await bot(v, "Frente longa");
+    await v.json<RespostaMutacao>("POST", `conversas/${conversaA}/mensagens`, { texto: "Trabalho de horas" });
+    const { plano: frente } = (await (await pedirV("puxar")).json()) as { plano: PlanoTurno };
+    expect(frente).not.toBeNull();
+    const sessao = randomUUID();
+    expect(((await (await pedirV("renovar", { turnoId: frente.turnoId, sinais, eventos: [], sessaoCli: sessao }, frente.tokenDeTurno)).json()) as { ativo: boolean }).ativo).toBe(true);
+    expect((await linhaDoTurno(frente.turnoId))?.sessao_cli).toBe(sessao);
+    // O banco guarda só o hash: nem o token inteiro nem a parte aleatória aparecem na linha.
+    const gravada = await credencial(frente.turnoId);
+    expect(gravada).not.toBeNull();
+    expect(gravada).not.toContain(frente.tokenDeTurno);
+    expect(gravada).not.toContain(frente.tokenDeTurno.split(".")[1]!);
+
+    // Antes: o token vivo segurava a drenagem até o prazo (10 min no deploy) e a fila parava junto.
+    const inicio = Date.now();
+    expect(await v.drenar({ prazoMs: 600_000, intervaloMs: 50 })).toMatchObject({ turnos: 0, prazo_vencido: false });
+    expect(Date.now() - inicio).toBeLessThan(2_000);
+    await v.fechar();
+
+    // O processo novo: a máquina reconecta e a fila anda (um turno novo é despachado com a frente ainda rodando).
+    novo = await servidorCompleto({ env, pessoaId: v.pessoa.pessoaId });
+    const n = novo;
+    const pedirN = pedirEm(n);
+    expect((await pedirN("conectar", conectar)).status).toBe(200);
+    const conversaB = await bot(n, "Chegou no deploy");
+    const enviadaB = await n.json<RespostaMutacao>("POST", `conversas/${conversaB}/mensagens`, { texto: "Responde rápido" });
+    const { plano: novoTurno } = (await (await pedirN("puxar")).json()) as { plano: PlanoTurno };
+    expect(novoTurno?.turnoId).toBe(enviadaB.ids.turno);
+
+    // A chave de máquina sozinha não adota; o token de OUTRO turno também não.
+    expect(((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] })).json()) as { ativo: boolean }).ativo).toBe(false);
+    expect(((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] }, novoTurno.tokenDeTurno)).json()) as { ativo: boolean }).ativo).toBe(false);
+    expect((await linhaDoTurno(frente.turnoId))?.estado).toBe("despachando");
+
+    // Com o token da frente: renova (a sessão do CLI fica), entrega e conclui. Duas renovações ao mesmo tempo (a da
+    // frente e a repetida pelo cliente) adotam o mesmo turno sem uma derrubar a outra.
+    const duas = await Promise.all([0, 1].map(async () => ((await (await pedirN("renovar", { turnoId: frente.turnoId, sinais, eventos: [] }, frente.tokenDeTurno)).json()) as { ativo: boolean }).ativo));
+    expect(duas).toEqual([true, true]);
+    // Os dois tokens (o adotado e o do turno novo) são de máquina que sobrevive: nenhum segura a próxima drenagem.
+    expect(n.app.tokens.ativos()).toBe(2);
+    expect(n.app.tokens.ativos({ semSobrevive: true })).toBe(0);
+    expect((await pedirN("entregar", entregaDe(frente, machineId, 1), frente.tokenDeTurno)).status).toBe(200);
+    expect(await linhaDoTurno(frente.turnoId)).toEqual({ estado: "concluido", sessao_cli: sessao });
+    expect(await credencial(frente.turnoId)).toBeNull();
+
+    // A entrega repetida cuja resposta se perdeu (outro seqLocal, plano já solto): 200 `ja_assentado`, não 403.
+    const repetida = await pedirN("entregar", entregaDe(frente, machineId, 2), frente.tokenDeTurno);
+    expect(repetida.status).toBe(200);
+    expect(await repetida.json()).toMatchObject({ ok: true, codigo: "ja_assentado" });
+
+    expect((await pedirN("entregar", entregaDe(novoTurno, machineId, 1))).status).toBe(200);
+    expect((await linhaDoTurno(novoTurno.turnoId))?.estado).toBe("concluido");
+  }, 30_000);
 });

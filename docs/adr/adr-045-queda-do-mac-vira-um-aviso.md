@@ -275,3 +275,68 @@ arquivos/720 testes, integration 78/286, conformidade 8/59, concurrency 22/70 (1
 **Não implementado.** A decisora designada que não é dona da conversa responde em "Sua vez" sem ver o
 fio (RLS de `mensagens`): a retomada leva o histórico, mas a tela dela mostra só a frase da rodada. Fio
 que começou antes desta migração não tem rodadas ligadas.
+
+## Emenda de 2026-10-09 — a queda nomeia a máquina Linux
+
+**Contexto.** Com o motor numa VM Linux (ADR-090/092), o turno que perdia o lease na VM aparecia como "Turno
+interrompido: seu Mac parou de responder", e o aviso dizia "Seu Mac ficou sem contato entre 15:32 e 15:36". O Mac estava
+aberto na mesa: quem tinha caído era a VM, ou o motor dela reiniciando. A conexão viva da ponte sabe a plataforma, mas
+some 90 s depois do último contato, antes de o varredor notar o lease vencido.
+
+**Decisão.** A chave da máquina guarda o sistema que ela anunciou no `conectar` (`maquina_tokens.plataforma`, migração
+0067, `'darwin'` ou `'linux'`, só escrita quando muda). Na queda (`maquina_sem_contato`), a máquina Linux é nomeada com
+as causas dela: "a máquina nod-motor-teste parou de responder (desligada, sem rede ou motor parado)"
+(`motivoDaQuedaEmPortugues`, `src/domain/redacao.ts`). O aviso da queda leva `maquina` no `IncidenteDto` e começa com
+"A máquina nod-motor-teste ficou sem contato…". O Mac, a chave que ainda não se conectou depois da 0067 e o Mac sem
+chave do modo local continuam com "seu Mac". A frase vale nas duas portas da regra (varredor e entrega tardia), porque
+as duas passam por `aplicar`.
+
+**Alternativa descartada.** Lembrar a plataforma só em memória, numa lista que não esquece a máquina depois dos 90 s.
+Funcionaria enquanto o servidor não reinicia, mas cada deploy reinicia. A coluna tem o mesmo custo e sobrevive.
+
+**Não implementado.** Um aviso mescla quedas pela janela de tempo (`destinoDaQueda`), e não por máquina. Se o Mac e a VM
+caírem na mesma janela, o aviso nomeia a primeira. O histórico da rotina (`web/lib/execucao.ts`) e a leitura em voz da
+retomada (`leitura-aprovacao.ts`) ainda dizem "seu Mac".
+
+**Validação.** Integração `incidentes` (queda na chave Linux nomeia a VM na conversa e no aviso; `darwin`, chave sem
+sistema e Mac sem chave ficam com "seu Mac"), unit `ponte-http` (só o `conectar` grava a plataforma) e
+`web/incidentes` (a frase com e sem `maquina`). A migração passa pela ida e volta da conformidade.
+
+## Emenda de 2026-10-15 — entrega tardia com sucesso conclui o turno (NOD-264, E8) e a aprovação segue na queda (NOD-261, E2)
+
+**Contexto.** A ADR-010 diz que o turno interrompido nunca volta a `pendente`, e a entrega que chega depois do varredor
+entra como anexo parcial. Mas quando a máquina sumiu (`maquina_sem_contato`) ou o servidor reiniciou
+(`reinicio_servidor`) e o CLI terminou o trabalho com `result` de sucesso, o que chega é o trabalho acabado. Mesmo
+assim a fala entrava como parcial, o card "Retomar" ficava aberto e a task ficava `precisa_de_voce` por um trabalho já
+feito. No mesmo varredor, uma aprovação decidida enquanto o turno caía ficava sem continuação: a fila só a pegava quando
+uma entrega chegava. E se a entrega viesse, ela podia criar uma segunda retomada.
+
+**Decisão.**
+1. Entrega tardia com sucesso, depois de uma queda (`maquina_sem_contato` ou `reinicio_servidor`) e sem retomada criada
+   (`turnos.temRetomada`): a fala entra com `parcial: false` e `turnos.concluirTardia` muda o turno para `concluido`. É um
+   UPDATE condicional (`estado = 'interrompido'`, motivo de queda, nenhum turno com `retoma_turno_id` dele), então a
+   corrida com a retomada automática fica decidida no banco. O "Retomar" do turno fecha por regra
+   (`regra:entrega_tardia_com_sucesso`), o evento é `turno_encerrado` com essa regra, e `sincronizarTrabalho` relê o
+   estado. Não é requeue: o turno vai para terminal, nunca para `pendente` (gate `sem-requeue` continua verde).
+2. Com retomada já criada, inclusive uma automática que ainda está na fila, o comportamento continua o de hoje: anexo
+   parcial. O mesmo vale quando o UPDATE perde a corrida (a fala volta a parcial com `marcarParciaisDoTurno`).
+3. Na queda, `aplicar` (comum ao varredor e à entrega com lease vencido) continua as aprovações já decididas do turno
+   (`continuarAprovacoes`, uma continuação por decisão pela 0032). Se ao menos uma seguiu, o "Retomar" daquela queda
+   fecha por `regra:aprovacao_continuada`. A entrega tardia que chegar depois encontra a decisão já reivindicada e não
+   cria outra.
+4. Quando um turno posterior do mesmo trabalho conclui, os "Retomar" de turnos anteriores fecham por
+   `regra:retomar_superado`. Em `fatos`, um `retomar_turno` só conta como decisão pendente se for do último turno
+   terminal.
+
+**Alternativa descartada.** Reabrir o turno interrompido (voltar a `despachando` ou `pendente`) para a entrega assentar
+pelo caminho normal. Isso fere a ADR-010 e reabre a janela em que o varredor e a retomada disputam o mesmo turno.
+Promover direto para `concluido`, com a condição no UPDATE, não reabre nada.
+
+**Gatilho de reversão.** Se aparecer turno promovido cuja fala estava cortada, a promoção passa a exigir também
+`produced_output` e a ausência de tarefa em fundo pendente. Isso também vale se aparecer uma retomada que nasceu depois
+da promoção sem ver o `concluido`.
+
+**Validação.** Unitário `assentar-turno-queda` (tardia com sucesso sem retomada → `concluido`, fala inteira, card
+fechado; com retomada na fila → parcial como antes); integração `aprovacao-na-queda` (varredor duas vezes + entrega tardia → uma
+continuação só e o card fechado) e `retomar-superado` (card antigo + recado novo que conclui → `retomar_superado`, task
+`terminado`, lote fechado; e os fatos só contam o card do último turno terminal).

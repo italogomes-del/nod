@@ -42,7 +42,7 @@ async function cenario(trx: Tx, relogio: () => number) {
   const tx: Transacao = (fn) => fn(trx);
   const tick = () => tickPessoa(MARLON, tx, { machineId: randomUUID(), executor: "catcher", services: deps.services, useCases: deps.useCases, agora: relogio });
   // Turno REAL (decisoes tem FK para turnos), já assentado: a fila do agente fica livre para a rotina.
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "cria a rotina dos e-mails", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "cria a rotina dos e-mails", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   await repos.turnos.assentar(turno.id, { estado: "concluido" });
   const ctx = { agenteId, conversaId, turnoId: turno.id };

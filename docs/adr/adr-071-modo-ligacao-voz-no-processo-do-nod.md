@@ -114,12 +114,28 @@ reserva feita nunca é desfeita, e a drenagem só termina com esse contador em z
 padrão do Node (`process.once`).
 
 **Saúde.** `/api/saude` faz `select 1` com prazo de 2 s. Se falhar, devolve 503 `{ok:false}`, sem detalhe (log
-`saude_banco_falhou {motivo}`). Na drenagem continua 200: o banco segue no ar e o container só deve sair pelo SIGTERM.
+`saude_falhou {motivo}`, nome desde a NOD-267, que somou o batimento dos laços — ADR-017, refinamento de 2026-10-15).
+Na drenagem continua 200: o banco segue no ar, os laços seguem batendo e o container só deve sair pelo SIGTERM (o
+watchdog da NOD-267 para no começo de `drenar()`).
 
 **Custo aceito.** Um deploy com uma sessão viva longa congela a entrega de turnos novos por até 10 min. Um token órfão
 (rollback depois do `cunhar`) segura a drenagem até o prazo, sem perder turno. A medida é
 `pos_restart{desfecho="perdido",origem="restart_servidor"}` por deploy, antes e depois, junto com
 `drenagem_concluida.duracao_ms`.
+
+## Emenda 2026-10-05 — o fim que a pessoa não escolheu fica na conversa (NOD-168)
+
+**O que muda.** Definido em 2026-10-05: quando a ligação acaba por um motivo que a pessoa não escolheu, o
+`encerrarLigacao` grava, na mesma tx que atualiza a linha "Chat de voz", uma mensagem `sistema` com o porquê, e emite
+`mensagem_criada`. Os textos são os do `textoFim` da web (`TEXTOS_FIM` em `src/use-cases/ligacoes.ts`); `pessoa_desligou`,
+`bot_desligou`, `tempo_maximo` e `nao_atendida` não gravam nada (a linha "Chat de voz" já diz tudo).
+
+**Uma vez só.** O repo encerra a ligação uma vez; a 2ª chamada (o `fechar()` repetido, o boot depois da queda) não
+devolve a linha e não grava de novo.
+
+**Deploy que passa do prazo.** A ligação que sobra depois de `NOD_DRENAGEM_MAX_MS` encerra no `fechar()` com
+`reinicio_servidor` e deixa "A ligação caiu porque o nod foi atualizado. Ligue de novo." na conversa. O "religa sozinha
+na mesma linha" do plano não foi feito: a pessoa liga de novo.
 
 ## Emenda 2026-10-05 — provedor de produção e limitador da cota do TTS (NOD-166)
 
@@ -158,3 +174,60 @@ vozes, voz abaixo de 3,5 sai do catálogo da Release 1), a rotação de 12 min (
 `voz_tts_limitado` com `descartado:false` e `espera_ms` acima de 1 s em mais de 1 em cada 50 ligações (subir a cota
 no GCP ou o teto) ou a sonda mostrar que o fluxo não conta na cota (o teto sobe e o streaming deixa de pedir vaga
 extra).
+
+## Emenda 2026-10-06 — voz fora da ligação: ouvir uma resposta (NOD-180)
+
+A voz do bot também lê uma resposta pronta do chat, sem ligação: `GET /api/t/:tenant/mensagens/:id/ouvir`. Só o
+servidor (a tela é da NOD-106). Desligado por padrão (`NOD_VOZ_LEITURA=1` liga) e com a mesma abertura das ligações
+(`NOD_LIGACAO`). A disponibilidade da ligação ganha `ouvir`, que não depende do Mac nem da IA.
+
+- **Mesmo provedor, prioridade `previa`.** A leitura usa o `Sintetizador` das ligações e entra no limitador da cota no
+  nível mais baixo, junto da prévia da voz: a ligação ao vivo sempre passa na frente.
+- **Contrato do áudio.** PCM16 mono a 24 kHz, **big-endian**, `content-type: audio/L16; rate=24000; channels=1` (RFC
+  2586), `cache-control: no-store`, sem `content-length`. O cabeçalho só sai com o primeiro pedaço: erro do TTS antes
+  disso é 502 (`conector_indisponivel`); depois, a resposta corta (o roteador não muda mais o status).
+- **Texto.** `textoParaLeitura` (domínio): bloco de código e tabela viram uma frase ("Aqui tem um bloco de código em
+  TypeScript."), link vira o rótulo, URL solta vira "um link", caminho vira o nome do arquivo. Até 4.000 caracteres;
+  passou, corta no fim de frase e fecha com "O resto está na tela.". O 1º trecho tem até 25 palavras, para o áudio
+  começar cedo; os outros juntam frases até 400 caracteres.
+- **Custo e corrida.** Teto diário por pessoa em caracteres (`NOD_VOZ_LEITURA_CARACTERES_DIA`, padrão 100.000, dia de
+  São Paulo), reservado inteiro antes do 1º byte e devolvido no que não chegou ao TTS; passou, 429. Uma leitura por
+  pessoa: a nova aborta a anterior. A pessoa fechou, o TTS é abortado na hora e nenhum trecho novo é pedido. No máximo
+  `NOD_VOZ_LEITURA_ADIANTE_MS` (padrão 15 s) de áudio à frente do relógio, mais o `drain` do socket. No desligamento,
+  as leituras vivas são abortadas. Log `voz_leitura` (trechos, caracteres, bytes, ms, desfecho, provedor), nunca o texto.
+
+**Por que streaming HTTP e não o WebSocket da ligação.** Ouvir é uma ida só, sem microfone, vez nem cérebro: um GET
+que o navegador toca enquanto chega não precisa de sessão de mídia, e o Caddy já passa o corpo sem buffer
+(`flush_interval -1`).
+
+**Gatilho de reversão.** `voz_tts_limitado` com prioridade `previa` descartando leituras com frequência (a leitura
+precisa de cota própria) ou o custo de TTS das leituras passar o das ligações no mês (o teto diário desce ou a leitura
+passa a ter cache por mensagem, o que exigiria rever a regra de nenhum áudio guardado da ADR-075).
+
+
+## Emenda 2026-10-13 — o deploy não espera a frente que atravessa o reinício (NOD-214)
+
+**O que muda.** Revisto em 2026-10-13: substitui o **custo aceito** da emenda NOD-175. Um deploy com uma frente longa
+num Mac (horas de trabalho) congelava a fila por até 10 min e, passado o prazo, assentava a frente como
+`reinicio_servidor` com a máquina ainda rodando. Agora:
+
+- **A máquina anuncia que atravessa o reinício.** O app com o laço da NOD-214 (PR 1) manda `sobreviveReinicio: true` no
+  `conectar`. A renovação sem resposta vira `indefinido` (o CLI segue) e a entrega insiste por até 2 min.
+- **A drenagem não espera o turno dessa máquina.** Ela espera `tokenTurno.ativos({semSobrevive: true})` mais as
+  reservas em voo. O turno de máquina que não anuncia (app antigo) e o modo local seguem como antes.
+- **O processo novo reconhece o turno.** O puxar grava o sha256 do token de turno em `turno_credenciais` (0073, RLS por
+  pessoa, nunca o token em claro). A renovação ou a entrega de um turno que o processo não conhece traz o token no
+  header `x-nod-token-turno`. A ponte confere a máquina, o estado `despachando` e o hash em tempo constante, e recoloca
+  o token e o plano na memória (a adoção). A chave de máquina sozinha nunca adota. Turno já assentado responde 200
+  `{ok:true, codigo:"ja_assentado"}`, e o app lê isso como sucesso.
+- **Carência no boot.** Nos primeiros `LEASE_MS` (90 s) do processo, no modo compartilhado, o varredor não assenta como
+  `reinicio_servidor` o turno com credencial `sobrevive_reinicio`, e a adoção aceita o lease vencido. Passada a
+  carência sem a máquina voltar, o turno assenta como antes, e a sessão do CLI que a renovação gravou no turno vai para a
+  conversa (a próxima mensagem retoma em vez de começar do zero).
+
+**Fica de fora.** A ligação de voz segue segurando a drenagem (ela vive no processo); fazer a voz atravessar o reinício
+é follow-up.
+
+**Gatilho de reversão.** `pos_restart{desfecho="perdido",origem="restart_servidor"}` não cair nos deploys com frente
+longa, ou `adocao_falhou` aparecer em deploy normal (a adoção não está segurando o turno e a drenagem curta passa a
+perder trabalho; volta a esperar todos os tokens).

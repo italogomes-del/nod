@@ -135,6 +135,30 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
     });
   });
 
+  it("NOD-156: idEnvio que não é UUID → 400 entrada_invalida; o mesmo idEnvio duas vezes → 201 com os mesmos ids", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const { conversa } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "pessoa" })).json()) as { conversa: Conversa };
+      await criarRepos(trx, MARLON).inventario.registrar("catcher", { estado: "pronto", versao: "teste", em: Date.now() });
+
+      for (const idEnvio of ["nao-e-uuid", 42, "", `${randomUUID()}x`]) {
+        const r = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+        expect(r.status).toBe(400);
+        expect(((await r.json()) as { codigo: string }).codigo).toBe("entrada_invalida");
+      }
+      const idEnvio = randomUUID();
+      const primeiro = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+      const segundo = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "oi", idEnvio });
+      expect([primeiro.status, segundo.status]).toEqual([201, 201]);
+      expect(((await segundo.json()) as RespostaMutacao).ids).toEqual(((await primeiro.json()) as RespostaMutacao).ids);
+      const reusado = await servidor.chamar(marlon, "POST", `conversas/${conversa.id}/mensagens`, { texto: "outra", idEnvio });
+      expect(reusado.status).toBe(409);
+      expect(((await reusado.json()) as { codigo: string }).codigo).toBe("estado_invalido");
+      trxAtual = null;
+    });
+  });
+
   it("propostas: confirmar aplica e devolve ids; recusar; memória CRUD; fixar/ocultar/duplicar", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
@@ -143,11 +167,17 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       const deps = depsSobreTrx(trx, MARLON);
       const p1 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Vera", titulo: "Revisora" })).data;
       const p2 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Outra" })).data;
+      const p3 = (await executar(deps, atualizarPerfil, { turnoId: randomUUID(), agenteId: agente.id, conversaId: conversa.id, nome: "Terceira" })).data;
 
       const confirmada = await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`);
       expect(confirmada.status).toBe(200);
       expect(((await confirmada.json()) as RespostaMutacao).ids).toEqual({ proposta: idDaProposta(p1), agente: agente.id });
-      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`)).status).toBe(409);
+      // NOD-190: o mesmo card de novo é idempotente; um card montado sobre o perfil anterior responde 409 (perfil_mudou).
+      expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p1)}/confirmar`)).status).toBe(200);
+      const obsoleta = await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p3)}/confirmar`);
+      expect(obsoleta.status).toBe(409);
+      expect(((await obsoleta.json()) as { codigo: string }).codigo).toBe("estado_invalido");
+      expect((await deps.repos.propostas.buscar(idDaProposta(p3)))?.estado).toBe("recusada");
       expect((await servidor.chamar(marlon, "POST", `propostas/${idDaProposta(p2)}/recusar`)).status).toBe(200);
       expect((await servidor.chamar(marlon, "POST", `propostas/${randomUUID()}/recusar`)).status).toBe(404);
       expect(await deps.repos.agentes.buscar(agente.id)).toMatchObject({ nome: "Vera", titulo: "Revisora", confirmado: true });

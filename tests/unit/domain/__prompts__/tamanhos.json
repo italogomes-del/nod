@@ -1,0 +1,58 @@
+{
+  "colega-profundidade-1": {
+    "estavel": 6156,
+    "volatil": 1030
+  },
+  "colega-profundidade-3": {
+    "estavel": 5689,
+    "volatil": 1178
+  },
+  "conversa-automatico": {
+    "estavel": 16083,
+    "volatil": 1099
+  },
+  "conversa-manual": {
+    "estavel": 15033,
+    "volatil": 1099
+  },
+  "conversa-total": {
+    "estavel": 15822,
+    "volatil": 1099
+  },
+  "criacao-de-bot": {
+    "estavel": 7611,
+    "volatil": 0
+  },
+  "frente-do-dono": {
+    "estavel": 9742,
+    "volatil": 826
+  },
+  "nod": {
+    "estavel": 9165,
+    "volatil": 0
+  },
+  "rotina-com-inventario": {
+    "estavel": 8664,
+    "volatil": 1590
+  },
+  "segundo-turno": {
+    "estavel": 15822,
+    "volatil": 455
+  },
+  "sem-terminal-computador-fora": {
+    "estavel": 2558,
+    "volatil": 1080
+  },
+  "task-filha-de-rotina": {
+    "estavel": 5197,
+    "volatil": 1083
+  },
+  "triagem-de-colega": {
+    "estavel": 7380,
+    "volatil": 1233
+  },
+  "triagem-de-rotina": {
+    "estavel": 6596,
+    "volatil": 403
+  }
+}

@@ -76,7 +76,37 @@ Depois de desligar: "Como foi a ligação?":
   manual no app assinado (plano, "Manual no Mac").
 - **Voz do Google**: não testada ao vivo (sem credencial nesta máquina); o provedor está atrás da mesma interface e
   coberto por testes com transporte falso. O teste cego é da fase 0.
-- **Codex**: só contra o app-server falso (o Codex não está instalado aqui).
+- **Codex**: só contra o app-server falso (o Codex não está instalado aqui). A homologação com o Codex real é do
+  Marlon, pelo roteiro abaixo; até lá, produção sobe com `NOD_LIGACAO_CODEX=0` (NOD-167).
+
+### Homologar a ligação com Codex (NOD-167, Marlon)
+
+Precisa do Codex instalado e logado na conta do ChatGPT (`codex --version` e `codex login status`). Custa centavos da
+assinatura.
+
+1. **Sonda** (uns 2 minutos): `node scripts/sonda-codex-app-server.ts`. Ela fala direto com o `codex app-server` com os
+   argumentos reais do laço e um MCP falso, e grava `sonda-codex-app-server-<data>.txt` com a data e a versão do Codex.
+   Com o Codex fora do PATH, use `--codex /caminho/do/codex`. Para outro modelo ou esforço, use `--modelo` e `--esforco`.
+   Para investigar uma medição estranha, `--bruto sonda.jsonl` guarda o JSON-RPC cru.
+   - **Aprova** se a última linha for `veredito: aprovada`: `model/list` lista `gpt-5.6-luna` (com o `low` entre os
+     esforços), sai delta no 1º turno, `mcp__nod__lembrar` chega ao MCP, `turn/steer` é aceito e `turn/interrupt`
+     conclui como `interrupted`, e o processo responde depois.
+   - **Reprova**: anexe o arquivo na NOD-167 e avise a Cecília **antes** de seguir. A saída prevista é o critério 6,
+     opção (b): "ChatGPT sem voz na Release 1".
+   - Se o `model/list` mostrar outro id para o Luna, ele se troca numa linha só, `MODELO_LUNA_CODEX` em
+     `src/contracts/harness.ts`.
+2. **Ligação manual de 10 minutos**, com o servidor local (`NOD_LIGACAO_CODEX` sem valor ou `1`) e um bot cuja IA é o
+   Codex:
+   - liga e conversa de verdade, com pelo menos 10 vezes;
+   - fala por cima da resposta: a fala para, e a resposta seguinte considera o que você disse (é o `turn/steer`);
+   - pede algo que use uma ferramenta do nod (por exemplo "me lembra de beber água às 15h"): sai a fala de espera e
+     depois a confirmação;
+   - fica calado: a ociosidade encerra como hoje;
+   - anote o tempo até a primeira fala de umas 10 respostas. A meta é p50 ≤ 3,0 s e p95 ≤ 4,5 s (saída da fase 4);
+   - confira nos logs do Mac os eventos `codex_ligacao_notificacao_ignorada`, que dizem quais notificações o app-server
+     manda e o laço não usa, e `ligacao_vez_sem_resposta`, que deve aparecer só se a IA travar.
+3. Aprovado nos dois, anote o resultado na NOD-167 e no ADR-076 (emenda de 2026-10-05). Depois, `NOD_LIGACAO_CODEX=1`
+   no `infra/gcp/config.env` liga em produção.
 - **whisper base**: erra nomes curtos ("Ouina" por "Oi Nina"); suficiente para dev (decisão de 2026-10-04: grátis e
   compreensível). Para mais acerto, `NOD_VOZ_WHISPER_MODELO` com o `small`.
 
@@ -196,3 +226,40 @@ HD); o item 6 são 220 frases curtas.
 | Limite da sessão sem rotação e `goAway` | a medir |
 | Fluxo de streaming conta na cota | a medir |
 | `tts_pico_min` com 3 ligações | a medir |
+
+## Resiliência da ligação (NOD-168, roteiro escrito em 2026-10-05)
+
+Ensaio manual, num Mac de verdade, depois do PR da NOD-168 e da preparação da NOD-165 (#147: `scripts/uat/relatorio-ligacao.ts`
+lê os logs do intervalo e as decisões com `canal:"voz"`). Os testes automáticos cobrem cada queda com custo zero; aqui
+se confere o que só o aparelho mostra: a tela, a voz e o tempo de verdade.
+
+Preparação: app desktop logado, uma IA pronta no Mac (o Claude Code) e, para o item 6, também o Codex. Antes de cada item,
+anote a hora em UTC; no fim rode `node scripts/uat/relatorio-ligacao.ts --desde <hora> --ate <hora>` e cole o resumo
+na tabela de resultados.
+
+| # | O quê | Como provocar | Passa se |
+|---|---|---|---|
+| 1 | Wi-Fi fora por 5 s | No meio de uma fala da pessoa, desligue o Wi-Fi do Mac e religue 5 s depois | A tela mostra "reconectando" e volta sozinha; o cérebro religa (`cerebro_religando` no Mac, `ligacao_cerebro_religou` no servidor); o bot **não** cumprimenta de novo; a vez dita na queda é respondida depois |
+| 2 | Wi-Fi fora por 30 s | Igual, mas 30 s | Passados os 20 s de reconexão do cérebro, a ligação encerra com `cerebro_caiu`, e a conversa ganha **uma** linha "A ligação caiu: o seu Mac parou de responder." |
+| 3 | Tampa fechada | Com a ligação em curso, feche a tampa por 1 min e abra | Mídia e cérebro caem juntos: fim `cerebro_caiu` e a mesma linha do item 2; nenhum card "Retomar" na conversa (o varredor não abre Retomar para turno de ligação) |
+| 4 | TTS bloqueado | Com voz `google`, bloqueie `texttospeech.googleapis.com` (linha `0.0.0.0` no `/etc/hosts` do servidor local) e fale duas vezes | Depois de 2 falhas seguidas (`voz_tts_falhou`), `voz_so_legenda` uma vez e o aviso escrito único; as respostas seguem em legenda; um card de aprovação **não** abre a janela de voz, só o card da tela |
+| 5 | STT morto | Com voz local, `pkill -f whisper-server` no meio da ligação; repita depois da reabertura | Na 1ª, `voz_stt_reaberto` e a ligação segue ouvindo; na 2ª, `voz_stt_falhou` e o aviso pedindo para digitar; o texto digitado continua sendo respondido |
+| 6 | Limite simulado | Aponte `NOD_CLAUDE_BIN` do app para um shim do CLI falso (o mesmo de `iniciar()` em `tests/integration/executor/claude-ligacao-falso.test.ts`: `NOD_FALSO_CENARIO=ligacao-voz`, o `NOD_FALSO_HELP` do teste e `exec node tests/fixtures/claude-falso.mjs "$@"`) e digite uma frase com `[[limite]]`; repita com o Codex desligado | Com o Codex pronto: aviso "Sua assinatura de IA chegou ao limite.", a tela "A assinatura do Claude Code deste Mac chegou ao limite." e "Continuar com o ChatGPT", que retoma a mesma ligação. Sem o Codex: o aviso falado "…então vou encerrar a ligação" e o fim `limite_da_assinatura` (`ligacao_limite_da_assinatura` no log) |
+| 7 | Deploy passando do prazo | Servidor local com `NOD_DRENAGEM_MAX_MS=30000`; com a ligação em curso, mande `SIGTERM` ao processo e não desligue | Ligação nova é recusada durante a drenagem; aos 30 s a ligação encerra com `reinicio_servidor`, e a conversa ganha **uma** linha "A ligação caiu porque o nod foi atualizado. Ligue de novo." |
+| 8 | Aprovar na tela durante a queda | Com o servidor fora do Mac (staging), peça uma rotina, espere o card, desligue o Wi-Fi do Mac e aprove o card no celular durante a queda; religue em menos de 20 s | A decisão sai uma vez (uma rotina só), e o bot, ao voltar, não lê o card de novo |
+
+Fim que a pessoa escolheu (`pessoa_desligou`, `bot_desligou`, `tempo_maximo`, `nao_atendida`) **não** deixa linha de
+motivo: só a "Chat de voz · mm:ss" de sempre.
+
+### Resultados
+
+| Item | Resultado |
+|---|---|
+| 1 Wi-Fi 5 s | a ensaiar |
+| 2 Wi-Fi 30 s | a ensaiar |
+| 3 Tampa fechada | a ensaiar |
+| 4 TTS bloqueado | a ensaiar |
+| 5 STT morto | a ensaiar |
+| 6 Limite simulado | a ensaiar |
+| 7 Deploy passando do prazo | a ensaiar |
+| 8 Aprovar na tela durante a queda | a ensaiar |

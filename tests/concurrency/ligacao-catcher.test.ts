@@ -1,12 +1,16 @@
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { criarCatcherDriver } from "../../src/adapters/executor/drivers/catcher.ts";
+import type { FabricaSocket } from "../../src/adapters/executor/cerebro-ligacao.ts";
 import type { Driver } from "../../src/adapters/executor/spi.ts";
+import { NOTA_CONEXAO_VOLTOU } from "../../src/adapters/voz/orquestrador.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { ConversaDto } from "../../src/contracts/api.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao } from "../../src/contracts/ligacao.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import type { Rotina } from "../../src/contracts/rotina.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { MsgMidiaServidor } from "../../src/contracts/voz.ts";
 import { servidorCompleto, type ServidorCompleto } from "../helpers/servidor-completo.ts";
@@ -34,7 +38,7 @@ afterAll(async () => {
   }
 });
 
-type Cliente = { msgs: MsgMidiaServidor[]; quadrosDeVoz: number; ws: WebSocket; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
+type Cliente = { msgs: MsgMidiaServidor[]; quadrosDeVoz: number; ws: WebSocket; fechou: string | null; esperarMsg(f: (m: MsgMidiaServidor) => boolean, nome: string, timeoutMs?: number): Promise<MsgMidiaServidor> };
 
 async function abrirMidia(ligacaoId: string, origin: string, s: ServidorCompleto = srv): Promise<Cliente> {
   const url = `${s.url.replace("http", "ws")}/api/t/${s.pessoa.tenantId}/voz/v1/midia`;
@@ -43,10 +47,20 @@ async function abrirMidia(ligacaoId: string, origin: string, s: ServidorCompleto
     msgs: [],
     quadrosDeVoz: 0,
     ws,
+    fechou: null,
     async esperarMsg(f, nome, timeoutMs = 8_000) {
-      return s.esperar(async () => c.msgs.find(f) ?? null, { nome, timeoutMs });
+      return s.esperar(async () => {
+        const m = c.msgs.find(f);
+        if (m) return m;
+        // NOD-184: a mídia fechada pelo servidor não traz mais nada — falha já, com o motivo, em vez de estourar o prazo.
+        if (c.fechou) throw new Error(`a mídia fechou (${c.fechou}) esperando: ${nome}`);
+        return null;
+      }, { nome, timeoutMs });
     },
   };
+  ws.on("close", (codigo, motivo) => {
+    c.fechou = `${codigo} ${String(motivo)}`.trim();
+  });
   ws.on("message", (dados, binario) => {
     if (binario) {
       c.quadrosDeVoz++;
@@ -77,6 +91,19 @@ function quadroMicrofone(seq: number, comVoz: boolean): Buffer {
   return b;
 }
 
+/**
+ * Uma fala pelo microfone no ritmo do app: blocos de 100 ms (5 quadros) em tempo real. Em rajada, as duas falas do teste
+ * (3,6 s de áudio) chegavam ~1,2 s depois de a mídia abrir, acima de 1,2× o tempo real + 2 s: a guarda de abuso fechava a
+ * mídia com 4429 e o "pode criar" nunca virava comando (NOD-184; só passava com o Mac lento).
+ */
+async function falarPeloMicrofone(cli: Cliente, seq: { n: number }, quadrosComVoz: number, quadrosDeSilencio: number): Promise<void> {
+  const total = quadrosComVoz + quadrosDeSilencio;
+  for (let i = 0; i < total; i++) {
+    cli.ws.send(quadroMicrofone(seq.n++, i < quadrosComVoz));
+    if (i % 5 === 4) await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transcrição, resumo e turno concluído", async () => {
   const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
   criados.agentes.push(agente.id);
@@ -86,7 +113,7 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   expect(antes).toMatchObject({ disponivel: true, consentimentoNecessario: true });
   // Sem consentimento a ligação é recusada.
   expect((await srv.chamar("POST", "ligacoes", { agenteId: agente.id })).status).toBe(409);
-  await srv.json("POST", "voz/consentimento", { versao: 1 });
+  await srv.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
 
   const { ligacao } = await srv.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
   expect(ligacao.estado).toBe("chamando");
@@ -107,9 +134,8 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("quero criar uma rotina"), "resposta ao texto");
 
   // Fala por áudio: 600 ms de tom e 1,2 s de silêncio → STT falso → "Oi, tudo bem com você?".
-  let seq = 0;
-  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
-  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+  const seq = { n: 0 };
+  await falarPeloMicrofone(cli, seq, 30, 60);
   await cli.esperarMsg((m) => m.t === "legenda" && m.final && m.texto.includes("tudo bem"), "legenda final");
   await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("tudo bem"), "resposta à fala");
   expect(cli.quadrosDeVoz).toBeGreaterThan(0);
@@ -127,8 +153,7 @@ it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transc
   const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
   // Um comando forjado (sem passar pela janela) é recusado.
   expect((await srv.chamar("POST", `decisoes/${decisaoId}/decidir`, { canal: "voz", ligacaoId: ligacao.id, comandoId: "forjado", acao: "aprovar" })).status).toBe(403);
-  for (let i = 0; i < 30; i++) cli.ws.send(quadroMicrofone(seq++, true));
-  for (let i = 0; i < 60; i++) cli.ws.send(quadroMicrofone(seq++, false));
+  await falarPeloMicrofone(cli, seq, 30, 60);
   const comando = await cli.esperarMsg((m) => m.t === "comando", "comando de voz");
   if (comando.t !== "comando") throw new Error("sem comando");
   expect(comando.acao).toBe("aprovar");
@@ -254,7 +279,7 @@ describe("o cérebro cai no meio da ligação", () => {
     const { agente, conversa } = await srv2.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
     criados2.agentes.push(agente.id);
     criados2.conversas.push(conversa.id);
-    await srv2.json("POST", "voz/consentimento", { versao: 1 });
+    await srv2.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
     const { ligacao } = await srv2.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
 
     const cli = await abrirMidia(ligacao.id, `http://${new URL(srv2.url).host}`, srv2);
@@ -333,4 +358,79 @@ describe("o cérebro cai no meio da ligação", () => {
     // O que foi escrito na espera não entrou na ligação.
     expect(falas.some((f) => f.texto.includes("alguém me ouve"))).toBe(false);
   }, 120_000);
+});
+
+/**
+ * NOD-168: a rede do Mac cai com o card de aprovação na tela. O canal do cérebro fecha sem código de fim, o executor
+ * religa a MESMA sessão e o servidor manda "A conexão voltou" em vez da abertura. Aprovar na tela durante a queda (dois
+ * cliques ao mesmo tempo) decide uma vez só, cria uma rotina só, e a nota da decisão chega ao cérebro quando ele volta, depois da de religação.
+ */
+describe("a rede cai com o card na tela (NOD-168)", () => {
+  let srv3: ServidorCompleto;
+  const criados3 = { agentes: [] as string[], conversas: [] as string[] };
+  const sockets: { s: { close(codigo?: number): void }; recebidas: Record<string, unknown>[] }[] = [];
+  const fabricaEspia: FabricaSocket = (url, headers) => {
+    const Ctor: unknown = Reflect.get(globalThis, "WebSocket");
+    const s = Reflect.construct(Ctor as new (...a: unknown[]) => object, [url, { headers }]) as ReturnType<FabricaSocket>;
+    const espia = { s, recebidas: [] as Record<string, unknown>[] };
+    s.addEventListener("message", (ev) => {
+      if (typeof ev.data === "string") espia.recebidas.push(JSON.parse(ev.data) as Record<string, unknown>);
+    });
+    sockets.push(espia);
+    return s;
+  };
+
+  beforeAll(async () => {
+    srv3 = await servidorCompleto({ env: { NOD_LIGACAO: "todas" }, drivers: ({ urlNod }) => [criarCatcherDriver({ urlNod, fabricaSocket: fabricaEspia })] });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (!srv3) return;
+    try {
+      await srv3.fechar();
+    } finally {
+      await limparPessoaE2E(srv3.db, srv3.dbDono, { tenantId: srv3.pessoa.tenantId, pessoaId: srv3.pessoa.pessoaId }, criados3);
+      await srv3.desligar();
+    }
+  }, 30_000);
+
+  it("aprovar durante a queda decide uma vez; o cérebro religado recebe a nota, não a abertura", async () => {
+    const { agente, conversa } = await srv3.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    criados3.agentes.push(agente.id);
+    criados3.conversas.push(conversa.id);
+    await srv3.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
+    const { ligacao } = await srv3.json<{ ligacao: Ligacao; maxS: number }>("POST", "ligacoes", { agenteId: agente.id });
+    const cli = await abrirMidia(ligacao.id, `http://${new URL(srv3.url).host}`, srv3);
+    await cli.esperarMsg((m) => m.t === "cerebro" && m.online, "cérebro online", 10_000);
+
+    const rotina = { cron: "0 9 * * 1-5", fuso_iana: "America/Sao_Paulo", instrucao: "resuma os PRs abertos", fonte: "PRs abertos", entregavel: "resumo curto", limites_aprovacao: "nada sai sem aprovação", politica_sem_dado: "diga que não houve" };
+    cli.ws.send(JSON.stringify({ t: "texto", conteudo: `cria uma rotina [[tool: criar_rotina ${JSON.stringify(rotina)}]] [[delta: Proposta enviada.]]` }));
+    const janela = await cli.esperarMsg((m) => m.t === "janela", "janela aberta", 10_000);
+    const decisaoId = janela.t === "janela" ? janela.decisaoId : "";
+    expect(sockets).toHaveLength(1);
+
+    // ---- a rede cai: fechamento sem código de fim, o executor vai religar ----
+    sockets[0]?.s.close(4000);
+    await cli.esperarMsg((m) => m.t === "cerebro" && !m.online, "cérebro fora");
+    const [a, b] = await Promise.all([srv3.chamar("POST", `decisoes/${decisaoId}/decidir`, {}), srv3.chamar("POST", `decisoes/${decisaoId}/decidir`, {})]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+
+    // ---- religou: a mesma sessão, outro socket ----
+    await srv3.esperar(async () => (cli.msgs.filter((m) => m.t === "cerebro" && m.online).length >= 2 ? true : null), { nome: "cérebro religado", timeoutMs: 10_000 });
+    const religado = await srv3.esperar(async () => {
+      const r = sockets[1]?.recebidas ?? [];
+      return r.some((m) => m.t === "nota" && typeof m.texto === "string" && m.texto.includes("decidiu na tela")) ? r : null;
+    }, { nome: "nota da decisão no cérebro religado" });
+    expect(religado.filter((m) => m.t === "nota").map((m) => m.texto)[0]).toBe(NOTA_CONEXAO_VOLTOU);
+    expect(religado.filter((m) => m.t === "nota" && m.texto === NOTA_CONEXAO_VOLTOU)).toHaveLength(1);
+    expect(religado.filter((m) => m.t === "vez" && m.n === 0)).toEqual([]);
+
+    const { rotinas } = await srv3.json<{ rotinas: { rotina: Rotina }[] }>("GET", "rotinas");
+    expect(rotinas.filter((x) => x.rotina.agenteId === agente.id)).toHaveLength(1);
+    // A ligação seguiu viva e responde de novo.
+    cli.ws.send(JSON.stringify({ t: "texto", conteudo: "voltou?" }));
+    await cli.esperarMsg((m) => m.t === "bot-fala" && m.tipo === "conteudo" && m.texto.includes("voltou?"), "resposta depois da religação", 10_000);
+    cli.ws.send(JSON.stringify({ t: "tchau" }));
+    await cli.esperarMsg((m) => m.t === "fim", "fim");
+  }, 60_000);
 });

@@ -10,6 +10,11 @@ export type PoolDeLacos = {
   tamanho(): number;
   /** Turnos rodando agora, um por laço ocupado. */
   turnosAtuais(): string[];
+  /**
+   * ADR-100: com `true`, o laço ocioso para de puxar trabalho novo (o puxar volta vazio); os turnos que rodam terminam e
+   * entregam como sempre. É o que o motor faz para se atualizar sem interromper ninguém. `false` volta a puxar.
+   */
+  drenar(sim: boolean): void;
 };
 
 /**
@@ -27,6 +32,7 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
   type Vaga = { laco: LacoDoPool | null; ocupado: boolean; aposentado: boolean };
   const vagas = new Set<Vaga>();
   let parando = false;
+  let drenando = false;
   const ociosos = () => [...vagas].filter((v) => !v.ocupado && !v.aposentado).length;
 
   function subir(): void {
@@ -34,7 +40,7 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
     vagas.add(vaga);
     const envolvida: PonteInterna = {
       ...ponte,
-      puxar: async (pessoaId) => {
+      puxar: async (pessoaId, maquina) => {
         vaga.ocupado = false;
         if (parando || vaga.aposentado) return null;
         if (ociosos() > 1) {
@@ -45,7 +51,8 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
           void vaga.laco?.parar();
           return null;
         }
-        const plano = await ponte.puxar(pessoaId);
+        if (drenando) return null;
+        const plano = await ponte.puxar(pessoaId, maquina);
         if (plano) {
           vaga.ocupado = true;
           if (!parando && ociosos() === 0) subir();
@@ -72,5 +79,6 @@ export function iniciarPoolDeLacos(criar: (ponte: PonteInterna) => LacoDoPool, p
     },
     tamanho: () => vagas.size,
     turnosAtuais: () => [...vagas].map((v) => v.laco?.turnoAtual?.() ?? null).filter((t): t is string => t !== null),
+    drenar(sim) { drenando = sim; },
   };
 }

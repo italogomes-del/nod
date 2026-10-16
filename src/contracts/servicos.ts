@@ -1,12 +1,12 @@
-import type { Conector } from "./conector.ts";
+import type { CapacidadeConector, Conector } from "./conector.ts";
 import type { JeitoGithub } from "./github.ts";
 import type { RuntimeEvent } from "./evento.ts";
 import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod.ts";
 import type { FrameSse, TipoFrame } from "./frame.ts";
-import type { CapacidadeConector } from "./conector.ts";
 import type { MotivoNegacao, MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
 import type { Rotina } from "./rotina.ts";
+import type { LeituraDisco, NivelPressao, ServicoDasMaquinas } from "./trabalho.ts";
 
 /** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). */
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
@@ -43,7 +43,30 @@ export interface ServicesNod<Trx> {
   };
   computadores?: {
     executarAprovado(p: { tenantId: string; pessoaId: string; agenteId: string; turnoId: string; acaoId: string }): Promise<void>;
+    /** ADR-083 (S5): o título do trabalho (ou "a conversa") que segura o computador que este turno pediu; null = não espera. */
+    esperandoPor?(turnoId: string): string | null;
   };
+  /**
+   * definido em 2026-10-08 (NOD-200, ADR proposta): a última tela que o bot viu no turno, para virar anexo da fala.
+   * `ler` não esquece (o assentar repetido por impasse acha a mesma tela); null = chave NOD_CAPTURA_NO_TRANSCRIPT
+   * desligada ou sem tela. `esquecer` é da ponte, depois do assentar confirmado. Ausente = desligado.
+   */
+  capturas?: { ler(turnoId: string): Uint8Array | null; esquecer(turnoId: string): void };
+  /**
+   * definido em 2026-10-07 (ADR-083): o que só o processo sabe dos trabalhos — a última ferramenta de cada turno vivo
+   * (o "último passo" da faixa) e a pressão de memória dos Macs da pessoa (#194). Ausente = nada a mostrar.
+   */
+  trabalhosVivos?: {
+    ultimaFerramenta(turnoId: string): string | null;
+    /**
+     * ADR-085: com o pior processador e a maior carga por núcleo entre os Macs vivos dela (null = nenhum mandou). #219: e
+     * o pior disco, com a histerese, e se algum app o mede. ADR-091: o maior uso da CPU e a pior fila (null = sem app novo).
+     */
+    memoria(pessoaId: string): { nivel: NivelPressao; totalMb: number; processador?: NivelPressao | null; carga?: number | null; uso?: number | null; fila?: NivelPressao | null; disco?: LeituraDisco | null; discoNivel?: NivelPressao | null; discoSuportado?: boolean; discoAcabaEmMs?: number | null } | null;
+    /** ADR-085: a pessoa trocou o "uso do Mac" (gravado) — o puxar relê na próxima vez em vez de esperar o cache. */
+    trocouUsoDoMac?(pessoaId: string): void;
+  };
+  /** A tela fala por máquina (2026-10-09): a leitura e o nome de cada máquina (trabalho.ts). Ausente = só a junta. */ maquinas?: ServicoDasMaquinas;
   relogio: () => number;
   tokenTurno: {
     /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */
@@ -64,7 +87,7 @@ export interface ServicesNod<Trx> {
   conectores: {
     /** `contexto.rotina` (ADR-048): só turno de rotina pode usar o GitHub App da organização. Ausente = interativo. `somenteLeitura` (NOD-157): readOnlyHint da ferramenta; ausente = escrita, que só repete em 429. */
     chamar(conectorId: string, tool: string, args: Record<string, unknown>, contexto?: { rotina: boolean; somenteLeitura?: boolean }): Promise<{ conteudo: string; isError: boolean }>;
-    sondar(conector: Conector): Promise<ResultadoSonda>;
+    sondar(conector: Conector, opcoes?: { orcamentoMs?: number }): Promise<ResultadoSonda>; // orcamentoMs (NOD-208): teto da sonda http inteira; ausente = ORCAMENTO_CONECTOR_MS
   };
   interruptor: {
     registrar(turnoId: string, fn: () => Promise<void>): void;
@@ -83,21 +106,19 @@ export interface ServicesNod<Trx> {
 }
 
 /**
- * Quem chamou a ferramenta, derivado do token (nunca do corpo). `plano` é o PLANO JÁ PUXADO
- * (ADR-013/024): a regra de aprovação automática é avaliada localmente a partir dele, nunca por
- * consulta na hora da chamada. AUSENTE = nunca automático — o caminho do computador
- * (adapters/fundo/computadores.ts) chama pedirAprovacaoComputador sem plano, e fail-closed é o
- * comportamento certo ali (ADR-042 claim 1).
+ * Quem chamou a ferramenta, derivado do token (nunca do corpo). `plano` é o PLANO JÁ PUXADO (ADR-013/024): a regra de
+ * aprovação automática é avaliada localmente a partir dele, nunca por consulta na hora da chamada. AUSENTE = nunca
+ * automático — o caminho do computador (adapters/fundo/computadores.ts) chama pedirAprovacaoComputador sem plano, e
+ * fail-closed é o comportamento certo ali (ADR-042 claim 1).
  */
 export type ContextoFerramenta = { turnoId: string; agenteId: string; conversaId: string; plano?: PlanoTurno };
 
 export type SaidaCasoDeUso<O> = { data: O; events?: RuntimeEvent[] };
 
 /**
- * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema,
- * aplica gate de parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps`
- * pelo mesmo motivo de ServicesNod. lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/
- * pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
+ * Uma implementação por ferramenta nod (EMENDA 5): chamar-ferramenta.ts valida args pelo schema, aplica gate de
+ * parada/catálogo/trilha e DESPACHA para `deps.useCases[nome]`. Genérico em `Deps` pelo mesmo motivo de ServicesNod.
+ * lembrar/atualizarPerfil ← L6; criarRotina/passar/encaminhar/pedirABot ← L7; pedirAcesso/pedirAprovacao/pedirAPessoa ← L5.
  */
 export type CasoNod<Deps, N extends NomeFerramentaNod> = (
   deps: Deps,
@@ -131,6 +152,14 @@ export interface UseCasesNod<Deps> {
   anotarEntrevista: CasoNod<Deps, "anotar_entrevista">;
   concluirEntrevista: CasoNod<Deps, "concluir_entrevista">;
   proporBot: CasoNod<Deps, "propor_bot">;
+  // ADR-099 (I2): abrir_task e mandar_para_task ficam como sinônimos de abrir_frentes e mandar_para_frente.
+  abrirTask: CasoNod<Deps, "abrir_task">; mandarParaTask: CasoNod<Deps, "mandar_para_task">; meChameAs: CasoNod<Deps, "me_chame_as">;
+  esperarComando: CasoNod<Deps, "esperar_comando">;
+  abrirFrentes: CasoNod<Deps, "abrir_frentes">; mandarParaFrente: CasoNod<Deps, "mandar_para_frente">; devolverResumo: CasoNod<Deps, "devolver_resumo">;
+  gerirBots: CasoNod<Deps, "gerir_bots">;
+  verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
+  registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
+  criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -161,4 +190,10 @@ export const USE_CASE_POR_FERRAMENTA = {
   anotar_entrevista: "anotarEntrevista",
   concluir_entrevista: "concluirEntrevista",
   propor_bot: "proporBot",
+  abrir_task: "abrirTask", mandar_para_task: "mandarParaTask", me_chame_as: "meChameAs", esperar_comando: "esperarComando",
+  abrir_frentes: "abrirFrentes", mandar_para_frente: "mandarParaFrente", devolver_resumo: "devolverResumo",
+  gerir_bots: "gerirBots",
+  ver_apps_conectados: "verAppsConectados",
+  registrar_relato: "registrarRelatoDoNod",
+  criar_bots: "criarBots", responder_pedido: "responderPedido",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

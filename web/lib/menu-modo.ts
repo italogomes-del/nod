@@ -1,5 +1,5 @@
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
-import { renderMenuModo } from "../telas/aprovacoes.ts";
+import { chaveAvisoModo, renderMenuModo } from "../telas/aprovacoes.ts";
 import { dialogo } from "../telas/gestao-agentes.ts";
 
 /**
@@ -34,36 +34,40 @@ export function abrirMenuModo(ancora: HTMLElement, nome: string, atual: ModoApro
 }
 
 /**
- * Avisos fechados, por bot e modo. definido em 2026-09-29: localStorage é conveniência — o app desktop o limpa a cada
- * conexão, e aí o aviso volta uma vez por sessão, o que para um bot que aprova sozinho é aceitável.
+ * Avisos de modo fechados (revisto em 2026-10-06, pedido do Marlon): por modo, não por bot, e guardados no servidor
+ * (0059) — o app do Mac limpa o localStorage a cada conexão, e o aviso voltava a cada abertura, em cada bot, a cada
+ * troca de modo. O localStorage fica só de cache, para o aviso não piscar antes de as preferências chegarem.
  */
-const CHAVE_AVISOS = "nod.avisosModoFechados";
+const CHAVE_AVISOS = "nod.avisosFechados";
 const fechados = new Set<string>(lerFechados());
 
 function lerFechados(): string[] {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE_AVISOS) ?? "[]") as unknown;
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-200) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-50) : [];
   } catch {
     return [];
   }
 }
 
 function gravarFechados(): void {
-  try { localStorage.setItem(CHAVE_AVISOS, JSON.stringify([...fechados].slice(-200))); } catch { /* o aviso some nesta sessão mesmo sem storage */ }
+  try { localStorage.setItem(CHAVE_AVISOS, JSON.stringify([...fechados].slice(-50))); } catch { /* o servidor guarda de qualquer jeito */ }
 }
 
-export function avisoFechado(agenteId: string, modo: ModoAprovacao): boolean {
-  return fechados.has(`${agenteId}:${modo}`);
-}
-
-export function fecharAviso(agenteId: string, modo: ModoAprovacao): void {
-  fechados.add(`${agenteId}:${modo}`);
+/** As chaves que o servidor devolveu em GET preferencias somam às do cache. */
+export function hidratarAvisosFechados(chaves: readonly string[]): void {
+  for (const c of chaves) fechados.add(c);
   gravarFechados();
 }
 
-/** Trocar de modo reabre o aviso do modo novo: é a confirmação do que a pessoa acabou de ligar. */
-export function reabrirAviso(agenteId: string, modo: ModoAprovacao): void {
-  fechados.delete(`${agenteId}:${modo}`);
+export function avisoFechado(modo: ModoAprovacao): boolean {
+  return fechados.has(chaveAvisoModo(modo));
+}
+
+/** Marca fechado aqui e devolve a chave, que quem chama grava no servidor. */
+export function fecharAviso(modo: ModoAprovacao): string {
+  const chave = chaveAvisoModo(modo);
+  fechados.add(chave);
   gravarFechados();
+  return chave;
 }

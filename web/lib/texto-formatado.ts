@@ -10,6 +10,11 @@ export interface OpcoesTexto {
   /** Identifica a mensagem: o "mostrar mais" de cada tabela sobrevive a um novo render (data-disclosure). */
   chave?: string;
   agora?: Date;
+  /**
+   * NOD-204: só os balões de streaming. Esconde 1 ou 2 crases de cerca partida no fim do texto (fechamento colado no
+   * código ou abertura ainda em prosa), para nenhum quadro mostrar uma crase que some no quadro seguinte.
+   */
+  aoVivo?: boolean;
 }
 
 const LINHAS_VISIVEIS = 8;
@@ -25,7 +30,7 @@ const LINHAS_SEM_MOSTRAR_MAIS = 10;
  * passa `agora` (os testes) formata direto.
  */
 const MEMORIA_MAX = 2_000;
-const memoria = new Map<string, { texto: string; html: string }>();
+const memoria = new Map<string, { texto: string; aoVivo: boolean; html: string }>();
 let diaDaMemoria = "";
 
 export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string {
@@ -35,21 +40,50 @@ export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string 
     memoria.clear();
     diaDaMemoria = dia;
   }
+  const aoVivo = Boolean(opcoes.aoVivo);
   const guardado = memoria.get(opcoes.chave);
-  if (guardado && guardado.texto === texto) return guardado.html;
+  // NOD-204: o HTML ao vivo esconde crases que a resposta completa mostra; o mesmo texto só reaproveita no mesmo modo.
+  if (guardado && guardado.texto === texto && guardado.aoVivo === aoVivo) return guardado.html;
   const html = formatar(texto, opcoes);
   memoria.delete(opcoes.chave);
-  memoria.set(opcoes.chave, { texto, html });
+  memoria.set(opcoes.chave, { texto, aoVivo, html });
   if (memoria.size > MEMORIA_MAX) memoria.delete(memoria.keys().next().value ?? "");
   return html;
 }
 
+/**
+ * NOD-201: a linha da linguagem do bloco (```c++, ```objective-c, ```shell-session). Mesma classe que a spec da NOD-45
+ * usa para o rótulo; qualquer outra primeira linha continua dentro do código.
+ */
+const LINGUAGEM = /^[A-Za-z0-9_+#.-]{0,20}\n/;
+const SO_LINGUAGEM = /^[A-Za-z0-9_+#.-]{0,20}$/;
+
 function formatar(texto: string, opcoes: OpcoesTexto): string {
   let tabelas = 0;
-  return texto.split(/(```[\s\S]*?```)/g).map((trecho, i) => {
-    if (i % 2 === 1) return `<pre><code>${esc(trecho.slice(3, -3).replace(/^\w*\n/, ""))}</code></pre>`;
+  // NOD-201: a cerca sem par vai até o fim do texto e vira código já durante o streaming, com o mesmo HTML do bloco
+  // fechado (sem salto quando a cerca fecha). Sem a flag `m`, o `$` é o fim do texto.
+  const aoVivo = Boolean(opcoes.aoVivo);
+  const partes = texto.split(/(```[\s\S]*?(?:```|$))/g);
+  return partes.map((trecho, i) => {
+    if (i % 2 === 1) return codigo(trecho, aoVivo);
+    // NOD-204: ao vivo, a cerca que ainda está abrindo ("\n`", "\n``" no fim) não aparece crua antes da terceira crase.
+    // Só o último trecho: prosa no meio do texto nunca muda. A cerca pode vir indentada até 3 espaços, como dentro de
+    // um item de lista ("1. Instale:\n   ```bash"), e a indentação fica: é o que o quadro seguinte mostra.
+    if (aoVivo && i === partes.length - 1) trecho = trecho.replace(/(^|\n)( {0,3})`{1,2}$/, "$1$2");
     return blocos(trecho).map((b) => (typeof b === "string" ? comListas(b, opcoes) : tabelaHtml(b, opcoes, tabelas++))).join("");
   }).join("");
+}
+
+function codigo(trecho: string, aoVivo: boolean): string {
+  const fechado = trecho.length >= 6 && trecho.endsWith("```");
+  // Bloco aberto cuja cerca de fechamento chegou partida ("\n`" ou "\n``" no fim): essas crases não piscam no código
+  // antes da terceira chegar e o bloco fechar (revisão da NOD-201). Ao vivo (NOD-204), também quando a cerca vem
+  // colada no código ("foo()`"); na resposta completa essa crase é conteúdo e aparece.
+  const aberto = trecho.slice(3);
+  const corpo = fechado ? trecho.slice(3, -3) : aoVivo ? aberto.replace(/`{1,2}$/, "") : aberto.replace(/(^|\n)`{1,2}$/, "$1");
+  // Cerca recém-aberta só com a palavra da linguagem ("```ty"): ela não pisca dentro do código antes do \n chegar.
+  const semLinguagem = !fechado && SO_LINGUAGEM.test(corpo) ? "" : corpo.replace(LINGUAGEM, "");
+  return `<pre><code>${esc(semLinguagem)}</code></pre>`;
 }
 
 /**

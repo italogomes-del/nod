@@ -58,3 +58,38 @@ gravado da pessoa (ADR-041), e continua fora do log do servidor (`erroCruNoLog: 
 `src/domain/conta-da-ia.ts`. Se o teste do onboarding reprovar contas boas (lentidão do fornecedor), o teto de 90 s do
 turno de teste é o primeiro a rever.
 
+
+## Emenda de 2026-10-06 — piso de versão por CLI (NOD-171)
+
+**Contexto.** A versão do CLI já entrava no inventário "porque alimenta os flag floors", mas nenhum piso recusava nada:
+um Codex de quatro meses atrás era anunciado como pronto e todo turno fixado nele falhava com erro de argumento.
+
+**Decisão.**
+- `PISO_CLI` (`src/adapters/executor/flag-floors.ts`) guarda a versão mínima de cada CLI: as versões aprovadas no UAT
+  de 2026-10-06 (`claude-cli` 2.1.290, `codex-cli` 0.159.0). O piso do Codex fica numa linha só, isolado, até o Marlon
+  escolher entre 0.159.0 e 0.159.2: trocar é essa linha.
+- Abaixo do piso, a sonda (completa e sem turno) devolve `ausente` com `causa: "cli_antigo"`, `versao` e `minima`, sem
+  gastar turno nem perguntar o login. O turno lança `executor_indisponivel` com a mesma causa antes de qualquer prompt.
+  Pré-release conta (`0.159.0-alpha.3` < `0.159.0`); sem versão legível não recusa (o `--version` que falhou já é
+  `ausente`).
+- A ponte aceita `cli_antigo` de um Mac com versões no formato `x.y.z[-pre]`; a frase é sempre a do servidor.
+- A tela diz "desatualizado" (versão instalada e mínima, e o comando de atualizar), nunca "não instalado": o
+  onboarding, a frota, o seletor de Inteligência e a negação na conversa.
+
+**Gatilho de reversão.** Se um piso recusar uma versão boa (o fornecedor lançou uma versão com numeração fora do
+semver), baixar a linha do `PISO_CLI` e publicar o app e o servidor: o Mac sonda com o piso que veio no app.
+
+
+## Emenda de 2026-10-08 — o resultado da sonda chega ao servidor com turno rodando (NOD-199)
+
+O que a vigia do Mac sonda de novo (login novo, CLI atualizado, IA que volta no teste) é reanunciado pela rota só de
+inventário da ponte ([ADR-021, emenda de 2026-10-08](adr-021-a-ponte-de-execucao-o-app-local-puxa-o-servidor-nunca-di.md)),
+não pelo `conectar`: o servidor passa a saber da IA nova sem recusar nem limpar o turno que roda. Anúncio que falhou é
+repetido no passo de 30 s da vigia, mesmo com todas as IAs prontas.
+
+## Emenda de 2026-10-15 — o e-mail da conta vai ao servidor (ADR-105)
+
+"O email do fornecedor NÃO é gravado" deixa de valer para as contas de IA: o anúncio das contas leva o e-mail e a
+organização, e `contas_ia` os guarda para a tela de Provedores dizer qual conta é qual em qualquer máquina. A regra (2)
+continua inteira: a identidade é cosmética, nada autoriza nem casa conta por ela. O inventário da sonda continua sem
+e-mail. Detalhes e gatilho de reversão na [ADR-105](adr-105-email-da-conta-de-ia-no-servidor.md).

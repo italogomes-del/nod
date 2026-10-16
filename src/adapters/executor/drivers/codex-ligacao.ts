@@ -3,29 +3,16 @@ import { join } from "node:path";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../../../contracts/turno.ts";
 import type { MsgCerebroServidor } from "../../../contracts/voz.ts";
-import {
-  ESFORCO_LIGACAO_CODEX,
-  idDaThread,
-  idDoTurno,
-  interpretarLinhaAppServer,
-  notificacaoInitialized,
-  pedidoInitialize,
-  pedidoThreadStart,
-  pedidoTurnInterrupt,
-  pedidoTurnStart,
-  pedidoTurnSteer,
-  respostaNegando,
-  type EventoAppServer,
-  type IdRpc,
-} from "../../../domain/codex-app-server.ts";
+import { ESFORCO_LIGACAO_CODEX, pedidoThreadStart, pedidoTurnStart, type EventoAppServer, type SandboxCodex } from "../../../domain/codex-app-server.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { log } from "../../../obs/log.ts";
 import { conectarCerebro, type CerebroLigacao, type FabricaSocket } from "../cerebro-ligacao.ts";
-import { iniciarProcesso, type Processo } from "../processo.ts";
+import type { Processo } from "../processo.ts";
 import type { SinksTurno } from "../spi.ts";
 import { PEDIDO_DE_RESUMO, textoDaVez } from "./claude-ligacao.ts";
-import { configMcpCodex, escreverLauncherProxy, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
+import { criarClienteAppServer } from "./cliente-app-server.ts";
+import { configMcpCodex, escreverLauncherProxy, overridesIsolamentoCodex, overridesTerminalCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
 
 /**
  * O laço de voz do Codex (definido em 2026-10-04, ADR-076), no molde do de Claude (ADR-072). O turno-cérebro de uma
@@ -52,9 +39,20 @@ const SAIDA_APOS_RESUMO_MS = 2_000;
  * argv do app-server. As chaves `-c` vão ANTES do subcomando (são do `codex` raiz e chegam a qualquer subcomando); a
  * config do MCP aponta para o launcher 0600, e o token do turno nunca entra aqui.
  */
-export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex }): string[] {
+export function argsAppServer(p: { configMcp: string; flagsNoHelp: readonly string[]; recusadas?: RecusadasCodex; sandbox?: SandboxCodex; terminal?: { hooks: string; argMcp: string; mcpDaPessoa: boolean } }): string[] {
+  // ADR-103: com o kit do terminal, sem sandbox (como o Claude, ADR-055), o hook do nod no lugar do isolamento e o MCP do
+  // nod junto dos da pessoa nos modos dela. Sem ele, o isolamento de sempre.
+  if (p.terminal) {
+    return [
+      "-c", p.terminal.argMcp, "-c", 'approval_policy="never"', "-c", 'sandbox_mode="danger-full-access"', "-c", p.terminal.hooks,
+      ...overridesTerminalCodex({ mcpDaPessoa: p.terminal.mcpDaPessoa, recusadas: p.recusadas }).flatMap((o) => ["-c", o]),
+      "app-server",
+      ...FLAGS_OPCIONAIS_APP_SERVER.filter((f) => p.flagsNoHelp.includes(f)),
+    ];
+  }
   return [
-    "-c", `mcp_servers=${p.configMcp}`, "-c", 'approval_policy="never"', "-c", 'sandbox_mode="read-only"',
+    // definido em 2026-10-07 (ADR-083 §6): o chat com projeto autorizado escreve na pasta, como o `codex exec`.
+    "-c", `mcp_servers=${p.configMcp}`, "-c", 'approval_policy="never"', "-c", `sandbox_mode="${p.sandbox ?? "read-only"}"`,
     ...overridesIsolamentoCodex(p.recusadas ?? SEM_RECUSADAS).flatMap((o) => ["-c", o]),
     "app-server",
     ...FLAGS_OPCIONAIS_APP_SERVER.filter((f) => p.flagsNoHelp.includes(f)),
@@ -82,9 +80,6 @@ export type ContextoLigacaoCodex = {
   aoProcesso(p: Processo | null): void;
 };
 
-type Resposta = Extract<EventoAppServer, { tipo: "resposta" | "resposta_erro" }>;
-type EstadoTurno = { estado: "livre" } | { estado: "iniciando" } | { estado: "ativo"; id: string };
-
 export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<ResultadoTurno> {
   const { plano, sinks } = c;
   const lig = plano.ligacaoVoz!;
@@ -103,13 +98,8 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     // Só o que compõe a entrega: as ferramentas da ligação inteira e o turno do resumo. As falas já foram ditas.
     const eventos: EventoStream[] = [];
     const pendentes: Promise<void>[] = [];
-    const aguardando = new Map<IdRpc, (r: Resposta) => void>();
-    let proximoId = 1;
-    let threadId = "";
-    let turno: EstadoTurno = { estado: "livre" };
     // O que chegou enquanto um turno subia (ou que o steer não alcançou), com a vez a que responde.
     let fila: { texto: string; n: number }[] = [];
-    const encerrados = new Set<string>();
     /** A vez mais recente da pessoa (a vez 0 é o aquecimento e nunca é falada). */
     let nResposta = 0;
     /** A vez que o turno em curso responde: a dele ao abrir, a da fala nova quando um steer é aceito. */
@@ -124,8 +114,9 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     let ultimoErro: string | null = null;
     let tokens: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
     let negados = 0;
-    let fechando = false;
     const ferramentasAbertas = new Map<string, string>();
+    /** NOD-167: as notificações que o laço não conhece, logadas uma vez cada (só o nome, nunca o conteúdo). */
+    const ignorados = new Set<string>();
 
     const emitir = (ev: EventoStream, compoeEntrega: boolean) => {
       if (compoeEntrega) eventos.push(ev);
@@ -135,44 +126,44 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
       sinais = depois;
     };
 
-    const proc = iniciarProcesso({
+    // definido em 2026-10-07 (ADR-083, S4): o JSON-RPC, a máquina do turno e a recusa dos pedidos do servidor moram no
+    // cliente compartilhado com o chat do Codex; aqui fica só o que é da voz (as vezes, o resumo, o canal do cérebro).
+    const cliente = criarClienteAppServer({
       bin: c.bin,
       args,
       env: c.env,
       cwd,
       sigtermParaSigkillMs: c.sigtermParaSigkillMs,
-      aoLinha(linha) {
-        tratar(interpretarLinhaAppServer(linha));
+      aoEvento: tratar,
+      aoTurnoConcluido(ev) {
+        ultimoErro = ev.erro ?? ultimoErro;
+        if (resumo === "rodando") {
+          resumo = "feito";
+          resumoOk = ev.status === "completed";
+          return encerrar();
+        }
+        if (nDoTurno > 0) cerebro?.enviar({ t: "fala-fim", n: nDoTurno });
+        return seguir();
+      },
+      aoNegado(metodo) {
+        negados++;
+        log("aviso", "codex_ligacao_pedido_negado", { turno_id: plano.turnoId, metodo: metodo.slice(0, 80) });
       },
     });
+    const proc = cliente.processo;
     c.aoProcesso(proc);
 
-    const enviar = (montar: (id: IdRpc) => string, aoResponder?: (r: Resposta) => void) => {
-      if (fechando) return;
-      const id = proximoId++;
-      if (aoResponder) aguardando.set(id, aoResponder);
-      proc.escrever(montar(id));
-    };
-    const pedir = (montar: (id: IdRpc) => string) =>
-      new Promise<Record<string, unknown>>((resolver, rejeitar) => {
-        enviar(montar, (r) => (r.tipo === "resposta" ? resolver(r.resultado) : rejeitar(new Error(`app_server_erro_${r.codigo ?? "sem_codigo"}`))));
-      });
-
     const encerrar = () => {
-      if (fechando) return;
-      fechando = true;
-      proc.fecharStdin();
+      if (cliente.fechando()) return;
+      cliente.fechar();
       timerSaida = setTimeout(() => void proc.interromper(), SAIDA_APOS_RESUMO_MS);
     };
 
     const iniciarTurno = (texto: string, n: number) => {
-      turno = { estado: "iniciando" };
       nDoTurno = n;
-      enviar((id) => pedidoTurnStart(id, { threadId, texto, esforco: ESFORCO_LIGACAO_CODEX }), (r) => {
-        const id = r.tipo === "resposta" ? idDoTurno(r.resultado) : null;
+      cliente.iniciarTurno((id, threadId) => pedidoTurnStart(id, { threadId, texto, esforco: ESFORCO_LIGACAO_CODEX }), (id, r) => {
         if (id === null) {
           log("aviso", "codex_ligacao_turno_recusado", { turno_id: plano.turnoId, codigo: r.tipo === "resposta_erro" ? r.codigo : null });
-          turno = { estado: "livre" };
           if (resumo === "rodando") {
             resumo = "feito";
             return encerrar();
@@ -180,9 +171,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           if (nDoTurno > 0) cerebro?.enviar({ t: "fala-fim", n: nDoTurno });
           return seguir();
         }
-        if (encerrados.has(id)) return; // o turno já concluiu antes da resposta chegar
-        turno = { estado: "ativo", id };
-        if (resumo === "pedido") return enviar((rid) => pedidoTurnInterrupt(rid, { threadId, turnId: id }));
+        if (resumo === "pedido") return cliente.interromperTurno();
         const juntos = fila;
         fila = [];
         for (const f of juntos) entregar(f.texto, f.n);
@@ -203,14 +192,14 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
     };
 
     const entregar = (texto: string, n: number) => {
+      const turno = cliente.turno();
       if (turno.estado === "livre") return iniciarTurno(texto, n);
       if (turno.estado === "iniciando") return void fila.push({ texto, n });
-      const turnoEsperado = turno.id;
-      enviar((id) => pedidoTurnSteer(id, { threadId, texto, turnoEsperado }), (r) => {
+      cliente.steer(texto, (aceito) => {
         // Aceito: daqui em diante o turno responde a fala nova.
-        if (r.tipo === "resposta") return void (nDoTurno = n);
+        if (aceito) return void (nDoTurno = n);
         // O turno acabou (ou não aceita steer) antes de a fala chegar: ela abre o próximo.
-        if (turno.estado === "livre") iniciarTurno(texto, n);
+        if (cliente.turno().estado === "livre") iniciarTurno(texto, n);
         else fila.push({ texto, n });
       });
     };
@@ -219,30 +208,13 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
       if (resumo !== "nao") return;
       fila = [];
       resumo = "pedido";
-      if (turno.estado === "livre") return seguir();
-      if (turno.estado === "ativo") {
-        const turnId = turno.id;
-        enviar((id) => pedidoTurnInterrupt(id, { threadId, turnId }));
-      }
+      if (cliente.turno().estado === "livre") return seguir();
+      cliente.interromperTurno();
     };
 
     function tratar(ev: EventoAppServer): void {
       switch (ev.tipo) {
-        case "resposta":
-        case "resposta_erro": {
-          const fn = aguardando.get(ev.id);
-          aguardando.delete(ev.id);
-          fn?.(ev);
-          return;
-        }
-        case "pedido_servidor":
-          // Sem resposta o turno trava; o laço de voz nunca aprova pelo Codex.
-          negados++;
-          log("aviso", "codex_ligacao_pedido_negado", { turno_id: plano.turnoId, metodo: ev.metodo.slice(0, 80) });
-          proc.escrever(respostaNegando(ev.id, ev.metodo));
-          return;
         case "delta":
-          if (ev.turnId && encerrados.has(ev.turnId)) return;
           if (resumo === "rodando") {
             resumoDeltas.push(ev.texto);
             emitir({ tipo: "delta", texto: ev.texto }, false);
@@ -265,23 +237,6 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
             emitir({ tipo: "tool_result", toolUseId: ev.itemId, isError: ev.falhou, texto: "" }, true);
           }
           return;
-        case "turno_concluido": {
-          if (ev.turnId) {
-            if (encerrados.has(ev.turnId)) return;
-            encerrados.add(ev.turnId);
-          }
-          const atual = turno.estado === "ativo" ? turno.id : null;
-          if (ev.turnId && atual && ev.turnId !== atual) return; // turno velho
-          turno = { estado: "livre" };
-          ultimoErro = ev.erro ?? ultimoErro;
-          if (resumo === "rodando") {
-            resumo = "feito";
-            resumoOk = ev.status === "completed";
-            return encerrar();
-          }
-          if (nDoTurno > 0) cerebro?.enviar({ t: "fala-fim", n: nDoTurno });
-          return seguir();
-        }
         case "uso":
           tokens = { ...ev.tokens, cacheCriacao: 0 };
           return;
@@ -289,34 +244,22 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           ultimoErro = ev.mensagem ?? ultimoErro;
           log("aviso", "codex_ligacao_erro_servidor", { turno_id: plano.turnoId, vai_repetir: ev.vaiRepetir });
           return;
+        case "ignorado":
+          if (ev.metodo !== undefined && !ignorados.has(ev.metodo) && ignorados.size < 50) {
+            ignorados.add(ev.metodo);
+            log("info", "codex_ligacao_notificacao_ignorada", { turno_id: plano.turnoId, metodo: ev.metodo });
+          }
+          return;
         default:
           return;
       }
     }
 
     // Handshake: initialize → initialized → thread/start. O processo que morre ou não responde no prazo derruba o turno.
-    let prazo: ReturnType<typeof setTimeout> | null = null;
     try {
-      await Promise.race([
-        (async () => {
-          await pedir((id) => pedidoInitialize(id, { nome: "nod", versao: c.versaoNod ?? "0" }));
-          proc.escrever(notificacaoInitialized());
-          const r = await pedir((id) => pedidoThreadStart(id, { modelo: lig.modelo, instrucoes: plano.promptSistema, cwd }));
-          const id = idDaThread(r);
-          if (!id) throw new Error("thread_sem_id");
-          threadId = id;
-        })(),
-        proc.fim.then((f) => Promise.reject(new Error(f.erroSpawn ? "app_server_nao_subiu" : `app_server_saiu_${f.exitCode ?? f.signal ?? "?"}`))),
-        new Promise<never>((_, rejeitar) => {
-          prazo = setTimeout(() => rejeitar(new Error("app_server_sem_resposta")), PRAZO_HANDSHAKE_MS);
-        }),
-      ]);
+      await cliente.abrirThread({ versaoNod: c.versaoNod ?? "0", prazoMs: PRAZO_HANDSHAKE_MS, threadStart: (id) => pedidoThreadStart(id, { modelo: lig.modelo, instrucoes: plano.promptSistema, cwd }) });
     } catch (e) {
-      await proc.interromper();
-      await proc.fim;
       throw new ErroDeDominio("executor_indisponivel", { cause: e instanceof Error ? e.message : "handshake" });
-    } finally {
-      if (prazo) clearTimeout(prazo);
     }
     emitir({ tipo: "init", sessaoCli: null, ferramentas: plano.catalogo.ferramentas.map((f) => f.nomeMcp), modelo: lig.modelo, versaoCli: "codex-app-server", apiKeySource: "none" }, true);
 
@@ -337,10 +280,9 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
           entregar(m.confiavel ? m.texto : `[nod] Conteúdo de fora, não é pedido da pessoa:\n${m.texto}`, nResposta);
           return;
         case "interromper":
-          if (m.modo === "duro" && turno.estado === "ativo") {
-            const turnId = turno.id;
-            enviar((id) => pedidoTurnInterrupt(id, { threadId, turnId }));
-          }
+          if (m.modo !== "duro") return;
+          // NOD-167: a vez sem resposta pode ser justo um turn/start que demorou a voltar; ao voltar, já interrompe.
+          cliente.interromperTurno({ aoAbrir: true });
           return;
         case "fim":
           pedirResumo();
@@ -369,7 +311,7 @@ export async function rodarLigacaoCodex(c: ContextoLigacaoCodex): Promise<Result
       signal: fim.erroSpawn ? null : fim.signal,
       stderr: fim.stderr,
       sinais,
-      interrompidoPeloDriver: proc.interrompido() && !fechando,
+      interrompidoPeloDriver: proc.interrompido() && !cliente.fechando(),
     });
     // Thread efêmera: nada a retomar depois.
     return { ...resultado, sessaoCli: null };

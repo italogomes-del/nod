@@ -18,7 +18,7 @@ async function cenario(deps: Deps) {
   for (const capacidade of ["enviar", "buscar"]) await deps.repos.concessoes.conceder({ agenteId: agente?.id ?? "", conectorId: email?.id ?? "", capacidade, mensagemId: "m" });
   const crm = await deps.repos.conectores.criar({ nome: "CRM", slug: "crm", transporte: "stdio", comando: "node", declaracao: "toca" });
   const semDeclaracao = await deps.repos.conectores.criar({ nome: "Planilha", slug: "planilha", transporte: "stdio", comando: "node", declaracao: "nao-declarou" });
-  const turno = await deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: 9e12, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: 9e12, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
   return { agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", turnoId: turno?.id ?? "", crmId: crm?.id ?? "", planilhaId: semDeclaracao?.id ?? "" };
 }
 

@@ -4,8 +4,10 @@ import {
   idDaThread,
   idDoTurno,
   interpretarLinhaAppServer,
+  modelosDaLista,
   notificacaoInitialized,
   pedidoInitialize,
+  pedidoModelList,
   pedidoThreadStart,
   pedidoTurnInterrupt,
   pedidoTurnStart,
@@ -74,13 +76,24 @@ describe("linhas do servidor", () => {
 
   it("ferramenta MCP começa e acaba com o nome no formato do Claude; mensagem completa traz o texto", () => {
     const inicio = { method: "item/started", params: { threadId: "thr", turnId: "t1", item: { type: "mcpToolCall", id: "m1", server: "nod", tool: "lembrar", status: "inProgress", arguments: { a: 1 } } } };
-    expect(interpretarLinhaAppServer(linha(inicio))).toEqual({ tipo: "item", fase: "inicio", turnId: "t1", itemId: "m1", tipoItem: "mcpToolCall", ferramenta: "mcp__nod__lembrar", falhou: false, texto: null });
+    expect(interpretarLinhaAppServer(linha(inicio))).toEqual({ tipo: "item", fase: "inicio", turnId: "t1", itemId: "m1", tipoItem: "mcpToolCall", ferramenta: "mcp__nod__lembrar", falhou: false, texto: null, entrada: null });
     const falhou = { method: "item/completed", params: { turnId: "t1", item: { type: "mcpToolCall", id: "m1", server: "nod", tool: "lembrar", status: "failed", error: { message: "x" } } } };
     expect(interpretarLinhaAppServer(linha(falhou))).toMatchObject({ fase: "fim", ferramenta: "mcp__nod__lembrar", falhou: true });
     const msg = { method: "item/completed", params: { turnId: "t1", item: { type: "agentMessage", id: "a1", text: "Pronto." } } };
     expect(interpretarLinhaAppServer(linha(msg))).toMatchObject({ tipo: "item", fase: "fim", tipoItem: "agentMessage", ferramenta: null, falhou: false, texto: "Pronto." });
-    const comando = { method: "item/started", params: { turnId: "t1", item: { type: "commandExecution", id: "c1", command: "ls" } } };
-    expect(interpretarLinhaAppServer(linha(comando))).toMatchObject({ tipoItem: "commandExecution", ferramenta: null });
+  });
+
+  // ADR-103: as nativas do Codex viram ferramenta com o nome que o hook do nod conhece, e o passo leva o que o identifica.
+  it.each([
+    [{ type: "commandExecution", id: "c1", command: "git status" }, "Bash", { command: "git status" }],
+    [{ type: "fileChange", id: "c2", changes: [{ path: "/u/nod/x/a.ts", kind: "add" }], status: "inProgress" }, "apply_patch", { arquivos: ["/u/nod/x/a.ts"] }],
+    [{ type: "webSearch", id: "c3", query: "preço do plano" }, "web_search", { query: "preço do plano" }],
+    [{ type: "imageView", id: "c4", path: "/tmp/print.png" }, "view_image", { path: "/tmp/print.png" }],
+    [{ type: "collabAgentToolCall", id: "c5", tool: "spawn_agent" }, "spawn_agent", null],
+    [{ type: "reasoning", id: "c6" }, null, null],
+  ])("item %j → ferramenta %j", (item, ferramenta, entrada) => {
+    const ev = interpretarLinhaAppServer(linha({ method: "item/started", params: { turnId: "t1", item } }));
+    expect(ev).toMatchObject({ tipo: "item", ferramenta, entrada });
   });
 
   it("turno iniciado e concluído (completo, interrompido, falhou)", () => {
@@ -111,8 +124,34 @@ describe("linhas do servidor", () => {
   });
 
   it("linha que não é JSON, não é objeto ou é notificação desconhecida é ignorada sem lançar", () => {
-    for (const l of ["", "texto solto", "[1,2]", "null", linha({ method: "account/rateLimits/updated", params: {} }), linha({ result: {} })]) {
+    for (const l of ["", "texto solto", "[1,2]", "null", linha({ result: {} })]) {
       expect(interpretarLinhaAppServer(l)).toEqual({ tipo: "ignorado" });
     }
+    // NOD-167: a notificação desconhecida leva só o nome (cortado), nunca os parâmetros.
+    expect(interpretarLinhaAppServer(linha({ method: "account/rateLimits/updated", params: { segredo: "x" } }))).toEqual({ tipo: "ignorado", metodo: "account/rateLimits/updated" });
+    expect(interpretarLinhaAppServer(linha({ method: "x".repeat(200), params: {} }))).toEqual({ tipo: "ignorado", metodo: "x".repeat(80) });
+  });
+});
+
+describe("model/list (NOD-167)", () => {
+  it("o pedido não leva parâmetros", () => {
+    expect(ler(pedidoModelList(7))).toEqual({ jsonrpc: "2.0", id: 7, method: "model/list", params: {} });
+  });
+
+  it("lê id, padrão e esforços no formato do protocolo v2", () => {
+    expect(modelosDaLista({ data: [
+      { id: "gpt-5.6-sol", model: "gpt-5.6-sol", isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }], defaultReasoningEffort: "high" },
+      { id: "gpt-5.6-luna", isDefault: false, supportedReasoningEfforts: [{ reasoningEffort: "minimal" }, { reasoningEffort: "low" }], defaultReasoningEffort: "low" },
+    ], nextCursor: null })).toEqual([
+      { id: "gpt-5.6-sol", padrao: true, esforcos: ["low", "high"], esforcoPadrao: "high" },
+      { id: "gpt-5.6-luna", padrao: false, esforcos: ["minimal", "low"], esforcoPadrao: "low" },
+    ]);
+  });
+
+  it("tolera variações (models, model no lugar de id, esforço como texto ou {effort}) e descarta item sem id", () => {
+    expect(modelosDaLista({ models: [{ model: "m1", supportedReasoningEfforts: ["low", { effort: "medium" }, 3] }, { displayName: "sem id" }, "lixo"] })).toEqual([
+      { id: "m1", padrao: false, esforcos: ["low", "medium"], esforcoPadrao: null },
+    ]);
+    expect(modelosDaLista({})).toEqual([]);
   });
 });

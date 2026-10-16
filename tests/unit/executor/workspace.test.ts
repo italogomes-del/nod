@@ -4,10 +4,17 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { criarPreparadorWorkspace } from "../../../src/adapters/workspace/preparar.ts";
 
 const executar = promisify(execFile);
+/**
+ * NOD-194: cada teste roda de 5 a 15 `git` de verdade (init, commit, worktree) — o processo é o que está sendo testado.
+ * medido em 2026-10-07: com o Mac em load ~950 (duas `test:unit` em paralelo), 8 dos 9 testes estouravam os 5 s padrão
+ * do projeto unit, todos parados no meio de um `git`. 30 s por teste (e no afterEach, que apaga as pastas) dá folga
+ * a essa fila sem esconder um `git` travado, que segue falhando. Só este arquivo; o padrão do unit não muda.
+ */
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 const temporarios: string[] = [];
 afterEach(async () => { for (const dir of temporarios.splice(0)) await rm(dir, { recursive: true, force: true }); });
 async function fixture(comGit = true) {

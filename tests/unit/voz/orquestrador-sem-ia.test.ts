@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EstadoIaDaLigacao, MotivoFimLigacao, MsgCerebroServidor, MsgMidiaServidor } from "../../../src/contracts/voz.ts";
-import { criarServicoVoz, type FalaParaGravar, type FonteDeEsperas, type RegistroLigacao } from "../../../src/adapters/voz/orquestrador.ts";
+import { criarServicoVoz, type DepsVoz, type FalaParaGravar, type FonteDeEsperas, type RegistroLigacao, type ServicoVoz } from "../../../src/adapters/voz/orquestrador.ts";
 import { criarProvedoresFalsos } from "../../../src/adapters/voz/voz-falsa.ts";
 import type { CanalVoz } from "../../../src/adapters/voz/ws.ts";
 
@@ -52,7 +52,7 @@ function quadro(seq: number, voz: boolean): Uint8Array {
 const FRASE = "Não consegui usar a IA deste Mac. As opções estão na tela.";
 const DUAS_PRONTAS: EstadoIaDaLigacao[] = [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "pronto" }];
 
-function montar(o: { ias?: () => EstadoIaDaLigacao[]; prazos?: Record<string, number>; roteiro?: string[]; esperas?: FonteDeEsperas; relogio?: () => number } = {}) {
+function montar(o: { ias?: () => EstadoIaDaLigacao[]; prazos?: Record<string, number>; roteiro?: string[]; esperas?: FonteDeEsperas; relogio?: () => number; continuarCom?: DepsVoz["continuarCom"] } = {}) {
   const falas: FalaParaGravar[] = [];
   const fins: MotivoFimLigacao[] = [];
   const voz = criarServicoVoz({
@@ -66,6 +66,7 @@ function montar(o: { ias?: () => EstadoIaDaLigacao[]; prazos?: Record<string, nu
     iasDoMac: o.ias ?? (() => DUAS_PRONTAS),
     ...(o.esperas ? { esperas: o.esperas } : {}),
     ...(o.relogio ? { relogio: o.relogio } : {}),
+    ...(o.continuarCom ? { continuarCom: o.continuarCom } : {}),
     prazos: { midiaReconexaoMs: 100, cerebroReconexaoMs: 150, cerebroPrimeiroMs: 5000, confirmarInterrupcaoMs: 300, resumoMs: 50, vigiaDasIasMs: 30, ...o.prazos },
   });
   const reg: RegistroLigacao = { ligacaoId: "l1", tenantId: "t", pessoaId: "p", agenteId: "a", conversaId: "c", turnoId: "turno-1", voz: "clara", velocidade: 1, nomeBot: "Nina", genero: "feminina", maxS: 600 };
@@ -374,6 +375,138 @@ describe("rede de segurança: a IA do Mac cai com a ligação em curso", () => {
     await ate(() => m.fins.length > 0);
     expect(m.fins).toEqual(["pessoa_desligou"]);
     expect(m.voz.reabrirCerebro({ pessoaId: "p", ligacaoId: "l1", turnoId: "turno-2", ia: "codex-cli" })).toBe(false);
+    await m.voz.fechar();
+  });
+});
+
+describe("limite da assinatura (NOD-168, ADR-078)", () => {
+  const SO_CLAUDE: EstadoIaDaLigacao[] = [{ id: "claude-cli", estado: "pronto" }, { id: "codex-cli", estado: "nao_autenticado" }];
+
+  it("com a outra IA pronta: aviso escrito e falado, o 'sem IA' com causa `limite` (sem a frase fixa por cima) e nenhum `limite_da_assinatura`", async () => {
+    const m = montar();
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    const aviso = await ate(() => msgs(m.midia, "sem-ia")[0]);
+    expect(aviso).toMatchObject({ causa: "limite", ia: "claude-cli", ias: DUAS_PRONTAS });
+    expect(msgs(m.midia, "aviso").map((x) => x.texto)).toContain("Sua assinatura de IA chegou ao limite.");
+    await ate(() => falasDoBot(m.midia).some((t) => t.includes("chegou ao limite") && t.includes("outra IA")));
+    await ate(() => msgs(m.midia, "estado").at(-1)?.fase === "aguardando_escolha");
+    expect(falasDoBot(m.midia)).not.toContain(FRASE);
+    // Um segundo `limite` (o CLI manda um só, mas o canal é de fora) não muda nada.
+    m.cerebro.receber({ t: "limite" });
+    await dormir(250);
+    expect(msgs(m.midia, "sem-ia")).toHaveLength(1);
+    expect(m.fins).toEqual([]);
+    expect(m.voz.aguardandoEscolha({ pessoaId: "p", ligacaoId: "l1" })).toBe(true);
+    await m.voz.fechar();
+  });
+
+  it("sem outra IA pronta: aviso escrito e falado, e a ligação encerra com `limite_da_assinatura` depois da fala", async () => {
+    const m = montar({ ias: () => SO_CLAUDE });
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => falasDoBot(m.midia).some((t) => t.includes("vou encerrar a ligação")));
+    expect(msgs(m.midia, "aviso").map((x) => x.texto)).toContain("Sua assinatura de IA chegou ao limite.");
+    // A fala toca até o cliente dizer que tocou: a ligação ainda não encerrou.
+    expect(m.fins).toEqual([]);
+    for (const f of msgs(m.midia, "bot-fala")) m.midia.receber({ t: "tocou-fim", utt: Number(f.utt) });
+    await ate(() => m.fins.length > 0);
+    expect(m.fins).toEqual(["limite_da_assinatura"]);
+    expect(msgs(m.midia, "sem-ia")).toEqual([]);
+    expect(msgs(m.cerebro, "fim").at(-1)).toMatchObject({ motivo: "limite_da_assinatura" });
+    await m.voz.fechar();
+  });
+
+  it("sem outra IA pronta e o cliente sem confirmar a fala: o teto encerra mesmo assim", async () => {
+    const m = montar({ ias: () => SO_CLAUDE, prazos: { limiteFalaMs: 400 } });
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => m.fins.length > 0, 4000);
+    expect(m.fins).toEqual(["limite_da_assinatura"]);
+    await m.voz.fechar();
+  });
+
+  it("sem outra IA pronta, até encerrar: o que a pessoa diz não vira vez, nada do cérebro é falado e a queda dele não muda o motivo", async () => {
+    const m = montar({ ias: () => SO_CLAUDE, prazos: { limiteFalaMs: 400 } });
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => falasDoBot(m.midia).some((t) => t.includes("vou encerrar a ligação")));
+    const estadosAntes = msgs(m.midia, "estado").length;
+    // A pessoa fala por cima do aviso: não há vez nova para o cérebro (antes, a resposta dele, o erro do CLI, era falada).
+    m.midia.receber({ t: "texto", conteudo: "alô?" });
+    m.cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "You've hit your limit. " });
+    m.cerebro.receber({ t: "fala-fim", n: 1 });
+    await dormir(60);
+    expect(msgs(m.cerebro, "vez").filter((v) => Number(v.n) > 0)).toEqual([]);
+    expect(falasDoBot(m.midia).some((t) => t.includes("hit your limit"))).toBe(false);
+    // O CLI encerra o turno e o canal do cérebro fecha: nem reconexão, nem "sem IA".
+    expect(cairCerebro(m, { ia: "claude-cli" })).toBe(true);
+    await ate(() => m.fins.length > 0, 4000);
+    expect(m.fins).toEqual(["limite_da_assinatura"]);
+    expect(msgs(m.midia, "sem-ia")).toEqual([]);
+    expect(msgs(m.midia, "estado").slice(estadosAntes).map((e) => e.fase)).not.toContain("reconectando");
+    await m.voz.fechar();
+  });
+
+  it("a IA que assumiu também bate no limite: o `limite` dela vale (sem outra pronta, encerra)", async () => {
+    let ias: EstadoIaDaLigacao[] = DUAS_PRONTAS;
+    const m = montar({ ias: () => ias, prazos: { limiteFalaMs: 400 } });
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => m.voz.aguardandoEscolha({ pessoaId: "p", ligacaoId: "l1" }));
+    expect(m.voz.reabrirCerebro({ pessoaId: "p", ligacaoId: "l1", turnoId: "turno-2", ia: "codex-cli" })).toBe(true);
+    const novo = canalFalso();
+    expect(m.voz.anexarCerebro({ turnoId: "turno-2", ligacaoId: "l1", canal: novo })).toBeNull();
+    novo.receber({ t: "ola", ligacaoId: "l1", capacidades: { interrupcao: true, harness: "codex-cli" } });
+    ias = [{ id: "claude-cli", estado: "nao_autenticado" }, { id: "codex-cli", estado: "pronto" }];
+    novo.receber({ t: "limite" });
+    await ate(() => m.fins.length > 0, 4000);
+    expect(m.fins).toEqual(["limite_da_assinatura"]);
+    await m.voz.fechar();
+  });
+
+  it("revisto em 2026-10-10 (emenda da ADR-078): com outra IA pronta, a ligação segue SOZINHA por ela, sem esperar a escolha", async () => {
+    const pedidos: string[] = [];
+    const servico: { voz: ServicoVoz | null } = { voz: null };
+    const m = montar({
+      continuarCom: async (ref, ia) => {
+        pedidos.push(`${ref.ligacaoId}:${ia}`);
+        return servico.voz?.reabrirCerebro({ pessoaId: ref.pessoaId, ligacaoId: ref.ligacaoId, turnoId: "turno-2", ia }) ?? false;
+      },
+    });
+    servico.voz = m.voz;
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => pedidos.length === 1);
+    expect(pedidos).toEqual(["l1:codex-cli"]);
+    await ate(() => falasDoBot(m.midia).some((t) => t.includes("Vou continuar com o ChatGPT")));
+    expect(falasDoBot(m.midia).some((t) => t.includes("escolha na tela"))).toBe(false);
+    const novo = canalFalso();
+    expect(m.voz.anexarCerebro({ turnoId: "turno-2", ligacaoId: "l1", canal: novo })).toBeNull();
+    expect(msgs(m.midia, "ia-voltou").at(-1)).toEqual({ t: "ia-voltou", ia: "codex-cli", trocou: true });
+    expect(m.fins).toEqual([]);
+    await m.voz.fechar();
+  });
+
+  it("continuar sozinha não deu (o turno novo não nasceu): fica a escolha na tela, como antes", async () => {
+    const m = montar({ continuarCom: async () => { throw new Error("banco fora"); } });
+    await emLigacao(m);
+    m.cerebro.receber({ t: "limite" });
+    await ate(() => msgs(m.midia, "estado").at(-1)?.fase === "aguardando_escolha");
+    expect(m.voz.aguardandoEscolha({ pessoaId: "p", ligacaoId: "l1" })).toBe(true);
+    expect(m.fins).toEqual([]);
+    await m.voz.fechar();
+  });
+
+  it("um `limite` que chega depois do fim é ignorado", async () => {
+    const m = montar({ ias: () => SO_CLAUDE });
+    await emLigacao(m);
+    m.midia.receber({ t: "tchau" });
+    await ate(() => m.fins.length > 0);
+    m.cerebro.receber({ t: "limite" });
+    await dormir(200);
+    expect(m.fins).toEqual(["pessoa_desligou"]);
+    expect(msgs(m.midia, "aviso")).toEqual([]);
     await m.voz.fechar();
   });
 });

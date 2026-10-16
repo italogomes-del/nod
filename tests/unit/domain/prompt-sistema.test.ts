@@ -1,12 +1,10 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Conector } from "../../../src/contracts/conector.ts";
-import type { Memoria } from "../../../src/contracts/memoria.ts";
+import type { Pendencia } from "../../../src/contracts/pendencia.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
-import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
-
-const agente = { nome: "Vera", titulo: "revisora de PRs", descricao: "Revisa PRs do time nod e responde curto." };
-const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod__${nome}`, origem: "nod", conectorId: null, readOnlyHint: false, tocaDadoPessoal: false, schema: { type: "object" } });
-const mem = (id: string, texto: string, criadoEm: number): Memoria => ({ tenantId: "t", id, agenteId: "a", tipo: "preferencia", texto, origem: "pessoa", criadoEm });
+import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
+import { agente, f, mem } from "./_fixtures-prompt.ts";
 
 describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
   const comTerminal = (modoAprovacao: "manual" | "automatico" | "total") => montarPromptSistema({ agente: { ...agente, modoAprovacao }, memorias: [], ferramentas: [f("pedir_aprovacao")], nativas: ["Read", "Bash"], pastaDoBot: "Vera", pessoaNome: "Marlon", modo: "conversa" });
@@ -36,6 +34,13 @@ describe("montarPromptSistema: o modo de aprovação (ADR-059)", () => {
       expect(comTerminal(modo)).toContain("Gravar arquivo fora da sua pasta segue a mesma regra do comando que muda algo.");
     }
     expect(comTerminal("total")).toContain("só o que toca uma credencial do Mac vira um pedido de aprovação");
+  });
+
+  it("ADR-088: na task, a worktree nasce dentro da pasta dela e o nod a apaga quando a task acaba", () => {
+    const naTask = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_aprovacao")], nativas: ["Read", "Bash"], pastaDoBot: "Vera/fix-filtros-abc123", pessoaNome: "Marlon", modo: "conversa" });
+    expect(naTask).toContain("worktree add ~/nod/Vera/fix-filtros-abc123/<repo> -b <branch> origin/main");
+    expect(naTask).toContain("o nod apaga a worktree que não tem alteração por commitar; a branch fica no clone");
+    expect(naTask).not.toContain("<repo>-<task>");
   });
 
   it("a linha das aprovações pertence à seção do modo no Raio-X", () => {
@@ -204,6 +209,8 @@ describe("montarPromptSistema", () => {
       const p = montarPromptSistema({ agente, memorias: [], ferramentas: [f("pedir_acesso")], pessoaNome: "M", modo: "conversa", conectores: [gmail] });
       expect(conexoes(p)[0]).toMatchObject({ slug: "gmail", concedidas_a_voce: [] });
       expect(p).toContain("Conector habilitado não é acesso seu");
+      // 2026-10-06: o "já liberei" da pessoa vira pedido na hora — o card nasce na conversa, do bot.
+      expect(p).toContain("Se a pessoa disser que já conectou ou liberou um app e ele não está em concedidas_a_voce, chame pedir_acesso na hora");
       expect(p).toContain("Histórico e memória não provam concessão");
     });
 
@@ -263,5 +270,84 @@ describe("montarPromptSistema: o limite da corrente entre bots (ADR-063)", () =>
   it("peer (legado) nunca ganha a linha do limite: a linha do modo dele já diz que não repassa", () => {
     const p = montarPromptSistema({ ...base, modo: "peer", ferramentas: [f("lembrar")], profundidade: 3 });
     expect(p).not.toContain("Limite da corrente:");
+  });
+});
+
+describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefixo)", () => {
+  const colegas = [{ id: "dev2", nome: "Dev 2", titulo: "Dev", descricao: "implementa" }];
+  const conectores: Conector[] = [];
+  const kit = [f("pedir_a_bot"), f("ver_colegas"), f("anotar_pendencia"), f("criar_rotina"), f("pedir_acesso"), f("publicar_artefato"), f("computador_observar")].map((x) => (x.nome === "computador_observar" ? { ...x, origem: "computador" as const } : x));
+  const pend = (texto: string): Pendencia => ({ tenantId: "t", id: `p-${texto}`, agenteId: "a", conversaId: "c", turnoId: null, texto, aPartirDe: null, cuidado: false, profundidade: 0, estado: "aberta", resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: 1 });
+  const base = { agente: { ...agente, modoAprovacao: "total" as const }, ferramentas: kit, nativas: ["Read"], pessoaNome: "Marlon", colegas, conectores };
+  /** As entradas de turno: tudo que muda de um turno para outro do mesmo bot. */
+  const turnoA = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Cecília" }, profundidade: 0 as const, computadorFora: { estado: "fora_do_ar" as const, motivo: "sem rede" }, semTerminal: "pedido_de_colega" as const, pendencias: [pend("revisar o PR")], memorias: [mem("m1", "o time usa Linear", 1)], contextoConversa: '{"historico":[]}' };
+  const turnoB = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Chico" }, profundidade: 2 as const, computadorFora: { estado: "desligado" as const }, semTerminal: "conteudo_de_fora" as const, pendencias: [pend("outra coisa")], memorias: [mem("m2", "prefere curto", 2)], contextoConversa: '{"historico":[{"autor":"Chico"}]}' };
+
+  it("critério 1: dois turnos que só diferem nas entradas voláteis têm a parte estável idêntica, e ela é o prefixo dos dois", () => {
+    for (const modo of ["conversa", "rotina", "delegacao"] as const) {
+      const a = partesDoPromptSistema({ ...base, ...turnoA, modo });
+      const b = partesDoPromptSistema({ ...base, ...turnoB, modo });
+      expect(a.estavel.join("\n"), modo).toBe(b.estavel.join("\n"));
+      expect(a.estavel.length).toBeGreaterThan(0);
+      for (const t of [turnoA, turnoB]) {
+        const p = montarPromptSistema({ ...base, ...t, modo });
+        expect(p.startsWith(`${a.estavel.join("\n")}\n`), modo).toBe(true);
+      }
+      // Cada entrada volátil aparece na parte volátil (a linha mudou de lugar, não sumiu).
+      const volatil = a.volatil.join("\n");
+      if (modo === "delegacao") expect(volatil).toContain("Modo de pedido de colega:");
+      expect(volatil).toContain("Seu computador está fora do ar (sem rede)");
+      expect(a.volatil.some((l) => l.startsWith("Terminal: este turno não tem terminal")), modo).toBe(true);
+      expect(a.estavel.some((l) => l.startsWith("Terminal:") || l.startsWith("Seu computador está") || l.startsWith("Modo de pedido de colega:")), modo).toBe(false);
+      expect(volatil).toContain("o time usa Linear");
+      expect(volatil).toContain("revisar o PR");
+      expect(volatil).toContain("Contexto recente da conversa");
+      expect(partesDoPromptSistema({ ...base, ...turnoB, modo }).volatil.join("\n")).toContain("Quem receber um pedido seu agora");
+    }
+  });
+
+  it("critério 1: no limite da corrente (sem pedir_a_bot) a linha do limite vai para a parte volátil", () => {
+    const semPedir = base.ferramentas.filter((x) => x.nome !== "pedir_a_bot");
+    const p = partesDoPromptSistema({ ...base, ...turnoA, ferramentas: semPedir, profundidade: 3, modo: "delegacao" });
+    expect(p.volatil.some((l) => l.startsWith("Limite da corrente:"))).toBe(true);
+    expect(p.estavel.some((l) => l.startsWith("Limite da corrente:"))).toBe(false);
+    expect(p.estavel.join("\n")).toBe(partesDoPromptSistema({ ...base, ...turnoB, ferramentas: semPedir, profundidade: 1, modo: "delegacao" }).estavel.join("\n"));
+  });
+
+  it("a parte volátil segue a ordem da spec: delegação, limite, aviso do último passe, computador fora, sem terminal, memória, pendências, contexto", () => {
+    const v = partesDoPromptSistema({ ...base, ...turnoB, modo: "delegacao" }).volatil;
+    const i = (prefixo: string) => v.findIndex((l) => l.startsWith(prefixo));
+    const ordem = ["Modo de pedido de colega:", "Quem receber um pedido seu", "Seu computador está", "Memória (", "Suas pendências abertas", "Contexto recente da conversa"].map(i);
+    for (const n of ordem) expect(n).toBeGreaterThanOrEqual(0);
+    expect([...ordem].sort((x, y) => x - y)).toEqual(ordem);
+  });
+
+  it("critério 2: nada sumiu e nenhum texto mudou — as linhas ordenadas batem com as da main 833f05f nos três modos", () => {
+    // Impressão digital das linhas ORDENADAS do prompt da main 833f05f para as mesmas entradas (gerada antes da mudança).
+    // Profundidade 1 para não cair no aviso do último passe, a única frase que saiu da linha da Colaboração.
+    // É um retrato fixo: quem mudar de propósito o TEXTO de uma linha do prompt regenera estes hashes com o mesmo
+    // `digital`; uma falha aqui sem mudança de texto quer dizer que uma linha sumiu ou duplicou. Regenerado em 2026-10-06:
+    // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação.
+    const digital = (s: string) => createHash("sha256").update([...s.split("\n")].sort().join("\n")).digest("hex");
+    const esperado = {
+      conversa: "74d76b0ef12af0c0278b07b8338198a9a9a31daec1f529beeef816b40852b7d8",
+      rotina: "6fab7fec27c5acc8285b61f6edbf1818db32abd5915d251c1bfd9ac698a7613a",
+      delegacao: "efeb97808aec8c9bae528d82e7fbdea444e69601d690163ab00c9d06b461e758",
+    };
+    const obtido = { conversa: "", rotina: "", delegacao: "" };
+    for (const modo of ["conversa", "rotina", "delegacao"] as const) obtido[modo] = digital(montarPromptSistema({ ...base, ...turnoA, profundidade: 1, modo }));
+    expect(obtido).toEqual(esperado);
+  });
+
+  it("o aviso do último passe sai da linha da Colaboração com o mesmo texto e continua na seção colegas do Raio-X", () => {
+    const p = montarPromptSistema({ ...base, ...turnoB, modo: "conversa" }).split("\n");
+    const aviso = p.find((l) => l.startsWith("Quem receber um pedido seu")) ?? "";
+    expect(aviso).toBe("Quem receber um pedido seu agora já estará no último passe da corrente e não poderá repassá-lo: peça direto a quem resolve.");
+    expect(secaoDaLinha(aviso)).toBe("colegas");
+    expect(p.find((l) => l.startsWith("Colaboração:"))).not.toContain("Quem receber");
+  });
+
+  it("sem marcador: o CLI 2.1.290 não respeita a fronteira no --append-system-prompt (sonda da NOD-155), então ela não entra", () => {
+    expect(montarPromptSistema({ ...base, ...turnoA, modo: "delegacao" })).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
   });
 });

@@ -1,3 +1,5 @@
+import type { IdHarness } from "./harness.ts";
+import type { LimitesIa } from "./inteligencia.ts";
 import type { ModoTurno } from "./plano-turno.ts";
 
 /**
@@ -110,4 +112,24 @@ export type ResumoRaioX = {
 /** GET conversas/:id/raio-x?desde=<epoch ms>: os resumos e o total desde `desde` (a meia-noite da pessoa). */
 export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; turnos: number } };
 
-export type Preferencias = { modoDev: boolean };
+/**
+ * Preferências da pessoa (0036). `avisosFechados` (0059, definido em 2026-10-06): a chave de cada aviso da tela que ela
+ * fechou — por tipo, não por bot (ex.: "modo:total"). Fechou uma vez, não volta.
+ */
+/**
+ * `faixaTrabalhosRecolhida` (ADR-083) saiu do contrato em 2026-10-12 (ADR-099, I10): a web já não a lia nem gravava desde
+ * 09/10, e a faixa vira a linha do dono. A coluna `preferencias.faixa_trabalhos_recolhida` fica no banco (expand-only).
+ */
+/**
+ * `usoDoMac` (definido em 2026-10-08, ADR-085): quanto do Mac os bots podem usar antes de trabalho novo em segundo
+ * plano esperar. Ausente = "equilibrado" (o padrão da 0064).
+ */
+export const USOS_DO_MAC = ["pouco", "equilibrado", "livre"] as const;
+export type UsoDoMac = (typeof USOS_DO_MAC)[number];
+export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
+/** `maquinaPadraoId` (ADR-090, 0066): onde trabalha o bot sem máquina escolhida; null = qualquer uma. */
+/**
+ * `ordemIas` (0068, emenda da ADR-036): a ordem das IAs do Automático da pessoa; null = a padrão (ORDEM_IAS_PADRAO).
+ * `iasNoLimite`: as IAs que o servidor viu chegar ao limite da assinatura, com o prazo (vencidas podem continuar aqui).
+ */
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa };

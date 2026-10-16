@@ -1,4 +1,6 @@
 import type { Executor } from "../../../contracts/evento.ts";
+import type { IdHarness } from "../../../contracts/harness.ts";
+import type { Inventario } from "../../../contracts/inventario.ts";
 import { criarRepos } from "../../../repositories/index.ts";
 import type { Escopo, Relogio, Transacao } from "../../../shared/types.ts";
 import type { CasoDeUso, Deps, Services, UseCasesNod } from "../../../use-cases/tipos.ts";
@@ -16,6 +18,8 @@ export type DepsRotas = {
   modeloPadrao?: string;
   prazoDecisaoMs?: number;
   executor?: Executor;
+  /** #313: as IAs das máquinas vivas da pessoa (modo compartilhado), para a negação do envio nomear a IA do bot. */
+  harnessesDaPessoa?: (pessoaId: string) => Partial<Record<IdHarness, Inventario>>;
 };
 
 export type Executar = <I, O>(escopo: Escopo, caso: CasoDeUso<I, O>, input: I) => Promise<O>;

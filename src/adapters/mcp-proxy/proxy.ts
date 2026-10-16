@@ -63,6 +63,13 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
   const longpoll = opcoes.longpollMs ?? LONGPOLL_APROVACAO_MS;
   const diag = opcoes.diagnostico ?? (() => undefined);
   let plano: PlanoTurno | null = null;
+  /**
+   * definido em 2026-10-12 (NOD-214): o último plano recebido, guardado quando o GET /plano falha por SERVIDOR FORA (o
+   * deploy reinicia o servidor no meio do turno). Não serve a lista — tools/list continua fail-closed —, só muda a
+   * resposta do tools/call: em vez de plano_ausente (terminal), "indisponível, tente de novo" (transitória), e a chamada
+   * seguinte busca o plano outra vez. Plano ausente de verdade (404/401) segue negando como antes.
+   */
+  let ultimoPlano: PlanoTurno | null = null;
   let semPlanoDesde: number | null = null;
   let servidorForaDesde: number | null = null;
   let fila: Promise<unknown> = Promise.resolve();
@@ -93,8 +100,11 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
       diag("plano_recebido", { turno: r.plano.turnoId, ferramentas: r.plano.catalogo.ferramentas.length });
       return;
     }
+    if (r.motivo === "servidor_fora") {
+      ultimoPlano = plano ?? ultimoPlano;
+      servidorForaDesde ??= agora();
+    } else ultimoPlano = null;
     plano = null;
-    if (r.motivo === "servidor_fora") servidorForaDesde ??= agora();
     semPlanoDesde ??= agora();
     diag("plano_ausente", { motivo: r.motivo, status: r.status });
   }
@@ -138,8 +148,15 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
     const p = (typeof params === "object" && params !== null ? params : {}) as { name?: unknown; arguments?: unknown };
     const nome = typeof p.name === "string" ? p.name : "";
     const argumentos = (typeof p.arguments === "object" && p.arguments !== null ? p.arguments : {}) as Record<string, unknown>;
+    // NOD-214: o plano sumiu porque o servidor estava fora (deploy): tenta de novo antes de negar.
+    if (!plano && ultimoPlano && servidorForaDesde !== null) await buscarPlano();
     const v = validadeDoPlano(plano, agora());
     if (!v.ok) {
+      if (v.motivo === "plano_ausente" && ultimoPlano && servidorForaDesde !== null && validadeDoPlano(ultimoPlano, agora()).ok) {
+        const n = negacaoConectorIndisponivel(nome || "(sem nome)", servidorForaDesde, "conector_indisponivel");
+        diag("plano_indisponivel", { nome });
+        return resposta(id, conteudoNegado(n, agora()));
+      }
       if (v.motivo === "plano_expirado") semPlanoDesde ??= agora();
       return negarPlano(id, v.motivo);
     }
@@ -171,6 +188,8 @@ export function criarProxy(opcoes: OpcoesProxy): Proxy {
         const a = await cliente.aguardar(r.aguardar, longpoll);
         if (ehFalhaTransporte(a)) break;
         if (a.estado === "decidida") return resposta(id, decididaComResultados(a.itens, orcamento));
+        // ADR-083 (#194): sob pressão de memória o servidor solta a espera; o turno encerra e a decisão retoma depois.
+        if (a.soltar === true) break;
       }
       return resposta(id, texto(JSON.stringify({ estado: "pendente", decisao_id: r.aguardar, instrucao: INSTRUCAO_PENDENTE })));
     }

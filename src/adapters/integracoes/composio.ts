@@ -67,6 +67,8 @@ export type OpcoesClienteComposio = {
   agora?: () => number;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
+  /** NOD-208 (revisão do PR #264): instante (no relógio `agora`) em que toda requisição desiste; corta os 30 s. */
+  prazoFinal?: number;
 };
 
 /** definido em 2026-09-17: URLs e erros do provedor nunca transportam a chave para a web ou para o modelo. */
@@ -74,6 +76,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
   const agora = opcoes.agora ?? Date.now;
   const dormir = opcoes.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const aleatorio = opcoes.aleatorio ?? Math.random;
+  const prazoFinal = opcoes.prazoFinal ?? Number.POSITIVE_INFINITY;
 
   /**
    * NOD-157 (emenda à ADR-009): GET é leitura (repete em 429, 5xx e rede); POST e PATCH são escrita (só 429, a
@@ -83,6 +86,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
    */
   async function requisitar(metodo: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<Response> {
     const inicio = agora();
+    const restante = () => Math.min(ORCAMENTO_CONECTOR_MS - (agora() - inicio), prazoFinal - agora());
     const rotulo = `${metodo} /${path.split("?")[0]?.split("/")[1] ?? ""}`;
     let anterior: { status: number | "rede"; espera: number } | null = null;
     for (let tentativa = 1; ; tentativa++) {
@@ -91,7 +95,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
       let falha: FalhaHttp;
       // setTimeout e não AbortSignal.timeout: o relógio falso dos testes controla este, e unref não segura o processo.
       const ctrl = new AbortController();
-      const prazo = setTimeout(() => ctrl.abort(new DOMException("prazo", "TimeoutError")), prazoDaTentativa(CHAMADA_CONECTOR_MS, ORCAMENTO_CONECTOR_MS - (agora() - inicio)));
+      const prazo = setTimeout(() => ctrl.abort(new DOMException("prazo", "TimeoutError")), prazoDaTentativa(CHAMADA_CONECTOR_MS, restante()));
       prazo.unref?.();
       try {
         resposta = await f(`${BASE}${path}`, { method: metodo, headers: { "x-api-key": chave, "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}), signal: ctrl.signal, redirect: "error" });
@@ -113,7 +117,7 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
         ...(typeof falha === "number" ? { status: falha } : {}),
         somenteLeitura: metodo === "GET",
         tentativa,
-        restanteMs: ORCAMENTO_CONECTOR_MS - (agora() - inicio),
+        restanteMs: restante(),
         prazoMs: CHAMADA_CONECTOR_MS,
         ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
       });
@@ -228,9 +232,25 @@ export function criarClienteComposio(chave: string, f: typeof fetch = fetch, opc
       const t = r.toolkit as { slug?: unknown } | undefined;
       return r.status === "ACTIVE" && r.is_disabled !== true && r.user_id === userId && t?.slug === toolkit;
     },
-    async fixarConta(sessaoId: string, toolkit: string, contaId: string) {
+    /**
+     * NOD-212: a resposta do PATCH traz `tool_router_tools`, as ferramentas que a sessão expõe depois de fixar a conta.
+     * `ferramentas` conta as concretas (sem COMPOSIO_*); null = o provedor não mandou a lista (resposta sem corpo ou
+     * noutro formato) e ninguém conclui nada dela. `avisos` são só os códigos (ex.: PRELOAD_TOOLS_HIGH_CONTEXT_USAGE).
+     */
+    async fixarConta(sessaoId: string, toolkit: string, contaId: string): Promise<{ ferramentas: number | null; avisos: string[] }> {
       const r = await requisitar("PATCH", `/tool_router/session/${encodeURIComponent(sessaoId)}`, { connected_accounts: { [toolkit]: [contaId] } }).catch(() => null);
       if (!r?.ok) throw new ErroDeDominio("conector_indisponivel");
+      const lido: unknown = await r.json().catch(() => null);
+      const corpo = lido && typeof lido === "object" && !Array.isArray(lido) ? lido as Record<string, unknown> : null;
+      const lista = corpo?.tool_router_tools;
+      // Autorrevisão do PR #288: item que não é string = formato que não conhecemos; contar 0 culparia o Composio.
+      const ferramentas = Array.isArray(lista) && lista.every((t): t is string => typeof t === "string")
+        ? lista.filter((t) => !t.startsWith("COMPOSIO_")).length
+        : null;
+      const avisos = (Array.isArray(corpo?.warnings) ? corpo.warnings as unknown[] : [])
+        .map((w) => (w && typeof w === "object" ? (w as Record<string, unknown>).code : null))
+        .filter((c): c is string => typeof c === "string" && /^[A-Z0-9_]{1,64}$/.test(c));
+      return { ferramentas, avisos };
     },
   };
 }

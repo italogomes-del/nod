@@ -1,5 +1,9 @@
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../contracts/turno.ts";
-import { redigirECortar } from "./segredos.ts";
+import { motivoDoHookDoNod } from "./negacao-nativa.ts";
+import { redigirECortar, redigirSegredos } from "./segredos.ts";
+
+/** Os blocos de resposta a mensagens do meio (criarFalaDoMeio em mensagem-no-meio.ts), pelo próprio objeto do evento. */
+export type FalaDoMeioNoTurno = { falados: ReadonlySet<EventoStream>; obrigatorios: ReadonlySet<EventoStream> };
 
 /**
  * Parser PURO do `claude -p --output-format stream-json --verbose --include-partial-messages`
@@ -17,6 +21,12 @@ function str(v: unknown, padrao = ""): string {
 }
 function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** O `resetsAt` do rate_limit vem em segundos (medido no CLI 2.1.x); zero, negativo ou não número viram `null`. */
+function emMs(v: unknown): number | null {
+  const s = num(v);
+  return s !== null && s > 0 ? s * 1000 : null;
 }
 
 function tokensDe(usage: Obj | null): TokensTurno {
@@ -106,11 +116,18 @@ export function interpretarLinhaStreamJson(linha: string): EventoStream {
   if (type === "rate_limit_event") {
     const info = obj(o["rate_limit_info"]);
     const janelas = obj(info?.["unifiedWindows"]);
+    const cinco = obj(janelas?.["five_hour"]);
+    const sete = obj(janelas?.["seven_day"]);
+    const daJanela = obj(janelas?.[str(info?.["rateLimitType"])]);
     return {
       tipo: "rate_limit",
       status: str(info?.["status"], "desconhecido"),
-      utilizacaoCincoHoras: num(obj(janelas?.["five_hour"])?.["utilization"]),
-      utilizacaoSeteDias: num(obj(janelas?.["seven_day"])?.["utilization"]),
+      utilizacaoCincoHoras: num(cinco?.["utilization"]),
+      utilizacaoSeteDias: num(sete?.["utilization"]),
+      renovaCincoHorasEm: emMs(cinco?.["resetsAt"]),
+      renovaSeteDiasEm: emMs(sete?.["resetsAt"]),
+      voltaEm: emMs(info?.["resetsAt"]) ?? emMs(daJanela?.["resetsAt"]),
+      ...(info?.["isUsingOverage"] === true ? { usandoOverage: true } : {}),
     };
   }
   if (type === "stream_event") {
@@ -221,14 +238,15 @@ const juntarBlocos = (partes: readonly string[]) => partes.map((p) => p.trim()).
 /**
  * Fala = relatórios escritos antes da última ferramenta (> NARRACAO_MAX_CHARS, ainda não contidos no
  * texto final) + texto final, separados por linha em branco. Sem relatório a acrescentar, o texto final
- * sai intacto.
+ * sai intacto. `obrigatorios` (definido em 2026-10-07, ADR-083 §6): índices de `antesDaUltimaFerramenta` que entram
+ * de qualquer tamanho — a resposta a uma mensagem do meio que não pôde sair como fala na hora.
  */
-export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string): string {
+export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string, obrigatorios: ReadonlySet<number> = new Set()): string {
   const alvo = normalizar(final);
   const relatorios: string[] = [];
-  for (const bloco of antesDaUltimaFerramenta) {
+  for (const [i, bloco] of antesDaUltimaFerramenta.entries()) {
     const t = bloco.trim();
-    if (t.length <= NARRACAO_MAX_CHARS) continue;
+    if (t.length <= NARRACAO_MAX_CHARS && !obrigatorios.has(i)) continue;
     const n = normalizar(t);
     if (alvo.includes(n) || relatorios.some((r) => normalizar(r).includes(n))) continue;
     relatorios.push(t);
@@ -239,7 +257,8 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
 /**
  * Classifica pelo ESTADO DE PROTOCOLO (ADR-009), nunca pela string de erro — `stderr` entra na
  * assinatura só para o teste adversarial provar que variá-lo não muda nada (E9.1):
- *  - result presente → sucesso | falha (subtype ≠ success: erro_max_turns | erro_execucao);
+ *  - result presente → sucesso | falha (subtype ≠ success: erro_max_turns | erro_execucao; `rate_limit` `rejected`
+ *    na mesma rodada: limite_do_plano, com `limiteVoltaEm`);
  *  - sem result e (o driver interrompeu OU chegou signal OU houve init) → interrompido com motivo
  *    INDEFINIDO: quem sabe se pediu é o servidor (parado_pela_pessoa se pararSolicitadoEm existe,
  *    senão sem_progresso). A regra é a MESMA antes e depois do init — a sonda de 2026-09-16 mediu
@@ -256,6 +275,10 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
  *    eles, todos os blocos; sem blocos, os deltas colados, como antes;
  *  - sem result (interrompido): tudo o que foi escrito — os blocos separados por linha em branco mais o
  *    trecho em streaming que não chegou a fechar um bloco; sem blocos, os deltas colados, como antes.
+ *
+ * `falaDoMeio` (definido em 2026-10-07, ADR-083 §6): a resposta a uma mensagem da pessoa no meio do turno. A que o
+ * driver já mandou como fala intermediária (`falados`) sai da fala, e o `result.texto` igual a ela também; a que não
+ * saiu (`obrigatorios`) entra mesmo curta, antes de outra ferramenta. Sem nenhuma, tudo como antes.
  */
 export function classificarResultado(entrada: {
   eventos: readonly EventoStream[];
@@ -265,29 +288,53 @@ export function classificarResultado(entrada: {
   sinais?: Partial<SinaisTurno>;
   /** true quando o driver chamou interromper() (SIGTERM) — antes ou depois do init. */
   interrompidoPeloDriver?: boolean;
+  falaDoMeio?: FalaDoMeioNoTurno;
 }): ResultadoTurno {
   let sinais: SinaisTurno = { ...SINAIS_ZERADOS, ...entrada.sinais };
   let init: Extract<EventoStream, { tipo: "init" }> | null = null;
   let result: Extract<EventoStream, { tipo: "result" }> | null = null;
+  // NOD-171: o último `rate_limit` da rodada que o `result` fecha; a rodada seguinte começa sem nenhum.
+  let rateLimit: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
+  let rateLimitDoResult: Extract<EventoStream, { tipo: "rate_limit" }> | null = null;
   const ferramentasChamadas: string[] = [];
   let textoStream = "";
   // Deltas desde o último bloco completo: o trecho que um SIGTERM deixa sem o `assistant` que o fecharia.
   let textoAberto = "";
-  const blocos: { texto: string; posicao: number }[] = [];
+  const blocos: { texto: string; posicao: number; obrigatorio: boolean }[] = [];
+  const falados = entrada.falaDoMeio?.falados;
+  const obrigatorios = entrada.falaDoMeio?.obrigatorios;
+  const jaFaladas: string[] = [];
+  const jaFaladasCruas: string[] = [];
   let ultimaFerramenta = -1;
+  // definido em 2026-10-11: o motivo de cada negação do hook do nod, pelo nome da ferramenta que o tool_use pediu.
+  const nomePorId = new Map<string, string>();
+  const negacoesDoNod: { nome: string; motivo: string }[] = [];
   for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
+    if (ev.tipo === "tool_use") nomePorId.set(ev.id, ev.nome);
+    if (ev.tipo === "tool_result" && ev.isError) {
+      const motivo = motivoDoHookDoNod(ev.texto);
+      if (motivo !== null) negacoesDoNod.push({ nome: nomePorId.get(ev.toolUseId) ?? "", motivo: motivo.slice(0, 1000) });
+    }
     if (ev.tipo === "init") init = ev;
-    else if (ev.tipo === "result") result = ev;
-    else if (ev.tipo === "tool_use") {
+    else if (ev.tipo === "rate_limit") rateLimit = ev;
+    else if (ev.tipo === "result") {
+      result = ev;
+      rateLimitDoResult = rateLimit;
+      rateLimit = null;
+    } else if (ev.tipo === "tool_use") {
       ferramentasChamadas.push(ev.nome);
       ultimaFerramenta = posicao;
     } else if (ev.tipo === "delta") {
       textoStream += ev.texto;
       textoAberto += ev.texto;
     } else if (ev.tipo === "texto_bloco") {
-      blocos.push({ texto: ev.texto, posicao });
       textoAberto = "";
+      if (falados?.has(ev)) {
+        jaFaladas.push(normalizar(ev.texto));
+        jaFaladasCruas.push(ev.texto);
+      }
+      else blocos.push({ texto: ev.texto, posicao, obrigatorio: obrigatorios?.has(ev) === true });
     }
   }
   const lancou = entrada.exitCode !== null || entrada.signal !== null || entrada.eventos.length > 0;
@@ -296,27 +343,40 @@ export function classificarResultado(entrada: {
   const tokensZerados: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
 
   const todos = blocos.map((b) => b.texto);
+  // A resposta do meio já foi fala: o `result.texto` que a repete (era o último bloco) e os deltas dela não voltam.
+  const jaFalado = (t: string) => jaFaladas.includes(normalizar(t));
+  const deltas = jaFaladasCruas.reduce((t, falada) => t.replace(falada, ""), textoStream);
   if (result) {
     const depois = blocos.filter((b) => b.posicao > ultimaFerramenta).map((b) => b.texto);
     // NOD-174: na falha, o `result` é o erro do CLI em inglês, não fala do bot — fica só no `erroCru`. O que o modelo
     // escreveu antes do erro continua (vira parcial no servidor).
-    const final = (result.sucesso ? result.texto : "") || juntarBlocos(depois) || juntarBlocos(todos) || textoStream;
-    const antes = blocos.filter((b) => b.posicao < ultimaFerramenta).map((b) => b.texto);
+    const doResult = result.sucesso && !jaFalado(result.texto) ? result.texto : "";
+    const final = doResult || juntarBlocos(depois) || juntarBlocos(todos) || deltas;
+    const anteriores = blocos.filter((b) => b.posicao < ultimaFerramenta);
+    const antes = anteriores.map((b) => b.texto);
     const base = {
-      texto: comporFala(antes, final),
+      texto: comporFala(antes, final, new Set(anteriores.flatMap((b, i) => (b.obrigatorio ? [i] : [])))),
       sessaoCli,
       sinais,
       custoUsd: result.custoUsd,
       tokens: result.tokens,
       ferramentasChamadas,
       negacoesPermissao: result.negacoesPermissao,
+      ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}),
     };
     if (result.sucesso) return { desfecho: "sucesso", ...base };
+    // NOD-171: o CLI barrou pelo plano (`rejected`) e a rodada fechou com erro. Pelo estado, nunca pelo texto do result.
+    // Com o overage em uso o pedido seguiu apesar do `rejected`: o erro é outro. O max_turns diz o próprio motivo.
+    if (rateLimitDoResult?.status === "rejected" && !rateLimitDoResult.usandoOverage && result.subtype !== "error_max_turns") {
+      return { desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: rateLimitDoResult.voltaEm ?? null, erroCru: result.erroCru, ...base };
+    }
     return { desfecho: "falha", motivoFalha: result.subtype === "error_max_turns" ? "erro_max_turns" : "erro_execucao", erroCru: result.erroCru, ...base };
   }
 
-  const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : textoStream;
-  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[] };
+  const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
+  // NOD-264 (C20): a causa da entrega sem result, só em código — o driver interrompeu, o sinal que chegou ou o exit.
+  const causa = entrada.interrompidoPeloDriver === true ? "interrompido_pelo_driver" : entrada.signal !== null ? `sinal:${entrada.signal}` : entrada.exitCode !== null && entrada.exitCode !== 0 ? `exit:${entrada.exitCode}` : null;
+  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };
@@ -325,6 +385,26 @@ export function classificarResultado(entrada: {
     return { desfecho: "interrompido", motivoInterrupcao: "sessao_rejeitada", ...base, sinais: { ...sinais, rejected: true } };
   }
   return { desfecho: "interrompido", motivoInterrupcao: "sem_progresso", ...base, sinais };
+}
+
+/**
+ * NOD-264 (C20): a causa do turno sem result, só se tiver a forma de código (`renovacao_negada:sem_plano`,
+ * `sinal:SIGTERM`, `exit:1`…). Texto livre (stderr, frase do CLI) nunca atravessa a ponte nem entra no evento.
+ */
+export function causaDaEntrega(causa: unknown): string | null {
+  return typeof causa === "string" && causa.length <= 64 && /^[a-z_]+(:[A-Za-z0-9_-]{1,32})?$/.test(causa) ? causa : null;
+}
+
+/** NOD-264 (C20): quantas linhas do fim do stderr vão para o log local quando o turno acaba sem result. */
+export const LINHAS_DO_STDERR = 20;
+
+/**
+ * NOD-264 (C20): as últimas `LINHAS_DO_STDERR` linhas do stderr, com os segredos redigidos ANTES de cortar (segredos.ts).
+ * Só para o log da máquina — nunca atravessa a ponte. Vazio vira null.
+ */
+export function fimDoStderr(stderr: string, linhas: number = LINHAS_DO_STDERR): string | null {
+  const ultimas = redigirSegredos(stderr).split("\n").map((l) => l.trimEnd()).filter((l) => l !== "").slice(-linhas);
+  return ultimas.length > 0 ? ultimas.join("\n").slice(-4000) : null;
 }
 
 /** Uma rodada da sessão viva: os eventos até um `result`, inclusive. */
@@ -342,8 +422,8 @@ function rodadas(eventos: readonly EventoStream[]): { fechadas: EventoStream[][]
 }
 
 /** A fala de UMA rodada fechada (eventos até o `result`): a mesma composição do fim do turno. */
-export function textoDaRodada(eventos: readonly EventoStream[]): string {
-  return classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).texto;
+export function textoDaRodada(eventos: readonly EventoStream[], falaDoMeio?: FalaDoMeioNoTurno): string {
+  return classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "", falaDoMeio }).texto;
 }
 
 const somarTokens = (a: TokensTurno, b: TokensTurno): TokensTurno => ({
@@ -383,13 +463,13 @@ export function classificarSessao(entrada: Parameters<typeof classificarResultad
   // A sessão de uma rodada só (o turno de sempre): nada muda, nem os espaços do texto.
   if (fechadas.length === 1 && !(entrada.rodadasJaFaladas ?? 0) && !(pendente && parou)) return classificarResultado(entrada);
   const cortado = pendente && parou;
-  const textoAberto = trabalhouDepois ? classificarResultado({ eventos: aberta, exitCode: null, signal: null, stderr: "", interrompidoPeloDriver: true }).texto : "";
-  const texto = juntarBlocos([...fechadas.slice(entrada.rodadasJaFaladas ?? 0).map(textoDaRodada), textoAberto]);
+  const textoAberto = trabalhouDepois ? classificarResultado({ eventos: aberta, exitCode: null, signal: null, stderr: "", interrompidoPeloDriver: true, falaDoMeio: entrada.falaDoMeio }).texto : "";
+  const texto = juntarBlocos([...fechadas.slice(entrada.rodadasJaFaladas ?? 0).map((r) => textoDaRodada(r, entrada.falaDoMeio)), textoAberto]);
   const geral = classificarResultado(entrada);
   if (cortado) {
     const init = entrada.eventos.find((e) => e.tipo === "init");
     const interrompido = classificarResultado({ ...entrada, eventos: init ? [init, ...aberta] : aberta, interrompidoPeloDriver: true });
-    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao };
+    return { ...interrompido, texto, sessaoCli: geral.sessaoCli, ferramentasChamadas: geral.ferramentasChamadas, custoUsd: ultimo.custoUsd, tokens, negacoesPermissao, ...(geral.negacoesDoNod ? { negacoesDoNod: geral.negacoesDoNod } : {}) };
   }
   return { ...geral, texto, tokens, negacoesPermissao };
 }

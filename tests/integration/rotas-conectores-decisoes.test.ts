@@ -116,7 +116,7 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
   it("internas: Origin → 403; GET plano pelo token; tools/call despachado; pedir_aprovacao → aguardar → long-poll pendente/decidida; negação local registrada", async () => {
     const turnoId = randomUUID();
     const repos = memoria.repos(MARLON);
-    await repos.turnos.enfileirar({ id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId, agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const token = tokens.cunhar(turnoId, { ...MARLON, agenteId });
     const plano = planoDeTeste({
       turnoId,
@@ -167,6 +167,13 @@ describe("rotas: conectores, concessões, trilha e internas", () => {
     const decidida = (await (await interno("GET", `decisoes/${pedido.aguardar}/aguardar`)).json()) as { estado: string; itens: { idx: number }[] };
     expect(decidida.estado).toBe("decidida");
     expect(decidida.itens.map((i) => i.idx)).toEqual([0]);
+    // ADR-089 (revisão do #223): uma retomada já ficou com a decisão — a rota solta na hora (antes: "pendente" até o fim
+    // da espera, com o turno e a retomada vivos na mesma task).
+    const outro = (await (await interno("POST", "ferramentas/pedir_aprovacao", { argumentos: { resumo: "r2", itens: [{ texto: "b", destino: { conector: "somar", ferramenta: "gravar", argumentos: { texto: "b" } } }] } })).json()) as { aguardar: string };
+    await repos.decisoes.decidir(outro.aguardar, { por: PESSOA_MARLON, agora: agora() });
+    for (const item of await repos.itensAprovacao.listar(outro.aguardar)) await repos.itensAprovacao.registrarDesfecho(item.id, "executado");
+    expect(await repos.decisoes.reivindicarContinuacao(outro.aguardar, "retomada", agora())).not.toBeNull();
+    expect(await (await interno("GET", `decisoes/${outro.aguardar}/aguardar`)).json()).toEqual({ estado: "pendente", soltar: true });
     expect((await interno("GET", `decisoes/${randomUUID()}/aguardar`)).status).toBe(404);
 
     const n = await interno("POST", "negacoes", { nome: "x__y", motivo: "fora_do_catalogo", classe: "ferramenta_negada" });

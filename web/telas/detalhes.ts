@@ -6,10 +6,13 @@ import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
-import { VELOCIDADES, VOZES } from "./ligacao.ts";
+import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
+import { renderSeloModoDev } from "./modo-dev.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
+import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
-import { nomeInteligencia, renderInteligencia } from "./inteligencia.ts";
+import { iasDaTela, ordemDaPessoa, rascunhoDe, renderInteligencia, renderLinhaInteligencia, type ContextoInteligencia } from "./inteligencia.ts";
+import { UI_IAS_INICIAL } from "./cartao-ia.ts";
 import { MODOS } from "./aprovacoes.ts";
 import { blocoEsperando, conectorDoApp, nivelDoBot, ROTULO_NIVEL, situacaoDoApp, type NivelAtual } from "./app-acesso.ts";
 import { logoApp } from "./marketplace.ts";
@@ -17,9 +20,22 @@ import { renderMemoriaNaGaveta } from "./memoria.ts";
 import { renderNovaRotinaNaGaveta } from "./nova-rotina.ts";
 import { renderAFazerNaGaveta } from "./pendencias.ts";
 import { textoMotivo } from "./negacao.ts";
+import { renderGavetaTrabalhos } from "./trabalhos.ts";
+import { abertosDoBot } from "../lib/trabalhos.ts";
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 type Concessoes = Estado["concessoes"][string];
+
+/**
+ * O nível da gaveta que um `data-act="gaveta"` pede (`data-nivel`, `data-id`); null = nível desconhecido.
+ * definido em 2026-10-08 (QA do épico #188): a lista morava no clique de main.ts e não tinha "trabalhos" — a linha
+ * "Trabalhos" da gaveta não abria nada. Mora aqui, ao lado de quem desenha os `irPara`, e o teste confere os dois.
+ */
+export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | null {
+  if (tipo === "rotina" || tipo === "acesso") return { tipo, id };
+  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos") return { tipo };
+  return null;
+}
 
 /**
  * A gaveta do bot (ADR-032: "painel de detalhes com perfil, colegas e rotinas"). Desde 2026-09-18 ela é o lar do que É
@@ -66,10 +82,16 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     ? `<section class="gv-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
     : "";
 
+  // ADR-083 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
+  const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
+  // Plano "tela limpa" (2026-10-16, T2): o Ligar saiu do topo da conversa e é o primeiro atalho.
+  const ligar = htmlLinhaLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[a.id], ligacao: estado.ligacaoViva }), a.nome);
   const atalhos = `<section class="gv-secao"><h3>Atalhos</h3><div class="gv-cartao">
+      ${ligar}
       ${linha(`${ICONE.brilho}<span class="gv-linha-txt">Planejar uma tarefa</span>`, 'data-act="preencher-prompt" data-texto="Me ajude a planejar esta tarefa: "')}
       ${linha(`${ICONE.balao}<span class="gv-linha-txt">Pedir ajuda a outro bot</span>`, 'data-act="preencher-prompt" data-texto="Consulte o colega mais adequado da minha equipe para me ajudar com: "')}
       ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, irPara("memoria"), ICONE.seta)}
+      ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, irPara("trabalhos"), ICONE.seta)}
     </div></section>`;
 
   // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina (instrução,
@@ -102,8 +124,8 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   const ambiente = dona
     ? `<div class="gv-cartao">
         ${linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`)}
-        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${a.harness !== "codex-cli" ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
-        ${linha(`${ICONE.estrela}<span class="gv-linha-txt">Inteligência</span><span class="gv-meta">${esc(nomeInteligencia(a, estado.executor?.harnesses))}</span>`, irPara("inteligencia"), ICONE.seta)}
+        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
+        ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
@@ -114,7 +136,9 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
   const o = estado.onboarding;
   const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
-  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
+  // Plano "tela limpa" (2026-10-16, T2): o selo MODO DEV, o "Hoje com" e as "Linhas abertas" saíram do topo da conversa.
+  const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
+  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + dev + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------
@@ -133,16 +157,26 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       return nivelPerfil(a);
     case "memoria":
       return { titulo: "Memória", corpo: renderMemoriaNaGaveta(estado, a.id) };
-    case "inteligencia":
+    case "inteligencia": {
+      // 2B (protótipo Inteligencia2): o rascunho vive no reducer até Salvar; sem rascunho deste bot, o gravado.
+      const r = estado.rascunhoIa?.agenteId === a.id ? estado.rascunhoIa : rascunhoDe(a);
       return {
         titulo: "Inteligência",
-        corpo: renderInteligencia(a, estado.executor?.harnesses, true),
-        rodape: rodapeDeFormulario("Salvar escolha"),
+        corpo: renderInteligencia(r, a.nome, contextoInteligencia(estado), ordemDaPessoa(estado.ias?.ias, estado.ias?.ordem)),
+        rodape: rodapeDeFormulario("Salvar"),
         form: `data-form="inteligencia" data-id="${esc(a.id)}"`,
       };
+    }
     case "nova-rotina":
       return { titulo: "Nova rotina", corpo: renderNovaRotinaNaGaveta(a), rodape: rodapeDeFormulario("Criar rotina"), form: 'data-form="criar-rotina"' };
+    case "trabalhos":
+      return { titulo: `Trabalhos de ${a.nome}`, corpo: renderGavetaTrabalhos(estado, a.id) };
   }
+}
+
+/** O que a 2A e a 2B leem das IAs: as do servidor (ou o catálogo), o estado do Mac e o relógio. */
+export function contextoInteligencia(estado: Estado): ContextoInteligencia {
+  return { ias: iasDaTela(estado), ui: estado.iasMac ?? UI_IAS_INICIAL, agora: estado.agora };
 }
 
 const rodapeDeFormulario = (salvar: string) => `<button type="button" class="gv-bt" data-act="gaveta-voltar">Cancelar</button><button type="submit" class="gv-bt pri">${esc(salvar)}</button>`;
@@ -213,7 +247,7 @@ function nivelPerfil(a: Bot): Nivel {
   const corpo = `<div class="gv-mascote">${iconeAgente(a, "xl", "disponivel", "data-mascote-preview")}
       <div class="gv-formas" role="radiogroup" aria-label="Forma do mascote">${formas}</div>
       <div class="gv-cores" role="radiogroup" aria-label="Cor do mascote">${cores}</div></div>
-    <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>
+    <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60"${a.papel === "nod" ? ' readonly aria-describedby="nome-do-nod"' : ""} />${a.papel === "nod" ? '<small id="nome-do-nod" class="mudo">O nome do Nod não muda.</small>' : ""}</label>
     <label class="gv-campo">Título<input name="titulo" value="${esc(a.titulo)}" maxlength="80" /></label>
     <label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>
     ${campoVoz(a)}`;
@@ -251,7 +285,7 @@ function darAcesso(estado: Estado, agenteId: string, nomeBot: string): string {
   });
   const faltam = estado.marketplace.filter((app) => situacaoDoApp(estado, app.slug) !== "conectado").slice(0, 6).map((app) => {
     const login = estado.conectando[app.slug];
-    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
+    const acao = login && !login.falhou ? blocoEsperando(app.nome, login.url, true, login.semJanela === true) : botao("conectar-app", login?.falhou ? "Tentar de novo" : "Conectar", { classe: "sm", id: app.slug });
     return `<div class="da-linha">${logoApp(estado, app.slug, app.nome)}<div class="da-nome"><b>${esc(app.nome)}</b></div>${acao}</div>`;
   });
   return `<div class="dar-acesso gv-dar-acesso" aria-label="${esc(`Dar a ${nomeBot} acesso a um app`)}">

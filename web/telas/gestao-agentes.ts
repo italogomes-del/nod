@@ -35,7 +35,12 @@ export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, exec
     restaurar: "M3 4v6h6 M3 10a9 9 0 119 11",
   };
   const item = (acao: AcaoGestao, _icone: string, texto: string, perigo = false) => `<button type="button" role="menuitem" data-gestao="${acao}"${perigo ? ' class="danger"' : ""}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${caminhos[acao]}"/></svg>${texto}</button>`;
-  const d = dialogo(`<div role="menu" aria-label="Ações de ${esc(a.nome)}"><p class="menu-nome">${esc(a.nome)}</p>${dona ? item("fixar", "♧", a.fixado ? "Desafixar" : "Fixar") + item("mover", "▱", "Mover para…") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("renomear", "✎", "Renomear bot") + item("perfil", "⚙", "Editar perfil") : ""}${item("duplicar", "▣", "Duplicar")}<hr>${item("copiar", "▢", "Copiar ID da conversa")}${dona ? '<hr>' + item("ocultar", "◌", a.oculto ? "Mostrar na barra lateral" : "Ocultar da barra lateral") + item("excluir", "♲", "Excluir", true) : ""}</div>`, true);
+  // definido em 2026-10-07 (ADR-081): o Nod tem o menu dele — fixar vira "Voltar ao topo"/"Deixar discreto" (desafixado ele
+  // mora na barra de cima da lateral) e não há mover, renomear, duplicar, ocultar nem excluir; a linha final diz por quê.
+  const corpo = a.papel === "nod"
+    ? item("fixar", "♧", a.fixado ? "Deixar discreto" : "Voltar ao topo") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("perfil", "⚙", "Editar perfil") + item("copiar", "▢", "Copiar ID da conversa") + '<hr><p class="menu-nota">O Nod fica sempre com você: não dá para excluir, ocultar nem renomear.</p>'
+    : `${dona ? item("fixar", "♧", a.fixado ? "Desafixar" : "Fixar") + item("mover", "▱", "Mover para…") + item("nao-lido", "◉", a.naoLido ? "Marcar como lido" : "Marcar como não lido") + '<hr>' + item("renomear", "✎", "Renomear bot") + item("perfil", "⚙", "Editar perfil") : ""}${item("duplicar", "▣", "Duplicar")}<hr>${item("copiar", "▢", "Copiar ID da conversa")}${dona ? '<hr>' + item("ocultar", "◌", a.oculto ? "Mostrar na barra lateral" : "Ocultar da barra lateral") + item("excluir", "♲", "Excluir", true) : ""}`;
+  const d = dialogo(`<div role="menu" aria-label="Ações de ${esc(a.nome)}"><p class="menu-nome">${esc(a.nome)}</p>${corpo}</div>`, true);
   // definido em 2026-09-30: no clique direito o menu nasce no cursor; sem ponto, ao lado do que o abriu.
   const r = ancora.getBoundingClientRect();
   const x = ponto ? ponto.x + 4 : r.right;

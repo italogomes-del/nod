@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lerAviso, lerContador, lerPreferencias, lerTemaDesktop, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
+import { GRUPO_AVISOS, lerAviso, lerContador, lerPreferencias, lerTemaDesktop, opcoesDoAviso, origemDe, remetenteWebValido } from "../../../desktop/avisos-mac.ts";
 
 /**
  * O que o processo principal aceita da janela web (definido em 2026-09-24, "aviso no Mac"): a página é
@@ -55,17 +55,58 @@ describe("argumentos", () => {
   });
 
   it("preferencias.json: ausente ou corrompido, os avisos nascem ligados e o tema segue o sistema", () => {
-    expect(lerPreferencias(null)).toEqual({ avisos: true, tema: "sistema" });
-    expect(lerPreferencias("{")).toEqual({ avisos: true, tema: "sistema" });
-    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true, tema: "sistema" });
-    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false, tema: "sistema" });
+    expect(lerPreferencias(null)).toEqual({ avisos: true, tema: "sistema", som: true });
+    expect(lerPreferencias("{")).toEqual({ avisos: true, tema: "sistema", som: true });
+    expect(lerPreferencias('{"avisos":"sim"}')).toEqual({ avisos: true, tema: "sistema", som: true });
+    expect(lerPreferencias('{"avisos":false}')).toEqual({ avisos: false, tema: "sistema", som: true });
   });
 
   it("preferencias.json: o tema só aceita sistema, claro e escuro (ADR-070)", () => {
-    expect(lerPreferencias('{"avisos":false,"tema":"escuro"}')).toEqual({ avisos: false, tema: "escuro" });
-    expect(lerPreferencias('{"tema":"roxo"}')).toEqual({ avisos: true, tema: "sistema" });
+    expect(lerPreferencias('{"avisos":false,"tema":"escuro"}')).toEqual({ avisos: false, tema: "escuro", som: true });
+    expect(lerPreferencias('{"tema":"roxo"}')).toEqual({ avisos: true, tema: "sistema", som: true });
     expect(lerTemaDesktop("claro")).toBe("claro");
     expect(lerTemaDesktop("<script>")).toBeNull();
     expect(lerTemaDesktop(1)).toBeNull();
+  });
+
+  it("preferencias.json: o som (NOD-196) nasce ligado sem arquivo, corrompido, ausente ou não booleano", () => {
+    expect(lerPreferencias(null).som).toBe(true);
+    expect(lerPreferencias("{").som).toBe(true);
+    expect(lerPreferencias("[]").som).toBe(true);
+    expect(lerPreferencias('{"avisos":false}').som).toBe(true);
+    expect(lerPreferencias('{"som":"nao"}').som).toBe(true);
+    expect(lerPreferencias('{"som":0}').som).toBe(true);
+    expect(lerPreferencias('{"som":null}').som).toBe(true);
+    expect(lerPreferencias('{"som":false}')).toEqual({ avisos: true, tema: "sistema", som: false });
+    // Com os avisos desligados, a escolha do som continua guardada.
+    expect(lerPreferencias('{"avisos":false,"tema":"claro","som":false}')).toEqual({ avisos: false, tema: "claro", som: false });
+  });
+
+  it("preferencias.json: gravar e reler (JSON.stringify, como gravarPreferencias) mantém avisos, tema e som", () => {
+    // definirSom grava `{ ...preferencias, som }`: trocar o som não pode apagar avisos nem tema, e vice-versa.
+    for (const p of [
+      { avisos: false, tema: "escuro" as const, som: false },
+      { avisos: true, tema: "claro" as const, som: false },
+      { avisos: false, tema: "sistema" as const, som: true },
+    ]) {
+      expect(lerPreferencias(JSON.stringify(p))).toEqual(p);
+      expect(lerPreferencias(JSON.stringify({ ...p, som: !p.som }))).toEqual({ ...p, som: !p.som });
+    }
+    // Arquivo de antes da NOD-196 (sem `som`): avisos e tema ficam, o som nasce ligado.
+    expect(lerPreferencias(JSON.stringify({ avisos: false, tema: "escuro" }))).toEqual({ avisos: false, tema: "escuro", som: true });
+  });
+});
+
+describe("opcoesDoAviso (NOD-196)", () => {
+  const aviso = { titulo: "Nina precisa de você", corpo: "Aprovar o envio?", alvo: { tipo: "sua-vez" as const } };
+
+  it("som desligado → silent: true; ligado → silent: false; título, corpo e grupo iguais aos de antes", () => {
+    expect(opcoesDoAviso(aviso, { som: false })).toEqual({ title: "Nina precisa de você", body: "Aprovar o envio?", groupId: "nod-sua-vez", silent: true });
+    expect(opcoesDoAviso(aviso, { som: true })).toEqual({ title: "Nina precisa de você", body: "Aprovar o envio?", groupId: "nod-sua-vez", silent: false });
+    expect(GRUPO_AVISOS).toBe("nod-sua-vez");
+  });
+
+  it("não leva o alvo nem nada além das quatro opções ao macOS", () => {
+    expect(Object.keys(opcoesDoAviso(aviso, { som: true })).sort()).toEqual(["body", "groupId", "silent", "title"]);
   });
 });

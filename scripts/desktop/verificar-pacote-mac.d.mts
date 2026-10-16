@@ -1,0 +1,32 @@
+export type Conferencia = { item: string; ok: boolean; esperado: string; veio: string };
+export type SaidaComando = { codigo: number; saida: string };
+export type SaidasPacote = {
+  verify: SaidaComando;
+  detalhes: string;
+  entitlementsApp: string;
+  helpers: { nome: string; entitlements: string }[];
+  microfone: SaidaComando;
+  lipo: string;
+  staplerApp: SaidaComando;
+  staplerDmg: SaidaComando;
+  spctlApp: SaidaComando;
+  spctlDmg: SaidaComando;
+};
+export type EsperadoPacote = { teamId: string; arch: string; entitlements: readonly string[]; microfone: string };
+
+export const ARCH_DO_LIPO: Readonly<Record<string, string>>;
+export function interpretarVerify(alvo: string, saida: SaidaComando): Conferencia;
+export function interpretarCodesign(alvo: string, saida: string, teamId: string): Conferencia[];
+export function interpretarFlags(alvo: string, saida: string): Conferencia;
+export function lerEntitlements(xml: string): string[];
+export function compararEntitlements(alvo: string, xml: string, esperadas: readonly string[]): Conferencia;
+export function filtrarHelpers(nomes: readonly string[]): string[];
+export function conferirHelpersEncontrados(helpers: readonly string[]): Conferencia;
+export function lerTextoMicrofone(yaml: string): string;
+export function compararMicrofone(saida: SaidaComando, esperado: string): Conferencia;
+export function interpretarLipo(saida: string, arch: string): Conferencia;
+export function interpretarStapler(alvo: string, saida: SaidaComando): Conferencia;
+export function interpretarSpctl(alvo: string, saida: SaidaComando): Conferencia;
+export function interpretarNotarytool(saida: string): Conferencia & { id: string | null };
+export function conferirPacote(saidas: SaidasPacote, esperado: EsperadoPacote): Conferencia[];
+export function formatarFalhas(resultados: readonly Conferencia[]): string[];

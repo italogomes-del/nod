@@ -8,9 +8,9 @@ Cada pessoa usa o Claude Code que já está credenciado na própria máquina; o 
 
 ## Download do app para macOS
 
-A [pré-release Desktop 0.2.0-rc.1 — Preview](https://github.com/marlonwlv/nod/releases/tag/desktop-v0.2.0-rc.1) inclui DMGs para **Mac Intel** e **Mac com chip M**, além do guia e dos checksums.
+A [pré-release Desktop 0.2.0-rc.1 — Preview](https://github.com/gamefik/nod/releases/tag/desktop-v0.2.0-rc.1) inclui DMGs para **Mac Intel** e **Mac com chip M**, além do guia e dos checksums.
 
-[Guia de instalação, servidor compartilhado e publicação](https://github.com/marlonwlv/nod/blob/desktop-v0.2.0-rc.1/docs/release-desktop.md).
+[Guia de instalação, servidor compartilhado e publicação](https://github.com/gamefik/nod/blob/desktop-v0.2.0-rc.1/docs/release-desktop.md).
 
 Os instaladores desta pré-release **não têm assinatura Apple nem notarização** e precisam de um servidor nod acessível por HTTPS. Para montar o servidor correspondente aos DMGs, use o código da tag `desktop-v0.2.0-rc.1`. Windows ainda não é suportado nesta versão.
 

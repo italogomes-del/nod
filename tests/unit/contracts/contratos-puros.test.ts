@@ -22,7 +22,9 @@ describe("src/contracts é fechado", () => {
     }
   });
 
-  it("sem lógica (EMENDA 26): nenhum export é função nem contém função; fonte sem `function`, arrow em valor ou Object.*()", async () => {
+  // NOD-194: `import()` de cada um dos ~22 contratos, transformados pelo vite na hora. medido em 2026-10-07: 5,3 s
+  // (estouro do padrão de 5 s) com o Mac em load ~950; 30 s dá ~5x e um import travado continua falhando.
+  it("sem lógica (EMENDA 26): nenhum export é função nem contém função; fonte sem `function`, arrow em valor ou Object.*()", { timeout: 30_000 }, async () => {
     const contemFuncao = (v: unknown, visto = new Set<unknown>()): boolean => {
       if (typeof v === "function") return true;
       if (typeof v !== "object" || v === null || visto.has(v)) return false;

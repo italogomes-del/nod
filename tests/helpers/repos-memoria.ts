@@ -1,8 +1,10 @@
+import { contasIaMemoria, estadoContasIaMemoria, type EstadoContasIaMemoria } from "./contas-ia-memoria.ts";
 import type { ConfigGithubApp } from "../../src/repositories/github-app.repo.ts";
 import type { MimeAnexo } from "../../src/contracts/anexo.ts";
 import type { LinhaOnboarding } from "../../src/repositories/onboarding.repo.ts";
 import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../../src/contracts/raio-x.ts";
 import type { CatalogoDeComandos } from "../../src/contracts/comandos.ts";
+import type { UsoDoPlano } from "../../src/contracts/uso-do-plano.ts";
 import { ESTADO_MAX_BYTES_ARTEFATO, type Artefato, type EstadoArtefato, type VersaoArtefato } from "../../src/contracts/artefato.ts";
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../../src/contracts/agente.ts";
@@ -20,12 +22,24 @@ import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
+import type { CredencialTurno } from "../../src/repositories/turno-credenciais.repo.ts";
+import type { Trabalho } from "../../src/contracts/trabalho.ts";
+import type { NovoLote } from "../../src/repositories/frentes.repo.ts";
+import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts";
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
+import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
+import type { PedidoAberto } from "../../src/domain/triagem.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
+import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
 import type { Gasto } from "../../src/repositories/gastos.repo.ts";
 import type { ItemOutbox } from "../../src/repositories/outbox.repo.ts";
+import type { ExtrasTrabalho } from "../../src/repositories/trabalhos.repo.ts";
+import type { Espera } from "../../src/contracts/espera.ts";
+import type { TrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
@@ -52,6 +66,8 @@ export type BancoMemoria = {
   pendencias: (Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null })[];
   conversas: Conversa[];
   mensagens: Mensagem[];
+  /** NOD-156: `tenant:conversa:idEnvio` → id da mensagem (a coluna id_envio não sai em Mensagem). */
+  idsDeEnvio: Map<string, string>;
   anexos: { tenantId: string; ownerId: string; id: string; conversaId: string; mensagemId: string | null; nome: string; mime: MimeAnexo; bytes: Buffer; criadoEm: number }[];
   /** ADR-051 (0031): artefato, versões e o estado por pessoa (UNIQUE tenant+artefato+owner reproduzido). */
   artefatos: (Artefato & { tenantId: string; ownerId: string })[];
@@ -59,6 +75,19 @@ export type BancoMemoria = {
   artefatoEstados: (EstadoArtefato & { tenantId: string; ownerId: string; json: string })[];
   propostas: Proposta[];
   turnos: Turno[];
+  /** 0063 (ADR-083): os trabalhos, com a dona. */
+  trabalhos: (Trabalho & { ownerId: string })[];
+  /** 0070 (ADR-099, parte 2): as esperas de comando, com a dona (o comportamento completo se prova no Postgres). */
+  esperas: (Espera & { tenantId: string; ownerId: string })[];
+  /** 0074 (ADR-102): as contas de IA da pessoa e os vínculos com as máquinas. */
+  contasIa: EstadoContasIaMemoria;
+  /** 0080 (ADR-108): os avisos de troca de IA (o comportamento completo se prova no Postgres). */
+  trocasDeIa: (TrocaDeIa & { tenantId: string; ownerId: string })[];
+  /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
+  contaDoTurno: Map<string, string | null>;
+  contaDaSessao: Map<string, string | null>;
+  /** 0073 (NOD-214): as credenciais dos turnos despachados (o comportamento completo se prova no Postgres). */
+  credenciais: (CredencialTurno & { tenantId: string; ownerId: string })[];
   entregas: Set<string>;
   decisoes: (Decisao & { decididaEm: number | null })[];
   varridos: Set<string>;
@@ -84,6 +113,7 @@ export type BancoMemoria = {
   onboarding: Map<string, LinhaOnboarding>;
   /** 0038: o catálogo do "/" de cada pessoa (chave tenant:pessoa). */
   comandos: Map<string, { catalogo: CatalogoDeComandos; em: number }>;
+  usoDoPlano: Map<string, UsoDoPlano>;
   /** 0039: o "lido até" de cada pessoa em cada conversa (chave tenant:pessoa:conversa). */
   leituras: Map<string, number>;
   /** 0054: o "Agora não" do cartão de liberar apps (chave tenant:pessoa:agente:conector → instante). */
@@ -104,7 +134,9 @@ export type BancoMemoria = {
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
   outbox: (ItemOutbox & { tenantId: string; ownerId: string; entregueEm: number | null; abandonadoEm: number | null; canceladoEm: number | null })[];
-  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null }[];
+  maquinaTokens: { tenantId: string; ownerId: string; id: string; nome: string; prefixo: string; hash: Buffer; criadaEm: number; ultimoUsoEm: number | null; expiraEm: number | null; revogadaEm: number | null; plataforma?: "darwin" | "linux" | null }[];
+  /** 0071 (ADR-099, partes 3/4): os lotes de frentes, com a dona (o comportamento completo se prova no Postgres). */
+  lotes: (LoteDeFrentes & { tenantId: string; ownerId: string })[];
 };
 
 export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escopo): Repos } {
@@ -116,12 +148,20 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     pendencias: [],
     conversas: [],
     mensagens: [],
+    idsDeEnvio: new Map(),
     anexos: [],
     artefatos: [],
     artefatoVersoes: [],
     artefatoEstados: [],
     propostas: [],
     turnos: [],
+    trabalhos: [],
+    esperas: [],
+    contasIa: estadoContasIaMemoria(),
+    trocasDeIa: [],
+    contaDoTurno: new Map(),
+    contaDaSessao: new Map(),
+    credenciais: [],
     entregas: new Set(),
     decisoes: [],
     varridos: new Set(),
@@ -141,6 +181,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     preferencias: new Map(),
     onboarding: new Map(),
     comandos: new Map(),
+    usoDoPlano: new Map(),
     leituras: new Map(),
     liberacoesDispensadas: new Map(),
     contaminados: new Set(),
@@ -159,6 +200,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     events: [],
     outbox: [],
     maquinaTokens: [],
+    lotes: [],
   };
   return { banco, repos: (escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON }) => reposSobre(banco, escopo) };
 }
@@ -169,8 +211,12 @@ export function reposMemoria(escopo?: Escopo): Repos {
 }
 
 const agora = () => Date.now();
+/** ADR-086: o pedido de volta anotado em cada turno (no Postgres, turnos.despertar_em/despertar_motivo). */
+const despertares = new Map<string, { em: number; motivo: string }>();
 const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
+const semDonoEspera = ({ tenantId: _tenant, ownerId: _dona, ...e }: Espera & { tenantId: string; ownerId: string }): Espera => ({ ...e });
+const semDonoTrabalho = ({ ownerId: _dona, ...t }: Trabalho & { ownerId: string }): Trabalho => ({ ...t });
 const semDonoPendencia = ({ ownerId: _dona, resolvidaNoTurnoId: _turno, ...p }: Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null }): Pendencia => ({ ...p });
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
@@ -179,11 +225,24 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const acessoDeRotinaAberto = (agenteId: string, conector: string): Proposta | null =>
     doTenant(b.propostas).find((p) => p.agenteId === agenteId && p.estado === "pendente" && p.payload.kind === "acesso" && p.payload.conector === conector && p.payload.rotinaId !== undefined) ?? null;
 
+  /** O que listarComTurno do repo real devolve: origem e trabalho do turno, e a última fala de um turno encerrado. */
+  const comTurno = (lista: Mensagem[]): Mensagem[] => lista.map((m) => {
+    const t = m.turnoId ? doTenant(b.turnos).find((x) => x.id === m.turnoId) : undefined;
+    const aberto = !m.turnoId ? doTenant(b.turnos).filter((x) => x.mensagemOrigemId === m.id).sort((x, y) => x.criadoEm - y.criadoEm)[0] : undefined;
+    const falaDoBot = (x: Mensagem) => x.kind === "texto" && x.autoria.autor_tipo === "agente";
+    const ultima = t ? lista.filter((x) => x.turnoId === t.id && falaDoBot(x)).at(-1) : undefined;
+    return { ...m, origemTurno: t?.origem ?? null, trabalhoId: t?.trabalhoId ?? aberto?.trabalhoId ?? null, fimDoTurno: Boolean(t && (t.estado === "concluido" || t.estado === "interrompido") && falaDoBot(m) && ultima?.id === m.id) };
+  });
+  const minhasCredenciais = () => b.credenciais.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+  const minhasEsperas = () => b.esperas.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+  /** ADR-108 (turnos.repo daIa): as tasks pendentes do bot na IA — fixadas nela, ou no Automático com a sessão nela. */
+  const tasksNaIa = (agenteId: string, ia: string | null) => doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.agenteId === agenteId && t.estado === "pendente" && t.trabalhoId
+    && (ia === null || t.harness === ia || (t.harness === "auto" && b.trabalhos.some((w) => w.tenantId === escopo.tenantId && w.id === t.trabalhoId && w.sessaoHarness === ia))));
   const repos = {
     computadores: {
-      buscarVinculo: async () => null,
+      buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
       obter: async () => null, travar: async () => null, configurar: async () => undefined,
-      ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [], ociosos: async () => [],
+      ocupar: async () => undefined, liberar: async () => undefined, atividade: async () => [], ociosos: async () => [], emUsoPor: async () => null,
       buscarAcao: async () => null, concluir: async () => undefined,
       gravarResultado: async () => undefined, tirarResultado: async () => null,
       registrar: async () => { throw new Error("use o banco para testar computadores"); },
@@ -225,6 +284,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           ids.push(id);
         }
         return { ids };
+      },
+      async gravarSemOutbox(eventos: EventoGravavel[]) {
+        for (const ev of eventos) b.events.push({ ...ev, tenantId: escopo.tenantId, id: ev.id ?? randomUUID(), createdAt: ev.createdAt ?? agora() });
+        return eventos.length;
+      },
+      async contarLinhas(desde: number) {
+        const linhas = doTenant(b.events).filter((e) => (e.kind === "linha_mostrada" || e.kind === "linha_aberta") && e.pessoaDestinoId === escopo.pessoaId && e.createdAt >= desde);
+        const tipos = [...new Set(linhas.map((e) => String(e.dados?.tipo)))];
+        const distintas = (tipo: string, kind: string) => new Set(linhas.filter((e) => e.kind === kind && String(e.dados?.tipo) === tipo).map((e) => String(e.dados?.chave_linha))).size;
+        return tipos.map((tipo) => ({ tipo, mostradas: distintas(tipo, "linha_mostrada"), abertas: distintas(tipo, "linha_aberta") }));
       },
       async listarRecentes(limite = 50) {
         return doTenant(b.events)
@@ -271,9 +340,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contarAbandonados() {
         return doTenant(b.outbox).filter((o) => o.ownerId === escopo.pessoaId && o.abandonadoEm !== null).length;
       },
-      async cancelarPendentesDaPessoa(em: number) {
+      async cancelarPendentesDaPessoa(em: number, conversaId: string | null = null) {
         let n = 0;
         for (const o of doTenant(b.outbox)) {
+          if (conversaId !== null && b.events.find((e) => e.id === o.eventoId)?.conversaId !== conversaId) continue;
           if (o.ownerId === escopo.pessoaId && o.entregueEm === null && o.abandonadoEm === null && o.canceladoEm === null) {
             o.canceladoEm = em;
             n += 1;
@@ -315,6 +385,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.geracoes.set(id, (b.geracoes.get(id) ?? 0) + 1);
         for (const r of doTenant(b.rotinas).filter((r) => r.agenteId === id)) r.estado = "pausada";
         b.concessoes = b.concessoes.filter((c) => c.agenteId !== id);
+        for (const t of doTenant(b.trabalhos).filter((t) => t.agenteId === id && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado))) {
+          t.estado = "parado";
+          t.terminadoEm = em;
+        }
         return a;
       },
       async restaurar(id) {
@@ -325,6 +399,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return a;
       },
       async criar(a) {
+        // 0068: como o SQL — a inteligência inteira e os derivados gravados juntos.
+        const inteligencia = a.inteligencia ?? inteligenciaDoLegado(INTELIGENCIA_PADRAO, { harness: a.harness ?? "auto", modelo: a.modelo });
+        const d = derivadosDa(inteligencia);
         const agente: Agente = {
           tenantId: escopo.tenantId,
           id: a.id ?? randomUUID(),
@@ -339,7 +416,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           fixado: false,
           oculto: false,
           confirmado: a.confirmado ?? false,
-          modelo: a.modelo,
+          modelo: d.modelo,
+          harness: d.harness,
+          esforco: d.esforco,
+          inteligencia,
           duplicadoDe: a.duplicadoDe ?? null,
           criadoEm: agora(),
         };
@@ -357,6 +437,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((a) => (opcoes.incluirExcluidos || !a.excluidoEm) && (opcoes.incluirOcultos || !a.oculto))
           .sort((x, y) => Number(y.fixado) - Number(x.fixado) || (x.posicao ?? Infinity) - (y.posicao ?? Infinity) || x.criadoEm - y.criadoEm);
       },
+      async buscarParaAtualizar(id) {
+        // Espelha o SQL: só a dona e não excluído. Sem concorrência na memória, sem lock.
+        return doTenant(b.agentes).find((a) => a.id === id && a.ownerId === escopo.pessoaId && !a.excluidoEm) ?? null;
+      },
       async atualizarPerfil(id, perfil) {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;
@@ -365,13 +449,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           titulo: perfil.titulo ?? a.titulo,
           descricao: perfil.descricao ?? a.descricao,
           confirmado: perfil.confirmado ?? a.confirmado,
-          modelo: perfil.modelo ?? a.modelo,
           forma: perfil.forma ?? a.forma,
           cor: perfil.cor ?? a.cor,
-          // 0037: null volta ao padrão do modelo; ausente não mexe (o coalesce não serve aqui).
-          esforco: perfil.esforco === undefined ? a.esforco ?? null : perfil.esforco,
+          // 0068: a inteligência grava os derivados junto (harness, modelo e o esforço do Claude).
+          ...(perfil.inteligencia ? { inteligencia: perfil.inteligencia, ...derivadosDa(perfil.inteligencia) } : {}),
         });
         return a;
+      },
+      async definirMaquina(ids, maquinaId) {
+        const as = doTenant(b.agentes).filter((x) => ids.includes(x.id) && x.ownerId === escopo.pessoaId && !x.excluidoEm);
+        for (const a of as) a.maquinaId = maquinaId;
+        return as;
       },
       async definirModoAprovacao(id, modo) {
         const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.excluidoEm);
@@ -389,6 +477,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const a = doTenant(b.agentes).find((x) => x.id === id);
         if (!a) return null;
         a.oculto = oculto;
+        return a;
+      },
+      // ADR-104: sem concorrência na memória, a trava dos nomes não faz nada.
+      async travarNomesDeBots() {},
+      // ADR-081: sem concorrência na memória, travar é só buscar.
+      async travarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async buscarNod() {
+        return doTenant(b.agentes).find((a) => a.ownerId === escopo.pessoaId && a.papel === "nod") ?? null;
+      },
+      async marcarComoNod(id, perfil) {
+        const a = doTenant(b.agentes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.dono === "pessoa" && !x.excluidoEm && !x.papel);
+        if (!a || doTenant(b.agentes).some((x) => x.ownerId === escopo.pessoaId && x.papel === "nod")) return null;
+        Object.assign(a, { ...perfil, papel: "nod", cor: "c-black", fixado: true, oculto: false, confirmado: true });
         return a;
       },
       async definirVoz(id, p) {
@@ -527,7 +630,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         c.sessaoExecutor = sessaoCli ? sessaoExecutor : null;
         c.sessaoHarness = sessaoCli ? sessaoHarness : null;
         c.sessaoEm = sessaoCli ? agora() : null;
+        b.contaDaSessao.delete(`conversa:${id}`);
         return true;
+      },
+      async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`conversa:${id}`, contaId); },
+      async contaDaSessao(id) { return b.contaDaSessao.get(`conversa:${id}`) ?? null;
       },
     },
 
@@ -622,6 +729,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
 
     mensagens: {
       async criar(m) {
+        const chave = m.idEnvio ? `${escopo.tenantId}:${m.conversaId}:${m.idEnvio}` : null;
+        if (chave && b.idsDeEnvio.has(chave)) return null;
         const mensagem: Mensagem = {
           tenantId: escopo.tenantId,
           id: m.id ?? randomUUID(),
@@ -636,7 +745,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora() + b.mensagens.length / 1000,
         };
         b.mensagens.push(mensagem);
+        if (chave) b.idsDeEnvio.set(chave, mensagem.id);
         return mensagem;
+      },
+      async buscarPorIdEnvio(conversaId, idEnvio) {
+        const id = b.idsDeEnvio.get(`${escopo.tenantId}:${conversaId}:${idEnvio}`);
+        return id ? (doTenant(b.mensagens).find((m) => m.id === id) ?? null) : null;
       },
       async buscar(id) {
         return doTenant(b.mensagens).find((m) => m.id === id) ?? null;
@@ -644,6 +758,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listarDaConversa(conversaId, limite = 200) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas.slice(Math.max(0, todas.length - limite));
+      },
+      async listarComTurno(conversaId, limite = 200) {
+        const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
+        return comTurno(todas.slice(Math.max(0, todas.length - limite)));
+      },
+      async doTrabalho(trabalhoId, limite = 300) {
+        const turnos = doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId);
+        const ids = new Set(turnos.map((t) => t.id));
+        const origens = new Set(turnos.flatMap((t) => (t.mensagemOrigemId ? [t.mensagemOrigemId] : [])));
+        const todas = doTenant(b.mensagens).filter((m) => (m.turnoId !== null && ids.has(m.turnoId)) || origens.has(m.id)).sort((x, y) => x.criadoEm - y.criadoEm);
+        return comTurno(todas.slice(Math.max(0, todas.length - limite)));
       },
       async janelaAte(conversaId, ancoraId, desde, limite = 100) {
         const ancora = doTenant(b.mensagens).find((m) => m.id === ancoraId);
@@ -672,6 +797,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const m = doTenant(b.mensagens).find((x) => x.id === id);
         if (!m) return false;
         m.parcial = parcial;
+        return true;
+      },
+      async atualizarSistema(id, m) {
+        const x = doTenant(b.mensagens).find((y) => y.id === id && y.kind === "sistema");
+        if (!x) return false;
+        Object.assign(x, { texto: m.texto, payload: m.payload, turnoId: x.turnoId ?? m.turnoId ?? null });
         return true;
       },
       async marcarParciaisDoTurno(turnoId) {
@@ -716,6 +847,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id) {
         return doTenant(b.propostas).find((p) => p.id === id) ?? null;
       },
+      async buscarParaAtualizar(id) {
+        // Espelha `buscar`; sem concorrência na memória, sem lock.
+        return doTenant(b.propostas).find((p) => p.id === id) ?? null;
+      },
       async pendentesDaConversa(conversaId) {
         return doTenant(b.propostas).filter((p) => p.conversaId === conversaId && p.estado === "pendente");
       },
@@ -728,9 +863,292 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         p.estado = estado;
         return p;
       },
+      async atualizarPayload(id, payload) {
+        const p = doTenant(b.propostas).find((x) => x.id === id && x.kind === payload.kind);
+        if (!p) return null;
+        p.payload = payload;
+        return p;
+      },
+    },
+
+    contasIa: contasIaMemoria(b.contasIa, escopo),
+    trocasDeIa: (() => {
+      const minhas = () => b.trocasDeIa.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+      const sem = ({ tenantId: _t, ownerId: _o, ...t }: TrocaDeIa & { tenantId: string; ownerId: string }): TrocaDeIa => ({ ...t });
+      return {
+        async abrir(n) {
+          // Revisão do PR 2 (I2): um aberto por bot E IA que parou.
+          const aberta = minhas().find((x) => x.agenteId === n.agenteId && x.iaDe === n.iaDe && x.decididoEm === null);
+          if (aberta) {
+            Object.assign(aberta, { iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, fixo: n.fixo, machineId: n.machineId, contaDe: n.contaDe ?? aberta.contaDe, aplicarEm: n.recomendacao === "levar" ? aberta.aplicarEm ?? n.aplicarEm : null });
+            return { troca: sem(aberta), nova: false };
+          }
+          const t = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, conversaId: n.conversaId, iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, criadaEm: n.agora, aplicarEm: n.aplicarEm, decididoEm: null, decisao: null, mensagemId: null, fixo: n.fixo, voltaAoFixo: null, restauradoEm: null, machineId: n.machineId, contaDe: n.contaDe ?? null, voltouEm: null };
+          b.trocasDeIa.push(t);
+          return { troca: sem(t), nova: true };
+        },
+        async definirMensagem(id, mensagemId) { const t = minhas().find((x) => x.id === id); if (t) t.mensagemId = mensagemId; },
+        async buscar(id) { const t = minhas().find((x) => x.id === id); return t ? sem(t) : null; },
+        async abertaDoAgente(agenteId, iaDe) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.decididoEm === null && (!iaDe || x.iaDe === iaDe)).sort((x, y) => x.criadaEm - y.criadaEm)[0];
+          return t ? sem(t) : null;
+        },
+        async abertasDoAgente(agenteId) { return minhas().filter((x) => x.agenteId === agenteId && x.decididoEm === null).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
+        async esperaDecidida(agenteId, iaDe) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.iaDe === iaDe && x.decisao === "esperar" && x.voltouEm === null).sort((x, y) => (y.decididoEm ?? 0) - (x.decididoEm ?? 0))[0];
+          return t ? sem(t) : null;
+        },
+        async fechadaRecente(agenteId, iaDe, desde) {
+          const t = minhas().filter((x) => x.agenteId === agenteId && x.iaDe === iaDe && x.decididoEm !== null && x.decididoEm >= desde && x.mensagemId !== null).sort((x, y) => (y.decididoEm ?? 0) - (x.decididoEm ?? 0))[0];
+          return t ? sem(t) : null;
+        },
+        async marcarVoltou(id, em) {
+          const t = minhas().find((x) => x.id === id && (x.decisao === "esperar" || x.decisao === "conta") && x.voltouEm === null);
+          if (!t) return false;
+          t.voltouEm = em;
+          return true;
+        },
+        async fechar(id, decisao, em, voltaAoFixo) {
+          const t = minhas().find((x) => x.id === id && x.decididoEm === null);
+          if (!t) return null;
+          Object.assign(t, { decididoEm: em, decisao, voltaAoFixo: voltaAoFixo ?? null });
+          return sem(t);
+        },
+        async marcarRestaurada(id, em) {
+          const t = minhas().find((x) => x.id === id && x.voltaAoFixo !== null && x.restauradoEm === null);
+          if (!t) return false;
+          t.restauradoEm = em;
+          return true;
+        },
+        async paraVarrer() { return minhas().filter((x) => x.decididoEm === null || (x.voltaAoFixo !== null && x.restauradoEm === null) || ((x.decisao === "esperar" || x.decisao === "conta") && x.voltouEm === null)).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
+      };
+    })(),
+
+    esperas: {
+      async criar(e) {
+        if (b.esperas.some((x) => x.tenantId === escopo.tenantId && x.turnoId === e.turnoId)) return null;
+        const linha = { ...e, tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), estado: "rodando" as const, codigoSaida: null, saida: null, motivoFim: null, quedas: 0, iniciadaEm: null, vistoEm: null, acordouEm: null, criadoEm: agora(), terminadoEm: null };
+        b.esperas.push(linha);
+        return semDonoEspera(linha);
+      },
+      async buscar(id) { const e = minhasEsperas().find((x) => x.id === id); return e ? semDonoEspera(e) : null; },
+      async buscarTravado(id) { const e = minhasEsperas().find((x) => x.id === id); return e ? semDonoEspera(e) : null; },
+      async doTurnoTravada(turnoId) { const e = minhasEsperas().find((x) => x.turnoId === turnoId); return e ? semDonoEspera(e) : null; },
+      async paraAMaquina(maquinaId, quando) {
+        return minhasEsperas().filter((x) => x.maquinaId === maquinaId && x.estado === "rodando").map((x) => { x.vistoEm = quando; return { id: x.id, comando: x.comando, pasta: x.pasta, iniciada: x.iniciadaEm !== null }; });
+      },
+      async marcarIniciada(id, quando) { const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando"); if (!e) return false; e.iniciadaEm ??= quando; e.vistoEm = quando; return true; },
+      async gravarQuedas(id, quedas, quando) { const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando"); if (!e) return false; e.quedas = quedas; e.vistoEm = quando; return true; },
+      async finalizar(id, f) {
+        const e = minhasEsperas().find((x) => x.id === id && x.estado === "rodando");
+        if (!e) return null;
+        Object.assign(e, { estado: f.estado, codigoSaida: f.codigo ?? null, saida: f.saida ?? null, motivoFim: f.motivoFim ?? null, terminadoEm: f.agora });
+        return semDonoEspera(e);
+      },
+      async marcarAcordou(id, quando) { const e = minhasEsperas().find((x) => x.id === id && x.acordouEm === null); if (!e) return false; e.acordouEm = quando; return true; },
+      async cancelarRodando(alvo, motivoFim, quando) {
+        const alvos = minhasEsperas().filter((x) => x.estado === "rodando" && ("conversaId" in alvo ? x.conversaId === alvo.conversaId : "trabalhoId" in alvo ? x.trabalhoId === alvo.trabalhoId : true));
+        for (const e of alvos) Object.assign(e, { estado: "cancelada", motivoFim, terminadoEm: quando });
+        return alvos.map((e) => e.id);
+      },
+      // O varredor das esperas sem notícia se prova no Postgres (tests/integration/esperar-comando.test.ts).
+      async semNoticia() { return []; },
+    },
+    turnoCredenciais: {
+      async gravar(c) {
+        const i = b.credenciais.findIndex((x) => x.tenantId === escopo.tenantId && x.turnoId === c.turnoId);
+        if (i >= 0 && b.credenciais[i]!.epoch > c.epoch) return;
+        if (i >= 0) b.credenciais.splice(i, 1);
+        b.credenciais.push({ ...c, falasSeq: 0, tenantId: escopo.tenantId, ownerId: escopo.pessoaId });
+      },
+      async buscar(turnoId) { return minhasCredenciais().find((x) => x.turnoId === turnoId) ?? null; },
+      async buscarPorHash(hash) { return minhasCredenciais().find((x) => x.tokenHash.equals(hash)) ?? null; },
+      async registrarFalas(turnoId, seq) { const c = minhasCredenciais().find((x) => x.turnoId === turnoId); if (c) c.falasSeq = Math.max(c.falasSeq, seq); },
+      async apagar(turnoId) { b.credenciais = b.credenciais.filter((x) => !(x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.turnoId === turnoId)); },
+      async quaisSobrevivem(ids) { return new Set(minhasCredenciais().filter((x) => ids.includes(x.turnoId) && x.sobreviveReinicio).map((x) => x.turnoId)); },
+    },
+    trabalhos: {
+      async criar(n) {
+        const linha: Trabalho & { ownerId: string } = {
+          tenantId: escopo.tenantId,
+          ownerId: escopo.pessoaId,
+          id: n.id ?? randomUUID(),
+          agenteId: n.agenteId,
+          conversaId: n.conversaId,
+          titulo: n.titulo,
+          origem: n.origem,
+          pedidoPorAgenteId: n.pedidoPorAgenteId ?? null,
+          rotinaId: n.rotinaId ?? null,
+          trabalhoMaeId: n.trabalhoMaeId ?? null,
+          depoisDeTrabalhoId: n.depoisDeTrabalhoId ?? null,
+          estado: n.estado ?? "na_fila",
+          sessaoCli: n.sessaoCli ?? null,
+          sessaoHarness: n.sessaoHarness ?? null,
+          sessaoExecutor: n.sessaoCli ? (n.sessaoExecutor ?? null) : null,
+          pasta: n.pasta ?? null,
+          memoriaMb: null,
+          custoUsd: null,
+          pessoaEsperando: n.pessoaEsperando === true,
+          forma: n.forma ?? "task",
+          loteId: n.loteId ?? null,
+          resumo: null,
+          criadoEm: agora() + b.trabalhos.length / 1000,
+          iniciadoEm: n.iniciadoEm ?? null,
+          terminadoEm: null,
+        };
+        b.trabalhos.push(linha);
+        return semDonoTrabalho(linha);
+      },
+      async buscar(id) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id);
+        return t ? semDonoTrabalho(t) : null;
+      },
+      async buscarTravado(id) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id);
+        return t ? semDonoTrabalho(t) : null;
+      },
+      async listar(p) {
+        return doTenant(b.trabalhos)
+          .filter((t) => (!p.agenteId || t.agenteId === p.agenteId) && (t.terminadoEm === null || t.terminadoEm >= p.terminadosDesde))
+          .sort((x, y) => Number(x.terminadoEm !== null) - Number(y.terminadoEm !== null) || y.criadoEm - x.criadoEm)
+          .map(semDonoTrabalho);
+      },
+      async abertosDoAgente(agenteId) {
+        return doTenant(b.trabalhos).filter((t) => t.agenteId === agenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoTrabalho);
+      },
+      async filhaAbertaDaRotina(rotinaId) {
+        const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && (x.trabalhoMaeId !== null || x.forma === "frente") && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado));
+        return t ? semDonoTrabalho(t) : null;
+      },
+      async filhos(maeId) {
+        return doTenant(b.trabalhos).filter((t) => t.trabalhoMaeId === maeId).map(semDonoTrabalho);
+      },
+      async mudarEstado(id, estado, em) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!t) return null;
+        t.estado = estado;
+        if (estado === "rodando" || estado === "precisa_de_voce") t.iniciadoEm ??= em;
+        t.terminadoEm = estado === "terminado" || estado === "parado" || estado === "falhou" ? em : null;
+        return semDonoTrabalho(t);
+      },
+      async atualizarSessao(id, sessaoCli, harness, executor = null) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!t) return false;
+        t.sessaoCli = sessaoCli;
+        t.sessaoHarness = harness;
+        t.sessaoExecutor = executor;
+        b.contaDaSessao.delete(`trabalho:${id}`);
+        return true;
+      },
+      async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`trabalho:${id}`, contaId); },
+      async contaDaSessao(id) { return b.contaDaSessao.get(`trabalho:${id}`) ?? null;
+      },
+      async somarCusto(id, custoUsd) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!t) return false;
+        t.custoUsd = (t.custoUsd ?? 0) + custoUsd;
+        return true;
+      },
+      async atualizarMemoria(porTurno) {
+        let n = 0;
+        for (const p of porTurno) {
+          const turno = doTenant(b.turnos).find((x) => x.id === p.turnoId);
+          const t = turno?.trabalhoId ? doTenant(b.trabalhos).find((x) => x.id === turno.trabalhoId && x.ownerId === escopo.pessoaId) : undefined;
+          const mb = Math.max(0, Math.round(p.mb));
+          if (!t || t.memoriaMb === mb) continue;
+          t.memoriaMb = mb;
+          n += 1;
+        }
+        return n;
+      },
+      async travarEsperas() {
+        // Em memória tudo roda em série: não há o que travar.
+      },
+      async marcarDepoisDe(id, depoisDeId) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (!t) return null;
+        t.depoisDeTrabalhoId = depoisDeId;
+        return semDonoTrabalho(t);
+      },
+      async redeComSessao(conversaId, sessaoCli) {
+        const t = doTenant(b.trabalhos).filter((x) => x.conversaId === conversaId && x.origem === "rede" && x.sessaoCli === sessaoCli).sort((x, y) => y.criadoEm - x.criadoEm)[0];
+        return t ? semDonoTrabalho(t) : null;
+      },
+      async fatos(id) {
+        const dele = doTenant(b.turnos).filter((t) => t.trabalhoId === id);
+        const ids = new Set(dele.map((t) => t.id));
+        const terminais = dele.filter((t) => (t.estado === "concluido" || t.estado === "interrompido") && t.motivoInterrupcao !== "absorvido").sort((x, y) => y.criadoEm - x.criadoEm);
+        const ultimo = terminais[0];
+        const depoisDe = doTenant(b.trabalhos).find((w) => w.id === id)?.depoisDeTrabalhoId ?? null;
+        const dep = depoisDe ? doTenant(b.trabalhos).find((w) => w.id === depoisDe) : undefined;
+        return {
+          parando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm !== null).length,
+          despachando: dele.filter((t) => t.estado === "despachando" && t.pararSolicitadoEm === null).length,
+          pendentes: dele.filter((t) => t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).length,
+          aguardandoDespertar: dele.some((t) => t.estado === "pendente" && (t.acordarEm ?? 0) > agora()),
+          aguardandoComando: b.esperas.some((e) => e.tenantId === escopo.tenantId && e.trabalhoId === id && e.estado === "rodando"),
+          esperandoOutro: dep !== undefined && !["terminado", "parado", "falhou"].includes(dep.estado),
+          decisaoPendente: doTenant(b.decisoes).some((d) => d.turnoId !== null && ids.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta") && (d.tipo !== "retomar_turno" || d.turnoId === ultimo?.id)),
+          ...((() => {
+            const pergunta = doTenant(b.decisoes).filter((d) => d.turnoId !== null && ids.has(d.turnoId) && d.tipo !== "retomar_turno").sort((x, y) => Date.parse(y.criadoEm) - Date.parse(x.criadoEm))[0];
+            return pergunta && pergunta.estado === "vencida" && pergunta.turnoId === ultimo?.id ? { perguntaVencida: true } : {};
+          })()),
+          aguardandoColega: doTenant(b.mensagens).some((h) => h.kind === "handoff" && h.turnoId !== null && ids.has(h.turnoId) && h.payload?.kind === "handoff" && Boolean(h.payload.tarefaId)
+            && !doTenant(b.mensagens).some((r) => r.conversaId === h.conversaId && r.payload?.kind === "peer_ask" && h.payload?.kind === "handoff" && r.payload.tarefaId === h.payload.tarefaId)
+            && !doTenant(b.trabalhos).some((c) => h.payload?.kind === "handoff" && c.id === h.payload.trabalhoId && ["terminado", "parado", "falhou"].includes(c.estado))),
+          ultimo:ultimo ? { estado: ultimo.estado, motivo: ultimo.motivoInterrupcao } : null,
+        };
+      },
+      async extras(ids) {
+        const saida = new Map<string, ExtrasTrabalho>();
+        for (const id of ids) {
+          const t = doTenant(b.trabalhos).find((x) => x.id === id);
+          if (!t) continue;
+          const turnos = doTenant(b.turnos).filter((x) => x.trabalhoId === id);
+          const doTurno = new Set(turnos.map((x) => x.id));
+          const falas = doTenant(b.mensagens).filter((m) => m.turnoId !== null && doTurno.has(m.turnoId) && m.kind === "texto" && m.autoria.autor_tipo === "agente");
+          saida.set(id, {
+            pedidoPorNome: doTenant(b.agentes).find((a) => a.id === t.pedidoPorAgenteId)?.nome ?? null,
+            rotinaNome: doTenant(b.rotinas).find((r) => r.id === t.rotinaId)?.instrucao ?? null,
+            ultimaFala: falas.at(-1)?.texto ?? null,
+            turnoVivoId: turnos.find((x) => x.estado === "despachando")?.id ?? null,
+            turnosAbertos: turnos.filter((x) => x.estado === "pendente" || x.estado === "despachando").map((x) => x.id),
+            deFora: t.origem === "colega" || turnos.some((x) => b.contaminados.has(x.id) || x.entradaConfianca !== "confiavel"),
+            // O tempo e o colega esperado se provam no Postgres (tests/integration/repos/trabalhos.test.ts).
+            esperandoColega: null,
+            trabalhouMs: 0,
+            acordaEm: turnos.filter((x) => x.estado === "pendente" && x.acordarEm).map((x) => x.acordarEm!).sort((a, z) => a - z)[0] ?? null,
+            // As esperas de comando (ADR-099) se provam no Postgres (tests/integration/esperar-comando.test.ts).
+            esperandoComando: null,
+            // O alvo pela chave viva (desta vez → bot → padrão) se prova no Postgres; aqui, só a máquina do bot.
+            maquinaVivaId: turnos.find((x) => x.estado === "despachando")?.machineId ?? null,
+            maquinaAlvoId: doTenant(b.agentes).find((a) => a.id === t.agenteId)?.maquinaId ?? null,
+          });
+        }
+        return saida;
+      },
+      // Os pedidos parados se provam no Postgres (tests/integration/pedidos-parados.test.ts); a memória não os vê.
+      async pedidosAColegaParados() {
+        return [];
+      },
+      // A limpeza (ADR-088) se prova no Postgres (tests/integration/limpeza-das-tasks.test.ts); a memória não a vê.
+      async candidatosALimpeza() {
+        return [];
+      },
     },
 
     turnos: {
+      // NOD-219: os órfãos se provam no Postgres (tests/integration/turnos-orfaos.test.ts) — a geração do agente vive na
+      // tabela e no trigger da 0012, que a memória não tem.
+      async orfaosCandidatos() {
+        return [];
+      },
+      async encerrarOrfao() {
+        return null;
+      },
+      async buscarPorMensagemOrigem(mensagemId: string) {
+        return doTenant(b.turnos).filter((t) => t.mensagemOrigemId === mensagemId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
+      },
       async buscarTravado(id: string) {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
@@ -738,12 +1156,63 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         // Em memória tudo roda em série: não há o que travar.
       },
       async retomadaNaFila(retomaTurnoId: string) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente").sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
       },
-      async juntarEntrada(id: string, texto: string) {
+      async marcarDespertar(id: string, em: number, motivo: string) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "despachando" && x.pararSolicitadoEm === null);
+        if (!t) return false;
+        despertares.set(id, { em, motivo });
+        return true;
+      },
+      async despertarDoTurno(id: string) {
+        return despertares.get(id) ?? null;
+      },
+      async voltasMarcadas(retomaTurnoId: string) {
+        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null).length;
+      },
+      async ultimasVoltas(retomaTurnoId: string, limite: number) {
+        return doTenant(b.turnos)
+          .filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null)
+          .sort((x, y) => y.criadoEm - x.criadoEm)
+          .slice(0, limite)
+          .map((t) => ({
+            estado: t.estado,
+            marcouVolta: despertares.has(t.id) || b.esperas.some((e) => e.tenantId === escopo.tenantId && e.turnoId === t.id),
+            perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
+            pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
+            porCota: t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA),
+          }));
+      },
+      async contarTasksNaIa(agenteId, iaDe) {
+        return new Set(tasksNaIa(agenteId, iaDe).map((t) => t.trabalhoId)).size;
+      },
+      async levarTasksDoBot(p) {
+        const ids: string[] = [];
+        for (const t of tasksNaIa(p.agenteId, p.iaDe)) {
+          const daCota = t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
+          Object.assign(t, { harness: p.harness, modelo: p.modelo, ...(daCota ? { acordarEm: null, entradaTexto: p.entradaDaVolta } : {}) });
+          ids.push(t.id);
+        }
+        return ids;
+      },
+      async trazerTasksDeVolta(p) {
+        const ids: string[] = [];
+        for (const t of doTenant(b.turnos).filter((x) => x.ownerId === escopo.pessoaId && x.agenteId === p.agenteId && x.estado === "pendente" && x.trabalhoId && x.harness === p.de)) {
+          Object.assign(t, { harness: p.harness, modelo: p.modelo });
+          ids.push(t.id);
+        }
+        return ids;
+      },
+      async acordarEsperasDaCota(agenteId, iaDe) {
+        const alvo = tasksNaIa(agenteId, iaDe).filter((t) => t.acordarEm !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA));
+        for (const t of alvo) t.acordarEm = null;
+        return alvo.length;
+      },
+      async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
         if (!t) return null;
         t.entradaTexto = `${t.entradaTexto}\n\n${texto}`;
+        t.entradaAnexos = [...new Set([...t.entradaAnexos, ...anexos])];
         return t;
       },
       async raizDaCadeia(id: string) {
@@ -779,6 +1248,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async sessaoDoTurno() {
         return null;
       },
+      async registrarExecutor(id, executor) {
+        const t = doTenant(b.turnos).find((x) => x.id === id);
+        if (t) t.executor = executor;
+      },
+      async registrarConta(id, contaId) { b.contaDoTurno.set(id, contaId); },
+      async contaDoTurno(id) { return b.contaDoTurno.get(id) ?? null; },
       async enfileirar(t) {
         const turno: Turno = {
           tenantId: escopo.tenantId,
@@ -805,23 +1280,45 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           custoUsd: null,
           modelo: t.modelo,
           harness: t.harness ?? "auto",
+          executor: t.executor,
           criadoEm: agora() + b.turnos.length / 1000,
           mensagemOrigemId: t.mensagemOrigemId ?? null,
           absorvidoPor: null,
           sobProcuracaoDe: t.sobProcuracaoDe ?? null,
+          // Auditoria A3 (2026-10-15): o turno-cérebro guarda a ligação, como a coluna `ligacao_id` do repo real.
+          ligacaoId: t.ligacaoId ?? null,
+          // A retomada herda o trabalho do turno que continua, como o INSERT do repo real.
+          trabalhoId: t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? (doTenant(b.turnos).find((r) => r.id === t.retomaTurnoId)?.trabalhoId ?? null) : null,
+          acordarEm: t.acordarEm ?? null,
         };
         b.turnos.push(turno);
+        // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
+        if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         return turno;
       },
       async buscar(id) {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
       async reivindicar(p) {
+        const fimDaFila = (t: Turno) => ["rotina", "delegacao", "peer"].includes(t.origem) || ["rotina", "colega"].includes(doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId)?.origem ?? "");
         const vivos = doTenant(b.turnos);
         const candidatos = vivos
-          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente")
-          .filter((t) => !vivos.some((d) => d.estado === "despachando" && (d.conversaId === t.conversaId || d.agenteId === t.agenteId)))
-          .sort((x, y) => Number(x.origem === "rotina") - Number(y.origem === "rotina") || x.criadoEm - y.criadoEm);
+          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? 0) <= p.agora)
+          // ADR-083: a faixa é o trabalho ou, sem ele, a conversa; o trabalho espera o de que depende.
+          .filter((t) => {
+            if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao");
+            if (vivos.some((d) => d.estado === "despachando" && d.trabalhoId === t.trabalhoId)) return false;
+            const dono = doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId);
+            const dep = dono?.depoisDeTrabalhoId ? doTenant(b.trabalhos).find((x) => x.id === dono.depoisDeTrabalhoId) : null;
+            if (dep && !["terminado", "parado", "falhou"].includes(dep.estado)) return false;
+            // ADR-085: a mesma regra do SQL (seguravelPeloMac; o espaço segura também o que passou da espera máxima).
+            if (dono && p.espacarFundo === true && seguravelPeloMac({ ...dono, criadoEm: p.agora }, p.agora)) return false;
+            // #219: disco crítico — nenhum trabalho novo, nem a volta marcada (que só ele segura, revisão do #224);
+            // memória crítica — o segundo plano novo sem prazo.
+            if (p.segurarNovo === true && (t.acordarEm || (dono && dono.iniciadoEm === null))) return false;
+            return !(dono && p.segurarFundo === true && seguravelPeloMac(p.fundoSemPrazo === true ? { ...dono, criadoEm: p.agora } : dono, p.agora));
+          })
+          .sort((x, y) => Number(fimDaFila(x)) - Number(fimDaFila(y)) || x.criadoEm - y.criadoEm);
         const t = candidatos[0];
         if (!t) return null;
         t.estado = "despachando";
@@ -830,9 +1327,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.sinais = { ...t.sinais, attempted: true };
         return t;
       },
-      async renovarLease(id, machineId, sinais, em) {
+      async renovarLease(id, machineId, sinais, em, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.machineId === machineId);
-        if (!t) return { ativo: false };
+        if (!t) return { ativo: false, motivo: "lease_vencido" as const };
+        // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
+        if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false, motivo: "lease_vencido" as const };
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,
@@ -841,7 +1340,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
         const ativo = t.estado === "despachando" && t.pararSolicitadoEm === null;
         if (ativo) t.leaseAte = em + LEASE_MS;
-        return { ativo };
+        return ativo ? { ativo } : { ativo, motivo: "parado" as const };
       },
       async marcarSinal(id, sinal) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
@@ -877,18 +1376,51 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
         return totais.length === 0 ? null : Math.max(...totais);
       },
-      async interromper(id, motivo) {
+      async concluirTardia(id, a) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
+        if (!t || doTenant(b.turnos).some((r) => r.retomaTurnoId === id)) return null;
+        t.estado = "concluido";
+        t.motivoInterrupcao = null;
+        t.motivoFalha = null;
+        t.sinais = {
+          attempted: t.sinais.attempted || !!a.sinais?.attempted,
+          rejected: t.sinais.rejected || !!a.sinais?.rejected,
+          promptSubmitted: t.sinais.promptSubmitted || !!a.sinais?.promptSubmitted,
+          producedOutput: t.sinais.producedOutput || !!a.sinais?.producedOutput,
+        };
+        if (a.custoUsd !== undefined && a.custoUsd !== null) t.custoUsd = a.custoUsd;
+        t.leaseAte = null;
+        return t;
+      },
+      async temRetomada(retomaTurnoId) {
+        return doTenant(b.turnos).some((r) => r.retomaTurnoId === retomaTurnoId);
+      },
+      async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
         if (!t) return null;
+        // NOD-241: a guarda do varredor, como o UPDATE do repo real (o lease renovado no meio não é interrompido).
+        if (o.leaseVencidoEm !== undefined && t.leaseAte !== null && t.leaseAte >= o.leaseVencidoEm) return null;
         t.estado = "interrompido";
         t.motivoInterrupcao = motivo;
+        t.leaseAte = null;
+        return t;
+      },
+      async delegacoesPendentesDoAgente(agenteId, limite = 20) {
+        return doTenant(b.turnos).filter((t) => t.agenteId === agenteId && t.origem === "delegacao" && t.estado === "pendente").sort((x, y) => x.criadoEm - y.criadoEm || x.id.localeCompare(y.id)).slice(0, limite);
+      },
+      async absorverDelegacao(id, porTurnoId) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.origem === "delegacao" && x.estado === "pendente");
+        if (!t) return null;
+        t.estado = "interrompido";
+        t.motivoInterrupcao = "absorvido";
+        t.absorvidoPor = porTurnoId;
         t.leaseAte = null;
         return t;
       },
       async absorverPendentes(turno, entrada) {
         if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
         const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && (t.origem === "conversa" || t.origem === "sala") && t.mensagemOrigemId)
+          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && (t.origem === "conversa" || t.origem === "sala") && t.mensagemOrigemId && (t.trabalhoId ?? null) === (turno.trabalhoId ?? null))
           .sort((x, y) => x.criadoEm - y.criadoEm);
         for (const t of absorvidos) {
           t.estado = "interrompido";
@@ -902,10 +1434,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         alvo.entradaAnexos = [...new Set([...turno.entradaAnexos, ...absorvidos.flatMap((a) => a.entradaAnexos)])];
         return { turno: alvo, absorvidos };
       },
-      async absorverNaSessao(turno) {
-        const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0)
-          .sort((x, y) => x.criadoEm - y.criadoEm);
+      async absorverNaSessao(turno, ids) {
+        // NOD-286: como o SQL — fora de trabalho, e só até a primeira fala pendente com anexo do mesmo escopo.
+        const escopoDaFala = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && !t.trabalhoId);
+        const absorvidos = ateOPrimeiroAnexo(escopoDaFala).filter((t) => !ids || ids.includes(t.id));
         for (const t of absorvidos) {
           t.estado = "interrompido";
           t.motivoInterrupcao = "absorvido";
@@ -913,6 +1445,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           t.leaseAte = null;
         }
         return absorvidos;
+      },
+      async absorverDoTrabalho(turno, ids) {
+        if (!turno.trabalhoId || (ids && ids.length === 0)) return [];
+        const daFaixa = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId);
+        const absorvidos = ateOPrimeiroAnexo(daFaixa).filter((t) => !ids || ids.includes(t.id));
+        for (const t of absorvidos) {
+          t.estado = "interrompido";
+          t.motivoInterrupcao = "absorvido";
+          t.absorvidoPor = turno.id;
+          t.leaseAte = null;
+        }
+        return absorvidos;
+      },
+      // ADR-090: o fake não guarda nem aplica a máquina do turno (o reivindicar dele ignora onde o bot trabalha); a regra é
+      // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
+      async rodarDestaVez(conversaId, maquinaId) {
+        const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
+        void maquinaId;
+        return ts.length;
       },
       async cancelarPendente(id) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");
@@ -939,16 +1490,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "despachando");
       },
       async pendentesDaPessoa(conversaId) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId));
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId)).sort(porChegada);
       },
       async vivosDaConversa(conversaId) {
-        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando"));
+        return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando") && (t.acordarEm ?? 0) <= agora());
       },
       async pendentesRenderizaveis(conversaId) {
         const todos = doTenant(b.turnos);
         const saida: { id: string; motivo: "agente_ocupado_em"; conversaId: string }[] = [];
-        for (const p of todos.filter((t) => t.conversaId === conversaId && t.estado === "pendente")) {
-          const ocupado = todos.find((d) => d.estado === "despachando" && d.agenteId === p.agenteId) ?? todos.find((d) => d.estado === "despachando" && d.conversaId === p.conversaId);
+        for (const p of todos.filter((t) => t.conversaId === conversaId && t.estado === "pendente" && !t.trabalhoId && (t.acordarEm ?? 0) <= agora())) {
+          const daConversa = todos.filter((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === conversaId);
+          const ocupado = daConversa.find((d) => d.agenteId === p.agenteId) ?? daConversa[0];
           if (ocupado) saida.push({ id: p.id, motivo: "agente_ocupado_em", conversaId: ocupado.conversaId });
         }
         return saida;
@@ -967,12 +1519,38 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      async custoPorAgente(janelas) {
+        const somas = new Map<string, { agenteId: string; janela: number; usd: number }>();
+        for (const t of doTenant(b.turnos)) {
+          if (t.ownerId !== escopo.pessoaId || t.custoUsd === null) continue;
+          janelas.forEach((j, janela) => {
+            if (t.criadoEm < j.inicio || t.criadoEm >= j.fim) return;
+            const chave = `${t.agenteId}:${janela}`;
+            const atual = somas.get(chave) ?? { agenteId: t.agenteId, janela, usd: 0 };
+            atual.usd += t.custoUsd ?? 0;
+            somas.set(chave, atual);
+          });
+        }
+        return [...somas.values()];
+      },
       async barradosPorFaltaDeIa(desde) {
         const meus = doTenant(b.turnos);
         return meus
           .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.criadoEm >= desde)
           .filter((t) => !meus.some((n) => n.conversaId === t.conversaId && n.criadoEm > t.criadoEm))
           .sort((x, y) => x.criadoEm - y.criadoEm);
+      },
+      async travarAbertosDoTrabalho(trabalhoId: string) {
+        return doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && (t.estado === "pendente" || t.estado === "despachando")).sort((x, y) => x.criadoEm - y.criadoEm);
+      },
+      async doTrabalho(trabalhoId) {
+        return doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId).sort((x, y) => x.criadoEm - y.criadoEm);
+      },
+      async vincularTrabalho(id, trabalhoId) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && !x.trabalhoId && x.estado === "despachando");
+        if (!t) return null;
+        t.trabalhoId = trabalhoId;
+        return t;
       },
       async listarDaConversa(conversaId, limite = 50) {
         const todos = doTenant(b.turnos).filter((t) => t.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
@@ -1020,7 +1598,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((d) => d.decisorId === escopo.pessoaId)
           .filter((d) => d.estado === "pendente" || d.estado === "reaberta" || (d.estado === "vencida" && Date.parse(d.prazoDecisaoEm) >= em - 7 * 24 * 60 * 60 * 1000))
           .sort((x, y) => Date.parse(x.criadoEm) - Date.parse(y.criadoEm))
-          .map((d) => ({ ...d, agenteNome: b.agentes.find((a) => a.id === d.agenteId)?.nome ?? "agente" }));
+          .map((d) => ({ ...d, agenteNome: b.agentes.find((a) => a.id === d.agenteId)?.nome ?? "agente", trabalhoId: b.turnos.find((t) => t.id === d.turnoId)?.trabalhoId ?? null }));
+      },
+      async abertasDoTrabalho(trabalhoId) {
+        const turnos = new Set(doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId).map((t) => t.id));
+        return doTenant(b.decisoes).filter((d) => d.turnoId !== null && turnos.has(d.turnoId) && (d.estado === "pendente" || d.estado === "reaberta"));
       },
       async pendentesDaConversa(conversaId) {
         return doTenant(b.decisoes).filter((d) => d.conversaId === conversaId && (d.estado === "pendente" || d.estado === "reaberta"));
@@ -1090,6 +1672,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
         d.decididaEm = p.agora;
         return d;
+      },
+      async fecharRetomarAnteriores(trabalhoId, turnoIdAtual, p) {
+        const atual = doTenant(b.turnos).find((t) => t.id === turnoIdAtual);
+        if (!atual) return [];
+        const anteriores = new Set(doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && t.id !== atual.id && (t.criadoEm < atual.criadoEm || (t.criadoEm === atual.criadoEm && t.id < atual.id))).map((t) => t.id));
+        const fechadas: Decisao[] = [];
+        for (const d of doTenant(b.decisoes)) {
+          if (d.tipo !== "retomar_turno" || (d.estado !== "pendente" && d.estado !== "reaberta") || d.turnoId === null || !anteriores.has(d.turnoId)) continue;
+          d.estado = "decidida";
+          d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
+          d.decididaEm = p.agora;
+          fechadas.push(d);
+        }
+        return fechadas;
       },
 
       async ultimaDecisaoEm() {
@@ -1202,6 +1798,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async buscar(id) {
         return doTenant(b.rotinas).find((r) => r.id === id) ?? null;
       },
+      async buscarParaAtualizar(id) {
+        // Espelha o SQL: só a dona (o FOR UPDATE passa pela policy de UPDATE). Sem concorrência na memória, sem lock.
+        return doTenant(b.rotinas).find((r) => r.id === id && r.ownerId === escopo.pessoaId) ?? null;
+      },
       async listar() {
         return doTenant(b.rotinas).filter((r) => r.excluidoEm === null);
       },
@@ -1266,7 +1866,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async turnoAberto(rotinaId) {
         const abertas = doTenant(b.janelas)
           .filter((j) => j.rotinaId === rotinaId && j.turnoId !== null)
-          .filter((j) => ["pendente", "despachando"].includes(doTenant(b.turnos).find((t) => t.id === j.turnoId)?.estado ?? ""))
+          .filter((j) => {
+            const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
+            const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
+            // ADR-099 (I7 revista): sem trabalho, a cadeia de retomadas da execução (até 10 saltos).
+            const cadeia = new Set([t?.id]);
+            for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+            return t !== undefined && (vivo(t) || (Boolean(t.trabalhoId) && doTenant(b.turnos).some((v) => v.trabalhoId === t.trabalhoId && vivo(v)))
+              || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
+          })
           .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
         return abertas[0]?.turnoId ?? null;
       },
@@ -1543,6 +2151,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           tenantId: escopo.tenantId,
           id: randomUUID(),
           mensagemId: r.mensagemId,
+          tipo: r.tipo ?? "bug",
+          origem: r.origem ?? "botao",
           conversaId: r.conversaId,
           turnoId: r.turnoId,
           categoria: r.categoria,
@@ -1580,6 +2190,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async prosaDe() {
         return null;
+      },
+      async contarDoNodDesde(desde) {
+        return doTenant(b.relatos).filter((r) => r.ownerId === escopo.pessoaId && r.origem === "nod" && r.criadoEm >= desde).length;
       },
       async registrarDiagnostico() {},
       async diagnosticoDoTurno() {
@@ -1753,12 +2366,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return b.maquinaTokens
           .filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId)
           .sort((x, y) => y.criadaEm - x.criadaEm)
-          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm }));
+          .map(({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm, expiraEm }) => ({ id, nome, prefixo, criadaEm, ultimoUsoEm, revogadaEm: revogadaEm ?? (expiraEm !== null && expiraEm <= Date.now() ? expiraEm : null) }));
       },
       async revogar(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (!l) return false;
         l.revogadaEm ??= em;
+        return true;
+      },
+      async vencerEm(id, ate) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
+        if (!l) return false;
+        l.expiraEm = l.expiraEm === null ? ate : Math.min(l.expiraEm, ate);
         return true;
       },
       async buscarVivaPorHash(hash, em) {
@@ -1769,6 +2388,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async marcarUso(id, em) {
         const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
         if (l) l.ultimoUsoEm = em;
+      },
+      async renomear(id, nome) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id && x.revogadaEm === null);
+        if (!l) return false;
+        l.nome = nome;
+        return true;
+      },
+      async registrarPlataforma(id, plataforma) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        if (l) l.plataforma = plataforma;
+      },
+      async identificar(id) {
+        const l = b.maquinaTokens.find((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId && x.id === id);
+        return l ? { nome: l.nome, plataforma: l.plataforma ?? null } : null;
       },
     },
     permissoesPermanentes: {
@@ -1849,15 +2482,44 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { custoUsd: com.reduce((s, t) => s + (t.custoUsd ?? 0), 0), turnos: com.length };
       },
     },
-    preferencias: {
-      async buscar() {
-        return b.preferencias.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? { modoDev: false };
-      },
-      async gravar(p) {
-        b.preferencias.set(`${escopo.tenantId}:${escopo.pessoaId}`, { modoDev: p.modoDev });
-        return { modoDev: p.modoDev };
-      },
-    },
+    preferencias: (() => {
+      const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
+      const atual = (): Preferencias => b.preferencias.get(chave) ?? { modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} };
+      return {
+        async buscar() {
+          return atual();
+        },
+        async gravar(p) {
+          const nova = { ...atual(), ...(p.modoDev !== undefined ? { modoDev: p.modoDev } : {}), ...(p.usoDoMac !== undefined ? { usoDoMac: p.usoDoMac } : {}), ...(p.ordemIas !== undefined ? { ordemIas: p.ordemIas } : {}) };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+        async registrarLimite(ia, limite) {
+          const nova = { ...atual(), iasNoLimite: { ...atual().iasNoLimite, [ia]: limite } };
+          b.preferencias.set(chave, nova);
+          return nova.iasNoLimite;
+        },
+        async limparLimite(ia) {
+          const a = atual();
+          if (!a.iasNoLimite?.[ia]) return false;
+          const limites = { ...a.iasNoLimite };
+          delete limites[ia];
+          b.preferencias.set(chave, { ...a, iasNoLimite: limites });
+          return true;
+        },
+        async definirMaquinaPadrao(maquinaId) {
+          const nova = { ...atual(), maquinaPadraoId: maquinaId };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+        async fecharAviso(aviso) {
+          const a = atual();
+          const nova = a.avisosFechados.includes(aviso) ? a : { ...a, avisosFechados: [...a.avisosFechados, aviso] };
+          b.preferencias.set(chave, nova);
+          return nova;
+        },
+      };
+    })(),
     onboarding: (() => {
       const chave = `${escopo.tenantId}:${escopo.pessoaId}`;
       const atual = (): LinhaOnboarding => b.onboarding.get(chave) ?? { etapa: null, guiaId: null, botId: null, concluidoEm: null, campos: { apelido: null, comoConheceu: null, objetivo: null, tamanhoTime: null } };
@@ -1883,6 +2545,17 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async buscar() {
         return b.comandos.get(`${escopo.tenantId}:${escopo.pessoaId}`) ?? null;
+      },
+    },
+    usoDoPlano: {
+      async gravar(uso) {
+        const chave = `${escopo.tenantId}:${escopo.pessoaId}:${uso.harness}`;
+        const atual = b.usoDoPlano.get(chave);
+        if (!atual || atual.medidoEm < uso.medidoEm) b.usoDoPlano.set(chave, uso);
+      },
+      async listar() {
+        const prefixo = `${escopo.tenantId}:${escopo.pessoaId}:`;
+        return [...b.usoDoPlano].filter(([k]) => k.startsWith(prefixo)).map(([, v]) => v).sort((x, y) => x.harness.localeCompare(y.harness));
       },
     },
     leituras: (() => {
@@ -1980,6 +2653,102 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         },
       };
     })(),
+    frentes: (() => {
+      const meus = () => b.lotes.filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId);
+      const semDonoLote = ({ tenantId: _t, ownerId: _d, ...l }: LoteDeFrentes & { tenantId: string; ownerId: string }): LoteDeFrentes => ({ ...l });
+      return {
+        async criarLote(n: NovoLote) {
+          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null };
+          b.lotes.push(linha);
+          return semDonoLote(linha);
+        },
+        async buscarLote(id: string) { const l = doTenant(b.lotes).find((x) => x.id === id); return l ? semDonoLote(l) : null; },
+        async buscarLoteTravado(id: string) { const l = meus().find((x) => x.id === id); return l ? semDonoLote(l) : null; },
+        async ligarAoLote(loteId: string, ids: readonly string[]) {
+          const lote = doTenant(b.lotes).find((x) => x.id === loteId && x.devolvidoEm === null);
+          if (!lote) return 0;
+          const alvos = doTenant(b.trabalhos).filter((t) => ids.includes(t.id) && t.ownerId === escopo.pessoaId && t.agenteId === lote.agenteId && t.forma === "frente" && !t.loteId);
+          for (const t of alvos) t.loteId = loteId;
+          return alvos.length;
+        },
+        async gravarResumo(trabalhoId: string, resumo: ResumoFrente) {
+          const t = doTenant(b.trabalhos).find((x) => x.id === trabalhoId && x.ownerId === escopo.pessoaId && x.forma === "frente");
+          if (!t) return false;
+          t.resumo = resumo;
+          return true;
+        },
+        async frentesDoLote(loteId: string) {
+          return doTenant(b.trabalhos).filter((t) => t.loteId === loteId).sort((x, y) => x.criadoEm - y.criadoEm)
+            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivo: null, quedas: 0 }));
+        },
+        // ADR-099 (I9): a consulta das frentes caídas se prova no Postgres (tests/integration/frentes-caidas.test.ts).
+        async frentesCaidas() {
+          return [];
+        },
+        async lotesAbertosPor(ids: readonly string[]) {
+          return doTenant(b.lotes).filter((l) => ids.includes(l.abertoPorTurnoId)).sort((x, y) => x.criadoEm - y.criadoEm).map(semDonoLote);
+        },
+        async marcarDevolvido(loteId: string, retornoTurnoId: string | null, em: number) {
+          const l = meus().find((x) => x.id === loteId && x.devolvidoEm === null);
+          if (!l) return null;
+          l.devolvidoEm = em;
+          l.retornoTurnoId = retornoTurnoId;
+          return semDonoLote(l);
+        },
+      };
+    })(),
+    // ADR-099 (I10): o estado do dono se prova no Postgres (tests/integration/estado-do-dono.test.ts); aqui, as frentes
+    // vivas e as decisões abertas, o bastante para o estado principal.
+    donos: {
+      async fatos(agenteIds: readonly string[]) {
+        const vivos = doTenant(b.turnos).filter((t) => agenteIds.includes(t.agenteId) && t.estado === "despachando");
+        const decisoes = new Map<string, { quantas: number; desde: number }>();
+        for (const d of doTenant(b.decisoes).filter((x) => agenteIds.includes(x.agenteId) && (x.estado === "pendente" || x.estado === "reaberta"))) {
+          const atual = decisoes.get(d.agenteId);
+          const em = Date.parse(d.criadoEm);
+          decisoes.set(d.agenteId, { quantas: (atual?.quantas ?? 0) + 1, desde: Math.min(atual?.desde ?? em, em) });
+        }
+        return {
+          vivos: new Map(vivos.filter((t) => !t.trabalhoId).map((t) => [t.agenteId, t.criadoEm])),
+          vivosPropria: new Map(vivos.filter((t) => !t.trabalhoId && doTenant(b.conversas).some((c) => c.id === t.conversaId && c.tipo === "propria")).map((t) => [t.agenteId, t.criadoEm])),
+          frentesVivas: new Set(vivos.flatMap((t) => (t.trabalhoId ? [t.trabalhoId] : []))),
+          decisoes,
+          comandos: [],
+          voltas: [],
+          colegas: [],
+          fila: [],
+        };
+      },
+    },
+    // ADR-099 (I7 revista): os pedidos entre bots na triagem do dono. A trava e as quedas se provam no Postgres
+    // (tests/integration/fila-triagem.test.ts, tests/concurrency/pedidos-cruzados.test.ts); aqui, o mínimo para a regra.
+    pedidosDeColega: {
+      async travar() {},
+      async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
+        const ms = doTenant(b.mensagens);
+        const fechado = (id: unknown) => typeof id === "string" && doTenant(b.trabalhos).some((t) => t.id === id && ["terminado", "parado", "falhou"].includes(t.estado));
+        const handoffs = ms.flatMap((m) => (m.payload?.kind === "handoff" && m.payload.tarefaId && m.criadoEm >= desde && !fechado(m.payload.trabalhoId)
+          && !ms.some((r) => r.conversaId === m.conversaId && r.payload?.kind === "peer_ask" && r.payload.tarefaId === (m.payload?.kind === "handoff" ? m.payload.tarefaId : null))
+          ? [{ de: m.payload.de, para: m.payload.para, tarefaId: m.payload.tarefaId, criadoEm: m.criadoEm, texto: m.payload.motivo }] : []));
+        const frentes = doTenant(b.trabalhos)
+          .filter((t) => t.pedidoPorAgenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado))
+          .map((t) => ({ de: t.pedidoPorAgenteId as string, para: t.agenteId, tarefaId: null, criadoEm: t.criadoEm, texto: null }));
+        return [...handoffs, ...frentes].filter((p) => filtro.de === undefined || p.de === filtro.de);
+      },
+      async livres(ids: readonly string[], em: number) {
+        return ids.filter((id) => !doTenant(b.turnos).some((t) => t.agenteId === id && (t.estado === "despachando" || (t.estado === "pendente" && (t.acordarEm == null || t.acordarEm <= em)))));
+      },
+      async frentesAbertasDosTurnos(turnoIds: readonly string[]) {
+        const lotes = doTenant(b.lotes).filter((l) => turnoIds.includes(l.abertoPorTurnoId) && l.devolvidoEm === null).map((l) => l.id);
+        return doTenant(b.trabalhos).filter((t) => t.loteId && lotes.includes(t.loteId) && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).length;
+      },
+      async esperasRodandoDosTurnos(turnoIds: readonly string[]) {
+        return doTenant(b.esperas).filter((e) => turnoIds.includes(e.turnoId) && e.estado === "rodando").length;
+      },
+      async triagensParadas() {
+        return [];
+      },
+    },
   } satisfies Repos;
 
   return repos;

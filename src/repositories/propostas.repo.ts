@@ -56,6 +56,17 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-07 (NOD-197): `buscar` com a linha TRAVADA até o fim da transação. Ordem única dos cards de
+     * rotina: PROPOSTA e depois DECISÃO — a conversa já trava a proposta primeiro (propostas.decidir), e "Sua vez"
+     * passa a travar aqui antes de fechar a decisão. Mesmo filtro de `decidir` (só a dona): o FOR UPDATE passa pela
+     * policy de UPDATE, então a proposta de outra pessoa do tenant volta null.
+     */
+    async buscarParaAtualizar(id: string): Promise<Proposta | null> {
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
+      return l ? paraProposta(l) : null;
+    },
+
+    /**
      * Pedido de acesso vindo de ROTINA (definido em 2026-09-24, emenda da ADR-044): UM pendente por
      * (dona, agente, app), qualquer que seja a rotina — índice propostas_acesso_de_rotina_aberta (0026).
      * INSERT ... ON CONFLICT DO NOTHING e, perdendo, devolve o que já estava: duas rotinas no mesmo tick,
@@ -107,6 +118,13 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
         select ${conn.unsafe(COLUNAS)} from propostas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente' and kind = 'acesso'
           and criado_em >= ${data(desde)} and criado_em < ${data(ate)} order by criado_em`;
       return linhas.map(paraProposta);
+    },
+
+    /** ADR-082: o lote do Nod grava o desfecho de cada ação no próprio payload ao ser decidido. Só a dona. */
+    async atualizarPayload(id: string, payload: PayloadProposta): Promise<Proposta | null> {
+      const [l] = await conn<Linha[]>`
+        update propostas set payload = ${conn.json(payload)} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and kind = ${payload.kind} returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraProposta(l) : null;
     },
 
     /** Só sai de 'pendente': confirmar/recusar duas vezes devolve null (idempotência para a rota). */

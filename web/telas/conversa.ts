@@ -3,32 +3,41 @@ import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
+import type { TipoAnexo } from "../../src/contracts/anexo.ts";
+import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
 import { assinatura } from "../lib/assinatura.ts";
+import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
-import { linhaAtual, resumoEtapa, type AtividadeTurno } from "../lib/atividade.ts";
+import { maquinaDoBot } from "./maquinas.ts";
+import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
-import { estadoMascoteNaConversa } from "../lib/mascote.ts";
+import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
-import { renderCardLiberar } from "./card-liberar.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
 import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
+import { renderCardLote } from "./card-lote.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
-import { faixaDaMensagem, renderSeloModoDev } from "./modo-dev.ts";
+import { faixaDaMensagem } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
+import { HTML_SELETOR_IA } from "./seletor-ia.ts";
 import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
-import { avisoContaSemAcesso, ehIa, linhaIaTrocada } from "./ia-fora.ts";
-import { botaoLigar, htmlBotaoLigar, renderLinhaLigacao } from "./ligacao.ts";
+import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
+import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
+import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
+import { renderLinhaLigacao } from "./ligacao.ts";
+import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
+import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -167,7 +176,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
-  if (m.kind === "sistema") return linhaIaTrocada(m) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -188,32 +197,129 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "negacao" && p.classe === "plano_ausente") return avisoSemExecutor(m, estado);
   if (p?.kind === "negacao") return `<div class="negacao negacao-${esc(p.classe)}">${paragrafos(m.texto)}${p.terminal ? ' <span class="tag tag-ambar">terminal</span>' : ""}</div>`;
   if (p?.kind === "parada") return `<div class="msg-parada">■ ${paragrafos(m.texto)}</div>`;
+  // definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): o colega que não terminou vira UMA linha discreta;
+  // o motivo e o atalho para a task dele ficam atrás de "detalhes".
+  if (p?.kind === "peer_ask" && p.falhou) {
+    const motivo = m.texto.replace(/^[\s\S]*?não concluiu:\s*/, "");
+    const link = p.trabalhoId ? `<button type="button" class="pf-link" data-act="abrir-trabalho" data-id="${esc(p.trabalhoId)}">Ver a task do ${esc(p.nome)}</button>` : "";
+    return `<div class="msg-peer-falhou"><details data-disclosure="peer-falhou-${esc(m.id)}"><summary><span>${esc(p.nome)} não conseguiu terminar o pedido</span><span class="pf-detalhes">detalhes</span></summary><div class="pf-corpo"><span>${esc(motivo)}</span>${link}</div></details></div>`;
+  }
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
 }
 
 /**
+ * As linhas de IA do plano das IAs (2026-10-10): a troca de IA (tela 3) e o limite sem outra IA pronta (tela 4). Leem o
+ * bot que falou (o modelo dele na IA que assumiu; se está em "Uma IA só") e o estado das IAs (do Mac ou do servidor).
+ */
+function linhaDeIa(m: Mensagem, estado: Estado): string | null {
+  const p = m.payload;
+  if (p?.kind === "conta_trocada") return linhaContaTrocada(m);
+  if (p?.kind === "conta_seguiu" || p?.kind === "conta_escolhida") return linhaContaSeguiu(m);
+  // ADR-108 (R4/R6): o aviso de troca de IA do bot (o bot vem do payload: a linha pode ter nascido do despacho).
+  if (p?.kind === "troca_de_ia") return cartaoTrocaDeIa(m, { nomeDoBot: agenteDe(estado, p.agenteId)?.nome ?? null, agora: estado.agora });
+  if (p?.kind !== "ia_trocada" && p?.kind !== "limite_do_plano") return null;
+  const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
+  const ias = iasDaTela(estado);
+  if (p.kind === "ia_trocada") {
+    const ia = ias.find((i) => i.id === p.para);
+    return linhaIaTrocada(m, { modelo: ia && bot ? ia.modelos.find((x) => x.id === escolhaEfetiva(ia, inteligenciaDoBot(bot).escolhas).modelo)?.nome ?? null : null });
+  }
+  return linhaLimiteSemOutra(m, { nomeDoBot: bot?.nome ?? null, agenteId: bot?.id ?? null, agora: estado.agora, ui: estado.iasMac, ias, fixa: bot ? inteligenciaDoBot(bot).modo === "fixa" : false });
+}
+
+/**
+ * NOD-220 (revisão do #303): a fonte ÚNICA de "de que IA o aviso depende" — decide se ela ainda está fora, se o aviso a
+ * nomeia e o nome no "já voltou". Em ordem:
+ * - bot fixado (NOD-171/NOD-213): a IA DELE, mesmo que a negação tenha nomeado outra (ele não roda em outra);
+ * - payload `ia` (o harness do turno que recusou, gravado desde a NOD-220): essa IA, nomeada no aviso. Valor fora do
+ *   catálogo da web (IA nova, dado torto): nada se infere — segue fora, sem nome;
+ * - negação antiga ou do executor (sem `ia`) com IA no `nome`: a sonda dessa IA ("codex-cli" só vem do harness; "claude-cli"
+ *   é o motor local ou o harness, e os dois são a sonda do Claude Code), sem nomear no aviso — o de sempre fica legível;
+ * - "catcher": a sonda do próprio catcher (o executor que faltou), nunca a de uma IA;
+ * - "ia" ou desconhecido: nenhuma — nunca "já voltou".
+ */
+type AlvoDoAviso = { ia: IdIa; nomeia: boolean } | { motor: "catcher" };
+function alvoDoAviso(negacao: { nome: string; ia?: unknown } | null, fixado: IdIa | null): AlvoDoAviso | null {
+  if (fixado) return { ia: fixado, nomeia: true };
+  if (!negacao) return null;
+  if (negacao.ia !== undefined) return ehIa(negacao.ia) ? { ia: negacao.ia, nomeia: true } : null;
+  if (ehIa(negacao.nome)) return { ia: negacao.nome, nomeia: false };
+  return negacao.nome === "catcher" ? { motor: "catcher" } : null;
+}
+
+/** A IA que a negação diz ter recusado: `ia` (valor fora do catálogo: nenhuma); sem `ia`, o `nome` quando é IA. */
+function iaQueRecusou(negacao: { nome: string; ia?: unknown } | null): IdIa | null {
+  if (!negacao) return null;
+  const ia = negacao.ia !== undefined ? negacao.ia : negacao.nome;
+  return ehIa(ia) ? ia : null;
+}
+
+/** A sonda do alvo. Sem o catálogo das IAs (servidor anterior à NOD-171), a do Claude Code é a do motor local. */
+function sondaDoAlvo(estado: Estado, alvo: AlvoDoAviso): Inventario | null {
+  const doMotor = (id: string): Inventario | null => estado.executor ? estado.executor.opcoes.find((o) => o.id === id)?.inventario ?? null : id === "claude-cli" ? estado.inventario : null;
+  if ("motor" in alvo) return doMotor(alvo.motor);
+  return estado.executor?.harnesses ? inventarioDaIa(estado, alvo.ia) : alvo.ia === "claude-cli" ? doMotor("claude-cli") : null;
+}
+
+/** NOD-285: o nome do tipo de arquivo como a pessoa lê (o mesmo da frase do servidor, src/domain/harness.ts). */
+const NOME_DO_TIPO_DE_ANEXO: Readonly<Record<TipoAnexo, string>> = { pdf: "PDF", imagem: "imagem", texto: "arquivo de texto" };
+
+/**
  * Executor indisponível (ADR-029, classe plano_ausente) como aviso de ERRO do design system (definido em 2026-10-04):
- * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e o instante em ISO);
+ * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e a hora);
  * na frente, o que aconteceu em palavras e o próximo passo: "Conectar IA" enquanto a IA continua fora, e "mande de
  * novo" quando ela já voltou (a mensagem perdida não é reenviada sozinha).
  */
 function avisoSemExecutor(m: Mensagem, estado: Estado): string {
-  const nome = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id)?.nome : undefined;
-  const inv = inventarioEmUso(estado);
-  // Sem sonda ainda (inventário null, logo ao abrir a página) vale como fora: dizer "já voltou" seria afirmar sem saber.
-  const aindaFora = !inv || inv.estado !== "pronto";
-  // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
+  const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
+  const nome = bot?.nome;
   const negacao = m.payload?.kind === "negacao" ? m.payload : null;
-  if (negacao?.causa && ehIa(negacao.nome)) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia: negacao.nome, causa: negacao.causa, aindaFora, noApp: "nodDesktop" in globalThis });
+  // NOD-171/NOD-213: o bot FIXADO numa IA depende do inventário DELA, não do motor em uso. Quem diz se o bot está fixado
+  // (e em qual IA) é a `inteligencia` que o servidor calcula pelo domínio (iaDoModelo): um bot com modelo GPT é do Codex,
+  // nunca do Claude Code. A regra não se repete aqui.
+  const intel = bot ? inteligenciaDoBot(bot) : null;
+  const fixado = intel?.modo === "fixa" && intel.fixa && ehIa(intel.fixa) ? intel.fixa : null;
+  const alvo = alvoDoAviso(negacao, fixado);
+  // NOD-213/NOD-220: "já voltou" só com a sonda DO ALVO pronta e mais nova que a negação; sem alvo, nunca.
+  const aindaFora = !alvo || !prontaDepois(sondaDoAlvo(estado, alvo), m.criadoEm);
+  const iaDoAlvo = alvo && "ia" in alvo ? alvo.ia : null;
+  // A IA da causa e do modelo recusado: a que recusou (`ia`; nas antigas, o `nome`); sem ela, a do bot fixado.
+  const iaDoAviso = iaQueRecusou(negacao) ?? fixado;
+  const noApp = "nodDesktop" in globalThis;
   const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
+  // NOD-285 (revisão do Gil no #345): a IA está pronta e só não lê o arquivo. Nem "nenhuma IA pronta", nem "já voltou",
+  // nem "fica guardada": mandar de novo dá a mesma negação enquanto não houver uma IA que leia o arquivo.
+  if (negacao?.anexo) {
+    const tipo = NOME_DO_TIPO_DE_ANEXO[negacao.anexo];
+    // Quem lê o tipo sai das capacidades do catálogo (ADR-083), nunca do id da IA.
+    const leem = (estado.executor?.harnesses?.opcoes ?? []).filter((h) => h.integrado && h.capacidades.anexos.includes(negacao.anexo!)).map((h) => h.nome);
+    const passo = leem.length > 0 ? `Deixe o ${leem.join(" ou o ")} pronto e mande o arquivo de novo, ou cole o conteúdo como texto.` : "Cole o conteúdo como texto.";
+    return avisoDeEstado({
+      tom: "erro",
+      titulo: "Nenhum trabalho começou.",
+      texto: `${nome ?? "O bot"} não consegue ler ${tipo} com as IAs prontas agora. ${passo}`,
+      extra: detalhes,
+      acao: botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }),
+    });
+  }
+  // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
+  // Esse aviso não diz que a IA "voltou": diz que JÁ HÁ UMA IA PRONTA. No Automático (sem IA fixada) o bot pega a IA em
+  // uso, então vale a sonda dela, mais nova que a negação (NOD-213); o bot fixado segue a regra da IA dele.
+  if (negacao?.causa && iaDoAviso) return avisoContaSemAcesso(m, estado, { nomeDoBot: nome ?? "O bot", ia: iaDoAviso, causa: negacao.causa, aindaFora: fixado ? aindaFora : !prontaDepois(inventarioEmUso(estado), m.criadoEm), noApp });
+  // NOD-171: a IA está pronta e recusou o modelo do agente; esperar não resolve.
+  if (negacao?.modelo && iaDoAviso) return avisoModeloRecusado(m, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: iaDoAviso, modelo: negacao.modelo });
+  // NOD-171/NOD-220: a IA do alvo, nomeável e ainda fora — o aviso diz QUAL e o estado dela (desatualizada, sem login, no
+  // limite, fora, ou só "indisponível" quando o catálogo não explica).
+  if (aindaFora && alvo && "ia" in alvo && alvo.nomeia) return avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: alvo.ia, noApp });
+  const voltou = iaDoAlvo ? `O ${PROVEDOR_DA_IA[iaDoAlvo].cli} já voltou` : "Ela já voltou";
   return avisoDeEstado({
     tom: "erro",
     titulo: "Nenhum trabalho começou.",
     texto: aindaFora
-      ? `${nome ?? "O bot"} não pôde começar: sua conta de IA não está conectada neste computador. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
-      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. Ela já voltou: se a resposta não chegou, mande a mensagem de novo.`,
+      ? `${nome ?? "O bot"} não pôde começar: nenhuma IA está pronta agora. Sua mensagem fica guardada: quando a IA voltar, ${nome ?? "o bot"} responde sozinho.`
+      : `${nome ?? "O bot"} não pôde começar porque a sua conta de IA estava desconectada. ${voltou}: se a resposta não chegou, mande a mensagem de novo.`,
     extra: detalhes,
     acao: aindaFora ? botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }) : undefined,
   });
@@ -231,7 +337,11 @@ function anexosDe(m: Mensagem, estado: Estado): string {
   return renderAnexosDaMensagem(m.anexos, (id) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`);
 }
 
-type SituacaoFila = { tipo: "na_fila"; texto: string } | { tipo: "cancelando" } | { tipo: "cancelada" };
+/**
+ * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
+ * a própria linha da fila oferece "Rodar em <outra> desta vez", sem faixa por cima da conversa.
+ */
+type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string } } | { tipo: "cancelando" } | { tipo: "cancelada" };
 
 /**
  * Onde a mensagem da pessoa está na fila (definido em 2026-09-24): o turno que ela disparou ainda
@@ -250,6 +360,15 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   if (estado.turnosVivos[emCurso.id]?.estado !== "na_fila") return null;
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "o agente";
+  // ADR-090: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
+  const doBot = agente ? maquinaDoBot(estado, agente) : null;
+  // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
+  const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
+  if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
+  if (doBot && !doBot.conectada) {
+    const outra = (estado.maquinas?.maquinas ?? []).find((m) => m.conectada && m.id !== doBot.id && Object.values(m.ias).includes("pronto"));
+    return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} não responde${doBot.ultimoUsoEm ? ` desde ${hora(doBot.ultimoUsoEm)}` : ""}`, ...(outra ? { destaVez: { conversaId: c.conversa.id, maquinaId: outra.id, nome: outra.nome } } : {}) };
+  }
   const outra = c.turnosPendentes.find((p) => p.id === emCurso.id && p.conversaId !== c.conversa.id);
   if (outra) {
     const la = estado.frota?.agentes.find((a) => a.conversaId === outra.conversaId);
@@ -262,7 +381,8 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
 function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   if (s.tipo === "cancelada") return `<div class="fila-chip cancelada">Cancelada · não rodou</div>`;
   if (s.tipo === "cancelando") return `<div class="fila-chip">Cancelando…${botao("desfazer-cancelamento", "Desfazer", { classe: "link", id: turnoId })}</div>`;
-  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+  const destaVez = s.destaVez ? botao("rodar-desta-vez", `Rodar em ${esc(s.destaVez.nome)} desta vez`, { classe: "link", dados: { conversa: s.destaVez.conversaId, maquina: s.destaVez.maquinaId } }) : "";
+  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
 }
 
 /** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */
@@ -273,7 +393,11 @@ export function comChipDeComando(texto: string): string {
   return `<span class="chip-comando">/${esc(m[1]!)}</span>${resto ? ` ${paragrafos(resto)}` : ""}`;
 }
 
-export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false): string {
+/**
+ * `etiqueta` (definido em 2026-10-07, #191/#195): a fala que chega de uma rotina ou de uma task leva "da rotina …" /
+ * "da task …" ao lado do nome — é balão porque é para a pessoa, mas não é resposta à última mensagem dela.
+ */
+export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false, opcoes: { etiqueta?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -288,7 +412,8 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
   // contexto só existe em pedido antigo (delegar_tarefa); o de pedir_a_bot já traz o contexto no próprio texto.
   const autor = ehPessoa ? "Você" : m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agente?.nome ?? assinatura(m.autoria, nomesDe(estado));
-  const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time></div>`;
+  const etiqueta = opcoes.etiqueta ? `<span class="etiqueta-origem">${esc(opcoes.etiqueta)}</span>` : "";
+  const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
   const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? "outro bot")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
   const tags = ehPessoa || m.payload?.kind === "peer_pedido" || m.payload?.kind === "boas_vindas"
@@ -329,6 +454,8 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
   // definido em 2026-09-18: a pasta já vem descoberta, então autorizar é um clique — a pessoa não
   // navega em menu nem digita caminho. Sem candidatas, o mesmo card abre a escolha manual.
   if (p.payload.kind === "pasta") return renderCardPasta(p, p.payload, estado, a);
+  // definido em 2026-10-07 (ADR-082): as mudanças em vários bots que o Nod pediu de uma vez — um card, uma linha por ação.
+  if (p.payload.kind === "lote_bots") return renderCardLote(p, p.payload, p.estado === "pendente" && decisaoAbertaDoCard(p, estado) !== null);
   let itens = "";
   if (p.payload.kind === "perfil") {
     const c = p.payload;
@@ -421,18 +548,56 @@ const ETAPAS_VISIVEIS = 20;
  * Cartão de atividade (definido em 2026-09-24): o turno que já chamou ferramenta deixa de ser balão.
  * Mostra o que o agente está fazendo agora numa linha, há quanto tempo e as etapas recolhidas.
  */
-function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string): string {
+function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string, parar: string): string {
+  const mudo = minutosSemNovidade(a, estado.agora);
   const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
   const anteriores = a.totalEtapas - visiveis.length;
   const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
   return `<article class="message bot atividade ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
-    <div class="atividade-cab"><span class="atividade-pulso" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
+    <div class="atividade-cab"><span class="atividade-pulso${mudo !== null ? " parado" : ""}" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
     <p class="atividade-agora">${soLinks(linhaAtual(a))}</p>
+    ${renderAvisoDoVigia(a, estado.agora, parar)}
     ${renderTarefasDoBot(a.tarefas)}
     <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
       <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
     </details>
   </section></div></article>`;
+}
+
+/**
+ * O vigia do turno na tela (definido em 2026-10-05, NOD-73; protótipo do Gil): só aviso — quem decide parar é a
+ * pessoa, com o Parar que já existe. Minutos sem novidade contados pelo relógio da tela a partir de `mudoDesde`;
+ * null = sem aviso de silêncio.
+ */
+export function minutosSemNovidade(a: AtividadeTurno | undefined, agora: number): number | null {
+  const desde = a?.vigia?.mudoDesde;
+  return desde === null || desde === undefined ? null : Math.max(1, Math.floor((agora - desde) / 60_000));
+}
+
+function esperaDoVigia(v: VigiaDaAtividade): string {
+  if (v.aberta) return `Esperando <b>${esc(v.aberta)}</b> terminar.`;
+  if (v.emFundo > 0) return `Esperando ${v.emFundo === 1 ? "1 comando" : `${v.emFundo} comandos`} em segundo plano.`;
+  return "O bot não responde.";
+}
+
+/** Um bloco só, em âmbar (relógio no silêncio, setas em círculo na repetição; nunca o triângulo de erro), com um Parar: o silêncio e a repetição (só o maior limiar, numa linha que se atualiza). */
+export function renderAvisoDoVigia(a: AtividadeTurno, agora: number, parar: string): string {
+  const v = a.vigia;
+  const mudo = minutosSemNovidade(a, agora);
+  if (!v || (mudo === null && !v.repeticao)) return "";
+  const linhas = [
+    mudo !== null ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.relogioMini}</span>Sem novidade há ${mudo} min</b><span>${esperaDoVigia(v)} Se parecer travado, use Parar.</span></p>` : "",
+    v.repeticao ? `<p><b><span class="vigia-ic" aria-hidden="true">${ICONE.proxima}</span>Repetiu a mesma ação ${v.repeticao.vezes} vezes</b><span>Em <b>${esc(v.repeticao.rotulo)}</b>. Pode estar andando em círculo.</span></p>` : "",
+  ].join("");
+  return `<div class="atividade-vigia" role="status">${linhas}${parar}</div>`;
+}
+
+/** O Parar do aviso: a mesma ação do Parar do campo (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
+function pararDoVigia(c: ConversaEstado): string {
+  const salaId = c.conversa.salaId;
+  return salaId
+    ? botao("parar-sala", "Parar", { classe: "aviso", id: salaId, titulo: "interrompe todos os turnos desta sala" })
+    : botao("parar-conversa", "Parar", { classe: "aviso", titulo: "interrompe agora o que está rodando nesta conversa" });
 }
 
 /** A lista de tarefas do bot (definido em 2026-09-28): a checklist que o terminal mostra, dentro do cartão. */
@@ -461,14 +626,17 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "O agente";
   if (atividade && atividade.ferramentas > 0) {
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: renderCartaoAtividade(t, atividade, estado, nome) }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: renderCartaoAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
   }
+  // NOD-73: sem cartão, o aviso de silêncio vira uma linha só, com o Parar.
+  const mudo = t.estado === "rodando" ? minutosSemNovidade(atividade, estado.agora) : null;
+  const linhaMuda = mudo !== null ? `<div class="msg-sistema vigia-linha" role="status">sem novidade há ${mudo} min · o bot não responde · ${pararDoVigia(c)}</div>` : "";
   if (atividade?.atual) {
     // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
     // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
-    return [cabecalhoDoTurnoVivo(t, agente, nome), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave }))}</div></div></article>` }];
+    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
   }
-  return [{ chave, html: linhaDoTurnoVivo(t, c, estado) }];
+  return [{ chave, html: linhaDoTurnoVivo(t, c, estado) + linhaMuda }];
 }
 
 /** O cursor do streaming fica na mesma linha do último texto, mesmo quando ele termina num parágrafo, item ou título. */
@@ -484,10 +652,12 @@ function comCursor(html: string): string {
  * cima. O cabeçalho é um bloco À PARTE do corpo: o corpo muda a cada pedaço e a cada segundo do relógio, e o
  * <nod-mascote> regravado junto reiniciaria a animação; este bloco só muda quando o turno sai da fila.
  */
-function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string): BlocoDaTimeline {
+function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string, agora: number): BlocoDaTimeline {
+  // NOD-216: a mesma regra do mascote da barra — só o turno rodando anima; o recém-chegado pensa; a fila fica parada.
+  const mascote = t.estado === "rodando" ? "trabalhando" : filaRecente(t, agora) ? "pensando" : "na_fila";
   return {
     chave: `vivo-cab:${t.turnoId}`,
-    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", t.estado === "rodando" ? "trabalhando" : "pensando") : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
+    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", mascote) : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
   };
 }
 
@@ -515,46 +685,62 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
  */
 export type BlocoDaTimeline = { chave: string; html: string };
 
+/**
+ * As mensagens em blocos (revisto em 2026-10-07, #191, chat limpo): `planejarLinhas` (web/telas/linhas-do-chat.ts) diz
+ * o que vira linha centralizada, o que vira balão com etiqueta e o que some para dentro de uma linha ou da tela da task;
+ * o resto é desenhado como sempre. O pedido a colega de quem pede, que era um `<details class="collaboration">`, agora é
+ * linha também ("Enviou mensagem para…", "N mensagens com…").
+ */
 function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean): BlocoDaTimeline[] {
-  const grupos = new Map<string, Mensagem[]>();
-  const tarefas = new Map<string, string>();
-  for (const m of mensagens) {
-    if (m.payload?.kind === "handoff" && m.payload.tarefaId) tarefas.set(m.payload.tarefaId, m.turnoId ?? m.id);
-  }
-  const grupoDe = (m: Mensagem): string | undefined => {
-    if (m.payload?.kind === "handoff" && m.payload.tarefaId) return tarefas.get(m.payload.tarefaId);
-    if (m.payload?.kind === "peer_ask") return tarefas.get(m.payload.tarefaId) ?? m.payload.turnoOrigemId ?? m.id;
-    return undefined;
-  };
-  for (const m of mensagens) {
-    const k = grupoDe(m);
-    if (k) grupos.set(k, [...(grupos.get(k) ?? []), m]);
-  }
-  const mostrados = new Set<string>();
+  const planos = planejarLinhas(mensagens, estado);
   // definido em 2026-09-29 (0039, canvas "Não lidos"): a linha "Novas" entra acima da primeira não lida de quando a
-  // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair.
+  // pessoa abriu a conversa (ou voltou para a janela com outras novas, emenda de 2026-10-05), e fica até ela sair. Se a
+  // primeira não lida sumiu para dentro de uma linha, a linha "Novas" fica sozinha no lugar dela.
   const novas = mensagens[0] ? estado.novasDesde[mensagens[0].conversaId] : undefined;
-  const pedacos = mensagens.map((m) => (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + pedaco(m));
-  function pedaco(m: Mensagem): string {
-    const k = grupoDe(m);
-    if (!k) return renderMensagem(m, estado, sala);
-    if (mostrados.has(k)) return "";
-    mostrados.add(k);
-    const grupo = grupos.get(k) ?? [];
-    const participantes = [...new Set(grupo.flatMap((x) => x.payload?.kind === "handoff" ? [x.payload.para] : x.payload?.kind === "peer_ask" ? [x.payload.agenteId] : []))];
-    const avatares = participantes.map((id) => agenteDe(estado, id)).flatMap((a) => a ? [iconeAgente(a, "sm")] : []).join("");
-    const nome = participantes.length === 1 ? agenteDe(estado, participantes[0] ?? "")?.nome ?? "outro bot" : `${participantes.length} bots`;
-    return `<details class="collaboration" data-disclosure="${esc(k)}"><summary>${grupo.length} ${grupo.length === 1 ? "mensagem" : "mensagens"} com <span class="avatar-stack">${avatares}</span><span>${esc(nome)}</span><span class="chevron">⌄</span></summary><div class="collaboration-panel">${participantes.map((id) => {
-      const a = agenteDe(estado, id);
-      const trocas = grupo.filter((x) => x.payload?.kind === "handoff" ? x.payload.para === id : x.payload?.kind === "peer_ask" && x.payload.agenteId === id);
-      return `<details data-disclosure="${esc(k + id)}"><summary>${a ? iconeAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "Outro bot")}</b><small>${trocas.length} mensagens</small></summary><div class="collaboration-messages">${trocas.map((x) => `<div><small>${x.payload?.kind === "handoff" ? (x.autoria.sob_procuracao_de ? `Pedido · ${esc(assinatura(x.autoria, nomesDe(estado)))}` : "Pedido") : x.payload?.kind === "peer_ask" && x.payload.falhou ? "Não concluído" : "Resposta"} · ${hora(x.criadoEm)}</small>${textoFormatado(x.payload?.kind === "handoff" ? x.payload.motivo : x.texto, { chave: `colab:${x.id}` })}</div>`).join("")}${a ? botao("abrir-conversa", `Conversar com ${esc(a.nome)}`, { classe: "link", dados: { conversa: a.conversaId, agente: a.id } }) : ""}</div></details>`;
-    }).join("")}</div></details>`;
-  }
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
   // recolher os avisos — o <details> do fio não é linha de sistema.
-  const linhas: LinhaDaConversa[] = mensagens.map((m, i) => ({ id: m.id, sistema: linhaDeSistema(m), html: pedacos[i] ?? "" }));
+  const linhas: LinhaDaConversa[] = mensagens.map((m) => {
+    const plano = planos.get(m.id);
+    const html = !plano
+      ? renderMensagem(m, estado, sala)
+      : plano.tipo === "oculta"
+        ? ""
+        : plano.tipo === "linha"
+          ? plano.html
+          : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
+    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" ? { chave: plano.chave } : {}) };
+  });
   const conversaId = mensagens[0]?.conversaId;
-  return recolherAvisos(conversaId ? desenharFios(linhas, estado, conversaId) : linhas).filter((b) => b.html !== "");
+  const ordenadas = linhaDepoisDaFala(linhas, mensagens, planos);
+  const desenhadas = (conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== "");
+  return recolherAvisos(desenhadas);
+}
+
+/**
+ * definido em 2026-10-08 (QA do épico #188, pranchas K1 e B1 aprovadas): a linha que o turno grava no meio dele — "Abriu
+ * a task …" (trabalho_aberto) e "Enviou mensagem para …" (handoff) — entra DEPOIS da fala com que o bot a anunciou ("Abri
+ * uma task para isso…"), não antes. A linha nasce na hora da ferramenta e a fala no fim do turno, então pela ordem de
+ * criação ela vinha em cima. Só desce até a última fala do bot do MESMO turno que ainda está à vista; sem fala, fica.
+ */
+function linhaDepoisDaFala(linhas: readonly LinhaDaConversa[], mensagens: readonly Mensagem[], planos: ReadonlyMap<string, PlanoMensagem>): LinhaDaConversa[] {
+  const destino = new Map<number, number>();
+  mensagens.forEach((m, i) => {
+    const k = m.payload?.kind;
+    if (!m.turnoId || planos.get(m.id)?.tipo !== "linha" || (k !== "trabalho_aberto" && k !== "frentes_abertas" && k !== "recado_a_frente" && k !== "handoff")) return;
+    let alvo = -1;
+    for (let j = i + 1; j < mensagens.length; j++) {
+      const x = mensagens[j];
+      if (x?.turnoId === m.turnoId && x.kind === "texto" && x.autoria.autor_tipo === "agente" && (linhas[j]?.html ?? "") !== "") alvo = j;
+    }
+    if (alvo !== -1) destino.set(i, alvo);
+  });
+  if (destino.size === 0) return [...linhas];
+  const saida: LinhaDaConversa[] = [];
+  linhas.forEach((l, j) => {
+    if (!destino.has(j)) saida.push(l);
+    for (const [i, alvo] of destino) if (alvo === j && linhas[i]) saida.push(linhas[i]);
+  });
+  return saida;
 }
 
 /** Os data-* são da pílula da base (web/lib/rolagem.ts): ela sabe qual linha a pessoa já viu e o que dizer. */
@@ -568,8 +754,10 @@ const AVISOS_PARA_RECOLHER = 3;
 /**
  * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
  * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também.
+ * definido em 2026-10-16 (ADR-108, QA do PR 2): o aviso de troca de IA ainda sem decisão pede uma escolha — fica à vista.
  */
 function linhaDeSistema(m: Mensagem): boolean {
+  if (m.kind === "sistema" && m.payload?.kind === "troca_de_ia" && !m.payload.decisao) return false;
   return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
 }
 
@@ -590,11 +778,11 @@ function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
       saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>` });
       i = fim;
     } else if (fim > i) {
-      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.id, html: l.html })));
+      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.chave ?? l.id, html: l.html })));
       i = fim;
     } else {
       const l = linhas[i];
-      if (l) saida.push({ chave: l.id, html: l.html });
+      if (l) saida.push({ chave: l.chave ?? l.id, html: l.html });
       i++;
     }
   }
@@ -615,9 +803,23 @@ export function renderAoVivoDaTimeline(c: ConversaEstado, estado: Estado): strin
   return blocosAoVivo(c, estado).map((b) => b.html).join("");
 }
 
+/**
+ * Os turnos do bot que são de um trabalho (ADR-083): o ao vivo deles mora na tela da task, nunca no chat. O frame
+ * `turno.iniciado` pode dizer (`trabalhoId`); a conversa relida diz pelo `turnosEmCurso`; a lista, pelo `turnoVivoId`.
+ */
+export function turnosDeTrabalho(c: ConversaEstado, estado: Estado): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const t of c.turnosEmCurso) if (t.trabalhoId) ids.add(t.id);
+  for (const t of trabalhosConhecidos(estado, c.conversa.id)) if (t.turnoVivoId) ids.add(t.turnoVivoId);
+  for (const t of Object.values(estado.turnosVivos)) if (t.trabalhoId) ids.add(t.turnoId);
+  return ids;
+}
+
 /** Os turnos vivos da conversa e a faixa de parada, em blocos (um por turno). */
 export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
-  const vivos = Object.values(estado.turnosVivos).filter((t) => t.conversaId === c.conversa.id);
+  const deTrabalho = turnosDeTrabalho(c, estado);
+  // NOD-216: a mesma fonte do mascote (turnosVivosDaConversa), mais o que a conversa relida diz ser de trabalho.
+  const vivos = turnosVivosDaConversa(estado, c.conversa.id).filter((t) => !deTrabalho.has(t.turnoId));
   const blocos: BlocoDaTimeline[] = [...vivos.flatMap((t) => blocosDoTurnoVivo(t, c, estado)), { chave: "faixa", html: renderFaixaParada(estado.faixaParada) }];
   return blocos.filter((b) => b.html !== "");
 }
@@ -653,9 +855,9 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     { chave: "acolhimento", html: acolhimento },
     ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
-    // definido em 2026-10-05: a oferta de liberar apps recém-conectados fica no fim do histórico — é o que a pessoa
-    // acabou de fazer fora da conversa. Chave por bot: o cartão guarda no DOM o que ela marcou (card-liberar.ts).
-    { chave: `liberar:${c.conversa.agenteId ?? ""}`, html: renderCardLiberar(c, estado) },
+    // revisto em 2026-10-06 (pedido do Marlon): sai a oferta de liberar apps recém-conectados (card-liberar.ts, PR #141).
+    // Ela aparecia sozinha em bot novo e a cada reconexão do Mac, porque valia para todo bot sem acesso por 24 h depois de
+    // qualquer verificação. O card de acesso nasce quando o bot pede (pedir_acesso), logo abaixo da fala dele.
   ].filter((b) => b.html !== "");
 }
 
@@ -682,7 +884,8 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
   const pedidos = pedidosAncoraveis(estado, c.conversa.id, propostas);
   if (pedidos.length === 0) return { blocos, ancoradas: new Set() };
   const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
-  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave));
+  // As chaves com prefixo levam o id da primeira mensagem do bloco: `avisos-<id>` e, desde 2026-10-07 (#191), `linha:<id>`.
+  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave.startsWith("linha:") ? b.chave.slice("linha:".length) : b.chave));
   const depoisDe = new Map<number, typeof pedidos>();
   for (const item of pedidos) {
     const ancora = ancoraDoPedido(item.decisao, c);
@@ -698,37 +901,92 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
   return { blocos: saida, ancoradas };
 }
 
-const PAINEL = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.5v13"/></svg>';
-
 /**
- * Cabeçalho da conversa própria: só quem é o bot e o botão do painel. definido em 2026-09-24 (revisão da
- * interface): a barra de ações (Computador, Pasta, Inteligência, Perfil, Memória, •••) competia com o
- * chat; o que é do bot mora no painel (web/telas/detalhes.ts) e o ••• no clique direito da sidebar.
- * Parar só aparece enquanto há turno vivo, que é quando ele serve.
+ * O cabeçalho da conversa própria é uma pílula flutuante (definido em 2026-10-16, plano "tela limpa", T1; protótipo A1/A2
+ * do canvas "limite e troca"): mascote, nome e o ponto de presença, centrada sobre o chat. O clique alterna o painel do
+ * bot (`alternar-detalhes`). A presença inteira ("Trabalhando · 2 esperam você", "sem novidade há N min") vai no
+ * `title`/`aria-label` e num subtítulo curto embaixo da pílula, só quando não é "Disponível" — e o CSS só o mostra no
+ * hover/foco da pílula (em repouso ele colidia com a pílula "Novas", revisão do PR 1).
+ *
+ * O HTML não depende do painel (revisão do PR 1, 2026-10-16): o rótulo é fixo ("Painel de <nome> · <presença>") e o
+ * `aria-expanded` é posto pelo main depois de desenhar (`marcarPainelNaPilula`), que também o acompanha quando a
+ * largura da janela troca o painel de lado ou de sobreposto.
+ *
+ * O que morava no topo saiu (definido em 2026-10-16, decisões E11 e T2 do plano): MODO DEV, "Hoje com" e "Linhas
+ * abertas" e o Ligar foram para a gaveta (web/telas/detalhes.ts); o Parar foi para o campo, ao lado do Enviar
+ * (`botoesDoCampo`).
  */
 export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
-  const vivo = Object.values(estado.turnosVivos).find((v) => v.conversaId === a?.conversaId);
-  const ligar = htmlBotaoLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[agenteId], ligacao: estado.ligacaoViva }), nome);
+  const { html, ativa } = presencaDoBot(estado, agenteId);
+  const texto = html.replace(/<[^>]+>/g, "");
+  const disponivel = texto === "Disponível";
+  const rotulo = `${nome} · ${texto}`;
+  const sub = disponivel ? "" : `<span class="pilula-sub" aria-hidden="true">${html}</span>`;
+  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span></button>${sub}`;
+}
+
+/**
+ * A presença do bot na conversa, em HTML curto (os separadores e a contagem em negrito) e se o ponto fica verde.
+ * NOD-216: lê a mesma fonte do mascote da barra (turnosVivosDaConversa + estadoMascoteNaConversa). Antes qualquer turno
+ * vivo da conversa — na fila há horas, ou de uma task — dizia "Trabalhando".
+ */
+function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa: boolean } {
+  const a = agenteDe(estado, agenteId);
+  const vivos = a?.conversaId ? turnosVivosDaConversa(estado, a.conversaId) : [];
+  const rodando = vivos.find((v) => v.estado === "rodando");
+  const mascote = a ? estadoMascoteNaConversa(estado, a.conversaId) : "disponivel";
+  // NOD-73: "Trabalhando · sem novidade há N min" quando o vigia avisou silêncio.
+  const mudo = rodando && a?.conversaId ? minutosSemNovidade(estado.atividades[a.conversaId]?.[rodando.turnoId], estado.agora) : null;
   const emLigacao = estado.ligacaoViva?.agenteId === agenteId;
   // definido em 2026-10-03 (canvas "Uma conversa de verdade · depois"): uma regra só para o mascote e o rótulo. O
   // mascote já dava prioridade a "trabalhando" e o rótulo a "Aguardando você", e o cabeçalho se contradizia; agora o
   // turno vivo vence nos dois e o que espera a pessoa entra junto, contado por fio ("Trabalhando · 2 esperam você").
   const esperam = new Set((estado.suaVez?.itens ?? []).filter((item) => item.decisao.conversaId === a?.conversaId && item.estadoColuna !== "vencido").map(chaveDoItem)).size;
-  const presenca = emLigacao
+  const sep = ` <span class="presenca-sep" aria-hidden="true">·</span> `;
+  const comEsperam = esperam ? `${sep}<b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : "";
+  const html = emLigacao
     ? "Em ligação"
-    : vivo
-    ? `Trabalhando${esperam ? ` <span class="presenca-sep" aria-hidden="true">·</span> <b>${esperam} ${esperam === 1 ? "espera" : "esperam"} você</b>` : ""}`
-    : esperam ? "Aguardando você" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
-  return `<div class="cab-esq">${a ? iconeAgente(a, "lg", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<div class="cab-identidade"><div><span class="nome">${esc(nome)}</span><span class="presenca ${vivo || emLigacao ? "ativa" : ""}">${presenca}</span></div><p>${esc(a?.titulo || "Seu bot")}</p></div></div>
-    <div class="cab-acoes">
-      ${renderSeloModoDev(estado, a?.conversaId, nome)}
-      ${ligar}
-      ${vivo ? botao("parar-conversa", "Parar", { classe: "perigo", titulo: "interrompe agora o que está rodando nesta conversa" }) : ""}
-      <button type="button" class="bt toggle-detalhes" data-act="alternar-detalhes" aria-label="Mostrar ou esconder o painel do bot" title="Painel do bot">${PAINEL}</button>
-    </div>`;
+    : mascote === "trabalhando"
+    ? `Trabalhando${mudo !== null ? `${sep}sem novidade há ${mudo} min` : ""}${comEsperam}`
+    : mascote === "pensando"
+    ? `Pensando${comEsperam}`
+    : esperam ? "Aguardando você" : mascote === "na_fila" ? "Na fila" : estado.executor?.atual === "catcher" ? "Simulação" : "Disponível";
+  return { html, ativa: mascoteAnimado(mascote) || emLigacao };
 }
+
+/**
+ * O bot da conversa está trabalhando (definido em 2026-10-16, decisão E11 do plano "tela limpa"): há turno vivo da
+ * conversa ou task aberta do bot (ADR-083: com task aberta o Parar para tudo do bot e mostra a lista antes). O turno do
+ * cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
+ */
+export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
+  const a = agenteDe(estado, agenteId);
+  if (!a?.conversaId) return false;
+  return turnosVivosDaConversa(estado, a.conversaId).length > 0 || abertosDoBot(estado, agenteId, a.conversaId).length > 0;
+}
+
+/**
+ * Quais botões o campo mostra (revisão do PR 1, 2026-10-16): o Parar fica SEMPRE alcançável enquanto o bot trabalha —
+ * antes ele trocava de lugar com o Enviar e sumia assim que havia rascunho ou anexo. Agora é um botão secundário ao lado
+ * do Enviar: com o bot trabalhando e o campo vazio, só o Parar; com texto, anexo ou o ditado gravando (o Enviar para e
+ * manda), os dois. Sem trabalho, só o Enviar.
+ */
+export function botoesDoCampo(p: { trabalhando: boolean; temConteudo: boolean; ditando: boolean }): { enviar: boolean; parar: boolean } {
+  return { enviar: !p.trabalhando || p.temConteudo || p.ditando, parar: p.trabalhando };
+}
+
+/** O título do Parar do campo: com task aberta ele para tudo do bot (e mostra a lista antes). */
+export function tituloDoParar(estado: Estado, agenteId: string): string {
+  const a = agenteDe(estado, agenteId);
+  return abertosDoBot(estado, agenteId, a?.conversaId).length ? "Parar a conversa e as tasks deste bot (mostra a lista antes)" : "Parar o que está rodando nesta conversa";
+}
+
+/** O nome que o leitor de tela ouve no Parar do campo. */
+export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Parar ${nome}` : "Parar");
+
+const QUADRADO = '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg>';
 
 const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 
@@ -740,8 +998,16 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe a faixa, os modos e a citação
  * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
  * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
+ *
+ * definido em 2026-10-11 (ADR-095): o 🎤 do ditado e a pílula da gravação entram em todo composer, escondidos; quem os
+ * mostra é web/telas/ditado.ts, quando o servidor diz que o ditado está disponível.
+ *
+ * definido em 2026-10-16 (plano "tela limpa", T5/T6/E11): sai a dica "Enter envia · Shift+Enter…" — a nota nasce vazia
+ * e só mostra a do modo resposta; na conversa própria (`aprovacao`) entram o seletor de IA (web/telas/seletor-ia.ts),
+ * entre o texto e o microfone, e o Parar (secundário, redondo, escondido) logo antes do Enviar — o Enviar continua na
+ * ponta, onde a pessoa o procura; o main mostra cada um pelo `botoesDoCampo`. `bot` dá o nome do Parar ("Parar Eng 1").
  */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean } = {}): string {
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean; bot?: string } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
@@ -750,13 +1016,13 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
     ? `<div class="anexos-fila" id="composer-anexos" hidden></div><button type="button" class="clipe" data-act="anexar" aria-label="Anexar arquivo"${tituloClipe ? ` title="${esc(tituloClipe)}" data-titulo="${esc(tituloClipe)}"` : ""}>${CLIPE}</button><input type="file" id="composer-arquivos" multiple accept="${accept}" hidden data-aceita="${aceita}" />`
     : "";
   const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
-  const dica = [opcoes.comandos ? " · / para comandos" : "", aceita ? " · arraste ou cole imagens e PDFs" : sugestoes.length ? " · @ menciona um bot" : ""].join("");
   // O "/" (definido em 2026-09-28): a lista abre acima do campo; a dica diz o que o comando escrito faz.
   const barra = opcoes.comandos ? '<div class="barra-lista" id="barra-lista" role="listbox" aria-label="Comandos" hidden></div><div class="barra-dica" id="barra-dica" hidden></div>' : "";
-  const nota = `Enter envia · Shift+Enter quebra linha${dica}`;
   // ADR-059: o chip do modo de aprovação (só na conversa própria) e o aviso acima do campo; main.ts troca o miolo.
   const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
-  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
-  <p class="nota" id="composer-nota" data-padrao="${esc(nota)}">${esc(nota)}</p></div>`;
+  const seletor = opcoes.aprovacao ? HTML_SELETOR_IA : "";
+  const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="${esc(rotuloDoParar(opcoes.bot))}" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
+  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

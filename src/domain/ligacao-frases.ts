@@ -195,9 +195,16 @@ export function textoFalavel(md: string, opcoes: OpcoesFalavel = {}): TextoFalav
   t = t
     .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
     .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
-    .replace(/<(?:https?:\/\/|mailto:)[^>\s]+>/giu, LINK)
-    .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, LINK)
-    .replace(/`([^`\n]+)`/gu, (_, c: string) => codigoEmLinha(c));
+    .replace(AUTOLINK, LINK);
+  // Entidades (NOD-189) fora do código em linha, antes da URL solta (a mesma ordem de `textoParaLeitura`: senão a URL
+  // engole o `&gt` de `&lt;https://…&gt;` e o `;` que sobra fecha a frase) e antes de o código em linha virar fala.
+  // Os blocos já viraram marcador.
+  t = comCraseLiteral(
+    entidadesForaDeCodigo(t)
+      .replace(AUTOLINK, LINK)
+      .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, LINK)
+      .replace(/`([^`\n]+)`/gu, (_, c: string) => codigoEmLinha(c)),
+  );
 
   // Parágrafos: linhas em branco separam; título, item de lista e bloco (código ou tabela) são pedaços próprios.
   const pedacos: string[] = [];
@@ -298,6 +305,339 @@ function cortarFrase(frase: string, maxPalavras: number): string {
     }
   }
   return comPonto(palavras.slice(0, corte).join(" ").replace(/[,;:]$/u, ""));
+}
+
+/**
+ * Leitura de uma resposta pronta (definido em 2026-10-06, NOD-180): teto de caracteres por leitura e tamanhos dos
+ * trechos que vão ao TTS. O 1º trecho é curto para o áudio começar cedo; os outros juntam frases inteiras.
+ */
+export const LEITURA = { maxCaracteres: 4000, primeiroPalavras: 25, trechoCaracteres: 400, tetoTrechoCaracteres: 1000 } as const;
+export const FRASE_RESTO_TELA = "O resto está na tela.";
+export const FRASE_TABELA = "Aqui tem uma tabela.";
+
+/** definido em 2026-10-06: como o nome da linguagem do bloco de código é lido; fora da lista, a frase sai sem ela. */
+const LINGUAGENS: Record<string, string> = {
+  ts: "TypeScript", typescript: "TypeScript", tsx: "TypeScript", mts: "TypeScript", cts: "TypeScript",
+  js: "JavaScript", javascript: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
+  py: "Python", python: "Python", sql: "SQL", psql: "SQL", plpgsql: "SQL", json: "JSON", jsonc: "JSON",
+  sh: "shell", bash: "shell", zsh: "shell", shell: "shell", console: "shell", html: "HTML", css: "CSS",
+  yaml: "YAML", yml: "YAML", toml: "TOML", xml: "XML", md: "Markdown", markdown: "Markdown", go: "Go", rust: "Rust",
+  rs: "Rust", java: "Java", kotlin: "Kotlin", kt: "Kotlin", swift: "Swift", ruby: "Ruby", rb: "Ruby", php: "PHP",
+  c: "C", cpp: "C++", "c++": "C++", cs: "C#", csharp: "C#", dockerfile: "Dockerfile", graphql: "GraphQL", diff: "diff",
+};
+
+function fraseDoBloco(info: string): string {
+  const linguagem = LINGUAGENS[(info.trim().split(/[\s{,]/u)[0] ?? "").toLowerCase()];
+  return linguagem ? `Aqui tem um bloco de código em ${linguagem}.` : "Aqui tem um bloco de código.";
+}
+
+/**
+ * Caminho de arquivo vira o nome do arquivo ("src/adapters/voz/spi.ts" → "spi.ts"). definido em 2026-10-06: só conta
+ * como caminho o que tem letra e termina num arquivo com extensão, começa na raiz ("/", "~/", "./", "../") ou termina
+ * em barra ("docs/adr/"); "e/ou", "km/h", "sim/não/talvez" e datas ficam como estão.
+ */
+function nomeDoArquivo(caminho: string): string {
+  const partes = caminho.split("/").filter((p) => p !== "");
+  const ultimo = partes[partes.length - 1] ?? "";
+  if (!/\p{L}/u.test(ultimo)) return caminho;
+  const comExtensao = /\.[\p{L}\p{N}]{1,8}$/u.test(ultimo) && partes.length > 1;
+  const pasta = /^(?:~|\.{1,2})?\//u.test(caminho) || (caminho.endsWith("/") && partes.length > 1);
+  return comExtensao || pasta ? ultimo : caminho;
+}
+
+/** Linha separadora de tabela GFM (`---|---`, `:--|--:`, com ou sem `|` nas pontas); `---` sozinho é régua, não tabela. */
+const SEPARADORA_DE_TABELA = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/u;
+const RECUO_DE_CODIGO = /^(?: {4}|\t)/u;
+const ITEM_DE_LISTA = /^\s*(?:[-*+]|\d{1,9}[.)])\s/u;
+
+/**
+ * Bloco recuado (4 espaços ou tab, sem cerca) vira a frase de bloco sem linguagem (NOD-181). Como no CommonMark, só
+ * começa no início do texto ou depois de linha em branco, e não dentro de item de lista: a continuação recuada de um
+ * item segue lida como texto. Linhas em branco no meio do bloco continuam o bloco.
+ */
+function semBlocosRecuados(linhas: string[]): string[] {
+  const saida: string[] = [];
+  let depoisDeBranco = true;
+  let emItem = false;
+  for (let i = 0; i < linhas.length; i++) {
+    const l = linhas[i] ?? "";
+    if (l.trim() === "") {
+      saida.push(l);
+      depoisDeBranco = true;
+      continue;
+    }
+    if (depoisDeBranco && !emItem && RECUO_DE_CODIGO.test(l)) {
+      let fim = i;
+      for (let j = i; j < linhas.length; j++) {
+        const lj = linhas[j] ?? "";
+        if (lj.trim() !== "" && !RECUO_DE_CODIGO.test(lj)) break;
+        if (lj.trim() !== "") fim = j;
+      }
+      saida.push("", fraseDoBloco(""), "");
+      i = fim;
+      depoisDeBranco = false;
+      continue;
+    }
+    if (ITEM_DE_LISTA.test(l)) emItem = true;
+    else if (!(emItem && /^\s/u.test(l))) emItem = false;
+    depoisDeBranco = false;
+    saida.push(l);
+  }
+  return saida;
+}
+
+/**
+ * Tabela vira `FRASE_TABELA`: linha que começa e termina com `|`, ou linha com `|` seguida da separadora (NOD-181).
+ * As linhas seguintes com `|` entram na mesma tabela.
+ */
+function semTabelas(linhas: string[]): string[] {
+  const saida: string[] = [];
+  let naTabela = false;
+  for (let i = 0; i < linhas.length; i++) {
+    const l = linhas[i] ?? "";
+    if (naTabela && l.includes("|")) continue;
+    naTabela = /^\s*\|.*\|\s*$/u.test(l) || (l.includes("|") && SEPARADORA_DE_TABELA.test(linhas[i + 1] ?? ""));
+    if (!naTabela) saida.push(l);
+    else if (saida[saida.length - 2] !== FRASE_TABELA) saida.push("", FRASE_TABELA, "");
+  }
+  return saida;
+}
+
+const CODIGO_EM_LINHA = /(`+)([^\n]+?)\1(?!`)/gu;
+
+/** Comentário e `<script>`/`<style>` com o conteúdo: somem inteiros, mesmo com crase dentro. */
+const HTML_NAO_LIDO = /<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu;
+/** Tag de bloco separa palavras (`<p>a</p><p>b</p>` → "a b"); a de linha (`<b>`, `<a>`) cola (`<b>neg</b>rito`). */
+const TAG_DE_BLOCO =
+  /<\/?(?:address|article|aside|blockquote|br|caption|center|dd|details|div|dl|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul)\b(?:\s[^<>]*)?\/?>/giu;
+/** Só nome de tag HTML conhecido: `Promise<string>`, `Array<T>` e `<Enter>` ficam como estão. */
+const TAG_DE_LINHA =
+  /<\/?(?:a|abbr|b|bdi|bdo|big|button|cite|code|del|dfn|em|font|i|img|input|ins|kbd|label|mark|q|s|samp|small|span|strike|strong|sub|sup|time|tt|u|var|wbr)\b(?:\s[^<>]*)?\/?>/giu;
+
+/** Faixas `[início, fim)` de código em linha em `t`. */
+function faixasDeCodigo(t: string): Array<[number, number]> {
+  return [...t.matchAll(CODIGO_EM_LINHA)].map((m) => [m.index, m.index + m[0].length]);
+}
+
+/**
+ * HTML (NOD-181): tags conhecidas somem e o texto de dentro fica (tag de bloco, como `<br>` e `<p>`, vira espaço);
+ * comentário e conteúdo de `<script>` e `<style>` somem inteiros. `a < b`, `x -> y`, `<3` e `Promise<string>` ficam.
+ * Código em linha não é mexido: segue a regra de código em linha.
+ */
+function semHtml(t: string): string {
+  const dentroDeCodigo = (i: number, faixas: Array<[number, number]>) => faixas.some(([a, b]) => i >= a && i < b);
+  // Antes de separar o código em linha: a crase dentro do script não pode partir o script ao meio.
+  const faixas = faixasDeCodigo(t);
+  const s = t.replace(HTML_NAO_LIDO, (m: string, ...args: unknown[]) => (dentroDeCodigo(args.at(-2) as number, faixas) ? m : ""));
+  return foraDeCodigo(s, (x) => x.replace(TAG_DE_BLOCO, " ").replace(TAG_DE_LINHA, ""));
+}
+
+/** Aplica `f` só nos trechos de `t` fora do código em linha; o código fica como está. */
+function foraDeCodigo(t: string, f: (trecho: string) => string): string {
+  let saida = "";
+  let desde = 0;
+  for (const [a, b] of faixasDeCodigo(t)) {
+    saida += f(t.slice(desde, a)) + t.slice(a, b);
+    desde = b;
+  }
+  return saida + f(t.slice(desde));
+}
+
+/** definido em 2026-10-07 (NOD-189): lista fixa; nomeada fora dela fica literal. `&nbsp;` vira espaço comum. */
+const ENTIDADES_NOMEADAS: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+/** Autolink `<https://…>`. Passa de novo depois das entidades: `&lt;https://x.com&gt;` também é autolink (QA da NOD-189). */
+const AUTOLINK = /<(?:https?:\/\/|mailto:)[^>\s]+>/giu;
+const ENTIDADE = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/gu;
+
+/**
+ * Numérica só vira caractere se for Unicode válido: 1..0x10FFFF, fora dos surrogates, de controle (menos \t e \n) e do
+ * uso privado do BMP (0xE000–0xF8FF), onde moram os marcadores internos: `&#xE000;` forjaria um BLOCO.
+ */
+function caractereDoCodigo(n: number): string | null {
+  if (n < 1 || n > 0x10ffff) return null;
+  if (n >= 0xd800 && n <= 0xdfff) return null;
+  if (n >= 0xe000 && n <= 0xf8ff) return null;
+  if ((n < 0x20 && n !== 0x09 && n !== 0x0a) || (n >= 0x7f && n <= 0x9f)) return null;
+  return String.fromCodePoint(n);
+}
+
+function decodificar(t: string, crase: string, falado = false): string {
+  return t.replace(ENTIDADE, (m: string, dec: string | undefined, hex: string | undefined, nome: string | undefined) => {
+    if (nome !== undefined) return ENTIDADES_NOMEADAS[nome] ?? m;
+    const c = caractereDoCodigo(dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex ?? "", 16));
+    if (c === null) return m;
+    // QA da NOD-189: na fala, emoji vindo de entidade some como o emoji cru (o começo das duas funções já o tira).
+    if (falado && /^(?:\p{Extended_Pictographic}|\uFE0F)$/u.test(c)) return "";
+    return c === "`" ? crase : c;
+  });
+}
+
+/**
+ * Entidades HTML viram o caractere (NOD-189): `&amp;` → `&`, `&#39;` e `&#x27;` → `'`. Passada única: `&amp;lt;` vira
+ * `&lt;` literal, sem decodificar duas vezes. Desconhecida, malformada ou sem `;` fica como está. Quem chama decide o
+ * que é código; aqui decodifica tudo o que recebe.
+ */
+export function decodificarEntidades(t: string): string {
+  return decodificar(t, "`");
+}
+
+/** Crase vinda de `&#96;`/`&#x60;`: é texto, não marcação. Fica neste marcador até o código em linha virar fala. */
+const CRASE_LITERAL = "";
+
+/**
+ * Decodifica fora do código em linha. A crase decodificada sai como CRASE_LITERAL: se saísse crase, formaria par com
+ * outra da linha e criaria um código em linha falso. Quem chama devolve a crase com `comCraseLiteral` depois de tratar
+ * o código em linha.
+ */
+function entidadesForaDeCodigo(t: string): string {
+  return foraDeCodigo(t, (x) => decodificar(x, CRASE_LITERAL, true));
+}
+
+function comCraseLiteral(t: string): string {
+  return t.replaceAll(CRASE_LITERAL, "`");
+}
+
+/** Corta `texto` em pedaços de até `max` caracteres, na última vírgula que cabe ou, sem ela, na última palavra. */
+function partirPorCaracteres(texto: string, max: number): string[] {
+  const pedacos: string[] = [];
+  let resto = texto.trim();
+  while (resto.length > max) {
+    const janela = resto.slice(0, max + 1);
+    let corte = janela.lastIndexOf(", ");
+    if (corte < max / 4) corte = -1;
+    else corte += 1;
+    if (corte === -1) {
+      const espaco = janela.lastIndexOf(" ");
+      corte = espaco > 0 ? espaco : max;
+    }
+    pedacos.push(resto.slice(0, corte).trim());
+    resto = resto.slice(corte).trim();
+  }
+  if (resto !== "") pedacos.push(resto);
+  return pedacos;
+}
+
+/** Primeiro trecho de até `max` palavras: corta na última vírgula que cabe (depois de 4 palavras) ou na palavra. */
+function partirPrimeiro(frase: string, max: number): [string, string] {
+  const palavras = frase.split(/\s+/u);
+  let corte = max;
+  for (let i = max - 1; i >= SEGMENTACAO.primeiraVirgulaPalavras - 1; i--) {
+    if (/,$/u.test(palavras[i] ?? "")) {
+      corte = i + 1;
+      break;
+    }
+  }
+  return [palavras.slice(0, corte).join(" "), palavras.slice(corte).join(" ")];
+}
+
+/**
+ * Resposta → trechos para ouvir (definido em 2026-10-06, NOD-180). Diferente de `textoFalavel` (a ligação), nada vai
+ * "para o chat": a pessoa está olhando a tela. Bloco de código vira "Aqui tem um bloco de código em <linguagem>.",
+ * tabela vira "Aqui tem uma tabela.", link vira o rótulo, URL solta vira "um link", código em linha longo vira "um
+ * trecho de código" e caminho vira o nome do arquivo. Passou de 4.000 caracteres, corta no fim de frase e fecha com
+ * "O resto está na tela.". Sem nada para falar, devolve [].
+ */
+export function textoParaLeitura(md: string): string[] {
+  let t = md.replace(/\r\n?/g, "\n").replace(/\p{Extended_Pictographic}️?/gu, "");
+  // A cerca fecha numa linha só com a mesma cerca (ou maior): a de 4 crases não fecha na de 3 de dentro. Pode vir recuada (lista).
+  t = t.replace(/^[ \t]*(`{3,}|~{3,})([^\n]*)[\s\S]*?(?:\n[ \t]*\1[`~]*[ \t]*(?=\n|(?![\s\S]))|(?![\s\S]))/gmu, (_, _cerca: string, info: string) => `\n\n${fraseDoBloco(info)}\n\n`);
+  // Bloco recuado antes da tabela; HTML depois das cercas e dos autolinks (`<https://…>` não é tag).
+  const semMarcacao = semTabelas(semBlocosRecuados(t.split("\n")))
+    .join("\n")
+    .replace(/!\[([^\]]*)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
+    .replace(/\[([^\]]+)\]\((?:[^()\s]|\([^)]*\))*(?:\s+"[^"]*")?\)/gu, "$1")
+    .replace(AUTOLINK, "um link");
+  // Entidades depois do HTML: antes, `&lt;b&gt;` viraria tag e sumiria.
+  t = comCraseLiteral(
+    entidadesForaDeCodigo(semHtml(semMarcacao))
+      .replace(AUTOLINK, "um link")
+      .replace(/\b(?:https?:\/\/|www\.)[^\s<>()]*[^\s<>().,;:!?'"”’]/giu, "um link")
+      .replace(CODIGO_EM_LINHA, (_, _crases: string, c: string) => {
+        const falado = codigoEmLinha(c);
+        return falado === CODIGO ? "um trecho de código" : falado;
+      }),
+  ).replace(/(?<![\p{L}\p{N}_/])~?\.{0,2}\/?(?:[\p{L}\p{N}_.@-]+\/)+(?:[\p{L}\p{N}_.@-]*[\p{L}\p{N}_@-])?/gu, nomeDoArquivo);
+
+  const pedacos: string[] = [];
+  let paragrafo: string[] = [];
+  const fecharParagrafo = () => {
+    if (paragrafo.length > 0) pedacos.push(paragrafo.join(" "));
+    paragrafo = [];
+  };
+  for (const l of t.split("\n")) {
+    const { texto, frase } = linhaFalavel(l);
+    if (texto.trim() === "") {
+      fecharParagrafo();
+      continue;
+    }
+    if (frase) {
+      fecharParagrafo();
+      pedacos.push(texto);
+    } else paragrafo.push(texto.trim());
+  }
+  fecharParagrafo();
+
+  const frases = pedacos
+    .map((p) =>
+      maiuscula(
+        comPonto(
+          normalizarParaFala(semEnfase(p))
+            .replace(/[*#]{2,}/gu, "")
+            .replace(/\s+([,.;:!?…])/gu, "$1")
+            .replace(/\s+/gu, " ")
+            .trim(),
+        ),
+      ),
+    )
+    .filter((p) => /[\p{L}\p{N}]/u.test(p))
+    .flatMap(dividirFrases)
+    .map(maiuscula);
+  if (frases.length === 0) return [];
+
+  // Teto da leitura: frases inteiras enquanto couberem com o fecho; a 1ª frase sozinha grande demais é cortada.
+  const disponivel = LEITURA.maxCaracteres - FRASE_RESTO_TELA.length - 1;
+  if (frases.join(" ").length > LEITURA.maxCaracteres) {
+    const mantidas: string[] = [];
+    let usados = 0;
+    for (const f of frases) {
+      const custo = f.length + (mantidas.length > 0 ? 1 : 0);
+      if (usados + custo > disponivel) break;
+      mantidas.push(f);
+      usados += custo;
+    }
+    if (mantidas.length === 0) mantidas.push(comPonto(partirPorCaracteres(frases[0] ?? "", disponivel - 1)[0] ?? ""));
+    frases.splice(0, frases.length, ...mantidas, FRASE_RESTO_TELA);
+  }
+
+  // Trechos: o 1º com até 25 palavras; os outros juntam frases até 400 caracteres, frase de até 1.000 fica inteira.
+  const trechos: string[] = [];
+  const fila = [...frases];
+  const primeira = fila.shift() ?? "";
+  let [inicio, resto] = contarPalavras(primeira) <= LEITURA.primeiroPalavras ? [primeira, ""] : partirPrimeiro(primeira, LEITURA.primeiroPalavras);
+  // Poucas palavras não garantem trecho curto (hash, token, palavra gigante): o 1º também cabe em `trechoCaracteres`.
+  if (inicio.length > LEITURA.trechoCaracteres) {
+    const curto = partirPorCaracteres(inicio, LEITURA.trechoCaracteres)[0] ?? "";
+    resto = `${inicio.slice(curto.length).trim()} ${resto}`;
+    inicio = curto;
+  }
+  trechos.push(inicio);
+  if (resto.trim() !== "") fila.unshift(resto.trim());
+  let atual = "";
+  const fechar = () => {
+    if (atual !== "") trechos.push(atual);
+    atual = "";
+  };
+  for (const f of fila) {
+    if (f.length > LEITURA.trechoCaracteres) {
+      fechar();
+      trechos.push(...(f.length > LEITURA.tetoTrechoCaracteres ? partirPorCaracteres(f, LEITURA.trechoCaracteres) : [f]));
+      continue;
+    }
+    if (atual !== "" && atual.length + 1 + f.length > LEITURA.trechoCaracteres) fechar();
+    atual = atual === "" ? f : `${atual} ${f}`;
+  }
+  fechar();
+  return trechos;
 }
 
 /** definido em 2026-10-04: o primeiro trecho sai na 1ª vírgula depois de 4 palavras, ou após 400 ms parado com 3. */

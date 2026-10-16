@@ -1,12 +1,12 @@
-# nod 0.2.0-rc.1 — guia de instalação e distribuição
+# nod — guia de instalação e distribuição
 
 A distribuição usa um servidor compartilhado e dois aplicativos macOS: `arm64` para chips M e `x64` para Intel. O Mac precisa do Claude Code ou do Codex instalado e autenticado (ADR-036). Não precisa de Node, Docker ou Postgres. O servidor guarda as conversas, permissões, decisões e rotinas; cada app puxa os trabalhos da pessoa que emitiu sua chave.
 
-## Preview sem assinatura — 17/09/2026
+## Histórico (0.2.0-rc.1): Preview sem assinatura — 17/09/2026
 
 Implementados: app Electron, configuração do endereço, chave cifrada com `safeStorage` (Keychain no macOS), sessão web obtida pela chave, ponte HTTP autenticada, executor local reutilizado, builds separados e workflow de assinatura/notarização. Nenhuma URL de produção foi escolhida. Nenhum certificado Developer ID válido foi encontrado na máquina de desenvolvimento. O mantenedor autorizou publicar esta candidata como preview sem assinatura, repetindo a distribuição anterior. Não há assinatura Developer ID nem notarização Apple. O macOS pode bloquear a abertura; esta publicação não representa aceite de instalação sob Gatekeeper nem validação de uso em produção. A distribuição assinada fica para uma versão estável.
 
-## Mudanças e validação desta candidata
+## Histórico (0.2.0-rc.1): Mudanças e validação desta candidata
 
 Integra o desktop à main atual, incluindo gestão e exclusão recuperável de agentes (migrações 0011 e 0012), decisões diretamente no chat, cooperação iniciada por agentes acordados por rotinas e Sonnet como modelo padrão. As sondas usavam Haiku; desde a NOD-164 usam o Sonnet 4.6. Candidatas `-rc.N` são reconhecidas pela verificação de compatibilidade do app.
 
@@ -29,7 +29,15 @@ No modo compartilhado não há sonda nem execução Claude no servidor. `NOD_EXE
 
 ## Requisitos do Mac
 
-Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); esta candidata mantém Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
+macOS 12+ para o app e o Codex; o Claude Code exige macOS 13+.
+
+Electron 43.7.1, macOS 12 Monterey ou posterior, Intel x64 ou Apple Silicon ARM64. O suporte a Monterey foi removido somente no Electron 44 ([nota oficial](https://www.electronjs.org/blog/electron-44-0)); o app mantém o Electron 43. O requisito do runtime não substitui o aceite do Nod nas duas arquiteturas.
+
+**Versões mínimas das IAs (NOD-171, 2026-10-06).** Claude Code 2.1.290 e Codex 0.159.0 (`PISO_CLI`). Abaixo disso o app
+mostra a IA como **desatualizada**, com a versão instalada, a mínima e o comando de atualizar, e o bot fixado nela recebe
+a negação na conversa em vez de turnos com erro. **Ordem do deploy:** servidor antes do app. O servidor anterior não
+conhece a causa `cli_antigo` no anúncio da máquina (`ponte-validacao.ts` a descarta) e mostraria a IA desatualizada como
+"não encontrada", pedindo para instalar.
 
 ## Primeira abertura no Mac
 
@@ -66,14 +74,27 @@ pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
 
 ## Atualizar a partir da preview
 
-Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Instale o novo DMG sobre o app anterior, mantendo a configuração cifrada no Keychain. Valide conexão, execução, Parar e revogação de chave nas duas arquiteturas. Não há atualização automática. Esse caminho ainda depende de aceite real. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
+**No Mac.** Não há atualização automática (NOD-132). Baixe o DMG novo, abra e arraste **nod** para **Aplicativos**,
+escolhendo **Substituir**. Na primeira abertura, o macOS pode pedir a senha do Mac uma vez para o app novo usar o
+Keychain. Depois disso, um destes dois desfechos é o esperado:
+
+- **(a) Reconecta sozinho.** O app abre o nod com a mesma chave; **Chaves**, no navegador, não ganha chave nova.
+- **(b) Volta à tela de conexão.** O app assinado não conseguiu ler a conexão guardada pela preview. Clique em
+  **Entrar com Google** e conecte de novo; depois, em **Chaves**, revogue a chave antiga deste Mac.
+
+Travar, abrir tela branca ou ficar alternando entre a tela de conexão e o nod não é esperado: preserve o diagnóstico
+(**nod › Exportar diagnóstico…**) e avise o time. Ao abrir uma ligação, o macOS pode perguntar de novo pelo microfone
+(NOD-165). A 0.2.0-rc.1 usava outro `appId` (`br.com.leapy.nod`): quem vem dela é o pior caso e deve esperar o desfecho (b). O roteiro de aceite desses
+casos é a seção H de [aceite-desktop.md](aceite-desktop.md).
+
+**No servidor.** Faça backup do Postgres e valide as migrações em uma cópia antes de atualizar o servidor. Se falhar, preserve logs sem segredos, suspenda a indicação da candidata e restaure o servidor pelo backup testado ou por migração corretiva; reinstalar o DMG antigo não desfaz o banco.
 
 ## Diagnóstico para suporte (NOD-138)
 
 Quando o app não conecta, não acha o Claude ou o Codex, ou cai, peça à pessoa **nod › Exportar diagnóstico…**. O app
 abre "Salvar" com `nod-diagnostico-AAAAMMDD-HHMMSS.txt` sugerido em Downloads. Depois de salvar, o Finder mostra o
 arquivo; cancelar não grava nada. O item fica no menu nativo, e não na página: funciona na tela de conexão, sem
-servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` continua com 10 funções.
+servidor e com a janela web fora do ar, e a ponte `window.nodDesktop` não ganhou função para isso.
 
 **Onde fica o log.** O `log()` do app do Mac grava a mesma linha JSON do stdout, já redigida pela NOD-158, em
 `~/Library/Logs/nod/nod.log` (modo `0600`). Passou de 1 MiB, ela vira `nod.1.log`. São duas gerações, no máximo 2 MiB.
@@ -107,21 +128,57 @@ servidor nem entra no relato.
 
 ## Gerar e publicar
 
-Para esta preview, use a tag `desktop-v0.2.0-rc.1`, dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
+Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada é `desktop-v0.4.0-rc.9`; a primeira foi `desktop-v0.2.0-rc.1`), dois DMGs sem assinatura e o manifesto SHA-256 anexado à release. As tags `desktop-v*` não disparam o workflow de distribuição assinada; os controles abaixo continuam exigidos para a futura versão estável.
 
 `npm ci` usa as versões exatas de Electron e electron-builder do lockfile. `npm run desktop:build` compila app, preload e proxy e recusa dependências de servidor no bundle desktop. `npm run desktop:dev` permite HTTP somente em loopback para desenvolvimento; o app empacotado aceita só HTTPS.
 
-O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
+O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
 
-Configure estes secrets do GitHub, sem colocá-los no repositório:
+### Secrets e variável da release assinada (NOD-203)
 
-| Secret | Conteúdo |
-| --- | --- |
-| `APPLE_CERTIFICATE_P12` | Exportação Developer ID Application em P12, codificada em base64 |
-| `APPLE_CERTIFICATE_PASSWORD` | Senha da exportação P12 |
-| `APPLE_ID` | Conta Apple usada na notarização |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app dessa conta |
-| `APPLE_TEAM_ID` | Identificador do time Apple Developer |
+Cadastre em **Settings › Secrets and variables › Actions** do repositório, sem colocá-los no repositório. O nome é o
+que o preflight (`scripts/desktop/release-preflight.mjs`) cita quando falta: ele roda antes do `npm ci` e lista
+**tudo** o que falta numa execução só. String vazia conta como ausente.
+
+| Nome no GitHub | Tipo | Onde cadastrar | Chega ao job como | Conteúdo |
+| --- | --- | --- | --- | --- |
+| `APPLE_CERTIFICATE_P12` | secret | Actions › Secrets | `CSC_LINK` | Exportação Developer ID Application em P12, codificada em base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | Actions › Secrets | `CSC_KEY_PASSWORD` | Senha da exportação P12 |
+| `APPLE_ID` | secret | Actions › Secrets | `APPLE_ID` | Conta Apple usada na notarização |
+| `APPLE_APP_SPECIFIC_PASSWORD` | secret | Actions › Secrets | `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app dessa conta |
+| `APPLE_TEAM_ID` | secret | Actions › Secrets | `APPLE_TEAM_ID` | Identificador do time Apple Developer |
+| `NOD_SERVIDOR_PADRAO` | **variável** de repositório | Actions › Variables | `NOD_SERVIDOR_PADRAO` | Endereço do servidor embutido no app, `https://host` (porta opcional), sem caminho nem barra final |
+
+`NOD_SERVIDOR_PADRAO` é variável, e não secret, porque o endereço aparece no app. Ela é obrigatória em toda execução
+do `desktop-release`, de tag ou manual: um DMG oficial sem servidor embutido pediria o endereço na primeira abertura.
+A regra do formato é a mesma do `scripts/desktop/build.mjs` (`scripts/desktop/servidor-padrao.mjs`); o build local
+continua aceitando vazio.
+
+### O que o CI confere no job `mac`
+
+Ordem dos passos: preflight → `npm ci` → `desktop:build` → smoke da janela → `electron-builder` (assina e notariza o
+`.app`) → **Notarizar e grampear o DMG** → **Verificar assinatura e notarização** → SHA-256 → upload. O SHA-256 vem
+depois do grampo, porque o hash publicado tem que ser o do DMG final.
+
+- **Notarização do DMG:** `xcrun notarytool submit --wait --output-format json`; o status precisa ser `Accepted` (o
+  `--wait` sai com 0 mesmo com `Invalid`). Se não for, o passo imprime o `notarytool log` e falha. Depois,
+  `xcrun stapler staple` no DMG.
+- **Verificação** (`scripts/desktop/verificar-pacote-mac.mjs`), que junta todas as falhas e diz, em pt-BR, o que
+  esperava e o que veio:
+  - `smoke-proxy.mjs` com o binário empacotado;
+  - `codesign --verify --deep --strict` do `.app`;
+  - `Authority=Developer ID Application: …` e `TeamIdentifier` igual a `APPLE_TEAM_ID`;
+  - hardened runtime (`flags` com `runtime`);
+  - entitlements do `.app` e de cada `nod Helper*.app` iguais, exatamente, às de `desktop/entitlements.mac.plist`
+    (`com.apple.security.cs.allow-jit` e `com.apple.security.device.audio-input`); nenhum helper encontrado reprova;
+  - `NSMicrophoneUsageDescription` do `Info.plist` igual ao texto do `electron-builder.yml`;
+  - `lipo -archs` do binário igual à arquitetura do job (`arm64` ou `x86_64`), sem a outra;
+  - `stapler validate` do `.app` e do DMG;
+  - `spctl --assess` do `.app` (`--type execute`) e do DMG (`--type open --context context:primary-signature`) com
+    `accepted` e `source=Notarized Developer ID`.
+
+As funções que interpretam essas saídas são testadas no Linux com saídas de exemplo
+(`tests/unit/desktop/verificar-pacote-mac.test.ts`). A prova com os secrets reais é critério da NOD-133.
 
 `npm run desktop:mac` exige as variáveis equivalentes `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` e assinatura válida. Não publica automaticamente. Confirme instalação, conexão ao servidor e um turno real em um Mac Intel e outro com chip M antes de publicar o rascunho. A assinatura/notarização e esse aceite não foram realizados neste ambiente.
 

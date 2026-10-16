@@ -7,12 +7,14 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
+import { ligar, type ContextoLigacao } from "../../src/use-cases/ligacoes.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobreTrx, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 
 const PRONTO = { estado: "pronto" as const, versao: "teste", em: 0 };
+const CONTEXTO_LIGACAO: ContextoLigacao = { permitido: true, habilitada: true, maquinaComLigacao: true, iaPronta: true, codexSemVoz: false, drenando: false, vozDisponivel: true, vivasNoServidor: 0, maxSimultaneas: 20, limiteDiarioMs: 0, inicioDoDia: 0, provedorStt: "falso", provedorTts: "falso" };
 
 /** Uma rotina com o turno JÁ reivindicado por uma máquina (despachando, lease até agora + LEASE_MS). */
 async function rotinaRodando(deps: Deps, conversaId: string, agenteId: string, maquina: string, agora: number) {
@@ -61,7 +63,7 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       const segunda = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000);
       expect(segunda).toEqual({ interrompidos: [], decisoes: [] });
       expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toHaveLength(1);
-      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, agora + LEASE_MS + 5000)).toEqual({ ativo: false });
+      expect(await deps.repos.turnos.renovarLease(turnoId, maquina, {}, agora + LEASE_MS + 5000)).toEqual({ ativo: false, motivo: "lease_vencido" });
       expect(await deps.repos.turnos.reivindicar({ machineId: maquina, agora: agora + LEASE_MS + 5000 })).toBeNull();
       const estados = await trx<{ estado: string }[]>`select estado from turnos where conversa_id = ${criado.conversa.id}`;
       expect(estados.map((e) => e.estado)).toEqual(["interrompido"]);
@@ -123,6 +125,29 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
     });
   });
 
+  it("ligação (NOD-168): lease vencido → interrompido, 0 decisões, 0 mensagens de sistema, o evento do turno; o aviso conta a conversa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const maquina = randomUUID();
+      const { turno } = (await executar(deps, ligar, { agenteId: criado.agente.id, contexto: CONTEXTO_LIGACAO, executor: "local", iniciadaPor: "produto" })).data;
+      expect((await deps.repos.turnos.reivindicar({ machineId: maquina, agora, aceitaLigacao: true }))?.id).toBe(turno.id);
+      const mensagensAntes = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).length;
+
+      const r = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 1);
+      expect(r).toMatchObject({ interrompidos: [turno.id], decisoes: [] });
+      expect(await deps.repos.turnos.buscar(turno.id)).toMatchObject({ origem: "ligacao", estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+      expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toEqual([]);
+      expect(await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).toHaveLength(mensagensAntes);
+      // O evento fica: é por ele que o orquestrador sabe que o cérebro caiu (ADR-072).
+      const eventos = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turno.id} and created_at > ${new Date(agora)}`;
+      expect(eventos.map((e) => e.kind)).toEqual(["turno_interrompido"]);
+      expect(await deps.repos.incidentes.visiveis(0)).toMatchObject([{ id: r.incidenteId, conversas: 1, rotinas: 0 }]);
+      expect(await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000)).toEqual({ interrompidos: [], decisoes: [] });
+    });
+  });
+
   it("modo compartilhado: sem sinal desde antes do boot é reinicio_servidor, sem aviso do Mac; o aviso fica em curso até a máquina voltar a puxar", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();
@@ -158,6 +183,39 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       expect(volta.voltaram).toEqual([queda.incidenteId]);
       expect(await deps2.repos.incidentes.emCurso()).toEqual([]);
       expect(await deps2.repos.incidentes.visiveis(0)).toMatchObject([{ id: queda.incidenteId, voltouEm: agora2 + LEASE_MS + 30_000 }]);
+    });
+  });
+
+  it("NOD-241 (CA4f/CA4i): a queda grava o último sinal — o varredor, lease_ate − LEASE_MS; o despacho recusado, a hora da recusa; o primeiro valor vence", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const sinal = async (id: string) => (await trx<{ u: Date | null }[]>`select ultimo_sinal_em as u from turnos where id = ${id}`)[0]!.u?.getTime() ?? null;
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const turnoId = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId ?? "";
+      const leaseAte = (await deps.repos.turnos.buscar(turnoId))!.leaseAte!;
+      // Notada 10 min depois (o Mac dormiu): o último sinal é a última renovação do lease, não a hora da varredura.
+      expect((await varrerPessoa(deps.tx, MARLON, leaseAte + 10 * 60_000)).interrompidos).toEqual([turnoId]);
+      expect(await sinal(turnoId)).toBe(leaseAte - LEASE_MS);
+
+      // O despacho recusado (sem IA pronta na máquina): o último sinal é a hora da recusa.
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "de novo", inventario: PRONTO });
+      const recusa = await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: { estado: "nao_autenticado", motivo: "faça login", em: agora } });
+      const recusado = recusa.data.turno?.id ?? "";
+      expect(await deps.repos.turnos.buscar(recusado)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
+      expect(await sinal(recusado)).toBe(agora);
+
+      // O primeiro valor vence (coalesce): um sinal já gravado não é trocado por quem interrompe ou assenta depois.
+      const primeiro = new Date(agora - 3_600_000);
+      for (const fim of ["interromper", "assentar"] as const) {
+        await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: fim, inventario: PRONTO });
+        const id = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId ?? "";
+        await trx`update turnos set ultimo_sinal_em = ${primeiro} where id = ${id}`;
+        if (fim === "interromper") expect(await deps.repos.turnos.interromper(id, "maquina_sem_contato", { ultimoSinalEm: agora })).not.toBeNull();
+        else expect(await deps.repos.turnos.assentar(id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", ultimoSinalEm: agora })).not.toBeNull();
+        expect(await sinal(id)).toBe(primeiro.getTime());
+      }
     });
   });
 });

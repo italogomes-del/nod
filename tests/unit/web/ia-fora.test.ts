@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { HARNESSES } from "../../../src/contracts/harness.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 import { estadoInicial, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem } from "../../../web/telas/conversa.ts";
 import { inventarioDaIa, linhaIaTrocada, pedeInstalar } from "../../../web/telas/ia-fora.ts";
+import { hora } from "../../../web/lib/render.ts";
 
 /**
  * A conversa quando a conta da IA não serve (definido em 2026-10-05; protótipo "primeira sessão sem tropeços", jornada 3).
@@ -14,13 +16,14 @@ const autoria = { autor_tipo: "agente" as const, autor_id: "frida", sob_procurac
 const TEXTO = "Nenhum trabalho começa: executor indisponível (claude-cli: conta sem acesso) desde 2026-10-05T14:46:55.000Z.";
 const negacao = (causa: "conta_sem_acesso" | "teste_falhou" = "conta_sem_acesso"): Mensagem => ({ tenantId: "t", id: "m1", conversaId: "c1", turnoId: "t1", autoria, kind: "negacao", texto: TEXTO, payload: { kind: "negacao", classe: "plano_ausente", nome: "claude-cli", motivo: "plano_ausente", terminal: true, causa }, confianca: "confiavel", parcial: false, criadoEm: 0 });
 const SEM_ACESSO: Inventario = { estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "x", em: 0 };
-const PRONTO: Inventario = { estado: "pronto", versao: "1", em: 0 };
+// NOD-213: a sonda "pronto" é posterior à negação (criadoEm 0); uma sonda anterior não prova que a IA voltou.
+const PRONTO: Inventario = { estado: "pronto", versao: "1", em: 1 };
 const AUSENTE: Inventario = { estado: "ausente", motivo: "x", em: 0 };
 
 function com(p: { claude: Inventario; codex: Inventario }): Estado {
-  const opcoes = HARNESSES.map((h) => ({ ...h, inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
+  const opcoes = HARNESSES.map((h) => ({ ...h, capacidades: capacidadesDe(h.id), inventario: h.id === "claude-cli" ? p.claude : h.id === "codex-cli" ? p.codex : AUSENTE }));
   const emUso = p.claude.estado === "pronto" ? p.claude : p.codex.estado === "pronto" ? p.codex : p.claude;
-  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marcelo" }, inventario: emUso, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, opcoes } } };
+  return { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marcelo" }, inventario: emUso, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: { padrao: null, simulacao: false, legado: "claude-cli", opcoes } } };
 }
 const noApp = (sim: boolean) => { if (sim) (globalThis as Record<string, unknown>).nodDesktop = {}; else delete (globalThis as Record<string, unknown>).nodDesktop; };
 afterEach(() => noApp(false));
@@ -101,13 +104,24 @@ describe("aviso: a conta da IA entrou e não serve", () => {
 describe("linha: o bot em automático passou a responder por outra IA", () => {
   const sistema: Mensagem = { ...negacao(), kind: "sistema", texto: "Respondendo pelo Codex: a conta do Claude Code neste computador está sem acesso.", payload: { kind: "ia_trocada", de: "claude-cli", para: "codex-cli", causa: "conta_sem_acesso" } };
 
-  it("diz por quem responde e por quê, com o logo de quem assumiu e o caminho para as opções", () => {
+  it("tela 3: uma linha centralizada e discreta, com o logo de quem assumiu; o porquê e o caminho ficam atrás do clique", () => {
     const html = renderMensagem(sistema, com({ claude: SEM_ACESSO, codex: PRONTO }));
-    expect(html).toContain("aviso-ia-trocada");
-    expect(html).toContain("Respondendo pelo ChatGPT. A conta do Claude deste Mac está sem acesso ao Claude Code.");
+    expect(html).toContain("linha-centro-wrap linha-ia");
+    expect(html).toMatch(/<summary class="linha-centro">.*A conta do Claude está sem acesso ·<\/span><b>respondendo pelo ChatGPT<\/b><\/summary>/);
+    expect(html).toContain("A conta do Claude deste Mac entrou, mas não tem acesso ao Claude Code pela assinatura");
     expect(html.match(/class="ia-logo"/g)).toHaveLength(1);
-    expect(html).toContain('data-secao="conexao"');
-    expect(html).toContain("Ver opções");
+    expect(html).toContain('data-act="secao-espaco" data-secao="conexao">Ver em Provedores de IA');
+    expect(html).not.toContain("aviso-estado");
+  });
+
+  it("no limite: 'O Claude chegou ao limite · respondendo pelo ChatGPT', com a hora em que renova e a volta sozinha", () => {
+    const renovaEm = Date.UTC(2026, 9, 9, 17, 0);
+    const limite: Mensagem = { ...sistema, criadoEm: renovaEm - 3_600_000, payload: { kind: "ia_trocada", de: "claude-cli", para: "codex-cli", causa: "limite", renovaEm } };
+    const html = linhaIaTrocada(limite, { modelo: "GPT-5.6 Sol" }) ?? "";
+    expect(html).toContain("O Claude chegou ao limite ·</span><b>respondendo pelo ChatGPT</b>");
+    expect(html).toContain(`renova às ${hora(renovaEm)}`);
+    expect(html).toContain("usam o ChatGPT (GPT-5.6 Sol)");
+    expect(html).toContain("voltam sozinhos para o Claude");
   });
 
   it("payload com IA desconhecida não vira linha de troca (cai no texto de sistema)", () => {

@@ -11,6 +11,8 @@ import type { Escopo } from "../../shared/types.ts";
  * (cookie da sessão, tenant do caminho igual ao da sessão) e, além disso, exige `Origin` do mesmo host — o navegador
  * manda cookie em WebSocket de qualquer origem; o cérebro é rota interna (sem `Origin`, token de turno no Bearer).
  *
+ * O ditado (ADR-095, `/api/t/:tenant/voz/v1/ditado`) segue as regras da mídia.
+ *
  * `ws` é a única dependência nova de runtime (ADR-071): servidor WebSocket em JS puro, sem nativo. O cliente do Mac usa
  * o `WebSocket` global do Node/Electron.
  */
@@ -30,16 +32,20 @@ export type IdentidadeCerebro = Escopo & { turnoId: string; agenteId: string };
 
 export type DepsCanaisVoz = {
   resolverEscopo(req: IncomingMessage): Escopo | null;
-  autorizarTokenTurno(token: string): IdentidadeCerebro | null;
+  /** revisto em 2026-10-12 (NOD-214): pode ir ao banco (turno adotado depois de um reinício). */
+  autorizarTokenTurno(token: string): IdentidadeCerebro | null | Promise<IdentidadeCerebro | null>;
   /** A ligação do turno-cérebro (do plano guardado com o token); null = o turno não é de ligação. */
   ligacaoDoTurno(turnoId: string): string | null;
   /** Primeira mensagem `ola` da mídia: anexa o canal à ligação, ou devolve o código de fechamento. */
   anexarMidia(p: { escopo: Escopo; ligacaoId: string; retomar: boolean; canal: CanalVoz }): number | null;
   anexarCerebro(p: { identidade: IdentidadeCerebro; ligacaoId: string; canal: CanalVoz }): number | null;
+  /** ADR-095: o `ola` do ditado chegou; a composição autoriza (permissão, consentimento) e abre o ditado ou recusa. */
+  anexarDitado(p: { escopo: Escopo; canal: CanalVoz }): void;
 };
 
 const MIDIA = /^\/api\/t\/([^/]+)\/voz\/v1\/midia$/;
 const CEREBRO = /^\/api\/interno\/voz\/v1\/cerebro$/;
+const DITADO = /^\/api\/t\/([^/]+)\/voz\/v1\/ditado$/;
 /** definido em 2026-10-04: o `ola` da mídia tem de chegar em 5 s, senão a conexão fecha. */
 export const PRAZO_OLA_MS = 5_000;
 
@@ -96,7 +102,7 @@ export function lerJson(texto: string): Record<string, unknown> | null {
 
 export type CanaisVoz = { fechar(): Promise<void> };
 
-/** Liga o upgrade dos dois caminhos ao servidor HTTP. Qualquer outro caminho de upgrade é recusado com 404. */
+/** Liga o upgrade dos três caminhos (mídia, cérebro e ditado) ao servidor HTTP. Qualquer outro caminho de upgrade é recusado com 404. */
 export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MENSAGEM_MAX_BYTES, perMessageDeflate: false });
 
@@ -111,18 +117,32 @@ export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz 
       wss.handleUpgrade(req, socket, head, (ws) => aceitarMidia(ws, escopo));
       return;
     }
+    // ADR-095: o ditado é rota de tenant como a mídia — mesmas três conferências.
+    const ditado = DITADO.exec(caminho);
+    if (ditado) {
+      const escopo = deps.resolverEscopo(req);
+      if (!escopo) return recusar(socket, 401);
+      if (escopo.tenantId !== ditado[1]) return recusar(socket, 404);
+      if (!origemDoMesmoHost(req)) return recusar(socket, 403);
+      wss.handleUpgrade(req, socket, head, (ws) => aceitarDitado(ws, escopo));
+      return;
+    }
     if (CEREBRO.test(caminho)) {
       if (req.headers.origin !== undefined) return recusar(socket, 403);
       const auth = req.headers.authorization ?? "";
-      const identidade = auth.startsWith("Bearer ") ? deps.autorizarTokenTurno(auth.slice(7)) : null;
-      if (!identidade) return recusar(socket, 401);
-      const ligacaoId = deps.ligacaoDoTurno(identidade.turnoId);
-      if (!ligacaoId) return recusar(socket, 404);
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        const canal = canalDeSocket(ws);
-        const codigo = deps.anexarCerebro({ identidade, ligacaoId, canal });
-        if (codigo !== null) canal.fechar(codigo);
-      });
+      // NOD-214: a autorização pode ir ao banco; o erro dela recusa o upgrade em vez de derrubar o processo.
+      void Promise.resolve(auth.startsWith("Bearer ") ? deps.autorizarTokenTurno(auth.slice(7)) : null)
+        .catch(() => null)
+        .then((identidade) => {
+          if (!identidade) return recusar(socket, 401);
+          const ligacaoId = deps.ligacaoDoTurno(identidade.turnoId);
+          if (!ligacaoId) return recusar(socket, 404);
+          wss.handleUpgrade(req, socket, head, (ws) => {
+            const canal = canalDeSocket(ws);
+            const codigo = deps.anexarCerebro({ identidade, ligacaoId, canal });
+            if (codigo !== null) canal.fechar(codigo);
+          });
+        });
       return;
     }
     recusar(socket, 404);
@@ -154,6 +174,21 @@ export function anexarCanaisVoz(server: Server, deps: DepsCanaisVoz): CanaisVoz 
     };
     ws.on("message", primeira);
     ws.on("error", (e) => log("aviso", "voz_midia_erro_socket", { erro: e.name }));
+  }
+
+  function aceitarDitado(ws: WebSocket, escopo: Escopo): void {
+    const canal = canalDeSocket(ws);
+    const prazo = setTimeout(() => canal.fechar(FECHAMENTOS_VOZ.versao, "sem ola"), PRAZO_OLA_MS);
+    const primeira = (dados: RawData, binario: boolean) => {
+      ws.off("message", primeira);
+      clearTimeout(prazo);
+      const msg = binario ? null : lerJson(Buffer.isBuffer(dados) ? dados.toString("utf8") : String(dados));
+      if (!msg || msg.t !== "ola") return canal.fechar(FECHAMENTOS_VOZ.versao, "ola invalido");
+      if (msg.v !== 1) return canal.fechar(FECHAMENTOS_VOZ.versao, "versao");
+      deps.anexarDitado({ escopo, canal });
+    };
+    ws.on("message", primeira);
+    ws.on("error", (e) => log("aviso", "voz_ditado_erro_socket", { erro: e.name }));
   }
 
   return {

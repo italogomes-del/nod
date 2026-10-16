@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { paraCadaPessoa } from "../../src/adapters/fundo/escopos-de-fundo.ts";
-import { abrirTxEscopada } from "../../src/db/tx.ts";
+import { abrirTxEscopada, ErroBancoOcupado } from "../../src/db/tx.ts";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { listarTodas } from "../../src/repositories/pessoas.repo.ts";
 import type { Escopo, Tx } from "../../src/shared/types.ts";
@@ -106,5 +106,73 @@ describeIntegracao("escopos de fundo (paraCadaPessoa)", () => {
     } catch (e) {
       expect((e as ErroDeDominio).codigo).toBe("escopo_vazio");
     }
+  });
+});
+
+describeIntegracao("paraCadaPessoa com o banco ocupado (NOD-266)", () => {
+  it("o primeiro banco_ocupado encerra a volta: as pessoas seguintes não entram na fila do pool", async () => {
+    const pessoas = ["a", "b", "c"].map((id) => ({ tenantId: TENANT_PADRAO, id }));
+    const visitadas: string[] = [];
+    const falhas: string[] = [];
+    await paraCadaPessoa(
+      db,
+      async (escopo) => {
+        visitadas.push(escopo.pessoaId);
+        if (escopo.pessoaId === "b") throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000);
+      },
+      { listarPessoas: async () => pessoas, aoFalhar: (escopo, e) => falhas.push(`${escopo.pessoaId}:${e instanceof Error ? e.name : "?"}`), sortearInicio: () => 0 },
+    );
+    expect(visitadas).toEqual(["a", "b"]);
+    expect(falhas).toEqual(["b:ErroBancoOcupado"]);
+  });
+
+  it("QA do PR #321: banco_ocupado na LISTAGEM encerra a volta sem lançar — senão o `void tick()` dos laços vira unhandled rejection e derruba o processo", async () => {
+    const visitadas: string[] = [];
+    const volta = paraCadaPessoa(
+      db,
+      async (escopo) => { visitadas.push(escopo.pessoaId); },
+      { listarPessoas: async () => { throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000); } },
+    );
+    await expect(volta).resolves.toBeUndefined();
+    expect(visitadas).toEqual([]);
+  });
+
+  it("outra falha na listagem segue subindo (não é engolida)", async () => {
+    await expect(paraCadaPessoa(db, async () => {}, { listarPessoas: async () => { throw new Error("qualquer"); } })).rejects.toThrow("qualquer");
+  });
+
+  it("outra falha de uma pessoa não para o laço (como antes)", async () => {
+    const pessoas = ["a", "b", "c"].map((id) => ({ tenantId: TENANT_PADRAO, id }));
+    const visitadas: string[] = [];
+    await paraCadaPessoa(
+      db,
+      async (escopo) => {
+        visitadas.push(escopo.pessoaId);
+        if (escopo.pessoaId === "b") throw new Error("qualquer");
+      },
+      { listarPessoas: async () => pessoas, aoFalhar: () => {}, sortearInicio: () => 0 },
+    );
+    expect(visitadas).toEqual(["a", "b", "c"]);
+  });
+
+  it("revisão do PR #321: a volta começa num ponto sorteado e dá a volta — quem está no fim da lista não fica sempre de fora", async () => {
+    const pessoas = ["a", "b", "c"].map((id) => ({ tenantId: TENANT_PADRAO, id }));
+    const visitadas: string[] = [];
+    await paraCadaPessoa(
+      db,
+      async (escopo) => {
+        visitadas.push(escopo.pessoaId);
+        if (escopo.pessoaId === "a") throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000);
+      },
+      { listarPessoas: async () => pessoas, aoFalhar: () => {}, sortearInicio: () => 2 },
+    );
+    // Começou em "c" (o último), deu a volta e parou no banco_ocupado de "a".
+    expect(visitadas).toEqual(["c", "a"]);
+    // O default sorteia: em várias voltas, todas as posições aparecem como início.
+    const inicios = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      await paraCadaPessoa(db, async (escopo) => { inicios.add(escopo.pessoaId); throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 1); }, { listarPessoas: async () => pessoas, aoFalhar: () => {} });
+    }
+    expect([...inicios].sort()).toEqual(["a", "b", "c"]);
   });
 });

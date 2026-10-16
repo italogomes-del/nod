@@ -21,6 +21,10 @@ NOD_LOGIN=stub npm run dev
 4. Abra `http://127.0.0.1:5274` e confirme o selo verde **Persistente · DB 5434**.
 5. No fim do dia, encerre web e API com `Ctrl+C`. Pode desligar o Mac sem parar o Postgres.
 
+Para o Nod que fica aberto o dia todo, prefira o modo build (`npm run diario:prod`, seção
+[Modo build para o diário](#modo-build-para-o-diário)): ele gasta menos processador e memória que o
+`npm run dev`, mas a página passa a abrir em `http://127.0.0.1:8888`.
+
 Se o Postgres não estiver saudável, execute `npm run docker:up` e confira novamente. Não rode
 `docker:reset`, `docker compose down -v` nem remova `nod_nod_pgdata` para tentar corrigir uma falha:
 esses comandos apagam o banco diário.
@@ -103,6 +107,52 @@ Se a falha ocorrer antes das migrações, corrija a instalação ou retorne ao c
 migração já tiver sido aplicada, não faça downgrade cego: voltar a tag não reverte o schema. Pare o
 Nod, preserve o banco e o backup e use uma migração corretiva ou restaure o backup em outro banco
 para validar a recuperação antes de substituir o banco diário.
+
+## Modo build para o diário
+
+O `npm run dev` é o modo de quem desenvolve: sobe a API pelo `tsx` e a web pelo Vite, que vigia os
+arquivos e recompila a cada edição. Para o Nod que fica aberto o dia todo, isso gasta processador e
+memória sem necessidade, e qualquer edição na mesma pasta recarrega a página (medido em 09/10/2026,
+issue #218).
+
+O modo build gera a web uma vez e sobe só a API, que serve a página pela própria porta:
+
+```bash
+cd ~/code/nod
+NOD_LOGIN=stub npm run diario:prod
+```
+
+O comando roda `npm run build` (gera `dist/web`) e depois `node src/adapters/http/server.ts` com
+`NOD_STATIC_DIR=dist/web`. Abra `http://127.0.0.1:8888`, não a 5274: no modo build não há Vite. O
+selo **Persistente · DB 5434** e o login continuam iguais. Encerre com `Ctrl+C`, como no modo dev; a
+API espera os turnos em andamento terminarem antes de sair.
+
+Depois de trocar de versão (passo 4 da atualização acima), rode `npm run diario:prod` de novo: o
+build é refeito a cada início. Se o build falhar, a API não sobe e a versão anterior não fica
+servida. Com login Google, cadastre também `http://127.0.0.1:8888/api/sessao/google/callback` e
+aponte `NOD_GOOGLE_REDIRECT_URI` para ele.
+
+Quem desenvolve continua com `npm run dev` (web 5274, API 8888). Os dois modos usam a porta 8888 da
+API: rode um de cada vez.
+
+## Bancos de teste órfãos
+
+Fora do CI, cada worktree que roda os testes de integração cria o próprio banco
+`nod_test_<hash do caminho>` no Postgres que o `DATABASE_URL_DONO` aponta (veja
+`tests/setup/banco-por-worktree.ts`). Quando a worktree é apagada, o banco fica. Em 09/10/2026 o
+`nod-postgres` tinha cerca de 140 desses bancos (~1,8 GB) contra 183 MB do `nod`.
+
+O `npm run db:test:limpar` apaga os bancos `nod_test_<hash>` cuja worktree não existe mais. Ele lê o
+caminho gravado no comentário de cada banco, nunca toca em `nod` nem em `nod_test`, mantém os bancos
+sem comentário e não derruba conexões: um banco em uso é relatado e fica. Ele roda sozinho no fim do
+`npm run check`, quando todos os testes passaram. Para rodar à mão:
+
+```bash
+npm run db:test:limpar
+```
+
+O comando usa o `DATABASE_URL_DONO` do ambiente ou do `.env`. Numa worktree com banco efêmero, ele
+limpa só o efêmero.
 
 ## Nod diário: persistente, porta 5434
 

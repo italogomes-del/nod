@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Este Mac · Trabalhos</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:100%;height:100%;display:block}
+.ponto-trabalho.na-vez{background:transparent;border:1.5px solid var(--mascote-cor,var(--ink-3))}
+.tt-passo.vez{color:var(--ink-2)}
+.tt-maq{display:inline-flex;align-items:center;gap:6px;margin-left:2px;padding:1px 8px 1px 6px;border:0;border-radius:10px;background:none;color:var(--ink-2);font:inherit;font-size:13px;cursor:pointer}
+.tt-maq:hover,.tt-maq[aria-expanded="true"]{background:var(--surface-raised);color:var(--ink)}
+.tt-maq .maq-nivel{width:7px;height:7px}
+.tt-cab p{display:flex;align-items:center;flex-wrap:wrap;gap:2px}
+</style>
+</helmet>
+<div class="app" style="height: 900px;">
+<aside class="sidebar" aria-label="Bots e salas"><div class="search-wrap">
+  <div class="sh"><button class="nod-topo" aria-label="Abrir o Nod" title="Nod"><svg class="logo-nod" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-fundo" width="32" height="32" rx="7.5"></rect><g class="logo-olhos" transform="rotate(14 16 16)"><rect x="8.6" y="8.5" width="5.6" height="15" rx="2.8"></rect><rect x="17.8" y="8.5" width="5.6" height="15" rx="2.8"></rect></g></svg><span>Nod</span></button><button class="icone-topo" aria-label="Buscar agentes" title="Buscar (⌘K)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5 14 14"></path></svg></button><button class="icone-topo trabalhos-bt" aria-current="page" aria-label="Trabalhos: 6 abertos" title="Trabalhos"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="14" height="11" rx="2.2"></rect><path d="M7.5 5.5V4.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2v1.3"></path><path d="M3 10h14"></path></svg><span class="contagem-topo" aria-hidden="true">6</span></button><span class="create-actions"><button class="create-trigger" aria-label="Nova conversa"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+</div>
+<div class="list">
+  <section class="fixados" aria-label="Fixados"><div class="fixado"><button class="fixado-bt" aria-label="Abrir conversa com Clarice" title="Clarice"><span class="icon mascote c-red shape-circle lg" role="img" aria-label="Clarice"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span><b>Clarice</b></button></div></section>
+  <section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Meus agentes"><span class="secao-nome">Meus agentes</span></button></h3>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Milton"><span class="icon mascote c-black shape-drop" role="img" aria-label="Milton"><img src="/_blob/6cf8e7d4cc35a7d32a326738cbf2eefa" alt=""></span><span class="txt"><span class="nome-linha"><b>Milton</b><i class="chip">PM</i><span class="chip-trab"><span class="ponto-trabalho c-black pulso-trab" aria-hidden="true"></span>1</span></span><span>Consultando o HubSpot</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Ada"><span class="icon mascote c-orange shape-pebble" role="img" aria-label="Ada"><img src="/_blob/b9bc8d0254c2dc78d07fe2a9250063dd" alt=""></span><span class="txt"><span class="nome-linha"><b>Ada</b><span class="chip-trab"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span>1</span></span><span>Lendo a planilha de receita</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Tarsila"><span class="icon mascote c-orange shape-square" role="img" aria-label="Tarsila"><img src="/_blob/e473d72a730feb1fca9c08839c776a35" alt=""></span><span class="txt"><span class="nome-linha"><b>Tarsila</b><span class="chip-trab"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span>1</span></span><span>Gerando a arte do post</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Nina"><span class="icon mascote c-purple shape-hex" role="img" aria-label="Nina"><img src="/_blob/8a7b4c34eabfbd3c6306fbc886f687b1" alt=""></span><span class="txt"><span class="nome-linha"><b>Nina</b><i class="chip">Design UX/UI</i></span><span>O protótipo novo está no canvas</span></span></button></div>
+  </section>
+  <section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Gamefik"><span class="secao-nome">Gamefik</span></button></h3>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Ze 1"><span class="icon mascote c-red shape-square" role="img" aria-label="Ze 1"><img src="/_blob/29d20d2fee6bd83243b75f770a562c3a" alt=""></span><span class="txt"><span class="nome-linha"><b>Ze 1</b><i class="chip">Dev Sr</i><span class="chip-trab"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span>1</span></span><span>Rodando os testes</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Dev 1"><span class="icon mascote c-green shape-cloud" role="img" aria-label="Dev 1"><img src="/_blob/698e127b8f94d07c584f88d11905cf48" alt=""></span><span class="txt"><span class="nome-linha"><b>Dev 1</b><span class="chip-trab"><span class="ponto-trabalho c-green" aria-hidden="true"></span>1</span></span><span>Esperando a vez do typecheck</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Chico"><span class="icon mascote c-brown shape-square" role="img" aria-label="Chico"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><span class="txt"><span class="nome-linha"><b>Chico</b><i class="chip">Tech Lead</i></span><span>Revisei o PR e deixei dois comentários</span></span></button></div>
+  </section>
+</div>
+<div class="rodape">
+  <button class="me" aria-label="Menu da conta" title="Menu da conta"><span class="av-me">eu</span><span class="me-conexao conexao-aberto"></span></button>
+  <button class="marketplace-bt"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"></path><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"></path><path d="M4.2 10v7h11.6v-7"></path><path d="M8 17v-4h4v4"></path></svg>Marketplace</button>
+</div></aside>
+<main class="stage" style="overflow: auto;">
+<section class="tela-trabalhos" aria-label="Todos os trabalhos">
+  <header class="tt-cab"><div><h1>Trabalhos</h1><p>6 trabalhando ·<button type="button" class="tt-maq" aria-expanded="false" title="Ver o que o Mac está usando"><span class="maq-nivel" aria-hidden="true"></span>Este Mac<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"></path></svg></button></p></div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos"><button type="button" class="tt-filtro ativo" aria-pressed="true">Todos</button><button type="button" class="tt-filtro" aria-pressed="false">De você</button><button type="button" class="tt-filtro" aria-pressed="false">Rotinas</button><button type="button" class="tt-filtro" aria-pressed="false">Entre bots</button></div></header>
+
+  <section class="tt-grupo"><h2>Trabalhando · 6</h2><div class="tt-lista">
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-red shape-square sm"><img src="/_blob/29d20d2fee6bd83243b75f770a562c3a" alt=""></span><b>Ze 1</b></span><span class="tt-meio"><span class="tt-titulo">Rodar a suíte da GFK-1780 e abrir o PR</span><span class="etiqueta-origem">de você</span><span class="tt-passo">rodando os testes</span></span><span class="tt-fim">7 min</span></button>
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-green na-vez" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-green shape-cloud sm"><img src="/_blob/698e127b8f94d07c584f88d11905cf48" alt=""></span><b>Dev 1</b></span><span class="tt-meio"><span class="tt-titulo">Corrigir o login do app do Mac</span><span class="etiqueta-origem">de você</span><span class="tt-passo vez">esperando a vez do typecheck</span></span><span class="tt-fim">5 min</span></button>
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-orange shape-square sm"><img src="/_blob/e473d72a730feb1fca9c08839c776a35" alt=""></span><b>Tarsila</b></span><span class="tt-meio"><span class="tt-titulo">Arte do post de lançamento</span><span class="etiqueta-origem">pedido do Milton</span><span class="tt-passo">gerando a imagem</span></span><span class="tt-fim">15 min</span></button>
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-orange shape-pebble sm"><img src="/_blob/b9bc8d0254c2dc78d07fe2a9250063dd" alt=""></span><b>Ada</b></span><span class="tt-meio"><span class="tt-titulo">Planilha de receita de setembro</span><span class="etiqueta-origem">de você</span><span class="tt-passo">lendo a planilha de receita</span></span><span class="tt-fim">12 min</span></button>
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-black pulso-trab" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-black shape-drop sm"><img src="/_blob/6cf8e7d4cc35a7d32a326738cbf2eefa" alt=""></span><b>Milton</b></span><span class="tt-meio"><span class="tt-titulo">Resumo semanal do funil</span><span class="etiqueta-origem">rotina</span><span class="tt-passo">consultando o HubSpot</span></span><span class="tt-fim">4 min</span></button>
+    <button type="button" class="tt-linha"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span><span class="tt-bot"><span class="icon mascote c-red shape-circle sm"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span><b>Clarice</b></span><span class="tt-meio"><span class="tt-titulo">Responder os e-mails da manhã</span><span class="etiqueta-origem">de você</span><span class="tt-passo">escrevendo 3 respostas</span></span><span class="tt-fim">3 min</span></button>
+  </div></section>
+
+  <section class="tt-grupo"><h2>Terminados hoje · 18</h2><div class="tt-lista">
+    <button type="button" class="tt-linha"><span class="ponto-trabalho feito" aria-hidden="true">✓</span><span class="tt-bot"><span class="icon mascote c-brown shape-square sm"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><b>Chico</b></span><span class="tt-meio"><span class="tt-titulo">Revisar o PR #538</span><span class="etiqueta-origem">pedido do Ze 1</span><span class="tt-passo">terminou</span></span><span class="tt-fim">10:12</span></button>
+  </div></section>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

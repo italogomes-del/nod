@@ -266,3 +266,321 @@ describe("trecho cortado na vírgula (UAT de 2026-10-04)", () => {
     expect(textoFalavel("Então: você é Marlon,").falavel).toBe("Então: você é Marlon,");
   });
 });
+
+import { FRASE_RESTO_TELA, FRASE_TABELA, LEITURA, textoParaLeitura } from "../../../src/domain/ligacao-frases.ts";
+
+const lido = (md: string) => textoParaLeitura(md).join(" ");
+
+describe("textoParaLeitura (NOD-180: ouvir uma resposta pronta)", () => {
+  it("texto simples sai igual, com ponto, sem nada mandado para o chat", () => {
+    expect(textoParaLeitura("Tudo certo por aqui")).toEqual(["Tudo certo por aqui."]);
+    expect(lido("Pronto. Já resolvi.")).not.toMatch(/chat/iu);
+  });
+
+  it("vazio ou só código vira [] ou só o aviso do bloco", () => {
+    expect(textoParaLeitura("")).toEqual([]);
+    expect(textoParaLeitura("   \n\n  ")).toEqual([]);
+    expect(textoParaLeitura("**  **")).toEqual([]);
+    expect(textoParaLeitura("```ts\nconst a = 1;\n```")).toEqual(["Aqui tem um bloco de código em TypeScript."]);
+  });
+
+  it("bloco de código: uma frase por bloco, com a linguagem conhecida", () => {
+    const md = "Veja:\n\n```py\nprint(1)\n```\n\nE também:\n\n```\nx\n```\n\n~~~sql\nselect 1;\n~~~\n\n```brainfuck\n+++\n```";
+    const t = lido(md);
+    expect(t).toContain("Aqui tem um bloco de código em Python.");
+    expect(t).toContain("Aqui tem um bloco de código em SQL.");
+    expect(t.match(/Aqui tem um bloco de código\./gu)).toHaveLength(2);
+    expect(t).not.toMatch(/print|select|\+\+\+/u);
+  });
+
+  it("bloco sem fecho não vaza o código", () => {
+    expect(lido("Olha:\n```js\nconst segredo = 42;")).toBe("Olha: Aqui tem um bloco de código em JavaScript.");
+  });
+
+  it("tabela vira uma frase só, mesmo com várias linhas", () => {
+    const md = "Resumo:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\nFim.";
+    const t = textoParaLeitura(md);
+    expect(t.join(" ").match(new RegExp(FRASE_TABELA, "gu"))).toHaveLength(1);
+    expect(t.join(" ")).not.toMatch(/\|/u);
+  });
+
+  it("link vira o rótulo; URL solta e <url> viram 'um link'", () => {
+    expect(lido("Abri o [PR #157](https://github.com/marlonwlv/nod/pull/157).")).toBe("Abri o PR #157.");
+    expect(lido("Veja https://exemplo.com/a?b=1 agora.")).toBe("Veja um link agora.");
+    expect(lido("Veja <https://exemplo.com>.")).toBe("Veja um link.");
+  });
+
+  it("código em linha curto é lido; longo vira 'um trecho de código'", () => {
+    expect(lido("Rode `npm run check`.")).toBe("Rode npm run check.");
+    expect(lido("Use `if (a) { b(); }` no fim.")).toBe("Use um trecho de código no fim.");
+  });
+
+  it("caminho vira o nome do arquivo, sem pegar data nem e/ou", () => {
+    expect(lido("Mexi em src/adapters/voz/spi.ts hoje.")).toBe("Mexi em spi.ts hoje.");
+    expect(lido("Veja docs/adr/ e o resto.")).toBe("Veja adr e o resto.");
+    expect(lido("Dia 06/10/2026, e/ou amanhã a 80 km/h.")).toContain("e/ou");
+    expect(lido("Dia 06/10/2026.")).not.toBe("Dia 2026.");
+  });
+
+  it("não parte número, abreviação nem versão", () => {
+    const t = textoParaLeitura("Custou R$ 1.000,50 ao Sr. Silva. A versão é v1.2.3 desde ontem. Fim.");
+    const tudo = t.join(" ");
+    expect(tudo).toContain("Sr. Silva");
+    expect(tudo).toMatch(/1\.2\.3/u);
+    expect(t.some((x) => x.endsWith("Sr."))).toBe(false);
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): com 2 barras, uma lista de palavras virava só a última ("sim/não/talvez" → "talvez").
+  it("palavras separadas por barra, sem extensão nem raiz, ficam como estão", () => {
+    expect(lido("Defina leitura/escrita/execução no arquivo.")).toContain("leitura/escrita/execução");
+    expect(lido("Responda sim/não/talvez.")).toContain("sim/não/talvez");
+    expect(lido("Abri ~/nod/Tarsila/qa-180 e /tmp/saida agora.")).toBe("Abri qa-180 e saida agora.");
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): a cerca de 4 crases fechava na de 3 de dentro e o código era lido em voz alta.
+  it("bloco dentro de bloco (cerca de 4 crases) e bloco recuado em lista não vazam o código", () => {
+    expect(lido("Exemplo:\n\n````md\n```ts\nconst segredo = 42;\n```\n````\n\nFim.")).toBe("Exemplo: Aqui tem um bloco de código em Markdown. Fim.");
+    expect(lido("1. Rode:\n   ```bash\n   npm ci\n   ```\n2. Pronto.")).not.toMatch(/npm|ci\b/u);
+    expect(lido("Use ```npm ci``` aqui.")).toBe("Use npm ci aqui.");
+  });
+
+  it("1º trecho tem até 25 palavras; os outros juntam frases até 400 caracteres", () => {
+    const frase = "Esta é uma frase de exemplo com várias palavras para encher o trecho.";
+    const md = Array.from({ length: 30 }, () => frase).join(" ");
+    const t = textoParaLeitura(md);
+    expect(t[0]?.split(/\s+/u).length).toBeLessThanOrEqual(LEITURA.primeiroPalavras);
+    for (const x of t.slice(1)) expect(x.length).toBeLessThanOrEqual(LEITURA.trechoCaracteres);
+    expect(t.join(" ").replace(/\s+/gu, " ")).toBe(md);
+  });
+
+  it("1º trecho longo corta na vírgula que cabe", () => {
+    const md = "Olhei o PR inteiro com calma e atenção, conferi cada um dos testes e também os logs do CI que passaram sem nenhum problema de verdade.";
+    const t = textoParaLeitura(md);
+    expect(t[0]).toBe("Olhei o PR inteiro com calma e atenção,");
+    expect(t.join(" ")).toBe(md);
+  });
+
+  it("frase gigante sem pontuação é partida em pedaços de até 1.000 caracteres", () => {
+    const md = Array.from({ length: 400 }, (_, i) => `palavra${i}`).join(" ");
+    const t = textoParaLeitura(md);
+    for (const x of t) expect(x.length).toBeLessThanOrEqual(LEITURA.tetoTrechoCaracteres);
+    expect(t.length).toBeGreaterThan(2);
+  });
+
+  // Regressão (QA NOD-180, 2026-10-06): o 1º trecho só olhava palavras; um token longo sem espaço ia inteiro ao TTS (3.978 caracteres).
+  it("1º trecho também respeita o tamanho de trecho, mesmo com palavra gigante", () => {
+    for (const md of ["a".repeat(5000), `Hash: ${"ção".repeat(1500)}`, `${"x".repeat(900)} fim de frase.`]) {
+      const t = textoParaLeitura(md);
+      expect(t[0]?.length).toBeLessThanOrEqual(LEITURA.trechoCaracteres);
+      for (const x of t) expect(x.length).toBeLessThanOrEqual(LEITURA.tetoTrechoCaracteres);
+    }
+  });
+
+  it("passou de 4.000 caracteres: corta no fim de frase e fecha com 'O resto está na tela.'", () => {
+    const md = Array.from({ length: 200 }, (_, i) => `Esta é a frase número ${i} da resposta longa.`).join(" ");
+    const t = textoParaLeitura(md);
+    const tudo = t.join(" ");
+    expect(tudo.length).toBeLessThanOrEqual(LEITURA.maxCaracteres);
+    expect(tudo.endsWith(`resposta longa. ${FRASE_RESTO_TELA}`)).toBe(true);
+  });
+
+  it("até 4.000 caracteres não ganha o fecho", () => {
+    expect(lido("Uma resposta curta.")).not.toContain(FRASE_RESTO_TELA);
+  });
+
+  it("listas e títulos viram frases faladas, sem marcadores", () => {
+    const t = lido("## Resumo\n\n- primeiro item\n- segundo item\n\n**Importante:** acabou");
+    expect(t).not.toMatch(/[#*]/u);
+    expect(t).toContain("Primeiro item");
+    expect(t).toContain("acabou");
+  });
+});
+
+describe("textoParaLeitura: acertos da QA da NOD-180 (NOD-181)", () => {
+  it("1. tabela sem '|' no começo da linha vira uma frase só", () => {
+    for (const sep of ["---|---", ":--|--:", "| --- | --- |", "--- | ---"]) {
+      const t = lido(`Veja:\n\na | b\n${sep}\n1 | 2\n3 | 4\n\nFim.`);
+      expect(t).toBe(`Veja: ${FRASE_TABELA} Fim.`);
+      expect(t).not.toMatch(/\||---/u);
+    }
+    // A tabela vai até a 1ª linha sem "|".
+    expect(lido("a | b\n---|---\n1 | 2\nDepois da tabela.")).toBe(`${FRASE_TABELA} Depois da tabela.`);
+  });
+
+  it("2. regressão: '|' sem linha separadora segue lido como texto; régua sozinha não vira tabela", () => {
+    expect(lido("Escolha a | b agora.")).toBe("Escolha a | b agora.");
+    expect(lido("a | b\n\n---\n\nFim.")).not.toContain(FRASE_TABELA);
+    expect(lido("Dia 06/10/2026, e/ou amanhã.")).toContain("e/ou");
+    expect(lido("Dia 06/10/2026, e/ou amanhã.")).toContain("06/10/2026");
+  });
+
+  it("3. HTML: tags somem e o texto de dentro é lido; comentário, script e style não são lidos", () => {
+    expect(lido("Olá <b>mundo</b><br>tudo bem")).toBe("Olá mundo tudo bem.");
+    expect(lido("Antes <!-- nota --> depois.")).toBe("Antes depois.");
+    expect(lido("Antes <!--\nnota em\nduas linhas\n--> depois.")).not.toMatch(/nota/u);
+    expect(lido("Oi <script>x()</script> fim.")).toBe("Oi fim.");
+    expect(lido("Oi <SCRIPT type=\"a\">x()</SCRIPT> <style>p { a: b }</style>fim.")).toBe("Oi fim.");
+    expect(lido("<details><summary>Ver mais</summary>\n\nConteúdo.\n</details>")).toBe("Ver mais. Conteúdo.");
+    expect(lido('Um <a href="x">link</a> e <img src="y" /> aqui.')).toBe("Um link e aqui.");
+    // Código em linha não é mexido: segue a regra de código em linha.
+    expect(lido("Use `<b>` e pronto.")).toBe("Use um trecho de código e pronto.");
+    // Tag de bloco separa as palavras; a de linha não.
+    expect(lido("<p>Primeiro</p><p>segundo</p>")).toBe("Primeiro segundo.");
+    expect(lido("<ul><li>um</li><li>dois</li></ul>")).toBe("Um dois.");
+    expect(lido("<details><summary>Resumo</summary>Corpo</details>")).toBe("Resumo Corpo.");
+    expect(lido("<td>a</td><td>b</td>, <br/>fim")).toBe("A b, fim.");
+    expect(lido("Use <b>neg</b>rito e <pre>x</pre>.")).toBe("Use negrito e x.");
+    // Crase dentro de comentário, script ou style não salva o conteúdo; o mesmo HTML em código em linha fica.
+    expect(lido("Antes <script>const x = `a` + 1;</script> depois.")).toBe("Antes depois.");
+    expect(lido("A <!-- nota `x` secreta --> b.")).toBe("A b.");
+    expect(lido("<style>.a::after{content:`x`}</style> fim.")).toBe("Fim.");
+    expect(lido("Use `<!-- -->` para comentar.")).toBe("Use um trecho de código para comentar.");
+  });
+
+  it("3b. regressão: nome que não é tag HTML entre '<' e '>' fica (genérico, tecla, componente)", () => {
+    expect(lido("Retorna Promise<string> no final.")).toBe("Retorna Promise<string> no final.");
+    expect(lido("Array<T> e List<Item> ok.")).toBe("Array<T> e List<Item> ok.");
+    expect(lido("Aperte <Enter> para seguir.")).toBe("Aperte <Enter> para seguir.");
+  });
+
+  it("4. regressão: '<' e '>' soltos não perdem texto", () => {
+    expect(lido("Se a < b e c > d, pronto.")).toBe("Se a < b e c > d, pronto.");
+    expect(lido("Fluxo x -> y.")).toBe("Fluxo x -> y.");
+    expect(lido("Te amo <3")).toBe("Te amo <3.");
+  });
+
+  it("5. bloco recuado com 4 espaços (ou tab) vira a frase de bloco sem linguagem", () => {
+    const t = lido("Veja:\n\n    npm ci\n    npm test\n\nPronto.");
+    expect(t).toBe("Veja: Aqui tem um bloco de código. Pronto.");
+    expect(t).not.toMatch(/npm/u);
+    expect(lido("\tnpm ci\n\n\tnpm test\n\nPronto.")).toBe("Aqui tem um bloco de código. Pronto.");
+    // Sem linha em branco antes, não interrompe o parágrafo.
+    expect(lido("Veja:\n    npm ci")).toContain("npm ci");
+  });
+
+  it("6. regressão: continuação recuada de item de lista segue lida", () => {
+    expect(lido("- item\n\n    continuação")).toMatch(/continuação/iu);
+    expect(lido("1. item\n\n    continuação\n\n    mais uma")).toMatch(/mais uma/iu);
+  });
+
+  it("7. regressão: 'Deno/Node.js' continua como hoje (ponto 4 fora); caminho vira o nome do arquivo", () => {
+    expect(lido("Use Deno/Node.js aqui.")).toBe("Use Node.js aqui.");
+    expect(lido("Abra src/index.ts agora.")).toBe("Abra index.ts agora.");
+  });
+});
+
+import { decodificarEntidades } from "../../../src/domain/ligacao-frases.ts";
+
+describe("decodificarEntidades (NOD-189)", () => {
+  it.each([
+    ["&amp;", "&"],
+    ["&lt;", "<"],
+    ["&gt;", ">"],
+    ["&quot;", '"'],
+    ["&apos;", "'"],
+    ["a&nbsp;b", "a b"],
+    ["&#39;", "'"],
+    ["&#x27;", "'"],
+    ["&#X27;", "'"],
+    ["&#9;", "\t"],
+    ["&#10;", "\n"],
+    ["&#x1F600;", "😀"], // a função exportada devolve o emoji; quem fala é que o tira
+    ["&#x10FFFF;", "\u{10FFFF}"],
+    ["&#96;", "`"],
+    ["&#x60;", "`"],
+    ["&#xF900;", "\uF900"],
+  ])("%j vira %j", (entrada, saida) => {
+    expect(decodificarEntidades(entrada)).toBe(saida);
+  });
+
+  it.each(["&foo;", "&AMP;", "&#xZZ;", "&#0;", "&#x0;", "&#xD800;", "&#xDFFF;", "&#x110000;", "&#1;", "&#13;", "&#x7F;", "&#x9F;", "&amp", "& amp;", "&#;", "&#x;", "&#12345678;", "&#xE000;", "&#57345;", "&#xE002;", "&#xF8FF;"])(
+    "%j fica igual",
+    (entrada) => {
+      expect(decodificarEntidades(entrada)).toBe(entrada);
+    },
+  );
+
+  it("passada única: &amp;lt; vira &lt; literal, sem decodificar duas vezes", () => {
+    expect(decodificarEntidades("&amp;lt;")).toBe("&lt;");
+    expect(decodificarEntidades("&amp;amp;")).toBe("&amp;");
+  });
+});
+
+// Código em linha com `;` (como `&amp;`) já vira "trecho de código"/"o código": é o que prova que não foi decodificado.
+const entidadesNasDuas: Array<[string, (md: string) => string, string]> = [
+  ["textoParaLeitura", lido, "Use um trecho de código aqui."],
+  ["textoFalavel", falavel, `Use o código aqui. ${FRASE_CHAT}`],
+];
+
+describe.each(entidadesNasDuas)("%s: entidades HTML viram o caractere (NOD-189)", (_nome, fala, codigoNaoDecodificado) => {
+  it.each([
+    ["Tom &amp; Jerry", "Tom e Jerry."],
+    ["Tom&nbsp;&amp;&nbsp;Jerry", "Tom e Jerry."],
+    ["Se a &lt; b, pronto", "Se a < b, pronto."],
+    ["Se c &gt; d, pronto", "Se c > d, pronto."],
+    ["Ele disse &quot;oi&quot;", 'Ele disse "oi".'],
+    ["Copo d&apos;água", "Copo d'água."],
+    ["Copo d&#39;água", "Copo d'água."],
+    ["Copo d&#x27;água", "Copo d'água."],
+    ["Bom&nbsp;dia", "Bom dia."],
+    ["Use &lt;b&gt;negrito&lt;/b&gt; aqui", "Use <b>negrito</b> aqui."],
+  ])("%j sai %j", (md, esperado) => {
+    expect(fala(md)).toBe(esperado);
+  });
+
+  // O `;` que sobra segue a regra de sempre (fecha frase na leitura); o que importa é a entidade continuar literal.
+  it.each(["&foo;", "&#xZZ;", "&#0;", "&#xD800;", "&#x110000;", "&amp;lt;", "&#xE000;", "&#xE001;", "&#xE002;"])("%j fica literal (sem decodificar duas vezes)", (ent) => {
+    const esperado = ent === "&amp;lt;" ? "&lt;" : ent;
+    expect(fala(`Veja ${ent} aqui`)).toContain(`Veja ${esperado}`);
+  });
+
+  it('"&amp" sem ";" fica igual', () => {
+    expect(fala("Veja &amp aqui")).toBe("Veja &amp aqui.");
+  });
+
+  // Revisão da NOD-189: a crase decodificada é texto. Se virasse crase antes do código em linha, faria par com outra.
+  it.each([
+    ["Use &#96;x&#96; aqui", "Use `x` aqui."],
+    ["Use &#96; e depois `a b` fim", "Use ` e depois a b fim."],
+    ["Rode `ls` e &#x60;rm -rf /&#x60; agora", "Rode ls e `rm -rf /` agora."],
+    ["Use &lt;b&gt; e &#96;", "Use <b> e `."],
+  ])("crase de entidade não forma código em linha: %j sai %j", (md, esperado) => {
+    expect(fala(md)).toBe(esperado);
+  });
+
+  // A URL solta é trocada depois de decodificar: antes, ela engolia o `&gt` e o `;` que sobrava fechava a frase.
+  it("URL entre &lt; e &gt; vira o link inteira, sem sobrar ponto e vírgula", () => {
+    expect(fala("Veja &lt;https://x.com/a?b=1&amp;c=2&gt; aí")).not.toMatch(/;|&|x\.com/u);
+  });
+
+  // Uso privado do BMP é dos marcadores internos: `&#xE000;` decodificado diria "Te mandei no chat." sem ter mandado.
+  it("numérica no uso privado não forja marcador interno", () => {
+    expect(fala("Veja &#xE000; e &#xE001; e &#xE002; aqui")).not.toMatch(/chat|o link|o código|trecho/u);
+  });
+
+  // QA da NOD-189: `&lt;https://…&gt;` é o autolink de sempre, sem "<" e ">" em volta do link na fala.
+  it.each(["Veja &lt;https://x.com&gt; aí", "Veja &lt;https://x.com/a?b=1&amp;c=2&gt; aí", "Veja <https://x.com> aí"])(
+    "autolink vindo de entidade fala como o autolink cru: %j",
+    (md) => {
+      expect(fala(md)).toBe(fala("Veja <https://x.com> aí"));
+      expect(fala(md)).not.toMatch(/[<>]/u);
+    },
+  );
+
+  // QA da NOD-189: o emoji cru já some da fala; o que vem de entidade também.
+  it.each(["Oi &#x1F600; tudo bem", "Oi &#128512;&#xFE0F; tudo bem", "Oi &#x2705; tudo bem", "Oi 😀 tudo bem"])(
+    "emoji vindo de entidade não é falado: %j",
+    (md) => {
+      expect(fala(md)).toBe("Oi tudo bem.");
+    },
+  );
+
+  it("entidade dentro de crases não é decodificada", () => {
+    expect(fala("Use `&amp;` aqui")).toBe(codigoNaoDecodificado);
+  });
+
+  it("entidade dentro de bloco cercado não é lida", () => {
+    const t = fala("Veja:\n\n```html\n<p>Tom &amp; Jerry</p>\n```\n\nFim.");
+    expect(t).not.toMatch(/Tom|Jerry|&/u);
+  });
+});

@@ -17,3 +17,8 @@ declare module "*?worker&url" {
   const url: string;
   export default url;
 }
+
+/** O pedaço do `import.meta.env` do Vite que a web usa (web/pwa.ts); o tsconfig da web não carrega vite/client. */
+interface ImportMeta {
+  readonly env: { readonly PROD: boolean };
+}

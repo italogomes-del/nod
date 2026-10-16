@@ -41,6 +41,14 @@ export function renderChipModo(modo: ModoAprovacao, dona: boolean): { html: stri
 }
 
 /** O aviso acima do campo, como o do Claude: só nos modos que aprovam sozinhos, e some ao fechar. */
+/**
+ * definido em 2026-10-06 (pedido do Marlon): a chave do aviso fechado é por modo, não por bot nem por troca — fechou o
+ * aviso do "sem aprovações" uma vez, ele não volta em bot nenhum. Fica no servidor (0059, preferencias.avisos_fechados).
+ */
+export function chaveAvisoModo(modo: ModoAprovacao): string {
+  return `modo:${modo}`;
+}
+
 export function renderAvisoModo(nome: string, modo: ModoAprovacao): string {
   if (modo === "manual") return "";
   const texto = modo === "automatico"

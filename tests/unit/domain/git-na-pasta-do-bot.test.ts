@@ -41,6 +41,81 @@ describe("git que mexe na pasta de trabalho só dentro de ~/nod/<bot> (ADR-065)"
     ]) expect(naPasta(comando, CLONE), comando).toBeNull();
   });
 
+  it("ADR-088: na task, a worktree nova nasce dentro da pasta dela; fora (a raiz do bot, outro lugar) é negada com o caminho certo", () => {
+    const TASK = `${PASTA}/fix-filtros-abc123`;
+    const naTask = (comando: string, cwd: string | null = TASK) => gitForaDaPastaDoBot(comando, { cwd, pastaDoBot: TASK, home: HOME, daTask: true });
+    for (const comando of [
+      `git -C ${CLONE} worktree add "${TASK}/acme" -b feat/filtros origin/main`,
+      `git -C ${CLONE} worktree add -b feat/filtros ~/nod/"Dev 4"/fix-filtros-abc123/acme origin/main`,
+      `cd ${TASK} && git -C ${CLONE} worktree add --detach "${TASK}/acme"`,
+      `git worktree add acme -b feat/x`,
+      `git -C ${CLONE} worktree list`,
+    ]) expect(naTask(comando), comando).toBeNull();
+    const naRaiz = naTask(`git -C ${CLONE} worktree add "${PASTA}/acme-86akr9u9u" -b feat/filtros origin/main`);
+    expect(naRaiz).toContain(`criaria a worktree em ${PASTA}/acme-86akr9u9u, fora da pasta desta task`);
+    expect(naRaiz).toContain(`worktree add "${TASK}/<repo>" -b <branch> origin/main`);
+    expect(naRaiz).toContain("o nod apaga a worktree");
+    expect(naTask(`git -C ${CLONE} worktree add ../outra -b x`)).toContain("/Users/m/code/acme/main-repos/outra");
+    expect(naTask(`git -C ${CLONE} worktree add "$DESTINO" -b x`)).toContain("numa pasta que não deu para conferir");
+    // Revisão do #225: `worktree move` segue a regra do add; caixa e acento (NFD) não enganam a comparação.
+    expect(naTask(`git -C ${CLONE} worktree move "${TASK}/acme" "${PASTA}/acme"`)).toContain("fora da pasta desta task");
+    expect(naTask(`git -C ${CLONE} worktree move "${TASK}/acme" "${TASK}/acme-2"`)).toBeNull();
+    expect(naTask(`git -C ${CLONE} worktree add "/users/m/NOD/dev 4/fix-filtros-abc123/acme" -b x`)).toBeNull();
+    expect(gitForaDaPastaDoBot(`git -C ${CLONE} worktree add "/Users/m/nod/Cecília/t-1/acme" -b x`, { cwd: null, pastaDoBot: "/Users/m/nod/Cecília/t-1".normalize("NFD"), home: HOME, daTask: true })).toBeNull();
+    // A mensagem do git que mexe fora da pasta também ensina a worktree dentro da task.
+    expect(naTask("git switch main", CLONE)).toContain(`worktree add "${TASK}/<repo>"`);
+  });
+
+  it("ADR-088: sem task, a worktree nasce dentro da pasta do bot, como antes", () => {
+    expect(naPasta(`git -C ${CLONE} worktree add /tmp/acme -b x`)).toContain("criaria a worktree em /tmp/acme, fora da sua pasta");
+    expect(naPasta(`git -C ${CLONE} worktree add "${PASTA}" -b x`)).toContain("fora da sua pasta");
+    expect(naPasta(`git -C ${CLONE} worktree add "${PASTA}/acme-86akr9u9u" -b x`)).toBeNull();
+  });
+
+  it("definido em 2026-10-11: variável que o próprio comando definiu é lida (167 das 177 recusas 'não deu para conferir')", () => {
+    const TASK = "/home/nod/nod/Ze 1/jornada-recompensas-08aff6";
+    const BOT_CLONE = "/home/nod/nod/Ze 1/gamefik";
+    const naTask = (comando: string, cwd: string | null = BOT_CLONE) => gitForaDaPastaDoBot(comando, { cwd, pastaDoBot: TASK, home: "/home/nod", daTask: true });
+    // Os dois comandos do Ze 1 recusados em 11/10 às 14:11 e 14:12.
+    for (const comando of [
+      `cd ~/nod/"Ze 1"/gamefik && git fetch -q origin && T=~/nod/"Ze 1"/jornada-recompensas-08aff6; git worktree add -q "$T/pr757" --detach origin/b09; cd "$T/pr757" && git checkout -q -B b09 origin/b09`,
+      `C="${BOT_CLONE}"; W="${TASK}/pr758"; git -C "$C" worktree add -q "$W" -b ze1/pr758 origin/b09; cd "$W" && git merge --no-edit origin/b09-t1`,
+      // Atribuição encadeada por &&, `\${T}`, `export` e $PWD depois do cd.
+      `cd ${BOT_CLONE} && T="${TASK}/w845" && git worktree add "\${T}" -b x origin/main -q && cd "$T" && git commit -m x`,
+      `export D=${TASK}; git -C ${BOT_CLONE} worktree add "$D/repo" -b x`,
+      `cd ${TASK} && git -C ${BOT_CLONE} worktree add "$PWD/repo" -b x`,
+      `cd ${TASK}; D=$PWD; git -C ${BOT_CLONE} worktree add --detach "$D/base" origin/main`,
+      // Variável do bot que aponta para outra variável já conhecida.
+      `B=~/nod/"Ze 1"; T="$B/jornada-recompensas-08aff6"; git worktree add "$T/r" -b x`,
+    ]) expect(naTask(comando), comando).toBeNull();
+
+    // O valor conhecido também nega: a variável aponta para fora da task.
+    expect(naTask(`T=~/nod/"Ze 1"; git worktree add "$T/repo" -b x`)).toContain(`criaria a worktree em /home/nod/nod/Ze 1/repo`);
+    expect(naTask(`W="${BOT_CLONE}"; cd "$W" && git checkout main`, TASK)).toContain(`mexeria em ${BOT_CLONE}`);
+    // Sem aspas, o espaço corta a atribuição (o shell roda `1/gamefik`): o valor fica desconhecido.
+    expect(naTask(`W=${BOT_CLONE}; cd "$W" && git checkout main`, TASK)).toContain("não deu para conferir");
+    // O que continua sem valor certo: variável do laço, atribuição depois de || ou num pipe, prefixo do mesmo comando
+    // (`W=x git -C "$W"` expande antes de atribuir) e `$T` entre aspas simples (literal no shell).
+    for (const comando of [
+      `T=${TASK}; for b in a b; do git worktree add "$T/$b" -b x; done`,
+      `test -d x || T=${TASK}; git worktree add "$T/r" -b x`,
+      `echo | T=${TASK}; git worktree add "$T/r" -b x`,
+      `W="${TASK}/r" git -C "$W" commit -m x`,
+      `T=${TASK}; git worktree add '$T/r' -b x`,
+      `git worktree add "$SEM_VALOR/r" -b x`,
+    ]) expect(naTask(comando), comando).toContain("não deu para conferir");
+  });
+
+  it("definido em 2026-10-11: o git depois de do/then/else é conferido (antes passava sem olhar)", () => {
+    for (const comando of [
+      `for b in a b; do git -C ${CLONE} checkout main; done`,
+      `if true; then git -C ${CLONE} commit -m x; fi`,
+      `if false; then :; else git -C ${CLONE} reset --hard; fi`,
+      `while true; do git -C ${CLONE} pull; break; done`,
+    ]) expect(naPasta(comando), comando).toContain(`mexeria em ${CLONE}`);
+    expect(naPasta(`for f in a b; do git -C "${PASTA}/acme" add "$f"; done`)).toBeNull();
+  });
+
   it("pasta que depende do shell, ou cwd desconhecido, não passa quando o git mexe", () => {
     expect(naPasta("cd $REPO && git commit -m x")).toContain("roda numa pasta que não deu para conferir");
     expect(naPasta("git commit -m x", null)).toContain("não deu para conferir");

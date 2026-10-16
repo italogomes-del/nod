@@ -44,9 +44,12 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const plano = (await emitirPlanoTurno(deps, { turnoId: novo.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto }, harnessPreferido: "claude-cli" })).data;
       expect(plano.harness).toBe("codex-cli");
       expect(plano.modoTurno).toBe("ligacao");
+      // NOD-183: o prompt de voz substitui o de texto; as partes do de texto não vão junto.
+      expect(plano.promptSistemaPartes).toBeUndefined();
       expect(plano.ligacaoVoz).toMatchObject({ ligacaoId: ligacao.id, modelo: MODELOS_LIGACAO_PADRAO["codex-cli"].modelo });
       // A preferência do bot é da pessoa: continuar a ligação com outra IA não a troca.
-      expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "auto", modelo: "haiku" });
+      // (0068: o `auto` com modelo do Claude é gravado como o Claude fixo, que é como ele já rodava.)
+      expect(await repos.agentes.buscar(agenteId)).toMatchObject({ harness: "claude-cli", modelo: "haiku", inteligencia: { modo: "fixa", fixa: "claude-cli" } });
       // A linha "Chat de voz" é uma só.
       expect((await repos.mensagens.listarDaConversa(conversaId, 20)).filter((m) => m.payload?.kind === "ligacao")).toHaveLength(1);
     });
@@ -88,12 +91,19 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const { repos, agenteId } = await agenteComConversa(trx, escopo);
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      // A trava da fila da pessoa ANTES da ligação (definido em 2026-10-10): `ligar` ocupa o índice "uma ligação viva por
+      // pessoa" e `reivindicar` pede a trava da pessoa. Outro teste de ligação em paralelo, na mesma pessoa, faz na ordem
+      // contrária, e as duas transações se travavam (deadlock medido no `check` de 2026-10-10, também sem este PR).
+      await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const machineId = randomUUID();
       expect((await repos.turnos.reivindicar({ machineId, agora: agora(), aceitaLigacao: true }))?.id).toBe(turno.id);
       // O resultado como o laço de voz do Claude o entrega (comContaSemAcesso, src/domain/conta-da-ia.ts).
       const r = await assentarTurno(deps, { turnoId: turno.id, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: { ...FALHA, motivoFalha: "nao_autenticado", causaSemIa: "conta_sem_acesso", erroCru: "Your organization has disabled Claude subscription access" }, executor: "local", harness: "claude-cli", outraIa: "codex-cli" });
       expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" });
+      // NOD-241: a entrega que interrompe grava o último sinal (a hora da entrega: a máquina estava aqui).
+      const [sinal] = await trx<{ u: Date | null }[]>`select ultimo_sinal_em as u from turnos where id = ${turno.id}`;
+      expect(sinal?.u?.getTime()).toBeGreaterThan(Date.now() - 60_000);
       // Um evento só para o turno, o da ligação (com `origem`): é ele que o orquestrador de voz lê.
       const eventos = r.events?.filter((e) => e.kind === "turno_interrompido") ?? [];
       expect(eventos).toHaveLength(1);
@@ -114,6 +124,10 @@ describeIntegracao("rede de segurança da ligação: outro turno-cérebro na mes
       const { repos, agenteId } = await agenteComConversa(trx, escopo);
       const agora = () => Date.now();
       const deps = depsSobre(repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+      // A trava da fila da pessoa ANTES da ligação (definido em 2026-10-10): `ligar` ocupa o índice "uma ligação viva por
+      // pessoa" e `reivindicar` pede a trava da pessoa. Outro teste de ligação em paralelo, na mesma pessoa, faz na ordem
+      // contrária, e as duas transações se travavam (deadlock medido no `check` de 2026-10-10, também sem este PR).
+      await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
       const { turno } = (await ligar(deps, { agenteId, contexto, executor: "local", iniciadaPor: "produto" })).data;
       const machineId = randomUUID();
       await repos.turnos.reivindicar({ machineId, agora: agora(), aceitaLigacao: true });

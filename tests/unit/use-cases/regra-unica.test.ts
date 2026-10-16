@@ -30,7 +30,7 @@ async function cenario(o: { modo: ModoAprovacao; slug?: string; modoTurno?: Plan
   ] });
   const consentimento = await deps.repos.mensagens.criar({ conversaId: conversa?.id ?? "", autoria: { autor_tipo: "pessoa", autor_id: deps.escopo.pessoaId, sob_procuracao_de: null, conta_de_execucao: deps.escopo.pessoaId, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "consentimento", texto: "ok", confianca: "confiavel" });
   for (const capacidade of ["ler", "enviar"]) await deps.repos.concessoes.conceder({ agenteId, conectorId, capacidade, mensagemId: consentimento?.id ?? "" });
-  const turno = await deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId, origem: "delegacao", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "manda o resumo", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId, origem: "delegacao", prazoEm: AGORA + 60_000, profundidade: 1, entradaTexto: "manda o resumo", entradaConfianca: "confiavel", modelo: "m" });
   await deps.repos.turnos.reivindicar({ machineId: "m1", agora: AGORA });
   const turnoId = turno?.id ?? "";
   if (o.contaminado) await deps.repos.turnos.contaminar(turnoId, AGORA);

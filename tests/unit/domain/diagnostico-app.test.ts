@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bytesUtf8, cortarCauda, montarDiagnostico, nomeArquivoDiagnostico, TETO_REGISTROS_BYTES, type EntradaDiagnostico } from "../../../src/domain/diagnostico-app.ts";
 import { redigirSegredos } from "../../../src/domain/segredos.ts";
+import { PRAZO_GUARDA, RAZAO_MAXIMA_LINEAR, razaoDeCrescimento } from "../../helpers/crescimento.ts";
 
 /** Diagnóstico do app do Mac (definido em 2026-10-05, NOD-138): redige, depois corta; nada de chave, e-mail ou /Users/<nome>. */
 const AGORA = Date.UTC(2026, 9, 5, 21, 7, 3);
@@ -11,12 +12,18 @@ function entrada(o: Partial<EntradaDiagnostico> = {}): EntradaDiagnostico {
     conexao: { servidor: "https://nod.exemplo.com.br/caminho?x=1", conectado: true, maquinaId: "7d0c8a47-3a49-4f1e-9a0e-1c8a7e1d2f3b", status: "Conectado." },
     ia: [{ harness: "claude-cli", estado: "pronto", motivo: null, versao: "2.1.0" }, { harness: "codex-cli", estado: "ausente", motivo: "Instale o Codex", versao: null }],
     execucao: { conectado: true, lacoAtivo: true, sondandoIa: false, emLigacao: false, githubNoMac: true },
-    preferencias: { avisos: true, tema: "sistema", avisosBloqueados: false },
+    preferencias: { avisos: true, tema: "sistema", som: true, avisosBloqueados: false },
     registros: "",
     ...o,
   };
 }
 
+/**
+ * NOD-194: os testes que montam registros grandes (a guarda de crescimento e os de 6000 e 3000 linhas com segredo)
+ * são CPU pura e sem relógio na asserção. medido em 2026-10-07: com o Mac em load ~950 (duas `test:unit` em
+ * paralelo), 4–6 s cada, acima dos 5 s padrão do projeto unit. 30 s dá ~5x o pior medido; um laço infinito ainda falha.
+ */
+const PESADO = { timeout: 30_000 };
 const linhaLog = (evento: string, extra = "") => `{"ts":"2026-10-05T21:00:00.000Z","nivel":"info","evento":"${evento}"${extra}}`;
 
 describe("montarDiagnostico", () => {
@@ -30,6 +37,7 @@ describe("montarDiagnostico", () => {
     expect(t).toContain("Gerado em: 2026-10-05T21:07:03.000Z");
     expect(t).toContain("claude-cli: pronto (versão 2.1.0)");
     expect(t).toContain("codex-cli: ausente — Instale o Codex");
+    expect(t).toContain("Som dos avisos: ligado\n");
   });
 
   it("usuario:senha na URL do servidor nunca sai", () => {
@@ -77,14 +85,18 @@ describe("montarDiagnostico", () => {
     expect(t).toContain("«redigido: 17 caracteres»");
   });
 
-  it("anonimizar 256 KB sem @ nem / leva menos de 3 s (a regex sem teto levava ~33 s)", () => {
-    const registros = Array.from({ length: 6 }, () => "a.".repeat(20_000)).join("\n") + "\n" + "x".repeat(40_000);
-    const inicio = performance.now();
-    montarDiagnostico(entrada({ registros }), AGORA);
-    expect(performance.now() - inicio).toBeLessThan(3000);
+  // A regex de e-mail sem teto levava ~33 s para anonimizar 256 KB sem @ nem /. NOD-194: a guarda mede o
+  // crescimento (7 KB → 28 KB, o mesmo formato, linhas de 1000+ caracteres, bem acima do teto de 64) em tempo de
+  // CPU, não o relógio de parede (< 3 s caía com o Mac em load ~950: 10–11 s de fila sem regressão).
+  // medido em 2026-10-07 (load ~950): razão 4,0–4,4 com os tetos; 16,2–16,7 com os tetos de EMAIL e de /Users/
+  // removidos ({1,64}/{1,63}→+, {0,8}→*, {0,255}→*). CPU pura, 4–5 s de relógio nesse load: por isso o PRAZO_GUARDA.
+  it("anonimizar texto sem @ nem / cresce linear com o tamanho (a regex sem teto era quadrática)", PRAZO_GUARDA, () => {
+    const registros = (n: number) => Array.from({ length: 6 }, () => "a.".repeat(n)).join("\n") + "\n" + "x".repeat(2 * n);
+    const razao = razaoDeCrescimento(registros, (r) => montarDiagnostico(entrada({ registros: r }), AGORA), 500);
+    expect(razao).toBeLessThan(RAZAO_MAXIMA_LINEAR);
   });
 
-  it("os registros são cortados na borda de linha a ≤ 262 144 bytes DEPOIS da redação, sem pedaço de segredo", () => {
+  it("os registros são cortados na borda de linha a ≤ 262 144 bytes DEPOIS da redação, sem pedaço de segredo", PESADO, () => {
     const segredo = "sk-ant-" + "Z".repeat(60);
     const linhas = Array.from({ length: 6000 }, (_, i) => linhaLog(`ev_${i}`, `,"erro":"Bearer ${"q".repeat(20)} e ${segredo} ção"`));
     const t = montarDiagnostico(entrada({ registros: linhas.join("\n") + "\n" }), AGORA);
@@ -96,7 +108,7 @@ describe("montarDiagnostico", () => {
     expect(t).not.toContain("qqqq");
   });
 
-  it("redigir de novo o texto montado dá o mesmo texto, byte a byte", () => {
+  it("redigir de novo o texto montado dá o mesmo texto, byte a byte", PESADO, () => {
     const registros = Array.from({ length: 3000 }, (_, i) => `l${i} senha=hunter2 Authorization: Basic dXN1YXJpbzpzZW5oYQ== ghp_${"x".repeat(36)} /Users/ana/x`).join("\n");
     const t = montarDiagnostico(entrada({ registros }), AGORA);
     expect(redigirSegredos(t)).toBe(t);

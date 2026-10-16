@@ -235,3 +235,46 @@ fazer merge nunca são permanentes: sempre pedem clique.
 - Anexos da mensagem da pessoa não vão para a tarefa.
 - O teto diário da procuração não é contado (`gastoHoje = 0`, como em `perguntar_a_bot`).
 - A web assina "Taga · por você" e não "por Marlon": a sessão da web não carrega o nome da pessoa.
+
+## Emenda de 2026-10-09 — quem pediu foi excluído
+
+**Contexto.** Em produção, a Elis pediu ao Ze 1 a fatia 5 do PR #764 e foi excluída às 15:11, com o Ze 1 ainda
+trabalhando na VM. Quando ele terminou, a entrega da resposta (`entregarRespostaPeer`) lançou 404 "bot remetente" dentro
+do assentamento. A transação voltou inteira, a VM tentou entregar três vezes e desistiu, e o turno do Ze 1 caiu por
+lease vencido como "seu Mac parou de responder". Isso aconteceu duas vezes, às 16:52 e às 16:53. Nos dois casos a
+resposta se perdeu, embora a máquina estivesse de pé.
+
+**Decisão.** Com quem pediu excluído, a entrega e o aviso de falha devolvem `ignorado: "remetente_excluido"`: não há a
+quem continuar, e a resposta fica na conversa de quem a escreveu, porque o assentamento conclui. O varredor de pedidos
+parados (`pedidosAColegaParados`) deixa de listar o pedido cujo remetente (`handoff.payload.de`) foi excluído. Antes,
+ele voltaria ao pedido a cada 5 min até a janela fechar.
+
+**Validação.** Integração `pedidos-parados`: com a Ada excluída, o turno do Dev conclui, a resposta fica na conversa
+dele, entrega e aviso devolvem `remetente_excluido` e o varredor não volta ao pedido. Sem a correção, o teste falha com
+o 404.
+
+## Emenda de 2026-10-15 — o pedido fecha quando o colega o resolve na conversa (NOD-262)
+
+**Contexto.** A Clarice pediu algo ao Milton (tarefa 20f4696b, 14/10, bugs a5d1121a e e3f3c0e3). O turno `delegacao`
+ficou pendente, segurado pela cota. Nesse meio-tempo, a pessoa falou com o Milton na conversa dele e ele resolveu o
+assunto ali. A resposta a quem pediu só sai pelo turno da própria delegação (`entregar`), e a fila lida junta
+(`absorverPendentes`) só absorve turnos de conversa e sala. Resultado: a Clarice continuou esperando e, quando o turno do
+pedido rodou, o trabalho foi refeito.
+
+**Decisão.** Na conversa e na sala, o prompt lista os pedidos de colegas ainda na fila do bot: os 5 mais antigos, com
+`tarefa_id`, quem pediu e o pedido cortado em 200 caracteres, marcado como dado. Só nesse caso o catálogo ganha
+`responder_pedido(tarefa_id, texto)`. A ferramenta confere de novo se o turno é do próprio bot com a pessoa e se o
+pedido é uma delegação dele ainda `pendente`. Então, num SAVEPOINT, tira a delegação da fila como
+`interrompido`/`absorvido`, com `absorvido_por` = o turno que respondeu, e entrega o texto pelo caminho de sempre
+(`entregarRespostaDeclarada` → `entregar`: a `peer_ask` e a continuação de quem pediu). Se a entrega não sai
+(`ja_entregue`), a delegação volta à fila. Quem pediu excluído é a exceção: o pedido sai da fila mesmo assim. Se a
+conversa leu conteúdo de fora (ADR-062), a delegação e a continuação herdam a marca. Recusa não grava nada. Sem a
+chamada, nada muda: a delegação roda como sempre.
+
+**Fora.** Fechamento automático sem o bot declarar, a delegação já em despacho (responde sozinha ao assentar), os modos
+delegação, rotina, criação e ligação, e a interface.
+
+**Validação.** Integração `responder-pedido`: CA1 (peer_ask, absorvido, continuação; a segunda chamada é recusada), CA2
+(sem chamada, a entrega normal), CA3 (outro bot, turno alheio, delegação em despacho: recusa sem efeito), CA4 (o plano
+emitido lista o pedido e traz a ferramenta; o seguinte, não), CA5 (o varredor de pedidos parados ignora), e a marca da
+ADR-062. Unitário `pedidos-pendentes`: catálogo por modo, snapshot da linha, o "+N" e o corte.

@@ -110,3 +110,9 @@ Medido no CLI 2.1.284, lendo só o `init` (sem chamar o modelo):
 
 **Gatilho:** um `nativa__Bash` na trilha, de dentro de um subagente, sem decisão correspondente. Nesse caso o
 `Agent` sai do kit.
+
+## Emenda (2026-10-14)
+
+O item 8 ("Codex continua sem nativas") e a linha "Codex continua só com o proxy" foram revistos pela
+[ADR-103](adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md): o Codex tem o terminal sem sandbox, com o mesmo hook
+do nod decidindo cada comando.

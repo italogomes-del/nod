@@ -140,6 +140,23 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
     });
   });
 
+  it("duplicar põe a cópia na seção do original, logo abaixo dele (0041)", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const secao = `Devs ${Math.random().toString(36).slice(2, 8)}`;
+      const ids: string[] = [];
+      for (const nome of ["Dev 1", "Dev 2", "Dev 3"]) ids.push((await criarAgente(d, { dono: "pessoa", nome })).data.agente.id);
+      for (const id of ids) await gerirAgente(d, { agenteId: id, acao: "organizar", secao });
+      await gerirAgente(d, { agenteId: ids[0]!, acao: "organizar", ordem: ids });
+
+      const { data } = await duplicarAgente(d, { agenteId: ids[1]! });
+
+      expect(data.agente).toMatchObject({ secao, fixado: false, posicao: 2 });
+      const naSecao = (await listarFrota(d, {})).data.agentes.filter((x) => x.secao === secao);
+      expect(naSecao.map((x) => x.nome)).toEqual(["Dev 1", "Dev 2", "Dev 2 (cópia)", "Dev 3"]);
+    });
+  });
+
   it("soltar um bot arrastado fixa e grava a ordem do grupo num pedido só; id de outra pessoa não muda nada (0041)", async () => {
     await withRollback(MARLON, async (tx) => {
       const d = depsSobreTrx(tx, MARLON);

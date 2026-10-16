@@ -1,10 +1,12 @@
+import { decidirLoteDeBots } from "../../../use-cases/gerir-bots.ts";
 import { randomUUID } from "node:crypto";
 import type { RespostaMutacao } from "../../../contracts/api.ts";
 import type { Decisao } from "../../../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../../../contracts/evento.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { Escopo } from "../../../shared/types.ts";
-import { aplicarAtualizacaoRotina, aplicarExclusaoRotina } from "../../../use-cases/aplicar-proposta-rotina.ts";
+import { aplicarAtualizacaoRotina, aplicarExclusaoRotina, erroRotinaMudou } from "../../../use-cases/aplicar-proposta-rotina.ts";
+import { erroPerfilMudou } from "../../../use-cases/confirmar-perfil.ts";
 import { confirmarProposta } from "../../../use-cases/confirmar-proposta.ts";
 import { decidirAcesso } from "../../../use-cases/decidir-acesso.ts";
 import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
@@ -16,6 +18,7 @@ import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../../use-cases/responder-decisao.ts";
 import { retomarTurno } from "../../../use-cases/retomar-turno.ts";
 import type { Deps, Services } from "../../../use-cases/tipos.ts";
+import { sincronizarDasDecisoes } from "../../../use-cases/trabalhos.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, textoDoCorpo, type DentroDeTx } from "./dentro-de-tx.ts";
 
@@ -179,8 +182,21 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
             const r = await executar(deps, decidirPropostaDeBot, { propostaId: atual.id, recusar: recusada(corpo), nome: c.nome, descricao: c.descricao });
             if (r.agenteId) ids.agente = r.agenteId;
-            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) })]);
+            // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);
           });
+          const resposta: RespostaMutacao = { ok: true, ids };
+          ctx.json(200, resposta);
+          return;
+        }
+
+        if (atual.tipo === "lote_bots") {
+          // ADR-082: o card do lote do Nod. `selecionados` = os índices das ações que a pessoa deixou marcadas; ausente =
+          // todas as que esperam. Roda como a DONA (as ações mexem nos bots dela), gravando quem clicou.
+          const c = typeof corpo === "object" && corpo !== null ? (corpo as Record<string, unknown>) : {};
+          const r = await comoDona(ctx.escopo, atual, (deps) => executar(deps, decidirLoteDeBots, { decisaoId: atual.id, recusar: recusada(corpo), selecionados: c.selecionados }));
+          ids.feitas = String(r.feitas);
+          if (r.falhas > 0) ids.falhas = String(r.falhas);
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;
@@ -188,11 +204,28 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
 
         if (atual.tipo === "perfil" || atual.tipo === "rotina" || atual.tipo === "rotina_atualizacao" || atual.tipo === "rotina_exclusao") {
           // Proposta confirmada por botão em "Sua vez": decisao.id === proposta.id (criar-rotina.ts, rotinas-do-agente.ts).
+          // NOD-159/NOD-190: a rotina (ou o perfil) mudou depois da proposta — o caso recusou e avisou sem lançar; o erro
+          // sai DEPOIS do commit.
+          let obsoleta = false;
           await comoDona(ctx.escopo, atual, async (deps) => {
-            const proposta = await deps.repos.propostas.buscar(atual.id);
+            // NOD-190: o perfil trava o AGENTE antes da decisão, na mesma ordem de POST propostas/:id/confirmar
+            // (confirmar-perfil.ts trava o agente e, no card obsoleto, fecha a decisão). Na ordem inversa, o mesmo card
+            // clicado na conversa e em "Sua vez" ao mesmo tempo fazia deadlock (decisão → agente × agente → decisão).
+            // Vale também para RECUSAR (QA da NOD-190): a recusa fecha a decisão e depois a proposta, e a confirmação do
+            // card obsoleto pela conversa trava a proposta e depois a decisão — sem o agente na frente, 40P01 e 500.
+            // (A leitura sem trava aqui só descobre QUAL agente travar; o estado vale o da leitura travada logo abaixo.)
+            if (atual.tipo === "perfil") {
+              const lida = await deps.repos.propostas.buscar(atual.id);
+              if (lida) await deps.repos.agentes.buscarParaAtualizar(lida.agenteId);
+            }
+            // NOD-197: depois (do agente, no perfil) a PROPOSTA, e só então a decisão — a ordem da conversa, que trava a
+            // proposta em propostas.decidir e fecha a decisão depois (ativar-rotina.ts, recusar-proposta.ts). Lida sem
+            // trava, a proposta saía `pendente` daqui enquanto a conversa a recusava: a rotina nascia, mudava ou era
+            // excluída com a proposta recusada, e confirmar × confirmar dava 40P01. Travada, quem chega depois relê o
+            // estado já commitado e acha a decisão fechada (409).
+            const proposta = await deps.repos.propostas.buscarParaAtualizar(atual.id);
             const decidida = await deps.repos.decisoes.decidir(atual.id, { por: ctx.escopo.pessoaId, agora: deps.agora() });
             if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
-            const events: RuntimeEvent[] = [eventoDecidida(deps, decidida, { recusada: recusada(corpo) })];
             if (recusada(corpo)) {
               if (proposta && proposta.estado === "pendente") await executar(deps, recusarProposta, { propostaId: proposta.id });
             } else if (atual.tipo === "rotina") {
@@ -206,12 +239,17 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
               const caso = atual.tipo === "rotina_atualizacao" ? aplicarAtualizacaoRotina : aplicarExclusaoRotina;
               const r = await executar(deps, caso, { propostaId: atual.id });
               ids.rotina = r.rotina.id;
+              obsoleta = r.obsoleta === true;
             } else if (proposta && proposta.estado === "pendente") {
               const r = await executar(deps, confirmarProposta, { propostaId: proposta.id, prazoMs: d.prazoDecisaoMs });
               if (r.agente) ids.agente = r.agente.id;
+              obsoleta = r.obsoleta === true;
             }
-            await deps.repos.events.gravarComOutbox(events);
+            // Obsoleta: a pessoa clicou em confirmar, mas a proposta saiu recusada — o frame diz o que ficou no banco.
+            // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
+            await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);
           });
+          if (obsoleta) throw atual.tipo === "perfil" ? erroPerfilMudou() : erroRotinaMudou();
           const resposta: RespostaMutacao = { ok: true, ids };
           ctx.json(200, resposta);
           return;

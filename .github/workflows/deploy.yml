@@ -21,7 +21,8 @@ concurrency:
 jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
-    runs-on: ubuntu-latest
+    # Runner próprio (infra/gcp/runner/): não consome minutos do plano.
+    runs-on: [self-hosted, linux, nod-ci]
     environment: producao
     permissions:
       contents: read

@@ -44,7 +44,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       const mensagensAntes = (await c.repos.mensagens.listarDaConversa(c.conversaId)).length;
-      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher", aFazer: true });
       if (!("semPendencia" in r.data)) throw new Error(`deveria passar sem turno: ${JSON.stringify(r.data)}`);
       expect(new Date(r.data.proximaExecucao).toISOString()).toBe(SEGUINTE);
       expect(await turnosDa(c.repos, c.conversaId)).toBe(0);
@@ -60,7 +60,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
       // Pelo agendador: a rotina com o flag cai em semPendencia e grava o evento no outbox; a comum dispara.
       const comum = await c.repos.rotinas.criar({ agenteId: c.agenteId, conversaId: c.conversaId, cron: "*/20 * * * *", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA + 20 * 60_000 });
       const tx: Transacao = (fn) => fn(trx);
-      const opcoes = { machineId: randomUUID(), executor: "catcher" as const, services: c.deps.services, useCases: c.deps.useCases, agora: () => JANELA + 20 * 60_000 + 30_000 };
+      const opcoes = { machineId: randomUUID(), executor: "catcher" as const, services: c.deps.services, useCases: c.deps.useCases, agora: () => JANELA + 20 * 60_000 + 30_000, aFazer: true };
       const tick = await tickPessoa(MARLON, tx, opcoes);
       expect(tick).toMatchObject({ disparadas: [comum?.id], semPendencia: [c.rotina.id], bloqueadas: [], falhas: [] });
       expect(await turnosDa(c.repos, c.conversaId)).toBe(1);
@@ -74,12 +74,13 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx);
       await c.pendencia("Retomar o PR #475 depois do parecer do Chico");
-      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher", aFazer: true });
       if (!("turno" in r.data)) throw new Error(`deveria disparar: ${JSON.stringify(r.data)}`);
       expect(r.data.turno).toMatchObject({ origem: "rotina", estado: "pendente", agenteId: c.agenteId, profundidade: 0 });
       expect(new Date(r.data.proximaExecucao).toISOString()).toBe(SEGUINTE);
       expect((await c.repos.rotinaJanelas.listar(c.rotina.id)).map((j) => j.turnoId)).toEqual([r.data.turno.id]);
       expect(await c.repos.rotinaExecucoes.listar(c.rotina.id)).toEqual([]);
+      // ADR-099 (I7 revista): sem trabalho, só o turno do dono.
       expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
     });
   });
@@ -90,7 +91,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
       await c.pendencia("Cobrar o Dev 2 às 10h", AGORA + 3_600_000);
       const feita = await c.pendencia("Ler as 13 tasks");
       await c.repos.pendencias.resolver(feita?.id ?? "", { estado: "feita", por: "bot", turnoId: null, motivo: "li todas", agora: AGORA });
-      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher", aFazer: true });
       expect("semPendencia" in r.data).toBe(true);
       expect(await turnosDa(c.repos, c.conversaId)).toBe(0);
 
@@ -98,8 +99,18 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
       const dez = Date.parse("2026-10-01T10:00:00-03:00");
       const { deps } = depsSobre(trx, MARLON, { agora: () => dez + 30_000 });
       const rotina = await c.repos.rotinas.buscar(c.rotina.id);
-      const r2 = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: dez, machineId: randomUUID(), executor: "catcher" });
+      const r2 = await dispararRotina(deps, { rotina: rotina!, instanteAgendado: dez, machineId: randomUUID(), executor: "catcher", aFazer: true });
       expect("turno" in r2.data).toBe(true);
+    });
+  });
+
+  it("2026-10-06: com o \"A fazer\" desligado (sem aFazer) a rotina só com pendência não acorda nem com pendência visível", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      await c.pendencia("Retomar o PR #475 depois do parecer do Chico");
+      const r = await dispararRotina(c.deps, { rotina: c.rotina, instanteAgendado: JANELA, machineId: randomUUID(), executor: "catcher" });
+      expect("semPendencia" in r.data).toBe(true);
+      expect(await turnosDa(c.repos, c.conversaId)).toBe(0);
     });
   });
 
@@ -118,7 +129,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
   it("(e) atualizar_rotina só com o flag vira proposta e, aplicada, liga; repetir o valor é entrada_invalida; desligar volta; listar mostra só quando ligado", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx, false);
-      const turno = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "só acorde com pendência", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "só acorde com pendência", entradaConfianca: "confiavel", modelo: "m" });
       const ctx = contexto(c.agenteId, c.conversaId, turno?.id);
       expect((await listarRotinasDoAgente(c.deps, ctx)).data.rotinas[0]).not.toHaveProperty("so_com_pendencia");
 
@@ -154,7 +165,7 @@ describeIntegracao("rotina só com pendência (item 7 da ADR-066)", () => {
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "crie a rotina", entradaConfianca: "confiavel", modelo: "m" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "crie a rotina", entradaConfianca: "confiavel", modelo: "m" });
       const ctx = contexto(agenteId, conversaId, turno?.id);
       const com = await criarRotina(deps, { ...ctx, ...rotinaValida({ cron: "*/20 * * * *" }), so_com_pendencia: true });
       if ("erro" in com.data) throw new Error(`erro inesperado: ${com.data.erro}`);

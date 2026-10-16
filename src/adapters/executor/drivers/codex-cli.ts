@@ -9,15 +9,19 @@ import { baixarAnexos, entradaCodex } from "../anexos-turno.ts";
 import { erroDoCodex, interpretarCodex, ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { classificarResultado, reduzirSinais, SINAIS_ZERADOS } from "../../../domain/stream-json.ts";
 import { respostaDoTeste } from "../../../domain/conta-da-ia.ts";
+import { configInvalida, faltaNode, motivoConfigInvalida, motivoSemNode } from "../../../domain/saida-do-cli.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { log } from "../../../obs/log.ts";
 import { resolverBinario } from "../caminho.ts";
 import { executarColetando, iniciarProcesso, type Processo } from "../processo.ts";
+import { extrairVersao, inventarioAbaixoDoPiso } from "../flag-floors.ts";
 import { PRAZO_SONDA_PADRAO_MS } from "../sonda.ts";
 import type { Driver } from "../spi.ts";
-import type { LigacaoClaudeCli } from "./claude-cli.ts";
+import { comAvisoSemTerminal, invocarDoHook, pastaDaFila, type LigacaoClaudeCli } from "./claude-cli.ts";
 import { ambienteCodex, configMcpCodex, escreverLauncherProxy, negociarConfigCodex, overridesIsolamentoCodex, SEM_RECUSADAS, type RecusadasCodex } from "./codex-comum.ts";
+import { rodarChatCodex, type SessaoChatCodex, type TerminalChatCodex } from "./codex-chat.ts";
 import { rodarLigacaoCodex } from "./codex-ligacao.ts";
+import { capacidadesDe } from "../../../domain/harness.ts";
 
 export { configMcpCodex } from "./codex-comum.ts";
 
@@ -32,7 +36,9 @@ export const FLAGS_CODEX = ["--json", "--ephemeral", "--ignore-user-config", "--
  * definido em 2026-09-18 (ADR-040): o Codex nunca teve teto de passos, então é o Claude que se
  * alinha a ele quando `--max-turns` sai — nada a mudar aqui. `interpretarCodex` produz os mesmos
  * EventoStream do Claude. revisto em 2026-10-01 (ADR-067): o vigia de atividade de `laco.ts` saiu, e o
- * Codex segue um prompt por turno, sem sessão viva.
+ * Codex segue um prompt por turno, sem sessão viva. revisto em 2026-10-07 (ADR-083 §6): com o `app-server` na sonda,
+ * o chat roda lá, com sessão viva e mensagem no meio por `turn/steer` (codex-chat.ts); o `codex exec` daqui fica de
+ * reserva (sem app-server, com anexo, ou se o app-server não subir).
  *
  * LACUNA NÃO HOMOLOGADA: não há equivalente a `--autocompact` no conjunto FLAGS_CODEX sondado, e o
  * binário não estava instalado na máquina onde a medição foi feita. Não inventar flag de janela de
@@ -65,11 +71,12 @@ const MODELO_TESTE_CODEX = "gpt-5.6-sol";
 const TIMEOUT_TESTE_MS = 90_000;
 
 export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
+  const capacidadesDoDriver = capacidadesDe("codex-cli");
   return {
-    meta: { id: "codex-cli", locality: "local" },
+    meta: { id: "codex-cli", locality: "local", capacidades: capacidadesDoDriver },
     async create(cfg) {
       const home = cfg.env.HOME ?? "";
-      const env = ambienteCodex(cfg.env);
+      const env = ambienteCodex({ ...cfg.env, ...(cfg.envPorDriver?.["codex-cli"] ?? {}) });
       let bin: string | null = null;
       let inv: Inventario | null = null;
       // As chaves de config que a versão instalada recusou (negociarConfigCodex); refeito a cada sonda.
@@ -83,14 +90,26 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         if (!bin) return inv = { estado: "ausente", motivo: "Instale o Codex e entre na sua conta para usá-lo no nod.", em };
         const executar = (args: string[]) => executarColetando({ bin: bin!, args, env, cwd: home, timeoutMs: prazoSondaMs });
         const lenta = (): Inventario => ({ estado: "ausente", motivo: motivoSondaLenta("Codex"), causa: "sonda_lenta", em });
+        // NOD-171: a versão vem antes do help, para um Codex abaixo do piso ouvir "Atualize para a x.y.z", com as versões.
+        const lida = await executar(["--version"]);
+        if (lida.estourouTempo) return inv = lenta();
+        // revisto em 2026-10-09 (teste do Breno): o `codex` do npm é `#!/usr/bin/env node`; sem node no PATH o
+        // `--version` sai com 127 e a sonda seguia até o `exec --help` e dizia "Atualize o Codex". Agora diz o que falta.
+        const saidaVersao = `${lida.stdout}\n${lida.stderr}`;
+        if (lida.exitCode !== 0 && faltaNode(saidaVersao)) return inv = { estado: "ausente", motivo: motivoSemNode("Codex"), causa: "sem_node", em };
+        if (lida.exitCode !== 0 && configInvalida(saidaVersao)) return inv = { estado: "ausente", motivo: motivoConfigInvalida("Codex", "~/.codex/config.toml"), causa: "config_invalida", em };
+        const lidaLimpa = extrairVersao(lida.stdout);
+        const versao = lidaLimpa ?? lida.stdout.trim().slice(0, 100);
+        const antigo = inventarioAbaixoDoPiso("codex-cli", lidaLimpa ?? "", "Codex", em);
+        if (antigo) return inv = antigo;
         const help = await executar(["exec", "--help"]);
         if (help.estourouTempo) return inv = lenta();
         if (help.exitCode !== 0 || FLAGS_CODEX.some((f) => !help.stdout.includes(f))) return inv = { estado: "ausente", motivo: "Atualize o Codex: esta versão ainda não oferece o isolamento exigido pelo nod.", em };
-        const lida = await executar(["--version"]);
-        if (lida.estourouTempo) return inv = lenta();
-        const versao = lida.stdout.trim().slice(0, 100);
         const login = await executar(["login", "status"]);
         if (login.estourouTempo) return inv = { estado: "nao_autenticado", motivo: motivoSondaLenta("Codex"), versao, causa: "sonda_lenta", em };
+        // definido em 2026-10-09: config.toml quebrado faz o `login status` sair com 1 — não é falta de login, e "Entrar"
+        // não resolveria (o próprio login lê a mesma config).
+        if (login.exitCode !== 0 && configInvalida(`${login.stdout}\n${login.stderr}`)) return inv = { estado: "ausente", motivo: motivoConfigInvalida("Codex", "~/.codex/config.toml"), causa: "config_invalida", em };
         if (login.exitCode !== 0) return inv = { estado: "nao_autenticado", motivo: "Abra o Codex, entre na sua conta e tente novamente.", versao, em };
         // definido em 2026-10-05: a config do turno é validada aqui, de graça (stdin vazio, nenhum modelo), com um plano
         // de prova. O que a versão não conhece cai; o que não pode cair deixa o Codex indisponível com o motivo dito.
@@ -109,6 +128,14 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
         recusadas = negociacao.recusadas;
         return inv = { estado: "pronto", versao, em };
       }
+      /**
+       * ADR-103: o kit do terminal no Codex precisa do script do hook do nod nesta máquina (o app e o motor o instalam;
+       * o servidor de desenvolvimento também). Sem ele, o chat roda isolado e o prompt diz que não há terminal.
+       */
+      const terminalDaMaquina = (): TerminalChatCodex | null => lig.hookPath
+        ? { hookPath: lig.hookPath, nodePath: lig.nodePath ?? process.execPath, electronComoNode: lig.electronComoNode, home,
+            ...(lig.filaDoForno === false ? {} : { vaga: { dir: pastaDaFila(cfg.cwdBase), invocar: invocarDoHook({ nodePath: lig.nodePath ?? process.execPath, hookPath: lig.hookPath, electronComoNode: lig.electronComoNode }) } }) }
+        : null;
       // ADR-076: piso do laço de voz = `codex app-server --help` responde; as flags listadas ali decidem as opcionais.
       let flagsAppServer: { bin: string; flags: string[] | null } | null = null;
       async function sondarAppServer(b: string): Promise<string[] | null> {
@@ -149,20 +176,53 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
       return {
         sondar,
         testar,
+        // NOD-167: o Mac anuncia o Codex sem app-server, e o servidor recusa o Ligar com motivo próprio antes de tocar.
+        async lacoDeVoz() {
+          if ((await sondar()).estado !== "pronto" || !bin) return null;
+          try { return (await sondarAppServer(bin)) !== null; } catch { return null; }
+        },
+        // X9 (definido em 2026-10-08, revisão do épico #188): a mensagem no meio só existe no chat do app-server; sem ele
+        // (Codex antigo, ou a sonda não o achou) o turno roda no `codex exec` e o app não a anuncia.
+        // revisto em 2026-10-14 (ADR-103): o terminal e a pasta também dependem do app-server e do hook desta máquina.
+        async capacidades() {
+          let appServer = false;
+          if ((await sondar()).estado === "pronto" && bin) {
+            try { appServer = (await sondarAppServer(bin)) !== null; } catch { appServer = false; }
+          }
+          // A thread só continua no app-server; o `codex exec` de reserva é um prompt por turno.
+          const terminal = appServer && terminalDaMaquina() !== null;
+          return {
+            ...capacidadesDoDriver,
+            mensagemNoMeio: capacidadesDoDriver.mensagemNoMeio && appServer,
+            retomaSessao: capacidadesDoDriver.retomaSessao && appServer,
+            bifurcaSessao: capacidadesDoDriver.bifurcaSessao && appServer,
+            terminal: capacidadesDoDriver.terminal && terminal,
+            pastaDeTrabalho: capacidadesDoDriver.pastaDeTrabalho && terminal,
+          };
+        },
         adapter(plano) {
           let proc: Processo | null = null;
           let parado = false;
+          // ADR-083 §6: a thread do app-server enquanto o chat roda nele; null no `codex exec` (sem sessão viva).
+          let sessao: SessaoChatCodex | null = null;
           return {
             async interromper() { parado = true; if (proc) await proc.interromper(); },
+            aceitaMensagens: () => sessao?.aceitaMensagens() ?? false,
+            receberMensagem: (texto, id) => sessao?.receberMensagem(texto, id) ?? false,
+            grupoDeProcessos: () => proc?.pid ?? null,
             async rodarTurno(sinks) {
               const eventos: EventoStream[] = [];
               let sinais: SinaisTurno = { ...SINAIS_ZERADOS, attempted: true };
               await sinks.sinal("attempted");
-              if ((await sondar()).estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel");
+              // NOD-171: a causa da sonda (`cli_antigo`, `sonda_lenta`) segue no erro, para o log dizer por que recusou.
+              const sondado = await sondar();
+              if (sondado.estado !== "pronto" || !bin) throw new ErroDeDominio("executor_indisponivel", sondado.estado !== "pronto" && sondado.causa ? { cause: sondado.causa } : undefined);
               // ADR-076: o turno-cérebro de uma ligação é o laço de voz no app-server, não um `codex exec`.
               if (plano.modoTurno === "ligacao" && plano.ligacaoVoz) {
                 const flagsNoHelp = await sondarAppServer(bin);
-                if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex sem app-server: atualize o Codex para ligar" });
+                // NOD-167: o servidor já recusa o Ligar (motivo `codex_sem_app_server`) quando o Mac anuncia isto; aqui
+                // sobra só o Mac de um app antigo, que não anuncia, e a causa sai com o mesmo código no diagnóstico.
+                if (!flagsNoHelp) throw new ErroDeDominio("executor_indisponivel", { cause: "codex_sem_app_server" });
                 await mkdir(cfg.cwdBase, { recursive: true });
                 return await rodarLigacaoCodex({
                   plano, sinks, bin, flagsNoHelp, recusadas, env, cwdBase: cfg.cwdBase,
@@ -175,6 +235,26 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 });
               }
               await mkdir(cfg.cwdBase, { recursive: true });
+              // ADR-083 §6: o chat no app-server quando a sonda o acha. revisto em 2026-10-14 (ADR-103): o anexo também
+              // (imagem como `localImage`), e com o kit do terminal quando a máquina tem o hook do nod.
+              const flagsAppServer = await sondarAppServer(bin).catch(() => null);
+              if (flagsAppServer) {
+                const r = await rodarChatCodex({
+                  plano, sinks, bin, flagsNoHelp: flagsAppServer, recusadas, env, cwdBase: cfg.cwdBase,
+                  urlNod: lig.urlNod, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode,
+                  sigtermParaSigkillMs: lig.sigtermParaSigkillMs,
+                  terminal: terminalDaMaquina(),
+                  aoProcesso: (p) => {
+                    proc = p;
+                    if (p && parado) void p.interromper();
+                  },
+                  aoSessao: (s) => { sessao = s; },
+                });
+                // null: o app-server não subiu e nada foi escrito para o modelo; segue no `codex exec` (que respeita o Parar).
+                if (r) return r;
+              }
+              // ADR-103: o `codex exec` roda sempre isolado; o plano que prometia o terminal leva o aviso de que não há.
+              const planoExec = (plano.nativas ?? []).includes("Bash") ? { ...plano, ...comAvisoSemTerminal(plano) } : plano;
               const dir = await mkdtemp(join(cfg.cwdBase, "codex-"));
               try {
                 const launcher = await escreverLauncherProxy(dir, { urlNod: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath });
@@ -182,7 +262,7 @@ export function criarCodexCliDriver(lig: LigacaoClaudeCli): Driver {
                 // --image, texto de arquivo no prompt, PDF vira linha de "não lido".
                 const anexos = plano.entrada.anexos?.length ? await baixarAnexos(plano, lig.urlNod) : [];
                 const entrada = anexos.length > 0 ? await entradaCodex(plano.entrada.texto, anexos, dir) : { texto: plano.entrada.texto, imagens: [] };
-                const args = argsCodex(plano, configMcpCodex(plano, { ...lig, proxyPath: launcher }, recusadas), entrada.imagens, recusadas);
+                const args = argsCodex(planoExec, configMcpCodex(plano, { ...lig, proxyPath: launcher }, recusadas), entrada.imagens, recusadas);
                 const pendentes: Promise<void>[] = [];
                 // O que o Codex disse de errado (item `error`, evento `error`): hoje é a única pista de um turno que falha.
                 let ultimoErro: string | null = null;

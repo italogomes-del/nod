@@ -62,7 +62,7 @@ async function rodarUmCiclo(ponte: PonteInternaNod, machineId: string): Promise<
   const resultado = await adapter.rodarTurno({
     async sinal(s) {
       sinais = { ...sinais, [s]: true };
-      renovacoes.push((await ponte.renovar({ turnoId: plano.turnoId, machineId, sinais, eventos: [] })).ativo);
+      renovacoes.push((await ponte.renovar({ turnoId: plano.turnoId, machineId, sinais, eventos: [] })).ativo === true);
     },
     evento(e: EventoStream) {
       if (e.tipo === "tool_use") {
@@ -82,7 +82,9 @@ afterEach(async () => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
@@ -92,6 +94,8 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     if (criados.agentes.length) await trx`delete from agentes where id in ${trx(criados.agentes)}`;
@@ -185,10 +189,10 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
     expect(varrido[PESSOA.pessoaId]?.interrompidos).toEqual([plano2?.turnoId]);
     const decisaoId = varrido[PESSOA.pessoaId]?.decisoes[0] ?? "";
     expect((await ponteB.renovar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, sinais: SINAIS_ZERADOS, eventos: [] })).ativo).toBe(false);
-    // entrega tardia da B: anexo, sem reabrir
-    await ponteB.entregar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, seqLocal: 1, fala: { tipo: "texto", texto: "tarde" }, resultado: { ...(primeiro?.resultado as ResultadoTurno), texto: "tarde" } });
-
     const retomado = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), retomarTurno, { decisaoId, texto: "[[texto: continuei]]" })).data);
+    // entrega tardia da B com a retomada já na fila: anexo parcial, sem reabrir (sem retomada, a tardia com sucesso
+    // concluiria o turno e fecharia o "Retomar" — NOD-264, E8)
+    await ponteB.entregar({ turnoId: plano2?.turnoId ?? "", machineId: maquinaB, seqLocal: 1, fala: { tipo: "texto", texto: "tarde" }, resultado: { ...(primeiro?.resultado as ResultadoTurno), texto: "tarde" } });
     expect(retomado.turno).toMatchObject({ origem: "retomada", retomaTurnoId: plano2?.turnoId, reenvios: 1 });
     const terceiro = await rodarUmCiclo(ponteA, maquinaA);
     expect(terceiro?.plano).toMatchObject({ turnoId: retomado.turno.id, entrada: { texto: "[[texto: continuei]]", sessaoCli: sessao } });
@@ -217,7 +221,11 @@ describeIntegracao("orquestrador + ponte interna + catcher (ADR-021 in-process):
     await new Promise((r) => setTimeout(r, 80));
     expect(orq.lacos()).toEqual([PESSOA.pessoaId]);
     expect(vi.mocked(iniciarLaco)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(iniciarLaco).mock.calls[0]?.[0]).toMatchObject({ pessoaId: PESSOA.pessoaId, machineId, ponte });
+    expect(vi.mocked(iniciarLaco).mock.calls[0]?.[0]).toMatchObject({ pessoaId: PESSOA.pessoaId, machineId });
+    // #218: o laço recebe a mesma ponte, só com a entrega observada (turno recusado pela IA vence a sonda guardada).
+    const ponteDoLaco = vi.mocked(iniciarLaco).mock.calls[0]?.[0].ponte;
+    expect(ponteDoLaco?.puxar).toBe(ponte.puxar);
+    expect(ponteDoLaco?.renovar).toBe(ponte.renovar);
     expect(ponte.maquinasConectadas()).toEqual([{ machineId, nome: "teste", inventario: { estado: "pronto", versao: "catcher", em: expect.any(Number) }, versaoContrato: 1, ligacao: true }]);
 
     await orq.parar();

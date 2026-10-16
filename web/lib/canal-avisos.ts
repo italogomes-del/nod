@@ -1,5 +1,8 @@
-import type { AlvoAviso, AvisoDesktop, NodDesktop, PreferenciasDesktop } from "../../src/contracts/desktop.ts";
+import type { AlvoAviso } from "../../src/contracts/desktop.ts";
 import type { EstadoAvisos } from "./avisos.ts";
+import { canalMac, type CanalAvisos } from "./canal-avisos-mac.ts";
+
+export type { CanalAvisos } from "./canal-avisos-mac.ts";
 
 /**
  * Por onde o aviso sai (definido em 2026-09-24, "aviso no Mac"). No app desktop, pela ponte
@@ -8,18 +11,6 @@ import type { EstadoAvisos } from "./avisos.ts";
  * Num navegador comum, pela Notification API com `tag` fixa (um aviso substitui o anterior) e o número
  * no título da aba.
  */
-export type CanalAvisos = {
-  estado(): EstadoAvisos;
-  /** O avisador pode mostrar? */
-  ligado(): boolean;
-  /** Relê a preferência (o menu "Avisos no Mac" muda sem passar pela página). */
-  reler(): Promise<void>;
-  /** O interruptor de "Seu espaço". No navegador, pede a permissão no próprio clique. */
-  alternar(): Promise<void>;
-  mostrar(aviso: AvisoDesktop): void;
-  contador(n: number): void;
-};
-
 /** `tag` das notificações do navegador: a nova substitui a anterior em vez de empilhar. */
 export const TAG_AVISO = "nod-sua-vez";
 const CHAVE_PREFERENCIA = "nod:avisos";
@@ -27,27 +18,6 @@ const CHAVE_PREFERENCIA = "nod:avisos";
 export function criarCanalAvisos(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
   const mac = window.nodDesktop;
   return mac ? canalMac(mac, aoAbrir, aoMudar) : canalNavegador(aoAbrir, aoMudar);
-}
-
-function canalMac(mac: NodDesktop, aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {
-  let prefs: PreferenciasDesktop = { avisos: true, tema: "sistema", bloqueados: false };
-  const aplicar = (p: PreferenciasDesktop): void => {
-    const mudou = p.avisos !== prefs.avisos || p.bloqueados !== prefs.bloqueados;
-    prefs = p;
-    if (mudou) aoMudar();
-  };
-  const reler = (): Promise<void> => mac.preferencias().then(aplicar, () => undefined);
-  mac.aoAbrir(aoAbrir);
-  void reler();
-  return {
-    estado: () => ({ onde: "mac", situacao: !prefs.avisos ? "desligados" : prefs.bloqueados ? "bloqueados" : "ligados" }),
-    // Bloqueado continua tentando: se a pessoa liberar nos Ajustes, o próximo aviso aparece e o estado volta.
-    ligado: () => prefs.avisos,
-    reler,
-    alternar: () => mac.definirAvisos(!prefs.avisos).then(aplicar, () => undefined),
-    mostrar: (aviso) => void mac.avisar(aviso).then(reler, () => undefined),
-    contador: (n) => void mac.contador(n).catch(() => undefined),
-  };
 }
 
 function canalNavegador(aoAbrir: (alvo: AlvoAviso) => void, aoMudar: () => void): CanalAvisos {

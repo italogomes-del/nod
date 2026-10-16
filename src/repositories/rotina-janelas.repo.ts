@@ -61,14 +61,26 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * O turno de uma janela desta rotina que ainda está pendente ou rodando (ADR-045: uma execução
-     * aberta por rotina). null = pode abrir outra.
+     * O turno de uma janela desta rotina que ainda está pendente ou rodando, ou cujo trabalho ainda tem turno vivo
+     * (ADR-045: uma execução aberta por rotina). null = pode abrir outra.
      */
     async turnoAberto(rotinaId: string): Promise<string | null> {
       const [l] = await conn<{ turno_id: string }[]>`
         select j.turno_id from rotina_janelas j
         join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
-        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId} and t.estado in ('pendente', 'despachando')
+        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
+          and (t.estado in ('pendente', 'despachando')
+            -- ADR-086 (revisão do #212): a execução que marcou uma volta ("me chame às 16:00") ainda está aberta, mesmo
+            -- com o turno da janela já concluído — senão a próxima janela empilhava outra execução por cima.
+            or (t.trabalho_id is not null and exists (select 1 from turnos v where v.tenant_id = t.tenant_id and v.trabalho_id = t.trabalho_id and v.estado in ('pendente', 'despachando')))
+            -- revisto em 2026-10-12 (ADR-099, I7 revista): a execução sem trabalho (o pedido na fila do dono) continua aberta
+            -- enquanto uma retomada dela (a volta marcada, o retorno do lote, a resposta da pessoa) espera ou roda.
+            or (t.trabalho_id is null and exists (
+              with recursive c(id, n) as (
+                select t.id, 0
+                union all
+                select r.id, c.n + 1 from c join turnos r on r.tenant_id = t.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
+              ) select 1 from c join turnos v on v.tenant_id = t.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando'))))
         order by j.instante_agendado desc limit 1`;
       return l?.turno_id ?? null;
     },

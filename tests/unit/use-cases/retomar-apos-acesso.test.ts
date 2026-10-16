@@ -26,7 +26,7 @@ async function preparar() {
   if (!conector) throw new Error("conector");
   conector.habilitado = true;
   conector.catalogo = [{ nome: "enviar", descricao: "Enviar mensagem", schema: { type: "object" }, readOnlyHint: false }];
-  const original = await deps.repos.turnos.enfileirar({ conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10000, profundidade: 0, entradaTexto: "mande uma msg de teste para Ingridd", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+  const original = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: bot.conversa.id, agenteId: bot.agente.id, origem: "conversa", prazoEm: deps.agora() + 10000, profundidade: 0, entradaTexto: "mande uma msg de teste para Ingridd", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
   if (!original) throw new Error("turno");
   const pedido = await pedirAcesso(deps, { turnoId: original.id, conversaId: bot.conversa.id, agenteId: bot.agente.id, conector: "slack", capacidades: ["enviar"], nivel: "escrita", nao_pedido: [] });
   // ADR-044: sem passo de confirmar — o pedido já nasce com a decisão de mesmo id, ligada ao turno.

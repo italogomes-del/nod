@@ -108,6 +108,36 @@ Só contra o app-server falso (`tests/fixtures/codex-falso.mjs`, subcomando `app
 
 ## Não implementado
 
-- `model/list` para escolher o esforço e `account/rateLimits/*` para mostrar a cota.
-- Sonda paga do app-server e os 10 minutos manuais da saída da fase 4.
+- `model/list` para escolher o esforço sozinho (a sonda só confere) e `account/rateLimits/*` para mostrar a cota.
+- Os 10 minutos manuais da saída da fase 4 (a sonda existe desde a NOD-167; falta rodar com o Codex real).
 - Codex com sessão viva no turno de chat: continua `codex exec`, um prompt por turno.
+
+## Emenda de 2026-10-05 (NOD-167): pendente de homologação
+
+**Status: pendente de homologação.** Nada aqui foi medido contra o Codex real, que não está instalado na máquina de
+desenvolvimento. O roteiro de homologação do Marlon está em `docs/uat-modo-ligacao.md`, na seção "Homologar a ligação
+com Codex".
+
+- **Desligado em produção**: `NOD_LIGACAO_CODEX=0` no `infra/gcp/config.env`, repassado pelo `deploy.sh` com padrão `0`.
+  Liga com `1` depois da homologação.
+- **Recusa própria**: o Codex instalado sem o subcomando `app-server` não entra mais na ligação para falhar no meio. O
+  Mac anuncia `semLacoDeVoz` (o `codex app-server --help` falhou), e o servidor recusa com o motivo
+  `codex_sem_app_server` e um texto em pt-BR. O turno de ligação que chegar mesmo assim cai com a causa
+  `codex_sem_app_server`.
+- **Modelo da voz num lugar só**: `MODELO_LUNA_CODEX = "gpt-5.6-luna"` em `src/contracts/harness.ts`. O id é suposto
+  (família do `gpt-5.6-sol`, já medido) e precisa ser confirmado pelo `model/list` da sonda.
+- **Vez sem resposta**: se nada chega (nem delta, nem ferramenta) em `TEMPOS_ESPERA.vezSemRespostaMs` (20 s), o
+  orquestrador fala um aviso ("A IA não me respondeu. Pode repetir, por favor?"), fecha a vez como `sem_resposta` e
+  manda o interromper duro, que no laço do Codex vira `turn/interrupt`. Vale para qualquer IA. Se o `turn/start` ainda
+  não respondeu, o laço guarda o interrupt e manda assim que o turno abre.
+- **Sonda**: `scripts/sonda-codex-app-server.ts` mede o handshake, o `model/list`, o tempo até o 1º delta, a aprovação
+  negada, a ferramenta `mcp__nod__lembrar`, o `turn/steer` e o `turn/interrupt`. O `--seco` roda contra o app-server
+  falso e está no CI. As notificações que o laço não conhece passam a ser logadas pelo nome
+  (`codex_ligacao_notificacao_ignorada`, uma vez cada).
+- **Se a sonda reprovar**: o critério 6, opção (b), vale: "ChatGPT sem voz na Release 1", e este ADR volta ao gatilho de
+  reversão.
+
+> Nota (2026-10-06, NOD-179): a cota do Claude Code passou a ser gravada a cada turno (emenda à ADR-036, tabela
+> `uso_do_plano`), só para mostrar. O `account/rateLimits/*` do app-server é o caminho para o Codex entrar na mesma
+> tabela (harness `codex-cli`) quando o Codex de chat passar pelo app-server; até lá a linha do Codex não existe.
+

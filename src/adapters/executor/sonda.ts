@@ -4,12 +4,13 @@ import { join } from "node:path";
 import { RESPOSTA_TESTE_IA_MAX } from "../../contracts/desktop.ts";
 import type { CausaSemIa, Inventario } from "../../contracts/inventario.ts";
 import { motivoSondaLenta } from "../../domain/sonda-lenta.ts";
+import { faltaNode, motivoSemNode } from "../../domain/saida-do-cli.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { causaDaFalhaDeConta, respostaDoTeste } from "../../domain/conta-da-ia.ts";
 import { interpretarLinhaStreamJson } from "../../domain/stream-json.ts";
 import { caminhoAumentado, homeDaPessoa, resolverBinario } from "./caminho.ts";
-import { extrairVersao, flagsListadasNoHelp } from "./flag-floors.ts";
+import { extrairVersao, flagsListadasNoHelp, inventarioAbaixoDoPiso } from "./flag-floors.ts";
 import { executarColetando } from "./processo.ts";
 
 /**
@@ -79,6 +80,8 @@ export async function lerVersao(binario: string, env: Record<string, string>, ti
   const r = await executarColetando({ bin: binario, args: ["--version"], env, cwd: tmpdir(), timeoutMs });
   if (r.erroSpawn) return { erro: "binario_nao_executa" };
   if (r.estourouTempo) return { erro: "sonda_lenta" };
+  // definido em 2026-10-09: o Claude Code antigo do npm é `#!/usr/bin/env node`; sem node, a causa é dita, não "instale".
+  if (r.exitCode !== 0 && faltaNode(r.stderr)) return { erro: "sem_node" };
   if (r.exitCode !== 0) return { erro: `version_exit_${r.exitCode ?? "null"}` };
   const versao = extrairVersao(r.stdout);
   return versao ? { versao } : { erro: "versao_ilegivel" };
@@ -123,7 +126,11 @@ export async function sondarDetalhado(bin: string | undefined, env: Env, modelo:
   // NOD-178: o CLI que só demorou continua 'ausente' (fail-closed), mas com a causa e a frase de lentidão, nunca "não instalado".
   const lenta = (): SondaDetalhada => ({ inventario: { estado: "ausente", motivo: motivoSondaLenta("Claude"), causa: "sonda_lenta", em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null });
   const versao = await lerVersao(binario, ambiente, o.timeoutVersaoMs);
+  if ("erro" in versao && versao.erro === "sem_node") return { inventario: { estado: "ausente", motivo: motivoSemNode("Claude Code"), causa: "sem_node", em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
   if ("erro" in versao) return versao.erro === "sonda_lenta" ? lenta() : { inventario: { estado: "ausente", motivo: versao.erro, em: agora() }, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
+  // NOD-171: abaixo do piso testado não gasta turno; a pessoa lê "Atualize", com a versão que tem e a mínima.
+  const antigo = inventarioAbaixoDoPiso("claude-cli", versao.versao, "Claude Code", agora());
+  if (antigo) return { inventario: antigo, binario, flagsNoHelp: null, custoUsd: null, resposta: null };
   const help = await lerFlagsDoHelp(binario, ambiente, o.timeoutVersaoMs);
   if ("erro" in help) return lenta();
   const flagsNoHelp = help.flags;

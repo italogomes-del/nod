@@ -22,6 +22,7 @@ import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
 import type { Tx } from "../../src/shared/types.ts";
+import { tarefaDoPedido } from "../helpers/pedido.ts";
 
 const MARLON = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
 const ANA = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_ANA };
@@ -40,8 +41,8 @@ async function cenario(trx: Tx) {
   return { taga, dev1, deps, repos, chamadas, turnoTaga: data.turno };
 }
 
-function pedir(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
-  return pedirABot(deps, { ...p, agente, pedido: "revisar o PR 466", contexto: "https://github.com/acme/app/pull/466" });
+function pedir(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1", pedido = "revisar o PR 466") {
+  return pedirABot(deps, { ...p, agente, pedido, contexto: "https://github.com/acme/app/pull/466" });
 }
 
 /** GitHub com leitura e escrita, concedido ao Dev 1 inteiro. */
@@ -60,7 +61,7 @@ async function githubDoDev1(repos: Repos, dev1: { agenteId: string; conversaId: 
  */
 async function turnoDeRotina(repos: Repos, de: { agenteId: string; conversaId: string }, exigeAprovacao: boolean, o: { leuDeFora?: boolean } = {}) {
   const rotina = await repos.rotinas.criar({ agenteId: de.agenteId, conversaId: de.conversaId, cron: "*/10 * * * *", fusoIana: "UTC", instrucao: "Ler o Slack", fonte: "Slack", entregavel: "chat", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, exigeAprovacao });
-  const turno = await repos.turnos.enfileirar({ conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: de.conversaId, agenteId: de.agenteId, origem: "rotina", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "Execução agendada", entradaConfianca: "confiavel", modelo: "m" });
   await repos.rotinaJanelas.reivindicar({ rotinaId: rotina!.id, instanteAgendado: AGORA, machineId: randomUUID(), executor: "catcher" });
   await repos.rotinaJanelas.vincularTurno({ rotinaId: rotina!.id, instanteAgendado: AGORA, turnoId: turno!.id });
   if (o.leuDeFora) await repos.turnos.contaminar(turno!.id, AGORA);
@@ -81,7 +82,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const { taga, dev1, deps, repos, chamadas, turnoTaga } = await cenario(trx);
       await githubDoDev1(repos, dev1);
       const r = await pedir(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(r.data));
       expect(tarefa).toMatchObject({ agenteId: dev1.agenteId, conversaId: dev1.conversaId, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON, estado: "pendente" });
       expect(tarefa?.entradaTexto).toContain("Pedido de Taga:\n<pedido_do_colega>\nPedido: revisar o PR 466\nContexto: https://github.com/acme/app/pull/466\n</pedido_do_colega>");
       expect(tarefa?.entradaTexto).toContain(`<pedido_da_pessoa>\n${PEDIDO}\n</pedido_da_pessoa>`);
@@ -89,6 +90,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const [pedido] = (await repos.mensagens.listarDaConversa(dev1.conversaId)).filter((m) => m.payload?.kind === "peer_pedido");
       expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
       expect(pedido?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: taga.agenteId, sob_procuracao_de: PESSOA_MARLON, conta_de_execucao: PESSOA_MARLON });
+      // ADR-099 (I7 revista): o handoff e o turno de triagem; não nasce task em quem recebe (era + o trabalho_mudou, ADR-083).
       expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(2);
 
       const plano = await planoDe(deps, tarefa?.id ?? "");
@@ -127,7 +129,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       // A rotina do Taga leu um app de fora antes de pedir.
       const daRotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
       const r = await pedir(deps, { turnoId: daRotina.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefa = await repos.turnos.buscar(r.data.tarefa_id);
+      const tarefa = await repos.turnos.buscar(tarefaDoPedido(r.data));
       expect(tarefa).toMatchObject({ origem: "delegacao", entradaConfianca: "confiavel" });
       expect(tarefa?.entradaTexto).not.toContain("pedido_da_pessoa");
       // A página que a rotina leu não se lava pelo pedido (ADR-062): a marca passa a quem recebe, no lugar da trava.
@@ -143,11 +145,12 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       expect((await chamar(tarefa?.id ?? "", "github__pr_comentar")).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
 
       // Rotina que não leu nada de fora, mesmo com exige_aprovacao: nada passa a quem recebe, e a regra dele vale.
-      const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      expect(await repos.turnos.contaminado(limpa.data.tarefa_id)).toBe(false);
-      const planoLimpo = await planoDe(deps, limpa.data.tarefa_id);
+      // NOD-259: outra janela, outro pedido — o mesmo texto ainda aberto seria recusado como repetido.
+      const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", "revisar o PR 467");
+      expect(await repos.turnos.contaminado(tarefaDoPedido(limpa.data))).toBe(false);
+      const planoLimpo = await planoDe(deps, tarefaDoPedido(limpa.data));
       expect(chavesDaPolitica(planoLimpo.data)).toEqual(SEM_GATE);
-      expect((await chamar(limpa.data.tarefa_id, "github__pr_comentar", planoLimpo.data)).data).toMatchObject({ ok: true });
+      expect((await chamar(tarefaDoPedido(limpa.data), "github__pr_comentar", planoLimpo.data)).data).toMatchObject({ ok: true });
 
       // Automático: a marca não para — o pedido nascido da rotina que leu algo de fora comenta sozinho.
       await repos.agentes.definirModoAprovacao(dev1.agenteId, "automatico");
@@ -161,22 +164,26 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
       const base = { conversaId: taga.conversaId, agenteId: taga.agenteId, prazoEm: AGORA + 60_000, entradaTexto: "x", modelo: "m" };
       const aceitos = [
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 0, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
-        await repos.turnos.enfileirar({ ...base, origem: "conversa", profundidade: 0, entradaConfianca: "nao_confiavel" }),
-        await repos.turnos.enfileirar({ ...base, origem: "conversa", profundidade: 0, entradaConfianca: "confiavel" }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 0, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", profundidade: 0, entradaConfianca: "nao_confiavel" }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "conversa", profundidade: 0, entradaConfianca: "confiavel" }),
         // ADR-063: quem cumpre um pedido, ou a continuação de quem pediu, ainda pede até o limite da corrente.
-        await repos.turnos.enfileirar({ ...base, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
-      for (const t of aceitos) {
-        const tarefa = await repos.turnos.buscar((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data.tarefa_id);
+      // NOD-259: cada pedido com texto próprio e respondido antes do seguinte — o teto de pedidos abertos ao mesmo colega
+      // recusaria o quarto.
+      for (const [i, t] of aceitos.entries()) {
+        const tarefa = await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", `revisar o PR ${466 + i}`)).data));
         expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: (t?.profundidade ?? 0) + 1, entradaConfianca: "confiavel" });
         expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(t?.entradaConfianca === "nao_confiavel");
+        await repos.turnos.assentar(tarefa?.id ?? "", { estado: "concluido" });
+        await entregarRespostaPeer(deps, { tarefaId: tarefa?.id ?? "", texto: "feito" });
       }
 
       const noLimite = [
-        await repos.turnos.enfileirar({ ...base, origem: "delegacao", profundidade: 3, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
-        await repos.turnos.enfileirar({ ...base, origem: "retomada", profundidade: 3, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "delegacao", profundidade: 3, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
+        await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 3, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
       for (const t of noLimite) await expect(pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).rejects.toMatchObject({ codigo: "nao_permitido" });
       await expect(pedir(deps, { turnoId: turnoTaga.id, agenteId: dev1.agenteId, conversaId: dev1.conversaId }, "Taga")).rejects.toMatchObject({ codigo: "nao_permitido" });
@@ -191,12 +198,12 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const dev2 = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
       for (const a of [chico, dev2]) await repos.agentes.atualizarPerfil(a.agenteId, { confirmado: true });
       const base = { conversaId: taga.conversaId, agenteId: taga.agenteId, origem: "conversa" as const, prazoEm: AGORA + 60_000, entradaTexto: "x", entradaConfianca: "confiavel" as const, modelo: "m" };
-      expect((await repos.turnos.enfileirar({ ...base, profundidade: 3 }))?.profundidade).toBe(3);
+      expect((await repos.turnos.enfileirar({ executor: "catcher", ...base, profundidade: 3 }))?.profundidade).toBe(3);
       await expectRejected(trx, () => trx`insert into turnos (tenant_id, owner_id, conversa_id, agente_id, origem, prazo_em, profundidade, entrada_texto, entrada_confianca, modelo)
         values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${taga.conversaId}, ${taga.agenteId}, 'conversa', now(), 4, 'x', 'confiavel', 'm')`, "23514");
 
       const rotina = await turnoDeRotina(repos, taga, true, { leuDeFora: true });
-      const tarefa = async (de: { agenteId: string; conversaId: string }, turnoId: string, agente: string) => (await repos.turnos.buscar((await pedir(deps, { turnoId, agenteId: de.agenteId, conversaId: de.conversaId }, agente)).data.tarefa_id))!;
+      const tarefa = async (de: { agenteId: string; conversaId: string }, turnoId: string, agente: string) => (await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId, agenteId: de.agenteId, conversaId: de.conversaId }, agente)).data)))!;
       const d1 = await tarefa(taga, rotina.id, "Dev 1");
       const d2 = await tarefa(dev1, d1.id, "Chico");
       const d3 = await tarefa(chico, d2.id, "Dev 2");
@@ -237,7 +244,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       await trx`update procuracoes set classes_permitidas = ${["delegar_tarefa"]} where id = ${procuracao?.id ?? ""}`;
       await vincularEscopo(trx, MARLON);
       const r = await pedir(deps, ctx);
-      expect(await repos.turnos.buscar(r.data.tarefa_id)).toMatchObject({ agenteId: dev1.agenteId, origem: "delegacao", sobProcuracaoDe: PESSOA_MARLON });
+      expect(await repos.turnos.buscar(tarefaDoPedido(r.data))).toMatchObject({ agenteId: dev1.agenteId, origem: "delegacao", sobProcuracaoDe: PESSOA_MARLON });
     });
   });
 
@@ -247,7 +254,7 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       const criado = await repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
       await repos.conectores.registrarSonda(criado?.id ?? "", { ok: true, catalogo: [cap("pr_ver", true), cap("pr_comentar", false)], agora: AGORA });
       const r = await pedir(deps, { turnoId: turnoTaga.id, agenteId: taga.agenteId, conversaId: taga.conversaId });
-      const tarefaId = r.data.tarefa_id;
+      const tarefaId = tarefaDoPedido(r.data);
 
       const pedido = await pedirAcesso(deps, { turnoId: tarefaId, conversaId: dev1.conversaId, agenteId: dev1.agenteId, conector: "github", capacidades: ["pr_ver", "pr_comentar"], nivel: "escrita", nao_pedido: ["aprovar ou fazer merge"] });
       expect(pedido.data.estado).toBe("aguardando_pessoa");

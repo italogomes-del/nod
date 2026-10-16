@@ -71,3 +71,128 @@ isolamento "só o proxy nod" não está provado para o Codex como está para o C
 
 **Gatilho de reversão.** Se uma versão do Codex passar a dar arquivo ou rede ao código de `functions.exec`, o host
 volta a ser desligado e o Codex sai do catálogo até haver outro caminho para as ferramentas MCP.
+
+## Emenda (2026-10-06): a cota que o CLI informa é mostrada, nunca usada como gate (NOD-179)
+
+**Contexto.** "Limites desta entrega" diz que o login não prova saldo nem cota. O Claude Code passou a informar a cota
+a cada turno, de graça, no `rate_limit_event` do stream-json: quanto já foi usado na janela de 5 horas e na semana, e
+quando cada uma renova. A pessoa não tinha como ver isso no nod sem rodar `/uso` (que no Codex nem existia).
+
+**Decisão.**
+- O driver do Claude Code entrega o último `rate_limit` do turno (`usoDoPlano` no resultado). O servidor valida
+  pelo domínio (`usoDoPlanoValido`: utilização entre 0 e 1,5, horários plausíveis, harness igual ao que rodou o
+  turno) e grava uma linha por pessoa e CLI (0056, `uso_do_plano`, com RLS). A leitura mais nova vence; dado
+  inválido é descartado com log e a entrega segue.
+- `GET /api/uso-do-plano` devolve só as linhas da pessoa, em dados crus; a tela formata no fuso dela (ADR-007) com
+  `estadoDoMedidor`. A tela fica na NOD-12.
+- **Nunca gate.** Nenhum turno é bloqueado, adiado ou desviado para outra IA por este número, nem perto do limite.
+  O fim de cota continua sendo o erro do próprio fornecedor no turno (`limite_da_assinatura`, NOD-168).
+- Sem ler credencial nem chamar API do fornecedor (ADR-015/019) e sem processo extra só para medir.
+- `/uso` num bot de outra IA não vira `/cost`: responde "O uso do plano está em Seu espaço › Conexão."
+
+**Gatilho de reversão.** Se o Claude Code deixar de mandar o `rate_limit_event` ou mudar o formato, a linha para de
+ser atualizada (o `medido_em` envelhece) e a tela mostra a última leitura com a hora; nada no turno depende dela. Se
+um dia o número virar critério de decisão, isso pede ADR nova, não esta emenda.
+
+## Emenda (2026-10-06): fixado e indisponível recusa, limite do plano com motivo próprio (NOD-171)
+
+**Harness fixado e indisponível.** O UAT de 2026-09-18 deixou a ressalva UX-01: no app do Mac, o bot fixado num harness
+que o Mac não tinha pronto ficava com o turno pendente para sempre, e a negação falava em "motor pronto". Agora:
+- `resolverHarness` diz qual harness faltou; o despacho recusa com o inventário dele, e a negação nomeia o harness e o
+  estado (não instalado, sem conta conectada, desatualizado).
+- A reivindicação recebe os harnesses prontos de todas as máquinas vivas da pessoa: o turno fixado num harness que
+  nenhuma delas tem pronto é reivindicado e recusado, em vez de ficar pendente. Harness em `sonda_lenta` conta como
+  "pode ficar pronto" e o turno espera a re-sonda.
+- Modelo fora da lista vira `executor_indisponivel` com `modelo_invalido`, não `entrada_invalida`. A negação leva o
+  `modelo` no payload e a tela pede outro modelo: a IA está pronta, então nunca diz que ela "já voltou".
+- A repetição das falas barradas (`repetirBarradosPorIa`) não repete a fala fixada num harness que ainda não está
+  pronto, para não gerar uma negação nova a cada anúncio do Mac.
+
+**Limite do plano.** `limite_do_plano` entra no enum de motivos de falha (0058). No Claude Code ele vem do protocolo:
+`rate_limit_event` com `status: "rejected"` na mesma rodada do `result`, com a hora em que o plano volta
+(`limiteVoltaEm`); `isUsingOverage: true` não conta como limite. No Codex só existe texto (`usage_limit_reached`, "You've
+hit your usage limit"), classificado em `limite_de_uso`. Nos dois casos a conversa ganha a mensagem de sistema com
+`payload: { kind: "limite_do_plano", harness, voltaEm }`, e a tela diz quando volta (no Codex, "parece", porque a hora
+não vem do protocolo). A prova é por
+fixtures e CLI falso: não se leva uma conta ao limite de propósito.
+
+**Lista editorial.** Só cresce: entra o modelo que o `model/list` do Codex real mostrou e que passou num turno real do
+UAT (`docs/uat-harnesses-e-modelos.md`). Os padrões do automático (Sonnet e GPT-5.6 Sol) não mudaram.
+
+**Gatilho de reversão.** Se a recusa imediata do fixado irritar mais que a espera (a pessoa estava instalando o CLI
+naquele minuto), o caminho é estender o `sonda_lenta` a "instalando", não voltar à fila pendente sem aviso.
+
+## Emenda (2026-10-10): modos, ordem, raciocínio e troca no limite (plano das IAs, PR 2)
+
+**Por quê.** Teste do Breno em 09/10, em produção: a ligação de boas-vindas bateu no limite da assinatura do Claude, o
+Codex não estava pronto, e nada trocava de IA sozinho; o botão "usar Codex" chamava `POST /executor`, que não existe no
+servidor compartilhado (404). Decidido com o Marlon (canvas QYrgwbMiNRU4mn2SA1fAm2):
+
+**Modos.** Todo bot nasce em **Automático** (`inteligencia_modo = 'auto'`): usa a primeira IA **pronta** da ordem que
+não esteja no limite. Ele pode sair do padrão em **Uma IA só** (`'fixa'`): usa sempre a IA escolhida e, se ela não estiver
+pronta, espera (a recusa nomeando a IA, como na emenda de 2026-10-06), nunca troca de fornecedor sozinho — nem no limite.
+
+**Ordem.** É da pessoa (`preferencias.ordem_ias`, arrastada em Provedores de IA; nula = Claude e depois Codex). O bot
+segue a dela; com `agentes.ordem_ias` ele tem a própria. A ordem é sempre completada com as IAs que faltarem, no fim.
+No modo local sem ordem escolhida, o harness padrão do interruptor vai na frente (como antes).
+
+**Modelo e raciocínio por IA.** `agentes.escolhas_ia = {<ia>: {modelo, raciocinio}}`, nos dois modos. IA sem escolha usa
+o **Recomendado**: Opus no Claude e GPT-5.6 Sol no Codex, raciocínio médio. O automático, que usava o Sonnet, passa ao
+Opus. Os níveis de cada modelo moram no catálogo (`HARNESSES[].modelos[].raciocinios`): no Claude, o `--effort` (low…max;
+o Haiku só low…high, do protótipo, não medido por modelo); no Codex, o `effort` do `turn/start`, medido no `model/list`
+do app-server 0.147.0 sem turno (com a conta logada e com HOME vazio, a lista é a mesma: Sol e Luna aceitam low…max, o
+Sol também `ultra`, que fica de fora porque delega tarefas sozinho; os GPT-6 não aparecem nessa versão e ficam com
+low…xhigh). O raciocínio que vai ao CLI é sempre um nível que o modelo aceita (`raciocinioValido`). Lacuna: o `codex exec`
+(reserva, sem app-server) continua sem raciocínio — a chave `model_reasoning_effort` não foi provada num turno.
+
+**Campos derivados.** `harness`, `modelo` e `esforco` continuam e passam a ser derivados (`derivadosDa`), gravados
+junto pelo repositório: é o que os caminhos de enfileiramento copiam para o turno e o que o código anterior lê. Modo auto
+= `auto/auto`; fixa = a IA e o modelo escolhido dela (`auto` = o recomendado); `esforco` = o raciocínio do Claude. O
+`PATCH /agentes/:id` com `{harness, modelo, esforco}` (a tela de Inteligência de antes, o `gerir_bots`) é traduzido
+(`inteligenciaDoLegado`): `auto/auto` = Automático sem modelo escolhido (os modelos saem, os raciocínios e a ordem
+ficam), como era o "Automático" daquela tela. A tela nova usa `GET`/`PUT /agentes/:id/inteligencia` e `GET /ias`.
+
+**Migração (0068).** `auto/auto` → Automático, ordem nula. **Fixo no Sonnet** (o padrão antigo, `sonnet`, com o Claude
+escolhido ou não) → Automático (decisão do Marlon: só fica fixo quem escolheu outro modelo à mão). O `auto` antigo com
+outro modelo do Claude já rodava fixado nele (`harnessFixado`) → "Uma IA só" no Claude, com o modelo. Harness fixo →
+"Uma IA só" naquela IA, com o modelo dela. O esforço vira o raciocínio do Claude (e do Codex, no bot fixo nele, porque
+ia ao `turn/start` também).
+
+**Limite.** O turno que volta com `limite_do_plano` (protocolo do Claude Code: `rate_limit_event` `rejected`) ou com a
+classe `limite_de_uso` (texto do Codex) grava a IA em `preferencias.ias_no_limite` até `renovaEm` — a hora do fornecedor
+(até 8 dias à frente), senão **1 h** (o Codex não diz a hora). Vale para a ordem de todos os bots da pessoa:
+- no Automático, a fala da pessoa é repetida na **próxima IA da ordem** pronta e fora do limite, e a conversa ganha a
+  linha `ia_trocada` com `causa: "limite"` e `renovaEm`; sem outra IA, fica o aviso do limite de sempre, com a hora;
+- a fila não entrega turno do Automático a uma máquina que só tem a IA no limite enquanto a pessoa tiver outra fora
+  dele (`iasParaOAutomatico`); sem nenhuma fora do limite, vale a primeira pronta — o prazo é estimativa, e o próprio CLI
+  diz se o limite continua, então o turno nunca fica preso;
+- passado `renovaEm`, a IA volta a valer (o app do Mac testa de novo pela vigia); um turno que dá certo nela antes disso
+  a tira do limite;
+- `GET /ias` mostra a IA no limite como `nao_autenticado` com `causa: "limite"` e `renovaEm` (o Mac nunca anuncia essa
+  causa), e a ponte publica `inventario.mudou` quando o limite muda ou quando um Mac reanuncia IAs diferentes.
+Isto usa o ERRO do turno, não o número do uso do plano: a emenda de 2026-10-06 (NOD-179) continua — o medidor nunca é
+gate. A ligação no limite com outra IA pronta continua **sozinha** por ela (emenda da ADR-078).
+
+**Sem botão quebrado.** No servidor compartilhado o `GET /executor` diz `trocavel: false` e a tela não mostra o "usar"
+(o `POST /executor` existe só no modo local). As causas novas do app (`sem_node`, `config_invalida`) atravessam o anúncio
+com a frase do servidor, em vez de virar "não encontrado".
+
+**Gatilho de reversão.** Se a troca no limite repetir respostas (a primeira IA tinha feito parte do trabalho) mais do que
+ajuda, o caminho é perguntar antes de repetir (a linha âmbar "Continuar pelo ChatGPT" do PR da web), não desligar o
+limite: a ordem e o prazo continuam valendo. Se o Opus no automático custar caro demais para quem tem plano pequeno, o
+Recomendado muda numa linha do catálogo (`recomendado`), sem migração. Se o 1 h do Codex for curto (o limite dele é
+semanal), troque `PRAZO_LIMITE_SEM_HORARIO_MS` ou ensine o horário a `erro-fornecedor.ts` com uma amostra real.
+
+## Emenda (2026-10-12): a cota vira portão do trabalho de fundo (ADR-099 §7)
+
+A emenda NOD-179 dizia que o número da cota nunca seria gate e que, se virasse, seria por ADR nova. A
+[ADR-099](adr-099-um-dono-por-bot.md) §7 é essa ADR. Com 99% de uma janela usada, o trabalho novo de fundo espera, e o
+1% fica para a conversa com a pessoa. No limite, todo o fundo espera a renovação em vez de falhar. Detalhe na emenda de
+2026-10-12 da [ADR-085](adr-085-uso-do-mac-segura-trabalho-novo.md). A conversa com a pessoa continua como acima: nunca é
+segurada pelo número, e a troca de IA no limite segue igual.
+
+## Emenda (2026-10-14): o Codex com o terminal
+
+O "Codex continua só com o proxy" desta ADR caiu com a [ADR-103](adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md):
+o chat do Codex no app-server tem o kit do terminal pelo hook PreToolUse do Codex, confiado pela API do app-server, e o
+isolamento de antes fica para a máquina sem o hook e para o `codex exec` de reserva.

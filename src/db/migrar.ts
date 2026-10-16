@@ -19,6 +19,29 @@ export function trechoAplicavel(conteudo: string): string {
   return m ? conteudo.slice(0, m.index) : conteudo;
 }
 
+/**
+ * NOD-195: o SQL do bloco de rollback, que o teste de ida e volta executa (tests/conformidade/rollback-ida-e-volta).
+ * Formato (AGENTS.md): o marcador `-- ROLLBACK:` sozinho na linha (texto depois dele na mesma linha é comentário),
+ * cada linha seguinte com o SQL comentado por `-- `, e `-- -- texto` para um comentário de verdade, que não vira SQL.
+ * Linha sem `--` na frente fica como está. Devolve `null` sem marcador. Comentários e linhas em branco viram
+ * linhas vazias, para a contagem de linhas bater com o arquivo.
+ */
+export function trechoDeRollback(conteudo: string): string | null {
+  const m = MARCA_ROLLBACK.exec(conteudo);
+  if (!m) return null;
+  const fimDoMarcador = conteudo.indexOf("\n", m.index);
+  if (fimDoMarcador === -1) return "";
+  return conteudo
+    .slice(fimDoMarcador + 1)
+    .split("\n")
+    .map((linha) => {
+      const l = linha.replace(/\r$/, "");
+      if (/^\s*--\s*--/.test(l)) return "";
+      return l.replace(/^\s*-- ?/, "");
+    })
+    .join("\n");
+}
+
 export async function migrar(urlDono: string, dir: string): Promise<{ aplicadas: string[] }> {
   // onnotice — definido em 2026-09-16: NOTICE não é erro ("relation schema_migrations already exists,
   // skipping" a cada rodada); o default do postgres.js imprime via console, fora do wrapper único de

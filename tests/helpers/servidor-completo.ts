@@ -32,11 +32,24 @@ export type OpcoesServidorCompleto = {
   computador?: OpcoesBoot["computador"];
   env?: Record<string, string | undefined>;
   intervalos?: OpcoesBoot["intervalos"];
+  /**
+   * NOD-214: reusa a pessoa de um servidor anterior sobre o mesmo banco (o "processo novo" do deploy). Ausente = uma
+   * pessoa nova. Quem passa limpa uma vez só, pelo servidor que a criou.
+   */
+  pessoaId?: string;
   /** Nome da pessoa própria (default 'Pessoa E2E'). */
   nomePessoa?: string;
   /** Pessoas ADICIONAIS que os laços devem enxergar (default: só a própria). */
   pessoasExtras?: Escopo[];
   drivers?: OpcoesBoot["drivers"];
+  /** Provedores de voz prontos (NOD-180), para observar o TTS falso. */
+  voz?: OpcoesBoot["voz"];
+  /** O prazo da rede de 2 min (ADR-083 §2) para o e2e da #193 não esperar 120 s; ausente = REDE_MS. */
+  redeMs?: number;
+  /** NOD-267: envolve a fonte das pessoas dos laços (o teste do tick travado a pendura depois do boot). */
+  envolverListarPessoas?: (listar: () => Promise<{ tenantId: string; id: string }[]>) => () => Promise<{ tenantId: string; id: string }[]>;
+  /** NOD-267: o watchdog do compartilhado com intervalo, carência e saída de teste. */
+  watchdog?: OpcoesBoot["watchdog"];
 };
 
 /**
@@ -51,7 +64,7 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
   // definido em 2026-09-16: 6 conexões — rota (1) + conector carregado (1) + ponte/laços (≤3) sem enfileirar sob carga.
   const db = criarDb(urlTeste, { max: 6 });
   const dbDono = criarDb(urlDonoDeTeste(), { max: 1 });
-  const pessoaId = randomUUID();
+  const pessoaId = o.pessoaId ?? randomUUID();
   const escopo: Escopo = { tenantId: TENANT_PADRAO, pessoaId };
   // O CI nunca roda seed (Práticas §6): o tenant de identidade nasce aqui como nod_dono (idempotente) e fica — é catálogo, não dado.
   await dbDono`insert into tenants (id, nome) values (${TENANT_PADRAO}, 'Nod') on conflict do nothing`;
@@ -70,6 +83,9 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     // ADR-071: voz falsa (sem whisper nem say) — custo zero e determinística.
     NOD_VOZ_STT: "falso",
     NOD_VOZ_TTS: "falso",
+    // ADR-096: a limpeza das tasks liga por padrão e lê o disco a cada 5 min. O servidor de teste roda no modo local, com o
+    // HOME de quem roda a suíte: ligada, ela mexeria no ~/nod e nos caches dessa pessoa. O teste que precisa dela liga.
+    NOD_LIMPEZA_TASKS: "desligada",
     ...(o.env ?? {}),
   };
   const servidor = await boot({
@@ -78,10 +94,14 @@ export async function servidorCompleto(o: OpcoesServidorCompleto = {}): Promise<
     dbDono,
     porta: 0,
     intervalos: { orquestradorMs: 50, schedulerMs: 200, leaseMs: 200, expiracaoMs: 200, outboxMs: 40, ociosidadeMs: 3_600_000, ...(o.intervalos ?? {}) },
-    listarPessoas: async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId })),
+    listarPessoas: (o.envolverListarPessoas ?? ((l) => l))(async () => visiveis.map((p) => ({ tenantId: p.tenantId, id: p.pessoaId }))),
     segredoSessao: SEGREDO_DE_TESTE,
     drivers: o.drivers,
     computador: o.computador,
+    voz: o.voz,
+    redeMs: o.redeMs,
+    // NOD-267: o `process.exit` do watchdog derrubaria o worker do vitest numa suíte lenta; o teste que quer ver a saída injeta.
+    watchdog: { sair: () => undefined, ...o.watchdog },
   });
 
   const sessaoDe = (e: Escopo): SessaoDeTeste => ({ cookie: `nod_sessao=${cunharCookie(e, SEGREDO_DE_TESTE)}`, tenantId: e.tenantId, pessoaId: e.pessoaId });

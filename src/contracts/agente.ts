@@ -1,4 +1,5 @@
 import type { PreferenciaHarness } from "./harness.ts";
+import type { InteligenciaBot } from "./inteligencia.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 
 export const FORMAS_AGENTE = ["shape-square", "shape-hex", "shape-circle", "shape-pebble", "shape-capsule", "shape-triangle", "shape-cloud", "shape-drop"] as const;
@@ -46,12 +47,22 @@ export type Agente = {
   oculto: boolean;
   /** Perfil confirmado pela pessoa (nada aplicado antes disso). */
   confirmado: boolean;
+  /**
+   * revisto em 2026-10-10 (0068, emenda da ADR-036): `harness`, `modelo` e `esforco` são DERIVADOS de `inteligencia`
+   * (o repositório grava os quatro juntos) e continuam aqui para a tela de Inteligência antiga e para os caminhos que
+   * enfileiram turnos: modo auto = `auto/auto`; fixa = a IA e o modelo escolhido dela (`auto` = o recomendado);
+   * `esforco` = o raciocínio escolhido para o Claude.
+   */
   modelo: string;
   harness?: PreferenciaHarness;
   /** O `--effort` do Claude Code (0037). Ausente ou null = o padrão do modelo. */
   esforco?: EsforcoAgente | null;
+  /** 0068: o modo, a ordem e o modelo e o raciocínio por IA. Ausente = fixture anterior (vale o derivado de harness/modelo). */
+  inteligencia?: InteligenciaBot;
   /** ADR-059 (0040). Ausente = 'manual' (planos e fixtures anteriores ao modo). */
   modoAprovacao?: ModoAprovacao;
+  /** ADR-090 (0066): a máquina onde o bot trabalha — o id da chave da máquina. Ausente ou null = qualquer uma (o padrão da pessoa). */
+  maquinaId?: string | null;
   /** Duplicate copia perfil, nunca memória nem histórico. */
   duplicadoDe: string | null;
   secao?: string;
@@ -63,5 +74,12 @@ export type Agente = {
   voz?: string | null;
   /** Velocidade da fala nas ligações: 1, 1,25 ou 1,5. */
   vozVelocidade?: number;
+  /**
+   * definido em 2026-10-07 (0061, ADR-081): 'nod' = o bot fixo da pessoa (um por pessoa). Não se exclui, não se oculta,
+   * não se renomeia, não se move nem se duplica (`nod_protegido`). Ausente = bot comum.
+   */
+  papel?: PapelAgente | null;
   criadoEm: EpochMs;
 };
+
+export type PapelAgente = "nod";

@@ -4,6 +4,7 @@ import { SHAPE_BY_ID } from "../vendor/bloub/skins.ts";
 import { expressaoMascote } from "./mascote-pose.ts";
 import { FORMAS_BLOUB } from "./mascote-catalogo.ts";
 import { PintorMascote, svgMascote } from "./mascote-svg.ts";
+import { CONSULTA_MOVIMENTO_REDUZIDO, instanteDoMascote, lacoDoMascoteSegue, movimentoReduzido } from "./movimento.ts";
 
 // medido em 2026-09-30: criar 200 mascotes num innerHTML custava ~1 s síncrono, com 1.000 pinturas e 1.000
 // getComputedStyle — 4 pinturas por mascote no upgrade —, e 10 mascotes animados, 9 a 16 ms de CPU por quadro, cada um
@@ -14,7 +15,12 @@ const INK = "var(--mascote-cor, var(--agent-gris))";
 const ASSENTA = .8;
 /** definido em 2026-09-30: teto de 60 quadros por segundo; numa tela de 120 Hz o rAF dobraria o custo sem ganho visível. */
 const QUADRO_MS = 1000 / 60;
-const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+const reduced = matchMedia(CONSULTA_MOVIMENTO_REDUZIDO);
+/**
+ * NOD-122 (revisão): a resposta continua vindo de movimentoReduzido(), mas lida da MediaQueryList guardada acima. Chamar
+ * matchMedia() a cada quadro e a cada pintura criaria uma lista nova por chamada, dentro do laço que este arquivo mede.
+ */
+const reduzido = (): boolean => movimentoReduzido(() => reduced);
 const radii = (shape: string | null) => SHAPE_BY_ID.get(FORMAS_BLOUB[shape as keyof typeof FORMAS_BLOUB] ?? "squircle")!.radii;
 
 // Um relógio para todas as instâncias: quem está em `ativos` é pintado no mesmo requestAnimationFrame.
@@ -22,7 +28,7 @@ const conectados = new Set<MascoteElemento>();
 const ativos = new Set<MascoteElemento>();
 let quadro = 0;
 function agendar(): void {
-  if (quadro || !ativos.size || document.hidden || reduced.matches) return;
+  if (quadro || !lacoDoMascoteSegue({ ativos: ativos.size, oculto: document.hidden, reduzido: reduzido() })) return;
   quadro = requestAnimationFrame(stamp => {
     quadro = 0;
     for (const el of [...ativos]) {
@@ -126,7 +132,7 @@ class MascoteElemento extends HTMLElement {
     this.last = 0;
     this.paint();
     // Só quem se mexe precisa saber se está na tela; o parado não observa nem agenda nada.
-    const moving = this.moving() && !reduced.matches;
+    const moving = this.moving() && !reduzido();
     if (moving !== this.observed) {
       if (moving) observer.observe(this);
       else {
@@ -151,7 +157,7 @@ class MascoteElemento extends HTMLElement {
     return this.state !== "idle" || this.time - this.changed < ASSENTA;
   }
   private paint(): void {
-    const fixed = reduced.matches;
+    const fixed = reduzido();
     const state = this.state;
     if (fixed || !this.moving()) {
       const chave = `${this.pose}|${fixed}`;
@@ -159,7 +165,7 @@ class MascoteElemento extends HTMLElement {
       let svg = parados.get(chave);
       if (!svg) {
         const engine = fixed ? new BotEngine(100, state, radii(this.getAttribute("shape")), expressaoMascote(this.getAttribute("expression"))) : this.engine!;
-        svg = svgMascote(engine.sample(fixed ? POSES[state] : this.time, state !== "idle"), "@@", INK);
+        svg = svgMascote(engine.sample(instanteDoMascote({ reduzido: fixed, pose: POSES[state], tempo: this.time }), state !== "idle"), "@@", INK);
         if (parados.size >= 64) parados.clear();
         parados.set(chave, svg);
       }

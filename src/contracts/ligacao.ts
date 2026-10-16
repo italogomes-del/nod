@@ -55,6 +55,8 @@ export type MotivoRecusaLigacao =
   | "sem_ia"
   | "app_antigo"
   | "codex_em_breve"
+  /** NOD-167: o Codex do Mac não tem `codex app-server` (versão antiga): o laço de voz não sobe. */
+  | "codex_sem_app_server"
   | "ja_em_ligacao"
   | "bot_ocupado_em_ligacao"
   | "sala"
@@ -65,9 +67,13 @@ export type MotivoRecusaLigacao =
   | "drenagem"
   | "sem_consentimento";
 
+/**
+ * `ouvir` (definido em 2026-10-06, NOD-180): a pessoa pode ouvir as respostas deste bot (GET mensagens/:id/ouvir),
+ * mesmo quando a ligação está recusada (sem Mac, sem IA). Ausente = não pode (servidor anterior à NOD-180).
+ */
 export type DisponibilidadeLigacao =
-  | { disponivel: true; consentimentoNecessario: boolean; versaoConsentimento: number; provedor: string }
-  | { disponivel: false; motivo: MotivoRecusaLigacao; texto: string };
+  | { disponivel: true; consentimentoNecessario: boolean; versaoConsentimento: number; provedor: string; ouvir?: boolean }
+  | { disponivel: false; motivo: MotivoRecusaLigacao; texto: string; ouvir?: boolean };
 
 /** POST ligacoes: o que a tela precisa para abrir a mídia. */
 export type LigacaoCriada = { ligacao: Ligacao; maxS: number };
@@ -75,7 +81,11 @@ export type LigacaoCriada = { ligacao: Ligacao; maxS: number };
 /** Payload da mensagem `sistema` que vira a linha "Chat de voz · mm:ss" na conversa. */
 export type PayloadLinhaLigacao = { kind: "ligacao"; ligacaoId: string; duracaoMs: number | null; estado: EstadoLigacao };
 
-/** definido em 2026-10-04 (ADR-075): sobe quando muda o provedor ou o suboperador do áudio. */
-export const VERSAO_CONSENTIMENTO_VOZ = 1;
+/**
+ * definido em 2026-10-04 (ADR-075): sobe quando muda o provedor ou o suboperador do áudio.
+ * revisto em 2026-10-11 (ADR-095): 2 — o ditado no campo de mensagem também manda a fala ao Google; quem aceitou o
+ * aviso da ligação (v1) vê o texto novo uma vez, no próximo ditado ou na próxima ligação.
+ */
+export const VERSAO_CONSENTIMENTO_VOZ = 2;
 export const TEXTO_CONSENTIMENTO_VOZ =
-  "Na ligação, sua fala é transcrita pelo Google (nos EUA) e a voz do bot também é gerada lá. Nada é gravado: fica só a transcrição em texto, que você pode apagar.";
+  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA); na ligação, a voz do bot também é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";

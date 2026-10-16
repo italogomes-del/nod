@@ -59,3 +59,12 @@ describe("deploy.sh e o modelo da ligação no config.env (NOD-164)", () => {
     expect(err).toMatch(/faltam os segredos/);
   });
 });
+
+describe("ligação Codex desligada em produção (NOD-167)", () => {
+  it("o config.env traz NOD_LIGACAO_CODEX=0 e o deploy.sh repassa ao nod.env com padrão 0", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_LIGACAO_CODEX=0$/m);
+    expect(await readFile(DEPLOY, "utf8")).toMatch(/^NOD_LIGACAO_CODEX=\$\{NOD_LIGACAO_CODEX:-0\}$/m);
+  });
+});

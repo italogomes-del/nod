@@ -26,6 +26,8 @@ function gcloudQueVaza(): string {
 }
 
 // processo de verdade, vários por caso: sob o check inteiro em paralelo, cada um leva segundos
+// NOD-194 (QA): medido em 2026-10-08 (Mac, duas `test:unit` em paralelo, load ~500): o pior caso (`sonda-google: --cota
+// e --duracao`) levou 23,5 s; os outros, 12–22 s. 60 s dá ~2,5x o pior medido; cada `spawnSync` ainda corta em 30 s.
 describe("voz: saída de erro dos scripts (NOD-166)", { timeout: 60_000 }, () => {
   it("argumento inválido sai em pt-BR, sem pilha", () => {
     expect(() => inteiroPositivo("cota", undefined)).toThrow(/--cota precisa ser um número inteiro ≥ 1 \(veio nada\)/);

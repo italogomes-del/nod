@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { criarBackendGh } from "../../../src/adapters/conectores-locais/github/backend-gh.ts";
 import { ambienteDoGh, executarGithubNaMaquina } from "../../../src/adapters/conectores-locais/github/maquina.ts";
 import { validarArgsGithub } from "../../../src/domain/github.ts";
@@ -27,7 +27,7 @@ if [ "$MODO" = "sem_login" ]; then echo "To get started with GitHub CLI, please 
 if [ "$MODO" = "nao_achou" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
 case "$*" in
   *"--input -"*) cat > "$HOME/corpo.json"; echo '{"user":{"login":"marlon"},"html_url":"https://github.com/acme/nod/pull/7#issuecomment-1"}';;
-  *vnd.github.diff*) i=0; while [ $i -lt 3000 ]; do echo "+linha $i do diff"; i=$((i+1)); done;;
+  *vnd.github.diff*) awk 'BEGIN { for (i = 0; i < 3000; i++) print "+linha " i " do diff" }';;
   *pulls/7) echo '{"number":7,"title":"Arruma o login","state":"open","user":{"login":"bruno"},"base":{"ref":"main"},"head":{"ref":"feat/login","sha":"abc1234"},"body":"descricao","html_url":"https://github.com/acme/nod/pull/7","_links":{"self":"https://api.github.com/x"}}';;
   *) echo '[]';;
 esac
@@ -37,8 +37,27 @@ esac
  * medido em 2026-09-24: sob a suíte inteira com outra suíte rodando na mesma máquina, spawnar o
  * servidor stdio + o gh falso passou dos 5 s padrão do projeto unit (4 de 779 testes, uma rodada em
  * três). O teto por teste sobe só aqui, onde há processo de verdade.
+ * medido em 2026-10-07 (NOD-194): com o Mac em load ~950 (duas `test:unit` em paralelo), o mais lento (pr_checks,
+ * duas chamadas em sequência) levou 12,3 s, acima dos 5 s padrão. O teto (PROCESSO, abaixo) cobre três capacidades
+ * em sequência (o teste de erros faz três) no PRAZO_TESTE_MS de cada uma. Um gh travado segue falhando. O diff de
+ * 3000 linhas sai de um `awk` só, mais barato que o laço de `echo` no sh.
+ *
+ * NOD-194: o prazo da capacidade (PRAZO_CAPACIDADE_GITHUB_MS, 12 s) é do código e vale para TODAS as chamadas do
+ * executarGithubNaMaquina, que não o recebe. Com o Mac em load ~1000 (duas `test:unit` em paralelo) o gh falso,
+ * um `sh`, levou mais de 12 s só para ser escalonado, e pr_diff/pr_comentar voltaram isError sem defeito nenhum
+ * (medido em 2026-10-07; numa rodada passou até de 30 s). Aqui, quem não passa prazo ganha PRAZO_TESTE_MS; quem testa o prazo (o pr_checks do F)
+ * passa o seu explícito e não é afetado. O código não muda.
+ * medido em 2026-10-09 (QA da NOD-194, duas `test:unit` em paralelo, load de 5 min ~1000): os testes deste arquivo
+ * levaram 48–57 s cada, e o `pr_comentar` estourou os 60 s de antes (60,04 s, "O GitHub não respondeu") nas duas
+ * suítes, sem defeito: o gh falso não espera nada. Daí 120 s, ~2x o pior medido.
  */
-const PROCESSO = { timeout: 20_000 };
+const { PRAZO_TESTE_MS } = vi.hoisted(() => ({ PRAZO_TESTE_MS: 120_000 }));
+vi.mock("../../../src/adapters/conectores-locais/github/capacidades.ts", async (original) => {
+  const m = await original<typeof import("../../../src/adapters/conectores-locais/github/capacidades.ts")>();
+  return { ...m, executarPorRest: (...a: Parameters<typeof m.executarPorRest>) => m.executarPorRest(a[0], a[1], a[2] ?? PRAZO_TESTE_MS, a[3]) };
+});
+
+const PROCESSO = { timeout: 3 * PRAZO_TESTE_MS + 10_000 };
 
 let casa: string;
 let gh: string;

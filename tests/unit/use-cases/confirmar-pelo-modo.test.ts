@@ -33,7 +33,7 @@ async function cenario(modo: ModoAprovacao) {
   });
   await repos.conectores.habilitar(clickup.id, true);
   if (modo !== "manual") await repos.agentes.definirModoAprovacao(agente.id, modo);
-  const turno = await repos.turnos.enfileirar({ conversaId: conversa.id, agenteId: agente.id, origem: "conversa", prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "exclui as tasks de Tech Checkpoint e Tech Weekly", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa.id, agenteId: agente.id, origem: "conversa", prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "exclui as tasks de Tech Checkpoint e Tech Weekly", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano = (modoTurno: ModoTurno = "conversa", extra: Partial<PlanoTurno> = {}) => planoDeTeste({ turnoId: turno.id, agenteId: agente.id, conversaId: conversa.id, modoTurno, ...extra });
   const ctx = (p: PlanoTurno = plano()) => ({ turnoId: turno.id, agenteId: agente.id, conversaId: conversa.id, plano: p });
@@ -107,6 +107,24 @@ describe("rotina pelo modo do bot", () => {
     if ("erro" in naConversa.data) throw new Error(naConversa.data.erro);
     expect(naConversa.data.aplicada).toBe(true);
     expect(c.banco.rotinas.filter((r) => r.excluidoEm !== null)).toHaveLength(1);
+  });
+
+  it("NOD-159, critério 7: no 'Ignorar todas as aprovações', a proposta com revisão nasce e aplica no mesmo turno", async () => {
+    const c = await cenario("total");
+    const criada = (await criarRotina(c.deps, { ...c.ctx(), ...rotinaValida() })).data;
+    if ("erro" in criada) throw new Error(criada.erro);
+    const mudar = (await atualizarRotinaPeloAgente(c.deps, { ...c.ctx(), rotina_id: criada.proposta_id, cron: "0 12 * * 1-5" })).data;
+    if ("erro" in mudar) throw new Error(mudar.erro);
+    expect(mudar.aplicada).toBe(true);
+    expect(c.banco.rotinas.find((r) => r.id === criada.proposta_id)?.cron).toBe("0 12 * * 1-5");
+    expect(c.banco.propostas.find((p) => p.id === mudar.proposta_id)).toMatchObject({ estado: "confirmada", payload: { revisao: expect.stringMatching(/^[0-9a-f]{64}$/) } });
+
+    const excluir = (await excluirRotinaPeloAgente(c.deps, { ...c.ctx(), rotina_id: criada.proposta_id })).data;
+    if ("erro" in excluir) throw new Error(excluir.erro);
+    expect(excluir.aplicada).toBe(true);
+    expect(c.banco.rotinas.find((r) => r.id === criada.proposta_id)?.excluidoEm).not.toBeNull();
+    expect(c.banco.propostas.find((p) => p.id === excluir.proposta_id)).toMatchObject({ estado: "confirmada", payload: { revisao: expect.any(String) } });
+    expect(c.banco.mensagens.some((m) => m.texto.startsWith("Esta mudança não foi aplicada"))).toBe(false);
   });
 });
 

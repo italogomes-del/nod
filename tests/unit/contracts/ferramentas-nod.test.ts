@@ -13,12 +13,26 @@ const ESPERADAS = [
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia",
   "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot",
+  "abrir_task", "mandar_para_task",
+  "gerir_bots", "ver_apps_conectados", "registrar_relato",
+  "me_chame_as", "esperar_comando",
+  "abrir_frentes", "mandar_para_frente", "devolver_resumo",
+  "criar_bots", "responder_pedido",
 ];
 
 describe("FERRAMENTAS_NOD", () => {
-  it("lista fechada com as VINTE E SEIS ferramentas (2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
+  it("lista fechada com as TRINTA E OITO ferramentas (2026-10-15 traz responder_pedido, NOD-262; 2026-10-13 traz criar_bots, ADR-104; 2026-10-12 traz esperar_comando, abrir_frentes, mandar_para_frente e devolver_resumo, ADR-099; 2026-10-08 traz me_chame_as, ADR-086; 2026-10-07 traz abrir_task e mandar_para_task, ADR-083, e gerir_bots, ver_apps_conectados e registrar_relato, só do Nod, ADR-081/082; 2026-10-04 traz anotar_entrevista, concluir_entrevista e propor_bot, ADR-077; iniciar_tarefa e desligar, ADR-072; EMENDA 16 inclui pedir_a_pessoa; 2026-09-21 traz sem_novidade e o ciclo de vida de rotina; 2026-09-28 traz ver_colegas e o artefato, ADR-051; 2026-09-29 troca perguntar_a_bot e delegar_tarefa por pedir_a_bot, ADR-058; 2026-09-30 traz as pendências, ADR-064)", () => {
     expect([...NOMES_FERRAMENTAS_NOD].sort()).toEqual([...ESPERADAS].sort());
     expect(NOMES_FERRAMENTAS_NOD).toHaveLength(ESPERADAS.length);
+  });
+
+  it("ADR-081/082: as três do Nod — o lote tem um schema de ação só, com tipo obrigatório e até 20 ações", () => {
+    expect(FERRAMENTAS_NOD.gerir_bots.required).toEqual(["resumo", "acoes"]);
+    expect(FERRAMENTAS_NOD.gerir_bots.properties.acoes.maxItems).toBe(20);
+    expect(FERRAMENTAS_NOD.gerir_bots.properties.acoes.items.required).toEqual(["tipo"]);
+    expect(FERRAMENTAS_NOD.ver_apps_conectados.required).toEqual([]);
+    expect(FERRAMENTAS_NOD.registrar_relato.required).toEqual(["tipo", "titulo", "texto"]);
+    expect(FERRAMENTAS_NOD.registrar_relato.properties.tipo.enum).toEqual(["bug", "melhoria", "duvida"]);
   });
 
   it("ADR-077: as três do onboarding têm schema fechado e o para_bot é opcional em pedir_acesso e criar_rotina", () => {

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MsgCerebroServidor, MsgMidiaServidor } from "../../../src/contracts/voz.ts";
-import { criarServicoVoz, prioridadeTts, type FalaParaGravar, type FonteDeEsperas, type MetricasVoz, type RegistroLigacao } from "../../../src/adapters/voz/orquestrador.ts";
+import { criarServicoVoz, NOTA_CONEXAO_VOLTOU, prioridadeTts, type FalaParaGravar, type FonteDeEsperas, type MetricasVoz, type RegistroLigacao } from "../../../src/adapters/voz/orquestrador.ts";
 import { criarProvedoresFalsos } from "../../../src/adapters/voz/voz-falsa.ts";
 import type { OpcoesSessaoStt, PedidoTts, Sintetizador, Transcritor } from "../../../src/adapters/voz/spi.ts";
 import type { CanalVoz } from "../../../src/adapters/voz/ws.ts";
-import type { MotivoFimLigacao } from "../../../src/contracts/voz.ts";
+import { FECHAMENTOS_VOZ, type MotivoFimLigacao } from "../../../src/contracts/voz.ts";
+import { FALAS_DE_ESPERA } from "../../../src/domain/ligacao-espera.ts";
 
 /**
  * Orquestrador de voz com canais e provedores falsos (definido em 2026-10-04, ADR-071/073/074): sem socket, sem banco,
@@ -52,7 +53,7 @@ function quadro(seq: number, voz: boolean): Uint8Array {
   return b;
 }
 
-function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor; ligacaoId?: string } = {}) {
+function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, number>; tts?: Sintetizador; esperas?: FonteDeEsperas; aleatorio?: () => number; parciais?: boolean; stt?: Transcritor; ligacaoId?: string; relogio?: () => number } = {}) {
   const falsos = criarProvedoresFalsos({ roteiro: o.roteiro ?? [], silencioso: true, parciais: o.parciais === true });
   const provedores = o.tts ? { ...falsos, tts: o.tts } : falsos;
   const falas: FalaParaGravar[] = [];
@@ -66,6 +67,7 @@ function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, 
     },
     aleatorio: o.aleatorio ?? (() => 0.99),
     ...(o.esperas ? { esperas: o.esperas } : {}),
+    ...(o.relogio ? { relogio: o.relogio } : {}),
     prazos: { midiaReconexaoMs: 100, cerebroReconexaoMs: 150, cerebroPrimeiroMs: 5000, confirmarInterrupcaoMs: 300, resumoMs: 50, ...o.prazos },
   });
   const id = o.ligacaoId ?? "l1";
@@ -74,6 +76,18 @@ function montar(o: { roteiro?: string[]; maxS?: number; prazos?: Record<string, 
   const midia = canalFalso();
   const cerebro = canalFalso();
   return { voz, provedores, falas, fins, midia, cerebro, id };
+}
+
+/**
+ * Uma fala no ritmo do app: blocos de 100 ms (5 quadros) em tempo real. Em rajada, ~2,3 s de áudio logo depois de a mídia
+ * abrir passam de 1,2× o tempo real + 2 s e a guarda de abuso fecha a mídia no meio do teste (NOD-184).
+ */
+async function falarNoRitmo(midia: CanalFalso, seq: { n: number }, quadrosComVoz: number, quadrosDeSilencio: number): Promise<void> {
+  const total = quadrosComVoz + quadrosDeSilencio;
+  for (let i = 0; i < total; i++) {
+    midia.receber(quadro(seq.n++, i < quadrosComVoz));
+    if (i % 5 === 4) await dormir(100);
+  }
 }
 
 /** O "alto-falante" do teste: relata que tudo o que já foi mandado terminou de tocar. */
@@ -400,13 +414,11 @@ describe("orquestrador de voz", () => {
     tocouTudo(midia);
     provedores.stt.empurrarTexto("Primeiro eu quero definir o que você faz.");
     provedores.stt.empurrarTexto("Quero que seja minha secretária.");
-    let seq = 0;
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    const seq = { n: 0 };
+    await falarNoRitmo(midia, seq, 30, 40);
     await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
     // Volta a falar antes de qualquer áudio da resposta.
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    await falarNoRitmo(midia, seq, 30, 40);
     await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
     const vez2 = await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
     expect(String(vez2.texto)).toContain("Primeiro eu quero definir");
@@ -416,7 +428,8 @@ describe("orquestrador de voz", () => {
     cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Resposta velha." });
     await dormir(50);
     expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("velha"))).toBe(false);
-  });
+    expect(midia.fechadoCom).toBeNull();
+  }, 10_000);
 
   it("uma batida curta enquanto a vez espera não vai ao STT, não refaz nada e a vez sai (antes ficava pendurada)", async () => {
     const { voz, midia, cerebro, provedores } = montar();
@@ -427,18 +440,21 @@ describe("orquestrador de voz", () => {
     // Termina em "e": a vez espera 1,4 s; no meio dela, 100 ms de batida.
     provedores.stt.empurrarTexto("Quero criar uma rotina e");
     provedores.stt.empurrarTexto("isto não pode virar fala");
-    let seq = 0;
-    for (let i = 0; i < 30; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    // A primeira fala vai de uma vez (1,4 s cabe nos 2 s de folga da guarda) para a espera de 1,4 s começar já; a batida
+    // vem no ritmo do app, senão a soma passa de 1,2× o tempo real + 2 s e a guarda fecha a mídia (NOD-184).
+    const seq = { n: 0 };
+    for (let i = 0; i < 70; i++) midia.receber(quadro(seq.n++, i < 30));
     await ate(() => msgs(midia, "legenda").find((l) => l.final === true));
     await dormir(200);
-    for (let i = 0; i < 5; i++) midia.receber(quadro(seq++, true));
-    for (let i = 0; i < 40; i++) midia.receber(quadro(seq++, false));
+    // A batida tem de cair na espera: com a vez já fora, o teste passaria sem provar nada.
+    expect(msgs(cerebro, "vez").some((v) => v.n === 1)).toBe(false);
+    await falarNoRitmo(midia, seq, 5, 40);
     const vez = await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1), 4000);
     expect(vez.texto).toBe("Quero criar uma rotina e");
     expect(provedores.stt.restantes).toBe(1);
     expect(msgs(cerebro, "interromper")).toHaveLength(0);
-  });
+    expect(midia.fechadoCom).toBeNull();
+  }, 10_000);
 });
 
 /**
@@ -454,13 +470,15 @@ async function ruidoIntermitente(midia: CanalFalso, seq: { n: number }, quadros:
 }
 
 /** STT com tudo na mão do teste: quando chegam a parcial e o final, se o trecho está guardado, e a queda. */
-function sttNaMao(o: { parciais?: boolean } = {}) {
+function sttNaMao(o: { parciais?: boolean; recusarDaAbertura?: number } = {}) {
   let sessao: OpcoesSessaoStt | null = null;
-  const c = { enviados: 0, fins: 0, descartes: 0, guardando: false };
+  const c = { enviados: 0, fins: 0, descartes: 0, guardando: false, aberturas: 0 };
   const stt: Transcritor = {
     id: "manual",
     capacidades: { parciais: o.parciais === true, vocabulario: false, fimDeFalaManual: true },
     async abrir(op) {
+      c.aberturas++;
+      if (o.recusarDaAbertura !== undefined && c.aberturas >= o.recusarDaAbertura) throw new Error("recusado");
       sessao = op;
       return { enviar() { c.enviados++; }, fimDeFala() { c.fins++; }, descartar() { c.descartes++; }, guardando: () => c.guardando, async fechar() {} };
     },
@@ -637,17 +655,19 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     // Termina em "e": a vez espera 1,4 s. No meio dela, um "uhum".
     m.provedores.stt.empurrarTexto("Quero criar uma rotina e");
     m.provedores.stt.empurrarTexto("uhum");
+    // Como na batida: a fala vai de uma vez (1,4 s cabe nos 2 s de folga da guarda) e o "uhum" no ritmo do app (NOD-184).
     const seq = { n: 0 };
-    for (let i = 0; i < 30; i++) m.midia.receber(quadro(seq.n++, true));
-    for (let i = 0; i < 40; i++) m.midia.receber(quadro(seq.n++, false));
+    for (let i = 0; i < 70; i++) m.midia.receber(quadro(seq.n++, i < 30));
     await ate(() => msgs(m.midia, "legenda").find((l) => l.final === true));
     await dormir(200);
-    for (let i = 0; i < 12; i++) m.midia.receber(quadro(seq.n++, true));
-    for (let i = 0; i < 40; i++) m.midia.receber(quadro(seq.n++, false));
+    // O "uhum" tem de cair na espera: com a vez 2 já fora, o teste passaria sem provar nada.
+    expect(msgs(m.cerebro, "vez").some((v) => v.n === 2)).toBe(false);
+    await falarNoRitmo(m.midia, seq, 12, 40);
     const vez = await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === 2), 4000);
     expect(vez.texto).toBe("Quero criar uma rotina e");
     expect(m.provedores.stt.restantes).toBe(0);
-  });
+    expect(m.midia.fechadoCom).toBeNull();
+  }, 10_000);
 
   it("interromper vale para todas as falas que o app ainda tem, não só para a mais nova", async () => {
     const m = montar();
@@ -889,6 +909,38 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
     expect(fim?.quadros_perdidos).toBe(5);
   });
 
+  /**
+   * NOD-184: o e2e da ligação mandava cada fala (1,8 s de áudio) numa rajada só. Com o Mac rápido, a segunda rajada chegava
+   * ~1,2 s depois de a mídia abrir, com 3,6 s de áudio somados: acima de 1,2× o tempo real + 2 s. A guarda fechava a mídia
+   * e o "pode criar" nunca virava comando — a espera estourava sem dizer por quê.
+   */
+  it("duas falas de 1,8 s mandadas em rajada logo depois de a mídia abrir: a guarda de abuso fecha a mídia (4429)", async () => {
+    const linhas: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((l: unknown) => void linhas.push(String(l)));
+    // O relógio da guarda para em 1,2 s depois da mídia abrir, como no Mac rápido: com a máquina carregada, o atender
+    // sozinho podia passar de 1,3 s e a rajada deixava de estourar a guarda.
+    const t0 = Date.now();
+    let congelado: number | null = null;
+    const m = montar({ roteiro: ["Oi, tudo bem?", "pode criar"], ligacaoId: "rajada", relogio: () => congelado ?? Date.now() });
+    await atender(m);
+    congelado = t0 + 1_200;
+    let seq = 0;
+    for (let fala = 0; fala < 2; fala++) for (let i = 0; i < 90; i++) m.midia.receber(quadro(seq++, i < 30));
+    expect(m.midia.fechadoCom).toBe(FECHAMENTOS_VOZ.abuso);
+    expect(logDe(linhas, m.id).some((l) => l.evento === "voz_audio_acima_do_tempo_real")).toBe(true);
+  });
+
+  it("no ritmo do app (blocos de 100 ms em tempo real), 3 s de áudio não disparam a guarda de abuso", async () => {
+    const m = montar({ ligacaoId: "tempo-real" });
+    await atender(m);
+    let seq = 0;
+    for (let bloco = 0; bloco < 30; bloco++) {
+      for (let i = 0; i < 5; i++) m.midia.receber(quadro(seq++, false));
+      await dormir(100);
+    }
+    expect(m.midia.fechadoCom).toBeNull();
+  }, 10_000);
+
   it("cota do TTS: cada tipo de fala chega ao sintetizador com a sua prioridade, e o pico vai no voz_ligacao_encerrada", async () => {
     expect((["conteudo", "aviso", "leitura", "espera"] as const).map(prioridadeTts)).toEqual(["conteudo", "conteudo", "leitura", "espera"]);
     const linhas: string[] = [];
@@ -914,5 +966,247 @@ describe("orquestrador de voz: a vez não fica pendurada (2026-10-04)", () => {
       ["Mandar 1 e-mail. Para aprovar, diga 'eu aprovo'.", "leitura"],
     ]);
     expect(logDe(linhas, m.id).find((l) => l.evento === "voz_ligacao_encerrada")?.tts_pico_min).toBe(7);
+  });
+});
+
+describe("orquestrador de voz: resiliência (NOD-168)", () => {
+  const atender = async (m: ReturnType<typeof montar>) => {
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: m.id, retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: m.id, canal: m.cerebro });
+    await dormir(30);
+    tocouTudo(m.midia);
+  };
+  const avisos = (midia: CanalFalso) => msgs(midia, "aviso").map((a) => String(a.texto));
+  const TECLADO = "Não estou conseguindo te ouvir direito. Se continuar, use o teclado.";
+
+  it("o STT cai: reabre uma vez sem reanexar a mídia e sem aviso; caindo de novo, pede o teclado", async () => {
+    const { stt, c, cair } = sttNaMao();
+    const m = montar({ stt });
+    await atender(m);
+    expect(c.aberturas).toBe(1);
+    cair();
+    await ate(() => c.aberturas === 2);
+    await dormir(30);
+    expect(avisos(m.midia)).not.toContain(TECLADO);
+    // A mídia é a mesma: nenhum `pronto` novo.
+    expect(msgs(m.midia, "pronto")).toHaveLength(1);
+    cair();
+    await ate(() => avisos(m.midia).includes(TECLADO));
+    expect(c.aberturas).toBe(2);
+    await m.voz.fechar();
+  });
+
+  it("o STT cai e a reabertura falha: o aviso do teclado sai uma vez", async () => {
+    const { stt, c, cair } = sttNaMao({ recusarDaAbertura: 2 });
+    const m = montar({ stt });
+    await atender(m);
+    cair();
+    await ate(() => avisos(m.midia).includes(TECLADO));
+    expect(c.aberturas).toBe(2);
+    expect(avisos(m.midia).filter((a) => a === TECLADO)).toHaveLength(1);
+    await m.voz.fechar();
+  });
+
+  it("mídia e cérebro caem juntos (tampa fechada) e não voltam: encerra com cerebro_caiu, não midia_caiu", async () => {
+    const m = montar({ prazos: { midiaReconexaoMs: 100, cerebroReconexaoMs: 5000 } });
+    await atender(m);
+    m.cerebro.cair();
+    m.midia.cair();
+    await ate(() => m.fins.length > 0, 2000);
+    expect(m.fins.map((f) => f.motivo)).toEqual(["cerebro_caiu"]);
+  });
+
+  it("o cérebro religa com a ligação atendida: UMA nota \"A conexão voltou\" e nenhuma vez 0 nova; a vez que esperava segue", async () => {
+    const m = montar({ prazos: { cerebroReconexaoMs: 5000 } });
+    await atender(m);
+    const vezes0 = () => msgs(m.cerebro, "vez").filter((v) => v.n === 0).length + msgs(novo, "vez").filter((v) => v.n === 0).length;
+    const voltou = (c: CanalFalso) => msgs(c, "nota").filter((n) => n.texto === NOTA_CONEXAO_VOLTOU);
+    const novo = canalFalso();
+    expect(vezes0()).toBe(1);
+    expect(voltou(m.cerebro)).toHaveLength(0);
+    m.cerebro.cair();
+    m.midia.receber({ t: "texto", conteudo: "ainda está aí?" });
+    expect(m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: m.id, canal: novo })).toBeNull();
+    expect(voltou(novo)).toHaveLength(1);
+    expect(voltou(novo)[0]).toMatchObject({ confiavel: true });
+    expect(vezes0()).toBe(1);
+    // A vez dita durante a queda chega ao cérebro que voltou, depois da nota.
+    expect(msgs(novo, "vez").map((v) => v.texto)).toEqual(["ainda está aí?"]);
+    expect(novo.json.findIndex((x) => x.t === "nota")).toBeLessThan(novo.json.findIndex((x) => x.t === "vez"));
+    expect(msgs(m.midia, "estado").map((e) => e.fase)).toContain("reconectando");
+    expect(msgs(m.midia, "estado").at(-1)).toMatchObject({ fase: "pensando" });
+    await m.voz.fechar();
+  });
+
+  it("o cérebro religa antes de a ligação ser atendida: segue com a vez 0 da abertura, sem a nota", async () => {
+    const m = montar();
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: m.id, canal: m.cerebro });
+    m.cerebro.cair();
+    const novo = canalFalso();
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: m.id, canal: novo });
+    expect(msgs(novo, "vez").filter((v) => v.n === 0)).toHaveLength(1);
+    expect(msgs(novo, "nota").filter((n) => n.texto === NOTA_CONEXAO_VOLTOU)).toHaveLength(0);
+    await m.voz.fechar();
+  });
+
+  it("só a mídia cai e não volta: encerra com midia_caiu", async () => {
+    const m = montar({ prazos: { midiaReconexaoMs: 100 } });
+    await atender(m);
+    m.midia.cair();
+    await ate(() => m.fins.length > 0, 2000);
+    expect(m.fins.map((f) => f.motivo)).toEqual(["midia_caiu"]);
+  });
+});
+
+describe("orquestrador de voz: só legenda (NOD-168)", () => {
+  /** TTS que falha nas frases com "falha" no texto e conta quantas vezes foi chamado. */
+  function ttsQueFalha() {
+    const pedidos: string[] = [];
+    const tts: Sintetizador = {
+      id: "falha",
+      capacidades: { streaming: false, velocidade: true },
+      async *sintetizar(p) {
+        pedidos.push(p.texto);
+        if (p.texto.includes("falha")) throw new Error("tts fora");
+        yield new Int16Array(2400);
+      },
+    };
+    return { tts, pedidos };
+  }
+  /** Só o clipe do aviso "voz fora" está no cache. */
+  const soVozFora: FonteDeEsperas = { obterPronto: (f) => (f.categoria === "voz_fora" ? new Int16Array(2400) : null), aquecer: () => undefined };
+  const VOZ_FORA = "A voz falhou. Sigo por escrito, na legenda e no chat.";
+
+  async function falar(m: ReturnType<typeof montar>, n: number, delta: string): Promise<void> {
+    m.midia.receber({ t: "texto", conteudo: `pergunta ${n}` });
+    await ate(() => msgs(m.cerebro, "vez").find((v) => v.n === n));
+    m.cerebro.receber({ t: "fala", n, seq: 0, delta });
+    m.cerebro.receber({ t: "fala-fim", n });
+    await ate(() => msgs(m.midia, "bot-fala").find((x) => String(x.texto) === delta.trim()));
+    await dormir(80);
+    tocouTudo(m.midia);
+  }
+
+  it("2 frases seguidas sem voz: um único aviso (escrito e o clipe voz_fora), e a 3ª frase sai só na legenda, sem chamar o TTS", async () => {
+    const { tts, pedidos } = ttsQueFalha();
+    const m = montar({ tts, esperas: soVozFora });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    await dormir(50);
+    tocouTudo(m.midia);
+    await falar(m, 1, "Primeira falha aqui. ");
+    expect(msgs(m.midia, "aviso")).toHaveLength(0);
+    await falar(m, 2, "Segunda falha aqui. ");
+    await ate(() => msgs(m.midia, "aviso").length > 0);
+    await ate(() => msgs(m.midia, "bot-fala").find((x) => x.texto === VOZ_FORA));
+    const chamadas = pedidos.length;
+    await falar(m, 3, "Terceira frase, essa teria voz. ");
+    expect(pedidos.length).toBe(chamadas);
+    expect(pedidos.some((t) => t.includes("Terceira"))).toBe(false);
+    expect(msgs(m.midia, "aviso")).toHaveLength(1);
+    expect(msgs(m.midia, "bot-fala").filter((x) => x.texto === VOZ_FORA)).toHaveLength(1);
+    // A ligação segue: a pessoa ainda fala e a vez ainda sai.
+    expect(m.fins).toHaveLength(0);
+    expect(msgs(m.cerebro, "vez").some((v) => v.n === 3)).toBe(true);
+    await m.voz.fechar();
+  });
+
+  it("uma falha seguida de uma frase com voz: nada de aviso nem só legenda", async () => {
+    const { tts, pedidos } = ttsQueFalha();
+    const m = montar({ tts, esperas: soVozFora });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    await dormir(50);
+    tocouTudo(m.midia);
+    await falar(m, 1, "Uma falha aqui. ");
+    await falar(m, 2, "Agora com voz. ");
+    await falar(m, 3, "Outra falha aqui. ");
+    expect(msgs(m.midia, "aviso")).toHaveLength(0);
+    expect(msgs(m.midia, "bot-fala").some((x) => x.texto === VOZ_FORA)).toBe(false);
+    await falar(m, 4, "E de novo com voz. ");
+    expect(pedidos.some((t) => t.includes("de novo com voz"))).toBe(true);
+    await m.voz.fechar();
+  });
+
+  it("só legenda: uma decisão pendente não é lida nem abre a janela de voz (a aprovação fica na tela)", async () => {
+    const { tts } = ttsQueFalha();
+    const m = montar({ tts, esperas: soVozFora });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    await dormir(50);
+    tocouTudo(m.midia);
+    await falar(m, 1, "Primeira falha aqui. ");
+    await falar(m, 2, "Segunda falha aqui. ");
+    await ate(() => msgs(m.midia, "aviso").length > 0);
+    tocouTudo(m.midia);
+    m.voz.pedirAprovacao("l1", { decisaoId: "d1", leitura: "Mandar 1 e-mail. Para aprovar, diga 'eu aprovo'.", perfil: "estrito" });
+    await dormir(1200);
+    expect(msgs(m.midia, "bot-fala").some((x) => x.tipo === "leitura")).toBe(false);
+    expect(msgs(m.midia, "janela")).toHaveLength(0);
+    await m.voz.fechar();
+  });
+});
+
+describe("vez sem resposta (NOD-167)", () => {
+  const esperas: FonteDeEsperas = { obterPronto: () => new Int16Array(2400), aquecer: () => undefined };
+  const avisos = FALAS_DE_ESPERA.filter((f) => f.categoria === "vez_sem_resposta").map((f) => f.texto);
+
+  async function ligado(prazo: number, fonte: FonteDeEsperas | null = esperas) {
+    const m = montar({ esperas: fonte ?? undefined, prazos: { vezSemRespostaMs: prazo } });
+    m.voz.anexarMidia({ pessoaId: "p", ligacaoId: "l1", retomar: false, canal: m.midia });
+    m.voz.anexarCerebro({ turnoId: "turno", ligacaoId: "l1", canal: m.cerebro });
+    await dormir(30);
+    tocouTudo(m.midia);
+    return m;
+  }
+
+  it("sem trecho nem ferramenta no prazo: fala o aviso, interrompe o cérebro, cala a resposta atrasada e a vez seguinte segue normal", async () => {
+    const { midia, cerebro } = await ligado(200);
+    midia.receber({ t: "texto", conteudo: "qual a minha próxima reunião" });
+    await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
+    const aviso = await ate(() => msgs(midia, "bot-fala").find((m) => m.tipo === "espera" && avisos.includes(String(m.texto))));
+    expect(aviso).toBeTruthy();
+    // O Codex responde depois da interrupção: não é falado.
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Resposta atrasada que não deve soar. " });
+    cerebro.receber({ t: "fala-fim", n: 1 });
+    await dormir(600);
+    expect(msgs(midia, "bot-fala").some((m) => String(m.texto).includes("atrasada"))).toBe(false);
+    expect(msgs(cerebro, "interromper")).toHaveLength(1);
+
+    tocouTudo(midia);
+    midia.receber({ t: "texto", conteudo: "e a de amanhã" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
+    cerebro.receber({ t: "fala", n: 2, seq: 0, delta: "Amanhã às nove. " });
+    cerebro.receber({ t: "fala-fim", n: 2 });
+    await ate(() => msgs(midia, "bot-fala").find((m) => m.texto === "Amanhã às nove."));
+  });
+
+  it("com trecho ou ferramenta antes do prazo, nada de aviso nem interrupção", async () => {
+    const { midia, cerebro } = await ligado(250);
+    midia.receber({ t: "texto", conteudo: "me conta uma coisa" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 1));
+    cerebro.receber({ t: "fala", n: 1, seq: 0, delta: "Já te conto" });
+    await dormir(500);
+    cerebro.receber({ t: "fala-fim", n: 1 });
+    tocouTudo(midia);
+    midia.receber({ t: "texto", conteudo: "agora olha a agenda" });
+    await ate(() => msgs(cerebro, "vez").find((v) => v.n === 2));
+    cerebro.receber({ t: "atividade", tipo: "inicio", nome: "mcp__nod__lembrar" });
+    await dormir(500);
+    expect(msgs(cerebro, "interromper")).toHaveLength(0);
+    expect(msgs(midia, "bot-fala").some((m) => avisos.includes(String(m.texto)))).toBe(false);
+  });
+
+  // Regressão (revisão NOD-167): sem o clipe em cache, o aviso saía mudo e a pessoa ficava em silêncio.
+  it.each([
+    ["clipe ainda não sintetizado", { obterPronto: () => null, aquecer: () => undefined } as FonteDeEsperas],
+    ["sem fonte de esperas", null],
+  ])("%s: o aviso sai pela voz normal, nunca em silêncio", async (_nome, fonte) => {
+    const { midia, cerebro } = await ligado(200, fonte);
+    midia.receber({ t: "texto", conteudo: "qual a minha próxima reunião" });
+    await ate(() => msgs(cerebro, "interromper").find((m) => m.modo === "duro"));
+    const aviso = await ate(() => msgs(midia, "bot-fala").find((m) => avisos.includes(String(m.texto))));
+    expect(aviso.tipo).toBe("aviso");
+    expect(msgs(midia, "bot-fala").filter((m) => avisos.includes(String(m.texto)))).toHaveLength(1);
   });
 });

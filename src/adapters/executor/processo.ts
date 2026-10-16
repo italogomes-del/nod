@@ -1,4 +1,10 @@
 import { spawn } from "node:child_process";
+import { basename, join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { encerrarFugitivosDoTurno } from "./fugitivos.ts";
+import { abrirGrupoDoTurno, fecharGrupoDoTurno } from "./grupos-da-maquina.ts";
+import { spawnNoGrupo } from "../../domain/grupos-da-maquina.ts";
+import { gravarArquivoDeGrupos, inicioDesteProcesso, prefixoDaMarca, VARIAVEL_DA_MARCA, type GrupoRegistrado } from "./grupos-orfaos.ts";
 
 /**
  * Processo filho do executor: spawn, linhas do stdout, stderr acumulado, e interrupção em dois
@@ -33,6 +39,101 @@ const DEPOIS_DO_SIGKILL_MS = 1_000;
 const STDERR_MAX_CHARS = 65_536;
 
 const dormir = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Grupos de processo vivos (definido em 2026-10-07, ADR-083, #194). Cada filho nasce líder do próprio grupo
+ * (`detached: true`), para o amostrador somar a memória do grupo e o Parar levar junto os netos (servidor MCP, Bash do
+ * modelo). O preço do `detached` é o filho não morrer com o app: o `exit` do processo do nod (app do Mac ou servidor)
+ * mata com SIGKILL todo grupo que ainda estiver aqui. `process.kill` é síncrono, o único tipo de trabalho que o `exit`
+ * permite.
+ * revisto em 2026-10-09 (ADR-089, #217): o `exit` não roda num SIGKILL nem numa queda, e os grupos ficavam órfãos por
+ * horas. Com `registrarGruposEm`, cada grupo também fica anotado no arquivo da instância (grupos-orfaos.ts), e o boot
+ * seguinte mata o que sobrou. Sem arquivo (testes, sonda avulsa), nada é gravado.
+ */
+const gruposVivos = new Map<number, GrupoRegistrado>();
+let ganchoDeSaida = false;
+let arquivoDeGrupos: string | null = null;
+/** Com o registro ligado, cada spawn leva NOD_GRUPO=<prefixo da instância>-<aleatório>: a prova que o boot lê (revisão do #223). */
+let prefixoDeMarca: string | null = null;
+
+/** Anota a lista no arquivo da instância; uma falha de disco não pode derrubar o turno (o `exit` ainda mata). */
+function anotarGrupos(): void {
+  if (arquivoDeGrupos === null) return;
+  try {
+    gravarArquivoDeGrupos(arquivoDeGrupos, { dono: { pid: process.pid, inicioMs: inicioDesteProcesso() }, grupos: [...gruposVivos.values()] });
+  } catch {
+    // disco cheio ou sem permissão: segue só com o `exit`, como antes da ADR-089
+  }
+}
+
+/**
+ * Liga o registro em arquivo (ADR-089). O boot chama depois de `encerrarGruposOrfaos` dizer que este processo assumiu o
+ * arquivo; null desliga (os testes).
+ */
+export function registrarGruposEm(arquivo: string | null): void {
+  arquivoDeGrupos = arquivo;
+  prefixoDeMarca = arquivo === null ? null : prefixoDaMarca(arquivo);
+  anotarGrupos();
+}
+
+/**
+ * SIGKILL em todo grupo que este processo ainda tem e o arquivo anotado vazio: o caminho do `exit`, e o do app do Mac ao
+ * sair (will-quit). Síncrono e idempotente.
+ */
+export function encerrarGruposVivos(): void {
+  for (const g of gruposVivos.keys()) {
+    try {
+      process.kill(-g, "SIGKILL");
+    } catch {
+      // o grupo já acabou
+    }
+  }
+  gruposVivos.clear();
+  anotarGrupos();
+}
+
+/** Sinal para o grupo inteiro; sem grupo (plataforma sem `-pid`) ou já morto, cai no próprio processo. */
+function sinalizarGrupo(pid: number, sinal: NodeJS.Signals, sozinho: () => void): void {
+  try {
+    process.kill(-pid, sinal);
+  } catch {
+    try {
+      sozinho();
+    } catch {
+      // já saiu
+    }
+  }
+}
+
+function vigiarGrupo(pid: number, grupo: GrupoRegistrado): void {
+  gruposVivos.set(pid, grupo);
+  anotarGrupos();
+  if (ganchoDeSaida) return;
+  ganchoDeSaida = true;
+  process.on("exit", encerrarGruposVivos);
+}
+
+/** Tira o grupo da lista (e do arquivo); true se ele estava lá — só então o pid ainda é nosso. */
+function soltarGrupo(pid: number): boolean {
+  if (!gruposVivos.delete(pid)) return false;
+  anotarGrupos();
+  return true;
+}
+
+/** Os grupos que este processo do nod ainda tem vivos (os testes conferem que o Parar os solta). */
+export function gruposDeProcessoVivos(): number[] {
+  return [...gruposVivos.keys()];
+}
+
+/**
+ * ADR-097 (fase 0c): a marca NOD_GRUPO de cada grupo vivo, pela qual o amostrador soma no turno o que saiu do grupo dele
+ * (o Postgres de teste). Vazio com o registro desligado (sem marca).
+ */
+export function marcasDosGruposVivos(): Map<string, number> {
+  const marcas = new Map<string, number>();
+  for (const g of gruposVivos.values()) if (g.marca !== "") marcas.set(g.marca, g.pid);
+  return marcas;
+}
 
 /**
  * Divide o stdout em linhas procurando o "\n" só no pedaço que acabou de chegar; os pedaços da linha ainda aberta são
@@ -71,6 +172,11 @@ export function iniciarProcesso(o: {
   env: Record<string, string>;
   cwd: string;
   aoLinha(linha: string): void;
+  /**
+   * Cada pedaço do stderr, quando chega (definido em 2026-10-09: o npm escreve o progresso no stderr, e a instalação
+   * pelo app mostra a última linha ao vivo). O stderr continua acumulado no `fim`, como sempre.
+   */
+  aoStderr?(pedaco: string): void;
   /** 'pipe' (default) para mandar o prompt; 'ignore' para a sonda com prompt como argumento. */
   stdin?: "pipe" | "ignore";
   /**
@@ -79,19 +185,46 @@ export function iniciarProcesso(o: {
    * mesmo 5 s é corrida, não asserção (a suíte piscava com 'expected 5020 to be less than 5000').
    */
   sigtermParaSigkillMs?: number;
+  /**
+   * ADR-097 (fase 0): no fim, também encerra o que saiu do grupo com a marca deste spawn (fugitivos.ts). Padrão true;
+   * `executarColetando` (sonda, `--version`) passa false: comando curto não abre servidor, e não vale um `ps` por sonda.
+   */
+  encerrarFugitivos?: boolean;
+  /**
+   * ADR-097 (fase 2): na VM com a repartição ligada (grupos-da-maquina.ts), o turno nasce no próprio grupo de controle.
+   * Padrão: o mesmo de `encerrarFugitivos` (a sonda e o `--version` não abrem grupo).
+   */
+  repartir?: boolean;
 }): Processo {
   const esperaAteSigkill = o.sigtermParaSigkillMs ?? SIGTERM_PARA_SIGKILL_MS;
-  const filho = spawn(o.bin, [...o.args], { cwd: o.cwd, env: o.env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"] });
+  // #194: líder de um grupo próprio (ver gruposVivos). stdin/stdout/stderr continuam pipes.
+  // ADR-089: a marca vai no ambiente do líder e é herdada pelos netos (o Bash do modelo, o servidor MCP).
+  const marca = prefixoDeMarca === null ? "" : `${prefixoDeMarca}-${randomBytes(6).toString("hex")}`;
+  const env = marca === "" ? o.env : { ...o.env, [VARIAVEL_DA_MARCA]: marca };
+  const desdeMs = Date.now();
+  // ADR-097 (fase 2): o `sh` do spawnNoGrupo entra no grupo e vira o programa (exec): mesmo pid, mesmo grupo de processos.
+  const grupo = (o.repartir ?? o.encerrarFugitivos !== false) ? abrirGrupoDoTurno() : null;
+  const alvo = grupo ? spawnNoGrupo(join(grupo, "cgroup.procs"), o.bin, o.args) : { bin: o.bin, args: [...o.args] };
+  const filho = spawn(alvo.bin, alvo.args, { cwd: o.cwd, env, stdio: [o.stdin ?? "pipe", "pipe", "pipe"], detached: true });
+  const pid = filho.pid;
+  // ADR-089: o relógio antes e depois do spawn cerca o início que o `ps` vai mostrar para este líder.
+  if (pid !== undefined) vigiarGrupo(pid, { pid, desdeMs, ateMs: Date.now(), programa: basename(o.bin), marca });
   let stderr = "";
   const linhas = criarDivisorDeLinhas((linha) => o.aoLinha(linha));
   let terminou = false;
   let interrompido = false;
+  // ADR-097: o que abriu sessão própria (o Postgres de teste) não sai com o grupo; vai pela marca, sem segurar o fim.
+  const levarFugitivos = () => {
+    if (pid === undefined || marca === "" || o.encerrarFugitivos === false) return;
+    void encerrarFugitivosDoTurno({ pgid: pid, desdeMs, marca }, [...gruposVivos.keys()]);
+  };
 
   filho.stdout?.setEncoding("utf8");
   filho.stdout?.on("data", (pedaco: string) => linhas.empurrar(pedaco));
   filho.stderr?.setEncoding("utf8");
   filho.stderr?.on("data", (pedaco: string) => {
     if (stderr.length < STDERR_MAX_CHARS) stderr += pedaco.slice(0, STDERR_MAX_CHARS - stderr.length);
+    o.aoStderr?.(pedaco);
   });
   filho.stdin?.on("error", () => {
     // EPIPE quando o filho morre antes de ler o prompt: o fim do processo já diz o que houve
@@ -113,7 +246,24 @@ export function iniciarProcesso(o: {
     });
     // 'close' (e não 'exit'): garante que o stdout foi drenado até a última linha
     filho.on("close", (code, signal) => concluir({ exitCode: code, signal, stderr, erroSpawn: null }));
+  }).then((r) => {
+    // O líder saiu e o stdout fechou: o grupo sai da lista, senão o `exit` do app mataria um grupo novo que reusasse o
+    // pid. Quem interrompeu solta o grupo no fim do interromper(), depois do SIGKILL nos netos.
+    // revisto em 2026-10-08 (revisão do épico #188, X6): o líder que sai sozinho pode deixar neto no grupo (um
+    // `sleep 60 &` do Bash do modelo, um servidor MCP). Fora da lista, o `exit` do app não o mataria mais: o grupo é
+    // levado agora, enquanto o pid ainda é nosso (o grupo vive enquanto houver membro, então não foi reusado).
+    if (pid !== undefined && !interrompido && soltarGrupo(pid)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        // o grupo já acabou junto com o líder
+      }
+      levarFugitivos();
+    }
+    return r;
   });
+  // O grupo sai quando esvazia: depois do fim e do SIGKILL no grupo de processos (o interromper também espera o fim).
+  if (grupo) void fim.then(() => fecharGrupoDoTurno(grupo));
 
   /** Um neto órfão (servidor MCP que não morreu) pode segurar o pipe aberto depois do exit; fecha à força. */
   const fecharStdio = () => {
@@ -122,7 +272,7 @@ export function iniciarProcesso(o: {
   };
 
   return {
-    pid: filho.pid ?? null,
+    pid: pid ?? null,
     escrever(texto) {
       if (!terminou && filho.stdin && !filho.stdin.destroyed) filho.stdin.write(texto);
     },
@@ -132,14 +282,28 @@ export function iniciarProcesso(o: {
     interrompido: () => interrompido,
     async interromper() {
       interrompido = true;
-      if (terminou || filho.pid === undefined) return;
-      filho.kill("SIGTERM");
+      if (pid === undefined) return;
+      if (terminou) {
+        // O líder já saiu; um neto do grupo pode estar vivo (Bash do modelo). Leva o grupo, sem esperar — só se ele
+        // ainda é nosso (fora da lista, o pid pode já ser de outro).
+        if (soltarGrupo(pid)) {
+          sinalizarGrupo(pid, "SIGKILL", () => undefined);
+          levarFugitivos();
+        }
+        return;
+      }
+      // #194: SIGTERM no GRUPO (o CLI e o que ele abriu), com o mesmo 5 s até o SIGKILL.
+      sinalizarGrupo(pid, "SIGTERM", () => filho.kill("SIGTERM"));
       const fechou = await Promise.race([fim.then(() => true), dormir(esperaAteSigkill).then(() => false)]);
-      if (fechou) return;
-      if (!saiu) filho.kill("SIGKILL");
-      const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
-      if (!fechouDepois) fecharStdio();
-      await fim;
+      if (!fechou) {
+        sinalizarGrupo(pid, "SIGKILL", () => { if (!saiu) filho.kill("SIGKILL"); });
+        const fechouDepois = await Promise.race([fim.then(() => true), dormir(DEPOIS_DO_SIGKILL_MS).then(() => false)]);
+        if (!fechouDepois) fecharStdio();
+        await fim;
+      }
+      // Quem saiu no SIGTERM pode ter deixado neto no grupo: o SIGKILL final não custa nada se não houver.
+      sinalizarGrupo(pid, "SIGKILL", () => undefined);
+      if (soltarGrupo(pid)) levarFugitivos();
     },
     fim,
   };
@@ -154,7 +318,7 @@ export async function executarColetando(o: {
   timeoutMs: number;
 }): Promise<FimProcesso & { stdout: string; estourouTempo: boolean }> {
   const linhas: string[] = [];
-  const proc = iniciarProcesso({ ...o, stdin: "ignore", aoLinha: (l) => linhas.push(l) });
+  const proc = iniciarProcesso({ ...o, stdin: "ignore", encerrarFugitivos: false, aoLinha: (l) => linhas.push(l) });
   let estourouTempo = false;
   const relogio = setTimeout(() => {
     estourouTempo = true;

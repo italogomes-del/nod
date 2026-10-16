@@ -91,6 +91,16 @@ export function rotinasRepo(conn: Conn, escopo: Escopo) {
       return l ? paraRotina(l) : null;
     },
 
+    /**
+     * definido em 2026-10-06 (NOD-182): `buscar` com a linha TRAVADA até o fim da transação, para confirmar uma proposta
+     * de mudar/excluir. A segunda confirmação concorrente espera a primeira e relê a rotina já mudada. Só a dona: o
+     * FOR UPDATE passa pela policy de UPDATE (0004), então rotina de outra pessoa do tenant volta null.
+     */
+    async buscarParaAtualizar(id: string): Promise<Rotina | null> {
+      const [l] = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;
+      return l ? paraRotina(l) : null;
+    },
+
     async listar(): Promise<Rotina[]> {
       const linhas = await conn<Linha[]>`select ${conn.unsafe(COLUNAS)} from rotinas where tenant_id = ${escopo.tenantId} and excluido_em is null and exists (select 1 from agentes a where a.tenant_id = rotinas.tenant_id and a.id = rotinas.agente_id and a.excluido_em is null) order by criado_em`;
       return linhas.map(paraRotina);

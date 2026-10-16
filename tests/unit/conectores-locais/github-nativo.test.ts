@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { configGithubNativo, criarDetectorGh, sondaGithubNativa } from "../../../src/adapters/conectores-locais/github/nativo.ts";
 
 /**
@@ -16,8 +16,21 @@ const APP = { token: "ghs_instalacao", expiraEm: 1_000 };
  * medido em 2026-09-24: sob a suíte inteira com outra suíte rodando na mesma máquina, spawnar o
  * servidor stdio + o gh falso passou dos 5 s padrão do projeto unit (4 de 779 testes, uma rodada em
  * três). O teto por teste sobe só aqui, onde há processo de verdade.
+ * NOD-194: o detector tem prazo FIXO de 5 s no `gh auth status` (criarDetectorGh, maquina.ts). Com o Mac em load
+ * ~1000 (duas `test:unit` em paralelo) o gh falso, um `sh`, passou disso, o detector leu "deslogado" e o teste
+ * caiu sem defeito nenhum (medido em 2026-10-07). O teste mede o cache, não o prazo: o execFile deste arquivo
+ * sobe esse prazo para PRAZO_GH_MS; o resto do child_process fica intacto. O código não muda.
+ * medido em 2026-10-09 (QA da NOD-194, duas `test:unit` em paralelo, load de 5 min ~1000): este arquivo levou 54,2 s
+ * e o `github-gh` vizinho estourou os 60 s do mesmo padrão com um gh falso que não espera nada. Daí 120 s.
  */
-const PROCESSO = { timeout: 20_000 };
+const { PRAZO_GH_MS } = vi.hoisted(() => ({ PRAZO_GH_MS: 120_000 }));
+vi.mock("node:child_process", async (original) => {
+  const m = await original<typeof import("node:child_process")>();
+  const execFile = (bin: string, args: string[], opcoes: { timeout?: number }, cb: (...r: unknown[]) => void) => m.execFile(bin, args, { ...opcoes, timeout: opcoes.timeout ? Math.max(opcoes.timeout, PRAZO_GH_MS) : opcoes.timeout }, cb);
+  return { ...m, execFile };
+});
+/** Duas chamadas ao gh no pior caso, cada uma no PRAZO_GH_MS. */
+const PROCESSO = { timeout: 2 * PRAZO_GH_MS + 10_000 };
 
 describe("configGithubNativo: jeitos do servidor, por turno", () => {
   it("token da pessoa primeiro, sem nada do Composio nem segredo do servidor no ambiente", () => {

@@ -33,9 +33,18 @@ import { salasRepo } from "./salas.repo.ts";
 import type { Repos } from "./tipos.ts";
 import { trilhaRepo } from "./trilha.repo.ts";
 import { turnosRepo } from "./turnos.repo.ts";
+import { trabalhosRepo } from "./trabalhos.repo.ts";
+import { frentesRepo } from "./frentes.repo.ts";
+import { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
+import { donosRepo } from "./donos.repo.ts";
+import { esperasRepo } from "./esperas.repo.ts";
+import { contasIaRepo } from "./contas-ia.repo.ts";
+import { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
+import { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import { onboardingRepo } from "./onboarding.repo.ts";
 import { comandosRepo } from "./comandos.repo.ts";
+import { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
 import { ligacoesRepo } from "./ligacoes.repo.ts";
 import { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
@@ -57,6 +66,14 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     propostas: propostasRepo(conn, escopo),
     relatos: relatosRepo(conn, escopo),
     turnos: turnosRepo(conn, escopo),
+    trabalhos: trabalhosRepo(conn, escopo),
+    frentes: frentesRepo(conn, escopo),
+    pedidosDeColega: pedidosDeColegaRepo(conn, escopo),
+    donos: donosRepo(conn, escopo),
+    esperas: esperasRepo(conn, escopo),
+    contasIa: contasIaRepo(conn, escopo),
+    trocasDeIa: trocasDeIaRepo(conn, escopo),
+    turnoCredenciais: turnoCredenciaisRepo(conn, escopo),
     decisoes: decisoesRepo(conn, escopo),
     itensAprovacao: itensAprovacaoRepo(conn, escopo),
     rotinas: rotinasRepo(conn, escopo),
@@ -79,6 +96,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     raioX: raioXRepo(conn, escopo),
     preferencias: preferenciasRepo(conn, escopo),
     comandos: comandosRepo(conn, escopo),
+    usoDoPlano: usoDoPlanoRepo(conn, escopo),
     leituras: leiturasRepo(conn, escopo),
     ligacoes: ligacoesRepo(conn, escopo),
     liberacoesDispensadas: liberacoesDispensadasRepo(conn, escopo),

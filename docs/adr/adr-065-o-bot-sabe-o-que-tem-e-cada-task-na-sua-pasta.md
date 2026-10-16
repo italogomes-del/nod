@@ -1,7 +1,9 @@
 # ADR-065 — O bot sabe o que tem neste turno, e cada task na sua pasta
 
 Status: aceito, revista pela [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md) no mesmo dia (o terminal
-vale em todo modo, então a linha "Terminal:" só aparece no peer legado; os itens 5 e 7 abaixo foram feitos lá) ·
+vale em todo modo, então a linha "Terminal:" só aparece no peer legado; os itens 5 e 7 abaixo foram feitos lá);
+emendada pela [ADR-088](adr-088-limpeza-das-pastas-de-task.md) em 2026-10-09 (o `worktree add` também é cercado: a
+worktree nasce na pasta do turno, a da task quando há task, e sai quando a task acaba) ·
 Data: 2026-10-01 · Emenda a [ADR-055](adr-055-terminal-de-verdade-como-o-inhouse.md) (o git que mexe
 na pasta de trabalho só roda dentro de `~/nod/<bot>`) e a [ADR-052](adr-052-o-kit-do-terminal-com-o-nod-decidindo.md)
 (o prompt diz por que o terminal falta). Itens 8 e 6 da investigação "os Devs não executam tasks", aprovados pelo
@@ -92,6 +94,35 @@ dois campos, não liga a cerca.
   turno: revisar `gitForaDaPastaDoBot` antes de mais cercas.
 - **A linha não muda a fala.** Uma semana depois do deploy, ainda aparece "a ferramenta caiu" ou "sem terminal" como
   fato em mais de 5 turnos: a linha não basta, e o caminho é dar o terminal (decisão em aberto, abaixo).
+
+## Revisão de 2026-10-11: o gatilho disparou
+
+O primeiro gatilho de reversão disparou sem ser visto. A pílula da conversa diz "alcance insuficiente — peça
+aprovação" para toda nativa negada, e o motivo de verdade só chega ao modelo.
+
+O Marlon perguntou por que o Ze 1 teve "Bash negada". Para responder, as sessões dos bots foram varridas: o
+`tool_result` de cada `PreToolUse:Bash hook error: nod: …` foi casado com o comando que o gerou. O resultado:
+
+- 482 negações: 161 na VM, de 09/10 a 11/10, e 321 no Mac, de 28/09 a 09/10.
+- 177 eram "numa pasta que não deu para conferir". Em 167 delas, o comando dava valor à variável e a usava em
+  seguida, como em `T=~/nod/"Ze 1"/<task>; git worktree add "$T/pr757"`. O `resolver` desistia de todo `$`.
+- O Ze 1 tropeçou 82 vezes só na VM.
+
+**Mudança:** `gitForaDaPastaDoBot` passa a ler as variáveis que o próprio comando definiu:
+
+- **Formas aceitas:** `NOME=valor` depois de `;`, de `&&` ou no começo; `export`, `local` e `readonly`; `$PWD`, que é a
+  pasta naquele ponto; e `$HOME`.
+- **Formas que continuam sem valor:** variável de laço; atribuição depois de `||` ou num pipe; o prefixo
+  `W=x git -C "$W"`, que o shell expande antes de atribuir; e a variável entre aspas simples.
+
+Com as negações reais reaplicadas, 144 das 177 passam. Nenhuma das 53 que eram "fora da sua pasta" passou.
+
+**Buraco fechado no mesmo PR:** o git depois de `do`, `then` e `else` (`for …; do git checkout …; done`) não era
+conferido, porque a cerca via `do` como o programa.
+
+**Próximo passo, fora deste PR:** a fronteira de escrita aplicada pelo sistema operacional (o sandbox do Claude Code,
+que já trata a worktree, e o `workspace-write` do Codex). Ela tira do nod a leitura de shell como texto, que nunca
+fecha. O assunto fica para uma ADR própria, porque a ADR-055 recusou o sandbox por causa da rede.
 
 ## Não implementado
 

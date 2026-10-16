@@ -1,6 +1,6 @@
 # Como publicar cada versão do nod
 
-Este roteiro é para quem mantém o projeto. Para instalar a versão já publicada, use o [guia da primeira pré-release](https://github.com/marlonwlv/nod/blob/desktop-v0.1.0-preview.1/docs/release-desktop.md).
+Este roteiro é para quem mantém o projeto. Para instalar a versão já publicada, use o [guia da primeira pré-release](https://github.com/gamefik/nod/blob/desktop-v0.1.0-preview.1/docs/release-desktop.md).
 
 ## Ponto de partida e pendências
 
@@ -16,6 +16,32 @@ Em 2026-09-17, o mantenedor pediu repetir a preview anterior e adiar a distribui
 
 O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assinado de tags `v*`. Não se alteram `forceCodeSigning`, hardened runtime ou notarização da configuração de distribuição estável. Para gerar somente os artefatos desta preview, aplique os overrides explícitos na linha de comando: `CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dmg --x64 --arm64 --publish never --config.mac.identity=null --config.mac.notarize=false --config.dmg.sign=false`. Os demais passos e requisitos abaixo descrevem a distribuição assinada.
 
+## Pré-release local: `npm run release:mac`
+
+Definido em 2026-10-13. É o fluxo de hoje, enquanto os secrets da Apple não estão cadastrados e o workflow assinado
+não roda. As rc.1 a rc.9 da 0.4.0 saíram assim.
+
+1. **A versão sobe por PR** (`chore: versão X`, `npm version X --no-git-tag-version`). O app manda `app.getVersion()`
+   no header `x-nod-versao`, então a versão vem antes do build.
+2. **O merge desse PR abre uma issue** "Release do app do Mac pendente: X", atribuída ao mantenedor
+   (`.github/workflows/release-pendente.yml`). O passo depois do merge se perdia: a rc.5, a rc.8 e a rc.9 ficaram
+   mergeadas sem release.
+3. **Num Mac com o `gh` logado, rode `npm run release:mac`** (`scripts/desktop/release-mac.sh`). O script:
+   - builda numa cópia limpa do commit (worktree temporária). Se a tag `desktop-vX` já existe, usa o commit dela sem
+     movê-la; senão, usa a `origin/main`;
+   - testa o `hdiutil` antes: ele trava com o Mac saturado (rc.8);
+   - embute o servidor de `NOD_SERVIDOR_PADRAO` (ambiente ou variável do repositório; sem elas, o endereço de produção);
+   - gera os DMGs x64 e arm64 com assinatura ad-hoc e verifica cada um: `hdiutil verify`, `codesign`, arquitetura,
+     versão, servidor e npm embutidos e o smoke do proxy na arquitetura do Mac;
+   - escreve as notas com os títulos dos PRs desde a última release publicada (`--notas arquivo` troca por outras);
+   - cria o rascunho, baixa o que o GitHub guardou, confere os hashes e publica. `--sem-publicar` para no rascunho;
+   - copia os DMGs para `~/Downloads/nod-X/`.
+4. **A publicação fecha a issue.** Se a versão subir de novo antes da release, a issue antiga fecha como substituída.
+
+O app não se atualiza sozinho: cada pessoa baixa e instala o DMG. Só precisa de versão nova o que roda no Mac
+(`desktop/`, o executor local, o proxy). A tela e o servidor chegam a todos pelo deploy, porque o app carrega a página
+do servidor.
+
 ## Uma vez: preparar a distribuição
 
 - Integre e revise `desktop/`, `scripts/desktop/`, `electron-builder.yml`, scripts npm, ponte HTTP e workflow. Preserve os testes e migrações mais recentes da main.
@@ -23,13 +49,10 @@ O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assina
 - Tenha acesso Apple Developer e certificado **Developer ID Application** com chave privada. Configure os secrets abaixo no GitHub; não inclua certificados, senhas, chaves de máquina ou dados locais nos commits e artefatos.
 - Disponibilize um Mac Intel e um Mac com chip M para aceite, com Claude Code instalado e autenticado. Confirme os requisitos de macOS do Electron usado; não trate apenas `minimumSystemVersion` como prova de compatibilidade.
 
-| Secret no GitHub | Uso no build |
-| --- | --- |
-| `APPLE_CERTIFICATE_P12` | Certificado e chave privada exportados em P12/base64; vira `CSC_LINK` |
-| `APPLE_CERTIFICATE_PASSWORD` | Senha do P12; vira `CSC_KEY_PASSWORD` |
-| `APPLE_ID` | Conta de notarização |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Senha específica de app |
-| `APPLE_TEAM_ID` | Time Apple Developer |
+Os cinco secrets (`APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`,
+`APPLE_TEAM_ID`) e a variável de repositório `NOD_SERVIDOR_PADRAO`, com onde cadastrar cada um e a lista do que o CI
+confere no pacote, estão em [release-desktop.md › Secrets e variável da release assinada](release-desktop.md#secrets-e-variável-da-release-assinada-nod-203).
+Sem algum deles, o job `mac` falha no preflight citando o nome a cadastrar.
 
 O workflow exige assinatura (`forceCodeSigning=true`), hardened runtime e notarização. Não desligue esses controles para publicar uma versão estável. Veja a [configuração macOS do electron-builder usado na preview](https://www.electron.build/v26/docs/mac/).
 
@@ -78,7 +101,7 @@ A execução manual (`workflow_dispatch`) desse workflow guarda artefatos, mas n
 
 ## 3. Completar e conferir o rascunho
 
-Use o guia do mesmo commit da tag. Anexe-o ao rascunho como `guia-instalacao-nod.md`, sem copiar silenciosamente uma documentação mais recente. Inclua nas notas um link permanente `https://github.com/marlonwlv/nod/blob/TAG/docs/release-desktop.md`, substituindo `TAG`, além do endereço do servidor e requisitos de acesso ao repositório.
+Use o guia do mesmo commit da tag. Anexe-o ao rascunho como `guia-instalacao-nod.md`, sem copiar silenciosamente uma documentação mais recente. Inclua nas notas um link permanente `https://github.com/gamefik/nod/blob/TAG/docs/release-desktop.md`, substituindo `TAG`, além do endereço do servidor e requisitos de acesso ao repositório.
 
 Baixe os artefatos do rascunho em diretório vazio e confira os hashes dos bytes efetivamente hospedados. O workflow de referência escreve caminhos `release/` nos arquivos SHA; normalize para nomes de arquivo ao preparar o manifesto para distribuição, ou preserve essa subpasta ao verificar. Exemplo para produzir um manifesto portátil na pasta dos DMGs:
 
@@ -93,20 +116,7 @@ Se um upload falhar, consulte primeiro os assets existentes. Reenvie apenas o ar
 
 ## 4. Aceitar os instaladores baixados
 
-Em **cada arquitetura**, registre pessoa, modelo do Mac, macOS, versão/SHA, data e resultado:
-
-- Baixar pelo GitHub, abrir DMG, arrastar para Aplicativos e abrir normalmente sob Gatekeeper, sem remover quarentena nem desabilitar proteções.
-- Verificar assinatura e ticket no app instalado:
-
-  ```bash
-  codesign --verify --deep --strict --verbose=2 /Applications/nod.app
-  xcrun stapler validate /Applications/nod.app
-  spctl --assess --type execute --verbose=2 /Applications/nod.app
-  ```
-
-- Configurar HTTPS, autenticar via navegador, gerar chave individual e conectar.
-- Executar um turno real curto e testar Parar, reconexão, fechar/reabrir e revogação da chave. O turno e a sonda usam a assinatura Claude: registrar o custo e evitar repetições desnecessárias.
-- Atualizar a partir da versão anterior, preservando configuração, e verificar compatibilidade com o servidor que o time vai usar.
+Em **cada arquitetura**, siga o checklist [aceite-desktop.md](aceite-desktop.md) com os DMGs baixados do rascunho e preencha o bloco de registro dele. O turno usa a assinatura da IA: registre o custo e evite repetições desnecessárias.
 
 Falha de assinatura, login, executor ou compatibilidade impede release estável. Build cruzado e inspeção Mach-O não substituem execução nativa. Publique os resultados e limitações nas notas; não copie contagens de testes de outra versão.
 
@@ -144,6 +154,7 @@ Assinatura e notarização:
 Aceite Intel (pessoa, Mac, macOS, resultado):
 Aceite ARM (pessoa, Mac, macOS, resultado):
 Atualização desde a versão anterior:
+Custo dos turnos do aceite:
 Limitações e recuperação:
 O que falhou e o que melhorar na próxima versão:
 ```

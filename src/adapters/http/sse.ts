@@ -13,8 +13,16 @@ import type { Ctx } from "./roteador.ts";
 
 /** definido em 2026-09-16: retry do EventSource nativo; o cliente do nod faz o próprio backoff com jitter. */
 export const RETRY_MS = 3_000;
-/** definido em 2026-09-16: comentário `: ping` a cada 15 s mantém proxies e o Vite sem cortar a conexão ociosa. */
+/**
+ * definido em 2026-09-16: ping a cada 15 s mantém proxies e o Vite sem cortar a conexão ociosa.
+ * definido em 2026-10-15 (NOD-254): evento `ping` nomeado, não comentário: o EventSource descarta comentário e o cliente
+ * precisa ver o sinal para medir o silêncio (vigia de 45 s em web/lib/live-events.ts). Sem `id:`: não mexe no
+ * `lastEventId` nem no contrato de resume, não gasta `seq` nem buffer.
+ */
 export const PING_MS = 15_000;
+
+/** O bloco do ping, sem `id:` (ver PING_MS). */
+export const PING_SSE = "event: ping\ndata: {}\n\n";
 
 export function serializarFrame(frame: FrameSse): string {
   return `id: ${frame.streamId}:${frame.seq}\nevent: ${frame.tipo}\ndata: ${JSON.stringify(frame)}\n\n`;
@@ -77,7 +85,7 @@ export function criarHandlerSse(barramento: Barramento, opcoes: OpcoesSse = {}):
     contar(escopo.tenantId, escopo.pessoaId, +1);
 
     const ping = setInterval(() => {
-      if (!res.writableEnded && !res.destroyed) res.write(": ping\n\n");
+      if (!res.writableEnded && !res.destroyed) res.write(PING_SSE);
     }, pingMs);
     ping.unref();
 

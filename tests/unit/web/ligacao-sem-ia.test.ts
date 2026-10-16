@@ -28,6 +28,11 @@ describe("o motivo, com o que se sabe", () => {
     expect(motivoSemIa("falhou", null)).toBe("A IA deste Mac parou de responder.");
     expect(motivoSemIa("conta_sem_acesso", null)).toBe("A IA deste Mac parou de responder.");
   });
+
+  it("NOD-168: limite da assinatura é dito como é (nomeia o programa quando se sabe qual)", () => {
+    expect(motivoSemIa("limite", "claude-cli")).toBe("A assinatura do Claude Code deste Mac chegou ao limite.");
+    expect(motivoSemIa("limite", null)).toBe("A assinatura de IA deste Mac chegou ao limite.");
+  });
 });
 
 describe("2A · há outra IA pronta no Mac", () => {
@@ -154,6 +159,17 @@ describe("2C · nenhuma outra IA pronta no Mac", () => {
     }
   });
 
+  it("NOD-171 (QA): a outra IA está desatualizada: a versão, a mínima e o comando; nem 'Instalar' nem 'não está neste Mac'", () => {
+    const antigo = { id: "codex-cli", estado: "ausente", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0" } as const;
+    for (const ponte of [{ entrar: true, instalar: true }, { entrar: false, instalar: false }]) {
+      const html = htmlSemIa(semOutra({ ias: [{ id: "claude-cli", estado: "pronto" }, antigo], ponte }), NINA);
+      expect(html).toContain("O Codex deste Mac está na versão 0.147.0; o nod precisa da 0.159 ou mais nova. A ligação percebe quando ficar pronto.");
+      expect(html).toContain("No Terminal deste Mac, rode “npm install -g @openai/codex@latest”.");
+      expect(html).not.toMatch(/Instal|não está neste Mac|não foi encontrado/);
+      expect(botoes(html).map((b) => b.ia)).not.toContain("codex-cli");
+    }
+  });
+
   it("uma IA que o servidor não listou (não atende ligação neste nod) não ganha card", () => {
     const html = htmlSemIa(semOutra({ ias: [{ id: "claude-cli", estado: "pronto" }] }), NINA);
     expect(html.match(/class="lsi-card"/g)).toHaveLength(1);
@@ -232,6 +248,10 @@ describe("as mensagens novas da mídia, conferidas campo a campo", () => {
     const lenta = [{ id: "codex-cli", estado: "ausente", causa: "sonda_lenta" }];
     expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: lenta, ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: lenta, ate: 1 });
     expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ id: "codex-cli", estado: "ausente", causa: "binario_nao_encontrado" }], ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ id: "codex-cli", estado: "ausente" }], ate: 1 });
+    // NOD-171: o CLI desatualizado passa com as duas versões; versão fora do formato derruba só a causa.
+    const antiga = [{ id: "codex-cli", estado: "ausente", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0" }];
+    expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: antiga, ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: antiga, ate: 1 });
+    expect(lerMsgServidor(JSON.stringify({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ ...antiga[0], versao: "<b>x</b>" }], ate: 1 }))).toEqual({ t: "sem-ia", causa: "falhou", ia: null, ias: [{ id: "codex-cli", estado: "ausente" }], ate: 1 });
   });
 
   it("`sem-ia` fora do formato é ignorada", () => {

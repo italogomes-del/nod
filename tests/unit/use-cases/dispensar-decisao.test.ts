@@ -48,7 +48,7 @@ describe("dispensar: quem pode sair pelo × / 'Dispensar'", () => {
     const d = depsMemoria({ agora: () => AGORA });
     const agente = await d.deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
     const conversa = await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
-    const turno = await d.deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 10_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
+    const turno = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 10_000, profundidade: 0, entradaTexto: "revise", entradaConfianca: "confiavel", modelo: "sonnet", interrompidoCom: "maquina_sem_contato" });
     const retomar = await d.deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", turnoId: turno?.id ?? null, prazoDecisaoEm: AGORA + DIA, frase: "Turno interrompido: seu Mac parou de responder." });
     const aprovacao = await d.deps.repos.decisoes.criar({ tipo: "aprovacao", agenteId: agente?.id ?? "", conversaId: conversa?.id ?? "", prazoDecisaoEm: AGORA + DIA, frase: "enviar" });
 
@@ -66,6 +66,8 @@ describe("dispensar o pedido ABERTO de uma execução de rotina (definido em 202
     const c = await rotinaQuePediu(d);
     const r = await dispensarDecisao(d.deps, { decisaoId: c.pedidoId });
     expect(d.banco.execucoes.map((e) => [e.instanteAgendado, e.desfecho, e.motivo])).toEqual([[JANELA, "passou_em_branco", "pedido_dispensado"]]);
+    // Revisão do épico (S2, 2026-10-08): a execução era uma task de rotina, que relia o estado (trabalho_mudou). revisto
+    // em 2026-10-12 (ADR-099, I7 revista): a execução é um turno do dono, sem trabalho.
     expect(r.events.map((e) => e.kind)).toEqual(["decisao_decidida", "rotina_executou"]);
     const aviso = d.banco.mensagens.filter((m) => m.kind === "rotina_execucao").at(-1);
     expect(aviso?.texto).toContain("A rotina passou em branco: o pedido foi dispensado sem resposta. Nada foi enviado.");

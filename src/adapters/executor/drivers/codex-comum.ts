@@ -77,8 +77,61 @@ export function overridesIsolamentoCodex(recusadas: RecusadasCodex = SEM_RECUSAD
   return OVERRIDES_ISOLAMENTO_CODEX.filter((o) => !recusadas.has(chaveDoOverride(o)));
 }
 
+/**
+ * definido em 2026-10-14 (ADR-103, paridade do Codex): com o kit do terminal, o Codex roda como o da pessoa — shell,
+ * apply_patch, busca na web, skills, AGENTS.md, subagentes, imagem — e o que segura é o hook do nod. Continuam
+ * desligados o navegador e o uso do computador (a recomendação de 14/10: só depois do hook provado no terminal).
+ */
+export const OVERRIDES_TERMINAL_CODEX = [
+  "features.browser_use=false", "features.browser_use_external=false", "features.computer_use=false",
+  "features.in_app_browser=false", "features.remote_plugin=false",
+] as const;
+
+/** Fora dos modos da dona (ADR-103), os apps e plugins da conta do ChatGPT dela também não carregam. */
+const SEM_APPS_DA_PESSOA = ["features.apps=false", "features.plugins=false"] as const;
+
+export function overridesTerminalCodex(p: { mcpDaPessoa: boolean; recusadas?: RecusadasCodex }): string[] {
+  const recusadas = p.recusadas ?? SEM_RECUSADAS;
+  return [...OVERRIDES_TERMINAL_CODEX, ...(p.mcpDaPessoa ? [] : SEM_APPS_DA_PESSOA)].filter((o) => !recusadas.has(chaveDoOverride(o)));
+}
+
+/**
+ * As ferramentas que o hook do nod decide no Codex (ADR-103): o PreToolUse casa por regex no nome que ele informa
+ * (medido no 0.147.0: "Bash" e "apply_patch"; `spawn_agent` e `view_image` pela documentação de hooks). O MCP entra
+ * sempre: o do nod o hook libera na hora (quem decide é o proxy), o da pessoa vai ao servidor. O matcher é fixo para o
+ * hash do hook não mudar entre turnos — a confiança é gravada uma vez por conta.
+ */
+export const MATCHER_HOOK_CODEX = "^(Bash|apply_patch|view_image|spawn_agent)$|^mcp__";
+
+/**
+ * O comando do hook no Codex (ADR-103): fixo por máquina (o node e o script), sem a config do turno, que vai pela
+ * variável VARIAVEL_CONFIG_HOOK. O Codex não roda o comando num shell (medido: `cmd || exit 2` não negou), então o
+ * ELECTRON_RUN_AS_NODE do app do Mac vai pelo `/usr/bin/env`.
+ */
+export function comandoHookCodex(p: { nodePath: string; hookPath: string; electronComoNode?: boolean }): string {
+  const aspas = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+  return `${p.electronComoNode ? "/usr/bin/env ELECTRON_RUN_AS_NODE=1 " : ""}${aspas(p.nodePath)} ${aspas(p.hookPath)}`;
+}
+
+/** A chave `-c hooks=…` com o PreToolUse do nod; `timeoutS` acima do prazo do próprio hook (o Codex falha aberto). */
+export function hooksDoTerminalCodex(p: { comando: string; timeoutS: number }): string {
+  return `hooks={PreToolUse=[{matcher=${JSON.stringify(MATCHER_HOOK_CODEX)}, hooks=[{type="command", command=${JSON.stringify(p.comando)}, timeout=${p.timeoutS}}]}]}`;
+}
+
 /** definido em 2026-09-18: configuração aponta para um launcher privado; token nunca em argv. */
 export function configMcpCodex(plano: PlanoTurno, lig: LigacaoClaudeCli, recusadas: RecusadasCodex = SEM_RECUSADAS): string {
+  return `{ nod = ${servidorNodCodex(plano, lig, recusadas)} }`;
+}
+
+/**
+ * O `-c` do MCP (ADR-103): `mcp_servers={nod=…}` troca a tabela inteira (só o nod); com os MCPs da pessoa,
+ * `mcp_servers.nod={…}` junta o nod aos servidores do config.toml dela.
+ */
+export function argMcpCodex(plano: PlanoTurno, lig: LigacaoClaudeCli, p: { recusadas?: RecusadasCodex; mcpDaPessoa: boolean }): string {
+  return p.mcpDaPessoa ? `mcp_servers.nod=${servidorNodCodex(plano, lig, p.recusadas)}` : `mcp_servers=${configMcpCodex(plano, lig, p.recusadas)}`;
+}
+
+function servidorNodCodex(plano: PlanoTurno, lig: LigacaoClaudeCli, recusadas: RecusadasCodex = SEM_RECUSADAS): string {
   const mcp = { command: lig.nodePath ?? process.execPath, args: [lig.proxyPath], env: lig.electronComoNode ? { ELECTRON_RUN_AS_NODE: "1" } : {} };
   const quote = JSON.stringify;
   const campos: [string, string][] = [
@@ -90,7 +143,7 @@ export function configMcpCodex(plano: PlanoTurno, lig: LigacaoClaudeCli, recusad
     ["tool_timeout_sec", String(Math.ceil(plano.politicaExecucao.prazoMs / 1000))],
     ["env", `{ ${Object.entries(mcp.env).map(([k, v]) => `${k} = ${quote(v)}`).join(", ")} }`],
   ];
-  return `{ nod = { ${campos.filter(([nome]) => !recusadas.has(`mcp_servers.nod.${nome}`)).map(([nome, valor]) => `${nome} = ${valor}`).join(", ")} } }`;
+  return `{ ${campos.filter(([nome]) => !recusadas.has(`mcp_servers.nod.${nome}`)).map(([nome, valor]) => `${nome} = ${valor}`).join(", ")} }`;
 }
 
 /** A chave que o Codex recusou, tirada da mensagem dele. null = a saída não é uma recusa de chave. */

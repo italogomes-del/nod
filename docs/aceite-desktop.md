@@ -1,0 +1,153 @@
+# Aceite do app desktop por arquitetura
+
+Roteiro do §4 de [processo-de-release.md](processo-de-release.md). Rode-o inteiro **em cada arquitetura** (um Mac
+Intel `x64` e um Mac com chip M `arm64`) com os DMGs baixados do rascunho da release, nunca com um build local. Marque
+cada item `ok` ou `falha`. Uma falha de assinatura, login, executor ou compatibilidade impede a release estável.
+
+Os itens citam o código pelo nome da função ou da constante, não pela linha. Se o comportamento observado divergir do
+código citado, registre a divergência: ela é falha até alguém explicar.
+
+## Registro
+
+Copie um bloco por arquitetura para as notas da release, junto do registro da versão em
+[processo-de-release.md](processo-de-release.md#recuperação-e-lições-por-versão).
+
+```text
+Pessoa:
+Mac (modelo, chip, arquitetura):
+macOS (versão e build):
+IA usada (Claude Code ou Codex, versão):
+Versão do app / tag / SHA:
+Data:
+Resultado por seção:
+  A Actions:              ok | falha
+  B Instalação limpa:     ok | falha
+  C Primeira abertura:    ok | falha
+  D Primeiro turno:       ok | falha
+  E Parar:                ok | falha
+  F Fechar e reabrir:     ok | falha
+  G Revogar a chave:      ok | falha
+  H1 Atualizar da preview: ok | falha
+  H2 Atualizar da 0.2.0-rc.1: ok | falha | não feito nesta arquitetura
+  I Auto-update:          não se aplica até a NOD-132
+Desfecho do Keychain em H1: (a) mesma chave | (b) tela de conexão e chave nova
+Custo dos turnos do aceite (US$ ou % do plano):
+Observações e falhas:
+```
+
+## A. Actions
+
+- [ ] **Execução do `desktop-release` verde nas duas arquiteturas.** Observar: no run da tag, o job `verify` e os dois
+  jobs `mac` (`arm64` e `x64`) verdes, com os passos `Smoke da janela` (`smoke-window.mjs`), e, em
+  `Verificar assinatura e notarização`, `smoke-proxy.mjs`, `codesign`, `stapler` e `spctl`. O job `draft` criou o
+  rascunho com os dois DMGs e os `SHA256-*.txt`. Reprova se: algum passo foi pulado, desligado ou falhou; o rascunho
+  não traz os dois DMGs; o run não corresponde ao SHA da tag.
+
+## B. Instalação limpa
+
+Num usuário novo do macOS (Ajustes do Sistema → Usuários e Grupos), sem nod instalado nem `~/Library/Application
+Support/nod`.
+
+- [ ] **DMG baixado pelo GitHub abre normalmente.** Observar: abrir o DMG, arrastar **nod** para **Aplicativos** e abrir
+  com dois cliques, sem aviso de desenvolvedor não identificado. Reprova se: o macOS bloqueia, pede **Abrir mesmo
+  assim** em Privacidade e Segurança, ou só abre removendo a quarentena (`xattr`) ou desligando o Gatekeeper.
+- [ ] **Assinatura, ticket e Gatekeeper no app instalado.** Rodar:
+
+  ```bash
+  codesign --verify --deep --strict --verbose=2 /Applications/nod.app
+  xcrun stapler validate /Applications/nod.app
+  spctl --assess --type execute --verbose=2 /Applications/nod.app
+  lipo -archs /Applications/nod.app/Contents/MacOS/nod
+  ```
+
+  Observar: `valid on disk` e `satisfies its Designated Requirement`; `The validate action worked!`; `accepted` com
+  `source=Notarized Developer ID`; `lipo` mostra só a arquitetura deste Mac (`x86_64` no Intel, `arm64` no chip M).
+  Reprova se: qualquer comando falha, o `spctl` diz `rejected`, ou o `lipo` mostra a arquitetura errada (DMG trocado).
+
+## C. Primeira abertura
+
+- [ ] **Servidor já preenchido.** Observar: a tela "Conectar ao nod" abre com o endereço HTTPS do servidor do time, que
+  vem do build (`SERVIDOR_PADRAO`, de `NOD_SERVIDOR_PADRAO` em `scripts/desktop/build.mjs`). Reprova se: o campo vem
+  vazio ou com outro endereço num usuário novo.
+- [ ] **Entrar com Google e Conectar este Mac.** Observar: **Entrar com Google** abre o navegador padrão; depois do
+  login, a página mostra **Conectar este Mac**; ao clicar, o app volta sozinho para a frente e abre o nod
+  (`parearPeloNavegador`, ADR-069), e **Chaves** no navegador mostra uma chave nova com o nome deste Mac. Reprova se:
+  o app não volta, pede para colar uma chave, mostra "O navegador não confirmou a tempo" ou "O nod não confirmou
+  este Mac" (`mensagens.sem_resposta`, `mensagens.recusado`) sem que a pessoa tenha demorado ou recusado.
+- [ ] **A conexão fica guardada.** Observar: `~/Library/Application Support/nod/conexao.enc` existe com modo
+  `-rw-------` e não é texto legível (`guardar()` cifra com `safeStorage`, chave no Keychain). Reprova se: o arquivo
+  falta, está legível ou com outra permissão.
+
+## D. Primeiro turno
+
+- [ ] **A IA é encontrada sem gastar turno.** Observar: com Claude Code (macOS 13+) ou Codex instalado e autenticado,
+  o nod mostra a IA como pronta logo depois de conectar, sem turno no uso do plano (a sonda do
+  `criarRegistryDetalhado` roda com `sondaSemTurno`, vigiada por `criarVigiaDasIas`). Se a versão está abaixo do
+  `PISO_CLI`, aparece "desatualizada" com o comando de atualizar. Reprova se: a IA instalada aparece como "não
+  encontrada"; o uso do plano sobe só por abrir o app.
+- [ ] **Um turno real curto responde.** Observar: mandar "responda só ok" a um bot fixado na IA deste Mac; a resposta
+  chega na conversa, e **Exportar diagnóstico** mostra a execução sem erro. Reprova se: o turno fica parado na fila,
+  termina em erro ou a resposta vem de outro Mac. Anote o custo do turno no registro.
+
+## E. Parar
+
+- [ ] **Parar interrompe o turno.** Observar: mandar um pedido longo (por exemplo, "conte de 1 a 500 por extenso") e
+  clicar em **Parar** durante a resposta; em até uns 2 segundos o texto para de crescer e o turno fecha como parado.
+  O laço renova a cada 1 s (`iniciarLaco`, `renovar`) e aborta o executor quando o servidor manda parar. Reprova se:
+  o texto continua chegando, o processo `claude`/`codex` segue vivo no Monitor de Atividade, ou o próximo turno
+  não roda.
+
+## F. Fechar e reabrir
+
+- [ ] **Reabrir reconecta sem pedir nada.** Observar: Cmd+Q e abrir de novo; o app passa pela tela de conexão só de
+  relance e abre o nod, sem login, sem chave nova em **Chaves** e sem pedir o Keychain (`ler()` decifra a conexão
+  salva e `conectar()` usa a mesma chave). O URL salvo ganha do `SERVIDOR_PADRAO`. Reprova se: pede login ou chave,
+  cria chave nova, ou fica na tela de conexão com mensagem.
+
+## G. Revogar a chave
+
+- [ ] **Revogar derruba o app.** Observar: com o app aberto, revogar a chave deste Mac em **Chaves**, no navegador; o
+  app volta à tela de conexão com "Esta chave não é mais válida. Gere uma nova em Chaves no navegador."
+  (`mensagens.chave_invalida`: o servidor responde 401/403, `conectar()` ou o laço chamam `falha()`, que para tudo e
+  mostra a tela). Reprova se: o app continua conectado, trava, fica em laço de reconexão ou mostra outra mensagem.
+- [ ] **Entrar de novo funciona.** Observar: **Entrar com Google** de novo conecta e cria uma chave nova em **Chaves**;
+  um turno curto responde. Reprova se: a chave revogada volta a valer ou o novo pareamento falha.
+
+## H1. Atualizar a partir da última preview publicada
+
+Com a última preview instalada e conectada (hoje `desktop-v0.4.0-rc.4`, sem assinatura), instalar o DMG novo por cima
+(arrastar para **Aplicativos** e **Substituir**). A preview e o app assinado têm o mesmo `appId` (`app.nod.desktop`) e
+a mesma pasta `Application Support/nod`; a assinatura nova é que pode mudar o acesso ao item do Keychain.
+
+- [ ] **Instalar por cima.** Observar: o macOS pode pedir a senha do Mac uma vez para liberar o Keychain ao app novo;
+  depois abre normalmente. Reprova se: pede **Abrir mesmo assim**, pede a senha a cada abertura, trava ou abre tela
+  branca.
+- [ ] **Um dos dois desfechos aprovados.** Registre qual:
+  - **(a)** o app reconecta com a mesma chave, sem chave nova em **Chaves** (`ler()` decifrou a conexão da preview);
+  - **(b)** o app cai na tela de conexão (o `safeStorage` não decifrou a conexão da preview, `ler()` devolve `null`);
+    a pessoa clica em **Entrar com Google**, conecta, e revoga a chave antiga em **Chaves**.
+
+  Reprova se: trava, tela branca, laço entre tela de conexão e nod, mensagem de erro sem saída, ou, em (b), a chave
+  antiga não aparece para revogar.
+- [ ] **O microfone pode ser pedido de novo.** Observar: ao abrir uma ligação, o macOS pode perguntar de novo pelo
+  microfone (NOD-165); aceitar e a ligação funciona. Reprova se: a ligação fica muda sem pergunta e sem aviso.
+- [ ] **Compatibilidade com o servidor.** Observar: o servidor do time aceita esta versão (`conectar()` não recebe 426
+  nem `x-nod-versao-minima` acima dela). Reprova se: aparece "Atualize o nod para continuar"
+  (`mensagens.atualize_app`) com o app novo.
+
+## H2. Atualizar a partir da 0.2.0-rc.1
+
+Em **uma** arquitetura basta. A 0.2.0-rc.1 usava outro `appId` (`br.com.leapy.nod`, hoje é `app.nod.desktop`) e não tinha **Entrar com Google**: é o
+pior caso.
+
+- [ ] **O app novo abre e conecta.** Observar: com a 0.2.0-rc.1 instalada e conectada, instalar o DMG novo por cima
+  (**Substituir**). Vale o mesmo critério de H1: (a) reconecta com a configuração salva, ou (b) cai na tela de
+  conexão, conecta com **Entrar com Google** e a chave da 0.2.0-rc.1 é revogada em **Chaves**. Se (a) reconectou num
+  servidor antigo, o URL salvo ganha do `SERVIDOR_PADRAO` (o handler `nod:estado` usa `configuracao?.url ?? SERVIDOR_PADRAO`, com a `configuracao` vinda de `ler()`); trocar por **Outro servidor ou chave manual**
+  deve funcionar. Reprova se: trava, tela branca, laço, não deixa trocar o endereço, ou aparecem dois **nod** no Dock.
+
+## I. Auto-update entre duas candidatas assinadas
+
+**Não se aplica até a NOD-132** estar na versão. Quando estiver: com uma candidata assinada instalada, publicar a
+seguinte e confirmar que o app avisa, baixa, reinicia na versão nova e reconecta como em F. Reprova se: não avisa,
+baixa sem assinatura válida, ou perde a conexão.

@@ -11,8 +11,8 @@ describe("lerModelosLigacao (NOD-164)", () => {
     expect(lerModelosLigacao(env)).toEqual(MODELOS_LIGACAO_PADRAO);
   });
 
-  it("o padrão é o Sonnet 5.5 pelo id, com esforço low e sem thinking adaptativo (sonda de 2026-10-05); o Codex segue no gpt-6-luna", () => {
-    expect(MODELOS_LIGACAO_PADRAO).toEqual({ "claude-cli": { modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }, "codex-cli": { modelo: "gpt-6-luna" } });
+  it("o padrão é o Sonnet 5.5 pelo id, com esforço low e sem thinking adaptativo (sonda de 2026-10-05); o Codex usa o Luna do catálogo (NOD-167)", () => {
+    expect(MODELOS_LIGACAO_PADRAO).toEqual({ "claude-cli": { modelo: "claude-sonnet-5-5", esforco: "low", pensamentoAdaptativo: false }, "codex-cli": { modelo: "gpt-5.6-luna" } });
   });
 
   it.each([
@@ -58,7 +58,7 @@ describe("modeloDeVoz (NOD-164, decisão de 2026-10-05)", () => {
 
   it("Codex: só o modelo da configuração", () => {
     expect(modeloDeVoz("codex-cli", configurada)).toEqual({ modelo: "gpt-6-astra" });
-    expect(modeloDeVoz("codex-cli", MODELOS_LIGACAO_PADRAO)).toEqual({ modelo: "gpt-6-luna" });
+    expect(modeloDeVoz("codex-cli", MODELOS_LIGACAO_PADRAO)).toEqual({ modelo: "gpt-5.6-luna" });
   });
 
   it("nunca devolve o mais potente: a guia do onboarding fala no mesmo modelo de voz das outras ligações", () => {

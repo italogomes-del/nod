@@ -1,17 +1,19 @@
 import type { DriverComputador } from "../../contracts/computador.ts";
+import type { ProvedoresVoz } from "../voz/spi.ts";
 import { criarCodexCliDriver } from "../executor/drivers/codex-cli.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Inventario } from "../../contracts/inventario.ts";
-import { criarDb } from "../../db/client.ts";
+import { criarDb, lerPoolMax } from "../../db/client.ts";
 import { log } from "../../obs/log.ts";
+import { LEASE_MS } from "../../shared/constantes.ts";
 import { admitirPorDominio, buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
 import type { Db } from "../../shared/types.ts";
 import { criarCatcherDriver } from "../executor/drivers/catcher.ts";
 import { criarClaudeCliDriver } from "../executor/drivers/claude-cli.ts";
-import { configDosDrivers, criarRegistryDetalhado, executorPadrao, nodHome, registrarDriver } from "../executor/registry.ts";
+import { configDosDrivers, criarRegistryDetalhado, executorPadrao, lerNodExecutor, nodHome, registrarDriver, VALIDOS_NOD_EXECUTOR } from "../executor/registry.ts";
 import { homeDaPessoa } from "../executor/caminho.ts";
 import { prazoSondaDoEnv } from "../executor/sonda.ts";
 import type { Driver, Registry } from "../executor/spi.ts";
@@ -19,17 +21,20 @@ import { iniciarDespachanteOutbox, type DespachanteOutbox } from "../fundo/despa
 import { iniciarOrquestrador, type Orquestrador } from "../fundo/orquestrador-turnos.ts";
 import { garantirParticoes } from "../fundo/particoes.ts";
 import { sincronizarDominiosAdmitidos } from "../fundo/dominios-admitidos.ts";
-import { iniciarScheduler } from "../fundo/scheduler-rotina.ts";
+import { INTERVALO_SCHEDULER_MS, iniciarScheduler } from "../fundo/scheduler-rotina.ts";
+import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iniciarVarredorOciosidade } from "../fundo/varredor-ociosidade.ts";
 import { limiteDoAmbiente } from "../../domain/computador.ts";
 import { iniciarVarredorExpiracao } from "../fundo/varredor-expiracao.ts";
-import { iniciarVarredorLease } from "../fundo/varredor-lease.ts";
+import { INTERVALO_VARREDOR_LEASE_MS, iniciarVarredorLease } from "../fundo/varredor-lease.ts";
 import { comporApp, type App, type AtivarDriver, type EnvApp } from "./compor.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { lerDominiosAdmitidos } from "../../domain/dominios-admitidos.ts";
 import { identidadeDoEmail } from "../../domain/identidade-do-email.ts";
 import { encerrarLigacao } from "../../use-cases/ligacoes.ts";
+import { criarBatimentos, criarVerificacaoSaude, INTERVALOS_ATE_LACO_PARADO } from "./rotas/saude.ts";
 import { listen } from "./servidor.ts";
+import { iniciarWatchdog, type Watchdog } from "./watchdog.ts";
 import { opcoesSessaoDoEnv } from "./sessao.ts";
 
 /**
@@ -50,10 +55,24 @@ export type OpcoesBoot = {
   /** Intervalos dos laços (testes encurtam). */
   intervalos?: { orquestradorMs?: number; schedulerMs?: number; leaseMs?: number; expiracaoMs?: number; outboxMs?: number; ociosidadeMs?: number };
   listarPessoas?: () => Promise<{ tenantId: string; id: string }[]>;
-  /** Drivers do registry; default: catcher (+ claude-cli quando NOD_EXECUTOR=claude-cli). */
+  /** Drivers do registry; default: catcher (+ claude-cli/codex-cli quando NOD_EXECUTOR os pede ou é auto). */
   drivers?: (p: { urlNod: string; app: App }) => Driver[];
+  /** Provedores de voz prontos (NOD-180); só em teste. Default: pelas envs NOD_VOZ_*. */
+  voz?: ProvedoresVoz;
+  /** Só em teste: o prazo da rede de 2 min (OpcoesCompor.redeMs). */
+  redeMs?: number;
   segredoSessao?: string;
   staticDir?: string;
+  /**
+   * ADR-089 (revisão do #223): roda logo depois do listen dar certo e antes de qualquer turno — a limpeza dos grupos
+   * órfãos. Uma segunda cópia da mesma instância não pega a porta e nunca chega aqui, então nunca mata os bots da primeira.
+   */
+  aposEscutar?: () => Promise<void>;
+  /**
+   * Só em teste (NOD-267): o watchdog do modo compartilhado com intervalo, carência e saída injetados. Default: 15 s,
+   * a carência do lease (90 s) e `process.exit`.
+   */
+  watchdog?: { intervaloMs?: number; carenciaMs?: number; sair?: (codigo: number) => void; lacoParadoMinimoMs?: number };
 };
 
 export type ResultadoDrenagem = { vivas: number; turnos: number; duracao_ms: number; prazo_vencido: boolean };
@@ -98,7 +117,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   const env: EnvApp = o.env ?? process.env;
   const urlApp = env.DATABASE_URL;
   const urlDono = env.DATABASE_URL_DONO;
-  const db = o.db ?? (urlApp ? criarDb(urlApp) : null);
+  const db = o.db ?? (urlApp ? criarDb(urlApp, { max: lerPoolMax(env) }) : null);
   const dbDono = o.dbDono ?? (urlDono ? criarDb(urlDono, { max: 1 }) : null);
   if (!db || !dbDono) throw new Error("boot: DATABASE_URL e DATABASE_URL_DONO são obrigatórios");
   // Antes de qualquer efeito: sem NOD_LOGIN válido o servidor não sobe (ADR-030).
@@ -135,29 +154,60 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
 
   // 2. composição + 3. listen (a URL do servidor é insumo do driver catcher e do claude-cli).
   let canaisVoz: { fechar(): Promise<void> } | null = null;
-  const app = comporApp({ db, computador: o.computador, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas });
+  const app = comporApp({ db, computador: o.computador, voz: o.voz, env: { ...env, NOD_MACHINE_ID: machineId }, relogio: agora, listarPessoas: o.listarPessoas, redeMs: o.redeMs, inicioDoProcesso });
+  // NOD-267 (emenda à ADR-017): a saúde olha o banco e, só no compartilhado, o batimento do agendador e do varredor de
+  // lease — no Mac, acordar do sono deixaria o batimento velho e daria 503 falso. A rota e o watchdog usam a MESMA
+  // verificação, para compartilharem o `select 1` em voo.
+  const batimentos = criarBatimentos({ agora, minimoMs: o.watchdog?.lacoParadoMinimoMs });
+  const verificarSaude = criarVerificacaoSaude({ verificarBanco: () => db`select 1`, ...(app.compartilhado ? { batimentos } : {}) });
   const srv = await listen(o.porta ?? Number(env.NOD_API_PORT ?? 8888), o.host ?? env.NOD_HOST ?? "127.0.0.1", {
     rotas: app.rotas,
     segredoSessao: o.segredoSessao ?? env.NOD_SESSAO_SEGREDO,
     staticDir: o.staticDir ?? env.NOD_STATIC_DIR,
-    autorizarTokenTurno: app.tokens.autorizar,
-    autorizarMaquina: app.compartilhado ? app.autorizarMaquina : undefined,
+    // NOD-214: o token de um turno que atravessou o reinício é reconhecido pelo banco.
+    autorizarTokenTurno: app.tokens.autorizarComBanco,
+    // ADR-092: também no modo local — a VM da pessoa (o motor da ADR-090) puxa turnos deste Mac pela ponte.
+    autorizarMaquina: app.autorizarMaquina,
     sessao,
-    verificarBanco: () => db`select 1`,
+    verificarSaude,
     // ADR-071: os canais WebSocket da ligação (mídia e cérebro) no mesmo servidor.
     upgrade: (server, resolverEscopo) => {
       canaisVoz = app.anexarVoz(server, resolverEscopo);
     },
   });
   const url = `http://127.0.0.1:${srv.port}`;
+  // NOD-267: o Docker só reinicia processo morto; travado, o processo do compartilhado se derruba (exit 1) e o
+  // `unless-stopped` sobe outro. Liga logo depois do listen (revisão do PR): o registry, o inventário e o fechamento das
+  // ligações abaixo vão ao banco, e um boot pendurado no pool esgotado também precisa reiniciar. O próprio boot é um
+  // "laço" até os laços de verdade subirem: bate ao começar e sai da conta no fim do passo 5 — pendurado além da
+  // carência (o piso de laço parado), vira 503 e o watchdog age. Fora da carência (NOD-214) e parado na drenagem (ADR-071).
+  if (app.compartilhado) batimentos.registrar("boot", (o.watchdog?.carenciaMs ?? LEASE_MS) / INTERVALOS_ATE_LACO_PARADO);
+  const watchdog: Watchdog = app.compartilhado
+    ? iniciarWatchdog({
+        verificar: verificarSaude,
+        agora,
+        carenciaAte: inicioDoProcesso + (o.watchdog?.carenciaMs ?? LEASE_MS),
+        intervaloMs: o.watchdog?.intervaloMs,
+        sair: o.watchdog?.sair ?? ((codigo) => process.exit(codigo)),
+      })
+    : { parar: () => undefined };
+  await o.aposEscutar?.();
 
   // 4. registry: catcher sempre; definido em 2026-09-18, auto descobre Claude/Codex por instalação e login,
   //    sem submeter prompt. Fora de auto, os outros candidatos ficam à espera do interruptor.
-  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env) }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, prazoSondaMs: prazoSondaDoEnv(env) })];
-  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || env.NOD_EXECUTOR === "claude-cli" || env.NOD_EXECUTOR === "codex-cli" || env.NOD_EXECUTOR === "auto" || (!env.NOD_EXECUTOR && env.NODE_ENV === "production"));
-  const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado });
+  const candidatos = o.drivers ? o.drivers({ urlNod: url, app }) : [criarCatcherDriver({ urlNod: url }), criarClaudeCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, modeloSonda: env.NOD_MODELO_SONDA, sondaSemTurno: true, prazoSondaMs: prazoSondaDoEnv(env), filaDoForno: env.NOD_FILA_DO_FORNO !== "0" }), criarCodexCliDriver({ urlNod: url, proxyPath: CAMINHO_PROXY, hookPath: CAMINHO_HOOK, prazoSondaMs: prazoSondaDoEnv(env), filaDoForno: env.NOD_FILA_DO_FORNO !== "0" })];
+  //    NOD-160: NOD_EXECUTOR desconhecido sobe só o catcher (que não vira executor) e avisa UMA vez, aqui.
+  const lido = lerNodExecutor(env);
+  if ("desconhecido" in lido) log("aviso", "nod_executor_desconhecido", { valor: lido.desconhecido, validos: VALIDOS_NOD_EXECUTOR.join(", ") });
+  const sondaIas = "pedido" in lido && (lido.pedido === "claude-cli" || lido.pedido === "codex-cli" || lido.pedido === "auto" || (lido.pedido === null && env.NODE_ENV === "production"));
+  const noBoot = app.compartilhado ? [] : candidatos.filter((d) => d.meta.id === "catcher" || sondaIas);
+  // revisto em 2026-10-09: o boot do servidor local espera o shell como antes (até 3 s); o app do Mac espera menos.
+  const cfgDrivers = await configDosDrivers(env, { shellDeLogin: !app.compartilhado, esperaShellMs: 3_000 });
   const { registry, inventarios } = await criarRegistryDetalhado(env, noBoot, { cfg: cfgDrivers });
   const padrao = executorPadrao(env, registry);
+  // O inventário e o seletor leem o motivo do registro do driver em uso: com o valor desconhecido, ele diz a causa em vez de
+  // "driver não registrado". O interruptor re-registra por cima, inclusive escolhendo de novo o próprio driver em sombra.
+  if ("desconhecido" in lido && !app.compartilhado && padrao.id === null) registry[app.idDriver] = { estado: "sombra", motivo: padrao.motivo };
   const ativar: AtivarDriver = async (id) => {
     const driver = candidatos.find((d) => d.meta.id === id);
     if (!driver) return { estado: "ausente", motivo: `driver ${id} não disponível neste servidor`, em: agora() };
@@ -184,6 +234,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     });
   }
 
+  batimentos.soltar("boot");
+
   // 6. laços de fundo, todos por paraCadaPessoa (EMENDA 3).
   const iv = o.intervalos ?? {};
   const orquestrador: Pick<Orquestrador, "parar"> = app.compartilhado ? { parar: async () => undefined } : await iniciarOrquestrador({
@@ -202,6 +254,8 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     relogio: agora,
     intervaloMs: iv.orquestradorMs,
     listarPessoas: o.listarPessoas,
+    // #218: a sonda do passo 4 vale para o primeiro anúncio (sem um segundo `auth status` segundos depois).
+    inventarioInicial: inventarios[app.idDriver],
   });
   const scheduler = iniciarScheduler(
     db,
@@ -214,7 +268,9 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
       services: app.services,
       useCases: app.useCases,
       agora,
+      aFazer: aFazerLigado(env.NOD_PENDENCIAS),
       intervaloMs: iv.schedulerMs,
+      aoBater: batimentos.registrar("agendador", iv.schedulerMs ?? INTERVALO_SCHEDULER_MS),
     },
     { listarPessoas: o.listarPessoas },
   );
@@ -230,6 +286,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     },
     // ADR-067: o token sem relógio some junto com o turno que o lease encerrou.
     aoInterromper: (ids) => { for (const id of ids) app.services.tokenTurno.revogar(id); },
+    aoBater: batimentos.registrar("varredor_lease", iv.leaseMs ?? INTERVALO_VARREDOR_LEASE_MS),
   });
   const varredorExpiracao = iniciarVarredorExpiracao(db, { services: app.services, useCases: app.useCases, agora, intervaloMs: iv.expiracaoMs }, { listarPessoas: o.listarPessoas });
   // NOD-170: só com computadores ligados; NOD_COMPUTADOR_OCIOSO_MIN=0 não sobe o laço.
@@ -250,11 +307,16 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     inventario,
     async drenar({ prazoMs, intervaloMs = 1_000 }) {
       const inicio = agora();
+      // NOD-267: um SIGTERM nunca vira exit(1) no meio da drenagem — o watchdog para antes de esperar.
+      watchdog.parar();
       app.voz.iniciarDrenagem();
       app.drenarPonte();
       // definido em 2026-10-05 (NOD-175): só o compartilhado espera tokens — no modo local o turno roda neste processo e
       // o Ctrl+C do `npm start` não pode travar 10 min; o servidor local espera só as ligações, como antes.
-      const turnos = () => (app.compartilhado ? app.tokens.ativos() + app.reservasEmVoo() : 0);
+      // revisto em 2026-10-12 (NOD-214, emenda à ADR-071): o turno da máquina que atravessa o reinício (`sobreviveReinicio`
+      // no anúncio) não segura o deploy — ela continua rodando, e o processo novo o adota pelo token (turno_credenciais).
+      // A drenagem espera só os outros (app antigo, a ponte interna), as reservas em voo e as ligações; o teto segue.
+      const turnos = () => (app.compartilhado ? app.tokens.ativos({ semSobrevive: true }) + app.reservasEmVoo() : 0);
       const pendente = () => app.voz.vivas() > 0 || turnos() > 0;
       while (pendente() && agora() - inicio < prazoMs) {
         await new Promise((r) => setTimeout(r, Math.min(intervaloMs, Math.max(1, prazoMs - (agora() - inicio)))));
@@ -266,6 +328,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
     async fechar() {
       if (fechado) return;
       fechado = true;
+      watchdog.parar();
       scheduler.parar();
       varredorLease.parar();
       varredorExpiracao.parar();

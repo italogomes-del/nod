@@ -1,4 +1,4 @@
-import { gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../../use-cases/raio-x.ts";
+import { fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../../use-cases/raio-x.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, type DepsRotas } from "./executar-caso.ts";
 
@@ -25,7 +25,19 @@ export function criarRotasRaioX(d: DepsRotas): Rota[] {
       padrao: /^\/preferencias$/,
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev }));
+        const gravado = await executar(ctx.escopo, gravarPreferencias, { modoDev: corpo.modoDev, usoDoMac: corpo.usoDoMac, ordemIas: corpo.ordemIas });
+        // ADR-085: já gravado (a tx fechou) — o puxar relê o "uso do Mac" agora, sem esperar os 30 s do cache.
+        if (corpo.usoDoMac !== undefined) d.services.trabalhosVivos?.trocouUsoDoMac?.(ctx.escopo.pessoaId);
+        ctx.json(200, gravado);
+      },
+    },
+    {
+      // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa, não no navegador (o app do Mac limpa o dele).
+      metodo: "POST",
+      padrao: /^\/preferencias\/avisos-fechados$/,
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, fecharAviso, { chave: corpo.chave }));
       },
     },
     {

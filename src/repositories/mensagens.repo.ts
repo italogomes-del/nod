@@ -1,5 +1,6 @@
 import type { Autoria } from "../contracts/evento.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
+import type { OrigemTurno } from "../contracts/turno.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
 
@@ -67,7 +68,48 @@ export type NovaMensagem = {
   /** NOT NULL no banco (ADR-026): quem grava DECLARA a confiança do conteúdo. */
   confianca: Confianca;
   parcial?: boolean;
+  /**
+   * Chave de idempotência do envio da pessoa (definido em 2026-10-06, NOD-156). Com ela, o insert vira
+   * `on conflict do nothing` no índice único parcial da 0057 e devolve `null` se a chave já existe na conversa.
+   */
+  idEnvio?: string;
 };
+
+/** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
+type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null };
+
+function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
+  return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
+}
+
+/**
+ * definido em 2026-10-07 (ADR-083, S2): o que a web usa para agrupar sem adivinhar, no MESMO select (S3 da revisão: a
+ * janela `max(criado_em) over (partition by turno_id)`, nunca subconsulta por linha). A fala da pessoa não tem turno
+ * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0063). `fimDoTurno` olha só as
+ * falas de texto do bot e só turno já encerrado; a janela é a mesma página lida, e a última fala de um turno é sempre a
+ * mais nova dele, então ela está na página sempre que alguma fala dele estiver.
+ */
+function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
+  return conn<LinhaComTurno[]>`
+    select m.*, t.origem as turno_origem, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id,
+      (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
+        and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
+    from (${recorte}) m
+    left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
+    left join lateral (
+      select x.trabalho_id from turnos x where x.tenant_id = ${tenantId} and x.mensagem_origem_id = m.id and m.turno_id is null
+      order by x.criado_em limit 1
+    ) o on true
+    left join lateral (
+      with recursive c(id, origem, retoma, n) as (
+        select t.id, t.origem, t.retoma_turno_id, 0 where t.origem = 'retomada'
+        union all
+        select p.id, p.origem, p.retoma_turno_id, c.n + 1 from c join turnos p on p.tenant_id = ${tenantId} and p.id = c.retoma
+        where c.origem = 'retomada' and c.n < 10
+      ) select c.id as raiz_id, c.origem as raiz_origem from c where c.n > 0 order by c.n desc limit 1
+    ) rz on true
+    order by m.criado_em, m.id`;
+}
 
 /** Mensagens com autoria composta (ADR-023/025). A da sala é lida por quem tem grant (perna via sala_id). */
 export function mensagensRepo(conn: Conn, escopo: Escopo) {
@@ -76,11 +118,20 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       const a = m.autoria;
       const [l] = await conn<LinhaMensagem[]>`
         insert into mensagens (tenant_id, id, owner_id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao,
-          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial)
+          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, id_envio)
         values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.conversaId}, ${m.turnoId ?? null}, ${a.autor_tipo}, ${a.autor_id},
           ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por},
-          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false})
+          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false}, ${m.idEnvio ?? null})
+        ${m.idEnvio ? conn`on conflict (tenant_id, conversa_id, id_envio) where id_envio is not null do nothing` : conn``}
         returning ${conn.unsafe(COLUNAS_MENSAGEM)}`;
+      return l ? paraMensagem(l) : null;
+    },
+
+    /** A mensagem gravada com a chave de envio nesta conversa (NOD-156), para o reenvio devolver a mesma fala. */
+    async buscarPorIdEnvio(conversaId: string, idEnvio: string): Promise<Mensagem | null> {
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and id_envio = ${idEnvio}`;
       return l ? paraMensagem(l) : null;
     },
 
@@ -97,6 +148,30 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
           order by criado_em desc, id desc limit ${limite}
         ) recentes order by criado_em, id`;
       return linhas.map(paraMensagem);
+    },
+
+    /** listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083). */
+    async listarComTurno(conversaId: string, limite = 200): Promise<Mensagem[]> {
+      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
+        order by criado_em desc, id desc limit ${limite}`);
+      return linhas.map(paraMensagemComTurno);
+    },
+
+    /**
+     * As mensagens de um trabalho (a tela da task, ADR-083): as falas dos turnos dele, inclusive as do meio, e as da
+     * pessoa que abriram um turno dele. As mais recentes, até `limite`.
+     */
+    async doTrabalho(trabalhoId: string, limite = 300): Promise<Mensagem[]> {
+      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and id in (
+          select mm.id from mensagens mm join turnos t on t.tenant_id = mm.tenant_id and t.id = mm.turno_id
+          where mm.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${trabalhoId}
+          union all
+          select t.mensagem_origem_id from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${trabalhoId} and t.mensagem_origem_id is not null)
+        order by criado_em desc, id desc limit ${limite}`);
+      return linhas.map(paraMensagemComTurno);
     },
 
     /**
@@ -155,6 +230,17 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
 
     async marcarParcial(id: string, parcial: boolean): Promise<boolean> {
       const r = await conn`update mensagens set parcial = ${parcial} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
+      return r.count === 1;
+    },
+
+    /**
+     * ADR-108: o aviso de troca de IA é UM por bot — a segunda task que para atualiza a linha de sistema dele (texto e
+     * payload), e a decisão grava o desfecho nela. Só linha de sistema da dona. `turnoId` liga a linha sem turno à fala da
+     * conversa que parou depois (o "Continuar na conta" refaz essa fala); a que já tem turno fica com ele.
+     */
+    async atualizarSistema(id: string, m: { texto: string; payload: NonNullable<NovaMensagem["payload"]>; turnoId?: string | null }): Promise<boolean> {
+      const r = await conn`update mensagens set texto = ${m.texto}, payload = ${conn.json(m.payload)}, turno_id = coalesce(turno_id, ${m.turnoId ?? null})
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and kind = 'sistema'`;
       return r.count === 1;
     },
 

@@ -25,6 +25,11 @@ export type ConfigSonda = {
 
 export type OpcoesSonda = {
   timeoutMs?: number;
+  /**
+   * NOD-208: orçamento da sonda inteira no http (initialize, tools/list, páginas e novas tentativas); o prazo de
+   * cada requisição é cortado ao que sobra. Ausente = ORCAMENTO_CONECTOR_MS (30 s) do cliente.
+   */
+  orcamentoMs?: number;
   /** Fonte do ambiente base (default process.env); injetável no teste. */
   ambiente?: Readonly<Record<string, string | undefined>>;
   fetchImpl?: typeof fetch;
@@ -69,6 +74,27 @@ export function paraCapacidade(t: FerramentaDescoberta): CapacidadeConector {
   };
 }
 
+/**
+ * NOD-212: a causa de uma falha de sonda, para o log separar o que o `motivo` junta (conector_indisponivel cobre 401,
+ * 5xx, rede, sessão expirada e resposta grande). Só rótulos fixos e o código: nunca a URL, a chave ou a mensagem bruta.
+ */
+export function causaDaFalhaDeSonda(e: unknown): string {
+  if (!(e instanceof ErroTransporteMcp)) return "falha_tecnica";
+  if (e.sessaoExpirada) return "sessao_expirada";
+  if (e.status !== undefined) return `http_${e.status}`;
+  if (e.motivo === "timeout_transporte") return "prazo";
+  if (e.cause instanceof ErroTransporteMcp) return causaDaFalhaDeSonda(e.cause);
+  if (e.cause instanceof Error && e.cause.message === "resposta_mcp_grande") return "resposta_grande";
+  if (e.cause instanceof Error && e.cause.name === "AbortError") return "prazo";
+  if (typeof e.cause === "string") {
+    const rpc = /^(-\d+) /.exec(e.cause);
+    if (rpc) return `rpc_${rpc[1]}`;
+    if (e.cause === "resposta não JSON-RPC") return "resposta_invalida";
+  }
+  if (e.motivo === "falha_tecnica") return "catalogo_invalido";
+  return "rede";
+}
+
 export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {}): Promise<ResultadoSonda> {
   const env = cfg.transporte === "http" ? { ...(cfg.env ?? {}) } : { ...montarAmbiente("servidor", opcoes.ambiente ?? process.env), ...(cfg.env ?? {}) };
   const cliente = criarClienteMcp({
@@ -80,17 +106,23 @@ export async function sondarConector(cfg: ConfigSonda, opcoes: OpcoesSonda = {})
     env,
     timeoutMs: opcoes.timeoutMs ?? PROBE_MS,
     fetchImpl: opcoes.fetchImpl,
+    ...(opcoes.orcamentoMs !== undefined ? { orcamentoMs: Math.max(1, opcoes.orcamentoMs) } : {}),
   });
   try {
     const ferramentas = await cliente.listar();
     const composio = cfg.transporte === "http" && cfg.url && ["app.composio.dev", "backend.composio.dev"].includes(new URL(cfg.url).hostname);
     // definido em 2026-09-17: só ferramentas concretas por capacidade; meta-executores burlariam a aprovação do destino.
     const concretas = composio ? ferramentas.filter((t) => !t.name.startsWith("COMPOSIO_")) : ferramentas;
-    if (concretas.length === 0) return { ok: false, motivo: "conector_indisponivel" };
+    if (concretas.length === 0) {
+      // NOD-208: catálogo vazio também é falha com log (antes, silêncio). `meta` = quantos COMPOSIO_* vieram.
+      // O motivo devolvido segue conector_indisponivel: o contrato e a CHECK do banco não mudam. Sem URL nem chave.
+      log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo: "catalogo_vazio", meta: ferramentas.length - concretas.length, total: ferramentas.length });
+      return { ok: false, motivo: "conector_indisponivel" };
+    }
     return { ok: true, ferramentas: concretas.map(paraCapacidade) };
   } catch (e) {
     const motivo = e instanceof ErroTransporteMcp ? e.motivo : "falha_tecnica";
-    log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, erro: e instanceof Error ? e.name : "desconhecido" });
+    log("aviso", "sonda_conector_falhou", { conector: cfg.nome, motivo, causa: causaDaFalhaDeSonda(e), ...(e instanceof ErroTransporteMcp && e.status !== undefined ? { status: e.status } : {}), erro: e instanceof Error ? e.name : "desconhecido" });
     return { ok: false, motivo };
   } finally {
     await cliente.fechar().catch(() => undefined);

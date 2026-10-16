@@ -4,6 +4,7 @@ import type { ItemAprovacao } from "../../../src/contracts/item-aprovacao.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../../web/telas/conversa.ts";
+import { renderTelaLinha } from "../../../web/telas/trabalhos.ts";
 
 const autoria = { autor_tipo: "agente" as const, autor_id: "taga", sob_procuracao_de: "marlon", conta_de_execucao: "marlon", executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
 const estado: Estado = { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marlon" } };
@@ -26,20 +27,34 @@ describe("pedido de colega na conversa (ADR-047/058)", () => {
     expect(html).not.toContain("não é instrução da pessoa");
   });
 
-  it("o handoff na conversa do Taga mostra o autor composto; agrupado, vira 'Pedido · <autor>'", () => {
+  // revisto em 2026-10-07 (#191, chat limpo): agrupado, o pedido vira a linha "Enviou mensagem para…"; o autor composto
+  // continua no handoff, que a tela provisória da linha desenha inteiro.
+  it("o handoff na conversa do Taga mostra o autor composto; agrupado, vira a linha 'Enviou mensagem para' que abre o pedido", () => {
     const m: Mensagem = { tenantId: "t", id: "m2", conversaId: "c-taga", turnoId: "t-taga", autoria, kind: "handoff", texto: "x", payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466" }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
     const html = renderMensagem(m, estado);
     expect(html).toContain("agente · por você → agente");
     expect(html).toContain("revisar o PR 466");
-    const agrupado = renderMensagensAgrupadas([{ ...m, payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466", tarefaId: "tarefa" } }], estado);
-    expect(agrupado).toContain("Pedido · agente · por você");
+    const delegado: Mensagem = { ...m, payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466", tarefaId: "tarefa" } };
+    const agrupado = renderMensagensAgrupadas([delegado], estado);
+    expect(agrupado).toContain("<span>Enviou mensagem para</span>");
+    expect(agrupado).toContain('data-act="abrir-linha"');
+    expect(agrupado).toContain('data-mensagens="m2"');
+    const conversa: ConversaEstado = { conversa: { tenantId: "t", id: "c-taga", ownerId: "marlon", visibility: "privado", tipo: "propria", agenteId: "taga", salaId: null, sessaoCli: null, criadoEm: 0 }, mensagens: [delegado], propostas: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], fios: [], carregadaEm: 0 };
+    const tela = renderTelaLinha({ ...estado, conversas: { "c-taga": conversa } }, { tipo: "linha", conversaId: "c-taga", mensagens: ["m2"], titulo: "Mensagem para Dev 1", voltar: { tipo: "inicio" } });
+    expect(tela).toContain("agente · por você → agente");
+    expect(tela).toContain('data-act="fechar-trabalho"');
   });
 
-  it("a resposta volta como 'Resposta de Dev 1'; a falha, como 'Não concluído por Dev 1'", () => {
+  it("a resposta volta como 'Resposta de Dev 1'; a falha, numa linha discreta com o motivo atrás de 'detalhes'", () => {
     const m: Mensagem = { tenantId: "t", id: "m3", conversaId: "c-taga", turnoId: "cont", autoria: { ...autoria, autor_id: "dev1" }, kind: "peer_ask", texto: "Revisei", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true }, confianca: "nao_confiavel", parcial: false, criadoEm: 0 };
     expect(renderMensagem(m, estado)).toContain("Resposta de Dev 1");
-    const aviso: Mensagem = { ...m, texto: "Dev 1 não concluiu: você pediu para parar", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true, falhou: true } };
-    expect(renderMensagem(aviso, estado)).toContain("Não concluído por Dev 1");
+    const aviso: Mensagem = { ...m, texto: "Dev 1 não concluiu: você pediu para parar", payload: { kind: "peer_ask", agenteId: "dev1", nome: "Dev 1", naoSupervisionado: true, tarefaId: "tarefa", delegada: true, falhou: true, trabalhoId: "w-dev1" } };
+    const html = renderMensagem(aviso, estado);
+    // Protótipo "Nod — tempo da task" (aprovado em 2026-10-08): uma linha; motivo e atalho para a task dele em "detalhes".
+    expect(html).toContain('<summary><span>Dev 1 não conseguiu terminar o pedido</span><span class="pf-detalhes">detalhes</span></summary>');
+    expect(html).toContain("<span>você pediu para parar</span>");
+    expect(html).toContain('data-act="abrir-trabalho" data-id="w-dev1">Ver a task do Dev 1</button>');
+    expect(html).not.toContain("msg-peer\"");
   });
 });
 

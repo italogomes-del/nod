@@ -19,7 +19,11 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from relatos where owner_id = ${p}`;
     await trx`delete from turno_diagnosticos where owner_id = ${p}`;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
+    // ADR-108 (0080): o aviso de troca aponta para agente e conversa — sai antes deles.
+    await trx`delete from trocas_de_ia where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from computador_acoes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
@@ -42,6 +46,8 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from rotina_execucoes where owner_id = ${p}`;
     await trx`delete from rotina_janelas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    await trx`delete from trabalhos where owner_id = ${p}`;
     // ADR-075 (0048): a ligação aponta para agente e conversa, e os turnos apontam para ela — sai entre os dois.
     await trx`delete from ligacao_falas where owner_id = ${p}`;
     await trx`delete from ligacoes where owner_id = ${p}`;

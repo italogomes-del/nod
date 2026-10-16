@@ -4,7 +4,7 @@ import { classificarFalhaHttp, ehRedirecionamentoRecusado, esperaAntes, lerRetry
 import { log } from "../../obs/log.ts";
 import { ORCAMENTO_CONECTOR_MS } from "../../shared/constantes.ts";
 import { CODIGO, interpretar, notificacao, requisicao, type ErroJsonRpc } from "./jsonrpc.ts";
-import { lerRespostaHttp } from "./resposta-http.ts";
+import { lerRespostaHttp, TETO_CATALOGO_MCP_BYTES, TETO_RESPOSTA_MCP_BYTES } from "./resposta-http.ts";
 import { criarLineSplitter } from "./line-splitter.ts";
 
 /**
@@ -49,12 +49,18 @@ export class ErroTransporteMcp extends Error {
   /** Status HTTP da resposta que falhou (só transporte http): a nova tentativa e o log decidem por ele. */
   readonly status?: number;
   readonly retryAfterMs?: number;
-  constructor(motivo: "conector_indisponivel" | "timeout_transporte" | "falha_tecnica", cause?: unknown, http: { status?: number; retryAfterMs?: number } = {}) {
+  /**
+   * NOD-193: 404 numa requisição que LEVAVA `mcp-session-id`. Pela spec MCP (2025-06-18, Session Management)
+   * o servidor encerrou a sessão e não executou o pedido; o cliente abre outra com `initialize` e repete.
+   */
+  readonly sessaoExpirada?: true;
+  constructor(motivo: "conector_indisponivel" | "timeout_transporte" | "falha_tecnica", cause?: unknown, http: { status?: number; retryAfterMs?: number; sessaoExpirada?: true } = {}) {
     super(motivo, { cause });
     this.name = "ErroTransporteMcp";
     this.motivo = motivo;
     if (http.status !== undefined) this.status = http.status;
     if (http.retryAfterMs !== undefined) this.retryAfterMs = http.retryAfterMs;
+    if (http.sessaoExpirada) this.sessaoExpirada = true;
   }
 }
 
@@ -86,8 +92,11 @@ export function textoDoConteudo(result: unknown): ResultadoChamadaMcp {
 export const PROTOCOLO_MCP = "2025-06-18";
 
 type Transporte = {
-  /** `prazoMs` corta o timeout desta requisição (só http; o stdio usa sempre o seu). */
-  enviar(linha: string, prazoMs?: number): Promise<{ result?: unknown; error?: ErroJsonRpc } | null>;
+  /**
+   * `prazoMs` corta o timeout desta requisição (só http; o stdio usa sempre o seu). `tetoBytes` (NOD-212, só http):
+   * teto da resposta; padrão TETO_RESPOSTA_MCP_BYTES.
+   */
+  enviar(linha: string, prazoMs?: number, tetoBytes?: number): Promise<{ result?: unknown; error?: ErroJsonRpc } | null>;
   fechar(): Promise<void>;
 };
 
@@ -192,14 +201,21 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
   const url = cfg.url;
   let sessao: string | null = null;
   return {
-    async enviar(linha, prazoMs) {
+    async enviar(linha, prazoMs, tetoBytes = TETO_RESPOSTA_MCP_BYTES) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, prazoMs ?? timeoutMs));
       try {
         const cabecalhos: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream", ...(cfg.env ?? {}) };
-        if (sessao) cabecalhos["mcp-session-id"] = sessao;
+        const comSessao = sessao;
+        if (comSessao) cabecalhos["mcp-session-id"] = comSessao;
         cabecalhos["mcp-protocol-version"] = PROTOCOLO_MCP;
         const r = await f(url, { method: "POST", headers: cabecalhos, redirect: "error", body: linha, signal: ctrl.signal });
+        if (r.status === 404 && comSessao !== null) {
+          // Sessão encerrada pelo servidor: zera para o próximo initialize ir SEM session id. 404 sem sessão segue abaixo, como erro do pedido.
+          if (sessao === comSessao) sessao = null;
+          await r.body?.cancel().catch(() => undefined);
+          throw new ErroTransporteMcp("conector_indisponivel", "sessao_expirada", { status: 404, sessaoExpirada: true });
+        }
         const sid = r.headers.get("mcp-session-id");
         if (sid) sessao = sid;
         if (r.status === 202 || r.status === 204) return null;
@@ -210,7 +226,7 @@ function transporteHttp(cfg: ConfigClienteMcp, timeoutMs: number): Transporte {
         }
         const pedido = interpretar(linha);
         const id = pedido.tipo === "requisicao" ? pedido.id : null;
-        const m = await lerRespostaHttp(r, id);
+        const m = await lerRespostaHttp(r, id, tetoBytes);
         if (!m) {
           if (id === null) return null;
           throw new ErroTransporteMcp("falha_tecnica", "resposta não JSON-RPC");
@@ -251,6 +267,20 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
   const orcamentoMs = cfg.transporte === "http" && cfg.orcamentoMs !== null ? (cfg.orcamentoMs ?? ORCAMENTO_CONECTOR_MS) : null;
   const prazo = (inicio: number) => (orcamentoMs === null ? undefined : prazoDaTentativa(timeoutMs, orcamentoMs - (agora() - inicio)));
 
+  /** Uma operação (iniciar, listar, chamar): o orçamento corre desde `inicio` e a sessão se renova no máximo uma vez. */
+  type Operacao = { inicio: number; renovou: boolean };
+  const operacao = (): Operacao => ({ inicio: agora(), renovou: false });
+
+  /**
+   * NOD-193: renova só o 404 de sessão, fora do próprio initialize, uma vez por operação, e só se ainda cabe um
+   * prazo inteiro de requisição no orçamento (a mesma folga que a nova tentativa exige). Sem orçamento, sempre cabe.
+   */
+  function podeRenovar(e: unknown, metodo: string, op: Operacao): boolean {
+    if (!(e instanceof ErroTransporteMcp) || e.sessaoExpirada !== true) return false;
+    if (metodo === "initialize" || op.renovou) return false;
+    return orcamentoMs === null || orcamentoMs - (agora() - op.inicio) >= timeoutMs;
+  }
+
   /** Falha de transporte → entrada da política; só o que é do HTTP e não é erro do protocolo entra. */
   function falhaDe(e: unknown): FalhaHttp | null {
     if (!(e instanceof ErroTransporteMcp)) return null;
@@ -268,17 +298,45 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
    * serializada, então a espera segura as outras chamadas do mesmo conector — aceitável porque tudo cabe
    * em ORCAMENTO_CONECTOR_MS (`inicio` é o começo da operação, que o initialize também consome).
    */
-  async function pedir(metodo: string, params: unknown, inicio: number, somenteLeitura: boolean, rotulo = metodo): Promise<unknown> {
+  async function pedir(metodo: string, params: unknown, op: Operacao, somenteLeitura: boolean, rotulo = metodo): Promise<unknown> {
+    const { inicio } = op;
     // `anterior` é a falha que provocou a tentativa em curso; vira o log `conector_nova_tentativa` quando ela termina.
     let anterior: { status: number | "rede"; espera: number } | null = null;
     let r: Awaited<ReturnType<Transporte["enviar"]>> = null;
+    // A tentativa em curso é o reenvio depois de renovar a sessão: o desfecho dela vira `conector_sessao_renovada`.
+    let renovada = false;
+    const logRenovacao = (desfecho: "recuperou" | "falhou") => {
+      if (!renovada) return;
+      renovada = false;
+      log("info", "conector_sessao_renovada", { conector: cfg.nome, ferramenta: rotulo, desfecho });
+    };
     for (let tentativa = 1; ; tentativa++) {
       const campos = (desfecho: string) => ({ conector: cfg.nome, ferramenta: rotulo, status: anterior?.status, tentativa, espera_ms: anterior?.espera, desfecho });
       try {
-        r = await transporte.enviar(requisicao(proximoId++, metodo, params), prazo(inicio));
+        // NOD-212: o catálogo (tools/list) tem teto próprio; acima de 1 MiB ele falhava sempre, e a re-sonda repetia a falha.
+        r = await transporte.enviar(requisicao(proximoId++, metodo, params), prazo(inicio), metodo === "tools/list" ? TETO_CATALOGO_MCP_BYTES : undefined);
         if (anterior) log("info", "conector_nova_tentativa", campos("recuperou"));
+        logRenovacao("recuperou");
         break;
       } catch (e) {
+        // NOD-193: antes da política de nova tentativa (lá o 404 continua "pedido"). O servidor não executou o
+        // pedido, então vale também para escrita. Repete com id novo; o initialize consome o mesmo orçamento.
+        if (podeRenovar(e, metodo, op)) {
+          op.renovou = true;
+          anterior = null;
+          iniciado = false;
+          try {
+            await iniciarDentro(op);
+          } catch (erroInicio) {
+            log("info", "conector_sessao_renovada", { conector: cfg.nome, ferramenta: rotulo, desfecho: "falhou" });
+            // Erro JSON-RPC do initialize não pode virar "erro da ferramenta" no chamar(): embrulha a causa.
+            throw erroInicio instanceof ErroTransporteMcp && erroInicio.motivo === "falha_tecnica" ? new ErroTransporteMcp("falha_tecnica", erroInicio) : erroInicio;
+          }
+          renovada = true;
+          // O reenvio não conta como nova tentativa: a política (máximo de tentativas e espera) recomeça na sessão nova.
+          tentativa--;
+          continue;
+        }
         const falha = orcamentoMs !== null ? falhaDe(e) : null;
         const retryAfterMs = e instanceof ErroTransporteMcp ? e.retryAfterMs : undefined;
         const repetir =
@@ -293,7 +351,10 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
           });
         if (anterior) log("aviso", "conector_nova_tentativa", campos(repetir ? "repetindo" : "esgotou"));
-        if (!repetir || falha === null || falha === "timeout") throw e;
+        if (!repetir || falha === null || falha === "timeout") {
+          logRenovacao("falhou");
+          throw e;
+        }
         const espera = esperaAntes(tentativa, aleatorio(), retryAfterMs);
         anterior = { status: falha, espera };
         await dormir(espera);
@@ -307,24 +368,25 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
     return r.result;
   }
 
-  async function iniciarDentro(inicio: number): Promise<void> {
+  async function iniciarDentro(op: Operacao): Promise<void> {
     if (iniciado) return;
-    await pedir("initialize", { protocolVersion: PROTOCOLO_MCP, capabilities: {}, clientInfo: { name: "nod", version: "0.1.0" } }, inicio, true);
-    await transporte.enviar(notificacao("notifications/initialized"), prazo(inicio));
+    await pedir("initialize", { protocolVersion: PROTOCOLO_MCP, capabilities: {}, clientInfo: { name: "nod", version: "0.1.0" } }, op, true);
+    await transporte.enviar(notificacao("notifications/initialized"), prazo(op.inicio));
     iniciado = true;
   }
 
   return {
-    iniciar: () => serializado(() => iniciarDentro(agora())),
+    iniciar: () => serializado(() => iniciarDentro(operacao())),
     listar: () =>
       serializado(async () => {
-        const inicio = agora();
-        await iniciarDentro(inicio);
+        const op = operacao();
+        await iniciarDentro(op);
         const ferramentas: FerramentaDescoberta[] = [];
         const vistos = new Set<string>();
         let cursor: string | undefined;
         do {
-          const r = (await pedir("tools/list", cursor ? { cursor } : undefined, inicio, true)) as { tools?: unknown; nextCursor?: unknown };
+          // Renovar a sessão repete a página em curso com o mesmo cursor; cursor recusado sobe como erro.
+          const r = (await pedir("tools/list", cursor ? { cursor } : undefined, op, true)) as { tools?: unknown; nextCursor?: unknown };
           if (!Array.isArray(r?.tools)) throw new ErroTransporteMcp("falha_tecnica");
           ferramentas.push(...(r.tools as FerramentaDescoberta[]).filter((t) => typeof t?.name === "string"));
           cursor = typeof r.nextCursor === "string" && r.nextCursor !== "" ? r.nextCursor : undefined;
@@ -335,10 +397,10 @@ export function criarClienteMcp(cfg: ConfigClienteMcp): ClienteMcp {
       }),
     chamar: (tool, args, opcoes) =>
       serializado(async () => {
-        const inicio = agora();
-        await iniciarDentro(inicio);
+        const op = operacao();
+        await iniciarDentro(op);
         try {
-          return textoDoConteudo(await pedir("tools/call", { name: tool, arguments: args }, inicio, opcoes?.somenteLeitura === true, tool));
+          return textoDoConteudo(await pedir("tools/call", { name: tool, arguments: args }, op, opcoes?.somenteLeitura === true, tool));
         } catch (e) {
           // Erro JSON-RPC da ferramenta (ex.: -32602) não é queda do conector: volta como isError para o modelo.
           if (e instanceof ErroTransporteMcp && e.motivo === "falha_tecnica" && typeof e.cause === "string" && /^-\d+ /.test(e.cause)) {

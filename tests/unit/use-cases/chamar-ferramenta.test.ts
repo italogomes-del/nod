@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ErroTransporteMcp } from "../../../src/adapters/mcp-proxy/cliente-mcp.ts";
+import { ErroBancoOcupado, ErroTxEncerrada } from "../../../src/db/tx.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { FerramentaPlano, PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import { chamarFerramenta, errosDoSchema, validarArgsNod } from "../../../src/use-cases/chamar-ferramenta.ts";
 import type { Deps } from "../../../src/use-cases/tipos.ts";
+import { criarConectoresVivos } from "../../../src/services/conectores-vivos.ts";
 import { planoDeTeste } from "../../helpers/l5.ts";
 import { depsFalsos, type OpcoesDepsFalsos } from "./deps-l5.ts";
 
@@ -27,7 +29,7 @@ async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno>
   });
   const consentimento = await deps.repos.mensagens.criar({ conversaId: conversa?.id ?? "", autoria: { autor_tipo: "pessoa", autor_id: deps.escopo.pessoaId, sob_procuracao_de: null, conta_de_execucao: deps.escopo.pessoaId, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "consentimento", texto: "ok", confianca: "confiavel" });
   await deps.repos.concessoes.conceder({ agenteId: agente?.id ?? "", conectorId, capacidade: "somar", mensagemId: consentimento?.id ?? "" });
-  const turno = await deps.repos.turnos.enfileirar({ conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
   await deps.repos.turnos.reivindicar({ machineId: "m1", agora: AGORA });
   const turnoId = turno?.id ?? "";
   const agenteId = agente?.id ?? "";
@@ -277,6 +279,48 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(marcar).toHaveBeenCalledTimes(1);
     expect(r.data).toMatchObject({ ok: false, negacao: { classe: "conector_indisponivel", motivo: "conector_indisponivel", terminal: false } });
     expect(r.data).not.toHaveProperty("negacao.causa");
+  });
+
+  it.each([
+    ["banco_ocupado", () => new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000)],
+    ["tx_encerrada", () => new ErroTxEncerrada()],
+    ["statement_timeout (57014)", () => Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" })],
+    ["lock_timeout (55P03)", () => Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })],
+  ])("NOD-266: %s durante a chamada é falha nossa, não do app — relança sem marcarFalha nem negação", async (_nome, erro) => {
+    const c = await cenario({ responder: () => { throw erro(); } });
+    const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+    await expect(c.chamar("exemplo__somar", { a: 1, b: 2 })).rejects.toBeInstanceOf(erro().constructor);
+    expect(marcar).not.toHaveBeenCalled();
+    expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toBeNull();
+  });
+
+  it("NOD-193: sessão MCP expirada (404 com mcp-session-id) uma vez e depois 200 → ok: true, sem marcarFalha", async () => {
+    let sessoes = 0;
+    let expirar = 1;
+    const metodos: string[] = [];
+    const fetchImpl: typeof fetch = async (_u, init) => {
+      const q = JSON.parse(String(init?.body)) as { id?: number; method: string };
+      metodos.push(q.method);
+      if (q.method === "initialize") return Response.json({ jsonrpc: "2.0", id: q.id, result: {} }, { headers: { "mcp-session-id": `S${++sessoes}` } });
+      if (!q.id) return new Response(null, { status: 202 });
+      if (expirar-- > 0) return new Response("x", { status: 404 });
+      return Response.json({ jsonrpc: "2.0", id: q.id, result: { content: [{ type: "text", text: "3" }] } });
+    };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const vivos = criarConectoresVivos({ agora: () => AGORA, fetchImpl, carregar: async () => ({ nome: "exemplo", transporte: "http", url: "https://mcp.exemplo.com/mcp" }) });
+    try {
+      const c = await cenario({ responder: (ch) => vivos.chamar(ch.conectorId, ch.tool, ch.args, { rotina: false, somenteLeitura: true }) });
+      const marcar = vi.spyOn(c.deps.repos.conectores, "marcarFalha");
+      const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+      expect(r.data).toMatchObject({ ok: true });
+      expect(marcar).not.toHaveBeenCalled();
+      expect((await c.deps.repos.conectores.buscar(c.conectorId))?.ultimaFalha).toBeNull();
+      expect(metodos.filter((m) => m === "tools/call")).toHaveLength(2);
+      expect(metodos.filter((m) => m === "initialize")).toHaveLength(2);
+    } finally {
+      log.mockRestore();
+      await vivos.fechar();
+    }
   });
 
   it("NOD-157: 401/403 do conector nega com causa acesso_recusado (falha_tecnica), sem enum novo e sem dizer 'servidor fora'", async () => {

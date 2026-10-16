@@ -1,9 +1,10 @@
 import { build } from "esbuild";
 import { mkdir, copyFile } from "node:fs/promises";
+import { FORMATO_SERVIDOR_PADRAO } from "./servidor-padrao.mjs";
 await mkdir("dist/desktop", { recursive: true });
 // definido em 2026-10-03 (ADR-069): NOD_SERVIDOR_PADRAO embute o endereço do servidor no app; vazio, a pessoa informa na primeira abertura.
 const servidorPadrao = process.env.NOD_SERVIDOR_PADRAO ?? "";
-if (servidorPadrao && !/^https:\/\/[^/]+$/.test(servidorPadrao)) throw new Error(`NOD_SERVIDOR_PADRAO precisa ser https://host, sem caminho: ${servidorPadrao}`);
+if (servidorPadrao && !FORMATO_SERVIDOR_PADRAO.test(servidorPadrao)) throw new Error(`NOD_SERVIDOR_PADRAO precisa ser https://host, sem caminho: ${servidorPadrao}`);
 const compilado = await build({ metafile: true, entryPoints: ["desktop/main.ts", "desktop/proxy.ts", "desktop/hook-nativas.ts"], outdir: "dist/desktop", outExtension: { ".js": ".mjs" }, bundle: true, platform: "node", target: "node24", format: "esm", external: ["electron"], logLevel: "warning", define: { __NOD_SERVIDOR_PADRAO__: JSON.stringify(servidorPadrao) } });
 for (const arquivo of Object.keys(compilado.metafile.inputs)) {
   if (/src\/(db|repositories|use-cases)\/|src\/adapters\/(http|fundo)\//.test(arquivo)) throw new Error(`Servidor não pode entrar no app desktop: ${arquivo}`);

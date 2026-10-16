@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { DepsRotas } from "../../src/adapters/http/rotas/executar-caso.ts";
 import { criarRotasOnboarding } from "../../src/adapters/http/rotas/onboarding.ts";
+import { VERSAO_CONSENTIMENTO_VOZ } from "../../src/contracts/ligacao.ts";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -87,10 +88,11 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       expect((await post("onboarding/etapa", { etapa: "voando" })).status).toBe(400);
       expect(((await (await post("onboarding/etapa", { etapa: "executor" })).json()) as EstadoOnboarding).etapa).toBe("executor");
 
-      // Sem permissão para ligar: a guia nasce do mesmo jeito e a recusa volta tipada (a web segue sem voz).
+      // ADR-081: o primeiro GET já criou o Nod, e ele é a guia. Sem permissão para ligar, a recusa volta tipada.
+      expect(inicio.guia?.nome).toBe("Nod");
       const chamando = (await (await post("onboarding/etapa", { etapa: "chamando" })).json()) as EstadoOnboarding;
       expect(chamando).toMatchObject({ etapa: "chamando", ligacao: null, recusa: { motivo: "sem_permissao" } });
-      expect(chamando.guia?.nome).toMatch(/^Nina/);
+      expect(chamando.guia).toMatchObject({ id: inicio.guia?.id, nome: "Nod", cor: "c-black" });
       expect(registradas).toHaveLength(0);
 
       expect(((await (await post("onboarding/etapa", { etapa: "configurando", semVoz: true })).json()) as EstadoOnboarding).etapa).toBe("configurando");
@@ -125,13 +127,13 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       const chamando = (await (await post("onboarding/etapa", { etapa: "chamando" })).json()) as EstadoOnboarding;
       expect(chamando.ligacao).toMatchObject({ estado: "chamando", iniciadaPor: "produto", agenteId: chamando.guia?.id });
       expect(registradas.map((r) => r.ligacao.id)).toEqual([chamando.ligacao?.id]);
-      // A guia tem voz feminina (a concordância do prompt de voz) e o mascote do protótipo.
-      expect(registradas[0]).toMatchObject({ voz: "clara", genero: "feminina" });
+      // ADR-081: a guia é o Nod, com voz masculina (a concordância do prompt de voz: "Eu sou o Nod").
+      expect(registradas[0]).toMatchObject({ voz: "bento", genero: "masculina" });
 
       const d = depsSobreTrx(trx, MARLON);
       const consentimento = (await d.repos.ligacoes.consentimento()).versao ?? 0;
       if (consentimento < 1) expect((await post("onboarding/etapa", { etapa: "entrevista" })).status).toBe(409);
-      await d.repos.ligacoes.consentir(1, Date.now());
+      await d.repos.ligacoes.consentir(VERSAO_CONSENTIMENTO_VOZ, Date.now());
       const atendida = (await (await post("onboarding/etapa", { etapa: "entrevista" })).json()) as EstadoOnboarding;
       expect(atendida.etapa).toBe("entrevista");
       expect(liberadas).toContain(chamando.ligacao?.id);
@@ -145,7 +147,7 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
     });
   });
 
-  it("excluir a guia no meio da configuração tira o onboarding da frente; 'Ver de novo' cria outra guia", async () => {
+  it("o Nod (a guia) não se exclui no meio da configuração; 'Ver de novo' liga o mesmo Nod (ADR-081)", async () => {
     await withRollback(MARLON, async (trx) => {
       trxAtual = trx;
       contexto = { ...CONTEXTO_LIBERADO, permitido: false };
@@ -155,14 +157,13 @@ describeIntegracao("rotas do onboarding com servidor-de-teste", () => {
       const configurando = await post("onboarding/etapa", { etapa: "configurando", semVoz: true });
       expect(configurando).toMatchObject({ etapa: "configurando", mostrar: true });
       const guiaId = configurando.guia?.id ?? "";
-      await executar(depsSobreTrx(trx, MARLON), gerirAgente, { agenteId: guiaId, acao: "excluir" });
+      await expect(executar(depsSobreTrx(trx, MARLON), gerirAgente, { agenteId: guiaId, acao: "excluir" })).rejects.toMatchObject({ codigo: "nod_protegido" });
       const depois = (await (await servidor.chamar(marlon, "GET", "onboarding")).json()) as EstadoOnboarding;
-      expect(depois).toMatchObject({ etapa: "configurando", mostrar: false, guia: null });
+      expect(depois).toMatchObject({ etapa: "configurando", mostrar: true, guia: { id: guiaId } });
       const deNovo = await post("onboarding/etapa", { etapa: "ola" });
       expect(deNovo.mostrar).toBe(true);
       const outra = await post("onboarding/etapa", { etapa: "chamando" });
-      expect(outra.guia?.id).toBeTruthy();
-      expect(outra.guia?.id).not.toBe(guiaId);
+      expect(outra.guia?.id).toBe(guiaId);
       trxAtual = null;
     });
   });

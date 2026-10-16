@@ -29,7 +29,11 @@ describeIntegracao("propostas no Postgres (E1.1): confirmar aplica; nada antes",
       const { data } = await executar(deps, confirmarProposta, { propostaId: idDaProposta(p) });
       expect(data.agente).toMatchObject({ nome: "Vera", titulo: "Revisora", descricao: "Revisa PRs do nod e responde curto", confirmado: true });
       expect((await deps.repos.mensagens.ultimaDaConversa(criado.conversa.id))?.texto).toContain("Confirmado por");
-      await esperarErro(() => confirmarProposta(deps, { propostaId: idDaProposta(p) }), "estado_invalido");
+      // NOD-190: o mesmo card de novo é idempotente (sem evento, sem o aviso de perfil mudou).
+      const de_novo = await executar(deps, confirmarProposta, { propostaId: idDaProposta(p) });
+      expect(de_novo.data).toMatchObject({ proposta: { estado: "confirmada" } });
+      expect(de_novo.data.obsoleta).toBeUndefined();
+      expect(de_novo.events).toEqual([]);
     });
   });
 

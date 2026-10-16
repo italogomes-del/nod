@@ -7,6 +7,7 @@ import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts"
 import { decidirAcesso } from "../../../src/use-cases/decidir-acesso.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { executarRotinaAgora } from "../../../src/use-cases/executar-rotina-agora.ts";
+import { pedirABot } from "../../../src/use-cases/pedir-a-bot.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 
@@ -34,6 +35,25 @@ async function rotinaAtiva(d: ReturnType<typeof depsMemoria>, extra: { fonte?: s
 }
 
 describe("dispararRotina", () => {
+  it("NOD-259: a entrada da janela lista os pedidos do bot a colegas ainda sem resposta, de outras janelas; sem pedidos, nada", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const limpa = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in limpa.data)) throw new Error("deveria ter disparado");
+    expect(limpa.data.turno.entradaTexto).not.toContain("Pedidos seus a colegas");
+    // A janela anterior pediu ao Ze 1; a seguinte vê o pedido com o horário.
+    const ze = await d.deps.repos.agentes.criar({ nome: "Ze 1", dono: "pessoa", forma: "shape-hex", cor: "c-red", modelo: "claude-haiku-4-5-20251001" });
+    await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: ze?.id ?? "" });
+    const r = await pedirABot(d.deps, { turnoId: limpa.data.turno.id, agenteId: rotina.agenteId, conversaId: rotina.conversaId, agente: "Ze 1", pedido: "Status da NOD-12?" });
+    expect(r.data).toMatchObject({ ok: true });
+    await d.deps.repos.turnos.assentar(limpa.data.turno.id, { estado: "concluido" });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    const atual = (await d.deps.repos.rotinas.buscar(rotina.id))!;
+    const r2 = await dispararRotina({ ...d.deps, agora: () => seguinte }, { rotina: atual, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" });
+    if (!("turno" in r2.data)) throw new Error("deveria ter disparado");
+    // O horário vem do carimbo do handoff (no repositório em memória, o relógio real): só o formato.
+    expect(r2.data.turno.entradaTexto).toMatch(/\n\nPedidos seus a colegas ainda sem resposta \(a resposta chega em um novo turno; não peça de novo o mesmo\):\n- a Ze 1, às (\d\d\/\d\d )?\d\d:\d\d: Status da NOD-12\?$/);
+  });
   it("teste manual mantém pausa e agenda e deduplica dois cliques no mesmo minuto", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const rotina = await rotinaAtiva(d);
@@ -44,6 +64,10 @@ describe("dispararRotina", () => {
     expect(b.data.turnoId).toBeNull();
     expect(d.banco.turnos).toHaveLength(1);
     expect(await d.deps.repos.rotinas.buscar(rotina.id)).toMatchObject({ estado: "pausada", proximaExecucao: JANELA });
+    // ADR-085 (revisão do #209): "Executar agora" é a pessoa esperando — o Mac apertado não segura. revisto em 2026-10-12
+    // (ADR-099, I7 revista): o turno é do dono, sem trabalho, e o Mac apertado só segura trabalho novo em segundo plano.
+    expect(d.banco.trabalhos).toHaveLength(0);
+    expect(d.banco.turnos[0]?.trabalhoId ?? null).toBeNull();
   });
   it("reivindica a janela canônica, enfileira turno origem 'rotina' ligado à janela e reagenda a próxima; a mesma janela de novo é de outro processo", async () => {
     const d = depsMemoria({ agora: () => AGORA });
@@ -58,6 +82,10 @@ describe("dispararRotina", () => {
     expect(d.banco.rotinas[0]?.proximaExecucao).toBe(r.data.proximaExecucao);
     expect(d.banco.janelas).toEqual([{ tenantId: rotina.tenantId, rotinaId: rotina.id, instanteAgendado: JANELA, executor: "catcher", machineId: "m1", turnoId: r.data.turno.id }]);
     expect(r.events?.map((e) => e.kind)).toEqual(["turno_criado"]);
+    // revisto em 2026-10-12 (ADR-099, I7 revista; era um trabalho `rotina` por execução, ADR-083 S7/S13): a execução é
+    // um pedido na fila do dono — o turno nasce na conversa da rotina, sem trabalho; o dono abre frentes se precisar.
+    expect(d.banco.trabalhos).toHaveLength(0);
+    expect(r.data.turno.trabalhoId ?? null).toBeNull();
     // nenhuma execução ainda: o enum não tem 'pendente'; a janela com turno é o "em curso"
     expect(d.banco.execucoes).toHaveLength(0);
 
@@ -93,6 +121,36 @@ describe("dispararRotina", () => {
     if ("turno" in daPessoa.data) await d.deps.repos.turnos.reivindicar({ machineId: "m1", agora: AGORA });
     expect("pulada" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
     if ("turno" in daPessoa.data) await d.deps.repos.turnos.assentar(daPessoa.data.turno.id, { estado: "concluido" });
+    expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
+  });
+
+  it("ADR-086 (revisão do #212): a execução que marcou uma volta segue aberta — o turno da janela concluiu, mas a próxima janela é pulada", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const primeira = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
+    const t = primeira.data.turno;
+    await d.deps.repos.turnos.assentar(t.id, { estado: "concluido" });
+    await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: t.conversaId, agenteId: t.agenteId, origem: "retomada", retomaTurnoId: t.id, prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "volta", entradaConfianca: "confiavel", modelo: t.modelo, acordarEm: AGORA + 600_000 });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    expect((await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toMatchObject({ pulada: true, turnoAbertoId: t.id });
+  });
+
+  /**
+   * Revisão do épico #188 (S12, 2026-10-08): a task que a execução anterior abriu ainda aberta também pula a janela.
+   * revisto em 2026-10-12 (ADR-099, I7 revista): agora é a frente que o dono abriu na triagem da rotina (sem mãe).
+   */
+  it("S12: frente da execução anterior ainda aberta → a janela do agendador é pulada; acabada, roda", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const primeira = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in primeira.data)) throw new Error("deveria ter disparado");
+    const filha = await d.deps.repos.trabalhos.criar({ agenteId: rotina.agenteId, conversaId: rotina.conversaId, titulo: "Responder o chamado 42", origem: "rotina", rotinaId: rotina.id, forma: "frente" });
+    await d.deps.repos.turnos.assentar(primeira.data.turno.id, { estado: "concluido" });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    const pulada = await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" });
+    expect(pulada.data).toEqual({ pulada: true, turnoAbertoId: null, trabalhoAbertoId: filha!.id, proximaExecucao: Date.parse("2026-09-21T08:00:00-03:00") });
+    await d.deps.repos.trabalhos.mudarEstado(filha!.id, "terminado", AGORA);
     expect("turno" in (await dispararRotina(d.deps, { rotina, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" })).data).toBe(true);
   });
 
@@ -165,7 +223,7 @@ describe("dispararRotina", () => {
     expect(d.banco.execucoes.filter((e) => e.rotinaId === rotina.id)).toHaveLength(EXECUCOES_GUARDADAS);
 
     // turno que não é de rotina → ignorado, sem execução
-    const alheio = await d.deps.repos.turnos.enfileirar({ conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    const alheio = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "conversa", prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     expect((await registrarDesfechoRotina(d.deps, { turnoId: alheio?.id ?? randomUUID(), desfecho: "executou" })).data).toEqual({ ignorado: "nao_e_rotina" });
   });
 
@@ -190,7 +248,7 @@ describe("dispararRotina", () => {
     const gate = await d.deps.repos.decisoes.criar({ tipo: "gate_rotina", agenteId: rotina.agenteId, conversaId: rotina.conversaId, turnoId, prazoDecisaoEm: AGORA + 60_000, frase: "gate" });
     expect((await registrarDesfechoRotina(d.deps, { turnoId, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_gate" });
     await d.deps.repos.decisoes.decidir(gate?.id ?? "", { por: "p", agora: AGORA });
-    const retomada = await d.deps.repos.turnos.enfileirar({ conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "retomada", retomaTurnoId: turnoId, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+    const retomada = await d.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: rotina.conversaId, agenteId: rotina.agenteId, origem: "retomada", retomaTurnoId: turnoId, prazoEm: AGORA + 1, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
     const ok = await registrarDesfechoRotina(d.deps, { turnoId: retomada?.id ?? "", desfecho: "executou" });
     expect("execucao" in ok.data && ok.data.execucao.turnoId).toBe(turnoId);
   });

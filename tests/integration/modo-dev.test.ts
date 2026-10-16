@@ -8,7 +8,7 @@ import { criarAgente } from "../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
-import { gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../src/use-cases/raio-x.ts";
+import { fecharAviso, gravarPreferencias, lerPreferencias, raioXDaConversa, raioXDoTurno } from "../../src/use-cases/raio-x.ts";
 import { ANA, depsSobreTrx, esperarErro, executar, MARLON } from "../helpers/deps-l6.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
@@ -89,8 +89,13 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       expect(semTexto.execucao).toBeNull();
       await executar(deps, assentarTurno, { turnoId: t1, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(0.5, randomUUID()) });
 
-      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false });
-      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true });
+      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} });
+      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} });
+      // Corpo vazio é recusado. ADR-099 (I10): `faixaTrabalhosRecolhida` saiu do contrato — vinda sozinha, é corpo vazio.
+      await expect(executar(deps, gravarPreferencias, {})).rejects.toMatchObject({ codigo: "entrada_invalida" });
+      await expect(executar(deps, gravarPreferencias, { faixaTrabalhosRecolhida: true } as never)).rejects.toMatchObject({ codigo: "entrada_invalida" });
+      expect((await executar(deps, gravarPreferencias, { modoDev: false })).data).not.toHaveProperty("faixaTrabalhosRecolhida");
+      await executar(deps, gravarPreferencias, { modoDev: true });
       await esperarErro(() => gravarPreferencias(deps, { modoDev: "sim" }), "entrada_invalida");
 
       await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "com modo dev", inventario: PRONTO });
@@ -122,8 +127,23 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       const daAna = depsSobreTrx(trx, ANA);
       await esperarErro(() => raioXDoTurno(daAna, { turnoId }), "nao_encontrado");
       expect(await trx`select 1 from turno_raio_x where turno_id = ${turnoId}`).toHaveLength(0);
-      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false });
+      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} });
       expect((await executar(daAna, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data).toEqual({ turnos: [], desde: { custoUsd: 0, turnos: 0 } });
+    });
+  });
+
+  it("0059: o aviso fechado fica com a pessoa — sem repetir, sem apagar o modo dev, privado e com chave fechada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      expect((await executar(deps, fecharAviso, { chave: "modo:total" })).data).toEqual({ modoDev: false, avisosFechados: ["modo:total"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} });
+      await executar(deps, gravarPreferencias, { modoDev: true });
+      await executar(deps, fecharAviso, { chave: "modo:total" });
+      expect((await executar(deps, fecharAviso, { chave: "modo:automatico" })).data).toEqual({ modoDev: true, avisosFechados: ["modo:total", "modo:automatico"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {} });
+      expect((await executar(deps, lerPreferencias, {})).data.avisosFechados).toEqual(["modo:total", "modo:automatico"]);
+      for (const chave of ["", "Modo:total", "modo:total; drop", "x".repeat(80), 42]) await esperarErro(() => fecharAviso(deps, { chave }), "entrada_invalida");
+
+      await vincularEscopo(trx, ANA);
+      expect((await executar(depsSobreTrx(trx, ANA), lerPreferencias, {})).data.avisosFechados).toEqual([]);
     });
   });
 });

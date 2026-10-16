@@ -32,9 +32,18 @@ import type { rotinasRepo } from "./rotinas.repo.ts";
 import type { salasRepo } from "./salas.repo.ts";
 import type { trilhaRepo } from "./trilha.repo.ts";
 import type { turnosRepo } from "./turnos.repo.ts";
+import type { trabalhosRepo } from "./trabalhos.repo.ts";
+import type { frentesRepo } from "./frentes.repo.ts";
+import type { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
+import type { donosRepo } from "./donos.repo.ts";
+import type { esperasRepo } from "./esperas.repo.ts";
+import type { contasIaRepo } from "./contas-ia.repo.ts";
+import type { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
+import type { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
+import type { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import type { leiturasRepo } from "./leituras.repo.ts";
 import type { ligacoesRepo } from "./ligacoes.repo.ts";
 import type { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
@@ -66,6 +75,21 @@ export interface Repos {
   propostas: ReturnType<typeof propostasRepo>;
   relatos: ReturnType<typeof relatosRepo>;
   turnos: ReturnType<typeof turnosRepo>;
+  trabalhos: ReturnType<typeof trabalhosRepo>;
+  /** 0071 (ADR-099, partes 3/4): os lotes de frentes e o resumo da frente. */
+  frentes: ReturnType<typeof frentesRepo>;
+  /** ADR-099 (I7 revista): os pedidos entre bots vistos pela triagem do dono — espera circular, livres, quedas. */
+  pedidosDeColega: ReturnType<typeof pedidosDeColegaRepo>;
+  /** ADR-099 (I10): o que o estado do dono lê de cada bot (a linha acima do campo e a linha do bot em Trabalhos). */
+  donos: ReturnType<typeof donosRepo>;
+  /** 0070 (ADR-099, parte 2): as esperas de comando. */
+  esperas: ReturnType<typeof esperasRepo>;
+  /** 0074 (ADR-102): as contas de IA da pessoa em todas as máquinas. */
+  contasIa: ReturnType<typeof contasIaRepo>;
+  /** 0080 (ADR-108): os avisos de troca de IA das tasks no limite, um aberto por bot. */
+  trocasDeIa: ReturnType<typeof trocasDeIaRepo>;
+  /** 0073 (NOD-214): a credencial do turno despachado (hash do token), para atravessar o reinício do servidor. */
+  turnoCredenciais: ReturnType<typeof turnoCredenciaisRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;
   rotinas: ReturnType<typeof rotinasRepo>;
@@ -87,6 +111,7 @@ export interface Repos {
   preferencias: ReturnType<typeof preferenciasRepo>;
   onboarding: ReturnType<typeof onboardingRepo>;
   comandos: ReturnType<typeof comandosRepo>;
+  usoDoPlano: ReturnType<typeof usoDoPlanoRepo>;
   leituras: ReturnType<typeof leiturasRepo>;
   ligacoes: ReturnType<typeof ligacoesRepo>;
   liberacoesDispensadas: ReturnType<typeof liberacoesDispensadasRepo>;

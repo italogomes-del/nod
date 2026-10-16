@@ -14,6 +14,19 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
         where c.tenant_id = ${escopo.tenantId} and c.owner_id = ${escopo.pessoaId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId}`;
       return l ? computador(l) : null;
     },
+    /**
+     * NOD-192: o painel só lê — sem FOR UPDATE e sem insert. `undefined` = agente inexistente, excluído ou de
+     * outra pessoa (o mesmo 404 de `obter`); `null` = o agente ainda não tem computador.
+     */
+    async buscarDoAgente(agenteId: string): Promise<Computador | null | undefined> {
+      const [l] = await conn<(Partial<Linha> & { dono_agente_id: string; vinculo: string | null })[]>`select c.*, a.id as dono_agente_id, a.computador_id as vinculo from agentes a
+        left join computadores c on c.tenant_id = a.tenant_id and c.id = a.computador_id and c.owner_id = ${escopo.pessoaId}
+        where a.tenant_id = ${escopo.tenantId} and a.owner_id = ${escopo.pessoaId} and a.id = ${agenteId} and a.excluido_em is null`;
+      if (!l) return undefined;
+      // Vínculo para uma linha que esta pessoa não vê: o mesmo 404 que `obter` daria.
+      if (l.vinculo && !l.id) return undefined;
+      return l.id ? computador({ ...l, agente_id: l.dono_agente_id } as Linha) : null;
+    },
     async obter(agenteId: string): Promise<Computador | null> {
       const [agente] = await conn<{ id: string; computador_id: string | null }[]>`select id, computador_id from agentes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${agenteId} and excluido_em is null for update`;
       if (!agente) return null;
@@ -69,6 +82,27 @@ export function computadoresRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<LinhaAcao[]>`insert into computador_acoes (tenant_id, owner_id, computador_id, turno_id, autor, tipo, estado, argumentos_cifrados)
         values (${escopo.tenantId}, ${escopo.pessoaId}, ${e.computadorId}, ${e.turnoId ?? null}, ${e.autor}, ${e.tipo}, ${e.estado}, ${e.argumentosCifrados ?? null}) returning *`;
       return acao(l!);
+    },
+    /**
+     * ADR-083 (S5): quem segura o computador agora — o título do trabalho do turno da ação em execução, ou "a conversa"
+     * (turno sem trabalho), ou "a pessoa" (ação dela, sem turno). null = nenhuma ação executando.
+     */
+    /**
+     * Quem segura o computador agora. revisto em 2026-10-08 (revisão do épico, S24): `deFora` quando o título é de uma
+     * task de colega ou de uma que leu conteúdo de fora — quem repassa o título ao modelo o marca não confiável.
+     */
+    async emUsoPor(id: string): Promise<{ titulo: string; deFora: boolean } | null> {
+      const [l] = await conn<{ autor: string; turno_id: string | null; titulo: string | null; de_fora: boolean | null }[]>`
+        select a.autor, a.turno_id, w.titulo,
+          (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
+            and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora
+        from computador_acoes a
+        left join turnos t on t.tenant_id = a.tenant_id and t.id = a.turno_id
+        left join trabalhos w on w.tenant_id = t.tenant_id and w.id = t.trabalho_id
+        where a.tenant_id = ${escopo.tenantId} and a.computador_id = ${id} and a.estado = 'executando'
+        order by a.em desc limit 1`;
+      if (!l) return null;
+      return l.titulo ? { titulo: l.titulo, deFora: l.de_fora === true } : { titulo: l.turno_id ? "a conversa" : "a pessoa", deFora: false };
     },
     async buscarAcao(id: string): Promise<(RegistroComputador & { argumentosCifrados: string | null }) | null> {
       const [l] = await conn<LinhaAcao[]>`select * from computador_acoes where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} for update`;

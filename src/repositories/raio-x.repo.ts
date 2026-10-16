@@ -1,4 +1,6 @@
-import type { ComposicaoRaioX, ExecucaoRaioX, Preferencias } from "../contracts/raio-x.ts";
+import type { IdHarness } from "../contracts/harness.ts";
+import type { LimiteDaIa, LimitesIa } from "../contracts/inteligencia.ts";
+import { USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb, ms } from "./conversao.ts";
 
@@ -89,21 +91,77 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 }
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
+const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite";
+
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {} });
   return {
     async buscar(): Promise<Preferencias> {
-      const [l] = await conn<{ modo_dev: boolean }[]>`
-        select modo_dev from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
-      return { modoDev: l?.modo_dev ?? false };
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS_PREFERENCIAS)} from preferencias where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}`;
+      return paraPreferencias(l);
     },
 
-    async gravar(p: Preferencias): Promise<Preferencias> {
-      const [l] = await conn<{ modo_dev: boolean }[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev})
-        on conflict (tenant_id, owner_id) do update set modo_dev = excluded.modo_dev, atualizado_em = clock_timestamp()
-        returning modo_dev`;
-      return { modoDev: l?.modo_dev ?? p.modoDev };
+    /** O que vier muda; o que faltar fica como está. ADR-099 (I10): `faixa_trabalhos_recolhida` fica no banco, sem uso. */
+    /** 0068: `ordemIas` null volta à ordem padrão; ausente não mexe. */
+    async gravar(p: { modoDev?: boolean; usoDoMac?: UsoDoMac; ordemIas?: IdHarness[] | null }): Promise<Preferencias> {
+      const ordem = p.ordemIas ? jsonb(conn, p.ordemIas) : null;
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb)
+        on conflict (tenant_id, owner_id) do update set
+          modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
+          uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
+          ordem_ias = case when ${p.ordemIas !== undefined} then ${ordem}::jsonb else preferencias.ordem_ias end,
+          atualizado_em = clock_timestamp()
+        returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
+      return paraPreferencias(l);
+    },
+
+    /** ADR-090: a máquina onde bot sem escolha trabalha (id da chave; null = qualquer uma). Quem chama já conferiu a chave. */
+    async definirMaquinaPadrao(maquinaId: string | null): Promise<Preferencias> {
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, maquina_padrao_id)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${maquinaId})
+        on conflict (tenant_id, owner_id) do update set maquina_padrao_id = ${maquinaId}, atualizado_em = clock_timestamp()
+        returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
+      return paraPreferencias(l);
+    },
+
+    /**
+     * 0068 (emenda da ADR-036): a IA chegou ao limite da assinatura até `renovaEm`. Por IA, a última gravação vence (dois
+     * turnos no limite ao mesmo tempo gravam o mesmo prazo, ou um mais novo).
+     */
+    async registrarLimite(ia: IdHarness, limite: LimiteDaIa): Promise<LimitesIa> {
+      const [l] = await conn<{ ias_no_limite: LimitesIa }[]>`
+        insert into preferencias (tenant_id, owner_id, ias_no_limite)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, jsonb_build_object(${ia}::text, ${jsonb(conn, limite)}::jsonb))
+        on conflict (tenant_id, owner_id) do update set
+          ias_no_limite = preferencias.ias_no_limite || jsonb_build_object(${ia}::text, ${jsonb(conn, limite)}::jsonb),
+          atualizado_em = clock_timestamp()
+        returning ias_no_limite`;
+      return l?.ias_no_limite ?? {};
+    },
+
+    /** 0068: um turno deu certo na IA — ela sai do limite. true = estava lá (a tela precisa saber). */
+    async limparLimite(ia: IdHarness): Promise<boolean> {
+      const r = await conn`update preferencias set ias_no_limite = ias_no_limite - ${ia}::text, atualizado_em = clock_timestamp()
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and ias_no_limite ? ${ia}::text`;
+      return r.count > 0;
+    },
+
+    /** 0059: guarda a chave do aviso fechado, sem repetir. Idempotente: fechar de novo não muda nada. */
+    async fecharAviso(chave: string): Promise<Preferencias> {
+      const [l] = await conn<Linha[]>`
+        insert into preferencias (tenant_id, owner_id, avisos_fechados)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${[chave]}::text[])
+        on conflict (tenant_id, owner_id) do update set
+          avisos_fechados = case when ${chave} = any(preferencias.avisos_fechados) then preferencias.avisos_fechados
+            else array_append(preferencias.avisos_fechados, ${chave}) end,
+          atualizado_em = clock_timestamp()
+        returning ${conn.unsafe(COLUNAS_PREFERENCIAS)}`;
+      return paraPreferencias(l);
     },
   };
 }

@@ -49,7 +49,9 @@ afterEach(async () => {
     await trx`set local lock_timeout = '2s'`;
     const p = PESSOA.pessoaId;
     await trx`delete from turno_raio_x where owner_id = ${p}`;
+    await trx`delete from esperas where owner_id = ${p}`;
     await trx`delete from turno_entregas where owner_id = ${p}`;
+    await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from catcher_registros where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
@@ -59,6 +61,8 @@ afterEach(async () => {
     await trx`delete from agente_memorias where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;
+    // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
+    await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     if (criados.agentes.length) await trx`delete from agentes where id in ${trx(criados.agentes)}`;

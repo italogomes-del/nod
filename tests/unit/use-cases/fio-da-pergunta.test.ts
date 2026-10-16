@@ -30,7 +30,7 @@ async function cenario() {
     relogio += ms;
   };
   const turno = async (origem: "conversa" | "retomada" = "conversa", retomaTurnoId: string | null = null) => {
-    const t = await d.deps.repos.turnos.enfileirar({ ...alvo, origem, retomaTurnoId, prazoEm: relogio + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "sonnet" });
+    const t = await d.deps.repos.turnos.enfileirar({ executor: "catcher", ...alvo, origem, retomaTurnoId, prazoEm: relogio + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "sonnet" });
     if (!t) throw new Error("turno");
     return t.id;
   };

@@ -5,45 +5,119 @@ import type { Rota } from "../roteador.ts";
 export const PRAZO_SAUDE_BANCO_MS = 2_000;
 
 /**
- * `GET /api/saude`. Com `verificar` (o boot passa um `select 1`), responde 200 só se o banco respondeu no prazo; falha ou
- * prazo → 503 `{ok:false}`, sem detalhe no corpo nem a message no log. Sem `verificar` (testes do roteador), 200 como antes.
- * A rota é pública: pedidos simultâneos compartilham a verificação em voo, para não empilhar `select 1` no pool com o
- * banco pendurado.
+ * definido em 2026-10-15 (NOD-267, emenda à ADR-017): um laço de fundo que não termina um tick há mais de 3 intervalos
+ * está parado (tick pendurado no pool esgotado, por exemplo: a trava `rodando` faz os ticks seguintes serem pulados em
+ * silêncio). 3 dá folga para um tick lento legítimo sem esconder o laço preso por mais de ~1,5 min.
  */
-export function criarRotaSaude(verificar?: () => Promise<unknown>): Rota {
+export const INTERVALOS_ATE_LACO_PARADO = 3;
+
+/**
+ * definido em 2026-10-15 (NOD-267, revisão do PR): o piso do "laço parado", qualquer que seja o intervalo. Com 3 × 15 s o
+ * varredor de lease daria 503 (e o watchdog reiniciaria) com um único tick legítimo de 46 s logo depois da carência,
+ * quando ele interrompe os turnos órfãos de todo mundo; e os testes de laço a 200 ms ficariam sensíveis à carga.
+ * 60 s = um lease de folga sobre o intervalo do varredor, sem esconder o laço preso por mais de ~1,5 min.
+ */
+export const LACO_PARADO_MINIMO_MS = 60_000;
+
+/** `null` = saudável. O motivo vai só para o log: a rota é pública. */
+export type MotivoSaude = "erro" | "prazo" | `laco_parado:${string}`;
+export type VerificacaoSaude = () => Promise<MotivoSaude | null>;
+
+/**
+ * Batimento por laço, em memória (NOD-267): o laço grava `agora()` ao TERMINAR cada tick (com sucesso ou com erro) —
+ * o tick pulado por `rodando` não bate, que é justamente o laço preso. `registrar` declara o laço com o intervalo,
+ * começa o batimento ali (quando o laço sobe, depois do registry e do inventário do boot, que podem demorar) e devolve
+ * a função que o laço chama ao bater.
+ */
+export type Batimentos = {
+  registrar(laco: string, intervaloMs: number): () => void;
+  /** Tira o laço da conta (o "boot", quando termina). */
+  soltar(laco: string): void;
+  /** O primeiro laço com o batimento vencido (`agora - batimento > max(3 × intervalo, piso)`), ou `null`. */
+  parado(): string | null;
+};
+
+export function criarBatimentos(p: { agora: () => number; minimoMs?: number }): Batimentos {
+  const minimoMs = p.minimoMs ?? LACO_PARADO_MINIMO_MS;
+  const lacos = new Map<string, { limiteMs: number; ultimo: number }>();
+  return {
+    registrar(laco, intervaloMs) {
+      const registro = { limiteMs: Math.max(INTERVALOS_ATE_LACO_PARADO * intervaloMs, minimoMs), ultimo: p.agora() };
+      lacos.set(laco, registro);
+      return () => {
+        registro.ultimo = p.agora();
+      };
+    },
+    soltar(laco) {
+      lacos.delete(laco);
+    },
+    parado() {
+      const agora = p.agora();
+      for (const [laco, r] of lacos) if (agora - r.ultimo > r.limiteMs) return laco;
+      return null;
+    },
+  };
+}
+
+/**
+ * A verificação de saúde, usada pela rota e pelo watchdog (NOD-267). Com `batimentos` (só no modo compartilhado: no
+ * Mac, acordar do sono deixaria o batimento velho e daria 503 falso), um laço parado já é falha, sem tocar no banco.
+ * Depois, o `select 1` com prazo: falha ou prazo → falha. Chamadas simultâneas compartilham a verificação em voo, para
+ * a rota pública e o watchdog não empilharem `select 1` no pool com o banco pendurado.
+ */
+export function criarVerificacaoSaude(p: { verificarBanco?: () => Promise<unknown>; batimentos?: Batimentos; prazoMs?: number }): VerificacaoSaude {
+  const prazoMs = p.prazoMs ?? PRAZO_SAUDE_BANCO_MS;
   let emVoo: Promise<"erro" | "prazo" | null> | null = null;
-  function verificarComPrazo(v: () => Promise<unknown>): Promise<"erro" | "prazo" | null> {
+  // O `select 1` que estourou o prazo continua na fila do postgres.js: enquanto ele não volta, a próxima verificação
+  // espera ESSE (com prazo novo) em vez de enfileirar outro — com o pool esgotado, não empilha um por chamada.
+  let bancoPendente: Promise<"erro" | null> | null = null;
+  function bancoComPrazo(v: () => Promise<unknown>): Promise<"erro" | "prazo" | null> {
     let prazo: ReturnType<typeof setTimeout> | undefined;
+    bancoPendente ??= Promise.resolve()
+      .then(v)
+      .then(
+        () => null,
+        () => "erro" as const,
+      )
+      .finally(() => {
+        bancoPendente = null;
+      });
     return Promise.race([
-      Promise.resolve()
-        .then(v)
-        .then(
-          () => null,
-          () => "erro" as const,
-        ),
+      bancoPendente,
       new Promise<"prazo">((r) => {
-        prazo = setTimeout(() => r("prazo"), PRAZO_SAUDE_BANCO_MS);
+        prazo = setTimeout(() => r("prazo"), prazoMs);
       }),
     ]).finally(() => clearTimeout(prazo));
   }
+  return async () => {
+    const laco = p.batimentos?.parado();
+    if (laco) return `laco_parado:${laco}`;
+    const v = p.verificarBanco;
+    if (!v) return null;
+    emVoo ??= bancoComPrazo(v).finally(() => {
+      emVoo = null;
+    });
+    return emVoo;
+  };
+}
+
+/**
+ * `GET /api/saude`. Com `verificar` (o boot passa a verificação de saúde), responde 200 só se ela passou; senão 503
+ * `{ok:false}`, sem detalhe no corpo — o motivo vai só para o log `saude_falhou`. Sem `verificar` (testes do roteador),
+ * 200 como antes.
+ */
+export function criarRotaSaude(verificar?: VerificacaoSaude): Rota {
   return {
     metodo: "GET",
     padrao: /^\/saude$/,
     publica: true,
     async handler(ctx) {
-      if (!verificar) {
-        ctx.json(200, { ok: true });
-        return;
-      }
-      emVoo ??= verificarComPrazo(verificar).finally(() => {
-        emVoo = null;
-      });
-      const motivo = await emVoo;
+      const motivo = verificar ? await verificar() : null;
       if (motivo === null) {
         ctx.json(200, { ok: true });
         return;
       }
-      log("aviso", "saude_banco_falhou", { motivo });
+      log("aviso", "saude_falhou", { motivo });
       ctx.json(503, { ok: false });
     },
   };

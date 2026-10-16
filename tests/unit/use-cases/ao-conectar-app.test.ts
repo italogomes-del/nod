@@ -58,7 +58,7 @@ describe("o login do app terminou: os cards de conexão viram cards de permitir 
     const { deps, banco } = depsEmMemoria();
     const { data: gil } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Gil" });
     await clickupConectado(deps);
-    const turno = await deps.repos.turnos.enfileirar({ conversaId: gil.conversa.id, agenteId: gil.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "crie a tarefa", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
+    const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: gil.conversa.id, agenteId: gil.agente.id, origem: "conversa", prazoEm: deps.agora() + 60_000, profundidade: 0, entradaTexto: "crie a tarefa", entradaConfianca: "confiavel", harness: "claude-cli", modelo: "sonnet" });
     const pedido = await pedirAcesso(deps, { turnoId: turno?.id ?? "", agenteId: gil.agente.id, conversaId: gil.conversa.id, conector: "clickup", capacidades: [], nivel: "escrita", nao_pedido: [] });
     const id = pedido.data.proposta_id;
     await esperarErro(() => decidirAcesso(deps, { decisaoId: id, recusar: false, executor: "catcher", capacidades: ["CLICKUP_DELETE_TASK"] }), "entrada_invalida");

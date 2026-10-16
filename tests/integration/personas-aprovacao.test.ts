@@ -126,7 +126,7 @@ async function conceder(m: Mundo, a: Bot, app: App, capacidades: readonly string
 
 async function turnoConversa(m: Mundo, o: { agente?: Bot; retomaTurnoId?: string } = {}): Promise<Turno> {
   const a = o.agente ?? m.bot;
-  const t = await m.repos.turnos.enfileirar({ conversaId: a.conversaId, agenteId: a.agenteId, origem: o.retomaTurnoId ? "retomada" : "conversa", retomaTurnoId: o.retomaTurnoId ?? null, prazoEm: Date.now() + 3_600_000, profundidade: 0, entradaTexto: "comenta na task 86abc que o deploy saiu", entradaConfianca: "confiavel", modelo: "m" });
+  const t = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: a.conversaId, agenteId: a.agenteId, origem: o.retomaTurnoId ? "retomada" : "conversa", retomaTurnoId: o.retomaTurnoId ?? null, prazoEm: Date.now() + 3_600_000, profundidade: 0, entradaTexto: "comenta na task 86abc que o deploy saiu", entradaConfianca: "confiavel", modelo: "m" });
   if (!t) throw new Error("turno");
   return t;
 }

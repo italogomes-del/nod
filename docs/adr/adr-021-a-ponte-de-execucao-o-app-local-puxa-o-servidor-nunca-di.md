@@ -38,3 +38,30 @@ in-process permanece. Usa-se uma instância do servidor enquanto conexões e tok
 Para evitar `--resume` de uma sessão existente só em outro computador, o modo compartilhado
 reconstrói o contexto a partir do histórico do servidor. Afinidade de sessão por máquina fica para
 outra etapa. Assinatura e disponibilização: [guia da release](../release-desktop.md).
+
+## Emenda de 2026-10-08 — anúncio só de inventário (NOD-199)
+
+**Contexto.** Desde a NOD-171/NOD-178 a vigia do Mac reanuncia as IAs quando algo muda (login no Codex, CLI
+atualizado, IA reprovada que volta). O reanúncio ia pelo `conectar`, que não aceita turno em andamento: com plano puxado
+há menos de 90 s respondia `estado_invalido` (o anúncio se perdia); depois de 90 s limpava `planos` e a entrega do turno
+que ainda rodava deixava de casar. Com as duas IAs prontas a vigia não tentava de novo, e o Codex só aparecia ao
+reabrir o app.
+
+**Decisão.**
+- Sexta rota da máquina, `POST /api/maquina/inventario`, com a mesma chave, o mesmo bloqueio de Origin e o mesmo piso
+  de versão (426) das outras. Exige conexão viva desta chave: sem ela, 409 (`reconectar`), e o app volta ao `conectar`.
+- Ela lê o anúncio pela mesma função do `conectar` (`lerAnuncio`: só harness integrado, `semLacoDeVoz` só de harness
+  pronto no anúncio, capacidades validadas, gh) e troca inventário, harnesses, gh e capacidades da conexão. Persiste e
+  repete as falas barradas como o `conectar`. **Nunca** toca em `planos`, `puxando` nem `recebidas`: o turno em curso
+  termina e entrega como antes. Nome, plataforma (ADR-090) e laço de voz vêm do último `conectar` e só mudam
+  reabrindo o app.
+- O `conectar` continua sendo o primeiro anúncio e a recuperação do `reconectar`; o contrato dele não mudou e apps
+  antigos seguem funcionando.
+- No app, `anunciarInventario` vai pela rota nova quando já conectado e grava o anúncio, para um `reconectar` depois
+  não reanunciar o inventário velho. Servidor antigo (404 na rota nova): cai no `conectar` só sem turno puxado e ainda
+  não entregue; com turno, falha e a vigia tenta de novo. **O app nunca limpa planos para anunciar.**
+- Anúncio que falhou é tentado de novo no passo de 30 s da vigia, mesmo com todas as IAs prontas.
+- O motor sem janela (ADR-090) usa a mesma vigia e reanuncia pelo mesmo `anunciarInventario` que o app do Mac.
+
+**Gatilho de reversão.** Se a rota de inventário e o `conectar` divergirem (um campo novo do anúncio lido só em um),
+fundir as duas leituras de volta é trocar `lerAnuncio` — o teste parametrizado das duas rotas pega a divergência.

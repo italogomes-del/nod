@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
-import { enviarMensagem, lerConversa } from "../../../src/use-cases/enviar-mensagem.ts";
+import { enviarMensagem, lerConversa, mensagemExecutorIndisponivel } from "../../../src/use-cases/enviar-mensagem.ts";
 import { depsEmMemoria, esperarErro, executar } from "../../helpers/deps-l6.ts";
 
 const PRONTO = { estado: "pronto" as const, versao: "teste", em: 0 };
@@ -78,5 +78,68 @@ describe("enviarMensagem: mensagem + turno + outbox na mesma tx (ADR-010), local
     expect(await deps.repos.paradas.ativa(deps.escopo.pessoaId, criado.conversa.id)).toBe(true);
     await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "voltei", inventario: PRONTO });
     expect(await deps.repos.paradas.ativa(deps.escopo.pessoaId, criado.conversa.id)).toBe(false);
+  });
+});
+
+/**
+ * NOD-220: a negação de executor indisponível grava a IA que negou (`ia`). Sem ela, a web via o bot no Automático com o
+ * turno recusado pelo Codex e decidia "já voltou" pela sonda do Claude (motor em uso), pronto.
+ */
+describe("NOD-220: a negação grava a IA que negou", () => {
+  const AUSENTE = { estado: "ausente" as const, motivo: "sem sonda", em: 0 };
+
+  it("harness recusado (Codex): ia = codex-cli, mesmo com o executor local (motor claude-cli)", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+    const m = await mensagemExecutorIndisponivel(deps, { conversaId: criado.conversa.id, turnoId: data.turno.id, agenteId: criado.agente.id, executor: "local", inventario: PRONTO, agora: 1, harness: "codex-cli" });
+    expect(m?.payload).toMatchObject({ kind: "negacao", classe: "plano_ausente", nome: "codex-cli", ia: "codex-cli" });
+    expect(m?.texto).toContain("Codex indisponível");
+  });
+
+  // Revisão do #303: o motor local fora não é a IA "claude-cli" recusando. Antes gravava ia = claude-cli e a web, num bot
+  // fixado no Codex, esperava o Claude Code voltar para sempre.
+  it("o executor fora (sem harness): nem o motor local nem o catcher gravam `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const local = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", executor: "local", inventario: AUSENTE });
+    expect(local.data.negacao?.payload).toMatchObject({ kind: "negacao", nome: "claude-cli" });
+    expect(local.data.negacao?.payload).not.toHaveProperty("ia");
+    const catcher = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "de novo", inventario: AUSENTE });
+    expect(catcher.data.negacao?.payload).toMatchObject({ kind: "negacao", nome: "catcher" });
+    expect(catcher.data.negacao?.payload).not.toHaveProperty("ia");
+  });
+
+  // #313: no envio, o bot fixado nomeia a IA DELE (com o estado que as máquinas anunciam) e o Automático não chama o motor
+  // de "Claude Code" — quem só tinha o ChatGPT lia "Claude Code sem conta conectada" com o bot fixado no Codex.
+  it("#313: bot fixado no Codex sem Codex pronto: a negação nomeia o Codex e grava `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", harness: "codex-cli", modelo: "gpt-5.6-sol" });
+    const semLogin = { estado: "nao_autenticado" as const, motivo: "entre no codex", em: 0 };
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", executor: "local", inventario: AUSENTE, harnessesDaPessoa: { "claude-cli": PRONTO, "codex-cli": semLogin } });
+    expect(data.negacao?.payload).toMatchObject({ kind: "negacao", nome: "codex-cli", ia: "codex-cli" });
+    expect(data.negacao?.texto).toContain("Codex sem conta conectada: entre no codex");
+    expect(data.negacao?.texto).not.toContain("Claude Code");
+    // Sem máquina viva nenhuma: não afirma "não instalado", diz que nenhum computador conectado o tem pronto.
+    const semMaquina = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "de novo", executor: "local", inventario: AUSENTE, harnessesDaPessoa: {} });
+    expect(semMaquina.data.negacao?.texto).toContain("Codex não está pronto em nenhum computador conectado");
+  });
+
+  it("#313: bot no Automático sem IA pronta: 'nenhuma IA pronta nas suas máquinas', sem nomear IA nem gravar `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", executor: "local", inventario: { estado: "nao_autenticado", motivo: "Entre na conta do harness neste computador", em: 0 }, harnessesDaPessoa: {} });
+    expect(data.negacao?.texto).toContain("nenhuma IA pronta nas suas máquinas");
+    expect(data.negacao?.texto).not.toContain("Claude Code");
+    expect(data.negacao?.payload).not.toHaveProperty("ia");
+  });
+
+  it("harness Claude recusado: ia = claude-cli; harness fora do catálogo não grava `ia`", async () => {
+    const { deps } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const { data } = await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+    const base = { conversaId: criado.conversa.id, turnoId: data.turno.id, agenteId: criado.agente.id, executor: "catcher" as const, inventario: AUSENTE, agora: 1 };
+    expect((await mensagemExecutorIndisponivel(deps, { ...base, harness: "claude-cli" }))?.payload).toMatchObject({ nome: "claude-cli", ia: "claude-cli" });
+    expect((await mensagemExecutorIndisponivel(deps, { ...base, harness: "gemini-x" }))?.payload).not.toHaveProperty("ia");
   });
 });

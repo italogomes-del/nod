@@ -95,14 +95,17 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
      * estado como COLUNA (vencido em cinza, nunca suprimido). agenteNome vem por LEFT JOIN porque o
      * agente de outra pessoa pode ser invisível para a decisora (RLS): cai em 'agente'.
      */
-    async listarSuaVez(agora: number): Promise<(Decisao & { agenteNome: string })[]> {
-      const linhas = await conn<(Linha & { agente_nome: string | null })[]>`
-        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `d.${c}`).join(", "))}, a.nome as agente_nome
+    async listarSuaVez(agora: number): Promise<(Decisao & { agenteNome: string; trabalhoId: string | null })[]> {
+      // definido em 2026-10-08 (revisão do épico, S4): o trabalho do turno da decisão separa as gêmeas por faixa — o
+      // "Retomar" de uma task não se dobra com o da conversa nem com o de outra task (montarFila, chaveDeGemea).
+      const linhas = await conn<(Linha & { agente_nome: string | null; trabalho_id: string | null })[]>`
+        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `d.${c}`).join(", "))}, a.nome as agente_nome, t.trabalho_id
         from decisoes d left join agentes a on a.tenant_id = d.tenant_id and a.id = d.agente_id
+          left join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
         where d.tenant_id = ${escopo.tenantId} and d.decisor_id = ${escopo.pessoaId}
           and (d.estado in ('pendente', 'reaberta') or (d.estado = 'vencida' and d.prazo_decisao_em >= ${data(agora - VENCIDAS_VISIVEIS_MS)}))
         order by d.criado_em`;
-      return linhas.map((l) => ({ ...paraDecisao(l), agenteNome: l.agente_nome ?? "agente" }));
+      return linhas.map((l) => ({ ...paraDecisao(l), agenteNome: l.agente_nome ?? "agente", trabalhoId: l.trabalho_id }));
     },
 
     /** As decisões que um turno criou (fio da pergunta: a pergunta respondida que a retomada continua). */
@@ -120,6 +123,19 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
       if (ids.length === 0) return [];
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from decisoes where tenant_id = ${escopo.tenantId} and (id in ${conn([...ids])} or fio_id in ${conn([...ids])}) order by criado_em`;
+      return linhas.map(paraDecisao);
+    },
+
+    /**
+     * definido em 2026-10-08 (revisão do épico, S1): as decisões ainda abertas dos turnos de um trabalho — o Parar da task,
+     * o "Fazer aqui" e o Parar do chat as fecham por regra, senão uma aprovação depois do Parar reabria a task.
+     */
+    async abertasDoTrabalho(trabalhoId: string): Promise<Decisao[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `d.${c}`).join(", "))}
+        from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+        where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${trabalhoId} and d.estado in ('pendente', 'reaberta')
+        order by d.criado_em, d.id`;
       return linhas.map(paraDecisao);
     },
 
@@ -182,6 +198,25 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ('pendente', 'reaberta')
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
+    },
+
+    /**
+     * definido em 2026-10-15 (NOD-261, G3): um turno do trabalho concluiu — os "Retomar" ainda abertos de turnos ANTERIORES
+     * do mesmo trabalho fecham por regra (`regra:retomar_superado`). Sem isso o card do turno caído segurava a frente em
+     * "Sua vez" depois que um recado posterior já a tinha concluído, e o lote nunca fechava. Anterior = criado antes do
+     * turno que concluiu; o "Retomar" de um turno posterior (que caiu depois) segue valendo. Pela dona, como fecharPorRegra.
+     */
+    async fecharRetomarAnteriores(trabalhoId: string, turnoIdAtual: string, p: { regra: `regra:${string}`; regraVersao: number; agora: number }): Promise<Decisao[]> {
+      const desfecho: DesfechoDecisao = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: iso(p.agora) };
+      const linhas = await conn<Linha[]>`
+        update decisoes d set estado = 'decidida', desfecho = ${conn.json(desfecho)}, decidida_em = ${data(p.agora)}
+        from turnos t, turnos atual
+        where d.tenant_id = ${escopo.tenantId} and d.owner_id = ${escopo.pessoaId} and d.tipo = 'retomar_turno' and d.estado in ('pendente', 'reaberta')
+          and t.tenant_id = d.tenant_id and t.id = d.turno_id and t.trabalho_id = ${trabalhoId}
+          and atual.tenant_id = d.tenant_id and atual.id = ${turnoIdAtual} and t.id <> atual.id
+          and (t.criado_em, t.id) < (atual.criado_em, atual.id)
+        returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `d.${c}`).join(", "))}`;
+      return linhas.map(paraDecisao);
     },
 
     /**

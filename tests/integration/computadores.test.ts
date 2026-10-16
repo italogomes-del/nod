@@ -6,6 +6,7 @@ import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { randomUUID } from "node:crypto";
+import { computadorPadrao } from "../../src/domain/computador.ts";
 const escopo = {tenantId:TENANT_PADRAO,pessoaId:PESSOA_MARLON};
 describeIntegracao("computador persistente por bot",()=>{
   it("mantém IDs distintos, vínculo estável e libera somente a reserva correta",async()=>{
@@ -60,6 +61,28 @@ describeIntegracao("computador persistente por bot",()=>{
       expect(await trx`update computadores set controle = 'pessoa' where id = ${c!.id} returning id`).toHaveLength(0);
       await vincularEscopo(trx,escopo);
       expect((await a.repos.computadores.travar(c!.id))!.controle).toBe("bot");
+    });
+  });
+  it("NOD-192: buscarDoAgente só lê; o padrão do domínio bate com os defaults da 0014/0022 de uma linha nova",async()=>{
+    await withRollback(escopo,async trx=>{
+      const a=await agenteComConversa(trx,escopo);
+      const linhas=async()=>(await trx<{n:number}[]>`select count(*)::int as n from computadores`)[0]!.n;
+      const antes=await linhas();
+      expect(await a.repos.computadores.buscarDoAgente(a.agenteId)).toBeNull();
+      expect(await linhas()).toBe(antes);
+      expect((await trx<{computador_id:string|null}[]>`select computador_id from agentes where id = ${a.agenteId}`)[0]!.computador_id).toBeNull();
+      // A 1ª ação cria pela migração (obter); o padrão é ela sem id e sem criado_em.
+      const criado=(await a.repos.computadores.obter(a.agenteId))!;
+      expect(await linhas()).toBe(antes+1);
+      expect({...criado,id:null,criadoEm:null}).toEqual(computadorPadrao(a.agenteId));
+      expect(await a.repos.computadores.buscarDoAgente(a.agenteId)).toEqual(criado);
+      // 404 como obter: inexistente, de outra pessoa ou excluído.
+      expect(await a.repos.computadores.buscarDoAgente(randomUUID())).toBeUndefined();
+      const ana={tenantId:TENANT_PADRAO,pessoaId:PESSOA_ANA};await vincularEscopo(trx,ana);
+      expect(await criarRepos(trx,ana).computadores.buscarDoAgente(a.agenteId)).toBeUndefined();
+      await vincularEscopo(trx,escopo);
+      await trx`update agentes set excluido_em = now() where id = ${a.agenteId}`;
+      expect(await a.repos.computadores.buscarDoAgente(a.agenteId)).toBeUndefined();
     });
   });
 });

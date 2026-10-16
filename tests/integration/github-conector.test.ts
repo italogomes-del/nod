@@ -73,7 +73,7 @@ function depsGithub(trx: Tx, escopo: Escopo, gh: boolean, opcoes: Opcoes = {}): 
 }
 
 async function turnoDaConversa(repos: Repos, conversaId: string, agenteId: string): Promise<string> {
-  const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "revise o PR 466", entradaConfianca: "confiavel", modelo: "m" });
+  const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "revise o PR 466", entradaConfianca: "confiavel", modelo: "m" });
   if (!t) throw new Error("turno");
   return t.id;
 }
@@ -176,7 +176,7 @@ describeIntegracao("GitHub nativo: registro sem configuração e execução na m
       // O GitHub é app de fora: chamá-lo marca o turno, também quando roda no gh do Mac.
       expect(await repos.turnos.contaminado(plano.turnoId)).toBe(true);
 
-      const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "veio de fora", entradaConfianca: "nao_confiavel", modelo: "m" });
+      const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "veio de fora", entradaConfianca: "nao_confiavel", modelo: "m" });
       const naoConfiavel = await planoDoTurno(deps, t?.id ?? "", true);
       const doGithub = naoConfiavel.catalogo.ferramentas.filter((f) => f.conectorId === conectorId);
       expect(doGithub.map((f) => f.nome).sort()).toEqual(CAPACIDADES_GITHUB.map((c) => `github__${c.nome}`).sort());

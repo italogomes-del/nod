@@ -14,17 +14,27 @@ ou remover esse volume sem um pedido explícito de perda total dos dados.
 npm ci                      # Node 24.19.0 (pinado em .mise.toml)
 npm run dev:setup           # sobe o Postgres (127.0.0.1:5434, container nod-postgres), migra nod + nod_test (0001–0010) e roda o seed em nod
 npm run dev                 # api 8888 + web 5274 (5173 e 5432 são de OUTROS projetos: nunca use); executor catcher por default
-npm run check               # lint → typecheck → fence:domain → unit → integration → conformidade → concurrency
+npm run check               # lint → typecheck → fence:domain → fence:migrations → unit → integration → conformidade → concurrency → db:test:limpar
+npm run diario:prod         # Nod diário sem modo dev (#218): build da web + só a API, que serve a página em 127.0.0.1:8888 (docs/ambiente-local-persistente.md)
 npm run e2e:fumaca          # doze jornadas sobre o servidor completo com catcher (tests/concurrency/e2e-catcher.test.ts), custo zero
 npm run e2e:aceite          # scripts/e2e-aceite.sh com o CLI real (sonnet, ou NOD_MODELO); imprime o custo somado — rode UMA vez, custa assinatura
 node scripts/carga-tela/rodar.ts medir <rotulo>   # carga da TELA num Chrome headless (vários bots escrevendo, turno pesado) sobre um banco efêmero; uso no cabeçalho do script (ADR-061)
 npm run sonda               # ADR-019: {estado, versao} sem email; custa um turno de MODELO_SONDA_PADRAO (Sonnet 4.6). sonda:mcp-timeout mede o teto do tools/call
 npm run test:integration    # só com DATABASE_URL_TEST (copie .env.example para .env); sem ele pula fora do CI e FALHA sob CI
-npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test)
+npm run prompt:referencia   # NOD-163: regrava tests/unit/domain/__prompts__/ (o prompt de sistema inteiro por cenário, estável × volátil, e tamanhos.json) — só quando a mudança no prompt é de propósito
+npm run db:test:limpar      # apaga os bancos nod_test_<hash> de worktrees que não existem mais (nunca nod nem nod_test); roda no fim do check
 npm run db:migrate          # como nod_dono; a aplicação (nod_app, NOBYPASSRLS) nunca migra
 npm run db:seed             # identidade (tenants/pessoas) como nod_dono + Vera/Tuca/sala geral como nod_app; idempotente por id determinístico (a 2ª passagem registra seed_sem_mudancas); o CI nunca chama
 npm start                   # node src/adapters/http/server.ts → boot.ts (partições, compor, listen, registry, laços); é o mesmo CMD do Dockerfile
 ```
+
+Prompts de referência (NOD-163): `tests/unit/domain/prompt-referencia.test.ts` (projeto unit, roda no `check`) compara o
+prompt de sistema de cada cenário fixo com `__prompts__/<cenario>.txt` e falha com o diff em qualquer mudança de
+`src/domain/prompt-sistema.ts`; também falha se a parte estável de um cenário crescer mais de 10% sobre
+`__prompts__/tamanhos.json`. Mudou o prompt de propósito: rode `npm run prompt:referencia` e commite o diff de
+`__prompts__/` junto. **Regra:** o diff de `__prompts__/` é revisado no PR como código — o revisor lê as linhas que
+entraram, saíram ou mudaram de parte (estável × volátil) e o tamanho novo; atualizar a referência sem olhar é o que este
+teste existe para impedir.
 
 O pre-commit roda só `lint-staged` (eslint --fix nos .ts). O gate pesado é `npm run check`, antes do push.
 O hook é instalado pelo `prepare` do `npm ci`/`npm install`; confira com `ls .git/hooks/pre-commit`
@@ -67,6 +77,39 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
   desligados: a decisora reescreveu frase/prazo e pôs `visibility = 'equipe'` na decisão da dona); por isso a policy vem
   SEMPRE com um trigger BEFORE UPDATE que fecha a lista de colunas que quem não é a dona pode mudar
   (`colunasLivresDaDecisora` em `src/db/schema/decisoes.ts`), e o motivo em `POLICIES_EXTRAS` nomeia o trigger.
+- **Migração nova só adiciona** (NOD-186). `npm run fence:migrations` (`scripts/migracao-aditiva.ts`, no `check`
+  e no CI) lê o trecho antes de `-- ROLLBACK:`, sem comentários nem literais (`'…'`, `E'…'`, `"…"`; o corpo
+  de `$$…$$` é verificado como código), e barra `DROP TABLE`,
+  `DROP [COLUMN]`, `RENAME` (tabela, coluna, valor de enum…), `ALTER [COLUMN] … TYPE`, `SET NOT NULL` e
+  (NOD-191) `DROP [MATERIALIZED] VIEW`, `DROP TYPE`, `DROP DOMAIN`, `DROP FUNCTION/PROCEDURE/ROUTINE`,
+  `TRUNCATE` e, em `ALTER TYPE`, `ALTER ATTRIBUTE … [SET DATA] TYPE` e `DROP ATTRIBUTE`, com `arquivo:linha`.
+  Passam: `ALTER TYPE … ADD VALUE/ADD ATTRIBUTE`, `CREATE OR REPLACE VIEW/FUNCTION`, `DROP INDEX/TRIGGER/POLICY`,
+  `DROP CONSTRAINT/DEFAULT/NOT NULL` e `TRUNCATE` como privilégio (`GRANT/REVOKE`) ou evento de trigger.
+  Motivo: o rollback de código (NOD-173) volta a imagem e deixa o banco novo; o código
+  antigo quebra se a coluna, a view, a função ou o tipo sumiu ou mudou, e `TRUNCATE` apaga dado que o
+  rollback não devolve. Vale só para prefixo > `BASE_ADITIVA` (0058); as antigas não
+  são reescritas. Exceção caso a caso: `-- destrutiva-ok: <motivo>` na linha anterior ao comando (ou à
+  cláusula dele); a marca vale do código logo abaixo até o `;` seguinte, nunca para a instrução
+  seguinte nem para o resto do arquivo; motivo vazio falha. Exemplo legítimo: `DROP FUNCTION f(int)`
+  antes de recriar `f(bigint)` com outra assinatura leva a marca com o motivo (o gate não analisa se o
+  código antigo usa o objeto; barra sempre e a exceção decide caso a caso).
+  **E traz um rollback que desfaz de verdade** (NOD-195). O mesmo gate exige, nas > 0058, o marcador
+  `-- ROLLBACK:` sozinho no início da linha (texto depois dele na mesma linha é comentário) e pelo menos um
+  comando no bloco abaixo; sem marcador ou com bloco vazio sai com 1 e `arquivo:linha`. Formato do bloco:
+  cada linha de SQL comentada com `-- ` (o runner não aplica nada depois do marcador) e `-- -- texto` para
+  comentário de verdade, que não vira SQL (`trechoDeRollback` em `src/db/migrar.ts`). O rollback é
+  executado: `tests/conformidade/rollback-ida-e-volta.test.ts` cria um banco descartável como `nod_dono`,
+  aplica até a 0058 e, para cada nova, tira uma foto do schema pelo `pg_catalog` (relações com RLS,
+  persistência e opções, colunas, constraints, índices, tipos/enums, funções, views, triggers, policies,
+  regras, grants; ACL nula conta como a padrão do dono, que é o que o `REVOKE` deixa), aplica a
+  migração, aplica o rollback, exige a mesma foto e reaplica. Rollback que esquece algo falha dizendo o
+  objeto que sobrou ou faltou. `ALTER TYPE … ADD VALUE` não tem volta direta: o rollback renomeia o tipo,
+  recria com os valores de antes (mesmo nome e ordem), converte as colunas com `USING col::text::tipo` e
+  apaga o renomeado; índice parcial ou default que cita o tipo sai antes e volta igual (modelo na 0060).
+  Linha que ainda usa o valor novo faz o cast falhar e a transação voltar inteira — por isso o bloco roda
+  numa transação só (`psql -1 -v ON_ERROR_STOP=1`); colado solto, cada instrução se confirma e o erro deixa
+  o schema pela metade. O teste de ida e volta prova com uma linha `lote_bots` que o rollback da 0060 falha
+  sem apagar nada.
 - **Domínio é puro** (`src/domain/**`): sem `node:*`, sem banco, `agora: number` por parâmetro.
   O compilador guarda a pureza (`tsconfig.domain.json`); o eslint guarda a direção entre camadas.
 - **`src/services` é SEM BANCO.** Laço de fundo que abre transação mora em `src/adapters/fundo/` e
@@ -92,6 +135,36 @@ feature que estavam corretos (docs/praticas-herdadas.md §8). Se algo falhar sem
 (lê o catálogo do Postgres; o primeiro teste do gate é NEGATIVO) · `tests/concurrency` (duas
 conexões de verdade, serial, limpeza própria por id). Testes nunca dependem do seed: criam as próprias
 linhas com `randomUUID` dentro do envelope; só `tests/helpers/ids.ts` (identidade) é fixo.
+
+**Teste sob carga** (NOD-194, 2026-10-07). O Mac roda a suíte de vários bots ao mesmo tempo (load 600–950),
+e o relógio de parede mede a fila, não o código. Guarda de desempenho (regex O(n²), backtracking) não usa
+`performance.now() < N`: usa `razaoDeCrescimento` de `tests/helpers/crescimento.ts` (tempo de CPU, entrada 4x
+maior, razão < 8, cada medida repetida até ≥ 5 ms de CPU para o caso rápido não cair no ruído) e prova no PR que ela falha com o teto revertido. O `it` da guarda leva o `PRAZO_GUARDA` (30 s) do mesmo helper, cobrado por
+`tests/unit/helpers/crescimento-prazo.test.ts`. Espera de rede afirma contra o próprio
+prazo (`< LONGPOLL_MS / 2`, `< 2 * PRAZO_...`), nunca contra um número mágico. Teste do `unit` que sobe processo
+de verdade, faz `import()` ou é CPU pesada leva prazo explícito por teste ou por arquivo (`vi.setConfig`), com o
+`medido em …` ao lado; o padrão de 5 s do projeto `unit` não muda. Quando há `spawnSync` com `timeout`, o
+prazo do teste cobre a soma deles, senão o vitest corta antes do processo. Prazo INTERNO do código (sonda de
+1 s do whisper, 12 s da capacidade do gh, 5 s do `gh auth status`) também estoura com carga: o teste que não mede
+esse prazo injeta o que o código já aceita (`fetchImpl`, `criarBackendGh({prazoMs})`); se o prazo é fixo no código,
+um `vi.mock` do arquivo de teste troca SÓ o prazo (`executarPorRest` em `github-gh`, `execFile` em `github-nativo`) e
+mantém o teste que mede o prazo com o valor explícito; ou deixa o falso mais barato. O código não muda.
+
+**Teste sob carga: fakes e workers** (NOD-198, 2026-10-08). O Mac roda a suíte de vários bots ao mesmo tempo
+(load 200–970) e o relógio de parede mede a fila, não o código. **Fake termina por evento, não por relógio**: a
+ferramenta "em curso" de um CLI falso (`tests/fixtures/*-falso.mjs`) termina com a próxima mensagem do stdin
+(olhando a fila ANTES de esperar), com o corte ou com o fim do stdin; quando a ordem depende do teste, o fake espera
+um portão que o teste abre (`TESTE_NOD_PORTAO` no `codex-falso`) depois de provar que o driver já tratou o que foi
+mandado (ping/pong no mesmo WebSocket), nunca `setTimeout(r, 50)` contra 300 ms do fake. Sem relógio de reserva: se
+ninguém manda o evento, o fake espera e o prazo do teste acusa. Todo `dormir`/`setTimeout` que sobra numa fixture
+tem comentário dizendo o que imita e por que não decide ordem (o revisor confere com `rg "dormir|setTimeout"
+tests/fixtures/*-falso.mjs`). Os testes `tests/integration/executor/*-falso` que sobem o CLI falso de verdade usam
+`PRAZO_TESTE_FALSO_MS` e `prazoSondaDoTeste()` de `tests/helpers/prazo-falso.ts` (medida lá), não um número local;
+o `testTimeout` dos projetos não muda. O `vitest.config.ts` limita `maxWorkers` a **8**, sem passar do padrão
+núcleos − 1 (medido em 2026-10-08, nota no arquivo; +18% sem carga; um 8 fixo subia o paralelismo no CI de poucos
+núcleos): no vitest 3.2.7 o limite só existe na raiz, então vale para os quatro projetos; com núcleos − 1 workers o
+processo principal do `test:unit` sob carga não respondia ao RPC a tempo e a suíte saía com exit 1 por
+`Timeout calling "onTaskUpdate"`, sem teste falho.
 
 ## Composição (L9)
 
@@ -151,7 +224,7 @@ Para trocar a versão: `GSTACK_REF=<sha-ou-tag> bash scripts/cloud/install-gstac
 ## Executor e custo
 
 Dev local não exige CLI nem chave: `NOD_EXECUTOR=catcher` é o padrão. Qualquer `claude -p` real
-usa o modelo do agente (padrão `sonnet`, configurável por `NOD_MODELO`), `--strict-mcp-config --tools ""` e ambiente limpo
+usa o modelo do agente (no Automático, o Recomendado: Opus desde 2026-10-10; `NOD_MODELO` fixa um para os bots novos), `--strict-mcp-config --tools ""` e ambiente limpo
 (denylist `^(CLAUDECODE|CLAUDE_CODE_.*|CLAUDE_PID|CLAUDE_EFFORT|ANTHROPIC_.*)$`) — sem isso o custo
 de um turno trivial sobe 8x (mapa da sonda de 2026-09-16) e pode cair na fatura errada.
 
@@ -170,6 +243,12 @@ token de turno e o `prazoEm` nas pastas e no computador; o Bash do CLI roda sem 
 O turno acaba quando o bot termina, no Parar ou com o lease vencido (a máquina sumiu). **Um processo
 preso fica "trabalhando" até alguém apertar Parar** — a lacuna está na ADR-067.
 
+Revisto em 2026-10-05 (NOD-73, emenda à ADR-067): **vigia que avisa, não corta**. `src/domain/vigia-turno.ts`
+avisa com 10 min sem novidade (sobe em 10, 20, 40… min) e com a mesma chamada 5, 10 e 20 vezes (LRU de 256
+chaves); o laço o consulta a cada 60 s (`aoVigia`). Nenhum caminho do vigia chama `interromper()`. O trecho
+`{ vigia }` da renovação leva só nome e números — argumento de ferramenta nunca sai do Mac — e a validação do
+servidor é estrita. O servidor publica `turno.vigia` e registra `turno_sem_novidade` / `turno_repeticao`.
+
 ## Desktop e servidor compartilhado (2026-09-17)
 
 Produção na GCP (VM + Cloud SQL, deploy pelo workflow `deploy`): [docs/deploy-gcp.md](docs/deploy-gcp.md).
@@ -177,6 +256,8 @@ Produção na GCP (VM + Cloud SQL, deploy pelo workflow `deploy`): [docs/deploy-
 com chave escopada. O id da chave identifica o computador; o corpo não escolhe o escopo.
 `npm run desktop:build` compila Electron, preload e proxy; a cerca do bundle recusa imports de
 banco/repositórios/casos de uso/HTTP/fundo. `npm run desktop:mac` exige assinatura/notarização.
+`npm run release:mac` publica a pré-release local sem assinatura (`desktop-v<versão>`); o merge que sobe a versão abre
+a issue "Release do app do Mac pendente" ([docs/processo-de-release.md](docs/processo-de-release.md)).
 O proxy usa o runtime do app com ELECTRON_RUN_AS_NODE somente em seu mcp.json.
 Não rode sondas reais para validar empacotamento: `scripts/desktop/smoke-proxy.mjs` testa JSON-RPC
 sem Claude. Instruções e limites: [docs/release-desktop.md](docs/release-desktop.md).
@@ -190,6 +271,17 @@ principal, que confere remetente e argumentos (`desktop/avisos-mac.ts`). A voz d
 renderer (web/lib/ligacao.ts), nunca pelo processo principal: é a referência do AEC do Chromium.
 `electron scripts/desktop/smoke-window.mjs` (depois de `desktop:build`) confere as duas pontes sem empacotar.
 
+Definido em 2026-10-09 (ADR-093): o app acha, instala e entra nas IAs sozinho. O PATH vem em camadas
+(`caminho.ts`: processo, instaladores, todas as versões do nvm, `$SHELL -l` em segundo plano) e nunca leva nada do
+nod nem `ELECTRON_RUN_AS_NODE`. Instalar = o npm que o app leva (`extraResources`) rodando no Electron como node, com
+configuração só do nod, em `<userData>/ferramentas/<ia>/v-…` trocado atomicamente para `atual`; o binário do nod
+(o nativo, no Codex) só é usado quando é igual ou mais novo que o de fora (`desktop/ferramentas.ts`).
+Login = `codex login --device-auth` / `claude auth login --claudeai` por pipe (`desktop/login-ia.ts`): só links da lista
+`LINKS_OFICIAIS` (host e caminho medidos), e o único texto da página que chega a um processo é o código colado, pelo
+stdin. Para medir a saída de um CLI novo, rode-o com `HOME`, `CODEX_HOME`/`CLAUDE_CONFIG_DIR` temporários e um `open`
+falso no PATH, só até o link aparecer — nunca complete login nem rode logout com o HOME real. As fixtures ficam em
+`tests/fixtures/login-ia/` com os códigos trocados por X.
+
 ## Harnesses e inteligência por agente (ADR-036, 2026-09-18)
 
 `harness` identifica o driver; `executor` continua indicando `local`/`catcher` nos eventos existentes.
@@ -198,14 +290,24 @@ Novos agentes usam `harness=auto, modelo=auto`; perfis anteriores preservam seus
 **harness e modelo** do agente (ou do turno original em retomadas). O plano resolve a escolha uma vez;
 quem executa usa `plano.harness`, nunca o padrão global copiado no boot.
 
+Revisto em 2026-10-10 (0068, emenda da ADR-036): a inteligência do bot é `inteligencia_modo` (auto | fixa), `ordem_ias`
+(nula = a da pessoa, `preferencias.ordem_ias`) e `escolhas_ia` (modelo e raciocínio por IA); `harness`/`modelo`/`esforco`
+são DERIVADOS (`derivadosDa` em `src/domain/inteligencia.ts`) e o repositório grava os quatro juntos — nunca escreva
+`harness` ou `modelo` de agente direto (`atualizarPerfil` só aceita `inteligencia`). O Automático usa a primeira IA pronta
+da ordem fora do limite (`preferencias.ias_no_limite`, gravado pelo turno que volta no limite); o Recomendado é Opus /
+GPT-5.6 Sol, raciocínio médio. Níveis de raciocínio por modelo: `HARNESSES[].modelos[].raciocinios` (o do Codex vem do
+`model/list` do app-server, que não precisa de login: mede com HOME vazio e `tests/fixtures/codex-model-list-0.147.json`).
+
 Claude Code e Codex estão integrados; Cursor e Hermes são somente entradas indisponíveis no catálogo.
 `NOD_EXECUTOR=auto` descobre contas conectadas sem turno pago; produção sem variável também usa auto.
-Desenvolvimento continua com catcher. `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
+Desenvolvimento continua com catcher. Valor fora de `auto|claude-cli|codex-cli|catcher` (exato, só as
+pontas aparadas; lido só por `lerNodExecutor`) falha fechado: o servidor sobe, loga `nod_executor_desconhecido`
+e fica sem IA com o motivo escrito, nunca cai no catcher (NOD-160). `NOD_MODELO=auto` permite o padrão por harness; `sonnet` fixa
 Claude para os agentes criados com esse override. Boot/desktop usam sondagem de login sem inferência;
 `scripts/sonda.ts` e `e2e:aceite` continuam explicitamente separados e pagos.
 
-Codex exige flags de isolamento verificadas no help, usa apenas o proxy nod para integrações, não
-herda chaves OpenAI nem configuração de plugins/apps e não põe o token de turno no argv. Seu launcher
+Codex exige flags de isolamento verificadas no help, usa o proxy nod para as integrações do nod (os MCPs da pessoa só pelo hook, ADR-103), não
+herda chaves OpenAI nem, fora dos modos da dona (ADR-103), plugins/apps, e não põe o token de turno no argv. Seu launcher
 0600 chama `main()` do proxy e é apagado ao encerrar. `desktop/proxy.ts` deve exportar `main` além de
 funcionar como executável direto. Valide ambos os caminhos sem modelos reais.
 
@@ -222,6 +324,21 @@ Revisto em 2026-10-05 (primeiro uso real do Codex em produção: nove turnos, ze
 `node scripts/sonda-codex-ferramentas.ts` (paga, centavos da assinatura do Codex) roda o driver de verdade contra um
 servidor MCP de prova e diz se o `tools/call` chegou. Rode-a quando o Codex mudar de versão. O erro que o Codex devolve
 (`turn.failed`, item `error`, última linha do stderr) vai para `erroCru`, só no diagnóstico.
+
+Revisto em 2026-10-14 ([ADR-103](docs/adr/adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md), paridade): o chat do Codex
+no app-server tem o kit do terminal. O isolamento acima vale só sem o hook (máquina sem o script, hook não confiado) e no
+`codex exec` de reserva. Regras medidas no 0.147.0 e no 0.162.0:
+- **O hook de `-c hooks=…` só roda confiado.** A confiança é gravada pelo próprio app-server (`hooks/list` +
+  `config/batchWrite`, em `codex-chat.ts`); `--dangerously-bypass-hook-trust` NÃO funciona no app-server. Não mude o
+  comando nem o matcher do hook à toa: o hash muda e a confiança é gravada de novo no `config.toml` da pessoa.
+- **O hook do Codex falha aberto** (timeout estourado ou hook quebrado = o comando roda). O `hook-nativas.ts` nega sozinho
+  em `PRAZO_HOOK_CODEX_MS`, abaixo do `TIMEOUT_HOOK_CODEX_S` que o Codex recebe; não inverta os dois.
+- **No Codex, "permitir" é stdout vazio** (`formato: "codex"`); o JSON de allow sem `updatedInput` conta como falha.
+- **O Codex usa o caminho real da pasta** (`realpath`): o `cwd` do hook é o real; o caminho dentro do patch segue o que
+  o driver passou.
+- `node scripts/sonda-codex-terminal.ts --codex <bin>` (paga, três turnos do Luna) homologa o hook, a recusa, o patch, a
+  web, o `thread/resume` e o `thread/fork` com o Codex de verdade. Rode-a a cada versão nova do Codex; o Codex que o
+  app usa fica em `~/Library/Application Support/nod/ferramentas/codex-cli/atual/bin/codex`, não no do nvm.
 
 Conta logada que não responde (2026-10-05, emenda da ADR-019). Login conferido não prova que a conta serve: uma
 organização pode ter desativado o uso por assinatura. `nao_autenticado` leva um código `causa` (`conta_sem_acesso` |
@@ -246,6 +363,18 @@ Anúncio remoto de harnesses é validado e vinculado ao escopo da chave; a fila 
 tarefas compatíveis. O fluxo com seleção de harness não reutiliza sessões nativas: reconstrói contexto
 com histórico e memória do nod. Harness explicitamente escolhido e indisponível nunca muda para outro
 fornecedor nem para catcher sem a pessoa escolher.
+
+Piso de versão e limite do plano (NOD-171, 2026-10-06; emendas das ADR-019 e ADR-036):
+- `PISO_CLI` em `flag-floors.ts` é a versão mínima testada de cada CLI. Abaixo dela o harness é `ausente` com causa
+  `cli_antigo` (com `versao` e `minima`) e o turno é recusado antes do prompt. Subir o piso exige rodar de novo o UAT
+  real (`scripts/uat/harnesses.sh`) e registrar em `docs/uat-harnesses-e-modelos.md`. O piso do Codex é uma linha
+  isolada: trocar 0.159.0 por 0.159.2 é só ela.
+- Bot fixado num harness que nenhuma máquina viva da pessoa tem pronto: o turno é reivindicado e recusado com a
+  negação que nomeia o harness, nunca fica pendente. Não reintroduza "motor pronto" na negação.
+- `limite_do_plano` do Claude Code vem do protocolo (`rate_limit_event` `rejected`), nunca de texto; o do Codex é a
+  classe `limite_de_uso` de `erro-fornecedor.ts`. Teste com fixtures e CLI falso; não leve conta real ao limite.
+- Lista editorial de modelos (`HARNESSES` em `contracts/harness.ts`) só cresce, e só com modelo que passou num turno
+  real do UAT. Os padrões do automático não mudam por ela.
 
 ## Computadores dos bots (ADR-037, 2026-09-18)
 
@@ -308,3 +437,33 @@ do Mac roda como laço de voz (`drivers/claude-ligacao.ts`, `codex-ligacao.ts`, 
   (`aguardando_escolha`; sem escolha em 2 min, fim `sem_ia`). `POST ligacoes/:id/continuar {ia}` abre OUTRO turno-cérebro
   para a mesma ligação. Quem criar um caminho novo que encerre o turno `ligacao` mantém o evento com `origem: "ligacao"`
   e o motivo em código, senão a ligação volta a ficar muda. Log: `ligacao_cerebro_caiu` (causa e contagens, nunca fala).
+- Limite da assinatura (ADR-078): só o `rate_limit_event` com `rejected` vira `{t:"limite"}` no canal do cérebro; nunca
+  classifique pelo texto do erro do fornecedor. Com outra IA pronta, o limite entra no "sem IA" (causa `limite`); sem
+  alternativa, encerra com `limite_da_assinatura`. Log: `ligacao_limite_da_assinatura`.
+- Ouvir uma resposta fora da ligação (NOD-180, emenda de 2026-10-06 das ADR-071/075): `GET mensagens/:id/ouvir` devolve
+  o áudio em streaming (`audio/L16; rate=24000`, PCM16 **big-endian**). Desligado por padrão: só `NOD_VOZ_LEITURA=1` liga,
+  e a abertura segue `NOD_LIGACAO`. O texto vira trechos em `textoParaLeitura` (`ligacao-frases.ts`), o caso de uso é
+  `prepararLeitura` e o áudio é do `leitura-voz.ts` (teto diário em memória `NOD_VOZ_LEITURA_CARACTERES_DIA`, padrão
+  100000; janela à frente `NOD_VOZ_LEITURA_ADIANTE_MS`, padrão 15000; prioridade `previa`; uma leitura por pessoa). Log
+  `voz_leitura` só com contagens e desfecho. Nos testes, a voz falsa entra pela opção `voz` do `servidorCompleto`.
+
+## Celular (ADR-094, 2026-10-10)
+
+O celular abre a mesma web, servida pelo mesmo servidor e instalável (PWA). Não há app de loja nem host fixo:
+o manifesto usa `/`, e quem instala de `https://<servidor>` fala com aquele servidor.
+
+- **Celular = toque E tela de telefone.** A consulta é `CONSULTA_CELULAR`, em `web/lib/celular.ts`, e é a mesma string do
+  `@media` de `web/mobile.css`. O teste confere. Regra de layout de celular entra nesse bloco, nunca num `max-width` solto.
+- **O service worker (`web/public/sw.js`) guarda só `/offline.html` e os ícones.** Nunca ponha API, HTML do app nem
+  resposta da rede no cache dele. Mudou a lista: suba a versão de `CACHE`. `tests/unit/web/pwa.test.ts` roda o worker
+  num contexto isolado.
+- **`estatico.ts`:** `/assets/*` é imutável e HTML, `sw.js` e manifesto são `no-cache`. O cache do HTML é o que faz um
+  deploy chegar ao app instalado.
+- **Ícones:** `node scripts/mobile/icones.mjs` gera os PNGs a partir da marca do `favicon.svg` num Chrome headless.
+  Passe `CHROME=<binário>` se o do cache do Playwright não existir.
+- **Sem comando próprio de teste mobile.** O que roda no `check` são os unitários acima, mais `celular`, `retomada`,
+  `estatico` e `live-events`. Para ver a tela, suba o servidor com `NOD_STATIC_DIR=dist/web` depois do build: o worker só
+  registra no build. Fotografe com o `chrome-headless-shell` via CDP, com toque emulado
+  (`Emulation.setTouchEmulationEnabled`), 390×844 e 412×915. O teclado é simulado encolhendo a altura.
+  Toque de verdade (`Input.dispatchTouchEvent`), não `el.click()`: o clique sintético acende o anel de foco, e o dedo
+  não acende.

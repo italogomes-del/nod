@@ -4,6 +4,21 @@
 export const LEASE_MS = 90_000;
 /** Batida de renovação. definido em 2026-09-16: um terço do lease (ADR-010/021). */
 export const RENOVACAO_MS = 30_000;
+/**
+ * definido em 2026-10-12 (NOD-214): por quanto tempo a máquina segue o turno sem resposta do servidor (o deploy reinicia o
+ * processo; o novo responde em ~10 s). Passado isso, a renovação vira `{ativo:false}` e o CLI para. Fica ABAIXO de
+ * `LEASE_MS`: se o servidor não voltar, a máquina desiste antes de o varredor assentar o turno por lease vencido — nunca
+ * roda um turno que o servidor já deu por perdido. `TOLERANCIA_REINICIO_MS < LEASE_MS` é conferido em teste e no carregamento
+ * da ponte HTTP.
+ */
+export const TOLERANCIA_REINICIO_MS = 60_000;
+/**
+ * definido em 2026-10-12 (NOD-214): a entrega tenta de novo com espera exponencial de 1 s a 10 s por até 120 s — o servidor
+ * reiniciando no fim de um turno não perde a resposta (antes eram 3 tentativas em ~2 s).
+ */
+export const ENTREGA_PERSISTENCIA_MS = 120_000;
+export const ENTREGA_ESPERA_INICIAL_MS = 1_000;
+export const ENTREGA_ESPERA_MAX_MS = 10_000;
 /** Máquina sem poll há mais que isto = offline. definido em 2026-09-16: dois pulls de 20s + folga (ADR-021, presença derivada do poll). */
 export const OFFLINE_MS = 60_000;
 /**
@@ -25,6 +40,8 @@ export const LONGPOLL_APROVACAO_MS = 20_000;
  * repetido. Era abaixo da isenção do vigia (480 s); o vigia saiu em 2026-10-01 (ADR-067) e o valor ficou.
  */
 export const ESPERA_APROVACAO_NO_TURNO_MS = 420_000;
+/** ADR-103: a variável com o caminho da config do hook do nod no Codex (o comando do hook é fixo; a config vai por aqui). */
+export const VARIAVEL_CONFIG_HOOK = "NOD_HOOK_CONFIG";
 /** Conteúdo não confiável menor que isto não é embrulhado. definido em 2026-09-16: copiado do limiar _UNTRUSTED_WRAP_MIN_CHARS do openmausbot (ADR-026). */
 export const UNTRUSTED_WRAP_MIN_CHARS = 32;
 /**
@@ -103,3 +120,16 @@ export const ESPERAS_NOVA_TENTATIVA_MS: readonly number[] = [1_000, 3_000];
 export const JITTER_NOVA_TENTATIVA = 0.25;
 export const ORCAMENTO_CONECTOR_MS = 30_000;
 export const RETRY_AFTER_MAX_MS = 5_000;
+
+/**
+ * Sonda logo depois do login do Composio (NOD-208). definido em 2026-10-12: logo depois do `fixarConta`, a
+ * sessão do tool router ainda pode não expor as ferramentas do toolkit (só os meta COMPOSIO_*) ou responder
+ * devagar — os conectores do Breno ficaram desligados assim e, minutos depois, a mesma chamada respondeu na
+ * hora. O `verificar` repete a sonda com estas esperas (antes de cada tentativa) e não COMEÇA tentativa
+ * nova depois de VERIFICAR_TETO_MS contados do início; cada sonda recebe como orçamento o que sobra do teto
+ * (revisão do PR #264: sozinha, a sonda http pode levar ORCAMENTO_CONECTOR_MS). Assim a resposta fica em ~20 s
+ * mais o banco: com prazo de sonda (PROBE_MS) nas tentativas, são duas em ~18 s; com catálogo vazio que volta
+ * na hora, as quatro em ~14 s.
+ */
+export const ESPERAS_SONDA_VERIFICAR_MS: readonly number[] = [0, 2_000, 4_000, 8_000];
+export const VERIFICAR_TETO_MS = 20_000;

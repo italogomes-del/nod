@@ -57,7 +57,8 @@ describe("aplicarFrame por TipoFrame", () => {
     e = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
     expect(e.atividades[CONVERSA]).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota"]);
+    // Plano "tela limpa" (2026-10-16): o turno que termina relê o uso do plano (o anel do seletor de IA).
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "uso-plano"]);
   });
 
   it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
@@ -85,6 +86,7 @@ describe("aplicarFrame por TipoFrame", () => {
       ferramentas: 2,
       ultimaFerramenta: "Alterou Gmail",
       tarefas: [],
+      vigia: null,
     });
   });
 
@@ -97,11 +99,39 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.atividades[CONVERSA]?.[TURNO]?.ferramentas).toBe(1);
   });
 
-  it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {
+  it("turno.vigia (NOD-73) liga e desliga o aviso no turno vivo, sem perder a ferramenta; ligação e frame torto são ignorados", () => {
+    let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Bash", rotulo: "Rodou um comando" }), AGORA);
+    e = aplicarFrame(e, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: 600_000, aberta: "Terminal", emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia).toEqual({ mudoDesde: AGORA - 600_000, aberta: "Terminal", emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } });
+    e = aplicarFrame(e, frame("turno.atividade", { conversaId: CONVERSA, turnoId: TURNO, nome: "Read", rotulo: "Leu um arquivo" }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia?.mudoDesde).toBe(AGORA - 600_000);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.ferramentas).toBe(2);
+    e = aplicarFrame(e, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: 0, emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } }), AGORA);
+    expect(e.atividades[CONVERSA]?.[TURNO]?.vigia).toEqual({ mudoDesde: null, aberta: null, emFundo: 0, repeticao: { rotulo: "Terminal", vezes: 5 } });
+
+    const antes = e;
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, modo: "ligacao", mudoMs: 600_000, emFundo: 0 }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, turnoId: TURNO, mudoMs: "muito", emFundo: 0 }), AGORA)).toBe(antes);
+    expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, mudoMs: 600_000, emFundo: 0 }), AGORA)).toBe(antes);
+  });
+
+  it("turno.interrompido limpa o vivo e invalida conversa, frota, sua-vez (pode ter nascido 'retomar?') e o uso do plano", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
     e = aplicarFrame(e, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO, motivo: "parado_pela_pessoa" }), AGORA);
     expect(e.turnosVivos).toEqual({});
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "sua-vez"]);
+    // Revisão do PR 1 da tela limpa (2026-10-16): o turno interrompido também gastou a janela — o anel do seletor relê.
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "sua-vez", "uso-plano"]);
+  });
+
+  it("uso do plano: contas.mudou relê; com o servidor sem a rota (usoDoPlano null) nenhum frame pede de novo", () => {
+    expect(aplicarFrame(estadoInicial, frame("contas.mudou"), AGORA).invalidacoes).toEqual(["contas", "maquinas", "uso-plano"]);
+    const semRota: Estado = { ...comConversa(), usoDoPlano: null };
+    expect(aplicarFrame(semRota, frame("contas.mudou"), AGORA).invalidacoes).toEqual(["contas", "maquinas"]);
+    expect(aplicarFrame(semRota, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("inventario.mudou"), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("resumed", { resumed: false }), AGORA).invalidacoes).not.toContain("uso-plano");
   });
 
   it("decisao.nova / decisao.decidida / decisao.vencida invalidam Sua vez e a conversa", () => {
@@ -130,7 +160,8 @@ describe("aplicarFrame por TipoFrame", () => {
   });
 
   it("inventario.mudou invalida inventário, frota e o interruptor de executor; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
-    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor"]);
+    // ADR-090: a máquina que conecta ou cai muda a tela Máquinas e a linha da fila na conversa.
+    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor", "ias", "uso-plano", "maquinas"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", "concessoes:a1"]);
@@ -144,7 +175,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("resumed:false reidrata TUDO (replay parcial nunca é aplicado, ADR-016); resumed:true não faz nada", () => {
     const e = aplicarFrame(comConversa(), frame("resumed", { resumed: false }), AGORA);
-    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "salas", `conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", `conversa:${CONVERSA}`]);
     expect(aplicarFrame(comConversa(), frame("resumed", { resumed: true }), AGORA).invalidacoes).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import type { Decisao, EstadoColunaFila, ItemFila, TipoDecisao } from "../contracts/decisao.ts";
 
-export type DecisaoComNomes = Decisao & { agenteNome: string };
+/** `trabalhoId`: o trabalho do turno da decisão (null = a conversa), para as gêmeas não cruzarem faixas (S4). */
+export type DecisaoComNomes = Decisao & { agenteNome: string; trabalhoId?: string | null };
 
 export type GrupoFila = { pessoaId: string; agenteId: string; agenteNome: string; itens: ItemFila[] };
 
@@ -27,9 +28,13 @@ function estadoColuna(d: Decisao, agora: number): EstadoColunaFila {
  */
 export const TIPOS_QUE_AGRUPAM: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["acesso", "retomar_turno"]);
 
-/** Mesma decisora, agente, conversa, tipo e frase; null = este tipo nunca se dobra. */
-export function chaveDeGemea(d: Pick<Decisao, "tipo" | "decisorId" | "agenteId" | "conversaId" | "frase">): string | null {
-  return TIPOS_QUE_AGRUPAM.has(d.tipo) ? [d.decisorId, d.agenteId, d.conversaId, d.tipo, d.frase].join("\u0000") : null;
+/**
+ * Mesma decisora, agente, conversa, tipo e frase; null = este tipo nunca se dobra.
+ * revisto em 2026-10-08 (revisão do épico, S4): e mesma FAIXA — o trabalho do turno da decisão (ADR-083). As tasks do
+ * bot moram na conversa dele, e o "Retomar" de uma task fechava o da conversa e o das outras tasks junto.
+ */
+export function chaveDeGemea(d: Pick<Decisao, "tipo" | "decisorId" | "agenteId" | "conversaId" | "frase"> & { trabalhoId?: string | null }): string | null {
+  return TIPOS_QUE_AGRUPAM.has(d.tipo) ? [d.decisorId, d.agenteId, d.conversaId, d.tipo, d.frase, d.trabalhoId ?? ""].join("\u0000") : null;
 }
 
 /** Aberta NA FILA: pendente ou reaberta com prazo por vir. Vencida nunca entra no grupo de uma aberta. */
@@ -41,7 +46,7 @@ function abertaNaFila(d: Decisao, agora: number): boolean {
  * As gêmeas ABERTAS de `d` entre `candidatas` — as que a fila dobrou junto com ela. É a mesma regra
  * de montarFila: quem decide, recusa ou dispensa o item do grupo fecha exatamente estas.
  */
-export function gemeasAbertas<T extends Decisao>(d: Decisao, candidatas: readonly T[], agora: number): T[] {
+export function gemeasAbertas<T extends Decisao & { trabalhoId?: string | null }>(d: Decisao & { trabalhoId?: string | null }, candidatas: readonly T[], agora: number): T[] {
   const chave = chaveDeGemea(d);
   if (chave === null) return [];
   return candidatas.filter((c) => c.id !== d.id && abertaNaFila(c, agora) && chaveDeGemea(c) === chave);

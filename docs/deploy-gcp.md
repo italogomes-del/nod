@@ -16,8 +16,10 @@ estão em [`infra/gcp/`](../infra/gcp/) e a configuração não secreta em
 | Rede | VPC `nod-vpc`; 80/443 abertas; SSH só pelo IAP | A VM não aceita SSH da internet |
 | Deploy | `.github/workflows/deploy.yml` | Depois do `ci` verde num push ao `main`; autenticação por Workload Identity Federation |
 
-Contas de serviço: `nod-vm` (lê segredos e imagens, escreve logs) e `nod-deploy` (publica imagens e
-entra na VM pelo IAP; só o repositório `marlonwlv/nod`, na branch `main`, pode usá-la).
+Contas de serviço: `nod-vm` (lê segredos e imagens, escreve logs), `nod-deploy` (publica imagens e
+entra na VM pelo IAP) e `nod-ensaio` (clona o banco e apaga só as cópias `nod-pg-ensaio-*`, para o
+[ensaio de restauração](runbook-producao.md#5-como-rodar-o-ensaio)). Só o repositório `gamefik/nod`,
+na branch `main`, pode usar as duas últimas.
 
 ## Como um deploy acontece
 
@@ -31,7 +33,10 @@ entra na VM pelo IAP; só o repositório `marlonwlv/nod`, na branch `main`, pode
    boot usa só para criar as partições de `events` (ADR-006) e fecha em seguida.
 
 O deploy é recreate: o nod fica fora do ar alguns segundos. Os Macs reconectam sozinhos (o
-long-poll recomeça). Um deploy manual: Actions → deploy → Run workflow.
+long-poll recomeça). Desde a NOD-214, o turno que um Mac atualizado está rodando segue rodando no
+deploy: a drenagem não o espera, e o processo novo o reconhece pelo token de turno (o hash fica em
+`turno_credenciais`) quando a máquina renova ou entrega. Mac com app antigo ainda segura a drenagem
+até 10 min (ADR-071). Um deploy manual: Actions → deploy → Run workflow.
 
 ## Estado em 2026-10-02
 
@@ -93,8 +98,8 @@ cd infra/gcp
 ./levar-dados.sh        # opcional, UMA vez: recusa banco não vazio
 ```
 
-No GitHub, as variáveis do repositório `GCP_WIF_PROVIDER` e `GCP_DEPLOY_SA` recebem o que o
-`provisionar.sh` imprime no final.
+No GitHub, as variáveis do repositório `GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA` e `GCP_ENSAIO_SA` recebem
+o que o `provisionar.sh` imprime no final.
 
 ### Cliente OAuth do Google (manual)
 
@@ -129,6 +134,24 @@ derivado do IP fixo `nod-ip`. Para trocar:
    emite o certificado novo.
 4. No app do Mac, conecte de novo com o endereço novo.
 
+## Runner do CI
+
+Desde 2026-10-06 o `ci` e o `deploy` rodam num runner próprio, a VM `nod-ci-runner` (`e2-standard-4`),
+porque o repo é privado e os minutos do plano Free acabaram. Ela tem três runners: `nod-ci-1` e
+`nod-ci-2` (label `nod-ci`: lint, unit e deploy) e `nod-ci-integracao` (label `nod-integracao`: o único
+que sobe o Postgres na porta 5434 do host). Fica na rede `nod-ci`, separada da `nod-vpc`, sem service
+account; o deploy se autentica pelo WIF, como antes. O `desktop-release` continua no runner do GitHub.
+
+```bash
+# Criar ou recriar (idempotente; precisa do gh com admin no repo)
+infra/gcp/runner/provisionar-runner.sh
+# Entrar na VM e ver os runners
+gcloud compute ssh nod-ci-runner --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
+sudo systemctl list-units 'actions.runner.*'
+```
+
+Para recriar do zero: apague a VM, remova os três runners em Settings › Actions › Runners e rode o script.
+
 ## Operar
 
 ```bash
@@ -140,12 +163,13 @@ sudo docker compose -f /opt/nod/compose.yml logs -f nod
 sudo bash -c 'cd /opt/nod && export NOD_DOMINIO=34-39-164-139.sslip.io \
   NOD_IMAGEM="$(docker ps --filter label=com.docker.compose.service=nod --format "{{.Image}}")" &&
   docker compose run --rm --no-deps -T -e NOD_SEED_EMAIL=voce@exemplo.com nod node scripts/seed.ts'
-# Restaurar o banco num ponto do tempo (cria outra instância; nunca sobrescreve a atual)
-gcloud sql instances clone nod-pg nod-pg-restaurada --point-in-time='2026-10-02T12:00:00Z' --project=nod-producao
 ```
 
+Restaurar o banco (PITR, plano B, segredos) e o ensaio de restauração: [runbook-producao.md](runbook-producao.md).
+
 O monitor de disponibilidade fica fora da GCP (ADR-017): cadastre `https://<domínio>/api/saude`
-num serviço externo (Better Stack, UptimeRobot).
+num serviço externo (UptimeRobot, Better Stack). O passo a passo e o reinício automático pelo watchdog (NOD-267) estão
+em [runbook-producao.md](runbook-producao.md#7-monitor-externo-e-reinício-automático).
 
 Custo esperado, coberto pelos créditos do programa GFS: VM `e2-medium`, Cloud SQL `db-custom-1-3840`
-com 10 GB SSD, IP fixo e tráfego baixo.
+com 10 GB SSD, IP fixo e tráfego baixo, mais o runner do CI (`e2-standard-4`, disco de 100 GB).

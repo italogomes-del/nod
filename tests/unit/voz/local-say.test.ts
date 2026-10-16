@@ -10,6 +10,14 @@ import { criarSintetizadorSay, palavrasPorMinuto } from "../../../src/adapters/v
 
 const ehMac = process.platform === "darwin";
 
+/**
+ * NOD-194: o `say` de verdade tem prazo de 30 s por síntese (TIMEOUT_SAY_MS em local-say.ts). Com o Mac em load
+ * ~1000 (duas `test:unit` em paralelo), "1,5x sai mais curto que 1x" (duas sínteses em sequência) passou dos
+ * 20 s fixos (medido em 2026-10-07). O teto do teste cobre duas sínteses no prazo do código, mais folga.
+ */
+const UMA_SINTESE_MS = 30_000;
+const SAY = { timeout: 2 * UMA_SINTESE_MS + 10_000 };
+
 async function temporariosDoSay(): Promise<string[]> {
   return (await readdir(DIR)).filter((f) => f.startsWith("nod-say-"));
 }
@@ -33,7 +41,7 @@ describe("voz: say do macOS", () => {
     await expect(it.next()).rejects.toThrow("integracao_nao_configurada");
   });
 
-  it.skipIf(!ehMac)("gera PCM 24 kHz de verdade em pedaços de 100 ms e apaga os temporários", { timeout: 20_000 }, async () => {
+  it.skipIf(!ehMac)("gera PCM 24 kHz de verdade em pedaços de 100 ms e apaga os temporários", SAY, async () => {
     const antes = await temporariosDoSay();
     const tts = criarSintetizadorSay({ dirBase: DIR });
     const pedacos: Int16Array[] = [];
@@ -47,7 +55,7 @@ describe("voz: say do macOS", () => {
     expect(await temporariosDoSay()).toEqual(antes);
   });
 
-  it.skipIf(!ehMac)("1,5x sai mais curto que 1x", { timeout: 20_000 }, async () => {
+  it.skipIf(!ehMac)("1,5x sai mais curto que 1x", SAY, async () => {
     const tts = criarSintetizadorSay({ dirBase: DIR });
     const medir = async (velocidade: number) => {
       let n = 0;
@@ -57,7 +65,7 @@ describe("voz: say do macOS", () => {
     expect(await medir(1.5)).toBeLessThan((await medir(1)) * 0.85);
   });
 
-  it.skipIf(!ehMac)("o sinal mata o processo e apaga os temporários", { timeout: 20_000 }, async () => {
+  it.skipIf(!ehMac)("o sinal mata o processo e apaga os temporários", SAY, async () => {
     const antes = await temporariosDoSay();
     const tts = criarSintetizadorSay({ dirBase: DIR });
     const ac = new AbortController();

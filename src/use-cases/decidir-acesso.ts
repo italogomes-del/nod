@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Proposta } from "../contracts/conversa.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Rotina } from "../contracts/rotina.ts";
@@ -15,6 +16,7 @@ import { pausarRotina } from "./pausar-rotina.ts";
 import { recusarProposta } from "./recusar-proposta.ts";
 import { retomarAposAcesso } from "./retomar-apos-acesso.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 export type EntradaDecidirAcesso = {
   decisaoId: string;
@@ -38,6 +40,12 @@ export type EntradaDecidirAcesso = {
    * daria dois turnos da mesma janela. Concede e devolve; quem chamou segue com o disparo.
    */
   semDisparar?: boolean;
+  /**
+   * definido em 2026-10-09 (NOD-202): a recusa veio da conversa (POST propostas/:id/recusar), não de "Sua vez". Lá a
+   * proposta já decidida dá 409, como sempre deu: a recusa da conversa nunca fecha sozinha a decisão de um card que
+   * a conversa já não mostra com botões.
+   */
+  pelaConversa?: boolean;
 };
 
 export type SaidaDecidirAcesso = { decisao: Decisao; concessoes: number; consentimentoId: string | null; rotinaId: string | null; turnoId: string | null };
@@ -88,22 +96,68 @@ async function rotinaDoPedido(deps: Deps, agenteId: string, rotinaId: string | u
  * acesso ela pediria de novo a cada disparo.
  */
 export const decidirAcesso: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> = async (deps, input) => {
+  const r = await decidirAcessoDaDona(deps, input);
+  // Revisão do épico (S2, 2026-10-08): o trabalho do turno que pediu relê o estado (com a retomada, se nasceu, na fila).
+  return { ...r, events: [...(r.events ?? []), ...(await sincronizarDasDecisoes(deps, [r.data.decisao]))] };
+};
+
+/**
+ * definido em 2026-10-09 (NOD-202): "Deixar de lado" no card de acesso da conversa. Com a decisão de mesmo id aberta
+ * em "Sua vez" (pendente ou reaberta), a recusa vai pelo caminho da decisão (decidirAcesso), na ordem única do card
+ * de acesso: concessão (agente, conector) → decisão → proposta — a do varredor, que vence as decisões em lote antes
+ * de mexer nas propostas, e a das gêmeas. Assim a recusa fecha a decisão, as gêmeas, avisa o remetente da delegação,
+ * pausa a rotina e solta a task do turno, igual à de "Sua vez". Sem decisão aberta (pedido de antes da ADR-044,
+ * card de conexão, decisão vencida), segue o recusarProposta de sempre.
+ * Só a DONA vai pelo caminho da decisão: é ela quem recusa a proposta pela conversa (propostas.decidir filtra
+ * owner_id), e quem não é dona continua recebendo o 409 de antes.
+ */
+export const recusarPropostaPelaConversa: CasoDeUso<{ propostaId: string; executor: Executor }, { proposta: Proposta; decisao: Decisao | null }> = async (deps, input) => {
+  const lida = await deps.repos.propostas.buscar(input.propostaId);
+  if (lida?.payload.kind === "acesso" && !lida.payload.conectar && lida.estado === "pendente") {
+    const aberta = await deps.repos.decisoes.buscar(lida.id);
+    if (aberta?.tipo === "acesso" && aberta.ownerId === deps.escopo.pessoaId && (aberta.estado === "pendente" || aberta.estado === "reaberta")) {
+      const r = await decidirAcesso(deps, { decisaoId: lida.id, recusar: true, executor: input.executor, pelaConversa: true });
+      const proposta = await deps.repos.propostas.buscar(lida.id);
+      if (!proposta) throw new ErroDeDominio("nao_encontrado");
+      return { data: { proposta, decisao: r.data.decisao }, events: r.events ?? [] };
+    }
+  }
+  const r = await recusarProposta(deps, { propostaId: input.propostaId });
+  return { data: { proposta: r.data.proposta, decisao: null }, events: r.events ?? [] };
+};
+
+const decidirAcessoDaDona: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> = async (deps, input) => {
   const agora = deps.agora();
-  const proposta = await deps.repos.propostas.buscar(input.decisaoId);
+  // Lida sem trava: só serve para achar o par (agente, conector) da trava. O estado vale o da leitura travada abaixo.
+  const lidaSemTrava = await deps.repos.propostas.buscar(input.decisaoId);
   // definido em 2026-09-24 (emenda da ADR-044): trava (agente, conector) ANTES de mexer em qualquer linha —
   // o pré-voo da rotina trava o mesmo par para ler concessões e abrir o card; sem isto, um tick no meio
   // do clique via "sem concessão" e "sem card pendente" ao mesmo tempo e abria um card novo.
-  const doPedido = proposta?.payload.kind === "acesso" ? await deps.repos.conectores.buscarPorSlug(proposta.payload.conector) : null;
-  if (proposta && doPedido) await deps.repos.concessoes.travar(proposta.agenteId, doPedido.id);
+  const doPedido = lidaSemTrava?.payload.kind === "acesso" ? await deps.repos.conectores.buscarPorSlug(lidaSemTrava.payload.conector) : null;
+  if (lidaSemTrava && doPedido) await deps.repos.concessoes.travar(lidaSemTrava.agenteId, doPedido.id);
   if (input.capacidades && !input.recusar) {
-    const pedidas = new Set(proposta?.payload.kind === "acesso" ? proposta.payload.capacidades : []);
+    const pedidas = new Set(lidaSemTrava?.payload.kind === "acesso" ? lidaSemTrava.payload.capacidades : []);
     if (input.capacidades.length === 0 || input.capacidades.some((c) => !pedidas.has(c))) throw new ErroDeDominio("entrada_invalida", { cause: "capacidades fora do pedido" });
   }
+  // NOD-202: o estado de ANTES do fechamento, para a guarda abaixo. Lido depois da trava da concessão; quem disputa o
+  // mesmo card (recusa, Permitir) passa pela mesma trava, e o varredor só leva a decisão a `vencida`, de onde o
+  // `decidir` não fecha.
+  const antes = await deps.repos.decisoes.buscar(input.decisaoId);
   const decisao = input.porRegra
     ? await deps.repos.decisoes.fecharPorRegra(input.decisaoId, { ...input.porRegra, agora })
     : await deps.repos.decisoes.decidir(input.decisaoId, { por: input.por ?? deps.escopo.pessoaId, agora });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão já fechada ou inexistente" });
+  // definido em 2026-10-09 (NOD-202): ordem única do card de acesso — concessão → DECISÃO → PROPOSTA (a do varredor e a
+  // das gêmeas). A proposta é relida TRAVADA depois da decisão, e é esta leitura que vale daqui em diante: lida antes e
+  // sem trava, ela saía `pendente` enquanto a conversa a recusava, e o Permitir concedia com a proposta recusada.
+  const proposta = await deps.repos.propostas.buscarParaAtualizar(input.decisaoId);
   if (decisao.tipo !== "acesso" || !proposta || proposta.payload.kind !== "acesso" || proposta.payload.conectar) throw new ErroDeDominio("estado_invalido", { cause: "decisão de acesso sem proposta" });
+  // NOD-202: a conversa só recusa o que ainda está pendente — o 409 de sempre do recusarProposta.
+  if (input.pelaConversa && proposta.estado !== "pendente") throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
+  // NOD-202: Permitir com a proposta já recusada PELA PESSOA (decisão ainda pendente: legado de antes desta correção, ou
+  // pedido sem a recusa pela decisão) não concede — o erro desfaz a tx e a decisão não fecha. Reaberta, quem recusou
+  // foi o varredor ao vencer, e "Reabrir" continua concedendo (vencerPedidoDaRotina).
+  if (!input.recusar && proposta.estado === "recusada" && antes?.estado === "pendente") throw new ErroDeDominio("estado_invalido", { cause: "proposta recusada pela pessoa" });
   const p = proposta.payload;
   const autoria = input.porRegra ? { ...autoriaPessoa(deps.escopo), decidido_por: input.porRegra.regra, regra_versao: input.porRegra.regraVersao } : autoriaPessoa(deps.escopo);
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, tipo: decisao.tipo, recusada: input.recusar } })];

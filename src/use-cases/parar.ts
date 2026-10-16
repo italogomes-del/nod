@@ -4,6 +4,8 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { montarFaixaParada, type TentativaInterrupcao } from "../domain/parada.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
+import { cancelarEsperas } from "./esperar-comando.ts";
+import { marcarParado } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaParar = { conversaId: string | null };
@@ -13,7 +15,8 @@ export type EntradaParar = { conversaId: string | null };
  * até a pessoa falar de novo — definido em 2026-09-16: "Stop now" do Grok Bot; nova mensagem chama
  * encerrarAbertas), interrompe os pendentes na hora, pede interrupção dos despachando (a próxima
  * renovação devolve {ativo:false}) e tenta o SIGTERM pelo interruptor — falha vira `naoInterrompidas`
- * com motivo, NUNCA catch vazio. Cancela frames ainda não entregues do outbox e devolve a faixa.
+ * com motivo, NUNCA catch vazio. Cancela frames ainda não entregues do outbox (da conversa parada, ou todos sem
+ * conversa) e devolve a faixa.
  */
 export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) => {
   const conversaId = input.conversaId;
@@ -25,6 +28,12 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
 
   const parada = await deps.repos.paradas.ativar({ conversaId, agora });
   if (!parada) throw new ErroDeDominio("estado_invalido", { cause: "parada não gravada" });
+  // definido em 2026-10-07 (ADR-083): o Parar do chat para tudo do bot, inclusive as tasks dele (os turnos delas
+  // moram na conversa do bot e já caem abaixo); sem conversa, as de todos os bots. A lista volta para a tela.
+  const conversa = conversaId !== null ? await deps.repos.conversas.buscar(conversaId) : null;
+  const abertos = conversaId === null
+    ? (await deps.repos.trabalhos.listar({ terminadosDesde: agora + 1 }))
+    : conversa?.tipo === "propria" && conversa.agenteId ? await deps.repos.trabalhos.abertosDoAgente(conversa.agenteId) : [];
 
   // definido em 2026-10-04 (ADR-072): o Parar é do trabalho do bot; a ligação se encerra pelo Desligar.
   const pendentes = (await deps.repos.turnos.pendentesDaPessoa(conversaId ?? undefined)).filter((t) => t.origem !== "ligacao");
@@ -36,7 +45,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } }));
   }
 
-  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => t.origem !== "ligacao" && (conversaId === null || t.conversaId === conversaId));
+  const dosTrabalhos = new Set(abertos.map((t) => t.id));
+  const despachando = (await deps.repos.turnos.despachandoDaPessoa()).filter((t) => t.origem !== "ligacao" && (conversaId === null || t.conversaId === conversaId || (t.trabalhoId !== null && t.trabalhoId !== undefined && dosTrabalhos.has(t.trabalhoId))));
   await deps.repos.turnos.pedirInterrupcao(despachando.map((t) => t.id), agora);
   const tentativas: TentativaInterrupcao[] = [];
   for (const t of despachando) {
@@ -50,10 +60,15 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     }
   }
 
-  const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora);
+  // ADR-099 (parte 2): o Parar cancela os comandos que o bot deixou esperando, como cancela a volta marcada (o pendente
+  // acima). Na conversa, todos os do bot dela, tasks inclusive; sem conversa, todos da pessoa.
+  await cancelarEsperas(deps, conversaId === null ? { todas: true } : { conversaId });
+  // NOD-265: na conversa, só os frames dela; os de outro bot da pessoa seguem saindo (a fala final dele não some da tela).
+  const framesCancelados = await deps.repos.outbox.cancelarPendentesDaPessoa(agora, conversaId);
   // definido em 2026-09-16: nesta rodada o único efeito externo é item aprovado (L5) e ele é síncrono ao
   // decidir; não há emissão "a caminho" para listar como já entregue — a lista nasce vazia e honesta.
-  const faixa = montarFaixaParada({ pendentesInterrompidos, despachando: tentativas, entregues: [] });
+  const faixa: FaixaParada = { ...montarFaixaParada({ pendentesInterrompidos, despachando: tentativas, entregues: [] }), ...(abertos.length > 0 ? { trabalhosParados: abertos.map((t) => ({ id: t.id, titulo: t.titulo })) } : {}) };
+  for (const t of abertos) events.push(...(await marcarParado(deps, t)));
 
   if (conversaId !== null) {
     const texto = faixa.nadaRodando

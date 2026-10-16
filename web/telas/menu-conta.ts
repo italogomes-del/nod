@@ -1,6 +1,7 @@
 import type { SecaoEspaco } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
+import { pilhaDeAvatares } from "./cartao-ia.ts";
 
 /**
  * Menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o avatar do rodapé abre este menu no lugar de
@@ -13,6 +14,8 @@ export type DadosMenuConta = {
   avisos: string;
   modoDev: boolean;
   banco: { texto: string; regime: string } | null;
+  /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
+  esteMac?: string;
 };
 
 /** "Gmail e ClickUp fora do ar"; com mais de três, os dois primeiros e quantos faltam. */
@@ -26,9 +29,10 @@ export function htmlMenuConta(d: DadosMenuConta): string {
   const faixa = d.faixa ? `<div class="mc-faixa" role="status"><span>${esc(d.faixa.texto)}</span><button type="button" role="menuitem" data-secao="conexao">${esc(d.faixa.botao)}</button></div>` : "";
   const banco = d.banco ? `<p class="mc-banco banco-${esc(d.banco.regime)}"><span aria-hidden="true"></span>${esc(d.banco.texto)}</p>` : "";
   return `<div role="menu" aria-label="Menu da conta">${faixa}
-    ${item("conexao", ICONE.plug, "Conexão", d.conexao)}
+    ${item("conexao", pilhaDeAvatares(true), "Provedores de IA", d.conexao)}
     ${item("avisos", ICONE.sino, "Avisos", d.avisos)}
     <button type="button" role="menuitemcheckbox" aria-checked="${d.modoDev}" data-modo-dev>${ICONE.codigo}<span class="mc-nome">Modo dev</span><kbd>⌘⇧D</kbd><span class="mc-chave" aria-hidden="true"><span></span></span></button>
+    ${item("este-mac", ICONE.medidor, "Este Mac", d.esteMac ?? "")}
     ${item("computadores", ICONE.monitor, "Computadores")}
     <hr>
     ${item("agentes", ICONE.agentes, "Gerenciar agentes")}

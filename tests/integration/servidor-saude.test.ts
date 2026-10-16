@@ -1,8 +1,10 @@
 import { createConnection, createServer, type Socket } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ErroDeDominio } from "../../src/domain/erro.ts";
 import { criarDb } from "../../src/db/client.ts";
 import { listen } from "../../src/adapters/http/server.ts";
+import { criarVerificacaoSaude, PRAZO_SAUDE_BANCO_MS } from "../../src/adapters/http/rotas/saude.ts";
+import { iniciarWatchdog } from "../../src/adapters/http/watchdog.ts";
 import type { Rota } from "../../src/adapters/http/roteador.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -123,7 +125,7 @@ describe("servidor: saúde, sessão e roteador", () => {
 describe("NOD-175: /api/saude com verificador falso (sem banco)", () => {
   it("o banco recusa → 503 {ok:false} na hora, sem detalhe; o verificador que lança também é 503", async () => {
     for (const verificarBanco of [() => Promise.reject(new Error("senha do banco: segredo")), () => { throw new Error("segredo"); }]) {
-      const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarBanco });
+      const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarSaude: criarVerificacaoSaude({ verificarBanco }) });
       try {
         const r = await fetch(`http://127.0.0.1:${srv.port}/api/saude`);
         expect(r.status).toBe(503);
@@ -140,10 +142,12 @@ describe("NOD-175: /api/saude com verificador falso (sem banco)", () => {
     const srv = await listen(0, "127.0.0.1", {
       segredoSessao: "s",
       sessao: { modo: "stub" },
-      verificarBanco: () => {
-        chamadas++;
-        return new Promise<void>((r) => { soltar = r; });
-      },
+      verificarSaude: criarVerificacaoSaude({
+        verificarBanco: () => {
+          chamadas++;
+          return new Promise<void>((r) => { soltar = r; });
+        },
+      }),
     });
     const saude = () => fetch(`http://127.0.0.1:${srv.port}/api/saude`);
     try {
@@ -212,7 +216,7 @@ describeIntegracao("NOD-175: /api/saude verifica o banco", () => {
     viaProxy.hostname = "127.0.0.1";
     viaProxy.port = String(proxy.porta);
     const db = criarDb(viaProxy.toString(), { max: 2 });
-    const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarBanco: () => db`select 1` });
+    const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarSaude: criarVerificacaoSaude({ verificarBanco: () => db`select 1` }) });
     const saude = () => fetch(`http://127.0.0.1:${srv.port}/api/saude`);
     try {
       const ok = await saude();
@@ -222,7 +226,9 @@ describeIntegracao("NOD-175: /api/saude verifica o banco", () => {
       proxy.engolir();
       const inicio = Date.now();
       const fora = await saude();
-      expect(Date.now() - inicio).toBeLessThan(3_000);
+      // NOD-194: o 503 sai no prazo do `select 1`, não pendurado no banco; afirmado contra o próprio prazo, com folga
+      // de 1x para a fila da máquina carregada (sem prazo, o pedido ficaria pendurado até o timeout do teste).
+      expect(Date.now() - inicio).toBeLessThan(2 * PRAZO_SAUDE_BANCO_MS);
       expect(fora.status).toBe(503);
       expect(await fora.json()).toEqual({ ok: false });
 
@@ -231,6 +237,50 @@ describeIntegracao("NOD-175: /api/saude verifica o banco", () => {
     } finally {
       await srv.close();
       await proxy.fechar();
+      await db.end({ timeout: 0 });
+    }
+  });
+});
+
+describeIntegracao("NOD-267: pool de conexões esgotado", () => {
+  it("o servidor segue respondendo (503 no prazo, não pendura), o watchdog sai com 1 e, com o pool livre, volta o 200", async () => {
+    const PRAZO_MS = 300;
+    // Pool de UMA conexão, presa numa transação que não termina: o `select 1` da saúde fica na fila do pool.
+    const db = criarDb(process.env.DATABASE_URL_TEST ?? "", { max: 1 });
+    let soltar: () => void = () => undefined;
+    const presa = new Promise<void>((r) => { soltar = r; });
+    let conectou: () => void = () => undefined;
+    const ocupada = new Promise<void>((r) => { conectou = r; });
+    const tx = db.begin(async (sql) => {
+      await sql`select 1`;
+      conectou();
+      await presa;
+    });
+    await ocupada;
+    const verificarSaude = criarVerificacaoSaude({ verificarBanco: () => db`select 1`, prazoMs: PRAZO_MS });
+    const srv = await listen(0, "127.0.0.1", { segredoSessao: "s", sessao: { modo: "stub" }, verificarSaude });
+    const sair = vi.fn();
+    const watchdog = iniciarWatchdog({ verificar: verificarSaude, sair, agora: () => Date.now(), carenciaAte: 0, intervaloMs: 50 });
+    const saude = () => fetch(`http://127.0.0.1:${srv.port}/api/saude`);
+    try {
+      const inicio = Date.now();
+      const fora = await saude();
+      expect(Date.now() - inicio).toBeLessThan(PRAZO_MS + 1_500);
+      expect(fora.status).toBe(503);
+      expect(await fora.json()).toEqual({ ok: false });
+      // O processo continua de pé: outra rota pública responde na hora, com o pool ainda esgotado.
+      expect((await fetch(`http://127.0.0.1:${srv.port}/api/sessao/modo`)).status).toBe(200);
+
+      await expect.poll(() => sair.mock.calls.length, { timeout: 10_000, interval: 50 }).toBe(1);
+      expect(sair).toHaveBeenCalledWith(1);
+
+      soltar();
+      await tx;
+      await expect.poll(async () => (await saude()).status, { timeout: 10_000, interval: 100 }).toBe(200);
+    } finally {
+      watchdog.parar();
+      soltar();
+      await srv.close();
       await db.end({ timeout: 0 });
     }
   });

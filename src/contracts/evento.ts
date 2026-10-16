@@ -51,7 +51,14 @@ export type KindEvento =
   | "parada"
   | "relato_criado"
   /** definido em 2026-10-04 (ADR-075): a ligação começou, foi atendida ou acabou (só ids e estado, nunca fala). */
-  | "ligacao_mudou";
+  | "ligacao_mudou"
+  /** definido em 2026-10-07 (ADR-083): trabalho criado ou mudou de estado (só ids e estado). */
+  | "trabalho_mudou"
+  /** ADR-083 (#191): telemetria das linhas do chat — a web mostrou / a pessoa abriu (tipo, agente, chave). */
+  | "linha_mostrada"
+  | "linha_aberta"
+  /** ADR-083 (#194): a pressão de memória do Mac mudou de nível. */
+  | "pressao_memoria";
 
 /** Dados do evento: só escalares (o CHECK da trilha e o outbox não aceitam prosa aninhada). */
 export type DadosEvento = Record<string, string | number | boolean | null>;

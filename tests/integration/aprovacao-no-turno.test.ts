@@ -27,7 +27,7 @@ describeIntegracao("aprovação no mesmo turno: uma decisão, uma continuação 
     await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
     const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
     await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: consentimento?.id ?? "" });
-    const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte e envie", entradaConfianca: confianca, modelo: "m" });
+    const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "monte e envie", entradaConfianca: confianca, modelo: "m" });
     const machineId = randomUUID();
     expect((await repos.turnos.reivindicar({ machineId, agora: Date.now() }))?.id).toBe(turno?.id);
     const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
@@ -95,9 +95,9 @@ describeIntegracao("aprovação no mesmo turno: uma decisão, uma continuação 
       };
       const r = await liberarNaTarefa(c.deps, { decisao: await computador() });
       expect(r.data.liberado).toBe(true);
-      const retomada = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "retomada", retomaTurnoId: c.turnoId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
+      const retomada = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "retomada", retomaTurnoId: c.turnoId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
       expect(await computadorLiberadoNaTarefa(c.deps, retomada?.id ?? "")).toBe(true);
-      const outraTarefa = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra coisa", entradaConfianca: "confiavel", modelo: "m" });
+      const outraTarefa = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra coisa", entradaConfianca: "confiavel", modelo: "m" });
       expect(await computadorLiberadoNaTarefa(c.deps, outraTarefa?.id ?? "")).toBe(false);
       expect((await c.repos.mensagens.listarDaConversa(c.conversaId, 50)).some((m) => m.kind === "sistema" && m.texto.includes("liberou o computador do bot até o fim desta tarefa"))).toBe(true);
     });

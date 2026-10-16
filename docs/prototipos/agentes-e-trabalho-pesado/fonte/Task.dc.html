@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Task · esperando a vez</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/estilos.css">
+<link rel="stylesheet" href="css/interface.css">
+<link rel="stylesheet" href="css/navegacao.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=Geist+Mono:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.icon.mascote>img{width:100%;height:100%;display:block}
+.ponto-trabalho.na-vez{background:transparent;border:1.5px solid var(--mascote-cor,var(--ink-3))}
+.tk-pop-sec{padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-3)}
+.tk-pop-linha small{display:block;font-size:11.5px;color:var(--ink-3)}
+</style>
+</helmet>
+<div class="app" style="height: 900px;">
+<aside class="sidebar" aria-label="Bots e salas"><div class="search-wrap">
+  <div class="sh"><button class="nod-topo" aria-label="Abrir o Nod" title="Nod"><svg class="logo-nod" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-fundo" width="32" height="32" rx="7.5"></rect><g class="logo-olhos" transform="rotate(14 16 16)"><rect x="8.6" y="8.5" width="5.6" height="15" rx="2.8"></rect><rect x="17.8" y="8.5" width="5.6" height="15" rx="2.8"></rect></g></svg><span>Nod</span></button><button class="icone-topo" aria-label="Buscar agentes" title="Buscar (⌘K)"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5 14 14"></path></svg></button><button class="icone-topo trabalhos-bt" aria-current="false" aria-label="Trabalhos: 11 abertos" title="Trabalhos"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="14" height="11" rx="2.2"></rect><path d="M7.5 5.5V4.2a1.2 1.2 0 0 1 1.2-1.2h2.6a1.2 1.2 0 0 1 1.2 1.2v1.3"></path><path d="M3 10h14"></path></svg><span class="contagem-topo" aria-hidden="true">11</span></button><span class="create-actions"><button class="create-trigger" aria-label="Nova conversa"><span class="segurar-anel" aria-hidden="true"></span>+</button></span></div>
+</div>
+<div class="list">
+  <section class="fixados" aria-label="Fixados"><div class="fixado"><button class="fixado-bt" aria-label="Abrir conversa com Clarice" title="Clarice"><span class="icon mascote c-red shape-circle lg" role="img" aria-label="Clarice"><img src="/_blob/83959d85dcd943cf52ee2ce45894fed1" alt=""></span><b>Clarice</b></button></div></section>
+  <section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Meus agentes"><span class="secao-nome">Meus agentes</span></button></h3>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Milton"><span class="icon mascote c-black shape-drop" role="img" aria-label="Milton"><img src="/_blob/6cf8e7d4cc35a7d32a326738cbf2eefa" alt=""></span><span class="txt"><span class="nome-linha"><b>Milton</b><i class="chip">PM</i><span class="chip-trab"><span class="ponto-trabalho c-black pulso-trab" aria-hidden="true"></span>1</span></span><span>Consultando o HubSpot</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Ada"><span class="icon mascote c-orange shape-pebble" role="img" aria-label="Ada"><img src="/_blob/b9bc8d0254c2dc78d07fe2a9250063dd" alt=""></span><span class="txt"><span class="nome-linha"><b>Ada</b><span class="chip-trab"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span>1</span></span><span>Lendo a planilha de receita</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Tarsila"><span class="icon mascote c-orange shape-square" role="img" aria-label="Tarsila"><img src="/_blob/e473d72a730feb1fca9c08839c776a35" alt=""></span><span class="txt"><span class="nome-linha"><b>Tarsila</b><span class="chip-trab"><span class="ponto-trabalho c-orange pulso-trab" aria-hidden="true"></span>1</span></span><span>Gerando a arte do post</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Frida"><span class="icon mascote c-pink shape-circle" role="img" aria-label="Frida"><img src="/_blob/996ad093882a12026fccb7773b5e40f2" alt=""></span><span class="txt"><span class="nome-linha"><b>Frida</b><span class="chip-trab"><span class="ponto-trabalho c-pink pulso-trab" aria-hidden="true"></span>1</span></span><span>Renderizando o vídeo</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Nina"><span class="icon mascote c-purple shape-hex" role="img" aria-label="Nina"><img src="/_blob/8a7b4c34eabfbd3c6306fbc886f687b1" alt=""></span><span class="txt"><span class="nome-linha"><b>Nina</b><i class="chip">Design UX/UI</i><span class="chip-trab"><span class="ponto-trabalho precisa" aria-hidden="true"></span>1</span></span><span>Quer sua aprovação no protótipo</span></span></button></div>
+  </section>
+  <section class="section"><h3><button type="button" class="secao-cab" aria-expanded="true" aria-label="Gamefik"><span class="secao-nome">Gamefik</span></button></h3>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Ze 1"><span class="icon mascote c-red shape-square" role="img" aria-label="Ze 1"><img src="/_blob/29d20d2fee6bd83243b75f770a562c3a" alt=""></span><span class="txt"><span class="nome-linha"><b>Ze 1</b><i class="chip">Dev Sr</i><span class="chip-trab"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span>1</span></span><span>Rodando os testes</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-current="true" aria-label="Abrir conversa com Eng 1"><span class="icon mascote c-gray shape-triangle" role="img" aria-label="Eng 1"><img src="/_blob/40f336377f66d61f86c51898b4b00c85" alt=""></span><span class="txt"><span class="nome-linha"><b>Eng 1</b><span class="chip-trab"><span class="ponto-trabalho c-gray" aria-hidden="true"></span>1</span></span><span>Esperando a vez dos testes</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Dev 1"><span class="icon mascote c-green shape-cloud" role="img" aria-label="Dev 1"><img src="/_blob/698e127b8f94d07c584f88d11905cf48" alt=""></span><span class="txt"><span class="nome-linha"><b>Dev 1</b><span class="chip-trab"><span class="ponto-trabalho c-green" aria-hidden="true"></span>1</span></span><span>Esperando a vez do typecheck</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Chico"><span class="icon mascote c-brown shape-square" role="img" aria-label="Chico"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><span class="txt"><span class="nome-linha"><b>Chico</b><i class="chip">Tech Lead</i><span class="chip-trab"><span class="ponto-trabalho c-brown pulso-trab" aria-hidden="true"></span>1</span></span><span>Lendo o diff do PR #541</span></span></button></div>
+    <div class="bot-row"><button class="row" aria-label="Abrir conversa com Leonardo"><span class="icon mascote c-red shape-square" role="img" aria-label="Leonardo"><img src="/_blob/7321c08953948b0fa9bbfcaad107110d" alt=""></span><span class="txt"><span class="nome-linha"><b>Leonardo</b><span class="chip-trab"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span>1</span></span><span>Movendo cards no ClickUp</span></span></button></div>
+  </section>
+</div>
+<div class="rodape">
+  <button class="me" aria-label="Menu da conta" title="Menu da conta"><span class="av-me">eu</span><span class="me-conexao conexao-aberto"></span></button>
+  <button class="marketplace-bt"><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5 4.5 3h11L17 7.5"></path><path d="M3 7.5a2.3 2.3 0 0 0 4.7 0 2.3 2.3 0 0 0 4.6 0 2.3 2.3 0 0 0 4.7 0"></path><path d="M4.2 10v7h11.6v-7"></path><path d="M8 17v-4h4v4"></path></svg>Marketplace</button>
+</div></aside>
+<main class="stage">
+<header class="cabecalho cabecalho-task"><div class="tk-topo">
+  <span class="tk-chip"><span class="ponto-trabalho c-gray na-vez" aria-hidden="true"></span><span class="icon mascote c-brown shape-square sm"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><span class="tk-seta" aria-label="pediu a"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6h7M6.5 3l3 3-3 3"></path></svg></span><span class="icon mascote c-gray shape-triangle sm"><img src="/_blob/40f336377f66d61f86c51898b4b00c85" alt=""></span><span class="tk-titulo">Revisar o PR #206 do EngNod</span><button type="button" class="tk-status" aria-expanded="true" title="Ver o tempo da task">esperando a vez dos testes · começa sozinho<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 7.5l3-3 3 3"></path></svg></button></span>
+  <div class="tk-pop" role="group" aria-label="Tempo e consumo da task">
+    <div class="tk-pop-linha tk-pop-total"><span>Aberta há</span><b>19 min</b></div>
+    <div class="tk-pop-barra" role="img" aria-label="Trabalhou 14 min, esperou 5 min"><span style="width: 74%;"></span></div>
+    <div class="tk-pop-linha"><span class="tk-pop-ponto trabalhou" aria-hidden="true"></span><span>Trabalhando</span><b>14 min</b></div>
+    <div class="tk-pop-linha"><span class="tk-pop-ponto esperou" aria-hidden="true"></span><span>Esperando a vez</span><b>5 min</b></div>
+    <div class="tk-pop-sec">O que esta task usa</div>
+    <div class="tk-pop-linha"><span>Eng 1 pensando</span><b>340 MB</b></div>
+    <div class="tk-pop-linha"><span>Testes do nod<small>quando chegar a vez</small></span><b>~1,2 GB</b></div>
+    <div class="tk-pop-rodape"><span>1 na frente: Ze 1 rodando os testes</span><button type="button" class="tk-pop-link">Ver task</button></div>
+  </div>
+  <p class="tk-linha">task do Eng 1, pedida pelo Chico · com os acessos do Eng 1 · pasta nod-206 · na nod-motor-teste</p>
+</div></header>
+<section class="timeline-wrap"><div class="timeline tk-timeline">
+  <div class="time-sep">10:19 · pedido do Chico · a resposta volta para o Chico</div>
+  <article class="message bot"><span class="icon mascote c-brown shape-square md"><img src="/_blob/aa025d6906413c2c075c78762cc8eb56" alt=""></span><div class="bubble-wrap"><div class="msg-autor"><b>Chico</b><time>10:19</time></div><div class="bubble">Eng 1, revisa o PR #206 do EngNod e roda a suíte antes de aprovar. Se algo quebrar, me manda o trecho.</div></div></article>
+  <div class="passo"><span class="passo-ok" aria-hidden="true">✓</span><span>Leu o PR #206 · 14 arquivos</span></div>
+  <div class="passo"><span class="passo-ok" aria-hidden="true">✓</span><span>Rodou os testes do que mexeu · 40 s · todos passaram</span></div>
+  <div class="passo passo-agora"><span class="ponto-trabalho c-gray na-vez" aria-hidden="true"></span><span>esperando a vez de rodar a suíte completa · 1 na frente</span></div>
+</div></section>
+<footer class="composer-wrap"><div class="composer"><div class="box"><textarea rows="1" placeholder="Escreva para esta task…" aria-label="Escreva para esta task"></textarea><button class="send" aria-label="Enviar">➤</button></div><p class="nota">Enter envia · Shift+Enter quebra linha</p></div>
+<div class="tk-acoes"><button type="button" class="bt tk-parar">Parar task</button><button type="button" class="bt tk-fechar">Fechar</button></div></footer>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

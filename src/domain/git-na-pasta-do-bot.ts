@@ -14,7 +14,11 @@ const GIT_QUE_MEXE = new Set(["checkout", "switch", "commit", "merge", "rebase",
 const STASH_QUE_SO_LE = new Set(["list", "show"]);
 const SEPARADORES = new Set(["&&", "||", ";", "|"]);
 
-export type ContextoDaPasta = { cwd: string | null; pastaDoBot: string; home: string };
+/**
+ * `daTask` (definido em 2026-10-09, ADR-088): `pastaDoBot` é a pasta da task (`~/nod/<bot>/<slug>`), não a raiz do
+ * bot. A worktree nasce ali dentro e a mensagem ensina `<pasta>/<repo>`; ausente = a raiz do bot, `<repo>-<task>`.
+ */
+export type ContextoDaPasta = { cwd: string | null; pastaDoBot: string; home: string; daTask?: boolean };
 
 /** Caminho absoluto e normalizado, ou null quando depende do shell (variável que não seja HOME). */
 function resolver(caminho: string, base: string | null, home: string): string | null {
@@ -36,7 +40,16 @@ function resolver(caminho: string, base: string | null, home: string): string | 
   return `/${partes.join("/")}`;
 }
 
-const dentro = (alvo: string, pasta: string) => alvo === pasta || alvo.startsWith(`${pasta}/`);
+/**
+ * revisto em 2026-10-09 (revisão do #225): NFC e sem caixa — o APFS não diferencia maiúsculas e o mesmo acento chega em
+ * NFC ou NFD; `~/nod/dev 4/x` e `~/nod/Dev 4/x` são a mesma pasta no Mac.
+ */
+const comparavel = (c: string) => c.normalize("NFC").toLowerCase();
+const dentro = (alvo: string, pasta: string) => {
+  const a = comparavel(alvo);
+  const p = comparavel(pasta);
+  return a === p || a.startsWith(`${p}/`);
+};
 
 /**
  * As palavras do comando até a primeira substituição: o `git commit -m "$(cat <<'EOF' …)"` que o Claude Code
@@ -52,9 +65,36 @@ function tokensAteSubstituicao(comando: string): { texto: string; operador: bool
   return aspa >= 0 ? tokenizar(prefixo.slice(0, aspa)) : null;
 }
 
-function aviso(acao: string, alvo: string | null, pastaDoBot: string): string {
+/** O caminho que a mensagem ensina: dentro da pasta da task, só o repositório; na raiz do bot, repositório e task. */
+const destinoDaWorktree = (ctx: ContextoDaPasta) => (ctx.daTask ? `${ctx.pastaDoBot}/<repo>` : `${ctx.pastaDoBot}/<repo>-<task>`);
+
+function aviso(acao: string, alvo: string | null, ctx: ContextoDaPasta): string {
   const onde = alvo ? `mexeria em ${alvo}, fora da sua pasta` : "roda numa pasta que não deu para conferir";
-  return `${acao} ${onde}. Cada task numa worktree sua: git -C <clone> fetch origin && git -C <clone> worktree add "${pastaDoBot}/<repo>-<task>" -b <branch> origin/main, e rode os comandos dentro dela. Os clones de fora da sua pasta não são mexidos por bots.`;
+  return `${acao} ${onde}. Cada task numa worktree sua: git -C <clone> fetch origin && git -C <clone> worktree add "${destinoDaWorktree(ctx)}" -b <branch> origin/main, e rode os comandos dentro dela. Os clones de fora da sua pasta não são mexidos por bots.`;
+}
+
+/**
+ * definido em 2026-10-09 (ADR-088, #216): a worktree nova nasce dentro da pasta deste turno — a da task, quando há task.
+ * Medido em 09/10: 198 das 261 worktrees em `~/nod` estavam na raiz do bot, fora de qualquer task, e o nod não sabia de
+ * quem eram nem quando apagar. O `worktree add` no clone da pessoa segue livre; o que muda é ONDE ela pode nascer.
+ */
+function avisoWorktree(alvo: string | null, ctx: ContextoDaPasta): string {
+  const onde = alvo ? `criaria a worktree em ${alvo}, fora da ${ctx.daTask ? "pasta desta task" : "sua pasta"}` : "cria a worktree numa pasta que não deu para conferir";
+  const limpeza = ctx.daTask ? " Quando a task acaba, o nod apaga a worktree que não tem alteração por commitar (a branch fica no clone)." : "";
+  return `git worktree add ${onde}. Crie dentro dela: git -C <clone> worktree add "${destinoDaWorktree(ctx)}" -b <branch> origin/main.${limpeza}`;
+}
+
+/** As opções do `git worktree add` que levam valor (o caminho é o primeiro argumento que não é opção nem valor). */
+const OPCOES_COM_VALOR_DO_WORKTREE_ADD = new Set(["-b", "-B", "--reason"]);
+function caminhoDoWorktreeAdd(args: readonly string[]): string | null {
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k]!;
+    if (a === "--") return args[k + 1] ?? null;
+    if (OPCOES_COM_VALOR_DO_WORKTREE_ADD.has(a)) { k++; continue; }
+    if (a.startsWith("-")) continue;
+    return a;
+  }
+  return null;
 }
 
 /**
@@ -70,6 +110,36 @@ export function arquivoForaDaPastaDoBot(caminho: string, ctx: ContextoDaPasta): 
   return alvo ?? caminho;
 }
 
+/** Palavras do shell que abrem o comando de verdade: `for …; do git …`, `if …; then git …`. */
+const PALAVRAS_DE_CONTROLE = new Set(["do", "then", "else", "elif", "if", "while", "until", "{", "!", "time"]);
+const ATRIBUICAO = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
+
+/**
+ * definido em 2026-10-11: `$NOME` e `${NOME}` com o valor que o próprio comando deu antes (`T=~/nod/x; git worktree add
+ * "$T/repo"`), e `$HOME`. Variável sem valor conhecido fica como está, e o `resolver` desiste dela. No levantamento de
+ * 11/10, 167 das 177 recusas "numa pasta que não deu para conferir" (VM e Mac, 28/09 a 11/10) eram esse padrão.
+ */
+function expandir(palavra: string, vars: ReadonlyMap<string, string | null>, home: string, literal: (nome: string) => boolean): string {
+  return palavra.replace(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g, (inteiro, a?: string, b?: string) => {
+    const nome = (a ?? b)!;
+    if (literal(nome)) return inteiro;
+    if (nome === "HOME") return home;
+    return vars.get(nome) ?? inteiro;
+  });
+}
+
+/**
+ * O tokenizador tira as aspas, e `'$T'` é literal no shell. A variável que aparece entre aspas simples em algum ponto do
+ * comando não é expandida em lugar nenhum. A conferência é larga (pode casar de uma aspa que fecha até a próxima que
+ * abre), e o erro dela só nega a mais.
+ */
+const citadaLiteral = (comando: string) => (nome: string) => new RegExp(`'[^']*\\$\\{?${nome}(?![A-Za-z0-9_])[^']*'`).test(comando);
+
+/** `$PWD` é a pasta em que o comando está naquele ponto (o cwd, depois dos `cd`), quando ela é conhecida. */
+function comPwd(vars: ReadonlyMap<string, string | null>, dir: string | null): ReadonlyMap<string, string | null> {
+  return vars.has("PWD") ? vars : new Map([...vars, ["PWD", dir]]);
+}
+
 /** Por que este comando mexeria numa pasta de trabalho fora de ~/nod/<bot>, ou null se pode rodar. */
 export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): string | null {
   if (!/\b(git|gh)\b/.test(comando)) return null;
@@ -77,23 +147,42 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
   if (!tokens) {
     // Fail-closed só para o que claramente mexe: o resto segue para o servidor decidir (autorizar-comando.ts).
     const mexe = /\bgit\s[^;&|\n]*\b(checkout|switch|commit|merge|rebase|reset|pull|cherry-pick|revert|restore|clean)\b/.exec(comando);
-    return mexe ? aviso(`git ${mexe[1]}`, null, ctx.pastaDoBot) : null;
+    return mexe ? aviso(`git ${mexe[1]}`, null, ctx) : null;
   }
   let dir = ctx.cwd === null ? null : resolver(ctx.cwd, null, ctx.home);
   let palavras: string[] = [];
-  const segmentos: string[][] = [];
+  // `depois`: o separador que vem antes do segmento. A atribuição vale depois de `;`, do começo e de `&&` (se ela não
+  // rodou, o que vem encadeado por `&&` também não roda). Depois de `||` pode não ter rodado, e num pipe roda num subshell.
+  const segmentos: { palavras: string[]; depois: string }[] = [];
+  let depois = ";";
   for (const t of tokens) {
-    if (t.operador && SEPARADORES.has(t.texto)) { segmentos.push(palavras); palavras = []; continue; }
+    if (t.operador && SEPARADORES.has(t.texto)) { segmentos.push({ palavras, depois }); palavras = []; depois = t.texto; continue; }
     if (!t.operador) palavras.push(t.texto);
   }
-  segmentos.push(palavras);
-  for (const s of segmentos) {
+  segmentos.push({ palavras, depois });
+  const literal = citadaLiteral(comando);
+  const vars = new Map<string, string | null>();
+  for (const seg of segmentos) {
+    let s = seg.palavras;
+    while (s.length > 0 && PALAVRAS_DE_CONTROLE.has(s[0]!)) s = s.slice(1);
+    // `for b in …`: o valor de `b` muda a cada volta.
+    if (s[0] === "for" || s[0] === "select") { if (s[1]) vars.set(s[1], null); continue; }
+    if (s[0] === "export" || s[0] === "local" || s[0] === "readonly") s = s.slice(1).filter((w) => !w.startsWith("-"));
+    if (s.length > 0 && s.every((w) => ATRIBUICAO.test(w))) {
+      for (const w of s) {
+        const [, nome, valor] = ATRIBUICAO.exec(w)!;
+        const v = expandir(valor!, comPwd(vars, dir), ctx.home, literal);
+        vars.set(nome!, (seg.depois === ";" || seg.depois === "&&") && !v.includes("$") ? v : null);
+      }
+      continue;
+    }
+    s = s.map((w) => expandir(w, comPwd(vars, dir), ctx.home, literal));
     // `FOO=bar git …`: a variável não muda a pasta.
-    const inicio = s.findIndex((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+    const inicio = s.findIndex((w) => !ATRIBUICAO.test(w));
     const [programa, ...args] = inicio < 0 ? [] : s.slice(inicio);
     if (programa === "cd" || programa === "pushd") { dir = resolver(args[0] ?? "~", dir, ctx.home); continue; }
     if (programa === "gh" && args[0] === "pr" && args[1] === "checkout") {
-      if (dir === null || !dentro(dir, ctx.pastaDoBot)) return aviso("gh pr checkout", dir, ctx.pastaDoBot);
+      if (dir === null || !dentro(dir, ctx.pastaDoBot)) return aviso("gh pr checkout", dir, ctx);
       continue;
     }
     if (programa !== "git") continue;
@@ -106,9 +195,18 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
       i += a === "--git-dir" || a === "-c" ? 2 : 1;
     }
     const sub = args[i];
+    if (sub === "worktree" && (args[i + 1] === "add" || args[i + 1] === "move")) {
+      // revisão do #225: o `worktree move <worktree> <destino>` muda onde ela mora — vale a mesma regra do `add`.
+      const posicionais = args[i + 1] === "add" ? [caminhoDoWorktreeAdd(args.slice(i + 2))] : args.slice(i + 2).filter((a) => !a.startsWith("-"));
+      const caminho = args[i + 1] === "add" ? posicionais[0] : posicionais[1];
+      if (caminho === null || caminho === undefined) continue;
+      const destino = resolver(caminho, alvo, ctx.home);
+      if (destino === null || !dentro(destino, ctx.pastaDoBot) || comparavel(destino) === comparavel(ctx.pastaDoBot)) return avisoWorktree(destino, ctx);
+      continue;
+    }
     if (!sub || !GIT_QUE_MEXE.has(sub)) continue;
     if (sub === "stash" && STASH_QUE_SO_LE.has(args[i + 1] ?? "")) continue;
-    if (alvo === null || !dentro(alvo, ctx.pastaDoBot)) return aviso(`git ${sub}`, alvo, ctx.pastaDoBot);
+    if (alvo === null || !dentro(alvo, ctx.pastaDoBot)) return aviso(`git ${sub}`, alvo, ctx);
   }
   return null;
 }

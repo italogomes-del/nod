@@ -51,27 +51,52 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # NOD-203: o endereço do servidor embutido no app (ADR-069). Variável de repositório, não secret: aparece no app.
+      NOD_SERVIDOR_PADRAO: ${{ vars.NOD_SERVIDOR_PADRAO }}
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.19.0'
           cache: npm
-      - run: node scripts/desktop/release-preflight.mjs
+      # Antes do npm ci: falta de secret ou da variável falha aqui, listando tudo de uma vez.
+      - name: Preflight da release
+        run: node scripts/desktop/release-preflight.mjs
       - run: npm ci
       - run: npm run desktop:build
+      # NOD-187: antes do empacotamento, para falhar cedo sem gastar assinatura e notarização.
+      # Sem prazo, um Electron travado (GPU/viz sob carga) prenderia o job até o limite de 6 h do runner.
+      - name: Smoke da janela
+        timeout-minutes: 5
+        run: npx electron scripts/desktop/smoke-window.mjs
       - run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true
-      - name: Verificar assinatura e notarização
-        env:
-          ARCH: ${{ matrix.arch }}
+      # NOD-203: o electron-builder notariza só o .app; o DMG é notarizado e grampeado aqui. O `--wait` sai com 0
+      # mesmo com status Invalid, então o status é conferido pelo verificador. A senha só passa pela expansão do env.
+      - name: Notarizar e grampear o DMG
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(release/nod-*-mac-"$ARCH".dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then echo "::error::esperava 1 DMG release/nod-*-mac-$ARCH.dmg, veio ${#dmgs[@]}"; exit 1; fi
+          DMG="${dmgs[0]}"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait --output-format json > "$RUNNER_TEMP/notarizacao.json" || true
+          if ID=$(node scripts/desktop/verificar-pacote-mac.mjs notarizacao "$RUNNER_TEMP/notarizacao.json"); then
+            xcrun stapler staple "$DMG"
+          else
+            if [ -n "$ID" ]; then xcrun notarytool log "$ID" --apple-id "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" || true; fi
+            exit 1
+          fi
+      - name: Verificar assinatura e notarização
+        run: |
+          set -euo pipefail
           APP=$(find release -maxdepth 2 -name nod.app -type d -print -quit)
           test -n "$APP"
           node scripts/desktop/smoke-proxy.mjs "$APP/Contents/MacOS/nod" "$APP/Contents/Resources/app.asar.unpacked/dist/desktop/proxy.mjs"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          xcrun stapler validate "$APP"
-          spctl --assess --type execute --verbose=2 "$APP"
-          shasum -a 256 release/*.dmg > "release/SHA256-${ARCH}.txt"
+          node scripts/desktop/verificar-pacote-mac.mjs pacote "$APP" release/nod-*-mac-"$ARCH".dmg
+      # Depois do grampo e da verificação: o hash publicado é o do DMG final.
+      - name: SHA-256 do DMG
+        run: shasum -a 256 release/nod-*-mac-"$ARCH".dmg > "release/SHA256-${ARCH}.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nod-mac-${{ matrix.arch }}

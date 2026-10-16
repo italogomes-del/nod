@@ -10,14 +10,28 @@ import { vencerPedidoDaRotina } from "../../use-cases/decidir-acesso.ts";
 import { expirarItensNaMaquina } from "../../use-cases/itens-na-maquina.ts";
 import { registrarDesfechoRotina, TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../../use-cases/disparar-rotina.ts";
 import { avisarFalhaDelegacao } from "../../use-cases/entregar-resposta-peer.ts";
+import { cuidarDasFrentesCaidas } from "../../use-cases/frentes-caidas.ts";
+import { cuidarDosPedidosParados, type PedidosAdiados } from "../../use-cases/pedidos-parados.ts";
+import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../use-cases/turnos-orfaos.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
+import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
+import { varrerTrocasDeIa } from "../../use-cases/trocas-de-ia.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: 30 s — a spec aceita "em ≤30s" para o vencimento aparecer (fluxo SUA VEZ E EXPIRAÇÃO). */
 export const INTERVALO_VARREDOR_MS = 30_000;
 
-export type OpcoesVarredor = { services: Services; useCases: UseCasesNod; agora: Relogio; metricas?: Metricas };
+export type OpcoesVarredor = {
+  services: Services;
+  useCases: UseCasesNod;
+  agora: Relogio;
+  metricas?: Metricas;
+  /** #218: pedidos parados adiados entre as passadas (pedidos-parados.ts); o laço cria um mapa só para o processo. */
+  pedidosAdiados?: PedidosAdiados;
+  /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
+  turnosObservados?: TurnosObservados;
+};
 /** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
 
@@ -39,6 +53,70 @@ const DESFECHO_HUMANO: Readonly<Record<string, string>> = {
  * (agora − prazo) vai ao log: é como se observa um varredor que ficou parado (E7.4.3).
  */
 export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarredor): Promise<ResultadoVarredura> {
+  const resultado = await varrerDecisoes(escopo, tx, opcoes);
+  // definido em 2026-10-08: os pedidos a colega que pararam sem voltar (pedidos-parados.ts), em transação própria — um
+  // erro neles não desfaz o vencimento das decisões, e o próximo tique tenta de novo.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await cuidarDosPedidosParados(deps, { adiados: opcoes.pedidosAdiados });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "pedidos_parados_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-12 (ADR-099, I9): as frentes de lote que caíram (frentes-caidas.ts), também em transação própria.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await cuidarDasFrentesCaidas(deps, { adiados: opcoes.pedidosAdiados });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "frentes_caidas_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-13 (NOD-219): os turnos pendentes órfãos (turnos-orfaos.ts), em transação própria — encerra o que
+  // nenhuma máquina pode pegar e observa o que passou do prazo da fila. Um erro aqui não desfaz os blocos de cima.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      // Cada candidato num SAVEPOINT desta tx: o que lança volta sozinho, e os outros saem (revisão do PR #307).
+      const isolar = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const caixa: { valor?: T } = {};
+        await trx.savepoint(async () => {
+          caixa.valor = await fn();
+        });
+        return caixa.valor as T;
+      };
+      const r = await cuidarDosTurnosOrfaos(deps, { observados: opcoes.turnosObservados, metricas: opcoes.metricas ?? registroPadrao, isolar });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "turnos_orfaos_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-16 (ADR-108 R4/R6): os avisos de troca de IA (trocas-de-ia.ts), em transação própria — aplica o
+  // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta. Revisão do
+  // PR 2 (I5): cada aviso num SAVEPOINT desta tx (o padrão dos órfãos) — o que lança volta sozinho e os outros saem.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const isolar = async <T>(fn: () => Promise<T>): Promise<T> => {
+        const caixa: { valor?: T } = {};
+        await trx.savepoint(async () => {
+          caixa.valor = await fn();
+        });
+        return caixa.valor as T;
+      };
+      const r = await varrerTrocasDeIa(deps, { isolar });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "trocas_de_ia_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  return resultado;
+}
+
+async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarredor): Promise<ResultadoVarredura> {
   const agora = opcoes.agora();
   return tx(async (trx) => {
     const repos = criarRepos(trx, escopo);
@@ -91,6 +169,8 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
         const r = await avisarFalhaDelegacao(deps, { turnoId: d.turnoId, motivo });
         events.push(...(r.events ?? []));
       }
+      // Revisão do épico (S2, 2026-10-08): vencida, a decisão não segura mais a task do turno dela (nem o depois_de).
+      events.push(...(await sincronizarDasDecisoes(deps, [d])));
       await repos.events.gravarComOutbox(events);
       log("info", "decisao_vencida_varrida", { decisao_id: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atraso_ms: agora - Date.parse(d.prazoDecisaoEm) });
     }
@@ -125,7 +205,8 @@ export async function varrer(db: Db, opcoes: OpcoesVarredor, laco: OpcoesLaco = 
   );
 }
 
-export function iniciarVarredorExpiracao(db: Db, opcoes: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+export function iniciarVarredorExpiracao(db: Db, opcoesIniciais: OpcoesVarredor & { intervaloMs?: number }, laco: OpcoesLaco = {}): { parar(): void } {
+  const opcoes = { ...opcoesIniciais, pedidosAdiados: opcoesIniciais.pedidosAdiados ?? new Map<string, number>(), turnosObservados: opcoesIniciais.turnosObservados ?? new Map<string, number>() };
   let rodando = false;
   const timer = setInterval(() => {
     if (rodando) return;

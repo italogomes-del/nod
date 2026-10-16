@@ -6,6 +6,8 @@ import {
   type ComandoDaConversa,
   type ComandoDoMac,
 } from "../contracts/comandos.ts";
+import { HARNESS_LEGADO, type IdHarness } from "../contracts/harness.ts";
+import { capacidadesDe } from "./harness.ts";
 
 /**
  * Os comandos da conversa (definido em 2026-09-28, canvas "Comandos /"). Nomes em português, e o nome do terminal como
@@ -32,12 +34,28 @@ export function comandoDaConversa(texto: string): { comando: ComandoDaConversa; 
 }
 
 /**
+ * definido em 2026-10-06 (NOD-179): o /cost é do Claude Code. Num bot de outra IA (Codex) ele ia como prompt, e o
+ * modelo inventava uma resposta; o uso do plano fica no nod, gravado a cada turno do Claude Code.
+ */
+export const USO_FORA_DO_CLAUDE = "O uso do plano está em Seu espaço › Conexão.";
+
+/**
+ * O comando da conversa só vira o do CLI quando o harness do turno tem `comandosDoCli` (ADR-083); sem harness (catcher,
+ * legado), vale o do legado (HARNESS_LEGADO).
+ */
+function ehClaudeCode(harness: IdHarness | null | undefined): boolean {
+  return capacidadesDe(harness ?? HARNESS_LEGADO).comandosDoCli;
+}
+
+/**
  * A entrada do turno com o comando do CLI no lugar do nome da conversa: "/contexto" → "/context", "/compactar foca
  * no PR" → "/compact foca no PR". Qualquer outro texto passa igual — "/review 420" já é o que o CLI entende.
+ * Fora do Claude Code, /uso não vira /cost: pede só a frase fixa (a resposta é trocada por ela no assentar).
  */
-export function traduzirParaOCli(texto: string): string {
+export function traduzirParaOCli(texto: string, harness?: IdHarness | null): string {
   const c = comandoDaConversa(texto);
   if (!c || c.comando.acao !== "turno" || !c.comando.cli) return texto;
+  if (c.comando.nome === "uso" && !ehClaudeCode(harness)) return `Responda só esta frase, sem usar ferramentas: "${USO_FORA_DO_CLAUDE}"`;
   return c.resto ? `${c.comando.cli} ${c.resto}` : c.comando.cli;
 }
 
@@ -198,9 +216,11 @@ const TROCAS_DO_CONTEXTO: [RegExp, string][] = [
 /**
  * A resposta de um comando da conversa, em português (definido em 2026-09-28). /uso e /contexto voltam do Claude Code
  * em inglês e sem chamar o modelo; o nod troca as linhas que conhece. Qualquer outro turno passa intacto.
+ * Fora do Claude Code, /uso responde sempre a frase fixa, diga o modelo o que disser (NOD-179).
  */
-export function traduzirSaidaDoComando(entrada: string, saida: string): string {
+export function traduzirSaidaDoComando(entrada: string, saida: string, harness?: IdHarness | null): string {
   const c = comandoDaConversa(entrada)?.comando.nome;
+  if (c === "uso" && !ehClaudeCode(harness)) return USO_FORA_DO_CLAUDE;
   if (c === "uso") {
     return saida.split("\n").map((linha) => {
       const limpa = linha.trim();

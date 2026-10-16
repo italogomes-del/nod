@@ -1,4 +1,4 @@
-import type { AcaoComputador } from "../contracts/computador.ts";
+import type { AcaoComputador, ComputadorVisto } from "../contracts/computador.ts";
 import type { MotivoFalhaComputador } from "../contracts/motivos.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { mascarar, redigirECortar, redigirSegredos } from "./segredos.ts";
@@ -181,4 +181,13 @@ export function limiteDoAmbiente(env: Readonly<Record<string, string | undefined
     return v !== undefined && v.trim() !== "" && Number.isInteger(n) && n >= min ? n : padrao;
   };
   return { maximo: inteiro(env.NOD_COMPUTADORES_MAX, 1, 3), ociosoMin: inteiro(env.NOD_COMPUTADOR_OCIOSO_MIN, 0, 15) };
+}
+
+/**
+ * definido em 2026-10-07 (NOD-192): o computador de um bot que ainda não tem um. Abrir o painel não cria a linha
+ * (ela nasce na 1ª ação, em `obter`); o GET mostra estes valores, que são os DEFAULTS de 0014/0022 — o teste de
+ * integração cria a linha e compara, para os dois não divergirem.
+ */
+export function computadorPadrao(agenteId: string): ComputadorVisto {
+  return { id: null, agenteId, habilitado: true, controle: "bot", politica: "supervisionado", ajuda: null, ajudaDecisaoId: null, ocupadoAte: null, operacaoId: null, criadoEm: null, falhasSeguidas: 0, falhaMotivo: null, indisponivelDesde: null };
 }

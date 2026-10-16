@@ -41,7 +41,18 @@ export const MOTIVOS_INTERRUPCAO = [
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 
-export const MOTIVOS_FALHA = ["erro_max_turns", "erro_execucao", "motor_ausente", "nao_autenticado"] as const;
+export const MOTIVOS_FALHA = [
+  "erro_max_turns",
+  "erro_execucao",
+  "motor_ausente",
+  "nao_autenticado",
+  /**
+   * definido em 2026-10-06 (NOD-171, 0058): o plano do Claude Code atingiu o limite de uso. Só pelo protocolo:
+   * `rate_limit` `rejected` na rodada e `result` com erro. O Codex não informa isso em campo: fica `erro_execucao`, e
+   * só a frase muda (src/domain/erro-fornecedor.ts).
+   */
+  "limite_do_plano",
+] as const;
 export type MotivoFalha = (typeof MOTIVOS_FALHA)[number];
 
 /** Localidade honesta: nesta rodada existe um executor só, na máquina da pessoa (ADR-022, ADR-028). */
@@ -143,6 +154,8 @@ export const CODIGOS_ERRO = [
   "conector_indisponivel",
   "integracao_nao_configurada",
   "integracao_autenticacao",
+  // ADR-081 (0060): o Nod não se exclui, não se oculta, não se renomeia, não se move nem se duplica.
+  "nod_protegido",
 ] as const;
 export type CodigoErro = (typeof CODIGOS_ERRO)[number];
 

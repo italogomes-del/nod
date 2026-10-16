@@ -6,10 +6,12 @@ import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
+import { blocoPedidosAbertos, type PedidoAbertoNoPrompt } from "../domain/triagem.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
+import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
 import { preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -24,6 +26,8 @@ export type EntradaDisparo = {
    * pessoa conceder não passa pelo pré-voo — ela acabou de clicar "Permitir e rodar agora".
    */
   aposConceder?: boolean;
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1). Ausente = desligado: a rotina "só com pendência" não acorda pelo agendador. */
+  aFazer?: boolean;
 };
 /**
  * `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045).
@@ -35,7 +39,7 @@ export type EntradaDisparo = {
 export type SaidaDisparo =
   | { turno: Turno; proximaExecucao: number }
   | { janelaDeOutro: true }
-  | { pulada: true; turnoAbertoId: string; proximaExecucao: number }
+  | { pulada: true; turnoAbertoId: string | null; trabalhoAbertoId?: string; proximaExecucao: number }
   | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number }
   | { semPendencia: true; proximaExecucao: number };
 
@@ -43,7 +47,9 @@ export type SaidaDisparo =
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
  * limites, política sem dado). Texto do SERVIDOR, não do modelo: só o que a pessoa confirmou.
  */
-export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): string {
+export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number, pedidosAbertos: readonly PedidoAbertoNoPrompt[] = []): string {
+  // NOD-259: cada janela é um fio novo e não via os pedidos que as anteriores fizeram a colegas — e pedia de novo.
+  const bloco = blocoPedidosAbertos(pedidosAbertos, instanteAgendado, rotina.fusoIana);
   return [
     `Execução agendada da rotina "${resumoCron(rotina.cron, rotina.fusoIana)}" em ${carimbo(instanteAgendado, rotina.fusoIana)} (${rotina.fusoIana}).`,
     `Instrução: ${rotina.instrucao}`,
@@ -51,6 +57,7 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
     `Entregável: ${rotina.entregavel}`,
     `Limites de aprovação: ${rotina.limitesAprovacao}`,
     `Se não houver dado: ${rotina.politicaSemDado}`,
+    ...(bloco ? ["", bloco] : []),
   ].join("\n");
 }
 
@@ -119,10 +126,14 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   // (preservarAgenda) são atos da pessoa e nunca são pulados.
   if (!input.preservarAgenda) {
     const turnoAbertoId = await deps.repos.rotinaJanelas.turnoAberto(rotina.id);
-    if (turnoAbertoId) {
+    // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
+    // não acabou — a execução seguinte, sem ver a anterior, abria a mesma task de novo, a cada janela. revisto em
+    // 2026-10-12 (ADR-099, I7 revista): e enquanto uma frente que o dono abriu para a rotina não acabou.
+    const filha = turnoAbertoId ? null : await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id);
+    if (turnoAbertoId || filha) {
       const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(deps.agora(), instanteAgendado) });
       await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
-      return { data: { pulada: true, turnoAbertoId, proximaExecucao } };
+      return { data: { pulada: true, turnoAbertoId, ...(filha ? { trabalhoAbertoId: filha.id } : {}), proximaExecucao } };
     }
   }
   const ganhou = await deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina.id, instanteAgendado, machineId: input.machineId, executor: input.executor });
@@ -137,16 +148,22 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   // definido em 2026-10-01 (item 7 da ADR-066): depois do pré-voo (a rotina parada por acesso segue parada, com o
   // card dela) e antes do turno. Só no agendador: "Executar agora" e "Permitir e rodar agora" (preservarAgenda) são
   // atos da pessoa e rodam sempre. Visível = a mesma regra do prompt: aberta e com a_partir_de já passado.
-  if (rotina.soComPendencia && !input.preservarAgenda && pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0) {
+  // revisto em 2026-10-06: com o "A fazer" desligado o bot não anota nem vê pendência, então a rotina não acorda.
+  if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
     return registrarSemPendencia(deps, input, agora);
   }
+  // revisto em 2026-10-12 (ADR-099 item 1 e decisão 3, I7 revista; era um trabalho por execução, ADR-083 S7/S13): a rotina
+  // é um alarme que põe um pedido na fila do dono — um turno curto "rodar <rotina>" na conversa dela (a do bot, ou a sala),
+  // sem trabalho, que o `reivindicar` põe depois das falas da pessoa. O dono faz o que é rápido ali mesmo ou abre frentes
+  // (abrir_frentes); o lote volta a ele (I3), que fecha a execução com a linha "da rotina". Modo, catálogo e aprovações
+  // são os da rotina, como antes (o turno é origem 'rotina', ligado à janela).
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: rotina.conversaId,
     agenteId: rotina.agenteId,
     origem: "rotina",
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
-    entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
+    entradaTexto: montarEntradaRotina(rotina, instanteAgendado, await pedidosAbertosDoBot(deps, rotina.agenteId, agora)),
     // revisto em 2026-10-01 (ADR-066): a entrada da rotina é confiável — é a instrução que a pessoa confirmou. Antes
     // ela nascia não confiável quando a FONTE citava um app de fora (GitHub, Gmail), e o catálogo perdia a escrita:
     // 1.040 de 1.130 turnos de rotina saíram assim até 30/09. A marca agora vem do que o bot lê (chamar-ferramenta.ts).
@@ -173,7 +190,13 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
  * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração. `sem_pendencia` (definido em 2026-10-01, item 7
  * da ADR-066) hoje só nasce em registrarSemPendencia, sem turno; está na união para o histórico ter um tipo só.
  */
-export type EntradaDesfecho = { turnoId: string; desfecho: DesfechoRotina; motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null };
+export type EntradaDesfecho = {
+  turnoId: string;
+  desfecho: DesfechoRotina;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "parado_pela_pessoa" | null;
+  /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
+  regra?: `regra:${string}`;
+};
 
 /** O motivo do passou_em_branco em palavras na conversa; o código fica na execução. Sem tradução sai como está. */
 const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
@@ -204,7 +227,7 @@ export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(
  * a retomada segue sem perguntar de novo, 'passou_em_branco' quando a pergunta é deixada pra lá ou vence.
  */
 export const TIPOS_QUE_SEGURAM_A_EXECUCAO: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>([...TIPOS_GATE_ROTINA, ...TIPOS_PEDIDO_A_PESSOA]);
-export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" };
+export type SaidaDesfecho = { execucao: ExecucaoRotina; rotina: Rotina; podadas: number } | { ignorado: "nao_e_rotina" | "aguardando_gate" | "aguardando_frentes" };
 
 /**
  * Assentamento de um turno de rotina (chamado pela L6 ao assentar turno origem 'rotina' ou sua
@@ -224,6 +247,9 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     const turnosDaRotina = new Set([turnoDisparado.id, input.turnoId]);
     const gatesAbertos = (await deps.repos.decisoes.pendentesDaConversa(rotina.conversaId)).filter((d) => TIPOS_QUE_SEGURAM_A_EXECUCAO.has(d.tipo) && d.turnoId !== null && turnosDaRotina.has(d.turnoId));
     if (gatesAbertos.length > 0) return { data: { ignorado: "aguardando_gate" } };
+    // definido em 2026-10-12 (ADR-099, I7 revista): o turno do dono que abriu frentes para a rotina não é o fim da
+    // execução — o desfecho (e a linha "da rotina") é do retorno do lote, quando as frentes acabam (I3).
+    if ((await deps.repos.pedidosDeColega.frentesAbertasDosTurnos([...turnosDaRotina])) > 0) return { data: { ignorado: "aguardando_frentes" } };
   }
   const agora = deps.agora();
   // definido em 2026-09-24 (ADR-045): UMA linha por janela. A rotina que pergunta e é retomada, ou que
@@ -248,7 +274,7 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   // nem este marcador. Uma rotina que roda a cada 5 min e não acha novidade não deve deixar rastro
   // no chat; quem quer conferir que ela rodou olha o histórico.
   if (SILENCIOSOS.has(input.desfecho)) {
-    const autoriaSilencio = input.desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
+    const autoriaSilencio = input.desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, input.regra ?? "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
     return {
       data: { execucao, rotina, podadas },
       events: [evento(deps, "rotina_executou", autoriaSilencio, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })],
@@ -275,4 +301,45 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     evento(deps, "rotina_executou", autoria, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
   ];
   return { data: { execucao, rotina, podadas }, events };
+}
+
+/** NOD-251/NOD-275: quem decidiu que a janela não rodou — a máquina recusou o turno no despacho, ou a pessoa pediu Parar. */
+export const REGRA_DESPACHO_RECUSADO = "regra:despacho-recusado" as const;
+export const REGRA_PARAR = "regra:parar" as const;
+
+/** Por que a janela da rotina terminou sem rodar: a recusa do despacho (do inventário ou da conta) ou o Parar da pessoa. */
+export type MotivoRecusaDaRotina = "motor_ausente" | "nao_autenticado" | "limite_do_plano" | "parado_pela_pessoa";
+
+/**
+ * NOD-251/NOD-275 (definido em 2026-10-15): o turno de rotina (ou a retomada dela) que o despacho recusou — motor ausente,
+ * CLI sem login, conta no limite — ou que a pessoa parou antes de rodar. Sem isto a janela sumia do histórico: o turno saía
+ * `interrompido`, mas `rotina_execucoes` não ganhava linha e a trilha `rotina_*` não tinha evento. Registra 'interrompida'
+ * com o motivo, na MESMA tx do despacho, e devolve o `rotina_executou`. 'interrompida' é silencioso (SILENCIOSOS): a nota
+ * ou a negação que o despacho já escreve é a única linha no chat. Turno que não leva a uma rotina → nada.
+ */
+export async function registrarRecusaDaRotina(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Pick<Turno, "id" | "origem">, motivo: MotivoRecusaDaRotina): Promise<RuntimeEvent[]> {
+  if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
+  const regra = motivo === "parado_pela_pessoa" ? REGRA_PARAR : REGRA_DESPACHO_RECUSADO;
+  const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo, regra });
+  return "execucao" in r.data ? (r.events ?? []) : [];
+}
+
+/**
+ * O desfecho da janela quando a máquina entrega o turno da rotina (ou da retomada dela) — chamado pela ponte depois de
+ * assentar (compor.ts, depoisDeAssentar), na mesma tx. Turno que não é de rotina → nada.
+ * - definido em 2026-09-24 (ADR-045): turno derrubado pela máquina já registrou a execução como 'interrompida'
+ *   (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela.
+ * - definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não rendeu notícia ('sem_novidade',
+ *   silencioso); concluído = 'executou'; o resto = 'falhou' com o motivo da falha.
+ * - NOD-251 (definido em 2026-10-15): "Parar" no meio da rotina não é erro técnico — a janela fica 'interrompida'
+ *   (silenciosa) com o motivo parado_pela_pessoa, sem a linha "A rotina falhou por erro técnico" no chat.
+ */
+export async function registrarDesfechoDaEntrega(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Turno): Promise<RuntimeEvent[]> {
+  if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
+  if (turno.motivoInterrupcao === "maquina_sem_contato") return [];
+  if (turno.estado === "interrompido" && turno.motivoInterrupcao === "parado_pela_pessoa") return registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa");
+  const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
+  const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";
+  const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
+  return "execucao" in r.data ? (r.events ?? []) : [];
 }

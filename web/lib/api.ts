@@ -1,10 +1,13 @@
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
+import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
+import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
@@ -13,12 +16,18 @@ import type { Conector } from "../../src/contracts/conector.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
+import type { IasDaPessoa, InteligenciaBot, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
+import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
+import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
+import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { FaixaParada, Turno } from "../../src/contracts/turno.ts";
+import type { EventoLinha, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
+import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, LigacaoCriada } from "../../src/contracts/ligacao.ts";
 import type { IaDaLigacao } from "../../src/contracts/voz.ts";
 import type { AcaoComandoVoz } from "../../src/contracts/voz.ts";
@@ -27,6 +36,11 @@ import type { MotivoAvaliacaoLigacao } from "./ligacao-protocolo.ts";
 import type { WorkspaceDto } from "../../src/contracts/workspace.ts";
 import type { EstadoOnboarding, PedidoEtapaOnboarding } from "../../src/contracts/onboarding.ts";
 import type { Escopo } from "../../src/shared/types.ts";
+import { corpoDoEnvio } from "./envio-idempotente.ts";
+import { podeRepetir, tentarDeNovo } from "./tentar-de-novo.ts";
+import { ErroApi, ehAbort, erroDaResposta, falhaDeTransporte, rotaDe } from "./erro-api.ts";
+
+export { ErroApi, FRASE_SEM_INTERNET, FRASE_SERVIDOR_INDISPONIVEL, rotaDe } from "./erro-api.ts";
 
 /**
  * Cliente REST da web (ADR-020: a web DECIDE, nunca executa; ADR-018: só `import type` de src).
@@ -34,33 +48,53 @@ import type { Escopo } from "../../src/shared/types.ts";
  * servidor chega como `ErroApi` com o código FECHADO da tabela de erros — a web renderiza o código,
  * nunca inventa texto a partir de err.message (ADR-002/004).
  */
-/** NOD-174: quando o servidor não manda frase (proxy, corpo vazio), a pessoa lê isto — nunca "falha" solta. */
-const FALHA_SEM_FRASE = "Algo deu errado. Tente de novo; se repetir, relate o problema.";
-const FALHA_DE_REDE = "Não conseguimos falar com o servidor. Confira a conexão e tente de novo.";
-
-export class ErroApi extends Error {
-  readonly status: number;
-  readonly codigo: string;
-  readonly correlationId: string | null;
-  constructor(status: number, codigo: string, mensagem: string, correlationId: string | null = null) {
-    super(mensagem);
-    this.name = "ErroApi";
-    this.status = status;
-    this.codigo = codigo;
-    this.correlationId = correlationId;
-  }
-}
-
 export type SalaDto = { sala: Sala; membros: MembroSala[] };
 export type RegistroCatcher = { id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number };
 
-async function pedir<T>(metodo: string, url: string, corpo?: unknown): Promise<T> {
-  const r = await fetch(url, {
-    method: metodo,
-    headers: corpo === undefined ? {} : { "content-type": "application/json" },
-    body: corpo === undefined ? undefined : JSON.stringify(corpo),
-  });
-  const texto = await r.text();
+/**
+ * Quem acompanha a rede (main.ts): `falhou` a cada falha de transporte (inclusive as que ainda vão repetir), `voltou`
+ * quando o nod responde qualquer coisa. Um só, como o resto do estado da página.
+ */
+export type ObservadorDeRede = { falhou(e: ErroApi): void; voltou(): void };
+let observador: ObservadorDeRede | null = null;
+export function observarRede(o: ObservadorDeRede | null): void {
+  observador = o;
+}
+
+/**
+ * `silencioso`: chamada de fundo que a pessoa não fez (o lote da telemetria, inclusive o do `pagehide`): a falha dela
+ * não acende o "Reconectando…" (revisão NOD-215) — quem chama já engole o erro.
+ */
+type OpcoesPedido = { keepalive?: true; silencioso?: true };
+
+async function pedir<T>(metodo: string, url: string, corpo?: unknown, opcoesPedido: OpcoesPedido = {}): Promise<T> {
+  const rota = rotaDe(metodo, url);
+  const { silencioso, ...opcoes } = opcoesPedido;
+  const obs = silencioso ? null : observador;
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: metodo,
+      headers: corpo === undefined ? {} : { "content-type": "application/json" },
+      body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      ...opcoes,
+    });
+  } catch (e) {
+    // Navegação/troca de tela cancelou: não é falha, ninguém precisa de aviso.
+    if (ehAbort(e)) throw e;
+    const falha = falhaDeTransporte(rota);
+    obs?.falhou(falha);
+    throw falha;
+  }
+  let texto = "";
+  try {
+    texto = await r.text();
+  } catch (e) {
+    if (ehAbort(e)) throw e;
+    const falha = falhaDeTransporte(rota);
+    obs?.falhou(falha);
+    throw falha;
+  }
   let lido: unknown = null;
   try {
     lido = texto === "" ? null : JSON.parse(texto);
@@ -68,25 +102,48 @@ async function pedir<T>(metodo: string, url: string, corpo?: unknown): Promise<T
     lido = null;
   }
   if (!r.ok) {
-    const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null };
-    throw new ErroApi(r.status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null);
+    const erro = erroDaResposta(r.status, lido, rota);
+    if (erro.codigo === "servidor_indisponivel") obs?.falhou(erro);
+    else obs?.voltou();
+    throw erro;
   }
+  obs?.voltou();
   return lido as T;
 }
 
+/** GET e mutação com chave de idempotência atravessam alguns segundos de servidor fora (web/lib/tentar-de-novo.ts). */
+function pedirDeNovoSeCair<T>(metodo: string, url: string, corpo?: unknown, chave?: string): Promise<T> {
+  if (!podeRepetir(metodo, chave)) return pedir<T>(metodo, url, corpo);
+  return tentarDeNovo(() => pedir<T>(metodo, url, corpo));
+}
+
 function subir(url: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void): Promise<AnexoMeta> {
+  const rota = rotaDe("POST", url);
+  // Upload não repete sozinho (não é idempotente): só a frase certa.
   return new Promise((resolver, rejeitar) => {
     const x = new XMLHttpRequest();
     x.open("POST", url);
     x.setRequestHeader("content-type", mime);
     x.setRequestHeader("x-nod-nome", encodeURIComponent(arquivo.name));
     x.upload.onprogress = (e) => { if (e.lengthComputable) aoProgresso?.(e.loaded / e.total); };
-    x.onerror = () => rejeitar(new ErroApi(0, "falha_interna", FALHA_DE_REDE));
+    x.onerror = () => {
+      const falha = falhaDeTransporte(rota);
+      observador?.falhou(falha);
+      rejeitar(falha);
+    };
     x.onload = () => {
-      let lido: { codigo?: string; mensagem?: string } & Partial<AnexoMeta> = {};
-      try { lido = JSON.parse(x.responseText) as typeof lido; } catch { lido = {}; }
-      if (x.status >= 200 && x.status < 300) resolver(lido as AnexoMeta);
-      else rejeitar(new ErroApi(x.status, lido.codigo ?? "falha_interna", lido.mensagem ?? FALHA_SEM_FRASE));
+      let lido: unknown = null;
+      try { lido = JSON.parse(x.responseText); } catch { lido = null; }
+      if (x.status >= 200 && x.status < 300) {
+        observador?.voltou();
+        // Corpo vazio/ilegível num 2xx: objeto vazio como antes do NOD-215 (quem chama lê meta.id sem estourar).
+        resolver((lido ?? {}) as AnexoMeta);
+        return;
+      }
+      const erro = erroDaResposta(x.status, lido, rota);
+      if (erro.codigo === "servidor_indisponivel") observador?.falhou(erro);
+      else observador?.voltou();
+      rejeitar(erro);
     };
     x.send(arquivo);
   });
@@ -106,7 +163,7 @@ export function decidirPorVoz(tenantId: string, decisaoId: string, corpo: Decisa
 
 export function criarApi(escopo: Escopo) {
   const base = `/api/t/${encodeURIComponent(escopo.tenantId)}`;
-  const get = <T>(caminho: string) => pedir<T>("GET", `${base}/${caminho}`);
+  const get = <T>(caminho: string) => pedirDeNovoSeCair<T>("GET", `${base}/${caminho}`);
   const post = <T>(caminho: string, corpo?: unknown) => pedir<T>("POST", `${base}/${caminho}`, corpo ?? {});
   const patch = <T>(caminho: string, corpo: unknown) => pedir<T>("PATCH", `${base}/${caminho}`, corpo);
   const del = <T>(caminho: string) => pedir<T>("DELETE", `${base}/${caminho}`);
@@ -135,8 +192,17 @@ export function criarApi(escopo: Escopo) {
     ambiente: () => get<AmbienteBancoDto>("ambiente"),
     executor: () => get<EstadoExecutor>("executor"),
     trocarExecutor: (id: IdExecutor) => post<EstadoExecutor>("executor", { id }),
+    // Plano das IAs (2026-10-10): a ordem do Automático da pessoa, o estado com o limite e os modelos; e a escolha do bot.
+    ias: () => get<IasDaPessoa>("ias"),
+    // definido em 2026-10-16 (plano "tela limpa", decisão E6): o anel de uso do seletor de IA no campo.
+    usoDoPlano: () => get<UsoDoPlanoDto>("uso-do-plano"),
+    gravarOrdemIas: (ordemIas: IdHarness[] | null) => pedir<Preferencias>("PUT", `${base}/preferencias`, { ordemIas }),
+    gravarInteligencia: (agenteId: string, pedido: PedidoInteligencia) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/inteligencia`, pedido),
+    inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
-    enviar: (conversaId: string, texto: string, anexos: readonly string[] = []) => post<RespostaMutacao>(`conversas/${conversaId}/mensagens`, anexos.length ? { texto, anexos } : { texto }),
+    /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
+    enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string) =>
+      pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio), idEnvio),
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
@@ -147,13 +213,29 @@ export function criarApi(escopo: Escopo) {
     relatar: (entrada: EntradaRelato) => post<RespostaMutacao>("relatos", entrada),
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
-    gravarPreferencias: (p: Preferencias) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
+    gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">>) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
+    fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     // O "/" do chat (0038): o catálogo do Mac e os comandos da conversa; a nova sessão é do nod.
     comandos: () => get<ComandosDto>("comandos"),
     novaSessao: (conversaId: string) => post<RespostaMutacao>(`conversas/${encodeURIComponent(conversaId)}/nova-sessao`),
     relatos: () => get<{ relatos: Relato[] }>("relatos"),
+    // ADR-083 §8 (definido em 2026-10-07): os trabalhos (tasks) dos bots, a tela da task e o que se faz nela.
+    trabalhos: (agenteId?: string) => get<TrabalhosDto>(agenteId ? `trabalhos?agenteId=${encodeURIComponent(agenteId)}` : "trabalhos"),
+    trabalho: (id: string) => get<TrabalhoDetalheDto>(`trabalhos/${encodeURIComponent(id)}`),
+    // ADR-099 §7 (definido em 2026-10-12): quanto cada bot gastou hoje, no fuso da pessoa (o servidor não o guarda).
+    custoHoje: (fuso: string) => get<CustoDoDiaDto>(`custo-hoje?fuso=${encodeURIComponent(fuso)}`),
+    escreverNoTrabalho: (id: string, texto: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/mensagens`, { texto }),
+    pararTrabalho: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/parar`),
+    trabalhoDepois: (id: string, depoisDe: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/depois`, { depoisDe }),
+    trabalhoFazerAqui: (id: string) => post<RespostaMutacao>(`trabalhos/${encodeURIComponent(id)}/fazer-aqui`),
+    // #191: o que a tela mostrou e o que a pessoa abriu, em lote; a taxa por tipo aparece no Modo dev.
+    // Revisão W12 (2026-10-08): o último lote sai no `pagehide`; com keepalive o POST termina depois de a aba fechar.
+    telemetriaLinhas: (eventos: readonly EventoLinha[]) => pedir<RespostaMutacao>("POST", `${base}/telemetria/linhas`, { eventos }, { keepalive: true, silencioso: true }),
+    taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
     // ADR-059: o chip de aprovações do campo; o servidor escreve a troca na conversa do bot.
@@ -187,7 +269,7 @@ export function criarApi(escopo: Escopo) {
     conectarApp: (slug: string) => post<{ url?: string; conectorId?: string; conectado?: boolean; frase?: string }>(`marketplace/${encodeURIComponent(slug)}/conectar`),
     appGithub: (p: { appId: string; instalacaoId: string; chavePrivada: string }) => post<{ configurado: boolean }>("marketplace/github/app", p),
     tokenGithub: (token: string) => post<{ conectado: boolean; conectorId: string }>("marketplace/github/token", { token }),
-    verificarApp: (slug: string) => post<{ conectado: boolean; falhou?: boolean }>(`marketplace/${encodeURIComponent(slug)}/verificar`),
+    verificarApp: (slug: string) => post<{ conectado: boolean; falhou?: boolean; causa?: "composio" | "app" | null }>(`marketplace/${encodeURIComponent(slug)}/verificar`),
     atualizarCredenciais: (id: string, env: Record<string, string>) => patch<{ conector: Conector }>(`conectores/${id}/credenciais`, { env }),
     registrarConector: (c: Record<string, unknown>) => post<{ ok: true; ids: { conector: string }; conector: Conector }>("conectores", c),
     sondarConector: (id: string) => post<{ ok: boolean; conector: Conector }>(`conectores/${id}/sondar`),
@@ -208,6 +290,8 @@ export function criarApi(escopo: Escopo) {
     // Modo ligação (definido em 2026-10-04, ADR-071/075): disponibilidade é 200 com o motivo, nunca erro.
     disponibilidadeLigacao: (agenteId: string) => get<DisponibilidadeLigacao>(`ligacoes/disponibilidade?agenteId=${encodeURIComponent(agenteId)}`),
     consentirVoz: (versao: number) => post<RespostaMutacao>("voz/consentimento", { versao }),
+    // ADR-095: o microfone do campo de mensagem aparece? 200 com o motivo, nunca erro.
+    disponibilidadeDitado: () => get<DisponibilidadeDitado>("voz/ditado/disponibilidade"),
     criarLigacao: (agenteId: string) => post<LigacaoCriada>("ligacoes", { agenteId }),
     ligacaoViva: () => get<{ ligacao: Ligacao | null }>("ligacoes/viva"),
     encerrarLigacao: (id: string) => post<RespostaMutacao>(`ligacoes/${encodeURIComponent(id)}/encerrar`),
@@ -226,7 +310,7 @@ export function criarApi(escopo: Escopo) {
     rotinaDoOnboarding: (indice: number) => post<EstadoOnboarding>("onboarding/rotina", { indice }),
     /** A decisão 'bot' do onboarding decidida pelo clique: o nome e a descrição podem ter sido editados no card. */
     decidirBot: (id: string, corpo: { nome?: string; descricao?: string; recusar?: boolean }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
-    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
+    decidir: (id: string, corpo: { itens?: { id: string; selecionado: boolean; textoFinal?: string }[]; recusar?: boolean; sempre?: boolean; restoDaTarefa?: boolean; capacidades?: string[]; selecionados?: number[] }) => post<RespostaMutacao>(`decisoes/${id}/decidir`, corpo),
     responder: (id: string, texto: string) => post<RespostaMutacao>(`decisoes/${id}/responder`, { texto }),
     retomar: (id: string, texto?: string) => post<RespostaMutacao>(`decisoes/${id}/retomar`, texto ? { texto } : {}),
     reabrir: (id: string) => post<RespostaMutacao>(`decisoes/${id}/reabrir`),
@@ -236,6 +320,33 @@ export function criarApi(escopo: Escopo) {
     chaves: () => get<{ chaves: ChaveMaquinaDto[] }>("maquinas/chaves"),
     emitirChave: (nome: string) => post<ChaveEmitidaDto>("maquinas/chaves", { nome }),
     revogarChave: (id: string) => del<{ ok: true }>(`maquinas/chaves/${id}`),
+    // ADR-090: as máquinas, onde cada bot trabalha, o pareamento por código e o "rodar em outra desta vez".
+    maquinas: () => get<MaquinasDto>("maquinas"),
+    maquinaDoBot: (agenteId: string, maquinaId: string | null) => pedir<{ agente: Agente }>("PUT", `${base}/agentes/${encodeURIComponent(agenteId)}/maquina`, { maquinaId }),
+    moverBots: (maquinaId: string, agentes: string[]) => pedir<{ movidos: number }>("PUT", `${base}/maquinas/${encodeURIComponent(maquinaId)}/bots`, { agentes }),
+    maquinaPadrao: (maquinaId: string | null) => pedir<{ padraoId: string | null }>("PUT", `${base}/maquinas/padrao`, { maquinaId }),
+    verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string; pedidoHaS: number }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
+    aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
+    rodarDestaVez: (conversaId: string, maquinaId: string) => post<{ turnos: number }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId }),
+    // ADR-102: as contas de IA da pessoa em todas as máquinas, o login numa máquina pela tela e o convite da VM.
+    contasIa: () => get<ContasIaDto>("contas-ia"),
+    ordemContas: (ids: string[]) => pedir<null>("PUT", `${base}/contas-ia/ordem`, { ids }),
+    modoContas: (modo: ModoDasContas) => pedir<null>("PUT", `${base}/contas-ia/modo`, { modo }),
+    mudarConta: (id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }) => patch<null>(`contas-ia/${encodeURIComponent(id)}`, corpo),
+    sairDaConta: (id: string, maquinaId: string) => post<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}/sair`, { maquinaId }),
+    removerConta: (id: string) => del<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}`),
+    seguirComConta: (id: string, conversaId: string) => post<unknown>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId }),
+    // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot.
+    /** Revisão do PR 2 (I2): `trocaId` diz qual aviso (o bot pode ter um por IA). */
+    decidirTrocaDeIa: (agenteId: string, decisao: DecisaoDaPessoa, trocaId?: string) => post<{ decisao: string; aplicada: boolean; tasks: number }>(`agentes/${encodeURIComponent(agenteId)}/troca-de-ia`, { decisao, ...(trocaId ? { trocaId } : {}) }),
+    pedirLogin: (maquinaId: string, p: { ia: IaComConta; contaId?: string; apelido?: string | null }) => post<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins`, p),
+    verLogin: (maquinaId: string, loginId: string) => get<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}`),
+    colarCodigoLogin: (maquinaId: string, loginId: string, cifrado: CodigoCifrado) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/codigo`, { cifrado }),
+    cancelarLogin: (maquinaId: string, loginId: string) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/cancelar`),
+    renomearMaquina: (id: string, nome: string) => patch<{ id: string; nome: string }>(`maquinas/${encodeURIComponent(id)}`, { nome }),
+    desconectarMaquina: (id: string, sairDasContas: boolean) => post<{ ok: true; contas: number; aguardandoMaquina: boolean }>(`maquinas/${encodeURIComponent(id)}/desconectar`, { sairDasContas }),
+    criarConvite: () => post<{ convite: string; expiraEm: number }>("maquinas/convites"),
+    verConvite: (convite: string) => get<{ estado: "pendente" } | { estado: "chegou"; codigo: string; pedido: { nome: string; plataforma: string; pedidoHaS: number } }>(`maquinas/convites/${encodeURIComponent(convite)}`),
     /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */
     parearMac: (nome: string, desafio: string) => post<{ codigo: string }>("maquinas/pareamentos", { nome, desafio }),
     // ADR-051 (definido em 2026-09-28): o card do artefato busca o HTML da SUA versão e o estado da pessoa.
@@ -254,8 +365,8 @@ export function criarApi(escopo: Escopo) {
  * só existe no login de desenvolvimento (NOD_LOGIN=stub, 127.0.0.1).
  */
 export const sessao = {
-  atual: () => pedir<Escopo>("GET", "/api/sessao"),
-  modo: () => pedir<ModoSessaoDto>("GET", "/api/sessao/modo"),
+  atual: () => pedirDeNovoSeCair<Escopo>("GET", "/api/sessao"),
+  modo: () => pedirDeNovoSeCair<ModoSessaoDto>("GET", "/api/sessao/modo"),
   entrar: (pessoaId: string) => pedir<Escopo>("POST", "/api/sessao/entrar", { pessoaId }),
   urlGoogle: "/api/sessao/google",
 };

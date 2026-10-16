@@ -1,4 +1,4 @@
-import type { Executor } from "../contracts/evento.ts";
+import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { DisponibilidadeLigacao, FalaLigacao, Ligacao, MotivoRecusaLigacao, PayloadLinhaLigacao } from "../contracts/ligacao.ts";
 import { VERSAO_CONSENTIMENTO_VOZ } from "../contracts/ligacao.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -11,6 +11,7 @@ import { FECHO_LEITURA, redigirLeituraDeAprovacao, type PedidoDeLeitura } from "
 import { rotuloFerramenta } from "../domain/rotulo-ferramenta.ts";
 import type { MetricasLigacao, NovaFala } from "../repositories/ligacoes.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { encerrarCerebroSemLigacao } from "./despachar-turno.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -31,6 +32,11 @@ export type ContextoLigacao = {
   iaPronta: boolean;
   /** O harness do bot é o Codex (o laço de voz do Codex é o app-server). */
   codexSemVoz: boolean;
+  /**
+   * NOD-167: a IA do bot está pronta no Mac, mas ele anunciou que ela não roda o laço de voz (o Codex sem
+   * `app-server`). Ausente = false (o app antigo não anuncia; o turno ainda falha com `executor_indisponivel`).
+   */
+  iaSemLacoDeVoz?: boolean;
   drenando: boolean;
   vozDisponivel: boolean;
   vivasNoServidor: number;
@@ -41,6 +47,8 @@ export type ContextoLigacao = {
   inicioDoDia: number;
   provedorStt: string;
   provedorTts: string;
+  /** NOD_VOZ_LEITURA=1 (NOD-180): ouvir as respostas fora da ligação. Ausente = desligada. */
+  leituraHabilitada?: boolean;
 };
 
 const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
@@ -50,6 +58,7 @@ const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
   sem_ia: "A IA deste bot não está pronta no seu Mac. Abra o Claude Code (ou o Codex) e entre na sua conta.",
   app_antigo: "Atualize o app do nod no seu Mac para ligar.",
   codex_em_breve: "A ligação com bots que usam o ChatGPT (Codex) está desligada neste servidor. Por enquanto, converse por texto.",
+  codex_sem_app_server: "Atualize o Codex para ligar: a versão instalada no seu Mac não atende ligação. Por enquanto, converse por texto.",
   ja_em_ligacao: "Você já está numa ligação. Desligue antes de começar outra.",
   bot_ocupado_em_ligacao: "Este bot já está numa ligação.",
   sala: "Ligação é só com um bot por vez, na conversa dele.",
@@ -63,6 +72,34 @@ const TEXTOS_RECUSA: Record<MotivoRecusaLigacao, string> = {
 
 export function textoDaRecusa(m: MotivoRecusaLigacao): string {
   return TEXTOS_RECUSA[m];
+}
+
+/**
+ * NOD-168: a linha que fica na conversa quando a ligação acaba por um motivo que a pessoa não escolheu (o mapa total
+ * da web, `textoFim`). null = fim esperado (desligou, tempo, não atendeu, seguiu sem voz): a linha "Chat de voz" já
+ * diz tudo.
+ */
+const TEXTOS_FIM: Record<MotivoFimLigacao, string | null> = {
+  pessoa_desligou: null,
+  bot_desligou: null,
+  tempo_maximo: null,
+  limite_diario: "Você chegou ao limite de ligações de hoje.",
+  cerebro_caiu: "A ligação caiu: o seu Mac parou de responder.",
+  midia_caiu: "A ligação caiu: a conexão deste computador falhou.",
+  reinicio_servidor: "A ligação caiu porque o nod foi atualizado. Ligue de novo.",
+  drenagem: "A ligação caiu porque o nod foi atualizado. Ligue de novo.",
+  nao_atendida: null,
+  // A pessoa escolheu seguir sem voz (onboarding): a linha diria que "foi recusada", como se o bot tivesse recusado.
+  recusada: null,
+  voz_indisponivel: "A voz está fora do ar agora. Tente de novo em alguns minutos.",
+  ociosidade: "A ligação foi encerrada por falta de conversa.",
+  limite_da_assinatura: "Sua assinatura de IA chegou ao limite. A ligação foi encerrada.",
+  erro: "A ligação caiu por um erro.",
+  sem_ia: "A ligação foi encerrada: a IA deste Mac parou de responder e nenhuma saída foi escolhida em 2 minutos.",
+};
+
+export function textoDoFim(m: MotivoFimLigacao): string | null {
+  return TEXTOS_FIM[m];
 }
 
 /** A voz do bot: a escolhida, ou uma do catálogo derivada do id (estável entre ligações). */
@@ -100,14 +137,26 @@ async function motivoDeRecusa(deps: Deps, agenteId: string, c: ContextoLigacao):
   if (c.codexSemVoz) return { motivo: "codex_em_breve" };
   if (!c.maquinaComLigacao) return { motivo: "sem_mac" };
   if (!c.iaPronta) return { motivo: "sem_ia" };
+  if (c.iaSemLacoDeVoz) return { motivo: "codex_sem_app_server" };
   return { conversaId: conversa.id, agente };
+}
+
+/**
+ * Ouvir as respostas (NOD-180): a leitura ligada, a voz aberta para a pessoa e no ar, e um bot próprio. Não depende do
+ * Mac, da IA, da drenagem nem do consentimento (a tela pede o aviso antes do primeiro "ouvir").
+ */
+async function podeOuvir(deps: Deps, agenteId: string, c: ContextoLigacao): Promise<boolean> {
+  if (!c.leituraHabilitada || !c.habilitada || !c.permitido || !c.vozDisponivel) return false;
+  const agente = await deps.repos.agentes.buscar(agenteId);
+  return !!agente && agente.excluidoEm == null && agente.dono !== "empresa";
 }
 
 export const disponibilidadeLigacao: CasoDeUso<{ agenteId: string; contexto: ContextoLigacao }, DisponibilidadeLigacao> = async (deps, input) => {
   const r = await motivoDeRecusa(deps, input.agenteId, input.contexto);
-  if ("motivo" in r) return { data: { disponivel: false, motivo: r.motivo, texto: textoDaRecusa(r.motivo) } };
+  const ouvir = await podeOuvir(deps, input.agenteId, input.contexto);
+  if ("motivo" in r) return { data: { disponivel: false, motivo: r.motivo, texto: textoDaRecusa(r.motivo), ouvir } };
   const { versao } = await deps.repos.ligacoes.consentimento();
-  return { data: { disponivel: true, consentimentoNecessario: (versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ, versaoConsentimento: VERSAO_CONSENTIMENTO_VOZ, provedor: input.contexto.provedorTts } };
+  return { data: { disponivel: true, consentimentoNecessario: (versao ?? 0) < VERSAO_CONSENTIMENTO_VOZ, versaoConsentimento: VERSAO_CONSENTIMENTO_VOZ, provedor: input.contexto.provedorTts, ouvir } };
 };
 
 export type SaidaLigar = { ligacao: Ligacao; turno: Turno; voz: string; velocidade: number; nomeBot: string; genero: "feminina" | "masculina" };
@@ -215,15 +264,30 @@ export const atenderLigacao: CasoDeUso<{ ligacaoId: string }, Ligacao | null> = 
 };
 
 /**
- * Fecha a ligação uma vez (Desligar, queda, limite, drenagem). Atualiza a linha "Chat de voz" com a duração. O turno-
- * cérebro termina sozinho quando o laço recebe `fim` (ou o lease vence); quem fecha o canal é o orquestrador.
+ * Fecha a ligação uma vez (Desligar, queda, limite, drenagem). Atualiza a linha "Chat de voz" com a duração e, quando o
+ * fim não foi escolha da pessoa, deixa na conversa uma linha de sistema dizendo por quê (NOD-168): quem estava só na
+ * pílula, ou volta depois, não fica sem saber. O turno-cérebro termina sozinho quando o laço recebe `fim` (ou o lease
+ * vence); quem fecha o canal é o orquestrador.
  */
 export const encerrarLigacao: CasoDeUso<{ ligacaoId: string; motivo: MotivoFimLigacao; metricas?: MetricasLigacao }, Ligacao | null> = async (deps, input) => {
   const agora = deps.agora();
   const l = await deps.repos.ligacoes.encerrar(input.ligacaoId, { motivo: input.motivo, agora, metricas: input.metricas });
   if (!l) return { data: await deps.repos.ligacoes.buscar(input.ligacaoId) };
   if (l.mensagemId) await deps.repos.ligacoes.atualizarLinha(l.mensagemId, { kind: "ligacao", ligacaoId: l.id, duracaoMs: l.duracaoMs, estado: l.estado }, textoDaLinha(l.estado, l.duracaoMs));
-  return { data: l, events: [evento(deps.escopo, { kind: "ligacao_mudou", autoria: autoriaPessoa(deps.escopo), agora, conversaId: l.conversaId, dados: { ligacao_id: l.id, estado: l.estado, motivo: l.motivoFim } })] };
+  const autoria = autoriaPessoa(deps.escopo);
+  const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId: l.conversaId, dados: { ligacao_id: l.id, estado: l.estado, motivo: l.motivoFim } })];
+  // Só quem encerrou de fato chega aqui (o repo devolve a linha uma vez): a 2ª chamada não duplica o aviso.
+  const texto = l.motivoFim ? textoDoFim(l.motivoFim) : null;
+  const aviso = texto ? await deps.repos.mensagens.criar({ conversaId: l.conversaId, autoria, kind: "sistema", texto, confianca: "confiavel" }) : null;
+  if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: l.conversaId, dados: { mensagem_id: aviso.id, kind: "sistema", ligacao_id: l.id } }));
+  // Auditoria A3 (definido em 2026-10-15): o turno-cérebro que nenhuma máquina pegou não roda mais — sai na mesma tx que
+  // fecha a ligação. Pendente, ele envenenava a fila da máquina com voz (despacharTurno também o assenta, para o que já
+  // tinha ficado preso). O que já roda termina pelo `fim` do laço de voz, como antes.
+  for (const t of await deps.repos.turnos.pendentesDaPessoa(l.conversaId)) {
+    if (t.origem !== "ligacao" || t.ligacaoId !== l.id) continue;
+    events.push(...(await encerrarCerebroSemLigacao(deps, t, t.executor, agora)).events);
+  }
+  return { data: l, events };
 };
 
 export const gravarFalaLigacao: CasoDeUso<NovaFala, boolean> = async (deps, input) => {

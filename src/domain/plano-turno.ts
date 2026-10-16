@@ -1,10 +1,12 @@
 import type { AnexoMeta } from "../contracts/anexo.ts";
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { traduzirParaOCli } from "./comandos.ts";
-import type { Agente } from "../contracts/agente.ts";
+import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { Conector } from "../contracts/conector.ts";
 import type { Autoria, Executor } from "../contracts/evento.ts";
 import { FERRAMENTAS_NOD, type NomeFerramentaNod } from "../contracts/ferramentas-nod.ts";
+import type { IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { Memoria } from "../contracts/memoria.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
@@ -19,7 +21,15 @@ import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
 import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
-import { montarPromptSistema, type RotinaNoPrompt } from "./prompt-sistema.ts";
+import { FERRAMENTAS_PENDENCIA } from "./pendencia.ts";
+import { podeAbrirTask, podeMandarParaTask } from "./trabalho.ts";
+import { ehFrente, FERRAMENTA_DA_FRENTE, FERRAMENTAS_FORA_DA_FRENTE } from "./frente.ts";
+import type { OrigemTrabalho } from "../contracts/trabalho.ts";
+import type { FormaTrabalho } from "../contracts/frente.ts";
+import { MANUAL_DO_NOD } from "./manual-do-nod.ts";
+import { ehNod } from "./nod.ts";
+import { FERRAMENTA_RESPONDER_PEDIDO, temPedidosNoTurno, type PedidoPendenteNoPrompt } from "./pedidos-pendentes.ts";
+import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
@@ -71,14 +81,30 @@ import { FERRAMENTAS_WORKSPACE } from "../contracts/ferramentas-workspace.ts";
  * criação, conversa, sala, rotina e delegação —, inclusive no limite da corrente de colegas, que é justamente
  * quando algo fica para depois. concluir/descartar_pendencia entram onde a lista aparece: conversa, criação e
  * rotina (emitir-plano-turno.ts só a manda em profundidade 0).
+ *
+ * me_chame_as (definido em 2026-10-08, ADR-086): esperar algo de fora fora do Mac — em todo modo em que o bot trabalha
+ * com tempo (criação, conversa, rotina e delegação). A sala (várias pessoas) e a ligação (ao vivo) não esperam assim.
+ *
+ * Tasks (definido em 2026-10-07, ADR-083 §7): abrir_task e mandar_para_task são da conversa coordenadora; a rotina abre
+ * tasks (profundidade 1). Quem decide no turno é `podeAbrirTask`/`podeMandarParaTask` pelo trabalho dele: o turno de uma
+ * task da pessoa, de colega, da rede ou filha de rotina não abre nem repassa (montarPlano filtra).
+ *
+ * Frentes (definido em 2026-10-12, ADR-099, I2): abrir_frentes e mandar_para_frente entram no lugar de abrir_task e
+ * mandar_para_task (que seguem atendidos como sinônimos, fora do catálogo). O turno de uma frente perde me_chame_as e
+ * esperar_comando (ela devolve o fato e termina; quem espera é o dono) e ganha devolver_resumo (montarPlano).
+ *
+ * Triagem (definido em 2026-10-12, ADR-099 item 1a, I7 revista): o pedido de colega e o de rotina entram como um turno do
+ * dono fora de trabalho; ali ele abre frentes (abrir_frentes) ou junta o pedido a uma frente aberta (mandar_para_frente).
+ * Por isso a delegação e a rotina têm as duas; `podeAbrirTask`/`podeMandarParaTask` as tiram do turno que já é trabalho
+ * (a task de colega de antes, a filha de rotina, a frente), e a execução de rotina com mãe só abre, como antes.
  */
 export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramentaNod[]> = {
-  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
-  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
+  criacao: ["atualizar_perfil", "lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
+  conversa: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
   sala: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "pedir_a_pessoa", "passar", "encaminhar", "anotar_pendencia"],
-  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia"],
+  rotina: ["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
   peer: ["lembrar"],
-  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia"],
+  delegacao: ["lembrar", "pedir_acesso", "pedir_aprovacao", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "publicar_artefato", "ler_artefato", "anotar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"],
   // definido em 2026-10-04 (ADR-072): a ligação fala com a pessoa ao vivo. O kit da conversa sem pedir_a_pessoa (a
   // pergunta é a própria fala) e sem artefatos (não há tela para lê-los); trabalho demorado vai por iniciar_tarefa.
   ligacao: ["lembrar", "pedir_aprovacao", "pedir_acesso", "criar_rotina", "listar_rotinas", "pausar_rotina", "reativar_rotina", "atualizar_rotina", "excluir_rotina", "ver_colegas", "pedir_a_bot", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "iniciar_tarefa", "desligar"],
@@ -95,6 +121,21 @@ export const FERRAMENTAS_NOD_POR_MODO: Record<ModoTurno, readonly NomeFerramenta
  * quando o plano é da ligação que o produto iniciou com o onboarding da pessoa em curso (`EntradaPlano.onboarding`).
  */
 export const FERRAMENTAS_NOD_ONBOARDING: readonly NomeFerramentaNod[] = ["anotar_entrevista", "concluir_entrevista", "propor_bot"];
+
+/**
+ * definido em 2026-10-07 (ADR-081/082): as ferramentas que só o Nod tem. Somam-se ao catálogo quando o bot do turno é o
+ * Nod E quem fala é a pessoa (conversa, criação) — a cerca 2: nem rotina, nem sala, nem ligação, nem pedido de colega.
+ * O caso de uso confere de novo (turnoDoNodComAPessoa).
+ */
+export const FERRAMENTAS_DO_NOD: readonly NomeFerramentaNod[] = ["gerir_bots", "ver_apps_conectados", "registrar_relato"];
+const MODOS_DAS_MAOS_DO_NOD: readonly ModoTurno[] = ["conversa", "criacao"];
+
+/**
+ * definido em 2026-10-13 (NOD-210, ADR-104): criar_bots é dos bots comuns, nos mesmos modos em que a pessoa fala com o
+ * bot (conversa, criação). O Nod fica com gerir_bots, que já cria; rotina, sala, ligação e pedido de colega não criam
+ * bots. O caso de uso confere de novo (criar-bots.ts).
+ */
+export const FERRAMENTA_CRIAR_BOTS: NomeFerramentaNod = "criar_bots";
 
 export const PLANO_SEM_VALIDADE = Number.MAX_SAFE_INTEGER;
 
@@ -152,6 +193,8 @@ export type EntradaPlano = {
   /** ADR-046: metadados dos anexos da mensagem do turno, lidos pelo caso de uso. */
   anexos?: readonly AnexoMeta[];
   pessoaNome: string;
+  /** ADR-090: a máquina que roda o turno (nome e plataforma, do anúncio); ausente = o texto do Mac de sempre. */
+  maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   colegas?: readonly Pick<Agente, "id" | "nome" | "titulo" | "descricao">[];
   contextoConversa?: string;
   /** Inventário para o modelo escolher SOBRE QUAL rotina agir; não confundir com `rotina` acima. */
@@ -165,12 +208,42 @@ export type EntradaPlano = {
    * ou uma rotina chamou o bot (profundidade 0). Ausente ou vazia = a linha não entra.
    */
   pendencias?: readonly Pendencia[];
+  /** O "A fazer" ligado (NOD_PENDENCIAS=1). Ausente = desligado: as ferramentas de pendência saem do catálogo. */
+  aFazer?: boolean;
   /** A conversa tem projeto autorizado (ADR-039): só então as nativas de arquivo podem entrar (`nativasDoTurno`). */
   pastasAutorizadas?: boolean;
-  /** O harness do turno é o Claude Code real, com o hook do nod (ADR-052): libera o kit do terminal. */
+  /** O harness do turno tem o hook do nod (ADR-052; o Codex desde a ADR-103): libera o kit do terminal. */
   terminal?: boolean;
+  /** A IA que roda o turno; ausente ou null = Claude Code (catcher, legado). Decide a tradução dos comandos da conversa. */
+  harness?: IdHarness | null;
+  /**
+   * definido em 2026-10-10 (emenda da ADR-036): o raciocínio resolvido para a IA do turno (resolverHarness: a escolha do
+   * bot ou o médio). Ausente (catcher, sem IA escolhida) = o `esforco` do agente, como antes.
+   */
+  raciocinio?: EsforcoAgente;
   /** ADR-077: ligação de onboarding (iniciada pelo produto, onboarding em curso): entram as ferramentas do onboarding. */
   onboarding?: boolean;
+  /**
+   * definido em 2026-10-07 (ADR-083): a pasta do trabalho relativa a `~/nod` (`<bot>/<slug>`). Com o terminal, ela vira a
+   * `pastaDoBot` do plano: o driver a cria e a usa como diretório, e a cerca do git vale para ela. Ausente = a do bot.
+   */
+  pastaTrabalho?: string | null;
+  /**
+   * ADR-083: o trabalho deste turno (null = turno da conversa). Decide abrir_frentes/mandar_para_frente e a linha da task.
+   * ADR-099 (I2): `forma` = `frente` muda o catálogo (devolver_resumo; sem me_chame_as nem esperar_comando) e o prompt.
+   */
+  trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null; forma?: FormaTrabalho } | null;
+  /** ADR-083: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
+  trabalhosAbertos?: readonly TrabalhoNoPrompt[];
+  /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
+  semFerramentasDoNod?: boolean;
+  /** ADR-104 (revisão do PR #309): NOD_CRIAR_BOTS=0 tira criar_bots do catálogo dos bots comuns, o mesmo interruptor. */
+  semCriarBots?: boolean;
+  /**
+   * definido em 2026-10-15 (NOD-262): os pedidos de colegas na fila do bot (delegações pendentes), os mais antigos
+   * primeiro. Na conversa e na sala, com ao menos um, entram a linha do prompt e responder_pedido; ausente ou vazio = nada.
+   */
+  pedidosPendentes?: readonly PedidoPendenteNoPrompt[];
   agora: number;
 };
 
@@ -180,6 +253,7 @@ export type EntradaPlano = {
  * quando a localidade recusa (inventário não 'pronto'). tokenDeTurno e machineId são do servidor.
  */
 export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTurno" | "machineId"> {
+  const esforco = entrada.raciocinio ?? entrada.agente.esforco ?? undefined;
   const tocaDadoPessoal = entrada.conectores.some((c) => c.habilitado && conectorTocaDadoPessoal(c));
   const localidade = resolverLocalidade({ origem: entrada.turno.origem, tocaDadoPessoal, motorExigido: entrada.turno.modelo, inventario: entrada.inventario });
   if ("recusado" in localidade) throw new ErroDeDominio("executor_indisponivel", { cause: localidade.motivo });
@@ -188,7 +262,23 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   // salto (montarFerramentas tira pedir_a_bot e encaminhar), e o modo vem de modoDoTurno: quem cumpre o pedido é
   // 'delegacao', e a continuação de quem pediu é a retomada do turno dele (conversa, sala, rotina ou delegação).
   const modo: ModoTurno = entrada.modo;
-  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : [])].map(ferramentaNod);
+  const doNod = ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semFerramentasDoNod ? FERRAMENTAS_DO_NOD : [];
+  const criaBots: readonly NomeFerramentaNod[] = !ehNod(entrada.agente) && MODOS_DAS_MAOS_DO_NOD.includes(modo) && !entrada.semCriarBots ? [FERRAMENTA_CRIAR_BOTS] : [];
+  // NOD-262: responder_pedido só na conversa e na sala, e só com pedido de colega na fila (o caso de uso confere de novo).
+  const comPedidos = temPedidosNoTurno(modo, entrada.pedidosPendentes);
+  const respondePedido: readonly NomeFerramentaNod[] = comPedidos ? [FERRAMENTA_RESPONDER_PEDIDO] : [];
+  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true, harness: entrada.harness ?? null });
+  // definido em 2026-10-12 (ADR-099, parte 2): esperar_comando entra onde o bot espera com tempo (os modos do me_chame_as)
+  // E tem terminal — o comando roda pelas regras do Bash dele, na máquina e na pasta do turno. Sem terminal (Codex, sala,
+  // ligação), não há onde rodar: fica o me_chame_as.
+  const esperaComando: readonly NomeFerramentaNod[] = nativas.includes("Bash") && FERRAMENTAS_NOD_POR_MODO[modo].includes("me_chame_as") ? ["esperar_comando"] : [];
+  const frente = ehFrente(entrada.trabalho);
+  const nod = [...FERRAMENTAS_NOD_POR_MODO[modo], ...esperaComando, ...(modo === "ligacao" && entrada.onboarding ? FERRAMENTAS_NOD_ONBOARDING : []), ...doNod, ...criaBots, ...respondePedido]
+    .filter((n) => entrada.aFazer === true || !FERRAMENTAS_PENDENCIA.includes(n))
+    .filter((n) => (n !== "abrir_frentes" || podeAbrirTask(entrada.trabalho ?? null)) && (n !== "mandar_para_frente" || podeMandarParaTask(entrada.trabalho ?? null)))
+    .filter((n) => !frente || !FERRAMENTAS_FORA_DA_FRENTE.includes(n))
+    .concat(frente ? [FERRAMENTA_DA_FRENTE] : [])
+    .map(ferramentaNod);
   const { ferramentas: deConectores, servidores } = ferramentasDeConectores(entrada.conectores, entrada.concessoes, entrada.agente.id);
   // definido em 2026-09-24 (ADR-047): delegação sem computador na v1 — o alcance é o dos conectores concedidos.
   // revisto em 2026-09-28 (ADR-050): a criação também tem computador — bot novo é bot completo.
@@ -234,8 +324,7 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
   };
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
-  const nativas = nativasDoTurno({ modo, confianca: entrada.confianca, pastasAutorizadas: entrada.pastasAutorizadas === true, terminal: entrada.terminal === true });
-  const pasta = nativas.includes("Bash") ? pastaDoBot(entrada.agente.nome) : undefined;
+  const pasta = nativas.includes("Bash") ? (entrada.pastaTrabalho ?? pastaDoBot(entrada.agente.nome)) : undefined;
   return {
     tenantId: entrada.turno.tenantId,
     turnoId: entrada.turno.id,
@@ -251,8 +340,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    promptSistema: montarPromptSistema({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.pendencias, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }) }),
-    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(entrada.agente.esforco ? { esforco: entrada.agente.esforco } : {}) },
+    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, pendencias: entrada.aFazer === true ? entrada.pendencias : [], semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}) }),
+    entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
     politicaExecucao: {
       prazoMs,
       orcamentoResultadoChars: ORCAMENTO_RESULTADO_CHARS,
@@ -269,6 +358,16 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     semprePermitir: entrada.confianca === "nao_confiavel" ? [] : semprePermitirNoCatalogo(entrada.semprePermitir ?? [], ferramentas),
     expiraEm: PLANO_SEM_VALIDADE,
   };
+}
+
+/**
+ * definido em 2026-10-06 (NOD-183, ADR-080): o prompt de texto vai inteiro em `promptSistema` (Codex, Raio-X) e em
+ * duas partes em `promptSistemaPartes`, que o driver do claude-cli separa com o marcador de cache. Juntadas com "\n",
+ * as partes dão o `promptSistema` (a volátil pode vir vazia: aí ele é só a estável).
+ */
+export function promptEmPartes(entrada: EntradaPromptSistema): Pick<PlanoTurno, "promptSistema" | "promptSistemaPartes"> {
+  const p = partesDoPromptSistema(entrada);
+  return { promptSistema: [...p.estavel, ...p.volatil].join("\n"), promptSistemaPartes: { estavel: p.estavel.join("\n"), volatil: p.volatil.join("\n") } };
 }
 
 /**

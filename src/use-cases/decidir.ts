@@ -6,6 +6,7 @@ import type { DesfechoItem } from "../contracts/motivos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { exigirForaDaTx } from "../db/tx.ts";
 import { redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
@@ -13,6 +14,7 @@ import { fecharGemeas } from "./fechar-gemeas.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 export type MarcacaoItem = { id: string; selecionado: boolean; textoFinal?: string };
 
@@ -116,6 +118,9 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
  * erro ou isError do conector = falhou_na_execucao (E4.5: nunca "enviado" quando falhou).
  */
 export async function executarItens(services: Pick<Services, "conectores" | "computadores" | "github">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
+  // NOD-263: o gh do Mac e o computador do bot também são efeito de fora — a guarda vale para o lote inteiro. Item de
+  // terminal só libera o hook (nada sai daqui) e desmarcado não roda: sozinhos, não acusam.
+  if (aExecutar.some((a) => a.item.selecionado && !a.terminal)) exigirForaDaTx({ itens: aExecutar.length, decisao_id: aExecutar[0]?.item.decisaoId });
   const desfechos: DesfechoExecutado[] = [];
   for (const { item, conectorId, computador, dono, rotina, terminal } of aExecutar) {
     if (!item.selecionado) {
@@ -156,24 +161,33 @@ export async function executarItens(services: Pick<Services, "conectores" | "com
   return desfechos;
 }
 
+/**
+ * NOD-285 (K2): a retomada leva os anexos da fala de origem (enfileirar-retomada), então "nada foi reenviado" seria falso
+ * quando há arquivo — e, sem sessão, fazia o modelo achar que já tinha visto o anexo. Sem anexo, o texto de antes.
+ */
+export function fraseDoReenvio(comAnexos: boolean): string {
+  return comAnexos ? "os arquivos da fala de origem seguem anexados" : "nada foi reenviado";
+}
+
 /** A entrada da retomada que continua uma aprovação: o desfecho por item, em texto fixo do servidor. */
-export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string): string {
+export function entradaDaAprovacao(decisao: Decisao, itens: readonly ItemAprovacao[], texto: string, comAnexos = false): string {
+  const reenvio = fraseDoReenvio(comAnexos);
   const linhas = itens.map((i) => `- item ${i.idx + 1} (${i.destino.conector}.${i.destino.ferramenta}): ${i.desfecho ?? "sem desfecho"} — ${i.textoFinal}`);
   const noComputador = itens.some((i) => i.destino.conector === "computador" && i.desfecho === "executado");
   // ADR-055: o comando aprovado depois de a espera no turno acabar ainda não rodou — o turno anterior foi negado.
   const noTerminal = itens.some((i) => i.destino.conector === "terminal" && i.desfecho === "executado");
   return [
     // definido em 2026-09-28: não é "turno interrompido" — o turno que pediu concluiu; esta é a continuação dele.
-    "Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; nada foi reenviado.",
+    `Continuando a tarefa: a pessoa decidiu a aprovação que você pediu; ${reenvio}.`,
     `Resultado da aprovação "${decisao.frase}" (${texto}):`,
     ...linhas,
     ...(noComputador ? ["O resultado da ação no computador não veio junto: observe a tela ou os arquivos antes de seguir."] : []),
     ...(noTerminal ? ["O comando aprovado ainda NÃO rodou: rode exatamente o mesmo comando agora — ele passa sem novo pedido."] : []),
-    "Continue a partir daqui; nada foi reenviado.",
+    `Continue a partir daqui; ${reenvio}.`,
   ].join("\n");
 }
 
-function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
+function turnoCriado(deps: DepsContinuacao, turnoId: string, decisao: Decisao, autoria: RuntimeEvent["autoria"], agora: number): RuntimeEvent {
   return { tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId, dados: { origem: "retomada", retoma_turno_id: decisao.turnoId, decisao_id: decisao.id } };
 }
 
@@ -182,19 +196,33 @@ function turnoCriado(deps: Deps, turnoId: string, decisao: Decisao, autoria: Run
  * decidida — a espera do proxy acabou um instante antes do clique, ou o turno caiu. Chamado pelo
  * assentamento do turno, sob a mesma trava da fase 2. Item ainda executando fica para a fase 2.
  */
-export async function continuarAprovacoesDoTurno(deps: Deps, turno: Turno): Promise<RuntimeEvent[]> {
+export async function continuarAprovacoesDoTurno(deps: DepsContinuacao, turno: Turno): Promise<RuntimeEvent[]> {
+  return (await continuarAprovacoes(deps, turno)).events;
+}
+
+/** O que a continuação de uma aprovação usa de Deps: o varredor de lease (laço de fundo) também a chama (NOD-261). */
+export type DepsContinuacao = Pick<Deps, "repos" | "escopo" | "agora">;
+
+/**
+ * definido em 2026-10-15 (NOD-261, E2): como continuarAprovacoesDoTurno, dizendo quantas aprovações ESTA chamada
+ * continuou (a retomada nova ou a juntada à que já estava na fila). O varredor usa a contagem para fechar o "Retomar" do
+ * mesmo turno: a continuação já o retoma, e duas retomadas refariam o efeito externo.
+ */
+export async function continuarAprovacoes(deps: DepsContinuacao, turno: Turno): Promise<{ events: RuntimeEvent[]; continuadas: number }> {
   const agora = deps.agora();
   const events: RuntimeEvent[] = [];
+  let continuadas = 0;
   for (const decisao of await deps.repos.decisoes.aContinuarDoTurno(turno.id)) {
     const itens = await deps.repos.itensAprovacao.listar(decisao.id);
     if (itens.some((i) => i.selecionado && i.desfecho === null)) continue;
     if ((await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) !== "minha") continue;
     const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
     const texto = redigirDesfechoAprovacao({ itens, aprovadorNome: pessoa?.nome ?? "A pessoa", agora });
-    const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+    const r = await enfileirarRetomada(deps, { original: turno, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto, turno.entradaAnexos.length > 0) });
+    if (r.turno) continuadas += 1;
     if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoriaDaPessoa(deps.escopo), agora));
   }
-  return events;
+  return { events, continuadas };
 }
 
 export type EntradaAssentarAprovacao = { decisaoId: string; desfechos: readonly DesfechoExecutado[] };
@@ -225,7 +253,9 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       confianca: "confiavel",
     });
     const aviso: RuntimeEvent[] = espera ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "mensagem_criada", autoria: autoriaEspera, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { mensagem_id: espera.id, kind: "sistema", decisao_id: decisao.id, aguardando_maquina: noMac.length } }] : [];
-    return { data: { mensagemId: espera?.id ?? null, turnoRetomadaId: null, itens }, events: aviso };
+    // Revisão do épico (S2): a decisão fechou; a task espera o Mac como qualquer turno sem nada vivo (o resultado volta
+    // como retomada, que a reabre).
+    return { data: { mensagemId: espera?.id ?? null, turnoRetomadaId: null, itens }, events: [...aviso, ...(await sincronizarDasDecisoes(deps, [decisao]))] };
   }
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
   const aprovadorNome = pessoa?.nome ?? "A pessoa";
@@ -250,7 +280,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
     const original = await deps.repos.turnos.buscarTravado(decisao.turnoId);
     const vivo = original?.estado === "despachando";
     if (original && !vivo && (await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) === "minha") {
-      const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto) });
+      const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto, original.entradaAnexos.length > 0) });
       turnoRetomadaId = r.turno?.id ?? null;
       if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoria, agora));
     }
@@ -268,13 +298,15 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       dados: { mensagem_id: mensagem.id, kind: "resultado_aprovacao", decisao_id: decisao.id, executados: itens.filter((i) => i.desfecho === "executado").length, total: itens.length },
     });
   }
+  // Revisão do épico (S2, 2026-10-08): a task do turno que pediu relê o estado — com a retomada na fila, ou sem ela.
+  events.push(...(await sincronizarDasDecisoes(deps, [decisao])));
   return { data: { mensagemId: mensagem?.id ?? null, turnoRetomadaId, itens }, events };
 };
 
 /**
- * Caminho completo sobre os MESMOS deps (uma transação): fase 1 → execução → fase 2. A rota da L9
- * pode separar as fases em duas transações para a chamada ao conector não segurar a tx.
- * 'retomar_turno' cria o turno novo sem executar nada.
+ * SÓ PARA TESTES (NOD-263): o caminho completo sobre os MESMOS deps (uma transação) — fase 1 → execução → fase 2. Produção
+ * separa as fases (rotas/decisoes.ts): a execução roda fora de tx. Chamado de dentro de uma tx escopada, a guarda de
+ * `executarItens` loga `conector_dentro_da_tx` (e lança em teste). 'retomar_turno' cria o turno novo sem executar nada.
  */
 export const decidir: CasoDeUso<EntradaDecidir, SaidaDecidir> = async (deps: Deps, input) => {
   const fase1 = await marcarEDecidir(deps, input);
@@ -311,5 +343,6 @@ export const retomarPorDecisao: CasoDeUso<{ decisao: Decisao }, { turnoRetomadaI
   const events: RuntimeEvent[] = turno && nova
     ? [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "turno_criado", autoria: autoriaDaPessoa(deps.escopo), pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, decisao_id: decisao.id } }]
     : [];
-  return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events] };
+  // Revisão do épico (S2): a task do turno caído relê o estado (com a retomada na fila) — as gêmeas são da mesma faixa (S4).
+  return { data: { turnoRetomadaId: turno?.id ?? null }, events: [...gemeas.events, ...events, ...(await sincronizarDasDecisoes(deps, [decisao]))] };
 };

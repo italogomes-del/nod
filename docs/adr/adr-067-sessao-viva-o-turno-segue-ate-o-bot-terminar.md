@@ -116,8 +116,9 @@ que o CLI os reconhece.
 
 ## Custo aceito
 
-- **Um processo preso fica "trabalhando" até alguém apertar Parar.** O vigia não existe mais. O Monitor de um script
-  que nunca acaba segura o turno do bot, e a fila dele espera; a mensagem da pessoa ainda entra.
+- **Um processo preso fica "trabalhando" até alguém apertar Parar.** O vigia que cortava não existe mais. O Monitor
+  de um script que nunca acaba segura o turno do bot, e a fila dele espera; a mensagem da pessoa ainda entra. Desde
+  2026-10-05 (NOD-73) a tela pelo menos avisa: ver a emenda abaixo.
 - **Cada linha de um Monitor custa uma volta do modelo.** No teste com Haiku, cerca de US$ 0,017 por volta, com o
   contexto em cache. O prompt pede para filtrar a saída.
 - **A sessão de horas fica pesada.** O autocompact do CLI resume no meio, como no terminal.
@@ -141,7 +142,7 @@ que o CLI os reconhece.
   - comando da barra continua de uma vez só;
   - Parar com comando pendente sai interrompido.
 - `tests/unit/executor/laco.test.ts`:
-  - sem vigia, horas com uma ferramenta aberta não interrompem;
+  - horas com uma ferramenta aberta não interrompem; desde a NOD-73, avisam uma vez por nível;
   - fala com `seq`, uma vez;
   - fala não confirmada volta antes da entrega;
   - o ocioso traz a mensagem e depois para de pedir;
@@ -158,8 +159,9 @@ que o CLI os reconhece.
 
 - **Custo:** o gasto diário dos Devs mais que dobra sem dobrar as tasks em "feita", por Monitor ou espera mal usados.
   Revisar o prompt e a granularidade do Monitor antes de pôr relógio de volta.
-- **Preso:** um bot fica "trabalhando" sem progresso mais de uma vez por semana sem ninguém notar. Avaliar um aviso na
-  tela, como "sem novidade há N min", antes de um corte automático.
+- **Preso:** um bot fica "trabalhando" sem progresso mais de uma vez por semana sem ninguém notar. O aviso na tela
+  entrou na NOD-73 (emenda abaixo); o corte automático só volta a ser avaliado se, mesmo com o aviso, o log
+  `turno_sem_novidade` mostrar turnos de 40 min ou mais sem ninguém apertar Parar mais de uma vez por semana.
 - **Mensagem perdida:** `laco_mensagem_sem_sessao` aparece no log. Trocar a absorção por duas fases: o servidor só
   marca absorvida depois de o executor confirmar a escrita.
 
@@ -170,3 +172,38 @@ que o CLI os reconhece.
 - **Pedido de colega entrando na sessão viva do outro bot.**
 - **Acordar o bot de fora** quando algo fora do Mac muda, como o CI do GitHub ou um merge. O bot espera com `Monitor`
   (`gh pr checks` em laço) dentro da sessão.
+
+## Emenda (2026-10-05, NOD-73): vigia que avisa, não corta
+
+O gatilho "Preso" disparou: o Marlon via bot "trabalhando" sem saber se estava andando. Voltou um vigia, mas **só de
+aviso**: nenhum caminho dele chama `interromper()`, e o Parar continua sendo o único jeito de encerrar o turno.
+
+- **Domínio puro** em `src/domain/vigia-turno.ts`. Dois avisos:
+  - **sem novidade:** 10 min sem nenhum evento interpretado do CLI. Sobe de nível em 10, 20, 40… min (não repete a cada
+    minuto) e some com o próximo evento (aviso com `mudoMs` 0). A espera de aprovação (até 450 s) fica abaixo do limiar.
+  - **repetição:** a mesma chamada (nome + argumentos com chaves ordenadas e espaço normalizado) 5, 10 e 20 vezes no
+    turno. Chamada sem argumentos não conta. Até 256 chaves (LRU); a chave guarda uma impressão, nunca o argumento.
+- **Laço:** um `setInterval` de 60 s com o relógio do laço (`o.relogio`) pergunta ao vigia; os eventos do CLI passam
+  por ele no mesmo sink. O aviso sai por `aoVigia` e para assim que o turno é entregue.
+- **Os argumentos nunca saem do Mac.** O trecho `{ vigia }` da renovação leva só nome e números (`mudoMs`, `aberta`,
+  `emFundo`, `repeticao: { nome, vezes }`). A validação do servidor é estrita: campo a mais, nome fora do formato ou
+  limiar que não é 5, 10 ou 20 descartam o trecho. Na ponte do app, o aviso novo substitui o que ainda não saiu.
+- **Servidor:** publica o frame `turno.vigia` com o nome curto ("Terminal", "Gmail") e registra `turno_sem_novidade`
+  (uma linha por nível) e `turno_repeticao` (uma por limiar), por turno. É o dado que mede este gatilho.
+- **Tela:** o reducer guarda o aviso no turno vivo (`vigia`, com o instante em que o silêncio começou) e ignora a
+  ligação. A repetição mostra só o maior limiar atingido, numa linha que se atualiza.
+
+**Validação:** `tests/unit/domain/vigia-turno.test.ts`, `tests/unit/executor/laco.test.ts` (horas com ferramenta
+aberta avisam uma vez e não interrompem; 5 chamadas iguais avisam sem argumento), `tests/unit/ponte-http.test.ts`
+(validação estrita), `tests/unit/aviso-vigia.test.ts` (rota renovar, log sem repetir) e
+`tests/integration/executor/claude-cli-falso.test.ts` (cenário `repeticao`: o CLI falso real avisa em 5, 10 e 20).
+
+## Emenda em 2026-10-12 (ADR-099, parte 2)
+
+Esperar algo de fora não é mais comando em segundo plano do CLI ([ADR-099](adr-099-um-dono-por-bot.md), item 4). O Bash
+em segundo plano segura o turno e a fila do bot enquanto o comando roda — é a regra deste ADR, e ela continua valendo para o
+comando do próprio trabalho (testes, build, QA). Para a CI, o deploy ou o processo de outra pessoa, o bot chama
+`esperar_comando`: o motor da máquina roda o comando num grupo próprio (ADR-089), fora do CLI e sem prazo, o turno encerra
+na hora, e o fim do comando abre uma retomada na mesma sessão. O prompt do terminal deixou de citar a CI entre os comandos
+demorados que se rodam em segundo plano.
+

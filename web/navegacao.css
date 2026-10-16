@@ -16,6 +16,9 @@
 .fantasma-arrasto { position: fixed; top: -1000px; left: -1000px; z-index: 50; background: var(--surface); border-radius: 14px;
   box-shadow: var(--shadow-pop); }
 .fixados[data-vazio], .section[data-vazio], .nova-secao-alvo { display: none; }
+/* definido em 2026-10-06: arrastando, a lista ganha um fôlego embaixo — o último bot não encosta no rodapé e sobra onde
+   mirar para soltá-lo no fim; a rolagem automática (web/lib/arrastar.ts) leva até lá. */
+.arrastando-bot .list { padding-bottom: 72px; }
 .arrastando-bot .fixados[data-vazio] { display: grid; }
 .arrastando-bot .section[data-vazio] { display: block; min-height: 44px; }
 .fixados-vazio { grid-column: 1 / -1; margin: 0; padding: 18px 12px; border: 1.5px dashed var(--line-strong); border-radius: 14px; text-align: center;
@@ -106,6 +109,11 @@
 .espaco-ia > div { flex: 1; min-width: 0; }
 .espaco-ia b { display: block; font-size: 15px; font-weight: 500; }
 .espaco-ia small { display: block; margin-top: 2px; font-size: 13px; color: var(--ink-3); }
+/* NOD-171: o CLI abaixo do piso — o comando que atualiza, com Copiar (ia-fora.ts linhaAtualizarIa). */
+.ia-atualizar { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 18px 16px 40px; font-size: 13px; }
+.ia-atualizar p { margin: 0; }
+.ia-comando { display: flex; align-items: center; gap: 10px; align-self: stretch; padding: 6px 8px 6px 10px; border-radius: 8px; border: 1px solid var(--warning-line); background: var(--warning-soft); }
+.ia-comando code { flex: 1; background: none; padding: 0; overflow-x: auto; white-space: nowrap; }
 .espaco-ponto { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--success); }
 .espaco-ponto.falha { background: var(--danger); }
 .espaco-conteudo .bt.sm { padding: 7px 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); font-size: 13px; font-weight: 500; color: var(--ink); }
@@ -116,11 +124,55 @@
 .espaco-cartao .conexao-avancada > summary::after { content: "›"; font-size: 18px; color: var(--ink-3); transition: transform .12s; }
 .espaco-cartao .conexao-avancada[open] > summary::after { transform: rotate(90deg); }
 .espaco-cartao .conexao-avancada[open] > summary { margin: 0; }
+
+/* ---- Seu espaço › Este Mac (definido em 2026-10-08, ADR-085; protótipo "Nod — Ritmo do Mac", prancha 3) ------------
+   O resumo de agora, a memória e o processador em barras, e os bots trabalhando ou esperando o Mac aliviar. */
+.este-mac .linha-centro-wrap { margin: 0 0 14px; }
+.mac-cartao { margin-bottom: 6px; }
+.mac-agora { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mac-agora > div { display: flex; flex-direction: column; gap: 2px; padding: 14px 18px; min-width: 0; }
+.mac-agora > div + div { border-left: 1px solid var(--line); }
+.mac-agora b { font-size: 15px; font-weight: 500; color: var(--ink); }
+.mac-agora span { font-size: 13px; color: var(--ink-3); }
+.mac-medidor { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.mac-medidor b { min-width: 86px; font-weight: 400; color: var(--ink); }
+.mac-barra { flex: 1; min-width: 48px; height: 6px; border-radius: 3px; background: var(--surface-raised); overflow: hidden; }
+.mac-barra i { display: block; height: 100%; border-radius: 3px; background: var(--ink-3); }
+.mac-barra.nivel-amarela i { background: var(--warning); }
+.mac-barra.nivel-vermelha i { background: var(--danger); }
+.mac-medidor > span:last-child { min-width: 92px; text-align: right; }
+.mac-sem-leitura { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+/* Emenda à ADR-085 (definido em 2026-10-09): memória e disco com o status curto à vista e o porquê atrás de um clique; o "›" à
+   direita gira ao abrir, como o de "Avançado" na conexão. A linha sem detalhe (processador) guarda o mesmo espaço, para os status alinharem. */
+.mac-det > summary { list-style: none; cursor: pointer; }
+.mac-det > summary::-webkit-details-marker { display: none; }
+.mac-det > summary::after { content: "›"; flex: none; width: 8px; font-size: 18px; line-height: 1; color: var(--ink-3); text-align: center; transition: transform .12s; }
+.mac-det[open] > summary::after { transform: rotate(90deg); }
+.mac-det > summary:hover, .mac-det > summary:focus-visible { background: var(--surface-raised); }
+/* Revisão do PR 224: o trilho da barra é da mesma cor do hover; sem isto a barra some ao passar o mouse na linha. */
+.mac-det > summary:hover .mac-barra, .mac-det > summary:focus-visible .mac-barra { background: var(--line); }
+div.mac-medidor { padding-right: 36px; }
+.mac-det-txt { margin: 0; padding: 0 18px 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) { .mac-det > summary::after { transition: none; } }
+.mac-grupo { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 14px 18px 6px; border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--ink-3); }
+.mac-grupo span:first-child { font-weight: 500; color: var(--ink); }
+.mac-bot { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 18px; border: 0; background: none; font: inherit; color: inherit;
+  text-align: left; cursor: pointer; }
+.mac-bot:hover, .mac-bot:focus-visible { background: var(--surface-raised); }
+.mac-bot-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mac-bot-txt b { font-weight: 500; }
+.mac-bot-txt span { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mac-bot-fim { flex: none; font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .mac-agora { grid-template-columns: minmax(0, 1fr); }
+  .mac-agora > div + div { border-left: 0; border-top: 1px solid var(--line); }
+}
 .espaco-cartao .conexao-avancada > :not(summary) { padding: 0 18px 12px; }
 .espaco-subtitulo { margin: 28px 0 10px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
 /* Aparência em Preferências (definido em 2026-10-04): o seletor do tamanho das três opções, não da coluna. */
-.segmentado.escolha-tema { width: fit-content; margin-bottom: 8px; }
-.segmentado.escolha-tema .seg { padding: 6px 14px; font-size: 13px; }
+.segmentado.escolha-tema, .segmentado.uso-do-mac { width: fit-content; margin-bottom: 8px; }
+.segmentado.escolha-tema .seg, .segmentado.uso-do-mac .seg { padding: 6px 14px; font-size: 13px; }
 .espaco-fora { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 12px 14px; border: 1px solid var(--warning-line); border-radius: 12px; background: var(--warning-soft); }
 .espaco-fora > div { flex: 1; min-width: 0; font-size: 14px; }
 .espaco-fora b { font-weight: 500; }
@@ -271,7 +323,6 @@
 .gv-detalhes summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
 .gv-detalhes[open] summary { margin-bottom: 12px; }
 .gv-detalhes .gv-campo + .gv-campo { margin-top: 12px; }
-.gv-form .inteligencia-card { margin: 0; }
 .gv-anotar { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "texto texto" "tipo botao"; gap: 8px; }
 .gv-anotar input { grid-area: texto; }
 .gv-anotar select { grid-area: tipo; }
@@ -281,10 +332,459 @@
 .gv-memoria-cab { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .gv-memoria-cab select { width: auto; padding: 4px 8px; font-size: 12.5px; }
 
-/* O botão do painel no cabeçalho da conversa só aparece quando a gaveta está escondida: aberta, ele mora no topo dela. */
-@media (min-width: 1100px) {
-  .app.com-detalhes:not(.detalhes-ocultos) .cab-acoes .toggle-detalhes { display: none; }
-}
-@media (max-width: 1099px) {
-  .app.com-detalhes.detalhes-abertos .cab-acoes .toggle-detalhes { display: none; }
+/* Revisto em 2026-10-16 (plano "tela limpa", T1): o botão do painel no cabeçalho virou a pílula do bot, que fica à vista
+   com a gaveta aberta ou fechada (o clique alterna); as regras que escondiam o botão com a gaveta aberta saíram. */
+
+/* ADR-090: Seu espaço › Máquinas (protótipo "Nod — Motor na VM"). Só tokens (tests/unit/web/cores-por-token.test.ts). */
+.maquinas .maq-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.maquinas .maq-topo .intro { margin: 0; max-width: 540px; }
+.maquinas .maq-topo .bt.pri { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.maq-lista { display: flex; flex-direction: column; gap: 12px; }
+.maq-vazio p { margin: 0; padding: 16px 18px; font-size: 14px; color: var(--ink-3); }
+.maq-cab { display: flex; align-items: center; gap: 12px; padding: 16px 18px; }
+.maq-ic { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-raised); color: var(--ink); }
+.maq-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.maq-id b { font-size: 15px; font-weight: 500; }
+.maq-id small { font-size: 13px; color: var(--ink-3); }
+.maq-estado { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.maq-estado.fora { color: var(--warning); }
+.maq-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex: none; }
+.maq-ponto.fora { background: transparent; border: 1.5px solid var(--warning); box-sizing: border-box; }
+.maq-ias { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 14px 66px; }
+.maq-ia { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); }
+.maq-ia i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; }
+.maq-ia.nao { color: var(--ink-3); }
+.maq-ia.nao i { background: var(--line-strong); }
+/* A tela fala por máquina (2026-10-09): a leitura da máquina no cartão, o status curto à vista e os números no clique. */
+.maq-leitura { border-top: 1px solid var(--line); }
+.maq-leitura > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 11px 18px; font-size: 13px; color: var(--ink-2); }
+.maq-leitura > summary::-webkit-details-marker { display: none; }
+.maq-leitura > summary::after { content: "›"; margin-left: auto; font-size: 18px; line-height: 1; color: var(--ink-3); transition: transform .12s; }
+.maq-leitura[open] > summary::after { transform: rotate(90deg); }
+.maq-leitura > summary:hover, .maq-leitura > summary:focus-visible { background: var(--surface-raised); }
+.maq-nivel { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.maq-nivel.nivel-amarela { background: var(--warning); }
+.maq-nivel.nivel-vermelha { background: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .maq-leitura > summary::after { transition: none; } }
+.maq-quem { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+.maq-avatares { display: flex; }
+.maq-avatares .icon { margin-right: -5px; }
+.bots-cartao .bot-maq { display: flex; align-items: center; gap: 12px; padding: 10px 18px; }
+.bots-cartao .bot-maq + .bot-maq { border-top: 1px solid var(--line); }
+.bot-maq-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bot-maq-txt b { font-weight: 500; font-size: 14px; }
+.bot-maq-txt span { font-size: 12.5px; color: var(--ink-3); }
+.segmentado.maq { width: fit-content; flex-wrap: wrap; }
+.segmentado.maq .seg { padding: 5px 12px; font-size: 12.5px; }
+.regras-maq { margin: 16px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-3); display: flex; flex-direction: column; gap: 6px; }
+/* O "Conectar uma máquina": trilha de passos à esquerda, o passo atual à direita. */
+.cx-painel { display: grid; grid-template-columns: 200px minmax(0, 1fr); margin-bottom: 18px; }
+.cx-trilha { margin: 0; padding: 20px 14px; list-style: none; background: var(--surface-side); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.cx-trilha li { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 9px; font-size: 13px; color: var(--ink-3); }
+.cx-trilha li span { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; font: 500 11px var(--font-mono); flex: none; }
+.cx-trilha li.agora { background: var(--surface-selected); color: var(--ink); font-weight: 500; }
+.cx-trilha li.agora span { background: var(--action); color: var(--on-action); border-color: var(--action); }
+.cx-trilha li.feito { color: var(--ink-2); }
+.cx-trilha li.feito span { background: var(--success-soft); color: var(--success); border-color: transparent; }
+.cx-corpo { padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cx-corpo h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.2px; }
+.cx-corpo p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+.cx-corpo .cx-nota { font-size: 12.5px; color: var(--ink-3); }
+.cx-cmd { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; border-radius: 10px; background: var(--surface-raised); border: 1px solid var(--line); }
+.cx-cmd code { flex: 1; min-width: 0; font: 13px var(--font-mono); background: none; padding: 0; white-space: nowrap; overflow-x: auto; }
+.cx-codigo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-3); }
+.cx-codigo input { font: 500 22px var(--font-mono); letter-spacing: .16em; text-transform: uppercase; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--ink); width: 260px; box-sizing: border-box; }
+.cx-confirma { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.cx-confirma div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.cx-confirma b { font-weight: 500; font-size: 15px; }
+.cx-confirma small { font-size: 12.5px; color: var(--ink-3); }
+.cx-erro { color: var(--danger) !important; font-size: 13px !important; }
+.cx-ia { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.cx-ia + .cx-ia { border-top: 1px solid var(--line); }
+.cx-ia-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cx-ia-txt b { font-weight: 500; font-size: 14px; }
+.cx-ia-txt code { font: 12.5px var(--font-mono); color: var(--ink-2); background: var(--surface-raised); padding: 2px 7px; border-radius: 6px; width: fit-content; }
+.cx-st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.cx-st i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; display: inline-block; }
+.cx-st.ok { color: var(--success); }
+.cx-st.ok i { background: var(--success); border-color: var(--success); }
+.cx-bots { display: flex; flex-direction: column; }
+.cx-bots-cab { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); background: var(--surface-side); }
+.cx-bots-cab span { flex: 1; }
+.cx-bot { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 14px; text-align: left; border: 0; background: transparent; color: var(--ink); width: 100%; }
+.cx-bot + .cx-bot { border-top: 1px solid var(--line); }
+.cx-bot small { color: var(--ink-3); font-size: 12.5px; }
+.cx-check { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; font-size: 11px; flex: none; }
+.cx-bot[aria-checked="true"] .cx-check { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.cx-rodape { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 4px; }
+
+/* =====================================================================================================================
+   Provedores de IA, o cartão de IA e a Inteligência do bot (definido em 2026-10-10, plano "IAs: conexão, troca e escolha
+   de modelo", PR 3; protótipos Main, Gaveta, Inteligencia2 e Onboarding, aprovados). O cartão é o mesmo em Provedores de
+   IA e no onboarding (web/telas/cartao-ia.ts): logo redondo, estado curto, um botão, o verificar no hover e, quando há,
+   os passos de instalar, entrar e testar.
+   ===================================================================================================================== */
+.prov-titulo { display: flex; align-items: center; gap: 12px; }
+.prov-pilha { display: inline-flex; flex: none; }
+.prov-av { width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; background: var(--surface); border: 1px solid var(--line);
+  box-shadow: 0 0 0 2px var(--surface); display: grid; place-items: center; color: var(--ink); }
+.prov-av + .prov-av { margin-left: -9px; }
+.prov-av svg { width: 16px; height: 16px; display: block; }
+.prov-mini .prov-av { width: 18px; height: 18px; }
+.prov-mini .prov-av + .prov-av { margin-left: -7px; }
+.prov-mini .prov-av svg { width: 10px; height: 10px; }
+.prov-ordem { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 2px 8px; font-size: 12.5px; color: var(--ink-3); }
+.prov-ordem span:first-child { font-weight: 600; color: var(--ink-2); }
+.prov-linha { transition: box-shadow .12s, opacity .12s; }
+.prov-linha + .prov-linha { border-top: 1px solid var(--line); }
+.prov-linha.arrastando, .int-ia.arrastando { opacity: .45; }
+.prov-linha.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
+.prov-alca, .int-alca { flex: none; width: 22px; height: 32px; margin: 0 -4px; padding: 0; border: 0; border-radius: 6px; background: none;
+  display: grid; place-items: center; color: var(--ink-3); cursor: grab; touch-action: none; }
+.prov-alca:hover, .int-alca:hover { color: var(--ink); background: var(--surface-raised); }
+.prov-alca:focus-visible, .int-alca:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.prov-pos { flex: none; width: 12px; font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.provedores .ia-nota { margin: 12px 2px 0; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+.provedores .ia-nota b { font-weight: 500; color: var(--ink-2); }
+.provedores .prov-avancado { margin-top: 18px; }
+/* ADR-101 (NOD-211, protótipo v3): as várias contas de uma IA, embaixo do cartão dela. */
+.contas-ia { margin: 0 14px 14px 44px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); font-size: 13px; }
+.contas-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.contas-cab .mudo { font-size: 12px; }
+.contas-lista { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.contas-lista li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; }
+.contas-lista li + li { border-top: 1px solid var(--line); }
+.contas-pos { color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.contas-nome { font-weight: 600; }
+.contas-ident { margin-left: 6px; font-weight: 400; color: var(--ink-3); font-size: 12px; }
+.contas-selos { display: flex; gap: 6px; margin-top: 4px; }
+.contas-selos .selo { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); }
+.contas-optin, .contas-modo label { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; }
+.contas-optin small, .contas-modo small { display: block; color: var(--ink-3); font-size: 12px; }
+.contas-estado { font-size: 12px; border-radius: 999px; padding: 2px 8px; white-space: nowrap; border: 1px solid transparent; }
+.contas-estado.e-uso { background: var(--success-soft); color: var(--success); }
+.contas-estado.e-disp { background: var(--surface-raised); color: var(--ink-2); }
+.contas-estado.e-limite { background: var(--warning-soft); color: var(--warning); border-color: var(--warning-line); }
+.contas-acoes-ic { display: flex; gap: 2px; }
+.contas-ic { width: 26px; height: 26px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ink-2); cursor: pointer; }
+.contas-ic:hover { background: var(--surface-raised); }
+.contas-ic:disabled { opacity: .3; cursor: default; background: none; }
+.contas-ic:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.contas-rodape { margin-top: 10px; }
+.contas-login { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--ink-2); }
+.contas-nova { display: grid; gap: 6px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface); }
+.contas-nova input { width: 100%; margin-top: 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.contas-acoes { display: flex; gap: 8px; }
+.contas-modo { margin: 12px 0 0; padding: 10px 0 0; border: 0; border-top: 1px solid var(--line); }
+.contas-modo legend { padding: 0; font-weight: 600; }
+.contas-privado { margin: 10px 0 0; color: var(--ink-3); font-size: 12px; }
+
+.ia-linha { display: flex; align-items: center; gap: 14px; padding: 16px 18px; }
+.ia-linha .ob-logo { width: 40px; height: 40px; border-radius: 50%; }
+.ia-linha .ob-logo svg { width: 22px; height: 22px; display: block; }
+.ia-linha .ob-ia-txt b { font-size: 15px; }
+.ia-linha .ob-pilula { flex: none; }
+.ob-card-ia .ia-linha { padding: 0; gap: 16px; }
+.ob-card-ia .ia-linha .ob-logo { width: 44px; height: 44px; }
+.ob-card-ia.aberto { gap: 10px; }
+.ia-verificar { flex: none; width: 32px; height: 32px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none;
+  color: var(--ink-3); cursor: pointer; opacity: 0; transition: opacity .15s, background .15s; }
+.ia-linha:hover .ia-verificar, .ia-verificar:focus-visible, .ia-verificar.girando { opacity: 1; }
+.ia-verificar:hover { background: var(--surface-raised); color: var(--ink); }
+.ia-verificar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ia-verificar.girando svg { animation: ob-gira .9s linear infinite; }
+/* O balão fica à esquerda do ícone: em cima, o `overflow: hidden` do cartão cortava o da primeira linha. */
+.ia-dica { position: relative; flex: none; }
+.ia-dica .ia-balao { position: absolute; right: calc(100% + 6px); top: 50%; transform: translateY(-50%); white-space: nowrap; padding: 6px 9px;
+  border-radius: 8px; background: var(--ink); color: var(--surface); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .12s; }
+.ia-dica:hover .ia-balao, .ia-dica:focus-within .ia-balao { opacity: 1; }
+.ia-explica { margin: 0 18px 16px 126px; padding: 10px 12px; border-radius: 10px; background: var(--warning-soft); font-size: 13px; line-height: 1.45; color: var(--ink); }
+.ia-explica p { margin: 0; }
+.ia-aviso-nota { margin: 0 18px 14px 126px; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.ob-card-ia .ia-explica, .ob-card-ia .ia-aviso-nota { margin: 0 0 0 60px; }
+
+/* Os passos dentro do cartão: instalar, entrar, testar. */
+.ia-fluxo { display: flex; flex-direction: column; margin: -6px 18px 14px 126px; padding: 0; list-style: none; }
+.ob-card-ia .ia-fluxo { margin: 2px 0 0 60px; }
+.ia-passo { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; }
+.ia-passo-marca { width: 22px; height: 22px; box-sizing: border-box; flex: none; border-radius: 50%; border: 1px solid var(--line-strong);
+  color: var(--ink-3); display: grid; place-items: center; font-size: 11.5px; font-weight: 600; }
+.ia-passo-marca.feito { border: 0; background: var(--success); color: var(--on-status); }
+.ia-passo-marca.feito svg { width: 12px; height: 12px; }
+.ia-passo-marca.falha { border: 0; background: var(--warning); color: var(--on-status); }
+.ia-passo-marca.ativo { border-color: var(--ink); color: var(--ink); }
+.ia-passo-marca:has(.ob-gira) { border: 0; }
+.ia-passo-marca .ob-gira { width: 16px; height: 16px; border-color: var(--line); border-top-color: var(--ink); opacity: 1; }
+.ia-passo-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; color: var(--ink-3); }
+.ia-passo-txt b { font-size: 14px; font-weight: 500; color: var(--ink); }
+.ia-passo.depois .ia-passo-txt b { color: var(--ink-3); }
+.ia-erro-txt { color: var(--ink-2); }
+.ia-log { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ia-codigo { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.ia-codigo code { font-family: var(--font-mono); font-size: 22px; font-weight: 600; letter-spacing: .08em; color: var(--ink); padding: 6px 12px;
+  border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line); user-select: all; }
+.ia-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 4px; }
+.ia-acoes .ob-link svg { margin-left: 3px; vertical-align: -1px; }
+.ia-esperando { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-3); }
+.ia-esperando .ob-gira { width: 11px; height: 11px; }
+/* NOD-209 (protótipo aprovado em 2026-10-12): a conta logada, "Trocar conta" e os textos da troca. */
+.ob-ia-txt .ia-conta { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--ink-3); }
+.ia-conta svg { flex: none; opacity: .8; }
+.ob-ia-txt .ia-conta-txt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: inherit; }
+.ia-trocar { flex: none; font-size: 13px; font-weight: 500; }
+.ia-conta-atual { font-size: 12.5px; color: var(--ink-3); }
+.ia-passo-txt .ia-conta-atual b, .ia-passo-txt .ia-trocou b { font-size: inherit; }
+.ia-conta-atual b { font-weight: 500; color: var(--ink-2); }
+.ia-troca-dica { display: flex; gap: 8px; align-items: flex-start; margin-top: 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.ia-troca-dica p { margin: 0; }
+.ia-troca-dica svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+.ia-trocou { color: var(--ink-2); }
+.ia-trocou b { font-weight: 500; color: var(--ink); }
+.ia-colar { display: flex; gap: 8px; margin: 4px 0 0; }
+.ia-colar input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 13px; }
+.ia-colar input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ia-ajuda-link { align-self: flex-start; border: 0; background: none; padding: 0; margin-top: 2px; font: inherit; font-size: 12.5px; color: var(--ink-3);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ia-ajuda-link:hover { color: var(--ink); }
+.ia-ajuda-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.ia-ajuda { margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-side); border: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.ia-ajuda p { margin: 0 0 6px; }
+.ia-ajuda .ob-link { font-size: 12.5px; }
+.ia-ajuda .ob-link svg { margin-left: 3px; vertical-align: -1px; }
+.ordem-final { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 10px; font-size: 13px; color: var(--ink-2); }
+.ordem-final .ob-logo { width: 22px; height: 22px; border-radius: 50%; }
+.ordem-final .ob-logo svg { width: 12px; height: 12px; }
+.ordem-final b { font-weight: 500; color: var(--ink); }
+
+/* 2A: a linha Inteligência da gaveta abre o menu dentro do cartão. */
+.ia-linha-wrap { position: relative; }
+.ia-atual { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.ia-av { width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  display: inline-grid; place-items: center; flex: none; }
+.ia-av svg { width: 10px; height: 10px; display: block; }
+.ia-seta { flex: none; color: var(--ink-3); }
+.gv-linha[aria-expanded="true"] .ia-seta { transform: rotate(180deg); }
+.ia-menu { margin: 0 8px 8px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-side); }
+.ia-op { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 0; border-radius: 9px; background: none;
+  font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.ia-op:hover, .ia-op:focus-visible { background: var(--surface); }
+.ia-op:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.ia-op:disabled { cursor: default; opacity: .5; }
+.ia-op:disabled:hover { background: none; }
+.ia-op-txt { flex: 1; min-width: 0; }
+.ia-op-txt b { display: block; font-size: 13px; font-weight: 500; }
+.ia-op-txt small { display: block; margin-top: 1px; font-size: 11.5px; color: var(--ink-3); }
+.ia-op-modelo { padding-left: 34px; }
+.ia-grupo { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px 2px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+.ia-grupo-estado { color: var(--ink-3); }
+.ia-grupo-link { margin-left: auto; border: 0; background: none; padding: 0; font: inherit; font-size: 11.5px; color: var(--ink); text-decoration: underline; cursor: pointer; }
+.ia-mais { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 9px 10px 4px; border: 0; border-top: 1px solid var(--line); background: none;
+  font: inherit; font-size: 12.5px; color: var(--ink-2); text-align: left; cursor: pointer; }
+.ia-mais:hover { color: var(--ink); }
+.ia-mais:focus-visible, .ia-grupo-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+
+/* 2B: os dois modos com rádio, a lista arrastável e a pílula "Modelo · Raciocínio". */
+.gv-form .modo { display: flex; flex-direction: column; gap: 8px; }
+.modo-op { display: flex; align-items: flex-start; gap: 12px; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--surface); font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.modo-op:hover { border-color: var(--line-strong); }
+.modo-op[aria-checked="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.modo-op:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.modo-op b { display: block; font-size: 14px; font-weight: 600; }
+.modo-op span.sub { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.int-radio { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--line-strong); box-sizing: border-box; }
+.int-radio.on { border: 5px solid var(--action); }
+.int-titulo { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; padding: 0 4px; font-size: 12px; color: var(--ink-3); }
+.int-titulo b { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.int-lista { display: flex; flex-direction: column; gap: 8px; }
+.int-ia { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; transition: box-shadow .12s, opacity .12s; }
+.int-ia.alvo { box-shadow: 0 -3px 0 0 var(--action); }
+.int-ia.apagada .int-linha { opacity: .6; }
+.int-linha { display: flex; align-items: center; gap: 10px; padding: 8px; }
+.int-linha .int-radio { border-width: 1.5px; padding: 0; background: none; cursor: pointer; margin: 0 2px 0 4px; }
+.int-linha .int-radio.on { border-width: 5px; }
+.int-linha .int-radio:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.int-ia .ia-logo { width: 26px; height: 26px; border-radius: 50%; }
+.int-ia .ia-logo svg { width: 14px; height: 14px; }
+.int-nome { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 13.5px; }
+.int-uso { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.int-escolha { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); font: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.int-escolha:hover { border-color: var(--line-strong); color: var(--ink); }
+.int-escolha:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.int-escolha[aria-expanded="true"] svg { transform: rotate(180deg); }
+.int-painel { padding: 4px 12px 12px; border-top: 1px solid var(--line); background: var(--surface-side); }
+.int-rotulo { margin: 10px 0 6px; font-size: 11.5px; color: var(--ink-3); }
+.int-modelos { display: flex; flex-direction: column; }
+.int-mod { display: flex; align-items: flex-start; gap: 10px; padding: 6px 2px; border: 0; background: none; font: inherit; color: var(--ink); text-align: left; cursor: pointer; }
+.int-mod:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 6px; }
+.int-mod b { display: block; font-size: 13px; font-weight: 500; }
+.int-mod small { display: block; font-size: 11.5px; color: var(--ink-3); }
+.int-mod .int-radio { width: 14px; height: 14px; margin-top: 2px; }
+.int-mod .int-radio.on { border-width: 4px; }
+.int-niveis { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: var(--surface-raised); width: fit-content; }
+.int-nivel { height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.int-nivel.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-knob), inset 0 0 0 1px var(--line); }
+.int-nivel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.int-nivel-desc { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.int-fora { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 0 4px; font-size: 12.5px; color: var(--ink-3); }
+.int-fora button { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.int-fora button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.ia-log.ia-detalhe { white-space: normal; overflow-wrap: anywhere; }
+.ia-ajuda-links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+/* ADR-102 (2026-10-13, protótipos G1, G2, CM1-A, CMJ): a lista única de contas de IA e o que Máquinas mostra delas. */
+/* O ⋯ abre um menu por cima da lista e do cartão da máquina: os dois não cortam o que transborda (.espaco-cartao corta). */
+.cl-lista.espaco-cartao, .maq-cartao.espaco-cartao { overflow: visible; }
+.cl-lista.espaco-cartao > :first-child, .maq-cartao.espaco-cartao > :first-child { border-top-left-radius: 13px; border-top-right-radius: 13px; }
+.cl-lista.espaco-cartao > :last-child, .maq-cartao.espaco-cartao > :last-child,
+.maq-cartao.espaco-cartao > :last-child > summary { border-bottom-left-radius: 13px; border-bottom-right-radius: 13px; }
+.cl-lista { list-style: none; margin: 0; padding: 0; }
+.cl-linha { display: grid; grid-template-columns: 22px 14px 40px minmax(0, 1fr) auto 32px; gap: 10px; align-items: center; padding: 14px 16px; transition: box-shadow .12s, opacity .12s; }
+.cl-linha + .cl-linha { border-top: 1px solid var(--line); }
+.cl-linha.arrastando { opacity: .45; }
+.cl-linha.alvo { box-shadow: inset 0 3px 0 0 var(--action); }
+.cl-linha.entrando { background: var(--surface-side); align-items: start; }
+/* QA do PR 306 (ISSUE-005): com detalhes ou renomear abertos, a linha cresce para baixo e o resto fica no alto, com o nome. */
+.cl-linha:has(.cl-detalhes, .cl-renomear) { align-items: start; }
+.cl-linha.fora .cl-nome, .cl-linha.fora .cl-ident, .cl-linha.fora .cl-logo { opacity: .55; }
+.cl-alca { width: 22px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; display: grid; place-items: center; color: var(--ink-3); cursor: grab; touch-action: none; }
+.cl-alca:hover { color: var(--ink); background: var(--surface-raised); }
+.cl-alca:focus-visible, .cl-mais-bt:focus-visible, .cl-pil:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.cl-pos { font-size: 12px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.cl-logo { width: 40px; height: 40px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); display: grid; place-items: center; color: var(--ink); }
+.cl-logo svg { width: 22px; height: 22px; }
+.cl-logo.mini { width: 22px; height: 22px; display: inline-grid; margin-right: -6px; }
+.cl-logo.mini svg { width: 12px; height: 12px; }
+.cl-corpo { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cl-nome { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; }
+.cl-nome b { font-weight: 600; }
+.cl-plano { font-size: 11.5px; padding: 1px 7px; border-radius: 6px; background: var(--surface-raised); color: var(--ink-2); }
+.cl-nome .selo { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); }
+.cl-ident { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); min-width: 0; }
+.cl-ident span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-maqs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.cl-pil { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 12px; color: var(--ink-2); }
+.cl-pil svg { width: 13px; height: 13px; }
+.cl-pil.tracejada { border-style: dashed; border-color: var(--line-strong); color: var(--ink); cursor: pointer; }
+.cl-pil.tracejada:hover { background: var(--surface-raised); }
+.cl-pil.tracejada.mudo { color: var(--ink-3); cursor: default; background: none; }
+.cl-ponto { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; }
+.cl-ponto.fora { background: var(--line-strong); }
+.cl-dir { display: flex; justify-content: flex-end; }
+.cl-mais { position: relative; }
+.cl-mais-bt { width: 30px; height: 30px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; }
+.cl-mais-bt:hover, .cl-mais-bt[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+/* Plano "tela limpa" (2026-10-16, T8): em Provedores o ⋯ da conta só aparece no hover ou foco da linha, no foco do próprio
+   botão e com o menu aberto; no toque (sem hover) fica sempre à vista. O ⋯ da máquina (.maq-cab) não muda. */
+.cl-linha .cl-mais-bt { opacity: 0; }
+.cl-linha:hover .cl-mais-bt, .cl-linha:focus-within .cl-mais-bt, .cl-linha .cl-mais-bt:focus-visible, .cl-linha .cl-mais-bt[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .cl-linha .cl-mais-bt { opacity: 1; } }
+.cl-menu { position: absolute; right: 0; top: 36px; z-index: 30; width: 280px; padding: 6px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; }
+.cl-menu-tit { margin: 6px 10px 4px; font-size: 12px; color: var(--ink-3); }
+.cl-menu button { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 9px; background: none; text-align: left; color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.cl-menu button svg { margin-top: 2px; flex: none; color: var(--ink-3); }
+.cl-menu button small { display: block; font-size: 12px; color: var(--ink-3); }
+.cl-menu button:hover, .cl-menu button:focus-visible { background: var(--surface-raised); }
+.cl-menu button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.cl-menu button.perigo, .cl-menu button.perigo svg { color: var(--danger); }
+.cl-menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 8px; align-self: stretch; }
+.cl-renomear { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.cl-renomear input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.maq-renomear { flex: 1; margin-top: 0; }
+.cl-detalhes { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); font-size: 13px; }
+.cl-detalhes dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0 0 6px; }
+.cl-detalhes dt { color: var(--ink-3); }
+.cl-detalhes dd { margin: 0; color: var(--ink); }
+.cl-detalhes ul { margin: 0; padding-left: 16px; }
+.cl-login { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 13.5px; }
+.cl-login.erro { border-color: var(--danger-line); }
+.cl-login-cab { display: flex; align-items: center; gap: 8px; }
+.cl-login-cab b { font-weight: 500; flex: 1; }
+.cl-login-cab svg { color: var(--ink-3); }
+.cl-ok { color: var(--success); }
+.cl-passos { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.cl-passos li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+.cl-passos li > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cl-n { width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--ink); display: grid; place-items: center; font-size: 12px; }
+.cl-passos li.feito .cl-n { background: var(--success); border-color: var(--success); color: var(--surface); }
+.cl-link { color: var(--ink); text-decoration: underline; font-size: 13px; align-self: flex-start; }
+.cl-codigo { display: flex; gap: 8px; }
+.cl-codigo input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font: 13px var(--font-mono); }
+.cl-cadeado { display: flex; gap: 8px; align-items: flex-start; margin: 2px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--ink-3); }
+.cl-cadeado svg { flex: none; margin-top: 1px; }
+.cl-passo-txt { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; color: var(--ink-2); }
+.cl-erro { margin: 8px 0 0; color: var(--danger); }
+.cl-aviso { margin: 8px 0 0; color: var(--warning); }
+.cl-login-acoes { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.cl-terminal-link { margin-top: 10px; padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; color: var(--ink-3); cursor: pointer; text-decoration: underline dotted; }
+.cl-terminal { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
+.cl-terminal code { font: 12px var(--font-mono); }
+.cl-adicionar { display: inline-flex; align-items: center; gap: 8px; margin-top: 12px; }
+.cl-nova { margin-top: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.cl-nova-tit { font-size: 15px; }
+.cl-sem-maquina p { margin: 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.cl-sem-maquina .bt.pri { display: inline-flex; align-items: center; gap: 8px; }
+.cl-provs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cl-prov { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.cl-prov.ativo { border: 1.5px solid var(--ink); }
+.cl-prov span { display: flex; flex-direction: column; }
+.cl-prov small, .cl-maq small { font-size: 12px; color: var(--ink-3); }
+.cl-campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.cl-campo input { padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.cl-campo-tit { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+.cl-maqs-form { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.cl-maq { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.cl-maq + .cl-maq { border-top: 1px solid var(--line); }
+.cl-maq span { display: flex; flex-direction: column; }
+.cl-maq.mudo { color: var(--ink-3); }
+.cl-nova-acoes { display: flex; justify-content: flex-end; gap: 10px; }
+/* ADR-108 (R8): a fila — o liga/desliga na linha e as três regras do Nod no lugar do "Perguntar antes / Trocar sozinho". */
+.cl-dir { gap: 10px; align-items: center; }
+.contas-estado.e-fora { color: var(--ink-3); }
+.cl-regras { margin-top: 16px; padding: 14px 18px; }
+.cl-regras b { display: block; font-size: 14px; font-weight: 500; }
+.cl-regras small { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+.cl-regras ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 4px; }
+.cl-regras li b { display: inline; font-weight: 500; color: var(--ink); }
+.cl-filtro { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.cl-vazio p { margin: 0; padding: 16px 18px; font-size: 14px; color: var(--ink-3); }
+.cl-nota { margin: 10px 2px 0; font-size: 13px; color: var(--warning); }
+.cl-faixa { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--warning-line); background: var(--warning-soft); color: var(--warning); font-size: 13px; }
+.cl-fundo { position: fixed; inset: 0; z-index: 40; background: var(--backdrop); }
+.cl-dialogo { position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); box-sizing: border-box; padding: 22px 24px; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-pop); color: var(--ink); }
+.cl-dialogo h3 { margin: 0 0 8px; font-size: 18px; }
+.cl-dialogo p { margin: 0 0 10px; color: var(--ink-2); line-height: 1.55; font-size: 14px; }
+.cl-dialogo-acoes { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.cl-dialogo .bt.perigo { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+.cl-caixa { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-side); font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+.cl-check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.cl-check small { display: block; color: var(--ink-3); font-size: 12px; }
+.cl-na-maquina { margin: 12px 0; }
+.cl-na-maquina .cl-linha { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.cl-na-maquina .cl-vazia { display: block; }
+.cx-segue { font-size: 12.5px; color: var(--ink-3); }
+.cl-atalhos { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.cl-atalhos .bt { display: inline-flex; align-items: center; gap: 10px; }
+.cl-novas .cl-login { margin: 0 0 10px; }
+.maq-contas { display: flex; align-items: center; gap: 12px; padding: 12px 18px 12px 66px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.maq-contas-logos { display: inline-flex; padding-right: 6px; }
+.maq-contas-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cl-aviso-txt { color: var(--warning); font-size: 12px; }
+.maq-cab .cl-mais { margin-left: 4px; }
+.cx-espera { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; color: var(--ink-2); }
+.cx-espera small { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+.linha-link.forte { font-weight: 600; }
+@media (max-width: 640px) {
+  .cl-linha { grid-template-columns: 32px 40px minmax(0, 1fr) 40px; padding: 12px; }
+  .cl-alca, .cl-mais-bt { width: 40px; height: 44px; }
+  .cl-pil { padding: 8px 12px; }
+  .cl-pos { display: none; }
+  .cl-dir { grid-column: 3; justify-content: flex-start; }
+  .cl-mais { grid-row: 1; grid-column: 4; }
+  .cl-provs { grid-template-columns: 1fr; }
+  .cl-regras ul { padding-left: 16px; }
+  .maq-contas { padding-left: 18px; flex-wrap: wrap; }
 }

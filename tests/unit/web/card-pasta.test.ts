@@ -140,6 +140,17 @@ describe("registro da pasta aberta", () => {
     expect(html).toContain("<b>acme</b> aberta para Dev 1");
   });
 
+  it("o aviso de troca de IA ainda sem decisão também não some dentro de \"N avisos do sistema\" (ADR-108, QA de 16/10)", () => {
+    const aviso = (id: string): Mensagem => ({ ...registro, id, texto: `aviso ${id}`, payload: null });
+    const troca: Mensagem = { ...registro, id: "t1", texto: "O Claude chegou ao limite", payload: { kind: "troca_de_ia", trocaId: "x", agenteId: "a", iaDe: "claude-cli", iaPara: "codex-cli", recomendacao: "esperar", voltaEm: AGORA + 11 * 60_000, tasks: 19, aplicarEm: null } };
+    const aberto = renderTimeline(conversa([], [aviso("a1"), aviso("a2"), troca, aviso("a3")]), estado);
+    expect(aberto).not.toContain("avisos do sistema");
+    expect(aberto).toContain('data-act="troca-esperar"');
+    // Decidido, vira linha de desfecho e pode ser recolhido com os outros.
+    const decidido = renderTimeline(conversa([], [aviso("a1"), aviso("a2"), { ...troca, payload: { ...(troca.payload as object), decisao: "esperar", decididoEm: AGORA } } as Mensagem, aviso("a3")]), estado);
+    expect(decidido).toContain("avisos do sistema");
+  });
+
   it("quem não é dona do bot não vê o Trocar", () => {
     expect(renderMensagem(registro, { ...estado, sessao: { tenantId: "t", pessoaId: "outra" } })).not.toContain('data-act="abrir-workspace"');
   });

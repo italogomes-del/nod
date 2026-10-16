@@ -8,6 +8,13 @@ import type { TarefaDoBot } from "../../src/contracts/turno.ts";
  */
 export type Etapa = { texto: string; ferramentas: number };
 
+/**
+ * O vigia do turno (definido em 2026-10-05, NOD-73): só aviso, nunca corte. `mudoDesde` é quando o silêncio começou
+ * (null = sem aviso de silêncio), para a tela contar os minutos sozinha; `aberta` é o nome curto da ferramenta sem
+ * resultado ("Terminal"); `repeticao` é o maior limiar já atingido (5, 10, 20), numa linha que se atualiza.
+ */
+export type VigiaDaAtividade = { mudoDesde: number | null; aberta: string | null; emFundo: number; repeticao: { rotulo: string; vezes: number } | null };
+
 export type AtividadeTurno = {
   /** Texto desde a última ferramenta (ou desde o início, se ainda não houve nenhuma). */
   atual: string;
@@ -18,14 +25,20 @@ export type AtividadeTurno = {
   ultimaFerramenta: string | null;
   /** A lista de tarefas do bot (turno.tarefas), inteira, a mais nova que chegou. */
   tarefas: TarefaDoBot[];
+  /** O último aviso do vigia do turno (turno.vigia); null enquanto não houve nenhum. */
+  vigia: VigiaDaAtividade | null;
 };
 
 export const ETAPAS_GUARDADAS = 200;
 
-export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [] };
+export const ATIVIDADE_VAZIA: AtividadeTurno = { atual: "", etapas: [], totalEtapas: 0, ferramentas: 0, ultimaFerramenta: null, tarefas: [], vigia: null };
 
 export function comTarefas(a: AtividadeTurno | undefined, tarefas: TarefaDoBot[]): AtividadeTurno {
   return { ...(a ?? ATIVIDADE_VAZIA), tarefas };
+}
+
+export function comVigia(a: AtividadeTurno | undefined, vigia: VigiaDaAtividade): AtividadeTurno {
+  return { ...(a ?? ATIVIDADE_VAZIA), vigia };
 }
 
 export function comTexto(a: AtividadeTurno | undefined, trecho: string): AtividadeTurno {
@@ -52,7 +65,7 @@ export function comFerramenta(a: AtividadeTurno | undefined, rotulo: string): At
     etapas = [{ texto: rotulo, ferramentas: 1 }];
     totalEtapas += 1;
   }
-  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas };
+  return { atual: "", etapas: etapas.slice(-ETAPAS_GUARDADAS), totalEtapas, ferramentas: base.ferramentas + 1, ultimaFerramenta: rotulo, tarefas: base.tarefas, vigia: base.vigia };
 }
 
 /**

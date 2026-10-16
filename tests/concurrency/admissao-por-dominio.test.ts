@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { boot, type ServidorNod } from "../../src/adapters/http/boot.ts";
 import { lerCookieSessao } from "../../src/adapters/http/sessao.ts";
+import { PAGINA_ENTROU } from "../../src/adapters/http/sessao-google.ts";
 import { admitirPorDominio, buscarPorEmail } from "../../src/repositories/pessoas.repo.ts";
 import { db } from "../helpers/db.ts";
 import { dbDono } from "../helpers/db-dono.ts";
@@ -87,6 +88,8 @@ describeIntegracao("concorrência: admissão por domínio com nod_app de verdade
           NOD_MACHINE_ID: randomUUID(),
           NOD_VOZ_STT: "falso",
           NOD_VOZ_TTS: "falso",
+          // ADR-096: o servidor de teste nunca limpa o ~/nod de quem roda a suíte.
+          NOD_LIMPEZA_TASKS: "desligada",
         },
         db,
         dbDono,
@@ -105,7 +108,7 @@ describeIntegracao("concorrência: admissão por domínio com nod_app de verdade
         return real(`${servidor?.url}/api/sessao/google/callback?code=x&state=${encodeURIComponent(state)}`, { redirect: "manual", headers: { cookie } });
       };
       const r = await entrar();
-      expect(r.headers.get("location")).toBe("/");
+      expect(await r.text()).toBe(PAGINA_ENTROU);
       const sessao = r.headers.getSetCookie().find((c) => c.startsWith("nod_sessao="))?.split(";")[0] ?? "";
       const escopo = lerCookieSessao(sessao.slice("nod_sessao=".length), SEGREDO);
       expect(escopo?.tenantId).toBe(TENANT_PADRAO);

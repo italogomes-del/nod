@@ -23,7 +23,7 @@ describeIntegracao("perguntas viram conversa: a pergunta é fala ligada à decis
     await withRollback(MARLON, async (trx) => {
       const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Cecília" });
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => AGORA });
-      const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 60_000, profundidade: 0, entradaTexto: "arquive os PRs parados", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
       if (!turno) throw new Error("turno");
 
       const pedido = await pedirAPessoa(deps, { turnoId: turno.id, conversaId, agenteId, tipo: "pergunta", texto: "Posso arquivar o PR 7? Ele está parado há duas semanas.", opcoes: ["Sim, pode arquivar", " ", "sim, pode arquivar", "Não, deixe aberto", "x".repeat(61)] });

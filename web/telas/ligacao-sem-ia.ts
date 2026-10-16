@@ -1,6 +1,7 @@
 import type { CausaCerebroCaiu, EstadoIaDaLigacao, IaDaLigacao, IAS_DA_LIGACAO as IasDaLigacao } from "../../src/contracts/voz.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { botao, esc } from "../lib/render.ts";
+import { COMANDO_ATUALIZAR_IA, versaoLegivel } from "./ia-fora.ts";
 import { LOGOS_IA } from "./onboarding-logos.ts";
 
 /**
@@ -51,6 +52,8 @@ export type EstadoIaVoltou = { ia: IaDaLigacao | null; trocou: boolean };
  */
 export function motivoSemIa(causa: CausaCerebroCaiu, ia: IaDaLigacao | null): string {
   if (causa === "conta_sem_acesso" && ia) return `A conta do ${NOME_CLI[ia]} deste Mac está sem acesso: a organização dela desativou o uso por assinatura.`;
+  // NOD-168 (ADR-078): a assinatura no teto é dita como é; "parou de responder" faria a pessoa tentar de novo à toa.
+  if (causa === "limite") return ia ? `A assinatura do ${NOME_CLI[ia]} deste Mac chegou ao limite.` : "A assinatura de IA deste Mac chegou ao limite.";
   return "A IA deste Mac parou de responder.";
 }
 
@@ -104,13 +107,20 @@ function cardDaIa(ia: IaDaLigacao, s: EstadoSemIa): string {
   if (ia === s.ia) {
     texto = s.causa === "conta_sem_acesso"
       ? `Entre com uma conta que tenha acesso, ou peça ao administrador da organização para liberar o ${cli}.`
-      : `O ${cli} parou de responder nesta ligação. Dá para tentar de novo.`;
+      : s.causa === "limite"
+        ? `O ${cli} chegou ao limite da assinatura. Dá para tentar de novo quando o limite renovar.`
+        : `O ${cli} parou de responder nesta ligação. Dá para tentar de novo.`;
     acao = acaoDaQueCaiu(ia, s, true);
     if (s.causa === "conta_sem_acesso" && !s.ponte.entrar) noTerminal = notaNoTerminal(ia, "entrar");
   } else if (daIa?.causa === "sonda_lenta") {
     // NOD-178: o CLI só demorou para responder; nem "Instalar" nem "Entrar", o app do Mac sonda de novo sozinho.
     texto = `O ${cli} demorou para responder; o Mac está carregado. A ligação percebe quando ficar pronto.`;
     acao = "";
+  } else if (daIa?.causa === "cli_antigo" && daIa.versao && daIa.minima) {
+    // NOD-171: o CLI está no Mac, abaixo do piso. Nem "Instalar" nem "não está neste Mac": a versão, a mínima e o comando.
+    texto = `O ${cli} deste Mac está na versão ${daIa.versao}; o nod precisa da ${versaoLegivel(daIa.minima)} ou mais nova. A ligação percebe quando ficar pronto.`;
+    acao = "";
+    noTerminal = `No Terminal deste Mac, rode “${COMANDO_ATUALIZAR_IA[ia]}”.`;
   } else if (estado === "nao_autenticado") {
     texto = s.ponte.entrar ? `O ${cli} está neste Mac; falta entrar na conta.` : `O ${cli} está neste Mac; falta entrar na conta. A ligação percebe quando ficar pronto.`;
     acao = s.ponte.entrar ? botao("ligacao-ia-entrar", "Entrar", { classe: "sm", dados: { ia }, desabilitado: s.ocupado }) : "";

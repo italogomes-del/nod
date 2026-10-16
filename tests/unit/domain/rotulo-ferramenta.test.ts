@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rotuloFerramenta } from "../../../src/domain/rotulo-ferramenta.ts";
+import { nomeDaFerramenta, rotuloFerramenta } from "../../../src/domain/rotulo-ferramenta.ts";
 
 describe("rotuloFerramenta", () => {
   it("ferramenta nod tem rótulo próprio", () => {
@@ -24,5 +24,16 @@ describe("rotuloFerramenta", () => {
     expect(rotuloFerramenta("Ferramenta_nova")).toBe("Usou Ferramenta_nova");
     expect(rotuloFerramenta("mcp__outro__fazer")).toBe("Usou Outro");
     expect(rotuloFerramenta("")).toBe("Usou uma ferramenta");
+  });
+});
+
+describe("nomeDaFerramenta (NOD-73: o nome curto do aviso do vigia)", () => {
+  it("nativas, conectores, computador e desconhecidas", () => {
+    expect(nomeDaFerramenta("Bash")).toBe("Terminal");
+    expect(nomeDaFerramenta("mcp__nod__gmail__search_threads")).toBe("Gmail");
+    expect(nomeDaFerramenta("mcp__nod__computador_observar")).toBe("Computador");
+    expect(nomeDaFerramenta("mcp__nod__workspace_ler_texto")).toBe("Pasta de trabalho");
+    expect(nomeDaFerramenta("Ferramenta_nova")).toBe("Ferramenta_nova");
+    expect(nomeDaFerramenta("")).toBe("uma ferramenta");
   });
 });

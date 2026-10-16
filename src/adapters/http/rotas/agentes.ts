@@ -1,5 +1,6 @@
 import type { PreferenciaHarness } from "../../../contracts/harness.ts";
 import type { Escopo } from "../../../shared/types.ts";
+import type { IdHarness } from "../../../contracts/harness.ts";
 import { gerirAgente } from "../../../use-cases/gerir-agente.ts";
 import type { DonoAgente, FormaAgente, CorAgente } from "../../../contracts/agente.ts";
 import type { TipoMemoria } from "../../../contracts/memoria.ts";
@@ -10,6 +11,8 @@ import { editarPerfil } from "../../../use-cases/editar-perfil.ts";
 import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-agente.ts";
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
 import { mudarModoAprovacao } from "../../../use-cases/mudar-modo-aprovacao.ts";
+import { definirInteligenciaDoBot, lerInteligenciaDoBot } from "../../../use-cases/inteligencia.ts";
+import { decidirTrocaDeIa } from "../../../use-cases/trocas-de-ia.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, textoOpcional, type DepsRotas } from "./executar-caso.ts";
 
@@ -20,7 +23,7 @@ const ID = "(?<id>[^/]+)";
  * (dono no corpo → 403 dono_imutavel), Pin/Hide/Duplicate e memória. Cada handler: valida a forma,
  * chama o caso de uso, responde. Mutação devolve o que criou/alterou; o estado vivo chega por SSE.
  */
-export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>): Rota[] {
+export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Escopo, agenteId: string) => Promise<void>, prontosPorMaquina?: (escopo: Escopo) => Readonly<Record<string, readonly IdHarness[]>>): Rota[] {
   const executar = criarExecutor(d);
   return [
     { metodo: "PATCH", padrao: new RegExp(`^/agentes/${ID}/organizacao$`), async handler(ctx) {
@@ -64,6 +67,34 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
           dono: corpo.dono,
         });
         ctx.json(200, r);
+      },
+    },
+    {
+      // definido em 2026-10-10 (0068, emenda da ADR-036): a inteligência do bot — modo, IA fixa, ordem própria e o modelo e
+      // o raciocínio de cada IA (contrato em src/contracts/inteligencia.ts). Campo ausente não muda; `ordem: null` volta à
+      // ordem da pessoa. O PATCH acima continua aceitando o par antigo {harness, modelo, esforco}.
+      metodo: "GET",
+      padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
+      async handler(ctx) {
+        ctx.json(200, await executar(ctx.escopo, lerInteligenciaDoBot, { agenteId: ctx.params.id ?? "" }));
+      },
+    },
+    {
+      metodo: "PUT",
+      padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
+      async handler(ctx) {
+        // ADR-108 (revisão do PR 2, C6): as IAs prontas por máquina, para "levar as tasks" ao Automático.
+        ctx.json(200, await executar(ctx.escopo, definirInteligenciaDoBot, { agenteId: ctx.params.id ?? "", pedido: await ctx.corpo(), prontosPorMaquina: prontosPorMaquina?.(ctx.escopo) ?? {} }));
+      },
+    },
+    {
+      // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot — esperar, levar as tasks, ou (bot fixo) seguir noutra IA
+      // até a volta. Só a dona; quem chega primeiro vence (o segundo clique recebe `aplicada: false`).
+      metodo: "POST",
+      padrao: new RegExp(`^/agentes/${ID}/troca-de-ia$`),
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, decidirTrocaDeIa, { agenteId: ctx.params.id ?? "", decisao: corpo.decisao, ...(corpo.trocaId !== undefined ? { trocaId: corpo.trocaId } : {}) }));
       },
     },
     {

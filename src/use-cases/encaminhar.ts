@@ -66,6 +66,8 @@ export const encaminhar: CasoNod<Deps, "encaminhar"> = async (deps, input) => {
     payload: { kind: "handoff", de: de.id, para: para.id, motivo: input.motivo },
     confianca: "confiavel",
   });
+  // NOD-206: o turno de quem encaminha roda no mesmo executor que o do destinatário vai rodar; o plano grava o real.
+  const deQuem = await deps.repos.turnos.buscar(input.turnoId);
   const turno = await deps.repos.turnos.enfileirar({
     conversaId: input.conversaId,
     agenteId: para.id,
@@ -76,6 +78,7 @@ export const encaminhar: CasoNod<Deps, "encaminhar"> = async (deps, input) => {
     entradaConfianca: "nao_confiavel",
     modelo: para.modelo,
     harness: para.harness,
+    executor: deQuem?.executor ?? "catcher",
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno do destinatário não criado" });
   events.push(evento(deps, "sala_handoff", autoria, { de: de.id, para: para.id, salaId: sala.id, mensagemId: handoff?.id ?? null, turnoId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }));

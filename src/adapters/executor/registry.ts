@@ -1,8 +1,9 @@
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { HARNESS_LEGADO, HARNESSES } from "../../contracts/harness.ts";
 import type { Inventario } from "../../contracts/inventario.ts";
 import { montarAmbiente } from "../../domain/ambiente-executor.ts";
 import { log } from "../../obs/log.ts";
-import { caminhoAumentado, caminhoDoShellDeLogin, expandirTil, homeDaPessoa } from "./caminho.ts";
+import { camadasDoPath, expandirTil, homeDaPessoa, lerPathDoShell } from "./caminho.ts";
 import type { ConfigDriver, Driver, IdDriver, Instance, Registry } from "./spi.ts";
 
 /**
@@ -19,6 +20,8 @@ export type OpcoesRegistry = {
   home?: string;
   /** Config já montada (o boot monta UMA vez e reaproveita no interruptor: consultar o shell de login custa tempo). */
   cfg?: ConfigDriver;
+  /** Quanto esperar pelo PATH do shell real nesta chamada (lerPathDoShell); a leitura segue em segundo plano. */
+  esperaShellMs?: number;
 };
 
 export type RegistryDetalhado = {
@@ -36,12 +39,15 @@ export function nodHome(env: EnvRegistry, home: string): string {
 /** Config comum aos drivers a partir do env do processo: ambiente limpo + PATH aumentado + cwdBase. */
 export async function configDosDrivers(env: EnvRegistry, o: OpcoesRegistry = {}): Promise<ConfigDriver> {
   const home = o.home ?? homeDaPessoa(env);
-  const pathLogin = o.shellDeLogin === false ? null : await caminhoDoShellDeLogin(env.SHELL);
+  // revisto em 2026-10-09: o PATH do shell não segura mais o boot — espera pouco e, se não veio, a próxima config o traz.
+  const pathLogin = o.shellDeLogin === false ? null : await lerPathDoShell(env.SHELL, o.esperaShellMs);
   const limpo = montarAmbiente("local", env);
+  const camadas = camadasDoPath(env.PATH, home, pathLogin);
   return {
     bin: env.NOD_CLAUDE_BIN ? expandirTil(env.NOD_CLAUDE_BIN, home) : undefined,
     bins: { "codex-cli": env.NOD_CODEX_BIN ? expandirTil(env.NOD_CODEX_BIN, home) : undefined },
-    env: { ...limpo, PATH: caminhoAumentado(env.PATH, home, pathLogin), HOME: limpo.HOME ?? home },
+    env: { ...limpo, PATH: camadas.map((c) => c.dir).join(delimiter), HOME: limpo.HOME ?? home },
+    camadas,
     cwdBase: join(nodHome(env, home), "turnos"),
   };
 }
@@ -113,15 +119,37 @@ export async function criarRegistry(env: EnvRegistry, drivers: readonly Driver[]
 
 export type ExecutorPadrao = { id: IdDriver } | { id: null; motivo: string };
 
+export const VALIDOS_NOD_EXECUTOR = ["auto", "claude-cli", "codex-cli", "catcher"] as const;
+export type PedidoNodExecutor = (typeof VALIDOS_NOD_EXECUTOR)[number];
+
+/**
+ * NOD-160: o ÚNICO leitor de NOD_EXECUTOR (registry, boot e compor). Apara as pontas; o valor é exato (maiúscula
+ * não passa, para não esconder erro de digitação); ausente ou vazio vira null (regra do ambiente). Qualquer outro
+ * valor é `desconhecido`: quem chama falha fechado, nunca cai calado em outro driver.
+ */
+export function lerNodExecutor(env: EnvRegistry): { pedido: PedidoNodExecutor | null } | { desconhecido: string } {
+  const valor = env.NOD_EXECUTOR?.trim() ?? "";
+  if (!valor) return { pedido: null };
+  const valido = VALIDOS_NOD_EXECUTOR.find((v) => v === valor);
+  return valido ? { pedido: valido } : { desconhecido: valor };
+}
+
+export function motivoNodExecutorDesconhecido(valor: string): string {
+  return `NOD_EXECUTOR desconhecido: "${valor}" (válidos: ${VALIDOS_NOD_EXECUTOR.join(", ")})`;
+}
+
 /**
  * NOD_EXECUTOR escolhe; sem variável, catcher fora de produção e claude-cli em produção
- * (NODE_ENV=production). Só devolve um driver PRONTO; caso contrário diz por quê.
+ * (NODE_ENV=production). Só devolve um driver PRONTO; caso contrário diz por quê. Valor desconhecido → sem executor.
+ * No automático vale o primeiro harness integrado e pronto na ordem do catálogo (HARNESSES); nenhum = o do legado.
  */
 export function executorPadrao(env: EnvRegistry, registry: Registry): ExecutorPadrao {
-  const pedido = env.NOD_EXECUTOR;
+  const lido = lerNodExecutor(env);
+  if ("desconhecido" in lido) return { id: null, motivo: motivoNodExecutorDesconhecido(lido.desconhecido) };
+  const { pedido } = lido;
   const automatico = pedido === "auto" || (!pedido && env.NODE_ENV === "production");
-  const disponivel: IdDriver = registry["claude-cli"].estado === "pronto" ? "claude-cli" : registry["codex-cli"]?.estado === "pronto" ? "codex-cli" : "claude-cli";
-  const escolhido: IdDriver = automatico ? disponivel : pedido === "claude-cli" || pedido === "codex-cli" || pedido === "catcher" ? pedido : env.NODE_ENV === "production" ? "claude-cli" : "catcher";
+  const disponivel: IdDriver = HARNESSES.find((h) => h.integrado && registry[h.id]?.estado === "pronto")?.id ?? HARNESS_LEGADO;
+  const escolhido: IdDriver = automatico ? disponivel : pedido ?? "catcher";
   const registro = registry[escolhido];
   if (registro?.estado === "pronto") return { id: escolhido };
   return { id: null, motivo: `${escolhido} em sombra: ${registro?.motivo ?? MOTIVO_NAO_REGISTRADO}` };

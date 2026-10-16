@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
-import { autorizarComando } from "../../src/use-cases/autorizar-comando.ts";
+import { autorizarComando, COMANDO_MAX } from "../../src/use-cases/autorizar-comando.ts";
 import { decidir, entradaDaAprovacao, marcarEDecidir } from "../../src/use-cases/decidir.ts";
 import { liberarNaTarefa, terminalLiberadoNaTarefa } from "../../src/use-cases/liberar-na-tarefa.ts";
 import { agenteComConversa, autoriaPessoa } from "../helpers/fabricas.ts";
@@ -34,12 +34,12 @@ function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }, e
 async function cenario(trx: Trx) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
-  const turno = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "abra o PR", entradaConfianca: "confiavel", modelo: "m" });
+  const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "abra o PR", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano = planoDe({ turnoId: turno.id, agenteId, conversaId });
   const autorizar = (comando: string, p: PlanoTurno = plano) => autorizarComando(deps, { plano: p, comando });
   const retomada = async (de: string) => {
-    const t = await repos.turnos.enfileirar({ conversaId, agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: de });
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "m", retomaTurnoId: de });
     if (!t) throw new Error("retomada");
     return planoDe({ turnoId: t.id, agenteId, conversaId });
   };
@@ -105,7 +105,7 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       expect((await c.autorizar("git push", await c.retomada(c.turno.id))).data).toEqual({ permitir: true, porque: "liberado_na_tarefa" });
       // Liberar o terminal não libera o computador do bot.
       expect(await c.repos.turnos.computadorLiberado(c.turno.id)).toBe(false);
-      const outraTarefa = await c.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra", entradaConfianca: "confiavel", modelo: "m" });
+      const outraTarefa = await c.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "outra", entradaConfianca: "confiavel", modelo: "m" });
       expect("aguardar" in (await c.autorizar("git push", planoDe({ turnoId: outraTarefa?.id ?? "", agenteId: c.agenteId, conversaId: c.conversaId }))).data).toBe(true);
       // ADR-066: não há gate de rotina para vencer — o que segura a liberação é a marca de conteúdo de fora: depois
       // da web, no manual, o comando volta a pedir a pessoa.
@@ -121,6 +121,15 @@ describeIntegracao("terminal de verdade: cada comando passa pelo nod (ADR-055)",
       expect("aguardar" in (await c.autorizar("cat ~/.ssh/id_rsa")).data).toBe(true);
       await expect(c.autorizar("ls", { ...c.plano, nativas: ["Read"] })).rejects.toMatchObject({ codigo: "nao_permitido" });
       await expect(c.autorizar("   ")).rejects.toMatchObject({ codigo: "entrada_invalida" });
+    });
+  });
+
+  it("revisto em 2026-10-11: o heredoc que edita um arquivo grande (24 mil caracteres) vai à decisão; só o absurdo é recusado", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const c = await cenario(trx);
+      const heredoc = `python3 - <<'EOF'\np='a.ts'\ns=open(p).read()\ns=s.replace('''${"x".repeat(24_000)}''', '')\nopen(p,'w').write(s)\nEOF`;
+      expect("aguardar" in (await c.autorizar(heredoc)).data).toBe(true);
+      await expect(c.autorizar(`echo ${"x".repeat(COMANDO_MAX)}`)).rejects.toMatchObject({ codigo: "entrada_invalida" });
     });
   });
 

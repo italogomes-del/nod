@@ -33,7 +33,7 @@ describe("proxy com o artefato do nod (ADR-051)", () => {
     const repos = memoria.repos(MARLON);
     await repos.agentes.criar({ id: agenteId, nome: "Ada", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     const conversa = await repos.conversas.criar({ tipo: "propria", agenteId });
-    await repos.turnos.enfileirar({ id: turnoId, conversaId: conversa?.id ?? "", agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "checklist", entradaConfianca: "confiavel", modelo: "m" });
+    await repos.turnos.enfileirar({ executor: "catcher", id: turnoId, conversaId: conversa?.id ?? "", agenteId, origem: "conversa", prazoEm: agora() + 600_000, profundidade: 0, entradaTexto: "checklist", entradaConfianca: "confiavel", modelo: "m" });
     await repos.turnos.reivindicar({ machineId: "m1", agora: agora() });
 
     srv = await servidorDeTeste(rotasInternas({ dentro: memoria.dentro, tokens, agora }), { autorizarTokenTurno: tokens.autorizar });

@@ -1,0 +1,51 @@
+/**
+ * O erro do cliente REST e a classificação da falha (definido em 2026-10-13, NOD-215). Separado de api.ts para o reducer
+ * e os testes (tsconfig do servidor, sem DOM) importarem sem puxar `fetch`/`XMLHttpRequest`.
+ */
+/** NOD-174: quando o servidor não manda frase (proxy, corpo vazio), a pessoa lê isto — nunca "falha" solta. */
+export const FALHA_SEM_FRASE = "Algo deu errado. Tente de novo; se repetir, relate o problema.";
+/** NOD-215: a falha de transporte diz a causa — nunca mais "confira a conexão" para um servidor reiniciando. */
+export const FRASE_SEM_INTERNET = "Seu dispositivo está sem internet. Assim que voltar, tentamos de novo.";
+export const FRASE_SERVIDOR_INDISPONIVEL = "O servidor está reiniciando. Tentamos de novo sozinhos.";
+/** Proxy/balanceador respondendo no lugar do nod enquanto ele sobe (deploy): sem corpo do nod, é servidor fora. */
+const STATUS_DE_PROXY = new Set([502, 503, 504]);
+
+export class ErroApi extends Error {
+  readonly status: number;
+  readonly codigo: string;
+  readonly correlationId: string | null;
+  /** Método + caminho sem o tenant e sem query (NOD-215): vai para "Detalhes", nunca para a frase. */
+  readonly rota: string | null;
+  constructor(status: number, codigo: string, mensagem: string, correlationId: string | null = null, rota: string | null = null) {
+    super(mensagem);
+    this.name = "ErroApi";
+    this.status = status;
+    this.codigo = codigo;
+    this.correlationId = correlationId;
+    this.rota = rota;
+  }
+}
+
+/** Navegação/troca de tela cancelou a chamada: não é falha, ninguém precisa de aviso. */
+export const ehAbort = (e: unknown): boolean => typeof e === "object" && e !== null && (e as { name?: string }).name === "AbortError";
+
+export function rotaDe(metodo: string, url: string): string {
+  const caminho = (url.split("?")[0] ?? url).replace(/^\/api\/t\/[^/]+/, "");
+  return `${metodo.toUpperCase()} ${caminho === "" ? "/" : caminho}`;
+}
+
+/** O `fetch` rejeitou (ou o XHR deu onerror): o nod não respondeu. `onLine === false` é a única prova de sem internet. */
+export function falhaDeTransporte(rota: string): ErroApi {
+  const semInternet = typeof navigator !== "undefined" && (navigator as { onLine?: boolean }).onLine === false;
+  return semInternet
+    ? new ErroApi(0, "sem_internet", FRASE_SEM_INTERNET, null, rota)
+    : new ErroApi(0, "servidor_indisponivel", FRASE_SERVIDOR_INDISPONIVEL, null, rota);
+}
+
+/** Resposta de erro → ErroApi. 502/503/504 sem o corpo do nod viram servidor fora; com corpo, o código do servidor manda. */
+export function erroDaResposta(status: number, lido: unknown, rota: string): ErroApi {
+  const e = (typeof lido === "object" && lido !== null ? lido : {}) as { codigo?: string; mensagem?: string; correlation_id?: string | null };
+  if (e.codigo === undefined && STATUS_DE_PROXY.has(status)) return new ErroApi(status, "servidor_indisponivel", FRASE_SERVIDOR_INDISPONIVEL, null, rota);
+  return new ErroApi(status, e.codigo ?? "falha_interna", e.mensagem ?? FALHA_SEM_FRASE, e.correlation_id ?? null, rota);
+}
+

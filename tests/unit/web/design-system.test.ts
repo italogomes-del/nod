@@ -49,8 +49,9 @@ describe("executor indisponível vira aviso de erro com o próximo passo", () =>
     expect(html).toContain("Conectar IA");
   });
 
+  // NOD-213: "de volta" = sonda pronta POSTERIOR à negação (em 1 > criadoEm 0).
   it("com a IA de volta: sem botão, e diz para mandar a mensagem de novo", () => {
-    const html = renderMensagem(negacao, com({ estado: "pronto", versao: "2.1.0", em: 0 }));
+    const html = renderMensagem(negacao, com({ estado: "pronto", versao: "2.1.0", em: 1 }));
     expect(html).toContain("mande a mensagem de novo");
     expect(html).not.toContain("Conectar IA");
   });

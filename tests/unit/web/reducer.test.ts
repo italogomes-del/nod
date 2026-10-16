@@ -58,11 +58,12 @@ describe("reducer: hidratação e o que cada tela precisa", () => {
     expect(invalidacoesDaTela(estadoInicial)).toEqual(["frota", "sua-vez", "nao-lidos"]);
     let e = reduzir(estadoInicial, { tipo: "hidratar-frota", frota });
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } });
-    // Rotinas vêm junto com a conversa: elas moram no painel Detalhes, ao lado dela. O "a fazer" do bot também (ADR-064).
-    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1", "pendencias:a1", "rotinas", "conectores", "sua-vez", "nao-lidos"]);
+    // Rotinas vêm junto com a conversa: elas moram no painel Detalhes, ao lado dela. O "a fazer" (ADR-064) está desligado
+    // desde 2026-10-06 (web/lib/a-fazer.ts): a lista dele não é buscada.
+    expect(invalidacoesDaTela(e)).toEqual(["conversa:c1", "concessoes:a1", "rotinas", "conectores", "sua-vez", "nao-lidos"]);
     expect(conversaDaTela(e)).toBeNull();
     e = reduzir(e, { tipo: "invalidar", quais: ["conversa:c1"] });
-    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "pendencias:a1", "rotinas", "conectores", "sua-vez", "nao-lidos"]);
+    expect(invalidacoesDaTela(e)).toEqual(["concessoes:a1", "rotinas", "conectores", "sua-vez", "nao-lidos"]);
     e = reduzir(e, { tipo: "navegar", tela: { tipo: "sua-vez" } });
     // "Sua vez" traz os conectores desde 2026-09-24: o card da rotina diz se o app que ela precisa está conectado.
     expect(invalidacoesDaTela(e)).toEqual(["conectores", "sua-vez", "nao-lidos"]);

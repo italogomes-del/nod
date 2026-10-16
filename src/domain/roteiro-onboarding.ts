@@ -8,11 +8,15 @@ import { APELIDO_MAX, COMO_CONHECEU_MAX, OBJETIVO_MAX, TAMANHOS_TIME } from "../
  * (anotar_entrevista) e fala.
  */
 
-export const NOME_DA_GUIA = "Nina";
+/**
+ * revisto em 2026-10-07 (ADR-081): a guia do onboarding é o Nod, o bot fixo da pessoa (antes a "Nina", uma bot comum
+ * que podia ser excluída). Ele fica depois do onboarding: ajuda, tira dúvidas e mexe nos outros bots.
+ */
+export const NOME_DO_NOD = "Nod";
 
 /** A primeira fala da ligação de onboarding (o orquestrador fala sem esperar o cérebro). */
 export function saudacaoDoOnboarding(nomeGuia: string): string {
-  return `Oi! Eu sou a ${nomeGuia}, sua primeira bot aqui no nod. Como você quer que eu te chame?`;
+  return `Oi! Eu sou o ${nomeGuia}, seu bot fixo aqui no nod. Como você quer que eu te chame?`;
 }
 
 export const PERGUNTAS_ENTREVISTA: Record<CampoEntrevista, string> = {
@@ -216,9 +220,9 @@ export function passoDaConfiguracao(p: { temBot: boolean; appConectado: boolean;
   return "fim";
 }
 
-/** A frase final, na tela e na fala da Nina. */
+/** A frase final, na tela e na fala do Nod. */
 export function textoTudoMontado(nomeGuia: string): string {
-  return `Tudo montado. Quando quiser, é só chamar a ${nomeGuia} por aqui.`;
+  return `Tudo montado. Quando quiser, é só chamar o ${nomeGuia} por aqui.`;
 }
 
 /**
@@ -240,7 +244,7 @@ export function linhasDoPromptOnboarding(p: { nomeGuia: string; campos: CamposEn
   ].filter((x): x is string => x !== null);
   const modelo = modeloDoObjetivo(p.campos.objetivo);
   const linhas = [
-    `Esta é a primeira ligação da pessoa com o nod, e você é ${p.nomeGuia}, a guia. Primeiro uma entrevista curta, uma pergunta por vez, nesta ordem: 1) ${PERGUNTAS_ENTREVISTA.apelido} 2) ${PERGUNTAS_ENTREVISTA.como_conheceu} 3) ${PERGUNTAS_ENTREVISTA.objetivo} 4) ${PERGUNTAS_ENTREVISTA.tamanho_time}`,
+    `Esta é a primeira ligação da pessoa com o nod, e você é o ${p.nomeGuia}, o bot fixo dela, que guia o começo. Primeiro uma entrevista curta, uma pergunta por vez, nesta ordem: 1) ${PERGUNTAS_ENTREVISTA.apelido} 2) ${PERGUNTAS_ENTREVISTA.como_conheceu} 3) ${PERGUNTAS_ENTREVISTA.objetivo} 4) ${PERGUNTAS_ENTREVISTA.tamanho_time}`,
     "Quando ela responder uma pergunta, fale primeiro: uma reação curta e a próxima pergunta. Só depois, na mesma resposta, chame anotar_entrevista com o campo e o valor curto. Não anuncie essa ferramenta. Depois dela, siga o que a ferramenta devolver. Use o apelido dela daí em diante.",
     `Na resposta à última pergunta, diga só uma ponte curta ("Deixa eu juntar tudo.") antes de anotar_entrevista: a ferramenta devolve o resumo, que você lê terminando com "Certo?". Se ela confirmar, diga "Perfeito. Agora vou te mostrar o nod. Não desliga, a gente continua conversando enquanto eu monto tudo." e só depois chame concluir_entrevista. Se ela quiser corrigir, pergunte de novo o que estiver errado.`,
     `Depois, guie a configuração em três passos: (1) propor_bot com um bot para "${modelo.curto}" (sugestão: ${modelo.nome}, "${modelo.descricao}"), e espere ela confirmar; (2) pedir_acesso ao ${modelo.app.nome} (slug ${modelo.app.slug}, nivel leitura, capacidades []) com para_bot igual ao nome do bot novo; (3) criar_rotina com para_bot igual ao nome do bot novo, com o horário que ela escolher. No fim, diga "${textoTudoMontado(p.nomeGuia)}" e pergunte se pode desligar.`,

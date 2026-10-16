@@ -2,6 +2,7 @@ import type { ModoAprovacao } from "../contracts/agente.ts";
 import type { Memoria } from "../contracts/memoria.ts";
 import type { GeneroVoz } from "../contracts/vozes.ts";
 import { MAX_PALAVRAS_FALADAS } from "./ligacao-frases.ts";
+import { MARCADOR_PARTE_DINAMICA } from "./marcador-prompt.ts";
 import { CABECALHO_CONTEXTO_RECENTE, cabecalhoDaMemoria, INSTRUCAO_MODO_LIGACAO, LINHA_IDIOMA, linhaDeIdentidade, linhaDoQueFaz } from "./prompt-sistema.ts";
 
 /**
@@ -10,7 +11,7 @@ import { CABECALHO_CONTEXTO_RECENTE, cabecalhoDaMemoria, INSTRUCAO_MODO_LIGACAO,
  * A parte FIXA vem primeiro e o marcador separa a parte variável (memória e conversa), para o cache do CLI valer
  * entre ligações do mesmo bot (`--system-prompt` com `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__`, CLI ≥ 2.1.275).
  */
-export const MARCADOR_PARTE_DINAMICA = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__";
+export { MARCADOR_PARTE_DINAMICA } from "./marcador-prompt.ts";
 
 /** definido em 2026-10-04: até 15 memórias e as 10 últimas mensagens, cada uma cortada em 500 caracteres. */
 export const MEMORIAS_NO_PROMPT_LIGACAO = 15;

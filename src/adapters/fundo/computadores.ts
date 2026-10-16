@@ -3,7 +3,7 @@ import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, Resul
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { alteraComputador, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
+import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo } from "../../domain/modo-aprovacao.ts";
@@ -21,7 +21,9 @@ import type { Deps } from "../../use-cases/tipos.ts";
 
 type Dentro = <T>(escopo: Escopo, fn: (d: Deps) => Promise<T>) => Promise<T>;
 /** `saude`: o computador entrou ou saiu do ar — a frota (lateral, cabeçalho, painel) precisa reler. */
-type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void; agora?: () => number };
+type Opcoes = { executor(): "local" | "catcher"; dentro: Dentro; driver: DriverComputador; cifrar(s: string): string; decifrar(s: string): string; mudou(escopo: Escopo, agenteId: string, saude?: boolean): void; agora?: () => number;
+  /** NOD-200: guarda a última tela do turno para virar anexo da fala (NOD_CAPTURA_NO_TRANSCRIPT). Desligado, nada fica em memória. */
+  guardarTelas?: boolean };
 type Reserva = { computador: Computador; operacao: string; acao: AcaoComputador; registroId: string; turnoId?: string; aprovado: boolean };
 
 // definido em 2026-09-18: reserva confirmada ANTES do efeito; watchdog do runtime encerra em 55 s.
@@ -86,6 +88,12 @@ function comoErroDeDominio(e: unknown): unknown {
 const OBSERVACAO_TTL_MS = 30 * 60_000;
 const OBSERVACOES_MAX = 500;
 const AVISO_TELA_IGUAL = "Tela igual à anterior; use computador_observar com forcar: true para vê-la de novo.";
+/**
+ * definido em 2026-10-08 (NOD-200): a última tela do turno, para anexar à fala do bot no assentar. Fica 2 h
+ * (turno longo com aprovação no meio) e no máximo 200 turnos (sai o mais antigo); o assentar a toma e esquece.
+ */
+const TELA_DO_TURNO_TTL_MS = 2 * 60 * 60_000;
+const TELAS_DO_TURNO_MAX = 200;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /** "O computador está fora do ar desde …" para o agente, sem tocar no Docker (falha rápida). */
@@ -94,8 +102,22 @@ function foraDoArParaAgente(c: Computador): { erro: MotivoFalhaComputador; instr
   return { erro: motivo, instrucao: `O computador está fora do ar desde ${new Date(c.indisponivelDesde ?? 0).toISOString()}: ${MOTIVO_FALHA_EM_PORTUGUES[motivo]}. A pessoa já foi avisada. Não tente usá-lo neste turno; siga com os acessos que você tem e diga em uma frase o que ficou de fora.` };
 }
 
+/**
+ * definido em 2026-10-07 (ADR-083, S5): o computador é um por bot (ADR-037), e com tasks em paralelo a segunda que o
+ * pede encontra a reserva da primeira. Antes isso subia como 409, e o proxy tratava como servidor fora do ar. Agora
+ * volta como resultado para o modelo, com quem está usando e quando tentar de novo; nenhuma das duas falha.
+ */
+const TENTE_EM_MIN_S = 5;
+const TENTE_EM_MAX_S = 60;
+function ocupadoParaAgente(emUsoPor: string, ocupadoAte: number, agora: number): string {
+  const tenteEmS = Math.min(TENTE_EM_MAX_S, Math.max(TENTE_EM_MIN_S, Math.ceil((ocupadoAte - agora) / 1000)));
+  return JSON.stringify({ erro: "computador_ocupado", emUsoPor, tenteEmS, instrucao: `Seu computador está em uso por ${emUsoPor}. Nada foi executado. Siga com o que dá sem ele e tente de novo em ${tenteEmS} s; não diga que o computador está fora do ar.` });
+}
+
 export function criarComputadores(o: Opcoes) {
   const agora = o.agora ?? Date.now;
+  /** S5: o turno que pediu o computador ocupado e quem o segurava, até a próxima ação dele passar (TrabalhoDto). */
+  const esperando = new Map<string, string>();
   const observacoes = new Map<string, HashesObservacao & { em: number }>();
   const chaveObservacao = (turnoId: string, computadorId: string) => `${turnoId}:${computadorId}`;
   /** O modelo pode não ter a tela no contexto (aprovação, pessoa no controle): a próxima vai completa. */
@@ -106,6 +128,18 @@ export function criarComputadores(o: Opcoes) {
     observacoes.delete(chave);
     observacoes.set(chave, { ...hashes, em: agora() });
     for (const [k, v] of observacoes) if (observacoes.size > OBSERVACOES_MAX || agora() - v.em > OBSERVACAO_TTL_MS) observacoes.delete(k); else break;
+  }
+  /** NOD-200: base64 da última tela do turno (qualquer computador), antes da dedup. */
+  const telasDoTurno = new Map<string, { imagem: string; em: number }>();
+  function guardarTela(turnoId: string, imagem: string): void {
+    telasDoTurno.delete(turnoId);
+    telasDoTurno.set(turnoId, { imagem, em: agora() });
+    for (const [k, v] of telasDoTurno) if (telasDoTurno.size > TELAS_DO_TURNO_MAX || agora() - v.em > TELA_DO_TURNO_TTL_MS) telasDoTurno.delete(k); else break;
+  }
+  function ultimaTela(turnoId: string): string | null {
+    const v = telasDoTurno.get(turnoId);
+    if (v && agora() - v.em > TELA_DO_TURNO_TTL_MS) { telasDoTurno.delete(turnoId); return null; }
+    return v?.imagem ?? null;
   }
   function ultimaObservacao(chave: string): HashesObservacao | undefined {
     const v = observacoes.get(chave);
@@ -231,11 +265,18 @@ export function criarComputadores(o: Opcoes) {
       if (c) await o.driver.parar(c.id);
       o.mudou(escopo, agenteId);
     },
+    /**
+     * definido em 2026-10-07 (NOD-192): abrir o painel só lê — sem FOR UPDATE (não disputa com o turno nem com uma
+     * ação do mesmo bot) e sem criar a linha. Sem computador, devolve o padrão desligado e pergunta ao driver só o
+     * ambiente (Docker, cofre, imagem): não há container para inspecionar. A 1ª ação cria, em `obter`.
+     */
     async consultar(escopo: Escopo, agenteId: string): Promise<ComputadorDto> {
       const c = await o.dentro(escopo, async (d) => {
-        const computador = await obter(d, agenteId);
-        return { computador, atividade: await d.repos.computadores.atividade(computador.id) };
+        const computador = await d.repos.computadores.buscarDoAgente(agenteId);
+        if (computador === undefined) throw new ErroDeDominio("nao_encontrado");
+        return computador && { computador, atividade: await d.repos.computadores.atividade(computador.id) };
       });
+      if (!c) return { computador: computadorPadrao(agenteId), ativo: false, atividade: [], ...await o.driver.ambiente() };
       return { ...c, ...await o.driver.estado(c.computador.id) };
     },
     async configurar(escopo: Escopo, agenteId: string, operacao: string): Promise<void> {
@@ -323,6 +364,17 @@ export function criarComputadores(o: Opcoes) {
         if (c.indisponivelDesde !== null) return { ok: true, isError: true, conteudo: JSON.stringify(foraDoArParaAgente(c)), confianca: "confiavel" };
         if (c.controle !== "bot") { esquecerObservacao(plano.turnoId, c.id); return { ok: true, conteudo: JSON.stringify({ estado: "aguardando_pessoa", instrucao: "A pessoa está com o computador. Encerre o turno e aguarde a devolução." }), confianca: "confiavel" }; }
         const args = argumentos as Record<string, unknown>;
+        // ADR-083 (S5): ocupado por outra ação (outra task do bot, a conversa ou a pessoa) volta como resultado.
+        if (c.ocupadoAte && c.ocupadoAte > d.agora()) {
+          const uso = (await d.repos.computadores.emUsoPor(c.id)) ?? { titulo: "outra tarefa", deFora: false };
+          esperando.set(plano.turnoId, uso.titulo);
+          // Turno que acabou esperando não volta para tirar a marca: guarda as 500 mais novas.
+          if (esperando.size > 500) esperando.delete(esperando.keys().next().value!);
+          // Revisão do épico (S24, 2026-10-08): o título de uma task de colega (ou que leu conteúdo de fora) é texto de
+          // fora — o resultado vai marcado não confiável, como todo conteúdo de fora que entra no turno.
+          return { ok: true, isError: true, conteudo: ocupadoParaAgente(uso.titulo, c.ocupadoAte, d.agora()), confianca: uso.deFora ? "nao_confiavel" : "confiavel" };
+        }
+        esperando.delete(plano.turnoId);
         if (nome === "computador_pedir_ajuda") {
           livre(c, d.agora());
           const motivo = String(args.motivo).slice(0, 1000);
@@ -366,6 +418,8 @@ export function criarComputadores(o: Opcoes) {
         let imagem = r.tela?.imagem;
         let tela: Record<string, unknown> | undefined = r.tela ? { ...r.tela, imagem: undefined } : undefined;
         let aviso: string | undefined;
+        // NOD-200: a captura é a tela que o bot viu, inclusive a repetida que a dedup abaixo omite ao modelo.
+        if (o.guardarTelas && !isError && r.tela?.imagem && resultado.computador.controle === "bot") guardarTela(plano.turnoId, r.tela.imagem);
         // NOD-161: a tela igual à última entregue no turno sai sem imagem/texto. Resultado com erro não
         // conta como entregue e sai inteiro; quadro, url, título, abas e diálogo saem sempre.
         if (r.tela && !isError) {
@@ -381,6 +435,16 @@ export function criarComputadores(o: Opcoes) {
       } catch (e) {
         return { ok: true, isError: true, conteudo: JSON.stringify(erroDaFerramenta(nome, e)), confianca: "confiavel" };
       }
+    },
+    /** NOD-200: a última tela guardada do turno (base64), sem esquecer; null se não há. */
+    ultimaTela,
+    /** NOD-200: a ponte chama depois do assentar confirmado (serviço `capturas.esquecer`). */
+    esquecerTurno(turnoId: string): void {
+      telasDoTurno.delete(turnoId);
+    },
+    /** ADR-083 (S5): quem segurava o computador quando este turno o pediu pela última vez; null = não espera. */
+    esperandoPor(turnoId: string): string | null {
+      return esperando.get(turnoId) ?? null;
     },
     async executarAprovado(p: Escopo & { agenteId: string; turnoId: string; acaoId: string }): Promise<void> {
       const { r, tipo } = await o.dentro(p, async (d) => {

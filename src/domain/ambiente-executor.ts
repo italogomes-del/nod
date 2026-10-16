@@ -8,7 +8,11 @@ export type RegimeAmbiente = "local" | "servidor";
  * NOD_.* também sai: o filho não vê segredo de sessão, URL do banco nem chave de cifra.
  */
 const PREFIXOS_NEGADOS = ["CLAUDE_CODE_", "ANTHROPIC_", "NOD_"] as const;
-const NOMES_NEGADOS = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"] as const;
+/**
+ * revisto em 2026-10-09 (revisão do PR 1, ADR-093): ELECTRON_RUN_AS_NODE também sai. Com ela herdada, todo app Electron
+ * que um bot abrisse viraria node; quem precisa do Electron como node (o proxy MCP, o hook) a recebe explícita.
+ */
+const NOMES_NEGADOS = ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "ELECTRON_RUN_AS_NODE"] as const;
 
 /** Regime SERVIDOR: parte de {} e copia só a allowlist (ADR-015 B). Sem chave de fornecedor nesta rodada. */
 const ALLOWLIST_SERVIDOR = ["PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR"] as const;

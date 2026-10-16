@@ -9,6 +9,11 @@ export const ICONE = {
   plug: svg('<path d="M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21"/>'),
   sino: svg('<path d="M18 9a6 6 0 0 0-12 0c0 6.5-2.5 7.5-2.5 8.5h17c0-1-2.5-2-2.5-8.5M10 20.5h4"/>'),
   codigo: svg('<path d="M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5l-3 14"/>'),
+  // ADR-085: Este Mac — o medidor de quanto o Mac está sendo usado.
+  medidor: svg('<path d="M4 16a8 8 0 0 1 16 0M12 16l3.5-4.5M3 20h18"/>'),
+  /** ADR-090: as máquinas do motor — o Mac (laptop) e a VM Linux (servidor). */
+  laptop: svg('<rect x="4" y="5" width="16" height="10.5" rx="1.6"/><path d="M2.5 18.5h19"/>'),
+  servidor: svg('<rect x="3.5" y="4" width="17" height="6.5" rx="1.8"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"/><path d="M7 7.25h.01M7 16.75h.01"/>'),
   monitor: svg('<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>'),
   agentes: svg('<rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/>'),
   bandeira: svg('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),
@@ -30,4 +35,12 @@ export const ICONE = {
   proxima: svg('<path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 3.5V8h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20.5V16h4.5"/>', 12),
   abrir: svg('<path d="m6 9 6 6 6-6"/>', 14),
   recolher: svg('<path d="m18 15-6-6-6 6"/>', 14),
+  // ADR-102 (2026-10-13): a lista de contas de IA (Provedores de IA).
+  alca: svg('<circle cx="9" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1" fill="currentColor" stroke="none"/>', 16),
+  pessoa: svg('<circle cx="12" cy="8" r="3.6"/><path d="M5 20c.9-3.6 3.7-5.6 7-5.6s6.1 2 7 5.6"/>', 12),
+  cadeado: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', 13),
+  lapis: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 15),
+  info: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>', 15),
+  sair: svg('<path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4M6 12h10"/>', 15),
+  lixo: svg('<path d="M4.5 7h15M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>', 15),
 };

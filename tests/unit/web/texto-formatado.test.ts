@@ -138,3 +138,194 @@ describe("soLinks: a linha 'agora' do cartão de atividade (2026-10-03)", () => 
     expect(html.endsWith(".")).toBe(true);
   });
 });
+
+/** NOD-201: bloco certo durante o streaming e sem a linha da linguagem. */
+describe("bloco de código aberto e linha da linguagem (NOD-201)", () => {
+  const bloco = (html: string): string[] => html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g) ?? [];
+
+  it("cerca aberta até o fim vira código: nada dentro vira lista, tabela ou negrito; o texto antes segue igual", () => {
+    const html = textoFormatado("antes\n```ts\n- a\n| x | y |\n|---|---|\n**b**");
+    expect(html).toContain("<pre><code>- a\n| x | y |\n|---|---|\n**b**</code></pre>");
+    for (const proibido of ["<ul>", "<li>", "md-tabela", "<strong>"]) expect(html).not.toContain(proibido);
+    expect(html).toBe(`${textoFormatado("antes\n")}<pre><code>- a\n| x | y |\n|---|---|\n**b**</code></pre>`);
+  });
+
+  it("sem salto: o bloco aberto e o mesmo bloco fechado têm o mesmo <pre><code>", () => {
+    const aberto = textoFormatado("x\n```ts\nconst a = 1\n");
+    const fechado = textoFormatado("x\n```ts\nconst a = 1\n```");
+    expect(bloco(aberto)).toEqual(["<pre><code>const a = 1\n</code></pre>"]);
+    expect(bloco(aberto)).toEqual(bloco(fechado));
+    expect(aberto).toBe(fechado);
+  });
+
+  it("segurança: HTML na cerca aberta sai escapado", () => {
+    const html = textoFormatado("```\n<img src=x onerror=alert(1)>");
+    expect(html).toBe("<pre><code>&lt;img src=x onerror=alert(1)&gt;</code></pre>");
+    expect(html).not.toContain("<img");
+  });
+
+  it("dois blocos: o primeiro fechado, o meio formatado e o segundo aberto como código", () => {
+    expect(textoFormatado("```\na\n```\nmeio **m**\n```\nb")).toBe("<pre><code>a\n</code></pre><br>meio <strong>m</strong><br><pre><code>b</code></pre>");
+  });
+
+  it("linguagem com +, - e #: a linha sai do código; primeira linha que não é linguagem fica (escapada)", () => {
+    expect(textoFormatado("```c++\nint x;\n```")).toBe("<pre><code>int x;\n</code></pre>");
+    expect(textoFormatado("```objective-c\n@interface A\n```")).toBe("<pre><code>@interface A\n</code></pre>");
+    expect(textoFormatado("```shell-session\n$ ls\n```")).toBe("<pre><code>$ ls\n</code></pre>");
+    expect(textoFormatado("```c#\nvar a;\n```")).toBe("<pre><code>var a;\n</code></pre>");
+    const html = textoFormatado("```\"><img src=x>\nx\n```");
+    expect(html).toBe("<pre><code>&quot;&gt;&lt;img src=x&gt;\nx\n</code></pre>");
+    expect(html).not.toContain("<img");
+  });
+
+  it("cerca recém-aberta só com a linguagem, sem \\n: o corpo sai vazio, sem a palavra piscar", () => {
+    expect(textoFormatado("```ts")).toBe("<pre><code></code></pre>");
+    expect(textoFormatado("x\n```ty")).toBe("x<br><pre><code></code></pre>");
+    expect(textoFormatado("x\n```")).toBe("x<br><pre><code></code></pre>");
+  });
+
+  it("primeira linha com espaço não é linguagem e continua dentro do código", () => {
+    expect(textoFormatado("```não é linguagem\nx\n```")).toBe("<pre><code>não é linguagem\nx\n</code></pre>");
+  });
+
+  it("crases dentro do bloco aberto ficam literais", () => {
+    expect(textoFormatado("```\nuse `x` e *y*")).toBe("<pre><code>use `x` e *y*</code></pre>");
+  });
+
+  it("texto sem cerca sai idêntico ao de antes (esperado gerado com o formatar da main 43a4b3b)", () => {
+    expect(textoFormatado("um *dois*\n\ntrês")).toBe("um <em>dois</em><br><br>três");
+    expect(textoFormatado("## Resumo\n- a\n- b")).toBe('<p class="md-titulo">Resumo</p><ul class="md-lista"><li>a</li><li>b</li></ul>');
+    expect(textoFormatado("| a | b |\n|---|---|\n| 1 | 2 |")).toMatch(/^<div class="md-tabela"><div class="md-tabela-rolagem"><table><thead><tr><th class="curta">a<\/th>/);
+    expect(textoFormatado("use `x` aqui")).toBe("use <code>x</code> aqui");
+    expect(textoFormatado("dois `` crases")).toBe("dois `` crases");
+  });
+
+  it("cerca de fechamento partida (1 ou 2 crases no fim) não pisca dentro do código", () => {
+    expect(textoFormatado("```ts\nconst a = 1\n`")).toBe("<pre><code>const a = 1\n</code></pre>");
+    expect(textoFormatado("```ts\nconst a = 1\n``")).toBe("<pre><code>const a = 1\n</code></pre>");
+    expect(textoFormatado("```\nuse `x`")).toBe("<pre><code>use `x`</code></pre>");
+  });
+
+  // NOD-204: o mesmo teste roda também com aoVivo (o esperado da versão normal não muda).
+  it.each([false, true])("streaming caractere a caractere: o código de cada quadro é prefixo do código final (aoVivo: %s)", (aoVivo) => {
+    const final = "Segue:\n```ts\n- a\n- b\n| x | y |\n|---|---|\n**n**\nconst a: number = 1;\n```\nPronto, **ok**.";
+    const codigoDe = (texto: string): string | undefined => /<pre><code>([\s\S]*?)<\/code><\/pre>/.exec(textoFormatado(texto, { aoVivo }))?.[1];
+    const doFinal = codigoDe(final) ?? "";
+    expect(doFinal).toBe("- a\n- b\n| x | y |\n|---|---|\n**n**\nconst a: number = 1;\n");
+    for (let i = final.indexOf("```") + 3; i <= final.length; i++) {
+      const quadro = final.slice(0, i);
+      expect(doFinal.startsWith(codigoDe(quadro) ?? "∅"), JSON.stringify(quadro)).toBe(true);
+    }
+  });
+});
+
+/** NOD-204: ao vivo, a cerca partida (colada no código ou ainda abrindo) não aparece por um quadro. */
+describe("cerca partida só ao vivo (NOD-204)", () => {
+  const vivo = (texto: string): string => textoFormatado(texto, { aoVivo: true });
+
+  it("A e B: bloco aberto com 1 ou 2 crases coladas no código, ao vivo, não as mostra", () => {
+    expect(vivo("```ts\nfoo()`")).toBe("<pre><code>foo()</code></pre>");
+    expect(vivo("```ts\nfoo()``")).toBe("<pre><code>foo()</code></pre>");
+  });
+
+  it("C e D: prosa terminando em começo de linha + 1 ou 2 crases, ao vivo, não as mostra", () => {
+    expect(vivo("Segue:\n`")).toBe("Segue:<br>");
+    expect(vivo("Segue:\n``")).toBe("Segue:<br>");
+  });
+
+  it("E e F: sem aoVivo, igual à main 2f05de3", () => {
+    expect(textoFormatado("```ts\nfoo()`")).toBe("<pre><code>foo()`</code></pre>");
+    expect(textoFormatado("```ts\nfoo()``")).toBe("<pre><code>foo()``</code></pre>");
+    expect(textoFormatado("Segue:\n`")).toBe("Segue:<br>`");
+    expect(textoFormatado("Segue:\n``")).toBe("Segue:<br>``");
+    expect(textoFormatado("```ts\nfoo()`", { aoVivo: false })).toBe("<pre><code>foo()`</code></pre>");
+    expect(textoFormatado("Segue:\n`", { aoVivo: false })).toBe("Segue:<br>`");
+  });
+
+  it("G: streaming caractere a caractere, ao vivo: nenhum quadro tem crase e o código de cada quadro é prefixo do final", () => {
+    const final = "Segue:\n```ts\nconst a = 1;\nfoo()```\nPronto.";
+    const codigoDe = (html: string): string | undefined => /<pre><code>([\s\S]*?)<\/code><\/pre>/.exec(html)?.[1];
+    const htmlFinal = vivo(final);
+    expect(htmlFinal).not.toContain("`");
+    expect(htmlFinal).toBe(textoFormatado(final));
+    const doFinal = codigoDe(htmlFinal) ?? "";
+    expect(doFinal).toBe("const a = 1;\nfoo()");
+    for (let i = 1; i <= final.length; i++) {
+      const quadro = final.slice(0, i);
+      const html = vivo(quadro);
+      expect(html, JSON.stringify(quadro)).not.toContain("`");
+      const codigo = codigoDe(html);
+      if (codigo !== undefined) expect(doFinal.startsWith(codigo), JSON.stringify(quadro)).toBe(true);
+    }
+  });
+
+  // QA da NOD-204: a cerca dentro de item de lista vem indentada ("1. Instale:\n   ```bash") e a crase aparecia por
+  // um quadro ("<li>Instale: `</li>") antes da terceira chegar.
+  it.each([
+    ["lista numerada, 3 espaços", "1. Instale:\n   ```bash\nnpm i\n   ```\n2. Rode."],
+    ["lista com hífen, 2 espaços", "- Passo:\n  ```sh\nmake\n  ```\nFim."],
+    ["1 espaço", "Segue:\n ```ts\nconst a = 1;\n```\nPronto."],
+  ])("cerca indentada (%s), ao vivo: nenhum quadro tem crase e o código de cada quadro é prefixo do final", (_nome, final) => {
+    const codigoDe = (html: string): string | undefined => /<pre><code>([\s\S]*?)<\/code><\/pre>/.exec(html)?.[1];
+    const htmlFinal = vivo(final);
+    expect(htmlFinal).not.toContain("`");
+    expect(htmlFinal).toBe(textoFormatado(final));
+    const doFinal = codigoDe(htmlFinal) ?? "";
+    for (let i = 1; i <= final.length; i++) {
+      const quadro = final.slice(0, i);
+      const html = vivo(quadro);
+      expect(html, JSON.stringify(quadro)).not.toContain("`");
+      const codigo = codigoDe(html);
+      if (codigo !== undefined) expect(doFinal.startsWith(codigo), JSON.stringify(quadro)).toBe(true);
+    }
+  });
+
+  it("cerca indentada partida, sem aoVivo: as crases continuam aparecendo (só o streaming esconde)", () => {
+    expect(textoFormatado("1. Instale:\n   `")).toContain("`");
+    expect(textoFormatado("- Passo:\n  ``")).toContain("``");
+  });
+
+  it("cache: mesma chave e mesmo texto, com e sem aoVivo, cada chamada devolve o próprio HTML (nas duas ordens)", () => {
+    const texto = "Segue:\n`";
+    expect(textoFormatado(texto, { chave: "nod-204:a", aoVivo: true })).toBe("Segue:<br>");
+    expect(textoFormatado(texto, { chave: "nod-204:a" })).toBe("Segue:<br>`");
+    expect(textoFormatado(texto, { chave: "nod-204:a", aoVivo: true })).toBe("Segue:<br>");
+
+    expect(textoFormatado(texto, { chave: "nod-204:b" })).toBe("Segue:<br>`");
+    expect(textoFormatado(texto, { chave: "nod-204:b", aoVivo: true })).toBe("Segue:<br>");
+    expect(textoFormatado(texto, { chave: "nod-204:b" })).toBe("Segue:<br>`");
+  });
+
+  it("suposição aceita: \"```\\nuse `x`\" ao vivo mostra \"use `x\" por um quadro; sem aoVivo continua \"use `x`\"", () => {
+    expect(vivo("```\nuse `x`")).toBe("<pre><code>use `x</code></pre>");
+    expect(textoFormatado("```\nuse `x`")).toBe("<pre><code>use `x`</code></pre>");
+  });
+
+  it("cerca com linguagem e crase colada, ou quatro crases: corpo vazio, sem piscar e sem quebrar", () => {
+    expect(vivo("```ts`")).toBe("<pre><code></code></pre>");
+    expect(vivo("````")).toBe("<pre><code></code></pre>");
+    expect(vivo("x\n````")).toBe("x<br><pre><code></code></pre>");
+  });
+
+  it("prosa: crase no fim mas fora do começo da linha não muda; prosa no meio do texto não muda", () => {
+    expect(vivo("use `x`")).toBe(textoFormatado("use `x`"));
+    expect(vivo("use `x")).toBe(textoFormatado("use `x"));
+    expect(vivo("a\n`\n```\nb\n```\nfim")).toBe(textoFormatado("a\n`\n```\nb\n```\nfim"));
+  });
+
+  it("lista seguida de cerca abrindo: ao vivo, só a lista, sem <br> sobrando", () => {
+    expect(vivo("- item\n`")).toBe('<ul class="md-lista"><li>item</li></ul>');
+    expect(vivo("- item\n``")).toBe('<ul class="md-lista"><li>item</li></ul>');
+  });
+
+  it("texto que fica vazio depois de tirar a crase: string vazia, sem erro", () => {
+    expect(vivo("`")).toBe("");
+    expect(vivo("``")).toBe("");
+  });
+
+  it("bloco fechado e texto sem crase no fim: ao vivo, igual ao normal", () => {
+    for (const t of ["```ts\nfoo()```", "Segue:\n```ts\na\n```\nPronto, **ok**.", "um *dois*\n\ntrês", "## Resumo\n- a\n- b"]) {
+      expect(vivo(t), JSON.stringify(t)).toBe(textoFormatado(t));
+    }
+  });
+});

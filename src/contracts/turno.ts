@@ -1,3 +1,4 @@
+import type { Executor } from "./evento.ts";
 import type { PreferenciaHarness } from "./harness.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { CausaSemIa } from "./inventario.ts";
@@ -5,11 +6,9 @@ import type { Confianca } from "./mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoSemNovidade } from "./motivos.ts";
 import type { CatalogoDeComandos } from "./comandos.ts";
 import type { ExecucaoRaioX } from "./raio-x.ts";
+import type { UsoDoPlano } from "./uso-do-plano.ts";
 
-/**
- * Os quatro sinais write-ahead (ADR-009) — definição ÚNICA, usada pelo turno, pelo SPI e pela ponte.
- * promptSubmitted é gravado ANTES de escrever no stdin do CLI; viajam a cada renovação de lease.
- */
+/** Os quatro sinais write-ahead (ADR-009), definição ÚNICA (turno, SPI, ponte); promptSubmitted antes do stdin do CLI. */
 export type SinaisTurno = {
   attempted: boolean;
   rejected: boolean;
@@ -68,11 +67,14 @@ export type Turno = {
   custoUsd: number | null;
   modelo: string;
   harness?: PreferenciaHarness;
+  executor: Executor; // NOD-206: onde roda. Nasce com o palpite de quem enfileirou; o plano grava o real (registrarExecutor)
   criadoEm: EpochMs;
   /** Fala da pessoa que disparou o turno (0024). Não é `mensagens.turno_id`, que é a fala que o turno produziu. */
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
   absorvidoPor?: string | null;
+  trabalhoId?: string | null; // ADR-083: o trabalho deste turno; null = turno da conversa
+  acordarEm?: number | null; // ADR-086: a volta marcada ("me chame às 16:00") — a fila só a entrega a partir daqui
   /**
    * Pessoa que PEDIU o trabalho (0028, ADR-047/ADR-025). Preenchido só no turno de delegação: a autoria do
    * plano sai com `sob_procuracao_de` dela. Ausente/null = a pessoa falou direto, ou ninguém pediu.
@@ -101,8 +103,14 @@ export type ResultadoTurno = {
   custoUsd: number | null;
   tokens: TokensTurno;
   ferramentasChamadas: string[];
-  /** result.permission_denials[].tool_name: negação de permissão NÃO é erro no CLI (s4b). */
+  /** permission_denials[].tool_name (negar NÃO é erro no CLI, s4b); `negacoesDoNod` (2026-10-11): o motivo do hook do nod. */
   negacoesPermissao: string[];
+  negacoesDoNod?: { nome: string; motivo: string }[];
+  /**
+   * NOD-264 (C20): por que o turno acabou sem `result` — `renovacao_negada:<motivo>`, `interrompido_pelo_driver`,
+   * `reinicio_do_motor`, `sinal:<SIG>` ou `exit:<n>`. Só código (nunca texto do CLI); vai em `turno_interrompido.dados.causa`.
+   */
+  causa?: string;
   /** Motivo cru da falha, só para diagnóstico em log (0005: antes o `erro_execucao` chegava sem causa). */
   erroCru?: string | null;
   /**
@@ -114,79 +122,45 @@ export type ResultadoTurno = {
   execucao?: ExecucaoRaioX;
   /** O "/" do chat (0038): o catálogo do Mac, só quando mudou desde a última entrega deste app. */
   comandos?: CatalogoDeComandos;
+  /** NOD-179: o uso do plano que o CLI informou no turno (último `rate_limit`). Ausente quando o CLI não informou. */
+  usoDoPlano?: UsoDoPlano;
+  /** NOD-171: com `motivoFalha` `limite_do_plano`, quando o plano volta a funcionar (epoch ms); `null` se o CLI não disse. */
+  limiteVoltaEm?: number | null;
+  /**
+   * definido em 2026-10-12 (ADR-101): com `limite_do_plano`, o que o Mac decidiu sobre as CONTAS da IA. Só posições
+   * ("conta 1", "conta 2"); apelido, e-mail e plano ficam no Mac (ADR-019). Ausente = a IA tem uma conta só no nod.
+   */
+  contaNoLimite?: ContaNoLimite;
+  /**
+   * ADR-102 (R6 da revisão, 2026-10-13): o plano mandou usar uma conta que a máquina não tem mais (saiu dela entre o
+   * anúncio e o turno). O servidor apaga o vínculo e refaz o turno uma vez noutra conta.
+   */
+  contaAusente?: true;
 };
+
+/**
+ * definido em 2026-10-12 (ADR-101 item 6): `trocou` = "Trocar sozinho" ligado e o turno deve ser refeito na conta `para`;
+ * `perguntar` = há conta livre e a pessoa escolhe; `todas_no_limite` = nenhuma livre. `foraDaTroca`: as livres que a troca
+ * sozinha pulou (corporativas não marcadas). `voltaEm`: na troca e na pergunta, quando a conta `de` volta; em todas, a
+ * primeira que volta.
+ */
+export type ContaNoLimite =
+  | { tipo: "trocou"; de: number; para: number; voltaEm: number | null; foraDaTroca: number[] }
+  | { tipo: "perguntar"; de: number; livres: number[]; foraDaTroca: number[]; voltaEm: number | null }
+  | { tipo: "todas_no_limite"; noLimite: number[]; voltaEm: number | null };
 
 /** Lista de tarefas do bot (TaskCreate/TaskUpdate do Claude Code), no cartão de atividade (domain/tarefas-do-bot.ts). */
 export const ESTADOS_DA_TAREFA = ["pendente", "andamento", "feita"] as const;
 export type EstadoDaTarefa = (typeof ESTADOS_DA_TAREFA)[number];
 export type TarefaDoBot = { id: string; titulo: string; estado: EstadoDaTarefa };
 
-/**
- * Evento já interpretado de uma linha do `--output-format stream-json` (mapa-cli 2026-09-16).
- * Tipos/subtipos desconhecidos viram 'ignorado' em vez de falhar o parser.
- */
-export type EventoStream =
-  /** `sessaoCli` é null só no catcher (0005): ele não abre sessão real, e o classificador não pode promover um marcador a --resume. */
-  | {
-      tipo: "init";
-      sessaoCli: string | null;
-      ferramentas: string[];
-      modelo: string;
-      versaoCli: string;
-      apiKeySource: string;
-      /** O "/" do chat (definido em 2026-09-28): o que o CLI carregou. Ausentes no Codex e no catcher. */
-      skills?: string[];
-      comandos?: string[];
-      comandosSoDoTerminal?: string[];
-      plugins?: { nome: string; caminho: string }[];
-    }
-  | { tipo: "delta"; texto: string }
-  /**
-   * Bloco de texto COMPLETO de uma mensagem do assistente (definido em 2026-09-28). Só compõe a fala no
-   * fim do turno (classificarResultado); o texto ao vivo continua saindo dos `delta`, e ninguém publica
-   * este evento — republicá-lo duplicaria o texto no cartão de atividade.
-   */
-  | { tipo: "texto_bloco"; texto: string }
-  | { tipo: "tool_use"; id: string; nome: string; input: unknown }
-  | { tipo: "tool_result"; toolUseId: string; isError: boolean; texto: string }
-  /**
-   * Fim de uma chamada à API (`stream_event` message_delta, definido em 2026-09-28 para o modo dev): o usage
-   * DAQUELA chamada. O `usage` do `result` soma o turno inteiro e não mostra o contexto de cada chamada.
-   */
-  | { tipo: "chamada"; entrada: number; cacheLido: number; cacheNovo: number; saida: number; pensamento: number; subagente: boolean }
-  /** `system/compact_boundary`: o Claude Code resumiu o histórico no meio do turno. Tokens antes/depois quando vierem. */
-  | { tipo: "compactacao"; antes: number | null; depois: number | null; gatilho: string }
-  | {
-      tipo: "result";
-      sucesso: boolean;
-      subtype: string;
-      sessaoCli: string | null;
-      texto: string;
-      custoUsd: number | null;
-      tokens: TokensTurno;
-      numTurnos: number;
-      /** Maior `modelUsage[*].contextWindow` (modo dev): o teto contra o qual o contexto de cada chamada é medido. Ausente no Codex e no catcher. */
-      janela?: number | null;
-      negacoesPermissao: string[];
-      /** Texto cru do CLI quando `sucesso` é false (subtype/result/error): vai ao log, nunca à pessoa (ADR-002). */
-      erroCru: string | null;
-    }
-  | { tipo: "rate_limit"; status: string; utilizacaoCincoHoras: number | null; utilizacaoSeteDias: number | null }
-  /**
-   * Comando em segundo plano do Claude Code (definido em 2026-10-01, ADR-067): `Bash` com run_in_background ou um
-   * `Monitor`. Enquanto um estiver "iniciada", a sessão viva não fecha: quando ele termina, o CLI chama o modelo de
-   * novo sozinho. Medido no 2.1.286: `system/task_started` (is_backgrounded) abre; `task_updated` com status final
-   * ou `task_notification` fecha.
-   */
-  | { tipo: "tarefa_fundo"; id: string; estado: "iniciada" | "terminada" }
-  | { tipo: "ignorado"; razao: "linha_vazia" | "json_invalido" | "tipo_desconhecido" | "sintetico"; tipoBruto: string | null }
-  /** Passo do driver catcher (Práticas §11): `subtipo` snake_case (CHECK catcher_registros_tipo); o servidor persiste em catcher_registros. */
-  | { tipo: "catcher"; subtipo: string; dados: Record<string, unknown> };
+/** O evento do stream do CLI mora em evento-stream.ts (dividido em 2026-10-11, gatilho de 200 linhas da EMENDA 26). */
+export type { EventoStream } from "./evento-stream.ts";
 
 /** Resultado de Parar (E5.4), sempre renderizado — inclusive quando nada rodava. */
 export type FaixaParada = {
   interrompidas: number;
   naoInterrompidas: { turnoId: string; motivo: string }[];
   jaEntregues: { id: string; em: EpochMs }[];
-  nadaRodando: boolean;
+  nadaRodando: boolean; trabalhosParados?: { id: string; titulo: string }[]; // ADR-083: as tasks que este Parar parou
 };

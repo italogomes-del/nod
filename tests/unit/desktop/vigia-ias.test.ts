@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
 import type { Registry, TesteDoMotor } from "../../../src/adapters/executor/spi.ts";
 import { INTERVALO_SONDA_IA_MS } from "../../../desktop/ia-mac.ts";
-import { criarVigiaDasIas, ESPERA_RETESTE_MS, INTERVALO_COM_REPROVADA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
+import { criarVigiaDasIas, ESPERA_RETESTE_MS, INTERVALO_COM_REPROVADA_MS, INTERVALO_SONDA_OUTRA_IA_MS, lerVereditos, VALIDADE_VEREDITO_MS, type CapacidadesAnunciadas, type DepsVigia, type Veredito } from "../../../desktop/vigia-ias.ts";
+import { SEM_CAPACIDADES, type CapacidadesHarness } from "../../../src/contracts/harness.ts";
+import { capacidadesDe } from "../../../src/domain/harness.ts";
 
 type Ia = "claude-cli" | "codex-cli";
 /** O que o teste de verdade devolve: um resultado, uma promessa dele (teste pendurado) ou o CLI morrendo. */
@@ -16,7 +18,7 @@ const ausente = (): Inventario => ({ estado: "ausente", motivo: "instale", em: T
  * Um Mac de mentira: o login de cada IA (a sonda grátis), o que o teste de verdade devolve, a "impressão" da conta e o
  * que foi anunciado ao servidor. O timer é manual: `tique()` roda a passada agendada.
  */
-function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown }) {
+function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Roteiro>>; impressao?: Partial<Record<Ia, string>>; disco?: unknown; lacoDeVoz?: Partial<Record<Ia, boolean | null>>; capacidades?: Partial<Record<Ia, CapacidadesHarness | "explode">> }) {
   const m = {
     login: { ...o.login },
     teste: { ...(o.teste ?? {}) } as Partial<Record<Ia, Roteiro>>,
@@ -24,11 +26,26 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
     agora: T0,
     disco: o.disco as unknown,
     anuncios: [] as { estados: Record<string, string>; causas: Record<string, string | null>; principal: string }[],
+    /** NOD-167: o `semLacoDeVoz` de cada anúncio, na mesma ordem. */
+    semVoz: [] as string[][],
+    lacoDeVoz: { ...(o.lacoDeVoz ?? {}) } as Partial<Record<Ia, boolean | null>>,
+    /** X9: o que o CLI de cada IA diz que faz (Instance.capacidades) e o `capacidades` de cada anúncio. */
+    capacidades: { ...(o.capacidades ?? {}) } as Partial<Record<Ia, CapacidadesHarness | "explode">>,
+    anunciadas: [] as CapacidadesAnunciadas[],
     testes: [] as { ia: Ia; pergunta: string }[],
     sondas: 0,
+    /** definido em 2026-10-09: as IAs pedidas em cada sonda (null = todas). */
+    sondadas: [] as (Ia[] | null)[],
+    /** O registry que cada passada entregou ao laço. */
+    registros: [] as Registry[],
+    /** O que a vigia contou do teste em curso (aoTestando). */
+    testando: [] as Ia[][],
     gravacoes: 0,
     lacos: 0,
     agendado: null as { fn: () => void; ms: number } | null,
+    /** NOD-199: o anúncio ao servidor falha enquanto isto estiver ligado; `tentativas` conta as chamadas, falhas inclusive. */
+    anuncioFalha: null as Error | null,
+    tentativas: 0,
   };
   const registry = (): Registry => {
     const r = { "claude-cli": { estado: "sombra", motivo: "x" }, catcher: { estado: "sombra", motivo: "x" } } as Registry;
@@ -38,6 +55,8 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
         sondar: async () => m.login[ia],
         adapter: () => { throw new Error("não usado"); },
         dispose: async () => {},
+        ...(ia in m.lacoDeVoz ? { lacoDeVoz: async () => m.lacoDeVoz[ia] ?? null } : {}),
+        ...(ia in m.capacidades ? { capacidades: async () => { const c = m.capacidades[ia]; if (!c || c === "explode") throw new Error("help falhou"); return c; } } : {}),
         testar: async (pergunta: string) => {
           m.testes.push({ ia, pergunta });
           const t = m.teste[ia];
@@ -51,16 +70,30 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
   };
   let jaSubiu = false;
   const deps: DepsVigia = {
-    sondar: async () => { m.sondas++; return { registry: registry(), inventarios: { ...m.login } }; },
+    sondar: async (ias) => {
+      m.sondas++;
+      m.sondadas.push(ias ? [...ias] : null);
+      if (!ias) return { registry: registry(), inventarios: { ...m.login } };
+      // Como o app: só as IAs pedidas são sondadas; as outras ficam de fora do registry e do inventário.
+      const r = registry();
+      const so = { "claude-cli": { estado: "sombra", motivo: "driver não registrado" }, catcher: { estado: "sombra", motivo: "x" } } as Registry;
+      for (const ia of ias) if (r[ia]) so[ia] = r[ia];
+      return { registry: so, inventarios: Object.fromEntries(ias.map((ia) => [ia, m.login[ia]])) };
+    },
     impressao: async (ia) => m.impressao[ia],
-    anunciar: async (inventarios, principal) => {
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => {
+      m.tentativas++;
+      if (m.anuncioFalha) throw m.anuncioFalha;
+      m.semVoz.push([...semLacoDeVoz]);
+      m.anunciadas.push(capacidades);
       m.anuncios.push({
         estados: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v?.estado ?? "?"])),
         causas: Object.fromEntries(Object.entries(inventarios).map(([k, v]) => [k, v && v.estado === "nao_autenticado" ? v.causa ?? null : null])),
         principal: principal.estado,
       });
     },
-    aoRegistry: (_r, algumaPronta) => { if (algumaPronta && !jaSubiu) { jaSubiu = true; m.lacos++; } },
+    aoRegistry: (r, algumaPronta) => { m.registros.push(r); if (algumaPronta && !jaSubiu) { jaSubiu = true; m.lacos++; } },
+    aoTestando: (ias) => { m.testando.push([...ias]); },
     ler: async () => { if (m.disco === undefined) throw new Error("ENOENT"); return m.disco; },
     gravar: async (v: Veredito[]) => { m.gravacoes++; m.disco = JSON.parse(JSON.stringify(v)); },
     agora: () => m.agora,
@@ -82,13 +115,96 @@ function mac(o: { login: Record<Ia, Inventario>; teste?: Partial<Record<Ia, Rote
 const SEM_ACESSO: TesteDoMotor = { inventario: { estado: "nao_autenticado", motivo: "conta_sem_acesso", causa: "conta_sem_acesso", versao: "1.0", em: T0 }, resposta: null };
 
 describe("vigia das IAs do Mac (2026-10-05)", () => {
-  it("IA logada e sem veredito: anuncia como pronta, sobe o laço e não agenda nada nem gasta teste", async () => {
-    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() } });
+  it("X9: anuncia as capacidades de cada IA pronta com os pisos do CLI; CLI sem --fork-session sai com bifurcaSessao false", async () => {
+    const semFork = { ...capacidadesDe("claude-cli"), bifurcaSessao: false };
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": semLogin() }, capacidades: { "claude-cli": semFork } });
+    await vigia.iniciar(sondagem());
+    // Só a pronta entra; a sem login não promete nada.
+    expect(m.anunciadas.at(-1)).toEqual({ "claude-cli": semFork });
+    // O CLI atualizado (ganhou --fork-session) é novidade: reanuncia.
+    const antes = m.anunciadas.length;
+    m.capacidades["claude-cli"] = capacidadesDe("claude-cli");
+    await vigia.reanunciar();
+    expect(m.anunciadas.length).toBe(antes + 1);
+    expect(m.anunciadas.at(-1)!["claude-cli"]!.bifurcaSessao).toBe(true);
+    // A sonda que falha não promete nada.
+    m.capacidades["claude-cli"] = "explode";
+    await vigia.reanunciar();
+    expect(m.anunciadas.at(-1)).toEqual({ "claude-cli": SEM_CAPACIDADES });
+    vigia.parar();
+  });
+
+  it("NOD-167: Codex pronto sem app-server vai em semLacoDeVoz; 'não sei' não entra; atualizar o Codex reanuncia", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": pronto() }, lacoDeVoz: { "codex-cli": false } });
+    await vigia.iniciar(sondagem());
+    expect(m.semVoz).toEqual([["codex-cli"]]);
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "codex-cli": "pronto" }, principal: "pronto" });
+    // A sonda do app-server ficou lenta: sem certeza, o Codex não é anunciado como sem voz.
+    m.lacoDeVoz["codex-cli"] = null;
+    await vigia.reanunciar();
+    expect(m.semVoz.at(-1)).toEqual([]);
+    // O Codex foi atualizado: mesmo estado ("pronto"), anúncio novo porque o laço de voz mudou.
+    m.lacoDeVoz["codex-cli"] = false;
+    await vigia.reanunciar();
+    const antes = m.anuncios.length;
+    m.lacoDeVoz["codex-cli"] = true;
+    await vigia.contaMudou("codex-cli");
+    expect(m.anuncios.length).toBe(antes + 1);
+    expect(m.semVoz.at(-1)).toEqual([]);
+  });
+
+
+  it("IA logada e sem veredito: anuncia como pronta, sobe o laço e não gasta teste; a outra continua sondada a cada 60 s (revisto em 2026-10-09)", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() } });
     await vigia.iniciar(sondagem());
     expect(m.anuncios).toEqual([{ estados: { "claude-cli": "pronto", "codex-cli": "ausente" }, causas: { "claude-cli": null, "codex-cli": null }, principal: "pronto" }]);
     expect(m.lacos).toBe(1);
-    expect(m.agendado).toBeNull();
     expect(m.testes).toEqual([]);
+    // Antes de 2026-10-09 nada era agendado aqui, e o Codex instalado depois nunca aparecia (teste do Breno).
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_OUTRA_IA_MS);
+    const claudeVivo = m.registros.at(-1)!["claude-cli"];
+    await tique();
+    // Só a outra é sondada; a pronta mantém o MESMO registro (a sessão viva dela não é trocada).
+    expect(m.sondadas.at(-1)).toEqual(["codex-cli"]);
+    expect(m.registros.at(-1)!["claude-cli"]).toBe(claudeVivo);
+    expect(m.anuncios).toHaveLength(1);
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_OUTRA_IA_MS);
+    // A pessoa instalou e entrou no Codex por fora: na próxima volta ele aparece, sem teste pago.
+    m.login["codex-cli"] = pronto();
+    await tique();
+    expect(m.anuncios.at(-1)).toEqual({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" }, causas: { "claude-cli": null, "codex-cli": null }, principal: "pronto" });
+    expect(m.registros.at(-1)!["claude-cli"]).toBe(claudeVivo);
+    expect(m.registros.at(-1)!["codex-cli"]?.estado).toBe("pronto");
+    expect(m.testes).toEqual([]);
+    // As duas prontas: nada mais a sondar.
+    expect(m.agendado).toBeNull();
+  });
+
+  it("a sonda da outra IA nunca gasta teste por conta própria; a reprovada continua no passo de 30 s com o freio de sempre", async () => {
+    const disco = [{ ia: "codex-cli", causa: "conta_sem_acesso", impressao: "conta-x", em: T0 - 60_000 }];
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": pronto() }, disco });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    await tique();
+    expect(m.testes).toEqual([]);
+    expect(m.sondadas.at(-1)).toBeNull();
+  });
+
+  it("testar avisa quem está em teste (o estado 'testando' da tela) e limpa no fim, mesmo quando o teste explode", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": pronto(), "codex-cli": ausente() }, teste: { "claude-cli": "explode" } });
+    await vigia.iniciar(sondagem());
+    await vigia.testar({});
+    expect(m.testando).toEqual([["claude-cli"], []]);
+    expect(vigia.testando()).toEqual([]);
+  });
+
+  it("sondarAgora (o Verificar da tela) faz uma passada completa na hora", async () => {
+    const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": ausente() } });
+    await vigia.iniciar(sondagem());
+    m.login["claude-cli"] = pronto();
+    await vigia.sondarAgora();
+    expect(m.sondadas.at(-1)).toBeNull();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto" }, principal: "pronto" });
   });
 
   it("nenhuma IA pronta: olha de novo a cada 3 s e só reanuncia quando algo muda; pronta, sobe o laço", async () => {
@@ -102,7 +218,8 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     await tique();
     expect(m.anuncios.at(-1)).toMatchObject({ estados: { "codex-cli": "pronto" }, principal: "pronto" });
     expect(m.lacos).toBe(1);
-    expect(m.agendado).toBeNull();
+    // revisto em 2026-10-09: o Claude sem login continua sondado, no passo lento.
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_OUTRA_IA_MS);
   });
 
   it("teste do onboarding: a conta bloqueada é reprovada com a causa, o veredito vai ao disco e ao servidor, e a resposta da que passou volta", async () => {
@@ -170,7 +287,8 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto" }, principal: "pronto" });
     expect(m.disco).toEqual([]);
     expect(m.lacos).toBe(1);
-    expect(m.agendado).toBeNull();
+    // revisto em 2026-10-09: o Codex ausente continua sondado no passo lento.
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_OUTRA_IA_MS);
   });
 
   it("impressão que muda sozinha não vira teste pago a cada volta: depois do primeiro reteste, a espera é de 1 min e dobra", async () => {
@@ -250,6 +368,42 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.anuncios).toHaveLength(2);
   });
 
+  it("NOD-199: com as duas IAs prontas e o anúncio falhando, a vigia agenda nova tentativa; quando o anúncio passa, para de agendar", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": semLogin() } });
+    await vigia.iniciar(sondagem());
+    // revisto em 2026-10-09: o Codex sem login continua sondado no passo lento.
+    expect(m.agendado?.ms).toBe(INTERVALO_SONDA_OUTRA_IA_MS);
+    // A pessoa entrou no Codex com um turno rodando: o servidor (antigo, ou fora) recusa o anúncio.
+    m.login["codex-cli"] = pronto();
+    m.anuncioFalha = new Error("rota_ausente");
+    await vigia.contaMudou("codex-cli");
+    expect(m.tentativas).toBe(2);
+    expect(m.anuncios).toHaveLength(1);
+    // Antes da NOD-199 o erro pulava o reagendar e, com as duas prontas, nada mais rodava.
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    await tique();
+    expect(m.tentativas).toBe(3);
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    m.anuncioFalha = null;
+    await tique();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });
+    expect(m.agendado).toBeNull();
+    vigia.parar();
+  });
+
+  it("NOD-199: o reanúncio do 409 que falha devolve o erro a quem chamou e também deixa nova tentativa agendada", async () => {
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": pronto() } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado).toBeNull();
+    m.anuncioFalha = new Error("servidor_fora");
+    await expect(vigia.reanunciar()).rejects.toThrow("servidor_fora");
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
+    m.anuncioFalha = null;
+    await tique();
+    expect(m.anuncios).toHaveLength(2);
+    expect(m.agendado).toBeNull();
+  });
+
   it("parar cancela a passada agendada e nada mais roda", async () => {
     const { m, vigia, sondagem } = mac({ login: { "claude-cli": semLogin(), "codex-cli": ausente() } });
     await vigia.iniciar(sondagem());
@@ -266,6 +420,17 @@ describe("vigia das IAs do Mac (2026-10-05)", () => {
     expect(m.agendado?.ms).toBe(INTERVALO_SONDA_IA_MS);
     await tique();
     expect(m.agendado?.ms).toBe(INTERVALO_SONDA_IA_MS);
+    m.login["codex-cli"] = pronto();
+    await tique();
+    expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });
+    expect(m.agendado).toBeNull();
+  });
+
+  it("NOD-171 (revisão): com uma IA pronta e a outra desatualizada, a vigia sonda de novo a cada 30 s até a versão nova", async () => {
+    const ANTIGO: Inventario = { estado: "ausente", motivo: "Codex 0.147.0 abaixo do piso", causa: "cli_antigo", versao: "0.147.0", minima: "0.159.0", em: T0 };
+    const { m, vigia, sondagem, tique } = mac({ login: { "claude-cli": pronto(), "codex-cli": ANTIGO } });
+    await vigia.iniciar(sondagem());
+    expect(m.agendado?.ms).toBe(INTERVALO_COM_REPROVADA_MS);
     m.login["codex-cli"] = pronto();
     await tique();
     expect(m.anuncios.at(-1)).toMatchObject({ estados: { "claude-cli": "pronto", "codex-cli": "pronto" } });

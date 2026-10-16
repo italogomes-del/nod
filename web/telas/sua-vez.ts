@@ -10,6 +10,7 @@ import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
 import { botao, esc, hora } from "../lib/render.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
+import { listaDoLoteParaSuaVez } from "./card-lote.ts";
 
 type Item = SuaVezDto["itens"][number];
 
@@ -23,6 +24,7 @@ const TIPO_HUMANO: Record<TipoDecisao, string> = {
   rotina_atualizacao: "mudança de rotina",
   rotina_exclusao: "exclusão de rotina",
   bot: "bot proposto",
+  lote_bots: "mudanças nos seus bots",
   pergunta: "pergunta",
   falta_de_dado: "falta um dado",
   permissao: "pedido de permissão",
@@ -54,6 +56,7 @@ const PRAZO_POR_TIPO: Record<TipoDecisao, (em: string, item: Item) => string> = 
   rotina_atualizacao: nadaMudaSemVoce,
   rotina_exclusao: nadaMudaSemVoce,
   bot: nadaMudaSemVoce,
+  lote_bots: nadaMudaSemVoce,
   retomar_turno: vence,
   pergunta: vence,
   falta_de_dado: vence,
@@ -431,6 +434,13 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
       if (comAcesso) return `<div class="acoes">${comAcesso.botoes}</div>${comAcesso.ajuda}`;
       return `<div class="acoes">${botao("decidir-proposta", "Aplicar mudança", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter como está", { id: d.id })}</div>`;
     }
+    // definido em 2026-10-07 (ADR-082): o lote do Nod. Aqui aprova tudo de uma vez; para desmarcar uma ação, o card da
+    // conversa do Nod tem as caixas.
+    case "lote_bots": {
+      const p = item.proposta?.payload.kind === "lote_bots" ? item.proposta.payload : null;
+      const n = p ? p.acoes.filter((a) => a.estado === "esperando").length : 0;
+      return `${p ? listaDoLoteParaSuaVez(p) : ""}<div class="acoes">${botao("decidir-proposta", n > 1 ? `Aprovar as ${n}` : "Aprovar", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Recusar", { id: d.id })}</div>`;
+    }
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
@@ -561,13 +571,15 @@ const plural = (n: number, um: string, varios: string): string => `${n} ${n === 
  * segue sozinho. Rotina interrompida não se retoma (a próxima janela roda); conversa tem o seu Retomar.
  */
 export function fraseDoIncidente(i: SuaVezDto["incidentes"][number]): string {
-  const quando = i.voltouEm === null ? `Seu Mac está sem contato desde ${hora(i.comecouEm)}.` : `Seu Mac ficou sem contato entre ${hora(i.comecouEm)} e ${hora(i.voltouEm)}.`;
+  // definido em 2026-10-09: a queda da VM do motor (ADR-090) nomeia a máquina; "Seu Mac" é só do Mac.
+  const quem = i.maquina ? `A máquina ${i.maquina}` : "Seu Mac";
+  const quando = i.voltouEm === null ? `${quem} está sem contato desde ${hora(i.comecouEm)}.` : `${quem} ficou sem contato entre ${hora(i.comecouEm)} e ${hora(i.voltouEm)}.`;
   const partes = [i.rotinas > 0 ? plural(i.rotinas, "execução de rotina", "execuções de rotina") : "", i.conversas > 0 ? plural(i.conversas, "resposta em conversa", "respostas em conversa") : ""].filter(Boolean);
   if (partes.length === 0) return quando;
   const verbo = i.rotinas + i.conversas === 1 ? "não concluiu" : "não concluíram";
-  const quem = i.agentes.length ? ` (${i.agentes.join(", ")})` : "";
+  const deQuem = i.agentes.length ? ` (${i.agentes.join(", ")})` : "";
   const segue = i.rotinas === 0 ? " e dá para retomar pela conversa" : i.conversas === 0 ? " e as próximas seguem agendadas" : ": as rotinas seguem agendadas e a conversa pode ser retomada";
-  return `${quando} ${partes.join(" e ")} ${verbo}${quem}; nada foi reenviado${segue}.`;
+  return `${quando} ${partes.join(" e ")} ${verbo}${deQuem}; nada foi reenviado${segue}.`;
 }
 
 /**

@@ -93,6 +93,18 @@ export function useCasesFalsos(): UseCasesNod {
     anotarEntrevista: naoImplementado("useCases.anotarEntrevista"),
     concluirEntrevista: naoImplementado("useCases.concluirEntrevista"),
     proporBot: naoImplementado("useCases.proporBot"),
+    abrirTask: naoImplementado("useCases.abrirTask"),
+    mandarParaTask: naoImplementado("useCases.mandarParaTask"),
+    meChameAs: naoImplementado("useCases.meChameAs"),
+    abrirFrentes: naoImplementado("useCases.abrirFrentes"),
+    mandarParaFrente: naoImplementado("useCases.mandarParaFrente"),
+    devolverResumo: naoImplementado("useCases.devolverResumo"),
+    esperarComando: naoImplementado("useCases.esperarComando"),
+    criarBots: naoImplementado("useCases.criarBots"),
+    responderPedido: naoImplementado("useCases.responderPedido"),
+    gerirBots: naoImplementado("useCases.gerirBots"),
+    verAppsConectados: naoImplementado("useCases.verAppsConectados"),
+    registrarRelatoDoNod: naoImplementado("useCases.registrarRelatoDoNod"),
   };
 }
 

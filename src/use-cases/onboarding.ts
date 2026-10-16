@@ -8,11 +8,12 @@ import type { BotDoOnboarding, EstadoOnboarding, EtapaOnboarding, IaNoMac, Pende
 import type { ContextoFerramenta, SaidaCasoDeUso } from "../contracts/servicos.ts";
 import { ehIdVoz } from "../domain/vozes.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { camposQueFaltam, modeloDoObjetivo, NOME_DA_GUIA, normalizarCampo, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista } from "../domain/roteiro-onboarding.ts";
+import { DESCRICAO_DO_NOD, ehNod, NOME_DO_NOD, TITULO_DO_NOD } from "../domain/nod.ts";
+import { camposQueFaltam, modeloDoObjetivo, normalizarCampo, passoDaConfiguracao, PERGUNTAS_ENTREVISTA, resumoDaEntrevista } from "../domain/roteiro-onboarding.ts";
 import { log } from "../obs/log.ts";
 import type { LinhaOnboarding } from "../repositories/onboarding.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
-import { criarAgente } from "./criar-agente.ts";
+import { criarAgente, criarAgenteSemReserva } from "./criar-agente.ts";
 import { criarRotinaPelaPessoa } from "./criar-rotina.ts";
 import { botComConversa, botDe, contextoDoOnboarding } from "./onboarding-contexto.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -21,12 +22,10 @@ export { alvoDoParaBot, contextoDoOnboarding } from "./onboarding-contexto.ts";
 
 /**
  * Onboarding por ligação (definido em 2026-10-04, ADR-077). Aqui mora o que lê e grava o banco: o estado que a web
- * desenha, a bot guia (a Nina), as três ferramentas do laço de voz (anotar_entrevista, concluir_entrevista, propor_bot)
+ * desenha, o Nod (a guia, ADR-081; antes a Nina), as três ferramentas do laço de voz (anotar_entrevista, concluir_entrevista, propor_bot)
  * e os atalhos do caminho sem voz (criar o bot e a rotina direto, a pessoa clicando). Quem liga a ligação e fala é a
  * composição (rotas/onboarding.ts) e o orquestrador de voz.
  */
-
-const DESCRICAO_DA_GUIA = "Sua primeira bot no nod. Guia a configuração inicial, responde dúvidas sobre o produto e ajuda a criar e ajustar os outros bots.";
 
 /** O app do modelo está conectado e o bot novo tem alguma ferramenta dele concedida. */
 async function appDoBotConectado(deps: Deps, botId: string, slug: string): Promise<boolean> {
@@ -101,30 +100,42 @@ export const estadoOnboarding: CasoDeUso<EntradaEstadoOnboarding, EstadoOnboardi
   };
 };
 
-/** Um nome livre para a guia: "Nina", senão "Nina 2", "Nina 3"… (nunca duas Ninas na barra lateral). */
-export function nomeLivreDaGuia(usados: readonly string[]): string {
-  const ocupados = new Set(usados.map((n) => n.trim().toLowerCase()));
-  if (!ocupados.has(NOME_DA_GUIA.toLowerCase())) return NOME_DA_GUIA;
-  for (let i = 2; i < 100; i++) if (!ocupados.has(`${NOME_DA_GUIA} ${i}`.toLowerCase())) return `${NOME_DA_GUIA} ${i}`;
-  return `${NOME_DA_GUIA} ${Date.now() % 1000}`;
-}
+/** A linha de sistema da conversa nova do Nod (quem chega depois do onboarding também lê). */
+const APRESENTACAO_DO_NOD = "O Nod é o seu bot fixo: tira dúvidas sobre o produto, cria e ajusta seus bots, inclusive vários de uma vez, e anota bugs e ideias para o time do Nod.";
 
 /**
- * A bot guia da pessoa: a salva em preferencias (viva) ou uma nova pelo criar-agente, com nome livre, voz feminina e o
- * mascote azul do protótipo. Chamada ao entrar em 'chamando'.
+ * O Nod da pessoa (definido em 2026-10-07, ADR-081): o que já existe ou um novo, marcado como o Nod e fixado no topo, e
+ * ele vira a guia do onboarding. Roda em todo `GET /onboarding` (a web chama ao entrar), então toda pessoa tem o seu —
+ * inclusive quem concluiu o onboarding antes dele existir. A trava da pessoa (travarNod) segura duas abas abrindo juntas.
+ *
+ * Guia viva que não é o Nod (criada pelo código antigo durante a drenagem do deploy da 0061) vira o Nod aqui.
  */
-export const garantirGuia: CasoDeUso<Record<string, never>, { guia: BotDoOnboarding; criada: boolean }> = async (deps) => {
+export const garantirNod: CasoDeUso<Record<string, never>, { nod: BotDoOnboarding; criado: boolean }> = async (deps) => {
+  const existente = await deps.repos.agentes.travarNod();
   const linha = await deps.repos.onboarding.buscar();
-  const salva = await botComConversa(deps, linha.guiaId);
-  if (salva) return { data: { guia: salva, criada: false } };
-  const usados = (await deps.repos.agentes.listar({ incluirOcultos: true })).map((a) => a.nome);
-  const nome = nomeLivreDaGuia(usados);
-  const r = await criarAgente(deps, { dono: "pessoa", nome, titulo: "Guia", descricao: DESCRICAO_DA_GUIA, forma: "shape-square", cor: "c-blue", mensagem: `${nome} é a sua guia no nod. A primeira ligação dela monta o seu primeiro bot com você.` });
-  await deps.repos.agentes.definirVoz(r.data.agente.id, { voz: "clara" });
-  await deps.repos.onboarding.definirGuia(r.data.agente.id);
-  const guia = botDe(r.data.agente, r.data.conversa.id);
-  if (!guia) throw new ErroDeDominio("estado_invalido", { cause: "guia não criada" });
-  return { data: { guia, criada: true }, events: r.events };
+  if (existente) {
+    const nod = await botComConversa(deps, existente.id);
+    // Revisão de 2026-10-07: um Nod sem conversa (ou excluído por SQL) não ganha um segundo — o índice único recusaria e
+    // toda entrada no app viraria 500. A falha fica escrita; a web abre sem o onboarding.
+    if (!nod) throw new ErroDeDominio("estado_invalido", { cause: "o Nod da pessoa está sem conversa" });
+    if (linha.guiaId !== existente.id) await deps.repos.onboarding.definirGuia(existente.id);
+    return { data: { nod, criado: false } };
+  }
+  const guia = linha.guiaId ? await deps.repos.agentes.buscar(linha.guiaId) : null;
+  if (guia && !ehNod(guia) && guia.dono === "pessoa" && guia.ownerId === deps.escopo.pessoaId) {
+    const marcado = await deps.repos.agentes.marcarComoNod(guia.id, { nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD });
+    const nod = marcado ? await botComConversa(deps, marcado.id) : null;
+    if (nod) return { data: { nod, criado: false } };
+  }
+  const r = await criarAgenteSemReserva(deps, { dono: "pessoa", nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD, forma: "shape-square", cor: "c-black", mensagem: APRESENTACAO_DO_NOD });
+  const marcado = await deps.repos.agentes.marcarComoNod(r.data.agente.id, { nome: NOME_DO_NOD, titulo: TITULO_DO_NOD, descricao: DESCRICAO_DO_NOD });
+  if (!marcado) throw new ErroDeDominio("estado_invalido", { cause: "nod não marcado" });
+  await deps.repos.agentes.definirVoz(marcado.id, { voz: "bento" });
+  await deps.repos.onboarding.definirGuia(marcado.id);
+  const nod = botDe(marcado, r.data.conversa.id);
+  if (!nod) throw new ErroDeDominio("estado_invalido", { cause: "nod não criado" });
+  log("info", "nod_criado", {});
+  return { data: { nod, criado: true }, events: r.events };
 };
 
 export const definirEtapaOnboarding: CasoDeUso<{ etapa: unknown }, LinhaOnboarding> = async (deps, input) => {
