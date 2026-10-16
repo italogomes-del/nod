@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Inventario } from "../../contracts/inventario.ts";
-import { criarDb } from "../../db/client.ts";
+import { criarDb, lerPoolMax } from "../../db/client.ts";
 import { log } from "../../obs/log.ts";
 import { admitirPorDominio, buscarPorEmail, listarTodas } from "../../repositories/pessoas.repo.ts";
 import type { Db } from "../../shared/types.ts";
@@ -109,7 +109,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   const env: EnvApp = o.env ?? process.env;
   const urlApp = env.DATABASE_URL;
   const urlDono = env.DATABASE_URL_DONO;
-  const db = o.db ?? (urlApp ? criarDb(urlApp) : null);
+  const db = o.db ?? (urlApp ? criarDb(urlApp, { max: lerPoolMax(env) }) : null);
   const dbDono = o.dbDono ?? (urlDono ? criarDb(urlDono, { max: 1 }) : null);
   if (!db || !dbDono) throw new Error("boot: DATABASE_URL e DATABASE_URL_DONO são obrigatórios");
   // Antes de qualquer efeito: sem NOD_LOGIN válido o servidor não sobe (ADR-030).

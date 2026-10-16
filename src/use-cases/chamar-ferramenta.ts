@@ -8,6 +8,7 @@ import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso }
 import { acaoArriscadaNoApp, decidirAprovacao } from "../domain/aprovacao-permanente.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
+import { ehErroDeInfraDaTx } from "../db/tx.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
@@ -238,6 +239,9 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
     const conteudo = r.isError ? `erro do conector ${conector.slug}: ${r.conteudo}` : r.conteudo;
     return { data: { ok: true, conteudo, confianca: "nao_confiavel" }, events };
   } catch (e) {
+    // definido em 2026-10-15 (NOD-266): banco ocupado ou tx encerrada é falha NOSSA, não do app — relança sem marcar o
+    // conector como falho (a marca o desligaria para a pessoa) e sem escrever mais nada numa tx que pode estar morta.
+    if (ehErroDeInfraDaTx(e)) throw e;
     // definido em 2026-10-05 (NOD-157): 401/403 do conector não é "servidor fora" — o acesso ao app foi recusado. Sem enum novo:
     // falha_tecnica com `causa`, que muda só a redação. A chamada que chega aqui já esgotou as tentativas do cliente.
     const recusado = e instanceof Error && "status" in e && (e.status === 401 || e.status === 403);

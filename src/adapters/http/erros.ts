@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { ehErroDeDominio, ErroDeDominio, type CodigoErro } from "../../domain/erro.ts";
 import { redigirECortar } from "../../domain/segredos.ts";
+import { ehTimeoutDaTx, ErroBancoOcupado } from "../../db/tx.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
 import { json } from "./util.ts";
@@ -86,7 +87,22 @@ export function responderErro(res: ServerResponse, err: unknown, origem?: Origem
     json(res, 400, { codigo: "entrada_invalida", mensagem: TABELA_ERROS.entrada_invalida.mensagem });
     return;
   }
+  if (err instanceof ErroBancoOcupado) {
+    // NOD-266: pool cheio além do prazo. 503 com a mensagem genérica (nada do driver sai) e o correlation_id do log
+    // `banco_ocupado`, gerado antes do BEGIN — a requisição ainda não tinha contexto de tx.
+    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"), correlation_id: err.correlationId });
+    const corpo: ErroDto = { codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: err.correlationId };
+    json(res, 503, corpo);
+    return;
+  }
   const correlationId = contextoAtual()?.correlationId ?? null;
+  if (ehTimeoutDaTx(err)) {
+    // Revisão do PR #321: timeout da tx (57014/55P03/25P02) é o banco sob pressão, não erro de programa: 503 como o
+    // banco_ocupado do prazo de conexão. O sqlstate vai para o log (a causa), nunca a mensagem do driver.
+    log("aviso", "requisicao_recusada", { codigo: "banco_ocupado", status: 503, metodo: origem?.metodo, rota: origem?.caminho.split("?")[0]?.replace(UUID, ":id"), causa: String(Reflect.get(Object(err), "code")), correlation_id: correlationId });
+    json(res, 503, { codigo: "banco_ocupado", mensagem: MENSAGEM_FALHA_INTERNA, correlation_id: correlationId } satisfies ErroDto);
+    return;
+  }
   log("erro", "falha_interna", {
     erro: err instanceof Error ? err.name : "desconhecido",
     correlation_id: correlationId,

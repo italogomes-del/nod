@@ -10,6 +10,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
 import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
+import { abrirTxEscopada } from "../db/tx.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
@@ -311,13 +312,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         return l ? paraTurno(l) : null;
       };
       // Pool (tem `begin`): a trava só vale dentro de uma transação — abre uma curta. Tx: usa a corrente.
-      if ("begin" in conn && typeof conn.begin === "function") {
-        const caixa: { valor: Turno | null } = { valor: null };
-        await conn.begin(async (trx) => {
-          caixa.valor = await dentro(trx);
-        });
-        return caixa.valor;
-      }
+      // definido em 2026-10-15 (NOD-266): a curta é a escopada (prazo de conexão, timeouts, escopo da RLS). Antes era um
+      // `conn.begin` cru — sem prazo, pendurava com o pool cheio, e sem escopo a RLS a fazia achar nada.
+      if ("begin" in conn && typeof conn.begin === "function") return abrirTxEscopada(conn, escopo)(dentro);
       return dentro(conn);
     },
 
