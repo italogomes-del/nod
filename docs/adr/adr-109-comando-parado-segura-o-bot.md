@@ -1,7 +1,9 @@
-# ADR-078 — Um comando parado segura o bot: a conversa mostra e deixa interromper só o comando
+# ADR-109 — Um comando parado segura o bot: a conversa mostra e deixa interromper só o comando
 
-Status: proposto (não implementado) · Data: 2026-10-05 · Emenda à ADR-067 (sessão viva, Bash sem teto). Implementação:
-issue [#153](https://github.com/marlonwlv/nod/issues/153).
+Status: proposto (não implementado; conferido na main `61b42986` em 2026-10-16: não há `interromper-comando` nem o aviso
+"há N min em `comando`") · Data: 2026-10-05 · Emenda à ADR-067 (sessão viva, Bash sem teto). Implementação: issue
+[#153](https://github.com/marlonwlv/nod/issues/153). Renumerada de ADR-078 para ADR-109 em 2026-10-16 (NOD-305): a
+main já tinha a [ADR-078](adr-078-limite-da-assinatura-na-ligacao.md) do limite da assinatura na ligação.
 
 ## Contexto
 
