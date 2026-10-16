@@ -19,8 +19,12 @@ passo "Rede $REDE (sem as regras abertas da rede default)"
 gc compute networks describe "$REDE" >/dev/null 2>&1 || gc compute networks create "$REDE" --subnet-mode=custom
 gc compute networks subnets describe "$SUBREDE" --region="$REGIAO" >/dev/null 2>&1 ||
   gc compute networks subnets create "$SUBREDE" --network="$REDE" --region="$REGIAO" --range="$SUBREDE_FAIXA" --enable-private-ip-google-access
-gc compute firewall-rules describe nod-web >/dev/null 2>&1 ||
-  gc compute firewall-rules create nod-web --network="$REDE" --direction=INGRESS --allow=tcp:80,tcp:443,udp:443 --source-ranges=0.0.0.0/0 --target-tags=nod-web
+# Só TCP (NOD-254, 2026-10-15): sem HTTP/3 na VM; quem já tinha a regra com udp:443 fica só com TCP ao rodar de novo.
+if gc compute firewall-rules describe nod-web >/dev/null 2>&1; then
+  gc compute firewall-rules update nod-web --allow=tcp:80,tcp:443
+else
+  gc compute firewall-rules create nod-web --network="$REDE" --direction=INGRESS --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 --target-tags=nod-web
+fi
 # SSH só pelo IAP (faixa fixa do Google): o deploy entra por túnel, nunca pela internet.
 gc compute firewall-rules describe nod-ssh-iap >/dev/null 2>&1 ||
   gc compute firewall-rules create nod-ssh-iap --network="$REDE" --direction=INGRESS --allow=tcp:22 --source-ranges=35.235.240.0/20 --target-tags=nod-web

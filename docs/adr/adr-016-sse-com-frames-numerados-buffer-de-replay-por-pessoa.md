@@ -20,6 +20,10 @@ Este é um vazamento REAL no dia 1 do uso interno, não uma questão de SaaS, e 
 - O frame do outbox carrega `kind` (o KindEvento original), `eventoId`, os `dados` escalares do evento e, desde a L9, `conversaId`/`turnoId` do evento (LEFT JOIN em `events` no `outboxRepo.pendentes`). Ele NÃO carrega conteúdo: a web (`web/estado/reducer.ts`) marca o que reidratar por REST e só os `turno.delta` (publicados direto no barramento pelo laço, sem outbox) entram no estado. `resumed:false` reidrata tudo — replay parcial nunca é aplicado.
 - Executor do frame de delta: `turno.delta` leva `executor` e `machineId` do plano, que a web mostra como badge ('catcher' | 'rodou em <máquina>').
 
+## Emenda 2026-10-15 (NOD-254 — ping visível e vigia de silêncio)
+
+O servidor manda `event: ping` / `data: {}` a cada `PING_MS` (15 s), sem `id` (não entra no buffer nem no `seq`). O cliente trata 45 s sem nenhum sinal (open, frame ou ping) como queda e reabre com `since` pelo mesmo caminho do erro (`PRAZO_SILENCIO_MS` em `web/lib/live-events.ts`). Na VM o Caddy serve só h1/h2: o SSE não anda em QUIC.
+
 ## Gatilho de reversão
 
 Reabrir (trocar SSE por WebSocket, ou buffer em memória por buffer no Postgres) se `resumed:false` passar a ser rotina medida em uso normal (buffer de `BUFFER_SSE_FRAMES` frames insuficiente para uma reconexão típica), ou se a web precisar ENVIAR pelo mesmo canal — hoje comandos vão por REST e o canal é só servidor→navegador. Buffer por pessoa não é reversível: por tenant foi vazamento real.

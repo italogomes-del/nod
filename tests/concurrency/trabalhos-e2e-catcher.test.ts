@@ -144,7 +144,10 @@ async function subir(o: { nomePessoa: string; env?: Record<string, string>; rede
         const blocos = buffer.split("\n\n");
         buffer = blocos.pop() ?? "";
         for (const bloco of blocos) {
-          const linha = bloco.split("\n").find((l) => l.startsWith("data: "));
+          const linhas = bloco.split("\n");
+          // `event: ping` (NOD-254) é sinal de vida, não frame.
+          if (linhas.includes("event: ping")) continue;
+          const linha = linhas.find((l) => l.startsWith("data: "));
           if (linha) frames.push(JSON.parse(linha.slice(6)) as FrameSse);
         }
       }

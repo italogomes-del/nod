@@ -30,7 +30,8 @@ const INSTRUMENTO = `(() => {
   c.reset();
   const add = EventSource.prototype.addEventListener;
   EventSource.prototype.addEventListener = function (tipo, fn, opts) {
-    if (typeof fn !== "function" || tipo === "open" || tipo === "error") return add.call(this, tipo, fn, opts);
+    // ping (NOD-254) é sinal de vida a cada 15 s, não frame.
+    if (typeof fn !== "function" || tipo === "open" || tipo === "error" || tipo === "ping") return add.call(this, tipo, fn, opts);
     return add.call(this, tipo, function (ev) { c.frames[tipo] = (c.frames[tipo] || 0) + 1; c.framesTotal++; return fn.call(this, ev); }, opts);
   };
   new PerformanceObserver((l) => { for (const e of l.getEntries()) c.longtasks.push({ inicio: e.startTime, dur: e.duration }); }).observe({ type: "longtask", buffered: true });
