@@ -29,6 +29,7 @@ import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts"
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
@@ -1118,10 +1119,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             porCota: t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA),
           }));
       },
-      async juntarEntrada(id: string, texto: string) {
+      async juntarEntrada(id: string, texto: string, anexos: readonly string[] = []) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");
         if (!t) return null;
         t.entradaTexto = `${t.entradaTexto}\n\n${texto}`;
+        t.entradaAnexos = [...new Set([...t.entradaAnexos, ...anexos])];
         return t;
       },
       async raizDaCadeia(id: string) {
@@ -1201,6 +1203,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           acordarEm: t.acordarEm ?? null,
         };
         b.turnos.push(turno);
+        // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
+        if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         return turno;
       },
       async buscar(id) {
@@ -1342,9 +1346,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return { turno: alvo, absorvidos };
       },
       async absorverNaSessao(turno, ids) {
-        const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && t.entradaAnexos.length === 0 && (!ids || ids.includes(t.id)))
-          .sort((x, y) => x.criadoEm - y.criadoEm);
+        // NOD-286: como o SQL — fora de trabalho, e só até a primeira fala pendente com anexo do mesmo escopo.
+        const escopoDaFala = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.conversaId === turno.conversaId && t.agenteId === turno.agenteId && t.estado === "pendente" && t.origem === "conversa" && t.mensagemOrigemId && !t.trabalhoId);
+        const absorvidos = ateOPrimeiroAnexo(escopoDaFala).filter((t) => !ids || ids.includes(t.id));
         for (const t of absorvidos) {
           t.estado = "interrompido";
           t.motivoInterrupcao = "absorvido";
@@ -1355,9 +1359,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async absorverDoTrabalho(turno, ids) {
         if (!turno.trabalhoId || (ids && ids.length === 0)) return [];
-        const absorvidos = doTenant(b.turnos)
-          .filter((t) => t.id !== turno.id && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId && t.entradaAnexos.length === 0 && (!ids || ids.includes(t.id)))
-          .sort((x, y) => x.criadoEm - y.criadoEm);
+        const daFaixa = doTenant(b.turnos).filter((t) => t.id !== turno.id && t.ownerId === escopo.pessoaId && t.trabalhoId === turno.trabalhoId && t.estado === "pendente" && t.mensagemOrigemId);
+        const absorvidos = ateOPrimeiroAnexo(daFaixa).filter((t) => !ids || ids.includes(t.id));
         for (const t of absorvidos) {
           t.estado = "interrompido";
           t.motivoInterrupcao = "absorvido";
@@ -1398,7 +1401,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "despachando");
       },
       async pendentesDaPessoa(conversaId) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId));
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (!conversaId || t.conversaId === conversaId)).sort(porChegada);
       },
       async vivosDaConversa(conversaId) {
         return doTenant(b.turnos).filter((t) => t.conversaId === conversaId && (t.estado === "pendente" || t.estado === "despachando") && (t.acordarEm ?? 0) <= agora());

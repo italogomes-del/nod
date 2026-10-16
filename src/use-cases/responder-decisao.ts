@@ -1,3 +1,4 @@
+import { fraseDoReenvio } from "./decidir.ts";
 import type { Decisao, TipoDecisao } from "../contracts/decisao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
@@ -89,7 +90,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
       prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
       entradaTexto: [
         `Resposta de ${input.respondidaPor.nome} ao seu pedido (${d.tipo}: "${d.frase}"): ${input.texto}`,
-        "Continue a partir daqui; nada foi reenviado.",
+        `Continue a partir daqui; ${fraseDoReenvio(original.entradaAnexos.length > 0)}.`,
         ...(await historicoDaResposta(deps, d)),
         ...(daRotina ? ["Entrada original da rotina:", daRotina.turnoDisparado.entradaTexto] : []),
       ].join("\n"),

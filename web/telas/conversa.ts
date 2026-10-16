@@ -3,6 +3,7 @@ import type { FrotaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Proposta } from "../../src/contracts/conversa.ts";
 import type { Decisao } from "../../src/contracts/decisao.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
+import type { TipoAnexo } from "../../src/contracts/anexo.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { TarefaDoBot } from "../../src/contracts/turno.ts";
 import type { ConversaEstado, Estado, TurnoVivo } from "../estado/reducer.ts";
@@ -260,6 +261,9 @@ function sondaDoAlvo(estado: Estado, alvo: AlvoDoAviso): Inventario | null {
   return estado.executor?.harnesses ? inventarioDaIa(estado, alvo.ia) : alvo.ia === "claude-cli" ? doMotor("claude-cli") : null;
 }
 
+/** NOD-285: o nome do tipo de arquivo como a pessoa lê (o mesmo da frase do servidor, src/domain/harness.ts). */
+const NOME_DO_TIPO_DE_ANEXO: Readonly<Record<TipoAnexo, string>> = { pdf: "PDF", imagem: "imagem", texto: "arquivo de texto" };
+
 /**
  * Executor indisponível (ADR-029, classe plano_ausente) como aviso de ERRO do design system (definido em 2026-10-04):
  * o trabalho não começou. A frase da redação fica atrás de "Detalhes técnicos" (traz o motivo cru e a hora);
@@ -282,6 +286,22 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   // A IA da causa e do modelo recusado: a que recusou (`ia`; nas antigas, o `nome`); sem ela, a do bot fixado.
   const iaDoAviso = iaQueRecusou(negacao) ?? fixado;
   const noApp = "nodDesktop" in globalThis;
+  const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
+  // NOD-285 (revisão do Gil no #345): a IA está pronta e só não lê o arquivo. Nem "nenhuma IA pronta", nem "já voltou",
+  // nem "fica guardada": mandar de novo dá a mesma negação enquanto não houver uma IA que leia o arquivo.
+  if (negacao?.anexo) {
+    const tipo = NOME_DO_TIPO_DE_ANEXO[negacao.anexo];
+    // Quem lê o tipo sai das capacidades do catálogo (ADR-083), nunca do id da IA.
+    const leem = (estado.executor?.harnesses?.opcoes ?? []).filter((h) => h.integrado && h.capacidades.anexos.includes(negacao.anexo!)).map((h) => h.nome);
+    const passo = leem.length > 0 ? `Deixe o ${leem.join(" ou o ")} pronto e mande o arquivo de novo, ou cole o conteúdo como texto.` : "Cole o conteúdo como texto.";
+    return avisoDeEstado({
+      tom: "erro",
+      titulo: "Nenhum trabalho começou.",
+      texto: `${nome ?? "O bot"} não consegue ler ${tipo} com as IAs prontas agora. ${passo}`,
+      extra: detalhes,
+      acao: botao("secao-espaco", "Conectar IA", { classe: "pri sm", dados: { secao: "conexao" } }),
+    });
+  }
   // definido em 2026-10-05: a IA estava logada e a conta não serviu — aviso próprio, com a causa e os botões (ia-fora.ts).
   // Esse aviso não diz que a IA "voltou": diz que JÁ HÁ UMA IA PRONTA. No Automático (sem IA fixada) o bot pega a IA em
   // uso, então vale a sonda dela, mais nova que a negação (NOD-213); o bot fixado segue a regra da IA dele.
@@ -291,7 +311,6 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
   // NOD-171/NOD-220: a IA do alvo, nomeável e ainda fora — o aviso diz QUAL e o estado dela (desatualizada, sem login, no
   // limite, fora, ou só "indisponível" quando o catálogo não explica).
   if (aindaFora && alvo && "ia" in alvo && alvo.nomeia) return avisoHarnessFora(m, estado, { nomeDoBot: nome ?? null, agenteId: bot?.id ?? null, ia: alvo.ia, noApp });
-  const detalhes = `<details class="aviso-estado-detalhes" data-disclosure="negacao-${esc(m.id)}"><summary>Detalhes técnicos</summary>${paragrafos(m.texto)}</details>`;
   const voltou = iaDoAlvo ? `O ${PROVEDOR_DA_IA[iaDoAlvo].cli} já voltou` : "Ela já voltou";
   return avisoDeEstado({
     tom: "erro",

@@ -529,6 +529,7 @@ async function aposLimite(
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   // Só códigos e ids (o Marlon lê `ia_trocada` no log de produção depois do deploy).
@@ -582,6 +583,7 @@ async function aposTrocaDeConta(
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   log("info", "conta_trocada", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, harness: p.ia, de: troca.de, para: troca.para });
@@ -696,6 +698,7 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    contaminadoDe: turno.id,
   });
   return novo ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } })] : [];
 }
@@ -781,10 +784,12 @@ async function aposLimiteNoFundo(
     harness: turno.harness,
     executor: turno.executor,
     acordarEm: p.renovaEm,
+    // A marca de quem leu algo de fora (ADR-062) segue para a volta no mesmo INSERT (NOD-287).
+    contaminadoDe: turno.id,
   });
   if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
-  // A marca de quem leu algo de fora (ADR-062) segue para a volta, como na volta marcada (me-chame-as.ts).
-  if (turno.entradaConfianca !== "confiavel" || (await deps.repos.turnos.contaminado(turno.id))) await deps.repos.turnos.contaminar(volta.id, agora);
+  // A entrada de fora também marca a volta, como na volta marcada (me-chame-as.ts).
+  if (turno.entradaConfianca !== "confiavel") await deps.repos.turnos.contaminar(volta.id, agora);
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, custo_usd: p.custoUsd } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId, acordar_em: p.renovaEm } }),
@@ -856,6 +861,7 @@ async function aposContaSemAcesso(
       reenvios: turno.reenvios + 1,
       executor: p.executor,
       trabalhoId: turno.trabalhoId ?? null,
+      contaminadoDe: turno.id,
     });
     if (novo) events.push(evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
     return events;

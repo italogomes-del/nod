@@ -9,7 +9,7 @@ import { depsFalsos, type OpcoesDepsFalsos } from "./deps-l5.ts";
 
 const destino = { conector: "email", ferramenta: "enviar", argumentos: { texto: "corpo" } };
 
-async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}) {
+async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}, entradaAnexos: string[] = []) {
   const { deps, banco, chamadas } = depsFalsos(opcoes);
   banco.pessoas.push({ tenantId: TENANT_PADRAO, id: PESSOA_MARLON, nome: "Marlon", iniciais: "M", email: null });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
@@ -18,7 +18,7 @@ async function cenarioComDecisao(opcoes: OpcoesDepsFalsos = {}) {
   await deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: 1 });
   await deps.repos.concessoes.conceder({ agenteId: agente?.id ?? "", conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: "m" });
   await deps.repos.conectores.criar({ nome: "CRM", slug: "crm", transporte: "stdio", comando: "node", declaracao: "toca" });
-  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: 9e12, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001" });
+  const turno = await deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa?.id ?? "", agenteId: agente?.id ?? "", origem: "conversa", prazoEm: 9e12, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "claude-haiku-4-5-20251001", entradaAnexos });
   const pedido = await pedirAprovacao(deps, {
     turnoId: turno?.id ?? "",
     agenteId: agente?.id ?? "",
@@ -120,5 +120,17 @@ describe("decidir (E4.1/E4.3/E4.5): aprovação em lista com execução parcial"
     const perfil = await c.deps.repos.decisoes.criar({ tipo: "perfil", agenteId: c.itens[0]?.decisaoId ?? "a", conversaId: "c", prazoDecisaoEm: 9e12, frase: "x" });
     await expect(decidir(c.deps, { decisaoId: perfil?.id ?? "" })).rejects.toBeInstanceOf(ErroDeDominio);
     expect(c.chamadas).toHaveLength(0);
+  });
+});
+
+describe("a retomada da aprovação leva o anexo da fala (NOD-285)", () => {
+  it("a retomada nasce com o mesmo entradaAnexos e diz que os arquivos seguem anexados, nunca 'nada foi reenviado'", async () => {
+    const anexos = ["5b0c7c39-6c1e-4f43-9a8e-0f6a2d1e9b01", "5b0c7c39-6c1e-4f43-9a8e-0f6a2d1e9b02"];
+    const c = await cenarioComDecisao({}, anexos);
+    await decidir(c.deps, { decisaoId: c.decisaoId, itens: [] });
+    const retomada = c.banco.turnos.find((t) => t.origem === "retomada");
+    expect(retomada?.entradaAnexos).toEqual(anexos);
+    expect(retomada?.entradaTexto).toContain("os arquivos da fala de origem seguem anexados");
+    expect(retomada?.entradaTexto).not.toContain("nada foi reenviado");
   });
 });

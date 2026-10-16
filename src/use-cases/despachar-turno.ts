@@ -1,3 +1,4 @@
+import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { CotaDaIa } from "../contracts/cota.ts";
 import { HARNESS_LEGADO, HARNESSES, type IdHarness } from "../contracts/harness.ts";
@@ -163,7 +164,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
       const causa = causaHarnessIndisponivel(e);
       if (!causa) return recusarPorExecutor(deps, { turno, executor, inventario, agora, semIaOnde: "maquina_do_bot" });
       const doHarness = causa.inventario ?? input.harnessesDaPessoa?.[causa.harness] ?? (causa.motivo === "modelo_invalido" ? inventario : inventarioHarnessSemSonda(agora));
-      return recusarPorExecutor(deps, { turno, executor, inventario: doHarness, agora, harness: causa.harness, modeloInvalido: causa.motivo === "modelo_invalido" ? causa.modelo : undefined });
+      return recusarPorExecutor(deps, { turno, executor, inventario: doHarness, agora, harness: causa.harness, modeloInvalido: causa.motivo === "modelo_invalido" ? causa.modelo : undefined, anexoNaoLido: causa.motivo === "anexo_nao_lido" ? causa.tipo : undefined });
     }
     throw e;
   }
@@ -264,12 +265,12 @@ async function semContaNaMaquina(
 
 async function recusarPorExecutor(
   deps: Deps,
-  p: { turno: Turno; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; semIaOnde?: "maquina_do_bot" },
+  p: { turno: Turno; executor: Executor; inventario: Inventario; agora: number; harness?: string; modeloInvalido?: string; anexoNaoLido?: TipoAnexo; semIaOnde?: "maquina_do_bot" },
 ): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] }> {
   // nao_autenticado/motor_ausente são MotivoFalha (do inventário, nunca do classificador); a interrupção é executor_indisponivel.
   const motivoFalha = p.inventario.estado === "nao_autenticado" ? "nao_autenticado" : "motor_ausente";
   const assentado = await deps.repos.turnos.assentar(p.turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha, ultimoSinalEm: p.agora });
-  const negacao = await mensagemExecutorIndisponivel(deps, { conversaId: p.turno.conversaId, turnoId: p.turno.id, agenteId: p.turno.agenteId, executor: p.executor, inventario: p.inventario, agora: p.agora, harness: p.harness, modeloInvalido: p.modeloInvalido, semIaOnde: p.semIaOnde });
+  const negacao = await mensagemExecutorIndisponivel(deps, { conversaId: p.turno.conversaId, turnoId: p.turno.id, agenteId: p.turno.agenteId, executor: p.executor, inventario: p.inventario, agora: p.agora, harness: p.harness, modeloInvalido: p.modeloInvalido, anexoNaoLido: p.anexoNaoLido, semIaOnde: p.semIaOnde });
   const autoria = autoriaAgente({ agenteId: p.turno.agenteId, contaDeExecucao: p.turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
   const events = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: motivoFalha, inventario: p.inventario.estado } }),

@@ -145,6 +145,8 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
     reenvios: turno.reenvios + 1,
     executor: turno.executor,
     trabalhoId: turno.trabalhoId ?? null,
+    // NOD-287: a fala refeita na conta escolhida leva a marca da web do turno que bateu no limite.
+    contaminadoDe: turno.id,
   });
   if (novo) events.push(evento(d.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } }));
   log("info", "conta_escolhida", { turno_id: turno.id, novo_turno_id: novo?.id ?? null, conta_id: conta.id });

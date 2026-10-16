@@ -196,6 +196,32 @@ describe("conversa: o bot fixado numa IA que não está pronta", () => {
   });
 });
 
+// NOD-285 (revisão do Gil no #345): a negação por anexo tem aviso próprio; a frase não fica escondida em "Detalhes técnicos".
+describe("conversa: nenhuma IA pronta lê o arquivo (anexo_nao_lido)", () => {
+  const porAnexo = (anexo: "pdf" | "imagem"): Mensagem => {
+    const m = negacao("codex-cli");
+    return { ...m, texto: "Nenhum trabalho começa: nenhuma IA pronta agora lê PDF; deixe o Claude Code pronto ou cole o conteúdo como texto.", payload: { kind: "negacao", classe: "plano_ausente", nome: "codex-cli", motivo: "plano_ausente", terminal: true, anexo } };
+  };
+
+  for (const [caso, estado] of [["sonda do Codex mais antiga que a negação", com({ claude: SEM_LOGIN, codex: PRONTO, harnessDoGil: "auto" })], ["Codex com sonda nova", com({ claude: SEM_LOGIN, codex: { ...PRONTO, em: 1 }, harnessDoGil: "auto" })]] as const) {
+    it(`${caso}: diz que não lê PDF, sem 'nenhuma IA está pronta agora', 'já voltou' ou 'fica guardada'`, () => {
+      const html = renderMensagem(porAnexo("pdf"), estado);
+      expect(html).toContain("Nenhum trabalho começou.");
+      expect(html).toContain("Gil não consegue ler PDF com as IAs prontas agora. Deixe o Claude Code pronto e mande o arquivo de novo, ou cole o conteúdo como texto.");
+      expect(html).not.toContain("nenhuma IA está pronta agora");
+      expect(html).not.toContain("já voltou");
+      expect(html).not.toContain("fica guardada");
+      expect(html).toContain("Conectar IA");
+      expect(html).toContain("Detalhes técnicos");
+    });
+  }
+
+  it("imagem usa o nome do tipo e as IAs que leem", () => {
+    const html = renderMensagem(porAnexo("imagem"), com({ claude: SEM_LOGIN, codex: PRONTO, harnessDoGil: "auto" }));
+    expect(html).toContain("Gil não consegue ler imagem com as IAs prontas agora. Deixe o Claude Code ou o Codex pronto e mande o arquivo de novo");
+  });
+});
+
 describe("conversa: o limite do plano sem outra IA (tela 4 do plano das IAs)", () => {
   const limite = (harness: "claude-cli" | "codex-cli", voltaEm: number | null, criadoEm = 0): Mensagem => ({ ...negacao("x"), kind: "sistema", criadoEm, texto: "Turno interrompido: seu plano do Claude Code atingiu o limite de uso; volta a funcionar às 14:00. O que já saiu fica marcado como parcial; nada foi reenviado.", payload: { kind: "limite_do_plano", harness, voltaEm } });
 

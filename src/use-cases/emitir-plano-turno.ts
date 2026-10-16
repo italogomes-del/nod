@@ -1,3 +1,5 @@
+import type { TipoAnexo } from "../contracts/anexo.ts";
+import { tipoDoAnexo } from "../domain/anexo.ts";
 import type { CapacidadesHarness, IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import { capacidadesDe, causaHarnessIndisponivel, modeloMaisPotente, resolverHarness } from "../domain/harness.ts";
@@ -165,8 +167,11 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const daMaquina = executor !== "catcher" && input.harnesses && (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContasDaMaquina(deps, input.machineId) : null;
   const contas = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, agora) : null;
   const governadas = (ia: IdHarness) => contas !== null && ia in contas.porIa;
+  // NOD-285 (K1): os anexos que existem (o arquivo limpo do disco não tem meta e não filtra) decidem quais IAs servem.
+  const metasDosAnexos = await deps.repos.anexos.metas(turno.entradaAnexos);
   const escolha = executor !== "catcher" && input.harnesses
     ? escolherHarness(turno, input.harnesses, {
+      tiposDeAnexo: metasDosAnexos.map((a) => tipoDoAnexo(a.mime)),
       ordem: contas
         ? ordemCompleta([...(input.harnessPreferido ? [input.harnessPreferido] : []), ...contas.ordemIas, ...ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null })])
         : ordemEfetiva({ doBot: inteligencia.ordem, daPessoa: preferencias.ordemIas ?? null, preferido: input.harnessPreferido }),
@@ -238,7 +243,17 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // recados), nunca o da conversa do dono — no Codex a frente via a conversa com a pessoa. A task de antes segue igual.
   // revisto em 2026-10-12 (ADR-099, I10): a task de antes, migrada pela 0072 sem lote, segue com o histórico de antes.
   const doHistorico = !sessaoCli && formaEfetiva(trabalho) === "frente" ? await deps.repos.mensagens.doTrabalho(trabalho!.id, MENSAGENS_DO_PLANO) : mensagens;
-  const historico = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO).map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, 1000), confianca: m.confianca })) : [];
+  // NOD-285 (K2): sem sessão, o modelo só sabe que uma fala trazia arquivo pelo histórico — a fala ganha "[anexou X]".
+  // Com sessão, ela já viu o arquivo no turno dele; o histórico nem vai. Só a fala da pessoa: a captura de tela que o
+  // bot anexa à própria fala (NOD-200) não volta ao modelo nem pelo nome.
+  const janela = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO) : [];
+  const daPessoa = janela.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id);
+  const anexosDaJanela = daPessoa.length ? await deps.repos.anexos.daMensagens(daPessoa) : new Map<string, { nome: string }[]>();
+  const comAnexo = (m: (typeof janela)[number]) => {
+    const nomes = (anexosDaJanela.get(m.id) ?? []).map((a) => a.nome);
+    return nomes.length ? `${m.texto.slice(0, 1000)} [anexou ${nomes.join(", ")}]` : m.texto.slice(0, 1000);
+  };
+  const historico = janela.map((m) => ({ autor: autorDe(m), texto: comAnexo(m), confianca: m.confianca }));
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
@@ -333,7 +348,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     executor,
     // 0005: --resume só para o MESMO executor que gravou a sessão; senão sessão nova (--session-id).
     sessaoCli,
-    anexos: await deps.repos.anexos.metas(turno.entradaAnexos),
+    anexos: metasDosAnexos,
     contextoConversa,
     pessoaNome,
     maquina: input.maquina ?? null,
@@ -442,7 +457,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 };
 
 /** NOD-171: a recusa leva o inventário do harness que faltou, para a negação falar dele e não do motor. */
-function escolherHarness(turno: Turno, harnesses: Partial<Record<IdHarness, Inventario>>, ia: { ordem: IdHarness[]; noLimite: IdHarness[]; escolhas: EscolhasIa }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
+function escolherHarness(turno: Turno, harnesses: Partial<Record<IdHarness, Inventario>>, ia: { ordem: IdHarness[]; noLimite: IdHarness[]; escolhas: EscolhasIa; tiposDeAnexo: TipoAnexo[] }): { harness: IdHarness; modelo: string; raciocinio?: EsforcoAgente } {
   try {
     return resolverHarness({ harness: turno.harness, modelo: turno.modelo, prontos: (Object.keys(harnesses) as IdHarness[]).filter((id) => harnesses[id]?.estado === "pronto"), ...ia });
   } catch (e) {

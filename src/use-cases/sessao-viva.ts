@@ -1,5 +1,6 @@
 import type { Executor } from "../contracts/evento.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
+import { ateOPrimeiroAnexo } from "../domain/ordem-das-falas.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { contaminarSeAbsorveuDeFora } from "./coordenar-trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -59,6 +60,7 @@ export async function aceitaNaSessao(deps: Deps, t: Turno): Promise<boolean> {
 /**
  * As falas da pessoa que esperavam na fila desta conversa e podem entrar no turno vivo, na ordem: só fala dela (com
  * mensagem de origem), de conversa, sem anexo (o anexo espera o próximo turno, que o baixa inteiro) e fora de trabalho.
+ * NOD-286 (2026-10-15): só as que vieram antes da primeira com anexo — a posterior espera com o print, na ordem.
  *
  * definido em 2026-10-07 (#189): com `confirma` (o app confirma o que escreveu na sessão) elas NÃO saem da fila aqui —
  * só quando o app as confirma (`confirmarNaSessao`); a que o CLI não recebeu continua `pendente` e vira turno próprio,
@@ -71,8 +73,10 @@ export const absorverNaSessao: CasoDeUso<{ turnoId: string; executor: Executor; 
   if (!turno || !(await aceitaNaSessao(deps, turno))) return nada;
   if (e.confirma) {
     const fora = new Set(e.jaOferecidas ?? []);
-    const fila = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && !fora.has(t.id) && t.agenteId === turno.agenteId && t.origem === "conversa" && Boolean(t.mensagemOrigemId) && t.entradaAnexos.length === 0 && !t.trabalhoId)
-      .sort((x, y) => x.criadoEm - y.criadoEm);
+    // NOD-286: corta na primeira fala pendente com anexo (a que veio depois do print espera com ele). A já oferecida sai
+    // depois do corte: ela nunca tem anexo, então não muda onde a fila para.
+    const daSessao = (await deps.repos.turnos.pendentesDaPessoa(turno.conversaId)).filter((t) => t.id !== turno.id && t.agenteId === turno.agenteId && t.origem === "conversa" && Boolean(t.mensagemOrigemId) && !t.trabalhoId);
+    const fila = ateOPrimeiroAnexo(daSessao).filter((t) => !fora.has(t.id));
     return { data: { textos: fila.map((t) => t.entradaTexto), ids: fila.map((t) => t.id) } };
   }
   const absorvidos = await deps.repos.turnos.absorverNaSessao(turno);

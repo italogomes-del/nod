@@ -21,6 +21,7 @@ export type ChaveRedacao =
   | "passe"
   | "consentimento"
   | "executor-indisponivel"
+  | "anexo-nao-lido"
   | "ia-trocada"
   | "ia-trocada-limite"
   | "cota-no-limite-espera"
@@ -66,6 +67,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-09-24 (ADR-044): {escopo} é a lista `slug.capacidade` do lote; com uma só, o texto é o de antes.
   consentimento: "Concedido por {pessoa} em {quando}: {escopo}; não inclui: {naoInclui}.",
   "executor-indisponivel": "Nenhum trabalho começa: executor indisponível ({motivo}) desde {desde}.",
+  // NOD-285 (revisão do Gil no #345): a IA está pronta e só não lê o arquivo; nada de "executor indisponível… desde".
+  "anexo-nao-lido": "Nenhum trabalho começa: {motivo}.",
   // definido em 2026-10-05: o bot em automático repetiu o pedido na outra IA (assentar-turno.ts, aposContaSemAcesso).
   "ia-trocada": "Respondendo pelo {para}: a conta do {de} neste computador está sem acesso.",
   // definido em 2026-10-10 (emenda da ADR-036): o automático repetiu o pedido na próxima IA da ordem (aposLimite).
