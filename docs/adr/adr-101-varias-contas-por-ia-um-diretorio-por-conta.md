@@ -113,6 +113,14 @@ respeitam a variável, e o resultado volta pelo mesmo caminho (`lerConta`). O qu
 5. **A ordem é da pessoa:** a primeira conta disponível é usada. Quando a preferida renova (`resetsAt`), ela volta a ser
    a primeira escolha no próximo turno. Com todas no limite, os bots param e dizem quando a primeira volta, sem laço de
    tentativas; se a outra IA (Codex ou Claude Code) tiver conta disponível, a nota oferece seguir com ela.
+   - **Emenda NOD-268 (2026-10-15): o "sem laço" ficou com freio no código.** Em 15/10 uma conversa recebeu dezenas
+     de notas e reenvios. Agora: (a) **teto de 1 reenvio** por fala (`TETO_REENVIOS`, em `aposTrocaDeConta`,
+     `aposLimiteDaConta`, `aposLimite` e `repetirNaConversa`); passou do teto, a fala espera com `acordar_em` na hora
+     da renovação (sem horário, 1 h) e, se já esperou, vale o aviso de sempre; (b) **a nota das contas não se repete**:
+     com a mesma nota ainda aberta na conversa, o despacho não escreve outra, só adia a fala; (c) **"Seguir com" uma
+     conta que a máquina do bot não tem** não reenvia: a conversa ganha uma linha dizendo onde ela falta; (d) **alarme**
+     `reenvio_em_laco` no log quando a mesma fala passa de 3 turnos em menos de 5 min. Suposição registrada: o clique
+     da pessoa em "Seguir com" não passa pelo teto (é ato dela), só pela dedup e pela checagem da máquina.
 6. **Troca no limite: opção 2 do Marlon** (definido em 2026-10-12).
    - Ter várias contas e escolher a ordem manualmente está dentro dos termos. Trocar sozinho no momento do limite é
      exatamente o caso das cláusulas "circumvent rate limits" (OpenAI) e "ordinary, individual usage" (Anthropic). Por

@@ -7,6 +7,12 @@ import { modelosDaLista } from "../../../src/domain/codex-app-server.ts";
 import { causaHarnessIndisponivel, resolverHarness } from "../../../src/domain/harness.ts";
 import {
   aplicarPedidoInteligencia,
+  esperaDoAutomatico,
+  LACO_JANELA_MS,
+  LACO_TURNOS,
+  podeReenviar,
+  reenvioEmLaco,
+  TETO_REENVIOS,
   derivadosDa,
   iaDoAutomatico,
   iasDaPessoa,
@@ -200,5 +206,34 @@ describe("o estado das IAs da pessoa (GET /ias)", () => {
     expect(r.ias[1]?.modelos.find((m) => m.id === "opus")).toMatchObject({ recomendado: true, raciocinios: ["low", "medium", "high", "xhigh", "max"] });
     expect(r.ias[2]).toMatchObject({ integrado: false, inventario: { estado: "ausente" }, recomendado: null });
     expect(r.raciocinios.map((n) => n.id)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+});
+
+describe("NOD-268: teto de reenvios, espera do Automático e o alarme do laço", () => {
+  it("podeReenviar: uma vez só (TETO_REENVIOS = 1)", () => {
+    expect(TETO_REENVIOS).toBe(1);
+    expect(podeReenviar({ reenvios: 0 })).toBe(true);
+    expect(podeReenviar({ reenvios: 1 })).toBe(false);
+    expect(podeReenviar({ reenvios: 5 })).toBe(false);
+  });
+
+  it("esperaDoAutomatico: todas as prontas no limite → a renovação mais próxima; uma fora → null; nenhuma pronta → null", () => {
+    const agora = 1_000;
+    const limites = { "claude-cli": { renovaEm: 5_000, desde: 0 }, "codex-cli": { renovaEm: 3_000, desde: 0 } };
+    expect(esperaDoAutomatico({ prontos: ["claude-cli", "codex-cli"], limites, agora })).toBe(3_000);
+    expect(esperaDoAutomatico({ prontos: ["claude-cli"], limites, agora })).toBe(5_000);
+    expect(esperaDoAutomatico({ prontos: ["claude-cli", "gemini-cli"], limites, agora })).toBeNull();
+    expect(esperaDoAutomatico({ prontos: ["claude-cli", "codex-cli"], limites, agora: 4_000 })).toBeNull();
+    expect(esperaDoAutomatico({ prontos: [], limites, agora })).toBeNull();
+    expect(esperaDoAutomatico({ prontos: ["claude-cli"], limites: null, agora })).toBeNull();
+  });
+
+  it("reenvioEmLaco: mais de 3 turnos em menos de 5 min", () => {
+    const agora = 10 * 60_000;
+    const recentes = [agora - 60_000, agora - 30_000, agora - 10_000];
+    expect(reenvioEmLaco(recentes, agora)).toBe(false);
+    expect(reenvioEmLaco([...recentes, agora], agora)).toBe(true);
+    expect(reenvioEmLaco([...recentes, agora - LACO_JANELA_MS], agora)).toBe(false);
+    expect(LACO_TURNOS).toBe(3);
   });
 });

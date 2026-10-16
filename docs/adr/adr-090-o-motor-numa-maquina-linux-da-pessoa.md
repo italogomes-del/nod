@@ -38,6 +38,13 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
 5. **Cada bot tem onde trabalha** (estende a ADR-022). "Qualquer máquina" (o comportamento de hoje) ou uma máquina
    escolhida, com um padrão por pessoa. A regra é declarativa e decidida no `reivindicar`; o agente não escolhe e não
    tem ferramenta para trocar.
+   - **Emenda NOD-268 (2026-10-15): a troca de IA no limite só vai para a IA que a máquina do bot tem.** Com o bot
+     preso a uma máquina (ou ao padrão da pessoa), o reenvio depois do limite só troca para uma IA pronta *nela*, e o
+     turno novo sai com o harness fixo (não `auto`), para não ser escolhido de novo noutra volta. Se a outra IA só está
+     pronta noutra máquina, o turno não migra: a fala espera a hora do limite (`acordar_em`) e a conversa ganha UMA
+     linha ("O Codex está pronto noutra máquina, mas este bot roda em <máquina>…"). "A máquina do bot" segue a ordem de
+     `alvoDoTurno` sem o "desta vez" (`alvoDoBot`: a do bot, senão a padrão, só com a chave viva), porque é para ela que a
+     fala refeita vai.
 6. **Máquina escolhida fora do ar.**
    - **Conversa, task ou pedido de colega que ainda não começou:** espera na fila. A tela diz "esperando <máquina>
      (sem contato desde HH:MM)" e oferece "Rodar em <outra máquina> desta vez", que é ato da pessoa e vale só para
@@ -46,6 +53,10 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
      ADR-045, generalizado de "seu Mac" para "<máquina>".
    - **Turno que já tinha começado:** como hoje (ADR-045). Não migra: turno não é idempotente e a credencial mudaria
      no meio.
+   - **Emenda NOD-268 (2026-10-15): todas as IAs da máquina no limite.** O despacho no Automático não entrega a
+     fala a uma IA que ele sabe estar no limite: a fala fica com `acordar_em` na renovação mais próxima (sem horário do
+     fornecedor, 1 h) e a conversa ganha uma linha. Uma fala nova da pessoa absorve a adiada; Parar a cancela. A fala
+     que já esperou uma vez segue o caminho de sempre (não espera de novo).
 7. **Os arquivos ficam onde o bot trabalha.** A pasta do bot é `~/nod/<bot>` na máquina que roda o turno (como já é,
    `claude-cli.ts`). Não há sincronização com o Mac. Anexos já chegam por `/api/interno/anexos/:id` e funcionam em
    qualquer máquina; o arquivo do Mac para um app (ADR-068) já não vale no modo compartilhado e continua assim.

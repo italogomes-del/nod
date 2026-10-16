@@ -37,7 +37,7 @@ async function cenario(o: { pedido?: unknown; origem?: "conversa" | "rotina" | "
   const antes = banco.mensagens.length;
   const entregar = (resultado: ResultadoTurno, harness: IdHarness, prontosDaPessoa: IdHarness[] = ["claude-cli", "codex-cli"]) =>
     executar(deps, assentarTurno, { turnoId: t!.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, executor: "local", harness, prontosDaPessoa });
-  return { deps, banco, turnoId: t!.id, trabalhoId, antes, entregar };
+  return { deps, banco, turnoId: t!.id, trabalhoId, antes, entregar, turno: () => banco.turnos.find((x) => x.id === t!.id)! };
 }
 
 describe("assentarTurno: a conta da IA chegou ao limite (várias contas)", () => {
@@ -110,4 +110,29 @@ describe("assentarTurno: a conta da IA chegou ao limite (várias contas)", () =>
       expect(novas[0]?.texto).toMatch(/^A conta 1 do Claude Code chegou ao limite\. Esta task espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d, de onde parou\.$/);
     });
   }
+});
+
+describe("NOD-268: o teto de reenvios na troca de conta", () => {
+  it("Trocar sozinho com a fala já reenviada uma vez: não repete — espera a conta voltar, com UMA linha", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
+    c.turno().reenvios = 1;
+    await c.entregar(comConta({ tipo: "trocou", de: 1, para: 3, voltaEm: T0 + DUAS_HORAS, foraDaTroca: [] }), "claude-cli");
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas).toHaveLength(1);
+    expect(novas[0]?.texto).toMatch(/^O Claude Code está no limite da assinatura\. Sua mensagem espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d\.$/);
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", reenvios: 2, acordarEm: T0 + DUAS_HORAS }]);
+  });
+
+  it("e a que já esperou a hora fica com o aviso de sempre (nada na fila)", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
+    c.turno().reenvios = 2;
+    c.turno().acordarEm = T0 - 1;
+    await c.entregar(comConta({ tipo: "trocou", de: 1, para: 3, voltaEm: T0 + DUAS_HORAS, foraDaTroca: [] }), "claude-cli");
+    expect(c.banco.turnos).toHaveLength(1);
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas).toHaveLength(1);
+    // Revisão do PR #319: sem "Seguindo com a conta 3" — nada segue; o aviso do limite com a hora.
+    expect(novas[0]?.texto).not.toContain("Seguindo");
+    expect(novas[0]?.payload).toMatchObject({ kind: "limite_do_plano", harness: "claude-cli", voltaEm: T0 + DUAS_HORAS });
+  });
 });

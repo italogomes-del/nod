@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ContaAnunciada } from "../../../src/contracts/contas-ia.ts";
 import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
@@ -7,6 +7,7 @@ import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
 import { seguirComConta } from "../../../src/use-cases/contas-ia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
+import { parar } from "../../../src/use-cases/parar.ts";
 import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
 
 /**
@@ -40,7 +41,12 @@ async function cenario(o: { origem?: "conversa" | "rotina"; comTask?: boolean } 
   const reivindicar = () => deps.repos.turnos.reivindicar({ machineId: vm, agora: T0 });
   const entregar = (resultado: ResultadoTurno, harness: IdHarness) =>
     executar(deps, assentarTurno, { turnoId: t!.id, machineId: vm, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, executor: "local", harness, prontosDaPessoa: ["claude-cli", "codex-cli"] });
-  return { deps, banco, vm, turnoId: t!.id, conversaId: bot.conversa.id, contas: { cPessoal: cPessoal!, gPessoal: gPessoal!, cLeapy: cLeapy! }, antes, despachar, reivindicar, entregar };
+  /** Mais um turno da MESMA fala (o que o laço de 15/10 enfileirava a cada volta), já sem espera. */
+  const reenfileirar = async (reenvios = 1) => {
+    const o = banco.turnos.find((x) => x.id === t!.id)!;
+    return (await deps.repos.turnos.enfileirar({ conversaId: o.conversaId, agenteId: o.agenteId, origem: "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: o.entradaTexto, mensagemOrigemId: o.mensagemOrigemId, entradaConfianca: "confiavel", modelo: o.modelo, harness: o.harness, executor: "local", reenvios }))!;
+  };
+  return { deps, banco, vm, agenteId: bot.agente.id, reenfileirar, turnoId: t!.id, conversaId: bot.conversa.id, contas: { cPessoal: cPessoal!, gPessoal: gPessoal!, cLeapy: cLeapy! }, antes, despachar, reivindicar, entregar };
 }
 
 describe("a conta do turno no limite (ADR-102)", () => {
@@ -165,9 +171,235 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
     expect(r.data.turnoId).not.toBeNull();
     expect((await c.deps.repos.contasIa.modo()).escolhidas).toEqual({ "claude-cli": c.contas.cLeapy.id });
     expect(c.banco.mensagens.at(-1)).toMatchObject({ texto: "Seguindo com Claude · Leapy.", payload: { kind: "conta_escolhida", contaId: c.contas.cLeapy.id } });
+    // Revisão do PR #319: a cópia que esperava a conta (NOD-268) sai da fila — senão a nova a absorveria e o bot leria o
+    // mesmo pedido duas vezes.
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toMatchObject([{ id: r.data.turnoId, acordarEm: null }]);
     // De novo não refaz: já há uma fala nova pendente.
-    const r2 = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
     expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toHaveLength(1);
-    void r2;
   });
 });
+
+/** 14:50 de Brasília (UTC−3, sem horário de verão) de hoje ou de amanhã — a hora da nota de 15/10. */
+const AS_14_50 = (() => { const d = new Date(T0); d.setUTCHours(17, 50, 0, 0); return d.getTime() <= T0 ? d.getTime() + 24 * HORA : d.getTime(); })();
+const ESPERA = /^O (Claude Code|Codex) está no limite da assinatura\. Sua mensagem espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d\.$/;
+const notas = (c: { banco: { mensagens: { payload?: { kind?: string } | null }[] }; antes: number }) => c.banco.mensagens.slice(c.antes).filter((m) => m.payload?.kind === "limite_do_plano");
+
+describe("NOD-268: regressão de 15/10 (a conversa inundada de notas e reenvios)", () => {
+  it("dez despachos da mesma fala sem conta utilizável: UMA nota; a fala espera a conta voltar (acordar_em = 14:50)", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.despachar();
+    for (let i = 0; i < 9; i++) {
+      await c.reenfileirar();
+      await c.despachar();
+    }
+    expect(notas(c)).toHaveLength(1);
+    expect(c.banco.mensagens.slice(c.antes)[0]?.texto).toContain("14:50");
+    const adiado = c.banco.turnos.find((t) => t.estado === "pendente" && t.mensagemOrigemId === c.banco.turnos.find((x) => x.id === c.turnoId)!.mensagemOrigemId && t.acordarEm);
+    expect(adiado?.acordarEm).toBe(AS_14_50);
+  });
+
+  it("'Seguir com' numa conta que não está na máquina do bot: nada refeito, 0 notas novas e UMA linha, mesmo com três cliques", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.despachar();
+    const mac = (await c.deps.repos.maquinaTokens.criar({ nome: "Mac do Marlon", prefixo: "cc33", hash: randomBytes(32) }))!;
+    await c.deps.repos.contasIa.doAnuncio(mac.id, [anuncio(1, "claude-cli", "Pessoal")], T0);
+    await c.deps.repos.agentes.definirMaquina([c.agenteId], mac.id);
+    const notasAntes = notas(c).length;
+    for (let i = 0; i < 3; i++) expect((await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId })).data.turnoId).toBeNull();
+    expect(notas(c)).toHaveLength(notasAntes);
+    const linhas = c.banco.mensagens.slice(c.antes).filter((m) => m.texto.startsWith("A conta"));
+    expect(linhas.map((m) => m.texto)).toEqual(["A conta Claude · Leapy não está em Mac do Marlon. Entre com ela lá ou escolha outra conta."]);
+    expect(c.banco.turnos.filter((t) => t.reenvios > 0)).toHaveLength(1);
+    // Revisão do PR #319: a conta recusada não vira a escolhida da IA.
+    expect((await c.deps.repos.contasIa.modo()).escolhidas["claude-cli"] ?? null).toBeNull();
+  });
+
+  it("revisão do PR #319: a fala que já esperou a conta e volta sem conta ganha a nota de novo (nunca some calada)", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, AS_14_50 + 2 * HORA);
+    await c.despachar();
+    const adiado = c.banco.turnos.find((t) => t.estado === "pendente" && t.acordarEm)!;
+    adiado.acordarEm = T0 - 1;
+    await c.despachar();
+    expect(c.banco.turnos.find((t) => t.id === adiado.id)).toMatchObject({ estado: "interrompido" });
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+    expect(notas(c)).toHaveLength(2);
+  });
+
+  // Regression: ISSUE-001 — rotina sem task escrevia a mesma nota de contas a cada execução
+  // Found by /qa on 2026-10-15 (QA do NOD-268, PR #319)
+  it("QA do NOD-268: rotina sem task executada de novo com a nota igual aberta não escreve outra nota", async () => {
+    const c = await cenario({ origem: "rotina" });
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, AS_14_50 + 2 * HORA);
+    await c.despachar();
+    expect(notas(c)).toHaveLength(1);
+    // Cada execução da rotina é um turno novo, sem mensagem de origem (o teto por mensagem_origem_id não a pega).
+    for (let i = 0; i < 4; i++) {
+      await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "revisa o #861", mensagemOrigemId: null, entradaConfianca: "confiavel", modelo: "auto", harness: "auto", executor: "local" });
+      expect((await c.despachar()).data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    }
+    expect(notas(c)).toHaveLength(1);
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+  });
+
+  it("'Seguir com' numa conta pronta na máquina do bot refaz como antes", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.despachar();
+    await c.deps.repos.agentes.definirMaquina([c.agenteId], c.vm);
+    expect((await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId })).data.turnoId).not.toBeNull();
+  });
+
+  it("no limite da conta com a troca já usada nesta fala: espera a conta voltar com UMA linha, sem 'Seguindo com'", async () => {
+    const c = await cenario();
+    c.banco.turnos.find((t) => t.id === c.turnoId)!.reenvios = 1;
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+    await c.entregar(limite(T0 + 2 * HORA), "claude-cli");
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas.map((m) => m.payload ?? null)).toEqual([null]);
+    expect(novas[0]?.texto).toMatch(ESPERA);
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", reenvios: 2, acordarEm: T0 + 2 * HORA }]);
+  });
+
+  it("revisão do PR #319: e a que já esperou a hora não ganha 'Seguindo com' (nada segue): o aviso do limite com a hora", async () => {
+    const c = await cenario();
+    const t = c.banco.turnos.find((x) => x.id === c.turnoId)!;
+    t.reenvios = 2;
+    t.acordarEm = T0 - 1;
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+    await c.entregar(limite(T0 + 2 * HORA), "claude-cli");
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas).toHaveLength(1);
+    expect(novas[0]?.texto).not.toContain("Seguindo");
+    expect(novas[0]?.payload).toMatchObject({ kind: "limite_do_plano", harness: "claude-cli", voltaEm: T0 + 2 * HORA });
+    expect(c.banco.turnos).toHaveLength(1);
+  });
+});
+
+describe("NOD-268: o despacho do Automático com todas as IAs da máquina no limite", () => {
+  const despacharNoLimite = (c: Awaited<ReturnType<typeof cenario>>) =>
+    executar(c.deps, despacharTurno, { machineId: c.vm, executor: "local", inventario: { estado: "pronto", versao: "2.1.296", em: T0 }, harnessesProntos: ["claude-cli", "codex-cli"], noLimite: ["claude-cli", "codex-cli"] });
+
+  it("não roda a primeira IA: adia até a renovação mais próxima, com UMA linha", async () => {
+    const c = await cenario();
+    await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    await c.deps.repos.preferencias.registrarLimite("codex-cli", { renovaEm: T0 + 2 * HORA, desde: T0 });
+    const r = await despacharNoLimite(c);
+    expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido" });
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toMatchObject([{ acordarEm: T0 + 2 * HORA, reenvios: 1 }]);
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas).toHaveLength(1);
+    expect(novas[0]?.texto).toMatch(/^O Codex está no limite/);
+  });
+
+  it("com uma IA fora do limite, segue e o plano sai", async () => {
+    const c = await cenario();
+    await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    const r = await executar(c.deps, despacharTurno, { machineId: c.vm, executor: "local", inventario: { estado: "pronto", versao: "2.1.296", em: T0 }, harnessesProntos: ["claude-cli", "codex-cli"], noLimite: ["claude-cli"] });
+    expect(r.data.plano).not.toBeNull();
+  });
+
+  it("uma fala nova absorve a adiada (uma pendente só); Parar cancela a adiada", async () => {
+    const c = await cenario();
+    await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    await c.deps.repos.preferencias.registrarLimite("codex-cli", { renovaEm: T0 + 2 * HORA, desde: T0 });
+    await despacharNoLimite(c);
+    const adiado = c.banco.turnos.find((t) => t.estado === "pendente")!;
+    const fala = await c.deps.repos.mensagens.criar({ conversaId: c.conversaId, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "texto", texto: "e o #862?", confianca: "confiavel" });
+    await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "conversa", prazoEm: T0 + 86_400_000, profundidade: 0, entradaTexto: "e o #862?", mensagemOrigemId: fala!.id, entradaConfianca: "confiavel", modelo: "auto", harness: "auto", executor: "local" });
+    const r = await c.despachar();
+    expect(r.data.plano).not.toBeNull();
+    expect(c.banco.turnos.find((t) => t.id === adiado.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido" });
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+
+    const c2 = await cenario();
+    await c2.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    await c2.deps.repos.preferencias.registrarLimite("codex-cli", { renovaEm: T0 + 2 * HORA, desde: T0 });
+    await despacharNoLimite(c2);
+    await executar(c2.deps, parar, { conversaId: c2.conversaId });
+    expect(c2.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+  });
+
+  it("revisão do PR #319: a fala mandada a uma task adiada sincroniza a task (como as outras saídas do despacho)", async () => {
+    const c = await cenario({ comTask: true });
+    await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    await c.deps.repos.preferencias.registrarLimite("codex-cli", { renovaEm: T0 + 2 * HORA, desde: T0 });
+    expect(c.banco.trabalhos[0]?.estado).toBe("na_fila");
+    await despacharNoLimite(c);
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toMatchObject([{ acordarEm: T0 + 2 * HORA }]);
+    // Sem o sincronizarDoTurno a task ficava parada no estado de antes do despacho.
+    expect(c.banco.trabalhos[0]?.estado).not.toBe("na_fila");
+  });
+
+  it("a fala que já esperou roda como antes (não adia duas vezes)", async () => {
+    const c = await cenario();
+    await c.deps.repos.preferencias.registrarLimite("claude-cli", { renovaEm: T0 + 3 * HORA, desde: T0 });
+    await c.deps.repos.preferencias.registrarLimite("codex-cli", { renovaEm: T0 + 2 * HORA, desde: T0 });
+    c.banco.turnos.find((t) => t.id === c.turnoId)!.acordarEm = T0 - 1;
+    const r = await despacharNoLimite(c);
+    expect(r.data.plano).not.toBeNull();
+  });
+});
+
+describe("NOD-268: o alarme reenvio_em_laco", () => {
+  it("mais de 3 turnos da mesma fala em menos de 5 min: log de aviso (o despacho segue)", async () => {
+    const saidas: string[] = [];
+    const espioes = (["log", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation((...a: unknown[]) => { saidas.push(a.map(String).join(" ")); }));
+    try {
+      const c = await cenario();
+      for (let i = 0; i < 3; i++) {
+        const t = await c.reenfileirar(i + 1);
+        await c.deps.repos.turnos.assentar(t.id, { estado: "interrompido", motivoInterrupcao: "absorvido" });
+      }
+      await c.reenfileirar(4);
+      await c.deps.repos.turnos.assentar(c.turnoId, { estado: "interrompido", motivoInterrupcao: "absorvido" });
+      const r = await c.despachar();
+      expect(r.data.plano).not.toBeNull();
+      expect(saidas.some((l) => l.includes("reenvio_em_laco"))).toBe(true);
+    } finally {
+      for (const e of espioes) e.mockRestore();
+    }
+  });
+
+  it("revisão do PR #319: a consulta do alarme falhar não derruba o despacho já reivindicado", async () => {
+    const c = await cenario();
+    await c.reenfileirar(1);
+    await c.deps.repos.turnos.assentar(c.turnoId, { estado: "interrompido", motivoInterrupcao: "absorvido" });
+    const espiao = vi.spyOn(c.deps.repos.turnos, "listarDaConversa").mockRejectedValue(new Error("timeout"));
+    try {
+      expect((await c.despachar()).data.plano).not.toBeNull();
+    } finally {
+      espiao.mockRestore();
+    }
+  });
+
+  it("três turnos não disparam", async () => {
+    const saidas: string[] = [];
+    const espioes = (["log", "warn", "error"] as const).map((k) => vi.spyOn(console, k).mockImplementation((...a: unknown[]) => { saidas.push(a.map(String).join(" ")); }));
+    try {
+      const c = await cenario();
+      const t = await c.reenfileirar(1);
+      await c.deps.repos.turnos.assentar(t.id, { estado: "interrompido", motivoInterrupcao: "absorvido" });
+      await c.reenfileirar(2);
+      await c.deps.repos.turnos.assentar(c.turnoId, { estado: "interrompido", motivoInterrupcao: "absorvido" });
+      await c.despachar();
+      expect(saidas.some((l) => l.includes("reenvio_em_laco"))).toBe(false);
+    } finally {
+      for (const e of espioes) e.mockRestore();
+    }
+  });
+});
+

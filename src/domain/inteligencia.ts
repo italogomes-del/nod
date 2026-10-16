@@ -84,6 +84,41 @@ export function proximaIaNoLimite(p: { ordem: readonly IdHarness[]; prontos: rea
   return [...p.ordem, ...p.prontos.filter((id) => !p.ordem.includes(id))].find((id) => id !== p.atual && p.prontos.includes(id) && !p.noLimite.includes(id)) ?? null;
 }
 
+/**
+ * definido em 2026-10-15 (NOD-268, decisão da PM; o Marlon pode vetar): uma fala da pessoa é reenviada sozinha no máximo
+ * UMA vez — troca de IA no limite, troca de conta, conta ausente, conta sem acesso. Passou do teto, o turno espera a hora
+ * em que o limite sai (`acordar_em`) com uma linha só na conversa, em vez de girar de máquina em máquina.
+ */
+export const TETO_REENVIOS = 1;
+
+export function podeReenviar(turno: { reenvios: number }): boolean {
+  return turno.reenvios < TETO_REENVIOS;
+}
+
+/**
+ * NOD-268: o Automático com TODAS as IAs prontas na máquina no limite não roda a primeira (antes, iaDoAutomatico): a fala
+ * espera a renovação mais próxima. Devolve essa hora; null = há IA fora do limite (ou nenhuma pronta: o despacho recusa
+ * como antes). `iaDoAutomatico` continua com o fallback: é o que a tela usa para mostrar o plano.
+ */
+export function esperaDoAutomatico(p: { prontos: readonly string[]; limites: LimitesIa | null | undefined; agora: number }): number | null {
+  if (p.prontos.length === 0) return null;
+  let menor: number | null = null;
+  for (const ia of p.prontos) {
+    const l = p.limites?.[ia as IdHarness];
+    if (!l || l.renovaEm <= p.agora) return null;
+    menor = menor === null ? l.renovaEm : Math.min(menor, l.renovaEm);
+  }
+  return menor;
+}
+
+/** NOD-268: o alarme (não é freio) — mais de 3 turnos da mesma fala em menos de 5 min. */
+export const LACO_TURNOS = 3;
+export const LACO_JANELA_MS = 5 * 60_000;
+
+export function reenvioEmLaco(criadosEm: readonly number[], agora: number): boolean {
+  return criadosEm.filter((t) => agora - t < LACO_JANELA_MS).length > LACO_TURNOS;
+}
+
 /** Até quando a IA fica no limite: o que o fornecedor disse (no futuro, até 8 dias), senão 1 h. */
 export function prazoDoLimite(voltaEm: number | null | undefined, agora: number): number {
   return typeof voltaEm === "number" && Number.isFinite(voltaEm) && voltaEm > agora && voltaEm <= agora + PRAZO_LIMITE_MAXIMO_MS ? voltaEm : agora + PRAZO_LIMITE_SEM_HORARIO_MS;
