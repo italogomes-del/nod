@@ -5,7 +5,9 @@ import type { LimitesIa } from "../../contracts/inteligencia.ts";
 import { MOTIVO_DA_CAUSA, type CausaSemIa, type Inventario } from "../../contracts/inventario.ts";
 import { estadoDaMaquina } from "../../domain/harness.ts";
 import { iasNoLimite } from "../../domain/inteligencia.ts";
-import { cotaDasIas } from "../../domain/cota-da-ia.ts";
+import { cotaDasIasComContas } from "../../domain/cota-da-ia.ts";
+import type { IaComConta } from "../../contracts/contas-ia.ts";
+import type { ContaDaPessoa, VinculoDaConta } from "../../domain/contas-da-pessoa.ts";
 import type { CotaDaIa } from "../../contracts/cota.ts";
 import type { UsoDoPlano } from "../../contracts/uso-do-plano.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -134,6 +136,16 @@ export const USO_VALE_MS = 30_000;
  */
 export const LIMITES_VALEM_MS = 30_000;
 
+/** O que a ponte guarda por pessoa por LIMITES_VALEM_MS: limites, leituras da cota e (NOD-253) as contas da lista. */
+type LimitesLidos = {
+  limites: LimitesIa;
+  usos: UsoDoPlano[];
+  usosPorConta: UsoDoPlano[];
+  contas: { contas: ContaDaPessoa[]; vinculos: VinculoDaConta[]; escolhidas: Partial<Record<IaComConta, string>> } | null;
+  ate: number;
+  lidoEm: number;
+};
+
 /** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
 function ehConflitoTransitorio(err: unknown): boolean {
   const codigo = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
@@ -169,7 +181,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
    * ADR-099 (I8, 2026-10-12): e o modo do plano — a retomada do dono só é promovida em modo conversa.
    */
-  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean; modo: PlanoTurno["modoTurno"] | null }>();
+  const despachados = new Map<string, { em: number; sessaoCli: string | null; bifurcou: boolean; modo: PlanoTurno["modoTurno"] | null; conta?: string | null }>();
   /**
    * Revisão do épico (S21, 2026-10-08): a última vez que o turno foi puxado ou renovado. Passado o lease sem notícia, o
    * varredor de lease o encerra no banco e a entrega talvez nunca chegue: `oferecidas` e `despachados` dele saem aqui
@@ -185,7 +197,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * 0068: os limites das IAs de cada pessoa, lidos fora da tx do puxar (como o uso do Mac). ADR-099 §7 (2026-10-12): junto,
    * o uso do plano que cada CLI informou (a cota), na mesma leitura e no mesmo prazo de 30 s.
    */
-  const limitesLidos = new Map<string, { limites: LimitesIa; usos: UsoDoPlano[]; ate: number; lidoEm: number }>();
+  const limitesLidos = new Map<string, LimitesLidos>();
   /** ADR-099 §7: o que a cota segura em cada pessoa agora — o log `cota_segura` sai só na mudança. */
   const cotaVista = new Map<string, string>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
@@ -274,17 +286,22 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * 0068: as IAs da pessoa no limite agora; ADR-099 §7: e as que a cota segura (reserva ou limite). Sem leitura (erro do
    * banco), a última que deu certo, ou nenhuma.
    */
-  async function limitesECotaDe(escopo: Escopo): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[] }> {
+  async function limitesECotaDe(escopo: Escopo, machineId: string): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[] }> {
     const guardado = limitesLidos.get(escopo.pessoaId);
-    const de = (g: { limites: LimitesIa; usos: UsoDoPlano[] } | undefined) => ({ noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIas({ usos: g?.usos ?? [], limites: g?.limites, agora: agora() }) });
+    // NOD-253 (2026-10-15): a cota da IA com conta da lista olha a conta que o turno desta máquina usaria.
+    const de = (g: LimitesLidos | undefined) => {
+      const naMaquina = new Set((g?.contas?.vinculos ?? []).filter((v) => v.maquinaId === machineId && v.estado === "pronta" && v.sairPedidoEm === null).map((v) => v.contaId));
+      const contas = g?.contas ? { contas: g.contas.contas, naMaquina, escolhidas: g.contas.escolhidas } : null;
+      return { noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIasComContas({ usos: g?.usos ?? [], usosPorConta: g?.usosPorConta ?? [], limites: g?.limites, contas, agora: agora() }) };
+    };
     if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return de(guardado);
     try {
       const lidoEm = agora();
-      const { limites, usos } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const lido = await abrirTxEscopada(db, escopo)(async (trx): Promise<LimitesLidos> => {
         const repos = criarRepos(trx, escopo);
-        return { limites: (await repos.preferencias.buscar()).iasNoLimite ?? {}, usos: await repos.usoDoPlano.listar() };
+        const [preferencias, usos, usosPorConta, lista, { escolhidas }] = await Promise.all([repos.preferencias.buscar(), repos.usoDoPlano.listar(), repos.usoDoPlano.listarPorConta(), repos.contasIa.listar(), repos.contasIa.modo()]);
+        return { limites: preferencias.iasNoLimite ?? {}, usos, usosPorConta, contas: { contas: lista.contas, vinculos: lista.vinculos, escolhidas }, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
       });
-      const lido = { limites, usos, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
       limitesLidos.set(escopo.pessoaId, lido);
       return de(lido);
     } catch (e) {
@@ -335,7 +352,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const uso = pressao ? await usoDoMac(escopo) : "livre";
       // 0068: só a máquina que anuncia as IAs (o app novo) escolhe pela ordem e pelo limite. ADR-099 §7: a cota vale para
       // qualquer máquina (sem a lista de IAs, a de sempre).
-      const lidos = await limitesECotaDe(escopo);
+      const lidos = await limitesECotaDe(escopo, maquina.machineId);
       const noLimite = maquina.harnesses ? lidos.noLimite : [];
       const cota = lidos.cota;
       const cotaAgora = cota.map((c) => `${c.ia}:${c.situacao}`).join(" ");
@@ -374,7 +391,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
-            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true, modo: r.data.plano.modoTurno ?? null });
+            despachados.set(r.data.plano.turnoId, { em: agora(), sessaoCli: r.data.plano.entrada.bifurcar ? null : r.data.plano.entrada.sessaoCli, bifurcou: r.data.plano.entrada.bifurcar === true, modo: r.data.plano.modoTurno ?? null, conta: r.data.plano.conta?.id ?? null });
             escopos.set(r.data.plano.turnoId, escopo);
             executores.set(r.data.plano.turnoId, r.data.plano.executor);
             if (r.data.plano.harness) harnesses.set(r.data.plano.turnoId, r.data.plano.harness);
@@ -528,7 +545,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         });
       }
       const harnessDoTurno = harnesses.get(e.turnoId) ?? null;
-      const outraIa = e.resultado.causaSemIa && harnessDoTurno ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
+      // NOD-283 (2026-10-15): o turno numa conta da lista que voltou "sem acesso" reprova ESSA conta (o assentamento marca o
+      // vínculo `sem_acesso`), não a IA inteira — a outra conta da mesma IA continua servindo.
+      const naContaDaLista = Boolean(despachados.get(e.turnoId)?.conta);
+      const outraIa = e.resultado.causaSemIa && harnessDoTurno && !naContaDaLista ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
       // 0068: as IAs prontas da pessoa (todas as máquinas vivas), para o limite repetir o turno na próxima da ordem.
       const prontosDaPessoa = (Object.entries(harnessesDaPessoa(escopo.pessoaId)) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id);
       // NOD-268: as prontas de cada máquina conectada — com o bot preso a uma, a troca só vai para uma IA dela.
@@ -660,7 +680,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         return null;
       });
       if (!plano) return recusado;
-      if (!despachados.has(p.turnoId)) despachados.set(p.turnoId, { em: cred.despachadoEm, sessaoCli: cred.bifurcou ? null : plano.entrada.sessaoCli, bifurcou: cred.bifurcou, modo: cred.modo });
+      if (!despachados.has(p.turnoId)) despachados.set(p.turnoId, { em: cred.despachadoEm, sessaoCli: cred.bifurcou ? null : plano.entrada.sessaoCli, bifurcou: cred.bifurcou, modo: cred.modo, conta: plano.conta?.id ?? null });
       log("info", "turno_adotado", { turno_id: p.turnoId, machine_id: p.machineId, carencia: dentroDaCarencia() });
       return { tipo: "adotado", plano };
     },

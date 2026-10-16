@@ -26,7 +26,7 @@ import { decidirLimiteDaConta, ehIaComConta, fraseDoLimiteDaConta, type ContaDaP
 import type { IaComConta } from "../contracts/contas-ia.ts";
 import { harnessFixado } from "../domain/harness.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
-import { criarNotaDeContas, lerContasDaMaquina, type ContasDaMaquina } from "./contas-do-turno.ts";
+import { contasDaIaDoTurno, criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, type ContasDaMaquina } from "./contas-do-turno.ts";
 import { avisarTrocaDeIa, contaForaDaFila, maquinaDasTasks, outraIaParaAsTasks, quandoAIaVolta } from "./trocas-de-ia.ts";
 import { adiarFala } from "./adiar-fala.ts";
 import { alvoDoBot } from "./alvo-do-bot.ts";
@@ -288,9 +288,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   if (resultado.comandos) await deps.repos.comandos.gravar(resultado.comandos);
   // NOD-179: o uso do plano que o CLI informou. Só vale para o CLI que rodou o turno (o harness vem do plano puxado,
   // nunca da máquina) e é revalidado aqui, porque a entrega local não passa pela ponte HTTP. Nunca recusa a entrega.
+  // ADR-102 (2026-10-13): a conta da lista que o plano mandou usar. Lida antes do uso do plano (NOD-253): a leitura do
+  // turno é DAQUELA conta e vai também para a linha dela, para o portão da cota olhar a conta e não a IA inteira.
+  const contaDoTurnoId = entrega.harness ? await deps.repos.turnos.contaDoTurno(turno.id) : null;
   if (resultado.usoDoPlano) {
     const uso = usoDoPlanoValido(resultado.usoDoPlano, agora);
-    if (uso && uso.harness === entrega.harness) await deps.repos.usoDoPlano.gravar(uso, entrega.machineId);
+    if (uso && uso.harness === entrega.harness) await deps.repos.usoDoPlano.gravar(uso, entrega.machineId, contaDoTurnoId);
     else log("aviso", "uso_do_plano_descartado", { turno_id: turno.id, harness_do_turno: entrega.harness ?? null, valido: uso !== undefined });
   }
 
@@ -364,9 +367,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // escolhe com quem seguir. Só a conta em uso parou (o Mac guarda isso; o servidor só vê posições).
   const contas = ehLimite ? resultado.contaNoLimite : undefined;
   const contaLivre = contas !== undefined && contas.tipo !== "todas_no_limite";
-  // ADR-102 (2026-10-13): a conta da lista que o plano mandou usar. No limite, quem para é ELA (vale em todas as
-  // máquinas), não a IA; a decisão segue as regras da lista (contas-da-pessoa.ts).
-  const contaDoTurnoId = entrega.harness ? await deps.repos.turnos.contaDoTurno(turno.id) : null;
+  // ADR-102 (2026-10-13): no limite da conta da lista, quem para é ELA (vale em todas as máquinas), não a IA; a decisão
+  // segue as regras da lista (contas-da-pessoa.ts).
   const limiteDaConta = ehLimite && contaDoTurnoId && !contaLivre
     ? await decidirLimiteNoAssentamento(deps, { turno, contaId: contaDoTurnoId, machineId: entrega.machineId, ate: desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm ?? null : null, agora })
     : null;
@@ -374,6 +376,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     log("aviso", "conta_no_limite", { turno_id: turno.id, harness: entrega.harness, tipo: contas.tipo, de: contas.de, para: contas.tipo === "trocou" ? contas.para : null });
   } else if (ehLimite && entrega.harness && limiteDaConta) {
     log("aviso", "conta_da_lista_no_limite", { turno_id: turno.id, harness: entrega.harness, conta_id: contaDoTurnoId, decisao: limiteDaConta.decisao.tipo, volta_em: limiteDaConta.voltaEm });
+    // NOD-253: a conta parada muda o portão da cota (cotaDasIasComContas) — as pontes releem na hora.
+    limiteMudou = true;
   } else if (ehLimite && entrega.harness) {
     const renovaEm = prazoDoLimite(desfecho.motivoFalha === "limite_do_plano" ? resultado.limiteVoltaEm : null, agora);
     await deps.repos.preferencias.registrarLimite(entrega.harness, { renovaEm, desde: agora });
@@ -401,6 +405,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // que dariam à rotina uma mensagem no chat e à conversa duas linhas para a mesma queda.
     const q = await aposQuedaDaMaquina(deps, assentado, { perdidoDesde });
     events.push(...q.events);
+  } else if (resultado.causaSemIa && contaDoTurnoId && entrega.harness && (trocou = await aposContaDaListaSemAcesso(deps, { turno, assentado, executor, contaId: contaDoTurnoId, machineId: entrega.machineId, ia: entrega.harness, causa: resultado.causaSemIa, autoria, agora, custoUsd }))) {
+    events.push(...trocou);
   } else if (resultado.causaSemIa) {
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
   } else if (resultado.contaAusente && contaDoTurnoId && (trocou = await aposContaAusente(deps, { turno, assentado, executor, contaId: contaDoTurnoId, machineId: entrega.machineId, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
@@ -614,8 +620,10 @@ async function decidirLimiteNoAssentamento(
   if (c.escolhidas[conta.ia] === conta.id) await deps.repos.contasIa.definirEscolhida(conta.ia, null);
   const agente = await deps.repos.agentes.buscar(p.turno.agenteId);
   const fixo = harnessFixado(p.turno.harness, p.turno.modelo);
+  // NOD-283: com a IA fixa, só as contas dela (contasDaIaDoTurno, a mesma visão do despacho) e nunca outra IA.
   const iaFixa = fixo && ehIaComConta(fixo) ? fixo : null;
-  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, escolhidas: c.escolhidas, ordemDoBot: agente ? inteligenciaDoAgente(agente).ordem : null, iaFixa, contaId: conta.id, ate: voltaEm, agora: p.agora });
+  const v = iaFixa ? contasDaIaDoTurno(c, [iaFixa]) : c;
+  const { decisao } = decidirLimiteDaConta({ contas: v.contas, naMaquina: v.naMaquina, noutraMaquina: v.noutraMaquina, escolhidas: v.escolhidas, ordemDoBot: agente ? inteligenciaDoAgente(agente).ordem : null, contaId: conta.id, ate: voltaEm, agora: p.agora, iaFixa });
   // A lista lida antes de marcar o limite: a conta que parou já vai marcada para quem decide depois (R4/R6).
   const daMaquina: ContasDaMaquina = { ...c, contas: c.contas.map((x) => (x.id === conta.id ? { ...x, noLimiteAte: voltaEm } : x)) };
   return { conta, decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm, semHora: !(p.ate !== null && p.ate > p.agora), daMaquina, iaFixa };
@@ -789,6 +797,42 @@ async function aposContaAusente(
     evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_ausente: p.contaId, custo_usd: p.custoUsd } }),
     ...(await repetirNaConversa(deps, { turno: p.turno, executor: p.executor, agora: p.agora })),
   ];
+}
+
+/**
+ * definido em 2026-10-15 (NOD-283, C4): o turno numa conta da lista voltou "conta sem acesso" (a organização desligou o
+ * Claude da Team, a assinatura acabou). Quem para é ESSA conta nesta máquina: o vínculo vira `sem_acesso` (a ponte não
+ * reprova a IA inteira — ponte-interna.ts), a escolha que apontava para ela sai, e o turno é refeito se outra conta serve
+ * (a fala dentro do teto do #319; a task volta à fila na hora). Sem outra conta: null — o aviso de sempre, com a causa.
+ */
+async function aposContaDaListaSemAcesso(
+  deps: Deps,
+  p: { turno: Turno; assentado: Turno; executor: Executor; contaId: string; machineId: string; ia: IdHarness; causa: CausaSemIa; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, agora } = p;
+  await deps.repos.contasIa.marcarSemAcesso(p.contaId, p.machineId, agora);
+  const c = await lerContasDaMaquina(deps, p.machineId);
+  const conta = c.contas.find((x) => x.id === p.contaId);
+  if (conta && c.escolhidas[conta.ia] === conta.id) await deps.repos.contasIa.definirEscolhida(conta.ia, null);
+  log("aviso", "conta_sem_acesso_na_maquina", { turno_id: turno.id, conta_id: p.contaId, machine_id: p.machineId, causa: p.causa });
+  if (turno.pararSolicitadoEm !== null) return null;
+  const fixo = harnessFixado(turno.harness, turno.modelo);
+  const iaFixa = fixo && ehIaComConta(fixo) ? fixo : null;
+  const agente = await deps.repos.agentes.buscar(turno.agenteId);
+  const escolhidas = { ...c.escolhidas };
+  if (conta && escolhidas[conta.ia] === conta.id) delete escolhidas[conta.ia];
+  const r = escolherContaDoTurno({ ...(iaFixa ? contasDaIaDoTurno(c, [iaFixa]) : c), escolhidas }, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
+  const outra = r ? Object.values(r.porIa).find((x) => x && x.id !== p.contaId) : undefined;
+  if (!outra) return null;
+  const interrompido = evento(deps.escopo, { kind: "turno_interrompido", autoria: p.autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "nao_autenticado", causa: p.causa, conta_sem_acesso: p.contaId, custo_usd: p.custoUsd } });
+  if (turno.trabalhoId) {
+    // A task volta à fila na hora: o próximo plano já escolhe a outra conta (a sem acesso saiu de `naMaquina`).
+    return aposLimiteNoFundo(deps, { turno: p.assentado, executor: p.executor, ia: p.ia, renovaEm: agora, motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado", autoria: p.autoria, agora, custoUsd: p.custoUsd });
+  }
+  if (turno.origem !== "conversa" || !podeReenviar(turno)) return null;
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  log("info", "conta_sem_acesso_refeito", { turno_id: turno.id, de: p.contaId, para: outra.id });
+  return [interrompido, ...(await repetirNaConversa(deps, { turno, executor: p.executor, agora }))];
 }
 
 /**

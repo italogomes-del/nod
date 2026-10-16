@@ -128,7 +128,11 @@ export function decidirLimiteDaConta(p: {
   noutraMaquina: ReadonlyMap<string, { id: string; nome: string }>;
   escolhidas: Partial<Record<IaComConta, string>>;
   ordemDoBot: readonly IdHarness[] | null;
-  /** A IA fixa do bot (R2); null/ausente = Automático. */
+  /**
+   * A IA fixa do bot (R2); null/ausente = Automático. definido em 2026-10-15 (NOD-283, decisão da NOD-224): o bot tem a
+   * IA fixa — nunca `outra_ia`, e só contas da mesma IA em `livres` (sem conta livre dela, espera e diz a hora). Quem
+   * chama também filtra as contas (contasDaIaDoTurno).
+   */
   iaFixa?: IaComConta | null;
   contaId: string;
   ate: EpochMs | null;
@@ -184,6 +188,15 @@ export function ordemIasDaLista(contas: readonly ContaDaPessoa[], padrao: readon
   const vistas: IdHarness[] = [];
   for (const c of emOrdem(contas)) if (!vistas.includes(c.ia)) vistas.push(c.ia);
   return [...vistas, ...padrao.filter((ia) => !vistas.includes(ia))];
+}
+
+/**
+ * definido em 2026-10-15 (NOD-283, CA 10): o vínculo marcado `sem_acesso` em `semAcessoEm` segue assim quando a máquina
+ * anuncia a conta `pronta` sem um login mais novo (o app anterior anuncia `pronta` pela conferência de login). Um login
+ * depois da marca é intenção da pessoa: volta a valer o que a máquina diz.
+ */
+export function vinculoSegueSemAcesso(semAcessoEm: EpochMs | null, anunciado: EstadoContaNaMaquina, logadaEm: EpochMs): boolean {
+  return semAcessoEm !== null && anunciado === "pronta" && logadaEm <= semAcessoEm;
 }
 
 /**

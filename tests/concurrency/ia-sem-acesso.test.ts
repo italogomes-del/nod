@@ -3,6 +3,7 @@ import { afterEach, expect, it } from "vitest";
 import { criarPonteInterna } from "../../src/adapters/fundo/ponte-interna.ts";
 import { iniciarLaco } from "../../src/adapters/executor/laco.ts";
 import type { Driver, Registry } from "../../src/adapters/executor/spi.ts";
+import type { ContaAnunciada } from "../../src/contracts/contas-ia.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
@@ -78,6 +79,8 @@ afterEach(async () => {
     // ADR-083 (0060): o trabalho aponta para agente, conversa e rotina, e os turnos apontam para ele — sai entre os dois.
     await trx`delete from trabalhos where owner_id = ${p}`;
     await trx`delete from inventario_motores where owner_id = ${p}`;
+    await trx`delete from uso_do_plano_contas where owner_id = ${p}`;
+    await trx`delete from contas_ia where owner_id = ${p}`;
     if (criados.conversas.length) await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     if (criados.agentes.length) await trx`delete from agentes where id in ${trx(criados.agentes)}`;
     await trx`delete from events_outbox where owner_id = ${p}`;
@@ -119,26 +122,30 @@ const esperarAte = async (cond: () => Promise<boolean>, ms = 15_000) => {
   }
 };
 
-async function montar(harnesses: Partial<Record<"claude-cli" | "codex-cli", Inventario>>) {
+const contaClaude = (n: number, apelido: string): ContaAnunciada => ({ impressao: n.toString(16).padStart(64, "0"), ia: "claude-cli", estado: "pronta", plano: apelido, corporativa: false, logadaEm: Date.now() - 60_000, apelidoSugerido: apelido });
+
+async function montar(harnesses: Partial<Record<"claude-cli" | "codex-cli", Inventario>>, o: { contas?: ContaAnunciada[]; claude?: () => ResultadoTurno; antes?: (trx: Tx, machineId: string) => Promise<unknown> } = {}) {
   const machineId = randomUUID();
   const ponte = criarPonteInterna(db, { services, useCases, executor: "local", listarPessoas, esquecerTurno: (id) => services.interruptor.esquecer(id), erroCruNoLog: false });
   await ponte.conectar({ machineId, nome: "teste", inventario: PRONTO, harnesses, versaoContrato: 1 });
   harnessesDaMaquina = () => ponte.maquinasConectadas().find((m) => m.machineId === machineId)?.harnesses ?? {};
+  if (o.contas) await escopado((trx) => criarRepos(trx, PESSOA).contasIa.doAnuncio(machineId, o.contas!, Date.now()));
+  if (o.antes) await escopado((trx) => o.antes!(trx, machineId));
   const rodou: string[] = [];
-  const claude = driverFixo("claude-cli", () => SEM_ACESSO, rodou);
+  const claude = driverFixo("claude-cli", o.claude ?? (() => SEM_ACESSO), rodou);
   const codex = driverFixo("codex-cli", () => ({ ...BASE, desfecho: "sucesso", texto: "Oi! Respondi pelo Codex." }), rodou);
   const registry: Registry = {
     catcher: { estado: "sombra", motivo: "teste" },
     "claude-cli": { estado: "pronto", driver: claude, instance: await claude.create({ env: {}, cwdBase: "/tmp/nao-usado" }) },
     "codex-cli": { estado: "pronto", driver: codex, instance: await codex.create({ env: {}, cwdBase: "/tmp/nao-usado" }) },
   };
-  const conversaId = await escopado(async (trx) => {
+  const { conversaId, agenteId } = await escopado(async (trx) => {
     const deps = depsSobreTrx(trx, PESSOA, { services });
     const c = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Frida" })).data;
     criados.agentes.push(c.agente.id);
     criados.conversas.push(c.conversa.id);
     await executar(deps, enviarMensagem, { conversaId: c.conversa.id, texto: "oi", inventario: PRONTO, executor: "local" });
-    return c.conversa.id;
+    return { conversaId: c.conversa.id, agenteId: c.agente.id };
   });
   const laco = iniciarLaco({ ponte, registry, pessoaId: PESSOA.pessoaId, machineId, relogio: Date.now, esperaVaziaMs: 20, jitterMs: 5, renovacaoMs: 200 });
   // Só o que veio da fala da pessoa em diante (a conversa nasce com a linha de sistema da criação do bot).
@@ -146,8 +153,8 @@ async function montar(harnesses: Partial<Record<"claude-cli" | "codex-cli", Inve
     const todas = await escopado((trx) => trx<{ kind: string; texto: string; payload: Record<string, unknown> | null }[]>`select kind, texto, payload from mensagens where conversa_id = ${conversaId} order by criado_em, id`);
     return todas.slice(todas.findIndex((m) => m.kind === "texto" && m.texto === "oi"));
   };
-  const turnos = () => escopado((trx) => trx<{ estado: string; harness: string; motivo_interrupcao: string | null }[]>`select estado, harness, motivo_interrupcao from turnos where conversa_id = ${conversaId} order by criado_em, id`);
-  return { ponte, machineId, laco, rodou, mensagens, turnos };
+  const turnos = () => escopado((trx) => trx<{ estado: string; harness: string; motivo_interrupcao: string | null; conta_id: string | null }[]>`select estado, harness, motivo_interrupcao, conta_id from turnos where conversa_id = ${conversaId} order by criado_em, id`);
+  return { ponte, machineId, laco, rodou, mensagens, turnos, conversaId, agenteId };
 }
 
 describeIntegracao("a conta da IA entrou e não serve (2026-10-05)", () => {
@@ -184,6 +191,55 @@ describeIntegracao("a conta da IA entrou e não serve (2026-10-05)", () => {
       expect(await c.turnos()).toHaveLength(1);
       const maquina = c.ponte.maquinasConectadas().find((m) => m.machineId === c.machineId);
       expect(maquina?.inventario).toMatchObject({ estado: "nao_autenticado", causa: "conta_sem_acesso" });
+    } finally {
+      await c.laco.parar();
+    }
+  });
+
+  it("NOD-283 (QA do PR #337): só a conta da lista ficou sem acesso — o turno é refeito na outra conta do Claude e a máquina não reprova a IA", { timeout: 40_000 }, async () => {
+    let vez = 0;
+    const c = await montar({ "claude-cli": PRONTO }, {
+      contas: [contaClaude(1, "Max"), contaClaude(2, "Team")],
+      claude: () => (vez++ === 0 ? SEM_ACESSO : { ...BASE, desfecho: "sucesso", texto: "Oi! Respondi pela Team." }),
+    });
+    try {
+      await esperarAte(async () => (await c.mensagens()).some((m) => m.texto === "Oi! Respondi pela Team."));
+      expect(c.rodou).toEqual(["claude-cli", "claude-cli"]);
+      const { contas, vinculos } = await escopado((trx) => criarRepos(trx, PESSOA).contasIa.listar());
+      const max = contas.find((x) => x.apelido === "Max")!;
+      const team = contas.find((x) => x.apelido === "Team")!;
+      expect(vinculos.find((v) => v.contaId === max.id)?.estado).toBe("sem_acesso");
+      expect(vinculos.find((v) => v.contaId === team.id)?.estado).toBe("pronta");
+      const turnos = await c.turnos();
+      expect(turnos.map((t) => t.conta_id)).toEqual([max.id, team.id]);
+      expect(turnos.at(-1)?.estado).toBe("concluido");
+      // A IA segue pronta na máquina: o "sem acesso" é da conta, não do Claude (nada de nao_autenticado nem aviso).
+      const maquina = c.ponte.maquinasConectadas().find((m) => m.machineId === c.machineId);
+      expect(maquina?.harnesses?.["claude-cli"]?.estado).toBe("pronto");
+      expect(maquina?.inventario.estado).toBe("pronto");
+      expect((await c.mensagens()).some((m) => m.kind === "negacao")).toBe(false);
+    } finally {
+      await c.laco.parar();
+    }
+  });
+
+  it("NOD-253 (QA do PR #337): a cota olha as contas DESTA máquina — sem conta da lista aqui, o Claude no limite segura o fundo mesmo com contas livres noutra máquina", { timeout: 40_000 }, async () => {
+    const c = await montar({ "claude-cli": PRONTO }, {
+      claude: () => ({ ...BASE, desfecho: "sucesso", texto: "feito" }),
+      antes: async (trx, machineId) => {
+        const repos = criarRepos(trx, PESSOA);
+        await repos.contasIa.doAnuncio(randomUUID(), [contaClaude(1, "Max"), contaClaude(2, "Team")], Date.now());
+        await repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 1, renovaEm: Date.now() + 3_600_000 }, semana: null, medidoEm: Date.now() - 1000 }, machineId, null);
+      },
+    });
+    try {
+      // A conversa com a pessoa passa sempre (a régua de controle do teste).
+      await esperarAte(async () => (await c.mensagens()).some((m) => m.texto === "feito"));
+      const rotina = await escopado((trx) => criarRepos(trx, PESSOA).turnos.enfileirar({ executor: "local", conversaId: c.conversaId, agenteId: c.agenteId, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }));
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(c.rodou).toEqual(["claude-cli"]);
+      const [t] = await escopado((trx) => trx<{ estado: string }[]>`select estado from turnos where id = ${rotina!.id}`);
+      expect(t?.estado).toBe("pendente");
     } finally {
       await c.laco.parar();
     }

@@ -497,7 +497,8 @@ async function conectar(c: Config) {
         const ia = lerIaDesktop(driverDoPlano(p));
         // ADR-102: o turno rodou numa conta escolhida pelo servidor — o limite é dela e quem decide é o servidor; a conta
         // que perdeu o login é relida (não reprova a IA inteira).
-        if (p.conta) { if (ia && r.causaSemIa) void sincronizarContas({ ia }); return undefined; }
+        // NOD-283: "sem acesso" com o login de pé — a conta fica `sem_acesso` (até um login novo) e é reanunciada.
+        if (p.conta) { if (ia && r.causaSemIa) void sincronizarContas({ ia, semAcesso: p.conta.impressao }); return undefined; }
         if (ia && r.causaSemIa) void vigia.reprovar(ia, r.causaSemIa).catch(() => undefined);
         // ADR-101 (2026-10-12): no limite, com mais de uma conta, o Mac decide qual segue e anota só as posições.
         const anotado = ia && !r.causaSemIa ? contasDoApp.aoResultado(ia, r) : undefined;
@@ -527,7 +528,7 @@ async function conectar(c: Config) {
     impressao: (ia) => impressaoDoLogin(ia, cfgExecutor ?? cfg),
     aoInventarios: (inventarios) => { if (cliente !== ponteHttp) return; inventariosDaVigia = inventarios; emitirEstados(); conferirContas(inventarios); void sincronizarContas(); },
     aoTestando: (ias) => { if (cliente !== ponteHttp) return; testandoAgora = ias; emitirEstados(); },
-    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
+    anunciar: async (inventarios, principal, semLacoDeVoz, capacidades) => { if (cliente !== ponteHttp) return; inventariosAtuais = inventarios; const contas = contasLocais?.anuncio() ?? []; const comContas = inventariosComContas(inventarios, contas, contasLocais?.impressoesDaPadrao()); await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas }); if (!lacoNoAr && contas.some((c) => c.estado === "pronta")) { lacoNoAr = true; subirLaco(registryDoLaco); } },
     aoRegistry: (novo, algumaPronta) => {
       if (cliente !== ponteHttp) return;
       Object.assign(registryDoLaco, novo);
@@ -911,7 +912,7 @@ async function descartarDriverDaConta(chave: string): Promise<void> {
  * ADR-102 (2026-10-13): a lista que vai ao servidor segue a do app. Conta nova é lida pelo CLI (a impressão); a que saiu
  * perde o driver dela; `ia` relê as contas dessa IA (login novo, turno sem login); `todas` relê tudo. Mudou → reanuncia.
  */
-function sincronizarContas(o: { ia?: IaDesktop; todas?: boolean } = {}): Promise<void> {
+function sincronizarContas(o: { ia?: IaDesktop; todas?: boolean; semAcesso?: string } = {}): Promise<void> {
   const vez = sincronizandoContas.then(async () => {
     const locais = contasLocais;
     if (!locais || !contasDoApp.carregadas()) return;
@@ -921,6 +922,7 @@ function sincronizarContas(o: { ia?: IaDesktop; todas?: boolean } = {}): Promise
     if (o.todas) mudou = (await locais.ler({ forcar: true })) || mudou;
     else if (o.ia) for (const c of locais.listar().filter((x) => x.ia === o.ia)) mudou = (await locais.ler({ forcar: true, id: c.id })) || mudou;
     mudou = (await locais.ler()) || mudou;
+    if (o.semAcesso) mudou = (await locais.marcarSemAcesso(o.semAcesso)) || mudou;
     if (mudou && contasLocais === locais) await vigiaIas?.reanunciar().catch(() => undefined);
   }).catch((e: unknown) => { log("erro", "contas_sincronizar_falhou", { erro: e instanceof Error ? e.name : "desconhecido" }); });
   sincronizandoContas = vez;

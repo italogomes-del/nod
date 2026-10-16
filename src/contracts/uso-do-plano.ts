@@ -18,6 +18,11 @@ export type UsoDoPlano = {
   semana: JanelaDoPlano | null;
   /** Quando o CLI informou (relógio do Mac, limitado pelo servidor ao gravar). */
   medidoEm: EpochMs;
+  /**
+   * NOD-253 (0077): a conta da lista (contas_ia) em que o turno rodou. Ausente ou null = a linha por IA (0056), a de
+   * sempre — o motor/app antigo e o turno sem conta.
+   */
+  contaId?: string | null;
 };
 
 /** `GET /api/uso-do-plano`: só as linhas da pessoa logada; CLI que nunca informou não aparece. */

@@ -29,8 +29,8 @@ describeIntegracao("a conta do turno no plano (ADR-102)", () => {
     const vm = chave!.id;
     const agora = () => AGORA;
     const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ agora, tokens: criarTokenTurno({ agora }) }), agora, trx });
-    const plano = async () => {
-      const turno = await repos.turnos.enfileirar({ executor: "local", conversaId, agenteId, origem: "conversa", prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
+    const plano = async (origem: "conversa" | "rotina" = "conversa") => {
+      const turno = await repos.turnos.enfileirar({ executor: "local", conversaId, agenteId, origem, prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "ola", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" });
       const r = await emitirPlanoTurno(deps, { turnoId: turno!.id, machineId: vm, executor: "local", harnesses: { "claude-cli": pronto, "codex-cli": pronto } });
       return { plano: r.data, turnoId: turno!.id };
     };
@@ -62,6 +62,33 @@ describeIntegracao("a conta do turno no plano (ADR-102)", () => {
       const p = await m.plano();
       expect(p.plano.harness).toBe("codex-cli");
       expect(p.plano.conta?.id).toBe(gPessoal!.id);
+    });
+  });
+
+  it("NOD-253 (QA do PR #337): no fundo, a conta que a cota dela segura fica de fora: com Trocar sozinho o plano vai pela outra conta da mesma IA; a conversa segue na primeira", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.contasIa.doAnuncio(m.vm, [anuncio(1, "claude-cli", "Max"), anuncio(3, "claude-cli", "Team")], AGORA);
+      const [max, team] = (await m.repos.contasIa.listar()).contas;
+      // ADR-108 (R1/E2): a 1ª conta pessoal da IA nasce na fila; a 2ª nasce fora (a fila é o consentimento dos termos).
+      expect(max!.entraNaTrocaAutomatica).toBe(true);
+      expect(team!.entraNaTrocaAutomatica).toBe(false);
+      const uso = (utilizacao: number) => ({ harness: "claude-cli" as const, situacao: "normal" as const, cincoHoras: { utilizacao, renovaEm: AGORA + 3_600_000 }, semana: null, medidoEm: AGORA - 1000 });
+      await m.repos.usoDoPlano.gravar(uso(1), m.vm, max!.id);
+      await m.repos.usoDoPlano.gravar(uso(0.2), m.vm, team!.id);
+      const conversa = await m.plano();
+      expect(conversa.plano.harness).toBe("claude-cli");
+      expect(conversa.plano.conta?.id).toBe(max!.id);
+      // Team fora da fila (o antigo "Perguntar antes"): o fundo não pula de conta sozinho — o Claude fica segurado e o
+      // Automático vai à outra IA.
+      expect((await m.plano("rotina")).plano.harness).toBe("codex-cli");
+      // Team na fila (o antigo "Trocar sozinho"; ADR-108 tirou o `contas_modo` das decisões e a fila ficou no lugar dele):
+      // o fundo vai pela Team, da MESMA IA, nunca pela Max no limite.
+      await m.repos.contasIa.definirTrocaAutomatica(team!.id, true);
+      const fundo = await m.plano("rotina");
+      expect(fundo.plano.harness).toBe("claude-cli");
+      expect(fundo.plano.conta?.id).toBe(team!.id);
+      expect(await m.repos.turnos.contaDoTurno(fundo.turnoId)).toBe(team!.id);
     });
   });
 

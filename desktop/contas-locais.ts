@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import type { ContaAnunciada, EstadoContaNaMaquina } from "../src/contracts/contas-ia.ts";
-import type { Inventario } from "../src/contracts/inventario.ts";
+import { CAUSAS_SEM_IA, type Inventario } from "../src/contracts/inventario.ts";
 import { IAS_DESKTOP, type DetalheDaConta, type IaDesktop } from "../src/contracts/desktop.ts";
 import { CONTAS_POR_IA_MAX, ID_CONTA_PADRAO, contaCorporativa, apelidoValido } from "../src/domain/contas-da-ia.ts";
 import { textoDaImpressaoDaConta } from "../src/domain/contas-da-pessoa.ts";
@@ -55,11 +55,15 @@ export type DepsContasLocais = {
  * pronta nesta máquina, a IA não pode ser anunciada como fora: os turnos com conta rodam na pasta da conta. "ausente" (o
  * CLI não está instalado) continua ausente.
  */
-export function inventariosComContas<T extends Partial<Record<string, Inventario>>>(inventarios: T, contas: readonly ContaAnunciada[]): T {
+export function inventariosComContas<T extends Partial<Record<string, Inventario>>>(inventarios: T, contas: readonly ContaAnunciada[], padrao: Partial<Record<string, string>> = {}): T {
   const saida: Partial<Record<string, Inventario>> = { ...inventarios };
   for (const [ia, inv] of Object.entries(inventarios)) {
     if (!inv || inv.estado !== "nao_autenticado") continue;
-    if (contas.some((c) => c.ia === ia && c.estado === "pronta")) saida[ia] = { estado: "pronto", versao: inv.versao ?? "desconhecida", em: inv.em };
+    // NOD-283 (A5, QA do PR #337): a sonda testa a conta de sempre. Reprovada por um teste de verdade (CausaSemIa), ela
+    // não promove a IA — o login dela é o que falhou; só OUTRA conta pronta da IA promove.
+    const reprovouAPadrao = (CAUSAS_SEM_IA as readonly string[]).includes(inv.causa ?? "");
+    const promove = (c: ContaAnunciada) => c.ia === ia && c.estado === "pronta" && !(reprovouAPadrao && c.impressao === padrao[ia]);
+    if (contas.some(promove)) saida[ia] = { estado: "pronto", versao: inv.versao ?? "desconhecida", em: inv.em };
   }
   return saida as T;
 }
@@ -106,10 +110,13 @@ export function criarContasLocais(d: DepsContasLocais) {
     const antes = `${c.impressao}|${c.estado}|${c.plano}`;
     if (id.logado && id.email) {
       const impressao = createHash("sha256").update(textoDaImpressaoDaConta({ pessoaId: d.pessoaId, ia: c.ia, email: id.email, orgId: id.orgId })).digest("hex");
-      if (impressao !== c.impressao) c.logadaEm = d.agora();
+      const novoLogin = impressao !== c.impressao;
+      if (novoLogin) c.logadaEm = d.agora();
       c.impressao = impressao;
       c.plano = id.plano;
-      c.estado = "pronta";
+      // NOD-283 (2026-10-15): a conta que o turno achou sem acesso continua assim com o mesmo login (o CLI segue logado,
+      // quem desligou foi a organização); só um login noutra conta nesta pasta a solta.
+      c.estado = c.estado === "sem_acesso" && !novoLogin ? "sem_acesso" : "pronta";
       detalhes.set(impressao, { impressao, ia: c.ia, email: id.email, organizacao: id.organizacao ?? null, plano: id.plano });
     } else {
       c.estado = "sem_login";
@@ -143,7 +150,7 @@ export function criarContasLocais(d: DepsContasLocais) {
           const o = x as Partial<ContaLocal>;
           if (typeof o.id !== "string" || !IAS_DESKTOP.includes(o.ia as IaDesktop)) continue;
           if (o.id !== ID_CONTA_PADRAO && !pastaDaConta(d.base, o.ia as IaDesktop, o.id)) continue;
-          lidas.push({ id: o.id, ia: o.ia as IaDesktop, apelido: apelidoValido(o.apelido) ?? null, logadaEm: Number(o.logadaEm) || 0, impressao: typeof o.impressao === "string" ? o.impressao : null, plano: typeof o.plano === "string" ? o.plano : null, estado: o.estado === "pronta" ? "pronta" : "sem_login", lidaEm: 0 });
+          lidas.push({ id: o.id, ia: o.ia as IaDesktop, apelido: apelidoValido(o.apelido) ?? null, logadaEm: Number(o.logadaEm) || 0, impressao: typeof o.impressao === "string" ? o.impressao : null, plano: typeof o.plano === "string" ? o.plano : null, estado: o.estado === "pronta" || o.estado === "sem_acesso" ? o.estado : "sem_login", lidaEm: 0 });
         }
       } catch { /* arquivo quebrado: recomeça com as contas de sempre */ }
       contas = lidas;
@@ -193,6 +200,17 @@ export function criarContasLocais(d: DepsContasLocais) {
       }
       if (mudou) await gravar();
       return mudou;
+    },
+
+    /**
+     * NOD-283 (2026-10-15): o turno nesta conta voltou "sem acesso" — ela fica `sem_acesso` (gravado) até um login novo
+     * na pasta, e o anúncio a leva assim; a IA não é reprovada (a outra conta dela segue). true = mudou (reanunciar).
+     */
+    async marcarSemAcesso(impressao: string): Promise<boolean> {
+      const copias = contas.filter((c) => c.impressao === impressao && c.estado === "pronta");
+      for (const c of copias) c.estado = "sem_acesso";
+      if (copias.length > 0) await gravar();
+      return copias.length > 0;
     },
 
     /** O login novo numa pasta falhou ou foi cancelado: a pasta vazia sai (a conta de sempre fica). */
@@ -280,6 +298,13 @@ export function criarContasLocais(d: DepsContasLocais) {
      * O que vai ao servidor: as contas com impressão (a que perdeu o login vai como `sem_login`), uma vez cada. O e-mail
      * e a organização vão quando esta máquina os leu do CLI desde que abriu (ADR-105); sem eles, o servidor mantém os seus.
      */
+    /** A impressão do login da conta de sempre de cada IA (a que a sonda testa), para `inventariosComContas`. */
+    impressoesDaPadrao(): Partial<Record<IaDesktop, string>> {
+      const saida: Partial<Record<IaDesktop, string>> = {};
+      for (const c of contas) if (c.id === ID_CONTA_PADRAO && c.impressao) saida[c.ia] = c.impressao;
+      return saida;
+    },
+
     anuncio(): ContaAnunciada[] {
       const vistas = new Set<string>();
       const escolhidas = new Set<ContaLocal>();

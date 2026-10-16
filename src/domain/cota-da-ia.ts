@@ -4,6 +4,8 @@ import type { EpochMs } from "../contracts/ids.ts";
 import type { LimitesIa } from "../contracts/inteligencia.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
+import type { IaComConta } from "../contracts/contas-ia.ts";
+import { contaDoTurno, type ContaDaPessoa } from "./contas-da-pessoa.ts";
 import { harnessFixado } from "./harness.ts";
 import { iasParaOAutomatico, PRAZO_LIMITE_SEM_HORARIO_MS } from "./inteligencia.ts";
 
@@ -39,30 +41,99 @@ const PESO: Record<SituacaoDaCota, number> = { livre: 0, reserva: 1, limite: 2 }
  */
 export function cotaDasIas(p: { usos: readonly UsoDoPlano[]; limites: LimitesIa | null | undefined; agora: EpochMs }): CotaDaIa[] {
   const porIa = new Map<IdHarness, { situacao: SituacaoDaCota; voltaEm: EpochMs }>();
-  const marcar = (ia: IdHarness, situacao: SituacaoDaCota, voltaEm: EpochMs) => {
-    const atual = porIa.get(ia) ?? { situacao: "livre" as SituacaoDaCota, voltaEm };
-    porIa.set(ia, { situacao: PESO[situacao] > PESO[atual.situacao] ? situacao : atual.situacao, voltaEm: Math.max(atual.voltaEm, voltaEm) });
-  };
   for (const [ia, l] of Object.entries(p.limites ?? {}) as [IdHarness, { renovaEm: number } | undefined][]) {
-    if (l && l.renovaEm > p.agora) marcar(ia, "limite", l.renovaEm);
+    if (l && l.renovaEm > p.agora) marcar(porIa, ia, "limite", l.renovaEm);
   }
-  for (const u of p.usos) {
-    const janelas = [u.cincoHoras, u.semana].filter((j): j is JanelaDoPlano => j !== null);
-    const vigentes = janelas.filter((j) => vigenteAte(j, u.medidoEm) > p.agora);
-    for (const j of vigentes) {
-      if (j.utilizacao >= 1) marcar(u.harness, "limite", vigenteAte(j, u.medidoEm));
-      else if (j.utilizacao >= LIMIAR_DA_RESERVA) marcar(u.harness, "reserva", vigenteAte(j, u.medidoEm));
-    }
-    // "esgotado" (status `rejected`) sem janela em 100%: vale 1 h desde a leitura, ou até a janela mais longa que ainda
-    // não renovou. Depois, o próximo turno diz (e o limite que ele devolver traz o horário do fornecedor).
-    if (u.situacao === "esgotado" && u.medidoEm + LEITURA_SEM_HORARIO_VALE_MS > p.agora && !vigentes.some((j) => j.utilizacao >= 1)) {
-      marcar(u.harness, "limite", Math.max(u.medidoEm + LEITURA_SEM_HORARIO_VALE_MS, ...vigentes.map((j) => vigenteAte(j, u.medidoEm))));
-    }
-  }
+  for (const u of p.usos) lerUso(porIa, u.harness, u, p.agora);
   return [...porIa.entries()]
     .filter(([, c]) => c.situacao !== "livre")
     .map(([ia, c]) => ({ ia, situacao: c.situacao as CotaDaIa["situacao"], voltaEm: c.voltaEm }))
     .sort((a, b) => a.ia.localeCompare(b.ia));
+}
+
+function marcar<K>(m: Map<K, { situacao: SituacaoDaCota; voltaEm: EpochMs }>, chave: K, situacao: SituacaoDaCota, voltaEm: EpochMs): void {
+  const atual = m.get(chave) ?? { situacao: "livre" as SituacaoDaCota, voltaEm };
+  m.set(chave, { situacao: PESO[situacao] > PESO[atual.situacao] ? situacao : atual.situacao, voltaEm: Math.max(atual.voltaEm, voltaEm) });
+}
+
+/** Uma leitura do CLI: janela em 100% ou "esgotado" = limite; em 99% ou mais = reserva. Janela renovada não conta. */
+function lerUso<K>(m: Map<K, { situacao: SituacaoDaCota; voltaEm: EpochMs }>, chave: K, u: UsoDoPlano, agora: EpochMs): void {
+  const janelas = [u.cincoHoras, u.semana].filter((j): j is JanelaDoPlano => j !== null);
+  const vigentes = janelas.filter((j) => vigenteAte(j, u.medidoEm) > agora);
+  for (const j of vigentes) {
+    if (j.utilizacao >= 1) marcar(m, chave, "limite", vigenteAte(j, u.medidoEm));
+    else if (j.utilizacao >= LIMIAR_DA_RESERVA) marcar(m, chave, "reserva", vigenteAte(j, u.medidoEm));
+  }
+  // "esgotado" (status `rejected`) sem janela em 100%: vale 1 h desde a leitura, ou até a janela mais longa que ainda
+  // não renovou. Depois, o próximo turno diz (e o limite que ele devolver traz o horário do fornecedor).
+  if (u.situacao === "esgotado" && u.medidoEm + LEITURA_SEM_HORARIO_VALE_MS > agora && !vigentes.some((j) => j.utilizacao >= 1)) {
+    marcar(m, chave, "limite", Math.max(u.medidoEm + LEITURA_SEM_HORARIO_VALE_MS, ...vigentes.map((j) => vigenteAte(j, u.medidoEm))));
+  }
+}
+
+/**
+ * definido em 2026-10-15 (NOD-253): a cota de cada CONTA da lista, pelas leituras que os turnos dela trouxeram
+ * (`uso_do_plano_contas`, 0077). Só as contas que seguram (reserva ou limite); a leitura sem conta é ignorada.
+ */
+export type CotaDaConta = { situacao: Exclude<SituacaoDaCota, "livre">; voltaEm: EpochMs };
+
+export function cotaDasContas(p: { usos: readonly UsoDoPlano[]; agora: EpochMs }): Map<string, CotaDaConta> {
+  const porConta = new Map<string, { situacao: SituacaoDaCota; voltaEm: EpochMs }>();
+  for (const u of p.usos) if (u.contaId) lerUso(porConta, u.contaId, u, p.agora);
+  return new Map([...porConta.entries()].filter((e): e is [string, CotaDaConta] => e[1].situacao !== "livre"));
+}
+
+/**
+ * As contas como o turno de `tipo` as vê pela cota: a que a cota segura para esse tipo fica "no limite" até a janela dela
+ * renovar (a conversa com a pessoa não é segurada: vê as contas como são).
+ */
+export function contasPelaCota<T extends ContaDaPessoa>(contas: readonly T[], porConta: ReadonlyMap<string, CotaDaConta>, tipo: TipoParaCota): T[] {
+  return contas.map((c) => {
+    const s = porConta.get(c.id);
+    return s && cotaSegura(tipo, s.situacao) ? { ...c, noLimiteAte: Math.max(c.noLimiteAte ?? 0, s.voltaEm) } : c;
+  });
+}
+
+/** As contas da lista que a máquina tem logadas, com as escolhas da pessoa (lerContasDaMaquina). ADR-108: sem o modo. */
+export type ContasParaCota = {
+  contas: readonly ContaDaPessoa[];
+  naMaquina: ReadonlySet<string>;
+  escolhidas: Partial<Record<IaComConta, string>>;
+};
+
+/**
+ * definido em 2026-10-15 (NOD-253, decisão da NOD-221): a cota das IAs olhando a CONTA que o turno usaria. A IA com conta
+ * da lista logada na máquina segura o fundo só quando nenhuma conta dela serve sem a pessoa decidir (as regras da lista:
+ * desde a ADR-108 a fila: a primeira livre na fila, a escolhida, ou sem fila a primeira da IA) — a Max no limite não segura mais o
+ * fundo do Claude com a Team livre. A leitura por IA (`uso_do_plano`) e o limite por IA (`ias_no_limite`) dessa IA não
+ * contam: a leitura é da conta que rodou. A IA sem conta na máquina (motor, app antigo) segue a regra de antes.
+ */
+export function cotaDasIasComContas(p: {
+  usos: readonly UsoDoPlano[];
+  usosPorConta: readonly UsoDoPlano[];
+  limites: LimitesIa | null | undefined;
+  contas: ContasParaCota | null;
+  agora: EpochMs;
+}): CotaDaIa[] {
+  const daMaquina = p.contas ? p.contas.contas.filter((c) => c.removidaEm === null && p.contas!.naMaquina.has(c.id)) : [];
+  const governadas = new Set<string>(daMaquina.map((c) => c.ia));
+  if (!p.contas || governadas.size === 0) return cotaDasIas(p);
+  const limites = Object.fromEntries(Object.entries(p.limites ?? {}).filter(([ia]) => !governadas.has(ia))) as LimitesIa;
+  const base = cotaDasIas({ usos: p.usos.filter((u) => !governadas.has(u.harness)), limites, agora: p.agora });
+  const porConta = cotaDasContas({ usos: p.usosPorConta, agora: p.agora });
+  const ver = (tipo: TipoParaCota) => contaDoTurno({ ...p.contas!, contas: contasPelaCota(p.contas!.contas, porConta, tipo), ordemDoBot: null, agora: p.agora });
+  const noLimite = ver("fundo_seguindo");
+  const naReserva = ver("fundo_novo");
+  const extra: CotaDaIa[] = [];
+  for (const ia of governadas as Set<IaComConta>) {
+    const situacao = !noLimite?.porIa[ia] ? "limite" : !naReserva?.porIa[ia] ? "reserva" : null;
+    if (!situacao) continue;
+    // Volta quando a primeira conta dela renova (a nota diz qual; antes disso, a pessoa pode escolher outra).
+    const voltas = contasPelaCota(daMaquina.filter((c) => c.ia === ia), porConta, situacao === "limite" ? "fundo_seguindo" : "fundo_novo")
+      .map((c) => c.noLimiteAte).filter((t): t is number => t !== null && t > p.agora);
+    extra.push({ ia, situacao, voltaEm: voltas.length > 0 ? Math.min(...voltas) : p.agora + LEITURA_SEM_HORARIO_VALE_MS });
+  }
+  return [...base, ...extra].sort((a, b) => a.ia.localeCompare(b.ia));
 }
 
 /** A situação de UMA IA (livre quando não segura nada). */

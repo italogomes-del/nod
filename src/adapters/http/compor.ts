@@ -595,7 +595,12 @@ export function comporApp(o: OpcoesCompor): App {
   // ADR-102 (2026-10-13): os logins de contas pela tela e o pareamento por código/convite (em memória, src/services).
   const logins = criarLoginsNaMaquina(relogio);
   const dispositivo = criarPareamentoDispositivo(relogio);
-  const avisarContas = (escopo: Escopo, motivo: string, loginId?: string) => { barramento.publicar(escopo.pessoaId, "contas.mudou", { motivo, ...(loginId ? { loginId } : {}) }); };
+  // NOD-253 (2026-10-15): a lista mudou (ordem, modo, "Seguir com", conta logada ou saída) — a fila de todas as pontes relê
+  // a cota por conta na hora, em vez de esperar os 30 s do LIMITES_VALEM_MS.
+  const avisarContas = (escopo: Escopo, motivo: string, loginId?: string) => {
+    if (motivo !== "login") limitesTrocados.set(escopo.pessoaId, relogio());
+    barramento.publicar(escopo.pessoaId, "contas.mudou", { motivo, ...(loginId ? { loginId } : {}) });
+  };
   /**
    * ADR-092: no modo local a ponte HTTP também fica de pé, para as máquinas Linux da pessoa (o motor da ADR-090) — o Mac
    * continua rodando os bots neste processo. A máquina da ponte só pega o turno que tem ELA como alvo, roda sempre a IA

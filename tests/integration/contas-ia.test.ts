@@ -65,6 +65,40 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
     });
   });
 
+  it("NOD-283: a conta sem acesso resiste ao anúncio 'pronta' do mesmo login; um login mais novo a solta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(2)], AGORA);
+      const [, team] = (await repos.contasIa.listar()).contas;
+      expect(await repos.contasIa.marcarSemAcesso(team!.id, vm, AGORA + 1000)).toBe(true);
+      const estado = async () => (await repos.contasIa.listar()).vinculos.find((v) => v.contaId === team!.id)?.estado;
+      expect(await estado()).toBe("sem_acesso");
+      await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(2)], AGORA + 60_000);
+      expect(await estado()).toBe("sem_acesso");
+      await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(2, { logadaEm: AGORA + 90_000 })], AGORA + 120_000);
+      expect(await estado()).toBe("pronta");
+    });
+  });
+
+  it("NOD-253: o uso do plano é gravado também por conta; a linha por IA segue como antes", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(2)], AGORA);
+      const [max, team] = (await repos.contasIa.listar()).contas;
+      const uso = (utilizacao: number, medidoEm: number) => ({ harness: "claude-cli" as const, situacao: "normal" as const, cincoHoras: { utilizacao, renovaEm: AGORA + 3_600_000 }, semana: null, medidoEm });
+      await repos.usoDoPlano.gravar(uso(0.995, AGORA), vm, max!.id);
+      await repos.usoDoPlano.gravar(uso(0.2, AGORA + 1000), vm, team!.id);
+      const porConta = await repos.usoDoPlano.listarPorConta();
+      expect(porConta.map((u) => [u.contaId, u.cincoHoras?.utilizacao]).sort()).toEqual([[max!.id, 0.995], [team!.id, 0.2]].sort());
+      expect((await repos.usoDoPlano.listar()).map((u) => u.cincoHoras?.utilizacao)).toEqual([0.2]);
+      // Conta que não existe (apagada no meio do turno): a linha por IA fica, a entrega não cai.
+      await repos.usoDoPlano.gravar(uso(0.5, AGORA + 2000), vm, randomUUID());
+      expect(await repos.usoDoPlano.listarPorConta()).toHaveLength(2);
+    });
+  });
+
   it("ADR-108 (revisão do PR 2, C4): a conta que volta segue a regra de nascimento; a que vira corporativa sai da fila", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos } = depsSobre(trx, MARLON);

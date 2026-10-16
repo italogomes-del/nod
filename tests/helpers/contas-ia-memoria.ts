@@ -1,14 +1,14 @@
 import { CONTAS_DA_PESSOA_MAX } from "../../src/contracts/contas-ia.ts";
 import { randomUUID } from "node:crypto";
 import type { ContaAnunciada, IaComConta, ModoDasContas } from "../../src/contracts/contas-ia.ts";
-import { apelidoPadrao, decidirAnuncio, type VinculoDaConta } from "../../src/domain/contas-da-pessoa.ts";
+import { apelidoPadrao, decidirAnuncio, vinculoSegueSemAcesso, type VinculoDaConta } from "../../src/domain/contas-da-pessoa.ts";
 import type { ContaGuardadaNoServidor, ResultadoDoAnuncio, contasIaRepo } from "../../src/repositories/contas-ia.repo.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 
 type Dono = { tenantId: string; ownerId: string };
 export type EstadoContasIaMemoria = {
   contas: (ContaGuardadaNoServidor & Dono)[];
-  vinculos: (VinculoDaConta & Dono)[];
+  vinculos: (VinculoDaConta & Dono & { semAcessoEm?: number | null })[];
   modos: Map<string, { modo: ModoDasContas; escolhidas: Partial<Record<IaComConta, string>> }>;
 };
 
@@ -62,8 +62,10 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
         const v = meusVinculos().find((x) => x.contaId === conta!.id && x.maquinaId === maquinaId);
         if (decisao === "sair") sair.push(a.impressao);
         if (v) {
-          if (v.estado !== a.estado) mudou = true;
-          v.estado = a.estado;
+          const estado = vinculoSegueSemAcesso(v.semAcessoEm ?? null, a.estado, a.logadaEm) ? "sem_acesso" : a.estado;
+          if (v.estado !== estado) mudou = true;
+          v.estado = estado;
+          v.semAcessoEm = estado === "sem_acesso" ? (v.semAcessoEm ?? agora) : null;
           if (decisao === "sair") v.sairPedidoEm ??= agora;
         } else {
           e.vinculos.push({ ...dono, contaId: conta!.id, maquinaId, estado: a.estado, sairPedidoEm: decisao === "sair" ? agora : null });
@@ -104,6 +106,13 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
       const antes = e.vinculos.length;
       e.vinculos = e.vinculos.filter((v) => !(v.tenantId === escopo.tenantId && v.ownerId === escopo.pessoaId && v.maquinaId === maquinaId && ids.includes(v.contaId)));
       return antes - e.vinculos.length;
+    },
+    async marcarSemAcesso(id, maquinaId, agora) {
+      const v = meusVinculos().find((x) => x.contaId === id && x.maquinaId === maquinaId);
+      if (!v) return false;
+      v.estado = "sem_acesso";
+      v.semAcessoEm ??= agora;
+      return true;
     },
     async apagarVinculo(id, maquinaId) { e.vinculos = e.vinculos.filter((v) => !(v.tenantId === escopo.tenantId && v.ownerId === escopo.pessoaId && v.contaId === id && v.maquinaId === maquinaId)); },
     async modo() { return e.modos.get(chaveModo) ?? { modo: "perguntar", escolhidas: {} }; },

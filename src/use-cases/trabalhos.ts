@@ -6,7 +6,7 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { cotaDasIas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
+import { cotaDasIasComContas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
 import { iasNoLimite } from "../domain/inteligencia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
@@ -215,11 +215,14 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
   // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
   const fila = memoria?.fila ?? null;
-  const [preferencias, usos, agentes] = await Promise.all([deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.agentes.listar()]);
+  const [preferencias, usos, usosPorConta, lista, modoDasContas, agentes] = await Promise.all([deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.usoDoPlano.listarPorConta(), deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.agentes.listar()]);
   const usoDoMac = memoria === null ? "livre" : preferencias.usoDoMac ?? USO_DO_MAC_PADRAO;
   // definido em 2026-10-12 (ADR-099 §7): a cota da IA, a mesma regra do `reivindicar` (domain/cota-da-ia.ts). A pílula diz
   // quando o fundo volta; a linha da task diz que ela espera a cota.
-  const cotaAgora = cotaDasIas({ usos, limites: preferencias.iasNoLimite, agora: deps.agora() });
+  // NOD-253 (2026-10-15): a IA com conta da lista segura só quando nenhuma conta dela serve. A tela não sabe a máquina do
+  // próximo turno: conta como logada a conta `pronta` em qualquer máquina da pessoa.
+  const naAlgumaMaquina = new Set(lista.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null).map((v) => v.contaId));
+  const cotaAgora = cotaDasIasComContas({ usos, usosPorConta, limites: preferencias.iasNoLimite, contas: { contas: lista.contas, naMaquina: naAlgumaMaquina, escolhidas: modoDasContas.escolhidas }, agora: deps.agora() });
   const conhecidas = iasConhecidas(usos, preferencias.iasNoLimite);
   const botsPorId = new Map(agentes.map((a) => [a.id, a]));
   const servico = deps.services.maquinas;

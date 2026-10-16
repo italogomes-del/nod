@@ -218,7 +218,8 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
         const ia = lerIaDesktop(driverDoPlano(p));
         if (!ia || !r.causaSemIa) return;
         // Red team do PR #306 (como no Mac): o turno rodou numa conta da lista — a conta é relida, a IA não é reprovada.
-        if (p.conta) { const local = contasLocais.porImpressao(p.conta.impressao); void contasLocais.ler({ forcar: true, ...(local ? { id: local.id } : {}) }).then((mudou) => (mudou ? vigiaAtual.reanunciar() : undefined)).catch(() => undefined); return; }
+        // NOD-283: com o login de pé ("sem acesso", não "sem login"), a conta fica marcada `sem_acesso` e é reanunciada.
+        if (p.conta) { const impressao = p.conta.impressao; const local = contasLocais.porImpressao(impressao); void contasLocais.ler({ forcar: true, ...(local ? { id: local.id } : {}) }).then(async (mudou) => ((await contasLocais.marcarSemAcesso(impressao)) || mudou ? vigiaAtual.reanunciar() : undefined)).catch(() => undefined); return; }
         void vigiaAtual.reprovar(ia, r.causaSemIa).catch(() => undefined);
       } }), ponteHttp.ponte);
     log("info", "motor_laco_no_ar", { machine_id: dados.machineId });
@@ -244,7 +245,7 @@ async function conectar(c: ConexaoMotor, executor: string, pasta: string, versao
       // NOD-199: como no app do Mac, o reanúncio vai pela rota só de inventário — o `conectar` recusaria (409) ou, depois
       // de 90 s, limparia os planos do turno que roda. O primeiro anúncio e o que segue um 409 caem no `conectar` no cliente.
       const contas = contasLocais.anuncio();
-      const comContas = inventariosComContas(inventarios, contas);
+      const comContas = inventariosComContas(inventarios, contas, contasLocais.impressoesDaPadrao());
       await ponteHttp.ponte.anunciarInventario({ ...anuncio, inventario: estadoDaMaquina(principal, comContas), harnesses: comContas, semLacoDeVoz, capacidades, contas });
       subirSeTemConta();
       log("info", "motor_anunciou", { ias: Object.entries(inventarios).map(([h, i]) => `${h}:${i?.estado ?? "?"}`).join(",") });

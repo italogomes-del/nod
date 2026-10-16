@@ -6,6 +6,7 @@ import {
   fraseDoLimiteDaConta,
   ordemIasDaLista,
   textoDaImpressaoDaConta,
+  vinculoSegueSemAcesso,
   voltaDaIa,
   type ContaDaPessoa,
 } from "../../../src/domain/contas-da-pessoa.ts";
@@ -193,5 +194,31 @@ describe("fraseDoLimiteDaConta", () => {
   it("ADR-108 (R7): na mesma IA a linha é leve — quem acabou, quando, e com quem seguiu no mesmo modelo", () => {
     const d = { tipo: "trocou" as const, para: conta("Marlon 20x", "claude-cli", 4) };
     expect(fraseDoLimiteDaConta({ ia: "claude-cli", apelido: "marlonwlv (20x)" }, d, { ...p, quando: () => "20:39", acabouEm: AGORA })).toBe("marlonwlv (20x) acabou às 20:39 → seguindo no Claude · Marlon 20x · mesmo modelo");
+  });
+});
+
+describe("bot preso a uma IA no limite da conta (NOD-253)", () => {
+  const base = { naMaquina: todas, noutraMaquina: new Map(), escolhidas: {}, ordemDoBot: null, agora: AGORA };
+
+  it("preso ao Claude: nunca 'outra_ia' — oferece só contas do Claude", () => {
+    const r = decidirLimiteDaConta({ ...base, contas: lista(), contaId: "c-pessoal", ate: AGORA + HORA, iaFixa: "claude-cli" });
+    expect(r.decisao.tipo).not.toBe("outra_ia");
+    expect(JSON.stringify(r.decisao)).not.toContain("g-pessoal");
+  });
+
+  it("preso ao ChatGPT e a única conta dele no limite: espera a volta DELA, não a do Claude", () => {
+    const contas = lista({ "c-pessoal": { noLimiteAte: AGORA + 10 * HORA } });
+    const r = decidirLimiteDaConta({ ...base, contas, contaId: "g-pessoal", ate: AGORA + 2 * HORA, iaFixa: "codex-cli" });
+    expect(r.decisao).toMatchObject({ tipo: "todas_no_limite" });
+    expect(JSON.stringify(r.decisao)).not.toContain("c-leapy");
+  });
+});
+
+describe("vinculoSegueSemAcesso (NOD-283)", () => {
+  it("o anúncio 'pronta' com o mesmo login não solta a conta sem acesso; um login mais novo solta", () => {
+    expect(vinculoSegueSemAcesso(AGORA, "pronta", AGORA - HORA)).toBe(true);
+    expect(vinculoSegueSemAcesso(AGORA, "pronta", AGORA + 1)).toBe(false);
+    expect(vinculoSegueSemAcesso(AGORA, "sem_login", AGORA - HORA)).toBe(false);
+    expect(vinculoSegueSemAcesso(null, "pronta", AGORA - HORA)).toBe(false);
   });
 });

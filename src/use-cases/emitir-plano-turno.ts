@@ -19,7 +19,7 @@ import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemCompleta, ordemEfetiva } from "../domain/inteligencia.ts";
-import { cotaDasIas, tipoParaCota } from "../domain/cota-da-ia.ts";
+import { contasPelaCota, cotaDasContas, cotaDasIasComContas, tipoParaCota } from "../domain/cota-da-ia.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { MOTIVO_FALHA_EM_PORTUGUES } from "../domain/computador.ts";
@@ -170,11 +170,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // aviso de troca). Se a cota a segura de verdade (o limite medido segura o fundo que já começou), a guarda do despacho
   // (despachar-turno.ts, segurarTaskNaIaDaSessao) já devolveu o turno à espera; na reserva, a task que já começou segue nela.
   const daSessao = fundo && turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
-  const pelaCota = fundo ? cotaDasIas({ usos: await deps.repos.usoDoPlano.listar(), limites: preferencias.iasNoLimite, agora }).map((c) => c.ia).filter((ia) => !temSessaoNaIa(daSessao, ia)) : [];
   // ADR-102 (2026-10-13): a conta do turno, pela lista da pessoa e pelo que a máquina do turno tem logado. Com conta
   // anunciada na máquina, a posição da conta em uso de cada IA decide a ordem, e a IA sem conta utilizável entra no
   // "no limite" (o limite é da conta, não mais da IA); sem conta anunciada (motor ou app antigo), nada muda.
-  const daMaquina = executor !== "catcher" && input.harnesses && (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContasDaMaquina(deps, input.machineId) : null;
+  const lidas = executor !== "catcher" && input.harnesses && (await deps.repos.contasIa.temContaNaMaquina(input.machineId)) ? await lerContasDaMaquina(deps, input.machineId) : null;
+  // NOD-253 (2026-10-15): no trabalho de fundo, a conta que a cota dela segura (a leitura por conta, 0077) conta como no
+  // limite — o plano vai pela outra conta livre da mesma IA, a mesma regra do portão (cotaDasIasComContas).
+  const deFundo = !input.recompor && tipoParaCota(turno, null) !== "conversa";
+  const usosPorConta = lidas && deFundo ? await deps.repos.usoDoPlano.listarPorConta() : [];
+  const daMaquina = lidas && deFundo ? { ...lidas, contas: contasPelaCota(lidas.contas, cotaDasContas({ usos: usosPorConta, agora }), "fundo_seguindo") } : lidas;
+  const pelaCota = fundo ? cotaDasIasComContas({ usos: await deps.repos.usoDoPlano.listar(), usosPorConta, limites: preferencias.iasNoLimite, contas: lidas, agora }).map((c) => c.ia).filter((ia) => !temSessaoNaIa(daSessao, ia)) : [];
   const contas = daMaquina ? escolherContaDoTurno(daMaquina, inteligencia.ordem, agora) : null;
   const governadas = (ia: IdHarness) => contas !== null && ia in contas.porIa;
   // NOD-285 (K1): os anexos que existem (o arquivo limpo do disco não tem meta e não filtra) decidem quais IAs servem.

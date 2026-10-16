@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
-import { cotaDasIas, cotaParaTela, cotaSegura, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
+import type { ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
+import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
 
 const AGORA = Date.UTC(2026, 9, 12, 15, 0);
 const HORA = 3_600_000;
@@ -132,5 +133,40 @@ describe("a tela", () => {
 
   it("as IAs conhecidas: as que têm leitura ou limite gravado", () => {
     expect(iasConhecidas([uso(0.1)], { "codex-cli": { renovaEm: AGORA, desde: AGORA } })).toEqual(["claude-cli", "codex-cli"]);
+  });
+});
+
+/**
+ * NOD-253 (2026-10-15, decisão da NOD-221): a cota olha a CONTA que o turno usaria. O caso de 14/10: a Max do Claude no
+ * limite, a Team livre — o fundo do Claude não pode parar.
+ */
+describe("cotaDasIasComContas (NOD-253)", () => {
+  const conta = (id: string, posicao: number, o: Partial<ContaDaPessoa> = {}): ContaDaPessoa => ({ id, ia: "claude-cli", apelido: id, plano: null, corporativa: false, posicao, entraNaTrocaAutomatica: true, noLimiteAte: null, removidaEm: null, ...o });
+  const max = conta("max", 1);
+  const team = conta("team", 2);
+  const daConta = (id: string, cinco: number, renova = AGORA + 2 * HORA): UsoDoPlano => ({ ...uso(cinco, 0.1, { renovaCinco: renova }), contaId: id });
+  const comContas = (o: { usosPorConta: UsoDoPlano[]; contas?: ContaDaPessoa[]; usos?: UsoDoPlano[] }) =>
+    cotaDasIasComContas({ usos: o.usos ?? [], usosPorConta: o.usosPorConta, limites: {}, agora: AGORA, contas: { contas: o.contas ?? [max, team], naMaquina: new Set((o.contas ?? [max, team]).map((c) => c.id)), escolhidas: {} } });
+
+  it("Max no limite e Team livre na fila: o Claude não segura o fundo", () => {
+    expect(comContas({ usosPorConta: [daConta("max", 0.995)] })).toEqual([]);
+  });
+
+  it("a leitura por IA da Max (uso_do_plano) não segura mais o Claude quando a máquina tem a lista", () => {
+    expect(comContas({ usos: [uso(0.995)], usosPorConta: [daConta("max", 0.995)] })).toEqual([]);
+  });
+
+  it("todas as contas do Claude no limite: segura até a primeira voltar", () => {
+    expect(comContas({ usosPorConta: [daConta("max", 0.995, AGORA + 3 * HORA), daConta("team", 0.995, AGORA + HORA)] })).toEqual([{ ia: "claude-cli", situacao: "reserva", voltaEm: AGORA + HORA }]);
+  });
+
+  // ADR-108: o "Perguntar antes" saiu; a conta fora da fila é o caso equivalente (o fundo não passa para ela sozinho).
+  it("a primeira conta na reserva e a outra fora da fila: o fundo não pula de conta sozinho — segura", () => {
+    const r = comContas({ usosPorConta: [daConta("max", 0.995)], contas: [max, conta("team", 2, { entraNaTrocaAutomatica: false })] });
+    expect(r.map((x) => x.ia)).toEqual(["claude-cli"]);
+  });
+
+  it("sem conta da lista na máquina: a regra de antes (a leitura por IA)", () => {
+    expect(cotaDasIasComContas({ usos: [uso(0.995)], usosPorConta: [], limites: {}, agora: AGORA, contas: null })).toEqual(cotaDasIas({ usos: [uso(0.995)], limites: {}, agora: AGORA }));
   });
 });

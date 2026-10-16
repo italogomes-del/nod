@@ -2587,14 +2587,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
     usoDoPlano: {
-      async gravar(uso) {
-        const chave = `${escopo.tenantId}:${escopo.pessoaId}:${uso.harness}`;
-        const atual = b.usoDoPlano.get(chave);
-        if (!atual || atual.medidoEm < uso.medidoEm) b.usoDoPlano.set(chave, uso);
+      async gravar(uso, _machineId, contaId = null) {
+        const gravar = (chave: string, u: UsoDoPlano) => {
+          const atual = b.usoDoPlano.get(chave);
+          if (!atual || atual.medidoEm < u.medidoEm) b.usoDoPlano.set(chave, u);
+        };
+        if (contaId) gravar(`${escopo.tenantId}:${escopo.pessoaId}:conta:${contaId}`, { ...uso, contaId });
+        gravar(`${escopo.tenantId}:${escopo.pessoaId}:${uso.harness}`, uso);
       },
       async listar() {
         const prefixo = `${escopo.tenantId}:${escopo.pessoaId}:`;
-        return [...b.usoDoPlano].filter(([k]) => k.startsWith(prefixo)).map(([, v]) => v).sort((x, y) => x.harness.localeCompare(y.harness));
+        return [...b.usoDoPlano].filter(([k]) => k.startsWith(prefixo) && !k.startsWith(`${prefixo}conta:`)).map(([, v]) => v).sort((x, y) => x.harness.localeCompare(y.harness));
+      },
+      async listarPorConta() {
+        const prefixo = `${escopo.tenantId}:${escopo.pessoaId}:conta:`;
+        return [...b.usoDoPlano].filter(([k]) => k.startsWith(prefixo)).map(([, v]) => v).sort((x, y) => x.harness.localeCompare(y.harness) || (x.contaId ?? "").localeCompare(y.contaId ?? ""));
       },
     },
     leituras: (() => {

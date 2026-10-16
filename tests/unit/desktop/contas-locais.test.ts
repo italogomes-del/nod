@@ -34,6 +34,22 @@ const LEAPY: IdentidadeDaConta = { logado: true, email: "marlon@leapy.com.br", o
 const PESSOAL: IdentidadeDaConta = { logado: true, email: "marlon@exemplo.com", orgId: "org-p", plano: "Max", organizacao: null };
 
 describe("contas locais no app do Mac (ADR-102)", () => {
+  it("NOD-283: a conta sem acesso fica assim (e no arquivo) com o mesmo login; um login noutra conta a solta", async () => {
+    const ids: Record<string, IdentidadeDaConta> = { "claude-cli:c-1": LEAPY };
+    const m = await montar(ids);
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "c-1", apelido: "Leapy" }]);
+    await m.contas.ler({ forcar: true });
+    const impressao = m.contas.anuncio()[0]!.impressao;
+    expect(await m.contas.marcarSemAcesso(impressao)).toBe(true);
+    expect(await m.contas.marcarSemAcesso(impressao)).toBe(false);
+    await m.contas.ler({ forcar: true });
+    expect(m.contas.anuncio()[0]).toMatchObject({ impressao, estado: "sem_acesso" });
+    expect(await readFile(m.arquivo, "utf8")).toContain("sem_acesso");
+    ids["claude-cli:c-1"] = { ...LEAPY, email: "outra@leapy.com.br" };
+    await m.contas.ler({ forcar: true });
+    expect(m.contas.anuncio().find((c) => c.impressao !== impressao)?.estado).toBe("pronta");
+  });
+
   it("segue a lista do app: conta nova entra e é lida, a que saiu some do anúncio", async () => {
     const m = await montar({ "claude-cli:padrao": PESSOAL, "claude-cli:c-1": LEAPY });
     await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }, { ia: "claude-cli", id: "c-1", apelido: "Leapy" }, { ia: "codex-cli", id: "padrao", apelido: null }]);
@@ -168,5 +184,25 @@ describe("o estado da máquina no anúncio (#313)", () => {
   it("nenhuma IA pronta nem conta pronta: vai a explicação da vigia (`principal`)", () => {
     const principal: Inventario = { estado: "nao_autenticado", causa: "teste_falhou", motivo: "testei e não respondeu", em: 3 };
     expect(estadoDaMaquina(principal, inventariosComContas({ "claude-cli": semLogin, "codex-cli": semLogin }, []))).toBe(principal);
+  });
+
+  // NOD-283 A5 (QA do PR #337): a sonda testa a conta de sempre; reprovada por um teste de verdade, essa conta pronta na
+  // lista local não pode reanunciar o Claude como pronto. Outra conta (outro login) pronta ainda promove.
+  it("NOD-283: o teste reprovou a conta de sempre: ela não promove a IA; a Max (outro login) pronta promove", async () => {
+    const m = await montar({ "claude-cli:padrao": PESSOAL, "claude-cli:c-1": LEAPY });
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }]);
+    await m.contas.ler({ forcar: true });
+    const padrao = m.contas.impressoesDaPadrao();
+    expect(padrao["claude-cli"]).toBe(m.contas.anuncio()[0]!.impressao);
+    const reprovado: Inventario = { estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "a conta não tem acesso", em: 4 };
+    const so = inventariosComContas({ "claude-cli": reprovado }, m.contas.anuncio(), padrao);
+    expect(so["claude-cli"]).toBe(reprovado);
+    expect(inventariosComContas({ "claude-cli": { ...reprovado, causa: "teste_falhou" } }, m.contas.anuncio(), padrao)["claude-cli"]?.estado).toBe("nao_autenticado");
+    // Sem causa de teste (só não logada), a regra do #306 continua: a conta pronta promove.
+    expect(inventariosComContas({ "claude-cli": semLogin }, m.contas.anuncio(), padrao)["claude-cli"]?.estado).toBe("pronto");
+    await m.contas.sincronizar([{ ia: "claude-cli", id: "padrao", apelido: "Pessoal" }, { ia: "claude-cli", id: "c-1", apelido: "Leapy" }]);
+    await m.contas.ler({ forcar: true });
+    expect(m.contas.anuncio().filter((c) => c.estado === "pronta")).toHaveLength(2);
+    expect(inventariosComContas({ "claude-cli": reprovado }, m.contas.anuncio(), m.contas.impressoesDaPadrao())["claude-cli"]?.estado).toBe("pronto");
   });
 });

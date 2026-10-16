@@ -7,6 +7,7 @@ import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
 import { seguirComConta } from "../../../src/use-cases/contas-ia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
+import { definirInteligenciaDoBot } from "../../../src/use-cases/inteligencia.ts";
 import { parar } from "../../../src/use-cases/parar.ts";
 import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
 
@@ -26,13 +27,14 @@ const base = {
 } satisfies Omit<ResultadoTurno, "desfecho">;
 const limite = (voltaEm: number): ResultadoTurno => ({ ...base, desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: voltaEm, erroCru: "usage limit" });
 
-async function cenario(o: { origem?: "conversa" | "rotina"; comTask?: boolean } = {}) {
+async function cenario(o: { origem?: "conversa" | "rotina"; comTask?: boolean; pedido?: unknown } = {}) {
   const { deps, banco } = depsEmMemoria(MARLON, { relogio: () => T0 });
   const { data: bot } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Ze 1" });
   const chave = await deps.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: "8f2a", hash: randomBytes(32) });
   const vm = chave!.id;
   await deps.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy")], T0);
   const [cPessoal, gPessoal, cLeapy] = (await deps.repos.contasIa.listar()).contas;
+  if (o.pedido) await executar(deps, definirInteligenciaDoBot, { agenteId: bot.agente.id, pedido: o.pedido });
   const agente = (await deps.repos.agentes.buscar(bot.agente.id))!;
   const origem = await deps.repos.mensagens.criar({ conversaId: bot.conversa.id, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "texto", texto: "revisa o #861", confianca: "confiavel" });
   const task = o.comTask ? await deps.repos.trabalhos.criar({ agenteId: bot.agente.id, conversaId: bot.conversa.id, titulo: "Revisar o #861", origem: "rotina", rotinaId: null, forma: "frente" }) : null;
@@ -455,3 +457,61 @@ describe("NOD-268: o alarme reenvio_em_laco", () => {
   });
 });
 
+
+/**
+ * NOD-253/NOD-283 (2026-10-15): quem para é a CONTA. O bot preso a uma IA nunca recebe a oferta da outra IA (NOD-224), e
+ * a conta que voltou "sem acesso" (a organização desligou o Claude da Team) sai desta máquina sem reprovar a IA inteira.
+ */
+const semAcesso: ResultadoTurno = { ...base, desfecho: "falha", motivoFalha: "nao_autenticado", causaSemIa: "conta_sem_acesso" };
+const estadoNaVm = async (c: Awaited<ReturnType<typeof cenario>>, contaId: string) => (await c.deps.repos.contasIa.listar()).vinculos.find((v) => v.contaId === contaId && v.maquinaId === c.vm)?.estado;
+
+describe("a conta do turno sem acesso (NOD-283)", () => {
+  it("Claude · Leapy sem acesso: o vínculo vira sem_acesso, a IA não é reprovada e a fala é refeita uma vez", async () => {
+    const c = await cenario();
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cLeapy.id);
+    const r = await c.entregar(semAcesso, "claude-cli");
+    expect(await estadoNaVm(c, c.contas.cLeapy.id)).toBe("sem_acesso");
+    expect(await estadoNaVm(c, c.contas.cPessoal.id)).toBe("pronta");
+    expect(c.banco.mensagens.slice(c.antes).map((m) => m.kind)).not.toContain("negacao");
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", origem: "conversa", reenvios: 1 }]);
+    expect(r.events.map((e) => e.kind)).toContain("turno_interrompido");
+  });
+
+  it("bot preso ao ChatGPT e a única conta dele sem acesso: o aviso de sempre com a causa, nada refeito", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "codex-cli" } });
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.gPessoal.id);
+    await c.entregar(semAcesso, "codex-cli");
+    expect(await estadoNaVm(c, c.contas.gPessoal.id)).toBe("sem_acesso");
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas.map((m) => m.kind)).toEqual(["negacao"]);
+    expect(novas[0]?.payload).toMatchObject({ causa: "conta_sem_acesso" });
+    expect(c.banco.turnos).toHaveLength(1);
+  });
+
+  it("o anúncio 'pronta' com o mesmo login não solta a conta; um login mais novo solta", async () => {
+    const c = await cenario();
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cLeapy.id);
+    await c.entregar(semAcesso, "claude-cli");
+    const todas = [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy")];
+    await c.deps.repos.contasIa.doAnuncio(c.vm, todas, T0 + HORA);
+    expect(await estadoNaVm(c, c.contas.cLeapy.id)).toBe("sem_acesso");
+    await c.deps.repos.contasIa.doAnuncio(c.vm, todas.map((a) => (a.impressao === imp(3) ? { ...a, logadaEm: T0 + HORA } : a)), T0 + 2 * HORA);
+    expect(await estadoNaVm(c, c.contas.cLeapy.id)).toBe("pronta");
+  });
+});
+
+describe("bot preso a uma IA com a conta dela no limite (NOD-253)", () => {
+  it("preso ao ChatGPT: nunca segue no Claude — sem outra conta do ChatGPT, nada refeito no Claude", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "codex-cli" } });
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.gPessoal.id);
+    await c.entregar(limite(T0 + 2 * HORA), "codex-cli");
+    expect((await c.deps.repos.contasIa.buscar(c.contas.gPessoal.id))?.noLimiteAte).toBe(T0 + 2 * HORA);
+    const outros = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+    expect(outros.every((t) => t.harness === "codex-cli")).toBe(true);
+    for (const m of c.banco.mensagens.slice(c.antes)) expect(m.texto).not.toMatch(/Claude/);
+  });
+});

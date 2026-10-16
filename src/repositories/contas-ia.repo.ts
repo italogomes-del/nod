@@ -1,6 +1,6 @@
 import { CONTAS_DA_PESSOA_MAX } from "../contracts/contas-ia.ts";
 import type { ContaAnunciada, EstadoContaNaMaquina, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
-import { apelidoPadrao, decidirAnuncio, ehIaComConta, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
+import { apelidoPadrao, decidirAnuncio, vinculoSegueSemAcesso, ehIaComConta, type ContaDaPessoa, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
 
@@ -155,12 +155,15 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
             mudou = true;
           }
         }
-        const [antes] = await conn<{ estado: string }[]>`select estado from contas_ia_maquinas where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
-        if (antes?.estado !== a.estado) mudou = true;
+        const [antes] = await conn<{ estado: string; sem_acesso_em: Date | null }[]>`select estado, sem_acesso_em from contas_ia_maquinas where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
+        // NOD-283 (CA 10): a conta que voltou "sem acesso" num turno segue assim até um login mais novo que a marca.
+        const estado = vinculoSegueSemAcesso(antes?.sem_acesso_em ? antes.sem_acesso_em.getTime() : null, a.estado, a.logadaEm) ? "sem_acesso" : a.estado;
+        if (antes?.estado !== estado) mudou = true;
         await conn`
-          insert into contas_ia_maquinas (tenant_id, owner_id, conta_id, maquina_id, estado, visto_em)
-          values (${escopo.tenantId}, ${escopo.pessoaId}, ${id}, ${maquinaId}, ${a.estado}, ${data(agora)})
-          on conflict (tenant_id, conta_id, maquina_id) do update set estado = excluded.estado, visto_em = excluded.visto_em`;
+          insert into contas_ia_maquinas (tenant_id, owner_id, conta_id, maquina_id, estado, visto_em, sem_acesso_em)
+          values (${escopo.tenantId}, ${escopo.pessoaId}, ${id}, ${maquinaId}, ${estado}, ${data(agora)}, ${estado === "sem_acesso" ? data(agora) : null})
+          on conflict (tenant_id, conta_id, maquina_id) do update set estado = excluded.estado, visto_em = excluded.visto_em,
+            sem_acesso_em = case when excluded.estado = 'sem_acesso' then coalesce(contas_ia_maquinas.sem_acesso_em, excluded.sem_acesso_em) else null end`;
         vistas.push(id);
       }
       const apagados = await conn`
@@ -241,6 +244,16 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
     },
 
     /** A conta sumiu da máquina no meio do turno (`conta_ausente`, R6): o vínculo sai. */
+    /**
+     * NOD-283 (C4): o turno nesta conta voltou "conta sem acesso". Só o vínculo DESTA máquina vira `sem_acesso` (a IA segue
+     * pronta pelas outras contas). true = havia o vínculo.
+     */
+    async marcarSemAcesso(id: string, maquinaId: string, agora: number): Promise<boolean> {
+      const r = await conn`update contas_ia_maquinas set estado = 'sem_acesso', sem_acesso_em = coalesce(sem_acesso_em, ${data(agora)})
+        where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
+      return r.count > 0;
+    },
+
     async apagarVinculo(id: string, maquinaId: string): Promise<void> {
       await conn`delete from contas_ia_maquinas where ${doDono()} and conta_id = ${id} and maquina_id = ${maquinaId}`;
     },

@@ -69,20 +69,43 @@ export function escolherContaDoTurno(c: ContasDaMaquina, ordemDoBot: readonly Id
 export const contaDoPlano = (c: Pick<ContaGuardadaNoServidor, "id" | "impressao" | "apelido">): ContaDoPlano => ({ id: c.id, impressao: c.impressao, apelido: c.apelido });
 
 /**
+ * definido em 2026-10-15 (NOD-283, C3 = C11): a lista vista pelas IAs que podem pegar o turno (a fixa, ou as prontas na
+ * máquina no Automático). Uma regra só para o despacho, o assentamento e a nota do fundo segurado (NOD-253): a conta de
+ * outra IA não entra em `livres` nem vira "Seguindo com <outra IA>" para o bot de IA fixa.
+ */
+export function contasDaIaDoTurno(c: ContasDaMaquina, ias: readonly string[]): ContasDaMaquina {
+  const daIa = new Set(c.contas.filter((x) => ias.includes(x.ia)).map((x) => x.id));
+  return {
+    ...c,
+    contas: c.contas.filter((x) => daIa.has(x.id)),
+    naMaquina: new Set([...c.naMaquina].filter((id) => daIa.has(id))),
+    noutraMaquina: new Map([...c.noutraMaquina].filter(([id]) => daIa.has(id))),
+  };
+}
+
+/**
  * O turno não tem conta para usar nesta máquina sem a pessoa decidir? `iasDoTurno` são as IAs que podem pegá-lo (a fixa,
  * ou as prontas na máquina no Automático); IA sem conta anunciada aqui segue o caminho de antes (não segura o turno).
  * Devolve a conta "de" (a primeira da lista nesta máquina, a que parou) e a decisão para a nota; null = segue.
- * ADR-108 (R2): com `iaFixa`, a decisão só olha as contas dela (nunca oferece conta de outra IA).
+ * ADR-108 (R2) e NOD-283: a decisão olha só as contas das IAs do turno, com as escolhas da pessoa e a ordem do bot; com a
+ * IA fixa (`iaFixa`), só as contas dela e nunca outra IA.
  */
-export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuardadaNoServidor> | null, iasDoTurno: readonly string[], agora: number, iaFixa: IaComConta | null = null): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
+export function semContaParaOTurno(
+  c: ContasDaMaquina,
+  r: ContaDoTurno<ContaGuardadaNoServidor> | null,
+  iasDoTurno: readonly string[],
+  agora: number,
+  opcoes: { iaFixa?: IaComConta | null; ordemDoBot?: readonly IdHarness[] | null } = {},
+): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
   if (!r) return null;
   const governadas = iasDoTurno.filter((ia): ia is IaComConta => ia in r.porIa);
   const livresSemConta = iasDoTurno.filter((ia) => !(ia in r.porIa));
   if (governadas.length === 0 || livresSemConta.length > 0 || governadas.some((ia) => r.porIa[ia])) return null;
-  const naOrdem = c.contas.filter((x) => x.removidaEm === null && c.naMaquina.has(x.id) && governadas.includes(x.ia)).sort((a, b) => a.posicao - b.posicao);
+  const visao = contasDaIaDoTurno(c, governadas);
+  const naOrdem = visao.contas.filter((x) => x.removidaEm === null && visao.naMaquina.has(x.id)).sort((a, b) => a.posicao - b.posicao);
   const de = naOrdem.find((x) => x.noLimiteAte !== null && x.noLimiteAte > agora) ?? naOrdem[0];
   if (!de) return null;
-  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, escolhidas: {}, ordemDoBot: null, iaFixa, contaId: de.id, ate: de.noLimiteAte, agora });
+  const { decisao } = decidirLimiteDaConta({ contas: visao.contas, naMaquina: visao.naMaquina, noutraMaquina: visao.noutraMaquina, escolhidas: visao.escolhidas, ordemDoBot: opcoes.ordemDoBot ?? null, contaId: de.id, ate: de.noLimiteAte, agora, iaFixa: opcoes.iaFixa ?? null });
   return { de, decisao, voltaEm: de.noLimiteAte };
 }
 

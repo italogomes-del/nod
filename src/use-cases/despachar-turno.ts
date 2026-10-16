@@ -246,9 +246,10 @@ async function semContaNaMaquina(
   const c = contasDaMaquinaDe(p.contas, p.machineId, agora);
   if (c.naMaquina.size === 0) return null;
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
-  const r = escolherContaDoTurno(c, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
+  const ordemDoBot = agente ? inteligenciaDoAgente(agente).ordem : null;
+  const r = escolherContaDoTurno(c, ordemDoBot, agora);
   const fixo = harnessFixado(turno.harness, turno.modelo);
-  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, fixo && ehIaComConta(fixo) ? fixo : null);
+  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, { iaFixa: fixo && ehIaComConta(fixo) ? fixo : null, ordemDoBot });
   if (!sem) return null;
   const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", ultimoSinalEm: agora });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
