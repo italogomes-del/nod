@@ -112,9 +112,12 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         }
         if (decisao === "criar") {
           const posicao = await proximaPosicao();
+          // ADR-108 (termos de uso, ADR-101 §4): só a 1ª conta pessoal de cada IA nasce na fila; a 2ª em diante e a
+          // corporativa nascem fora, e a pessoa as liga em Provedores (com o aviso dos termos).
+          const naFila = !corporativaDe(a) && (await conn`select 1 from contas_ia where ${doDono()} and ia = ${a.ia} and removida_em is null and not corporativa limit 1`).length === 0;
           const [l] = await conn<{ id: string }[]>`
-            insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao, email, organizacao)
-            values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao}, ${a.email ?? null}, ${a.organizacao ?? null})
+            insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao, email, organizacao, entra_na_troca_automatica)
+            values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao}, ${a.email ?? null}, ${a.organizacao ?? null}, ${naFila})
             on conflict (tenant_id, owner_id, ia, impressao) do update set plano = coalesce(excluded.plano, contas_ia.plano),
               email = coalesce(excluded.email, contas_ia.email), organizacao = coalesce(excluded.organizacao, contas_ia.organizacao)
             returning id`;

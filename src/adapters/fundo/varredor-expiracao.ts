@@ -16,6 +16,7 @@ import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../use-cases/tu
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
+import { varrerTrocasDeIa } from "../../use-cases/trocas-de-ia.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
 /** definido em 2026-09-16: 30 s — a spec aceita "em ≤30s" para o vencimento aparecer (fluxo SUA VEZ E EXPIRAÇÃO). */
@@ -92,6 +93,17 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "turnos_orfaos_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // definido em 2026-10-16 (ADR-108 R4/R6): os avisos de troca de IA (trocas-de-ia.ts), em transação própria — aplica o
+  // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await varrerTrocasDeIa(deps);
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+    });
+  } catch (e) {
+    log("erro", "trocas_de_ia_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   return resultado;
 }

@@ -11,6 +11,7 @@ import { fixarAgente, ocultarAgente } from "../../../use-cases/fixar-ocultar-age
 import { registrarMemoria } from "../../../use-cases/lembrar.ts";
 import { mudarModoAprovacao } from "../../../use-cases/mudar-modo-aprovacao.ts";
 import { definirInteligenciaDoBot, lerInteligenciaDoBot } from "../../../use-cases/inteligencia.ts";
+import { decidirTrocaDeIa } from "../../../use-cases/trocas-de-ia.ts";
 import type { Rota } from "../roteador.ts";
 import { corpoObjeto, criarExecutor, texto, textoOpcional, type DepsRotas } from "./executar-caso.ts";
 
@@ -82,6 +83,16 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       padrao: new RegExp(`^/agentes/${ID}/inteligencia$`),
       async handler(ctx) {
         ctx.json(200, await executar(ctx.escopo, definirInteligenciaDoBot, { agenteId: ctx.params.id ?? "", pedido: await ctx.corpo() }));
+      },
+    },
+    {
+      // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot — esperar, levar as tasks, ou (bot fixo) seguir noutra IA
+      // até a volta. Só a dona; quem chega primeiro vence (o segundo clique recebe `aplicada: false`).
+      metodo: "POST",
+      padrao: new RegExp(`^/agentes/${ID}/troca-de-ia$`),
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        ctx.json(200, await executar(ctx.escopo, decidirTrocaDeIa, { agenteId: ctx.params.id ?? "", decisao: corpo.decisao }));
       },
     },
     {

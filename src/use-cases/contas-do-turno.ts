@@ -1,4 +1,4 @@
-import type { ContaDoPlano, ContasNoLimite, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
+import type { ContaDoPlano, ContasNoLimite, IaComConta } from "../contracts/contas-ia.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { IdHarness } from "../contracts/harness.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -17,7 +17,6 @@ import type { Deps } from "./tipos.ts";
 export type ContasDaMaquina = {
   contas: ContaGuardadaNoServidor[];
   vinculos: VinculoDaConta[];
-  modo: ModoDasContas;
   escolhidas: Partial<Record<IaComConta, string>>;
   /** As contas `pronta` na máquina do turno, sem saída pedida. */
   naMaquina: Set<string>;
@@ -34,7 +33,8 @@ export type ContasDaMaquina = {
 export const CONTATO_RECENTE_MS = 2 * 60_000;
 
 export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {
-  const [{ contas, vinculos }, { modo, escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
+  // ADR-108: o "Perguntar antes"/"Trocar sozinho" (preferencias.contas_modo) não decide mais nada; só a escolhida vale.
+  const [{ contas, vinculos }, { escolhidas }, chaves] = await Promise.all([deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.maquinaTokens.listar()]);
   const agora = deps.agora();
   const nomes = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
   const vivas = new Map(chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
@@ -42,11 +42,11 @@ export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, ma
   const naMaquina = new Set(prontas.filter((v) => v.maquinaId === machineId).map((v) => v.contaId));
   const noutraMaquina = new Map<string, { id: string; nome: string }>();
   for (const v of prontas) if (v.maquinaId !== machineId && vivas.has(v.maquinaId) && !noutraMaquina.has(v.contaId)) noutraMaquina.set(v.contaId, { id: v.maquinaId, nome: vivas.get(v.maquinaId)! });
-  return { contas, vinculos, modo, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+  return { contas, vinculos, escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
 }
 
 export function escolherContaDoTurno(c: ContasDaMaquina, ordemDoBot: readonly IdHarness[] | null, agora: number): ContaDoTurno<ContaGuardadaNoServidor> | null {
-  return contaDoTurno({ contas: c.contas, naMaquina: c.naMaquina, modo: c.modo, escolhidas: c.escolhidas, ordemDoBot, agora });
+  return contaDoTurno({ contas: c.contas, naMaquina: c.naMaquina, escolhidas: c.escolhidas, ordemDoBot, agora });
 }
 
 export const contaDoPlano = (c: Pick<ContaGuardadaNoServidor, "id" | "impressao" | "apelido">): ContaDoPlano => ({ id: c.id, impressao: c.impressao, apelido: c.apelido });
@@ -55,8 +55,9 @@ export const contaDoPlano = (c: Pick<ContaGuardadaNoServidor, "id" | "impressao"
  * O turno não tem conta para usar nesta máquina sem a pessoa decidir? `iasDoTurno` são as IAs que podem pegá-lo (a fixa,
  * ou as prontas na máquina no Automático); IA sem conta anunciada aqui segue o caminho de antes (não segura o turno).
  * Devolve a conta "de" (a primeira da lista nesta máquina, a que parou) e a decisão para a nota; null = segue.
+ * ADR-108 (R2): com `iaFixa`, a decisão só olha as contas dela (nunca oferece conta de outra IA).
  */
-export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuardadaNoServidor> | null, iasDoTurno: readonly string[], agora: number): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
+export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuardadaNoServidor> | null, iasDoTurno: readonly string[], agora: number, iaFixa: IaComConta | null = null): { de: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; voltaEm: number | null } | null {
   if (!r) return null;
   const governadas = iasDoTurno.filter((ia): ia is IaComConta => ia in r.porIa);
   const livresSemConta = iasDoTurno.filter((ia) => !(ia in r.porIa));
@@ -64,7 +65,7 @@ export function semContaParaOTurno(c: ContasDaMaquina, r: ContaDoTurno<ContaGuar
   const naOrdem = c.contas.filter((x) => x.removidaEm === null && c.naMaquina.has(x.id) && governadas.includes(x.ia)).sort((a, b) => a.posicao - b.posicao);
   const de = naOrdem.find((x) => x.noLimiteAte !== null && x.noLimiteAte > agora) ?? naOrdem[0];
   if (!de) return null;
-  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, modo: "perguntar", escolhidas: {}, ordemDoBot: null, contaId: de.id, ate: de.noLimiteAte, agora });
+  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, escolhidas: {}, ordemDoBot: null, iaFixa, contaId: de.id, ate: de.noLimiteAte, agora });
   return { de, decisao, voltaEm: de.noLimiteAte };
 }
 

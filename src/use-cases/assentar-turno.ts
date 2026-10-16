@@ -19,11 +19,14 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { entradaDaTrocaDeConta, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
+import { entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { fraseDaDecisao, PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
-import { decidirLimiteDaConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
+import { decidirLimiteDaConta, ehIaComConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
+import type { IaComConta } from "../contracts/contas-ia.ts";
 import { harnessFixado } from "../domain/harness.ts";
-import { criarNotaDeContas, lerContasDaMaquina } from "./contas-do-turno.ts";
+import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
+import { criarNotaDeContas, lerContasDaMaquina, type ContasDaMaquina } from "./contas-do-turno.ts";
+import { avisarTrocaDeIa, contaForaDaFila, outraIaParaAsTasks, quandoAIaVolta } from "./trocas-de-ia.ts";
 import { log } from "../obs/log.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -343,7 +346,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...(await aposContaSemAcesso(deps, { turno, executor, harness: entrega.harness ?? null, outraIa: entrega.outraIa ?? null, causa: resultado.causaSemIa, autoria, agora, custoUsd })));
   } else if (resultado.contaAusente && contaDoTurnoId && (trocou = await aposContaAusente(deps, { turno, assentado, executor, contaId: contaDoTurnoId, machineId: entrega.machineId, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
-  } else if (limiteDaConta && (trocou = await aposLimiteDaConta(deps, { turno, assentado, executor, ...limiteDaConta, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+  } else if (limiteDaConta && (trocou = await aposLimiteDaConta(deps, { turno, assentado, executor, ...limiteDaConta, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
   } else if (contas?.tipo === "trocou" && entrega.harness && (trocou = await aposTrocaDeConta(deps, { turno, executor, ia: entrega.harness, troca: contas, autoria, agora, custoUsd, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha }))) {
     events.push(...trocou);
@@ -353,7 +356,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...trocou);
   } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
-  } else if (limite && (trocou = await aposLimiteNoFundo(deps, { turno: assentado, executor, ...limite, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+  } else if (limite && (trocou = await aposLimiteDaIaNoFundo(deps, { turno: assentado, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
@@ -414,7 +417,8 @@ async function aposLimite(
   p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; prontos: readonly IdHarness[]; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
 ): Promise<RuntimeEvent[] | null> {
   const { turno, autoria, agora } = p;
-  if (turno.origem !== "conversa" || turno.harness !== "auto" || turno.modelo !== "auto") return null;
+  // ADR-108 (R4): o turno de uma task não é refeito noutra IA aqui — quem decide é aposLimiteDaIaNoFundo (a sessão).
+  if (turno.origem !== "conversa" || turno.harness !== "auto" || turno.modelo !== "auto" || turno.trabalhoId) return null;
   const [agente, preferencias] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar()]);
   if (!agente) return null;
   const ordem = ordemEfetiva({ doBot: inteligenciaDoAgente(agente).ordem, daPessoa: preferencias.ordemIas ?? null });
@@ -505,13 +509,13 @@ async function aposTrocaDeConta(
 
 /**
  * ADR-102: o turno que usou uma conta da lista bateu no limite. Marca a conta (vale em todas as máquinas), tira a escolha
- * que apontava para ela e decide pela lista. Com a IA fixa no bot, trocar de IA não vale: a decisão fica entre as contas
- * dela (perguntar, ou trocar com "Trocar sozinho").
+ * que apontava para ela e decide pela lista. ADR-108 (R2): com a IA fixa no bot, trocar de IA não vale — a decisão fica
+ * entre as contas dela (a próxima da fila, ou perguntar).
  */
 async function decidirLimiteNoAssentamento(
   deps: Deps,
   p: { turno: Turno; contaId: string; machineId: string; ate: number | null; agora: number },
-): Promise<{ conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number } | null> {
+): Promise<{ conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number; daMaquina: ContasDaMaquina; iaFixa: IaComConta | null } | null> {
   const c = await lerContasDaMaquina(deps, p.machineId);
   const conta = c.contas.find((x) => x.id === p.contaId);
   if (!conta) return null;
@@ -520,10 +524,11 @@ async function decidirLimiteNoAssentamento(
   if (c.escolhidas[conta.ia] === conta.id) await deps.repos.contasIa.definirEscolhida(conta.ia, null);
   const agente = await deps.repos.agentes.buscar(p.turno.agenteId);
   const fixo = harnessFixado(p.turno.harness, p.turno.modelo);
-  // Com a IA fixa, só as contas dela contam como "nesta máquina" (as outras aparecem como livres noutro lugar).
-  const naMaquina = fixo ? new Set([...c.naMaquina].filter((id) => c.contas.find((x) => x.id === id)?.ia === fixo)) : c.naMaquina;
-  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina, noutraMaquina: c.noutraMaquina, modo: c.modo, escolhidas: c.escolhidas, ordemDoBot: agente ? inteligenciaDoAgente(agente).ordem : null, contaId: conta.id, ate: voltaEm, agora: p.agora });
-  return { conta, decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm };
+  const iaFixa = fixo && ehIaComConta(fixo) ? fixo : null;
+  const { decisao } = decidirLimiteDaConta({ contas: c.contas, naMaquina: c.naMaquina, noutraMaquina: c.noutraMaquina, escolhidas: c.escolhidas, ordemDoBot: agente ? inteligenciaDoAgente(agente).ordem : null, iaFixa, contaId: conta.id, ate: voltaEm, agora: p.agora });
+  // A lista lida antes de marcar o limite: a conta que parou já vai marcada para quem decide depois (R4/R6).
+  const daMaquina: ContasDaMaquina = { ...c, contas: c.contas.map((x) => (x.id === conta.id ? { ...x, noLimiteAte: voltaEm } : x)) };
+  return { conta, decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm, daMaquina, iaFixa };
 }
 
 /**
@@ -532,21 +537,46 @@ async function decidirLimiteNoAssentamento(
  * segue na hora. Perguntar ou todas no limite: a nota com as contas livres (a tela desenha "Seguir com", "Entrar com ela
  * na <máquina>", "Rodar no <outra> desta vez"); a task espera a conta voltar. null = a pessoa pediu Parar (vale o aviso
  * de sempre).
+ * ADR-108: na mesma IA a linha é leve (R7). A task com sessão na IA que parou NÃO troca de IA sozinha: espera a conta
+ * voltar e o bot ganha o aviso com a recomendação (R4). O bot fixo sem conta da IA dele na fila ganha o aviso com os dois
+ * caminhos — a conta fora da fila e a outra IA até a volta (R6) — no lugar da nota, quando há algum dos dois.
  */
 async function aposLimiteDaConta(
   deps: Deps,
-  p: { turno: Turno; assentado: Turno; executor: Executor; conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+  p: { turno: Turno; assentado: Turno; executor: Executor; conta: ContaDaPessoa; decisao: DecisaoDoLimiteDaConta; maquina: { id: string; nome: string } | null; voltaEm: number; daMaquina: ContasDaMaquina; iaFixa: IaComConta | null; prontos: readonly IdHarness[]; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
 ): Promise<RuntimeEvent[] | null> {
   const { turno, autoria, agora, decisao } = p;
   if (turno.pararSolicitadoEm !== null) return null;
   const segue = decisao.tipo === "trocou" || decisao.tipo === "outra_ia";
-  if (turno.trabalhoId) return aposLimiteNoFundo(deps, { turno: p.assentado, executor: p.executor, ia: p.conta.ia, renovaEm: segue ? agora : p.voltaEm, motivoInterrupcao: p.motivoInterrupcao, motivoFalha: p.motivoFalha, autoria, agora, custoUsd: p.custoUsd });
+  const fundo = { turno: p.assentado, executor: p.executor, ia: p.conta.ia, motivoInterrupcao: p.motivoInterrupcao, motivoFalha: p.motivoFalha, autoria, agora, custoUsd: p.custoUsd };
+  if (turno.trabalhoId) {
+    if (decisao.tipo === "outra_ia") {
+      // R4: a task com sessão na IA que parou espera a volta da conta; a outra IA fica para a pessoa decidir.
+      const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+      if (!temSessaoNaIa(trabalho, p.conta.ia)) return aposLimiteNoFundo(deps, { ...fundo, renovaEm: agora, levadaPara: decisao.para.ia });
+      const volta = await quandoAIaVolta(deps, p.conta.ia, agora, p.daMaquina.contas);
+      const espera = await aposLimiteNoFundo(deps, { ...fundo, renovaEm: volta });
+      if (!espera) return null;
+      return [...espera, ...(await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: p.conta.ia, iaPara: decisao.para.ia, voltaEm: volta, fixo: false, autoria, agora }))];
+    }
+    if (p.iaFixa && !segue) {
+      const volta = await quandoAIaVolta(deps, p.conta.ia, agora, p.daMaquina.contas);
+      const espera = await aposLimiteNoFundo(deps, { ...fundo, renovaEm: volta });
+      if (!espera) return null;
+      return [...espera, ...((await avisoDoBotFixo(deps, { turno, turnoId: null, ia: p.conta.ia, voltaEm: volta, daMaquina: p.daMaquina, prontos: p.prontos, autoria, agora })) ?? [])];
+    }
+    return aposLimiteNoFundo(deps, { ...fundo, renovaEm: segue ? agora : p.voltaEm });
+  }
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_no_limite: p.conta.id, decisao: decisao.tipo, custo_usd: p.custoUsd } }),
   ];
   if (!segue || turno.origem !== "conversa") {
-    events.push(...(await criarNotaDeContas(deps, { turno, autoria, agora, de: p.conta, decisao, maquina: p.maquina, voltaEm: p.voltaEm })));
+    // R6: o bot fixo sem conta da IA dele na fila — o aviso com os caminhos no lugar da nota (sem caminho, a nota de sempre).
+    const fixo = p.iaFixa && turno.origem === "conversa"
+      ? await avisoDoBotFixo(deps, { turno, turnoId: turno.id, ia: p.conta.ia, voltaEm: await quandoAIaVolta(deps, p.conta.ia, agora, p.daMaquina.contas), daMaquina: p.daMaquina, prontos: p.prontos, autoria, agora })
+      : null;
+    events.push(...(fixo ?? (await criarNotaDeContas(deps, { turno, autoria, agora, de: p.conta, decisao, maquina: p.maquina, voltaEm: p.voltaEm }))));
     return events;
   }
   const linha = await deps.repos.mensagens.criar({
@@ -554,7 +584,7 @@ async function aposLimiteDaConta(
     turnoId: turno.id,
     autoria,
     kind: "sistema",
-    texto: fraseDoLimiteDaConta(p.conta, decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora), voltaEm: p.voltaEm }),
+    texto: fraseDoLimiteDaConta(p.conta, decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora), voltaEm: p.voltaEm, acabouEm: agora }),
     payload: { kind: "conta_seguiu", de: { id: p.conta.id, apelido: p.conta.apelido, ia: p.conta.ia }, para: { id: decisao.para.id, apelido: decisao.para.apelido, ia: decisao.para.ia }, voltaEm: p.voltaEm },
     confianca: "confiavel",
   });
@@ -562,6 +592,39 @@ async function aposLimiteDaConta(
   events.push(...(await repetirNaConversa(deps, { turno, executor: p.executor, agora })));
   log("info", "conta_seguiu", { turno_id: turno.id, de: p.conta.id, para: decisao.para.id, troca_de_ia: decisao.tipo === "outra_ia" });
   return events;
+}
+
+/**
+ * R6: o aviso do bot fixo cuja IA ficou sem conta na fila — o estado, a volta e os caminhos: a conta livre da mesma IA
+ * fora da fila nesta máquina e a outra IA pronta. null = nenhum caminho (vale a nota/linha de sempre).
+ */
+async function avisoDoBotFixo(
+  deps: Deps,
+  p: { turno: Turno; turnoId: string | null; ia: IaComConta; voltaEm: number; daMaquina: ContasDaMaquina; prontos: readonly IdHarness[]; autoria: Autoria; agora: number },
+): Promise<RuntimeEvent[] | null> {
+  const conta = contaForaDaFila(p.daMaquina, p.ia, p.agora);
+  const iaPara = await outraIaParaAsTasks(deps, { agenteId: p.turno.agenteId, iaDe: p.ia, prontos: p.prontos, daMaquina: p.daMaquina, agora: p.agora });
+  if (!conta && !iaPara) return null;
+  return avisarTrocaDeIa(deps, { agenteId: p.turno.agenteId, conversaId: p.turno.conversaId, turnoId: p.turnoId, iaDe: p.ia, iaPara, voltaEm: p.voltaEm, fixo: true, conta, autoria: p.autoria, agora: p.agora });
+}
+
+/**
+ * ADR-108 (R4) no caminho sem lista de contas (motor ou app anterior à ADR-102): a IA inteira parou. A task de um bot no
+ * Automático com outra IA pronta: sem sessão na que parou, segue na outra na hora; com sessão, espera a volta e o bot
+ * ganha o aviso com a recomendação. O resto espera como antes (ADR-099 §7).
+ */
+async function aposLimiteDaIaNoFundo(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; prontos: readonly IdHarness[]; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+): Promise<RuntimeEvent[] | null> {
+  const { turno } = p;
+  const auto = Boolean(turno.trabalhoId) && harnessFixado(turno.harness, turno.modelo) === null && turno.pararSolicitadoEm === null;
+  const iaPara = auto ? await outraIaParaAsTasks(deps, { agenteId: turno.agenteId, iaDe: p.ia, prontos: p.prontos, daMaquina: null, agora: p.agora }) : null;
+  if (!iaPara || !turno.trabalhoId) return aposLimiteNoFundo(deps, p);
+  if (!temSessaoNaIa(await deps.repos.trabalhos.buscar(turno.trabalhoId), p.ia)) return aposLimiteNoFundo(deps, { ...p, renovaEm: p.agora, levadaPara: iaPara });
+  const espera = await aposLimiteNoFundo(deps, p);
+  if (!espera) return null;
+  return [...espera, ...(await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: p.ia, iaPara, voltaEm: p.renovaEm, fixo: false, autoria: p.autoria, agora: p.agora }))];
 }
 
 /**
@@ -630,9 +693,11 @@ export function esperarContaNaFrente(
  */
 async function aposLimiteNoFundo(
   deps: Deps,
-  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; conta?: Exclude<ContaNoLimite, { tipo: "todas_no_limite" }>; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; conta?: Exclude<ContaNoLimite, { tipo: "todas_no_limite" }>; levadaPara?: IdHarness; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
 ): Promise<RuntimeEvent[] | null> {
   const { turno, autoria, agora, conta } = p;
+  // ADR-108 (R4): a task sem sessão na IA que parou segue na outra na hora — a entrada e a linha dizem isso, não "esperou".
+  const levada = p.levadaPara && !conta ? p.levadaPara : null;
   if (!turno.trabalhoId || turno.origem === "ligacao" || turno.pararSolicitadoEm !== null) return null;
   const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
   if (!trabalho || !trabalhoAberto(trabalho.estado)) return null;
@@ -647,7 +712,7 @@ async function aposLimiteNoFundo(
     trabalhoId: turno.trabalhoId,
     prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
     profundidade: turno.profundidade,
-    entradaTexto: conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : entradaDaVoltaDaCota(nomeDaIa(p.ia)),
+    entradaTexto: conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia)),
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
     modelo: turno.modelo,
@@ -670,7 +735,7 @@ async function aposLimiteNoFundo(
     // ADR-101: com outra conta, a linha diz só posições — "Seguindo com a conta 2" (troca) ou "A conta 1 … espera" (perguntar).
     ...(conta?.tipo === "trocou"
       ? { texto: fraseDaDecisao(conta, { ia: nomeDaIa(p.ia), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) }), payload: { kind: "conta_trocada" as const, harness: p.ia, de: conta.de, para: conta.para, voltaEm: conta.voltaEm, foraDaTroca: conta.foraDaTroca } }
-      : { texto: conta ? redigir("conta-no-limite-espera", agora, { de: String(conta.de), ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) : redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) }),
+      : { texto: conta ? redigir("conta-no-limite-espera", agora, { de: String(conta.de), ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) : levada ? redigir("cota-no-limite-segue", agora, { ia: nomeDaIa(p.ia), para: nomeDaIa(levada) }) : redigir("cota-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.renovaEm, agora) }) }),
     confianca: "confiavel",
   });
   if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));

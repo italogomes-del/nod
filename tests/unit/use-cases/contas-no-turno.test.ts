@@ -11,8 +11,9 @@ import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
 
 /**
  * ADR-102 (2026-10-13): o turno usa uma conta da lista da pessoa. No limite, quem para é a conta (não a IA): com outra
- * IA em uso na máquina o turno segue nela; com "Perguntar antes", a nota oferece as contas livres; sem conta utilizável,
- * o despacho nem gasta turno pago. O exemplo do Marlon: Claude · Pessoal, ChatGPT · Pessoal, Claude · Leapy.
+ * IA em uso na máquina o turno segue nela; sem outra conta na fila, a nota oferece as contas livres; sem conta
+ * utilizável, o despacho nem gasta turno pago. O exemplo do Marlon: Claude · Pessoal, ChatGPT · Pessoal, Claude · Leapy.
+ * ADR-108 (2026-10-16): a lista é a fila — a 1ª pessoal de cada IA nasce nela, a Leapy (2ª do Claude) nasce fora.
  */
 const T0 = Date.now();
 const HORA = 3_600_000;
@@ -57,7 +58,7 @@ describe("a conta do turno no limite (ADR-102)", () => {
     expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", entradaTexto: "revisa o #861", reenvios: 1 }]);
   });
 
-  it("'Perguntar antes' e o ChatGPT também no limite: nota com as contas livres, nada refeito", async () => {
+  it("sem outra conta do Claude na fila e o ChatGPT também no limite: nota com as contas livres (fora da fila), nada refeito", async () => {
     const c = await cenario();
     await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + 3 * HORA);
     await c.reivindicar();
@@ -70,13 +71,26 @@ describe("a conta do turno no limite (ADR-102)", () => {
     expect(c.banco.turnos).toHaveLength(1);
   });
 
-  it("'Trocar sozinho': troca para a próxima conta do MESMO provedor antes de mudar de IA", async () => {
+  it("ADR-108 (R1/R7): com a Leapy na fila, segue nela sozinho, sem perguntar, antes de mudar de IA — linha leve", async () => {
+    const c = await cenario();
+    expect(c.contas.cLeapy.entraNaTrocaAutomatica).toBe(false);
+    await c.deps.repos.contasIa.definirTrocaAutomatica(c.contas.cLeapy.id, true);
+    await c.reivindicar();
+    await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
+    await c.entregar(limite(T0 + 2 * HORA), "claude-cli");
+    const linha = c.banco.mensagens.slice(c.antes)[0];
+    expect(linha?.payload).toMatchObject({ kind: "conta_seguiu", para: { id: c.contas.cLeapy.id } });
+    expect(linha?.texto).toMatch(/^Pessoal acabou às .+ → seguindo no Claude · Leapy · mesmo modelo$/);
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", reenvios: 1 }]);
+  });
+
+  it("ADR-108 (R1): o 'Trocar sozinho' antigo (contas_modo) não decide mais nada — a Leapy fora da fila não entra sozinha", async () => {
     const c = await cenario();
     await c.deps.repos.contasIa.definirModo("automatico");
     await c.reivindicar();
     await c.deps.repos.turnos.registrarConta(c.turnoId, c.contas.cPessoal.id);
     await c.entregar(limite(T0 + 2 * HORA), "claude-cli");
-    expect(c.banco.mensagens.slice(c.antes)[0]?.payload).toMatchObject({ kind: "conta_seguiu", para: { id: c.contas.cLeapy.id } });
+    expect(c.banco.mensagens.slice(c.antes)[0]?.payload).toMatchObject({ kind: "conta_seguiu", para: { id: c.contas.gPessoal.id } });
   });
 
   it("o turno que dá certo tira a conta do limite antes do prazo", async () => {

@@ -40,7 +40,9 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
         let conta = existente;
         if (decisao === "criar") {
           const posicao = proximaPosicao();
-          conta = { ...dono, id: randomUUID(), ia: a.ia, impressao: a.impressao, apelido: a.apelidoSugerido ?? apelidoPadrao(posicao), plano: a.plano, corporativa: a.corporativa, posicao, entraNaTrocaAutomatica: false, noLimiteAte: null, removidaEm: null, email: a.email ?? null, organizacao: a.organizacao ?? null };
+          // ADR-108: como o repositório, só a 1ª conta pessoal de cada IA nasce na fila.
+          const naFila = !a.corporativa && !minhas().some((c) => c.ia === a.ia && c.removidaEm === null && !c.corporativa);
+          conta = { ...dono, id: randomUUID(), ia: a.ia, impressao: a.impressao, apelido: a.apelidoSugerido ?? apelidoPadrao(posicao), plano: a.plano, corporativa: a.corporativa, posicao, entraNaTrocaAutomatica: naFila, noLimiteAte: null, removidaEm: null, email: a.email ?? null, organizacao: a.organizacao ?? null };
           e.contas.push(conta);
           mudou = true;
         } else if (decisao === "voltar") {

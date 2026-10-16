@@ -65,7 +65,7 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
     });
   });
 
-  it("reordenar exige exatamente as contas da lista; renomear, limite e modo/escolhida", async () => {
+  it("reordenar exige exatamente as contas da lista; renomear, limite, na fila e a escolhida (o modo antigo só guardado)", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos } = depsSobre(trx, MARLON);
       await repos.contasIa.doAnuncio(randomUUID(), [anuncio(1), anuncio(2, { ia: "codex-cli" }), anuncio(3)], AGORA);
@@ -78,6 +78,11 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       expect((await repos.contasIa.buscar(ids[0]!))?.noLimiteAte).toBe(AGORA + 3_600_000);
       expect(await repos.contasIa.limparLimite(ids[0]!)).toBe(true);
       expect(await repos.contasIa.limparLimite(ids[0]!)).toBe(false);
+      // ADR-108: "na fila" por conta. A 1ª do Claude nasceu nela, a 2ª (anuncio 3) fora; ligar e desligar é da dona.
+      expect((await repos.contasIa.listar()).contas.map((c) => c.entraNaTrocaAutomatica)).toEqual([false, true, true]);
+      expect(await repos.contasIa.definirTrocaAutomatica(ids[2]!, true)).toBe(true);
+      expect((await repos.contasIa.buscar(ids[2]!))?.entraNaTrocaAutomatica).toBe(true);
+      // O modo ("Perguntar antes"/"Trocar sozinho") continua guardado só para o app antigo; nenhuma decisão o lê (ADR-108).
       expect(await repos.contasIa.modo()).toEqual({ modo: "perguntar", escolhidas: {} });
       await repos.contasIa.definirModo("automatico");
       await repos.contasIa.definirEscolhida("claude-cli", ids[2]!);

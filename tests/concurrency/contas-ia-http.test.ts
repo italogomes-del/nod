@@ -70,6 +70,13 @@ describeIntegracao("contas de IA pela ponte e pela tela (ADR-102, HTTP real)", (
     const [a, b] = contas;
     expect((await srv.chamar("PUT", "contas-ia/ordem", { ids: ["x"] })).status).toBe(400);
     expect((await srv.chamar("PUT", "contas-ia/modo", { modo: "sempre" })).status).toBe(400);
+    // ADR-108: o "Perguntar antes / Trocar sozinho" saiu da regra, mas a rota segue respondendo ao app antigo (guarda e
+    // não decide nada); o GET continua trazendo o campo.
+    expect((await srv.chamar("PUT", "contas-ia/modo", { modo: "automatico" })).status).toBe(204);
+    expect((await srv.json<ContasIaDto>("GET", "contas-ia")).modo).toBe("automatico");
+    // ADR-108: a decisão no aviso de troca valida a entrada e não acha bot que não é da pessoa.
+    expect((await srv.chamar("POST", `agentes/${randomUUID()}/troca-de-ia`, { decisao: "talvez" })).status).toBe(400);
+    expect((await srv.chamar("POST", `agentes/${randomUUID()}/troca-de-ia`, { decisao: "esperar" })).status).toBe(404);
     expect((await srv.chamar("PATCH", `contas-ia/${a!.id}`, { apelido: "x".repeat(41) })).status).toBe(400);
     expect((await srv.chamar("PATCH", `contas-ia/${a!.id}`, { entraNaTrocaAutomatica: "sim" })).status).toBe(400);
     expect((await srv.chamar("PATCH", `contas-ia/${a!.id}`, { apelido: "Leapy" }, outraPessoa())).status).toBe(404);

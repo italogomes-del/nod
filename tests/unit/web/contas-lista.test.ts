@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ContaIa, ContasIaDto, LoginNaMaquina } from "../../../src/contracts/contas-ia.ts";
 import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
-import { criarContasDaPessoa, type ApiContas } from "../../../web/lib/contas-da-pessoa.ts";
+import { criarContasDaPessoa, ligarPedeAvisoDosTermos, type ApiContas } from "../../../web/lib/contas-da-pessoa.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
+import { REGRAS_DA_FILA, renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
 import { renderMaquinas } from "../../../web/telas/maquinas.ts";
 import { renderProvedores } from "../../../web/telas/provedores.ts";
 
@@ -20,8 +20,9 @@ const conta = (id: string, ia: ContaIa["ia"], apelido: string, maquinas: string[
   id, ia, impressao: id.replace(/-/g, "").padEnd(64, "a").slice(0, 64), apelido, email: null, organizacao: null, plano: "Max", corporativa: false, posicao: 1, entraNaTrocaAutomatica: false, noLimiteAte: null,
   maquinas: maquinas.map((m) => ({ maquinaId: m, nome: m === VM ? "vm-bots" : "MacBook", estado: "pronta" as const })), ...o,
 });
-const PESSOAL = conta("aaaaaaaa-0000-4000-8000-000000000001", "claude-cli", "Pessoal", [VM, MAC]);
-const GPT = conta("aaaaaaaa-0000-4000-8000-000000000002", "codex-cli", "Pessoal", [MAC], { plano: "Plus" });
+// ADR-108: como a 0080 deixa — a 1ª pessoal de cada IA na fila; a corporativa fora.
+const PESSOAL = conta("aaaaaaaa-0000-4000-8000-000000000001", "claude-cli", "Pessoal", [VM, MAC], { entraNaTrocaAutomatica: true });
+const GPT = conta("aaaaaaaa-0000-4000-8000-000000000002", "codex-cli", "Pessoal", [MAC], { plano: "Plus", entraNaTrocaAutomatica: true });
 const LEAPY = conta("aaaaaaaa-0000-4000-8000-000000000003", "claude-cli", "Leapy", [MAC], { plano: "Team", corporativa: true, noLimiteAte: AGORA + 3_600_000 });
 const CONTAS: ContasIaDto = { disponivel: true, modo: "perguntar", contas: [PESSOAL, GPT, LEAPY] };
 
@@ -137,8 +138,28 @@ describe("lista única de contas (ADR-102)", () => {
     expect(html).toContain("Em uso na vm-bots");
   });
 
-  it("com mais de uma conta, o modo vale para a lista inteira", () => {
-    expect(renderListaDeContas(ctx())).toContain('data-act="cl-modo" data-modo="automatico"');
+  it("ADR-108 (R8): sem o 'Perguntar antes / Trocar sozinho' — um liga/desliga 'na fila' por conta e as três regras do Nod", () => {
+    const html = renderListaDeContas(ctx());
+    expect(html).not.toContain("cl-modo");
+    expect(html).not.toContain("Trocar sozinho");
+    expect(html).not.toContain("data-cl-optin");
+    expect(html).toContain(`role="switch" aria-checked="true" data-act="cl-fila" data-id="${PESSOAL.id}"`);
+    expect(html).toContain(`role="switch" aria-checked="false" data-act="cl-fila" data-id="${LEAPY.id}"`);
+    expect(html).toContain("Quando uma conta acabar");
+    for (const r of REGRAS_DA_FILA) expect(html).toContain(`<b>${r.titulo}:</b>`);
+    expect(html).toContain("Outra IA:</b> só nos bots em Automático");
+    expect(html).toContain("o Nod recomenda esperar ou trocar");
+    // Fora da fila e livre: a linha diz isso (no lugar de "Disponível").
+    const foraLivre = { ...CONTAS, contas: [PESSOAL, GPT, { ...LEAPY, noLimiteAte: null }] };
+    expect(renderListaDeContas(ctx({ contas: foraLivre }))).toContain("Fora da fila");
+  });
+
+  it("ADR-108 (E4): 'Em uso' é a 1ª da fila livre, nunca a fora da fila antes dela", () => {
+    const foraPrimeiro = { ...CONTAS, contas: [{ ...LEAPY, noLimiteAte: null, posicao: 1 }, { ...PESSOAL, posicao: 2 }, { ...GPT, posicao: 3 }] };
+    const html = renderListaDeContas(ctx({ contas: foraPrimeiro }));
+    const linhaDa = (id: string) => html.slice(html.indexOf(`data-ordem-item="${id}"`), html.indexOf("</li>", html.indexOf(`data-ordem-item="${id}"`)));
+    expect(linhaDa(PESSOAL.id)).toContain("Em uso");
+    expect(linhaDa(LEAPY.id)).toContain("Fora da fila");
   });
 
   describe("PR #306: Adicionar conta sem máquina que receba o login", () => {
@@ -219,15 +240,14 @@ describe("Provedores e Máquinas com a lista (ADR-102)", () => {
 });
 
 describe("controlador da lista (ADR-102)", () => {
-  function montar(api: Partial<ApiContas> = {}) {
+  function montar(api: Partial<ApiContas> = {}, termos: { aceita: boolean } = { aceita: true }) {
     let estado = reduzir({ ...estadoInicial, maquinas: { maquinas: MAQUINAS, padraoId: null } }, { tipo: "hidratar-contas", contas: CONTAS, detalhes: null });
     const pendentes: (() => void)[] = [];
     const chamadas: string[] = [];
     const c = criarContasDaPessoa({
       api: () => ({
         ordemContas: async (ids) => { chamadas.push(`ordem:${ids.length}`); return null; },
-        modoContas: async (m) => { chamadas.push(`modo:${m}`); return null; },
-        mudarConta: async () => null,
+        mudarConta: async (id, corpo) => { if (corpo.entraNaTrocaAutomatica !== undefined) chamadas.push(`fila:${id}:${corpo.entraNaTrocaAutomatica}`); return null; },
         sairDaConta: async (id, m) => { chamadas.push(`sair:${id}:${m}`); return { ok: true }; },
         removerConta: async (id) => { chamadas.push(`remover:${id}`); return { ok: true }; },
         pedirLogin: async (m, p) => login({ maquinaId: m, contaId: p.contaId ?? null, apelido: p.apelido ?? null, fase: "pedido", url: null }),
@@ -244,7 +264,7 @@ describe("controlador da lista (ADR-102)", () => {
       detalhes: () => estado.detalhesContas,
       invalidar: () => chamadas.push("invalidar"),
       entrarNoMac: async () => true,
-      avisarTermos: async () => true,
+      avisarTermos: async (ia) => { chamadas.push(`termos:${ia}`); return termos.aceita; },
       cifrar: async (chave, codigo) => ({ chave, iv: "aXY=", dados: btoa(codigo) }),
       agendar: (fn) => { pendentes.push(fn); },
       agora: () => AGORA,
@@ -283,10 +303,28 @@ describe("controlador da lista (ADR-102)", () => {
     expect(m.estado.contasIa?.contas.some((c) => c.id === LEAPY.id)).toBe(false);
   });
 
-  it("Trocar sozinho pede os termos; recusado, nada muda", async () => {
+  it("ADR-108: ligar a corporativa na fila pede os termos; recusado, nada muda; aceito, liga", async () => {
+    const recusa = montar({}, { aceita: false });
+    await recusa.c.naFila(LEAPY.id, true);
+    expect(recusa.chamadas).toEqual(["termos:claude-cli"]);
+    expect(recusa.estado.contasIa?.contas.find((c) => c.id === LEAPY.id)?.entraNaTrocaAutomatica).toBe(false);
+    const aceita = montar();
+    await aceita.c.naFila(LEAPY.id, true);
+    expect(aceita.chamadas).toEqual(["termos:claude-cli", `fila:${LEAPY.id}:true`, "invalidar"]);
+    expect(aceita.estado.contasIa?.contas.find((c) => c.id === LEAPY.id)?.entraNaTrocaAutomatica).toBe(true);
+  });
+
+  it("ADR-108: desligar nunca pede os termos; a 1ª pessoal da IA liga sem pedir; a 2ª da mesma IA pede", async () => {
     const m = montar();
-    await m.c.modo("automatico");
-    expect(m.chamadas).toContain("modo:automatico");
+    await m.c.naFila(PESSOAL.id, false);
+    expect(m.chamadas).toEqual([`fila:${PESSOAL.id}:false`, "invalidar"]);
+    await m.c.naFila(PESSOAL.id, true);
+    expect(m.chamadas).not.toContain("termos:claude-cli");
+    const segunda = conta("aaaaaaaa-0000-4000-8000-000000000004", "claude-cli", "Pessoal 2", [VM]);
+    const comSegunda = { ...CONTAS, contas: [...CONTAS.contas, segunda] };
+    expect(ligarPedeAvisoDosTermos(comSegunda, segunda.id)).toBe(true);
+    expect(ligarPedeAvisoDosTermos(comSegunda, LEAPY.id)).toBe(true);
+    expect(ligarPedeAvisoDosTermos({ ...CONTAS, contas: [{ ...PESSOAL, entraNaTrocaAutomatica: false }, GPT] }, PESSOAL.id)).toBe(false);
   });
 
   it("o Mac só entra pelo app aberto nele", async () => {

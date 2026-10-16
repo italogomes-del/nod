@@ -174,3 +174,14 @@ export function entradaDaVoltaDaCota(nomeDaIa: string): string {
 export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number): string {
   return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de} no meio deste trabalho e o nod seguiu com a conta ${para}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
 }
+
+/**
+ * definido em 2026-10-16 (ADR-108 R4/R5): a entrada da volta da task que o nod LEVOU para outra IA (a pessoa escolheu
+ * "Levar as tasks", o prazo da recomendação venceu ou o bot fixo seguiu noutra IA até a volta). Substitui a da espera
+ * (que dizia "o nod esperou ela renovar", o que deixaria de ser verdade). Começa com ENTRADA_DA_VOLTA_DA_COTA, para
+ * contar como a volta da cota (e não como volta sem novidade). A sessão do CLI ficou na outra IA: a task recomeça do
+ * histórico dela, então o texto pede para conferir o estado antes de seguir.
+ */
+export function entradaDaTrocaDeIa(nomeDe: string, nomePara: string): string {
+  return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDe} chegou ao limite no meio deste trabalho e o nod passou este trabalho para o ${nomePara}. A sessão anterior ficou no ${nomeDe}: confira o estado (arquivos, branch, o que já saiu) e siga de onde parou.`;
+}

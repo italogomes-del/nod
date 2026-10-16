@@ -17,8 +17,12 @@ import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
 import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
-import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, semContaParaOTurno } from "./contas-do-turno.ts";
+import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, semContaParaOTurno, type ContasDaMaquina } from "./contas-do-turno.ts";
 import { esperarContaNaFrente } from "./assentar-turno.ts";
+import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
+import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
+import { trabalhoAberto } from "../domain/trabalho.ts";
+import { avisarTrocaDeIa, outraIaParaAsTasks, quandoAIaVolta } from "./trocas-de-ia.ts";
 
 export type EntradaDespacharTurno = {
   machineId: string;
@@ -131,6 +135,9 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   if (executor !== "catcher" && turno.origem !== "ligacao") {
     const semConta = await semContaNaMaquina(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, agora });
     if (semConta) return semConta;
+    // ADR-108 (E1): a task do Automático com sessão na IA que está no limite não sai noutra IA pelo plano — espera a volta.
+    const segura = await segurarTaskNaIaDaSessao(deps, { turno, machineId: input.machineId, executor, harnessesProntos: input.harnessesProntos, noLimite: input.noLimite, agora });
+    if (segura) return segura;
   }
 
   // Fila lida junta (definido em 2026-09-24), só depois dos gates: um turno recusado não arrasta as outras
@@ -189,7 +196,7 @@ async function semContaNaMaquina(
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const r = escolherContaDoTurno(c, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
   const fixo = harnessFixado(turno.harness, turno.modelo);
-  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora);
+  const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, fixo && ehIaComConta(fixo) ? fixo : null);
   if (!sem) return null;
   const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
@@ -209,6 +216,45 @@ async function semContaNaMaquina(
   ];
   log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo });
   return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events };
+}
+
+/**
+ * ADR-108 (E1, guarda do despacho): o plano põe a IA sem conta (ou no limite) em `noLimite` e entrega a task pendente de
+ * um bot no Automático à outra IA — e a task recomeçaria do resumo, sem a pessoa decidir. Aqui, o turno de uma task cuja
+ * sessão (`trabalhos.sessao_cli` + `sessao_harness`) é de uma IA que não serve agora (sem conta utilizável na máquina, ou no
+ * limite sem lista de contas) volta a esperar a volta dela (a retomada com `acordar_em`), e o bot ganha ou atualiza o
+ * aviso de troca. Depois do "levar" o turno já vem fixo na IA nova (harness ≠ auto) e passa direto. null = segue.
+ */
+async function segurarTaskNaIaDaSessao(
+  deps: Deps,
+  p: { turno: Turno; machineId: string; executor: Executor; harnessesProntos?: readonly string[]; noLimite?: readonly string[]; agora: number },
+): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
+  const { turno, agora } = p;
+  if (!turno.trabalhoId || turno.pararSolicitadoEm !== null || harnessFixado(turno.harness, turno.modelo) !== null) return null;
+  const trabalho = await deps.repos.trabalhos.buscar(turno.trabalhoId);
+  const ia = trabalho?.sessaoHarness ?? null;
+  if (!trabalho || !trabalhoAberto(trabalho.estado) || !ia || !temSessaoNaIa(trabalho, ia) || !ehIaComConta(ia)) return null;
+  let daMaquina: ContasDaMaquina | null = null;
+  let parou: boolean;
+  if (await deps.repos.contasIa.temContaNaMaquina(p.machineId)) {
+    daMaquina = await lerContasDaMaquina(deps, p.machineId);
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    const r = escolherContaDoTurno(daMaquina, agente ? inteligenciaDoAgente(agente).ordem : null, agora);
+    // A IA da sessão com conta anunciada aqui e nenhuma utilizável: parou. Sem conta dela aqui, vale o limite da IA.
+    parou = r !== null && ia in r.porIa ? r.porIa[ia] === null : (p.noLimite ?? []).includes(ia);
+  } else {
+    parou = (p.noLimite ?? []).includes(ia);
+  }
+  if (!parou) return null;
+  const volta = await quandoAIaVolta(deps, ia, agora, daMaquina?.contas);
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
+  const espera = await esperarContaNaFrente(deps, { turno, executor: p.executor, ia, renovaEm: volta, autoria, agora });
+  if (!espera) throw new ErroDeDominio("estado_invalido", { cause: "task com sessão na IA no limite sem retomada" });
+  const iaPara = await outraIaParaAsTasks(deps, { agenteId: turno.agenteId, iaDe: ia, prontos: p.harnessesProntos ?? [], daMaquina, agora });
+  const aviso = iaPara ? await avisarTrocaDeIa(deps, { agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: null, iaDe: ia, iaPara, voltaEm: volta, fixo: false, autoria, agora }) : [];
+  log("info", "task_espera_ia_da_sessao", { turno_id: turno.id, trabalho_id: turno.trabalhoId, ia, acordar_em: volta, para: iaPara });
+  return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...aviso, ...(await sincronizarDoTurno(deps, turno))] };
 }
 
 async function recusarPorExecutor(

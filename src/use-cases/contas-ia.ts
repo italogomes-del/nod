@@ -7,6 +7,7 @@ import { log } from "../obs/log.ts";
 import type { ResultadoDoAnuncio } from "../repositories/contas-ia.repo.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import type { Deps } from "./tipos.ts";
+import { seguirNaContaFechaATroca } from "./trocas-de-ia.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102). A lista é do servidor; as máquinas
@@ -77,6 +78,8 @@ export async function removerConta(d: Deps, id: string): Promise<void> {
  * "Seguir com <conta>" na nota do limite (ADR-102, CMD-1): a conta vira a escolhida da IA dela e o turno que parou no
  * limite é refeito (antes a pessoa precisava mandar a mensagem de novo). Refaz só o último turno da conversa que parou
  * no limite e ainda não foi refeito; nada a refazer = só grava a escolha.
+ * ADR-108 (R6 a, "Continuar na conta …" do aviso do bot fixo): também acorda as tasks do bot da conversa que esperavam a
+ * IA da conta e fecha o aviso de troca dele.
  */
 export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: string }): Promise<{ data: { turnoId: string | null }; events: RuntimeEvent[] }> {
   // Revisão do PR #306: dois cliques (ou duas abas) esperam um pelo outro; o segundo já vê o "Seguindo com" do primeiro.
@@ -84,16 +87,24 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
   const conta = await d.repos.contasIa.buscar(p.contaId);
   if (!conta || conta.removidaEm !== null) throw new ErroDeDominio("nao_encontrado", { cause: "conta" });
   await d.repos.contasIa.definirEscolhida(conta.ia, conta.id);
+  const agora = d.agora();
+  const conversa = await d.repos.conversas.buscar(p.conversaId);
+  const events: RuntimeEvent[] = [];
+  if (conversa?.agenteId) {
+    const r = await seguirNaContaFechaATroca(d, { agenteId: conversa.agenteId, ia: conta.ia, agora });
+    if (r.acordadas > 0 || r.fechou) {
+      events.push(evento(d.escopo, { kind: "agente_atualizado", autoria: autoriaPessoa(d.escopo), agora, conversaId: p.conversaId, dados: { agente_id: conversa.agenteId, acao: "troca_de_ia", decisao: "conta", tasks: r.acordadas } }));
+      log("info", "conta_escolhida_acordou_tasks", { agente_id: conversa.agenteId, conta_id: conta.id, tasks: r.acordadas });
+    }
+  }
   const mensagens = await d.repos.mensagens.listarDaConversa(p.conversaId, 30);
-  const posAviso = mensagens.map((m) => m.payload?.kind === "limite_do_plano" && m.turnoId !== null).lastIndexOf(true);
+  const posAviso = mensagens.map((m) => (m.payload?.kind === "limite_do_plano" || m.payload?.kind === "troca_de_ia") && m.turnoId !== null).lastIndexOf(true);
   const aviso = posAviso >= 0 ? mensagens[posAviso] : undefined;
   const turno = aviso?.turnoId ? await d.repos.turnos.buscar(aviso.turnoId) : null;
   // Já refeito: depois do aviso veio a resposta do bot ou outro "Seguindo com" (o segundo clique não repete a fala).
   const jaRefeito = mensagens.slice(posAviso + 1).some((m) => m.autoria.autor_tipo === "agente" || m.payload?.kind === "conta_escolhida" || m.payload?.kind === "conta_seguiu");
-  if (!turno || turno.origem !== "conversa" || turno.estado !== "interrompido" || jaRefeito) return { data: { turnoId: null }, events: [] };
-  const agora = d.agora();
+  if (!turno || turno.origem !== "conversa" || turno.estado !== "interrompido" || jaRefeito) return { data: { turnoId: null }, events };
   const autoria = autoriaPessoa(d.escopo, turno.executor);
-  const events: RuntimeEvent[] = [];
   const linha = await d.repos.mensagens.criar({
     conversaId: turno.conversaId,
     turnoId: turno.id,

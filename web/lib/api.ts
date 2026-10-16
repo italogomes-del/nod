@@ -17,6 +17,7 @@ import type { Conversa } from "../../src/contracts/conversa.ts";
 import type { EstadoExecutor, IdExecutor } from "../../src/contracts/executor.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { IasDaPessoa, InteligenciaBot, PedidoInteligencia } from "../../src/contracts/inteligencia.ts";
+import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
@@ -332,6 +333,8 @@ export function criarApi(escopo: Escopo) {
     sairDaConta: (id: string, maquinaId: string) => post<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}/sair`, { maquinaId }),
     removerConta: (id: string) => del<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}`),
     seguirComConta: (id: string, conversaId: string) => post<unknown>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId }),
+    // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot.
+    decidirTrocaDeIa: (agenteId: string, decisao: DecisaoDaPessoa) => post<{ decisao: string; aplicada: boolean; tasks: number }>(`agentes/${encodeURIComponent(agenteId)}/troca-de-ia`, { decisao }),
     pedirLogin: (maquinaId: string, p: { ia: IaComConta; contaId?: string; apelido?: string | null }) => post<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins`, p),
     verLogin: (maquinaId: string, loginId: string) => get<LoginNaMaquina>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}`),
     colarCodigoLogin: (maquinaId: string, loginId: string, cifrado: CodigoCifrado) => post<{ ok: true }>(`maquinas/${encodeURIComponent(maquinaId)}/logins/${encodeURIComponent(loginId)}/codigo`, { cifrado }),

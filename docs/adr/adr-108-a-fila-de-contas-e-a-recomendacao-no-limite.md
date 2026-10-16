@@ -1,0 +1,110 @@
+# ADR-108 — A lista de contas é a fila; no limite, a task espera e o Nod recomenda
+
+Status: aceito (decisões do Marlon de 15 e 16/10/2026, aprovadas em 16/10 por volta das 02:20; implementação autônoma
+do PR 2 do plano, sob a autorização dele) · Data: 2026-10-16 · Emenda a
+[ADR-036](adr-036-harnesses-e-modelos.md) (o Automático troca de IA), aos itens 4 e 6 da
+[ADR-101](adr-101-varias-contas-por-ia-um-diretorio-por-conta.md) (termos de uso; "Perguntar antes / Trocar sozinho"),
+à [ADR-102](adr-102-contas-da-pessoa-em-todas-as-maquinas.md) (a regra da conta em uso) e às decisões NOD-221, NOD-223 e
+NOD-224 · Plano: [docs/plano-limite-e-troca.md](../plano-limite-e-troca.md) (PR 2, R1–R8, E1–E4, E7–E9)
+
+## Contexto
+
+Em 15/10 às 20:39 o Eng 1 tinha 19 frentes abertas no Claude quando a conta marlonwlv (20x) acabou. Três problemas
+apareceram juntos:
+
+- **Duas regras para a mesma lista.** A lista de Provedores tinha uma ordem e, por cima, o seletor "Perguntar antes /
+  Trocar sozinho" (ADR-101 §6). O "Perguntar antes" (o padrão) parava tudo para perguntar mesmo quando a próxima conta
+  da mesma IA estava livre. O opt-in "pode entrar na troca" só valia para a conta corporativa.
+- **A task trocava de IA sem ninguém decidir.** No assentamento a task esperava a conta voltar, mas no despacho o plano
+  punha a IA sem conta em `noLimite` e entregava a task pendente do bot no Automático ao ChatGPT
+  (`emitir-plano-turno.ts`, E1). A frente recomeçava do resumo, sem a sessão do Claude, e ninguém tinha escolhido isso.
+- **O bot fixo ficava preso sem saída.** Um bot "só Opus" sem outra conta do Claude na fila só mostrava a nota de
+  limite; os caminhos possíveis (uma conta fora da fila, ou outra IA até a volta) não apareciam.
+
+## Decisão
+
+1. **A lista é a fila (R1, E2, E4).** `contas_ia.entra_na_troca_automatica` passa a significar "na fila" para toda
+   conta, pessoal ou corporativa. Quando a conta em uso bate no limite, o Nod passa sozinho, sem perguntar, para a
+   próxima conta **da mesma IA** que está na fila, em ordem de posição. Some o "Perguntar antes / Trocar sozinho":
+   `preferencias.contas_modo` fica no banco e no `GET /contas-ia` (o app antigo lê) e o `PUT /contas-ia/modo` continua
+   respondendo, mas nenhuma decisão o lê.
+   - A escolha automática só considera contas na fila. Conta fora da fila só entra por escolha explícita da pessoa
+     (`contas_escolhidas`, "Seguir com" / "Continuar na conta").
+   - Sem nenhuma conta da IA na fila **nesta máquina**, vale a escolhida e, sem escolhida, a primeira da IA na
+     máquina — a pessoa nunca fica sem IA no primeiro uso (é o que a máquina fazia antes da fila).
+2. **Termos de uso: a fila é o consentimento (ADR-101 §4, mantido).** A 1ª conta pessoal de cada IA nasce na fila; a
+   2ª em diante e a corporativa nascem fora. Ligar uma delas na tela mostra o aviso dos termos que já existia ao ligar
+   "Trocar sozinho" (o mesmo texto, `TERMOS_DA_TROCA`); a pessoa consente uma vez por conta. Desligar nunca pergunta. A
+   migração **0080** liga, por pessoa e IA, a conta pessoal não removida de menor posição; quem já usava "Trocar
+   sozinho" já tinha consentido, então todas as pessoais dele entram. A corporativa fica como a pessoa deixou.
+   **A leitura jurídica dos termos (Anthropic: "ordinary, individual usage"; OpenAI: "circumvent rate limits") não foi
+   validada: fica sinalizada para o Marlon/jurídico antes de a fila virar padrão para clientes.**
+3. **Outra IA só no Automático (R2).** Bot com IA fixa nunca troca de IA: `decidirLimiteDaConta({ iaFixa })` e
+   `semContaParaOTurno(…, iaFixa)` só olham as contas dela (nem as oferecem como "livres").
+4. **Conversa no Automático troca de IA na hora (R3).** Sem mudança.
+5. **Task com sessão na IA que parou não troca de IA sozinha (R4, E1).** "Tem sessão" = `trabalhos.sessao_cli` não nulo
+   e `sessao_harness` = a IA que parou. Ela espera a volta da conta (a retomada com `acordar_em` = a primeira conta da
+   fila que sai do limite) e o bot ganha **um** aviso de troca (`trocas_de_ia`, um aberto por bot; a task seguinte que
+   para atualiza o mesmo) com a recomendação `recomendacaoDaTroca`:
+   - volta em até 30 min → **esperar**; sem resposta, nada acontece;
+   - mais de 30 min, ou o fornecedor não disse quando → **levar** para a outra IA; sem resposta, o varredor aplica
+     sozinho 10 min depois do aviso.
+   A task **sem** sessão na IA que parou segue na outra IA na hora (não há o que perder). A mesma guarda vale no
+   despacho (E1): o turno de task do Automático cuja sessão é de uma IA que não serve agora volta a esperar em vez de
+   sair no plano por outra IA. "Levar" reescreve os turnos pendentes das tasks do bot na IA que parou para a IA nova
+   (fixa naquele turno, modelo pela escolha do bot) e acorda só as esperas da cota (prefixo `ENTRADA_DA_VOLTA_DA_COTA`),
+   com uma entrada que diz que a task mudou de IA; o "me chame às" (ADR-086) mantém a hora. A decisão é
+   `UPDATE … WHERE decidido_em IS NULL`: o clique e o varredor ao mesmo tempo, um vence e o outro não aplica nada.
+6. **Trocar a IA do bot pelo seletor com tasks em andamento (R5, E8).** `PUT /agentes/:id/inteligencia` aceita
+   `levarTasks?: boolean`, separado no caso de uso antes da validação estrita. A web pergunta "Só daqui em diante"
+   (padrão) ou "Levar as tasks também".
+7. **Bot fixo sem conta da IA dele na fila (R6).** No lugar da nota, o aviso diz o estado ("O Eng 1 está parado até
+   13:00"), que ele volta sozinho, e oferece os caminhos que existem: (a) "Continuar na conta <fora da fila>" — o
+   "Seguir com" estendido: grava a escolhida, acorda as tasks do bot que esperavam a IA e fecha o aviso; (b) "Continuar
+   no <outra IA> até HH:MM" — guarda a inteligência em `trocas_de_ia.volta_ao_fixo`, passa o bot ao Automático, leva as
+   tasks e refaz a fala; o varredor devolve a inteligência fixa quando a conta volta (se a pessoa não mexeu nela
+   depois). Sem nenhum caminho, fica a nota de sempre.
+8. **Mesma IA, só troca de conta (R7, E3):** linha leve, sem cartão ("marlonwlv (20x) acabou às 20:39 → seguindo no
+   Claude · Marlon 20x · mesmo modelo"); as tasks seguem na hora em qualquer provedor (no Codex, pelo histórico).
+9. **Provedores (R8):** um liga/desliga "na fila" por conta, na própria linha, e três linhas fixas que dizem como o Nod
+   age (mesma IA, outra IA, tasks em andamento). Nada para configurar.
+
+## Suposições registradas (decididas sem o Marlon, no autônomo)
+
+- **E4 por máquina.** "Nenhuma conta da IA na fila" é avaliado entre as contas logadas na máquina do turno, não na lista
+  inteira: senão uma VM com só a 2ª conta (fora da fila) pararia com a nota dizendo que ela está "no limite" sem estar.
+- **A volta da IA** é a primeira conta da fila que sai do limite (sem fila, qualquer conta da IA); sem lista de contas,
+  o limite da IA em `preferencias.ias_no_limite`; sem nada, 1 h.
+- **Caminho sem lista de contas** (motor ou app anterior à ADR-102): a mesma regra R4 vale para a task do Automático
+  quando outra IA está pronta (`aposLimiteDaIaNoFundo`).
+- **O aviso mora na conversa do bot, sem turno**, quando nasce de uma task (a linha de um turno de task iria para a tela
+  da task); quando nasce da fala da conversa (bot fixo), leva o turno dela, para o "Continuar na conta" refazer a fala.
+- **Fechamentos novos além do pedido:** `conta` (R6 a) e `outra_ia` (R6 b) entram no CHECK de `trocas_de_ia.decisao`.
+- **"Voltou"** fecha o aviso aberto e acorda as esperas da cota da IA daquele bot, também quando o limite saiu antes do
+  prazo (um turno que deu certo).
+
+## Alternativas descartadas
+
+- **Manter "Perguntar antes" como padrão.** É o que parou o Eng 1 com conta livre na mesma IA.
+- **Levar as tasks sempre para a outra IA.** As frentes perdem a sessão; com a volta em minutos, esperar é melhor.
+- **Esperar sempre.** Com a volta em 16 horas, as tasks ficam paradas a noite inteira.
+- **Pôr toda conta na fila no backfill.** Seria consentir pela pessoa com a troca automática entre contas da mesma IA,
+  o caso das cláusulas dos termos.
+
+## Consequências
+
+- Quem tinha "Trocar sozinho" segue trocando entre as pessoais; quem tinha "Perguntar antes" passa a trocar sozinho só
+  se ligar a 2ª conta na fila (com o aviso).
+- O app do Mac no caminho da ADR-101 (`resultado.contaNoLimite`, as contas guardadas no Mac) segue igual: o seletor
+  "Trocar sozinho" dele continua lá.
+- A ligação de voz trocando de IA com bot fixo e o bot dizendo o que não fez ("Retomei as 19 frentes com ChatGPT") ficam
+  para issues próprias.
+
+## Gatilho de reversão
+
+- O jurídico ou um fornecedor disser que a troca automática entre contas da mesma IA viola os termos: a fila volta a
+  ser só a 1ª conta de cada IA (o liga/desliga da 2ª em diante some) e a troca entre contas volta a ser pergunta.
+- O aviso de troca gerar mais ruído do que ajuda (a pessoa ignorando e as tasks paradas): a recomendação passa a ser
+  aplicada sempre no prazo, inclusive "esperar".
+- Medir que tasks levadas para a outra IA recomeçam mal com frequência: subir o limite de 30 min ou tirar o "levar"
+  automático.

@@ -37,6 +37,7 @@ import type { Gasto } from "../../src/repositories/gastos.repo.ts";
 import type { ItemOutbox } from "../../src/repositories/outbox.repo.ts";
 import type { ExtrasTrabalho } from "../../src/repositories/trabalhos.repo.ts";
 import type { Espera } from "../../src/contracts/espera.ts";
+import type { TrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
 import type { Parada } from "../../src/repositories/paradas.repo.ts";
 import type { Pessoa } from "../../src/repositories/pessoas.repo.ts";
 import type { JanelaReivindicada } from "../../src/repositories/rotina-janelas.repo.ts";
@@ -78,6 +79,8 @@ export type BancoMemoria = {
   esperas: (Espera & { tenantId: string; ownerId: string })[];
   /** 0074 (ADR-102): as contas de IA da pessoa e os vínculos com as máquinas. */
   contasIa: EstadoContasIaMemoria;
+  /** 0080 (ADR-108): os avisos de troca de IA (o comportamento completo se prova no Postgres). */
+  trocasDeIa: (TrocaDeIa & { tenantId: string; ownerId: string })[];
   /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
   contaDoTurno: Map<string, string | null>;
   contaDaSessao: Map<string, string | null>;
@@ -153,6 +156,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     trabalhos: [],
     esperas: [],
     contasIa: estadoContasIaMemoria(),
+    trocasDeIa: [],
     contaDoTurno: new Map(),
     contaDaSessao: new Map(),
     credenciais: [],
@@ -229,6 +233,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   });
   const minhasCredenciais = () => b.credenciais.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
   const minhasEsperas = () => b.esperas.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+  /** ADR-108 (turnos.repo daIa): as tasks pendentes do bot na IA — fixadas nela, ou no Automático com a sessão nela. */
+  const tasksNaIa = (agenteId: string, ia: string | null) => doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.agenteId === agenteId && t.estado === "pendente" && t.trabalhoId
+    && (ia === null || t.harness === ia || (t.harness === "auto" && b.trabalhos.some((w) => w.tenantId === escopo.tenantId && w.id === t.trabalhoId && w.sessaoHarness === ia))));
   const repos = {
     computadores: {
       buscarVinculo: async () => null, buscarDoAgente: async () => undefined,
@@ -789,6 +796,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         m.parcial = parcial;
         return true;
       },
+      async atualizarSistema(id, m) {
+        const x = doTenant(b.mensagens).find((y) => y.id === id && y.kind === "sistema");
+        if (!x) return false;
+        Object.assign(x, { texto: m.texto, payload: m.payload, turnoId: x.turnoId ?? m.turnoId ?? null });
+        return true;
+      },
       async marcarParciaisDoTurno(turnoId) {
         let n = 0;
         for (const m of doTenant(b.mensagens)) {
@@ -856,6 +869,38 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     },
 
     contasIa: contasIaMemoria(b.contasIa, escopo),
+    trocasDeIa: (() => {
+      const minhas = () => b.trocasDeIa.filter((x) => x.tenantId === escopo.tenantId && x.ownerId === escopo.pessoaId);
+      const sem = ({ tenantId: _t, ownerId: _o, ...t }: TrocaDeIa & { tenantId: string; ownerId: string }): TrocaDeIa => ({ ...t });
+      return {
+        async abrir(n) {
+          const aberta = minhas().find((x) => x.agenteId === n.agenteId && x.decididoEm === null);
+          if (aberta) {
+            Object.assign(aberta, { iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, fixo: n.fixo, aplicarEm: n.recomendacao === "levar" ? aberta.aplicarEm ?? n.aplicarEm : null });
+            return { troca: sem(aberta), nova: false };
+          }
+          const t = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, conversaId: n.conversaId, iaDe: n.iaDe, iaPara: n.iaPara, recomendacao: n.recomendacao, voltaEm: n.voltaEm, criadaEm: n.agora, aplicarEm: n.aplicarEm, decididoEm: null, decisao: null, mensagemId: null, fixo: n.fixo, voltaAoFixo: null, restauradoEm: null };
+          b.trocasDeIa.push(t);
+          return { troca: sem(t), nova: true };
+        },
+        async definirMensagem(id, mensagemId) { const t = minhas().find((x) => x.id === id); if (t) t.mensagemId = mensagemId; },
+        async buscar(id) { const t = minhas().find((x) => x.id === id); return t ? sem(t) : null; },
+        async abertaDoAgente(agenteId) { const t = minhas().find((x) => x.agenteId === agenteId && x.decididoEm === null); return t ? sem(t) : null; },
+        async fechar(id, decisao, em, voltaAoFixo) {
+          const t = minhas().find((x) => x.id === id && x.decididoEm === null);
+          if (!t) return null;
+          Object.assign(t, { decididoEm: em, decisao, voltaAoFixo: voltaAoFixo ?? null });
+          return sem(t);
+        },
+        async marcarRestaurada(id, em) {
+          const t = minhas().find((x) => x.id === id && x.voltaAoFixo !== null && x.restauradoEm === null);
+          if (!t) return false;
+          t.restauradoEm = em;
+          return true;
+        },
+        async paraVarrer() { return minhas().filter((x) => x.decididoEm === null || (x.voltaAoFixo !== null && x.restauradoEm === null)).sort((x, y) => x.criadaEm - y.criadaEm).map(sem); },
+      };
+    })(),
 
     esperas: {
       async criar(e) {
@@ -1111,6 +1156,23 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
             porCota: t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA),
           }));
+      },
+      async contarTasksNaIa(agenteId, iaDe) {
+        return new Set(tasksNaIa(agenteId, iaDe).map((t) => t.trabalhoId)).size;
+      },
+      async levarTasksDoBot(p) {
+        const ids: string[] = [];
+        for (const t of tasksNaIa(p.agenteId, p.iaDe)) {
+          const daCota = t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
+          Object.assign(t, { harness: p.harness, modelo: p.modelo, ...(daCota ? { acordarEm: null, entradaTexto: p.entradaDaVolta } : {}) });
+          ids.push(t.id);
+        }
+        return ids;
+      },
+      async acordarEsperasDaCota(agenteId, iaDe) {
+        const alvo = tasksNaIa(agenteId, iaDe).filter((t) => t.acordarEm !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA));
+        for (const t of alvo) t.acordarEm = null;
+        return alvo.length;
       },
       async juntarEntrada(id: string, texto: string) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "pendente");

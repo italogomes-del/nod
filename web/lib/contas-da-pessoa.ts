@@ -1,4 +1,4 @@
-import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas } from "../../src/contracts/contas-ia.ts";
+import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina } from "../../src/contracts/contas-ia.ts";
 import type { DetalhesDasContas } from "../../src/contracts/desktop.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { contaDoLogin, idDoLogin, maquinaDoLogin, type LoginNaTela, type UiContas } from "../telas/contas-lista.ts";
@@ -13,7 +13,6 @@ import { ErroApi } from "./erro-api.ts";
  */
 export type ApiContas = {
   ordemContas(ids: string[]): Promise<unknown>;
-  modoContas(modo: ModoDasContas): Promise<unknown>;
   mudarConta(id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }): Promise<unknown>;
   sairDaConta(id: string, maquinaId: string): Promise<unknown>;
   removerConta(id: string): Promise<unknown>;
@@ -48,6 +47,17 @@ export const INTERVALO_LOGIN_TELA_MS = 1_000;
 export const PRONTO_VISIVEL_MS = 6_000;
 
 const FINAIS = new Set(["pronto", "falhou", "cancelado"]);
+
+/**
+ * ADR-108 (termos de uso, ADR-101 §4): ligar uma conta na fila pede o aviso dos termos quando ela é corporativa ou quando
+ * já há outra conta da mesma IA na fila (é aí que o nod passa sozinho de uma conta para a outra). A 1ª conta pessoal de
+ * cada IA nasce na fila e não pede nada. Desligar nunca pede.
+ */
+export function ligarPedeAvisoDosTermos(contas: ContasIaDto, id: string): boolean {
+  const c = contas.contas.find((x) => x.id === id);
+  if (!c) return false;
+  return c.corporativa || contas.contas.some((x) => x.id !== id && x.ia === c.ia && x.entraNaTrocaAutomatica);
+}
 
 export function criarContasDaPessoa(d: DepsContasDaPessoa) {
   let conferindo = false;
@@ -138,7 +148,15 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       await d.api()?.mudarConta(id, { apelido: limpo }).catch(() => d.mudar({ nota: "Não deu para renomear. Tente de novo." }));
       d.invalidar();
     },
-    async optin(id: string, ligado: boolean): Promise<void> {
+    /** ADR-108 (R8): o liga/desliga "na fila" de cada conta. Ligar a 2ª da mesma IA ou a corporativa mostra os termos antes. */
+    async naFila(id: string, ligado: boolean): Promise<void> {
+      const c = d.contas();
+      if (!c) return;
+      const conta = c.contas.find((x) => x.id === id);
+      if (!conta || conta.entraNaTrocaAutomatica === ligado) return;
+      if (ligado && ligarPedeAvisoDosTermos(c, id) && !(await d.avisarTermos(conta.ia))) return;
+      const atual = d.contas() ?? c;
+      d.trocarContas({ ...atual, contas: atual.contas.map((x) => (x.id === id ? { ...x, entraNaTrocaAutomatica: ligado } : x)) });
       await d.api()?.mudarConta(id, { entraNaTrocaAutomatica: ligado }).catch(() => d.mudar({ nota: "Não deu para salvar. Tente de novo." }));
       d.invalidar();
     },
@@ -153,19 +171,6 @@ export function criarContasDaPessoa(d: DepsContasDaPessoa) {
       await d.api()?.ordemContas(nova.map((x) => x.id)).catch(() => d.mudar({ nota: "Não deu para salvar a ordem. Tente de novo." }));
       d.invalidar();
     },
-    /** "Trocar sozinho" pede o aviso dos termos de cada provedor com mais de uma conta (ADR-101 §4). */
-    async modo(modo: ModoDasContas): Promise<void> {
-      const c = d.contas();
-      if (!c || c.modo === modo) return;
-      if (modo === "automatico") {
-        const ias = [...new Set(c.contas.map((x) => x.ia))].filter((ia) => c.contas.filter((x) => x.ia === ia).length > 1);
-        for (const ia of ias) if (!(await d.avisarTermos(ia))) return;
-      }
-      d.trocarContas({ ...c, modo });
-      await d.api()?.modoContas(modo).catch(() => d.mudar({ nota: "Não deu para salvar. Tente de novo." }));
-      d.invalidar();
-    },
-
     pedirSaida(id: string, maquinaId: string): void { d.mudar({ confirmar: { tipo: "sair", contaId: id, maquinaId }, menu: null }); },
     pedirRemocao(id: string): void { d.mudar({ confirmar: { tipo: "remover", contaId: id }, menu: null }); },
     fecharConfirmacao(): void { d.mudar({ confirmar: null }); },

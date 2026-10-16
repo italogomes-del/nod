@@ -2,6 +2,7 @@ import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { CausaSemIa, Inventario } from "../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { ContasNoLimite } from "../../src/contracts/contas-ia.ts";
+import type { PayloadTrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { formatoData } from "../lib/formato-data.ts";
@@ -265,6 +266,74 @@ function linhaContasNoLimite(m: Mensagem, c: ContasNoLimite, agora: number): str
 export function linhaContaSeguiu(m: Mensagem): string | null {
   if (m.payload?.kind !== "conta_seguiu" && m.payload?.kind !== "conta_escolhida") return null;
   return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(m.texto)}</span></span></div>`;
+}
+
+/** "11 min", "16 horas": quanto falta para a conta voltar, para a frase da recomendação. */
+function quantoFalta(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000));
+  if (min < 60) return `${min} min`;
+  const horas = Math.round(min / 60);
+  return horas === 1 ? "1 hora" : `${horas} horas`;
+}
+
+const nomeDaIa = (ia: string): string => (ehIa(ia) ? PROVEDOR_DA_IA[ia].nome : ia);
+
+/** O desfecho de um aviso já fechado: uma linha leve, sem botões. */
+function desfechoDaTroca(p: PayloadTrocaDeIa, nomeDoBot: string): string {
+  const de = nomeDaIa(p.iaDe);
+  const para = p.iaPara ? nomeDaIa(p.iaPara) : "a outra IA";
+  const tasks = p.tasks === 1 ? "A task" : "As tasks";
+  switch (p.decisao) {
+    case "esperar": return `${tasks} esperam o ${de}, como você escolheu.`;
+    case "levar": return `${tasks} foram para o ${para}.`;
+    case "expirou": return `Sem escolha em 10 min: ${tasks.toLowerCase()} foram para o ${para}, como recomendado.`;
+    case "voltou": return `O ${de} voltou: ${p.fixo ? `o ${nomeDoBot} seguiu` : `${tasks.toLowerCase()} seguiram`} de onde parou.`;
+    case "outra_ia": return `O ${nomeDoBot} segue no ${para} até o ${de} voltar.`;
+    case "conta": return `O ${nomeDoBot} seguiu ${p.conta ? `na conta ${de} · ${p.conta.apelido}` : "noutra conta"}.`;
+    default: return "";
+  }
+}
+
+/** Uma opção do aviso de troca: o que faz e a consequência escrita; a recomendada leva o selo. */
+function opcaoDaTroca(o: { act: string; dados: string; rotulo: string; consequencia: string; recomendada: boolean }): string {
+  const selo = o.recomendada ? '<span class="troca-reco">Recomendado</span>' : "";
+  return `<li><button type="button" class="troca-opcao${o.recomendada ? " recomendada" : ""}" data-act="${o.act}"${o.dados}><span class="troca-opcao-tit">${esc(o.rotulo)}${selo}</span><small>${esc(o.consequencia)}</small></button></li>`;
+}
+
+/**
+ * ADR-108 (R4/R6, canvas C1/C2/C3): o aviso de troca de IA na conversa do bot. Não fixo: a IA das tasks chegou ao
+ * limite e elas esperam — o título com a volta, a frase da recomendação, as duas opções com a consequência (a recomendada
+ * primeiro, marcada) e o rodapé do que acontece sem escolha. Fixo: o bot está parado até a volta e os dois caminhos
+ * (a conta fora da fila, a outra IA até a volta). Fechado: uma linha com o desfecho. null = não é esse aviso.
+ */
+export function cartaoTrocaDeIa(m: Mensagem, p: { nomeDoBot: string | null; agora: number }): string | null {
+  const t = m.payload;
+  if (t?.kind !== "troca_de_ia") return null;
+  const bot = p.nomeDoBot ?? "bot";
+  if (t.decisao) return `<div class="linha-centro-wrap linha-ia"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">↻</span><span>${esc(desfechoDaTroca(t, bot))}</span></span></div>`;
+  const de = nomeDaIa(t.iaDe);
+  const para = t.iaPara ? nomeDaIa(t.iaPara) : null;
+  const volta = t.voltaEm !== null ? quandoVolta(t.voltaEm, p.agora) : null;
+  const dados = ` data-id="${esc(t.agenteId)}" data-conversa="${esc(m.conversaId)}"`;
+  if (t.fixo) {
+    const ate = volta ? volta.replace(/^às /, "") : null;
+    const opcoes = [
+      ...(t.conta ? [opcaoDaTroca({ act: "cl-seguir", dados: ` data-id="${esc(t.conta.id)}" data-conversa="${esc(m.conversaId)}"`, rotulo: `Continuar na conta ${de} · ${t.conta.apelido}`, consequencia: `Mesmo modelo, continua de onde parou.${t.conta.corporativa ? " É a conta da empresa." : ""}`, recomendada: false })] : []),
+      ...(para ? [opcaoDaTroca({ act: "troca-outra-ia", dados, rotulo: `Continuar no ${para}${ate ? ` até ${ate}` : ""}`, consequencia: `Outro provedor: as tasks recomeçam do resumo.${volta ? ` ${volta[0]!.toUpperCase()}${volta.slice(1)} volta ao ${de}.` : ""}`, recomendada: false })] : []),
+    ].join("");
+    const texto = `Ele usa só o ${de}, e as contas do ${de} da sua fila acabaram. Se você não fizer nada, ele volta sozinho${volta ? ` ${volta}` : ""}.${opcoes ? " Para continuar agora, escolha um caminho:" : ""}`;
+    return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>O ${esc(bot)} está parado${ate ? ` até ${esc(ate)}` : ""}</b><p>${esc(texto)}</p>${opcoes ? `<ul class="troca-opcoes">${opcoes}</ul>` : ""}</div></div>`;
+  }
+  const tasks = t.tasks === 1 ? "a task" : `as ${t.tasks} tasks`;
+  const levar = t.recomendacao === "levar" && para !== null;
+  const falta = t.voltaEm !== null ? t.voltaEm - p.agora : null;
+  const frase = levar
+    ? `Para ${tasks}, recomendo levar para o ${para}: ${falta !== null ? `esperar seriam ${quantoFalta(falta)} paradas` : `o ${de} não disse quando volta`}.`
+    : `Para ${tasks}, recomendo esperar: ${falta !== null ? `o ${de} volta em ${quantoFalta(falta)} e ` : ""}elas continuam de onde pararam.`;
+  const esperar = opcaoDaTroca({ act: "troca-esperar", dados, rotulo: `Esperar o ${de}`, consequencia: volta ? `Voltam ${volta} com tudo o que já fizeram.` : "Voltam quando a conta voltar, com tudo o que já fizeram.", recomendada: !levar });
+  const levarOp = para ? opcaoDaTroca({ act: "troca-levar", dados, rotulo: `Levar as tasks para o ${para}`, consequencia: "Seguem agora, mas recomeçam do resumo de cada frente.", recomendada: levar }) : "";
+  const rodape = levar ? "Se você não escolher em 10 min, eu sigo a recomendação." : "Se você não escolher, eu sigo a recomendação.";
+  return `<div class="aviso-estado tom-info aviso-troca" role="status"><div class="aviso-estado-txt"><b>O ${esc(de)} chegou ao limite${volta ? ` · volta ${esc(volta)}` : ""}</b><p>${para ? `A conversa segue no ${esc(para)}. ` : ""}${esc(frase)}</p><ul class="troca-opcoes">${levar ? levarOp + esperar : esperar + levarOp}</ul><small class="troca-rodape">${esc(rodape)}</small></div></div>`;
 }
 
 /**
