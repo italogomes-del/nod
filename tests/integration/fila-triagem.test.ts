@@ -127,8 +127,12 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // Respondido o pedido (peer_ask), a aresta some: o Dev já pode pedir ao Chico.
       await m.repos.turnos.assentar(t1, { estado: "concluido" });
       await m.repos.turnos.assentar(t2, { estado: "concluido" });
-      await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "12 testes." });
-      await entregarRespostaPeer(m.deps, { tarefaId: t1, texto: "PR 42 ok." });
+      const doLivre = await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "12 testes." });
+      // NOD-239: a continuação do Dev com a resposta do Livre ainda vai rodar — o t1 não entrega; ela, sim.
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: t1, texto: "PR 42 ok." })).data).toEqual({ ignorado: "aguardando_volta" });
+      if (!("continuacao" in doLivre.data)) throw new Error("deveria abrir a continuação do Dev");
+      await m.repos.turnos.assentar(doLivre.data.continuacao.id, { estado: "concluido" });
+      await entregarRespostaPeer(m.deps, { tarefaId: doLivre.data.continuacao.id, texto: "PR 42 ok." });
       const segundo = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.kind === "handoff")[1];
       const t3 = segundo?.payload?.kind === "handoff" ? segundo.payload.tarefaId! : "";
       await m.repos.turnos.assentar(t3, { estado: "concluido" });

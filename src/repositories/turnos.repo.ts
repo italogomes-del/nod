@@ -562,6 +562,19 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * definido em 2026-10-15 (NOD-262): o turno de conversa ou sala que respondeu ao pedido de um colega (responder_pedido)
+     * tira da fila o turno `delegacao` do pedido — interrompido/'absorvido' apontando para ele, como na fila lida junta.
+     * Só o que ainda está 'pendente': o que já começou a rodar responde sozinho; null = não absorveu.
+     */
+    async absorverDelegacao(id: string, porTurnoId: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        update turnos set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${porTurnoId}, lease_ate = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and origem = 'delegacao' and estado = 'pendente'
+        returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
      * Fila lida junta (definido em 2026-09-24): logo depois de reivindicar um turno disparado por fala da
      * pessoa, os OUTROS pendentes da mesma conversa e do mesmo agente, também disparados por fala dela,
      * saem como interrompido/'absorvido' apontando para ele, e a entrada dele vira a lista de todas as
@@ -727,6 +740,18 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async despachandoDaPessoa(): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'despachando' order by criado_em`;
+      return linhas.map(paraTurno);
+    },
+
+    /**
+     * definido em 2026-10-15 (NOD-262): os pedidos de colega na fila do bot (turnos `delegacao` pendentes), os mais antigos
+     * primeiro — a lista que o prompt da conversa e da sala mostra para o bot fechar com responder_pedido.
+     */
+    async delegacoesPendentesDoAgente(agenteId: string, limite = 20): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and agente_id = ${agenteId} and origem = 'delegacao' and estado = 'pendente'
+        order by criado_em, id limit ${limite}`;
       return linhas.map(paraTurno);
     },
 

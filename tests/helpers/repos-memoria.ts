@@ -1288,6 +1288,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.leaseAte = null;
         return t;
       },
+      async delegacoesPendentesDoAgente(agenteId, limite = 20) {
+        return doTenant(b.turnos).filter((t) => t.agenteId === agenteId && t.origem === "delegacao" && t.estado === "pendente").sort((x, y) => x.criadoEm - y.criadoEm || x.id.localeCompare(y.id)).slice(0, limite);
+      },
+      async absorverDelegacao(id, porTurnoId) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.origem === "delegacao" && x.estado === "pendente");
+        if (!t) return null;
+        t.estado = "interrompido";
+        t.motivoInterrupcao = "absorvido";
+        t.absorvidoPor = porTurnoId;
+        t.leaseAte = null;
+        return t;
+      },
       async absorverPendentes(turno, entrada) {
         if (!turno.mensagemOrigemId || (turno.origem !== "conversa" && turno.origem !== "sala")) return { turno, absorvidos: [] };
         const absorvidos = doTenant(b.turnos)

@@ -327,6 +327,7 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     if (!("continuacao" in r2.data)) throw new Error("deveria entregar ao Chico");
     expect(r2.data.continuacao.entradaTexto).toContain("Ainda faltam as respostas de Dev 3; elas chegam em novos turnos. Siga com o que já tem e não repita esses pedidos.");
     expect((await entregarRespostaPeer(d.deps, { tarefaId: r2.data.continuacao.id, texto: "Dev 2 aprovou o 475; falta o Dev 3." })).data).toEqual({ ignorado: "aguardando_colega" });
+    await d.deps.repos.turnos.assentar(r2.data.continuacao.id, { estado: "concluido" });
     expect(naClarice()).toHaveLength(0);
 
     // O Dev 3 responde: tudo voltou. A continuação consolida para a Clarice, e é ela que entrega — uma vez.
@@ -339,6 +340,63 @@ describe("a corrente até três passes (ADR-063): Clarice → Chico → Dev", ()
     expect(final.data.continuacao).toMatchObject({ agenteId: clarice.id, origem: "retomada", retomaTurnoId: t0.id, profundidade: 1, sobProcuracaoDe: null });
     expect(naClarice()).toHaveLength(1);
     expect((await entregarRespostaPeer(d.deps, { tarefaId: r3.data.continuacao.id, texto: "de novo" })).data).toEqual({ ignorado: "ja_entregue" });
+  });
+
+  it("NOD-239: as duas respostas chegam juntas — a continuação que assenta com a outra ainda viva não entrega; a última entrega uma vez, com as duas", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const clarice = await bot(d, "Clarice");
+    const chico = await bot(d, "Chico");
+    await bot(d, "Dev 2");
+    await bot(d, "Dev 3");
+    const t0 = await turno(d, clarice.id, clarice.conversaId);
+    const d1 = tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "distribua os PRs 475 e 963 aos Devs")).data);
+    const paraDev2 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 2", "revise o PR 475")).data);
+    const paraDev3 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 3", "revise o PR 963")).data);
+    await d.deps.repos.turnos.assentar(d1, { estado: "concluido" });
+    const naClarice = () => d.banco.mensagens.filter((m) => m.conversaId === clarice.conversaId && m.payload?.kind === "peer_ask");
+
+    // O Dev 2 responde: C1 nasce e começa a rodar (despachando). Enquanto isso o Dev 3 responde: C2 nasce pendente.
+    const r2 = await entregarRespostaPeer(d.deps, { tarefaId: paraDev2, texto: "PR 475: aprovar." });
+    if (!("continuacao" in r2.data)) throw new Error("deveria entregar ao Chico");
+    const c1 = d.banco.turnos.find((x) => x.id === (r2.data as { continuacao: { id: string } }).continuacao.id)!;
+    c1.estado = "despachando";
+    const r3 = await entregarRespostaPeer(d.deps, { tarefaId: paraDev3, texto: "PR 963: aprovar com ressalvas." });
+    if (!("continuacao" in r3.data)) throw new Error("deveria entregar ao Chico");
+
+    // C1 assenta: não há pedido em aberto (as duas peer_ask já existem), mas C2 ainda vai rodar — não entrega, nem avisa.
+    await d.deps.repos.turnos.assentar(c1.id, { estado: "concluido" });
+    expect((await entregarRespostaPeer(d.deps, { tarefaId: c1.id, texto: "Dev 2 aprovou o 475; falta o Dev 3." })).data).toEqual({ ignorado: "aguardando_volta" });
+    expect((await avisarFalhaDelegacao(d.deps, { turnoId: c1.id, motivo: "terminou sem resposta" })).data).toEqual({ ignorado: "aguardando_volta" });
+    expect(naClarice()).toHaveLength(0);
+
+    // C2 assenta: é a última viva da cadeia, e entrega a resposta com as duas — uma vez.
+    await d.deps.repos.turnos.assentar(r3.data.continuacao.id, { estado: "concluido" });
+    const final = await entregarRespostaPeer(d.deps, { tarefaId: r3.data.continuacao.id, texto: "475 aprovado; 963 com ressalvas." });
+    if (!("mensagem" in final.data)) throw new Error("deveria entregar à Clarice");
+    expect(naClarice().map((m) => m.texto)).toEqual(["475 aprovado; 963 com ressalvas."]);
+  });
+
+  it("NOD-239: a continuação que ficaria por último é interrompida — o aviso sai uma vez, quando nenhuma outra continuação está viva", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const clarice = await bot(d, "Clarice");
+    const chico = await bot(d, "Chico");
+    await bot(d, "Dev 2");
+    await bot(d, "Dev 3");
+    const t0 = await turno(d, clarice.id, clarice.conversaId);
+    const d1 = tarefaDoPedido((await pedir(d, clarice, t0.id, "Chico", "distribua os PRs")).data);
+    const paraDev2 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 2", "revise o PR 475")).data);
+    const paraDev3 = tarefaDoPedido((await pedir(d, chico, d1, "Dev 3", "revise o PR 963")).data);
+    await d.deps.repos.turnos.assentar(d1, { estado: "concluido" });
+    const naClarice = () => d.banco.mensagens.filter((m) => m.conversaId === clarice.conversaId && m.payload?.kind === "peer_ask");
+    const r2 = await entregarRespostaPeer(d.deps, { tarefaId: paraDev2, texto: "ok 475" });
+    const r3 = await entregarRespostaPeer(d.deps, { tarefaId: paraDev3, texto: "ok 963" });
+    if (!("continuacao" in r2.data) || !("continuacao" in r3.data)) throw new Error("deveria entregar ao Chico");
+    await d.deps.repos.turnos.assentar(r2.data.continuacao.id, { estado: "concluido" });
+    expect((await entregarRespostaPeer(d.deps, { tarefaId: r2.data.continuacao.id, texto: "parcial" })).data).toEqual({ ignorado: "aguardando_volta" });
+    await d.deps.repos.turnos.interromper(r3.data.continuacao.id, "executor_indisponivel");
+    expect((await avisarFalhaDelegacao(d.deps, { turnoId: r3.data.continuacao.id, motivo: "a máquina parou" })).data).toMatchObject({ mensagem: { texto: "Chico não concluiu: a máquina parou" } });
+    expect((await avisarFalhaDelegacao(d.deps, { turnoId: r3.data.continuacao.id, motivo: "a máquina parou" })).data).toEqual({ ignorado: "ja_entregue" });
+    expect(naClarice()).toHaveLength(1);
   });
 
   it("fio de conversa: a continuação diz quem ainda falta e pede para não repetir o pedido", async () => {

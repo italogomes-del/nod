@@ -98,6 +98,7 @@ const DESPACHO: Despacho = {
   ver_apps_conectados: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_apps_conectados](deps, { ...ctx, ...args }),
   registrar_relato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.registrar_relato](deps, { ...ctx, ...args }),
   criar_bots: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.criar_bots](deps, { ...ctx, ...args }),
+  responder_pedido: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.responder_pedido](deps, { ...ctx, ...args }),
 };
 
 /**

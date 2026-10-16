@@ -35,6 +35,8 @@ const NOD: Record<string, string> = {
   esperar_comando: "Deixou um comando esperando por ele",
   // NOD-210 (ADR-104): um bot comum cria outros bots quando a pessoa pede.
   criar_bots: "Criou bots",
+  // NOD-262: o bot fecha da conversa um pedido de colega que já resolveu.
+  responder_pedido: "Respondeu a um pedido de colega",
 };
 
 /**
