@@ -20,7 +20,7 @@ const MAC = randomUUID();
 
 type Leitura = { nivel: NivelPressao; portao: NivelPressao | null; totalMb: number };
 
-async function montar(trx: Tx) {
+async function montar(trx: Tx, c15: { linuxSoVermelha?: boolean } = {}) {
   const ada = await agenteComConversa(trx, MARLON, { nome: "Ada" });
   const eli = await agenteComConversa(trx, MARLON, { nome: "Eli" });
   const { deps, repos } = depsSobre(trx, MARLON);
@@ -48,6 +48,9 @@ async function montar(trx: Tx) {
       leituras: () => [...leituras].map(([id, l]) => linha(id, l)),
       identificar: (_: unknown, id: string) => (id === MAC ? { nome: "Este Mac", ehMac: true } : id === vm ? { nome: "nod-motor-teste", ehMac: false } : null),
       macDoServidor: MAC,
+      // C15 (NOD-279): a VM é linux; o Mac, darwin.
+      plataforma: (_: unknown, id: string) => (id === vm ? ("linux" as const) : ("darwin" as const)),
+      fundoLinuxSoVermelha: c15.linuxSoVermelha === true,
     },
   };
   const listar = async () => (await listarTrabalhos({ ...deps, services }, {})).data;
@@ -78,6 +81,24 @@ describeIntegracao("a tela fala por máquina (2026-10-09)", () => {
       // A mesma regra do reivindicar: a VM (só como alvo, ADR-092) leva a rotina da Ada, não a do Eli.
       const pego = await m.repos.turnos.reivindicar({ machineId: m.vm, agora: Date.now(), soComoAlvo: true });
       expect(pego?.id).toBe(daVm.turno.id);
+    });
+  });
+
+  it("QA do PR 341 (C15 ligada): só a VM linux em amarela não segura nem no topo; com o Mac darwin em amarela, o topo segura", async () => {
+    await withRollback(MARLON, async (trx) => {
+      for (const ligada of [false, true]) {
+        const m = await montar(trx, { linuxSoVermelha: ligada });
+        const daVm = await m.rotina(m.ada, `Verificar o Slack ${ligada}`);
+        m.leituras.set(m.vm, { nivel: "amarela", portao: "verde", totalMb: 700 });
+        const dto = await m.listar();
+        expect(dto.trabalhos.find((t) => t.id === daVm.trabalho.id)?.esperaDoMac).toBe(ligada ? null : "memoria");
+        expect(dto.maquinas?.[0]?.motivoEspera).toBe(ligada ? null : "memoria");
+        // O topo (a linha da conversa e a web de antes) diz o mesmo que a máquina: antes, "segurando" com a VM solta.
+        expect([dto.segurando, dto.motivoEspera]).toEqual(ligada ? [false, null] : [true, "memoria"]);
+        // Uma darwin em amarela no meio: a pior pode ser dela, o topo fica com a regra de sempre.
+        m.leituras.set(MAC, { nivel: "amarela", portao: "verde", totalMb: 400 });
+        expect((await m.listar()).segurando).toBe(true);
+      }
     });
   });
 

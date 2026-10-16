@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { EXECUCOES_GUARDADAS } from "../../../src/shared/constantes.ts";
+import { listarRotinas } from "../../../src/use-cases/listar-rotinas.ts";
+import { depsSobre } from "../../helpers/deps-l7.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
 import { describeIntegracao } from "../../helpers/integracao.ts";
@@ -50,6 +52,38 @@ describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante 
       expect(await repos.rotinaExecucoes.podar(r?.id ?? "")).toBe(0);
 
       await expect(repos.rotinaExecucoes.registrar({ rotinaId: r?.id ?? "", instanteAgendado: base, desfecho: "falhou", motivo: "Erro: prosa livre", em: base })).rejects.toMatchObject({ code: "23514" });
+    });
+  });
+
+  // definido em 2026-10-15 (pacote A3): a execução anterior ainda aberta faz o agendador pular os horários seguintes;
+  // a lista conta quantos desde a janela dela e avisa a partir de 3. Sem migração e sem registrar o pulo.
+  it("aviso com 3 janelas puladas, não com 2; pausada não avisa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const instante = Date.UTC(2026, 9, 15, 11, 0, 0);
+      const r = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 * * * *", fusoIana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: instante + 3_600_000 });
+      expect(await repos.rotinaJanelas.reivindicar({ rotinaId: r!.id, instanteAgendado: instante, machineId: randomUUID(), executor: "catcher" })).toBe(true);
+      const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "i", entradaConfianca: "confiavel", modelo: "m" });
+      await repos.rotinaJanelas.vincularTurno({ rotinaId: r!.id, instanteAgendado: instante, turnoId: turno!.id });
+      expect(await repos.rotinaJanelas.execucaoAberta(r!.id)).toEqual({ turnoId: turno!.id, instanteAgendado: instante });
+      expect(await repos.rotinaJanelas.turnoAberto(r!.id)).toBe(turno!.id);
+
+      const lista = async (agora: number) => {
+        const { deps } = depsSobre(trx, MARLON, { agora: () => agora });
+        return (await listarRotinas(deps, {})).data.rotinas.find((d) => d.rotina.id === r!.id);
+      };
+      // 09:00 e 10:00 pulados: ainda não avisa.
+      expect(await lista(instante + 2 * 3_600_000)).not.toHaveProperty("janelasPuladas");
+      // 11:00 também: avisa com 3.
+      expect((await lista(instante + 3 * 3_600_000))?.janelasPuladas).toBe(3);
+      // Pausada não avisa.
+      await repos.rotinas.atualizarEstado(r!.id, "pausada");
+      expect(await lista(instante + 3 * 3_600_000)).not.toHaveProperty("janelasPuladas");
+      // Sem execução aberta (o turno acabou), nada a avisar.
+      await repos.rotinas.atualizarEstado(r!.id, "ativa");
+      await trx`update turnos set estado = 'concluido' where id = ${turno!.id}`;
+      expect(await repos.rotinaJanelas.execucaoAberta(r!.id)).toBeNull();
+      expect(await lista(instante + 3 * 3_600_000)).not.toHaveProperty("janelasPuladas");
     });
   });
 });

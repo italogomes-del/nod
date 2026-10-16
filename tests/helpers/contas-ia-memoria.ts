@@ -32,6 +32,7 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
     async doAnuncio(maquinaId: string, anunciadas: readonly ContaAnunciada[], agora: number): Promise<ResultadoDoAnuncio> {
       const sair: string[] = [];
       const vistas: string[] = [];
+      const prontasAgora: ResultadoDoAnuncio["prontasAgora"] = [];
       let mudou = false;
       for (const a of anunciadas) {
         const existente = minhas().find((c) => c.ia === a.ia && c.impressao === a.impressao) ?? null;
@@ -61,6 +62,7 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
         }
         const v = meusVinculos().find((x) => x.contaId === conta!.id && x.maquinaId === maquinaId);
         if (decisao === "sair") sair.push(a.impressao);
+        if (decisao !== "sair" && a.estado === "pronta" && v?.estado !== "pronta") prontasAgora.push({ contaId: conta!.id, ia: a.ia, corporativa: a.corporativa, entraNaTrocaAutomatica: conta!.entraNaTrocaAutomatica });
         if (v) {
           const estado = vinculoSegueSemAcesso(v.semAcessoEm ?? null, a.estado, a.logadaEm) ? "sem_acesso" : a.estado;
           if (v.estado !== estado) mudou = true;
@@ -76,7 +78,7 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
       const antes = e.vinculos.length;
       e.vinculos = e.vinculos.filter((v) => !(v.tenantId === escopo.tenantId && v.ownerId === escopo.pessoaId && v.maquinaId === maquinaId && !vistas.includes(v.contaId)));
       if (e.vinculos.length !== antes) mudou = true;
-      return { sair, mudou };
+      return { sair, mudou, prontasAgora };
     },
     async renomear(id, apelido) { const c = minhas().find((x) => x.id === id && x.removidaEm === null); if (!c) return false; c.apelido = apelido; return true; },
     async definirTrocaAutomatica(id, entra) { const c = minhas().find((x) => x.id === id && x.removidaEm === null); if (!c) return false; c.entraNaTrocaAutomatica = entra; return true; },

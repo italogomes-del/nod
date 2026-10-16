@@ -52,7 +52,20 @@ export async function anunciarContasDaMaquina(d: Deps, maquinaId: string, anunci
   const r = await d.repos.contasIa.doAnuncio(maquinaId, naOrdem, d.agora());
   if (r.mudou) await recalcularOrdemIas(d);
   if (r.sair.length > 0) log("info", "contas_saida_pedida_no_anuncio", { maquina_id: maquinaId, contas: r.sair.length });
+  // NOD-277 (definido em 2026-10-15): conta que acabou de ficar pronta nesta máquina acorda a espera da cota da IA dela. A
+  // corporativa fora da troca automática não acorda nada sozinha (NOD-221): ela só recebe esse fundo quando a pessoa a
+  // escolhe ("Seguir com" ou posição 1). O portão da cota continua segurando se o limite persistir.
+  for (const ia of new Set(r.prontasAgora.filter((c) => !c.corporativa || c.entraNaTrocaAutomatica).map((c) => c.ia))) {
+    const acordados = await d.repos.turnos.anteciparEsperasDaCota(ia);
+    if (acordados.length > 0) log("info", "espera_da_cota_antecipada", { gatilho: "conta_nova", ia, maquina_id: maquinaId, turnos: acordados.length });
+  }
   return r;
+}
+
+/** NOD-277: "Seguir com <conta>" resolve a espera da cota da IA da conta (a escolhida passa a valer já). */
+async function anteciparPelaEscolha(d: Deps, ia: string, contaId: string): Promise<void> {
+  const acordados = await d.repos.turnos.anteciparEsperasDaCota(ia);
+  if (acordados.length > 0) log("info", "espera_da_cota_antecipada", { gatilho: "seguir_com", ia, conta_id: contaId, turnos: acordados.length });
 }
 
 const posicaoNaOrdem = (ordem: readonly string[], ia: string): number => { const i = ordem.indexOf(ia); return i < 0 ? ordem.length : i; };
@@ -123,6 +136,7 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
       log("info", "conta_escolhida_acordou_tasks", { agente_id: agenteId, conta_id: conta.id, tasks: r.acordadas });
     }
   }
+  await anteciparPelaEscolha(d, conta.ia, conta.id);
   if (!refazer) return { data: { turnoId: null }, events };
   // Revisão do PR #319: a cópia da fala que esperava a conta (semContaNaMaquina, NOD-268) sai da fila — refeita agora, ela
   // seria absorvida pela nova e o bot leria o mesmo pedido duas vezes.

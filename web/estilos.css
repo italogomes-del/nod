@@ -379,6 +379,8 @@ body.ocupado { cursor: progress; }
 /* rotinas / conectores / memória / perfil */
 .rt-cab, .cn-cab { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rt-linha { font-size: 13px; margin-top: 4px; }
+/* definido em 2026-10-15 (pacote A3): o aviso dos horários pulados, ancorado logo abaixo da próxima execução. */
+.rt-aviso { color: var(--warning); }
 .execucoes { list-style: none; padding: 0; margin: 8px 0 0; font-size: 12.5px; }
 .exec { padding: 4px 0; border-top: 1px dashed var(--line); }
 .exec-executou b { color: var(--success); } .exec-passou_em_branco b { color: var(--warning); } .exec-falhou b { color: var(--danger); }

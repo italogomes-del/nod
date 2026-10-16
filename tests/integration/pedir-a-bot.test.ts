@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { CapacidadeConector } from "../../src/contracts/conector.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
+import { entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import type { Repos } from "../../src/repositories/tipos.ts";
@@ -12,7 +13,7 @@ import { enviarMensagem } from "../../src/use-cases/enviar-mensagem.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { listarSuaVez } from "../../src/use-cases/listar-sua-vez.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
-import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
+import { JANELA_PEDIDOS_ABERTOS_MS, pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import type { Deps } from "../../src/use-cases/tipos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
@@ -297,6 +298,24 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       expect(r.data.criadas).toHaveLength(1);
       expect((await repos.permissoesPermanentes.ativasDoAgente(dev1.agenteId)).map((p) => p.capacidade)).toEqual(["pr_comentar"]);
       expect((await permitirSempre(deps, { decisaoId: d?.id ?? "", itemIds: [itens[1]?.id ?? ""] })).data).toEqual({ criadas: [], mensagemId: null });
+    });
+  });
+
+  it("pedido com 30 h na cota segue em abertos", async () => {
+    // NOD-279 (C22): a janela de 24 h da espera circular não vence enquanto a cadeia da tarefa espera a cota da IA.
+    await withRollback(MARLON, async (trx) => {
+      const { taga, dev1, deps, repos, turnoTaga } = await cenario(trx);
+      const tarefaId = tarefaDoPedido((await pedir(deps, { turnoId: turnoTaga!.id, agenteId: taga.agenteId, conversaId: taga.conversaId })).data);
+      await trx`update mensagens set criado_em = ${new Date(AGORA - 30 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${tarefaId}`;
+      // A triagem parou no limite da IA; a volta da cota espera a renovação.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${tarefaId}`;
+      const volta = await repos.turnos.enfileirar({ executor: "catcher", conversaId: dev1.conversaId, agenteId: dev1.agenteId, origem: "retomada", retomaTurnoId: tarefaId, prazoEm: AGORA + 86_400_000, profundidade: 1, entradaTexto: entradaDaVoltaDaCota("Claude Code"), entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: AGORA + 3_600_000 });
+      // NOD-259: `abertos` traz o pedido inteiro (tarefaId, criadoEm, texto); casa o deste pedido pela aresta e a tarefa.
+      const aresta = expect.objectContaining({ de: taga.agenteId, para: dev1.agenteId, tarefaId });
+      expect(await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS)).toContainEqual(aresta);
+      // A cadeia acabou sem resposta: o pedido de 30 h sai da espera circular, como antes.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'trabalho_incompleto' where id = ${volta!.id}`;
+      expect(await repos.pedidosDeColega.abertos(AGORA - JANELA_PEDIDOS_ABERTOS_MS)).not.toContainEqual(aresta);
     });
   });
 });

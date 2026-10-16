@@ -38,6 +38,7 @@ import type { pedidosDeColegaRepo } from "./pedidos-de-colega.repo.ts";
 import type { donosRepo } from "./donos.repo.ts";
 import type { esperasRepo } from "./esperas.repo.ts";
 import type { contasIaRepo } from "./contas-ia.repo.ts";
+import type { esperasDaCotaRepo } from "./esperas-da-cota.repo.ts";
 import type { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
 import type { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
@@ -86,6 +87,8 @@ export interface Repos {
   esperas: ReturnType<typeof esperasRepo>;
   /** 0074 (ADR-102): as contas de IA da pessoa em todas as máquinas. */
   contasIa: ReturnType<typeof contasIaRepo>;
+  /** definido em 2026-10-15 (NOD-277): a task esperando a cota (a retomada marcada) e as contas livres da mesma IA. */
+  esperasDaCota: ReturnType<typeof esperasDaCotaRepo>;
   /** 0080 (ADR-108): os avisos de troca de IA das tasks no limite, um aberto por bot. */
   trocasDeIa: ReturnType<typeof trocasDeIaRepo>;
   /** 0073 (NOD-214): a credencial do turno despachado (hash do token), para atravessar o reinício do servidor. */

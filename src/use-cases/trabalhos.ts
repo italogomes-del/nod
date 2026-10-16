@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { IaComConta } from "../contracts/contas-ia.ts";
+import type { EsperaDaConta } from "../contracts/cota.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
@@ -7,8 +9,10 @@ import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquin
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { cotaDasIasComContas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
+import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
 import { iasNoLimite } from "../domain/inteligencia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
@@ -167,6 +171,7 @@ export async function linhaTrabalhoAberto(deps: DepsTrabalho, t: Trabalho, turno
  */
 export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "agora">, trabalhos: readonly Trabalho[], alemDisso?: (t: TrabalhoDto, e: ExtrasTrabalho | undefined) => Partial<TrabalhoDto>): Promise<TrabalhoDto[]> {
   const extras = await deps.repos.trabalhos.extras(trabalhos.map((t) => t.id), deps.agora());
+  const esperasDaCota = await esperasDaCotaDe(deps, trabalhos);
   return trabalhos.map((t): TrabalhoDto => {
     const { tenantId: _tenant, sessaoCli: _sessao, sessaoHarness: _harness, sessaoExecutor: _executor, ...publico } = t;
     const e = extras.get(t.id);
@@ -191,8 +196,32 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       acordaMotivo: e?.acordaMotivo ?? null,
       lote: e?.lote ?? null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
+      // definido em 2026-10-15 (NOD-277): só quando espera a cota — a task sem espera segue sem o campo.
+      ...(esperasDaCota.has(t.id) ? { esperaDaConta: esperasDaCota.get(t.id)! } : {}),
     };
   }).map((dto) => (alemDisso ? { ...dto, ...alemDisso(dto, extras.get(dto.id)) } : dto));
+}
+
+/**
+ * definido em 2026-10-15 (NOD-277, pacote A3): as tasks abertas paradas esperando a cota (a retomada da cota marcada) e as
+ * contas livres da mesma IA, numa leitura para a lista inteira.
+ */
+async function esperasDaCotaDe(deps: Pick<Deps, "repos">, trabalhos: readonly Trabalho[]): Promise<Map<string, EsperaDaConta>> {
+  const abertos = trabalhos.filter((t) => trabalhoAberto(t.estado)).map((t) => t.id);
+  const retomadas = await deps.repos.esperasDaCota.doTrabalhos(abertos);
+  if (retomadas.size === 0) return new Map();
+  const ias = new Set<IaComConta>();
+  for (const r of retomadas.values()) {
+    const ia = r.conta?.ia ?? iaDaEntrada(r.entrada)?.ia ?? null;
+    if (ia && ehIaComConta(ia)) ias.add(ia);
+  }
+  const livres = await deps.repos.esperasDaCota.livres([...ias]);
+  const saida = new Map<string, EsperaDaConta>();
+  for (const [id, r] of retomadas) {
+    const espera = esperaDaConta(r, livres);
+    if (espera) saida.set(id, espera);
+  }
+  return saida;
 }
 
 /** definido em 2026-10-07: "Terminados hoje" — o servidor manda as últimas 24 h e a tela corta no dia dela. */
@@ -235,7 +264,12 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const situacao = situacaoDaCotaDoTrabalho({ pendente: e?.pendente, bot: bot ? { harness: bot.harness ?? "auto", modelo: bot.modelo } : null, cota: cotaAgora, iasProntas, noLimite, conhecidas });
     return esperaDaCotaNaTela(t, situacao) ? { esperaDaCota: true } : {};
   };
-  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
+  // QA do PR 341 (C15): o topo junta as máquinas; a regra "linux só a vermelha" vale para ele quando TODAS as máquinas com
+  // leitura são linux (com uma darwin no meio, a pior pode ser dela, e o topo fica com a regra de sempre). Desligada, nada muda.
+  const leiturasDoTopo = servico && memoria !== null ? servico.leituras(deps.escopo.pessoaId) : [];
+  const topoLinux = leiturasDoTopo.length > 0 && leiturasDoTopo.every((l) => servico?.plataforma?.(deps.escopo, l.machineId) === "linux");
+  const regraDoTopo = topoLinux ? { plataforma: "linux" as const, linuxSoVermelha: servico?.fundoLinuxSoVermelha === true } : {};
+  const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco }, regraDoTopo);
   const agora = deps.agora();
   const topo = { cota: cotaParaTela(cotaAgora), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
   // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
@@ -285,7 +319,7 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
   };
   const portoes = new Map<string, PortaoDoMac>();
   const maquinas: LeituraDeMaquinaDto[] = servico.leituras(deps.escopo.pessoaId).map((l) => {
-    const portao = portaoDoMac(usoDoMac, { memoria: l.nivel, processador: l.portao, discoNivel: l.discoNivel });
+    const portao = portaoDoMac(usoDoMac, { memoria: l.nivel, processador: l.portao, discoNivel: l.discoNivel }, { plataforma: servico.plataforma?.(deps.escopo, l.machineId) ?? null, linuxSoVermelha: servico.fundoLinuxSoVermelha === true });
     portoes.set(l.machineId, portao);
     return {
       ...nomear(l.machineId),

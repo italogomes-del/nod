@@ -1017,6 +1017,9 @@ async function aposLimiteNoFundo(
     entradaTexto: conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia)),
     entradaConfianca: turno.entradaConfianca,
     sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
+    // NOD-279 D7 revisto pelo ADR-108 (#358): a volta segue com a inteligência do turno. A task com sessão já fica na IA da
+    // sessão pela guarda do despacho e do plano (segurarTaskNaIaDaSessao); fixar o harness aqui a tiraria do Automático e
+    // anularia o "levar" (a task sem sessão seguiria presa na IA no limite).
     modelo: turno.modelo,
     harness: turno.harness,
     executor: turno.executor,

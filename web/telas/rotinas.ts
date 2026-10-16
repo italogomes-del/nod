@@ -4,13 +4,23 @@ import { botaoDaParada, desdeDaParada, linhaNaoRodaram, linhaPerguntaPendente, m
 import { interpolar } from "../lib/relogio.ts";
 
 /**
+ * definido em 2026-10-15 (pacote A3): a execução anterior ainda aberta faz o agendador pular os horários seguintes
+ * (ADR-045). O servidor só manda o número a partir de 3 e só na rotina ativa (src/domain/janelas-puladas.ts); a linha
+ * diz quantos e por quê, embaixo da próxima execução.
+ */
+export function avisoDasJanelasPuladas(n: number | undefined): string {
+  if (n === undefined || n < 3) return "";
+  return `<div class="rt-linha rt-aviso" role="status">${n} horários pulados: a execução anterior ainda não saiu</div>`;
+}
+
+/**
  * Rotinas (E7): cada uma com a PRÓXIMA execução no fuso nomeado (o servidor calcula, ADR-011), o
  * gate de aprovação, pausar/ativar e as últimas 20 execuções com desfecho tipado — passou_em_branco ≠
  * falhou (E7.5). Rotinas nascem por texto na conversa (criar_rotina → proposta → decisão em Sua vez).
  */
 export function renderRotinas(estado: Estado): string {
   const linhas = estado.rotinas
-    .map(({ rotina: r, proximaExecucao, bloqueio, perguntaPendente }) => {
+    .map(({ rotina: r, proximaExecucao, bloqueio, perguntaPendente, janelasPuladas }) => {
       const a = estado.frota?.agentes.find((x) => x.id === r.agenteId);
       const exec = estado.execucoes[r.id];
       // definido em 2026-09-24 (emenda da ADR-044): a janela parada lê "parada (sem acesso)", sem o motivo cru ao lado.
@@ -24,6 +34,7 @@ export function renderRotinas(estado: Estado): string {
       return `<li class="rotina rotina-${esc(r.estado)}${bloqueio || perguntaPendente ? " rotina-parada" : ""}" data-rotina="${esc(r.id)}">
         <div class="rt-cab">${a ? avatarAgente(a, "sm") : ""}<b>${esc(a?.nome ?? "agente")}</b> · <code>${esc(r.cron)}</code> (${esc(r.fusoIana)}) <span class="tag ${r.estado === "ativa" ? "tag-ok" : "tag-cinza"}">${esc(r.estado)}</span>${bloqueio ? tagDaParada(bloqueio) : perguntaPendente ? tagParadaPergunta(perguntaPendente) : ""}${r.soComPendencia ? TAG_SO_COM_PENDENCIA : ""}${r.exigeAprovacao ? '<span class="tag tag-ambar" title="efeito externo só por item aprovado (E7.3)">gate de aprovação ligado</span>' : ""}</div>
         <div class="rt-linha"><b>próxima execução:</b> ${esc(dataHora(proximaExecucao, r.fusoIana))} (${esc(r.fusoIana)}) · ${esc(interpolar(proximaExecucao, estado.agora))}</div>
+        ${avisoDasJanelasPuladas(r.estado === "ativa" ? janelasPuladas : undefined)}
         <div class="rt-linha"><b>instrução:</b> ${esc(r.instrucao)}</div>
         <div class="rt-linha mudo">fonte: ${esc(r.fonte)} · entregável: ${esc(r.entregavel)} · limites: ${esc(r.limitesAprovacao)} · sem dado: ${esc(r.politicaSemDado)}</div>
         ${bloqueio ? `<div class="rt-linha">${esc(`Parada ${desdeDaParada(bloqueio, estado.agora)}.`)}</div>${linhaNaoRodaram(bloqueio, estado.agora)}` : perguntaPendente ? linhaPerguntaPendente(perguntaPendente, estado.agora, r.fusoIana) : ""}

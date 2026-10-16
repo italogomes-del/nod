@@ -1,3 +1,4 @@
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { PedidoAberto } from "../domain/triagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -27,13 +28,28 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      * - o `handoff` de quem pediu, desde `desde`, sem `peer_ask` da mesma tarefa (nem resultado nem aviso de falha) e sem
      *   a task de colega de antes já acabada — cobre o pedido de antes (task de colega) e o que entra pela triagem do dono;
      * - a frente aberta para o pedido de um colega (`pedido_por_agente_id`), enquanto ela não acaba.
+     * NOD-279 (C22, definido em 2026-10-15): o handoff mais velho que `desde` segue aberto enquanto a cadeia da tarefa (o
+     * turno da tarefa e as retomadas dele, ou os turnos da task do colega) tem turno pendente ou despachando — a espera da
+     * cota não vence a janela. Piso de IDADE_MAX_PEDIDO_RETOMAVEL_MS antes de `desde`, para não montar a cadeia do
+     * histórico todo.
      */
     async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
       // NOD-259: com o pedido em si (tarefaId, criadoEm, texto = `motivo` do handoff) e, opcional, só os de um bot.
       const de = filtro.de ?? null;
       const linhas = await conn<{ de: string; para: string; tarefa_id: string | null; criado_em: Date; texto: string | null }[]>`
         select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em, m.payload->>'motivo' as texto from mensagens m
-        where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null and m.criado_em >= ${data(desde)}
+        where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null
+          and (m.criado_em >= ${data(desde)} or (m.criado_em >= ${data(desde - IDADE_MAX_PEDIDO_RETOMAVEL_MS)} and (
+            exists (select 1 from turnos v where v.tenant_id = m.tenant_id and v.trabalho_id::text = m.payload->>'trabalhoId'
+              and v.estado in ('pendente', 'despachando'))
+            or exists (
+              with recursive cadeia(id, n) as (
+                select d.id, 0 from turnos d where d.tenant_id = m.tenant_id and d.id::text = m.payload->>'tarefaId'
+                union all
+                select r.id, c.n + 1 from cadeia c join turnos r on r.tenant_id = m.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada'
+                where c.n < 10
+              )
+              select 1 from cadeia c join turnos v on v.tenant_id = m.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando')))))
           and (${de}::text is null or m.payload->>'de' = ${de}::text)
           and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = m.payload->>'tarefaId')
@@ -137,9 +153,15 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           select d.id, d.estado from decisoes d where d.tenant_id = ${escopo.tenantId} and d.turno_id = u.id and d.tipo = 'retomar_turno'
           order by d.criado_em desc limit 1
         ) k on true
+        -- NOD-279 (C22): o fim da espera da cota na cadeia (o maior acordar_em das voltas da cota).
+        left join lateral (
+          select max(q.acordar_em) as fim from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          where c.raiz = p.tarefa_id and q.acordar_em is not null and starts_with(q.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
+        ) ec on true
         where u.estado = 'interrompido'
           -- NOD-241: a janela conta da queda quando o último turno caiu; senão, do pedido (como antes).
-          and (p.criado_em >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
+          -- NOD-279 (C22, definido em 2026-10-15): fora da queda, do maior entre o pedido e o fim da espera da cota.
+          and (greatest(p.criado_em, ec.fim) >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and not exists (select 1 from cadeia c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
             where c.raiz = p.tarefa_id and v.estado in ('pendente', 'despachando'))
         order by p.criado_em, p.handoff_id

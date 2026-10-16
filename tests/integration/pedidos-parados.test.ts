@@ -4,6 +4,7 @@ import type { Tx } from "../../src/shared/types.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
 import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-lease.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
+import { entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -169,6 +170,22 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       await trx`update mensagens set criado_em = now() - interval '25 hours' where kind = 'handoff' and payload->>'tarefaId' = ${m.tarefa.id}`;
       await m.cair(m.tarefa.id, "trabalho_incompleto");
       expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+    });
+  });
+
+  it("pedido que esperou a cota 30 h e terminou fora de MOTIVOS_DE_QUEDA entra no varredor", async () => {
+    // NOD-279 (C22): fora da queda, a janela de 24 h conta do fim da espera da cota (o maior acordar_em da cadeia).
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const agora = Date.now();
+      await trx`update mensagens set criado_em = ${new Date(agora - 31 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${m.tarefa.id}`;
+      await m.cair(m.tarefa.id, "trabalho_incompleto");
+      const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.dev.conversaId, agenteId: m.dev.agenteId, origem: "retomada", retomaTurnoId: m.tarefa.id, prazoEm: agora + 86_400_000, profundidade: 1, entradaTexto: entradaDaVoltaDaCota("Claude Code"), entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: agora - 3_600_000 });
+      expect(volta?.trabalhoId).toBe(m.colegaId);
+      await m.cair(volta!.id, "trabalho_incompleto");
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.avisados).toEqual([m.tarefa.id]);
+      expect(await m.pecasDaAda()).toHaveLength(1);
     });
   });
 

@@ -23,14 +23,14 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       const { repos } = depsSobre(trx, MARLON);
       const mac = randomUUID();
       const vm = randomUUID();
-      expect(await repos.contasIa.doAnuncio(mac, [anuncio(1, { apelidoSugerido: "Pessoal" }), anuncio(2, { ia: "codex-cli", plano: "Plus" })], AGORA)).toEqual({ sair: [], mudou: true });
-      expect(await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA)).toEqual({ sair: [], mudou: true });
+      expect(await repos.contasIa.doAnuncio(mac, [anuncio(1, { apelidoSugerido: "Pessoal" }), anuncio(2, { ia: "codex-cli", plano: "Plus" })], AGORA)).toMatchObject({ sair: [], mudou: true });
+      expect(await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA)).toMatchObject({ sair: [], mudou: true });
       const { contas, vinculos } = await repos.contasIa.listar();
       expect(contas.map((c) => [c.apelido, c.ia, c.posicao, c.corporativa])).toEqual([["Pessoal", "claude-cli", 1, false], ["Conta 2", "codex-cli", 2, false], ["Conta 3", "claude-cli", 3, true]]);
       const pessoal = contas[0]!.id;
       expect(vinculos.filter((v) => v.contaId === pessoal).map((v) => v.maquinaId).sort()).toEqual([mac, vm].sort());
       // O mesmo anúncio de novo não muda nada.
-      expect(await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA)).toEqual({ sair: [], mudou: false });
+      expect(await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA)).toMatchObject({ sair: [], mudou: false });
     });
   });
 
@@ -120,6 +120,29 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       // A mesma conta anunciada agora como corporativa (o plano mudou para Team): sai da fila.
       await repos.contasIa.doAnuncio(vm, [anuncio(2, { logadaEm: AGORA + 30_000, plano: "Team", corporativa: true })], AGORA + 50_000);
       expect(await repos.contasIa.buscar(b!.id)).toMatchObject({ corporativa: true, entraNaTrocaAutomatica: false });
+    });
+  });
+
+  it("QA do PR 341 (NOD-277 + NOD-221): prontasAgora leva a marca da fila gravada neste anúncio, não a da linha antiga", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      // Conta nova: a 1ª pessoal nasce na fila e a corporativa nasce fora, e o anúncio diz isso.
+      const r1 = await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA - 3_600_000);
+      expect(r1.prontasAgora.map((c) => [c.ia, c.corporativa, c.entraNaTrocaAutomatica])).toEqual([["claude-cli", false, true], ["claude-cli", true, false]]);
+      const corp = (await repos.contasIa.listar()).contas.find((c) => c.corporativa)!;
+      // A corporativa ligada na fila, removida e devolvida com um login novo: volta FORA (regra de nascimento) e o anúncio
+      // não pode dizer "na fila" pela marca antiga, senão o gatilho de conta nova acordaria as esperas da cota (NOD-221).
+      await repos.contasIa.definirTrocaAutomatica(corp.id, true);
+      await repos.contasIa.remover(corp.id, AGORA);
+      const r2 = await repos.contasIa.doAnuncio(randomUUID(), [anuncio(1), anuncio(3, { plano: "Team", corporativa: true, logadaEm: AGORA + 5_000 })], AGORA + 10_000);
+      expect((await repos.contasIa.buscar(corp.id))?.entraNaTrocaAutomatica).toBe(false);
+      expect(r2.prontasAgora.find((c) => c.contaId === corp.id)?.entraNaTrocaAutomatica).toBe(false);
+      // A pessoal na fila que passa a ser corporativa, pronta numa máquina nova: sai da fila e o anúncio diz "fora".
+      const pessoal = (await repos.contasIa.listar()).contas.find((c) => !c.corporativa)!;
+      const r3 = await repos.contasIa.doAnuncio(randomUUID(), [anuncio(1, { plano: "Team", corporativa: true })], AGORA + 20_000);
+      expect((await repos.contasIa.buscar(pessoal.id))?.entraNaTrocaAutomatica).toBe(false);
+      expect(r3.prontasAgora).toEqual([{ contaId: pessoal.id, ia: "claude-cli", corporativa: true, entraNaTrocaAutomatica: false }]);
     });
   });
 

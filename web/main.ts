@@ -2953,7 +2953,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "cl-seguir": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
     await api!.seguirComConta(el.dataset.id ?? "", conversaId);
-    dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
+    // definido em 2026-10-15 (NOD-277): o "Seguir com" da task parada pela cota (data-trabalho) relê também a task e a lista.
+    const trabalhoId = el.dataset.trabalho;
+    dispatch({ tipo: "invalidar", quais: trabalhoId ? [`conversa:${conversaId}` as Invalidacao, "trabalhos", `trabalho:${trabalhoId}` as Invalidacao] : [`conversa:${conversaId}` as Invalidacao] });
   }),
   "cl-entrar-chat": (el) => {
     const ia = el.dataset.ia;

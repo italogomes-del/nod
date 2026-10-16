@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, dicaSemContato, emEspera, esperandoColega, etiquetaOrigem, quandoVolta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { PARCIAL, usd } from "./modo-dev.ts";
@@ -275,7 +275,20 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", t.custoUsd !== null ? `${usd(t.custoUsd)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
-  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}</div>`;
+  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaConta(t, estado.agora)}</div>`;
+}
+
+/**
+ * definido em 2026-10-15 (NOD-277, pacote A3): no topo da task parada pela cota, o status do chip já diz "esperando a conta
+ * 2 · volta às 14:00" (`situacaoDe`); embaixo, para cada conta livre da mesma IA, "Seguir com Claude · Conta 3" — o mesmo
+ * `cl-seguir` da linha da conta no limite (ia-fora.ts), com a conversa do turno da task. Sem conta livre, nada (a frase
+ * não se repete).
+ */
+export function linhaDaEsperaDaConta(t: TrabalhoDto, agora: number): string {
+  const e = esperaDaContaDe(t, agora);
+  if (!e || e.livres.length === 0) return "";
+  const botoes = e.livres.map((c) => `<button type="button" class="linha-link forte" data-act="cl-seguir" data-id="${esc(c.id)}" data-conversa="${esc(t.conversaId)}" data-trabalho="${esc(t.id)}">Seguir com ${esc(c.nome)}</button>`).join('<span aria-hidden="true"> · </span>');
+  return `<p class="tk-espera tk-espera-cota" role="group" aria-label="${esc(textoDaEsperaDaConta(e, agora))}">${botoes}</p>`;
 }
 
 const ICONE_ABRIR_TEMPO = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"></path></svg>';

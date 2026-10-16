@@ -4,6 +4,7 @@ import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
+import { entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS } from "../../src/domain/pedido-parado.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
@@ -245,6 +246,22 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
         await m.repos.turnos.interromper(triagem, "maquina_sem_contato", { ultimoSinalEm: Date.now() - LEASE_MS });
         const parada = (await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem);
         expect(parada !== undefined).toBe(entra);
+      });
+    }
+  });
+
+  it("NOD-279 (C22): a triagem pedida há 30 h que esperou a cota e caiu fora de MOTIVOS_DE_QUEDA entra; sem a espera da cota, fica fora como antes", async () => {
+    for (const comCota of [true, false]) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+        const agora = Date.now();
+        await trx`update mensagens set criado_em = ${new Date(agora - 30 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${triagem}`;
+        await m.repos.turnos.interromper(triagem, "trabalho_incompleto");
+        const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.dev.conversaId, agenteId: m.dev.agenteId, origem: "retomada", retomaTurnoId: triagem, prazoEm: agora + 86_400_000, profundidade: 1, entradaTexto: comCota ? entradaDaVoltaDaCota("Claude Code") : "siga", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: agora - 3_600_000 });
+        await m.repos.turnos.interromper(volta!.id, "trabalho_incompleto");
+        const parada = (await m.repos.pedidosDeColega.triagensParadas(agora - 86_400_000, agora)).find((p) => p.tarefaId === triagem);
+        expect(parada !== undefined).toBe(comCota);
       });
     }
   });

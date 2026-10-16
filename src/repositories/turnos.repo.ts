@@ -403,6 +403,73 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       await conn`select pg_advisory_xact_lock(hashtext(${escopo.tenantId}), hashtext(${`retomada:${retomaTurnoId}`}))`;
     },
 
+    /**
+     * NOD-277 (definido em 2026-10-15): trocar a IA ou o modelo do bot vale para o fundo que já está na fila. Os turnos
+     * `pendente` de fundo do bot sem task — de rotina, de pedido de colega e as retomadas deles — passam
+     * para a IA nova, perdem a conta gravada (o próximo plano escolhe de novo) e, se esperavam a cota (o marcador da volta
+     * da cota), acordam: o portão da cota segura de novo se a IA nova também estiver no limite. A conversa, a sala e a
+     * ligação ficam como estão (ADR-036: a fala segue na IA que a pessoa viu). Pega a mesma trava do `reivindicar`
+     * (tenant:pessoa): o turno sai inteiro numa IA, uma vez só. Não muda o estado (sem-requeue). Devolve quantos mudaram.
+     * Os turnos de task (`trabalho_id`) ficam de fora: seguem a escolha "Só daqui em diante" / "Levar as tasks também" do
+     * ADR-108 (`levarTasksDoBot`, merge do #358).
+     */
+    async reescreverFundoDoBot(agenteId: string, para: { harness: PreferenciaHarness; modelo: string }): Promise<number> {
+      await conn`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
+      const linhas = await conn`
+        with recursive cadeia(id, raiz, saltos) as (
+          select t.id, t.retoma_turno_id, 0 from turnos t
+          where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${agenteId} and t.estado = 'pendente' and t.origem = 'retomada' and t.trabalho_id is null
+          union all
+          select c.id, r.retoma_turno_id, c.saltos + 1 from cadeia c join turnos r on r.tenant_id = ${escopo.tenantId} and r.id = c.raiz
+          where r.origem = 'retomada' and c.saltos < 50
+        ),
+        retomadas_de_fundo as (
+          select c.id from cadeia c join turnos r on r.tenant_id = ${escopo.tenantId} and r.id = c.raiz where r.origem in ('rotina', 'delegacao', 'peer')
+        )
+        update turnos t set harness = ${para.harness}, modelo = ${para.modelo}, conta_id = null,
+          acordar_em = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then null else t.acordar_em end
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${agenteId} and t.estado = 'pendente' and t.origem <> 'ligacao'
+          and t.trabalho_id is null and (t.origem in ('rotina', 'delegacao', 'peer') or t.id in (select id from retomadas_de_fundo))
+        returning t.id`;
+      return linhas.length;
+    },
+
+    /**
+     * NOD-277/NOD-279 (definido em 2026-10-15): a espera da cota acaba quando a pessoa resolve — "Seguir com <conta>", conta
+     * nova na máquina, trocar a IA do bot. Zera o `acordar_em` dos pendentes do dono marcados como volta da cota
+     * (`ENTRADA_DA_VOLTA_DA_COTA`) cuja IA (a mesma expressão do `reivindicar`: a fixada, ou a dona do modelo; auto/auto não
+     * tem IA e não é tocado) é `ia`. `turnoId` restringe a um turno (a aprovação que se junta à volta, NOD-279 D8). O portão
+     * da cota segue valendo: se o limite persistir, o turno acordado continua segurado. A volta marcada pelo bot
+     * (`me_chame_as`, esperar comando) não tem o marcador e não acorda. Devolve os ids acordados.
+     */
+    async anteciparEsperasDaCota(ia: string | null, opcoes: { turnoId?: string; agenteId?: string } = {}): Promise<string[]> {
+      const porIa = modelosPorIa();
+      const linhas = await conn<{ id: string }[]>`
+        update turnos t set acordar_em = null
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.acordar_em is not null
+          and starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
+          ${opcoes.turnoId === undefined ? conn`` : conn`and t.id = ${opcoes.turnoId}`}
+          ${opcoes.agenteId === undefined ? conn`` : conn`and t.agente_id = ${opcoes.agenteId}`}
+          ${ia === null ? conn`` : conn`and (case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end) = ${ia}
+            and not (t.harness = 'auto' and t.modelo = 'auto')`}
+        returning t.id`;
+      return linhas.map((l) => l.id);
+    },
+
+    /**
+     * NOD-279 (D8): a volta da cota que ainda está na fila para este trabalho (a mais antiga): a aprovação que chega durante
+     * a espera se junta a ela em vez de abrir uma segunda retomada. A cadeia da cota usa `retomaTurnoId ?? id` e a retomada
+     * usa o turno da decisão, por isso a busca é pelo trabalho.
+     */
+    async voltaDaCotaNaFila(trabalhoId: string): Promise<Turno | null> {
+      const [l] = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${trabalhoId} and origem = 'retomada' and estado = 'pendente'
+          and acordar_em is not null and starts_with(entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
+        order by criado_em asc, id asc limit 1`;
+      return l ? paraTurno(l) : null;
+    },
+
     /** A retomada deste turno que ainda não foi reivindicada: a próxima continuação se junta a ela. */
     async retomadaNaFila(retomaTurnoId: string): Promise<Turno | null> {
       const [l] = await conn<Linha[]>`
@@ -433,10 +500,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l?.despertar_em ? { em: ms(l.despertar_em), motivo: l.despertar_motivo ?? "" } : null;
     },
 
-    /** ADR-086: quantas voltas marcadas já retomaram este turno (o teto de voltas seguidas). */
+    /**
+     * ADR-086: quantas voltas marcadas já retomaram este turno (o teto de voltas seguidas). NOD-279 D8 (definido em
+     * 2026-10-15): a volta que a cota marcou (o marcador da cota, como `por_cota` em `ultimasVoltas`) não é do bot e não conta.
+     */
     async voltasMarcadas(retomaTurnoId: string): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
-        select count(*)::int as n from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId} and acordar_em is not null`;
+        select count(*)::int as n from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId} and acordar_em is not null
+          and not starts_with(entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})`;
       return l?.n ?? 0;
     },
 

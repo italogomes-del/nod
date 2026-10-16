@@ -4,6 +4,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
@@ -541,12 +542,19 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(m.parcial, false) = false
           order by m.criado_em desc, m.id desc limit 1
         ) f on true
+        -- NOD-279 (C22): o fim da espera da cota na task do colega (o maior acordar_em das voltas da cota).
+        left join lateral (
+          select max(t.acordar_em) as fim from turnos t
+          where t.tenant_id = c.tenant_id and t.trabalho_id = c.id and t.acordar_em is not null and starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
+        ) ec on true
         where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
           and h.payload->>'tarefaId' is not null
           -- NOD-241: a janela conta da queda quando o último turno caiu; senão, do pedido (como antes).
           -- NOD-241 (revisão): e nunca o pedido de mais de IDADE_MAX_PEDIDO_RETOMAVEL_MS, para as laterais não rodarem sobre o histórico todo.
+          -- NOD-279 (C22, definido em 2026-10-15): fora da queda, a âncora é o maior entre o pedido e o fim da espera da
+          -- cota — as 24 h não vencem enquanto o pedido espera a IA renovar. Sem espera da cota, greatest = o pedido.
           and h.criado_em >= ${data(agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS)}
-          and (h.criado_em >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
+          and (greatest(h.criado_em, ec.fim) >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and c.estado in ('terminado', 'parado', 'falhou', 'precisa_de_voce')
           and coalesce(rp.estado, '') <> 'parado'
           and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)

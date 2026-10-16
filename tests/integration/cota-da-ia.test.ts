@@ -107,6 +107,24 @@ describeIntegracao("cota da IA no reivindicar (ADR-099 §7)", () => {
     });
   });
 
+  it("QA do PR 341 (NOD-277 CA9): a espera da cota acordada antes da hora, com a IA ainda no limite, o portão segura", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.preferencias.registrarLimite("claude-cli", { renovaEm: Date.now() + HORA, desde: Date.now() });
+      const w = await m.task("rotina", "Rotina das 9h", true);
+      const t = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: entradaDaVoltaDaCota("Claude"), entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id, acordarEm: Date.now() + HORA });
+      if (!t) throw new Error("turno");
+      // Uma conta nova ou "Seguir com" acorda a espera (acordar_em vai a null)...
+      expect(await m.repos.turnos.anteciparEsperasDaCota("claude-cli")).toContain(t.id);
+      expect((await m.repos.turnos.buscar(t.id))?.acordarEm ?? null).toBeNull();
+      // ...mas a cota segue no limite: o reivindicar não a entrega; ela sai quando o limite passa.
+      expect(await m.reivindicarTudo(new Set([t.id]))).toEqual(new Set());
+      expect((await m.repos.turnos.buscar(t.id))?.estado).toBe("pendente");
+      await m.repos.preferencias.limparLimite("claude-cli");
+      expect(await m.reivindicarTudo(new Set([t.id]))).toEqual(new Set([t.id]));
+    });
+  });
+
   it("Automático: segura só se todas as IAs que podem pegá-lo seguram", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

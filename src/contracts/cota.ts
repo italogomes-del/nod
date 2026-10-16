@@ -26,7 +26,18 @@ export type CotaDto = { situacao: Exclude<SituacaoDaCota, "livre">; ias: IdHarne
  * Em cada `TrabalhoDto` (definido em 2026-10-12, ADR-099 §7): a cota da IA do bot segura esta task agora (o fundo novo na
  * reserva de 1%, ou todo o fundo com a IA no limite). A linha diz "esperando a cota da IA". Ausente: não espera pela cota.
  */
-export type CotaNoTrabalho = { esperaDaCota?: boolean };
+export type CotaNoTrabalho = { esperaDaCota?: boolean; esperaDaConta?: EsperaDaConta | null };
+
+/** Uma conta na linha da task: o id (o `cl-seguir` manda) e o nome da tela ("Claude · Conta 2", `nomeDaConta`). */
+export type ContaNaEspera = { id: string; nome: string };
+
+/**
+ * definido em 2026-10-15 (NOD-277, pacote A3): a task parou no limite e a retomada da cota está marcada para `voltaEm`. A
+ * linha diz "esperando a cota do <IA> · volta às HH:MM", ou "esperando a conta <apelido> · …" quando o turno interrompido
+ * rodava numa conta conhecida (`turnos.conta_id`, no limite). `livres`: as contas da mesma IA fora do limite e prontas em
+ * alguma máquina — cada uma vira "Seguir com <conta>". Ausente: a task não espera a cota (src/domain/espera-da-cota.ts).
+ */
+export type EsperaDaConta = { ia: IdHarness | null; iaNome: string; conta: (ContaNaEspera & { apelido: string }) | null; voltaEm: EpochMs; livres: ContaNaEspera[] };
 
 /**
  * No `TrabalhosDto`: a cota da IA segurando trabalho de fundo (null = nada segura; ausente = servidor anterior). A pílula

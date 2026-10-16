@@ -50,6 +50,12 @@ export const definirInteligenciaDoBot: CasoDeUso<{ agenteId: string; pedido: unk
     const conversa = await deps.repos.conversas.buscarPropriaDoAgente(agente.id);
     if (conversa) await deps.repos.conversas.atualizarSessaoCli(conversa.id, null);
   }
+  // NOD-277 (definido em 2026-10-15): a IA nova vale para o fundo que já está na fila (rotina, pedido de colega, task e as
+  // retomadas deles), na mesma transação; a espera da cota desse fundo acorda (o portão segura de novo se a IA nova também
+  // estiver no limite). A conversa, a sala e a ligação seguem na IA que a pessoa viu (ADR-036). Só o raciocínio mudou: a
+  // fila fica como está.
+  const reescritos = de.harness !== para.harness || de.modelo !== para.modelo ? await deps.repos.turnos.reescreverFundoDoBot(agente.id, para) : 0;
+  if (reescritos > 0) log("info", "fundo_reescrito_na_troca_de_ia", { agente_id: agente.id, turnos: reescritos, harness: para.harness, modelo: para.modelo });
   const autoria = autoriaPessoa(deps.escopo);
   const agora = deps.agora();
   const events: RuntimeEvent[] = [];

@@ -42,7 +42,12 @@ const paraConta = (l: LinhaConta): ContaGuardadaNoServidor => ({
 const paraVinculo = (l: LinhaVinculo): VinculoDaConta => ({ contaId: l.conta_id, maquinaId: l.maquina_id, estado: l.estado, sairPedidoEm: msOuNull(l.sair_pedido_em) });
 
 /** O resultado de um anúncio: as impressões de que a máquina deve sair (R4) e se a lista mudou (a tela relê). */
-export type ResultadoDoAnuncio = { sair: string[]; mudou: boolean };
+/**
+ * NOD-277 (definido em 2026-10-15): `prontasAgora` são as contas que ficaram prontas NESTA máquina neste anúncio (conta nova,
+ * conta que voltou, ou login que passou a valer aqui). A que já estava pronta não entra: o anúncio se repete a cada batida.
+ */
+export type ContaProntaAgora = { contaId: string; ia: IaComConta; corporativa: boolean; entraNaTrocaAutomatica: boolean };
+export type ResultadoDoAnuncio = { sair: string[]; mudou: boolean; prontasAgora: ContaProntaAgora[] };
 
 /**
  * As contas de IA da pessoa (0074, ADR-102). Toda escrita é da dona (RLS e `owner_id`). Anúncio e reordenação tomam o
@@ -98,6 +103,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
       const porChave = new Map(existentes.map((c) => [`${c.ia}:${c.impressao}`, c]));
       const sair: string[] = [];
       const vistas: string[] = [];
+      const prontasAgora: ContaProntaAgora[] = [];
       let mudou = false;
       let ativas = existentes.filter((c) => c.removidaEm === null).length;
       for (const a of anunciadas) {
@@ -106,6 +112,9 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         if ((decisao === "criar" || decisao === "voltar") && ativas >= CONTAS_DA_PESSOA_MAX) continue;
         if (decisao === "criar" || decisao === "voltar") ativas++;
         let id: string;
+        // A marca da fila que vale DEPOIS deste anúncio (a gravada agora), não a da linha antiga: é ela que o gatilho de
+        // conta nova lê (NOD-277 + NOD-221). A corporativa que volta ou que passa a ser corporativa sai fora da fila.
+        let naFilaAgora = existente?.entraNaTrocaAutomatica ?? false;
         if (decisao === "sair") {
           sair.push(a.impressao);
           id = existente!.id;
@@ -123,6 +132,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
           // mesmo tempo esperam uma pela outra no lock da pessoa (`travarPessoa`, no começo do anúncio), e esta leitura vem
           // depois dele: nunca nascem duas pessoais na fila sem o aviso (revisão do PR 2, C4; teste de concorrência).
           const naFila = await nasceNaFila(a);
+          naFilaAgora = naFila;
           const [l] = await conn<{ id: string }[]>`
             insert into contas_ia (tenant_id, owner_id, ia, impressao, apelido, plano, corporativa, posicao, email, organizacao, entra_na_troca_automatica)
             values (${escopo.tenantId}, ${escopo.pessoaId}, ${a.ia}, ${a.impressao}, ${a.apelidoSugerido ?? apelidoPadrao(posicao)}, ${a.plano}, ${corporativaDe(a)}, ${posicao}, ${a.email ?? null}, ${a.organizacao ?? null}, ${naFila})
@@ -135,6 +145,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
           const posicao = await proximaPosicao();
           // Revisão do PR 2 (C4): a conta que volta depois de removida segue a regra de nascimento, não a marca antiga.
           const naFila = await nasceNaFila(a);
+          naFilaAgora = naFila;
           await conn`update contas_ia set removida_em = null, no_limite_ate = null, posicao = ${posicao}, plano = coalesce(${a.plano}, plano), corporativa = ${corporativaDe(a)},
             entra_na_troca_automatica = ${naFila},
             email = coalesce(${a.email ?? null}, email), organizacao = coalesce(${a.organizacao ?? null}, organizacao) where ${doDono()} and id = ${existente!.id}`;
@@ -146,6 +157,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
             // Revisão do PR 2 (C4): a conta que passa a ser corporativa sai da fila (o consentimento dela é outro: a pessoa
             // a liga de novo em Provedores, com o aviso dos termos). A que deixa de ser corporativa fica como estava.
             const saiDaFila = corporativaDe(a) && !existente!.corporativa;
+            if (saiDaFila) naFilaAgora = false;
             await conn`update contas_ia set plano = ${a.plano}, corporativa = ${corporativaDe(a)}${saiDaFila ? conn`, entra_na_troca_automatica = false` : conn``} where ${doDono()} and id = ${id}`;
             mudou = true;
           }
@@ -159,6 +171,9 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
         // NOD-283 (CA 10): a conta que voltou "sem acesso" num turno segue assim até um login mais novo que a marca.
         const estado = vinculoSegueSemAcesso(antes?.sem_acesso_em ? antes.sem_acesso_em.getTime() : null, a.estado, a.logadaEm) ? "sem_acesso" : a.estado;
         if (antes?.estado !== estado) mudou = true;
+        if (estado === "pronta" && antes?.estado !== "pronta") {
+          prontasAgora.push({ contaId: id, ia: a.ia, corporativa: corporativaDe(a), entraNaTrocaAutomatica: naFilaAgora });
+        }
         await conn`
           insert into contas_ia_maquinas (tenant_id, owner_id, conta_id, maquina_id, estado, visto_em, sem_acesso_em)
           values (${escopo.tenantId}, ${escopo.pessoaId}, ${id}, ${maquinaId}, ${estado}, ${data(agora)}, ${estado === "sem_acesso" ? data(agora) : null})
@@ -171,7 +186,7 @@ export function contasIaRepo(conn: Conn, escopo: Escopo) {
           and not (conta_id = any(${vistas}::uuid[]))
         returning conta_id`;
       if (apagados.length > 0) mudou = true;
-      return { sair, mudou };
+      return { sair, mudou, prontasAgora };
     },
 
     async renomear(id: string, apelido: string): Promise<boolean> {

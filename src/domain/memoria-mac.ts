@@ -1,3 +1,4 @@
+import type { PlataformaMaquina } from "../contracts/ponte.ts";
 import type { UsoDoMac } from "../contracts/raio-x.ts";
 import type { LeituraDisco, LeituraMemoria, LeituraProcessador, MotivoEsperaMac, NivelPressao, Trabalho } from "../contracts/trabalho.ts";
 
@@ -217,10 +218,23 @@ const peloMenos = (n: NivelPressao | null | undefined, minimo: NivelPressao): bo
  * min), e o portão barrava um agente novo, que gasta ~5% de um núcleo, por causa deles. Ficou no "pouco", que é a escolha
  * da pessoa de deixar o Mac folgado para ela.
  */
-export function deveSegurar(uso: UsoDoMac, memoria: NivelPressao | null, processador: NivelPressao | null): boolean {
+export function deveSegurar(uso: UsoDoMac, memoria: NivelPressao | null, processador: NivelPressao | null, regra: RegraDaPlataforma = {}): boolean {
   if (uso === "livre") return false;
-  if (peloMenos(memoria, "amarela")) return true;
-  return uso === "pouco" && peloMenos(processador, "amarela");
+  const minimo = nivelQueSegura(regra);
+  if (peloMenos(memoria, minimo)) return true;
+  return uso === "pouco" && peloMenos(processador, minimo);
+}
+
+/**
+ * NOD-279 (C15, definido em 2026-10-15, suposição conservadora até a linha de base da VM): a plataforma da máquina que
+ * pede trabalho e a regra nova. Com `linuxSoVermelha` (NOD_FUNDO_LINUX_SO_VERMELHA=1, desligada por padrão), numa máquina
+ * `linux` memória e processador em amarela NÃO seguram o fundo novo; vermelha segura. O disco e a espera máxima de 1 h
+ * (ESPERA_MAXIMA_FUNDO_MS) não mudam. Sem plataforma = `darwin` (o app do Mac anterior ao campo, ADR-090): a regra de antes.
+ */
+export type RegraDaPlataforma = { plataforma?: PlataformaMaquina | null; linuxSoVermelha?: boolean };
+
+function nivelQueSegura(regra: RegraDaPlataforma): NivelPressao {
+  return regra.linuxSoVermelha === true && (regra.plataforma ?? "darwin") === "linux" ? "vermelha" : "amarela";
 }
 
 /**
@@ -366,7 +380,7 @@ export type PortaoDoMac = { fundo: MotivoEsperaMac | null; tudoNovo: MotivoEsper
 
 const PORTAO_ABERTO: PortaoDoMac = { fundo: null, tudoNovo: null, semPrazo: false };
 
-export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; discoNivel?: NivelPressao | null } | null): PortaoDoMac {
+export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; processador: NivelPressao | null; discoNivel?: NivelPressao | null } | null, regra: RegraDaPlataforma = {}): PortaoDoMac {
   if (!l) return PORTAO_ABERTO;
   // O nível já vem com a histerese (trabalhos-vivos.ts guarda o anterior de cada Mac).
   const disco = l.discoNivel ?? null;
@@ -374,8 +388,8 @@ export function portaoDoMac(uso: UsoDoMac, l: { memoria: NivelPressao | null; pr
   if (uso === "livre") return PORTAO_ABERTO;
   if (l.memoria === "vermelha") return { fundo: "memoria", tudoNovo: null, semPrazo: true };
   if (disco === "amarela") return { fundo: "disco", tudoNovo: null, semPrazo: false };
-  if (!deveSegurar(uso, l.memoria, l.processador)) return PORTAO_ABERTO;
-  return { fundo: peloMenos(l.memoria, "amarela") ? "memoria" : "processador", tudoNovo: null, semPrazo: false };
+  if (!deveSegurar(uso, l.memoria, l.processador, regra)) return PORTAO_ABERTO;
+  return { fundo: peloMenos(l.memoria, nivelQueSegura(regra)) ? "memoria" : "processador", tudoNovo: null, semPrazo: false };
 }
 
 /**

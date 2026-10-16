@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { definirInteligenciaDoBot, lerIasDaPessoa } from "../../src/use-cases/inteligencia.ts";
 import { editarPerfil } from "../../src/use-cases/editar-perfil.ts";
@@ -22,8 +23,9 @@ async function bot(trx: Trx, legado: { harness?: "auto" | "claude-cli" | "codex-
   const repos = criarRepos(trx, MARLON);
   const a = await repos.agentes.criar({ id: randomUUID(), nome: `Bot ${randomUUID().slice(0, 6)}`, dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: legado.modelo ?? "auto", harness: legado.harness ?? "auto" });
   if (!a) throw new Error("agente");
-  await repos.conversas.criar({ id: randomUUID(), tipo: "propria", agenteId: a.id });
-  return { repos, agente: a, deps: depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx }) };
+  const conversaId = randomUUID();
+  await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId: a.id });
+  return { repos, agente: a, conversaId, deps: depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx }) };
 }
 
 const colunas = async (trx: Trx, id: string) =>
@@ -122,6 +124,59 @@ describeIntegracao("inteligência do bot (0068)", () => {
         "claude/auto": { h: "claude-cli", m: "auto", modo: "fixa", e: {} },
         "codex/auto": { h: "codex-cli", m: "auto", modo: "fixa", e: {} },
         "codex/luna": { h: "codex-cli", m: "gpt-5.6-luna", modo: "fixa", e: { "claude-cli": { raciocinio: "max" }, "codex-cli": { modelo: "gpt-5.6-luna", raciocinio: "max" } } },
+      });
+    });
+  });
+  describe("NOD-277: a troca de IA reescreve o fundo que está na fila", () => {
+    type Origem = "conversa" | "rotina" | "delegacao" | "peer" | "retomada" | "sala" | "ligacao";
+    const turno = async (b: Awaited<ReturnType<typeof bot>>, o: { origem: Origem; retomaTurnoId?: string; acordarEm?: number; entrada?: string }) => {
+      const t = await b.repos.turnos.enfileirar({ executor: "catcher", conversaId: b.conversaId, agenteId: b.agente.id, origem: o.origem, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: o.entrada ?? "faça", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", retomaTurnoId: o.retomaTurnoId ?? null, ...(o.acordarEm ? { acordarEm: o.acordarEm } : {}) });
+      if (!t) throw new Error("turno");
+      return t;
+    };
+    const ia = async (trx: Trx, id: string) => (await trx<{ harness: string; modelo: string; acordar_em: Date | null; estado: string }[]>`select harness, modelo, acordar_em, estado from turnos where id = ${id}`)[0];
+    const paraCodex = { modo: "fixa", fixa: "codex-cli", escolhas: { "codex-cli": { modelo: "gpt-5.6-luna" } } };
+
+    it("rotina, pedido de colega e a retomada deles vão para a IA nova; a conversa e a retomada dela ficam", async () => {
+      await withRollback(MARLON, async (trx) => {
+        const b = await bot(trx, { harness: "claude-cli", modelo: "sonnet" });
+        const rotina = await turno(b, { origem: "rotina" });
+        const colega = await turno(b, { origem: "delegacao" });
+        const retomadaDaRotina = await turno(b, { origem: "retomada", retomaTurnoId: rotina.id });
+        const conversa = await turno(b, { origem: "conversa" });
+        const retomadaDaConversa = await turno(b, { origem: "retomada", retomaTurnoId: conversa.id });
+
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: paraCodex });
+        for (const t of [rotina, colega, retomadaDaRotina]) expect(await ia(trx, t.id)).toMatchObject({ harness: "codex-cli", modelo: "gpt-5.6-luna", estado: "pendente" });
+        for (const t of [conversa, retomadaDaConversa]) expect(await ia(trx, t.id)).toMatchObject({ harness: "claude-cli", modelo: "sonnet" });
+      });
+    });
+
+    it("o turno já despachando não muda; só o raciocínio mudou, a fila fica como está", async () => {
+      await withRollback(MARLON, async (trx) => {
+        const b = await bot(trx, { harness: "claude-cli", modelo: "sonnet" });
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: { modo: "fixa", fixa: "claude-cli", escolhas: { "claude-cli": { modelo: "sonnet" } } } });
+        const rodando = await turno(b, { origem: "rotina" });
+        await trx`update turnos set estado = 'despachando' where id = ${rodando.id}`;
+        const pendente = await turno(b, { origem: "rotina" });
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: { escolhas: { "claude-cli": { modelo: "sonnet", raciocinio: "low" } } } });
+        expect(await ia(trx, pendente.id)).toMatchObject({ harness: "claude-cli", modelo: "sonnet" });
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: paraCodex });
+        expect(await ia(trx, rodando.id)).toMatchObject({ harness: "claude-cli", modelo: "sonnet", estado: "despachando" });
+        expect(await ia(trx, pendente.id)).toMatchObject({ harness: "codex-cli" });
+      });
+    });
+
+    it("a espera da cota do fundo acorda na troca; a volta marcada pelo bot segue esperando", async () => {
+      await withRollback(MARLON, async (trx) => {
+        const b = await bot(trx, { harness: "claude-cli", modelo: "sonnet" });
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: { modo: "fixa", fixa: "claude-cli" } });
+        const rotina = await turno(b, { origem: "rotina" });
+        const daCota = await turno(b, { origem: "retomada", retomaTurnoId: rotina.id, acordarEm: Date.now() + 3 * 86_400_000, entrada: `${ENTRADA_DA_VOLTA_DA_COTA}Claude Code chegou ao limite.` });
+        const marcada = await turno(b, { origem: "retomada", retomaTurnoId: rotina.id, acordarEm: Date.now() + 3_600_000, entrada: "volte às 15h" });
+        await definirInteligenciaDoBot(b.deps, { agenteId: b.agente.id, pedido: { modo: "auto" } });
+        expect(await ia(trx, daCota.id)).toMatchObject({ harness: "auto", modelo: "auto", acordar_em: null });
+        expect((await ia(trx, marcada.id))?.acordar_em).not.toBeNull();
       });
     });
   });

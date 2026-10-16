@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { VOLTAS_SEGUIDAS_MAX } from "../../src/contracts/ferramentas-trabalho.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { enfileirarRetomada } from "../../src/use-cases/enfileirar-retomada.ts";
@@ -94,6 +95,35 @@ describeIntegracao("me chame às (ADR-086)", () => {
       expect(nova).toBe(true);
       expect(turno?.acordarEm ?? null).toBeNull();
       expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(turno?.id);
+    });
+  });
+
+  it("NOD-279 D8: a aprovação que chega durante a espera da cota se junta à volta da cota e a acorda (não abre uma 2ª retomada)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.assentar();
+      const daCota = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: m.turno.id, trabalhoId: m.trabalho!.id, prazoEm: Date.now() + 4 * 86_400_000, profundidade: 0, entradaTexto: `${ENTRADA_DA_VOLTA_DA_COTA}Claude Code chegou ao limite.`, entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: Date.now() + 3 * 86_400_000 });
+      const assentado = await m.repos.turnos.buscar(m.turno.id);
+      const { turno, nova } = await enfileirarRetomada(m.deps, { original: assentado!, entradaTexto: "aprovado", prazoEm: Date.now() + 600_000 });
+      expect(nova).toBe(false);
+      expect(turno?.id).toBe(daCota!.id);
+      const juntado = await m.repos.turnos.buscar(daCota!.id);
+      expect(juntado?.acordarEm ?? null).toBeNull();
+      expect(juntado?.entradaTexto).toContain("aprovado");
+      expect((await m.repos.turnos.listarDaConversa(m.conversaId, 50)).filter((t) => t.estado === "pendente")).toHaveLength(1);
+      expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(daCota!.id);
+    });
+  });
+
+  it("NOD-279 D8: as voltas que a cota marcou não contam no teto de voltas seguidas do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.assentar();
+      const volta = (entradaTexto: string) => m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: m.turno.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto, entradaConfianca: "confiavel", modelo: "sonnet", acordarEm: Date.now() + 86_400_000 });
+      for (let i = 0; i < VOLTAS_SEGUIDAS_MAX + 2; i++) await volta(`${ENTRADA_DA_VOLTA_DA_COTA}Claude Code chegou ao limite.`);
+      expect(await m.repos.turnos.voltasMarcadas(m.turno.id)).toBe(0);
+      await volta("ver o CI");
+      expect(await m.repos.turnos.voltasMarcadas(m.turno.id)).toBe(1);
     });
   });
 

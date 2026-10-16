@@ -113,6 +113,20 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     }
   });
 
+  it("NOD-279 D7 revisto pelo ADR-108: a volta da frente no Automático não é fixada na IA que bateu (sem sessão, segue já na outra)", async () => {
+    const c = await cenario({ task: true });
+    expect(c.turno()).toMatchObject({ harness: "auto", modelo: "auto" });
+    await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"]);
+    const volta = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+    expect(volta).toMatchObject([{ estado: "pendente", origem: "retomada", trabalhoId: c.trabalhoId, harness: "auto", modelo: "auto", acordarEm: T0 }]);
+  });
+
+  it("NOD-279 D7: a frente com IA fixa espera com a IA e o modelo que tinha", async () => {
+    const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli", escolhas: { "claude-cli": { modelo: "opus" } } }, task: true });
+    await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"]);
+    expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ harness: "claude-cli", modelo: "opus" }]);
+  });
+
   it("ADR-099 §7: a conversa com a pessoa no limite, sem outra IA, continua com o aviso de sempre (nada espera escondido)", async () => {
     const c = await cenario({ pedido: { modo: "fixa", fixa: "claude-cli" } });
     await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli"]);

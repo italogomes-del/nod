@@ -4,7 +4,8 @@ import type { ContaAnunciada } from "../../../src/contracts/contas-ia.ts";
 import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
-import { seguirComConta } from "../../../src/use-cases/contas-ia.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA } from "../../../src/domain/cota-da-ia.ts";
+import { anunciarContasDaMaquina, seguirComConta } from "../../../src/use-cases/contas-ia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
 import { definirInteligenciaDoBot } from "../../../src/use-cases/inteligencia.ts";
@@ -193,6 +194,38 @@ describe("o despacho sem conta utilizável (ADR-102)", () => {
     // De novo não refaz: já há uma fala nova pendente.
     await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
     expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toHaveLength(1);
+  });
+});
+
+describe("NOD-277: a espera da cota acaba quando a pessoa resolve", () => {
+  const TRES_DIAS = 3 * 24 * HORA;
+  const espera = async (c: Awaited<ReturnType<typeof cenario>>, harness: IdHarness, entrada = `${ENTRADA_DA_VOLTA_DA_COTA}Claude Code chegou ao limite.`) =>
+    (await c.deps.repos.turnos.enfileirar({ conversaId: c.conversaId, agenteId: c.agenteId, origem: "retomada", prazoEm: T0 + 4 * 24 * HORA, profundidade: 0, entradaTexto: entrada, entradaConfianca: "confiavel", modelo: "auto", harness, executor: "local", acordarEm: T0 + TRES_DIAS }))!;
+  const acordarEm = (c: Awaited<ReturnType<typeof cenario>>, id: string) => c.banco.turnos.find((t) => t.id === id)?.acordarEm ?? null;
+
+  it("'Seguir com' acorda a espera de +3 dias da IA da conta; a de outra IA e a volta marcada pelo bot seguem", async () => {
+    const c = await cenario();
+    const doClaude = await espera(c, "claude-cli");
+    const doCodex = await espera(c, "codex-cli", `${ENTRADA_DA_VOLTA_DA_COTA}Codex chegou ao limite.`);
+    const marcada = await espera(c, "claude-cli", "volte às 15h");
+    await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    expect(acordarEm(c, doClaude.id)).toBeNull();
+    expect(acordarEm(c, doCodex.id)).toBe(T0 + TRES_DIAS);
+    expect(acordarEm(c, marcada.id)).toBe(T0 + TRES_DIAS);
+  });
+
+  it("conta nova pronta na máquina acorda a espera da IA dela; a corporativa fora da troca automática não", async () => {
+    const c = await cenario();
+    const doCodex = await espera(c, "codex-cli", `${ENTRADA_DA_VOLTA_DA_COTA}Codex chegou ao limite.`);
+    const doClaude = await espera(c, "claude-cli");
+    const ja = (await c.deps.repos.contasIa.listar()).contas.length;
+    const atuais = [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy")];
+    await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, { ...anuncio(9, "codex-cli", "Empresa"), corporativa: true }]);
+    expect((await c.deps.repos.contasIa.listar()).contas.length).toBe(ja + 1);
+    expect(acordarEm(c, doCodex.id)).toBe(T0 + TRES_DIAS);
+    await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, { ...anuncio(9, "codex-cli", "Empresa"), corporativa: true }, anuncio(10, "codex-cli", "Nova")]);
+    expect(acordarEm(c, doCodex.id)).toBeNull();
+    expect(acordarEm(c, doClaude.id)).toBe(T0 + TRES_DIAS);
   });
 });
 

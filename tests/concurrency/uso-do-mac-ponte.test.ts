@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { criarPonteInterna, USO_VALE_MS, type DepsPonte } from "../../src/adapters/fundo/ponte-interna.ts";
 import { criarTrabalhosVivos } from "../../src/adapters/fundo/trabalhos-vivos.ts";
+import type { PlataformaMaquina } from "../../src/contracts/ponte.ts";
 import type { UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { LeituraMemoria, NivelPressao, OrigemTrabalho } from "../../src/contracts/trabalho.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { ESPACO_FUNDO_MS } from "../../src/domain/memoria-mac.ts";
+import { definirDestinoDoLog } from "../../src/obs/log.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
 import { criarInterruptor } from "../../src/services/interruptor.ts";
 import type { Tx } from "../../src/shared/types.ts";
@@ -61,7 +63,7 @@ afterEach(async () => {
 
 const leitura = (processador: NivelPressao, memoria: NivelPressao = "verde"): LeituraMemoria => ({ nivel: memoria, totalMb: 800, porTurno: [], processador: { nivel: processador, carga: processador === "verde" ? 0.3 : processador === "amarela" ? 0.8 : 1.4 } });
 
-async function montar(uso?: UsoDoMac) {
+async function montar(uso?: UsoDoMac, o: { plataforma?: PlataformaMaquina; fundoLinuxSoVermelha?: boolean } = {}) {
   let relogio = Date.now();
   const vivos = criarTrabalhosVivos(() => relogio);
   const deps: DepsPonte = {
@@ -71,10 +73,11 @@ async function montar(uso?: UsoDoMac) {
     desfazerMemoria: (p, m) => vivos.desfazer(p, m),
     usoTrocadoEm: (p) => vivos.usoTrocadoEm(p),
     esquecerMaquina: (m) => vivos.esquecerMaquina(m),
+    ...(o.fundoLinuxSoVermelha ? { fundoLinuxSoVermelha: true } : {}),
   };
   const ponte = criarPonteInterna(db, deps);
   const machineId = randomUUID();
-  await ponte.conectar({ machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO } });
+  await ponte.conectar({ machineId, nome: "Mac", inventario: PRONTO, versaoContrato: 1, harnesses: { "claude-cli": PRONTO }, ...(o.plataforma ? { plataforma: o.plataforma } : {}) });
   const { agenteId, conversaId } = await escopado(async (trx) => {
     const d = depsSobreTrx(trx, PESSOA, { services });
     const c = (await executar(d, criarAgente, { dono: "pessoa", nome: `Rui ${randomUUID().slice(0, 4)}` })).data;
@@ -193,5 +196,30 @@ describeIntegracao("uso do Mac pela ponte (ADR-085, revisão do #209)", () => {
     expect(await m.puxar(leitura("verde", "vermelha"))).toBe(daPessoa);
     expect(await m.puxar({ ...leitura("verde"), disco: { livreMb: 8 * 1024, totalMb: 500 * 1024 } })).toBeNull();
     expect(await m.puxar(leitura("verde", "verde"))).toBe(rotina);
+  });
+
+  it("NOD-279 (C15): fundo_comecou traz a plataforma; com NOD_FUNDO_LINUX_SO_VERMELHA, a VM linux em amarela não segura a rotina e a vermelha segura", async () => {
+    const linhas: string[] = [];
+    definirDestinoDoLog((l) => linhas.push(l));
+    try {
+      const vm = await montar("equilibrado", { plataforma: "linux", fundoLinuxSoVermelha: true });
+      const rotina = await vm.tarefa("rotina", "Verificar o Slack");
+      expect(await vm.puxar(leitura("verde", "amarela"))).toBe(rotina);
+      const comecou = linhas.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "fundo_comecou" && l.machine_id === vm.machineId);
+      expect(comecou).toMatchObject({ plataforma: "linux", origem: "rotina" });
+      vm.avancar(ESPACO_FUNDO_MS + 1);
+      const outra = await vm.tarefa("rotina", "Verificar o e-mail");
+      expect(await vm.puxar(leitura("verde", "vermelha"))).toBeNull();
+      expect(await vm.puxar(leitura("verde", "verde"))).toBe(outra);
+
+      // O Mac sem plataforma anunciada é darwin: a amarela segura como antes, mesmo com a regra ligada.
+      const mac = await montar("equilibrado", { fundoLinuxSoVermelha: true });
+      const r = await mac.tarefa("rotina", "Rotina do Mac");
+      expect(await mac.puxar(leitura("verde", "amarela"))).toBeNull();
+      expect(await mac.puxar(leitura("verde", "verde"))).toBe(r);
+      expect(linhas.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.evento === "fundo_comecou" && l.machine_id === mac.machineId)).toMatchObject({ plataforma: "darwin" });
+    } finally {
+      definirDestinoDoLog(null);
+    }
   });
 });

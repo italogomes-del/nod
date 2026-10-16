@@ -34,6 +34,20 @@ export async function enfileirarRetomada(deps: Pick<Deps, "repos" | "agora">, r:
     if (juntada && (await deps.repos.turnos.contaminado(r.original.id))) await deps.repos.turnos.contaminar(juntada.id, deps.agora());
     if (juntada) return { turno: juntada, nova: false };
   }
+  // NOD-279 D8 (definido em 2026-10-15): a task que espera a cota já tem a volta na fila (assentar-turno, aposLimiteNoFundo);
+  // a aprovação que chega durante a espera se junta a ela e a acorda, em vez de abrir uma segunda retomada. A volta é achada
+  // pelo trabalho (a cadeia dela usa `retomaTurnoId ?? id`, a decisão usa o turno que perguntou) e travada como no
+  // assentamento. O portão da cota segue segurando enquanto o limite durar. Volta já 'despachando': o caminho de sempre.
+  const daCota = r.original.trabalhoId ? await deps.repos.turnos.voltaDaCotaNaFila(r.original.trabalhoId) : null;
+  if (daCota) {
+    await deps.repos.turnos.travarRetomadas(daCota.retomaTurnoId ?? daCota.id);
+    const juntada = await deps.repos.turnos.juntarEntrada(daCota.id, r.entradaTexto);
+    if (juntada) {
+      await deps.repos.turnos.anteciparEsperasDaCota(null, { turnoId: juntada.id });
+      if (await deps.repos.turnos.contaminado(r.original.id)) await deps.repos.turnos.contaminar(juntada.id, deps.agora());
+      return { turno: { ...juntada, acordarEm: null }, nova: false };
+    }
+  }
   // NOD-259: a retomada nova lista os pedidos do bot a colegas ainda sem resposta, de qualquer fio (a de uma rotina não via
   // os das outras janelas e pedia de novo). A que se junta a uma da fila não repete: a da fila já tem a lista.
   const pedidos = await notaPedidosAbertos(deps, r.original.agenteId, deps.agora());

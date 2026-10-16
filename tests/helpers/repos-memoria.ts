@@ -32,6 +32,8 @@ import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
+import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
+import { HARNESS_LEGADO } from "../../src/contracts/harness.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
 import type { EventoGravavel } from "../../src/repositories/events.repo.ts";
@@ -935,6 +937,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       };
     })(),
 
+    // definido em 2026-10-15 (NOD-277): a espera da cota é leitura SQL (esperas-da-cota.repo.ts); em memória, nenhuma.
+    esperasDaCota: {
+      async doTrabalhos() {
+        return new Map();
+      },
+      async livres() {
+        return [];
+      },
+    },
+
     esperas: {
       async criar(e) {
         if (b.esperas.some((x) => x.tenantId === escopo.tenantId && x.turnoId === e.turnoId)) return null;
@@ -1180,6 +1192,35 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async travarRetomadas() {
         // Em memória tudo roda em série: não há o que travar.
       },
+      async reescreverFundoDoBot(agenteId: string, para: { harness: NonNullable<Turno["harness"]>; modelo: string }) {
+        const todos = doTenant(b.turnos);
+        const raizDeFundo = (t: Turno): boolean => {
+          let atual: Turno | undefined = t;
+          for (let saltos = 0; atual && atual.origem === "retomada" && saltos < 50; saltos++) atual = todos.find((x) => x.id === atual?.retomaTurnoId);
+          return atual !== undefined && atual !== t && ["rotina", "delegacao", "peer"].includes(atual.origem);
+        };
+        const alvo = todos.filter((t) => t.ownerId === escopo.pessoaId && t.agenteId === agenteId && t.estado === "pendente" && t.origem !== "ligacao"
+          && (t.trabalhoId ?? null) === null && (["rotina", "delegacao", "peer"].includes(t.origem) || (t.origem === "retomada" && raizDeFundo(t))));
+        for (const t of alvo) {
+          t.harness = para.harness;
+          t.modelo = para.modelo;
+          b.contaDoTurno.delete(t.id);
+          if (t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)) t.acordarEm = null;
+        }
+        return alvo.length;
+      },
+      async anteciparEsperasDaCota(ia: string | null, opcoes: { turnoId?: string; agenteId?: string } = {}) {
+        const iaDe = (t: Turno): string | null => (t.harness ?? "auto") !== "auto" ? t.harness! : t.modelo === "auto" ? null : (iaDoModelo(t.modelo) ?? HARNESS_LEGADO);
+        const alvo = doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? null) !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)
+          && (opcoes.turnoId === undefined || t.id === opcoes.turnoId) && (opcoes.agenteId === undefined || t.agenteId === opcoes.agenteId)
+          && (ia === null || iaDe(t) === ia));
+        for (const t of alvo) t.acordarEm = null;
+        return alvo.map((t) => t.id);
+      },
+      async voltaDaCotaNaFila(trabalhoId: string) {
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.trabalhoId === trabalhoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? null) !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA))
+          .sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
+      },
       async retomadaNaFila(retomaTurnoId: string) {
         return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.retomaTurnoId === retomaTurnoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? 0) <= agora()).sort((x, y) => y.criadoEm - x.criadoEm)[0] ?? null;
       },
@@ -1193,7 +1234,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return despertares.get(id) ?? null;
       },
       async voltasMarcadas(retomaTurnoId: string) {
-        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null).length;
+        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null && !t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)).length;
       },
       async ultimasVoltas(retomaTurnoId: string, limite: number) {
         return doTenant(b.turnos)
@@ -1899,6 +1940,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).find((v) => v.id !== raizId && v.id !== exceto && cadeia.has(v.id) && (v.estado === "pendente" || v.estado === "despachando"))?.id ?? null;
       },
       async turnoAberto(rotinaId) {
+        return (await this.execucaoAberta(rotinaId))?.turnoId ?? null;
+      },
+      // definido em 2026-10-15 (pacote A3): a execução aberta com o instante da janela (a lista conta os horários pulados).
+      async execucaoAberta(rotinaId) {
         const abertas = doTenant(b.janelas)
           .filter((j) => j.rotinaId === rotinaId && j.turnoId !== null)
           .filter((j) => {
@@ -1911,7 +1956,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
               || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
           })
           .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
-        return abertas[0]?.turnoId ?? null;
+        const a = abertas[0];
+        return a?.turnoId ? { turnoId: a.turnoId, instanteAgendado: a.instanteAgendado } : null;
       },
     },
 

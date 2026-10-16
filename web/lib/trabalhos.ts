@@ -1,3 +1,4 @@
+import type { EsperaDaConta } from "../../src/contracts/cota.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../../src/contracts/maquina.ts";
 import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
@@ -160,6 +161,26 @@ export function temposDaTask(t: Pick<TrabalhoDto, "iniciadoEm" | "criadoEm" | "t
 }
 
 /**
+ * definido em 2026-10-15 (NOD-277, pacote A3): a task parada esperando a cota renovar (a retomada marcada pelo servidor,
+ * src/domain/espera-da-cota.ts). Só aberta e com a volta ainda no futuro — passada a hora, a linha volta ao de sempre.
+ */
+export function esperaDaContaDe(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "esperaDaConta">>, agora: number): EsperaDaConta | null {
+  const e = t.esperaDaConta ?? null;
+  return e && aberto(t) && e.voltaEm > agora ? e : null;
+}
+
+/**
+ * definido em 2026-10-15 (NOD-277): "esperando a cota do Claude · volta às 14:00"; com a conta conhecida, "esperando a conta
+ * 2 · volta às 14:00" (apelido padrão "Conta 2") ou "esperando a conta Trabalho · volta às 14:00" (apelido dado pela pessoa).
+ * O texto mora aqui, como o resto da linha: a web não importa o `redigir` do servidor (só `import type` de src/).
+ */
+export function textoDaEsperaDaConta(e: EsperaDaConta, agora: number): string {
+  const apelido = e.conta?.apelido.trim() ?? "";
+  const quem = !apelido ? `a cota do ${e.iaNome}` : /^conta\s/i.test(apelido) ? `a conta ${apelido.replace(/^conta\s+/i, "")}` : `a conta ${apelido}`;
+  return `esperando ${quem} · volta ${quandoVolta(e.voltaEm, agora)}`;
+}
+
+/**
  * O que o trabalho está fazendo, em poucas palavras: o último passo, quem segura o computador, quem ele espera, ou o
  * estado. Sem o tempo (quem desenha junta o tempo quando cabe).
  */
@@ -167,6 +188,8 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   if (t.esperandoComputadorDe) return `esperando o computador (em uso por: ${t.esperandoComputadorDe})`;
   const colega = esperandoColega(t);
   if (colega) return `esperando ${colega.nome}`;
+  const daConta = esperaDaContaDe(t, agora);
+  if (daConta) return textoDaEsperaDaConta(daConta, agora);
   // definido em 2026-10-12 (ADR-099 §7): a cota da IA segura a task (o servidor decide, a mesma regra do `reivindicar`); a
   // hora da volta fica na pílula do topo.
   if (t.esperaDaCota) return "esperando a cota da IA";

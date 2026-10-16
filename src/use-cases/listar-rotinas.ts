@@ -3,6 +3,7 @@ import type { Concessao } from "../contracts/concessao.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Repos } from "../repositories/tipos.ts";
 import { TIPOS_GATE_ROTINA } from "../contracts/pedido.ts";
+import { avisoDeJanelasPuladas, janelasPuladas } from "../domain/janelas-puladas.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
@@ -29,10 +30,22 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
       perguntaPendente = await perguntaQueParou(deps.repos, rotina);
     }
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}) });
+    const puladas = await puladasDe(deps, rotina);
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
+
+/**
+ * definido em 2026-10-15 (pacote A3): a rotina ativa com uma execução ainda aberta — o agendador pula as janelas seguintes
+ * (ADR-045). Conta os horários do cron desde a janela dela até agora; a partir de 3, a lista avisa. Pausada não avisa.
+ */
+async function puladasDe(deps: Parameters<typeof listarRotinas>[0], rotina: RotinaDto["rotina"]): Promise<number | null> {
+  if (rotina.estado !== "ativa" || rotina.excluidoEm !== null) return null;
+  const aberta = await deps.repos.rotinaJanelas.execucaoAberta(rotina.id);
+  if (!aberta) return null;
+  return avisoDeJanelasPuladas(janelasPuladas({ cron: rotina.cron, fusoIana: rotina.fusoIana, desde: aberta.instanteAgendado, agora: deps.agora() }));
+}
 
 /**
  * definido em 2026-10-15 (NOD-270): a rotina cuja última janela saiu 'bloqueada'/'aguardando_resposta' está parada por

@@ -30,7 +30,7 @@ const paraJanela = (l: Linha): JanelaRotina => ({
  * ganhou. Provado em tests/concurrency/rotina-janela-unique.test.ts com duas conexões.
  */
 export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
-  return {
+  const repo = {
     async reivindicar(p: { rotinaId: string; instanteAgendado: number; machineId: string; executor: Executor }): Promise<boolean> {
       const linhas = await conn`
         insert into rotina_janelas (tenant_id, owner_id, rotina_id, instante_agendado, executor, machine_id)
@@ -65,8 +65,16 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
      * (ADR-045: uma execução aberta por rotina). null = pode abrir outra.
      */
     async turnoAberto(rotinaId: string): Promise<string | null> {
-      const [l] = await conn<{ turno_id: string }[]>`
-        select j.turno_id from rotina_janelas j
+      return (await repo.execucaoAberta(rotinaId))?.turnoId ?? null;
+    },
+
+    /**
+     * definido em 2026-10-15 (pacote A3): a mesma execução aberta de `turnoAberto`, com o instante da janela dela — a lista
+     * de rotinas conta os horários pulados desde ali (src/domain/janelas-puladas.ts).
+     */
+    async execucaoAberta(rotinaId: string): Promise<{ turnoId: string; instanteAgendado: number } | null> {
+      const [l] = await conn<{ turno_id: string; instante_agendado: Date }[]>`
+        select j.turno_id, j.instante_agendado from rotina_janelas j
         join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
         where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
           and (t.estado in ('pendente', 'despachando')
@@ -82,7 +90,7 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
                 select r.id, c.n + 1 from c join turnos r on r.tenant_id = t.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
               ) select 1 from c join turnos v on v.tenant_id = t.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando'))))
         order by j.instante_agendado desc limit 1`;
-      return l?.turno_id ?? null;
+      return l ? { turnoId: l.turno_id, instanteAgendado: ms(l.instante_agendado) } : null;
     },
 
     /**
@@ -117,4 +125,5 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraJanela);
     },
   };
+  return repo;
 }

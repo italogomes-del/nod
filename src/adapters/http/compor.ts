@@ -423,6 +423,11 @@ export function comporApp(o: OpcoesCompor): App {
 
   // ADR-083: a última ferramenta de cada turno vivo e a memória dos Macs, em memória do processo.
   const trabalhosVivos = criarTrabalhosVivos(relogio);
+  /**
+   * NOD-279 (C15, definido em 2026-10-15): desligada por padrão; `NOD_FUNDO_LINUX_SO_VERMELHA=1` liga, depois da linha de
+   * base da VM, a regra em que a máquina linux só segura o fundo novo por memória ou processador em vermelha (memoria-mac.ts).
+   */
+  const fundoLinuxSoVermelha = env.NOD_FUNDO_LINUX_SO_VERMELHA === "1";
   const services: Services = {
     trabalhosVivos,
     // A tela fala por máquina (2026-10-09): o nome de cada máquina e se é um Mac. Com o servidor no Mac (ADR-092), a
@@ -434,6 +439,12 @@ export function comporApp(o: OpcoesCompor): App {
         const m = ponteHttp.maquina(escopo, id);
         return m ? { nome: m.nome, ehMac: m.plataforma === "darwin" } : null;
       },
+      // NOD-279 (C15): a plataforma de cada máquina para o portão da tela (a mesma regra do `puxar`).
+      plataforma(escopo, id) {
+        if (!compartilhado && id === machineId) return "darwin";
+        return ponteHttp.maquina(escopo, id)?.plataforma ?? null;
+      },
+      fundoLinuxSoVermelha,
       macDoServidor: compartilhado || !machineId ? null : machineId,
       // NOD-260 (G8): conectada = a ponte falou com ela há menos de 60 s (a regra do chip); o Mac do servidor sempre.
       conectada(escopo, id) {
@@ -567,6 +578,7 @@ export function comporApp(o: OpcoesCompor): App {
       barramento.publicar(pessoaId, "inventario.mudou", { motivo: "limite" });
     },
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
+    fundoLinuxSoVermelha,
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];

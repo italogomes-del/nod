@@ -86,6 +86,13 @@ export type ParadaDaRotina = { desde: EpochMs; naoRodaram: EpochMs[]; fusoIana: 
 export type BloqueioRotina = ParadaDaRotina & { motivo: Exclude<MotivoBloqueioRotina, "aguardando_resposta">; app: string; slug: string; decisaoId: string | null; rodaNaHora: boolean };
 
 /**
+ * definido em 2026-10-15 (pacote A3): no `RotinaDto`, quantos horários do cron passaram desde a janela da execução que
+ * ainda está aberta — cada um pulado pelo agendador (ADR-045, disparar-rotina.ts). Só vem na rotina ativa e a partir de
+ * AVISO_JANELAS_PULADAS (src/domain/janelas-puladas.ts); ausente = nada a avisar. Não se grava: é contado a cada leitura.
+ */
+export type JanelasPuladasDaRotina = { janelasPuladas?: number };
+
+/**
  * definido em 2026-10-15 (NOD-270): a última janela parou porque uma pergunta (ou aprovação) de uma execução anterior
  * espera a pessoa — a lista mostra "parada: pergunta sem resposta desde X" e o atalho ao balão. Ausente no DTO = não está
  * parada por isso (ou a rotina não é da pessoa).

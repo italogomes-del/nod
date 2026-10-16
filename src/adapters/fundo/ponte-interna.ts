@@ -104,6 +104,12 @@ export type DepsPonte = {
    * Ausente = sem carência (o modo local: lá o reinício é o nod fechado).
    */
   inicioDoProcesso?: number;
+  /**
+   * NOD-279 (C15, definido em 2026-10-15): `NOD_FUNDO_LINUX_SO_VERMELHA=1` (lida em compor.ts; desligada por padrão até a
+   * linha de base da VM). Ligada, a máquina `linux` só segura o fundo novo por memória ou processador em vermelha
+   * (`RegraDaPlataforma` em memoria-mac.ts). Ausente = a regra de antes em toda plataforma.
+   */
+  fundoLinuxSoVermelha?: boolean;
 };
 
 /** NOD-214: o que a máquina apresenta para o processo novo reconhecer um turno que ela continuou rodando. */
@@ -363,7 +369,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       }
       // #219 (emenda à ADR-085): o disco crítico segura TODO trabalho novo (`segurarNovo`), em qualquer uso; a memória
       // crítica segura o segundo plano sem a espera máxima (`fundoSemPrazo`); o resto é o de antes (só o segundo plano).
-      const portao = portaoDoMac(uso, pressao);
+      // NOD-279 (C15): a máquina sem plataforma anunciada é o app do Mac anterior ao campo (ADR-090): darwin.
+      const plataforma = maquina.plataforma ?? "darwin";
+      const portao = portaoDoMac(uso, pressao, { plataforma, linuxSoVermelha: deps.fundoLinuxSoVermelha === true });
       const segurarFundo = portao.fundo !== null;
       const segurarNovo = portao.tudoNovo !== null;
       const fundoSemPrazo = portao.semPrazo;
@@ -372,7 +380,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const chaveSegurando = `${maquina.machineId} ${pessoaId}`;
       if ((segurando.get(chaveSegurando) ?? "") !== situacao) {
         segurando.set(chaveSegurando, situacao);
-        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, uso_cpu: pressao?.uso ?? null, carga: pressao?.carga ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
+        log("info", situacao ? "fundo_segurado" : "fundo_solto", { pessoa_id: pessoaId, machine_id: maquina.machineId, plataforma, uso, motivo: portao.fundo, tudo_novo: segurarNovo, sem_prazo: fundoSemPrazo, memoria: pressao?.memoria ?? null, processador: pressao?.processador ?? null, uso_cpu: pressao?.uso ?? null, carga: pressao?.carga ?? null, disco_livre_mb: pressao?.disco?.livreMb ?? null });
       }
       const antes = agora();
       // definido em 2026-10-05 (NOD-175): o token nasce dentro da tx (emitir-plano-turno). Se algo falha depois do
@@ -408,7 +416,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
             const volta = r.data.turno.acordarEm != null;
             if (w && (volta || ((w.origem === "rotina" || w.origem === "colega") && w.pessoaEsperando !== true && (w.iniciadoEm === null || w.iniciadoEm >= antes)))) {
               ultimoFundo.set(maquina.machineId, agora());
-              log("info", "fundo_comecou", { pessoa_id: pessoaId, machine_id: maquina.machineId, trabalho_id: w.id, origem: w.origem, volta, espera_ms: agora() - (volta ? r.data.turno.acordarEm! : w.criadoEm), segurando: segurarFundo });
+              log("info", "fundo_comecou", { pessoa_id: pessoaId, machine_id: maquina.machineId, plataforma, trabalho_id: w.id, origem: w.origem, volta, espera_ms: agora() - (volta ? r.data.turno.acordarEm! : w.criadoEm), segurando: segurarFundo });
             }
           }
           return r.data.plano;

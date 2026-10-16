@@ -222,6 +222,35 @@ describe("portão do Mac: memória normal/alerta/crítica e disco folgado/alerta
     expect(portaoDoMac("pouco", { memoria: "verde", processador: "amarela", discoNivel: null })).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
   });
 
+  describe("NOD-279 (C15): a plataforma da máquina (NOD_FUNDO_LINUX_SO_VERMELHA)", () => {
+    const LIGADA = { linuxSoVermelha: true };
+    it("linux amarela não segura; vermelha segura; darwin amarela segura", () => {
+      const linux = { ...LIGADA, plataforma: "linux" as const };
+      for (const uso of SEGURAM) {
+        expect(portaoDoMac(uso, { memoria: "amarela", processador: "amarela", discoNivel: folgado }, linux)).toEqual(ABERTO);
+        expect(portaoDoMac(uso, { memoria: "vermelha", processador: "verde", discoNivel: folgado }, linux)).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: true });
+        expect(portaoDoMac(uso, { memoria: "amarela", processador: "verde", discoNivel: folgado }, { ...LIGADA, plataforma: "darwin" })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: false });
+        // Máquina sem plataforma = darwin (o app do Mac anterior ao campo).
+        expect(portaoDoMac(uso, { memoria: "amarela", processador: "verde", discoNivel: folgado }, { ...LIGADA, plataforma: null })).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: false });
+        // O disco segue como hoje.
+        expect(portaoDoMac(uso, { memoria: "verde", processador: "verde", discoNivel: alerta }, linux)).toEqual({ fundo: "disco", tudoNovo: null, semPrazo: false });
+      }
+      expect(deveSegurar("pouco", "verde", "amarela", linux)).toBe(false);
+      expect(deveSegurar("pouco", "verde", "vermelha", linux)).toBe(true);
+      expect(portaoDoMac("pouco", { memoria: "verde", processador: "vermelha", discoNivel: folgado }, linux)).toEqual({ fundo: "processador", tudoNovo: null, semPrazo: false });
+      // O processador continua sem segurar no equilibrado (ADR-097), nem em vermelha.
+      expect(deveSegurar("equilibrado", "verde", "vermelha", linux)).toBe(false);
+      expect(deveSegurar("livre", "vermelha", "vermelha", linux)).toBe(false);
+    });
+
+    it("flag desligada: linux amarela segura como hoje", () => {
+      for (const regra of [{ plataforma: "linux" as const }, { plataforma: "linux" as const, linuxSoVermelha: false }]) {
+        for (const uso of SEGURAM) expect(portaoDoMac(uso, { memoria: "amarela", processador: "verde", discoNivel: folgado }, regra)).toEqual({ fundo: "memoria", tudoNovo: null, semPrazo: false });
+        expect(deveSegurar("pouco", "verde", "amarela", regra)).toBe(true);
+      }
+    });
+  });
+
   it("sem medição: sem leitura do Mac, ou sem disco (app anterior, fora do macOS), o disco não segura nada", () => {
     for (const uso of [...SEGURAM, "livre" as const]) expect(portaoDoMac(uso, null)).toEqual(ABERTO);
     expect(portaoDoMac("equilibrado", { memoria: "verde", processador: null, discoNivel: null })).toEqual(ABERTO);
