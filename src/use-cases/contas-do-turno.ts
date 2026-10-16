@@ -1,6 +1,7 @@
 import type { ContaDoPlano, ContasNoLimite, IaComConta, ModoDasContas } from "../contracts/contas-ia.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { IdHarness } from "../contracts/harness.ts";
+import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { contaDoTurno, decidirLimiteDaConta, fraseDoLimiteDaConta, type ContaDaPessoa, type ContaDoTurno, type DecisaoDoLimiteDaConta, type VinculoDaConta } from "../domain/contas-da-pessoa.ts";
 import { horaDaFrase, quandoDaFrase } from "../domain/erro-fornecedor.ts";
@@ -73,6 +74,34 @@ export function contasDaNota(de: ContaDaPessoa, d: DecisaoDoLimiteDaConta, maqui
   return { de: { id: de.id, apelido: de.apelido, ia: de.ia }, livres: d.tipo === "perguntar" ? d.livres : [], maquina, voltaEm };
 }
 
+/**
+ * A última nota de limite da conversa (`mensagens` em ordem de criação) e se ela segue ABERTA: depois dela não veio fala
+ * do bot nem um "Seguindo com" (`conta_escolhida`, `conta_seguiu`). Uma regra só (NOD-268) para o "Seguir com" não refazer
+ * duas vezes e para o despacho não escrever a mesma nota de novo.
+ */
+export function notaDeLimite(mensagens: readonly Mensagem[]): { nota: Mensagem; pos: number; aberta: boolean } | null {
+  const pos = mensagens.map((m) => m.payload?.kind === "limite_do_plano" && m.turnoId !== null).lastIndexOf(true);
+  if (pos < 0) return null;
+  const respondida = mensagens.slice(pos + 1).some((m) => m.autoria.autor_tipo === "agente" || m.payload?.kind === "conta_escolhida" || m.payload?.kind === "conta_seguiu");
+  return { nota: mensagens[pos]!, pos, aberta: !respondida };
+}
+
+/** O `voltaEm` que a nota grava (o mesmo cálculo de criarNotaDeContas): null quando já passou ou não há hora. */
+export function voltaDaNota(decisao: DecisaoDoLimiteDaConta, voltaEm: number | null, agora: number): number | null {
+  const v = decisao.tipo === "todas_no_limite" ? decisao.voltaEm : voltaEm;
+  return v !== null && v > agora ? v : null;
+}
+
+/**
+ * NOD-268 (regressão de 15/10: dez despachos, dez notas iguais): a conversa já tem a nota aberta da MESMA conta e do MESMO
+ * `voltaEm`? Então outra nota só repetiria a primeira.
+ */
+export async function notaIgualAberta(deps: Pick<Deps, "repos">, p: { conversaId: string; contaId: string; voltaEm: number | null }): Promise<boolean> {
+  const n = notaDeLimite(await deps.repos.mensagens.listarDaConversa(p.conversaId, 30));
+  if (!n?.aberta || n.nota.payload?.kind !== "limite_do_plano") return false;
+  return n.nota.payload.contas?.de.id === p.contaId && (n.nota.payload.voltaEm ?? null) === p.voltaEm;
+}
+
 /** A nota da conversa quando nenhuma conta serve (no despacho ou no assentamento): a frase pelo apelido e os botões. */
 export async function criarNotaDeContas(deps: Pick<Deps, "repos" | "escopo">, p: {
   turno: Turno;
@@ -84,6 +113,7 @@ export async function criarNotaDeContas(deps: Pick<Deps, "repos" | "escopo">, p:
   voltaEm: number | null;
 }): Promise<RuntimeEvent[]> {
   const voltaEm = p.decisao.tipo === "todas_no_limite" ? p.decisao.voltaEm : p.voltaEm;
+  const naNota = voltaDaNota(p.decisao, p.voltaEm, p.agora);
   const texto = fraseDoLimiteDaConta(p.de, p.decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, p.agora), quandoVolta: (t) => quandoDaFrase(t, p.agora), voltaEm });
   const aviso = await deps.repos.mensagens.criar({
     conversaId: p.turno.conversaId,
@@ -91,7 +121,7 @@ export async function criarNotaDeContas(deps: Pick<Deps, "repos" | "escopo">, p:
     autoria: p.autoria,
     kind: "sistema",
     texto,
-    payload: { kind: "limite_do_plano", harness: p.de.ia, voltaEm: voltaEm !== null && voltaEm > p.agora ? voltaEm : null, contas: contasDaNota(p.de, p.decisao, p.maquina, voltaEm) },
+    payload: { kind: "limite_do_plano", harness: p.de.ia, voltaEm: naNota, contas: contasDaNota(p.de, p.decisao, p.maquina, voltaEm) },
     confianca: "confiavel",
   });
   return aviso ? [evento(deps.escopo, { kind: "mensagem_criada", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } })] : [];

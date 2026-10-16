@@ -32,6 +32,10 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
    (`CLAUDE_CONFIG_DIR`/`CODEX_HOME`). As regras da ADR-101 continuam, por provedor: "Perguntar antes" é o padrão entre
    contas do mesmo provedor; passar de um provedor para o outro continua automático; conta corporativa só entra na troca
    automática marcada. O limite é da conta (vale em todas as máquinas).
+   - **Emenda NOD-268 (2026-10-15):** a conta escolhida precisa estar na máquina que roda o bot. Com alvo, a conta
+     tem que estar pronta nele; sem alvo, em qualquer máquina não revogada. Sem conta na máquina, a nota das contas é
+     escrita uma vez (dedup pela nota aberta) e a fala espera com `acordar_em` na volta da conta, em vez de repetir a
+     nota a cada despacho. Tasks de fundo ficam como estavam.
 6. **Emenda à ADR-101, item 3:** o **apelido** e o **plano** passam a morar no servidor (o apelido é um rótulo que a
    pessoa escreve; o plano decide o selo e a regra da conta corporativa). **E-mail e organização continuam só nas
    máquinas** e aparecem na tela só dentro do app do Mac que conhece a conta. A conversa cita a conta pelo apelido.

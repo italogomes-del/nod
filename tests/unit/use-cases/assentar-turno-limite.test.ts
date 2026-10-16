@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
@@ -36,9 +36,9 @@ async function cenario(o: { pedido?: unknown; origem?: "conversa" | "rotina"; ta
   const maquina = randomUUID();
   await deps.repos.turnos.reivindicar({ machineId: maquina, agora: T0 });
   const antes = banco.mensagens.length;
-  const entregar = (resultado: ResultadoTurno, harness: IdHarness, prontosDaPessoa: IdHarness[] = ["claude-cli", "codex-cli"]) =>
-    executar(deps, assentarTurno, { turnoId: t!.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, executor: "local", harness, prontosDaPessoa });
-  return { deps, banco, turnoId: t!.id, trabalhoId, antes, entregar };
+  const entregar = (resultado: ResultadoTurno, harness: IdHarness, prontosDaPessoa: IdHarness[] = ["claude-cli", "codex-cli"], prontosPorMaquina?: Record<string, IdHarness[]>) =>
+    executar(deps, assentarTurno, { turnoId: t!.id, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, executor: "local", harness, prontosDaPessoa, ...(prontosPorMaquina ? { prontosPorMaquina } : {}) });
+  return { deps, banco, botId: bot.agente.id, maquina, turnoId: t!.id, trabalhoId, antes, entregar, turno: () => banco.turnos.find((x) => x.id === t!.id)! };
 }
 
 describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
@@ -52,7 +52,7 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     expect(novas[0]?.payload).toEqual({ kind: "ia_trocada", de: "claude-cli", para: "codex-cli", causa: "limite", renovaEm: T0 + DUAS_HORAS });
     expect(novas[0]?.texto).toMatch(/^O Claude Code chegou ao limite da assinatura · respondendo pelo Codex\. Ele volta a ser usado (às|em \d\d\/\d\d às) \d\d:\d\d\.$/);
     const repetido = c.banco.turnos.filter((t) => t.id !== c.turnoId);
-    expect(repetido).toMatchObject([{ estado: "pendente", origem: "conversa", entradaTexto: "oi", harness: "auto", modelo: "auto", reenvios: 1 }]);
+    expect(repetido).toMatchObject([{ estado: "pendente", origem: "conversa", entradaTexto: "oi", harness: "codex-cli", modelo: "auto", reenvios: 1 }]);
     expect(r.events.map((e) => e.kind)).toEqual(["turno_interrompido", "mensagem_criada", "turno_criado"]);
     expect(r.events[0]?.dados).toMatchObject({ motivo_falha: "limite_do_plano", ia_no_limite: "claude-cli", renova_em: T0 + DUAS_HORAS });
   });
@@ -118,5 +118,87 @@ describe("assentarTurno: a IA chegou ao limite da assinatura", () => {
     await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli"]);
     expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
     expect(c.banco.turnos).toHaveLength(1);
+  });
+
+  describe("NOD-268: o teto de reenvios e a IA da máquina do bot", () => {
+    const ESPERA = /^O Claude Code está no limite da assinatura\. Sua mensagem espera e volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d\.$/;
+
+    it("o reenvio sai FIXO na IA escolhida (não `auto`): outra máquina não o roda de novo na IA parada", async () => {
+      const c = await cenario();
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+      const repetido = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(repetido).toHaveLength(1);
+      expect(repetido[0]?.harness).toBe("codex-cli");
+    });
+
+    it("no teto (a fala já foi reenviada uma vez): não troca de novo — espera a hora do limite com UMA linha", async () => {
+      const c = await cenario();
+      c.turno().reenvios = 1;
+      const r = await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+      const novas = c.banco.mensagens.slice(c.antes);
+      expect(novas).toHaveLength(1);
+      expect(novas[0]).toMatchObject({ kind: "sistema", payload: null });
+      expect(novas[0]?.texto).toMatch(ESPERA);
+      const adiado = c.banco.turnos.filter((t) => t.id !== c.turnoId);
+      expect(adiado).toMatchObject([{ estado: "pendente", harness: "auto", reenvios: 2, acordarEm: T0 + DUAS_HORAS, mensagemOrigemId: c.turno().mensagemOrigemId }]);
+      expect(r.events.map((e) => e.kind)).toEqual(["turno_interrompido", "turno_criado", "mensagem_criada"]);
+    });
+
+    it("a fala que já esperou a hora e bate de novo no limite não espera outra vez: o aviso de sempre, nada na fila", async () => {
+      const c = await cenario();
+      c.turno().reenvios = 2;
+      c.turno().acordarEm = T0 - 1;
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+      expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind)).toEqual(["limite_do_plano"]);
+      expect(c.banco.turnos).toHaveLength(1);
+    });
+
+    it("bot preso a uma máquina só com o Claude e o Codex pronto noutra: não troca; espera com a linha que nomeia a máquina", async () => {
+      const c = await cenario();
+      const alvo = await c.deps.repos.maquinaTokens.criar({ nome: "Mac só com o Claude", prefixo: "aa11", hash: randomBytes(32) });
+      await c.deps.repos.agentes.definirMaquina([c.botId], alvo!.id);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"], { [alvo!.id]: ["claude-cli"] });
+      const novas = c.banco.mensagens.slice(c.antes);
+      expect(novas.map((m) => m.texto)).toHaveLength(1);
+      expect(novas[0]?.texto).toMatch(/^O Claude Code está no limite da assinatura\. O Codex está pronto noutra máquina, mas este bot roda em Mac só com o Claude\. Sua mensagem volta sozinha (às|em \d\d\/\d\d às) \d\d:\d\d\.$/);
+      expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", harness: "auto", acordarEm: T0 + DUAS_HORAS }]);
+    });
+
+    it("bot preso a uma máquina que tem o Codex: troca para ele, como sempre", async () => {
+      const c = await cenario();
+      const alvo = await c.deps.repos.maquinaTokens.criar({ nome: "Mac com as duas", prefixo: "bb22", hash: randomBytes(32) });
+      await c.deps.repos.preferencias.definirMaquinaPadrao(alvo!.id);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"], { [alvo!.id]: ["claude-cli", "codex-cli"] });
+      expect(c.banco.mensagens.slice(c.antes)[0]?.payload).toMatchObject({ kind: "ia_trocada", para: "codex-cli" });
+    });
+
+    it("revisão do PR #319: rodou noutra máquina 'desta vez' (com o Codex) — vale a do bot, que só tem o Claude: espera", async () => {
+      const c = await cenario();
+      const alvo = await c.deps.repos.maquinaTokens.criar({ nome: "Mac só com o Claude", prefixo: "dd44", hash: randomBytes(32) });
+      await c.deps.repos.agentes.definirMaquina([c.botId], alvo!.id);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"], { [c.maquina]: ["claude-cli", "codex-cli"], [alvo!.id]: ["claude-cli"] });
+      expect(c.banco.mensagens.slice(c.antes).map((m) => m.payload?.kind ?? null)).toEqual([null]);
+      expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ estado: "pendente", harness: "auto", acordarEm: T0 + DUAS_HORAS }]);
+    });
+
+    it("revisão do PR #319: a máquina do bot foi revogada — vale o padrão da pessoa, e o Codex dele recebe a troca", async () => {
+      const c = await cenario();
+      const revogada = await c.deps.repos.maquinaTokens.criar({ nome: "Mac antigo", prefixo: "ee55", hash: randomBytes(32) });
+      const padrao = await c.deps.repos.maquinaTokens.criar({ nome: "VM", prefixo: "ff66", hash: randomBytes(32) });
+      await c.deps.repos.agentes.definirMaquina([c.botId], revogada!.id);
+      await c.deps.repos.preferencias.definirMaquinaPadrao(padrao!.id);
+      await c.deps.repos.maquinaTokens.revogar(revogada!.id, T0);
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli", ["claude-cli", "codex-cli"], { [padrao!.id]: ["claude-cli", "codex-cli"] });
+      expect(c.banco.mensagens.slice(c.antes)[0]?.payload).toMatchObject({ kind: "ia_trocada", para: "codex-cli" });
+      expect(c.banco.turnos.filter((t) => t.id !== c.turnoId)).toMatchObject([{ harness: "codex-cli", acordarEm: null }]);
+    });
+
+    it("Parar pedido: nada espera nem repete", async () => {
+      const c = await cenario();
+      c.turno().reenvios = 1;
+      c.turno().pararSolicitadoEm = T0;
+      await c.entregar(limiteDoClaude(T0 + DUAS_HORAS), "claude-cli");
+      expect(c.banco.turnos).toHaveLength(1);
+    });
   });
 });

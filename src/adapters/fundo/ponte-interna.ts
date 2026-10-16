@@ -519,6 +519,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const outraIa = e.resultado.causaSemIa && harnessDoTurno ? reprovarHarness(e.machineId, harnessDoTurno, e.resultado.causaSemIa) : null;
       // 0068: as IAs prontas da pessoa (todas as máquinas vivas), para o limite repetir o turno na próxima da ordem.
       const prontosDaPessoa = (Object.entries(harnessesDaPessoa(escopo.pessoaId)) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id);
+      // NOD-268: as prontas de cada máquina conectada — com o bot preso a uma, a troca só vai para uma IA dela.
+      const prontosPorMaquina = Object.fromEntries([...maquinas.values()].map((m) => [m.machineId, (Object.entries(m.harnesses ?? {}) as [IdHarness, Inventario | undefined][]).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)]));
       let limiteMudou = false;
       // Revisão do épico (S20, 2026-10-08): o assentar é repetido quando o Postgres o escolhe como vítima de um impasse
       // (40P01) ou de serialização (40001) — a transação inteira volta, inclusive o registro da entrega (idempotência
@@ -526,7 +528,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
+        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
