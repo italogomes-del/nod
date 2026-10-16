@@ -6,10 +6,12 @@ import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
+import { blocoPedidosAbertos, type PedidoAbertoNoPrompt } from "../domain/triagem.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
+import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
 import { preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -45,7 +47,9 @@ export type SaidaDisparo =
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
  * limites, política sem dado). Texto do SERVIDOR, não do modelo: só o que a pessoa confirmou.
  */
-export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): string {
+export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number, pedidosAbertos: readonly PedidoAbertoNoPrompt[] = []): string {
+  // NOD-259: cada janela é um fio novo e não via os pedidos que as anteriores fizeram a colegas — e pedia de novo.
+  const bloco = blocoPedidosAbertos(pedidosAbertos, instanteAgendado, rotina.fusoIana);
   return [
     `Execução agendada da rotina "${resumoCron(rotina.cron, rotina.fusoIana)}" em ${carimbo(instanteAgendado, rotina.fusoIana)} (${rotina.fusoIana}).`,
     `Instrução: ${rotina.instrucao}`,
@@ -53,6 +57,7 @@ export function montarEntradaRotina(rotina: Rotina, instanteAgendado: number): s
     `Entregável: ${rotina.entregavel}`,
     `Limites de aprovação: ${rotina.limitesAprovacao}`,
     `Se não houver dado: ${rotina.politicaSemDado}`,
+    ...(bloco ? ["", bloco] : []),
   ].join("\n");
 }
 
@@ -158,7 +163,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
     origem: "rotina",
     prazoEm: agora + PRAZO_DECISAO_MS,
     profundidade: 0,
-    entradaTexto: montarEntradaRotina(rotina, instanteAgendado),
+    entradaTexto: montarEntradaRotina(rotina, instanteAgendado, await pedidosAbertosDoBot(deps, rotina.agenteId, agora)),
     // revisto em 2026-10-01 (ADR-066): a entrada da rotina é confiável — é a instrução que a pessoa confirmou. Antes
     // ela nascia não confiável quando a FONTE citava um app de fora (GitHub, Gmail), e o catálogo perdia a escrita:
     // 1.040 de 1.130 turnos de rotina saíram assim até 30/09. A marca agora vem do que o bot lê (chamar-ferramenta.ts).

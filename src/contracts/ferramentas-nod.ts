@@ -9,9 +9,9 @@ import { FERRAMENTAS_TRABALHO, type ContratoFerramentasTrabalho } from "./ferram
 import { FERRAMENTAS_FRENTE, type ContratoFerramentasFrente } from "./ferramentas-frente.ts";
 import { FERRAMENTAS_DO_NOD, type ContratoFerramentasDoNod } from "./ferramentas-do-nod.ts";
 import { FERRAMENTAS_CRIAR_BOTS, type ContratoFerramentasCriarBots } from "./ferramentas-criar-bots.ts";
+import { FERRAMENTAS_RESPONDER_PEDIDO, type ContratoFerramentasResponderPedido } from "./ferramentas-responder-pedido.ts";
 import { SCHEMA_PEDIR_A_PESSOA, type ArgsPedirAPessoa } from "./pedido.ts";
 import type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsListarRotinas, ArgsPausarRotina, ArgsReativarRotina, ResultadoAlternarRotina, ResultadoCriarRotina, ResultadoListarRotinas, ResultadoPropostaRotina } from "./ferramentas-rotina.ts";
-
 import type { JsonSchema } from "./json-schema.ts";
 export type { JsonSchema } from "./json-schema.ts";
 export type { ArgsPedirAPessoa } from "./pedido.ts";
@@ -26,7 +26,7 @@ export type { ArgsAtualizarRotina, ArgsCriarRotina, ArgsExcluirRotina, ArgsLista
  * ferramentas-perfil.ts pelo mesmo gatilho; publicar_artefato/ler_artefato também em 2026-09-28, ADR-051,
  * em ferramentas-artefato.ts; anotar/concluir/descartar_pendencia em 2026-09-30, ADR-064, em
  * ferramentas-pendencia.ts; gerir_bots, ver_apps_conectados e registrar_relato, só do Nod, em 2026-10-07, ADR-081/082,
- * em ferramentas-do-nod.ts; criar_bots, dos bots comuns, em 2026-10-13, NOD-210/ADR-104, em ferramentas-criar-bots.ts).
+ * em ferramentas-do-nod.ts; criar_bots, NOD-210/ADR-104, e responder_pedido, NOD-262, nos arquivos com o nome delas).
  * Lista FECHADA: cada nome tem um case em chamar-ferramenta.ts (tests/conformidade/capabilities-consumidas, L5) e uma entrada em
  * UseCasesNod (servicos.ts). O CLI as vê como mcp__nod__<nome>. Ferramenta de conector é `${slug}__${tool}` e não mora aqui.
  */
@@ -38,7 +38,7 @@ export const FERRAMENTAS_NOD = {
   ...FERRAMENTAS_LIGACAO,
   ...FERRAMENTAS_TRABALHO,
   ...FERRAMENTAS_FRENTE,
-  ...FERRAMENTAS_DO_NOD, ...FERRAMENTAS_CRIAR_BOTS,
+  ...FERRAMENTAS_DO_NOD, ...FERRAMENTAS_CRIAR_BOTS, ...FERRAMENTAS_RESPONDER_PEDIDO,
   lembrar: {
     type: "object",
     description: "Guarda uma memória deste agente (preferência, fato ou resumo). A memória não substitui fonte autoritativa.",
@@ -151,7 +151,7 @@ export const NOMES_FERRAMENTAS_NOD = [
   "pedir_a_pessoa", "passar", "encaminhar", "sem_novidade", "pedir_a_bot", "ver_colegas", "publicar_artefato", "ler_artefato",
   "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "iniciar_tarefa", "desligar",
   "anotar_entrevista", "concluir_entrevista", "propor_bot", "abrir_task", "mandar_para_task",
-  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as", "esperar_comando", "abrir_frentes", "mandar_para_frente", "devolver_resumo", "criar_bots",
+  "gerir_bots", "ver_apps_conectados", "registrar_relato", "me_chame_as", "esperar_comando", "abrir_frentes", "mandar_para_frente", "devolver_resumo", "criar_bots", "responder_pedido",
 ] as const satisfies readonly NomeFerramentaNod[];
 
 export type ArgsLembrar = { tipo: "preferencia" | "fato" | "resumo"; texto: string };
@@ -176,10 +176,10 @@ export type ResultadoPedirAprovacao =
   | { estado: "recusada"; erros: string[]; instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" };
 export type ResultadoPedirAPessoa = { estado: "pendente"; decisao_id: string; instrucao: "encerre o turno; a resposta retoma depois" };
 export type ResultadoOk = { ok: true };
-export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular"; instrucao: string }; // ADR-099 (I7 revista): triagem do dono ou espera circular
+export type ResultadoPedirABot = { ok: true; tarefa_id: string; instrucao: string; livres: { id: string; nome: string }[] } | { ok: false; erro: "espera_circular" | "ja_pedido"; instrucao: string }; // ADR-099 (I7 revista): triagem do dono ou espera circular; NOD-259: ja_pedido
 
 /** Args ↔ resultado por nome: contrato entre proxy, chamar-ferramenta e UseCasesNod. */
-export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & {
+export type ContratoFerramentaNod = ContratoFerramentasArtefato & ContratoFerramentasPendencia & ContratoFerramentasLigacao & ContratoFerramentasTrabalho & ContratoFerramentasFrente & ContratoFerramentasDoNod & ContratoFerramentasCriarBots & ContratoFerramentasResponderPedido & {
   lembrar: { args: ArgsLembrar; resultado: ResultadoLembrar };
   atualizar_perfil: { args: ArgsAtualizarPerfil; resultado: ResultadoAtualizarPerfil };
   pedir_acesso: { args: ArgsPedirAcesso; resultado: ResultadoPedirAcesso };

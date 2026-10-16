@@ -159,7 +159,7 @@ export interface UseCasesNod<Deps> {
   gerirBots: CasoNod<Deps, "gerir_bots">;
   verAppsConectados: CasoNod<Deps, "ver_apps_conectados">;
   registrarRelatoDoNod: CasoNod<Deps, "registrar_relato">;
-  criarBots: CasoNod<Deps, "criar_bots">;
+  criarBots: CasoNod<Deps, "criar_bots">; responderPedido: CasoNod<Deps, "responder_pedido">;
 }
 
 /** Mapa nome da ferramenta → chave em UseCasesNod (o despacho é por tabela, não por if). */
@@ -195,5 +195,5 @@ export const USE_CASE_POR_FERRAMENTA = {
   gerir_bots: "gerirBots",
   ver_apps_conectados: "verAppsConectados",
   registrar_relato: "registrarRelatoDoNod",
-  criar_bots: "criarBots",
+  criar_bots: "criarBots", responder_pedido: "responderPedido",
 } as const satisfies Record<NomeFerramentaNod, keyof UseCasesNod<unknown>>;

@@ -29,6 +29,7 @@ import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts"
 import type { LinhaTrilha } from "../../src/db/schema/trilha.ts";
 import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
+import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
 import type { ConectorGuardado } from "../../src/repositories/conectores.repo.ts";
@@ -1366,11 +1367,25 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
         return totais.length === 0 ? null : Math.max(...totais);
       },
-      async interromper(id, motivo) {
+      async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));
         if (!t) return null;
+        // NOD-241: a guarda do varredor, como o UPDATE do repo real (o lease renovado no meio não é interrompido).
+        if (o.leaseVencidoEm !== undefined && t.leaseAte !== null && t.leaseAte >= o.leaseVencidoEm) return null;
         t.estado = "interrompido";
         t.motivoInterrupcao = motivo;
+        t.leaseAte = null;
+        return t;
+      },
+      async delegacoesPendentesDoAgente(agenteId, limite = 20) {
+        return doTenant(b.turnos).filter((t) => t.agenteId === agenteId && t.origem === "delegacao" && t.estado === "pendente").sort((x, y) => x.criadoEm - y.criadoEm || x.id.localeCompare(y.id)).slice(0, limite);
+      },
+      async absorverDelegacao(id, porTurnoId) {
+        const t = doTenant(b.turnos).find((x) => x.id === id && x.origem === "delegacao" && x.estado === "pendente");
+        if (!t) return null;
+        t.estado = "interrompido";
+        t.motivoInterrupcao = "absorvido";
+        t.absorvidoPor = porTurnoId;
         t.leaseAte = null;
         return t;
       },
@@ -2668,14 +2683,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     // (tests/integration/fila-triagem.test.ts, tests/concurrency/pedidos-cruzados.test.ts); aqui, o mínimo para a regra.
     pedidosDeColega: {
       async travar() {},
-      async abertos(desde: number) {
+      async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
         const ms = doTenant(b.mensagens);
         const fechado = (id: unknown) => typeof id === "string" && doTenant(b.trabalhos).some((t) => t.id === id && ["terminado", "parado", "falhou"].includes(t.estado));
         const handoffs = ms.flatMap((m) => (m.payload?.kind === "handoff" && m.payload.tarefaId && m.criadoEm >= desde && !fechado(m.payload.trabalhoId)
           && !ms.some((r) => r.conversaId === m.conversaId && r.payload?.kind === "peer_ask" && r.payload.tarefaId === (m.payload?.kind === "handoff" ? m.payload.tarefaId : null))
-          ? [{ de: m.payload.de, para: m.payload.para }] : []));
-        const frentes = doTenant(b.trabalhos).filter((t) => t.pedidoPorAgenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado)).map((t) => ({ de: t.pedidoPorAgenteId as string, para: t.agenteId }));
-        return [...handoffs, ...frentes];
+          ? [{ de: m.payload.de, para: m.payload.para, tarefaId: m.payload.tarefaId, criadoEm: m.criadoEm, texto: m.payload.motivo }] : []));
+        const frentes = doTenant(b.trabalhos)
+          .filter((t) => t.pedidoPorAgenteId && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(t.estado))
+          .map((t) => ({ de: t.pedidoPorAgenteId as string, para: t.agenteId, tarefaId: null, criadoEm: t.criadoEm, texto: null }));
+        return [...handoffs, ...frentes].filter((p) => filtro.de === undefined || p.de === filtro.de);
       },
       async livres(ids: readonly string[], em: number) {
         return ids.filter((id) => !doTenant(b.turnos).some((t) => t.agenteId === id && (t.estado === "despachando" || (t.estado === "pendente" && (t.acordarEm == null || t.acordarEm <= em)))));

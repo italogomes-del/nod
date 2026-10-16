@@ -4,7 +4,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho, OrigemTrabalho, Trabalho } from "../contracts/trabalho.ts";
 import type { EstadoTurno } from "../contracts/turno.ts";
-import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { FatosLimpeza } from "../domain/limpeza-das-tasks.ts";
 import type { FatosTrabalho } from "../domain/trabalho.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
@@ -486,12 +486,12 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
       }[]>`
         select h.payload->>'tarefaId' as tarefa_id, c.id as colega_id, c.estado as colega_estado,
-          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.lease_ate, u.criado_em) as queda_em,
+          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = c.tenant_id and q.trabalho_id = c.id and q.estado = 'interrompido'
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = c.tenant_id and v.owner_id = c.owner_id and u.id is not null
-            and v.criado_em > coalesce(u.lease_ate, u.criado_em)
+            and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal,
           f.texto as texto_final, f.turno_id as turno_texto
         from mensagens h
@@ -499,7 +499,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         left join turnos tp on tp.tenant_id = h.tenant_id and tp.id = h.turno_id
         left join trabalhos rp on rp.tenant_id = h.tenant_id and rp.id = tp.trabalho_id
         left join lateral (
-          select t.id, t.motivo_interrupcao, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.motivo_interrupcao, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
           where t.tenant_id = c.tenant_id and t.trabalho_id = c.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -515,7 +515,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           order by m.criado_em desc, m.id desc limit 1
         ) f on true
         where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
-          and h.payload->>'tarefaId' is not null and h.criado_em >= ${data(desde)}
+          and h.payload->>'tarefaId' is not null
+          -- NOD-241: a janela conta da queda quando o último turno caiu; senão, do pedido (como antes).
+          -- NOD-241 (revisão): e nunca o pedido de mais de IDADE_MAX_PEDIDO_RETOMAVEL_MS, para as laterais não rodarem sobre o histórico todo.
+          and h.criado_em >= ${data(agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS)}
+          and (h.criado_em >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and c.estado in ('terminado', 'parado', 'falhou', 'precisa_de_voce')
           and coalesce(rp.estado, '') <> 'parado'
           and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)

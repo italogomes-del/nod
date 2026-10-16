@@ -20,7 +20,7 @@ import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
-import { abrirTxEscopada, txEscopadaOuDoContexto } from "../../db/tx.ts";
+import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
@@ -135,6 +135,7 @@ import { meChameAs } from "../../use-cases/me-chame-as.ts";
 import { esperarComando } from "../../use-cases/esperar-comando.ts";
 import { gerirBots } from "../../use-cases/gerir-bots.ts";
 import { criarBots } from "../../use-cases/criar-bots.ts";
+import { responderPedido } from "../../use-cases/responder-pedido.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../use-cases/nod.ts";
 import { MODELOS_DE_BOT, saudacaoDoOnboarding } from "../../domain/roteiro-onboarding.ts";
 import type { IaNoMac } from "../../contracts/onboarding.ts";
@@ -324,7 +325,7 @@ export function comporApp(o: OpcoesCompor): App {
     return tenants.get(pessoaId) ?? null;
   }
 
-  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots };
+  const useCases: UseCasesNod = { lembrar, atualizarPerfil, pedirAcesso, criarRotina, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente, atualizarRotinaPeloAgente, excluirRotinaPeloAgente, pedirAprovacao, pedirAPessoa, passar, encaminhar, semNovidade, pedirABot, verColegas, publicarArtefato, lerArtefato, anotarPendencia, concluirPendencia, descartarPendencia, iniciarTarefa, desligar, anotarEntrevista, concluirEntrevista, proporBot, abrirTask, mandarParaTask, meChameAs, esperarComando, abrirFrentes, mandarParaFrente, devolverResumo, gerirBots, verAppsConectados, registrarRelatoDoNod, criarBots, responderPedido };
 
   const depsDe = (trx: Tx, escopo: Escopo): Deps => ({ repos: criarRepos(trx, escopo), services, useCases, tx: (fn) => fn(trx), escopo, agora: relogio });
   const depsSobre = (trx: Tx): Deps => depsDe(trx, escopoDoContexto());
@@ -394,6 +395,8 @@ export function comporApp(o: OpcoesCompor): App {
     ambiente: env,
     // ADR-068: o nod local está no Mac da pessoa e sobe o arquivo que o bot cita; o compartilhado não o alcança.
     ...(compartilhado ? {} : { subirArquivo: criarSubidaComposio() }),
+    // NOD-263: conector chamado com a tx escopada aberta segura uma conexão do pool pelo tempo do app de fora.
+    antesDeChamar: exigirForaDaTx,
     async carregar(conectorId, contexto) {
       const atual = contextoAtual();
       const escopos = atual

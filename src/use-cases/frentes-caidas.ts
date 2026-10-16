@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import { decidirFrenteCaida, type PedidoParado } from "../domain/pedido-parado.ts";
+import { decidirFrenteCaida, RETOMAR_ATE_MS, type PedidoParado } from "../domain/pedido-parado.ts";
 import { motivoEmPortugues } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, evento } from "./autoria-evento.ts";
@@ -37,6 +37,9 @@ async function desistir(deps: Deps, p: PedidoParado): Promise<RuntimeEvent[]> {
  * varredor de expiração, numa transação própria (varredor-expiracao.ts): a frente que caiu por infraestrutura é retomada
  * sozinha quando as máquinas voltam, até MAX_QUEDAS_POR_PEDIDO (3) e só nas últimas 2 h; na desistência ela fecha
  * `falhou`, o lote fecha e o dono pergunta. A regra é a do pedido parado (decidirFrenteCaida); `adiados` como lá (#218).
+ * NOD-241: sem sinal de volta, a frente espera até 2 h desde o último sinal (não 30 min). A frente em espera entra em
+ * `adiados` por ADIAR_PEDIDO_IGNORADO_MS: sem isso, até 20 frentes esperando ocupariam o `limit 20` da consulta e
+ * segurariam as que já podem voltar. Custo: a frente em espera percebe o sinal em até 5 min, não 30 s.
  */
 export async function cuidarDasFrentesCaidas(deps: Deps, o: { adiados?: PedidosAdiados } = {}): Promise<{ data: SaidaFrentesCaidas; events: RuntimeEvent[] }> {
   const agora = deps.agora();
@@ -46,7 +49,11 @@ export async function cuidarDasFrentesCaidas(deps: Deps, o: { adiados?: PedidosA
   const caidas = await deps.repos.frentes.frentesCaidas(agora - JANELA_PEDIDOS_PARADOS_MS, agora, o.adiados ? [...o.adiados.keys()] : []);
   for (const p of caidas) {
     const acao = decidirFrenteCaida(p, agora, motivoEmPortugues);
-    if (acao.tipo === "esperar") continue;
+    if (acao.tipo === "esperar") {
+      // NOD-241 (revisão): o adiamento não passa do limite das 2 h; a desistência sai na hora, não até 5 min depois.
+      o.adiados?.set(p.tarefaId, p.quedaEm !== null ? Math.min(agora + ADIAR_PEDIDO_IGNORADO_MS, p.quedaEm + RETOMAR_ATE_MS + 1) : agora + ADIAR_PEDIDO_IGNORADO_MS);
+      continue;
+    }
     let r: RuntimeEvent[];
     if (acao.tipo === "retomar") {
       const frente = p.trabalhoColegaId ? await deps.repos.trabalhos.buscar(p.trabalhoColegaId) : null;

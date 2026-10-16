@@ -17,6 +17,7 @@ import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTa
 import { meChameAs } from "../../src/use-cases/me-chame-as.ts";
 import { esperarComando } from "../../src/use-cases/esperar-comando.ts";
 import { criarBots } from "../../src/use-cases/criar-bots.ts";
+import { responderPedido } from "../../src/use-cases/responder-pedido.ts";
 import { gerirBots } from "../../src/use-cases/gerir-bots.ts";
 import { registrarRelatoDoNod, verAppsConectados } from "../../src/use-cases/nod.ts";
 import { pedirAcesso } from "../../src/use-cases/pedir-acesso.ts";
@@ -138,6 +139,7 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     devolverResumo,
     esperarComando,
     criarBots,
+    responderPedido,
     gerirBots,
     verAppsConectados,
     registrarRelatoDoNod,

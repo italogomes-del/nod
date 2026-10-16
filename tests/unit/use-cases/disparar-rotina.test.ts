@@ -7,6 +7,7 @@ import { confirmarProposta } from "../../../src/use-cases/confirmar-proposta.ts"
 import { decidirAcesso } from "../../../src/use-cases/decidir-acesso.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { executarRotinaAgora } from "../../../src/use-cases/executar-rotina-agora.ts";
+import { pedirABot } from "../../../src/use-cases/pedir-a-bot.ts";
 import { pedirAcesso } from "../../../src/use-cases/pedir-acesso.ts";
 import { depsMemoria } from "../../helpers/deps-l7.ts";
 
@@ -34,6 +35,25 @@ async function rotinaAtiva(d: ReturnType<typeof depsMemoria>, extra: { fonte?: s
 }
 
 describe("dispararRotina", () => {
+  it("NOD-259: a entrada da janela lista os pedidos do bot a colegas ainda sem resposta, de outras janelas; sem pedidos, nada", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const rotina = await rotinaAtiva(d);
+    const limpa = await dispararRotina(d.deps, { rotina, instanteAgendado: JANELA, machineId: "m1", executor: "catcher" });
+    if (!("turno" in limpa.data)) throw new Error("deveria ter disparado");
+    expect(limpa.data.turno.entradaTexto).not.toContain("Pedidos seus a colegas");
+    // A janela anterior pediu ao Ze 1; a seguinte vê o pedido com o horário.
+    const ze = await d.deps.repos.agentes.criar({ nome: "Ze 1", dono: "pessoa", forma: "shape-hex", cor: "c-red", modelo: "claude-haiku-4-5-20251001" });
+    await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: ze?.id ?? "" });
+    const r = await pedirABot(d.deps, { turnoId: limpa.data.turno.id, agenteId: rotina.agenteId, conversaId: rotina.conversaId, agente: "Ze 1", pedido: "Status da NOD-12?" });
+    expect(r.data).toMatchObject({ ok: true });
+    await d.deps.repos.turnos.assentar(limpa.data.turno.id, { estado: "concluido" });
+    const seguinte = Date.parse("2026-09-18T08:00:00-03:00");
+    const atual = (await d.deps.repos.rotinas.buscar(rotina.id))!;
+    const r2 = await dispararRotina({ ...d.deps, agora: () => seguinte }, { rotina: atual, instanteAgendado: seguinte, machineId: "m1", executor: "catcher" });
+    if (!("turno" in r2.data)) throw new Error("deveria ter disparado");
+    // O horário vem do carimbo do handoff (no repositório em memória, o relógio real): só o formato.
+    expect(r2.data.turno.entradaTexto).toMatch(/\n\nPedidos seus a colegas ainda sem resposta \(a resposta chega em um novo turno; não peça de novo o mesmo\):\n- a Ze 1, às (\d\d\/\d\d )?\d\d:\d\d: Status da NOD-12\?$/);
+  });
   it("teste manual mantém pausa e agenda e deduplica dois cliques no mesmo minuto", async () => {
     const d = depsMemoria({ agora: () => AGORA });
     const rotina = await rotinaAtiva(d);

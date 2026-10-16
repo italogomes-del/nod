@@ -246,7 +246,7 @@ async function semContaNaMaquina(
   const fixo = harnessFixado(turno.harness, turno.modelo);
   const sem = semContaParaOTurno(c, r, fixo ? [fixo] : (p.harnessesProntos ?? IAS_COM_CONTA), agora, fixo && ehIaComConta(fixo) ? fixo : null);
   if (!sem) return null;
-  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano", ultimoSinalEm: agora });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
   if (turno.origem !== "conversa") {
     // ADR-099 §7: nenhuma frente falha por limite — a task espera a conta voltar (1 h sem horário do fornecedor).
@@ -335,7 +335,7 @@ async function recusarPorExecutor(
 ): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] }> {
   // nao_autenticado/motor_ausente são MotivoFalha (do inventário, nunca do classificador); a interrupção é executor_indisponivel.
   const motivoFalha = p.inventario.estado === "nao_autenticado" ? "nao_autenticado" : "motor_ausente";
-  const assentado = await deps.repos.turnos.assentar(p.turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha });
+  const assentado = await deps.repos.turnos.assentar(p.turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha, ultimoSinalEm: p.agora });
   const negacao = await mensagemExecutorIndisponivel(deps, { conversaId: p.turno.conversaId, turnoId: p.turno.id, agenteId: p.turno.agenteId, executor: p.executor, inventario: p.inventario, agora: p.agora, harness: p.harness, modeloInvalido: p.modeloInvalido, semIaOnde: p.semIaOnde });
   const autoria = autoriaAgente({ agenteId: p.turno.agenteId, contaDeExecucao: p.turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
   const events = [

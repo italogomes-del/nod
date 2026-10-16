@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Tx } from "../../src/shared/types.ts";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
-import { MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
+import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-lease.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MAX_QUEDAS_POR_PEDIDO } from "../../src/domain/pedido-parado.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
@@ -127,6 +129,53 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       // Quem pediu segue esperando: nada voltou ainda.
       expect(await m.pecasDaAda()).toHaveLength(0);
       expect(await m.estado(m.w.id)).toBe("rodando");
+    });
+  });
+
+  it("NOD-241 (CA2): o pedido de antes cujo colega rodava havia 3 h e caiu no reinício do servidor é retomado, sem avisar falha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const sinalEm = Date.now();
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, criado_em = now() - interval '3 hours',
+        lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${m.tarefa.id}`;
+      const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1 });
+      expect(v.interrompidos).toEqual([m.tarefa.id]);
+      expect(await m.repos.turnos.buscar(m.tarefa.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
+      expect(await m.estado(m.colegaId)).toBe("precisa_de_voce");
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+      await m.sinalDeVida();
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data).toEqual({ retomados: [m.tarefa.id], avisados: [], entregues: [] });
+      expect(await m.pecasDaAda()).toHaveLength(0);
+    });
+  });
+
+  it("NOD-241 (CA4j): a janela de 24 h conta da queda — o pedido feito há 25 h cujo colega cai agora é retomado; o que terminou há 25 h não volta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await trx`update mensagens set criado_em = now() - interval '25 hours' where kind = 'handoff' and payload->>'tarefaId' = ${m.tarefa.id}`;
+      await m.cair(m.tarefa.id, "executor_indisponivel");
+      await trx`update turnos set ultimo_sinal_em = now() where id = ${m.tarefa.id}`;
+      await m.sinalDeVida();
+      expect((await cuidarDosPedidosParados(m.deps)).data.retomados).toEqual([m.tarefa.id]);
+    });
+    await withRollback(MARLON, async (trx) => {
+      // O pedido de 25 h cujo colega terminou por outro motivo (não queda) segue fora da janela, como antes.
+      const m = await montar(trx);
+      await trx`update mensagens set criado_em = now() - interval '25 hours' where kind = 'handoff' and payload->>'tarefaId' = ${m.tarefa.id}`;
+      await m.cair(m.tarefa.id, "trabalho_incompleto");
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+    });
+  });
+
+  it("NOD-241 (revisão): o piso da idade do pedido — o feito há mais de IDADE_MAX_PEDIDO_RETOMAVEL_MS não volta, mesmo caindo agora", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await trx`update mensagens set criado_em = ${new Date(Date.now() - IDADE_MAX_PEDIDO_RETOMAVEL_MS - 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${m.tarefa.id}`;
+      await m.cair(m.tarefa.id, "executor_indisponivel");
+      await trx`update turnos set ultimo_sinal_em = now() where id = ${m.tarefa.id}`;
+      await m.sinalDeVida();
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
     });
   });
 

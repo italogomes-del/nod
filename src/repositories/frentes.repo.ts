@@ -148,8 +148,10 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
      * definido em 2026-10-12 (ADR-099 itens 5 e 8, I9): as frentes de lote que caíram por infraestrutura e esperam alguém
      * as retomar — o varredor da ADR-084 (src/use-cases/frentes-caidas.ts) decide com a regra do pedido parado. No formato
      * de `pedidosAColegaParados` (tarefaId = trabalhoColegaId = a frente): frente da pessoa, com lote ainda não devolvido,
-     * nascida desde `desde`, `precisa_de_voce` (o "Retomar" da queda), sem turno vivo nem na fila e com o último turno
-     * interrompido por um dos MOTIVOS_DE_QUEDA. Frente sem lote (a task de antes, migrada pela 0072) fica de fora: o
+     * caída desde `desde`, `precisa_de_voce` (o "Retomar" da queda), sem turno vivo nem na fila e com o último turno
+     * interrompido por um dos MOTIVOS_DE_QUEDA. NOD-241 (emenda da ADR-084): a queda é o último sinal do turno
+     * (`turnos.ultimo_sinal_em`; sem ele, o lease ou a criação), e a janela `desde` conta dela, não da criação da frente — a
+     * frente de mais de um dia que cai agora entra. Frente sem lote (a task de antes, migrada pela 0072) fica de fora: o
      * "Retomar" dela continua com a pessoa, como hoje. Até 20, as mais antigas primeiro; `adiados` como no outro (#218).
      */
     async frentesCaidas(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
@@ -157,17 +159,17 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         id: string; estado: EstadoTrabalho; ultimo_id: string; ultimo_motivo: string | null; queda_em: Date | null; quedas: number;
         card_id: string | null; card_estado: string | null; sinal: boolean;
       }[]>`
-        select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.lease_ate, u.criado_em) as queda_em,
+        select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = w.tenant_id and v.owner_id = w.owner_id
-            and v.criado_em > coalesce(u.lease_ate, u.criado_em)
+            and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal
         from trabalhos w
         join lotes_de_frentes l on l.tenant_id = w.tenant_id and l.id = w.lote_id and l.devolvido_em is null
         join lateral (
-          select t.id, t.estado, t.motivo_interrupcao, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.estado, t.motivo_interrupcao, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
           where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -177,11 +179,11 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
           order by d.criado_em desc limit 1
         ) k on true
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.forma = 'frente' and w.estado = 'precisa_de_voce'
-          and w.criado_em >= ${data(desde)}
+          and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}
           and u.estado = 'interrompido' and u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
           and not exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('pendente', 'despachando'))
           and not (w.id::text = any(${[...adiados]}::text[]))
-        order by w.criado_em, w.id
+        order by queda_em, w.id
         limit 20`;
       return linhas.map((l) => ({
         tarefaId: l.id,

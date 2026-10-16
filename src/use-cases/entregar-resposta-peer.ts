@@ -6,6 +6,7 @@ import { proximaProfundidade } from "../domain/profundidade.ts";
 import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { perguntaDaTarefa } from "./pedido-de-colega.ts";
+import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
@@ -87,7 +88,7 @@ async function pedidosEmAberto(deps: DepsEntrega, cadeia: readonly Turno[], exce
  * cumpre o pedido pediu a um colega e a resposta dele ainda não voltou. Sem a segunda, "pedi ao Dev, aguardo" saía
  * como resultado final e a resposta de verdade era descartada como ja_entregue (a entrega é uma por raiz).
  */
-async function aindaNaoEntrega(deps: DepsEntrega, tarefa: Turno, doLote: string | null = null): Promise<"aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | null> {
+async function aindaNaoEntrega(deps: DepsEntrega, tarefa: Turno, doLote: string | null = null, assentadoId: string | null = null): Promise<"aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | null> {
   if (tarefa.origem !== "delegacao") return null;
   const cadeia = await cadeiaDaDelegacao(deps, tarefa);
   // definido em 2026-10-12 (ADR-099, I3): quem cumpre o pedido abriu frentes para ele — o "comecei 3 frentes" não é o
@@ -98,6 +99,11 @@ async function aindaNaoEntrega(deps: DepsEntrega, tarefa: Turno, doLote: string 
   // ADR-086 (revisão do #212): quem cumpre o pedido marcou uma volta ("vou esperar o CI"). Essa frase não é o resultado:
   // sem esta espera ela saía como entrega final e o resultado de verdade, na volta, era descartado como ja_entregue.
   if (cadeia.some((t) => t.estado === "pendente" && t.acordarEm != null)) return "aguardando_volta";
+  // definido em 2026-10-15 (NOD-239): as respostas de dois colegas chegam quase juntas e abrem duas continuações. A
+  // primeira assenta com a segunda ainda viva — não há pedido em aberto (as duas peer_ask já existem), e ela entregava
+  // a resposta parcial; a segunda, com as duas, caía em ja_entregue. Entrega só a última continuação viva da cadeia; a
+  // absorvida não conta (já saiu da fila).
+  if (cadeia.some((t) => t.id !== assentadoId && t.origem === "retomada" && (t.estado === "pendente" || t.estado === "despachando"))) return "aguardando_volta";
   // definido em 2026-10-12 (ADR-099, I7 revista): ou deixou um comando esperando (esperar_comando, parte 2) — a volta vem
   // quando ele acabar.
   if ((await deps.repos.pedidosDeColega.esperasRodandoDosTurnos(cadeia.map((t) => t.id))) > 0) return "aguardando_volta";
@@ -192,7 +198,8 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // da tarefa), e não mais 1 fixo: abaixo do limite, quem recebeu a resposta ainda pede a outro colega. Quem pediu
   // cumprindo um pedido (delegação) mantém a procuração — o modo, a trava e o aviso de falha seguem a cadeia.
   const pediu = delegada && origem ? await deps.repos.turnos.buscar(origem.turnoOrigemId) : null;
-  const fecho = pediu ? await fechoDaContinuacao(deps, pediu, tarefa.id) : "";
+  // NOD-259: e os pedidos dele a colegas ainda sem resposta, de qualquer fio — fora o que está sendo entregue agora.
+  const fecho = pediu ? `${await fechoDaContinuacao(deps, pediu, tarefa.id)}${await notaPedidosAbertos(deps, remetente.id, agora, { exceto: [tarefa.id] })}` : "";
   const entradaTexto = !delegada
     ? `${moldurarResposta(alvo.nome, e.texto)}\nConsolide a resposta para a pessoa, citando a contribuição do colega e retomando a tarefa original indicada no contexto.`
     : e.falha
@@ -259,9 +266,20 @@ export async function entregarRespostaPeer(deps: DepsEntrega, input: { tarefaId:
   // definido em 2026-09-24 (ADR-047): tarefa delegada entrega também — ela mesma ou a retomada dela.
   const tarefa = assentado.origem === "peer" ? assentado : await delegacaoDoTurno(deps.repos, assentado);
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
-  const espera = await aindaNaoEntrega(deps, tarefa, input.doLote ?? null);
+  // NOD-239: o turno que assentou agora não espera por ele mesmo; no fecho de lote, quem entrega é o turno que abriu o
+  // lote, como antes.
+  const espera = await aindaNaoEntrega(deps, tarefa, input.doLote ?? null, assentado.id);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.texto, falha: false });
+}
+
+/**
+ * definido em 2026-10-15 (NOD-262): o bot declarou, na conversa, a resposta ao pedido (responder_pedido) — o turno do
+ * pedido saiu da fila absorvido e nada da cadeia dele rodou, então não há o que esperar (aindaNaoEntrega). A entrega é
+ * a mesma: uma por raiz, ja_entregue se o resultado já saiu.
+ */
+export function entregarRespostaDeclarada(deps: DepsEntrega, input: { tarefa: Turno; texto: string }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+  return entregar(deps, { tarefa: input.tarefa, texto: input.texto, falha: false });
 }
 
 /**
@@ -279,7 +297,7 @@ export const avisarFalhaDelegacao: CasoDeUso<{ turnoId: string; motivo: string; 
   // definido em 2026-10-09 (#218): `semEsperar` — o varredor de pedidos parados já decidiu desistir (task parada, queda
   // sem volta; src/domain/pedido-parado.ts): avisa sem esperar pessoa, colega ou volta. Se a pessoa retomar depois e
   // sair um resultado, ele ainda chega a quem pediu (um resultado depois de um aviso sai normalmente, em `entregar`).
-  const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa);
+  const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa, null, input.turnoId);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.motivo, falha: true });
 };

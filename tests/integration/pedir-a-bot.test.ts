@@ -41,8 +41,8 @@ async function cenario(trx: Tx) {
   return { taga, dev1, deps, repos, chamadas, turnoTaga: data.turno };
 }
 
-function pedir(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1") {
-  return pedirABot(deps, { ...p, agente, pedido: "revisar o PR 466", contexto: "https://github.com/acme/app/pull/466" });
+function pedir(deps: Deps, p: { turnoId: string; agenteId: string; conversaId: string }, agente = "Dev 1", pedido = "revisar o PR 466") {
+  return pedirABot(deps, { ...p, agente, pedido, contexto: "https://github.com/acme/app/pull/466" });
 }
 
 /** GitHub com leitura e escrita, concedido ao Dev 1 inteiro. */
@@ -145,7 +145,8 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       expect((await chamar(tarefa?.id ?? "", "github__pr_comentar")).data).toMatchObject({ ok: false, negacao: { motivo: "alcance_insuficiente" } });
 
       // Rotina que não leu nada de fora, mesmo com exige_aprovacao: nada passa a quem recebe, e a regra dele vale.
-      const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId });
+      // NOD-259: outra janela, outro pedido — o mesmo texto ainda aberto seria recusado como repetido.
+      const limpa = await pedir(deps, { turnoId: (await turnoDeRotina(repos, taga, true)).id, agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", "revisar o PR 467");
       expect(await repos.turnos.contaminado(tarefaDoPedido(limpa.data))).toBe(false);
       const planoLimpo = await planoDe(deps, tarefaDoPedido(limpa.data));
       expect(chavesDaPolitica(planoLimpo.data)).toEqual(SEM_GATE);
@@ -170,10 +171,14 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
         await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: PESSOA_MARLON }),
         await repos.turnos.enfileirar({ executor: "catcher", ...base, origem: "retomada", profundidade: 2, entradaConfianca: "confiavel", retomaTurnoId: turnoTaga.id }),
       ];
-      for (const t of aceitos) {
-        const tarefa = await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId })).data));
+      // NOD-259: cada pedido com texto próprio e respondido antes do seguinte — o teto de pedidos abertos ao mesmo colega
+      // recusaria o quarto.
+      for (const [i, t] of aceitos.entries()) {
+        const tarefa = await repos.turnos.buscar(tarefaDoPedido((await pedir(deps, { turnoId: t?.id ?? "", agenteId: taga.agenteId, conversaId: taga.conversaId }, "Dev 1", `revisar o PR ${466 + i}`)).data));
         expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: (t?.profundidade ?? 0) + 1, entradaConfianca: "confiavel" });
         expect(await repos.turnos.contaminado(tarefa?.id ?? "")).toBe(t?.entradaConfianca === "nao_confiavel");
+        await repos.turnos.assentar(tarefa?.id ?? "", { estado: "concluido" });
+        await entregarRespostaPeer(deps, { tarefaId: tarefa?.id ?? "", texto: "feito" });
       }
 
       const noLimite = [

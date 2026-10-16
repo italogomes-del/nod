@@ -6,6 +6,7 @@ import type { DesfechoItem } from "../contracts/motivos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { exigirForaDaTx } from "../db/tx.ts";
 import { redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
@@ -117,6 +118,9 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
  * erro ou isError do conector = falhou_na_execucao (E4.5: nunca "enviado" quando falhou).
  */
 export async function executarItens(services: Pick<Services, "conectores" | "computadores" | "github">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
+  // NOD-263: o gh do Mac e o computador do bot também são efeito de fora — a guarda vale para o lote inteiro. Item de
+  // terminal só libera o hook (nada sai daqui) e desmarcado não roda: sozinhos, não acusam.
+  if (aExecutar.some((a) => a.item.selecionado && !a.terminal)) exigirForaDaTx({ itens: aExecutar.length, decisao_id: aExecutar[0]?.item.decisaoId });
   const desfechos: DesfechoExecutado[] = [];
   for (const { item, conectorId, computador, dono, rotina, terminal } of aExecutar) {
     if (!item.selecionado) {
@@ -277,9 +281,9 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
 };
 
 /**
- * Caminho completo sobre os MESMOS deps (uma transação): fase 1 → execução → fase 2. A rota da L9
- * pode separar as fases em duas transações para a chamada ao conector não segurar a tx.
- * 'retomar_turno' cria o turno novo sem executar nada.
+ * SÓ PARA TESTES (NOD-263): o caminho completo sobre os MESMOS deps (uma transação) — fase 1 → execução → fase 2. Produção
+ * separa as fases (rotas/decisoes.ts): a execução roda fora de tx. Chamado de dentro de uma tx escopada, a guarda de
+ * `executarItens` loga `conector_dentro_da_tx` (e lança em teste). 'retomar_turno' cria o turno novo sem executar nada.
  */
 export const decidir: CasoDeUso<EntradaDecidir, SaidaDecidir> = async (deps: Deps, input) => {
   const fase1 = await marcarEDecidir(deps, input);

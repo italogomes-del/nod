@@ -1,4 +1,4 @@
-import { MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS, MOTIVOS_DE_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
 import type { PedidoAberto } from "../domain/triagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, msOuNull } from "./conversao.ts";
@@ -28,18 +28,24 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      *   a task de colega de antes já acabada — cobre o pedido de antes (task de colega) e o que entra pela triagem do dono;
      * - a frente aberta para o pedido de um colega (`pedido_por_agente_id`), enquanto ela não acaba.
      */
-    async abertos(desde: number): Promise<PedidoAberto[]> {
-      const linhas = await conn<{ de: string; para: string }[]>`
-        select m.payload->>'de' as de, m.payload->>'para' as para from mensagens m
+    async abertos(desde: number, filtro: { de?: string } = {}): Promise<PedidoAberto[]> {
+      // NOD-259: com o pedido em si (tarefaId, criadoEm, texto = `motivo` do handoff) e, opcional, só os de um bot.
+      const de = filtro.de ?? null;
+      const linhas = await conn<{ de: string; para: string; tarefa_id: string | null; criado_em: Date; texto: string | null }[]>`
+        select m.payload->>'de' as de, m.payload->>'para' as para, m.payload->>'tarefaId' as tarefa_id, m.criado_em, m.payload->>'motivo' as texto from mensagens m
         where m.tenant_id = ${escopo.tenantId} and m.kind = 'handoff' and m.payload->>'tarefaId' is not null and m.criado_em >= ${data(desde)}
+          and (${de}::text is null or m.payload->>'de' = ${de}::text)
           and not exists (select 1 from mensagens r where r.tenant_id = m.tenant_id and r.conversa_id = m.conversa_id and r.kind = 'peer_ask'
             and r.payload->>'tarefaId' = m.payload->>'tarefaId')
           and not exists (select 1 from trabalhos k where k.tenant_id = m.tenant_id and k.id::text = m.payload->>'trabalhoId'
             and k.estado in ('terminado', 'parado', 'falhou'))
         union
-        select w.pedido_por_agente_id::text, w.agente_id::text from trabalhos w
-        where w.tenant_id = ${escopo.tenantId} and w.pedido_por_agente_id is not null and w.estado = any(${[...ABERTOS]}::text[])`;
-      return linhas.filter((l) => l.de && l.para).map((l) => ({ de: l.de, para: l.para }));
+        select w.pedido_por_agente_id::text, w.agente_id::text, null, w.criado_em, null from trabalhos w
+        where w.tenant_id = ${escopo.tenantId} and w.pedido_por_agente_id is not null and w.estado = any(${[...ABERTOS]}::text[])
+          and (${de}::text is null or w.pedido_por_agente_id::text = ${de}::text)`;
+      return linhas
+        .filter((l) => l.de && l.para)
+        .map((l) => ({ de: l.de, para: l.para, tarefaId: l.tarefa_id, criadoEm: l.criado_em.getTime(), texto: l.texto }));
     },
 
     /**
@@ -100,7 +106,9 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           select h.id as handoff_id, h.criado_em, d.id as tarefa_id, d.owner_id from mensagens h
           join turnos d on d.tenant_id = h.tenant_id and d.id::text = h.payload->>'tarefaId' and d.origem = 'delegacao' and d.trabalho_id is null
           where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
-            and h.payload->>'trabalhoId' is null and h.criado_em >= ${data(desde)}
+            and h.payload->>'trabalhoId' is null
+            -- NOD-241 (revisão): piso da idade do pedido; sem ele, a janela pela queda faria a cadeia recursiva varrer o histórico todo.
+            and h.criado_em >= ${data(agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS)}
             and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)
             and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
               and r.payload->>'tarefaId' = h.payload->>'tarefaId')
@@ -112,16 +120,16 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
           where c.n < 10
         )
-        select p.tarefa_id, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.lease_ate, u.criado_em) as queda_em,
+        select p.tarefa_id, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
             where c.raiz = p.tarefa_id and q.estado = 'interrompido' and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = ${escopo.tenantId} and v.owner_id = p.owner_id
-            and v.criado_em > coalesce(u.lease_ate, u.criado_em)
+            and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal
         from pedidos p
         join lateral (
-          select q.id, q.estado, q.motivo_interrupcao, q.lease_ate, q.criado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          select q.id, q.estado, q.motivo_interrupcao, q.ultimo_sinal_em, q.lease_ate, q.criado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
           where c.raiz = p.tarefa_id and coalesce(q.motivo_interrupcao::text, '') <> 'absorvido'
           order by q.criado_em desc, q.id desc limit 1
         ) u on true
@@ -130,6 +138,8 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           order by d.criado_em desc limit 1
         ) k on true
         where u.estado = 'interrompido'
+          -- NOD-241: a janela conta da queda quando o último turno caiu; senão, do pedido (como antes).
+          and (p.criado_em >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and not exists (select 1 from cadeia c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
             where c.raiz = p.tarefa_id and v.estado in ('pendente', 'despachando'))
         order by p.criado_em, p.handoff_id

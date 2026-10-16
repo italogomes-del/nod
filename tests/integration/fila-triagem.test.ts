@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-lease.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { LEASE_MS } from "../../src/shared/constantes.ts";
+import { IDADE_MAX_PEDIDO_RETOMAVEL_MS } from "../../src/domain/pedido-parado.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -124,13 +127,44 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // Respondido o pedido (peer_ask), a aresta some: o Dev já pode pedir ao Chico.
       await m.repos.turnos.assentar(t1, { estado: "concluido" });
       await m.repos.turnos.assentar(t2, { estado: "concluido" });
-      await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "12 testes." });
-      await entregarRespostaPeer(m.deps, { tarefaId: t1, texto: "PR 42 ok." });
+      const doLivre = await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "12 testes." });
+      // NOD-239: a continuação do Dev com a resposta do Livre ainda vai rodar — o t1 não entrega; ela, sim.
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: t1, texto: "PR 42 ok." })).data).toEqual({ ignorado: "aguardando_volta" });
+      if (!("continuacao" in doLivre.data)) throw new Error("deveria abrir a continuação do Dev");
+      await m.repos.turnos.assentar(doLivre.data.continuacao.id, { estado: "concluido" });
+      await entregarRespostaPeer(m.deps, { tarefaId: doLivre.data.continuacao.id, texto: "PR 42 ok." });
       const segundo = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.kind === "handoff")[1];
       const t3 = segundo?.payload?.kind === "handoff" ? segundo.payload.tarefaId! : "";
       await m.repos.turnos.assentar(t3, { estado: "concluido" });
       await entregarRespostaPeer(m.deps, { tarefaId: t3, texto: "PR 43 ok." });
       expect((await m.pedir(m.dev, (await m.turnoDe(m.dev)).id, nChico, "qual repositório?")).data).toMatchObject({ ok: true });
+    });
+  });
+
+  it("NOD-259: o mesmo pedido ainda aberto é recusado (ja_pedido); no teto do par também; abertos({ de }) traz só os do bot, com texto e tarefa", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const nDev = await m.nome(m.dev.agenteId);
+      const nLivre = await m.nome(m.livre.agenteId);
+      const t1 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico, { origem: "rotina" })).id, nDev, "Status da NOD-12?")).data);
+      // Outra janela da rotina: o mesmo pedido, com caixa e espaços diferentes.
+      const repetido = await m.pedir(m.chico, (await m.turnoDe(m.chico, { origem: "rotina" })).id, nDev, "status da  nod-12? ");
+      expect(repetido.data).toEqual({ ok: false, erro: "ja_pedido", instrucao: expect.stringContaining(`Você já pediu isso a ${nDev}`) });
+      expect((await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.kind === "handoff")).toHaveLength(1);
+      const t2 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 43.")).data);
+      tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 44.")).data);
+      expect((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 45.")).data).toMatchObject({ ok: false, erro: "ja_pedido" });
+      // Ao Livre passa; e o Livre pedindo ao Dev não entra na lista do Chico.
+      const t5 = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nLivre, "Revise o PR 45.")).data);
+      tarefaDoPedido((await m.pedir(m.livre, t5, nDev, "qual branch?")).data);
+      const doChico = await m.repos.pedidosDeColega.abertos(Date.now() - 3_600_000, { de: m.chico.agenteId });
+      expect(doChico.map((p) => p.texto).sort()).toEqual(["Revise o PR 43.", "Revise o PR 44.", "Revise o PR 45.", "Status da NOD-12?"]);
+      expect(doChico.every((p) => p.de === m.chico.agenteId && p.tarefaId !== null && typeof p.criadoEm === "number")).toBe(true);
+      // Respondido um, o par sai do teto.
+      await m.repos.turnos.assentar(t2, { estado: "concluido" });
+      await entregarRespostaPeer(m.deps, { tarefaId: t2, texto: "PR 43 ok." });
+      expect((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, nDev, "Revise o PR 45.")).data).toMatchObject({ ok: true, instrucao: expect.stringContaining(`Você já tem 2 pedidos abertos a ${nDev}`) });
+      expect(t1).toBeTruthy();
     });
   });
 
@@ -181,5 +215,37 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // Com a retomada na fila, a triagem não está mais parada.
       expect(await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).toEqual([]);
     });
+  });
+
+  it("NOD-241 (CA2): a triagem que rodava havia 3 h e caiu no reinício do servidor é retomada quando as máquinas voltam", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      const sinalEm = Date.now();
+      await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, criado_em = now() - interval '3 hours',
+        lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${triagem}`;
+      const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1 });
+      expect(v.interrompidos).toContain(triagem);
+      expect((await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem)).toMatchObject({ ultimoMotivo: "reinicio_servidor", quedaEm: sinalEm, sinalDepoisDaQueda: false });
+      const outro = await m.turnoDe(m.livre);
+      await m.repos.turnos.assentar(outro.id, { estado: "concluido" });
+      const r = await cuidarDosPedidosParados(m.deps);
+      expect(r.data.retomados).toEqual([triagem]);
+      expect(r.data.avisados).toEqual([]);
+    });
+  });
+
+  it("NOD-241 (revisão): a triagem pedida há 25 h que cai agora entra; a pedida há mais de IDADE_MAX_PEDIDO_RETOMAVEL_MS fica fora (sem varrer o histórico)", async () => {
+    for (const [idadeMs, entra] of [[25 * 3_600_000, true], [IDADE_MAX_PEDIDO_RETOMAVEL_MS + 3_600_000, false]] as const) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+        await trx`update mensagens set criado_em = ${new Date(Date.now() - idadeMs)} where kind = 'handoff' and payload->>'tarefaId' = ${triagem}`;
+        await trx`update turnos set estado = 'despachando', lease_ate = now() - interval '1 minute' where id = ${triagem}`;
+        await m.repos.turnos.interromper(triagem, "maquina_sem_contato", { ultimoSinalEm: Date.now() - LEASE_MS });
+        const parada = (await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem);
+        expect(parada !== undefined).toBe(entra);
+      });
+    }
   });
 });

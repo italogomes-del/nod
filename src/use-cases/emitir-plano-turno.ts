@@ -26,6 +26,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
+import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
@@ -278,6 +279,16 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // também — é olhando o que está em andamento que o dono decide começar, juntar ou esperar.
   const trabalhosAbertos = podeAbrirTask(trabalho) && (trabalho ? modo === "rotina" : modo === "conversa" || modo === "criacao" || modo === "rotina" || modo === "delegacao") ? (await trabalhosParaDto(deps, await deps.repos.trabalhos.abertosDoAgente(agente.id))).map((t) => ({ id: t.id, titulo: t.titulo, estado: esperaDoTrabalho(t) ? "esperando" : t.estado, ultimoPasso: t.ultimoPasso, ...(t.deFora ? { cuidado: true } : {}) })) : [];
 
+  // NOD-262: na conversa e na sala, os pedidos de colegas ainda na fila do bot — com eles o bot fecha com responder_pedido
+  // o que a pessoa já resolveu ali. A pergunta é a tarefa do peer_pedido (o texto do remetente), cortada no domínio.
+  const pedidosPendentes = modo === "conversa" || modo === "sala"
+    ? await Promise.all((await deps.repos.turnos.delegacoesPendentesDoAgente(agente.id, PEDIDOS_NO_PROMPT + 15)).map(async (d) => {
+      const pedido = await deps.repos.mensagens.pedidoDaTarefa(d.id);
+      const tarefa = pedido?.payload?.kind === "peer_pedido" ? pedido.payload.delegacao?.tarefa : undefined;
+      return { tarefaId: d.id, remetenteNome: visiveis.find((a) => a.id === pedido?.autoria.autor_id)?.nome ?? "outro bot", pergunta: tarefa ?? pedido?.texto ?? d.entradaTexto };
+    }))
+    : [];
+
   // Resolvido ANTES de montar: o catálogo depende de haver projeto autorizado, não só do serviço.
   const workspaceId = input.maquinaRemota ? null : await deps.services.workspaces?.id({ ...deps.escopo, conversaId: turno.conversaId }) ?? null;
 
@@ -356,6 +367,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
     trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho) } : null,
     trabalhosAbertos,
+    pedidosPendentes,
     harness: escolha?.harness ?? null,
     agora,
   });

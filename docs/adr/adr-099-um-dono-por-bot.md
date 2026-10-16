@@ -128,6 +128,11 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 - **ADR-083:** tasks deixam de ser pares visíveis. A faixa por trabalho no `reivindicar` continua, agora para frentes.
   `abrir_task` passa a abrir frente do dono.
 - **ADR-084:** o pedido a colega é um item na fila do dono do outro bot; o varredor lê a frente que o atende.
+- **ADR-084 (2026-10-15, NOD-241):** a frente de lote que caiu espera o sinal de volta até `RETOMAR_ATE_MS` (2 h desde o
+  último sinal), e não 30 min: o "Retomar" aberto fica com a pessoa nesse tempo e o dono só acorda na desistência. O
+  pedido a colega mantém os 30 min. A queda conta do último sinal do turno (emenda da ADR-084). A frente que espera sai da
+  consulta por `ADIAR_PEDIDO_IGNORADO_MS` (5 min), para não ocupar o limite de 20 das que já podem voltar — nunca além
+  do fim das 2 h, para a desistência sair na hora.
 - **ADR-086:** `me_chame_as` só para hora marcada; a volta marcada não conta como trabalhando; o teto de 24 voltas vira o
   item 5.
 - **ADR-067:** esperar algo de fora não é mais comando em segundo plano do CLI (item 4). O comando do próprio trabalho
