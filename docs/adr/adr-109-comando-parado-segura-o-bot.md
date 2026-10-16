@@ -2,7 +2,7 @@
 
 Status: proposto (não implementado; conferido na main `61b42986` em 2026-10-16: não há `interromper-comando` nem o aviso
 "há N min em `comando`") · Data: 2026-10-05 · Emenda à ADR-067 (sessão viva, Bash sem teto). Implementação: issue
-[#153](https://github.com/marlonwlv/nod/issues/153). Renumerada de ADR-078 para ADR-109 em 2026-10-16 (NOD-305): a
+[#153](https://github.com/gamefik/nod/issues/153). Renumerada de ADR-078 para ADR-109 em 2026-10-16 (NOD-305): a
 main já tinha a [ADR-078](adr-078-limite-da-assinatura-na-ligacao.md) do limite da assinatura na ligação.
 
 ## Contexto
@@ -34,14 +34,15 @@ preso): nenhuma delas é "trabalho" que valha minutos, mas nenhuma é interrompi
 1. **O teto continua fora** (a ADR-067 vale): o Bash do bot é o terminal da pessoa, e um teste de 20 minutos ou um
    `gh run watch` legítimos não podem morrer por relógio. Paridade com o terminal, não com um limite nosso.
 2. **A conversa diz há quanto tempo e em quê.** O trecho vivo já leva o nome da ferramenta (`{ferramenta}` em
-   `TrechoVivo`); passa a levar também o instante de início e, para o Bash, as primeiras ~80 caracteres do comando
+   `TrechoVivo`); passa a levar também o instante de início e, para o Bash, os primeiros ~80 caracteres do comando
    (já redigidos pelo mesmo caminho dos segredos, NOD-158). A partir de **2 minutos** no mesmo comando, a bolha
    "trabalhando" vira "há N min em `comando…`", atualizada pelo relógio da tela.
 3. **Interromper só o comando.** Ao lado desse aviso, o botão **Interromper comando** manda `POST
-   turnos/:id/interromper-comando`. O executor (laço do Mac, ADR-021) mata o grupo de processos do comando em curso
-   (SIGTERM, depois SIGKILL em 5 s), e o CLI recebe a saída como receberia um Ctrl-C: código ≠ 0 e a mensagem
-   "interrompido pela pessoa pelo nod". O **turno continua**; é a bot que decide o que fazer com o comando que falhou.
-   Nada mais é interrompido: delegações, outras ferramentas e o resto da fila ficam como estão.
+   turnos/:id/interromper-comando`. O executor (o laço da máquina, ADR-021; no Mac ou no Linux, ADR-090) mata o
+   grupo de processos do comando em curso (SIGTERM, depois SIGKILL em 5 s), e o CLI recebe a saída como receberia um
+   Ctrl-C: código ≠ 0 e a mensagem "interrompido pela pessoa pelo nod". O **turno continua**; é a bot que decide o
+   que fazer com o comando que falhou. Nada mais é interrompido: delegações, outras ferramentas e o resto da fila ficam
+   como estão.
 4. **Teto só para o que ninguém mandou.** Comando iniciado pelo próprio nod (sonda, hook, `gh` do GitHub nativo) tem
    teto próprio, como hoje. Comando do bot não ganha teto nesta ADR.
 

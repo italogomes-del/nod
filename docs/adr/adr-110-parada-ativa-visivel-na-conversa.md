@@ -2,8 +2,9 @@
 
 Status: proposto; revisto em 2026-10-16 contra a main (ver **Revisão 2026-10-16**): o item 2 já valia em parte desde
 2026-09-16 e o item 4 foi superado pela decisão NOD-225; os itens 1 e 3 continuam não implementados · Data: 2026-10-05 ·
-Complementa a ADR-024 (parada persistida) e a ADR-029 (o que a conversa mostra quando nada roda). Implementação: issue
-[#154](https://github.com/marlonwlv/nod/issues/154). Renumerada de ADR-079 para ADR-110 em 2026-10-16 (NOD-305), junto
+Complementa o Parar com parada persistida (`parar.ts`, E5.4/E8, definido em 2026-09-16; não tem ADR própria), a
+ADR-067 ("só o Parar freia") e a ADR-029 (o que a conversa mostra quando nada roda). Implementação: issue
+[#154](https://github.com/gamefik/nod/issues/154). Renumerada de ADR-079 para ADR-110 em 2026-10-16 (NOD-305), junto
 com a [ADR-109](adr-109-comando-parado-segura-o-bot.md) (era a ADR-078 deste PR).
 
 ## Contexto
@@ -18,7 +19,8 @@ de novo". O que havia:
 - o botão da conversa continuava sendo "Parar" (ele só aparece com turno vivo) e o compositor aceitava mensagem nova
   como se tudo estivesse normal; a mensagem entrava na fila e era interrompida em silêncio.
 
-A parada funcionou como desenhada (ADR-024: nada roda até retomar). O que faltou foi a conversa dizer isso.
+A parada funcionou como desenhada (`parar.ts`: nada roda até a pessoa falar de novo). O que faltou foi a conversa
+dizer isso.
 
 ## Decisão
 
@@ -39,7 +41,8 @@ A parada funcionou como desenhada (ADR-024: nada roda até retomar). O que falto
 - **Só a linha "■" no histórico:** é o que existe; rolou para cima e virou "travou".
 - **Bloquear o compositor enquanto parado:** obriga dois cliques para dizer "continue"; a pessoa que fala com o bot
   quer que ele volte.
-- **Retomar sozinho depois de N minutos:** o Parar é o freio de emergência (ADR-024); ele não pode soltar sozinho.
+- **Retomar sozinho depois de N minutos:** o Parar é o freio de emergência (ADR-067: só o Parar freia); ele não pode
+  soltar sozinho.
 
 ## Gatilho de reversão
 
