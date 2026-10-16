@@ -11,7 +11,7 @@ import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
-import { executarItens } from "./decidir.ts";
+import { executarItens, type DesfechoExecutado, type ItemAExecutar } from "./decidir.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -49,7 +49,27 @@ import type { Deps } from "./tipos.ts";
  */
 const CLASSIFICAR_ORIGEM_SENSIVEL = false;
 
-const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => async (deps, input) => {
+/**
+ * NOD-263: o lote que a regra aprovou sozinha, com a decisão JÁ FECHADA na fase 1 (nunca aparece em "Sua vez" nem expira).
+ * Os itens rodam FORA da tx (`executarItens`) e o desfecho entra na fase 2, numa tx nova (`assentarLoteAutomatico`).
+ */
+export type LoteAutomatico = {
+  decisaoId: string;
+  conversaId: string;
+  turnoId: string;
+  agenteId: string;
+  aExecutar: ItemAExecutar[];
+  regra: `regra:${string}`;
+  regraVersao: number;
+};
+
+type EntradaPedido = Parameters<CasoNod<Deps, "pedir_aprovacao">>[1];
+type SaidaPedido = Awaited<ReturnType<CasoNod<Deps, "pedir_aprovacao">>>;
+
+/** A fase 1 devolve a saída final (pendente, recusada) ou o lote automático a executar fora da tx. */
+export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico };
+
+const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPedido): Promise<SaidaFase1Pedido> => {
   const agora = deps.agora();
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
   const propostas: PropostaItem[] = [];
@@ -106,7 +126,7 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     arriscadaPorIdx.push(acaoArriscadaNoApp(capacidade));
   }
 
-  if (errosDeArgs.length > 0) return { data: { estado: "recusada", erros: errosDeArgs, instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" }, events: [] };
+  if (errosDeArgs.length > 0) return { saida: { data: { estado: "recusada", erros: errosDeArgs, instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" }, events: [] } };
 
   // ADR-052 (0033): turno que trouxe a web pelas nativas não usa "Sempre permitir" — a mesma regra do não confiável.
   const contaminado = input.plano ? await deps.repos.turnos.contaminado(input.turnoId) : false;
@@ -133,17 +153,15 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
       decisao.id,
       itens.map((i, idx) => ({ idx: i.idx, texto: i.textoOriginal, destino: i.destino, origemSensivel: i.origemSensivel, justificativa: i.justificativa, motivoManual: motivoDe(porItem[idx]) })),
     );
-    return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [eventoCriada(deps, input, decisao.id, itens, agora)] };
+    return { saida: { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [eventoCriada(deps, input, decisao.id, itens, agora)] } };
   }
 
-  // Lote automático: executa ANTES de gravar o desfecho, como faz o caminho da pessoa (decidir.ts).
+  // Lote automático (NOD-263): a fase 1 cria os itens e FECHA a decisão por regra; o efeito sai daqui sem banco.
   const criados = await deps.repos.itensAprovacao.criarLote(
     decisao.id,
     itens.map((i) => ({ idx: i.idx, texto: i.textoOriginal, destino: i.destino, origemSensivel: i.origemSensivel, justificativa: i.justificativa })),
   );
   const rotina = (await rotinaDoTurno(deps.repos, input.turnoId)) !== null;
-  const desfechos = await executarItens(deps.services, criados.map((item, idx) => ({ item, conectorId: conectorIdPorIdx[idx] ?? null, dono: deps.escopo, rotina })));
-  for (const d of desfechos) await deps.repos.itensAprovacao.registrarDesfecho(d.itemId, d.desfecho);
   // decidida_por fica NULO: nenhuma PESSOA decidiu. Quem decidiu está em decidido_por da autoria,
   // com a versão da regra (ADR-023: autoria não se infere de outro campo).
   // A regra que MAIS concede manda no registro: se a pessoa criou uma permissão, é ela que
@@ -155,19 +173,48 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
   const regra = quemMaisConcede?.automatico ? quemMaisConcede.regra : primeiraRegra(porItem);
   const regraVersao = quemMaisConcede?.automatico ? quemMaisConcede.versao : primeiraVersao(porItem);
   await deps.repos.decisoes.fecharPorRegra(decisao.id, { regra, regraVersao, agora });
+  return {
+    lote: {
+      decisaoId: decisao.id,
+      conversaId: input.conversaId,
+      turnoId: input.turnoId,
+      agenteId: input.agenteId,
+      aExecutar: criados.map((item, idx) => ({ item, conectorId: conectorIdPorIdx[idx] ?? null, dono: deps.escopo, rotina })),
+      regra,
+      regraVersao,
+    },
+  };
+};
+
+export type EntradaAssentarLote = { lote: LoteAutomatico; desfechos: readonly DesfechoExecutado[] };
+
+/**
+ * FASE 2 do lote automático (NOD-263), numa tx NOVA: grava o desfecho por item só se ainda aberto (`desfecho is null`) e
+ * escreve a fala "Fiz sem perguntar" + o evento `mensagem_criada` só quando ESTA fase gravou algum desfecho — repetir a
+ * fase (retry da escrita depois de banco_ocupado) não reescreve desfecho nem duplica a mensagem. Nunca reexecuta o efeito
+ * (ADR-009). Item que roda no gh do Mac sem desfecho deixa a decisão pendente para o turno, como antes.
+ */
+export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarLote): Promise<SaidaPedido> => {
+  const agora = deps.agora();
+  const { lote, desfechos } = input;
+  let gravados = 0;
+  for (const d of desfechos) if (await deps.repos.itensAprovacao.registrarDesfechoSeAberto(d.itemId, d.desfecho)) gravados++;
+  const criados = lote.aExecutar.map((a) => a.item);
   // ADR-048: item que roda no gh do Mac (servidor compartilhado) ainda não tem desfecho: o turno espera
   // pelo long-poll de `aguardar` enquanto o app desktop da pessoa executa; a fala "Fiz sem perguntar"
   // sai quando o Mac relatar (itens-na-maquina.ts).
   if (criados.some((i) => i.selecionado && i.destino.execucao === "maquina" && !desfechos.some((d) => d.itemId === i.id))) {
-    return { data: { estado: "pendente", decisao_id: decisao.id, instrucao: "encerre o turno; a decisão retoma depois" }, events: [] };
+    return { data: { estado: "pendente", decisao_id: lote.decisaoId, instrucao: "encerre o turno; a decisão retoma depois" }, events: [] };
   }
+  const resultado = { estado: "decidida" as const, itens: desfechos.map((d, idx) => ({ idx, desfecho: d.desfecho })) };
+  if (gravados === 0) return { data: resultado, events: [] };
 
-  const autoria = autoriaDoAgente(deps.escopo, input.agenteId, { decididoPor: regra, regraVersao });
+  const autoria = autoriaDoAgente(deps.escopo, lote.agenteId, { decididoPor: lote.regra, regraVersao: lote.regraVersao });
   const mensagem = await deps.repos.mensagens.criar({
-    conversaId: input.conversaId,
-    turnoId: input.turnoId,
+    conversaId: lote.conversaId,
+    turnoId: lote.turnoId,
     kind: "resultado_aprovacao",
-    texto: textoAutomatico(criados, desfechos, regra),
+    texto: textoAutomatico(criados, desfechos, lote.regra),
     confianca: "confiavel",
     autoria,
   });
@@ -179,14 +226,28 @@ const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => 
     kind: "mensagem_criada",
     autoria,
     pessoaDestinoId: deps.escopo.pessoaId,
-    conversaId: input.conversaId,
-    turnoId: input.turnoId,
-    dados: { decisao_id: decisao.id, mensagem_id: mensagem?.id ?? null, itens: criados.length, executados: desfechos.filter((d) => d.desfecho === "executado").length },
+    conversaId: lote.conversaId,
+    turnoId: lote.turnoId,
+    dados: { decisao_id: lote.decisaoId, mensagem_id: mensagem?.id ?? null, itens: criados.length, executados: desfechos.filter((d) => d.desfecho === "executado").length },
   };
-  return {
-    data: { estado: "decidida", itens: desfechos.map((d, idx) => ({ idx, desfecho: d.desfecho })) },
-    events: [evento],
-  };
+  return { data: resultado, events: [evento] };
+};
+
+/**
+ * Fase 1 do pedir_aprovacao chamado pela ferramenta (NOD-263): a rota interna executa o lote fora da tx e assenta numa nova.
+ * O caminho do computador não passa aqui — ele nunca é automático (sem plano, o modo é manual).
+ */
+export const pedirAprovacaoFase1 = montarFase1(false);
+
+/**
+ * Composição em UMA tx (fase 1 → executarItens → fase 2) para quem já está fora do caminho da ferramenta: o computador (que
+ * nunca é automático) e os testes. Com tx escopada aberta e lote automático, a guarda de `executarItens` acusa.
+ */
+const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => async (deps, input) => {
+  const f = await montarFase1(computador)(deps, input);
+  if ("saida" in f) return f.saida;
+  const desfechos = await executarItens(deps.services, f.lote.aExecutar);
+  return assentarLoteAutomatico(deps, { lote: f.lote, desfechos });
 };
 
 const motivoDe = (d: DecisaoAutomatica | undefined): MotivoAprovacaoManual | null => (d && !d.automatico ? d.motivo : null);

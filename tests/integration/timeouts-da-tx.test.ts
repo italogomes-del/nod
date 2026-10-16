@@ -68,8 +68,8 @@ describeIntegracao("timeouts da tx escopada (NOD-266)", () => {
     const sessao = (await umaConexao`select current_setting('statement_timeout') as s, current_setting('lock_timeout') as l, current_setting('idle_in_transaction_session_timeout') as i`)[0];
     const dentro = await abrirTxEscopada(umaConexao, ESCOPO)(async (trx) => (await trx`select current_setting('statement_timeout') as s, current_setting('lock_timeout') as l, current_setting('idle_in_transaction_session_timeout') as i`)[0]);
     const depois = (await umaConexao`select current_setting('statement_timeout') as s, current_setting('lock_timeout') as l, current_setting('idle_in_transaction_session_timeout') as i`)[0];
-    expect(dentro).toEqual({ s: "1min", l: "10s", i: "11min" });
-    expect(TIMEOUTS_TX).toEqual({ statement: "60s", lock: "10s", idleNaTx: "660s" });
+    expect(dentro).toEqual({ s: "1min", l: "10s", i: "1min" });
+    expect(TIMEOUTS_TX).toEqual({ statement: "60s", lock: "10s", idleNaTx: "60s" });
     expect(depois).toEqual(sessao);
   });
 });

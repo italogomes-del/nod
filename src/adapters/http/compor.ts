@@ -20,7 +20,7 @@ import { sondaFoiLenta } from "../../domain/sonda-lenta.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import type { EventoStream } from "../../contracts/turno.ts";
 import { chaveDe, cifrar, decifrar } from "../../db/cifra.ts";
-import { abrirTxEscopada, txEscopadaOuDoContexto } from "../../db/tx.ts";
+import { abrirTxEscopada, exigirForaDaTx, txEscopadaOuDoContexto } from "../../db/tx.ts";
 import { ErroDeDominio } from "../../domain/erro.ts";
 import { aFazerLigado } from "../../domain/pendencia.ts";
 import { iaAtualDoCatalogo, opcoesDoCatalogo } from "../../domain/harness.ts";
@@ -395,6 +395,8 @@ export function comporApp(o: OpcoesCompor): App {
     ambiente: env,
     // ADR-068: o nod local está no Mac da pessoa e sobe o arquivo que o bot cita; o compartilhado não o alcança.
     ...(compartilhado ? {} : { subirArquivo: criarSubidaComposio() }),
+    // NOD-263: conector chamado com a tx escopada aberta segura uma conexão do pool pelo tempo do app de fora.
+    antesDeChamar: exigirForaDaTx,
     async carregar(conectorId, contexto) {
       const atual = contextoAtual();
       const escopos = atual

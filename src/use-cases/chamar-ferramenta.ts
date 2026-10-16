@@ -11,9 +11,11 @@ import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
+import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from "./pedir-aprovacao.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
-import { nomeParaTrilha, registrarNegacao } from "./registrar-negacao.ts";
-import type { CasoDeUso, Deps } from "./tipos.ts";
+import { executarItens, type DesfechoExecutado } from "./decidir.ts";
+import { nomeParaTrilha, registrarNegacao, type EntradaRegistrarNegacao } from "./registrar-negacao.ts";
+import type { CasoDeUso, Deps, Services } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
 /** Corpo devolvido por POST /api/interno/ferramentas/:nome (o proxy consome; src/adapters/executor/cliente-nod.ts espelha). */
@@ -37,6 +39,35 @@ export type EntradaChamarFerramenta = {
   /** Plano do turno guardado junto do token (services/token-turno.ts); null = plano ausente. */
   plano: PlanoTurno | null;
 };
+
+/**
+ * NOD-263 (emenda ao ADR-001): o efeito externo que a fase 1 decidiu e que roda FORA da tx — nunca sai da rota interna, que
+ * o resolve e responde com o ResultadoChamada final. `conector`: a chamada direta a um app; `lote`: os itens que o
+ * pedir_aprovacao aprovou sozinho por regra, com a decisão já fechada.
+ */
+export type EfeitoPendente =
+  | {
+    tipo: "conector";
+    conectorId: string;
+    slug: string;
+    tool: string;
+    argumentos: Record<string, unknown>;
+    rotina: boolean;
+    somenteLeitura: boolean;
+    /** O que a fase 2 precisa para registrar a negação se o app falhar (o mesmo registro de antes). */
+    negacao: Pick<EntradaRegistrarNegacao, "turnoId" | "agenteId" | "conversaId" | "nome" | "autoria">;
+  }
+  | { tipo: "lote"; lote: LoteAutomatico };
+
+export type SaidaFase1Chamada = ResultadoChamada | { efeito: EfeitoPendente };
+
+type RespostaConector = Awaited<ReturnType<Services["conectores"]["chamar"]>>;
+
+/** O que o efeito deu, sem banco: a resposta do app, o erro dele ou o desfecho de cada item do lote. */
+export type DesfechoEfeito =
+  | { tipo: "conector"; ok: true; resposta: RespostaConector }
+  | { tipo: "conector"; ok: false; erro: unknown }
+  | { tipo: "lote"; desfechos: DesfechoExecutado[] };
 
 export const REGRA_CHAMADA = "regra:chamar_ferramenta" as const;
 export const VERSAO_REGRA_CHAMADA = 1 as const;
@@ -122,13 +153,22 @@ async function rodarValidado<N extends NomeFerramentaNod>(deps: Deps, ctx: Conte
   return DESPACHO[nome](deps, ctx, v.args);
 }
 
-async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerramentaNod, args: unknown): Promise<{ resultado: ResultadoChamada; events: RuntimeEvent[] } | { erros: string[] }> {
+async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerramentaNod, args: unknown): Promise<{ resultado: SaidaFase1Chamada; events: RuntimeEvent[] } | { erros: string[] }> {
   // EMENDA 16: pedir_a_pessoa nunca é recusada por args — malformado vira pergunta (julgamento humano).
   if (nome === "pedir_a_pessoa") {
     const saida = await DESPACHO.pedir_a_pessoa(deps, ctx, normalizarPedidoAPessoa(args));
     return { resultado: { ok: true, conteudo: JSON.stringify(saida.data), confianca: "confiavel" }, events: saida.events ?? [] };
   }
-  const saida = await rodarValidado(deps, ctx, nome, args);
+  // NOD-263: o pedir_aprovacao da ferramenta roda só a FASE 1 — o lote que a regra aprova sozinha volta como efeito, para a
+  // rota executar fora da tx. A entrada de DESPACHO segue valendo para quem chama o caso inteiro (a conformidade a confere).
+  let saida: Awaited<ReturnType<typeof rodarValidado>>;
+  if (nome === "pedir_aprovacao") {
+    const v = validarArgsNod("pedir_aprovacao", args);
+    if (!v.ok) return { erros: v.erros };
+    const f = await pedirAprovacaoFase1(deps, { ...ctx, ...v.args });
+    if ("lote" in f) return { resultado: { efeito: { tipo: "lote", lote: f.lote } }, events: [] };
+    saida = f.saida;
+  } else saida = await rodarValidado(deps, ctx, nome, args);
   if ("erros" in saida) return saida;
   const data: unknown = saida.data;
   if (nome === "pedir_aprovacao" && typeof data === "object" && data !== null && (data as { estado?: unknown }).estado === "pendente") {
@@ -147,12 +187,12 @@ async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerra
  * aprovado), chama services.conectores e marca o conteúdo como não confiável (ADR-026). Toda
  * chamada e toda negação deixam linha na trilha com a regra (E8.4).
  */
-export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChamada> = async (deps, input) => {
+export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase1Chamada> = async (deps, input) => {
   const agora = deps.agora();
   const events: RuntimeEvent[] = [];
   const plano = input.plano;
 
-  const negar = async (motivo: MotivoNegacao, classe: Negacao["classe"], conectorId: string | null = null, viaGateDeRotina = false, causa?: Negacao["causa"]): Promise<{ data: ResultadoChamada; events: RuntimeEvent[] }> => {
+  const negar = async (motivo: MotivoNegacao, classe: Negacao["classe"], conectorId: string | null = null, viaGateDeRotina = false, causa?: Negacao["causa"]): Promise<{ data: SaidaFase1Chamada; events: RuntimeEvent[] }> => {
     const n = await registrarNegacao(deps, {
       turnoId: input.turnoId,
       agenteId: input.agenteId,
@@ -235,21 +275,88 @@ export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChama
   if (ferramenta.execucao === "maquina") return { data: { executarLocal: { capacidade: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> } }, events };
   // O GitHub App da organização só atende turno de rotina (ADR-048): ninguém olhando, nada em nome da pessoa.
   const rotina = (await rotinaDoTurno(deps.repos, input.turnoId)) !== null;
+  // NOD-263: a chamada ao app sai da tx — a rota a executa (executarEfeito) e só volta ao banco se ela falhar (concluirChamada).
+  return {
+    data: {
+      efeito: {
+        tipo: "conector",
+        conectorId,
+        slug: conector.slug,
+        tool,
+        argumentos: (input.argumentos ?? {}) as Record<string, unknown>,
+        rotina,
+        somenteLeitura: ferramenta.readOnlyHint === true,
+        negacao: { turnoId: input.turnoId, agenteId: input.agenteId, conversaId: plano.conversaId, nome: input.nome, ...(plano.autoria ? { autoria: plano.autoria } : {}) },
+      },
+    },
+    events,
+  };
+};
+
+/**
+ * O EFEITO (NOD-263), sem banco e sem tx: chama o app ou executa os itens do lote. Erro do app vira desfecho (a fase 2 marca a
+ * falha); banco ocupado ou tx encerrada — o `carregar` do conector abre a própria tx curta — é falha NOSSA e relança sem
+ * marcar o conector (NOD-266). Quem chama roda isto sob o contexto de log da fase 1 (mesmo correlation_id).
+ */
+export async function executarEfeito(services: Pick<Services, "conectores" | "computadores" | "github">, efeito: EfeitoPendente): Promise<DesfechoEfeito> {
+  if (efeito.tipo === "lote") return { tipo: "lote", desfechos: await executarItens(services, efeito.lote.aExecutar) };
   try {
-    const r = await deps.services.conectores.chamar(conectorId, tool, (input.argumentos ?? {}) as Record<string, unknown>, { rotina, somenteLeitura: ferramenta.readOnlyHint === true });
-    const conteudo = r.isError ? `erro do conector ${conector.slug}: ${r.conteudo}` : r.conteudo;
-    return { data: { ok: true, conteudo, confianca: "nao_confiavel" }, events };
+    return { tipo: "conector", ok: true, resposta: await services.conectores.chamar(efeito.conectorId, efeito.tool, efeito.argumentos, { rotina: efeito.rotina, somenteLeitura: efeito.somenteLeitura }) };
   } catch (e) {
-    // definido em 2026-10-15 (NOD-266): banco ocupado ou tx encerrada é falha NOSSA, não do app — relança sem marcar o
-    // conector como falho (a marca o desligaria para a pessoa) e sem escrever mais nada numa tx que pode estar morta.
     if (ehErroDeInfraDaTx(e)) throw e;
+    return { tipo: "conector", ok: false, erro: e };
+  }
+}
+
+/** O sucesso do app não escreve nada (NOD-263): o conteúdo volta direto, com o rótulo não confiável (ADR-026). */
+export function respostaSemFase2(efeito: EfeitoPendente, desfecho: DesfechoEfeito): ResultadoChamada | null {
+  if (efeito.tipo !== "conector" || desfecho.tipo !== "conector" || !desfecho.ok) return null;
+  const r = desfecho.resposta;
+  return { ok: true, conteudo: r.isError ? `erro do conector ${efeito.slug}: ${r.conteudo}` : r.conteudo, confianca: "nao_confiavel" };
+}
+
+export type EntradaConcluirChamada = { efeito: EfeitoPendente; desfecho: DesfechoEfeito };
+
+/**
+ * FASE 2 (NOD-263), numa tx NOVA: grava o desfecho do efeito e nunca o reenvia (ADR-009). Conector que falhou: marca a falha e
+ * registra a negação com o mesmo mapeamento de antes (401/403 → acesso_recusado; timeout_transporte; conector_indisponivel).
+ * Lote: assenta os desfechos (idempotente) e responde como o pedir_aprovacao respondia — pendente vira `aguardar`.
+ */
+export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada> = async (deps, { efeito, desfecho }) => {
+  if (efeito.tipo === "lote" && desfecho.tipo === "lote") {
+    const s = await assentarLoteAutomatico(deps, { lote: efeito.lote, desfechos: desfecho.desfechos });
+    const data = s.data;
+    const resultado: ResultadoChamada = data.estado === "pendente" ? { aguardar: data.decisao_id } : { ok: true, conteudo: JSON.stringify(data), confianca: "confiavel" };
+    return { data: resultado, events: s.events ?? [] };
+  }
+  if (efeito.tipo === "conector" && desfecho.tipo === "conector") {
+    const sem = respostaSemFase2(efeito, desfecho);
+    if (sem) return { data: sem, events: [] };
+    const e = desfecho.ok ? undefined : desfecho.erro;
     // definido em 2026-10-05 (NOD-157): 401/403 do conector não é "servidor fora" — o acesso ao app foi recusado. Sem enum novo:
     // falha_tecnica com `causa`, que muda só a redação. A chamada que chega aqui já esgotou as tentativas do cliente.
     const recusado = e instanceof Error && "status" in e && (e.status === 401 || e.status === 403);
     const motivo: MotivoNegacao = recusado ? "falha_tecnica" : e instanceof Error && e.message === "timeout_transporte" ? "timeout_transporte" : "conector_indisponivel";
-    await deps.repos.conectores.marcarFalha(conectorId, motivo, agora);
-    return negar(motivo, "conector_indisponivel", conectorId, false, recusado ? "acesso_recusado" : undefined);
+    await deps.repos.conectores.marcarFalha(efeito.conectorId, motivo, deps.agora());
+    const n = await registrarNegacao(deps, { ...efeito.negacao, motivo, classe: "conector_indisponivel", conectorId: efeito.conectorId, viaGateDeRotina: false, ...(recusado ? { causa: "acesso_recusado" as const } : {}) });
+    return { data: { ok: false, negacao: n.data }, events: n.events ?? [] };
   }
+  throw new Error("efeito e desfecho de tipos diferentes");
+};
+
+/**
+ * SÓ PARA TESTES (NOD-263): as três fases sobre os MESMOS deps (uma transação), com a resposta de sempre. Produção separa
+ * (rotas/interno.ts): o efeito roda fora de tx. Chamado de dentro de uma tx escopada, a guarda acusa (e lança em teste).
+ */
+export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChamada> = async (deps, input) => {
+  const f1 = await chamarFerramentaFase1(deps, input);
+  const data = f1.data;
+  if (!("efeito" in data)) return { data, events: f1.events ?? [] };
+  const desfecho = await executarEfeito(deps.services, data.efeito);
+  const sem = respostaSemFase2(data.efeito, desfecho);
+  if (sem) return { data: sem, events: f1.events ?? [] };
+  const f2 = await concluirChamada(deps, { efeito: data.efeito, desfecho });
+  return { data: f2.data, events: [...(f1.events ?? []), ...(f2.events ?? [])] };
 };
 
 export const REGRA_EXECUCAO_LOCAL = "regra:execucao_local" as const;

@@ -172,8 +172,8 @@ describe("tx: prazo para pegar conexão (NOD-266)", () => {
     expect(um?.sql).toContain("set_config('statement_timeout', ?, true)");
     expect(um?.sql).toContain("set_config('lock_timeout', ?, true)");
     expect(um?.sql).toContain("set_config('idle_in_transaction_session_timeout', ?, true)");
-    expect(um?.valores).toEqual(["t1", "p1", "60s", "10s", "660s"]);
-    expect(TIMEOUTS_TX).toEqual({ statement: "60s", lock: "10s", idleNaTx: "660s" });
+    expect(um?.valores).toEqual(["t1", "p1", "60s", "10s", "60s"]);
+    expect(TIMEOUTS_TX).toEqual({ statement: "60s", lock: "10s", idleNaTx: "60s" });
   });
 
   it("tx acima do limiar loga tx_longa com o correlation_id; abaixo, não", async () => {

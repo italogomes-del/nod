@@ -6,6 +6,9 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-laco.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_TOTAL } from "../../../domain/modo-aprovacao.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
+import { randomUUID } from "node:crypto";
+import { ErroBancoOcupado } from "../../../db/tx.ts";
+import { contextoAtual, executarComContexto } from "../../../obs/contexto.ts";
 import { log } from "../../../obs/log.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
 import { LONGPOLL_APROVACAO_MS } from "../../../shared/constantes.ts";
@@ -14,7 +17,7 @@ import type { NivelPressao } from "../../../contracts/trabalho.ts";
 import { soltarPorMemoria } from "../../../domain/trabalho.ts";
 import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
-import { chamarFerramenta, REGRA_CHAMADA, registrarExecucaoLocal, VERSAO_REGRA_CHAMADA } from "../../../use-cases/chamar-ferramenta.ts";
+import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type EfeitoPendente, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
 import { bytes } from "../util.ts";
@@ -42,6 +45,35 @@ export type DepsRotasInternas = {
 const CLASSES: readonly ClasseNegacao[] = ["ferramenta_negada", "conector_indisponivel", "plano_ausente"];
 
 const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** NOD-263: quantas vezes a fase 2 tenta gravar o desfecho quando o banco está ocupado, e a espera antes de cada nova tentativa. */
+export const TENTATIVAS_FASE2 = 3;
+const ESPERA_FASE2_MS = [100, 300] as const;
+
+/**
+ * A FASE 2 com banco ocupado (NOD-263): repete SÓ a escrita — o efeito já aconteceu e nunca é reenviado (ADR-009); a fase 2 é
+ * idempotente (`desfecho is null`, mensagem só quando grava). Esgotou: loga `desfecho_nao_gravado` com o que identifica o
+ * efeito e relança (a rota responde 503 como qualquer banco_ocupado). Outro erro relança na hora.
+ */
+export async function assentarComNovaTentativa<T>(gravar: () => Promise<T>, o: { correlationId: string; efeito: EfeitoPendente; dormir: (ms: number) => Promise<void> }): Promise<T> {
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      return await gravar();
+    } catch (e) {
+      if (!(e instanceof ErroBancoOcupado)) throw e;
+      if (tentativa >= TENTATIVAS_FASE2) {
+        log("erro", "desfecho_nao_gravado", {
+          correlation_id: o.correlationId,
+          tentativas: tentativa,
+          tipo: o.efeito.tipo,
+          ...(o.efeito.tipo === "lote" ? { decisao_id: o.efeito.lote.decisaoId, turno_id: o.efeito.lote.turnoId } : { conector_id: o.efeito.conectorId, ferramenta: o.efeito.tool, turno_id: o.efeito.negacao.turnoId }),
+        });
+        throw e;
+      }
+      await o.dormir(ESPERA_FASE2_MS[tentativa - 1] ?? 300);
+    }
+  }
+}
 
 /**
  * Rotas INTERNAS (/api/interno/…), autenticadas pelo token de turno no roteador da L1: a
@@ -110,15 +142,40 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           ctx.json(200, await deps.computadores.chamar(ctx.escopo, plano, ctx.params.nome, corpo?.argumentos ?? {}));
           return;
         }
-        const resultado = await deps.dentro(ctx.escopo, (d) =>
-          executar(d, chamarFerramenta, {
+        // NOD-263 (emenda ao ADR-001): três tempos. FASE 1 numa tx curta (portões, trilha, decisão do lote); o EFEITO fora de
+        // tx, sob o contexto de log da fase 1; a FASE 2 numa tx nova, só quando há o que gravar (o app falhou, ou o lote).
+        const contexto: { correlationId?: string; services?: Parameters<typeof executarEfeito>[0] } = {};
+        const fase1: SaidaFase1Chamada = await deps.dentro(ctx.escopo, (d) => {
+          contexto.correlationId = contextoAtual()?.correlationId;
+          contexto.services = d.services;
+          return executar(d, chamarFerramentaFase1, {
             turnoId,
             agenteId: ctx.params.agenteId ?? "",
             nome: ctx.params.nome ?? "",
             argumentos: typeof corpo === "object" && corpo !== null ? (corpo.argumentos ?? {}) : {},
             plano,
-          }),
-        );
+          });
+        });
+        if (!("efeito" in fase1)) {
+          ctx.json(200, fase1);
+          return;
+        }
+        const { efeito } = fase1;
+        const servicos = contexto.services;
+        if (!servicos) throw new Error("fase 1 sem services");
+        const correlationId = contexto.correlationId ?? randomUUID();
+        // Sem o contexto, o `carregar` do conector não sabe de quem é a chamada e procura entre todas as pessoas (compor.ts).
+        const contextoDoLog = { tenantId: ctx.escopo.tenantId, pessoaId: ctx.escopo.pessoaId, correlationId };
+        const desfecho = await executarComContexto(contextoDoLog, () => executarEfeito(servicos, efeito));
+        const direto = respostaSemFase2(efeito, desfecho);
+        if (direto) {
+          ctx.json(200, direto);
+          return;
+        }
+        const resultado = await executarComContexto(contextoDoLog, () => assentarComNovaTentativa(
+          () => deps.dentro(ctx.escopo, (d) => executar(d, concluirChamada, { efeito, desfecho })),
+          { correlationId, efeito, dormir: deps.dormir ?? dormirPadrao },
+        ));
         ctx.json(200, resultado);
       },
     },

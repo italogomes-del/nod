@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { executarComContexto } from "../obs/contexto.ts";
-import { log } from "../obs/log.ts";
+import { log, type CamposLog } from "../obs/log.ts";
 import type { Db, Escopo, Transacao, Tx } from "../shared/types.ts";
 
 /**
@@ -31,14 +31,16 @@ export interface TimeoutsTx {
   lock: string;
   /**
    * idle_in_transaction_session_timeout: a sessão ociosa dentro da tx além disto é ENCERRADA pelo Postgres (FATAL 25P03).
-   * definido em 2026-10-15 (NOD-266): 660 s, acima do caminho legítimo mais longo de hoje — o conector roda dentro da tx e a
-   * chamada com arquivo vai até 600 s (CHAMADA_COM_ARQUIVO_MS, src/services/conectores-vivos.ts; tests/unit/db/pool-max.test.ts trava a folga). Baixa para 60 s quando a NOD-263 tirar o conector da tx.
+   * definido em 2026-10-15 (NOD-266): era 660 s porque o conector rodava dentro da tx (até 600 s com arquivo). revisto em
+   * 2026-10-16 (NOD-263): 60 s — a chamada do bot e o lote automático saíram da tx (emenda ao ADR-001). O que ainda fala com
+   * o app de fora dentro da tx são as sondas (issue irmã), com orçamento de ORCAMENTO_CONECTOR_MS (30 s, constantes.ts);
+   * tests/unit/db/pool-max.test.ts trava a folga.
    * Só é seguro ligar porque a `trx` entregue a `fn` é guardada (`guardarTrx`): ver o spike no comentário dela.
    */
   idleNaTx: string;
 }
 
-export const TIMEOUTS_TX: TimeoutsTx = { statement: "60s", lock: "10s", idleNaTx: "660s" };
+export const TIMEOUTS_TX: TimeoutsTx = { statement: "60s", lock: "10s", idleNaTx: "60s" };
 
 export interface OpcoesTx {
   /** Prazo para pegar conexão e abrir o BEGIN. Default PRAZO_CONEXAO_MS; o teste injeta um curto. */
@@ -288,6 +290,33 @@ export function abrirTxEscopada(db: Db, escopo: Escopo, opcoes: OpcoesTx = {}): 
       }
     }
   };
+}
+
+/**
+ * NOD-263: há uma tx escopada VIVA neste contexto assíncrono? A chamada externa (conector, lote de itens) não pode rodar com
+ * ela aberta: a tx segura uma das conexões do pool (ADR-001) pelo tempo todo do app de fora — até 600 s com arquivo.
+ */
+export function haTxEscopadaAberta(): boolean {
+  return txDoContexto.getStore()?.viva() === true;
+}
+
+/** NOD-263: lançado só em teste (NODE_ENV=test) quando uma chamada externa roda com tx escopada aberta. */
+export class ErroConectorDentroDaTx extends Error {
+  constructor() {
+    super("conector_dentro_da_tx");
+    this.name = "ErroConectorDentroDaTx";
+  }
+}
+
+/**
+ * NOD-263 (emenda ao ADR-001): a guarda do efeito externo. Com tx escopada aberta, loga `conector_dentro_da_tx` (aviso) e
+ * segue em produção — derrubar a chamada da pessoa por um caminho esquecido seria pior que o pool apertado —, mas LANÇA em
+ * teste, para o caminho novo que chamar conector de dentro da tx quebrar a suíte antes de chegar a alguém.
+ */
+export function exigirForaDaTx(campos: CamposLog): void {
+  if (!haTxEscopadaAberta()) return;
+  log("aviso", "conector_dentro_da_tx", campos);
+  if (process.env.NODE_ENV === "test") throw new ErroConectorDentroDaTx();
 }
 
 /**
