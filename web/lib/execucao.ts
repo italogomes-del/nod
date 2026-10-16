@@ -15,6 +15,11 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
   // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
   sem_pendencia: "sem pendência aberta, nenhum turno rodou",
+  // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.
+  motor_ausente: "a IA não estava pronta na máquina",
+  nao_autenticado: "a IA da máquina estava sem login",
+  limite_do_plano: "a conta da IA estava no limite",
+  parado_pela_pessoa: "você parou",
 };
 
 /** definido em 2026-10-01 (item 7 da ADR-066): a rotina que só acorda com pendência, na lista de rotinas. */

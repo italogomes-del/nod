@@ -20,6 +20,7 @@ import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
 import { contasDaMaquinaDe, criarNotaDeContas, escolherContaDoTurno, lerContas, notaIgualAberta, semContaParaOTurno, voltaDaNota, type LeituraDasContas } from "./contas-do-turno.ts";
 import { esperarContaNaFrente } from "./assentar-turno.ts";
+import { registrarRecusaDaRotina } from "./disparar-rotina.ts";
 import { adiarFala, vigiarLaco } from "./adiar-fala.ts";
 import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -123,9 +124,11 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   if (paradaConversa) {
     const interrompido = await deps.repos.turnos.interromper(turno.id, "parado_pela_pessoa");
     const autoria = autoriaPessoa(deps.escopo, executor);
+    // NOD-251: a janela da rotina parada antes de rodar fica no histórico como 'interrompida' (Parar), não some.
+    const daRotina = interrompido ? await registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa") : [];
     return {
       data: { plano: null, turno: interrompido ?? turno, motivo: "parada_ativa" },
-      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...(await sincronizarDoTurno(deps, turno))],
+      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...daRotina, ...(await sincronizarDoTurno(deps, turno))],
     };
   }
 
@@ -271,6 +274,8 @@ async function semContaNaMaquina(
     // Revisão do PR #319: a fala que já esperou não espera de novo — sem a nota, ela sumiria calada (nunca silêncio).
     ...(calada ? [] : await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
     ...(adiada ?? []),
+    // NOD-251/NOD-275: a rotina que não esperou a conta (sem task aberta) registra a janela 'interrompida'/limite_do_plano.
+    ...(await registrarRecusaDaRotina(deps, turno, "limite_do_plano")),
     ...(await sincronizarDoTurno(deps, turno)),
   ];
   log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo, nota_repetida: calada });
@@ -343,6 +348,9 @@ async function recusarPorExecutor(
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: motivoFalha, inventario: p.inventario.estado } }),
   ];
   if (negacao) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { mensagem_id: negacao.id, kind: "negacao" } }));
+  // NOD-251/NOD-275: a janela da rotina recusada aparece no histórico ('interrompida' com o motivo); a negação acima é a
+  // única linha no chat.
+  events.push(...(await registrarRecusaDaRotina(deps, p.turno, motivoFalha)));
   events.push(...(await sincronizarDoTurno(deps, p.turno)));
   return { data: { plano: null, turno: assentado ?? p.turno, motivo: "executor_indisponivel" }, events };
 }

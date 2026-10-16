@@ -55,7 +55,7 @@ import { atualizarPerfil } from "../../use-cases/atualizar-perfil.ts";
 import { motorDe } from "../../use-cases/autoria-evento.ts";
 import { criarRotina } from "../../use-cases/criar-rotina.ts";
 import { atualizarRotinaPeloAgente, excluirRotinaPeloAgente, listarRotinasDoAgente, pausarRotinaPeloAgente, reativarRotinaPeloAgente } from "../../use-cases/rotinas-do-agente.ts";
-import { registrarDesfechoRotina } from "../../use-cases/disparar-rotina.ts";
+import { registrarDesfechoDaEntrega } from "../../use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../use-cases/emitir-plano-turno.ts";
 import { encaminhar } from "../../use-cases/encaminhar.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../use-cases/entregar-resposta-peer.ts";
@@ -555,17 +555,8 @@ export function comporApp(o: OpcoesCompor): App {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
       const events: RuntimeEvent[] = [];
-      // definido em 2026-09-24 (ADR-045): turno derrubado pela máquina já registrou a execução como
-      // 'interrompida' (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela.
-      if ((turno.origem === "rotina" || turno.origem === "retomada") && turno.motivoInterrupcao !== "maquina_sem_contato") {
-        // definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não
-        // rendeu notícia. Desfecho próprio para o histórico distinguir "rodou e não tinha nada" de
-        // "rodou e relatou" — e para registrarDesfechoRotina saber que não deve escrever marcador.
-        const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
-        const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";
-        const r = await registrarDesfechoRotina(d, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
-        if ("execucao" in r.data) events.push(...(r.events ?? []));
-      }
+      // A rotina (ou a retomada dela) registra o desfecho da janela; a regra mora em registrarDesfechoDaEntrega (NOD-251).
+      events.push(...(await registrarDesfechoDaEntrega(d, turno)));
       // definido em 2026-09-24 (ADR-047): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)
       // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.
       if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {

@@ -193,7 +193,7 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "parado_pela_pessoa" | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
 };
@@ -301,4 +301,45 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
     evento(deps, "rotina_executou", autoria, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: input.desfecho, motivo: input.motivo ?? null, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
   ];
   return { data: { execucao, rotina, podadas }, events };
+}
+
+/** NOD-251/NOD-275: quem decidiu que a janela não rodou — a máquina recusou o turno no despacho, ou a pessoa pediu Parar. */
+export const REGRA_DESPACHO_RECUSADO = "regra:despacho-recusado" as const;
+export const REGRA_PARAR = "regra:parar" as const;
+
+/** Por que a janela da rotina terminou sem rodar: a recusa do despacho (do inventário ou da conta) ou o Parar da pessoa. */
+export type MotivoRecusaDaRotina = "motor_ausente" | "nao_autenticado" | "limite_do_plano" | "parado_pela_pessoa";
+
+/**
+ * NOD-251/NOD-275 (definido em 2026-10-15): o turno de rotina (ou a retomada dela) que o despacho recusou — motor ausente,
+ * CLI sem login, conta no limite — ou que a pessoa parou antes de rodar. Sem isto a janela sumia do histórico: o turno saía
+ * `interrompido`, mas `rotina_execucoes` não ganhava linha e a trilha `rotina_*` não tinha evento. Registra 'interrompida'
+ * com o motivo, na MESMA tx do despacho, e devolve o `rotina_executou`. 'interrompida' é silencioso (SILENCIOSOS): a nota
+ * ou a negação que o despacho já escreve é a única linha no chat. Turno que não leva a uma rotina → nada.
+ */
+export async function registrarRecusaDaRotina(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Pick<Turno, "id" | "origem">, motivo: MotivoRecusaDaRotina): Promise<RuntimeEvent[]> {
+  if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
+  const regra = motivo === "parado_pela_pessoa" ? REGRA_PARAR : REGRA_DESPACHO_RECUSADO;
+  const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo, regra });
+  return "execucao" in r.data ? (r.events ?? []) : [];
+}
+
+/**
+ * O desfecho da janela quando a máquina entrega o turno da rotina (ou da retomada dela) — chamado pela ponte depois de
+ * assentar (compor.ts, depoisDeAssentar), na mesma tx. Turno que não é de rotina → nada.
+ * - definido em 2026-09-24 (ADR-045): turno derrubado pela máquina já registrou a execução como 'interrompida'
+ *   (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela.
+ * - definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não rendeu notícia ('sem_novidade',
+ *   silencioso); concluído = 'executou'; o resto = 'falhou' com o motivo da falha.
+ * - NOD-251 (definido em 2026-10-15): "Parar" no meio da rotina não é erro técnico — a janela fica 'interrompida'
+ *   (silenciosa) com o motivo parado_pela_pessoa, sem a linha "A rotina falhou por erro técnico" no chat.
+ */
+export async function registrarDesfechoDaEntrega(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Turno): Promise<RuntimeEvent[]> {
+  if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
+  if (turno.motivoInterrupcao === "maquina_sem_contato") return [];
+  if (turno.estado === "interrompido" && turno.motivoInterrupcao === "parado_pela_pessoa") return registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa");
+  const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
+  const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";
+  const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho, motivo: silencioso ? turno.semNovidadeMotivo : desfecho === "falhou" ? (turno.motivoFalha ?? null) : null });
+  return "execucao" in r.data ? (r.events ?? []) : [];
 }
