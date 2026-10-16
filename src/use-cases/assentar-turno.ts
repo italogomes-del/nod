@@ -16,7 +16,7 @@ import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
 import { ultimoSinalDoTurno } from "../domain/incidente.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
-import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
 import { entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
@@ -27,6 +27,8 @@ import { harnessFixado } from "../domain/harness.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import { criarNotaDeContas, lerContasDaMaquina, type ContasDaMaquina } from "./contas-do-turno.ts";
 import { avisarTrocaDeIa, contaForaDaFila, outraIaParaAsTasks, quandoAIaVolta } from "./trocas-de-ia.ts";
+import { adiarFala } from "./adiar-fala.ts";
+import { alvoDoBot } from "./alvo-do-bot.ts";
 import { log } from "../obs/log.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -58,8 +60,11 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 /**
  * `prontosDaPessoa` (definido em 2026-10-10, emenda da ADR-036): as IAs prontas em alguma máquina viva da pessoa (quem
  * sabe é a ponte). No limite da assinatura, o turno do Automático é repetido na próxima delas pela ordem (aposLimite).
+ * `prontosPorMaquina` (definido em 2026-10-15, NOD-268; revisão do PR #319): as IAs prontas em cada máquina conectada.
+ * Com o bot preso a uma máquina (a dele ou a padrão da pessoa, ADR-090), a troca só vai para uma IA pronta NELA — a de
+ * outra máquina nunca pegaria o turno.
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[] };
+export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[]; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -354,7 +359,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // QA do NOD-211 (2026-10-12): a task (frente) cuja conta parou com outra livre não pode cair no aviso de sempre e
     // virar "falhou" (ADR-099 §7). "trocou": segue já, na conta nova; "perguntar": nada troca sozinho, espera a conta voltar.
     events.push(...trocou);
-  } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
+  } else if (limite && (trocou = await aposLimite(deps, { turno, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], prontosPorMaquina: entrega.prontosPorMaquina ?? null, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
   } else if (limite && (trocou = await aposLimiteDaIaNoFundo(deps, { turno: assentado, executor, ...limite, prontos: entrega.prontosDaPessoa ?? [], motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))) {
     events.push(...trocou);
@@ -411,23 +416,42 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
  * já não entrega o turno novo à IA parada (iasParaOAutomatico) e o plano o resolve na próxima (o limite acabou de ser
  * gravado). null = não repete: bot em "Uma IA só", rotina, sala, pedido entre bots (mesmos motivos de aposContaSemAcesso)
  * ou nenhuma outra IA disponível — então vale o aviso do limite de sempre, com a hora.
+ *
+ * revisto em 2026-10-15 (NOD-268, a conversa inundada de 15/10): (1) o turno novo sai FIXO na IA escolhida — no `auto`,
+ * outra máquina o pegava e o rodava de novo na IA parada; (2) com o bot preso a uma máquina (ADR-090), só vale IA pronta
+ * NELA (`prontosPorMaquina` + alvoDoBot); a que está pronta noutra máquina vira a linha "pronto noutra máquina, mas este bot roda em…" e a
+ * fala espera a hora do limite; (3) passou do teto de reenvios (TETO_REENVIOS), a fala espera a hora, com UMA linha.
  */
 async function aposLimite(
   deps: Deps,
-  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; prontos: readonly IdHarness[]; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
+  p: { turno: Turno; executor: Executor; ia: IdHarness; renovaEm: number; prontos: readonly IdHarness[]; prontosPorMaquina: Readonly<Record<string, readonly IdHarness[]>> | null; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null },
 ): Promise<RuntimeEvent[] | null> {
   const { turno, autoria, agora } = p;
   // ADR-108 (R4): o turno de uma task não é refeito noutra IA aqui — quem decide é aposLimiteDaIaNoFundo (a sessão).
   if (turno.origem !== "conversa" || turno.harness !== "auto" || turno.modelo !== "auto" || turno.trabalhoId) return null;
   const [agente, preferencias] = await Promise.all([deps.repos.agentes.buscar(turno.agenteId), deps.repos.preferencias.buscar()]);
   if (!agente) return null;
+  const interrompido = evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, custo_usd: p.custoUsd } });
+  const esperar = async (texto: string, causa: string): Promise<RuntimeEvent[] | null> => {
+    const adiada = await adiarFala(deps, { turno, executor: p.executor, acordarEm: p.renovaEm, autoria, agora, texto, causa });
+    return adiada ? [interrompido, ...adiada] : null;
+  };
+  const quando = quandoDaFrase(p.renovaEm, agora);
+  if (!podeReenviar(turno)) return esperar(redigir("fala-no-limite-espera", agora, { ia: nomeDaIa(p.ia), quando }), "teto_de_reenvios");
   const ordem = ordemEfetiva({ doBot: inteligenciaDoAgente(agente).ordem, daPessoa: preferencias.ordemIas ?? null });
-  const para = proximaIaNoLimite({ ordem, prontos: p.prontos, noLimite: iasNoLimite(preferencias.iasNoLimite, agora), atual: p.ia });
-  if (!para) return null;
+  const noLimite = iasNoLimite(preferencias.iasNoLimite, agora);
+  // Revisão do PR #319: as prontas da máquina para onde a fala refeita VAI (a do bot ou a padrão, com a chave viva), não
+  // as da que entregou — com "Rodar em <outra> desta vez", o turno novo volta à do bot. Fora do ar: nenhuma pronta nela.
+  const alvo = p.prontosPorMaquina ? await alvoDoBot(deps, turno.agenteId) : null;
+  const prontos = alvo && p.prontosPorMaquina ? (p.prontosPorMaquina[alvo.id] ?? []) : p.prontos;
+  const para = proximaIaNoLimite({ ordem, prontos, noLimite, atual: p.ia });
+  if (!para) {
+    const noutra = alvo ? proximaIaNoLimite({ ordem, prontos: p.prontos, noLimite, atual: p.ia }) : null;
+    if (!noutra) return null;
+    return esperar(redigir("ia-pronta-noutra-maquina", agora, { ia: nomeDaIa(p.ia), outra: nomeDaIa(noutra), maquina: `em ${alvo!.nome}`, quando }), "ia_noutra_maquina");
+  }
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
-  const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, custo_usd: p.custoUsd } }),
-  ];
+  const events: RuntimeEvent[] = [interrompido];
   const linha = await deps.repos.mensagens.criar({
     conversaId: turno.conversaId,
     turnoId: turno.id,
@@ -448,8 +472,9 @@ async function aposLimite(
     mensagemOrigemId: turno.mensagemOrigemId,
     entradaAnexos: turno.entradaAnexos,
     entradaConfianca: turno.entradaConfianca,
+    // NOD-268: fixo na IA escolhida (modelo `auto` = a escolha do bot para ela, senão o recomendado).
     modelo: turno.modelo,
-    harness: turno.harness,
+    harness: para,
     reenvios: turno.reenvios + 1,
     executor: p.executor,
     trabalhoId: turno.trabalhoId ?? null,
@@ -472,10 +497,15 @@ async function aposTrocaDeConta(
 ): Promise<RuntimeEvent[] | null> {
   const { turno, autoria, agora, troca } = p;
   if (turno.origem !== "conversa" || turno.pararSolicitadoEm !== null) return null;
+  const interrompido = evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_de: troca.de, conta_para: troca.para, custo_usd: p.custoUsd } });
+  // NOD-268: passou do teto de reenvios — a fala espera a conta que parou voltar, com uma linha (null: o aviso de sempre).
+  // Revisão do PR #319: já esperou — o aviso do limite sem o "Seguindo com" (a fala não segue).
+  if (!podeReenviar(turno)) {
+    const acordarEm = prazoDoLimite(troca.voltaEm, agora);
+    return (await esperarNoTeto(deps, { turno, executor: p.executor, ia: p.ia, acordarEm, autoria, agora, interrompido })) ?? avisoNoTeto(deps, { turno, ia: p.ia, voltaEm: acordarEm, autoria, agora, interrompido });
+  }
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
-  const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_de: troca.de, conta_para: troca.para, custo_usd: p.custoUsd } }),
-  ];
+  const events: RuntimeEvent[] = [interrompido];
   const linha = await deps.repos.mensagens.criar({
     conversaId: turno.conversaId,
     turnoId: turno.id,
@@ -567,10 +597,14 @@ async function aposLimiteDaConta(
     }
     return aposLimiteNoFundo(deps, { ...fundo, renovaEm: segue ? agora : p.voltaEm });
   }
+  const interrompido = evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_no_limite: p.conta.id, decisao: decisao.tipo, custo_usd: p.custoUsd } });
+  // NOD-268: a troca já foi usada nesta fala — ela espera a conta voltar, com uma linha. Já esperou (revisão do PR #319):
+  // o aviso do limite sem o "Seguindo com" da nota (a fala não segue).
+  if (segue && turno.origem === "conversa" && !podeReenviar(turno)) {
+    return (await esperarNoTeto(deps, { turno, executor: p.executor, ia: p.conta.ia, acordarEm: p.voltaEm, autoria, agora, interrompido })) ?? avisoNoTeto(deps, { turno, ia: p.conta.ia, voltaEm: p.voltaEm, autoria, agora, interrompido });
+  }
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
-  const events: RuntimeEvent[] = [
-    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, conta_no_limite: p.conta.id, decisao: decisao.tipo, custo_usd: p.custoUsd } }),
-  ];
+  const events: RuntimeEvent[] = [interrompido];
   if (!segue || turno.origem !== "conversa") {
     // R6: o bot fixo sem conta da IA dele na fila — o aviso com os caminhos no lugar da nota (sem caminho, a nota de sempre).
     const fixo = p.iaFixa && turno.origem === "conversa"
@@ -637,7 +671,7 @@ async function aposContaAusente(
 ): Promise<RuntimeEvent[] | null> {
   await deps.repos.contasIa.apagarVinculo(p.contaId, p.machineId);
   log("aviso", "conta_ausente_na_maquina", { turno_id: p.turno.id, conta_id: p.contaId, machine_id: p.machineId });
-  if (p.turno.pararSolicitadoEm !== null || p.turno.reenvios >= 1) return null;
+  if (p.turno.pararSolicitadoEm !== null || !podeReenviar(p.turno)) return null;
   // Revisão do PR #306: a task não passa pelo caminho do limite (não houve limite; a frase e a IA sairiam erradas, e a
   // retomada não leva `reenvios`, então a trava acima não valeria). Vale o aviso de sempre; sem o vínculo, o próximo
   // plano já escolhe outra conta.
@@ -649,7 +683,10 @@ async function aposContaAusente(
   ];
 }
 
-/** A fala da pessoa de novo na fila (a mesma entrada; `reenvios` + 1), como na troca de IA e de conta. */
+/**
+ * A fala da pessoa de novo na fila (a mesma entrada; `reenvios` + 1), como na troca de IA e de conta. Quem chama já
+ * conferiu o teto (podeReenviar, NOD-268).
+ */
 async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Executor; agora: number }): Promise<RuntimeEvent[]> {
   const { turno } = p;
   const novo = await deps.repos.turnos.enfileirar({
@@ -669,6 +706,41 @@ async function repetirNaConversa(deps: Deps, p: { turno: Turno; executor: Execut
     trabalhoId: turno.trabalhoId ?? null,
   });
   return novo ? [evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora: p.agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id } })] : [];
+}
+
+/**
+ * NOD-268: a fala que passou do teto espera a hora (`acordarEm`) com a linha "O <IA> está no limite… volta sozinha às
+ * HH:MM". null = ela já esperou uma vez (ou não é conversa): quem chama segue com o aviso de sempre.
+ */
+async function esperarNoTeto(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; ia: IdHarness; acordarEm: number; autoria: Autoria; agora: number; interrompido: RuntimeEvent },
+): Promise<RuntimeEvent[] | null> {
+  const texto = redigir("fala-no-limite-espera", p.agora, { ia: nomeDaIa(p.ia), quando: quandoDaFrase(p.acordarEm, p.agora) });
+  const adiada = await adiarFala(deps, { turno: p.turno, executor: p.executor, acordarEm: p.acordarEm, autoria: p.autoria, agora: p.agora, texto, causa: "teto_de_reenvios" });
+  return adiada ? [p.interrompido, ...adiada] : null;
+}
+
+/**
+ * NOD-268 (revisão do PR #319): a fala no teto que já esperou a hora uma vez e bateu no limite de novo. Nada refaz nem
+ * espera: o aviso do limite com a hora (o card do limite), sem "Seguindo com" — a frase da troca prometeria uma resposta
+ * que não vem.
+ */
+async function avisoNoTeto(
+  deps: Deps,
+  p: { turno: Turno; ia: IdHarness; voltaEm: number; autoria: Autoria; agora: number; interrompido: RuntimeEvent },
+): Promise<RuntimeEvent[]> {
+  await deps.repos.mensagens.marcarParciaisDoTurno(p.turno.id);
+  const aviso = await deps.repos.mensagens.criar({
+    conversaId: p.turno.conversaId,
+    turnoId: p.turno.id,
+    autoria: p.autoria,
+    kind: "sistema",
+    texto: redigir("turno-interrompido", p.agora, { motivo: fraseDoLimiteDoPlano(p.ia, p.voltaEm, p.agora) }),
+    payload: { kind: "limite_do_plano", harness: p.ia, voltaEm: p.voltaEm > p.agora ? p.voltaEm : null },
+    confianca: "confiavel",
+  });
+  return [p.interrompido, ...(aviso ? [evento(deps.escopo, { kind: "mensagem_criada", autoria: p.autoria, agora: p.agora, conversaId: p.turno.conversaId, turnoId: p.turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } })] : [])];
 }
 
 /**
@@ -766,7 +838,8 @@ async function aposContaSemAcesso(
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "nao_autenticado", causa, custo_usd: p.custoUsd } }),
   ];
-  const repete = turno.origem === "conversa" && turno.harness === "auto" && turno.modelo === "auto" && p.harness !== null && p.outraIa !== null && p.outraIa !== p.harness;
+  // NOD-268: no teto de reenvios, a negação com a causa (a conta sem acesso não volta sozinha com a hora).
+  const repete = turno.origem === "conversa" && turno.harness === "auto" && turno.modelo === "auto" && p.harness !== null && p.outraIa !== null && p.outraIa !== p.harness && podeReenviar(turno);
   if (repete && p.harness && p.outraIa) {
     const linha = await deps.repos.mensagens.criar({
       conversaId: turno.conversaId,

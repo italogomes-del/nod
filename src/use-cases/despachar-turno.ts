@@ -1,6 +1,6 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { CotaDaIa } from "../contracts/cota.ts";
-import { HARNESS_LEGADO, type IdHarness } from "../contracts/harness.ts";
+import { HARNESS_LEGADO, HARNESSES, type IdHarness } from "../contracts/harness.ts";
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -8,7 +8,7 @@ import { portaoDaCota } from "../domain/cota-da-ia.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
-import { iasParaOAutomatico } from "../domain/inteligencia.ts";
+import { esperaDoAutomatico, iasParaOAutomatico } from "../domain/inteligencia.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
@@ -17,8 +17,11 @@ import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
 import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
 import { inteligenciaDoAgente } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
-import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, semContaParaOTurno, type ContasDaMaquina } from "./contas-do-turno.ts";
+import { criarNotaDeContas, escolherContaDoTurno, lerContasDaMaquina, notaIgualAberta, semContaParaOTurno, voltaDaNota, type ContasDaMaquina } from "./contas-do-turno.ts";
 import { esperarContaNaFrente } from "./assentar-turno.ts";
+import { adiarFala, vigiarLaco } from "./adiar-fala.ts";
+import { quandoDaFrase } from "../domain/erro-fornecedor.ts";
+import { redigir } from "../domain/redacao.ts";
 import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
 import { temSessaoNaIa } from "../domain/troca-de-ia.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
@@ -88,6 +91,9 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
   const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
+  // NOD-268: o alarme do reenvio em laço (só log; o freio é o teto de reenvios). Revisão do PR #319: a falha da consulta
+  // não derruba o despacho de um turno já reivindicado.
+  await vigiarLaco(deps, turno, agora).catch((e: unknown) => log("aviso", "vigia_do_laco_falhou", { turno_id: turno.id, erro: e instanceof Error ? e.name : "desconhecido" }));
 
   // Auditoria A3 (definido em 2026-10-15): o turno-cérebro de uma ligação que já acabou (a pessoa desligou, o prazo do
   // primeiro cérebro venceu, o deploy encerrou) antes de alguma máquina pegá-lo. O plano recusaria com estado_invalido,
@@ -146,6 +152,11 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const autoria = autoriaPessoa(deps.escopo, executor);
   const events = absorvidos.map((a) => evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: a.conversaId, turnoId: a.id, dados: { motivo: "absorvido", absorvido_por: comFila.id } }));
 
+  // NOD-268: o Automático com todas as IAs desta máquina no limite não roda a primeira delas (gastaria o turno e voltaria
+  // como mais um reenvio): a fala (já com a fila junta) espera a renovação mais próxima, com uma linha.
+  const adiado = await adiarNoAutomatico(deps, { turno: comFila, executor, prontos: input.harnessesProntos, noLimite: input.noLimite, agora });
+  if (adiado) return { data: adiado.data, events: [...events, ...adiado.events] };
+
   try {
     const plano = await deps.tx((trx) => deps.services.planos.emitir(trx, comFila.id, input.machineId));
     // ADR-083: o trabalho do turno passa a rodando (ou a precisa de você, se uma decisão dele segue aberta).
@@ -163,6 +174,35 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     throw e;
   }
 };
+
+/**
+ * NOD-268: turno da conversa no Automático (que ainda não esperou) numa máquina cujas IAs prontas estão TODAS no limite.
+ * null = roda como antes (há IA fora do limite, a lista não veio, ou a fala já esperou uma vez).
+ */
+async function adiarNoAutomatico(
+  deps: Deps,
+  p: { turno: Turno; executor: Executor; prontos?: readonly string[]; noLimite?: readonly string[]; agora: number },
+): Promise<{ data: SaidaDespacharTurno; events: RuntimeEvent[] } | null> {
+  const { turno, agora } = p;
+  if (turno.origem !== "conversa" || turno.harness !== "auto" || turno.modelo !== "auto" || (turno.acordarEm ?? null) !== null || turno.pararSolicitadoEm !== null) return null;
+  const prontos = p.prontos ?? [];
+  if (prontos.length === 0 || !prontos.every((id) => p.noLimite?.includes(id))) return null;
+  const limites = (await deps.repos.preferencias.buscar()).iasNoLimite;
+  const acordarEm = esperaDoAutomatico({ prontos, limites, agora });
+  if (acordarEm === null) return null;
+  const ia = (prontos.find((id) => limites?.[id as IdHarness]?.renovaEm === acordarEm) ?? prontos[0]) as IdHarness;
+  const assentado = await deps.repos.turnos.assentar(turno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "limite_do_plano" });
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: p.executor, localityReason: "motor_ausente" });
+  const texto = redigir("fala-no-limite-espera", agora, { ia: HARNESSES.find((h) => h.id === ia)?.nome ?? ia, quando: quandoDaFrase(acordarEm, agora) });
+  const adiada = await adiarFala(deps, { turno, executor: p.executor, acordarEm, autoria, agora, texto, causa: "todas_no_limite" });
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "limite_do_plano", ia_no_limite: ia, renova_em: acordarEm } }),
+    ...(adiada ?? []),
+    // Revisão do PR #319: a fala mandada a uma task muda o estado dela como nas outras saídas do despacho.
+    ...(await sincronizarDoTurno(deps, turno)),
+  ];
+  return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events };
+}
 
 /** Auditoria A3: a regra que assenta o turno-cérebro de uma ligação que já acabou (autoria do evento). */
 export const REGRA_CEREBRO_SEM_LIGACAO = "regra:cerebro-sem-ligacao" as const;
@@ -209,12 +249,22 @@ async function semContaNaMaquina(
       return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events: [...espera, ...(await sincronizarDoTurno(deps, turno))] };
     }
   }
+  // NOD-268 (regressão de 15/10: dez despachos, dez notas iguais): a nota da mesma conta e da mesma volta, ainda aberta,
+  // não se repete. Na conversa, a fala espera a conta voltar (1 h sem horário), em silêncio — a nota já diz a hora.
+  const repetida = await notaIgualAberta(deps, { conversaId: turno.conversaId, contaId: sem.de.id, voltaEm: voltaDaNota(sem.decisao, sem.voltaEm, agora) });
+  const volta = voltaDaNota(sem.decisao, sem.voltaEm, agora) ?? agora + PRAZO_SEM_HORARIO_MS;
+  const adiada = await adiarFala(deps, { turno, executor: p.executor, acordarEm: volta, autoria, agora, texto: null, causa: "sem_conta" });
+  // QA do NOD-268: a rotina sem task não espera (adiarFala é só da conversa) e cada execução é um turno novo — com a nota
+  // igual aberta, ela assenta calada (só log); a nota já diz a hora. A fala da conversa que já esperou ganha a nota de novo.
+  const calada = repetida && (adiada !== null || turno.origem !== "conversa");
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "executor_indisponivel", motivo_falha: "limite_do_plano", sem_conta: true } }),
-    ...(await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
+    // Revisão do PR #319: a fala que já esperou não espera de novo — sem a nota, ela sumiria calada (nunca silêncio).
+    ...(calada ? [] : await criarNotaDeContas(deps, { turno, autoria, agora, de: sem.de, decisao: sem.decisao, maquina: c.nomeDaMaquina ? { id: p.machineId, nome: c.nomeDaMaquina } : null, voltaEm: sem.voltaEm })),
+    ...(adiada ?? []),
     ...(await sincronizarDoTurno(deps, turno)),
   ];
-  log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo });
+  log("info", "turno_sem_conta", { turno_id: turno.id, decisao: sem.decisao.tipo, nota_repetida: calada });
   return { data: { plano: null, turno: assentado ?? turno, motivo: "executor_indisponivel" }, events };
 }
 

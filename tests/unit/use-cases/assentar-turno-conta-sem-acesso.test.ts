@@ -111,3 +111,13 @@ describe("repetirBarradosPorIa: uma IA ficou pronta", () => {
     expect((await executar(c.deps, repetirBarradosPorIa, { executor: "local" })).data).toEqual({ repetidos: 0 });
   });
 });
+
+describe("NOD-268: conta sem acesso no teto de reenvios", () => {
+  it("a fala já reenviada uma vez não é repetida de novo: a negação com a causa", async () => {
+    const c = await cenario();
+    c.banco.turnos.find((t) => t.id === c.turnoId)!.reenvios = 1;
+    await c.entregar("codex-cli", RECUSA);
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toEqual([]);
+    expect(c.banco.mensagens.slice(c.antes).some((m) => m.payload?.kind === "ia_trocada")).toBe(false);
+  });
+});

@@ -26,6 +26,9 @@ export type ChaveRedacao =
   | "cota-no-limite-espera"
   | "cota-no-limite-segue"
   | "conta-no-limite-espera"
+  | "fala-no-limite-espera"
+  | "ia-pronta-noutra-maquina"
+  | "conta-fora-da-maquina"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
@@ -75,6 +78,13 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-10-16 (ADR-108 R4): a task SEM sessão na IA que parou segue na outra IA na hora (não há o que perder).
   "cota-no-limite-segue": "A cota do {ia} chegou ao limite. Esta task segue no {para}, de onde parou.",
   "conta-no-limite-espera": "A conta {de} do {ia} chegou ao limite. Esta task espera e volta sozinha {quando}, de onde parou.",
+  // definido em 2026-10-15 (NOD-268): a fala da pessoa passou do teto de reenvios (ou todas as IAs da máquina do bot estão
+  // no limite) e espera a hora do limite, com UMA linha, em vez de girar de IA em IA.
+  "fala-no-limite-espera": "O {ia} está no limite da assinatura. Sua mensagem espera e volta sozinha {quando}.",
+  // NOD-268: a outra IA existe, mas noutra máquina; o bot só roda na dele (ADR-090), então a troca não serve.
+  "ia-pronta-noutra-maquina": "O {ia} está no limite da assinatura. O {outra} está pronto noutra máquina, mas este bot roda {maquina}. Sua mensagem volta sozinha {quando}.",
+  // NOD-268: "Seguir com" numa conta que não está logada na máquina que pega o turno — refazer só daria outra nota.
+  "conta-fora-da-maquina": "A conta {conta} não está {maquina}. Entre com ela lá ou escolha outra conta.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",
