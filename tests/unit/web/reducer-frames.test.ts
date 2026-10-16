@@ -57,7 +57,8 @@ describe("aplicarFrame por TipoFrame", () => {
     e = aplicarFrame(e, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA);
     expect(e.atividades[CONVERSA]).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota"]);
+    // Plano "tela limpa" (2026-10-16): o turno que termina relê o uso do plano (o anel do seletor de IA).
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "uso-plano"]);
   });
 
   it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
@@ -149,7 +150,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("inventario.mudou invalida inventário, frota e o interruptor de executor; agente.mudou invalida frota (+ memória quando a ação é memoria_criada, + concessões quando é concessao_criada)", () => {
     // ADR-090: a máquina que conecta ou cai muda a tela Máquinas e a linha da fila na conversa.
-    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor", "ias", "maquinas"]);
+    expect(aplicarFrame(estadoInicial, frame("inventario.mudou"), AGORA).invalidacoes).toEqual(["inventario", "frota", "executor", "ias", "uso-plano", "maquinas"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "perfil_confirmado" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", acao: "memoria_criada", conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", `conversa:${CONVERSA}`, "memoria:a1"]);
     expect(aplicarFrame(estadoInicial, frame("agente.mudou", { agente_id: "a1", kind: "concessao_criada" }), AGORA).invalidacoes).toEqual(["frota", "gestao", "nao-lidos", "concessoes:a1"]);
@@ -163,7 +164,7 @@ describe("aplicarFrame por TipoFrame", () => {
 
   it("resumed:false reidrata TUDO (replay parcial nunca é aplicado, ADR-016); resumed:true não faz nada", () => {
     const e = aplicarFrame(comConversa(), frame("resumed", { resumed: false }), AGORA);
-    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "salas", `conversa:${CONVERSA}`]);
+    expect(e.invalidacoes).toEqual(["frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", `conversa:${CONVERSA}`]);
     expect(aplicarFrame(comConversa(), frame("resumed", { resumed: true }), AGORA).invalidacoes).toEqual([]);
   });
 });

@@ -84,9 +84,16 @@ function identidadeDe(c: ContaIa, x: ContextoContas): { email: string | null; or
 
 /** A conta que os bots usam agora: a primeira fora do limite (na máquina do filtro, se há filtro). */
 function emUso(x: ContextoContas): string | null {
-  // QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
-  const lista = x.contas.contas.filter((c) => !noLimite(c, x.agora) && (x.ui.filtro ? prontaEm(c, x.ui.filtro) : c.maquinas.some((v) => v.estado === "pronta")));
-  return lista[0]?.id ?? null;
+  return contaEmUso(x.contas.contas, x.agora, { filtro: x.ui.filtro })?.id ?? null;
+}
+
+/**
+ * A conta em uso, pura (extraída em 2026-10-16 para o seletor de IA do campo, plano "tela limpa", T6): a primeira da lista
+ * fora do limite e logada em alguma máquina (na do filtro, se há filtro); com `ia`, só entre as contas daquela IA.
+ * QA do PR #306 (ISSUE-008): só conta logada em alguma máquina está "em uso".
+ */
+export function contaEmUso(contas: readonly ContaIa[], agora: number, p: { filtro?: string | null; ia?: ContaIa["ia"] } = {}): ContaIa | null {
+  return contas.find((c) => (p.ia === undefined || c.ia === p.ia) && !noLimite(c, agora) && (p.filtro ? prontaEm(c, p.filtro) : c.maquinas.some((v) => v.estado === "pronta"))) ?? null;
 }
 
 function pilulas(c: ContaIa, x: ContextoContas): string {

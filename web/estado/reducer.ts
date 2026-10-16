@@ -8,6 +8,7 @@ import type { EstadoExecutor } from "../../src/contracts/executor.ts";
 import type { FrameSse, TipoFrame } from "../../src/contracts/frame.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { IasDaPessoa } from "../../src/contracts/inteligencia.ts";
+import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { DisponibilidadeLigacao } from "../../src/contracts/ligacao.ts";
 import type { EstadoOnboarding } from "../../src/contracts/onboarding.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
@@ -153,7 +154,7 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -170,6 +171,11 @@ export type Estado = {
    * o limite e os modelos. undefined = ainda não lido; null = o servidor não tem a rota (versão anterior).
    */
   ias?: IasDaPessoa | null;
+  /**
+   * O uso da janela de cada IA (`GET /uso-do-plano`, NOD-179), para o anel do seletor de IA do campo (definido em
+   * 2026-10-16, plano "tela limpa", decisão E6). undefined = ainda não lido; null = o servidor não tem a rota.
+   */
+  usoDoPlano?: UsoDoPlanoDto | null;
   /** As IAs do app do Mac (`nodDesktop.ias`) e o que é só da tela nos cartões (web/telas/cartao-ia.ts). */
   iasMac: UiIas;
   /** O rascunho do nível Inteligência da gaveta (2B) até Salvar; null = nenhum. */
@@ -348,6 +354,7 @@ export type Acao =
   | { tipo: "hidratar-inventario"; inventario: Inventario }
   | { tipo: "hidratar-executor"; executor: EstadoExecutor }
   | { tipo: "hidratar-ias"; ias: IasDaPessoa | null }
+  | { tipo: "hidratar-uso-plano"; usoDoPlano: UsoDoPlanoDto | null }
   /** Mudou algo das IAs do Mac ou da tela dos cartões (só os campos que vieram). */
   | { tipo: "ias-mac"; mudanca: Partial<UiIas> }
   /** A ordem arrastada em Provedores de IA, já na tela antes do servidor responder. */
@@ -751,7 +758,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // ADR-067: a volta do modelo virou mensagem e o turno segue rodando — a conversa relê, e o cartão ao vivo recomeça
   // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).
   "turno.fala": (e, f) => invalidar(semDelta(e, texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f)),
-  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota"),
+  // definido em 2026-10-16 (plano "tela limpa", T6): o CLI informa o uso do plano a cada turno, então o anel do seletor relê
+  // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir.
+  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "uso-plano"),
   "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
@@ -779,7 +788,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-24 (emenda da ADR-037): só a SAÚDE (entrou ou saiu do ar) muda a frota — a
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", "maquinas"),
+  // definido em 2026-10-16 (decisão E6): o uso da janela é relido junto com as IAs.
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", "uso-plano", "maquinas"),
   // ADR-102: a lista de contas (ou um login numa máquina) mudou.
   "contas.mudou": (e) => invalidar(e, "contas", "maquinas"),
   "agente.mudou": (e, f) => {
@@ -821,7 +831,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (nivel !== "verde" && nivel !== "amarela" && nivel !== "vermelha") return e;
     return invalidar(e.pressao === nivel ? e : { ...e, pressao: nivel }, "trabalhos");
   },
-  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
 /** Frames que trazem fala nova (ou o fim de um turno) para a conversa do bot: a tela da task aberta relê as mensagens dela. */
@@ -909,6 +919,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, executor: acao.executor };
     case "hidratar-ias":
       return { ...estado, ias: acao.ias };
+    case "hidratar-uso-plano":
+      return { ...estado, usoDoPlano: acao.usoDoPlano };
     case "ias-mac":
       return { ...estado, iasMac: { ...estado.iasMac, ...acao.mudanca } };
     case "ordem-ias": {
@@ -1172,6 +1184,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (!estado.frota) faltas.push("frota");
   // Plano das IAs (2026-10-10): Provedores de IA, a gaveta (2A/2B) e as linhas de troca de IA no chat leem `GET /ias`.
   if (estado.sessao && estado.ias === undefined && (secao === "conexao" || t.tipo === "conversa")) faltas.push("ias");
+  // definido em 2026-10-16 (plano "tela limpa", T6): o anel do seletor de IA no campo da conversa lê o uso da janela.
+  if (estado.sessao && estado.usoDoPlano === undefined && t.tipo === "conversa") faltas.push("uso-plano");
   // ADR-077: o onboarding é lido uma vez por sessão (a falha vira null e o app abre normal).
   if (estado.sessao && estado.onboarding === undefined) faltas.push("onboarding");
   if ((t.tipo === "conversa" || t.tipo === "sala") && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
@@ -1209,7 +1223,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
   if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("maquinas");
   // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
-  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao")) faltas.push("contas");
+  // definido em 2026-10-16 (T6): e o cabeçalho do seletor de IA no campo (a conta em uso, só o apelido).
+  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));
@@ -1236,7 +1251,7 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
   if (!estado.sessao) return [];
   const t = estado.tela;
   const todas: Invalidacao[] = [
-    "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "salas", "rotinas", "ligacao", "trabalhos",
+    "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "uso-plano", "salas", "rotinas", "ligacao", "trabalhos",
     ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
     ...(A_FAZER_LIGADO ? Object.keys(estado.pendencias).map((id): Invalidacao => `pendencias:${id}`) : []),
     ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),
