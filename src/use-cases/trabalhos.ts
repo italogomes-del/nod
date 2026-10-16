@@ -6,7 +6,8 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { cotaDasIas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDoTurno } from "../domain/cota-da-ia.ts";
+import { cotaDasIas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
+import { iasNoLimite } from "../domain/inteligencia.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
@@ -221,11 +222,15 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const cotaAgora = cotaDasIas({ usos, limites: preferencias.iasNoLimite, agora: deps.agora() });
   const conhecidas = iasConhecidas(usos, preferencias.iasNoLimite);
   const botsPorId = new Map(agentes.map((a) => [a.id, a]));
-  const comCota = (t: TrabalhoDto): TrabalhoDto => {
-    if (cotaAgora.length === 0 || !trabalhoAberto(t.estado)) return t;
+  const servico = deps.services.maquinas;
+  // NOD-260 (D3): as IAs prontas nas máquinas vivas decidem o Automático; a IA do turno pendente mais antigo, a fixa.
+  const iasProntas = servico?.iasProntas ? servico.iasProntas(deps.escopo.pessoaId) : null;
+  const noLimite = iasNoLimite(preferencias.iasNoLimite, deps.agora());
+  const cotaDoTrabalho = (t: TrabalhoDto, e: ExtrasTrabalho | undefined): Partial<TrabalhoDto> => {
+    if (cotaAgora.length === 0 || !trabalhoAberto(t.estado)) return {};
     const bot = botsPorId.get(t.agenteId);
-    const situacao = bot ? situacaoDoTurno({ harness: bot.harness ?? "auto", modelo: bot.modelo }, cotaAgora, conhecidas) : "livre";
-    return esperaDaCotaNaTela(t, situacao) ? { ...t, esperaDaCota: true } : t;
+    const situacao = situacaoDaCotaDoTrabalho({ pendente: e?.pendente, bot: bot ? { harness: bot.harness ?? "auto", modelo: bot.modelo } : null, cota: cotaAgora, iasProntas, noLimite, conhecidas });
+    return esperaDaCotaNaTela(t, situacao) ? { esperaDaCota: true } : {};
   };
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco });
   const agora = deps.agora();
@@ -233,37 +238,47 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
   const bots = input.agenteId ? [input.agenteId] : agentes.filter((a) => a.ownerId === deps.escopo.pessoaId && !a.excluidoEm).map((a) => a.id);
   const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];
-  const servico = deps.services.maquinas;
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
-    const dtos = (await trabalhosParaDto(deps, trabalhos)).map((t) => {
+    const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
       const motivo = esperaDoMac(t, portao, agora);
-      return comCota(motivo ? { ...t, esperaDoMac: motivo } : t);
+      return { ...(motivo ? { esperaDoMac: motivo } : {}), ...cotaDoTrabalho(t, e) };
     });
     return { data: { trabalhos: dtos, ...topo, donos } };
   }
-  const { maquinas, portoes, nomear } = maquinasDaPessoa(deps, servico, usoDoMac);
+  // NOD-260 (G8): o último uso da chave de cada máquina, para "sem contato desde HH:MM" (a regra do chip da conversa).
+  const ultimoUso = servico.conectada ? new Map((await deps.repos.maquinaTokens.listar()).map((c) => [c.id, c.ultimoUsoEm])) : new Map<string, number | null>();
+  const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso);
   const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
     if (!trabalhoAberto(t.estado)) return {};
     // Onde roda (o turno vivo) ou vai rodar (o alvo do turno na fila, a regra do reivindicar); sem alvo, no modo local,
     // o Mac do servidor (ADR-092); no compartilhado, qualquer uma (null).
     const id = e?.maquinaVivaId ?? e?.maquinaAlvoId ?? servico.macDoServidor;
-    const espera = esperaNaMaquina(t, id, portoes, agora);
+    const espera = esperaNaMaquina(t, id, portoes, agora, semContatoDesde);
     const maquina = espera?.maquinaId ?? id;
-    return { esperaDoMac: espera?.motivo ?? null, maquina: maquina === null ? null : nomear(maquina) };
+    // G12: a espera pela máquina sem contato não é do portão (memória, disco, processador): a linha a diz pela máquina.
+    const motivo = espera && espera.motivo !== "sem_contato" ? espera.motivo : null;
+    return { esperaDoMac: motivo, maquina: maquina === null ? null : nomear(maquina), ...cotaDoTrabalho(t, e) };
   });
-  return { data: { trabalhos: dtos.map(comCota), ...topo, maquinas, donos } };
+  return { data: { trabalhos: dtos, ...topo, maquinas, donos } };
 };
 
 /**
  * A tela fala por máquina (2026-10-09): cada máquina viva da pessoa com o nome, o portão (pelo "uso do Mac", que vale
  * para todas) e a leitura. Máquina que mandou leitura e já não está conectada fica com o id curto ("máquina 309ec3dd").
  */
-function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0]) {
+function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0], ultimoUso: ReadonlyMap<string, number | null> = new Map()) {
+  // NOD-260 (G8): sem contato = não conectada (contato há 60 s ou mais), desde o último uso da chave. O Mac do servidor
+  // fala sempre; sem o serviço saber (`conectada` ausente) ou sem o último uso, null — na dúvida, não acusa.
+  const semContatoDesde = (id: string): number | null => {
+    if (!servico.conectada || id === servico.macDoServidor || servico.conectada(deps.escopo, id)) return null;
+    return ultimoUso.get(id) ?? null;
+  };
   const nomear = (id: string): MaquinaDoTrabalho => {
     const conhecida = servico.identificar(deps.escopo, id);
-    if (conhecida) return { id, ...conhecida };
-    return id === servico.macDoServidor ? { id, nome: "Este Mac", ehMac: true } : { id, nome: `máquina ${id.slice(0, 8)}`, ehMac: false };
+    const contato = servico.conectada ? { semContatoDesde: semContatoDesde(id) } : {};
+    if (conhecida) return { id, ...conhecida, ...contato };
+    return id === servico.macDoServidor ? { id, nome: "Este Mac", ehMac: true, ...contato } : { id, nome: `máquina ${id.slice(0, 8)}`, ehMac: false, ...contato };
   };
   const portoes = new Map<string, PortaoDoMac>();
   const maquinas: LeituraDeMaquinaDto[] = servico.leituras(deps.escopo.pessoaId).map((l) => {
@@ -284,7 +299,7 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
       seguraTudoNovo: portao.tudoNovo !== null,
     };
   });
-  return { maquinas, portoes, nomear };
+  return { maquinas, portoes, nomear, semContatoDesde };
 }
 
 /**

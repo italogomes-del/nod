@@ -25,9 +25,9 @@ describe("estadoDoDono: cada prioridade sozinha", () => {
     expect(estado({ conversaTrabalhandoDesde: T0 + 1 })).toMatchObject({ principal: "trabalhando", frentes: 0, conversaTrabalhando: true, desde: T0 + 1 });
   });
 
-  it("NOD-219: conversaPropriaTrabalhando sai só quando o fato foi lido; o turno da sala conta como trabalhando, a própria não", () => {
+  it("NOD-219: conversaPropriaTrabalhando sai só quando o fato foi lido; NOD-260: o turno da sala não faz o dono trabalhar", () => {
     expect(estado({})).not.toHaveProperty("conversaPropriaTrabalhando");
-    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null })).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true, conversaPropriaTrabalhando: false });
+    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null })).toMatchObject({ principal: "livre", conversaTrabalhando: false, conversaPropriaTrabalhando: false });
     expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: T0 })).toMatchObject({ conversaTrabalhando: true, conversaPropriaTrabalhando: true });
   });
 
@@ -101,5 +101,20 @@ describe("tentativa da espera e última linha", () => {
     expect(ultimaLinha(null)).toBeNull();
     expect(ultimaLinha("   \n")).toBeNull();
     expect(ultimaLinha("a".repeat(500))).toHaveLength(200);
+  });
+});
+
+describe("NOD-260 (definido em 2026-10-15): o turno de sala não é 'trabalhando na conversa'", () => {
+  it("só a conversa própria trabalhando faz o dono trabalhar; o desde é o da própria", () => {
+    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null })).toMatchObject({ principal: "livre", conversaTrabalhando: false });
+    expect(estado({ conversaTrabalhandoDesde: T0 - 60_000, conversaPropriaTrabalhandoDesde: T0 })).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true, desde: T0 });
+  });
+
+  it("o fato de antes (sem o campo da própria) segue valendo como sempre", () => {
+    expect(estado({ conversaTrabalhandoDesde: T0 })).toMatchObject({ principal: "trabalhando", conversaTrabalhando: true });
+  });
+
+  it("com o turno de sala e uma frente na fila, a linha diz fila, não trabalhando", () => {
+    expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null, frentes: [frente("na_fila")] })).toMatchObject({ principal: "fila", fila: 1 });
   });
 });

@@ -30,6 +30,7 @@ import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoReconectar, 
 import { criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
 import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
+import { criarReleituraAdiada } from "./lib/releitura-adiada.ts";
 import { tabelaComo } from "./lib/texto-formatado.ts";
 import { CHAVE_GUARDADA, lerGuardado, lerPedido, PARAMETROS_DO_PEDIDO, type PedidoPareamento } from "./lib/parear-mac.ts";
 import { abrirPareamento } from "./telas/parear-mac.ts";
@@ -401,7 +402,19 @@ function temNovas(conversaId: string, e: Estado = estado): boolean {
   return !(aberta && naFrente() && deixarNaoLida !== conversaId);
 }
 
+/**
+ * NOD-260 (definido em 2026-10-15, J1): os frames de turno pedem `GET trabalhos`; a releitura sai uma vez por segundo, no
+ * fim da janela (web/lib/releitura-adiada.ts). Enquanto a janela está aberta, `reidratar` deixa "trabalhos" para ela.
+ */
+const JANELA_TRABALHOS_MS = 1000;
+const releituraTrabalhos = criarReleituraAdiada(JANELA_TRABALHOS_MS, (fn, ms) => {
+  const t = window.setTimeout(fn, ms);
+  return () => window.clearTimeout(t);
+}, () => void reidratar());
+
 function dispatch(acao: Acao): void {
+  // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
+  if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
   estado = reduzir(estado, acao);
   render();
   void reidratar();
@@ -428,7 +441,9 @@ function receberFrame(frame: FrameSse): void {
   if (mudouNaTela(antes, estado)) renderNoQuadro();
   telaOnboarding.aoFrame();
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
-  if (estado.invalidacoes !== antes.invalidacoes) void reidratar();
+  if (estado.invalidacoes === antes.invalidacoes) return;
+  if (frame.tipo.startsWith("turno.") && estado.invalidacoes.includes("trabalhos")) releituraTrabalhos.pedir();
+  void reidratar();
 }
 
 /**
@@ -693,7 +708,7 @@ async function reidratar(): Promise<void> {
   if (!api || reidratando) return;
   const pendentes = [...new Set([...estado.invalidacoes, ...invalidacoesDaTela(estado)])];
   // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
-  const relevantes = pendentes.filter((q) => relevante(q));
+  const relevantes = pendentes.filter((q) => relevante(q) && !(q === "trabalhos" && releituraTrabalhos.pendente()));
   // definido em 2026-09-30: nada relevante, nada a buscar nem a redesenhar. A conversa de outro bot fica marcada
   // até ser aberta, e antes cada frame caía aqui e redesenhava a tela inteira de forma síncrona.
   if (relevantes.length === 0) return;

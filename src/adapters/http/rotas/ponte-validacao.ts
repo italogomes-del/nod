@@ -332,7 +332,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   const entregues = idsDeMensagens(e.mensagensEntregues);
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
-    custoUsd: r.custoUsd as number | null, sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
+    custoUsd: r.custoUsd as number | null, ...(r.custoDesconhecido === true && r.custoUsd === null ? { custoDesconhecido: true } : {}), sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
     ferramentasChamadas: r.ferramentasChamadas as string[], negacoesPermissao: r.negacoesPermissao as string[],
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
     ...(raioX ? { execucao: raioX } : {}),

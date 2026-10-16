@@ -435,6 +435,17 @@ export function comporApp(o: OpcoesCompor): App {
         return m ? { nome: m.nome, ehMac: m.plataforma === "darwin" } : null;
       },
       macDoServidor: compartilhado || !machineId ? null : machineId,
+      // NOD-260 (G8): conectada = a ponte falou com ela há menos de 60 s (a regra do chip); o Mac do servidor sempre.
+      conectada(escopo, id) {
+        if (!compartilhado && id === machineId) return true;
+        return ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id);
+      },
+      // NOD-260 (D3): as IAs prontas nas máquinas vivas da pessoa (a ponte) e, no modo local, as deste Mac.
+      iasProntas(pessoaId) {
+        const daPonte = Object.entries(ponteHttp.harnessesDaPessoa(pessoaId)).filter(([, i]) => i?.estado === "pronto").map(([h]) => h);
+        const desteMac = compartilhado ? [] : HARNESSES.filter((h) => inventarioDe(h.id).estado === "pronto").map((h) => h.id);
+        return [...new Set([...daPonte, ...desteMac])];
+      },
     },
     relogio,
     tokenTurno: tokens,

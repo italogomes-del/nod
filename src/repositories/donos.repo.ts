@@ -19,7 +19,20 @@ export type ComandoDoDono = {
 };
 
 export type VoltaDoDono = { agenteId: string; trabalhoId: string | null; motivo: string | null; desde: number; acordaEm: number };
-export type ColegaDoDono = { agenteId: string; trabalhoId: string | null; nome: string | null; desde: number };
+/**
+ * Um pedido a colega sem resposta. NOD-260 (definido em 2026-10-15): o painel "Esperando <bot>" mostra o estado do bot
+ * esperado — se roda agora e quantos pedidos tem na fila — e "bot removido" quando ele foi excluído (ou não existe mais).
+ */
+export type ColegaDoDono = {
+  agenteId: string;
+  trabalhoId: string | null;
+  nome: string | null;
+  desde: number;
+  colegaId: string | null;
+  colegaRemovido: boolean;
+  colegaTrabalhando: boolean;
+  colegaFila: number;
+};
 export type PedidoDoDono = { turnoId: string; agenteId: string; de: DeQuemPediu; nome: string | null; desde: number };
 
 export type FatosCrusDosDonos = {
@@ -43,18 +56,19 @@ export type FatosCrusDosDonos = {
 /**
  * O que o estado do dono lê de cada bot (definido em 2026-10-12, ADR-099 item 10, I10). Padrão dos repositórios
  * (tipos.ts): WHERE tenant_id explícito sob RLS, só leitura. Quem decide é src/domain/estado-do-dono.ts; as frentes vêm
- * da lista de trabalhos de sempre (trabalhos.repo.ts). `desdeColegas` é a janela dos pedidos a colega que ainda contam
- * (a mesma do varredor de pedidos parados, 24 h).
+ * da lista de trabalhos de sempre (trabalhos.repo.ts). NOD-276 (definido em 2026-10-15): o pedido a colega sem
+ * resposta conta pelo tempo que for, como em `fatos.colega` de trabalhos.repo.ts — a janela de 24 h daqui fazia a linha
+ * do dono dizer "livre" enquanto a lista de trabalhos ainda dizia "esperando o colega".
  */
 export function donosRepo(conn: Conn, escopo: Escopo) {
   return {
-    async fatos(agenteIds: readonly string[], agora: number, desdeColegas: number): Promise<FatosCrusDosDonos> {
+    async fatos(agenteIds: readonly string[], agora: number): Promise<FatosCrusDosDonos> {
       const vazio: FatosCrusDosDonos = { vivos: new Map(), vivosPropria: new Map(), frentesVivas: new Set(), decisoes: new Map(), comandos: [], voltas: [], colegas: [], fila: [] };
       if (agenteIds.length === 0) return vazio;
       const ids = [...agenteIds];
       const [vivos, frentesVivas, decisoes, comandos, voltas, colegas, fila] = await Promise.all([
         conn<{ agente_id: string; desde: Date; desde_propria: Date | null }[]>`
-          select t.agente_id, min(t.criado_em) as desde, min(t.criado_em) filter (where c.tipo = 'propria') as desde_propria
+          select t.agente_id, min(coalesce(t.despachado_em, t.criado_em)) as desde, min(coalesce(t.despachado_em, t.criado_em)) filter (where c.tipo = 'propria') as desde_propria
           from turnos t left join conversas c on c.tenant_id = t.tenant_id and c.id = t.conversa_id
           where t.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and t.estado = 'despachando' and t.trabalho_id is null
           group by t.agente_id`,
@@ -86,12 +100,17 @@ export function donosRepo(conn: Conn, escopo: Escopo) {
           where t.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and t.estado = 'pendente' and t.acordar_em > ${data(agora)}
           order by t.criado_em, t.id`,
         // O pedido a colega sem resposta (a regra de fatos.colega em trabalhos.repo.ts), da conversa ou de uma frente.
-        conn<{ agente_id: string; trabalho_id: string | null; nome: string | null; criado_em: Date }[]>`
-          select t.agente_id, t.trabalho_id, g.nome, h.criado_em from mensagens h
+        conn<{ agente_id: string; trabalho_id: string | null; nome: string | null; criado_em: Date; colega_id: string | null; colega_removido: boolean; colega_trabalhando: boolean; colega_fila: number }[]>`
+          select t.agente_id, t.trabalho_id, g.nome, h.criado_em, g.id as colega_id,
+            (g.id is null or g.excluido_em is not null) as colega_removido,
+            (g.id is not null and exists (select 1 from turnos q where q.tenant_id = g.tenant_id and q.agente_id = g.id and q.estado = 'despachando')) as colega_trabalhando,
+            (select count(*)::int from turnos q where q.tenant_id = h.tenant_id and q.agente_id = g.id and q.estado = 'pendente'
+              and (q.acordar_em is null or q.acordar_em <= ${data(agora)})) as colega_fila
+          from mensagens h
           join turnos t on t.tenant_id = h.tenant_id and t.id = h.turno_id
           left join agentes g on g.tenant_id = h.tenant_id and g.id::text = h.payload->>'para'
           where h.tenant_id = ${escopo.tenantId} and t.agente_id = any(${ids}::uuid[]) and h.kind = 'handoff'
-            and h.payload->>'tarefaId' is not null and h.criado_em >= ${data(desdeColegas)}
+            and h.payload->>'tarefaId' is not null
             and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
               and r.payload->>'tarefaId' = h.payload->>'tarefaId')
             and not exists (select 1 from trabalhos k where k.tenant_id = h.tenant_id and k.id::text = h.payload->>'trabalhoId'
@@ -118,7 +137,7 @@ export function donosRepo(conn: Conn, escopo: Escopo) {
         decisoes: new Map(decisoes.map((l) => [l.agente_id, { quantas: l.quantas, desde: ms(l.desde) }])),
         comandos: comandos.map((l) => ({ id: l.id, agenteId: l.agente_id, trabalhoId: l.trabalho_id, turnoId: l.turno_id, comando: l.comando, motivo: l.motivo, desde: ms(l.criado_em), saidaAnterior: l.saida_anterior, emVolta: l.em_volta, origem: l.origem })),
         voltas: voltas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, motivo: l.motivo, desde: ms(l.criado_em), acordaEm: ms(l.acordar_em) })),
-        colegas: colegas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, nome: l.nome, desde: ms(l.criado_em) })),
+        colegas: colegas.map((l) => ({ agenteId: l.agente_id, trabalhoId: l.trabalho_id, nome: l.nome, desde: ms(l.criado_em), colegaId: l.colega_id, colegaRemovido: l.colega_removido, colegaTrabalhando: l.colega_trabalhando, colegaFila: l.colega_fila })),
         fila: fila.map((l) => {
           const de: DeQuemPediu = l.origem === "conversa" ? "pessoa" : l.origem === "rotina" ? "rotina" : "colega";
           return { turnoId: l.id, agenteId: l.agente_id, de, nome: de === "colega" ? l.colega : de === "rotina" ? l.rotina : null, desde: ms(l.criado_em) };

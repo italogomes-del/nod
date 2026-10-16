@@ -393,6 +393,9 @@ export function esperaDoMac(t: Pick<Trabalho, "estado" | "origem" | "iniciadoEm"
   return null;
 }
 
+/** Por que o trabalho espera uma máquina: o portão dela, ou ela sem contato com o servidor (NOD-276, G12). */
+export type MotivoEsperaNaMaquina = MotivoEsperaMac | "sem_contato";
+
 /**
  * De qual máquina o trabalho espera, e por quê (definido em 2026-10-09, a tela fala por máquina). O `puxar` de cada
  * máquina decide pela leitura DELA (ponte-interna.ts) e o `reivindicar` só lhe entrega o turno que tem ela como alvo; a
@@ -406,7 +409,11 @@ export function esperaNaMaquina(
   maquinaId: string | null,
   portoes: ReadonlyMap<string, PortaoDoMac>,
   agora: number,
-): { motivo: MotivoEsperaMac; maquinaId: string | null } | null {
+  semContatoDesde: (maquinaId: string) => number | null = () => null,
+): { motivo: MotivoEsperaNaMaquina; maquinaId: string | null } | null {
+  // NOD-276 (definido em 2026-10-15, G12): o trabalho na fila cujo alvo não fala com o servidor espera essa máquina —
+  // nenhuma outra o pega (o `reivindicar` só entrega a quem é o alvo). Vem antes do portão: a leitura dela é velha.
+  if (maquinaId !== null && t.estado === "na_fila" && semContatoDesde(maquinaId) !== null) return { motivo: "sem_contato", maquinaId };
   if (maquinaId !== null) {
     const portao = portoes.get(maquinaId);
     const motivo = portao ? esperaDoMac(t, portao, agora) : null;

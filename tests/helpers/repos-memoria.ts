@@ -1123,6 +1123,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             // O alvo pela chave viva (desta vez → bot → padrão) se prova no Postgres; aqui, só a máquina do bot.
             maquinaVivaId: turnos.find((x) => x.estado === "despachando")?.machineId ?? null,
             maquinaAlvoId: doTenant(b.agentes).find((a) => a.id === t.agenteId)?.maquinaId ?? null,
+            pendente: (() => {
+              const p = turnos.filter((x) => x.estado === "pendente").sort((a, z) => a.criadoEm - z.criadoEm)[0];
+              return p ? { harness: p.harness ?? "auto", modelo: p.modelo } : null;
+            })(),
           });
         }
         return saida;
@@ -1322,6 +1326,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = candidatos[0];
         if (!t) return null;
         t.estado = "despachando";
+        t.despachadoEm = p.agora; // NOD-276 (J3)
         t.machineId = p.machineId;
         t.leaseAte = p.agora + LEASE_MS;
         t.sinais = { ...t.sinais, attempted: true };
@@ -2252,6 +2257,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.gastos.push(gasto);
         const { tenantId: _t, ownerId: _o, ...semEscopo } = gasto;
         return semEscopo;
+      },
+      async algumSemCusto(p) {
+        const daConversa = (turnoId: string) => !p.conversaId || doTenant(b.turnos).some((t) => t.id === turnoId && t.conversaId === p.conversaId);
+        return doTenant(b.gastos).some((g) => g.ownerId === escopo.pessoaId && g.custoUsd === null && g.tokensEntrada + g.tokensSaida > 0 && g.em >= p.desde && g.em <= p.ate && daConversa(g.turnoId));
       },
       async doTurno(turnoId) {
         return doTenant(b.gastos).filter((g) => g.turnoId === turnoId).map(({ tenantId: _t, ownerId: _o, ...g }) => g);

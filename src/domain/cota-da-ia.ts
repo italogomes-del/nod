@@ -5,7 +5,7 @@ import type { LimitesIa } from "../contracts/inteligencia.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
 import { harnessFixado } from "./harness.ts";
-import { PRAZO_LIMITE_SEM_HORARIO_MS } from "./inteligencia.ts";
+import { iasParaOAutomatico, PRAZO_LIMITE_SEM_HORARIO_MS } from "./inteligencia.ts";
 
 /**
  * A cota da IA como portão do trabalho de fundo (definido em 2026-10-12, ADR-099 §7; decisão do Marlon em 12/10). Puro:
@@ -143,6 +143,31 @@ export function esperaDaCotaNaTela(t: { estado: string; iniciadoEm: number | nul
   if (situacao === "livre" || t.turnoVivoId || t.esperandoColega) return false;
   if (t.estado === "na_fila") return situacao === "limite" || t.iniciadoEm === null;
   return t.estado === "rodando" && situacao === "limite";
+}
+
+/**
+ * NOD-260 (definido em 2026-10-15, D3): a situação da cota para a linha de um trabalho. "Esperando a cota" só quando
+ * nenhuma IA pronta pode pegá-lo — a tela dizia "esperando a cota" com o Codex pronto e livre no Automático.
+ * - A IA é a do turno pendente mais antigo (a que vai rodar); sem ele, a de agora do bot; sem nenhum dos dois, "livre".
+ * - IA fixa: a situação dela (só ela pega o turno).
+ * - Automático: `iasParaOAutomatico` sobre as IAs prontas nas máquinas vivas da pessoa (a regra do despacho); nenhuma
+ *   pronta = "livre" (na dúvida, não acusa a cota). `iasProntas` null = não se sabe (serviço de antes): as IAs que a
+ *   pessoa já usou (`conhecidas`), como antes.
+ */
+export function situacaoDaCotaDoTrabalho(p: {
+  pendente: { harness: string; modelo: string } | null | undefined;
+  bot: { harness: string; modelo: string } | null;
+  cota: readonly CotaDaIa[];
+  iasProntas: readonly string[] | null;
+  noLimite: readonly string[];
+  conhecidas: readonly string[];
+}): SituacaoDaCota {
+  const turno = p.pendente ?? p.bot;
+  if (!turno || p.cota.length === 0) return "livre";
+  if (harnessFixado(turno.harness, turno.modelo)) return situacaoDoTurno(turno, p.cota, []);
+  if (p.iasProntas === null) return situacaoDoTurno(turno, p.cota, p.conhecidas);
+  const prontas = [...new Set(p.iasProntas)];
+  return situacaoDoTurno(turno, p.cota, iasParaOAutomatico({ prontosMaquina: prontas, prontosPessoa: prontas, noLimite: p.noLimite }));
 }
 
 /**

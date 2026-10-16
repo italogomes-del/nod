@@ -45,7 +45,10 @@ describe("aplicarFrame por TipoFrame", () => {
     const naFila = aplicarFrame(estadoInicial, frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_criado" }), AGORA);
     expect(naFila.turnosVivos[TURNO]).toMatchObject({ estado: "na_fila", conversaId: CONVERSA, desde: AGORA });
     const rodando = aplicarFrame(naFila, frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado", executor: "catcher", machine_id: "m1" }), AGORA + 5);
-    expect(rodando.turnosVivos[TURNO]).toMatchObject({ estado: "rodando", executor: "catcher", machineId: "m1", desde: AGORA });
+    // NOD-276 (J3): "Trabalhando · há N" conta do despacho, não da fila; a janela de "pensando" (chegouEm) segue da chegada.
+    expect(rodando.turnosVivos[TURNO]).toMatchObject({ estado: "rodando", executor: "catcher", machineId: "m1", desde: AGORA + 5, chegouEm: AGORA });
+    // O frame repetido do mesmo despacho não reinicia a conta.
+    expect(aplicarFrame(rodando, frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA + 9).turnosVivos[TURNO]?.desde).toBe(AGORA + 5);
   });
 
   it("turno.delta acumula o texto por turno na conversa carregada e promove o turno a 'rodando'; turno.encerrado limpa o delta e o vivo", () => {
@@ -58,7 +61,7 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(e.atividades[CONVERSA]).toEqual({});
     expect(e.turnosVivos[TURNO]).toBeUndefined();
     // Plano "tela limpa" (2026-10-16): o turno que termina relê o uso do plano (o anel do seletor de IA).
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "uso-plano"]);
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "trabalhos", "frota", "uso-plano"]);
   });
 
   it("ADR-067: turno.fala troca o texto ao vivo pela mensagem gravada — o cartão recomeça vazio e o turno segue rodando", () => {
@@ -121,7 +124,7 @@ describe("aplicarFrame por TipoFrame", () => {
     e = aplicarFrame(e, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO, motivo: "parado_pela_pessoa" }), AGORA);
     expect(e.turnosVivos).toEqual({});
     // Revisão do PR 1 da tela limpa (2026-10-16): o turno interrompido também gastou a janela — o anel do seletor relê.
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "sua-vez", "uso-plano"]);
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "trabalhos", "frota", "sua-vez", "uso-plano"]);
   });
 
   it("uso do plano: contas.mudou relê; com o servidor sem a rota (usoDoPlano null) nenhum frame pede de novo", () => {

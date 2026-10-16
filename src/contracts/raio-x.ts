@@ -110,7 +110,8 @@ export type ResumoRaioX = {
 };
 
 /** GET conversas/:id/raio-x?desde=<epoch ms>: os resumos e o total desde `desde` (a meia-noite da pessoa). */
-export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; turnos: number } };
+/** NOD-276 (D10): `parcial` = algum turno do período gastou sem custo conhecido; o total soma só os que têm. */
+export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; turnos: number; parcial?: boolean } };
 
 /**
  * Preferências da pessoa (0036). `avisosFechados` (0059, definido em 2026-10-06): a chave de cada aviso da tela que ela

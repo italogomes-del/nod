@@ -126,6 +126,11 @@ export type ExtrasTrabalho = {
    */
   maquinaVivaId: string | null;
   maquinaAlvoId: string | null;
+  /**
+   * NOD-260 (definido em 2026-10-15, D3): a IA e o modelo do turno pendente mais antigo — quem decide se a cota segura é
+   * a IA que vai rodar, não a de agora do bot (a pessoa pode ter trocado). null = sem turno pendente.
+   */
+  pendente?: { harness: string; modelo: string } | null;
   /** ADR-099 (I10): o motivo da volta marcada mais próxima; null = nenhuma (ou sem motivo). */
   acordaMotivo?: string | null;
   /** ADR-099 (I10): o lote da frente; null = sem lote. */
@@ -379,13 +384,14 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       if (ids.length === 0) return new Map();
       const linhas = await conn<{
         id: string; pedido_por_nome: string | null; rotina_instrucao: string | null; ultima_fala: string | null; turno_vivo_id: string | null; abertos: string[] | null; de_fora: boolean;
-        maquina_viva_id: string | null; maquina_alvo_id: string | null;
+        maquina_viva_id: string | null; maquina_alvo_id: string | null; pendente_harness: string | null; pendente_modelo: string | null;
         colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
         espera_motivo: string | null; espera_desde: Date | null; acorda_motivo: string | null;
         lote_id: string | null; lote_criado_em: Date | null; lote_frentes: number | null; lote_abertas: number | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
+          pe.harness as pendente_harness, pe.modelo as pendente_modelo,
           c.nome as colega_nome, c.desde as colega_desde, c.trabalho_id as colega_trabalho_id,
           -- definido em 2026-10-08 (tempo da task): o tempo trabalhado é o dos turnos (Raio-X: começo → último sinal); o
           -- resto do "aberta há" é espera. O turno que roda conta até agora.
@@ -411,7 +417,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         -- pendente (esperando um colega, a pessoa ou a hora marcada), onde o próximo turno do bot iria: a mesma regra sem o
         -- "desta vez", que é de um turno só.
         left join lateral (
-          select true as tem, ${alvoDoTurno(conn, agora)} as alvo from turnos t
+          select true as tem, ${alvoDoTurno(conn, agora)} as alvo, coalesce(t.harness, 'auto') as harness, t.modelo from turnos t
           where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' order by t.criado_em, t.id limit 1
         ) pe on true
         left join lateral (
@@ -472,6 +478,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             esperandoComando: l.espera_motivo !== null && l.espera_desde ? { motivo: l.espera_motivo, desde: ms(l.espera_desde) } : null,
             maquinaVivaId: l.maquina_viva_id,
             maquinaAlvoId: l.maquina_alvo_id,
+            pendente: l.pendente_harness !== null && l.pendente_modelo !== null ? { harness: l.pendente_harness, modelo: l.pendente_modelo } : null,
             acordaMotivo: l.acorda_motivo,
             lote: l.lote_id && l.lote_criado_em ? { id: l.lote_id, abertoEm: ms(l.lote_criado_em), frentes: l.lote_frentes ?? 0, abertas: l.lote_abertas ?? 0 } : null,
           },

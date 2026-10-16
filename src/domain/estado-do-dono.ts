@@ -58,7 +58,10 @@ export function estadoDoDono(f: FatosDoDono): EstadoDoDono {
     porSituacao.set(s, [...(porSituacao.get(s) ?? []), frente]);
   }
   const quantas = (s: Situacao) => porSituacao.get(s)?.length ?? 0;
-  const conversaTrabalhando = f.conversaTrabalhandoDesde !== null;
+  // NOD-260 (definido em 2026-10-15): o turno de uma sala não é "trabalhando na conversa" — a conversa do dono é a
+  // própria. Lida a própria (`conversaPropriaTrabalhandoDesde`), ela decide; ausente (quem ainda não lê), vale a de antes.
+  const conversaDesde = f.conversaPropriaTrabalhandoDesde === undefined ? f.conversaTrabalhandoDesde : f.conversaPropriaTrabalhandoDesde;
+  const conversaTrabalhando = conversaDesde !== null;
   // A espera conta pela unidade que espera: a conversa (sem turno vivo) e as frentes que só esperam.
   const esperandoIds = new Set((porSituacao.get("esperando") ?? []).map((x) => x.id));
   const esperasValidas = f.esperas.filter((e) => (e.trabalhoId === null ? !conversaTrabalhando : esperandoIds.has(e.trabalhoId)));
@@ -76,7 +79,7 @@ export function estadoDoDono(f: FatosDoDono): EstadoDoDono {
     principal === "esperando_voce"
       ? menor([f.decisoes.desde, ...(porSituacao.get("voce") ?? []).map((x) => x.iniciadoEm ?? x.criadoEm)])
       : principal === "trabalhando"
-        ? menor([f.conversaTrabalhandoDesde, ...(porSituacao.get("trabalhando") ?? []).map((x) => x.iniciadoEm ?? x.criadoEm)])
+        ? menor([conversaDesde, ...(porSituacao.get("trabalhando") ?? []).map((x) => x.iniciadoEm ?? x.criadoEm)])
         : principal === "esperando"
           ? (maisAntiga?.desde ?? null)
           : principal === "fila"

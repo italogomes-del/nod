@@ -6,9 +6,11 @@ import type { EpochMs } from "../contracts/ids.ts";
  * e o fuso por parâmetro. Nada aqui segura trabalho — é só o que a tela Trabalhos mostra atrás de um clique.
  *
  * A regra do aviso: o gasto de HOJE até agora passa de 2× a média dos 7 dias anteriores, cada um somado da meia-noite
- * até o MESMO horário (no fuso da pessoa), e passa do piso de US$ 1. Dias sem gasto contam como zero na média (um bot
- * parado ontem puxa a média para baixo, de propósito: o ritmo é o do bot, não o dos dias em que ele trabalhou). Sem
- * média (nenhum gasto nos 7 dias), não há aviso: falta com que comparar.
+ * até o MESMO horário (no fuso da pessoa), e passa do piso de US$ 1.
+ *
+ * NOD-276 (definido em 2026-10-15, D9): a média é a dos dias em que o bot gastou (soma ÷ dias com soma > 0). Antes, dia
+ * sem gasto contava zero: o bot que trabalhou um dia em sete tinha média de 1/7 do normal e qualquer dia comum dele
+ * "passava de 7×". Com menos de 3 dias com gasto nos 7, o ritmo é "sem base" e não há aviso: falta com que comparar.
  */
 
 /** definido em 2026-10-12: o aviso sai acima de 2× a média do mesmo horário. */
@@ -17,6 +19,8 @@ export const VEZES_FORA_DO_RITMO = 2;
 export const PISO_DO_AVISO_USD = 1;
 /** Os 7 dias anteriores. */
 export const DIAS_DA_MEDIA = 7;
+/** NOD-276 (D9): com menos que isto de dias com gasto nos 7 anteriores, não há base para o aviso. */
+export const DIAS_MINIMOS_DA_BASE = 3;
 
 const DIA_MS = 86_400_000;
 
@@ -67,12 +71,13 @@ export function janelasDoDia(agora: EpochMs, fuso: string): { inicio: EpochMs; f
   return janelas;
 }
 
-/** O ritmo de um bot: `hoje` e os gastos dos 7 dias anteriores no mesmo horário (faltando dia, conta zero). */
-export function ritmoDoBot(hojeUsd: number, anteriores: readonly number[]): Pick<CustoDoBotHoje, "mediaUsd" | "vezes" | "foraDoRitmo"> {
-  const soma = anteriores.slice(0, DIAS_DA_MEDIA).reduce((s, v) => s + (Number.isFinite(v) ? v : 0), 0);
-  const mediaUsd = soma / DIAS_DA_MEDIA;
-  const vezes = mediaUsd > 0 ? hojeUsd / mediaUsd : null;
-  return { mediaUsd, vezes, foraDoRitmo: vezes !== null && hojeUsd >= PISO_DO_AVISO_USD && vezes > VEZES_FORA_DO_RITMO };
+/** O ritmo de um bot: `hoje` e os gastos dos 7 dias anteriores no mesmo horário (faltando dia, ele não entra na média). */
+export function ritmoDoBot(hojeUsd: number, anteriores: readonly number[]): Pick<CustoDoBotHoje, "mediaUsd" | "vezes" | "foraDoRitmo"> & { ritmo: "normal" | "sem base" } {
+  const comGasto = anteriores.slice(0, DIAS_DA_MEDIA).filter((v) => Number.isFinite(v) && v > 0);
+  const mediaUsd = comGasto.length === 0 ? 0 : comGasto.reduce((s, v) => s + v, 0) / comGasto.length;
+  if (comGasto.length < DIAS_MINIMOS_DA_BASE) return { mediaUsd, vezes: null, foraDoRitmo: false, ritmo: "sem base" };
+  const vezes = hojeUsd / mediaUsd;
+  return { mediaUsd, vezes, foraDoRitmo: hojeUsd >= PISO_DO_AVISO_USD && vezes > VEZES_FORA_DO_RITMO, ritmo: "normal" };
 }
 
 /**

@@ -80,7 +80,16 @@ describe("o custo de hoje, atrás de um clique", () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toMatch(/Ze 1<\/span><small>3× o normal<\/small><b>US\$ 18,20<\/b>/);
     expect(html).toMatch(/Ana<\/span><b>US\$ 3,20<\/b>/);
-    expect(html).toContain("mais que o dobro da média dos últimos 7 dias até este horário");
+    expect(html).toContain("mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário");
+    expect(html).not.toContain("Parcial:");
+  });
+
+  it("revisão do Gil no #336: o bot sem base diz 'sem base'; o total parcial explica o que ficou de fora", () => {
+    const semBase = { ...custo, parcial: true, bots: custo.bots.map((b) => (b.agenteId === "ana" ? { ...b, ritmo: "sem base" as const } : b)) };
+    const html = custoDoTopo(estadoCom({}, { custoHoje: semBase, custoAberto: true }));
+    expect(html).toMatch(/Ana<\/span><small title="Menos de 3 dias com gasto nos últimos 7: ainda não dá para comparar.">sem base<\/small><b>US\$ 3,20<\/b>/);
+    expect(html).toContain("(parcial)");
+    expect(html).toContain("Parcial: algum turno caiu antes de informar o custo e ficou fora da soma.");
   });
 
   it("sem leitura (servidor anterior ou ainda carregando), nada", () => {

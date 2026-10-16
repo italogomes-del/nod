@@ -54,10 +54,11 @@ interface Linha {
   ligacao_id: string | null;
   trabalho_id: string | null;
   acordar_em: Date | null;
+  despachado_em?: Date | null;
 }
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, despachado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -93,6 +94,7 @@ function paraTurno(l: Linha): Turno {
     ligacaoId: l.ligacao_id,
     trabalhoId: l.trabalho_id,
     acordarEm: msOuNull(l.acordar_em),
+    despachadoEm: msOuNull(l.despachado_em ?? null),
   };
 }
 
@@ -255,7 +257,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         const iaDoTurno = trx`(case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end)`;
         const naCota = (ias: readonly string[], auto: boolean) => trx`(case when t.harness = 'auto' and t.modelo = 'auto' then ${auto}::boolean else ${iaDoTurno} = any(${[...ias]}::text[]) end)`;
         const [l] = await trx<Linha[]>`
-          update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true
+          update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true,
+            -- NOD-276 (J3): a hora em que a máquina pegou o turno; "Trabalhando · há N" conta daqui (criado_em é a fila).
+            despachado_em = ${data(p.agora)}
           where (tenant_id, id) = (
             select t.tenant_id, t.id from turnos t
             where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'

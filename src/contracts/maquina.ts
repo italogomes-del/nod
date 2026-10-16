@@ -29,7 +29,17 @@ export type MaquinaDto = {
 export type MaquinasDto = { maquinas: MaquinaDto[]; padraoId: string | null; servidorNoMac?: { api: string } };
 
 /** Uma máquina da pessoa como a tela a nomeia: o Mac ("seu Mac") ou outra, pelo nome que ela anunciou ("nod-motor-teste"). */
-export type MaquinaDoTrabalho = { id: string; nome: string; ehMac: boolean };
+export type MaquinaDoTrabalho = {
+  id: string;
+  nome: string;
+  ehMac: boolean;
+  /**
+   * NOD-260 (definido em 2026-10-15, G8): desde quando a máquina não fala com o servidor — a regra do chip da conversa
+   * (conectada = contato há menos de 60 s; senão o último uso da chave). null = em contato (ou não se sabe). Opcional: o
+   * servidor de antes não manda.
+   */
+  semContatoDesde?: number | null;
+};
 
 /**
  * A leitura de UMA máquina (2026-10-09): os mesmos níveis de `TrabalhosDto`, só dela, e o que o portão dela segura agora

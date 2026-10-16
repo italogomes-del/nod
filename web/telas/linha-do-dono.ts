@@ -146,7 +146,7 @@ export function sinalDoBot(estado: Estado, a: Pick<Agente, "id" | "cor" | "conve
   const dono = estado.trabalhos?.donos?.find((d) => d.estado.agenteId === a.id);
   const l = dono ? linhaDoDono(dono, 0) : null;
   if (!dono || !l) return "";
-  const frase = fraseDoDono({ ...dono, estado: { ...dono.estado, conversaTrabalhando: false } });
+  const frase = fraseDoDono({ ...dono, estado: { ...dono.estado, conversaTrabalhando: false, conversaPropriaTrabalhando: false } });
   const ponto = l.sinal === "voce" ? "precisa" : l.sinal === "vivo" ? `${esc(a.cor)} pulso-trab` : "fora-do-mac";
   const n = l.sinal === "vivo" && dono.estado.frentes > 1 ? `<span class="sinal-n">${dono.estado.frentes}</span>` : "";
   return `<span class="chip-trab sinal-dono" data-sinal="${l.sinal}" title="${esc(frase)}" aria-label="${esc(frase)}"><span class="ponto-trabalho ${ponto}" aria-hidden="true"></span>${n}</span>`;
@@ -208,7 +208,8 @@ export function renderTrabalhosPorBot(estado: Estado): string {
   for (const dono of estado.trabalhos.donos ?? []) {
     const bot = agente(estado, dono.estado.agenteId);
     if (!bot) continue;
-    const viva = { ...dono, estado: { ...dono.estado, conversaTrabalhando: conversaViva(estado, bot.conversaId) } };
+    const vivaAgora = conversaViva(estado, bot.conversaId);
+    const viva = { ...dono, estado: { ...dono.estado, conversaTrabalhando: vivaAgora, conversaPropriaTrabalhando: vivaAgora } };
     const linha = linhaDoDono(viva, estado.agora, { comConversa: true });
     const grupo = grupoDaLinha(linha);
     if (linha && grupo) linhas.push({ bot, dono: viva, linha, grupo });

@@ -195,4 +195,5 @@ export type DiscoDoMac = LeituraDisco & { nivel: NivelPressao; alertaMb: number;
 /** Por que o Mac segura trabalho novo (#219): o processador cheio, a memória em alerta ou crítica, ou o disco quase cheio. */
 export type MotivoEsperaMac = "processador" | "memoria" | "disco";
 /** A tela fala por máquina (2026-10-09): a leitura viva de cada máquina, o nome dela e o Mac do servidor (ADR-092: o turno sem alvo é dele; null no compartilhado). `identificar` null = não conectada. */
-export type ServicoDasMaquinas = { leituras(pessoaId: string): LeituraDaMaquinaViva[]; identificar(escopo: { tenantId: string; pessoaId: string }, machineId: string): Omit<MaquinaDoTrabalho, "id"> | null; macDoServidor: string | null };
+/** NOD-260 (definido em 2026-10-15): `conectada` (G8, contato há menos de 60 s; o Mac do servidor sempre) e `iasProntas` (D3, as IAs prontas nas máquinas vivas). Ausentes (serviço de antes) = não se sabe. */
+export type ServicoDasMaquinas = { leituras(pessoaId: string): LeituraDaMaquinaViva[]; identificar(escopo: { tenantId: string; pessoaId: string }, machineId: string): Omit<MaquinaDoTrabalho, "id" | "semContatoDesde"> | null; macDoServidor: string | null; conectada?(escopo: { tenantId: string; pessoaId: string }, machineId: string): boolean; iasProntas?(pessoaId: string): string[] };

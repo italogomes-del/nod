@@ -552,7 +552,8 @@ const desmentidoDepois = (estado: Estado, turnoId: string, leituraEm: number): b
 /**
  * NOD-219 (definido em 2026-10-13): a conversa PRÓPRIA do bot trabalha? A barra e a conversa reconciliadas aqui são a
  * própria; `conversaTrabalhando` conta também o turno do bot numa sala, que segurava o vivo de uma conversa própria
- * parada. O servidor de antes não manda o campo novo: aí vale o de sempre.
+ * parada. O servidor de antes não manda o campo novo: aí vale o de sempre. NOD-260 (definido em 2026-10-15): o servidor
+ * novo manda sempre o campo, e o turno de sala nunca entra nele.
  */
 const propriaTrabalhando = (e: EstadoDoDono): boolean => e.conversaPropriaTrabalhando ?? e.conversaTrabalhando;
 
@@ -708,6 +709,9 @@ const conv = (f: FrameSse): Invalidacao | null => {
   return id ? `conversa:${id}` : null;
 };
 
+/** O turno da ligação não é trabalho do bot (ADR-072): não relê Trabalhos. */
+const trabalhosDoTurno = (f: FrameSse): Invalidacao[] => (turnoDeLigacao(f.dados) || f.dados.modo === "ligacao" || f.dados.origem === "ligacao" ? [] : ["trabalhos"]);
+
 const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
   "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos") : e),
@@ -724,8 +728,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const estado = f.dados.kind === "turno_despachado" ? "rodando" : "na_fila";
     const anterior = e.turnosVivos[turnoId];
     const trabalhoId = texto(f.dados.trabalhoId) ?? texto(f.dados.trabalho_id) ?? anterior?.trabalhoId ?? null;
-    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: anterior?.desde ?? agora, trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null };
-    return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f));
+    const vivo: TurnoVivo = { turnoId, conversaId, estado, executor: texto(f.dados.executor) ?? anterior?.executor ?? null, machineId: texto(f.dados.machine_id) ?? anterior?.machineId ?? null, desde: estado === "rodando" && anterior?.estado !== "rodando" ? agora : (anterior?.desde ?? agora), trabalhoId, vistoEm: agora, chegouEm: anterior?.chegouEm ?? agora, origem: texto(f.dados.origem) ?? anterior?.origem ?? null };
+    return invalidar({ ...e, turnosVivos: { ...e.turnosVivos, [turnoId]: vivo } }, conv(f), "trabalhos");
   },
   "turno.delta": (e, f) => {
     if (turnoDeLigacao(f.dados)) return e;
@@ -768,11 +772,14 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // ADR-067: a volta do modelo virou mensagem e o turno segue rodando — a conversa relê, e o cartão ao vivo recomeça
   // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).
   "turno.fala": (e, f) => invalidar(semDelta(e, texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f)),
+  // NOD-260 (definido em 2026-10-15, J1): o turno que começa, acaba ou é interrompido muda Trabalhos (a linha do dono, o
+  // "Trabalhando · há N"); antes só `trabalho.mudou` relia, e o turno da conversa ficava "trabalhando" lá. Os frames são
+  // da pessoa (o barramento publica por pessoa); main.ts junta a releitura numa por segundo (web/lib/releitura-adiada.ts).
   // definido em 2026-10-16 (plano "tela limpa", T6): o CLI informa o uso do plano a cada turno, então o anel do seletor relê
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
-  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e)),
-  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e)),
+  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e), ...trabalhosDoTurno(f)),
+  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e), ...trabalhosDoTurno(f)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
@@ -895,7 +902,10 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         novasDesde: {},
         faixaTrabalhosAberta: faixaAbertaAoNavegar(estado.faixaTrabalhosAberta, estado.tela, acao.tela),
       });
-      return acao.tela.tipo === "trabalho" ? invalidar(navegado, `trabalho:${acao.tela.id}`) : navegado;
+      if (acao.tela.tipo === "trabalho") return invalidar(navegado, `trabalho:${acao.tela.id}`);
+      // NOD-260 (definido em 2026-10-15): abrir Trabalhos (vindo de outra tela) sempre relê — a lista guardada é de
+      // quando ela foi lida, e só o frame de um trabalho a relia.
+      return acao.tela.tipo === "trabalhos" && estado.tela.tipo !== "trabalhos" ? invalidar(navegado, "trabalhos") : navegado;
     }
     case "espaco":
       // A chave crua só vive enquanto a pessoa está em Computadores; trocar de seção ou fechar a descarta.
@@ -970,7 +980,9 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const semSumidos = semDesmentidos(estado, sumiram, acao.agora);
       const turnosVivos = novos.length === 0 ? semSumidos.turnosVivos : { ...semSumidos.turnosVivos };
       // `chegouEm`: o relógio da web, nunca adiante do `desde` do banco (o relógio da web atrasado faria a fila "pensar").
-      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: t.desde, trabalhoId: t.trabalhoId ?? null, vistoEm: acao.agora, chegouEm: Math.min(t.desde, acao.agora), origem: t.origem ?? null };
+      // NOD-276 (J3): o que já roda conta "Trabalhando · há N" do despacho; "Na fila há N" segue com a criação.
+      const desdeDe = (t: (typeof novos)[number]): number => (t.estado === "despachando" ? (t.despachadoEm ?? t.desde) : t.desde);
+      for (const t of novos) turnosVivos[t.id] = { turnoId: t.id, conversaId, estado: t.estado === "despachando" ? "rodando" : "na_fila", executor: null, machineId: null, desde: desdeDe(t), trabalhoId: t.trabalhoId ?? null, vistoEm: acao.agora, chegouEm: Math.min(desdeDe(t), acao.agora), origem: t.origem ?? null };
       // O texto em streaming de um turno que já acabou sai; o dos que continuam vivos fica.
       const vivosDaConversa = new Set(Object.values(turnosVivos).filter((t) => t.conversaId === conversaId).map((t) => t.turnoId));
       const anteriores = estado.atividades[conversaId] ?? {};

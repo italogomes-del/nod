@@ -55,7 +55,14 @@ export type EsperaDoDonoDto = {
   tentativa?: number;
   tentativas?: number;
   acordaEm?: number;
+  /**
+   * NOD-260 (definido em 2026-10-15): o bot esperado, na espera de colega — se roda agora, quantos pedidos tem na fila e
+   * se foi removido. Opcional: o servidor de antes não manda.
+   */
+  colega?: ColegaEsperadoDto;
 };
+
+export type ColegaEsperadoDto = { id: string | null; removido: boolean; trabalhando: boolean; fila: number };
 
 /** De onde veio um pedido na fila do dono. */
 export type DeQuemPediu = "pessoa" | "colega" | "rotina";

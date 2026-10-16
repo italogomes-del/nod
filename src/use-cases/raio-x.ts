@@ -55,10 +55,12 @@ export const raioXDoTurno: CasoDeUso<{ turnoId: string }, RaioXTurno> = async (d
 
 /** A faixa dev de cada resposta da conversa e o total desde `desde` (a meia-noite de quem pergunta). */
 export const raioXDaConversa: CasoDeUso<{ conversaId: string; desde: number }, RaioXConversa> = async (deps, input) => {
-  const [turnos, desde] = await Promise.all([
+  const [turnos, total, parcial] = await Promise.all([
     deps.repos.raioX.daConversa(input.conversaId, TURNOS_NO_RAIO_X_DA_CONVERSA),
     deps.repos.raioX.totalDesde(input.conversaId, input.desde),
+    deps.repos.gastos.algumSemCusto({ desde: input.desde, ate: deps.agora(), conversaId: input.conversaId }),
   ]);
+  const desde = parcial ? { ...total, parcial: true } : total;
   return {
     data: {
       turnos: turnos.filter((t) => t.execucao !== null || t.custoUsd !== null).map((t) => resumoDoRaioX(t.turnoId, t.custoUsd, t.execucao)),

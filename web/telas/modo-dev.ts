@@ -22,6 +22,23 @@ export function mil(n: number): string {
 }
 
 /** US$ com duas casas; abaixo de um centavo, três (um turno curto de haiku custa menos que isso). */
+/**
+ * NOD-276 (D10): o custo de UM turno. Null com chamadas registradas = o turno gastou e o CLI não disse quanto (caiu antes
+ * do `result`): "custo desconhecido", e não "US$ —", que lia como "não custou".
+ */
+export function custoDoTurno(v: number | null, gastou: boolean): string {
+  return v === null && gastou ? "custo desconhecido" : usd(v);
+}
+
+/** NOD-276 (D10): o total que deixou de fora turno sem custo conhecido diz "parcial". */
+/** Revisão do Gil no #336: o que "(parcial)" e "custo desconhecido" querem dizer, no title de quem os mostra. */
+export const PARCIAL = "Parcial: algum turno caiu antes de informar o custo e ficou fora da soma.";
+export const CUSTO_DESCONHECIDO = "O turno caiu antes de informar o custo; os tokens estão somados.";
+
+export function totalUsd(v: number, parcial: boolean | undefined): string {
+  return parcial ? `${usd(v)} (parcial)` : usd(v);
+}
+
 export function usd(v: number | null): string {
   if (v === null) return "US$ —";
   const casas = v > 0 && v < 0.01 ? 3 : 2;
@@ -51,7 +68,7 @@ export function renderFaixaDev(r: ResumoRaioX): string {
   const rotulo = r.compactacoes ? "pico" : "contexto";
   const barra = r.picoContexto !== null && r.janela ? `<span class="faixa-dev-barra" aria-hidden="true"><span style="width:${Math.min(100, (r.picoContexto / r.janela) * 100).toFixed(1)}%"></span></span>` : "";
   const partes = [
-    `<b>${esc(usd(r.custoUsd))}</b>`,
+    r.custoUsd === null && r.chamadas > 0 ? `<b title="${CUSTO_DESCONHECIDO}">${esc(custoDoTurno(r.custoUsd, true))}</b>` : `<b>${esc(custoDoTurno(r.custoUsd, r.chamadas > 0))}</b>`,
     r.chamadas ? `<span>${r.chamadas} ${r.chamadas === 1 ? "chamada" : "chamadas"}${r.compactacoes ? ` + ${r.compactacoes} ${r.compactacoes === 1 ? "compactação" : "compactações"}` : ""}</span>` : "",
     r.picoContexto !== null ? `<span class="faixa-dev-ctx${alerta ? " dev-alerta" : ""}">${rotulo}${barra}<span>${esc(mil(r.picoContexto))}${r.janela ? ` / ${esc(mil(r.janela))}` : ""}</span></span>` : "",
     r.cachePct !== null ? `<span>${r.cachePct}% do cache</span>` : "",
@@ -64,7 +81,7 @@ export function renderFaixaDev(r: ResumoRaioX): string {
 export function renderSeloModoDev(estado: Estado, conversaId: string | undefined, nome: string): string {
   if (!estado.modoDev.ligado) return "";
   const hoje = conversaId ? estado.modoDev.raioX[conversaId]?.desde : undefined;
-  const total = hoje ? `<span class="dev-hoje">Hoje com ${esc(nome)}: <b>${esc(usd(hoje.custoUsd))}</b> · ${hoje.turnos} ${hoje.turnos === 1 ? "turno" : "turnos"}</span>` : "";
+  const total = hoje ? `<span class="dev-hoje">Hoje com ${esc(nome)}: <b${hoje.parcial ? ` title="${PARCIAL}"` : ""}>${esc(totalUsd(hoje.custoUsd, hoje.parcial))}</b> · ${hoje.turnos} ${hoje.turnos === 1 ? "turno" : "turnos"}</span>` : "";
   return `<span class="selo-dev" title="Modo dev ligado (⌘⇧D)">MODO DEV</span>${total}${renderTaxasLinhas(estado)}`;
 }
 

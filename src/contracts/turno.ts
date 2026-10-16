@@ -69,6 +69,8 @@ export type Turno = {
   harness?: PreferenciaHarness;
   executor: Executor; // NOD-206: onde roda. Nasce com o palpite de quem enfileirou; o plano grava o real (registrarExecutor)
   criadoEm: EpochMs;
+  /** NOD-276 (J3): quando a máquina o pegou (`reivindicar`); null/ausente = ainda na fila, ou turno de antes da 0083. */
+  despachadoEm?: EpochMs | null;
   /** Fala da pessoa que disparou o turno (0024). Não é `mensagens.turno_id`, que é a fala que o turno produziu. */
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */
@@ -101,6 +103,8 @@ export type ResultadoTurno = {
   sessaoCli: string | null;
   sinais: SinaisTurno;
   custoUsd: number | null;
+  /** NOD-276 (D10): o turno gastou (as chamadas têm usage) mas o CLI não fechou com `result`: custo null, tokens somados. */
+  custoDesconhecido?: boolean;
   tokens: TokensTurno;
   ferramentasChamadas: string[];
   /** permission_denials[].tool_name (negar NÃO é erro no CLI, s4b); `negacoesDoNod` (2026-10-11): o motivo do hook do nod. */

@@ -39,8 +39,12 @@ export type CustoDoBotHoje = {
   agenteId: string;
   /** Soma de `turnos.custo_usd` dos turnos criados hoje até agora, no fuso da pessoa. */
   hojeUsd: number;
-  /** Média dos 7 dias anteriores, cada um somado da meia-noite até o mesmo horário de agora. */
+  /**
+   * Média dos dias com gasto entre os 7 anteriores, cada um somado da meia-noite até o mesmo horário de agora (NOD-276, D9).
+   */
   mediaUsd: number;
+  /** NOD-276 (D9): "sem base" = menos de 3 dias com gasto nos 7 anteriores; sem alarme. Ausente = servidor anterior. */
+  ritmo?: "normal" | "sem base";
   /** hoje ÷ média; null sem média. */
   vezes: number | null;
   /** O gasto de hoje passou do dobro da média, acima do piso (domain/custo-do-dia.ts). */
@@ -48,4 +52,5 @@ export type CustoDoBotHoje = {
 };
 
 /** `GET custo-hoje?fuso=`: os bots com gasto hoje (ou fora do ritmo), do que mais gastou ao que menos. */
-export type CustoDoDiaDto = { fuso: string; desde: EpochMs; ate: EpochMs; totalUsd: number; bots: CustoDoBotHoje[]; foraDoRitmo: boolean };
+/** NOD-276 (D10): `parcial` = algum turno de hoje gastou sem custo conhecido; o total soma só os que têm. */
+export type CustoDoDiaDto = { fuso: string; desde: EpochMs; ate: EpochMs; totalUsd: number; bots: CustoDoBotHoje[]; foraDoRitmo: boolean; parcial?: boolean };

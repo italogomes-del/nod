@@ -50,13 +50,20 @@ export type LinhaDoDono = {
 };
 
 /**
+ * NOD-260 (definido em 2026-10-15): "trabalhando na conversa" é só a conversa PRÓPRIA do bot. `conversaTrabalhando`
+ * conta também o turno numa sala; o servidor que manda `conversaPropriaTrabalhando` decide por ele, o de antes (sem o
+ * campo) fica no de sempre.
+ */
+const conversaPropria = (e: DonoDto["estado"]): boolean => e.conversaPropriaTrabalhando ?? e.conversaTrabalhando;
+
+/**
  * A linha de um dono. `comConversa`: o turno da própria conversa conta como trabalhando — na barra e em Trabalhos sim; na
  * linha acima do campo não (a conversa já mostra o turno ao vivo, e "Trabalhando" ali repetiria o balão que escreve).
  * null = nada a dizer (a linha some).
  */
 export function linhaDoDono(dono: DonoDto, agora: number, opcoes: { comConversa?: boolean } = {}): LinhaDoDono | null {
   const e = dono.estado;
-  const conversa = opcoes.comConversa === true && e.conversaTrabalhando;
+  const conversa = opcoes.comConversa === true && conversaPropria(e);
   const fila = e.fila > 0 ? textoDaFila(e, dono.fila.length) : "";
   const esperas = e.esperando > 0 ? textoDasEsperas(e) : "";
   const trabalhando = e.frentes > 0 ? plural(e.frentes, "frente trabalhando", "frentes trabalhando") : conversa ? "trabalhando na conversa" : "";
@@ -81,7 +88,7 @@ export function linhaDoDono(dono: DonoDto, agora: number, opcoes: { comConversa?
  */
 export function fraseDoDono(dono: DonoDto): string {
   const e = dono.estado;
-  const trabalhando = e.frentes > 0 ? e.frentes : e.conversaTrabalhando ? 1 : 0;
+  const trabalhando = e.frentes > 0 ? e.frentes : conversaPropria(e) ? 1 : 0;
   return [
     e.esperandoVoce > 0 ? "precisa de você" : "",
     trabalhando > 0 ? `${trabalhando} trabalhando` : "",
@@ -131,7 +138,20 @@ export function esperaNaTela(e: EsperaDoDonoDto, agora: number, frente?: string 
     const quando = e.acordaEm ? `Volta ${quandoVolta(e.acordaEm, agora)}` : "Volta marcada";
     return { titulo: quando, comando: false, linhas: [[e.motivo !== "a volta marcada" ? e.motivo : "", daFrente].filter(Boolean).join(" · ")].filter(Boolean), tempo };
   }
-  return { titulo: `Esperando ${e.motivo}`, comando: false, linhas: [[`pedido enviado às ${hora(e.desde)}`, daFrente].filter(Boolean).join(" · ")], tempo };
+  const linhas = [[`pedido enviado às ${hora(e.desde)}`, daFrente].filter(Boolean).join(" · ")];
+  const colega = e.colega ? estadoDoColega(e.colega, e.motivo) : "";
+  return { titulo: `Esperando ${e.motivo}`, comando: false, linhas: colega ? [colega, ...linhas] : linhas, tempo };
+}
+
+/**
+ * NOD-260 (definido em 2026-10-15): o estado do bot esperado no painel "Esperando <bot>" — "Leonardo está trabalhando ·
+ * 2 pedidos na fila", "Ada ainda não começou · 1 pedido na fila" (neutro, revisão do Gil no #336), "Leonardo está livre".
+ * Excluído (ou que não existe mais): "Leonardo foi removido · a resposta não vem".
+ */
+export function estadoDoColega(c: NonNullable<EsperaDoDonoDto["colega"]>, nome: string): string {
+  if (c.removido) return `${nome} foi removido · a resposta não vem`;
+  const fila = c.fila > 0 ? plural(c.fila, "pedido na fila", "pedidos na fila") : "";
+  return [c.trabalhando ? `${nome} está trabalhando` : c.fila > 0 ? `${nome} ainda não começou` : `${nome} está livre`, fila].filter(Boolean).join(" · ");
 }
 
 /** Quem pediu o que está na fila: "seu pedido", "pedido do Leonardo", "rotina Triagem do Slack". */

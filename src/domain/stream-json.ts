@@ -309,6 +309,8 @@ export function classificarResultado(entrada: {
   // definido em 2026-10-11: o motivo de cada negação do hook do nod, pelo nome da ferramenta que o tool_use pediu.
   const nomePorId = new Map<string, string>();
   const negacoesDoNod: { nome: string; motivo: string }[] = [];
+  // NOD-276 (D10): o usage de cada chamada à API (`message_delta`). Sem `result` é o único uso que o turno deixa.
+  let tokensDasChamadas: TokensTurno = { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 };
   for (const [posicao, ev] of entrada.eventos.entries()) {
     sinais = reduzirSinais(sinais, ev);
     if (ev.tipo === "tool_use") nomePorId.set(ev.id, ev.nome);
@@ -316,6 +318,7 @@ export function classificarResultado(entrada: {
       const motivo = motivoDoHookDoNod(ev.texto);
       if (motivo !== null) negacoesDoNod.push({ nome: nomePorId.get(ev.toolUseId) ?? "", motivo: motivo.slice(0, 1000) });
     }
+    if (ev.tipo === "chamada") tokensDasChamadas = somarTokens(tokensDasChamadas, { entrada: ev.entrada, saida: ev.saida, cacheLeitura: ev.cacheLido, cacheCriacao: ev.cacheNovo });
     if (ev.tipo === "init") init = ev;
     else if (ev.tipo === "rate_limit") rateLimit = ev;
     else if (ev.tipo === "result") {
@@ -374,9 +377,13 @@ export function classificarResultado(entrada: {
   }
 
   const texto = blocos.length > 0 ? juntarBlocos([...todos, textoAberto]) : deltas;
+  // NOD-276 (definido em 2026-10-15, D10): sem `result` o CLI não diz o custo, mas as chamadas já gastaram. Antes o turno
+  // saía com tokens zerados e custo null — um turno caído no meio sumia dos somatórios como se não tivesse custado nada.
+  // Agora sai com os tokens das chamadas e `custoDesconhecido` (a tela diz "custo desconhecido"; o total, "parcial").
+  const gastou = tokensDasChamadas.entrada + tokensDasChamadas.saida + tokensDasChamadas.cacheLeitura + tokensDasChamadas.cacheCriacao > 0;
   // NOD-264 (C20): a causa da entrega sem result, só em código — o driver interrompeu, o sinal que chegou ou o exit.
   const causa = entrada.interrompidoPeloDriver === true ? "interrompido_pelo_driver" : entrada.signal !== null ? `sinal:${entrada.signal}` : entrada.exitCode !== null && entrada.exitCode !== 0 ? `exit:${entrada.exitCode}` : null;
-  const base = { texto, sessaoCli, custoUsd: null, tokens: tokensZerados, ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
+  const base = { texto, sessaoCli, custoUsd: null, tokens: gastou ? tokensDasChamadas : tokensZerados, ...(gastou ? { custoDesconhecido: true } : {}), ferramentasChamadas, negacoesPermissao: [] as string[], ...(negacoesDoNod.length > 0 ? { negacoesDoNod } : {}), ...(causa ? { causa } : {}) };
   if (entrada.interrompidoPeloDriver === true || entrada.signal !== null || init) return { desfecho: "interrompido", ...base, sinais };
   if (entrada.exitCode === null) {
     return { desfecho: "interrompido", motivoInterrupcao: "lancamento_falhou", ...base, sinais };

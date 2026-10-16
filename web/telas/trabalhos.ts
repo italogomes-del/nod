@@ -6,10 +6,10 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, esperandoColega, etiquetaOrigem, foraDoMac, quandoVolta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, agrupar, dicaSemContato, emEspera, esperandoColega, etiquetaOrigem, quandoVolta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
-import { usd } from "./modo-dev.ts";
+import { PARCIAL, usd } from "./modo-dev.ts";
 
 /**
  * As telas dos trabalhos (ADR-083, épico #188; protótipo "Chat limpo", pranchas K1–K9 e M1–M3): a faixa de Trabalhos em
@@ -31,7 +31,7 @@ const etiqueta = (t: TrabalhoDto): string => `<span class="etiqueta-origem">${es
  * turno que roda, quando a tela a guarda — o passo anda a cada frame em vez de esperar o próximo `GET trabalhos`.
  */
 function progresso(t: TrabalhoDto, todos: readonly TrabalhoDto[], agora: number, vivo?: AtividadeTurno, segurando = false): string {
-  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
+  const situacao = vivo && t.estado === "rodando" && !t.esperandoComputadorDe && !emEspera(t) ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
   return t.estado === "na_fila" ? situacao : `${situacao} · ${tempoDe(t, agora)}`;
 }
 
@@ -46,7 +46,7 @@ function atividadeDe(estado: Estado, t: TrabalhoDto): AtividadeTurno | undefined
 
 /** O status curto da task, sem tempo: "esperando Eng 2", o passo de agora ou o estado. */
 function statusCurto(t: TrabalhoDto, todos: readonly TrabalhoDto[], vivo?: AtividadeTurno, segurando = false, agora = Date.now()): string {
-  return vivo && t.estado === "rodando" && !t.esperandoComputadorDe ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
+  return vivo && t.estado === "rodando" && !t.esperandoComputadorDe && !emEspera(t) ? linhaAtual(vivo) : situacaoDe(t, todos, segurando, agora);
 }
 
 /**
@@ -110,8 +110,8 @@ export function chipTrabalhosDoBot(estado: Estado, a: Pick<Agente, "id" | "cor" 
   if (lista.length === 0) return "";
   // definido em 2026-10-12 (ADR-099, parte 1): só pisca com algo trabalhando de fato; com o bot só esperando (a volta
   // marcada ou um colega), o ponto vazado da espera — o mesmo da linha da task (`pontoTrabalho`).
-  const trabalhando = lista.some((t) => t.estado === "rodando" && !foraDoMac(t));
-  const esperando = lista.filter((t) => foraDoMac(t)).length;
+  const trabalhando = lista.some((t) => t.estado === "rodando" && !emEspera(t));
+  const esperando = lista.filter((t) => emEspera(t)).length;
   const soEspera = !trabalhando && esperando > 0 && !lista.some((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso");
   const n = lista.length;
   const titulo = `${n} ${n === 1 ? "trabalho aberto" : "trabalhos abertos"}${esperando > 0 ? ` · ${esperando} esperando` : ""}`;
@@ -181,20 +181,23 @@ function resumoDosTrabalhos(g: GruposTrabalhos, memoria: string): string {
  * e, quando algum bot passou do ritmo, "acima do normal" — o Marlon quer a tela limpa. O clique abre quanto cada bot gastou
  * e quem passou do ritmo (a regra: src/domain/custo-do-dia.ts). Sem leitura (servidor anterior), nada.
  */
+const SEM_BASE = "Menos de 3 dias com gasto nos últimos 7: ainda não dá para comparar.";
+
 export function custoDoTopo(estado: Estado): string {
   const c = estado.custoHoje;
   if (!c) return "";
   const aberto = estado.custoAberto;
   const aviso = c.foraDoRitmo ? '<span class="tt-custo-aviso" aria-hidden="true"></span>' : "";
-  const rotulo = `${usd(c.totalUsd)} hoje${c.foraDoRitmo ? " · acima do normal" : ""}`;
+  // NOD-276 (D10): o total que deixou de fora turno sem custo conhecido diz "parcial".
+  const rotulo = `${usd(c.totalUsd)} hoje${c.parcial ? " (parcial)" : ""}${c.foraDoRitmo ? " · acima do normal" : ""}`;
   const botao = `<button type="button" class="tt-custo${c.foraDoRitmo ? " fora" : ""}" data-act="custo-hoje" aria-expanded="${aberto}" title="Ver quanto cada bot gastou hoje">${aviso}${esc(rotulo)}${ICONE.abrir}</button>`;
   if (!aberto) return botao;
   const vezes = (v: number | null) => (v === null ? "" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}× o normal`);
   const linhas = c.bots.map((b) => {
     const bot = agente(estado, b.agenteId);
-    return `<li class="tt-custo-bot${b.foraDoRitmo ? " fora" : ""}">${bot ? iconeAgente(bot, "sm") : ""}<span class="tt-custo-nome">${esc(bot?.nome ?? "bot")}</span>${b.foraDoRitmo ? `<small>${esc(vezes(b.vezes))}</small>` : ""}<b>${esc(usd(b.hojeUsd))}</b></li>`;
+    return `<li class="tt-custo-bot${b.foraDoRitmo ? " fora" : ""}">${bot ? iconeAgente(bot, "sm") : ""}<span class="tt-custo-nome">${esc(bot?.nome ?? "bot")}</span>${b.foraDoRitmo ? `<small>${esc(vezes(b.vezes))}</small>` : b.ritmo === "sem base" ? `<small title="${SEM_BASE}">sem base</small>` : ""}<b>${esc(usd(b.hojeUsd))}</b></li>`;
   }).join("");
-  return `${botao}<div class="tt-custo-detalhe" role="group" aria-label="Custo de hoje por bot"><ul>${linhas || '<li class="mudo">Nenhum gasto hoje.</li>'}</ul><p>Desde a meia-noite. "Acima do normal" é mais que o dobro da média dos últimos 7 dias até este horário.</p></div>`;
+  return `${botao}<div class="tt-custo-detalhe" role="group" aria-label="Custo de hoje por bot"><ul>${linhas || '<li class="mudo">Nenhum gasto hoje.</li>'}</ul><p>Desde a meia-noite. "Acima do normal" é mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário.${c.parcial ? ` ${PARCIAL}` : ""}</p></div>`;
 }
 
 const FILTROS: { id: FiltroTrabalhos; nome: string }[] = [
@@ -228,7 +231,10 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
     const bot = agente(estado, t.agenteId);
     const mem = aberto(t) && t.memoriaMb !== null ? ` · ${memoriaLegivel(t.memoriaMb)}` : "";
     const fim = aberto(t) ? (t.estado === "na_fila" ? "" : tempoDe(t, estado.agora)) : hora(t.terminadoEm ?? t.criadoEm);
-    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio">${tituloDaLinha(t, "tt-titulo")}${etiqueta(t)}<span class="tt-passo">${esc(situacaoDe(t, todos, segurando, estado.agora))}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
+    const passo = situacaoDe(t, todos, segurando, estado.agora);
+    // Revisão do Gil no #336: o passo corta (40%, some no estreito) — o title leva o texto inteiro e o que fazer.
+    const dica = passo.includes(" · sem contato") ? dicaSemContato(t, estado.agora) : "";
+    return `<button type="button" class="tt-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="tt-bot">${bot ? iconeAgente(bot, "sm") : ""}<b>${esc(bot?.nome ?? "bot")}</b></span><span class="tt-meio">${tituloDaLinha(t, "tt-titulo")}${etiqueta(t)}<span class="tt-passo"${dica ? ` title="${esc(dica)}"` : ""}>${esc(passo)}</span></span><span class="tt-fim">${esc(fim + mem)}</span></button>`;
   };
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => `<section class="tt-grupo" data-grupo="${g.chave}"><h2>${g.titulo} · ${grupos[g.chave].length}${g.chave === "trabalhando" && grupos.trabalhando.some((t) => t.memoriaMb !== null) ? " · os que mais usam memória primeiro" : ""}</h2><div class="tt-lista">${grupos[g.chave].map(linha).join("")}</div></section>`).join("");
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";
@@ -261,7 +267,8 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const quemPediu = pediu ? `${iconeAgente(pediu, "sm")}<span class="tk-seta" aria-label="pediu a">${ICONE.seta}</span>` : "";
   // revisto em 2026-10-08 (protótipo "Nod — tempo da task", aprovado): no lugar do tempo total, o status curto ("esperando
   // Eng 2", "trabalhando"); o tempo trabalhado e o de espera ficam no cartão que o status abre.
-  const fora = foraDoMac(t);
+  // Revisão do Gil no #336: a máquina sem contato também é espera — o topo nunca diz "trabalhando" (NOD-260, critério 3).
+  const fora = emEspera(t);
   const status = !aberto(t) ? `${situacaoDe(t)} · ${tempoDe(t, estado.agora)}` : fora ? situacaoDe(t, [], false, estado.agora) : t.estado === "rodando" ? "trabalhando" : situacaoDe(t);
   const abertoCartao = estado.tempoTaskAberto === t.id;
   const botaoStatus = `<button type="button" class="tk-status${fora ? " fora-do-mac" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;

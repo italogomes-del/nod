@@ -140,7 +140,7 @@ describeIntegracao("o estado do dono na tela: GET trabalhos, ConversaDto e o fra
     });
   });
 
-  it("NOD-219: o turno vivo numa SALA conta como conversa trabalhando, mas não como a conversa PRÓPRIA do bot", async () => {
+  it("NOD-260 (definido em 2026-10-15; antes NOD-219): o turno vivo numa SALA não faz o bot trabalhar — nem a conversa, nem a própria", async () => {
     await withRollback(MARLON, async (trx) => {
       const vera = await agenteComConversa(trx, MARLON, { nome: "Vera" });
       const tuca = await agenteComConversa(trx, MARLON, { nome: "Tuca" });
@@ -150,7 +150,7 @@ describeIntegracao("o estado do dono na tela: GET trabalhos, ConversaDto e o fra
       const naSala = await repos.turnos.enfileirar({ executor: "catcher", conversaId: s.data.conversa.id, agenteId: vera.agenteId, origem: "sala", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "@Vera olha", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${naSala?.id ?? ""}`;
       const { data } = await listarTrabalhos(deps, { agenteId: vera.agenteId });
-      expect(data.donos?.[0]?.estado).toMatchObject({ conversaTrabalhando: true, conversaPropriaTrabalhando: false });
+      expect(data.donos?.[0]?.estado).toMatchObject({ principal: "livre", conversaTrabalhando: false, conversaPropriaTrabalhando: false });
     });
   });
 });

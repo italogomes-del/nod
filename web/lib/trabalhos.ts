@@ -1,7 +1,7 @@
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../../src/contracts/maquina.ts";
 import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
-import { duracaoCurta } from "./relogio.ts";
+import { duracaoCurta, quandoCurto } from "./relogio.ts";
 import { esc, hora } from "./render.ts";
 
 /**
@@ -109,6 +109,42 @@ export function foraDoMac(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esper
 }
 
 /**
+ * NOD-260 (definido em 2026-10-15, G8/G12): a máquina do trabalho não fala com o servidor há mais de 60 s (a regra do
+ * chip) — o servidor manda `maquina.semContatoDesde`. Despachando, o turno não anda: é espera, não trabalho (vai ao grupo
+ * Esperando); na fila, ele espera a máquina voltar. Sem atalho para rodar em outra (decisão do NOD-260).
+ */
+export function esperandoMaquina(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "maquina">>): { nome: string; desde: number } | null {
+  if (t.estado !== "rodando" && t.estado !== "na_fila") return null;
+  const desde = t.maquina?.semContatoDesde;
+  return t.maquina && desde !== null && desde !== undefined ? { nome: t.maquina.nome, desde } : null;
+}
+
+/**
+ * Revisão do Gil no #336 (bloqueante 1): a regra única de "só espera" — um colega, um comando, a hora marcada
+ * (`foraDoMac`) ou a máquina sem contato (`esperandoMaquina`). Quem espera não pulsa nem diz "trabalhando" em lugar
+ * nenhum: ponto, chip da barra, pílula, topo da task e passo ao vivo leem daqui.
+ */
+export function emEspera(t: Pick<TrabalhoDto, "estado" | "turnoVivoId" | "esperandoColega" | "acordaEm"> & Partial<Pick<TrabalhoDto, "esperandoComando" | "maquina">>): boolean {
+  return foraDoMac(t) || esperandoMaquina(t) !== null;
+}
+
+/**
+ * Desde quando a máquina está sem contato (revisão do Gil no #336): "14:32" hoje, "ontem 14:32", "14/10 14:32" antes —
+ * a convenção de `quandoCurto`, sem o "hoje", no fuso da máquina da pessoa (o mesmo de `hora`).
+ */
+export function desdeCurto(desde: number, agora: number): string {
+  const fuso = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return quandoCurto(desde, agora, fuso).replace(/^hoje /, "");
+}
+
+/** O `title` do passo "esperando <máquina> · sem contato": o texto inteiro (o passo corta) e o que fazer. */
+export function dicaSemContato(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "maquina">>, agora: number): string {
+  const m = esperandoMaquina(t);
+  if (!m) return "";
+  return `${m.nome} não responde desde ${desdeCurto(m.desde, agora)}. O trabalho segue sozinho quando ela voltar; para rodar em outra máquina desta vez, abra a conversa do bot.`;
+}
+
+/**
  * definido em 2026-10-12 (ADR-099, parte 5): a frente deixou um comando rodando (`esperar_comando`, "a CI do #845") e saiu
  * do Mac até ele acabar — rodando, sem turno vivo. Esperar não é trabalhar: conta como Esperando em todo lugar.
  */
@@ -136,6 +172,8 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
   if (t.esperaDaCota) return "esperando a cota da IA";
   const comando = esperandoComando(t);
   if (comando) return `esperando ${comando.motivo}`;
+  const semContato = esperandoMaquina(t);
+  if (semContato) return t.estado === "rodando" ? `esperando ${semContato.nome} · sem contato desde ${desdeCurto(semContato.desde, agora)}` : `esperando ${semContato.nome} · sem contato`;
   const volta = voltaMarcada(t);
   // Revisão do #224: a volta vencida que o Mac segura (o disco crítico, ou o segundo plano apertado) diz por quê, em vez de
   // "volta às 16:00" já passado. O servidor decide (`esperaDoMac`, a mesma regra do `reivindicar`).
@@ -334,8 +372,10 @@ const porVolta = (a: TrabalhoDto, b: TrabalhoDto): number => (a.acordaEm ?? Infi
 export function agrupar(lista: readonly TrabalhoDto[], agora: number): GruposTrabalhos {
   const hoje = meiaNoiteDe(agora);
   const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").sort(porMemoria);
-  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).sort(porMemoria);
-  const esperando = lista.filter((t) => foraDoMac(t)).sort(porVolta);
+  // NOD-260 (G8): o despachado para máquina sem contato espera, não trabalha.
+  const esperaMaquina = (t: TrabalhoDto) => t.estado === "rodando" && esperandoMaquina(t) !== null;
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !emEspera(t)).sort(porMemoria);
+  const esperando = lista.filter((t) => foraDoMac(t) || esperaMaquina(t)).sort(porVolta);
   const fila = lista.filter((t) => t.estado === "na_fila").sort((a, b) => a.criadoEm - b.criadoEm);
   const terminados = lista
     .filter((t) => !aberto(t) && (t.terminadoEm ?? t.criadoEm) >= hoje)
@@ -373,12 +413,13 @@ export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): 
 }
 
 /** O ponto do trabalho: na cor do bot (`c-*`), piscando enquanto roda; azul quando espera a pessoa; vazado na fila. */
-export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "esperandoComando" | "acordaEm">>, cor: string | undefined): string {
+export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<TrabalhoDto, "turnoVivoId" | "esperandoColega" | "esperandoComando" | "acordaEm" | "maquina">>, cor: string | undefined): string {
   if (t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso") return '<span class="ponto-trabalho precisa" aria-hidden="true"></span>';
   // Esperando colega ou a hora marcada (ADR-086): ponto vazado âmbar, sem pulsar (protótipo "Nod — tempo da task").
   // revisto em 2026-10-09: a classe era `esperando`, que já é a caixa "Esperando você entrar no …" do cartão de acesso
   // (interface.css, `.esperando` com padding e fundo) — o ponto de 8 px virava um anel de ~30 px e empurrava a linha.
-  if (foraDoMac({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, esperandoComando: t.esperandoComando ?? null, acordaEm: t.acordaEm ?? null })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
+  // Revisão do Gil no #336: a máquina sem contato também é espera (`emEspera`) — sem pulso no grupo Esperando.
+  if (emEspera({ estado: t.estado, turnoVivoId: t.turnoVivoId ?? null, esperandoColega: t.esperandoColega ?? null, esperandoComando: t.esperandoComando ?? null, acordaEm: t.acordaEm ?? null, maquina: t.maquina })) return '<span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span>';
   if (t.estado === "na_fila") return '<span class="ponto-trabalho na-fila" aria-hidden="true"></span>';
   // definido em 2026-10-08 (QA do épico): o ✓ é só de quem terminou; a task parada e a que falhou ganhavam o mesmo ✓
   // verde em "Terminados hoje" e no topo da tela da task, e liam como entregues.
@@ -395,8 +436,8 @@ export function pontoTrabalho(t: Pick<TrabalhoDto, "estado"> & Partial<Pick<Trab
  */
 export function resumoDaPilula(lista: readonly TrabalhoDto[]): { ponto: "precisa" | "trabalhando" | "fora-do-mac" | "na-fila"; texto: string; precisa: number } {
   const precisa = lista.filter((t) => t.estado === "precisa_de_voce" || t.estado === "fechado_ocioso").length;
-  const trabalhando = lista.filter((t) => t.estado === "rodando" && !foraDoMac(t)).length;
-  const fora = lista.filter((t) => foraDoMac(t)).length;
+  const trabalhando = lista.filter((t) => t.estado === "rodando" && !emEspera(t)).length;
+  const fora = lista.filter((t) => emEspera(t)).length;
   const ponto = precisa ? "precisa" : trabalhando ? "trabalhando" : fora ? "fora-do-mac" : "na-fila";
   return { ponto, texto: trabalhando ? "trabalhando" : precisa === lista.length ? (precisa === 1 ? "precisa de você" : "precisam de você") : "esperando", precisa };
 }

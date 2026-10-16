@@ -55,6 +55,22 @@ export function gastosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * NOD-276 (definido em 2026-10-15, D10): houve, entre `desde` e `ate` (e na conversa, se dada), turno que gastou
+     * tokens sem o CLI dizer o custo (`custoDesconhecido`: o turno caiu antes do `result`). O total desse período é
+     * parcial — soma só o que tem custo.
+     */
+    async algumSemCusto(p: { desde: number; ate: number; conversaId?: string }): Promise<boolean> {
+      const [l] = await conn<{ ha: boolean }[]>`
+        select exists (
+          select 1 from gastos g
+          ${p.conversaId ? conn`join turnos t on t.tenant_id = g.tenant_id and t.id = g.turno_id and t.conversa_id = ${p.conversaId}` : conn``}
+          where g.tenant_id = ${escopo.tenantId} and g.owner_id = ${escopo.pessoaId} and g.custo_usd is null
+            and g.tokens_entrada + g.tokens_saida > 0 and g.em >= ${data(p.desde)} and g.em <= ${data(p.ate)}
+        ) as ha`;
+      return l?.ha === true;
+    },
+
+    /**
      * Soma do mês civil (UTC) do instante dado, para a pessoa, opcionalmente por executor (pendência L8 §3):
      * `custo_servidor_mes` (ADR-017) só pode somar o executor de SERVIDOR, que nesta rodada não existe
      * (Executor = 'local' | 'catcher'); sem filtro soma tudo (o que a assinatura da pessoa pagou).

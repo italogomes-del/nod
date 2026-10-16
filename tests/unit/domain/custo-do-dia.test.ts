@@ -36,15 +36,15 @@ describe("o dia no fuso da pessoa", () => {
 
 describe("o aviso de ritmo: hoje acima de 2× a média dos 7 dias no mesmo horário", () => {
   it("acima do dobro e do piso: fora do ritmo", () => {
-    expect(ritmoDoBot(10, [4, 4, 4, 4, 4, 4, 4])).toEqual({ mediaUsd: 4, vezes: 2.5, foraDoRitmo: true });
+    expect(ritmoDoBot(10, [4, 4, 4, 4, 4, 4, 4])).toEqual({ mediaUsd: 4, vezes: 2.5, foraDoRitmo: true, ritmo: "normal" });
   });
 
   it("até o dobro, não", () => {
     expect(ritmoDoBot(8, [4, 4, 4, 4, 4, 4, 4]).foraDoRitmo).toBe(false);
   });
 
-  it("dia sem gasto conta zero na média (o bot parado ontem puxa a média para baixo)", () => {
-    expect(ritmoDoBot(3, [7, 0, 0, 0, 0, 0, 0])).toEqual({ mediaUsd: 1, vezes: 3, foraDoRitmo: true });
+  it("NOD-276 (D9): dia sem gasto não entra na média — e com menos de 3 dias com gasto não há base", () => {
+    expect(ritmoDoBot(3, [7, 0, 0, 0, 0, 0, 0])).toEqual({ mediaUsd: 7, vezes: null, foraDoRitmo: false, ritmo: "sem base" });
   });
 
   it("abaixo do piso de US$ 1 não avisa, mesmo dobrando", () => {
@@ -52,7 +52,7 @@ describe("o aviso de ritmo: hoje acima de 2× a média dos 7 dias no mesmo horá
   });
 
   it("sem histórico não há com que comparar: nenhum aviso", () => {
-    expect(ritmoDoBot(50, [0, 0, 0, 0, 0, 0, 0])).toEqual({ mediaUsd: 0, vezes: null, foraDoRitmo: false });
+    expect(ritmoDoBot(50, [0, 0, 0, 0, 0, 0, 0])).toEqual({ mediaUsd: 0, vezes: null, foraDoRitmo: false, ritmo: "sem base" });
   });
 
   it("custoDosBots: só quem gastou hoje, do que mais gastou ao que menos", () => {
@@ -64,8 +64,8 @@ describe("o aviso de ritmo: hoje acima de 2× a média dos 7 dias no mesmo horá
       { agenteId: "parado", janela: 3, usd: 5 },
     ];
     expect(custoDosBots(somas)).toEqual([
-      { agenteId: "ze", hojeUsd: 12, mediaUsd: 3, vezes: 4, foraDoRitmo: true },
-      { agenteId: "ana", hojeUsd: 2, mediaUsd: 2, vezes: 1, foraDoRitmo: false },
+      { agenteId: "ze", hojeUsd: 12, mediaUsd: 3, vezes: 4, foraDoRitmo: true, ritmo: "normal" },
+      { agenteId: "ana", hojeUsd: 2, mediaUsd: 14, vezes: null, foraDoRitmo: false, ritmo: "sem base" },
     ]);
   });
 

@@ -1,6 +1,6 @@
 import type { ChamadaRaioX, CompactacaoRaioX, ExecucaoRaioX, GrupoDeFerramentas, RaioXTurno, SecaoDoPrompt } from "../../src/contracts/raio-x.ts";
 import { esc } from "../lib/render.ts";
-import { ALERTA_JANELA, mil, modeloCurto, usd } from "./modo-dev.ts";
+import { ALERTA_JANELA, CUSTO_DESCONHECIDO, custoDoTurno, mil, modeloCurto, usd } from "./modo-dev.ts";
 
 /**
  * O conteúdo do Raio-X (modo dev, 0036), só strings: a gaveta (raio-x.ts) mexe no DOM e este módulo não, para
@@ -140,7 +140,7 @@ function abaCusto(r: RaioXTurno): string {
   // A sessão só acumula além do turno quando foi retomada; numa sessão nova os dois números são o mesmo.
   const acumulado = x.custoSessaoUsd !== null && r.composicao?.sessaoRetomada ? `<span class="rx-sub">sessão: ${esc(usd(x.custoSessaoUsd))} acumulado</span>` : "";
   const cartoes = `<div class="rx-cartoes">
-      <div class="rx-cartao"><span class="rx-rotulo">Custo do turno</span><b class="rx-valor">${esc(usd(r.custoUsd))}</b>${acumulado}</div>
+      <div class="rx-cartao"><span class="rx-rotulo">Custo do turno</span>${r.custoUsd === null && x.chamadas.length + x.chamadasOmitidas > 0 ? `<span class="rx-sub mudo" title="${CUSTO_DESCONHECIDO}">${esc(custoDoTurno(null, true))}</span>` : `<b class="rx-valor">${esc(custoDoTurno(r.custoUsd, x.chamadas.length + x.chamadasOmitidas > 0))}</b>`}${acumulado}</div>
       <div class="rx-cartao"><span class="rx-rotulo">Chamadas</span><b class="rx-valor">${x.chamadas.length + x.chamadasOmitidas}</b>${x.compactacoes.length ? `<span class="rx-sub rx-atencao">+${ESPACO_FIXO}${x.compactacoes.length}${ESPACO_FIXO}${x.compactacoes.length === 1 ? "compactação" : "compactações"}</span>` : ""}</div>
       <div class="rx-cartao"><span class="rx-rotulo">Pico do contexto</span><b class="rx-valor${perto ? " rx-atencao" : ""}">${pico === null ? "—" : esc(mil(pico))}</b>${x.janela ? `<span class="rx-sub">de ${esc(mil(x.janela))}</span>` : ""}</div>
       <div class="rx-cartao"><span class="rx-rotulo">Tokens</span><span class="rx-tokens">${esc(mil(soma("cacheLido")))} cache<br>${esc(mil(novos))} novos<br>${esc(mil(soma("saida")))} saída</span></div>

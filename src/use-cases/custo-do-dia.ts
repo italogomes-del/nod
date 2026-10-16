@@ -10,7 +10,8 @@ import type { CasoDeUso } from "./tipos.ts";
 export const lerCustoDoDia: CasoDeUso<{ fuso: string }, CustoDoDiaDto> = async (deps, input) => {
   const agora = deps.agora();
   const janelas = janelasDoDia(agora, input.fuso);
-  const bots = custoDosBots(await deps.repos.turnos.custoPorAgente(janelas));
+  const [somas, parcial] = await Promise.all([deps.repos.turnos.custoPorAgente(janelas), deps.repos.gastos.algumSemCusto({ desde: janelas[0]!.inicio, ate: agora })]);
+  const bots = custoDosBots(somas);
   return {
     data: {
       fuso: input.fuso,
@@ -19,6 +20,7 @@ export const lerCustoDoDia: CasoDeUso<{ fuso: string }, CustoDoDiaDto> = async (
       totalUsd: bots.reduce((s, b) => s + b.hojeUsd, 0),
       bots,
       foraDoRitmo: bots.some((b) => b.foraDoRitmo),
+      ...(parcial ? { parcial: true } : {}),
     },
   };
 };

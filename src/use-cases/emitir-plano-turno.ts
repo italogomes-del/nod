@@ -445,6 +445,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     turnoId: turno.id,
     dados: {
       machine_id: input.machineId,
+      // NOD-276 (J3): a hora do despacho; a web conta "Trabalhando · há N" daqui (pelo próprio relógio, ao ver o frame).
+      despachadoEm: turno.despachadoEm ?? agora,
       // ADR-083: o frame turno.iniciado diz de que trabalho é o turno (a web põe o ao vivo na task, não no chat).
       trabalhoId: turno.trabalhoId ?? null,
       executor,
