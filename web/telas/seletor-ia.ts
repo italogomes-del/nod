@@ -6,8 +6,8 @@ import { esc, hora } from "../lib/render.ts";
 import { ehIaMac, logoDaIa, PROVEDOR, UI_IAS_INICIAL, type IaMac } from "./cartao-ia.ts";
 import { contaEmUso } from "./contas-lista.ts";
 import {
-  conectada, escolhaEfetiva, iaEmUso, iasDaTela, iasDoBot, inteligenciaDoBot, modelosDoMenu, mudarRascunho, niveisDoModelo, NIVEIS, noLimite,
-  nomeDoModelo, nomeDoNivel, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type ContextoInteligencia,
+  conectada, escolhaEfetiva, iaEmUso, iasDaTela, iasDoBot, inteligenciaDoBot, modelosDoMenu, niveisDoModelo, NIVEIS, noLimite, nomeDoModelo,
+  nomeDoNivel, type ContextoInteligencia,
 } from "./inteligencia.ts";
 
 /**
@@ -17,12 +17,13 @@ import {
  * assinatura e o rótulo "Auto · Opus" (Automático) ou "Opus" (o bot fixo naquele modelo); a partir de 90% o anel e o
  * número ficam âmbar e o rótulo mostra o número.
  *
- * O menu: o cabeçalho com a conta em uso (só o apelido, nunca o e-mail), o uso e o que acontece se acabar; "Automático";
- * os modelos de cada IA (um clique fixa o bot no modelo); a régua de raciocínio com os níveis que o modelo do momento
- * aceita; e o link para a fila de contas em Provedores de IA. Grava em `PUT agentes/:id/inteligencia` com os mesmos
- * pedidos da gaveta (`pedidoDoMenu`, `pedidoDoRascunho`). A linha "Inteligência" da gaveta continua (ordem, 2B).
+ * O menu: o cabeçalho com o uso da janela da IA ("62% da janela do Claude"), a conta em uso à parte (só o apelido, nunca
+ * o e-mail) e o que acontece se acabar; "Automático"; os modelos de cada IA (um clique fixa o bot no modelo); a régua de
+ * raciocínio com os níveis que o modelo do momento aceita; e o link para a fila de contas em Provedores de IA. Grava em
+ * `PUT agentes/:id/inteligencia` só o que o clique muda (`pedidoDoSeletor`). A linha "Inteligência" da gaveta continua
+ * (ordem, 2B).
  *
- * Funções puras (tests/unit/web/seletor-ia.test.ts); a metade com DOM é web/lib/menu-ia.ts e o miolo é trocado no nó pelo
+ * Funções puras (tests/unit/web/tela-limpa.test.ts); a metade com DOM é web/lib/menu-ia.ts e o miolo é trocado no nó pelo
  * main (o campo nunca é regravado, web/lib/regioes.ts).
  */
 
@@ -33,6 +34,12 @@ export const ALERTA_USO = 0.9;
 export const HTML_SELETOR_IA = '<button type="button" class="seletor-ia" id="composer-ia" data-act="seletor-ia" aria-haspopup="menu" aria-expanded="false" hidden></button>';
 
 export type GrupoDoSeletor = { ia: IaMac; serve: boolean; modelos: { id: string; nome: string; marcado: boolean }[] };
+
+/**
+ * O que acontece se a conta em uso acabar (`fraseDoLimite`): segue noutra conta da mesma IA, segue noutra IA, o Nod
+ * pergunta antes de trocar de conta, ou o bot espera a conta voltar.
+ */
+export type SeguirSeAcabar = { tipo: "conta"; apelido: string } | { tipo: "ia"; nome: string } | { tipo: "perguntar" } | { tipo: "esperar" };
 
 export type DadosSeletor = {
   agenteId: string;
@@ -45,38 +52,56 @@ export type DadosSeletor = {
   modelo: string;
   /** O modelo que o Automático usaria agora (o subtítulo do item "Automático"). */
   modeloDoAuto: string;
-  /** O uso da janela de 5 h da IA em uso (0 a 1, pode passar de 1); null = o CLI ainda não informou. */
+  /**
+   * O uso da janela de 5 h da IA em uso (0 a 1, pode passar de 1). O número é da IA da PESSOA que vê (`uso_do_plano` é
+   * por pessoa + IA), por isso só a dona do bot o vê. null = o CLI ainda não informou, a janela já renovou ou quem vê não é
+   * a dona.
+   */
   uso: number | null;
   renovaEm: number | null;
-  /** O apelido da conta em uso (nunca o e-mail); null = a lista de contas não chegou ou não há conta logada. */
+  /** O apelido da conta em uso (nunca o e-mail); null = a lista de contas não chegou, não há conta logada ou não é a dona. */
   conta: string | null;
-  /** Para onde a conversa vai se a conta acabar ("Claude · Pessoal", "ChatGPT"); null = espera a conta voltar. */
-  seguir: string | null;
+  /** O que acontece se a conta acabar. */
+  seguir: SeguirSeAcabar;
   raciocinio: EsforcoAgente | null;
   niveis: readonly EsforcoAgente[];
   grupos: GrupoDoSeletor[];
 };
 
 const livre = (c: ContaIa, agora: number) => c.noLimiteAte === null || c.noLimiteAte <= agora;
-const logada = (c: ContaIa) => c.maquinas.some((v) => v.estado === "pronta");
+/** Pronta na máquina do bot; sem máquina conhecida, em qualquer uma. */
+const prontaNa = (c: ContaIa, maquina: string | null) => c.maquinas.some((v) => v.estado === "pronta" && (maquina === null || v.maquinaId === maquina));
 
 /**
- * Para onde a conversa segue se a conta acabar, pela regra de hoje (src/domain/contas-da-pessoa.ts, ADR-101/102): outra
- * conta livre da mesma IA quando a pessoa deixou "Trocar sozinho" (corporativa só marcada); senão, no Automático, a
- * próxima IA pronta da ordem; senão nada — o bot espera a conta voltar. definido em 2026-10-16: vale também para o bot
- * fixo, porque a troca entre contas da mesma IA não muda o modelo.
+ * O que acontece se a conta em uso acabar, espelhando a regra do servidor (`decidirLimiteDaConta` em
+ * src/domain/contas-da-pessoa.ts, ADR-101/102), na mesma ordem:
+ *  1. "Trocar sozinho" (`modo: automatico`) e outra conta livre da MESMA IA pronta na máquina, que entra na troca
+ *     (corporativa só marcada): segue nela ("trocou").
+ *  2. No Automático, outra IA pronta e fora do limite: a conversa segue nela ("outra_ia"). O bot fixo não troca de IA.
+ *  3. Outra conta livre (o servidor pergunta com as livres de qualquer máquina): o Nod pergunta antes de trocar de conta.
+ *     No bot fixo, só as da mesma IA contam.
+ *  4. Senão o bot espera a conta voltar.
+ *
+ * definido em 2026-10-16 (revisão do PR 1): a máquina é a do bot (`agente.maquinaId`, senão a padrão da pessoa); sem
+ * nenhuma das duas, vale qualquer máquina com a conta pronta. A conta "escolhida" da pessoa (`contas_escolhidas`) não
+ * chega à web (ContasIaDto não a traz): a conta em uso é a primeira livre da ordem, como o servidor faz quando não há
+ * escolha — e no limite o servidor descarta a escolha da IA que acabou, então a regra 1 não depende dela.
  */
-function seguirNo(estado: Estado, ia: IaDaPessoa, auto: boolean, ordem: Parameters<typeof iasDoBot>[1], c: ContextoInteligencia, atual: ContaIa | null): string | null {
+export function seguirSeAcabar(estado: Estado, p: { ia: IaDaPessoa; auto: boolean; ordem: Parameters<typeof iasDoBot>[1]; c: ContextoInteligencia; atual: ContaIa | null; maquina: string | null }): SeguirSeAcabar {
   const contas = estado.contasIa?.contas ?? [];
-  if (atual && estado.contasIa?.modo === "automatico") {
-    const outra = contas.find((x) => x.ia === atual.ia && x.id !== atual.id && livre(x, c.agora) && logada(x) && (!x.corporativa || x.entraNaTrocaAutomatica));
-    if (outra && ehIaMac(outra.ia)) return `${PROVEDOR[outra.ia].nome} · ${outra.apelido}`;
+  const atual = p.atual;
+  const outras = atual ? contas.filter((x) => x.id !== atual.id && livre(x, p.c.agora)) : [];
+  const daMesmaIa = outras.filter((x) => x.ia === atual?.ia);
+  if (estado.contasIa?.modo === "automatico") {
+    const sozinha = daMesmaIa.find((x) => prontaNa(x, p.maquina) && (!x.corporativa || x.entraNaTrocaAutomatica));
+    if (sozinha) return { tipo: "conta", apelido: sozinha.apelido };
   }
-  if (!auto) return null;
-  const proxima = iasDoBot(c.ias, ordem).find((x) => x.id !== ia.id && ehIaMac(x.id) && conectada(x, c) && !noLimite(x, c));
-  if (!proxima || !ehIaMac(proxima.id)) return null;
-  const conta = contaEmUso(contas, c.agora, { ia: proxima.id });
-  return conta ? `${PROVEDOR[proxima.id].nome} · ${conta.apelido}` : PROVEDOR[proxima.id].nome;
+  if (p.auto) {
+    const proxima = iasDoBot(p.c.ias, p.ordem).find((x) => x.id !== p.ia.id && ehIaMac(x.id) && conectada(x, p.c) && !noLimite(x, p.c));
+    if (proxima && ehIaMac(proxima.id)) return { tipo: "ia", nome: PROVEDOR[proxima.id].nome };
+  }
+  if ((p.auto ? outras : daMesmaIa).length > 0) return { tipo: "perguntar" };
+  return { tipo: "esperar" };
 }
 
 /** Tudo o que o botão e o menu mostram para o bot da conversa. null = bot desconhecido (frota ainda não chegou). */
@@ -90,8 +115,16 @@ export function dadosDoSeletor(estado: Estado, agenteId: string): DadosSeletor |
   const ia = uso && ehIaMac(uso.id) ? uso.id : null;
   const doAuto = auto ? uso : iaEmUso({ ...i, modo: "auto" }, c);
   const escolha = uso ? escolhaEfetiva(uso, i.escolhas) : null;
-  const plano = ia ? estado.usoDoPlano?.planos.find((p) => p.harness === ia) ?? null : null;
-  const conta = ia ? contaEmUso(estado.contasIa?.contas ?? [], estado.agora, { ia }) : null;
+  const dona = a.ownerId === estado.sessao?.pessoaId;
+  // O uso e a conta são da pessoa que vê: no bot de outra pessoa, nenhum dos dois (seria o uso do visitante).
+  const plano = ia && dona ? estado.usoDoPlano?.planos.find((p) => p.harness === ia) ?? null : null;
+  // A janela que já renovou (renovaEm no passado) é tratada como nova: sem número até o CLI informar de novo, e sem
+  // "Renova às" de uma hora que passou.
+  const cinco = plano?.cincoHoras ?? null;
+  const janela = cinco && !(cinco.renovaEm !== null && cinco.renovaEm <= estado.agora) ? cinco : null;
+  const maquina = a.maquinaId ?? estado.maquinas?.padraoId ?? null;
+  const contas = estado.contasIa?.contas ?? [];
+  const conta = ia && dona ? contaEmUso(contas, estado.agora, { ia, filtro: maquina }) : null;
   const grupos = iasDoBot(c.ias, i.ordem).filter((x) => ehIaMac(x.id)).map((x): GrupoDoSeletor => {
     const id = x.id as IaMac;
     const escolhido = !auto && i.fixa === id ? escolhaEfetiva(x, i.escolhas).modelo : null;
@@ -100,15 +133,15 @@ export function dadosDoSeletor(estado: Estado, agenteId: string): DadosSeletor |
   return {
     agenteId: a.id,
     nome: a.nome,
-    dona: a.ownerId === estado.sessao?.pessoaId,
+    dona,
     auto,
     ia,
     modelo: uso && escolha ? nomeDoModelo(uso, escolha.modelo) : "",
     modeloDoAuto: doAuto ? nomeDoModelo(doAuto, escolhaEfetiva(doAuto, i.escolhas).modelo) : "",
-    uso: plano?.cincoHoras?.utilizacao ?? null,
-    renovaEm: plano?.cincoHoras?.renovaEm ?? null,
+    uso: janela?.utilizacao ?? null,
+    renovaEm: janela?.renovaEm ?? null,
     conta: conta?.apelido ?? null,
-    seguir: uso ? seguirNo(estado, uso, auto, i.ordem, c, conta) : null,
+    seguir: uso && dona ? seguirSeAcabar(estado, { ia: uso, auto, ordem: i.ordem, c, atual: conta, maquina }) : { tipo: "esperar" },
     raciocinio: escolha?.raciocinio ?? null,
     niveis: uso && escolha ? niveisDoModelo(uso, escolha.modelo) : [],
     grupos,
@@ -150,27 +183,38 @@ export function fraseDoLimite(d: Pick<DadosSeletor, "uso" | "renovaEm" | "seguir
   const alerta = d.uso !== null && d.uso >= ALERTA_USO;
   const renova = d.renovaEm !== null ? `Renova às ${esc(hora(d.renovaEm))}. ` : "";
   const quando = alerta ? "Se acabar agora," : "Se acabar,";
-  if (!d.seguir) return `${renova}${quando} espera a conta voltar.`;
-  return `${renova}${quando} ${alerta ? "a conversa segue" : "segue"} no <span class="ia-sel-forte">${esc(d.seguir)}</span>.`;
+  const forte = (t: string) => `<span class="ia-sel-forte">${esc(t)}</span>`;
+  const s = d.seguir;
+  const depois = s.tipo === "conta" ? `segue na conta ${forte(s.apelido)}` : s.tipo === "ia" ? `a conversa segue no ${forte(s.nome)}` : s.tipo === "perguntar" ? "o Nod pergunta antes de trocar de conta" : "espera a conta voltar";
+  return `${renova}${quando} ${depois}.`;
 }
 
-/** O menu do seletor (puro, para o teste ler o HTML). */
+/**
+ * O menu do seletor (puro, para o teste ler o HTML). ARIA (definido em 2026-10-16, revisão do PR 1): o cabeçalho é texto
+ * fora do `role="menu"`; dentro dele só itens — `menuitemradio` para o Automático e os modelos (cada IA num
+ * `role="group"` rotulado), a régua de raciocínio num `role="group"` com um `menuitemradio` por nível, e o link para a fila
+ * de contas como `menuitem`. Os títulos visíveis dos grupos ficam `aria-hidden` (o rótulo do grupo já os diz).
+ */
 export function renderMenuIa(d: DadosSeletor): string {
   const alerta = d.uso !== null && d.uso >= ALERTA_USO;
+  const numero = d.ia && d.uso !== null ? `${pct(d.uso)} da janela do ${PROVEDOR[d.ia].nome}` : null;
   const cab = d.ia
     ? `<div class="ia-sel-cab${alerta ? " ia-sel-alerta" : ""}">
-        <div class="ia-sel-conta">${logoDaIa(d.ia, "ia-sel-logo")}<b>${esc(PROVEDOR[d.ia].nome)}${d.conta ? ` · ${esc(d.conta)}` : ""}</b>${d.uso !== null ? `<span class="ia-sel-pct">${pct(d.uso)}</span>` : ""}</div>
+        <div class="ia-sel-conta">${logoDaIa(d.ia, "ia-sel-logo")}${numero ? `<b class="ia-sel-pct">${esc(numero)}</b>` : `<b>${esc(PROVEDOR[d.ia].nome)}</b>`}</div>
         ${d.uso !== null ? `<div class="ia-sel-barra" aria-hidden="true"><span style="width:${(Math.max(0, Math.min(1, d.uso)) * 100).toFixed(1)}%"></span></div>` : ""}
-        <p class="ia-sel-frase">${fraseDoLimite(d)}</p>
+        ${d.conta ? `<p class="ia-sel-quem">conta: ${esc(d.conta)}</p>` : ""}
+        ${d.dona ? `<p class="ia-sel-frase">${fraseDoLimite(d)}</p>` : ""}
       </div><hr>`
     : "";
   const auto = `<button type="button" class="ia-sel-op" role="menuitemradio" aria-checked="${d.auto}" data-escolha="auto"><span class="ia-sel-txt"><span>Automático</span><small>${esc(d.modeloDoAuto ? `Agora no ${d.modeloDoAuto}. ` : "")}Troca de provedor sozinho se a conta acabar.</small></span>${d.auto ? CHECK : ""}</button>`;
   const grupos = d.grupos.map((g) => {
-    const titulo = `<div class="ia-sel-grupo">${esc(PROVEDOR[g.ia].nome)} <span>· ${g.serve ? "fixa o bot neste modelo" : "não conectado"}</span></div>`;
+    const nome = PROVEDOR[g.ia].nome;
+    const sub = g.serve ? "fixa o bot neste modelo" : "não conectado";
+    const titulo = `<div class="ia-sel-grupo" aria-hidden="true">${esc(nome)} <span>· ${sub}</span></div>`;
     const modelos = g.modelos.map((m) => `<button type="button" class="ia-sel-op" role="menuitemradio" aria-checked="${m.marcado}" data-escolha="modelo" data-ia="${g.ia}" data-modelo="${esc(m.id)}"${g.serve ? "" : " disabled"}><span class="ia-sel-txt"><span>${esc(m.nome)}</span></span>${m.marcado ? CHECK : ""}</button>`).join("");
-    return titulo + modelos;
+    return `<div role="group" aria-label="${esc(`${nome}: ${sub}`)}">${titulo}${modelos}</div>`;
   }).join("");
-  return `<div role="menu" aria-label="IA e modelo de ${esc(d.nome)}">${cab}${auto}${grupos}${reguaDeRaciocinio(d)}<hr><button type="button" class="ia-sel-link" data-escolha="provedores"><span>Fila de contas e regra de troca</span>${MAIS}</button></div>`;
+  return `${cab}<div role="menu" aria-label="IA e modelo de ${esc(d.nome)}">${auto}${grupos}${reguaDeRaciocinio(d)}<hr><button type="button" class="ia-sel-link" role="menuitem" data-escolha="provedores"><span>Fila de contas e regra de troca</span>${MAIS}</button></div>`;
 }
 
 /** A régua "Raciocínio · Médio · 2 de 5 no Opus": um ponto por nível que o modelo aceita, um clique troca. */
@@ -180,12 +224,12 @@ function reguaDeRaciocinio(d: DadosSeletor): string {
   const n = niveis.length;
   const atual = Math.max(0, niveis.findIndex((x) => x.id === d.raciocinio));
   const passo = 100 / n;
-  const pontos = niveis.map((x, i) => `<button type="button" role="radio" class="ia-sel-ponto${i < atual ? " feito" : ""}${i === atual ? " atual" : ""}" aria-checked="${i === atual}" aria-label="${esc(x.nome)}" title="${esc(`${x.nome} · ${x.descricao}`)}" data-escolha="raciocinio" data-raciocinio="${x.id}"></button>`).join("");
+  const pontos = niveis.map((x, i) => `<button type="button" role="menuitemradio" class="ia-sel-ponto${i < atual ? " feito" : ""}${i === atual ? " atual" : ""}" aria-checked="${i === atual}" aria-label="${esc(x.nome)}" title="${esc(`${x.nome} · ${x.descricao}`)}" data-escolha="raciocinio" data-raciocinio="${x.id}"></button>`).join("");
   const nomes = niveis.map((x, i) => `<span${i === atual ? ' class="atual"' : ""}>${esc(x.nome)}</span>`).join("");
   const colunas = `grid-template-columns: repeat(${n}, minmax(0, 1fr))`;
-  return `<hr><div class="ia-sel-regua">
-      <div class="ia-sel-regua-cab"><span>Raciocínio</span><b>${esc(nomeDoNivel(d.raciocinio))}</b><small>· ${atual + 1} de ${n} no ${esc(d.modelo)}</small></div>
-      <div class="ia-sel-trilho" role="radiogroup" aria-label="Raciocínio do ${esc(d.modelo)}" style="${colunas}"><span class="ia-sel-linha" aria-hidden="true" style="left:${(passo / 2).toFixed(2)}%;right:${(passo / 2).toFixed(2)}%"></span><span class="ia-sel-linha feita" aria-hidden="true" style="left:${(passo / 2).toFixed(2)}%;width:${(atual * passo).toFixed(2)}%"></span>${pontos}</div>
+  return `<hr><div class="ia-sel-regua" role="group" aria-label="${esc(`Raciocínio do ${d.modelo}: ${nomeDoNivel(d.raciocinio)}, ${atual + 1} de ${n}`)}">
+      <div class="ia-sel-regua-cab" aria-hidden="true"><span>Raciocínio</span><b>${esc(nomeDoNivel(d.raciocinio))}</b><small>· ${atual + 1} de ${n} no ${esc(d.modelo)}</small></div>
+      <div class="ia-sel-trilho" style="${colunas}"><span class="ia-sel-linha" aria-hidden="true" style="left:${(passo / 2).toFixed(2)}%;right:${(passo / 2).toFixed(2)}%"></span><span class="ia-sel-linha feita" aria-hidden="true" style="left:${(passo / 2).toFixed(2)}%;width:${(atual * passo).toFixed(2)}%"></span>${pontos}</div>
       <div class="ia-sel-nomes" aria-hidden="true" style="${colunas}">${nomes}</div>
     </div>`;
 }
@@ -204,20 +248,29 @@ export function escolhaDoItem(dados: { escolha?: string; ia?: string; modelo?: s
 }
 
 /**
- * O pedido de `PUT agentes/:id/inteligencia` para uma escolha do menu: Automático e modelo pelo `pedidoDoMenu` da gaveta
- * (2A); o raciocínio troca só o nível da IA em uso, pelo rascunho da 2B (o resto da inteligência fica como está). null =
- * nada a gravar (a escolha é a atual, ou não há IA em uso para o raciocínio).
+ * O pedido de `PUT agentes/:id/inteligencia` para uma escolha do menu, só com o que o clique muda (revisão do PR 1,
+ * 2026-10-16; campo ausente não muda, src/contracts/inteligencia.ts): Automático → `{modo: "auto"}`; um modelo →
+ * `{modo: "fixa", fixa, escolhas}`; o raciocínio → só `{escolhas}`. Antes ia a inteligência inteira (modo, fixa e
+ * ordem), e um clique desfazia o que outra aba tinha acabado de gravar.
+ *
+ * `escolhas` vai inteiro, com a mudança por cima: o servidor troca o mapa todo (`lerEscolhas` em
+ * src/domain/inteligencia.ts não mescla por IA), então mandar só `{[ia]: {raciocinio}}` apagaria o modelo dessa IA e as
+ * escolhas das outras. Ao trocar de modelo, o raciocínio guardado da IA só fica se o modelo novo o aceita (senão o
+ * servidor recusa com `raciocinio` inválido). null = nada a gravar (a escolha é a atual, ou não há IA em uso).
  */
 export function pedidoDoSeletor(a: Pick<Agente, "id" | "harness" | "modelo" | "esforco" | "inteligencia">, escolha: EscolhaSeletor, c: ContextoInteligencia): PedidoInteligencia | null {
   const i = inteligenciaDoBot(a);
   if (escolha.tipo === "provedores") return null;
-  if (escolha.tipo === "auto") return i.modo === "auto" ? null : pedidoDoMenu(a, { modo: "auto" });
+  if (escolha.tipo === "auto") return i.modo === "auto" ? null : { modo: "auto" };
   if (escolha.tipo === "modelo") {
     const ia = c.ias.find((x) => x.id === escolha.ia);
     const atual = ia && i.modo === "fixa" && i.fixa === escolha.ia ? escolhaEfetiva(ia, i.escolhas).modelo : null;
-    return atual === escolha.modelo ? null : pedidoDoMenu(a, { ia: escolha.ia, modelo: escolha.modelo });
+    if (atual === escolha.modelo) return null;
+    const guardado = i.escolhas[escolha.ia]?.raciocinio;
+    const raciocinio = guardado && ia && niveisDoModelo(ia, escolha.modelo).includes(guardado) ? guardado : undefined;
+    return { modo: "fixa", fixa: escolha.ia, escolhas: { ...i.escolhas, [escolha.ia]: { modelo: escolha.modelo, ...(raciocinio ? { raciocinio } : {}) } } };
   }
   const uso = iaEmUso(i, c);
   if (!uso || escolhaEfetiva(uso, i.escolhas).raciocinio === escolha.raciocinio) return null;
-  return pedidoDoRascunho(mudarRascunho(rascunhoDe(a), { tipo: "raciocinio", ia: uso, raciocinio: escolha.raciocinio }, c));
+  return { escolhas: { ...i.escolhas, [uso.id]: { ...i.escolhas[uso.id], raciocinio: escolha.raciocinio } } };
 }

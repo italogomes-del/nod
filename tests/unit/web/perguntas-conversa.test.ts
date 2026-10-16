@@ -186,6 +186,13 @@ describe("a faixa e o campo em modo resposta", () => {
     expect(html).toContain('id="composer-pergunta"');
     expect(html).toContain('<p class="nota" id="composer-nota" data-padrao=""></p>');
     expect(html).not.toContain("Enter envia");
+    // definido em 2026-10-16: as dicas "@ menciona um bot", "/ para comandos" e "arraste ou cole imagens e PDFs" saíram de
+    // propósito junto com "Enter envia" (decisão do Marlon no plano "tela limpa", T5: a nota do campo some fora do modo
+    // resposta). Se uma delas voltar, é decisão nova, não regressão.
+    for (const opcoes of [{ anexos: "tudo" as const, comandos: true }, {}]) {
+      const campo = htmlComposer("x", ["Vera"], opcoes);
+      for (const dica of ["@ menciona um bot", "/ para comandos", "arraste ou cole"]) expect(campo).not.toContain(dica);
+    }
   });
 
   it("duas perguntas: o campo cita a mais antiga — 'Respondendo à Nina · “…” · 1 de 2' com × — e 'Responder a esta' troca a citada", () => {

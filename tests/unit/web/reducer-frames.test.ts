@@ -116,11 +116,22 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(aplicarFrame(antes, frame("turno.vigia", { conversaId: CONVERSA, mudoMs: 600_000, emFundo: 0 }), AGORA)).toBe(antes);
   });
 
-  it("turno.interrompido limpa o vivo e invalida conversa, frota e sua-vez (pode ter nascido 'retomar?')", () => {
+  it("turno.interrompido limpa o vivo e invalida conversa, frota, sua-vez (pode ter nascido 'retomar?') e o uso do plano", () => {
     let e = aplicarFrame(comConversa(), frame("turno.iniciado", { conversaId: CONVERSA, turnoId: TURNO, kind: "turno_despachado" }), AGORA);
     e = aplicarFrame(e, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO, motivo: "parado_pela_pessoa" }), AGORA);
     expect(e.turnosVivos).toEqual({});
-    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "sua-vez"]);
+    // Revisão do PR 1 da tela limpa (2026-10-16): o turno interrompido também gastou a janela — o anel do seletor relê.
+    expect(e.invalidacoes).toEqual([`conversa:${CONVERSA}`, "frota", "sua-vez", "uso-plano"]);
+  });
+
+  it("uso do plano: contas.mudou relê; com o servidor sem a rota (usoDoPlano null) nenhum frame pede de novo", () => {
+    expect(aplicarFrame(estadoInicial, frame("contas.mudou"), AGORA).invalidacoes).toEqual(["contas", "maquinas", "uso-plano"]);
+    const semRota: Estado = { ...comConversa(), usoDoPlano: null };
+    expect(aplicarFrame(semRota, frame("contas.mudou"), AGORA).invalidacoes).toEqual(["contas", "maquinas"]);
+    expect(aplicarFrame(semRota, frame("turno.encerrado", { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("turno.interrompido", { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("inventario.mudou"), AGORA).invalidacoes).not.toContain("uso-plano");
+    expect(aplicarFrame(semRota, frame("resumed", { resumed: false }), AGORA).invalidacoes).not.toContain("uso-plano");
   });
 
   it("decisao.nova / decisao.decidida / decisao.vencida invalidam Sua vez e a conversa", () => {

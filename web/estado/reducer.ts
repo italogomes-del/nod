@@ -1,3 +1,4 @@
+import type { Agente } from "../../src/contracts/agente.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
@@ -355,6 +356,8 @@ export type Acao =
   | { tipo: "hidratar-executor"; executor: EstadoExecutor }
   | { tipo: "hidratar-ias"; ias: IasDaPessoa | null }
   | { tipo: "hidratar-uso-plano"; usoDoPlano: UsoDoPlanoDto | null }
+  /** O agente que o servidor devolveu ao gravar (`PUT agentes/:id/inteligencia`), já na frota e na gestão antes de reler. */
+  | { tipo: "agente-gravado"; agente: Agente }
   /** Mudou algo das IAs do Mac ou da tela dos cartões (só os campos que vieram). */
   | { tipo: "ias-mac"; mudanca: Partial<UiIas> }
   /** A ordem arrastada em Provedores de IA, já na tela antes do servidor responder. */
@@ -507,6 +510,13 @@ function invalidar(estado: Estado, ...quais: (Invalidacao | null)[]): Estado {
   const novas = quais.filter((q): q is Invalidacao => q !== null && !estado.invalidacoes.includes(q));
   return novas.length === 0 ? estado : { ...estado, invalidacoes: [...estado.invalidacoes, ...novas] };
 }
+
+/**
+ * O uso do plano relido por um frame (revisão do PR 1, 2026-10-16): `usoDoPlano === null` é o servidor sem a rota, ou a
+ * leitura que falhou fechada (main.ts) — nenhum frame pede de novo; quem tenta outra vez é a volta da janela ou da rede
+ * (`invalidacoesAoRetomar`).
+ */
+const usoPlano = (e: Estado): Invalidacao | null => (e.usoDoPlano === null ? null : "uso-plano");
 
 function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
   if (!turnoId || !estado.turnosVivos[turnoId]) return estado;
@@ -759,9 +769,10 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // vazio para a próxima volta (senão o mesmo texto apareceria duas vezes).
   "turno.fala": (e, f) => invalidar(semDelta(e, texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f)),
   // definido em 2026-10-16 (plano "tela limpa", T6): o CLI informa o uso do plano a cada turno, então o anel do seletor relê
-  // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir.
-  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "uso-plano"),
-  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez"),
+  // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
+  // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
+  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e)),
+  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),
@@ -789,9 +800,10 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
   // definido em 2026-10-16 (decisão E6): o uso da janela é relido junto com as IAs.
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", "uso-plano", "maquinas"),
-  // ADR-102: a lista de contas (ou um login numa máquina) mudou.
-  "contas.mudou": (e) => invalidar(e, "contas", "maquinas"),
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", usoPlano(e), "maquinas"),
+  // ADR-102: a lista de contas (ou um login numa máquina) mudou. definido em 2026-10-16 (revisão do PR 1): a conta em uso
+  // pode ter trocado (limite, login, outra conta na frente), e com ela o uso da janela do anel.
+  "contas.mudou": (e) => invalidar(e, "contas", "maquinas", usoPlano(e)),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
     // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
@@ -831,7 +843,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     if (nivel !== "verde" && nivel !== "amarela" && nivel !== "vermelha") return e;
     return invalidar(e.pressao === nivel ? e : { ...e, pressao: nivel }, "trabalhos");
   },
-  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", "uso-plano", "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
+  resumed: (e, f) => (f.dados.resumed === true ? e : invalidar(e, "frota", "sua-vez", "nao-lidos", "rotinas", "conectores", "inventario", "executor", "ias", usoPlano(e), "salas", ...Object.keys(e.conversas).map((id): Invalidacao => `conversa:${id}`))),
 };
 
 /** Frames que trazem fala nova (ou o fim de um turno) para a conversa do bot: a tela da task aberta relê as mensagens dela. */
@@ -921,6 +933,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, ias: acao.ias };
     case "hidratar-uso-plano":
       return { ...estado, usoDoPlano: acao.usoDoPlano };
+    case "agente-gravado": {
+      // Revisão do PR 1 (2026-10-16): o seletor de IA mostra a escolha na hora; o refetch de frota/gestão confirma depois.
+      // Só os campos do perfil que o PUT devolve entram — o que é da frota (conversaId, estado, prévia) fica.
+      const junto = <T extends { agentes: Agente[] }>(dto: T): T => ({ ...dto, agentes: dto.agentes.map((x) => (x.id === acao.agente.id ? { ...x, ...acao.agente } : x)) });
+      return { ...estado, frota: estado.frota ? junto(estado.frota) : estado.frota, gestao: estado.gestao ? junto(estado.gestao) : estado.gestao };
+    }
     case "ias-mac":
       return { ...estado, iasMac: { ...estado.iasMac, ...acao.mudanca } };
     case "ordem-ias": {

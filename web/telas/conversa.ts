@@ -571,7 +571,7 @@ export function renderAvisoDoVigia(a: AtividadeTurno, agora: number, parar: stri
   return `<div class="atividade-vigia" role="status">${linhas}${parar}</div>`;
 }
 
-/** O Parar do aviso: a mesma ação do cabeçalho (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
+/** O Parar do aviso: a mesma ação do Parar do campo (conversa) ou da sala, em âmbar — é aviso, não erro (protótipo do Gil). */
 function pararDoVigia(c: ConversaEstado): string {
   const salaId = c.conversa.salaId;
   return salaId
@@ -882,13 +882,18 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
  * O cabeçalho da conversa própria é uma pílula flutuante (definido em 2026-10-16, plano "tela limpa", T1; protótipo A1/A2
  * do canvas "limite e troca"): mascote, nome e o ponto de presença, centrada sobre o chat. O clique alterna o painel do
  * bot (`alternar-detalhes`). A presença inteira ("Trabalhando · 2 esperam você", "sem novidade há N min") vai no
- * `title`/`aria-label` e num subtítulo curto embaixo da pílula, só quando não é "Disponível".
+ * `title`/`aria-label` e num subtítulo curto embaixo da pílula, só quando não é "Disponível" — e o CSS só o mostra no
+ * hover/foco da pílula (em repouso ele colidia com a pílula "Novas", revisão do PR 1).
+ *
+ * O HTML não depende do painel (revisão do PR 1, 2026-10-16): o rótulo é fixo ("Painel de <nome> · <presença>") e o
+ * `aria-expanded` é posto pelo main depois de desenhar (`marcarPainelNaPilula`), que também o acompanha quando a
+ * largura da janela troca o painel de lado ou de sobreposto.
  *
  * O que morava no topo saiu (definido em 2026-10-16, decisões E11 e T2 do plano): MODO DEV, "Hoje com" e "Linhas
- * abertas" e o Ligar foram para a gaveta (web/telas/detalhes.ts); o Parar foi para o campo, no lugar do Enviar
- * (`mostraPararNoCampo`).
+ * abertas" e o Ligar foram para a gaveta (web/telas/detalhes.ts); o Parar foi para o campo, ao lado do Enviar
+ * (`botoesDoCampo`).
  */
-export function renderCabecalhoConversa(estado: Estado, agenteId: string, painelAberto = false): string {
+export function renderCabecalhoConversa(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   const nome = a?.nome ?? "agente";
   const { html, ativa } = presencaDoBot(estado, agenteId);
@@ -896,7 +901,7 @@ export function renderCabecalhoConversa(estado: Estado, agenteId: string, painel
   const disponivel = texto === "Disponível";
   const rotulo = `${nome} · ${texto}`;
   const sub = disponivel ? "" : `<span class="pilula-sub" aria-hidden="true">${html}</span>`;
-  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-expanded="${painelAberto}" aria-label="${esc(`${rotulo}. ${painelAberto ? "Fechar" : "Abrir"} o painel do bot`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span></button>${sub}`;
+  return `<button type="button" class="pilula-bot" data-act="alternar-detalhes" aria-controls="detalhes" aria-label="${esc(`Painel de ${rotulo}`)}" title="${esc(rotulo)}">${a ? iconeAgente(a, "sm", estadoMascoteNaConversa(estado, a.conversaId)) : ""}<span class="pilula-nome">${esc(nome)}</span><span class="presenca${ativa ? " ativa" : ""}" aria-hidden="true"></span><span class="pilula-seta" aria-hidden="true">›</span></button>${sub}`;
 }
 
 /**
@@ -929,10 +934,9 @@ function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa:
 }
 
 /**
- * O Parar no campo (definido em 2026-10-16, decisão E11 do plano "tela limpa"): o Enviar vira Parar enquanto há turno
- * vivo da conversa ou task aberta do bot (ADR-083: com task aberta ele para tudo do bot e mostra a lista antes). O turno
- * do cérebro da ligação não entra (turnosVivos já o ignora). Quem decide se o campo está vazio é o main: com texto
- * digitado, o botão volta a ser Enviar — mandar mensagem com o bot trabalhando continua possível.
+ * O bot da conversa está trabalhando (definido em 2026-10-16, decisão E11 do plano "tela limpa"): há turno vivo da
+ * conversa ou task aberta do bot (ADR-083: com task aberta o Parar para tudo do bot e mostra a lista antes). O turno do
+ * cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
  */
 export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
   const a = agenteDe(estado, agenteId);
@@ -940,11 +944,24 @@ export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
   return turnosVivosDaConversa(estado, a.conversaId).length > 0 || abertosDoBot(estado, agenteId, a.conversaId).length > 0;
 }
 
+/**
+ * Quais botões o campo mostra (revisão do PR 1, 2026-10-16): o Parar fica SEMPRE alcançável enquanto o bot trabalha —
+ * antes ele trocava de lugar com o Enviar e sumia assim que havia rascunho ou anexo. Agora é um botão secundário ao lado
+ * do Enviar: com o bot trabalhando e o campo vazio, só o Parar; com texto, anexo ou o ditado gravando (o Enviar para e
+ * manda), os dois. Sem trabalho, só o Enviar.
+ */
+export function botoesDoCampo(p: { trabalhando: boolean; temConteudo: boolean; ditando: boolean }): { enviar: boolean; parar: boolean } {
+  return { enviar: !p.trabalhando || p.temConteudo || p.ditando, parar: p.trabalhando };
+}
+
 /** O título do Parar do campo: com task aberta ele para tudo do bot (e mostra a lista antes). */
 export function tituloDoParar(estado: Estado, agenteId: string): string {
   const a = agenteDe(estado, agenteId);
   return abertosDoBot(estado, agenteId, a?.conversaId).length ? "Parar a conversa e as tasks deste bot (mostra a lista antes)" : "Parar o que está rodando nesta conversa";
 }
+
+/** O nome que o leitor de tela ouve no Parar do campo. */
+export const rotuloDoParar = (nome: string | undefined): string => (nome ? `Parar ${nome}` : "Parar");
 
 const QUADRADO = '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg>';
 
@@ -964,9 +981,10 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  *
  * definido em 2026-10-16 (plano "tela limpa", T5/T6/E11): sai a dica "Enter envia · Shift+Enter…" — a nota nasce vazia
  * e só mostra a do modo resposta; na conversa própria (`aprovacao`) entram o seletor de IA (web/telas/seletor-ia.ts),
- * entre o texto e o microfone, e o Parar escondido ao lado do Enviar (o main alterna os dois, `mostraPararNoCampo`).
+ * entre o texto e o microfone, e o Parar (secundário, redondo, escondido) logo antes do Enviar — o Enviar continua na
+ * ponta, onde a pessoa o procura; o main mostra cada um pelo `botoesDoCampo`. `bot` dá o nome do Parar ("Parar Eng 1").
  */
-export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean } = {}): string {
+export function htmlComposer(placeholder: string, sugestoes: readonly string[] = [], opcoes: { anexos?: Aceita; comandos?: boolean; aprovacao?: boolean; bot?: string } = {}): string {
   const lista = sugestoes.length ? `<div class="autocomplete" id="autocomplete" hidden></div>` : "";
   const aceita = opcoes.anexos;
   const accept = aceita === "sem_pdf" ? "image/*,.txt,.md,.csv,.json" : "image/*,application/pdf,.pdf,.txt,.md,.csv,.json";
@@ -981,7 +999,7 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
   const seletor = opcoes.aprovacao ? HTML_SELETOR_IA : "";
-  const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="Parar" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
-  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}<button class="send" data-act="enviar" aria-label="Enviar">➤</button>${parar}</div>
+  const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="${esc(rotuloDoParar(opcoes.bot))}" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
+  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

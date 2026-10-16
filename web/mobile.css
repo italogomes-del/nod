@@ -60,7 +60,7 @@
     min-height: 56px; padding: calc(6px + env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
     border-bottom: 1px solid var(--line); background: var(--surface); }
   .cabecalho.cabecalho-pilula::before, .cabecalho.cabecalho-pilula .pilula-sub { display: none; }
-  .cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: 14px; }
+  .cabecalho.cabecalho-pilula ~ .timeline-wrap, .cabecalho.cabecalho-pilula + #erro:not(:empty) + .timeline-wrap { padding-top: 14px; }
   .cabecalho.cabecalho-pilula + #erro:not(:empty) { margin-top: 0; }
   .pilula-bot { min-height: 44px; height: 44px; box-shadow: none; }
 
@@ -89,6 +89,8 @@
   .composer textarea, input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px; }
   .composer textarea { max-height: 30vh; }
   .composer .send, .composer .clipe, .composer .parar-envio { min-width: 44px; min-height: 44px; }
+  /* Revisão do PR 1 (2026-10-16): o seletor de IA também é alvo de toque (44 px). */
+  .composer .seletor-ia { min-height: 44px; margin-bottom: 0; }
   /* ADR-095 (as fotos do Grok no iPhone, docs/referencias/ditado-grok/): gravando, a linha do campo vira três pílulas —
      ■ (para e põe no campo) | tempo e nível | enviar largo (para e envia direto). O resto do campo some até acabar. */
   .composer .mic { width: 44px; height: 44px; background: transparent; }

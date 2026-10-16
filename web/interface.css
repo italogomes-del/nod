@@ -1418,14 +1418,17 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 
 /* ---- Plano "tela limpa" (definido em 2026-10-16; protótipos A1, A2, B1 e B2 do canvas "limite e troca") ----------------
    T1: o cabeçalho da conversa é uma pílula flutuante centrada sobre o chat, fora da área que rola (como a pílula de
-   novas). Embaixo dela o texto esmaece (--surface → transparente, 130 px). No hover e no foco, borda --ink e "›": o azul
-   (--signal) é só do que é novo (tokens.css). */
+   novas). Embaixo dela o texto esmaece (--surface → transparente, 104 px). No hover e no foco, borda --ink e "›": o azul
+   (--signal) é só do que é novo (tokens.css).
+   Revisão do PR 1 (2026-10-16): o padding do topo da rolagem é a altura do véu, então a primeira mensagem nunca começa
+   embaixo dele; com #erro à vista (62 px de margem + a faixa, no fluxo), a rolagem completa só o que falta (104 − 62). */
 .cabecalho.cabecalho-pilula { position: absolute; top: 0; left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 6px;
   min-height: 0; padding: 14px 16px 0; border: 0; background: transparent; pointer-events: none; }
-.cabecalho.cabecalho-pilula::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 130px; z-index: -1; pointer-events: none;
+.cabecalho.cabecalho-pilula::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 104px; z-index: -1; pointer-events: none;
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 94%, transparent) 34%, color-mix(in srgb, var(--surface) 0%, transparent) 100%); }
-.cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: 84px; }
+.cabecalho.cabecalho-pilula ~ .timeline-wrap { padding-top: 104px; }
 .cabecalho.cabecalho-pilula + #erro:not(:empty) { position: relative; z-index: 5; margin-top: 62px; }
+.cabecalho.cabecalho-pilula + #erro:not(:empty) + .timeline-wrap { padding-top: 42px; }
 .pilula-bot { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; height: 38px; max-width: min(420px, 100%); box-sizing: border-box;
   padding: 0 16px 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-pop);
   color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
@@ -1437,21 +1440,24 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .pilula-seta { display: none; margin: 0 0 1px -2px; font-size: 17px; font-weight: 500; line-height: 1; }
 .pilula-bot:hover, .pilula-bot:focus-visible { border-color: var(--ink); padding-right: 10px; }
 .pilula-bot:hover .pilula-seta, .pilula-bot:focus-visible .pilula-seta { display: inline; }
-.pilula-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 6px;
+/* O subtítulo da presença só aparece no hover/foco da pílula (revisão do PR 1, 2026-10-16): em repouso ele colidia com a
+   linha "Novas" no topo da rolagem; a presença inteira já vai no title e no aria-label. */
+.pilula-sub { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 8px; border-radius: 6px;
   background: var(--surface); font-size: 11.5px; color: var(--ink-3); }
+.pilula-bot:hover + .pilula-sub, .pilula-bot:focus-visible + .pilula-sub { display: block; }
 .pilula-sub b { font-weight: 600; color: var(--ink-2); }
 .pilula-sub .presenca-sep { color: var(--ink-3); }
 
 /* T4: a linha do dono e a faixa de Trabalhos acima do campo acompanham os 760 px da coluna. */
 .lugar-faixa-trabalhos > * { max-width: 760px; margin-left: auto; margin-right: auto; }
 
-/* E11: o Enviar vira Parar enquanto o bot trabalha e o campo está vazio (main.ts, atualizarParar). Os dois alternam por
-   `hidden`; o ditado gravando sempre usa o Enviar (para e manda). */
+/* E11 (revisão do PR 1, 2026-10-16): com o bot trabalhando, o Parar fica à vista como botão secundário, redondo, logo
+   antes do Enviar (main.ts, atualizarParar → botoesDoCampo); com o campo vazio, só ele. O ditado gravando sempre usa o
+   Enviar (para e manda). */
 .composer .send[hidden], .composer .parar-envio[hidden] { display: none; }
-.composer .parar-envio { width: 35px; height: 35px; border-radius: 50%; border: 0; padding: 0; background: var(--action); color: var(--on-action);
+.composer .parar-envio { width: 35px; height: 35px; border-radius: 50%; border: 1px solid var(--line); padding: 0; background: var(--surface); color: var(--ink);
   display: grid; place-items: center; flex: none; cursor: pointer; }
-.composer .parar-envio:hover { background: color-mix(in srgb, var(--action) 85%, var(--surface)); }
-.composer .box.gravando .parar-envio { display: none; }
+.composer .parar-envio:hover, .composer .parar-envio:focus-visible { background: var(--surface-raised); border-color: var(--line-strong); }
 .composer .box.gravando .send[hidden] { display: grid; }
 
 /* T6: o seletor de IA no campo, entre o texto e o microfone — sem fundo, como o chip de aprovações; o anel de 20 px mostra
@@ -1480,8 +1486,9 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 .ia-sel-conta b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ia-sel-logo { display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--ink); }
 .ia-sel-logo svg { display: block; width: 14px; height: 14px; }
-.ia-sel-pct { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ia-sel-conta b.ia-sel-pct { font-variant-numeric: tabular-nums; }
 .ia-sel-alerta .ia-sel-pct { color: var(--warning); }
+.ia-sel-quem { margin: 0; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ia-sel-barra { height: 4px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
 .ia-sel-barra > span { display: block; height: 100%; background: var(--line-strong); }
 .ia-sel-alerta .ia-sel-barra > span { background: var(--warning); }

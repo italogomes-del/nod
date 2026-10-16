@@ -60,7 +60,7 @@ import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
-import { blocosAoVivo, blocosDoHistorico, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso, motorDesatualizado, situacaoMotorFora } from "./telas/frota.ts";
@@ -205,11 +205,16 @@ function painelVisivel(): boolean {
   return !painelOculto();
 }
 
-/** A pílula do cabeçalho diz se o painel está aberto; o clique muda as classes sem redesenhar, então o atributo vem junto. */
+/**
+ * A pílula do cabeçalho diz se o painel está aberto. O HTML dela não depende do painel (revisão do PR 1, 2026-10-16): o
+ * atributo é posto aqui depois de cada desenho do cabeçalho, a cada clique que muda as classes sem redesenhar e quando a
+ * janela cruza a largura em que o painel passa de lado a sobreposto.
+ */
 function marcarPainelNaPilula(): void {
   const aberto = painelVisivel();
   document.querySelector<HTMLElement>("#cabecalho .pilula-bot")?.setAttribute("aria-expanded", String(aberto));
 }
+window.matchMedia("(max-width: 1099px)").addEventListener("change", marcarPainelNaPilula);
 
 /**
  * Avisos (definido em 2026-09-24, "aviso no Mac"): depois de cada leitura de "Sua vez" o avisador decide
@@ -269,7 +274,7 @@ const ditado = criarControleDitado({
   aoTexto: (texto, destino) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (!ta) return;
-    ta.value = juntarAoCampo(ta.value, texto);
+    escreverNoCampo(ta, juntarAoCampo(ta.value, texto));
     ajustarAltura(ta);
     if (composerDe) rascunhos.guardar(composerDe, ta.value);
     if (destino === "enviar") return void enviarComposer();
@@ -529,6 +534,13 @@ async function semConflito(fn: () => Promise<unknown>): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 // Reidratação: o reducer diz O QUE mudou; aqui busca-se por REST e despacha o hidratar.
 
+/**
+ * A última leitura de contas que falhou na conversa (revisão do PR 1, 2026-10-16). Sem ela, a falta de `contasIa` voltaria
+ * a pedir a cada frame. definido em 2026-10-16: 60 s entre tentativas — o cabeçalho do menu fica sem a conta enquanto isso.
+ */
+let contasFalharamEm: number | null = null;
+const ESPERA_CONTAS_MS = 60_000;
+
 async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (!api) return null;
   const agora = Date.now();
@@ -538,8 +550,10 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "executor") return { tipo: "hidratar-executor", executor: await api.executor() };
   // Plano das IAs (2026-10-10): servidor sem a rota (404, versão anterior) fica sem `ias`; a tela usa o catálogo do executor.
   if (q === "ias") return { tipo: "hidratar-ias", ias: await api.ias().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
-  // Plano "tela limpa" (2026-10-16, E6): servidor sem a rota (404) fica sem o anel; o seletor mostra só o logo.
-  if (q === "uso-plano") return { tipo: "hidratar-uso-plano", usoDoPlano: await api.usoDoPlano().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; }) };
+  // Plano "tela limpa" (2026-10-16, E6): o anel é informativo — falha fechada, como o onboarding (revisão do PR 1): servidor
+  // sem a rota (404) ou erro fica sem o anel (o seletor mostra só o logo), sem faixa vermelha; com null os frames não
+  // pedem de novo (reducer.ts, `usoPlano`), só a volta da janela ou da rede.
+  if (q === "uso-plano") return { tipo: "hidratar-uso-plano", usoDoPlano: await api.usoDoPlano().catch(() => null) };
   if (q === "sua-vez") {
     // definido em 2026-09-24 ("aviso no Mac"): atrás, a leitura serve ao Dock e ao aviso, e não conta como vista.
     const ver = naFrente();
@@ -567,7 +581,17 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
   // ADR-102: servidor sem a rota (404, versão anterior) fica com a tela de antes.
   if (q === "contas") {
-    const contas = await api.contasIa().catch((e: unknown): ContasIaDto => { if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] }; throw e; });
+    // Revisão do PR 1 (2026-10-16): na conversa a lista só serve ao cabeçalho do seletor de IA (informativo) — a falha fica
+    // fechada, sem faixa vermelha, e a conversa só tenta de novo depois de ESPERA_CONTAS_MS (`relevante`). Em Máquinas e
+    // em Provedores de IA o erro continua aparecendo.
+    const naTelaDeContas = estado.espaco?.secao === "maquinas" || estado.espaco?.secao === "conexao";
+    const contas = await api.contasIa().catch((e: unknown): ContasIaDto | null => {
+      if (e instanceof ErroApi && e.status === 404) return { disponivel: false, modo: "perguntar", contas: [] };
+      if (naTelaDeContas) throw e;
+      return null;
+    });
+    if (!contas) { contasFalharamEm = Date.now(); return null; }
+    contasFalharamEm = null;
     const ponte = window.nodDesktop?.contas;
     const detalhes = ponte?.detalhes ? await ponte.detalhes().catch(() => null) : null;
     window.setTimeout(() => contasDaPessoa.aoHidratar(contas), 0);
@@ -696,7 +720,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
   if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
-  if (q === "contas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
+  if (q === "contas") return secao === "maquinas" || secao === "conexao" || (t.tipo === "conversa" && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -911,10 +935,10 @@ function renderPrincipal(): void {
       corpo = `<div class="timeline tk-timeline">${renderTelaLinha(estado, t)}</div>`;
       break;
     case "conversa":
-      cabecalho = renderCabecalhoConversa(estado, t.agenteId, painelVisivel());
+      cabecalho = renderCabecalhoConversa(estado, t.agenteId);
       partes = partesDaTimeline();
       corpo = partes ? CASCA_TIMELINE : renderTimeline(null, estado);
-      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true }) };
+      composer = { chave: `conversa:${t.conversaId}`, html: htmlComposer(placeholderPadrao(), (estado.frota?.agentes ?? []).filter((a) => a.id !== t.agenteId && a.ownerId === estado.sessao?.pessoaId && a.confirmado).map((a) => a.nome), { anexos: aceitaDo(botGerido(t.agenteId)?.harness), comandos: true, aprovacao: true, bot: botGerido(t.agenteId)?.nome }) };
       break;
     case "sala":
       cabecalho = renderCabecalhoSala(estado, t.salaId);
@@ -933,6 +957,7 @@ function renderPrincipal(): void {
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-task", t.tipo === "trabalho");
   // Plano "tela limpa" (2026-10-16, T1): na conversa própria o cabeçalho é a pílula flutuante sobre o chat.
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
+  marcarPainelNaPilula();
   regiao("erro", erro);
   // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
   // ADR-099 (parte 5): virou a linha do dono — uma linha só, com o estado de maior prioridade; some com o bot livre.
@@ -945,6 +970,8 @@ function renderPrincipal(): void {
   if (composer?.chave !== composerDe) {
     // ADR-095: a gravação é do campo que sai; o texto dela nunca cai no campo de outra conversa.
     ditado.descartar();
+    // Revisão do PR 1 (2026-10-16): o menu do seletor de IA é do bot do campo que sai; um clique nele nunca grava noutro.
+    fecharMenuIa();
     const saindo = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (composerDe && saindo) rascunhos.guardar(composerDe, saindo.value);
     composerDe = composer?.chave ?? null;
@@ -1115,9 +1142,9 @@ function atualizarComposer(): void {
 }
 
 /**
- * O Enviar vira Parar (plano "tela limpa", 2026-10-16, decisão E11) enquanto há turno vivo ou task aberta do bot — mas só
- * com o campo vazio: com texto ou anexo, volta a ser Enviar (mandar mensagem com o bot trabalhando continua possível) e o
- * ditado gravando usa o Enviar para parar e mandar. Os dois botões alternam por `hidden`, como o `parar-trabalho` da task.
+ * O Parar do campo (plano "tela limpa", 2026-10-16, decisão E11; revisão do PR 1): enquanto há turno vivo ou task aberta
+ * do bot, o Parar fica à vista como botão secundário ao lado do Enviar — mesmo com rascunho, anexo ou o ditado gravando,
+ * quando o Enviar também aparece. Com o campo vazio, só o Parar. Quem decide é `botoesDoCampo` (web/telas/conversa.ts).
  */
 function atualizarParar(): void {
   const t = estado.tela;
@@ -1127,11 +1154,24 @@ function atualizarParar(): void {
   if (!parar || !enviar || !ta) return;
   const alvo = conversaAtual();
   const anexos = alvo && !alvo.salaId ? (anexosPendentes.get(alvo.conversaId) ?? []).length : 0;
-  const mostra = t.tipo === "conversa" && mostraPararNoCampo(estado, t.agenteId) && ta.value.trim() === "" && anexos === 0 && !ditado.ativo();
-  if (parar.hidden === !mostra && enviar.hidden === mostra) return;
-  parar.hidden = !mostra;
-  enviar.hidden = mostra;
-  if (mostra && t.tipo === "conversa") parar.title = tituloDoParar(estado, t.agenteId);
+  const b = botoesDoCampo({ trabalhando: t.tipo === "conversa" && mostraPararNoCampo(estado, t.agenteId), temConteudo: ta.value.trim() !== "" || anexos > 0, ditando: ditado.ativo() });
+  if (parar.hidden !== !b.parar) parar.hidden = !b.parar;
+  if (enviar.hidden !== !b.enviar) enviar.hidden = !b.enviar;
+  if (b.parar && t.tipo === "conversa") {
+    const titulo = tituloDoParar(estado, t.agenteId);
+    const rotulo = rotuloDoParar(botGerido(t.agenteId)?.nome);
+    if (parar.title !== titulo) parar.title = titulo;
+    if (parar.getAttribute("aria-label") !== rotulo) parar.setAttribute("aria-label", rotulo);
+  }
+}
+
+/**
+ * Escreve no campo por código (ditado, sugestão, limpar depois de enviar) e reavalia o Enviar/Parar: o evento "input" só
+ * dispara quando a pessoa digita, e sem isto o botão ficava o de antes (revisão do PR 1, 2026-10-16).
+ */
+function escreverNoCampo(ta: HTMLTextAreaElement, valor: string): void {
+  ta.value = valor;
+  atualizarParar();
 }
 
 /**
@@ -1151,18 +1191,42 @@ function atualizarSeletorIa(): void {
   bt.setAttribute("aria-disabled", String(!d.dona));
 }
 
+/** O menu do seletor de IA aberto (um por vez) e se um clique dele ainda está gravando. */
+let menuIa: HTMLDialogElement | null = null;
+let gravandoIa = false;
+
+function fecharMenuIa(): void {
+  if (menuIa?.open) menuIa.close();
+  menuIa = null;
+}
+
+/**
+ * Revisão do PR 1 (2026-10-16): o clique grava só o que muda (`pedidoDoSeletor`), um por vez (o próximo clique espera o
+ * PUT voltar), e o agente devolvido entra na frota e na gestão na hora (`agente-gravado`), antes do refetch. O clique que
+ * chega depois de a conversa trocar (o menu é fechado por `fecharMenuIa`, mas o PUT pode estar no ar) não grava.
+ */
 function abrirSeletorIa(el: HTMLElement): void {
   const t = estado.tela;
   const a = t.tipo === "conversa" ? estado.frota?.agentes.find((b) => b.id === t.agenteId) : undefined;
   const d = t.tipo === "conversa" ? dadosDoSeletor(estado, t.agenteId) : null;
-  if (!a || !d || !d.dona) return;
-  abrirMenuIa(el, renderMenuIa(d), (escolha) => {
+  if (!a || !d || !d.dona || gravandoIa || estado.ocupado) return;
+  const chave = composerDe;
+  menuIa = abrirMenuIa(el, renderMenuIa(d), (escolha) => {
+    menuIa = null;
     if (escolha.tipo === "provedores") { abrirEspaco("conexao"); return; }
-    const pedido = pedidoDoSeletor(a, escolha, contextoInteligencia(estado));
+    if (composerDe !== chave || gravandoIa) return;
+    const atual = estado.frota?.agentes.find((b) => b.id === a.id) ?? a;
+    const pedido = pedidoDoSeletor(atual, escolha, contextoInteligencia(estado));
     if (!pedido) return;
+    gravandoIa = true;
     void agir(async () => {
-      await api!.gravarInteligencia(a.id, pedido);
-      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+      try {
+        const { agente } = await api!.gravarInteligencia(a.id, pedido);
+        dispatch({ tipo: "agente-gravado", agente });
+        dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+      } finally {
+        gravandoIa = false;
+      }
     });
   }, atualizarSeletorIa);
 }
@@ -1255,6 +1319,8 @@ function render(): void {
     regiao("detalhes", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
+    // Revisão do PR 1 (2026-10-16): sem sessão não há pílula — a classe deixava o cabeçalho vazio flutuando sobre a entrada.
+    document.getElementById("cabecalho")?.classList.remove("cabecalho-pilula");
     regiao("timeline", renderEntrada());
     regiao("composer", "");
     rolagem.depoisDeDesenhar(null, true);
@@ -1837,7 +1903,7 @@ function ajustarAltura(ta: HTMLTextAreaElement): void {
 function limparDepoisDeEnviar(ta: HTMLTextAreaElement, chave: string | null, texto: string): void {
   const naTela = ta.isConnected && composerDe === chave;
   if (naTela && ta.value.trim() === texto) {
-    ta.value = "";
+    escreverNoCampo(ta, "");
     ta.style.height = "auto";
     atualizarBarra(ta);
   }
@@ -2459,7 +2525,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "escolher-missao": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (ta) { ta.value = el.dataset.texto ?? ""; return enviarComposer(); }
+    if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); return enviarComposer(); }
   },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
@@ -2518,7 +2584,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   "preencher-prompt": (el) => {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
-    if (ta) { ta.value = el.dataset.texto ?? ""; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
+    if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; if (composerDe) rascunhos.guardar(composerDe, ta.value); }
   },
   // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): o que é do bot abre DENTRO da gaveta, com ‹ para voltar.
   gaveta: (el) => {
