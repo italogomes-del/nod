@@ -126,6 +126,21 @@ describeIntegracao("paraCadaPessoa com o banco ocupado (NOD-266)", () => {
     expect(falhas).toEqual(["b:ErroBancoOcupado"]);
   });
 
+  it("QA do PR #321: banco_ocupado na LISTAGEM encerra a volta sem lançar — senão o `void tick()` dos laços vira unhandled rejection e derruba o processo", async () => {
+    const visitadas: string[] = [];
+    const volta = paraCadaPessoa(
+      db,
+      async (escopo) => { visitadas.push(escopo.pessoaId); },
+      { listarPessoas: async () => { throw new ErroBancoOcupado("c0ffee00-0000-4000-8000-000000000000", 10_000); } },
+    );
+    await expect(volta).resolves.toBeUndefined();
+    expect(visitadas).toEqual([]);
+  });
+
+  it("outra falha na listagem segue subindo (não é engolida)", async () => {
+    await expect(paraCadaPessoa(db, async () => {}, { listarPessoas: async () => { throw new Error("qualquer"); } })).rejects.toThrow("qualquer");
+  });
+
   it("outra falha de uma pessoa não para o laço (como antes)", async () => {
     const pessoas = ["a", "b", "c"].map((id) => ({ tenantId: TENANT_PADRAO, id }));
     const visitadas: string[] = [];
