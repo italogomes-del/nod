@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import type { Proposta } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { complementoCapacidades } from "../domain/catalogo-conectores.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaDaPessoa } from "./registrar-negacao.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import { autoriaPessoa, evento } from "./autoria-evento.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaConceder = {
   agenteId: string;
@@ -109,8 +111,41 @@ export const concederLote: CasoDeUso<EntradaConcederLote, SaidaConcederLote> = a
     const c = doConector.find((x) => x.capacidade === capacidade);
     if (c) saida.push({ capacidade, concessaoId: c.id, mensagemId: c.mensagemId });
   }
+  // definido em 2026-10-15 (NOD-270, I4): o acesso dado por qualquer caminho (a tela Conectores, o cartão "Liberar", o
+  // nível do app) fecha o card do pré-voo que ele cobre — antes o card seguia aberto e, ao vencer, pausava a rotina.
+  // O card que este lote está decidindo (decidirAcesso) já saiu de 'pendente' antes daqui e não é achado de novo.
+  const card = await deps.repos.propostas.acessoDeRotinaAberto(agente.id, conector.slug);
+  if (card) events.push(...((await fecharCardAtendido(deps, card)) ?? []));
   return { data: { concessoes: saida, mensagemId, naoInclui }, events };
 };
+
+/** definido em 2026-10-15 (NOD-270, I4): quem fecha o card de acesso da rotina cujo acesso já foi dado. */
+export const REGRA_ACESSO_JA_CONCEDIDO = "regra:acesso_ja_concedido" as const;
+
+/**
+ * O card de acesso do PRÉ-VOO de uma rotina (sem turno: nasce do servidor, não de um pedir_acesso) cujas capacidades o
+ * bot já tem fecha como atendido: decisão por regra (sem pessoa, ADR-042), proposta confirmada, ninguém continua (não
+ * há turno esperando; a próxima janela roda). Concessão parcial não fecha. `tambemVencida`: o varredor acabou de
+ * vencê-lo (vencerPedidoDaRotina). null = não era esse card, ou o acesso ainda falta — quem chamou segue como antes.
+ * O card de um turno (pedir_acesso) fica de fora de propósito: o turno espera o clique para retomar.
+ */
+export async function fecharCardAtendido(deps: Pick<Deps, "repos" | "escopo" | "agora">, proposta: Proposta, opcoes: { tambemVencida?: boolean } = {}): Promise<RuntimeEvent[] | null> {
+  const p = proposta.payload;
+  if (p.kind !== "acesso" || p.conectar || !p.rotinaId || proposta.estado !== "pendente" || p.capacidades.length === 0) return null;
+  const decisao = await deps.repos.decisoes.buscar(proposta.id);
+  if (!decisao || decisao.tipo !== "acesso" || decisao.turnoId !== null) return null;
+  const conector = await deps.repos.conectores.buscarPorSlug(p.conector);
+  if (!conector?.habilitado) return null;
+  const concedidas = new Set((await deps.repos.concessoes.doAgente(proposta.agenteId)).filter((c) => c.conectorId === conector.id).map((c) => c.capacidade));
+  if (p.capacidades.some((c) => !concedidas.has(c))) return null;
+  const agora = deps.agora();
+  const fechada = await deps.repos.decisoes.fecharPorRegra(decisao.id, { regra: REGRA_ACESSO_JA_CONCEDIDO, regraVersao: 1, agora, ...(opcoes.tambemVencida ? { tambemVencida: true } : {}) });
+  if (!fechada) return null;
+  await deps.repos.decisoes.reivindicarContinuacao(fechada.id, "turno", agora);
+  await deps.repos.propostas.decidir(proposta.id, "confirmada");
+  const autoria = { ...autoriaPessoa(deps.escopo), decidido_por: REGRA_ACESSO_JA_CONCEDIDO };
+  return [evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: fechada.conversaId, turnoId: null, dados: { decisao_id: fechada.id, tipo: fechada.tipo, regra: REGRA_ACESSO_JA_CONCEDIDO, rotina_id: p.rotinaId } })];
+}
 
 /** Uma capacidade: o lote de um. Quem decide acesso por botão chama `concederLote` (decidir-acesso.ts). */
 export const conceder: CasoDeUso<EntradaConceder, SaidaConceder> = async (deps, input) => {

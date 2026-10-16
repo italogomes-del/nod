@@ -240,6 +240,15 @@ describe("9. 'N coisas esperam você' acima do campo", () => {
     expect(html).not.toContain("está esperando sua resposta");
   });
 
+  it("gate_rotina tem o mesmo nome da lista de rotinas: 'Ver aprovação' (re-revisão do #342, ajuste B)", () => {
+    const pergunta = { ...pedido("q1"), decisao: { ...pedido("q1").decisao, tipo: "pergunta" as const } };
+    const gate = { ...pedido("g1"), decisao: { ...pedido("g1").decisao, tipo: "gate_rotina" as const } };
+    const { e } = cenario([], [pergunta, gate]);
+    const html = renderTopoComposer({ tipo: "resposta", alvo: pergunta as never, indice: 0, perguntas: [pergunta as never] }, e, C);
+    expect(html).toMatch(/data-act="ver-decisao" data-id="g1"[^>]*>Ver aprovação</);
+    expect(html).not.toContain(">Ver pedido<");
+  });
+
   it("só pergunta, sem outro pedido: a faixa de sempre", () => {
     const pergunta = { ...pedido("q1"), decisao: { ...pedido("q1").decisao, tipo: "pergunta" as const } };
     const { e } = cenario([], [pergunta]);

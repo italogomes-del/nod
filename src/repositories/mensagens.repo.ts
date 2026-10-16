@@ -209,6 +209,19 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return l ? paraMensagem(l) : null;
     },
 
+    /**
+     * definido em 2026-10-15 (NOD-270): o balão `pedido_a_pessoa` de uma decisão — é ele que diz quem perguntou (a autoria
+     * `decidido_por` da regra das voltas sem novidade), porque a decisão pendente não guarda a regra. Pelo turno da
+     * decisão (o balão nasce no mesmo turno, na mesma transação), sem varrer a conversa.
+     */
+    async pedidoAPessoaDaDecisao(turnoId: string, decisaoId: string): Promise<Mensagem | null> {
+      const [l] = await conn<LinhaMensagem[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and turno_id = ${turnoId} and payload->>'kind' = 'pedido_a_pessoa' and payload->>'decisaoId' = ${decisaoId}
+        order by criado_em, id limit 1`;
+      return l ? paraMensagem(l) : null;
+    },
+
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {
       const [l] = await conn<LinhaMensagem[]>`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;

@@ -798,6 +798,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         }
         return saida;
       },
+      async pedidoAPessoaDaDecisao(turnoId, decisaoId) {
+        return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "pedido_a_pessoa" && m.payload.decisaoId === decisaoId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
+      },
       async pedidoDaTarefa(turnoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
@@ -1693,7 +1696,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return true;
       },
       async fecharPorRegra(id, p) {
-        const d = doTenant(b.decisoes).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "reaberta"));
+        const d = doTenant(b.decisoes).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "reaberta" || (p.tambemVencida === true && x.estado === "vencida")));
         if (!d) return null;
         d.estado = "decidida";
         d.desfecho = { tipo: "decidida_por_regra", regra: p.regra, regraVersao: p.regraVersao, em: new Date(p.agora).toISOString() };
@@ -1889,6 +1892,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // Sem concorrência em memória: travar só confirma que a janela existe.
       async travar(rotinaId, instanteAgendado) {
         return doTenant(b.janelas).some((j) => j.rotinaId === rotinaId && j.instanteAgendado === instanteAgendado);
+      },
+      async retomadaPendenteDe(raizId, exceto) {
+        const cadeia = new Set([raizId]);
+        for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+        return doTenant(b.turnos).find((v) => v.id !== raizId && v.id !== exceto && cadeia.has(v.id) && (v.estado === "pendente" || v.estado === "despachando"))?.id ?? null;
       },
       async turnoAberto(rotinaId) {
         const abertas = doTenant(b.janelas)

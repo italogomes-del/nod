@@ -1,4 +1,4 @@
-import type { BloqueioRotina, ExecucaoRotina, ParadaDaRotina } from "../../src/contracts/rotina.ts";
+import type { BloqueioRotina, ExecucaoRotina, ParadaDaRotina, PerguntaPendenteDaRotina } from "../../src/contracts/rotina.ts";
 import { botao, esc } from "./render.ts";
 import { desdeQuando, listaDeJanelas } from "./relogio.ts";
 
@@ -15,6 +15,8 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
   // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
   sem_pendencia: "sem pendência aberta, nenhum turno rodou",
+  // definido em 2026-10-15 (NOD-270): a pergunta das voltas sem novidade ficou sem resposta e a janela seguinte seguiu.
+  voltas_sem_novidade: "pergunta sem resposta, fechada pela janela seguinte",
   // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.
   motor_ausente: "a IA não estava pronta na máquina",
   nao_autenticado: "a IA da máquina estava sem login",
@@ -82,4 +84,36 @@ export function linhaNaoRodaram(p: ParadaDaRotina | null, agora: number): string
   if (!p || p.naoRodaram.length === 0) return "";
   const verbo = p.naoRodaram.length === 1 ? "Não rodou" : "Não rodaram";
   return `<p class="dec-nao-rodaram">${esc(`${verbo}: ${listaDeJanelas(p.naoRodaram, agora, p.fusoIana)}. Nenhuma tentativa gastou crédito.`)}</p>`;
+}
+
+/**
+ * definido em 2026-10-15 (NOD-270): a rotina parada por uma pergunta (ou aprovação) que espera a pessoa — a linha
+ * "Parada: pergunta sem resposta desde ontem 13:00." e o atalho ao balão na conversa da rotina.
+ */
+export function linhaPerguntaPendente(p: PerguntaPendenteDaRotina, agora: number, fusoIana: string): string {
+  return `<div class="rt-linha">${esc(`Parada: ${nomeDaPendencia(p)} sem resposta ${desdeQuando(p.desde, agora, fusoIana)}.`)}</div>`;
+}
+
+/**
+ * definido em 2026-10-16 (review de design do #342): a pendência que segura a rotina pelo nome do card que o atalho
+ * abre — "pergunta" ou "aprovação". Record sobre o tipo: tipo novo sem nome não compila.
+ */
+const NOME_DA_PENDENCIA: Record<PerguntaPendenteDaRotina["tipo"], string> = { pergunta: "pergunta", aprovacao: "aprovação" };
+
+/**
+ * definido em 2026-10-16 (re-revisão de design do #342, ajuste A): o Record protege na compilação, não em execução — um
+ * DTO sem `tipo` (servidor antigo, deploy fora de ordem) diria "undefined". Tipo ausente ou desconhecido vira "pergunta".
+ */
+function nomeDaPendencia(p: PerguntaPendenteDaRotina): string {
+  return (NOME_DA_PENDENCIA as Partial<Record<string, string>>)[p.tipo] ?? "pergunta";
+}
+
+/** A tag "parada · pergunta sem resposta" (ou "aprovação sem resposta") da rotina parada por uma pendência. */
+export function tagParadaPergunta(p: PerguntaPendenteDaRotina): string {
+  return `<span class="tag tag-ambar" title="as janelas seguintes esperam a sua resposta; nenhuma gastou crédito">${esc(`parada · ${nomeDaPendencia(p)} sem resposta`)}</span>`;
+}
+
+/** O atalho ao balão: "Ver pergunta" ou "Ver aprovação" (o mesmo rótulo de web/telas/pergunta.ts). */
+export function rotuloVerPendencia(p: PerguntaPendenteDaRotina): string {
+  return `Ver ${nomeDaPendencia(p)}`;
 }

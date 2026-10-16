@@ -2,9 +2,9 @@ import type { Concessao } from "../contracts/concessao.ts";
 import type { Proposta } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { MotivoBloqueioRotina } from "../contracts/motivos.ts";
-import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
+import { REGRA_VOLTAS_SEM_NOVIDADE, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../contracts/pedido.ts";
 import type { BloqueioRotina, ParadaDaRotina, Rotina } from "../contracts/rotina.ts";
-import type { TipoDecisao } from "../contracts/decisao.ts";
+import type { Decisao } from "../contracts/decisao.ts";
 import { acaoArriscadaNoApp } from "../domain/aprovacao-permanente.ts";
 import { decidirPeloModo } from "../domain/modo-aprovacao.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
@@ -18,8 +18,6 @@ import type { Deps } from "./tipos.ts";
 
 /** definido em 2026-09-24 (emenda da ADR-044): a regra que para a janela e abre o card, sem pessoa. */
 export const REGRA_PRE_VOO = "regra:pre-voo-rotina" as const;
-
-const PEDIDO_A_PESSOA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(TIPOS_PEDIDO_A_PESSOA);
 
 /**
  * O que a rotina precisa AGORA: o que ela declara ou cita na fonte (necessidadesDaRotina) e, além disso,
@@ -41,13 +39,29 @@ async function necessidadesAtuais(repos: Repos, rotina: Rotina, registrados: rea
   return [...base, ...dosCards].sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
-/** A pergunta de pedir_a_pessoa que um turno desta rotina fez e ainda espera (o fio da pergunta, #58). */
-async function perguntaAbertaDaRotina(repos: Repos, rotina: Rotina): Promise<boolean> {
+/**
+ * As decisões que um turno desta rotina abriu e ainda esperam a pessoa, separadas em duas: as que seguram a janela
+ * seguinte e as perguntas das voltas sem novidade (ADR-099 §5), que não seguram. revisto em 2026-10-15 (NOD-255, I1):
+ * a aprovação pendente também segura — antes só a pergunta (o fio, #58), e o card de aprovação aberto deixava a janela
+ * seguinte abrir outro igual; aprovados os dois, a ação saía em dobro. revisto na mesma data (NOD-270, C10; decidido
+ * em 15/10 na NOD-228): a pergunta das voltas não segura o cron — a janela seguinte é a volta. Ela é reconhecida pelo
+ * balão (autoria `decidido_por` da regra), porque a decisão pendente não guarda a regra.
+ */
+export async function pendenciasDaRotina(repos: Repos, rotina: Rotina): Promise<{ seguram: Decisao[]; dasVoltas: Decisao[] }> {
+  const seguram: Decisao[] = [];
+  const dasVoltas: Decisao[] = [];
   for (const d of await repos.decisoes.pendentesDaConversa(rotina.conversaId)) {
-    if (!PEDIDO_A_PESSOA.has(d.tipo) || d.turnoId === null) continue;
-    if ((await rotinaDoTurno(repos, d.turnoId))?.rotina.id === rotina.id) return true;
+    if (!TIPOS_QUE_SEGURAM_A_EXECUCAO.has(d.tipo) || d.turnoId === null) continue;
+    if ((await rotinaDoTurno(repos, d.turnoId))?.rotina.id !== rotina.id) continue;
+    const balao = d.tipo === "pergunta" ? await repos.mensagens.pedidoAPessoaDaDecisao(d.turnoId, d.id) : null;
+    (balao?.autoria.decidido_por === REGRA_VOLTAS_SEM_NOVIDADE ? dasVoltas : seguram).push(d);
   }
-  return false;
+  return { seguram, dasVoltas };
+}
+
+/** A pendência mais antiga que segura a janela seguinte desta rotina (pendenciasDaRotina), ou null. */
+export async function pendenciaAbertaDaRotina(repos: Repos, rotina: Rotina): Promise<Decisao | null> {
+  return (await pendenciasDaRotina(repos, rotina)).seguram[0] ?? null;
 }
 
 export type BloqueioDoPreVoo = { motivo: MotivoBloqueioRotina; propostaId: string | null; events: RuntimeEvent[] };
@@ -56,7 +70,8 @@ export type BloqueioDoPreVoo = { motivo: MotivoBloqueioRotina; propostaId: strin
  * Pré-voo da rotina (definido em 2026-09-24, emenda da ADR-044, "rotina se trava sozinha"): antes de
  * enfileirar o turno — e de gastar um turno de modelo —, o servidor confere o que ele mesmo sabe:
  * 1. falta conexão ou acesso a um app que a rotina precisa → garante UM card por (agente, app) e para;
- * 2. só no agendador: a pergunta da execução anterior ainda espera → para (o fio segura a janela, #58).
+ * 2. só no agendador: a pergunta ou a aprovação da execução anterior ainda espera → para (o fio segura a janela, #58;
+ *    a aprovação desde a NOD-255). A pergunta das voltas sem novidade não para (NOD-270): quem a fecha é o disparo.
  * Trava (agente, conector) de cada app necessário, em ordem, antes de ler as concessões: o clique que
  * concede trava o mesmo par, e assim um tick nunca abre card para um acesso que acabou de ser dado.
  */
@@ -67,7 +82,7 @@ export async function preVooDaRotina(deps: Deps, rotina: Rotina, opcoes: { agend
   // ADR-066: cada app que falta e que o modo concede sai do caminho; o primeiro que ele não concede para a janela.
   for (let i = 0; i <= necessidades.length; i++) {
     const bloqueio = await faltaOuConcede(deps, rotina, necessidades);
-    if (bloqueio !== "concedido") return bloqueio ?? (opcoes.agendada && (await perguntaAbertaDaRotina(deps.repos, rotina)) ? { motivo: "aguardando_resposta", propostaId: null, events: [] } : null);
+    if (bloqueio !== "concedido") return bloqueio ?? (opcoes.agendada && (await pendenciaAbertaDaRotina(deps.repos, rotina)) ? { motivo: "aguardando_resposta", propostaId: null, events: [] } : null);
   }
   return null;
 }

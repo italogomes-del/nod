@@ -86,7 +86,8 @@ import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
 import { criarControleDitado } from "./telas/ditado-controle.ts";
 import { juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
-import { comportamentoDaRolagem, movimentoReduzido } from "./lib/movimento.ts";
+import { movimentoReduzido } from "./lib/movimento.ts";
+import { alvoDoQueEspera, levarAoAlvo, passoDoAtalho, type AlvoDoAtalho } from "./lib/levar-ao-alvo.ts";
 import { gavetaPrendeFoco, irmaosAteARaiz, seletoresDaOrigem, voltaDoTab } from "./lib/foco-gaveta.ts";
 import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
@@ -2103,10 +2104,35 @@ function escolherNoComposer(outroAssunto: boolean, alvoId?: string): void {
 function verPergunta(decisaoId: string): void {
   const balao = document.querySelector<HTMLElement>(`[data-pergunta="${CSS.escape(decisaoId)}"]`);
   if (!balao) return;
+  levarAo(balao);
+}
+
+/** Rola até o balão/card, põe o foco nele e (se `realcar`) realça (web/lib/levar-ao-alvo.ts) — a lista redesenhada não o perde. */
+function levarAo(alvo: AlvoDoAtalho, realcar = true): void {
   rolagem.soltar();
-  balao.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
-  balao.classList.add("realce");
-  window.setTimeout(() => balao.classList.remove("realce"), 1600);
+  levarAoAlvo(alvo, { reduzido: movimentoReduzido(), agendar: (fn, ms) => window.setTimeout(fn, ms), realcar });
+}
+
+/**
+ * definido em 2026-10-15 (NOD-270): abre a conversa da rotina e leva ao balão da pergunta (ou ao card, se for aprovação)
+ * quando a timeline o desenhar — espera até ~3 s. Fora da janela carregada (re-revisão de design do #342, ajuste C), abre
+ * a faixa de trabalhos com o que espera a pessoa — nunca só a conversa aberta, em silêncio, nem um card sem relação.
+ */
+function verPerguntaNaConversa(conversaId: string, agenteId: string, decisaoId: string): void {
+  if (!conversaId || !decisaoId) return;
+  navegar({ tipo: "conversa", conversaId, agenteId });
+  const id = CSS.escape(decisaoId);
+  const ate = Date.now() + 3000;
+  const tentar = (): void => {
+    // A pessoa saiu da conversa nesses 3 s: o atalho não a puxa de volta.
+    if (estado.tela.tipo !== "conversa" || estado.tela.conversaId !== conversaId) return;
+    const alvo = document.querySelector<HTMLElement>(`[data-pergunta="${id}"], [data-decisao="${id}"], [data-proposta="${id}"]`);
+    const passo = passoDoAtalho(alvo !== null, Date.now(), ate);
+    if (passo === "tentar") window.setTimeout(tentar, 100);
+    else if (passo === "faixa") dispatch({ tipo: "faixa-trabalhos", agenteId });
+    else if (alvo) levarAo(alvo);
+  };
+  window.setTimeout(tentar, 0);
 }
 
 /**
@@ -2117,18 +2143,18 @@ function verPergunta(decisaoId: string): void {
 function irAoQueEsperaVoce(decisaoId: string | null): void {
   const timeline = document.getElementById("timeline") ?? document;
   const id = decisaoId ? CSS.escape(decisaoId) : null;
-  const alvo = (id ? timeline.querySelector<HTMLElement>(`[data-pergunta="${id}"], [data-decisao="${id}"], [data-proposta="${id}"]`) : null)
-    ?? [...timeline.querySelectorAll<HTMLElement>("[data-pergunta], [data-decisao], [data-proposta]")].at(-1) ?? null;
+  // Re-revisão de design do #342 (ajuste C): só o card da própria decisão ganha realce; o último qualquer só rola e foca.
+  const escolha = alvoDoQueEspera(
+    id ? timeline.querySelector<HTMLElement>(`[data-pergunta="${id}"], [data-decisao="${id}"], [data-proposta="${id}"]`) : null,
+    [...timeline.querySelectorAll<HTMLElement>("[data-pergunta], [data-decisao], [data-proposta]")].at(-1) ?? null,
+  );
   const t = estado.tela;
-  if (!alvo) {
+  if (!escolha) {
     if (t.tipo === "conversa") dispatch({ tipo: "faixa-trabalhos", agenteId: t.agenteId });
     return;
   }
   if (estado.faixaTrabalhosAberta) dispatch({ tipo: "faixa-trabalhos", agenteId: null });
-  rolagem.soltar();
-  alvo.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
-  alvo.classList.add("realce");
-  window.setTimeout(() => alvo.classList.remove("realce"), 1600);
+  levarAo(escolha.alvo, escolha.realcar);
 }
 
 /** "Ver aprovação" (definido em 2026-10-03): da lista "N coisas esperam você" ao card do pedido na timeline. */
@@ -2136,10 +2162,7 @@ function verDecisao(decisaoId: string): void {
   const id = CSS.escape(decisaoId);
   const card = document.querySelector<HTMLElement>(`[data-decisao="${id}"], [data-proposta="${id}"]`);
   if (!card) return;
-  rolagem.soltar();
-  card.scrollIntoView({ block: "center", behavior: comportamentoDaRolagem(movimentoReduzido()) });
-  card.classList.add("realce");
-  window.setTimeout(() => card.classList.remove("realce"), 1600);
+  levarAo(card);
 }
 
 function marcacoesDe(decisaoId: string): { id: string; selecionado: boolean; textoFinal?: string }[] {
@@ -2866,6 +2889,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "composer-responder": (el) => escolherNoComposer(false, el.dataset.id),
   "composer-outro": () => escolherNoComposer(true),
   "ver-pergunta": (el) => verPergunta(el.dataset.id ?? ""),
+  // definido em 2026-10-15 (NOD-270): da lista de rotinas ao balão da pergunta que segura a rotina, na conversa dela.
+  "ver-pergunta-da-rotina": (el) => verPerguntaNaConversa(el.dataset.conversa ?? "", el.dataset.agente ?? "", el.dataset.id ?? ""),
   "ver-decisao": (el) => verDecisao(el.dataset.id ?? ""),
   // A resposta pronta é TEXTO da pessoa (EMENDA 16): o toque manda as palavras da opção por `responder`.
   "responder-opcao": (el) =>

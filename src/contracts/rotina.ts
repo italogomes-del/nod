@@ -84,3 +84,17 @@ export type ParadaDaRotina = { desde: EpochMs; naoRodaram: EpochMs[]; fusoIana: 
  * rotina do mesmo agente (esta roda na próxima janela dela).
  */
 export type BloqueioRotina = ParadaDaRotina & { motivo: Exclude<MotivoBloqueioRotina, "aguardando_resposta">; app: string; slug: string; decisaoId: string | null; rodaNaHora: boolean };
+
+/**
+ * definido em 2026-10-15 (NOD-270): a última janela parou porque uma pergunta (ou aprovação) de uma execução anterior
+ * espera a pessoa — a lista mostra "parada: pergunta sem resposta desde X" e o atalho ao balão. Ausente no DTO = não está
+ * parada por isso (ou a rotina não é da pessoa).
+ */
+export type PerguntaPendenteDaRotina = { decisaoId: string; desde: EpochMs; tipo: TipoPendenciaDaRotina };
+
+/**
+ * definido em 2026-10-16 (review de design do #342): o que segura a janela — "aprovacao" para os tipos de gate
+ * (TIPOS_GATE_ROTINA: gate_rotina e aprovacao), "pergunta" para o resto. A lista diz "aprovação sem resposta" e
+ * "Ver aprovação" no primeiro caso, para o rótulo não contradizer o card que o atalho abre.
+ */
+export type TipoPendenciaDaRotina = "pergunta" | "aprovacao";

@@ -85,6 +85,23 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
       return l?.turno_id ?? null;
     },
 
+    /**
+     * definido em 2026-10-15 (NOD-255, I3): a retomada da execução que começou em `raizId` (a volta marcada, a resposta da
+     * pessoa, o retorno do lote) que ainda espera ou roda — a mesma cadeia que turnoAberto segue (retoma_turno_id, origem
+     * 'retomada', até 10 saltos). `exceto` é o turno que está registrando o desfecho agora: ele não segura a si mesmo.
+     */
+    async retomadaPendenteDe(raizId: string, exceto: string): Promise<string | null> {
+      const [l] = await conn<{ id: string }[]>`
+        with recursive c(id, n) as (
+          select ${raizId}::uuid, 0
+          union all
+          select r.id, c.n + 1 from c join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
+        ) select v.id from c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
+        where c.n > 0 and v.id <> ${exceto}::uuid and v.estado in ('pendente', 'despachando')
+        limit 1`;
+      return l?.id ?? null;
+    },
+
     /** A janela que ligou este turno à rotina (índice rotina_janelas_turno_idx, 0004) — pendência L7 §5. */
     async buscarPorTurno(turnoId: string): Promise<JanelaRotina | null> {
       const [l] = await conn<Linha[]>`

@@ -391,6 +391,8 @@ describe("fila honesta: vencidos recolhidos, ×N, prazo por tipo e rótulos em p
     expect(rotulo({ tipo: "dispensada", por: "p", em, antes: "vencida" })).toBe("dispensado por você");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:rotina_nao_retoma", regraVersao: 1, em })).toBe("fechado: a rotina não retoma");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:gemea_resolvida", regraVersao: 1, em })).toBe("resolvido junto do pedido igual");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:janela_seguinte", regraVersao: 1, em })).toBe("fechada: a janela seguinte já rodou");
+    expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:acesso_ja_concedido", regraVersao: 1, em })).toBe("fechado: o acesso já tinha sido dado");
     expect(rotulo({ tipo: "decidida_por_regra", regra: "regra:uma_nova", regraVersao: 1, em })).toBe("fechado automaticamente");
     expect(rotulo(null)).toBe("venceu há 3h");
     for (const r of [rotulo({ tipo: "expirou_sem_ninguem_ver", em }), rotulo({ tipo: "expirou_com_alguem_ciente", em }), rotulo({ tipo: "decidida", por: "p", em })]) expect(r).not.toContain("_");

@@ -137,7 +137,8 @@ async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarre
       const pedidoDaRotina = await vencerPedidoDaRotina(deps, d);
       if (pedidoDaRotina.pausada) {
         resultado.pausadas.push(pedidoDaRotina.pausada.id);
-      } else {
+      } else if (!pedidoDaRotina.atendido) {
+        // NOD-270 (I4): atendido = o acesso já tinha sido dado e o card fechou por regra; não há vencimento a contar.
         await repos.mensagens.criar({
           conversaId: d.conversaId,
           turnoId: d.turnoId,
@@ -147,7 +148,7 @@ async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarre
           confianca: "confiavel",
         });
       }
-      resultado.mensagens += 1;
+      if (!pedidoDaRotina.atendido) resultado.mensagens += 1;
       const events = [evento(deps, "decisao_vencida", autoria, { decisaoId: d.id, tipo: d.tipo, desfecho: tipoDesfecho, atrasoMs: agora - Date.parse(d.prazoDecisaoEm) }, { conversaId: d.conversaId, turnoId: d.turnoId }), ...pedidoDaRotina.events];
       // Gate de rotina = gate_rotina OU aprovacao ligada a um turno de rotina (TIPOS_GATE_ROTINA); se o
       // turno não é de rotina, registrarDesfechoRotina devolve 'nao_e_rotina' e nada mais acontece.

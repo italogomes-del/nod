@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ACORDAR_MAX_MINUTOS, ACORDAR_MIN_MINUTOS, MOTIVO_MAX_DESPERTAR, VOLTAS_SEGUIDAS_MAX, VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
+import { REGRA_VOLTAS_SEM_NOVIDADE } from "../contracts/pedido.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -122,8 +123,8 @@ export async function enfileirarVolta(deps: DepsVolta, turno: Turno, v: { acorda
   return { volta, events: [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: volta.trabalhoId ?? null, acordar_em: v.acordarEm } })] };
 }
 
-/** A regra que fala no lugar do bot quando as voltas param (a autoria do evento e da mensagem diz que foi ela). */
-export const REGRA_VOLTAS_SEM_NOVIDADE = "regra:voltas_sem_novidade" as const;
+/** A regra que fala no lugar do bot quando as voltas param (mora no contrato desde a NOD-270: o pré-voo a lê). */
+export { REGRA_VOLTAS_SEM_NOVIDADE };
 
 /**
  * ADR-099 §5 (parte 1, definido em 2026-10-12): no lugar da quarta volta, uma pergunta à pessoa — a mesma forma do

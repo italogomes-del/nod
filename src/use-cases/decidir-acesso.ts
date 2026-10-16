@@ -7,7 +7,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
-import { concederLote } from "./conceder.ts";
+import { concederLote, fecharCardAtendido } from "./conceder.ts";
 import { dispararRotina } from "./disparar-rotina.ts";
 import type { PorRegra } from "./confirmar-pelo-modo.ts";
 import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
@@ -61,10 +61,14 @@ const REGRA_VARREDOR = "regra:varredor-expiracao" as const;
  * `pausada` null = não era pedido de rotina, ou a rotina já não estava ativa: o varredor escreve a
  * mensagem de vencimento de sempre.
  */
-export async function vencerPedidoDaRotina(deps: Deps, decisao: Decisao): Promise<{ pausada: Rotina | null; events: RuntimeEvent[] }> {
+export async function vencerPedidoDaRotina(deps: Deps, decisao: Decisao): Promise<{ pausada: Rotina | null; atendido?: true; events: RuntimeEvent[] }> {
   if (decisao.tipo !== "acesso") return { pausada: null, events: [] };
   const proposta = await deps.repos.propostas.buscar(decisao.id);
   if (proposta?.payload.kind !== "acesso" || !proposta.payload.rotinaId) return { pausada: null, events: [] };
+  // revisto em 2026-10-15 (NOD-270, I4): antes de pausar, relê as concessões — o acesso dado por outro caminho (a tela
+  // Conectores) fecha o card como atendido e a rotina segue ativa; sem isto ela pausava "porque ninguém liberou".
+  const atendido = await fecharCardAtendido(deps, proposta, { tambemVencida: true });
+  if (atendido) return { pausada: null, atendido: true, events: atendido };
   if (proposta.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "recusada");
   const rotina = await rotinaDoPedido(deps, proposta.agenteId, proposta.payload.rotinaId);
   if (!rotina || rotina.estado !== "ativa") return { pausada: null, events: [] };

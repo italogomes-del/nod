@@ -288,3 +288,29 @@ describe("'Sua vez' (ver todos)", () => {
     expect(html).not.toContain("responder-na-conversa");
   });
 });
+
+describe("pergunta das voltas fechada pela regra (review de design do #342)", () => {
+  const dasVoltas = (): Mensagem => ({ ...fala("m1", "d1", "Nada novo desde a última volta. Continuo de olho?"), autoria: { ...autoria, decidido_por: "regra:voltas_sem_novidade" } });
+
+  it("conversa sem rotina (task, delegação, espera de CI): só 'Fechada sem resposta', sem falar de rotina", () => {
+    const html = timeline(cenario([dasVoltas()], []));
+    expect(html).toContain('<p class="pergunta-estado vencida">Fechada sem resposta</p>');
+    expect(html).not.toContain("rotina");
+    expect(html).not.toContain("Parei aqui até você responder");
+    const daDelegacao = { ...dasVoltas(), origemTurno: "retomada" as const, raiz: { turnoId: "t0", origem: "delegacao" as const } };
+    expect(timeline(cenario([daDelegacao], []))).not.toContain("rotina");
+  });
+
+  it("cadeia de rotina (pela raiz ou pela origem do turno): 'Fechada sem resposta · a rotina segue na próxima janela'", () => {
+    const pelaRaiz = { ...dasVoltas(), origemTurno: "retomada" as const, raiz: { turnoId: "t0", origem: "rotina" as const } };
+    expect(timeline(cenario([pelaRaiz], []))).toContain("Fechada sem resposta · a rotina segue na próxima janela");
+    const peloTurno = { ...dasVoltas(), origemTurno: "rotina" as const };
+    expect(timeline(cenario([peloTurno], []))).toContain("Fechada sem resposta · a rotina segue na próxima janela");
+  });
+
+  it("aberta, segue 'Parei aqui…'; sem 'Sua vez' carregada, nada é afirmado; outra pergunta encerrada continua calada", () => {
+    expect(timeline(cenario([dasVoltas()], [item("d1")]))).toContain("Parei aqui até você responder");
+    expect(timeline({ ...cenario([dasVoltas()], []), suaVez: null })).not.toContain("Fechada sem resposta");
+    expect(timeline(cenario([fala("m1", "d1", PERGUNTA)], []))).not.toContain("Fechada sem resposta");
+  });
+});

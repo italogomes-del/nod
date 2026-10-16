@@ -206,6 +206,12 @@ export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarL
   if (criados.some((i) => i.selecionado && i.destino.execucao === "maquina" && !desfechos.some((d) => d.itemId === i.id))) {
     return { data: { estado: "pendente", decisao_id: lote.decisaoId, instrucao: "encerre o turno; a decisão retoma depois" }, events: [] };
   }
+  // definido em 2026-10-15 (NOD-255, C18): todos os itens já têm desfecho e o resultado volta NESTE turno (a resposta
+  // da ferramenta) — quem continua é o turno. Sem a reivindicação, o assentamento (continuarAprovacoesDoTurno, 0032)
+  // via a decisão como "decidida e não continuada" e enfileirava uma retomada redundante, que rodava a rotina de novo.
+  // O caso do item no Mac (acima) não reivindica: ali a retomada é o caminho legítimo do resultado. Idempotente
+  // (só grava se continuada_em is null), então vem antes do retorno de fase repetida.
+  await deps.repos.decisoes.reivindicarContinuacao(lote.decisaoId, "turno", agora);
   const resultado = { estado: "decidida" as const, itens: desfechos.map((d, idx) => ({ idx, desfecho: d.desfecho })) };
   if (gravados === 0) return { data: resultado, events: [] };
 

@@ -54,9 +54,23 @@ export function rodapeDaPergunta(m: Mensagem, estado: Estado): string {
       return `<p class="pergunta-estado vencida">Sem resposta · ${esc(rotuloVencido(d, estado.agora))}${reabrir}</p>`;
     }
     case "encerrada":
-      return "";
+      // definido em 2026-10-16 (re-revisão de design do #342): a pergunta das voltas sem novidade (ADR-099 §5) nasce em
+      // qualquer cadeia de "me chame às" — task, delegação, espera de CI —, não só em rotina. Fechada (janela seguinte,
+      // "Deixar pra lá" ou vencida antiga), o balão diz "Fechada sem resposta"; o complemento da rotina só vem quando a
+      // cadeia é de fato de uma rotina (origem do turno ou da raiz). Só com "Sua vez" carregada: antes dela, toda
+      // pergunta parece encerrada.
+      return estado.suaVez && m.autoria.decidido_por === REGRA_VOLTAS_SEM_NOVIDADE ? `<p class="pergunta-estado vencida">${esc(rodapeDaFechada(m))}</p>` : "";
   }
 }
+
+/** O rodapé da pergunta das voltas fechada: "Fechada sem resposta", e o complemento só quando a cadeia é de rotina. */
+function rodapeDaFechada(m: Mensagem): string {
+  const daRotina = m.origemTurno === "rotina" || m.raiz?.origem === "rotina";
+  return daRotina ? "Fechada sem resposta · a rotina segue na próxima janela" : "Fechada sem resposta";
+}
+
+/** A regra que marca o balão da pergunta das voltas sem novidade (src/contracts/pedido.ts; a web não importa valores de src/). */
+const REGRA_VOLTAS_SEM_NOVIDADE = "regra:voltas_sem_novidade";
 
 /** Em cima da mensagem que respondeu a uma pergunta: a pessoa vê a qual pergunta ela se liga. */
 export function rotuloDaResposta(m: Mensagem): string {
@@ -188,7 +202,7 @@ function renderEspera(perguntas: readonly ItemPergunta[], outros: readonly ItemD
       const slug = i.itensAprovacao[0]?.destino.conector;
       const app = slug ? estado.conectores.find((c) => c.slug === slug)?.nome ?? slug : "";
       const prazo = d.tipo === "aprovacao" || d.tipo === "acesso" ? `recusa automática ${emQuanto(vence)}` : `vence ${emQuanto(vence)}`;
-      const ver = botao("ver-decisao", d.tipo === "aprovacao" ? "Ver aprovação" : "Ver pedido", { classe: "link sm", id: d.id });
+      const ver = botao("ver-decisao", d.tipo === "aprovacao" || d.tipo === "gate_rotina" ? "Ver aprovação" : "Ver pedido", { classe: "link sm", id: d.id });
       return { em: Date.parse(d.criadoEm), html: `<span class="tag tag-ambar">${esc(ROTULO_DO_PEDIDO[d.tipo] ?? "decisão")}</span><span class="esp-txt">${esc(d.frase)}<small>${esc([app, prazo].filter(Boolean).join(" · "))}</small></span>${ver}` };
     }),
   ].sort((a, b) => a.em - b.em);

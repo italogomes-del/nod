@@ -1,10 +1,12 @@
 import type { RotinaDto } from "../contracts/api.ts";
 import type { Concessao } from "../contracts/concessao.ts";
-import type { ExecucaoRotina } from "../contracts/rotina.ts";
+import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
+import type { Repos } from "../repositories/tipos.ts";
+import { TIPOS_GATE_ROTINA } from "../contracts/pedido.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
-import { bloqueioDaRotina } from "./pre-voo-rotina.ts";
+import { bloqueioDaRotina, pendenciaAbertaDaRotina } from "./pre-voo-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -21,14 +23,28 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
   const dtos: RotinaDto[] = [];
   for (const rotina of rotinas) {
     let bloqueio: RotinaDto["bloqueio"] = null;
+    let perguntaPendente: RotinaDto["perguntaPendente"];
     if (minhas.includes(rotina)) {
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
+      perguntaPendente = await perguntaQueParou(deps.repos, rotina);
     }
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana) });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
+
+/**
+ * definido em 2026-10-15 (NOD-270): a rotina cuja última janela saiu 'bloqueada'/'aguardando_resposta' está parada por
+ * uma pergunta (ou aprovação) que ainda espera — a mais antiga que segura a janela, e desde quando. Só a última execução
+ * conta: se a janela seguinte já rodou, não há parada a mostrar.
+ */
+async function perguntaQueParou(repos: Repos, rotina: Rotina): Promise<RotinaDto["perguntaPendente"]> {
+  const [ultima] = await repos.rotinaExecucoes.listar(rotina.id, 1);
+  if (ultima?.desfecho !== "bloqueada" || ultima.motivo !== "aguardando_resposta") return undefined;
+  const d = await pendenciaAbertaDaRotina(repos, rotina);
+  return d ? { decisaoId: d.id, desde: Date.parse(d.criadoEm), tipo: TIPOS_GATE_ROTINA.has(d.tipo) ? "aprovacao" : "pergunta" } : undefined;
+}
 
 /** Um cron que o parser não aceita (linha antiga, gravada à mão) não derruba a lista: fica o cron cru. */
 function resumoDe(cron: string, fusoIana: string): string {

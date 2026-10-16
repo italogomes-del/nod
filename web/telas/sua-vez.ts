@@ -74,6 +74,10 @@ const REGRA_HUMANA: Readonly<Record<string, string>> = {
   "regra:modo_total": "aprovado sozinho: sem aprovações",
   // definido em 2026-09-24 (emenda da ADR-044, migração 0026): a sobra de um pedido de rotina repetido.
   "regra:pedido_de_acesso_unico": "fechado: o mesmo acesso já estava pedido",
+  // definido em 2026-10-16 (review de design do #342, NOD-270): a janela seguinte fechou a pergunta das voltas, e o card
+  // de acesso venceu com o acesso já dado por outro caminho.
+  "regra:janela_seguinte": "fechada: a janela seguinte já rodou",
+  "regra:acesso_ja_concedido": "fechado: o acesso já tinha sido dado",
 };
 
 /**

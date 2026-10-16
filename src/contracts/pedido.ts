@@ -9,6 +9,31 @@ export const TIPOS_PEDIDO_A_PESSOA = ["pergunta", "falta_de_dado", "permissao"] 
 export type TipoPedidoAPessoa = (typeof TIPOS_PEDIDO_A_PESSOA)[number];
 
 /**
+ * definido em 2026-09-16: o gate de uma rotina é QUALQUER pedido de aprovação pendente ligado ao turno
+ * dela — tipo 'gate_rotina' (rótulo do plano) ou 'aprovacao' (o que pedirAprovacao da L5 cria hoje).
+ * Assim o caminho real (rotina roda → pedir_aprovacao → ninguém responde) chega a passou_em_branco
+ * sem depender de a L5 trocar o rótulo; a ligação é o turno_id, dado tipado, nunca a frase.
+ * revisto em 2026-10-15 (NOD-255): mora no contrato para o pré-voo ler sem importar disparar-rotina.ts (ciclo).
+ */
+export const TIPOS_GATE_ROTINA: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>(["gate_rotina", "aprovacao"]);
+
+/**
+ * definido em 2026-09-24 (fio da pergunta, emenda da ADR-045): o que SEGURA o desfecho da execução — o
+ * gate e as perguntas de pedir_a_pessoa. A execução que pergunta não "executou" ao encerrar o turno da
+ * pergunta: todas as rodadas do fio são da mesma janela, e o desfecho é do fio inteiro — 'executou' quando
+ * a retomada segue sem perguntar de novo, 'passou_em_branco' quando a pergunta é deixada pra lá ou vence.
+ * revisto em 2026-10-15 (NOD-255): também é o que segura a janela SEGUINTE no pré-voo do agendador — antes só as
+ * perguntas seguravam, e o card de aprovação aberto deixava a rotina abrir outro igual (a ação saía em dobro).
+ */
+export const TIPOS_QUE_SEGURAM_A_EXECUCAO: ReadonlySet<TipoDecisao> = new Set<TipoDecisao>([...TIPOS_GATE_ROTINA, ...TIPOS_PEDIDO_A_PESSOA]);
+
+/**
+ * A regra que fala no lugar do bot quando as voltas param (ADR-099 §5; a autoria da pergunta e da mensagem diz que foi
+ * ela). revisto em 2026-10-15 (NOD-270): no contrato porque o pré-voo a reconhece — essa pergunta não segura o cron.
+ */
+export const REGRA_VOLTAS_SEM_NOVIDADE = "regra:voltas_sem_novidade" as const;
+
+/**
  * definido em 2026-09-24 (emenda da ADR-045): respostas prontas viram botões de um toque debaixo da
  * pergunta. Quatro cabem numa linha do balão; 60 caracteres cabem num botão sem quebrar.
  */
