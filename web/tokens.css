@@ -90,6 +90,8 @@
 
   /* Sombra só no que flutua (menus, popovers, gavetas, diálogos); cards separam por line */
   --shadow-pop: 0 6px 20px rgba(24, 24, 27, .10), 0 1px 2px rgba(24, 24, 27, .06);
+  /* O campo da conversa (plano "tela limpa", 2026-10-16): borda fina e uma sombra mais leve que a do que flutua */
+  --shadow-composer: 0 6px 20px rgba(24, 24, 27, .07), 0 1px 2px rgba(24, 24, 27, .05);
   /* Extensões do app, fora do tokens.json: o botão das chaves e do segmentado, e o fundo atrás de diálogos */
   --shadow-knob: 0 1px 2px rgba(24, 24, 27, .22);
   --backdrop: rgba(24, 24, 27, .28);
@@ -122,6 +124,7 @@
     --success-soft: #132a1e;
     --on-status: #131315;
     --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .04);
+    --shadow-composer: 0 6px 20px rgba(0, 0, 0, .32), 0 1px 2px rgba(0, 0, 0, .4);
     --shadow-knob: 0 1px 2px rgba(0, 0, 0, .5);
     --backdrop: rgba(0, 0, 0, .5);
   }
@@ -154,6 +157,7 @@
   --success-soft: #132a1e;
   --on-status: #131315;
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .04);
+  --shadow-composer: 0 6px 20px rgba(0, 0, 0, .32), 0 1px 2px rgba(0, 0, 0, .4);
   --shadow-knob: 0 1px 2px rgba(0, 0, 0, .5);
   --backdrop: rgba(0, 0, 0, .5);
 }

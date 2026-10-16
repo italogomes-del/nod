@@ -6,7 +6,8 @@ import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
 import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
-import { VELOCIDADES, VOZES } from "./ligacao.ts";
+import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
+import { renderSeloModoDev } from "./modo-dev.ts";
 import { caminhoDaPastaDoBot } from "../lib/pasta-do-bot.ts";
 import { mostraCaminhoDaPasta } from "../lib/capacidades.ts";
 import { interpolar } from "../lib/relogio.ts";
@@ -83,7 +84,10 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
 
   // ADR-083 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
   const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
+  // Plano "tela limpa" (2026-10-16, T2): o Ligar saiu do topo da conversa e é o primeiro atalho.
+  const ligar = htmlLinhaLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[a.id], ligacao: estado.ligacaoViva }), a.nome);
   const atalhos = `<section class="gv-secao"><h3>Atalhos</h3><div class="gv-cartao">
+      ${ligar}
       ${linha(`${ICONE.brilho}<span class="gv-linha-txt">Planejar uma tarefa</span>`, 'data-act="preencher-prompt" data-texto="Me ajude a planejar esta tarefa: "')}
       ${linha(`${ICONE.balao}<span class="gv-linha-txt">Pedir ajuda a outro bot</span>`, 'data-act="preencher-prompt" data-texto="Consulte o colega mais adequado da minha equipe para me ajudar com: "')}
       ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, irPara("memoria"), ICONE.seta)}
@@ -132,7 +136,9 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
   const o = estado.onboarding;
   const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
-  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + ambienteHtml;
+  // Plano "tela limpa" (2026-10-16, T2): o selo MODO DEV, o "Hoje com" e as "Linhas abertas" saíram do topo da conversa.
+  const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
+  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + dev + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------

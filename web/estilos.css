@@ -130,7 +130,9 @@ body.ocupado { cursor: progress; }
 /* Revisão: `.aviso-compacto` (mais abaixo, mesma especificidade) ganhava; as duas classes juntas vencem. */
 .aviso-compacto.aviso-reconectando { margin: 10px 14px 0; }
 /* Aviso de estado (componente Notice do design system, web/lib/aviso-estado.ts; definido em 2026-10-04): o que aconteceu,
-   o motivo e o botão que resolve. O botão primário dentro do aviso usa a cor do estado. */
+   o motivo e o botão que resolve. O botão primário dentro do aviso usa a cor do estado.
+   Revisto em 2026-10-16 (plano "tela limpa", T7; pedido do Marlon: "cards bege muito feios"): o alerta é um cartão branco
+   com borda fina; o âmbar fica só no ícone e o botão que resolve é o primário de sempre (--action). */
 .aviso-estado { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 12px; border: 1px solid; border-radius: 10px;
   font-size: 13px; line-height: 18px; margin: 4px 0 14px; }
 .aviso-estado-ic { flex: none; align-self: flex-start; margin-top: 1px; }
@@ -138,11 +140,12 @@ body.ocupado { cursor: progress; }
 .aviso-estado-txt b { font-weight: 600; }
 .aviso-estado .bt { flex: none; }
 .tom-erro { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
-.tom-alerta { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
+.tom-alerta { background: var(--surface); border-color: var(--line); color: var(--ink); }
+.tom-alerta .aviso-estado-ic { color: var(--warning); }
 .tom-ok { background: var(--success-soft); border-color: transparent; color: var(--success); }
 .tom-info { background: var(--surface-raised); border-color: var(--line); color: var(--ink); }
 .tom-erro .bt.pri { background: var(--danger); border-color: var(--danger); color: var(--on-status); }
-.tom-alerta .bt.pri { background: var(--warning); border-color: var(--warning); color: var(--on-status); }
+.tom-alerta .bt.pri { background: var(--action); border-color: var(--action); color: var(--on-action); }
 .tom-ok .bt.pri { background: var(--success); border-color: var(--success); color: var(--on-status); }
 .aviso-estado-detalhes { margin-top: 4px; color: var(--ink-2); font-size: 12px; }
 .aviso-estado-detalhes > summary { cursor: pointer; width: fit-content; color: var(--ink-3); }

@@ -69,7 +69,8 @@ function duasRodadas() {
   const fio = (estado: FioDaPergunta["estado"]): FioDaPergunta => ({ id: "d1", agenteId: "a", estado, rodada: 2, decisoes: ["d1", "d2"], mensagens: ["p1", "r1", "e1", "p2"] });
   return { mensagens, fio };
 }
-const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "Enter envia · Shift+Enter quebra linha" };
+// Plano "tela limpa" (2026-10-16, T5): a nota padrão do campo é vazia; só o modo resposta tem nota.
+const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "" };
 
 describe("a faixa acima do campo", () => {
   it("da 2ª rodada em diante: '{agente} ainda está esperando sua resposta · 2ª rodada · vence em …'", () => {

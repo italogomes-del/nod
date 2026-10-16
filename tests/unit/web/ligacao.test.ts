@@ -6,7 +6,8 @@ import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer
 import { DetectorDeFala, dePcm16, Ganho, paraPcm16, QUADROS_PARA_CALAR, Reamostrador } from "../../../web/lib/ligacao-audio.ts";
 import { AMOSTRAS_POR_QUADRO, fechamentoDefinitivo, lerMsgServidor, lerQuadroVoz, quadroMicrofone, rotaPeloNome } from "../../../web/lib/ligacao-protocolo.ts";
 import { duracaoRelogio } from "../../../web/lib/relogio.ts";
-import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
+import { mostraPararNoCampo, renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
+import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 import { avisoDoEstadoLocal, botaoLigar, comLegenda, htmlCardJanela, partesDaLigacao, renderAvaliacao, renderLinhaLigacao, renderTranscricao, textoFase, textoFim, type EstadoTelaLigacao } from "../../../web/telas/ligacao.ts";
 
 /** Modo ligação na web (definido em 2026-10-04, ADR-071): protocolo, áudio, a tela e a linha "Chat de voz". */
@@ -275,13 +276,18 @@ describe("a linha 'Chat de voz' na conversa", () => {
 });
 
 describe("cabeçalho e turnos da ligação", () => {
-  it("o cabeçalho mostra Ligar com a disponibilidade lida e 'Em ligação' durante a ligação", () => {
-    const e = { ...cenario(), disponibilidadeLigacao: { a: { disponivel: true as const, consentimentoNecessario: false, versaoConsentimento: 1, provedor: "google" } } };
-    expect(renderCabecalhoConversa(e, "a")).toContain('data-act="iniciar-ligacao"');
-    const emLigacao = { ...e, ligacaoViva: { ligacaoId: "l1", agenteId: "a", conversaId: C, local: true } };
-    const html = renderCabecalhoConversa(emLigacao, "a");
-    expect(html).toContain("Em ligação");
+  // Plano "tela limpa" (2026-10-16, T2): o Ligar saiu do topo e é o primeiro atalho da gaveta do bot.
+  it("a gaveta mostra Ligar com a disponibilidade lida e 'Em ligação' durante a ligação; o topo não tem mais o botão", () => {
+    const e: Estado = { ...cenario(), tela: { tipo: "conversa", conversaId: C, agenteId: "a" }, disponibilidadeLigacao: { a: { disponivel: true as const, consentimentoNecessario: false, versaoConsentimento: 1, provedor: "google" } } };
+    expect(renderDetalhes(e)).toContain('data-act="iniciar-ligacao"');
+    expect(renderDetalhes(e)).toContain("Ligar para Nina");
+    expect(renderCabecalhoConversa(e, "a")).not.toContain("iniciar-ligacao");
+    const emLigacao: Estado = { ...e, ligacaoViva: { ligacaoId: "l1", agenteId: "a", conversaId: C, local: true } };
+    const html = renderDetalhes(emLigacao);
+    expect(html).toContain('data-act="ligacao-expandir"');
     expect(html).not.toContain("iniciar-ligacao");
+    // A pílula do topo diz que ele está em ligação.
+    expect(renderCabecalhoConversa(emLigacao, "a")).toContain("Em ligação");
   });
 
   it("o turno do cérebro da ligação não vira 'trabalhando', fila nem Parar", () => {
@@ -290,7 +296,8 @@ describe("cabeçalho e turnos da ligação", () => {
     expect(reduzir(e, frame({ modo: "ligacao" })).turnosVivos).toEqual({});
     expect(reduzir(e, frame({ origem: "ligacao" })).turnosVivos).toEqual({});
     expect(Object.keys(reduzir(e, frame({})).turnosVivos)).toEqual(["t1"]);
-    expect(renderCabecalhoConversa(reduzir(e, frame({ modo: "ligacao" })), "a")).not.toContain("parar-conversa");
+    expect(mostraPararNoCampo(reduzir(e, frame({ modo: "ligacao" })), "a")).toBe(false);
+    expect(mostraPararNoCampo(reduzir(e, frame({})), "a")).toBe(true);
   });
 
   it("o frame ligacao.mudou relê a conversa e a ligação viva", () => {

@@ -4,7 +4,7 @@ import type { ConversaDto } from "../../../src/contracts/api.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { blocosAoVivo, blocosDoHistorico, renderCabecalhoConversa } from "../../../web/telas/conversa.ts";
+import { blocosAoVivo, blocosDoHistorico, mostraPararNoCampo } from "../../../web/telas/conversa.ts";
 import { horariosDaRotina, planejarLinhas } from "../../../web/telas/linhas-do-chat.ts";
 
 /**
@@ -216,10 +216,11 @@ describe("tasks na conversa (#195)", () => {
     expect(blocosAoVivo(c, semMarca).map((b) => b.chave)).toEqual([]);
   });
 
-  it("o Parar do cabeçalho aparece com task aberta mesmo sem turno da conversa", () => {
+  // Plano "tela limpa" (2026-10-16, E11): o Parar saiu do cabeçalho e é o Enviar do campo que vira Parar.
+  it("o Parar do campo aparece com task aberta mesmo sem turno da conversa", () => {
     const { e } = cenario([], { trabalhos: { trabalhos: [trabalho("tb-1")], pressao: null, memoriaTotalMb: null } });
-    expect(renderCabecalhoConversa(e, "clarice")).toContain('data-act="parar-conversa"');
-    expect(renderCabecalhoConversa({ ...e, trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null } }, "clarice")).not.toContain('data-act="parar-conversa"');
+    expect(mostraPararNoCampo(e, "clarice")).toBe(true);
+    expect(mostraPararNoCampo({ ...e, trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null } }, "clarice")).toBe(false);
   });
 });
 
