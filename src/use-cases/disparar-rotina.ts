@@ -381,7 +381,7 @@ export async function registrarRecusaDaRotina(deps: Pick<Deps, "repos" | "escopo
  * O desfecho da janela quando a máquina entrega o turno da rotina (ou da retomada dela) — chamado pela ponte depois de
  * assentar (compor.ts, depoisDeAssentar), na mesma tx. Turno que não é de rotina → nada.
  * - definido em 2026-09-24 (ADR-045): turno derrubado pela máquina já registrou a execução como 'interrompida'
- *   (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela.
+ *   (interromper-por-maquina.ts); registrar 'falhou' aqui sobrescreveria a janela. NOD-245: idem `reinicio_servidor`.
  * - definido em 2026-09-21: concluído + `sem_novidade` chamado = execução completa que não rendeu notícia ('sem_novidade',
  *   silencioso); concluído = 'executou'; o resto = 'falhou' com o motivo da falha.
  * - NOD-251 (definido em 2026-10-15): "Parar" no meio da rotina não é erro técnico — a janela fica 'interrompida'
@@ -389,7 +389,8 @@ export async function registrarRecusaDaRotina(deps: Pick<Deps, "repos" | "escopo
  */
 export async function registrarDesfechoDaEntrega(deps: Pick<Deps, "repos" | "escopo" | "agora">, turno: Turno): Promise<RuntimeEvent[]> {
   if (turno.origem !== "rotina" && turno.origem !== "retomada") return [];
-  if (turno.motivoInterrupcao === "maquina_sem_contato") return [];
+  // NOD-245: o mesmo para `reinicio_servidor` (a entrega do turno adotado que o deploy derrubou).
+  if (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") return [];
   if (turno.estado === "interrompido" && turno.motivoInterrupcao === "parado_pela_pessoa") return registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa");
   const silencioso = turno.estado === "concluido" && turno.semNovidadeMotivo !== null;
   const desfecho = silencioso ? "sem_novidade" : turno.estado === "concluido" ? "executou" : "falhou";

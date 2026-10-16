@@ -158,20 +158,24 @@ export function criarPonteHttpServidor(d: {
   /**
    * NOD-214: o turno que esta máquina roda e o processo não conhece (despachado antes do reinício). Só com o token do
    * turno no header — a chave de máquina sozinha nunca devolve um plano; a ponte confere o resto no banco.
+   * revisto em 2026-10-15 (NOD-245): a exceção (banco fora, impasse) é `erro`, separada da recusa real — quem chama
+   * responde 503, que a máquina lê como transitório e repete; antes virava `{ativo:false}` (matava o CLI) ou 403 na entrega.
    */
-  async function adocao(ctx: Ctx, c: Conexao, turnoId: string): Promise<DesfechoAdocao | null> {
+  async function adocao(ctx: Ctx, c: Conexao, turnoId: string, para: "rodar" | "assentar"): Promise<DesfechoAdocao | { tipo: "erro" }> {
     const token = ctx.req.headers["x-nod-token-turno"];
-    if (typeof token !== "string" || token === "" || token.length > 512 || !c.ponte.adotar) return null;
+    if (typeof token !== "string" || token === "" || token.length > 512 || !c.ponte.adotar) return { tipo: "recusado" };
     try {
-      return await c.ponte.adotar({ pessoaId: ctx.escopo.pessoaId, turnoId, machineId: ctx.params.chaveId!, token });
+      return await c.ponte.adotar({ pessoaId: ctx.escopo.pessoaId, turnoId, machineId: ctx.params.chaveId!, token, para });
     } catch (e) {
-      log("aviso", "adocao_falhou", { turno_id: turnoId, erro: e instanceof Error ? e.name : "desconhecido" });
-      return null;
+      log("aviso", "adocao_falhou", { turno_id: turnoId, para, erro: e instanceof Error ? e.name : "desconhecido" });
+      return { tipo: "erro" };
     }
   }
-  async function adotado(ctx: Ctx, c: Conexao, turnoId: string): Promise<PlanoTurno | null> {
-    const r = await adocao(ctx, c, turnoId);
-    if (r?.tipo !== "adotado") return null;
+  /** O plano do turno adotado para RODAR; `erro` = a adoção falhou por exceção (a rota responde 503). */
+  async function adotado(ctx: Ctx, c: Conexao, turnoId: string): Promise<PlanoTurno | null | "erro"> {
+    const r = await adocao(ctx, c, turnoId, "rodar");
+    if (r.tipo === "erro") return "erro";
+    if (r.tipo !== "adotado") return null;
     c.planos.set(turnoId, r.plano);
     return r.plano;
   }
@@ -311,6 +315,7 @@ export function criarPonteHttpServidor(d: {
       exigir(b.eventos === undefined || (Array.isArray(b.eventos) && b.eventos.length === 0));
       const s = sinais(b.sinais);
       const plano = c.planos.get(turnoId) ?? await adotado(ctx, c, turnoId);
+      if (plano === "erro") { ctx.json(503, { codigo: "adocao_indisponivel" }); return; }
       if (!plano) { ctx.json(200, { ativo: false, versaoMinimaApp: VERSAO_MINIMA_APP, motivo: "sem_plano" }); return; }
       c.ultimo = d.agora();
       const sessaoCli = d.descartarSessao ? undefined : sessaoDaRenovacao(b.sessaoCli);
@@ -340,9 +345,11 @@ export function criarPonteHttpServidor(d: {
       // responde `ja_assentado`, que o app lê como sucesso.
       let jaAssentado = false;
       if (!c.planos.has(e.turnoId)) {
-        const r = await adocao(ctx, c, e.turnoId);
-        if (r?.tipo === "adotado") c.planos.set(e.turnoId, r.plano);
-        else if (r?.tipo === "ja_assentado") jaAssentado = true;
+        // NOD-245/NOD-252: adota para ASSENTAR — sem renovar o lease e aceitando o Parar pendente; exceção dá 503.
+        const r = await adocao(ctx, c, e.turnoId, "assentar");
+        if (r.tipo === "erro") { ctx.json(503, { codigo: "adocao_indisponivel" }); return; }
+        if (r.tipo === "adotado") c.planos.set(e.turnoId, r.plano);
+        else if (r.tipo === "ja_assentado") jaAssentado = true;
         else throw new ErroDeDominio("nao_permitido");
       }
       c.ultimo = d.agora();

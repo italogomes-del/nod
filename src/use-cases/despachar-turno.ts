@@ -12,6 +12,7 @@ import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } fr
 import { esperaDoAutomatico, iasParaOAutomatico } from "../domain/inteligencia.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
+import { registrarInterrupcaoPorParada } from "./interrupcao-por-parada.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
@@ -125,10 +126,11 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
     const interrompido = await deps.repos.turnos.interromper(turno.id, "parado_pela_pessoa");
     const autoria = autoriaPessoa(deps.escopo, executor);
     // NOD-251: a janela da rotina parada antes de rodar fica no histórico como 'interrompida' (Parar), não some.
-    const daRotina = interrompido ? await registrarRecusaDaRotina(deps, turno, "parado_pela_pessoa") : [];
+    // NOD-252: e a delegação barrada pela parada avisa quem pediu — só quem interrompeu de fato registra.
+    const daParada = interrompido ? await registrarInterrupcaoPorParada(deps, { turnoId: turno.id }) : [];
     return {
       data: { plano: null, turno: interrompido ?? turno, motivo: "parada_ativa" },
-      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...daRotina, ...(await sincronizarDoTurno(deps, turno))],
+      events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...daParada, ...(await sincronizarDoTurno(deps, turno))],
     };
   }
 

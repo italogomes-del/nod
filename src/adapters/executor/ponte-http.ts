@@ -17,8 +17,10 @@ export class FalhaPonte extends Error {
    * `acao_recusada` (revisão do PR #291): 403 `nao_permitido` de uma rota de máquina — a chave vale (chave inválida é 401
    * no roteador), mas o servidor recusa ESTA ação (o entregar de um turno que o processo novo não conhece). Não é
    * `chave_invalida`: essa faz o motor e o app pararem todos os turnos.
+   * `entrada_invalida` (NOD-245): 400 — o servidor recusou o corpo. É definitivo: repetir o mesmo corpo dá o mesmo 400 (antes
+   * virava `servidor_fora` e a entrega insistia por 120 s).
    */
-  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida" | "rota_ausente" | "ja_assentado" | "acao_recusada";
+  readonly codigo: "servidor_fora" | "chave_invalida" | "atualize_app" | "reconectar" | "resposta_invalida" | "rota_ausente" | "ja_assentado" | "acao_recusada" | "entrada_invalida";
   constructor(codigo: FalhaPonte["codigo"]) { super(codigo); this.codigo = codigo; }
 }
 
@@ -60,10 +62,11 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
   const agora = o.relogio ?? Date.now;
   const dormir = o.dormir ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   /**
-   * NOD-214: a última resposta do servidor a cada turno (o puxar que o entregou ou uma renovação respondida). A renovação
-   * sem resposta devolve `indefinido` até `TOLERANCIA_REINICIO_MS` depois dela; daí em diante, `false`.
+   * revisto em 2026-10-15 (NOD-245): quando começou a falha em curso de cada turno — gravado na primeira renovação sem
+   * resposta e apagado a cada resposta boa. A renovação sem resposta devolve `indefinido` até `TOLERANCIA_REINICIO_MS`
+   * depois DELA (antes contava da última resposta boa, e um deploy de 45 s, com a última resposta 25 s antes, matava o CLI).
    */
-  const ultimaResposta = new Map<string, number>();
+  const primeiraFalha = new Map<string, number>();
   let anuncio: AnuncioMaquina | null = null;
   /** Um buffer por turno: com o pool de laços, dois turnos renovam em paralelo e não podem trocar texto. */
   const trechos = new Map<string, TrechoVivo[]>();
@@ -104,6 +107,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
       if (r.status === 426 || (minima && !versaoAceita(o.versao, minima))) throw new FalhaPonte("atualize_app");
       const codigo = r.ok ? undefined : await codigoDoCorpo(r);
       if (codigo === "ja_assentado") throw new FalhaPonte("ja_assentado");
+      if (r.status === 400) throw new FalhaPonte("entrada_invalida");
       if (r.status === 403 && codigo === "nao_permitido") throw new FalhaPonte("acao_recusada");
       if (r.status === 401 || r.status === 403) throw new FalhaPonte("chave_invalida");
       if (r.status === 409) throw new FalhaPonte("reconectar");
@@ -113,8 +117,8 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     } catch (e) {
       const erro = e instanceof FalhaPonte ? e : new FalhaPonte("servidor_fora");
       // O 404 da rota nova num servidor antigo não é falha de conexão: quem pediu decide (nada de aviso na tela).
-      // `ja_assentado` e `acao_recusada` falam do turno, não da conexão: nada de aviso (nem de parar a máquina).
-      if (erro.codigo !== "rota_ausente" && erro.codigo !== "ja_assentado" && erro.codigo !== "acao_recusada") o.aoFalhar?.(erro.codigo);
+      // `ja_assentado`, `acao_recusada` e `entrada_invalida` falam do turno, não da conexão: nada de aviso (nem de parar a máquina).
+      if (erro.codigo !== "rota_ausente" && erro.codigo !== "ja_assentado" && erro.codigo !== "acao_recusada" && erro.codigo !== "entrada_invalida") o.aoFalhar?.(erro.codigo);
       throw erro;
     } finally { clearTimeout(timer); ativos.delete(ctrl); }
   }
@@ -153,7 +157,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     async puxar(_pessoaId, maquina) {
       try {
         const plano = (await chamar<{ plano: PlanoTurno | null }>("puxar", maquina ? { memoria: maquina } : {})).plano;
-        if (plano) { emAndamento.add(plano.turnoId); ultimaResposta.set(plano.turnoId, agora()); if (plano.tokenDeTurno) tokens.set(plano.turnoId, plano.tokenDeTurno); }
+        if (plano) { emAndamento.add(plano.turnoId); primeiraFalha.delete(plano.turnoId); if (plano.tokenDeTurno) tokens.set(plano.turnoId, plano.tokenDeTurno); }
         return plano;
       }
       catch (e) {
@@ -164,7 +168,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
     },
     /**
      * revisto em 2026-10-12 (NOD-214): a renovação sem resposta não interrompe mais o CLI na hora. Servidor fora, 5xx ou
-     * 409 devolvem `{ativo:"indefinido"}` (o laço segue) até `TOLERANCIA_REINICIO_MS` depois da última resposta; daí em
+     * 409 devolvem `{ativo:"indefinido"}` (o laço segue) até `TOLERANCIA_REINICIO_MS` depois da primeira falha (NOD-245); daí em
      * diante, `false`. No 409 (o servidor não conhece esta conexão: reiniciou) reconecta e SÓ ENTÃO renova — a renovação
      * antes da reconexão voltaria 409 de novo. 401/403 (chave revogada), 403 `nao_permitido` (turno recusado) e 426 (app velho) são resposta definitiva: `false`.
      */
@@ -180,13 +184,13 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
           await reconectar(anuncio);
           r = await pedir();
         }
-        ultimaResposta.set(p.turnoId, agora());
+        primeiraFalha.delete(p.turnoId);
         return r;
       } catch (e) {
         const codigo = e instanceof FalhaPonte ? e.codigo : "servidor_fora";
         if (codigo === "chave_invalida" || codigo === "atualize_app" || codigo === "acao_recusada") return { ativo: false, versaoMinimaApp: o.versao };
-        const desde = ultimaResposta.get(p.turnoId);
-        if (desde === undefined) ultimaResposta.set(p.turnoId, agora());
+        const desde = primeiraFalha.get(p.turnoId);
+        if (desde === undefined) primeiraFalha.set(p.turnoId, agora());
         else if (agora() - desde >= TOLERANCIA_REINICIO_MS) return { ativo: false, versaoMinimaApp: o.versao };
         return { ativo: "indefinido", versaoMinimaApp: o.versao };
       }
@@ -195,6 +199,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
      * revisto em 2026-10-12 (NOD-214): servidor fora, 5xx e 409 (reconecta antes da próxima) tentam de novo com espera de
      * 1 s, 2 s, 4 s… até 10 s, por até `ENTREGA_PERSISTENCIA_MS` (120 s) — o deploy reinicia o servidor em ~10 s, e as 3
      * tentativas em ~2 s de antes perdiam a entrega. `ja_assentado` é sucesso: o servidor já tem o desfecho do turno.
+     * `entrada_invalida` (400, NOD-245) não é transitório: falha na primeira tentativa.
      */
     async entregar(e) {
       trechos.delete(e.turnoId);
@@ -219,7 +224,7 @@ export function criarPonteHttp(o: { url: string; chave: string; versao: string; 
             if (erro.codigo === "reconectar" && anuncio) await reconectar(anuncio).catch(() => undefined);
           }
         }
-      } finally { emAndamento.delete(e.turnoId); ultimaResposta.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
+      } finally { emAndamento.delete(e.turnoId); primeiraFalha.delete(e.turnoId); tokens.delete(e.turnoId); } // entregue ou abandonado: o turno deixou de rodar neste Mac.
     },
     async desconectar() { await chamar("desconectar", {}); },
     /**

@@ -161,7 +161,8 @@ async function linhaFrentesTerminadas(deps: DepsFecho, p: { lote: LoteDeFrentes;
  */
 export async function refazerRetornoDoLote(deps: DepsFecho, turno: Turno): Promise<RuntimeEvent[]> {
   // A queda da máquina (maquina_sem_contato) já tem o caminho dela (interromper-por-maquina.ts): refazer aqui duplicaria.
-  if (turno.decididoPor !== RETORNO_DO_LOTE || turno.estado !== "interrompido" || turno.pararSolicitadoEm !== null || turno.motivoInterrupcao === "maquina_sem_contato") return [];
+  // NOD-245: idem `reinicio_servidor` — a entrega do turno adotado que o deploy derrubou segue a mesma regra de queda.
+  if (turno.decididoPor !== RETORNO_DO_LOTE || turno.estado !== "interrompido" || turno.pararSolicitadoEm !== null || turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") return [];
   // A volta da cota de um retorno passa o lote para ela (aposLimiteNoFundo): o lote aponta sempre para o último.
   const raiz = turno;
   const lote = await deps.repos.frentes.loteDoRetorno(raiz.id);

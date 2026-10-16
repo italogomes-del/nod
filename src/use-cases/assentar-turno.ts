@@ -14,7 +14,7 @@ import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano,
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { iaDaNegacao } from "../domain/harness.ts";
 import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
-import { ultimoSinalDoTurno } from "../domain/incidente.ts";
+import { ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
@@ -67,7 +67,11 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Com o bot preso a uma máquina (a dele ou a padrão da pessoa, ADR-090), a troca só vai para uma IA pronta NELA — a de
  * outra máquina nunca pegaria o turno.
  */
-export type EntradaAssentarTurno = Entrega & { executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[]; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> };
+/**
+ * `adotada` (definido em 2026-10-15, NOD-245): o turno chegou a esta ponte por adoção (o processo que o despachou caiu num
+ * deploy). Quem sabe é a ponte; a máquina nunca diz.
+ */
+export type EntradaAssentarTurno = Entrega & { adotada?: boolean; executor?: Executor; harness?: IdHarness | null; outraIa?: IdHarness | null; bifurcou?: boolean; maquinaBifurca?: boolean; prontosDaPessoa?: readonly IdHarness[]; prontosPorMaquina?: Readonly<Record<string, readonly IdHarness[]>> };
 export type SaidaAssentarTurno = {
   turno: Turno | null;
   mensagem: Mensagem | null;
@@ -153,11 +157,15 @@ type Desfecho = { estado: "concluido" | "interrompido"; motivoInterrupcao: Motiv
  * — maquina_sem_contato, o mesmo desfecho do varredor. Sucesso depois do lease vencido é trabalho
  * TERMINADO e assenta como concluído.
  */
-export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leaseAte">, resultado: Entrega["resultado"], agora: number): Desfecho {
+export function desfechoDaEntrega(turno: Pick<Turno, "pararSolicitadoEm" | "leaseAte">, resultado: Entrega["resultado"], agora: number, o: { adotada?: boolean } = {}): Desfecho {
   if (resultado.desfecho === "sucesso") return { estado: "concluido", motivoInterrupcao: null, motivoFalha: null };
   // definido em 2026-10-05: a conta da IA não serviu — o mesmo desfecho de quando o inventário já barra o despacho
   // (despachar-turno.ts, recusarPorExecutor): nenhum trabalho começou.
   if (resultado.causaSemIa) return { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha: "nao_autenticado" };
+  // definido em 2026-10-15 (NOD-245): a entrega de um turno ADOTADO (o processo que o despachou caiu num deploy),
+  // interrompida sem motivo e sem Parar, é o CLI que a máquina matou porque o servidor não respondia — quem derrubou o
+  // turno foi o reinício, não o trabalho: `reinicio_servidor`, com card Retomar (antes, `trabalho_incompleto` sem Retomar).
+  if (o.adotada === true && resultado.desfecho === "interrompido" && !resultado.motivoInterrupcao && turno.pararSolicitadoEm === null) return { estado: "interrompido", motivoInterrupcao: "reinicio_servidor", motivoFalha: resultado.motivoFalha ?? null };
   if (turno.pararSolicitadoEm === null && turno.leaseAte !== null && turno.leaseAte < agora) return { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", motivoFalha: resultado.motivoFalha ?? null };
   // definido em 2026-09-18: quem produziu saída e não concluiu NÃO é 'sem_progresso' — o rótulo
   // mentia num turno que tinha lido arquivos e escrito no chat antes de acabar. producedOutput é o
@@ -192,18 +200,20 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // última falhou) — a entrega as confirma ANTES de assentar, senão viravam turno próprio e a resposta saía duas vezes.
   // Com a linha do turno já travada (a ordem de sempre: turno, depois os recados, depois o trabalho).
   const confirmadas = entrega.mensagensEntregues?.length && !tardia ? await confirmarNaSessao(deps, { turnoId: turno.id, executor, ids: entrega.mensagensEntregues }) : null;
-  const desfecho = desfechoDaEntrega(turno, resultado, agora);
+  const desfecho = desfechoDaEntrega(turno, resultado, agora, { adotada: entrega.adotada === true });
   // NOD-264 (E8, emenda da ADR-045 sobre a ADR-010): o trabalho terminou com sucesso e só a máquina sumiu antes de
   // entregar; sem retomada criada, a entrega promove o turno a `concluido` (a fala entra inteira, não parcial).
   const promoverTardia = tardia && turno.estado === "interrompido" && resultado.desfecho === "sucesso" && !resultado.causaSemIa
     && (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor")
     && !(await deps.repos.turnos.temRetomada(turno.id));
   const interrompido = (tardia && !promoverTardia) || desfecho.estado === "interrompido";
-  // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia).
-  const quedaDaMaquina = !tardia && desfecho.motivoInterrupcao === "maquina_sem_contato";
+  // A máquina caiu (ADR-045): nesta entrega (lease vencido) ou antes dela, pelo varredor (tardia). NOD-245: ou o
+  // servidor reiniciou no meio do turno adotado — a mesma regra de queda, com o motivo dela (sem aviso de queda do Mac).
+  const motivoDaQuedaNaEntrega: MotivoDaQueda | null = tardia ? null : desfecho.motivoInterrupcao === "maquina_sem_contato" || desfecho.motivoInterrupcao === "reinicio_servidor" ? desfecho.motivoInterrupcao : null;
+  const quedaDaMaquina = motivoDaQuedaNaEntrega !== null;
   // Lido AGORA: assentar zera lease_ate, e o último sinal de vida (lease − LEASE_MS) é o começo do aviso.
   const perdidoDesde = ultimoSinalDoTurno(turno, agora);
-  const caiuAntes = tardia && turno.motivoInterrupcao === "maquina_sem_contato" && resultado.desfecho !== "sucesso";
+  const caiuAntes = tardia && (turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") && resultado.desfecho !== "sucesso";
   // definido em 2026-09-24 (ADR-045): rotina derrubada pela máquina não escreve na conversa — nem a
   // fala parcial, que seria um "Vou verificar…" cortado. A execução vai só para o histórico da rotina.
   // Sucesso tardio continua entrando: é trabalho terminado, e o entregável da rotina É a fala.
@@ -407,10 +417,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     const porQueParou = { motivo: desfecho.motivoInterrupcao, motivo_falha: desfecho.motivoFalha, harness: entrega.harness ?? null, ...(resultado.causaSemIa ? { causa_sem_ia: resultado.causaSemIa } : {}) };
     events.push(evento(deps.escopo, { kind: desfecho.estado === "interrompido" ? "turno_interrompido" : "turno_encerrado", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { estado: desfecho.estado, origem: "ligacao", custo_usd: custoUsd, ...porQueParou } }));
     if (mensagem && turno.ligacaoId) await deps.repos.ligacoes.marcarResumida(turno.ligacaoId);
-  } else if (quedaDaMaquina) {
+  } else if (motivoDaQuedaNaEntrega) {
     // A MESMA regra do varredor (interromper-por-maquina.ts): sem a linha 'sistema' e o evento daqui,
     // que dariam à rotina uma mensagem no chat e à conversa duas linhas para a mesma queda.
-    const q = await aposQuedaDaMaquina(deps, assentado, { perdidoDesde });
+    const q = await aposQuedaDaMaquina(deps, assentado, { perdidoDesde, motivo: motivoDaQuedaNaEntrega });
     events.push(...q.events);
   } else if (resultado.causaSemIa && contaDoTurnoId && entrega.harness && (trocou = await aposContaDaListaSemAcesso(deps, { turno, assentado, executor, contaId: contaDoTurnoId, machineId: entrega.machineId, ia: entrega.harness, causa: resultado.causaSemIa, autoria, agora, custoUsd }))) {
     events.push(...trocou);

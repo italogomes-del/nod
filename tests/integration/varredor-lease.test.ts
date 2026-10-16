@@ -219,3 +219,67 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
     });
   });
 });
+
+describeIntegracao("NOD-252: Parar com a máquina fora do ar termina como parada, não como queda", () => {
+  it("conversa: Parar pendente + lease vencido → parado_pela_pessoa, sem Retomar, sem aviso de queda, sem métrica pos_restart", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const maquina = randomUUID();
+      const turnoId = (await executar(deps, despacharTurno, { machineId: maquina, inventario: PRONTO })).data.plano?.turnoId ?? "";
+      // O Mac dorme; a pessoa aperta Parar (o lease congela e vence sem ninguém entregar).
+      await deps.repos.turnos.pedirInterrupcao([turnoId], agora + 1000);
+
+      const metricas = criarMetricas();
+      const r = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 1, { metricas });
+      expect(r.interrompidos).toEqual([turnoId]);
+      expect(r.decisoes).toEqual([]);
+      expect(r.incidenteId ?? null).toBeNull();
+      expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa", leaseAte: null });
+      expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toEqual([]);
+      expect(await deps.repos.incidentes.visiveis(0)).toEqual([]);
+      expect((await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).filter((m) => m.turnoId === turnoId && m.kind === "sistema")).toEqual([]);
+      expect(metricas.ler({ metrica: "pos_restart", desfecho: "perdido", origem: "maquina_sumida", tenant_id: MARLON.tenantId }) ?? 0).toBe(0);
+      const eventos = await trx<{ kind: string; dados: { motivo?: string } }[]>`select kind, dados from events where turno_id = ${turnoId} and kind = 'turno_interrompido' and created_at > ${new Date(agora)}`;
+      expect(eventos.map((e) => e.dados.motivo)).toEqual(["parado_pela_pessoa"]);
+      // Idempotente.
+      expect(await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000)).toEqual({ interrompidos: [], decisoes: [] });
+    });
+  });
+
+  it("Parar e queda real ao mesmo tempo, no modo compartilhado (sem sinal desde antes do boot): o Parar vence", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      await executar(deps, enviarMensagem, { conversaId: criado.conversa.id, texto: "oi", inventario: PRONTO });
+      const turnoId = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data.plano?.turnoId ?? "";
+      await deps.repos.turnos.pedirInterrupcao([turnoId], agora + 1000);
+      const r = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 1, { inicioDoProcesso: agora + 10_000, ultimoContato: () => null });
+      expect(r).toMatchObject({ interrompidos: [turnoId], decisoes: [] });
+      expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ motivoInterrupcao: "parado_pela_pessoa" });
+    });
+  });
+
+  it("rotina: Parar pendente + lease vencido → execução 'interrompida' (parado_pela_pessoa), sem aviso de queda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Taga" });
+      const maquina = randomUUID();
+      const { rotina, turnoId } = await rotinaRodando(deps, criado.conversa.id, criado.agente.id, maquina, agora);
+      await deps.repos.turnos.pedirInterrupcao([turnoId], agora + 1000);
+      const mensagensAntes = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).length;
+
+      const r = await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 1);
+      expect(r).toMatchObject({ interrompidos: [turnoId], decisoes: [] });
+      expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+      const execucoes = await deps.repos.rotinaExecucoes.listar(rotina.id);
+      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["interrompida", "parado_pela_pessoa", turnoId]]);
+      expect(await deps.repos.incidentes.visiveis(0)).toEqual([]);
+      expect(await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).toHaveLength(mensagensAntes);
+    });
+  });
+});

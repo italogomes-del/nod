@@ -112,8 +112,13 @@ export type DepsPonte = {
   fundoLinuxSoVermelha?: boolean;
 };
 
-/** NOD-214: o que a máquina apresenta para o processo novo reconhecer um turno que ela continuou rodando. */
-export type PedidoAdocao = { pessoaId: string; turnoId: string; machineId: string; token: string };
+/**
+ * NOD-214: o que a máquina apresenta para o processo novo reconhecer um turno que ela continuou rodando.
+ * `para` (definido em 2026-10-15, NOD-245/NOD-252): `rodar` (a renovação; padrão) renova o lease e recusa o turno com
+ * Parar pendente — o CLI deve parar; `assentar` (a entrega) só confere token e máquina: não renova o lease (o turno já
+ * acabou no Mac) e aceita o Parar pendente, que o assentamento lê (`desfechoDaEntrega`) e transforma em `parado_pela_pessoa`.
+ */
+export type PedidoAdocao = { pessoaId: string; turnoId: string; machineId: string; token: string; para?: "rodar" | "assentar" };
 /**
  * NOD-214: `adotado` traz o plano (recomposto) para a conexão; `ja_assentado` = o turno desta máquina já foi assentado
  * (a entrega dela é idempotente); `recusado` = nada a adotar (token de outro turno, outra máquina, turno parado).
@@ -195,6 +200,11 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    */
   const vistos = new Map<string, number>();
   /**
+   * NOD-245: os turnos que a ENTREGA adotou (`adotar` com `para: "assentar"`) — o processo que os despachou caiu antes de
+   * eles terminarem. O assentamento lê daqui (`adotada`); sai com a entrega ou com o lease vencido (`esquecerVencidos`).
+   */
+  const adotadosNaEntrega = new Set<string>();
+  /**
    * ADR-085 (revisão do #209): o "uso do Mac" de cada pessoa, lido no máximo a cada USO_VALE_MS e fora da tx do puxar
    * (antes era uma consulta por puxar apertado, dentro da trava da fila; e um erro dela virava "nenhum trabalho").
    */
@@ -221,6 +231,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       vistos.delete(turnoId);
       oferecidas.delete(turnoId);
       despachados.delete(turnoId);
+      adotadosNaEntrega.delete(turnoId);
     }
   }
 
@@ -568,7 +579,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // apagava o escopo mesmo na falha, e a nova tentativa da entrega caía em "entrega sem escopo" — a resposta se perdia.
       const assentar = () => abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
-        const r = await assentarTurno(d, { ...e, executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina: porMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
+        const r = await assentarTurno(d, { ...e, adotada: adotadosNaEntrega.has(e.turnoId), executor, harness: harnessDoTurno, outraIa, prontosDaPessoa, prontosPorMaquina: porMaquina, bifurcou: despachados.get(e.turnoId)?.bifurcou === true, maquinaBifurca: maquinaBifurcaCom(e.machineId, harnessDoTurno) });
         limiteMudou = r.data.limiteMudou === true;
         // definido em 2026-09-21 (ADR-041): o diagnóstico da falha também PERSISTE, não só vira log.
         // A linha acima vai para stdout e some no Electron empacotado; sem isto um relato feito
@@ -603,6 +614,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         }
         // ADR-017 #4 / ADR-045: a entrega que chegou com o lease vencido é um turno perdido pela máquina.
         if (!r.data.tardia && r.data.turno?.motivoInterrupcao === "maquina_sem_contato") registroPadrao.incrementar({ metrica: "pos_restart", desfecho: "perdido", origem: "maquina_sumida", tenant_id: escopo.tenantId });
+        // NOD-245: o turno adotado que o reinício derrubou (a máquina desistiu antes de o servidor voltar).
+        if (!r.data.tardia && r.data.turno?.motivoInterrupcao === "reinicio_servidor") registroPadrao.incrementar({ metrica: "pos_restart", desfecho: "perdido", origem: "restart_servidor", tenant_id: escopo.tenantId });
         const extras = deps.depoisDeAssentar && !r.data.duplicada ? await deps.depoisDeAssentar(d, { entrega: e, saida: r.data }) : [];
         const events = [...(r.events ?? []), ...extras];
         if (events.length) await d.repos.events.gravarComOutbox(events);
@@ -639,6 +652,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       oferecidas.delete(e.turnoId);
       despachados.delete(e.turnoId);
       vistos.delete(e.turnoId);
+      adotadosNaEntrega.delete(e.turnoId);
       deps.services.tokenTurno.revogar(e.turnoId);
       // NOD-200: a captura do turno sai só com o assentar confirmado; na falha fica, como o escopo, para a entrega repetida.
       deps.services.capturas?.esquecer(e.turnoId);
@@ -652,8 +666,12 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
      * mesma tx (atômico contra o varredor; dentro da carência do boot, aceita o lease vencido) e os mapas da ponte são
      * refeitos da credencial: escopo, executor, harness, quando foi despachado, se bifurcou, o modo e as falas gravadas.
      * O turno já assentado desta máquina não é adotado: a entrega dele vira tardia/duplicada (ADR-045), nunca uma recusa.
+     * revisto em 2026-10-15 (NOD-245/NOD-252): `para: "assentar"` (a entrega) não renova o lease nem exige que o turno
+     * siga ativo — com Parar pendente ou lease vencido, a entrega é aceita e o assentamento decide o desfecho (antes, 403).
+     * Uma exceção aqui (banco) é lançada, nunca vira `recusado`: a rota responde 503 e a máquina tenta de novo.
      */
     async adotar(p: PedidoAdocao): Promise<DesfechoAdocao> {
+      const paraAssentar = p.para === "assentar";
       const recusado: DesfechoAdocao = { tipo: "recusado" };
       const escopo = await resolverEscopo(p.pessoaId);
       if (!escopo || !tokens.adotar || !tokens.planoOuRecompor || p.token === "") return recusado;
@@ -666,6 +684,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         if (turno.estado !== "despachando") return null;
         const cred = await repos.turnoCredenciais.buscar(p.turnoId);
         if (!cred || cred.tokenHash.length !== hash.length || !timingSafeEqual(cred.tokenHash, hash)) return null;
+        if (paraAssentar) return { assentado: false as const, cred };
         const r = await repos.turnos.renovarLease(p.turnoId, p.machineId, {}, agora(), { aceitaVencido: dentroDaCarencia() });
         return r.ativo ? { assentado: false as const, cred } : null;
       });
@@ -689,7 +708,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       });
       if (!plano) return recusado;
       if (!despachados.has(p.turnoId)) despachados.set(p.turnoId, { em: cred.despachadoEm, sessaoCli: cred.bifurcou ? null : plano.entrada.sessaoCli, bifurcou: cred.bifurcou, modo: cred.modo, conta: plano.conta?.id ?? null });
-      log("info", "turno_adotado", { turno_id: p.turnoId, machine_id: p.machineId, carencia: dentroDaCarencia() });
+      if (paraAssentar) adotadosNaEntrega.add(p.turnoId);
+      log("info", "turno_adotado", { turno_id: p.turnoId, machine_id: p.machineId, carencia: dentroDaCarencia(), para: paraAssentar ? "assentar" : "rodar" });
       return { tipo: "adotado", plano };
     },
 

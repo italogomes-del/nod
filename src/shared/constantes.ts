@@ -13,6 +13,11 @@ export const RENOVACAO_MS = 30_000;
  */
 export const TOLERANCIA_REINICIO_MS = 60_000;
 /**
+ * definido em 2026-10-15 (NOD-245): depois de uma renovação `indefinido` (servidor fora ou reiniciando), a seguinte sai em
+ * 10 s, não em `RENOVACAO_MS` — o processo novo adota o turno logo que volta, bem antes de a tolerância acabar.
+ */
+export const RENOVACAO_INDEFINIDO_MS = 10_000;
+/**
  * definido em 2026-10-12 (NOD-214): a entrega tenta de novo com espera exponencial de 1 s a 10 s por até 120 s — o servidor
  * reiniciando no fim de um turno não perde a resposta (antes eram 3 tentativas em ~2 s).
  */

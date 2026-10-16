@@ -7,6 +7,7 @@ import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { continuarAprovacoes } from "./decidir.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
+import { registrarInterrupcaoPorParada } from "./interrupcao-por-parada.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
 import { propagarSessaoDoTurno } from "./sessao-do-turno.ts";
@@ -152,9 +153,14 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
   const agora = deps.agora();
   const caidos: Caido[] = [];
   const naCarencia = input.carenciaAte != null && agora < input.carenciaAte ? await deps.repos.turnoCredenciais.quaisSobrevivem(input.turnos.map((t) => t.id)) : new Set<string>();
+  const parados: { turno: Turno; perdidoDesde: number }[] = [];
   for (const vencido of input.turnos) {
     if (naCarencia.has(vencido.id)) continue;
-    const motivo = motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
+    // definido em 2026-10-15 (NOD-252): a pessoa pediu para parar (ou excluiu o bot) e o lease venceu porque a
+    // renovação o congelou (renovarLease) — com a máquina fora, ninguém entregou. O Parar vence a queda: o turno
+    // termina `parado_pela_pessoa`, sem Retomar, sem aviso de queda e sem contar em `porMotivo`.
+    const parado = vencido.pararSolicitadoEm !== null;
+    const motivo = parado ? "parado_pela_pessoa" : motivoDaQueda(vencido, agora, input.inicioDoProcesso ?? null);
     // NOD-241 (emenda da ADR-084): o último sinal vai para a linha — é a régua da retomada automática. `leaseVencidoEm`:
     // o turno que renovou o lease depois de `vencidos()` não é interrompido.
     const perdidoDesde = ultimoSinalDoTurno(vencido, agora);
@@ -169,18 +175,38 @@ export async function interromperPorMaquina(deps: DepsQueda, input: EntradaVarre
       if (sessao) await propagarSessaoDoTurno(deps, { turno, sessaoCli: sessao.sessaoCli, executor: cred.executor, harness: cred.harness, maquinaBifurca: false });
       await deps.repos.turnoCredenciais.apagar(turno.id);
     }
-    caidos.push({ turno, motivo, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
+    if (parado) parados.push({ turno, perdidoDesde });
+    else caidos.push({ turno, motivo: motivo as MotivoDaQueda, perdidoDesde, maquinaPresente: input.maquinaPresente ? input.maquinaPresente(vencido.machineId) : true });
   }
-  return aplicar(deps, caidos, input.prazoMs);
+  const r = await aplicar(deps, caidos, input.prazoMs);
+  // Depois das quedas: a mesma ordem de travas (a trava por pessoa dos incidentes antes das janelas de rotina).
+  for (const p of parados) r.events.push(...(await aposParada(deps, p.turno, p.perdidoDesde)));
+  r.data.interrompidos.push(...parados.map((p) => p.turno.id));
+  return r;
+}
+
+/** O turno parado pela pessoa que o varredor assentou (NOD-252): as parciais, o evento, a task e o registro da parada. */
+async function aposParada(deps: DepsQueda, turno: Turno, perdidoDesde: number): Promise<RuntimeEvent[]> {
+  const agora = deps.agora();
+  const events: RuntimeEvent[] = [];
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: "catcher", machineId: turno.machineId, decididoPor: "regra:varredor_lease" });
+  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", machine_id: turno.machineId, perdido_desde: perdidoDesde } }));
+  events.push(...(await sincronizarDoTurno(deps, turno)));
+  // A ligação se encerra pelo Desligar (ADR-072): sem histórico de rotina nem aviso de delegação.
+  if (turno.origem !== "ligacao") events.push(...(await registrarInterrupcaoPorParada(deps, { turnoId: turno.id })));
+  return events;
 }
 
 /**
  * Porta da entrega (assentar-turno.ts): a máquina voltou e entregou depois de o lease vencer, sem Parar;
  * o turno JÁ foi assentado como interrompido maquina_sem_contato. Quem entregou está presente.
  * Termina igual ao varredor.
+ * revisto em 2026-10-15 (NOD-245): `motivo` vem de quem assentou — a entrega de um turno adotado que o reinício do
+ * servidor derrubou é `reinicio_servidor` (Retomar, sem aviso de queda do Mac). Ausente = `maquina_sem_contato`.
  */
-export function aposQuedaDaMaquina(deps: DepsQueda, turno: Turno, p: { perdidoDesde: number; prazoMs?: number }): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
-  return aplicar(deps, [{ turno, motivo: "maquina_sem_contato", perdidoDesde: p.perdidoDesde, maquinaPresente: true }], p.prazoMs);
+export function aposQuedaDaMaquina(deps: DepsQueda, turno: Turno, p: { perdidoDesde: number; prazoMs?: number; motivo?: MotivoDaQueda }): Promise<{ data: SaidaQuedaDaMaquina; events: RuntimeEvent[] }> {
+  return aplicar(deps, [{ turno, motivo: p.motivo ?? "maquina_sem_contato", perdidoDesde: p.perdidoDesde, maquinaPresente: true }], p.prazoMs);
 }
 
 /**

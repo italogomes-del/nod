@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { LEASE_MS } from "../../../src/shared/constantes.ts";
-import { assentarTurno, REGRA_ENTREGA_TARDIA } from "../../../src/use-cases/assentar-turno.ts";
+import { assentarTurno, desfechoDaEntrega, REGRA_ENTREGA_TARDIA } from "../../../src/use-cases/assentar-turno.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { dispararRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { interromperPorMaquina } from "../../../src/use-cases/interromper-por-maquina.ts";
@@ -38,7 +38,7 @@ async function cenario(tipo: "rotina" | "conversa") {
   const maquina = randomUUID();
   await deps.repos.turnos.reivindicar({ machineId: maquina, agora: T0 });
   const antes = banco.mensagens.length;
-  const entregar = (resultado: ResultadoTurno) => executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado });
+  const entregar = (resultado: ResultadoTurno, o: { adotada?: true } = {}) => executar(deps, assentarTurno, { turnoId, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: resultado.texto }, resultado, ...o });
   const passar = (ms: number) => {
     agora = T0 + ms;
   };
@@ -128,5 +128,48 @@ describe("assentarTurno: entrega depois de o Mac cair (ADR-045)", () => {
       expect(c.banco.mensagens.slice(c.antes).filter((m) => m.kind === "texto").map((m) => m.parcial)).toEqual([true]);
       expect((await c.deps.repos.turnos.buscar(retomada.turno!.id))?.estado).toBe("pendente");
     });
+  });
+});
+
+describe("NOD-245: entrega de um turno ADOTADO depois do reinício do servidor", () => {
+  it("desfechoDaEntrega: adotada sem motivo e sem Parar é reinicio_servidor; o Parar e o motivo do cliente continuam valendo", () => {
+    const livre = { pararSolicitadoEm: null, leaseAte: null };
+    expect(desfechoDaEntrega(livre, cortado, T0, { adotada: true })).toEqual({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor", motivoFalha: null });
+    expect(desfechoDaEntrega({ pararSolicitadoEm: T0, leaseAte: null }, cortado, T0, { adotada: true })).toMatchObject({ motivoInterrupcao: "parado_pela_pessoa" });
+    expect(desfechoDaEntrega(livre, { ...cortado, motivoInterrupcao: "sessao_rejeitada" }, T0, { adotada: true })).toMatchObject({ motivoInterrupcao: "sessao_rejeitada" });
+    expect(desfechoDaEntrega(livre, pronto, T0, { adotada: true })).toMatchObject({ estado: "concluido" });
+    // Sem adoção, nada muda: lease vencido continua sendo a máquina que caiu.
+    expect(desfechoDaEntrega({ pararSolicitadoEm: null, leaseAte: T0 }, cortado, T0 + 1)).toMatchObject({ motivoInterrupcao: "maquina_sem_contato" });
+    expect(desfechoDaEntrega(livre, cortado, T0)).toMatchObject({ motivoInterrupcao: "trabalho_incompleto" });
+  });
+
+  it("conversa: entrega adotada cortada → reinicio_servidor com UM Retomar aberto, sem aviso de Mac", async () => {
+    const c = await cenario("conversa");
+    c.passar(30_000);
+    const r = await c.entregar(cortado, { adotada: true });
+    expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
+    expect(c.banco.decisoes.map((d) => [d.tipo, d.turnoId, d.estado])).toEqual([["retomar_turno", c.turnoId, "pendente"]]);
+    expect(c.banco.decisoes[0]?.frase).toContain("o servidor reiniciou");
+    expect(c.banco.incidentes).toEqual([]);
+    expect(r.events.filter((e) => e.kind === "turno_interrompido")).toHaveLength(1);
+  });
+
+  it("NOD-252: entrega adotada com Parar pendente → parado_pela_pessoa, sem Retomar", async () => {
+    const c = await cenario("conversa");
+    await c.deps.repos.turnos.pedirInterrupcao([c.turnoId], T0 + 1_000);
+    c.passar(30_000);
+    const r = await c.entregar(cortado, { adotada: true });
+    expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+    expect(c.banco.decisoes).toEqual([]);
+    expect(c.banco.incidentes).toEqual([]);
+  });
+
+  it("rotina: entrega adotada cortada → execução interrompida/reinicio_servidor, registrada UMA vez", async () => {
+    const c = await cenario("rotina");
+    c.passar(30_000);
+    const r = await c.entregar(cortado, { adotada: true });
+    expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
+    expect(c.banco.execucoes.map((e) => [e.rotinaId, e.desfecho, e.motivo])).toEqual([[c.rotinaId, "interrompida", "reinicio_servidor"]]);
+    expect(c.banco.incidentes).toEqual([]);
   });
 });

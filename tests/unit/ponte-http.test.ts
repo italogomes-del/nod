@@ -725,3 +725,51 @@ describe("validação das contas anunciadas (ADR-102, revisão do PR #306)", () 
     expect(impressoes([imp])).toEqual([imp]);
   });
 });
+
+describe("NOD-245: a adoção que falha por exceção e a entrega grande", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const TURNO = "00000000-0000-4000-8000-000000000003";
+  const plano = { turnoId: TURNO } as PlanoTurno;
+  const SINAIS_OK = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
+  const resultado = (n: number) => ({ desfecho: "sucesso", texto: "ok", sessaoCli: null, custoUsd: null, sinais: SINAIS_OK, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: Array.from({ length: n }, (_, i) => `f${i}`), negacoesPermissao: [] });
+
+  function montar(adotar: NonNullable<PonteInternaNod["adotar"]>, entregar: PonteInternaNod["entregar"] = async () => undefined) {
+    const ponte: PonteInternaNod = { conectar: async () => undefined, puxar: async () => null, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }), entregar, desconectar: async () => undefined, maquinasConectadas: () => [], escopoDoTurno: () => null, adotar };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => Date.now(), delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 50,
+    });
+    return async (nome: string, corpo: unknown = {}) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP, "x-nod-token-turno": "tok" };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId: "m1" }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+  }
+  const conectar = { versaoContrato: 1, nome: "Mac", inventario: { estado: "pronto", versao: "fake", em: 0 } };
+
+  it("exceção em `adotar` → 503 adocao_indisponivel no renovar e no entregar (nunca 403 nem {ativo:false})", async () => {
+    const adotar = vi.fn<NonNullable<PonteInternaNod["adotar"]>>().mockRejectedValue(new Error("banco fora"));
+    const entregar = vi.fn<PonteInternaNod["entregar"]>().mockResolvedValue(undefined);
+    const chamar = montar(adotar, entregar);
+    await chamar("conectar", conectar);
+    expect(await chamar("renovar", { turnoId: TURNO, sinais: SINAIS_OK, eventos: [] })).toEqual({ status: 503, body: { codigo: "adocao_indisponivel" } });
+    expect(await chamar("entregar", { turnoId: TURNO, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(0) })).toEqual({ status: 503, body: { codigo: "adocao_indisponivel" } });
+    expect(adotar.mock.calls.map((c) => c[0].para)).toEqual(["rodar", "assentar"]);
+    expect(entregar).not.toHaveBeenCalled();
+  });
+
+  it("entrega adotada com 2500 ferramentas → 200 e a ponte recebe as últimas 1000", async () => {
+    const adotar = vi.fn<NonNullable<PonteInternaNod["adotar"]>>().mockResolvedValue({ tipo: "adotado", plano });
+    const entregar = vi.fn<PonteInternaNod["entregar"]>().mockResolvedValue(undefined);
+    const chamar = montar(adotar, entregar);
+    await chamar("conectar", conectar);
+    expect(await chamar("entregar", { turnoId: TURNO, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(2500) })).toEqual({ status: 200, body: { ok: true } });
+    const gravadas = entregar.mock.calls[0]![0].resultado.ferramentasChamadas;
+    expect(gravadas).toHaveLength(1000);
+    expect(gravadas[0]).toBe("f1500");
+    expect(gravadas.at(-1)).toBe("f2499");
+  });
+});

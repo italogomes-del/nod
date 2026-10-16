@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { entrega as validarEntrega } from "../../../src/adapters/http/rotas/ponte-validacao.ts";
 import { cortarTexto, driverDoPlano, iniciarLaco, resultadoDeExcecao } from "../../../src/adapters/executor/laco.ts";
-import { TEXTO_ENTREGA_MAX_CHARS } from "../../../src/shared/constantes.ts";
+import { RENOVACAO_INDEFINIDO_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../../src/shared/constantes.ts";
 import type { Adapter, Driver, Instance, Registry } from "../../../src/adapters/executor/spi.ts";
 import type { PlanoTurno } from "../../../src/contracts/plano-turno.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
@@ -852,6 +852,32 @@ describe("NOD-214: o laço atravessa o reinício do servidor", () => {
     await esperarAte(() => ponte.entregas.length === 1);
     const depois = ponte.renovacoes.slice(ponte.renovacoes.findIndex((r) => r.sessaoCli === "sessao-1"));
     expect(depois.every((r) => r.sessaoCli === "sessao-1")).toBe(true);
+    await laco.parar();
+  });
+});
+
+describe("NOD-245: depois de um `indefinido`, a renovação seguinte não espera o intervalo inteiro", () => {
+  it("o padrão é 10 s (um terço do intervalo normal)", () => {
+    expect(RENOVACAO_INDEFINIDO_MS).toBe(10_000);
+    expect(RENOVACAO_INDEFINIDO_MS).toBeLessThan(RENOVACAO_MS);
+  });
+
+  it("`indefinido` agenda a próxima renovação em `renovacaoIndefinidoMs`; a resposta boa volta ao intervalo normal", async () => {
+    const d = driverControlado();
+    let n = 0;
+    const ponte = ponteDaSessao({ ativo: () => (++n === 1 ? "indefinido" : true) });
+    const registry = await registryCom(d.driver);
+    const laco = iniciarLaco({ ponte, registry, pessoaId: "p", machineId: "m1", relogio: Date.now, renovacaoMs: 10 ** 6, renovacaoIndefinidoMs: 15, checagemMensagensMs: 10 ** 6, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => d.sinks() !== null);
+    d.sinks()!.falaIntermediaria!("parte 1");
+    // Sem nenhum evento novo, a segunda renovação sai sozinha (o intervalo normal é 10^6 ms).
+    await esperarAte(() => ponte.renovacoes.length >= 2);
+    const depois = ponte.renovacoes.length;
+    await new Promise((r) => setTimeout(r, 60));
+    expect(ponte.renovacoes.length).toBe(depois);
+    expect(d.interrupcoes()).toBe(0);
+    d.terminar("fim");
+    await esperarAte(() => ponte.entregas.length === 1);
     await laco.parar();
   });
 });

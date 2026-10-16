@@ -10,6 +10,7 @@ import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { cuidarDosPedidosParados, REGRA_RETOMADA_AUTOMATICA } from "../../src/use-cases/pedidos-parados.ts";
+import { interromperPorMaquina } from "../../src/use-cases/interromper-por-maquina.ts";
 import { criarTrabalho, marcarParado, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
@@ -309,6 +310,34 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       expect((await cuidarDosPedidosParados(depois)).data.avisados).toEqual([m.tarefa.id]);
       expect((await cuidarDosPedidosParados(depois)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
       expect(await m.pecasDaAda()).toHaveLength(1);
+    });
+  });
+
+  it("NOD-252: o colega parado pela pessoa com a máquina fora (varredor de lease) não é retomado — quem pediu recebe UM aviso", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const maquina = randomUUID();
+      for (let i = 0; i < 10; i++) {
+        const r = await m.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() });
+        if (!r || r.id === m.tarefa.id) break;
+      }
+      // O Mac do colega dorme; a pessoa aperta Parar; o lease vence e o varredor assenta.
+      await m.repos.turnos.pedirInterrupcao([m.tarefa.id], Date.now());
+      const vencido = await m.repos.turnos.buscar(m.tarefa.id);
+      // NOD-241: o varredor só interrompe com o lease JÁ vencido (guarda `leaseVencidoEm`) — o relógio passa do lease.
+      const aposOLease = { ...m.deps, agora: () => Date.now() + LEASE_MS + 1 };
+      const r = await interromperPorMaquina(aposOLease, { turnos: [vencido!] });
+      expect(r.data).toMatchObject({ interrompidos: [m.tarefa.id], decisoes: [], incidenteId: null, porMotivo: { maquina_sem_contato: 0, reinicio_servidor: 0 } });
+      expect(await m.repos.turnos.buscar(m.tarefa.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+      expect(await m.estado(m.colegaId)).toBe("parado");
+
+      // As máquinas voltam: nada é retomado, e o aviso a quem pediu sai uma vez só.
+      await m.sinalDeVida();
+      const passada = await cuidarDosPedidosParados(m.deps);
+      expect(passada.data.retomados).toEqual([]);
+      expect((await m.turnosDoColega()).filter((x) => x.origem === "retomada")).toEqual([]);
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+      expect((await m.pecasDaAda()).filter((x) => x.payload?.kind === "peer_ask" && "falhou" in x.payload && x.payload.falhou)).toHaveLength(1);
     });
   });
 

@@ -7,6 +7,7 @@ import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { cancelarEsperas } from "./esperar-comando.ts";
 import { marcarParado } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
+import { registrarInterrupcaoPorParada } from "./interrupcao-por-parada.ts";
 
 export type EntradaParar = { conversaId: string | null };
 
@@ -43,6 +44,8 @@ export const parar: CasoDeUso<EntradaParar, FaixaParada> = async (deps, input) =
     if (!i) continue;
     pendentesInterrompidos.push(t.id);
     events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", estava: "pendente" } }));
+    // NOD-252: a rotina pendente vai ao histórico (interrompida, parado_pela_pessoa); a delegação avisa quem pediu.
+    events.push(...(await registrarInterrupcaoPorParada(deps, { turnoId: t.id })));
   }
 
   const dosTrabalhos = new Set(abertos.map((t) => t.id));

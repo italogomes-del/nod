@@ -7,7 +7,7 @@ import { autoriaAgente, delegacaoDoTurno, evento, exigir, PRAZO_DECISAO_MS, SALT
 import { PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { perguntaDaTarefa } from "./pedido-de-colega.ts";
 import { notaPedidosAbertos } from "./pedidos-abertos.ts";
-import type { CasoDeUso, Deps } from "./tipos.ts";
+import type { Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
 export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" };
@@ -290,7 +290,8 @@ export function entregarRespostaDeclarada(deps: DepsEntrega, input: { tarefa: Tu
  * revisto em 2026-09-30 (ADR-063): com um pedido a colega ainda em aberto na cadeia, o aviso também espera — a
  * resposta do colega abre uma continuação que segue a tarefa e entrega; se ela também falhar, avisa então.
  */
-export const avisarFalhaDelegacao: CasoDeUso<{ turnoId: string; motivo: string; semEsperar?: true }, SaidaEntregaPeer> = async (deps, input) => {
+// revisto em 2026-10-15 (NOD-252): só repos, escopo e relógio — o varredor de lease (DepsQueda) também avisa.
+export const avisarFalhaDelegacao = async (deps: DepsEntrega, input: { turnoId: string; motivo: string; semEsperar?: true }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> => {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };

@@ -463,3 +463,82 @@ describeIntegracao("NOD-214 (PR 2): deploy com uma frente longa na máquina que 
     expect((await linhaDoTurno(novoTurno.turnoId))?.estado).toBe("concluido");
   }, 30_000);
 });
+
+describeIntegracao("NOD-245/NOD-252: a entrega adotada depois do deploy assenta pelo desfecho certo (adotar para assentar)", () => {
+  // Dois processos sobre o mesmo banco: o velho despacha duas frentes e fecha; a máquina desistiu delas (CLI morto) e só
+  // ENTREGA no processo novo, sem renovar antes. A adoção da entrega (`para: "assentar"`) não renova o lease nem recusa o
+  // Parar pendente: a entrega é aceita (200, não 403) e o assentamento decide o desfecho.
+  let velho: ServidorCompleto | null = null;
+  let novo: ServidorCompleto | null = null;
+  const criados = { agentes: [] as string[], conversas: [] as string[] };
+  afterAll(async () => {
+    await novo?.fechar();
+    await velho?.fechar();
+    if (velho) {
+      const v = velho;
+      await v.db.begin(async (tx) => { await vincularEscopo(tx, v.pessoa); await tx`delete from maquina_tokens where owner_id = ${v.pessoa.pessoaId}`; });
+      await limparPessoaE2E(v.db, v.dbDono, v.pessoa, criados);
+    }
+    await novo?.desligar();
+    await velho?.desligar();
+  });
+
+  it("Parar pendente → 200 e parado_pela_pessoa, sem Retomar; sem motivo e sem Parar → reinicio_servidor com UM Retomar", async () => {
+    const env = { NOD_MODO: "compartilhado", NOD_LONGPOLL_MS: "20" };
+    velho = await servidorCompleto({ env });
+    const v = velho;
+    const { chave, dados } = await v.json<{ chave: string; dados: { id: string } }>("POST", "maquinas/chaves", { nome: "Mac" });
+    const machineId = dados.id;
+    const pedirEm = (srv: ServidorCompleto) => (nome: string, body: unknown = {}, token?: string) => fetch(`${srv.url}/api/maquina/${nome}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${chave}`, "content-type": "application/json", "x-nod-versao": "0.1.0", ...(token ? { "x-nod-token-turno": token } : {}) },
+      body: JSON.stringify(body),
+    });
+    const conectar = { nome: "Mac", versaoContrato: 1, inventario: { estado: "pronto", versao: "fake-sem-custo", em: 0 }, sobreviveReinicio: true };
+    const bot = async (nome: string) => {
+      const r = await v.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome });
+      criados.agentes.push(r.agente.id);
+      criados.conversas.push(r.conversa.id);
+      return r.conversa.id;
+    };
+    const escopado = <T>(fn: (trx: Tx) => Promise<T>): Promise<T> => v.db.begin(async (trx) => {
+      await vincularEscopo(trx, v.pessoa);
+      return fn(trx);
+    }) as Promise<T>;
+    const linhaDoTurno = async (id: string) => (await escopado((trx) => trx<{ estado: string; motivo_interrupcao: string | null }[]>`select estado, motivo_interrupcao from turnos where id = ${id}`))[0];
+    const decisoes = (id: string) => escopado((trx) => trx<{ tipo: string; estado: string }[]>`select tipo, estado from decisoes where turno_id = ${id}`);
+    const cortada = (plano: PlanoTurno): Entrega => {
+      const e = entregaDe(plano, machineId, 1);
+      return { ...e, fala: { tipo: "texto", texto: "Vou verificar" }, resultado: { ...e.resultado, desfecho: "interrompido", texto: "Vou verificar" } };
+    };
+
+    const pedirV = pedirEm(v);
+    expect((await pedirV("conectar", conectar)).status).toBe(200);
+    const conversaParada = await bot("Parado no deploy");
+    await v.json<RespostaMutacao>("POST", `conversas/${conversaParada}/mensagens`, { texto: "Trabalho longo A" });
+    const { plano: parado } = (await (await pedirV("puxar")).json()) as { plano: PlanoTurno };
+    expect(parado).not.toBeNull();
+    const conversaCortada = await bot("Cortado no deploy");
+    await v.json<RespostaMutacao>("POST", `conversas/${conversaCortada}/mensagens`, { texto: "Trabalho longo B" });
+    const { plano: cortado } = (await (await pedirV("puxar")).json()) as { plano: PlanoTurno };
+    expect(cortado).not.toBeNull();
+    // A pessoa aperta Parar na conversa A com o processo velho ainda de pé; o deploy chega antes de a máquina entregar.
+    expect((await v.chamar("POST", `conversas/${conversaParada}/parar`)).status).toBe(200);
+    expect(await v.drenar({ prazoMs: 600_000, intervaloMs: 50 })).toMatchObject({ prazo_vencido: false });
+    await v.fechar();
+
+    novo = await servidorCompleto({ env, pessoaId: v.pessoa.pessoaId });
+    const pedirN = pedirEm(novo);
+    expect((await pedirN("conectar", conectar)).status).toBe(200);
+
+    // NOD-252 (CA3): antes, a adoção renovava o lease e recusava o turno com Parar pendente → 403 na entrega.
+    expect((await pedirN("entregar", cortada(parado), parado.tokenDeTurno)).status).toBe(200);
+    expect(await linhaDoTurno(parado.turnoId)).toEqual({ estado: "interrompido", motivo_interrupcao: "parado_pela_pessoa" });
+    expect(await decisoes(parado.turnoId)).toEqual([]);
+
+    // NOD-245 (CA3): a entrega adotada, cortada sem motivo e sem Parar, é o reinício que derrubou o turno.
+    expect((await pedirN("entregar", cortada(cortado), cortado.tokenDeTurno)).status).toBe(200);
+    expect(await linhaDoTurno(cortado.turnoId)).toEqual({ estado: "interrompido", motivo_interrupcao: "reinicio_servidor" });
+    expect(await decisoes(cortado.turnoId)).toEqual([{ tipo: "retomar_turno", estado: "pendente" }]);
+  }, 30_000);
+});

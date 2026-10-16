@@ -310,3 +310,63 @@ describe("NOD-214 (PR 2): o token do turno vai no header da renovação e da ent
   });
 });
 
+
+describe("NOD-245: deploy de 45 s não derruba o turno; 400 é definitivo", () => {
+  it("última resposta boa há 25 s e o servidor fora por 45 s: a renovação nunca devolve `false` (a tolerância conta da 1ª falha)", async () => {
+    const s = await comTurno();
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe(true);
+    // O servidor cai 25 s depois da última resposta boa; a próxima renovação (30 s) já falha, e as seguintes saem a cada 10 s.
+    s.avancar(25_000);
+    s.status.renovar = "fora";
+    s.avancar(5_000);
+    const vistos: unknown[] = [];
+    for (let t = 0; t <= 40_000; t += 10_000) {
+      vistos.push((await s.c.ponte.renovar(pedido())).ativo);
+      s.avancar(10_000);
+    }
+    expect(vistos.every((v) => v === "indefinido")).toBe(true);
+    // 45 s depois da queda, o servidor volta: a renovação responde e a contagem zera.
+    delete s.status.renovar;
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe(true);
+    s.status.renovar = "fora";
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+  });
+
+  it("a resposta boa zera a contagem: dois deploys seguidos, cada um abaixo da tolerância, não somam (QA do #343)", async () => {
+    const s = await comTurno();
+    s.status.renovar = "fora";
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+    s.avancar(TOLERANCIA_REINICIO_MS - 10_000);
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+    // O servidor volta e responde; logo depois, o deploy seguinte derruba de novo.
+    delete s.status.renovar;
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe(true);
+    s.status.renovar = "fora";
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+    // Contada da falha de ANTES da resposta boa, esta já passaria da tolerância e mataria o CLI.
+    s.avancar(TOLERANCIA_REINICIO_MS - 10_000);
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+    s.avancar(10_000);
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe(false);
+  });
+
+  it("a falha que dura a tolerância inteira ainda devolve `false` (contada da 1ª falha)", async () => {
+    const s = await comTurno();
+    s.status.renovar = "fora";
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe("indefinido");
+    s.avancar(TOLERANCIA_REINICIO_MS);
+    expect((await s.c.ponte.renovar(pedido())).ativo).toBe(false);
+  });
+
+  it("400 `entrada_invalida` na entrega: falha na 1ª tentativa, sem esperar e sem aviso de conexão", async () => {
+    const aoFalhar = vi.fn();
+    const s = servidor({ puxar: () => ({ turnoId: TURNO }), aoFalhar });
+    await s.c.ponte.conectar(anuncio);
+    await s.c.ponte.puxar("p");
+    s.status.entregar = 400;
+    await expect(s.c.ponte.entregar(entrega())).rejects.toThrow("entrada_invalida");
+    expect(s.rotas().filter((r) => r === "entregar")).toHaveLength(1);
+    expect(s.esperas).toEqual([]);
+    expect(aoFalhar).not.toHaveBeenCalled();
+  });
+});

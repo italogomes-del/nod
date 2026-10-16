@@ -7,7 +7,7 @@ import { molduraMensagemNoMeio } from "../../domain/mensagem-no-meio.ts";
 import { SINAIS_ZERADOS } from "../../domain/stream-json.ts";
 import { AVALIACAO_VIGIA_MS, criarVigiaTurno } from "../../domain/vigia-turno.ts";
 import { log } from "../../obs/log.ts";
-import { CHECAGEM_MENSAGENS_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
+import { CHECAGEM_MENSAGENS_MS, RENOVACAO_INDEFINIDO_MS, RENOVACAO_MS, TEXTO_ENTREGA_MAX_CHARS } from "../../shared/constantes.ts";
 import type { Relogio } from "../../shared/types.ts";
 import { INTERVALO_AMOSTRA_MEMORIA_MS, type FonteMemoria } from "./amostrador-memoria.ts";
 import type { Adapter, IdDriver, Registry, RegistroDriver } from "./spi.ts";
@@ -30,6 +30,8 @@ export type OpcoesLaco = {
   esperaVaziaMs?: number;
   jitterMs?: number;
   renovacaoMs?: number;
+  /** NOD-245: depois de uma renovação `indefinido`, a seguinte sai neste prazo (uma vez), não em `renovacaoMs`. */
+  renovacaoIndefinidoMs?: number;
   /** ADR-067: de quanto em quanto a sessão viva pergunta por mensagem nova da pessoa (injetável no teste). */
   checagemMensagensMs?: number;
   /** Deltas são efêmeros: vão direto ao barramento (L8), nunca pelo outbox. */
@@ -114,6 +116,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   const esperaVaziaMs = o.esperaVaziaMs ?? 1_000;
   const jitterMs = o.jitterMs ?? 300;
   const renovacaoMs = o.renovacaoMs ?? RENOVACAO_MS;
+  const renovacaoIndefinidoMs = o.renovacaoIndefinidoMs ?? RENOVACAO_INDEFINIDO_MS;
   const checagemMensagensMs = o.checagemMensagensMs ?? CHECAGEM_MENSAGENS_MS;
   const vigiaMs = o.vigiaMs ?? AVALIACAO_VIGIA_MS;
   let parado = false;
@@ -156,6 +159,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
     const aConfirmar = () => entregues.length > 0 || devolvidas.length > 0;
     // X5 (revisto em 2026-10-08): a última leitura de memória que o servidor confirmou (o número da amostra e quando).
     let memoriaEnviada: { amostra: number; em: number } | null = null;
+    /** NOD-245: a renovação extra agendada depois de um `indefinido` (uma só por vez; a resposta boa volta à batida normal). */
+    let renovarLogo: ReturnType<typeof setTimeout> | null = null;
     // NOD-264 (C20): por que o laço mandou o CLI parar (renovação negada ou o motor parando); vira a causa da entrega.
     let causaDoLaco: string | null = null;
     causaDoTurno = null;
@@ -237,6 +242,12 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
             causaDoLaco ??= `renovacao_negada:${r.motivo ?? "desconhecido"}`;
             log("aviso", "renovacao_negada", { turno_id: plano.turnoId, motivo: r.motivo ?? "desconhecido" });
             if (adapterAtual) await adapterAtual.interromper();
+          }
+          // NOD-245: sem resposta (`indefinido`), a próxima tentativa sai em 10 s — o servidor recém-subido adota o turno
+          // logo. Uma de cada vez: com resposta boa, fica só a batida de `renovacaoMs`.
+          if (r.ativo === "indefinido" && !renovarLogo && !entregue) {
+            renovarLogo = setTimeout(() => { renovarLogo = null; void renovar(); }, renovacaoIndefinidoMs);
+            renovarLogo.unref?.();
           }
         } catch (erro) {
           log("aviso", "laco_renovar_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
@@ -382,6 +393,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       await entregar(resultadoDeExcecao(erro, sinais));
     } finally {
       clearInterval(batida);
+      if (renovarLogo) clearTimeout(renovarLogo);
       clearInterval(checagem);
       clearInterval(observacao);
       o.memoria?.soltar(plano.turnoId);

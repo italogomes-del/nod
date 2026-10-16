@@ -590,7 +590,8 @@ export function comporApp(o: OpcoesCompor): App {
       // NOD-258: o retorno do lote que caiu é refeito uma vez (e, na segunda, a linha diz onde ficaram os resumos).
       // A regra (só o interrompido, sem Parar, fora a queda da máquina) fica em refazerRetornoDoLote, onde tem teste.
       events.push(...(await refazerRetornoDoLote(d, turno)));
-      // A rotina (ou a retomada dela) registra o desfecho da janela; a regra mora em registrarDesfechoDaEntrega (NOD-251).
+      // A rotina (ou a retomada dela) registra o desfecho da janela; a regra mora em registrarDesfechoDaEntrega (NOD-251;
+      // NOD-245: o turno adotado que o reinício do servidor derrubou também fica de fora, como o da máquina sem contato).
       events.push(...(await registrarDesfechoDaEntrega(d, turno)));
       // definido em 2026-09-24 (ADR-047): a tarefa delegada (e a retomada dela, depois de um acesso aprovado)
       // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.

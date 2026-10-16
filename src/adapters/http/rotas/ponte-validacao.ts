@@ -297,6 +297,9 @@ function negacoesDoNod(v: unknown): { nome: string; motivo: string }[] | undefin
   return ok ? (v as { nome: string; motivo: string }[]).map(({ nome, motivo }) => ({ nome, motivo })) : undefined;
 }
 
+/** NOD-245: quantas ferramentas chamadas (e negações) a entrega guarda — as últimas; o resto é cortado, não recusado. */
+export const LISTA_DA_ENTREGA_MAX = 1000;
+
 export function entrega(v: unknown, machineId: string, agora: number = Date.now()): Entrega {
   const e = objeto(v), r = objeto(e.resultado), f = objeto(e.fala), t = objeto(r.tokens);
   exigir(Number.isSafeInteger(e.seqLocal) && Number(e.seqLocal) > 0);
@@ -305,7 +308,9 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   exigir(r.sessaoCli === null || (typeof r.sessaoCli === "string" && UUID.test(r.sessaoCli)));
   exigir(r.custoUsd === null || (typeof r.custoUsd === "number" && Number.isFinite(r.custoUsd) && r.custoUsd >= 0));
   exigir(["entrada", "saida", "cacheLeitura", "cacheCriacao"].every((k) => Number.isSafeInteger(t[k]) && Number(t[k]) >= 0));
-  exigir([r.ferramentasChamadas, r.negacoesPermissao].every((a) => Array.isArray(a) && a.length <= 1000 && a.every((x) => texto(x, 200))));
+  // revisto em 2026-10-15 (NOD-245): mais de 1000 itens não recusa mais a entrega (um turno com 2333 ferramentas virava
+  // 400 e "máquina sem contato"): as listas guardam só as últimas LISTA_DA_ENTREGA_MAX, abaixo. Cada item segue conferido.
+  exigir([r.ferramentasChamadas, r.negacoesPermissao].every((a) => Array.isArray(a) && a.every((x) => texto(x, 200))));
   exigir(r.motivoFalha === undefined || MOTIVOS_FALHA.some((m) => m === r.motivoFalha));
   exigir(r.motivoInterrupcao === undefined || MOTIVOS_INTERRUPCAO.some((m) => m === r.motivoInterrupcao));
   const validados = sinais(r.sinais);
@@ -333,7 +338,7 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   return { turnoId: uuid(e.turnoId), machineId, seqLocal: Number(e.seqLocal), fala: f as Entrega["fala"], ...(entregues?.length ? { mensagensEntregues: entregues } : {}), resultado: {
     desfecho: r.desfecho as Entrega["resultado"]["desfecho"], texto: r.texto, sessaoCli: r.sessaoCli as string | null,
     custoUsd: r.custoUsd as number | null, ...(r.custoDesconhecido === true && r.custoUsd === null ? { custoDesconhecido: true } : {}), sinais: validados, tokens: t as Entrega["resultado"]["tokens"],
-    ferramentasChamadas: r.ferramentasChamadas as string[], negacoesPermissao: r.negacoesPermissao as string[],
+    ferramentasChamadas: (r.ferramentasChamadas as string[]).slice(-LISTA_DA_ENTREGA_MAX), negacoesPermissao: (r.negacoesPermissao as string[]).slice(-LISTA_DA_ENTREGA_MAX),
     motivoFalha: r.motivoFalha as Entrega["resultado"]["motivoFalha"], motivoInterrupcao: r.motivoInterrupcao as Entrega["resultado"]["motivoInterrupcao"],
     ...(raioX ? { execucao: raioX } : {}),
     ...(catalogo ? { comandos: catalogo } : {}),

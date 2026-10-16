@@ -131,6 +131,9 @@ describeIntegracao("NOD-258: o retorno do lote espera a cota e não se perde (QA
       const antes = await total();
       await m.repos.turnos.assentar(m.retorno.id, { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
       expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
+      // NOD-245: a entrega do turno adotado que o reinício do servidor derrubou também segue a regra de queda.
+      await trx`update turnos set motivo_interrupcao = 'reinicio_servidor' where id = ${m.retorno.id}`;
+      expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
       await trx`update turnos set motivo_interrupcao = 'executor_indisponivel', parar_solicitado_em = now() where id = ${m.retorno.id}`;
       expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
       await trx`update turnos set estado = 'concluido', parar_solicitado_em = null where id = ${m.retorno.id}`;
