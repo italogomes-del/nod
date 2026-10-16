@@ -1,3 +1,4 @@
+import type { Experimentos } from "../../src/contracts/raio-x.ts";
 import type { SecaoEspaco } from "../estado/reducer.ts";
 import { esc } from "../lib/render.ts";
 import type { AcaoGestao, BotGerido } from "./gestao.ts";
@@ -78,7 +79,7 @@ export function pedirGestao(titulo: string, corpo: string, confirmar: string, sa
 }
 
 /** O menu da conta (web/telas/menu-conta.ts) sobre o mesmo diálogo dos menus do bot. */
-export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; onboarding?(): void }): void {
+export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes: { secao(s: SecaoEspaco): void; modoDev(): Promise<boolean>; experimento?(chave: keyof Experimentos): Promise<boolean>; onboarding?(): void }): void {
   const d = dialogo(htmlMenuConta(dados), true);
   d.classList.add("menu-conta");
   // Nasce acima do avatar, alinhado à esquerda da barra (a largura dela menos as margens).
@@ -92,7 +93,11 @@ export function abrirMenuConta(ancora: HTMLElement, dados: DadosMenuConta, acoes
     // ADR-077: "Ver o onboarding de novo" volta ao "olá".
     if (alvo.closest("[data-onboarding]")) { d.close(); acoes.onboarding?.(); return; }
     const chave = alvo.closest<HTMLElement>("[data-modo-dev]");
-    if (chave) void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado)));
+    if (chave) { void acoes.modoDev().then((ligado) => chave.setAttribute("aria-checked", String(ligado))); return; }
+    // ADR-111: as chaves de experimento, do mesmo jeito.
+    const exp = alvo.closest<HTMLElement>("[data-experimento]");
+    const qual = exp?.dataset.experimento as keyof Experimentos | undefined;
+    if (exp && qual && acoes.experimento) void acoes.experimento(qual).then((ligado) => exp.setAttribute("aria-checked", String(ligado)));
   });
   d.addEventListener("keydown", (e) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;

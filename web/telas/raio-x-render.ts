@@ -185,7 +185,12 @@ function abaEnviado(r: RaioXTurno): string {
     ? `Fica na sessão do Claude Code no Mac, não no nod.${compactacoes.length ? ` Depois de cada compactação, o que sobrou: ${compactacoes.map((k) => (k.depois !== null ? mil(k.depois) : "?")).join(" → ")} tokens.` : ""}`
     : "Sessão nova: as últimas falas vão dentro do prompt, na seção “Contexto recente da conversa”.";
   const anexos = c.entrada.anexos ? ` · ${c.entrada.anexos} ${c.entrada.anexos === 1 ? "anexo" : "anexos"}` : "";
-  return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}
+  // ADR-111: as chaves de experimento que valeram neste turno — é o que deixa comparar turnos com e sem elas.
+  const x = c.experimentos;
+  const experimentos = x
+    ? `<p class="rx-quadro">Experimentos: Calibração <b>${x.calibracao ? "ligada" : "desligada"}</b> · Memória longa <b>${x.memoriaLonga ? "ligada" : "desligada"}</b>${x.memoriaLonga && c.sessaoRetomada ? " (sem efeito: a sessão foi retomada)" : ""}${x.anexosAnteriores ? ` · ${x.anexosAnteriores} ${x.anexosAnteriores === 1 ? "anexo anterior voltou" : "anexos anteriores voltaram"}` : ""}</p>`
+    : "";
+  return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}${experimentos}
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>1 · Prompt de sistema do nod</h3><span class="rx-num">${esc(mil(c.promptChars))} caract.</span></div>${prompt}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>2 · Definições de ferramentas</h3><span class="rx-num">${esc(mil(totalFerramentas))} caract.</span></div>${grupos}${nativas}${busca}</section>
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>3 · Histórico da conversa</h3><span class="rx-num">${c.sessaoRetomada ? "sessão retomada" : "sessão nova"}</span></div><p class="rx-texto">${esc(historico)}</p></section>

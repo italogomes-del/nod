@@ -21,4 +21,9 @@ export type AnexoMeta = {
   nome: string;
   mime: MimeAnexo;
   tamanho: number;
+  /**
+   * ADR-111 (memória longa): o anexo é de uma fala ANTERIOR da conversa, não da mensagem deste turno. O driver diz isso
+   * ao modelo. Ausente = da mensagem do turno (o motor de antes ignora o campo e o mostra como anexo da mensagem).
+   */
+  anterior?: true;
 };

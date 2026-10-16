@@ -1,6 +1,6 @@
 import type { IdHarness } from "../contracts/harness.ts";
 import type { LimiteDaIa, LimitesIa } from "../contracts/inteligencia.ts";
-import { USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
+import { USO_DO_MAC_PADRAO, type ComposicaoRaioX, type ExecucaoRaioX, type Experimentos, type Preferencias, type UsoDoMac } from "../contracts/raio-x.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, jsonb, ms } from "./conversao.ts";
 
@@ -91,11 +91,12 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
 }
 
 /** Preferências da pessoa (0036). Sem linha = tudo desligado. */
-const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite";
+/** ADR-111 (0088): `exp_calibracao` e `exp_memoria_longa`, as chaves de experimento. */
+const COLUNAS_PREFERENCIAS = "modo_dev, avisos_fechados, uso_do_mac, maquina_padrao_id, ordem_ias, ias_no_limite, exp_calibracao, exp_memoria_longa";
 
 export function preferenciasRepo(conn: Conn, escopo: Escopo) {
-  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null };
-  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {} });
+  type Linha = { modo_dev: boolean; avisos_fechados: string[]; uso_do_mac: UsoDoMac; maquina_padrao_id: string | null; ordem_ias: IdHarness[] | null; ias_no_limite: LimitesIa | null; exp_calibracao: boolean; exp_memoria_longa: boolean };
+  const paraPreferencias = (l: Linha | undefined): Preferencias => ({ modoDev: l?.modo_dev ?? false, avisosFechados: l?.avisos_fechados ?? [], usoDoMac: l?.uso_do_mac ?? USO_DO_MAC_PADRAO, maquinaPadraoId: l?.maquina_padrao_id ?? null, ordemIas: l?.ordem_ias ?? null, iasNoLimite: l?.ias_no_limite ?? {}, experimentos: { calibracao: l?.exp_calibracao ?? false, memoriaLonga: l?.exp_memoria_longa ?? false } });
   return {
     async buscar(): Promise<Preferencias> {
       const [l] = await conn<Linha[]>`
@@ -105,13 +106,18 @@ export function preferenciasRepo(conn: Conn, escopo: Escopo) {
 
     /** O que vier muda; o que faltar fica como está. ADR-099 (I10): `faixa_trabalhos_recolhida` fica no banco, sem uso. */
     /** 0068: `ordemIas` null volta à ordem padrão; ausente não mexe. */
-    async gravar(p: { modoDev?: boolean; usoDoMac?: UsoDoMac; ordemIas?: IdHarness[] | null }): Promise<Preferencias> {
+    /** ADR-111: cada chave de `experimentos` que vier muda sozinha; a outra fica. */
+    async gravar(p: { modoDev?: boolean; usoDoMac?: UsoDoMac; ordemIas?: IdHarness[] | null; experimentos?: Partial<Experimentos> }): Promise<Preferencias> {
       const ordem = p.ordemIas ? jsonb(conn, p.ordemIas) : null;
+      const calibracao = p.experimentos?.calibracao ?? null;
+      const memoriaLonga = p.experimentos?.memoriaLonga ?? null;
       const [l] = await conn<Linha[]>`
-        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb)
+        insert into preferencias (tenant_id, owner_id, modo_dev, uso_do_mac, ordem_ias, exp_calibracao, exp_memoria_longa)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.modoDev ?? false}, ${p.usoDoMac ?? USO_DO_MAC_PADRAO}, ${ordem}::jsonb, ${calibracao ?? false}, ${memoriaLonga ?? false})
         on conflict (tenant_id, owner_id) do update set
           modo_dev = coalesce(${p.modoDev ?? null}::boolean, preferencias.modo_dev),
+          exp_calibracao = coalesce(${calibracao}::boolean, preferencias.exp_calibracao),
+          exp_memoria_longa = coalesce(${memoriaLonga}::boolean, preferencias.exp_memoria_longa),
           uso_do_mac = coalesce(${p.usoDoMac ?? null}::text, preferencias.uso_do_mac),
           ordem_ias = case when ${p.ordemIas !== undefined} then ${ordem}::jsonb else preferencias.ordem_ias end,
           atualizado_em = clock_timestamp()

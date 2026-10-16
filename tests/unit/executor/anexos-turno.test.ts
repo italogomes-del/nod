@@ -27,6 +27,13 @@ describe("entrada do Claude com anexos (stream-json)", () => {
     expect(o.message.content[3]?.text).toContain('Arquivo anexado "notas.md":\n# Reunião');
   });
 
+  it("ADR-111: o anexo de uma fala anterior chega dito como anterior — texto no cabeçalho, imagem com a linha antes", () => {
+    const o = JSON.parse(mensagemClaude("e aí?", [{ ...md, meta: { ...md.meta, anterior: true } }, { ...png, meta: { ...png.meta, anterior: true } }])) as { message: { content: { type: string; text?: string }[] } };
+    expect(o.message.content.map((b) => b.type)).toEqual(["text", "text", "text", "image"]);
+    expect(o.message.content[1]?.text).toContain('Arquivo anexado antes nesta conversa (não nesta mensagem) "notas.md":\n# Reunião');
+    expect(o.message.content[2]?.text).toBe('[o arquivo "print.png" a seguir foi anexado antes nesta conversa, não nesta mensagem]');
+  });
+
   it("anexo que não desceu vira aviso escrito, nunca some", () => {
     const o = JSON.parse(mensagemClaude("", [falhou])) as { message: { content: { type: string; text: string }[] } };
     expect(o.message.content).toEqual([{ type: "text", text: '[anexo "sumiu.png" não pôde ser lido: falha ao baixar do servidor. Diga isso à pessoa.]' }]);

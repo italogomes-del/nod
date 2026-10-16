@@ -30,7 +30,12 @@ export async function baixarAnexos(plano: PlanoTurno, urlNod: string, fetchImpl:
 export function textoDoArquivo(a: AnexoBaixado): string {
   const corpo = new TextDecoder("utf-8", { fatal: false }).decode(a.bytes ?? new Uint8Array());
   const cortado = corpo.length > TEXTO_ANEXO_MAX ? `${corpo.slice(0, TEXTO_ANEXO_MAX)}\n[cortado pelo nod: ${corpo.length - TEXTO_ANEXO_MAX} caracteres ficaram de fora]` : corpo;
-  return `Arquivo anexado "${a.meta.nome}":\n${cortado}`;
+  return a.meta.anterior ? `Arquivo anexado antes nesta conversa (não nesta mensagem) "${a.meta.nome}":\n${cortado}` : `Arquivo anexado "${a.meta.nome}":\n${cortado}`;
+}
+
+/** ADR-111 (memória longa): a imagem ou o PDF de uma fala anterior entra com esta linha antes, para o modelo não os tomar por novos. */
+export function linhaDoAnterior(a: AnexoBaixado): string {
+  return `[o arquivo "${a.meta.nome}" a seguir foi anexado antes nesta conversa, não nesta mensagem]`;
 }
 
 const naoLido = (a: AnexoBaixado, porque: string) => `[anexo "${a.meta.nome}" não pôde ser lido: ${porque}. Diga isso à pessoa.]`;
@@ -51,6 +56,7 @@ export function mensagemClaude(texto: string, anexos: readonly AnexoBaixado[], u
     if (!a.bytes) { blocos.push({ type: "text", text: naoLido(a, "falha ao baixar do servidor") }); continue; }
     const tipo = tipoDoAnexo(a.meta.mime);
     const data = Buffer.from(a.bytes).toString("base64");
+    if (a.meta.anterior && tipo !== "texto") blocos.push({ type: "text", text: linhaDoAnterior(a) });
     if (tipo === "imagem") blocos.push({ type: "image", source: { type: "base64", media_type: a.meta.mime, data } });
     else if (tipo === "pdf") blocos.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
     else blocos.push({ type: "text", text: textoDoArquivo(a) });
@@ -74,6 +80,7 @@ export async function entradaCodex(texto: string, anexos: readonly AnexoBaixado[
       const caminho = join(dir, `anexo-${i}.${a.meta.mime.split("/")[1] ?? "img"}`);
       await writeFile(caminho, a.bytes, { mode: 0o600 });
       imagens.push(caminho);
+      if (a.meta.anterior) extras.push(linhaDoAnterior(a));
     } else if (tipo === "texto") {
       extras.push(textoDoArquivo(a));
     } else {

@@ -24,6 +24,7 @@ import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
 import type { AmbienteBancoDto, ModoSessaoDto } from "../src/contracts/api.ts";
 import type { PedidoInteligencia } from "../src/contracts/inteligencia.ts";
 import type { AlvoAviso } from "../src/contracts/desktop.ts";
+import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
 import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
@@ -703,6 +704,13 @@ async function alternarModoDev(): Promise<void> {
   dispatch({ tipo: "modo-dev", ligado: p.modoDev });
   const c = conversaDaTela(estado);
   if (p.modoDev && c) await carregarRaioX(c.conversa.id);
+}
+
+/** ADR-111: liga ou desliga uma chave de experimento; vale a partir do próximo turno de qualquer bot da pessoa. */
+async function alternarExperimento(chave: keyof Experimentos): Promise<void> {
+  if (!api) return;
+  const p = await api.gravarPreferencias({ experimentos: { [chave]: !estado.experimentos[chave] } });
+  if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos });
 }
 
 async function reidratar(): Promise<void> {
@@ -1516,6 +1524,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
+    if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos });
     const c = conversaDaTela(estado);
     if (p.modoDev && c) void carregarRaioX(c.conversa.id);
   }, () => undefined);
@@ -2425,7 +2434,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     else if (tela === "gestao") abrirEspaco("agentes");
     else if (tela === "espaco") abrirEspaco("conexao");
   },
-  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, onboarding: () => void telaOnboarding.deNovo() }),
+  "menu-conta": (el) => abrirMenuConta(el, dadosMenuConta(), { secao: abrirEspaco, modoDev: async () => { await agir(alternarModoDev); return estado.modoDev.ligado; }, experimento: async (chave) => { await agir(() => alternarExperimento(chave)); return estado.experimentos[chave]; }, onboarding: () => void telaOnboarding.deNovo() }),
   "secao-espaco": (el) => abrirEspaco((el.dataset.secao as SecaoEspaco | undefined) ?? "conexao"),
   // definido em 2026-10-05 (ia-fora.ts): os botões do aviso "a conta da IA não serve". Só existem dentro do app do Mac;
   // o login abre no navegador e o app percebe sozinho quando termina (testa a conta nova e reanuncia).
@@ -3839,6 +3848,7 @@ function dadosMenuConta(): DadosMenuConta {
     conexao: !estado.executor ? "Verificando" : falha ? "Desconectada" : estado.executor.atual === "catcher" ? "Simulação" : "Conectada",
     avisos: situacaoCurtaAvisos(canalAvisos.estado()),
     modoDev: estado.modoDev.ligado,
+    experimentos: estado.experimentos,
     banco: banco ? { texto: banco, regime: ambienteBanco?.regime ?? "desconhecido" } : null,
     // #219: com o disco quase cheio, o menu diz o disco (é o que pede a mão da pessoa).
     // Revisto em 2026-10-09 (a tela fala por máquina): só a leitura do Mac — a VM ocupada não diz "Ocupado" em Este Mac.

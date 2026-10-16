@@ -1,4 +1,4 @@
-import { USOS_DO_MAC, type Preferencias, type RaioXConversa, type RaioXTurno, type UsoDoMac } from "../contracts/raio-x.ts";
+import { USOS_DO_MAC, type Experimentos, type Preferencias, type RaioXConversa, type RaioXTurno, type UsoDoMac } from "../contracts/raio-x.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { lerOrdemDaPessoa } from "../domain/inteligencia.ts";
 import { resumoDoRaioX } from "../domain/raio-x.ts";
@@ -16,15 +16,30 @@ export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = a
  * Provedores de IA (lista das IAs integradas, completada no fim com as que faltarem; null = a padrão). Corpo sem nenhum
  * dos três, ou com valor fora do tipo, é entrada inválida.
  */
-export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; usoDoMac?: unknown; ordemIas?: unknown }, Preferencias> = async (deps, input) => {
+/**
+ * revisto em 2026-10-16 (ADR-111, 0088): `experimentos`, as chaves do menu da conta — `{calibracao?, memoriaLonga?}`, cada
+ * uma booleana; a que vier muda sozinha. Objeto vazio, com chave desconhecida ou valor fora do tipo é entrada inválida.
+ */
+function lerExperimentos(v: unknown): Partial<Experimentos> | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw new ErroDeDominio("entrada_invalida", { cause: "experimentos" });
+  const chaves = Object.keys(v);
+  const validas: readonly string[] = ["calibracao", "memoriaLonga"];
+  if (chaves.length === 0 || chaves.some((k) => !validas.includes(k) || typeof (v as Record<string, unknown>)[k] !== "boolean")) throw new ErroDeDominio("entrada_invalida", { cause: "experimentos" });
+  return v as Partial<Experimentos>;
+}
+
+export const gravarPreferencias: CasoDeUso<{ modoDev?: unknown; usoDoMac?: unknown; ordemIas?: unknown; experimentos?: unknown }, Preferencias> = async (deps, input) => {
   const ok = (v: unknown) => v === undefined || typeof v === "boolean";
   const usoOk = input.usoDoMac === undefined || (typeof input.usoDoMac === "string" && (USOS_DO_MAC as readonly string[]).includes(input.usoDoMac));
-  const nenhum = input.modoDev === undefined && input.usoDoMac === undefined && input.ordemIas === undefined;
+  const nenhum = input.modoDev === undefined && input.usoDoMac === undefined && input.ordemIas === undefined && input.experimentos === undefined;
   if (!ok(input.modoDev) || !usoOk || nenhum) throw new ErroDeDominio("entrada_invalida", { cause: "preferencias" });
   const ordemIas = input.ordemIas === undefined ? undefined : lerOrdemDaPessoa(input.ordemIas);
+  const experimentos = lerExperimentos(input.experimentos);
   return {
     data: await deps.repos.preferencias.gravar({
       ...(ordemIas !== undefined ? { ordemIas } : {}),
+      ...(experimentos ? { experimentos } : {}),
       ...(typeof input.modoDev === "boolean" ? { modoDev: input.modoDev } : {}),
       ...(input.usoDoMac !== undefined ? { usoDoMac: input.usoDoMac as UsoDoMac } : {}),
     }),

@@ -115,6 +115,8 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 2. Modo automático e modo total (ADR-059).
   "conversa-automatico": conversa("automatico"),
   "conversa-total": conversa("total"),
+  // ADR-111: a chave "Calibração" ligada — a mesma conversa manual com a linha a mais na parte estável.
+  "conversa-calibracao": { ...conversa("manual"), calibracao: true },
   // 3. Pedido de colega em profundidade 1 e no limite da corrente (ADR-063).
   "colega-profundidade-1": pedidoDeColega(1),
   "colega-profundidade-3": pedidoDeColega(3),

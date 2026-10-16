@@ -9,7 +9,7 @@ import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
-import type { Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
+import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { Conector } from "../../src/contracts/conector.ts";
@@ -214,7 +214,8 @@ export function criarApi(escopo: Escopo) {
     // Modo dev (0036): a preferência mora no servidor e o Raio-X é lido por conversa (a faixa) e por turno (a gaveta).
     preferencias: () => get<Preferencias>("preferencias"),
     // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
-    gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">>) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
+    // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao } ou { memoriaLonga }).
+    gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">> & { experimentos?: Partial<Experimentos> }) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
     // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
     fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),

@@ -1,4 +1,4 @@
-import type { TipoAnexo } from "../contracts/anexo.ts";
+import type { AnexoMeta, TipoAnexo } from "../contracts/anexo.ts";
 import { tipoDoAnexo } from "../domain/anexo.ts";
 import type { CapacidadesHarness, IdHarness } from "../contracts/harness.ts";
 import type { PlataformaMaquina } from "../contracts/ponte.ts";
@@ -14,6 +14,7 @@ import { montarPromptLigacao, MENSAGENS_NO_PROMPT_LIGACAO } from "../domain/prom
 import { linhasDoPromptOnboarding } from "../domain/roteiro-onboarding.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { Inventario } from "../contracts/inventario.ts";
+import { EXPERIMENTOS_DESLIGADOS } from "../contracts/raio-x.ts";
 import type { ModoTurno, PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { Agente, EsforcoAgente } from "../contracts/agente.ts";
@@ -30,6 +31,7 @@ import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
+import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
@@ -278,12 +280,18 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // bot anexa à própria fala (NOD-200) não volta ao modelo nem pelo nome.
   const janela = !sessaoCli ? doHistorico.filter((m) => recomeco === null || m.criadoEm > recomeco).slice(-HISTORICO_NO_PLANO) : [];
   const daPessoa = janela.filter((m) => m.autoria.autor_tipo === "pessoa").map((m) => m.id);
-  const anexosDaJanela = daPessoa.length ? await deps.repos.anexos.daMensagens(daPessoa) : new Map<string, { nome: string }[]>();
-  const comAnexo = (m: (typeof janela)[number]) => {
+  const anexosDaJanela = daPessoa.length ? await deps.repos.anexos.daMensagens(daPessoa) : new Map<string, AnexoMeta[]>();
+  // ADR-111: a chave "Memória longa" da pessoa (0088) — as falas recentes até 8 mil caracteres e os anexos anteriores.
+  // Só no turno sem sessão (a janela vazia não muda nada) e fora da ligação, que tem o próprio histórico curto.
+  const experimentos = preferencias.experimentos ?? EXPERIMENTOS_DESLIGADOS;
+  const memoriaLonga = experimentos.memoriaLonga && modo !== "ligacao";
+  const cortes = cortarFalas(janela.map((m) => m.texto), memoriaLonga);
+  const comAnexo = (m: (typeof janela)[number], i: number) => {
     const nomes = (anexosDaJanela.get(m.id) ?? []).map((a) => a.nome);
-    return nomes.length ? `${m.texto.slice(0, 1000)} [anexou ${nomes.join(", ")}]` : m.texto.slice(0, 1000);
+    return nomes.length ? `${cortes[i]} [anexou ${nomes.join(", ")}]` : (cortes[i] ?? "");
   };
-  const historico = janela.map((m) => ({ autor: autorDe(m), texto: comAnexo(m), confianca: m.confianca }));
+  const historico = janela.map((m, i) => ({ autor: autorDe(m), texto: comAnexo(m, i), confianca: m.confianca }));
+  const anteriores = memoriaLonga ? anexosAnteriores({ falas: daPessoa, anexosPorFala: anexosDaJanela, jaNoTurno: turno.entradaAnexos, harness: escolha?.harness ?? null }) : [];
   // A sessão retomada não viu o que a conversa ganhou depois dela (rotina, colega, turno de outro harness):
   // entra aqui. A fala que disparou este turno e as que ele absorveu já vão na entrada (criadas depois dele).
   // Na sessão da cadeia, o que mudou desde ela (a decisão, a resposta do colega) já vem na entrada da retomada.
@@ -378,7 +386,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     executor,
     // 0005: --resume só para o MESMO executor que gravou a sessão; senão sessão nova (--session-id).
     sessaoCli,
-    anexos: metasDosAnexos,
+    anexos: [...metasDosAnexos, ...anteriores],
+    ...(experimentos.calibracao ? { calibracao: true } : {}),
     contextoConversa,
     pessoaNome,
     maquina: input.maquina ?? null,
@@ -457,7 +466,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;
-  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev }));
+  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, anexosAnteriores: anteriores.length } }));
 
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,

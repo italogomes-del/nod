@@ -18,7 +18,7 @@ import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { CausaNativa, Negacao } from "../../src/contracts/negacao.ts";
 import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
-import type { RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
+import type { Experimentos, RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { EstadoDaTarefa, FaixaParada, TarefaDoBot } from "../../src/contracts/turno.ts";
@@ -327,6 +327,8 @@ export type Estado = {
   botAbertoEmTrabalhos: string | null;
   /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
   usoDoMac: UsoDoMac;
+  /** ADR-111: as chaves de experimento do menu da conta (Calibração e Memória longa), lidas de `GET preferencias`. */
+  experimentos: Experimentos;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
   tempoTaskAberto: string | null;
   /**
@@ -415,6 +417,7 @@ export type Acao =
   /** ADR-099 (parte 5): abre (o id do bot) ou fecha (null) as frentes de um bot na tela Trabalhos. */
   | { tipo: "bot-trabalhos"; agenteId: string | null }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
+  | { tipo: "experimentos"; experimentos: Experimentos }
   | { tipo: "tempo-task"; id: string | null }
   | { tipo: "hidratar-custo"; custo: CustoDoDiaDto | null }
   | { tipo: "custo-aberto"; aberto: boolean }
@@ -483,6 +486,7 @@ export const estadoInicial: Estado = {
   frenteAberta: null,
   botAbertoEmTrabalhos: null,
   usoDoMac: "equilibrado",
+  experimentos: { calibracao: false, memoriaLonga: false },
   tempoTaskAberto: null,
   custoAberto: false,
 };
@@ -1129,6 +1133,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return estado.botAbertoEmTrabalhos === acao.agenteId ? estado : { ...estado, botAbertoEmTrabalhos: acao.agenteId };
     case "uso-do-mac":
       return estado.usoDoMac === acao.uso ? estado : { ...estado, usoDoMac: acao.uso };
+    case "experimentos":
+      return { ...estado, experimentos: acao.experimentos };
     case "tempo-task":
       return estado.tempoTaskAberto === acao.id ? estado : { ...estado, tempoTaskAberto: acao.id };
     case "hidratar-custo":

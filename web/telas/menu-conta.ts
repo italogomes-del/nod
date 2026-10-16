@@ -1,3 +1,4 @@
+import type { Experimentos } from "../../src/contracts/raio-x.ts";
 import type { SecaoEspaco } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
@@ -13,6 +14,8 @@ export type DadosMenuConta = {
   conexao: string;
   avisos: string;
   modoDev: boolean;
+  /** ADR-111: as chaves de experimento, logo abaixo do Modo dev. Ausente = as duas desligadas. */
+  experimentos?: Experimentos;
   banco: { texto: string; regime: string } | null;
   /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
   esteMac?: string;
@@ -24,6 +27,15 @@ export function faixaDeConectores(nomes: readonly string[]): string {
   return `${new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(lista)} fora do ar`;
 }
 
+/**
+ * definido em 2026-10-16 (ADR-111): as chaves de experimento, como a do Modo dev — ligam ali mesmo e valem para os turnos
+ * seguintes de todos os bots da pessoa. O porquê fica no title (hover), não no menu; o Raio-X de cada turno diz o que valeu.
+ */
+const EXPERIMENTOS: readonly { chave: keyof Experimentos; icone: string; nome: string; dica: string }[] = [
+  { chave: "calibracao", icone: ICONE.escudo, nome: "Calibração", dica: "Experimento: o bot diz que não achou em vez de afirmar que algo não existe." },
+  { chave: "memoriaLonga", icone: ICONE.livro, nome: "Memória longa", dica: "Experimento: sem sessão retomada, o bot recebe as falas recentes inteiras (até 8 mil caracteres) e os anexos de antes." },
+];
+
 export function htmlMenuConta(d: DadosMenuConta): string {
   const item = (secao: SecaoEspaco, icone: string, nome: string, meta = "") => `<button type="button" role="menuitem" data-secao="${secao}">${icone}<span class="mc-nome">${esc(nome)}</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}${ICONE.seta}</button>`;
   const faixa = d.faixa ? `<div class="mc-faixa" role="status"><span>${esc(d.faixa.texto)}</span><button type="button" role="menuitem" data-secao="conexao">${esc(d.faixa.botao)}</button></div>` : "";
@@ -32,6 +44,7 @@ export function htmlMenuConta(d: DadosMenuConta): string {
     ${item("conexao", pilhaDeAvatares(true), "Provedores de IA", d.conexao)}
     ${item("avisos", ICONE.sino, "Avisos", d.avisos)}
     <button type="button" role="menuitemcheckbox" aria-checked="${d.modoDev}" data-modo-dev>${ICONE.codigo}<span class="mc-nome">Modo dev</span><kbd>⌘⇧D</kbd><span class="mc-chave" aria-hidden="true"><span></span></span></button>
+    ${EXPERIMENTOS.map((e) => `<button type="button" role="menuitemcheckbox" aria-checked="${d.experimentos?.[e.chave] ?? false}" data-experimento="${e.chave}" title="${esc(e.dica)}">${e.icone}<span class="mc-nome">${esc(e.nome)}</span><span class="mc-chave" aria-hidden="true"><span></span></span></button>`).join("")}
     ${item("este-mac", ICONE.medidor, "Este Mac", d.esteMac ?? "")}
     ${item("computadores", ICONE.monitor, "Computadores")}
     <hr>

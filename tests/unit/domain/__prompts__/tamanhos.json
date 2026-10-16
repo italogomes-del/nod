@@ -11,6 +11,10 @@
     "estavel": 16083,
     "volatil": 1099
   },
+  "conversa-calibracao": {
+    "estavel": 15415,
+    "volatil": 1099
+  },
   "conversa-manual": {
     "estavel": 15033,
     "volatil": 1099

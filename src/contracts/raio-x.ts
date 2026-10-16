@@ -82,6 +82,11 @@ export type ComposicaoRaioX = {
   entrada: { chars: number; anexos: number; texto?: string };
   /** Os textos vieram junto (modo dev ligado na emissão). */
   comTexto: boolean;
+  /**
+   * ADR-111: as chaves de experimento que valeram neste turno e o que a memória longa trouxe a mais (anexos de falas
+   * anteriores). Ausente = turno de antes da 0088.
+   */
+  experimentos?: Experimentos & { anexosAnteriores: number };
 };
 
 /** GET turnos/:id/raio-x. `custoUsd` é o do turno (turnos.custo_usd), já sem o acumulado da sessão. */
@@ -133,4 +138,11 @@ export const USO_DO_MAC_PADRAO: UsoDoMac = "equilibrado";
  * `ordemIas` (0068, emenda da ADR-036): a ordem das IAs do Automático da pessoa; null = a padrão (ORDEM_IAS_PADRAO).
  * `iasNoLimite`: as IAs que o servidor viu chegar ao limite da assinatura, com o prazo (vencidas podem continuar aqui).
  */
-export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa };
+/**
+ * `experimentos` (definido em 2026-10-16, ADR-111, 0088): as chaves de experimento da pessoa, ao lado do modo dev.
+ * `calibracao` põe a linha "Calibração:" no prompt de texto; `memoriaLonga` leva, sem sessão retomada, as falas recentes
+ * até 8 mil caracteres e os anexos anteriores da conversa. Ausente = as duas desligadas.
+ */
+export type Experimentos = { calibracao: boolean; memoriaLonga: boolean };
+export const EXPERIMENTOS_DESLIGADOS: Experimentos = { calibracao: false, memoriaLonga: false };
+export type Preferencias = { modoDev: boolean; avisosFechados: string[]; usoDoMac?: UsoDoMac; maquinaPadraoId?: string | null; ordemIas?: IdHarness[] | null; iasNoLimite?: LimitesIa; experimentos?: Experimentos };

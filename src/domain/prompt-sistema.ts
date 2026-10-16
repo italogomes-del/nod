@@ -231,7 +231,16 @@ export type EntradaPromptSistema = {
   maquina?: { nome: string; plataforma: PlataformaMaquina } | null;
   /** ADR-103: a IA do turno. Com o Codex e o terminal, a linha do terminal fala das ferramentas dele, não das do Claude. */
   harness?: IdHarness | null;
+  /** ADR-111: a chave "Calibração" da pessoa (0088) — entra a LINHA_CALIBRACAO na parte estável. Ausente = sem a linha. */
+  calibracao?: boolean;
 };
+
+/**
+ * definido em 2026-10-16 (ADR-111): a linha da chave "Calibração". Motivo medido: no teste de 16/10, 17:16, o Nod
+ * pesquisou "GPT-5.5 vs Opus 5.5", não achou o segundo, afirmou que ele não existe e comparou com o Opus 5 — e repetiu a
+ * correção no resumo pedido em seguida. O modelo existia; a busca é que estava atrás do que a pessoa via.
+ */
+export const LINHA_CALIBRACAO = "Calibração: quando a pessoa citar algo que você não conhece ou que a busca não achou (um modelo, uma versão, um produto, uma pessoa), diga que não encontrou e com o que comparou no lugar; não afirme que não existe nem corrija a pessoa por isso. O que ela vê pode ser mais novo que o seu conhecimento e que o índice da busca. Corrija a pessoa só com evidência direta, e diga qual é.";
 
 /** Uma task aberta do bot como entra no prompt da conversa: id (para mandar_para_frente), título, estado e o último passo. */
 /** `cuidado` (revisão do épico, S24): título e último passo vindos de colega ou de task que leu conteúdo de fora. */
@@ -264,6 +273,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   linhas.push(LINHA_IDIOMA);
   // definido em 2026-09-28 (ADR-053): a conversa mostra link e tabela; a URL solta ainda funciona, mas o nome lê melhor.
   linhas.push("Formatação: a conversa mostra **negrito**, *itálico*, `código`, blocos de código, tabelas em markdown (cabeçalho e linha |---|) e links http(s). Ao citar uma mensagem, tarefa, PR ou página, ponha o link no próprio nome, como [PR #481](https://…), em vez de colar a URL solta.");
+  if (entrada.calibracao) linhas.push(LINHA_CALIBRACAO);
   const queFaz = linhaDoQueFaz(entrada.agente.descricao);
   if (queFaz) linhas.push(queFaz);
   if (entrada.manualDoNod) linhas.push(entrada.manualDoNod);
@@ -456,7 +466,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
 const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]])[] = [
   // definido em 2026-10-04 (ADR-072): "Fala:", "Ligação:", "Primeira ligação:", "Colegas no nod" e "Apps conectados" são
   // do prompt de voz (prompt-ligacao.ts); o de texto nunca começa linha assim.
-  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "O que você faz:", "Fala:"]],
+  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "Calibração:", "O que você faz:", "Fala:"]],
   ["modo", [...Object.values(INSTRUCAO_MODO).map((t) => t.slice(0, 40)), "Modo de pedido de colega:", "Aprovações:", "Ligação:", "Primeira ligação:"]],
   ["computador", ["Seu computador está", "Você tem um computador", "Pastas do computador"]],
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:", "Quem receber um pedido seu", "Colegas no nod"]],

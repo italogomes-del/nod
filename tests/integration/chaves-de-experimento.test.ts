@@ -1,0 +1,87 @@
+import { randomUUID } from "node:crypto";
+import { expect, it } from "vitest";
+import type { Inventario } from "../../src/contracts/inventario.ts";
+import { LINHA_CALIBRACAO } from "../../src/domain/prompt-sistema.ts";
+import { autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
+import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { gravarPreferencias } from "../../src/use-cases/raio-x.ts";
+import { agenteComConversa } from "../helpers/fabricas.ts";
+import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
+import { describeIntegracao } from "../helpers/integracao.ts";
+import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
+import { withRollback } from "../helpers/with-rollback.ts";
+
+/**
+ * ADR-111 (0088) no Postgres: as chaves de experimento da pessoa mudam o plano do turno seguinte — a Calibração põe a
+ * linha no prompt; a Memória longa, sem sessão retomada, leva a fala inteira (até 8 mil) e o anexo de antes — e o Raio-X
+ * grava o que valeu. Desligadas, o plano sai como antes.
+ */
+const escopo = { tenantId: TENANT_PADRAO, pessoaId: PESSOA_MARLON };
+const pronto: Inventario = { estado: "pronto", versao: "teste", em: Date.now() };
+const LONGA = `${"a".repeat(4000)} FIM-DA-TABELA`;
+
+describeIntegracao("chaves de experimento (ADR-111)", () => {
+  async function montar(trx: Parameters<Parameters<typeof withRollback>[1]>[0]) {
+    const base = await agenteComConversa(trx, escopo);
+    const agora = () => Date.now();
+    const deps = depsSobre(base.repos, escopo, { services: servicosDeTeste({ agora }), agora, trx });
+    const fala = (await base.repos.mensagens.criar({ conversaId: base.conversaId, autoria: autoriaPessoa(escopo), kind: "texto", texto: "segue o playbook", confianca: "confiavel" }))!;
+    const anexo = (await base.repos.anexos.criar({ conversaId: base.conversaId, nome: "playbook.md", mime: "text/markdown", conteudo: new TextEncoder().encode("# playbook") }))!;
+    await base.repos.anexos.prender([anexo.id], { conversaId: base.conversaId, mensagemId: fala.id });
+    await base.repos.mensagens.criar({ conversaId: base.conversaId, autoria: autoriaPessoa(escopo), kind: "texto", texto: LONGA, confianca: "confiavel" });
+    const turno = (await base.repos.turnos.enfileirar({ executor: "local", agenteId: base.agenteId, conversaId: base.conversaId, origem: "conversa", prazoEm: agora() + 60_000, profundidade: 0, entradaTexto: "e aí?", entradaConfianca: "confiavel", modelo: "auto", harness: "auto" }))!;
+    const plano = async () => (await emitirPlanoTurno(deps, { turnoId: turno.id, machineId: randomUUID(), executor: "local", harnesses: { "claude-cli": pronto } })).data;
+    return { ...base, deps, anexo, turno, plano };
+  }
+
+  it("a preferência: cada chave muda sozinha, nasce desligada e recusa o que não é booleano", async () => {
+    await withRollback(escopo, async (trx) => {
+      const m = await montar(trx);
+      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false });
+      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: false });
+      const ambas = (await gravarPreferencias(m.deps, { experimentos: { memoriaLonga: true } })).data;
+      expect(ambas.experimentos).toEqual({ calibracao: true, memoriaLonga: true });
+      expect(ambas.modoDev).toBe(false);
+      for (const ruim of [{}, [], { calibracao: "sim" }, { outra: true }, null]) {
+        await expect(gravarPreferencias(m.deps, { experimentos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });
+      }
+    });
+  });
+
+  it("desligadas: o plano sai como antes — sem a linha, fala cortada em 1 mil, sem o anexo de antes", async () => {
+    await withRollback(escopo, async (trx) => {
+      const m = await montar(trx);
+      const p = await m.plano();
+      expect(p.entrada.sessaoCli).toBeNull();
+      expect(p.promptSistema).not.toContain("Calibração:");
+      expect(p.promptSistema).toContain("a".repeat(1000));
+      expect(p.promptSistema).not.toContain("FIM-DA-TABELA");
+      expect(p.entrada.anexos).toBeUndefined();
+      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: false, memoriaLonga: false, anexosAnteriores: 0 });
+    });
+  });
+
+  it("ligadas: a linha da Calibração entra, a fala vai inteira e o anexo anterior volta marcado; o Raio-X grava", async () => {
+    await withRollback(escopo, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.preferencias.gravar({ experimentos: { calibracao: true, memoriaLonga: true } });
+      const p = await m.plano();
+      expect(p.promptSistema).toContain(LINHA_CALIBRACAO);
+      expect(p.promptSistema).toContain("FIM-DA-TABELA");
+      expect(p.entrada.anexos).toEqual([{ id: m.anexo.id, nome: "playbook.md", mime: "text/markdown", tamanho: 10, anterior: true }]);
+      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: true, memoriaLonga: true, anexosAnteriores: 1 });
+    });
+  });
+
+  it("com sessão retomada, a Memória longa não traz nada: o modelo já viu o arquivo na sessão", async () => {
+    await withRollback(escopo, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.preferencias.gravar({ experimentos: { memoriaLonga: true } });
+      await m.repos.conversas.atualizarSessaoCli(m.conversaId, randomUUID(), "local", "claude-cli");
+      const p = await m.plano();
+      expect(p.entrada.sessaoCli).not.toBeNull();
+      expect(p.entrada.anexos).toBeUndefined();
+      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toMatchObject({ memoriaLonga: true, anexosAnteriores: 0 });
+    });
+  });
+});
