@@ -64,8 +64,8 @@ describe("o aviso de ritmo: hoje acima de 2× a média dos 7 dias no mesmo horá
       { agenteId: "parado", janela: 3, usd: 5 },
     ];
     expect(custoDosBots(somas)).toEqual([
-      { agenteId: "ze", hojeUsd: 12, mediaUsd: 3, vezes: 4, foraDoRitmo: true, ritmo: "normal" },
-      { agenteId: "ana", hojeUsd: 2, mediaUsd: 14, vezes: null, foraDoRitmo: false, ritmo: "sem base" },
+      { agenteId: "ze", hojeUsd: 12, tokens: 0, parcial: false, mediaUsd: 3, vezes: 4, foraDoRitmo: true, ritmo: "normal" },
+      { agenteId: "ana", hojeUsd: 2, tokens: 0, parcial: false, mediaUsd: 14, vezes: null, foraDoRitmo: false, ritmo: "sem base" },
     ]);
   });
 

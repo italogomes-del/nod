@@ -209,7 +209,8 @@ describeIntegracao("custo de cada bot hoje (ADR-099 §7)", () => {
       const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
       const gasto = async (b: { agenteId: string; conversaId: string }, usd: number, em: number) => {
         const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: b.conversaId, agenteId: b.agenteId, origem: "conversa", prazoEm: agora + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
-        await trx`update turnos set custo_usd = ${usd}, criado_em = ${new Date(em)} where id = ${t!.id}`;
+        // NOD-273: o custo do dia soma `gastos` pelo instante do gasto (`em`), não o turno pela criação.
+        await repos.gastos.registrar({ turnoId: t!.id, executor: "local", tokensEntrada: 10, tokensSaida: 5, custoUsd: usd, modelo: "sonnet", em });
       };
       // UTC deixa a conta legível: hoje desde 00:00 UTC até agora; os dias anteriores até o mesmo horário.
       const meiaNoite = Math.floor(agora / 86_400_000) * 86_400_000;

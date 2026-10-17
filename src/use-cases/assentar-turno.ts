@@ -301,6 +301,8 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     em: agora,
   });
   if (turno.trabalhoId && custoUsd !== null && custoUsd > 0) await deps.repos.trabalhos.somarCusto(turno.trabalhoId, custoUsd);
+  // NOD-273: consumo sem custo informado (o Codex não informa) — o custo da frente passa a ser só parte do que custou.
+  if (turno.trabalhoId && custoUsd === null && resultado.tokens.entrada + resultado.tokens.saida > 0) await deps.repos.trabalhos.marcarCustoParcial(turno.trabalhoId);
   // Modo dev (0036): cada chamada e as compactações. Também na entrega tardia, que é a que mais pede explicação.
   if (resultado.execucao) await deps.repos.raioX.gravarExecucao(turno.id, resultado.execucao);
   // O "/" do chat (0038): o catálogo do Mac, quando o app mandou um novo.

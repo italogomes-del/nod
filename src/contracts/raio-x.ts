@@ -115,7 +115,10 @@ export type ResumoRaioX = {
 };
 
 /** GET conversas/:id/raio-x?desde=<epoch ms>: os resumos e o total desde `desde` (a meia-noite da pessoa). */
-/** NOD-276 (D10): `parcial` = algum turno do período gastou sem custo conhecido; o total soma só os que têm. */
+/**
+ * `desde.parcial` (NOD-273 / NOD-276, D10): algum turno do período teve consumo sem custo informado (o Codex, ou o turno
+ * que caiu antes do `result`) — o total soma só os que têm custo.
+ */
 export type RaioXConversa = { turnos: ResumoRaioX[]; desde: { custoUsd: number; turnos: number; parcial?: boolean } };
 
 /**

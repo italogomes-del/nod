@@ -69,6 +69,13 @@ O desenho está na página "modo-dev" do canvas "Nod — tela do agente".
 
 - Se, em 14 dias, algum turno assentado tiver `custo_usd` negativo ou maior que o `custo_sessao_usd`, o
   cálculo da diferença está errado e volta a gravar o total, com a faixa avisando "total da sessão".
+- Emenda de 2026-10-15 (NOD-291): o caso "sem anterior no mesmo id, custo = total" deixou de valer para a sessão
+  copiada com `--resume <mãe> --fork-session` (a rede de 2 min da ADR-083 §2). A cópia carrega o histórico da mãe,
+  e o primeiro turno dela gravava o total inteiro (US$ 670 em 4 turnos de 08/10). Agora o turno guarda a mãe em
+  `turnos.sessao_origem_cli` (0084), e o anterior é o maior total da mãe nos turnos criados antes da cópia. Se,
+  em 14 dias, algum turno com `sessao_origem_cli` tiver `custo_usd` igual ao `custo_sessao_usd` e a mãe tiver
+  total anterior, o desconto não está acontecendo. Os turnos antigos se corrigem com
+  `scripts/recalcular-custo-bifurcado.ts`, que só simula, a menos que se passe `--aplicar`.
 - Se o modo dev mostrar turnos em que o modelo chama uma ferramenta de app sem antes buscá-la e o CLI recusa a
   chamada, a busca de ferramentas não serve ao nosso catálogo e o `ToolSearch` sai do `--tools`.
 - Se `turno_raio_x` passar de 1 GB no banco diário, os textos passam a ser podados após 7 dias (a tabela já

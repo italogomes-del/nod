@@ -218,5 +218,23 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
       expect((await a.repos.mensagens.buscar(mensagem!.id))?.texto).toBe(texto);
     });
   });
-});
 
+  // Re-QA do #346 (Tarsila, 2026-10-17): NOD-291 — o relato diz onde o turno RODOU, não o executor da autoria da mensagem.
+  it("o executor do relato é o do turno, mesmo quando a autoria da mensagem diz outro (NOD-291)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const turno = await a.repos.turnos.enfileirar({ executor: "local",
+        conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
+        profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: "m", harness: "claude-cli",
+      });
+      const mensagem = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, turnoId: turno!.id, autoria: autoriaPessoa(PESSOA_MARLON),
+        kind: "texto", texto: "rodou no Mac", confianca: "confiavel", parcial: false,
+      });
+      expect(mensagem!.autoria.executor).toBe("catcher");
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: mensagem!.id, categoria: "outro", alcance: "mensagem" });
+      expect(r.data.relato.metadados.executor).toBe("local");
+    });
+  });
+});

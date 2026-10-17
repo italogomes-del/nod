@@ -463,6 +463,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const plano: PlanoTurno = { ...parcial, ...(escolha ? { harness: escolha.harness } : {}), ...(conta ? { conta: contaDoPlano(conta) } : {}), machineId: input.machineId, autoria: { ...parcial.autoria, machine_id: input.machineId }, tokenDeTurno };
   // NOD-214: o recomposto é guardado por quem pediu (tokenTurno.planoOuRecompor), e só se o token ainda for o mesmo.
   if (input.recompor) return { data: plano, events: [] };
+  // NOD-291 (0084): o turno roda numa CÓPIA da sessão da conversa — o total que o CLI devolver traz o histórico da mãe,
+  // e o assentar desconta o total dela (turnos.totalAnteriorDaSessao). Grava de onde a cópia saiu.
+  if (bifurcar && sessaoDaConversa) await deps.repos.turnos.registrarSessaoOrigem(turno.id, sessaoDaConversa);
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;

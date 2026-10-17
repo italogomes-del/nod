@@ -81,19 +81,32 @@ export function ritmoDoBot(hojeUsd: number, anteriores: readonly number[]): Pick
 }
 
 /**
- * Os bots do dia a partir das somas por (bot, janela) — janela 0 é hoje, 1 a 7 os dias anteriores. Entra quem gastou hoje
- * ou está fora do ritmo, do que mais gastou ao que menos.
+ * A soma de um bot numa janela (o que o repositório devolve). `tokens` = entrada + saída dos gastos; `semCusto` = algum
+ * gasto teve consumo e nenhum custo informado (o Codex) — o dólar da janela é só parte do que custou.
  */
-export function custoDosBots(somas: readonly { agenteId: string; janela: number; usd: number }[]): CustoDoBotHoje[] {
-  const porBot = new Map<string, number[]>();
+export type SomaDoDia = { agenteId: string; janela: number; usd: number; tokens?: number; semCusto?: boolean };
+
+/**
+ * Os bots do dia a partir das somas por (bot, janela) — janela 0 é hoje, 1 a 7 os dias anteriores. Entra quem gastou hoje
+ * (em dólar ou só em tokens) ou está fora do ritmo, do que mais gastou ao que menos (empate: mais tokens primeiro).
+ *
+ * revisto em 2026-10-15 (NOD-273, D4): o bot que só roda no Codex não some mais da lista — aparece com os tokens, e
+ * `parcial` diz que o dólar de hoje não cobre tudo. O ritmo segue só em dólar (tokens não têm preço aqui).
+ */
+export function custoDosBots(somas: readonly SomaDoDia[]): CustoDoBotHoje[] {
+  const porBot = new Map<string, { usd: number[]; tokens: number; parcial: boolean }>();
   for (const s of somas) {
     if (s.janela < 0 || s.janela > DIAS_DA_MEDIA) continue;
-    const linha = porBot.get(s.agenteId) ?? new Array<number>(DIAS_DA_MEDIA + 1).fill(0);
-    linha[s.janela] = (linha[s.janela] ?? 0) + s.usd;
+    const linha = porBot.get(s.agenteId) ?? { usd: new Array<number>(DIAS_DA_MEDIA + 1).fill(0), tokens: 0, parcial: false };
+    linha.usd[s.janela] = (linha.usd[s.janela] ?? 0) + (Number.isFinite(s.usd) ? s.usd : 0);
+    if (s.janela === 0) {
+      linha.tokens += Number.isFinite(s.tokens) ? (s.tokens ?? 0) : 0;
+      linha.parcial ||= s.semCusto === true;
+    }
     porBot.set(s.agenteId, linha);
   }
   return [...porBot.entries()]
-    .map(([agenteId, linha]) => ({ agenteId, hojeUsd: linha[0] ?? 0, ...ritmoDoBot(linha[0] ?? 0, linha.slice(1)) }))
-    .filter((b) => b.hojeUsd > 0 || b.foraDoRitmo)
-    .sort((a, b) => b.hojeUsd - a.hojeUsd || a.agenteId.localeCompare(b.agenteId));
+    .map(([agenteId, l]) => ({ agenteId, hojeUsd: l.usd[0] ?? 0, tokens: l.tokens, parcial: l.parcial, ...ritmoDoBot(l.usd[0] ?? 0, l.usd.slice(1)) }))
+    .filter((b) => b.hojeUsd > 0 || b.tokens > 0 || b.foraDoRitmo)
+    .sort((a, b) => b.hojeUsd - a.hojeUsd || b.tokens - a.tokens || a.agenteId.localeCompare(b.agenteId));
 }

@@ -64,8 +64,15 @@ export type PedidoNaFilaDaCota = {
 /** O custo de um bot hoje e o ritmo dele (definido em 2026-10-12, ADR-099 §7). */
 export type CustoDoBotHoje = {
   agenteId: string;
-  /** Soma de `turnos.custo_usd` dos turnos criados hoje até agora, no fuso da pessoa. */
+  /**
+   * Soma de `gastos.custo_usd` dos gastos de hoje até agora (pelo instante do gasto, `gastos.em`), no fuso da pessoa
+   * (revisto em 2026-10-15, NOD-273). O gasto sem custo informado conta zero aqui e entra em `tokens`.
+   */
   hojeUsd: number;
+  /** Tokens (entrada + saída) dos gastos de hoje — o consumo do Codex, que não informa custo, aparece por aqui. */
+  tokens: number;
+  /** Algum gasto de hoje teve consumo sem custo informado: `hojeUsd` é só parte do que custou. */
+  parcial: boolean;
   /**
    * Média dos dias com gasto entre os 7 anteriores, cada um somado da meia-noite até o mesmo horário de agora (NOD-276, D9).
    */
@@ -79,8 +86,19 @@ export type CustoDoBotHoje = {
 };
 
 /** `GET custo-hoje?fuso=`: os bots com gasto hoje (ou fora do ritmo), do que mais gastou ao que menos. */
-/** NOD-276 (D10): `parcial` = algum turno de hoje gastou sem custo conhecido; o total soma só os que têm. */
-export type CustoDoDiaDto = { fuso: string; desde: EpochMs; ate: EpochMs; totalUsd: number; bots: CustoDoBotHoje[]; foraDoRitmo: boolean; parcial?: boolean };
+export type CustoDoDiaDto = {
+  fuso: string;
+  desde: EpochMs;
+  ate: EpochMs;
+  totalUsd: number;
+  bots: CustoDoBotHoje[];
+  foraDoRitmo: boolean;
+  /**
+   * NOD-273 / NOD-276 (D10): algum gasto de hoje teve consumo sem custo informado (o Codex, ou o turno que caiu antes do
+   * `result`) — o total em dólar soma só os que têm custo e é parcial.
+   */
+  parcial: boolean;
+};
 
 /** esperaDaCota da rotina (RotinaDto em api.ts, mesmo formato; definido em 2026-10-16, NOD-274 C7): a execução aberta espera a cota da IA renovar; `ia` é o nome (ex.: "Claude Code"). */
 export type EsperaDaCotaDaRotina = { ia: string; voltaEm: EpochMs };

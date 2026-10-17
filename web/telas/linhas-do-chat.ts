@@ -4,7 +4,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { aberto, abertosDoBot, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
-import { usd } from "./modo-dev.ts";
+import { custoDaFrente } from "./modo-dev.ts";
 
 /**
  * Chat limpo (definido em 2026-10-07, #191/#195, ADR-083): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
@@ -353,7 +353,8 @@ function trabalhoDoPedido(mensagens: readonly Mensagem[], para: readonly string[
 
 /** "Migrar relatórios terminou · 39 min · US$ 0,88" — a linha que entra acima do resultado da task (K5). */
 function linhaTerminou(t: TrabalhoDto, estado: Estado): string {
-  const custo = t.custoUsd !== null ? ` · ${usd(t.custoUsd)}` : "";
+  const valor = custoDaFrente(t);
+  const custo = valor !== null ? ` · ${valor}` : "";
   return `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-terminou"><span class="linha-ok" aria-hidden="true">✓</span><b>${esc(t.titulo)}</b><span>terminou · ${esc(tempoDe(t, estado.agora))}${esc(custo)}</span></span></div>`;
 }
 

@@ -138,6 +138,21 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
     });
   });
 
+  it("NOD-291: a retomada automática leva o executor em que o turno rodou, não um catcher fixo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.turnos.registrarExecutor(m.tarefa.id, "local");
+      await m.cair(m.tarefa.id, "executor_indisponivel");
+      await m.sinalDeVida();
+      const { data, events } = await cuidarDosPedidosParados(m.deps);
+      expect(data.retomados).toEqual([m.tarefa.id]);
+      const retomada = (await m.turnosDoColega()).find((x) => x.origem === "retomada");
+      expect(retomada?.executor).toBe("local");
+      const criado = events.filter((e) => e.kind === "turno_criado" && e.turnoId === retomada!.id);
+      expect(criado.map((e) => e.autoria.executor)).toEqual(["local"]);
+    });
+  });
+
   it("NOD-241 (CA2): o pedido de antes cujo colega rodava havia 3 h e caiu no reinício do servidor é retomado, sem avisar falha", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

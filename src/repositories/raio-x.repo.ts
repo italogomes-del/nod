@@ -79,13 +79,21 @@ export function raioXRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraTurno);
     },
 
-    /** Custo e turnos da conversa desde `desde` (a meia-noite de quem pergunta). Turno sem custo não conta. */
-    async totalDesde(conversaId: string, desde: number): Promise<{ custoUsd: number; turnos: number }> {
-      const [l] = await conn<{ custo: string | null; turnos: number }[]>`
-        select sum(custo_usd) as custo, count(*)::int as turnos
-        from turnos
-        where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and criado_em >= ${data(desde)} and custo_usd is not null`;
-      return { custoUsd: l?.custo === null || l?.custo === undefined ? 0 : Number(l.custo), turnos: l?.turnos ?? 0 };
+    /**
+     * Custo e turnos da conversa desde `desde` (a meia-noite de quem pergunta). Conta o turno que tem custo ou gasto
+     * registrado. revisto em 2026-10-15 (NOD-273): o turno do Codex (gasto sem custo informado) conta como turno e marca
+     * `parcial` — antes sumia da conta e o "Hoje com o bot" mentia.
+     */
+    async totalDesde(conversaId: string, desde: number): Promise<{ custoUsd: number; turnos: number; parcial?: boolean }> {
+      const [l] = await conn<{ custo: string | null; turnos: number; parcial: boolean | null }[]>`
+        select sum(t.custo_usd) as custo, count(*)::int as turnos,
+          bool_or(t.custo_usd is null) as parcial
+        from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.conversa_id = ${conversaId} and t.criado_em >= ${data(desde)}
+          and (t.custo_usd is not null or exists (
+            select 1 from gastos g where g.tenant_id = t.tenant_id and g.turno_id = t.id and g.tokens_entrada + g.tokens_saida > 0))`;
+      const custoUsd = l?.custo === null || l?.custo === undefined ? 0 : Number(l.custo);
+      return { custoUsd, turnos: l?.turnos ?? 0, ...(l?.parcial ? { parcial: true } : {}) };
     },
   };
 }

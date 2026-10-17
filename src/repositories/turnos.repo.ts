@@ -6,6 +6,7 @@ import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
@@ -688,6 +689,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       await conn`update turnos set executor = ${executor} where tenant_id = ${escopo.tenantId} and id = ${id}`;
     },
 
+    /**
+     * NOD-291 (0084): o turno que roda numa CÓPIA da sessão da conversa (`--fork-session`, a rede de 2 min da ADR-083 §2)
+     * guarda de que sessão a cópia saiu. O CLI devolve um id novo cujo total traz o histórico da mãe; o assentar desconta
+     * o total da mãe (totalAnteriorDaSessao). Só grava quando bifurca: a coluna nasce nula (a tabela mais quente).
+     */
+    async registrarSessaoOrigem(id: string, sessaoCli: string): Promise<void> {
+      await conn`update turnos set sessao_origem_cli = ${sessaoCli} where tenant_id = ${escopo.tenantId} and id = ${id} and sessao_origem_cli is distinct from ${sessaoCli}`;
+    },
+
     /** ADR-102 (0074): a conta que o plano mandou a máquina usar (null = a pasta padrão da máquina). */
     async registrarConta(id: string, contaId: string | null): Promise<void> {
       await conn`update turnos set conta_id = ${contaId} where tenant_id = ${escopo.tenantId} and id = ${id}`;
@@ -775,11 +785,21 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * 0035: o total que a sessão do CLI tinha no turno anterior DELA (o maior já registrado, que é o último: o total
      * só cresce dentro de uma sessão). null = nenhum turno desta sessão registrou total ainda.
+     *
+     * NOD-291 (0084): sem anterior na sessão e com o turno numa cópia (`sessao_origem_cli`), o anterior é o total da MÃE
+     * quando a cópia saiu: o maior dos turnos dela criados antes deste (a mãe segue no trabalho promovido e cresce
+     * depois; o que ela gastou depois não entrou na cópia). Cópia de cópia: a mãe imediata, pela mesma regra.
      */
     async totalAnteriorDaSessao(sessaoCli: string, turnoId: string): Promise<number | null> {
       const [l] = await conn<{ total: string | null }[]>`
-        select max(custo_sessao_usd) as total from turnos
-        where tenant_id = ${escopo.tenantId} and sessao_cli = ${sessaoCli} and id <> ${turnoId} and custo_sessao_usd is not null`;
+        select coalesce(
+          (select max(custo_sessao_usd) from turnos
+            where tenant_id = ${escopo.tenantId} and sessao_cli = ${sessaoCli} and id <> ${turnoId} and custo_sessao_usd is not null),
+          (select max(m.custo_sessao_usd) from turnos f
+            join turnos m on m.tenant_id = f.tenant_id and m.sessao_cli = f.sessao_origem_cli and m.id <> f.id
+              and m.custo_sessao_usd is not null and m.criado_em < f.criado_em
+            where f.tenant_id = ${escopo.tenantId} and f.id = ${turnoId} and f.sessao_origem_cli is distinct from ${sessaoCli})
+        )::text as total`;
       return l?.total === null || l?.total === undefined ? null : Number(l.total);
     },
 
@@ -1136,21 +1156,28 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * definido em 2026-10-12 (ADR-099 §7, custo visível): a soma de `custo_usd` por bot em cada janela [inicio, fim), pela
-     * criação do turno (como o total do Raio-X, raio-x.repo.ts). `janela` é o índice em `janelas`. Só a pessoa (RLS e o
-     * filtro do dono); turno sem custo não conta.
+     * definido em 2026-10-12 (ADR-099 §7, custo visível): o gasto por bot em cada janela [inicio, fim). `janela` é o índice
+     * em `janelas`. Só a pessoa (RLS e o filtro do dono).
+     *
+     * revisto em 2026-10-15 (NOD-273, D4/D5): soma a tabela `gastos` pelo INSTANTE do gasto (`g.em`, o fim do turno), não
+     * `turnos.custo_usd` pela criação do turno — o turno das 23h que termina às 2h conta no dia em que terminou (em 14 dias de
+     * produção, 46 gastos cruzavam a meia-noite). E o gasto sem custo informado (o Codex) entra com os tokens: `semCusto`
+     * diz que houve consumo que o dólar não cobre. Tokens = entrada + saída do que o CLI informou.
      */
-    async custoPorAgente(janelas: readonly { inicio: number; fim: number }[]): Promise<{ agenteId: string; janela: number; usd: number }[]> {
+    async custoPorAgente(janelas: readonly { inicio: number; fim: number }[]): Promise<SomaDoDia[]> {
       if (janelas.length === 0) return [];
       const inicios = janelas.map((j) => new Date(j.inicio).toISOString());
       const fins = janelas.map((j) => new Date(j.fim).toISOString());
-      const linhas = await conn<{ agente_id: string; janela: number; usd: string }[]>`
-        select t.agente_id, (j.i - 1)::int as janela, sum(t.custo_usd)::text as usd
+      const linhas = await conn<{ agente_id: string; janela: number; usd: string; tokens: string; sem_custo: boolean }[]>`
+        select t.agente_id, (j.i - 1)::int as janela, coalesce(sum(g.custo_usd), 0)::text as usd,
+          sum(g.tokens_entrada::bigint + g.tokens_saida::bigint)::text as tokens,
+          bool_or(g.custo_usd is null and g.tokens_entrada + g.tokens_saida > 0) as sem_custo
         from unnest(${inicios}::text[], ${fins}::text[]) with ordinality as j(inicio, fim, i)
-        join turnos t on t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId}
-          and t.criado_em >= j.inicio::timestamptz and t.criado_em < j.fim::timestamptz and t.custo_usd is not null
+        join gastos g on g.tenant_id = ${escopo.tenantId} and g.owner_id = ${escopo.pessoaId}
+          and g.em >= j.inicio::timestamptz and g.em < j.fim::timestamptz
+        join turnos t on t.tenant_id = g.tenant_id and t.id = g.turno_id
         group by t.agente_id, j.i`;
-      return linhas.map((l) => ({ agenteId: l.agente_id, janela: l.janela, usd: Number(l.usd) }));
+      return linhas.map((l) => ({ agenteId: l.agente_id, janela: l.janela, usd: Number(l.usd), tokens: Number(l.tokens), semCusto: l.sem_custo }));
     },
 
     /**

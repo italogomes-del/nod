@@ -29,10 +29,10 @@ function estadoCom(trabalhos: Partial<TrabalhosDto>, extra: Partial<Estado> = {}
 }
 
 const custo: CustoDoDiaDto = {
-  fuso: "America/Sao_Paulo", desde: AGORA - 15 * HORA, ate: AGORA, totalUsd: 21.4, foraDoRitmo: true,
+  fuso: "America/Sao_Paulo", desde: AGORA - 15 * HORA, ate: AGORA, totalUsd: 21.4, foraDoRitmo: true, parcial: false,
   bots: [
-    { agenteId: "ze", hojeUsd: 18.2, mediaUsd: 6, vezes: 3.03, foraDoRitmo: true },
-    { agenteId: "ana", hojeUsd: 3.2, mediaUsd: 3, vezes: 1.07, foraDoRitmo: false },
+    { agenteId: "ze", hojeUsd: 18.2, mediaUsd: 6, vezes: 3.03, foraDoRitmo: true, tokens: 0, parcial: false },
+    { agenteId: "ana", hojeUsd: 3.2, mediaUsd: 3, vezes: 1.07, foraDoRitmo: false, tokens: 0, parcial: false },
   ],
 };
 

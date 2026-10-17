@@ -20,7 +20,8 @@ export const lerCustoDoDia: CasoDeUso<{ fuso: string }, CustoDoDiaDto> = async (
       totalUsd: bots.reduce((s, b) => s + b.hojeUsd, 0),
       bots,
       foraDoRitmo: bots.some((b) => b.foraDoRitmo),
-      ...(parcial ? { parcial: true } : {}),
+      // NOD-276 (gasto sem custo no período) ou NOD-273 (o bot de hoje com consumo sem custo): as duas dizem "parcial".
+      parcial: parcial || bots.some((b) => b.parcial),
     },
   };
 };

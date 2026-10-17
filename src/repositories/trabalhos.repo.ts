@@ -30,6 +30,7 @@ interface Linha {
   pasta: string | null;
   memoria_mb: number | null;
   custo_usd: string | null;
+  custo_parcial: boolean;
   pessoa_esperando: boolean;
   forma: FormaTrabalho;
   lote_id: string | null;
@@ -46,7 +47,7 @@ interface Linha {
 const TETO_COM_CODIGOS = 10_000;
 
 const COLUNAS =
-  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, pessoa_esperando, forma, lote_id, resumo, criado_em, iniciado_em, terminado_em";
+  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, custo_parcial, pessoa_esperando, forma, lote_id, resumo, criado_em, iniciado_em, terminado_em";
 
 const paraTrabalho = (l: Linha): Trabalho => ({
   tenantId: l.tenant_id,
@@ -66,6 +67,7 @@ const paraTrabalho = (l: Linha): Trabalho => ({
   pasta: l.pasta,
   memoriaMb: l.memoria_mb,
   custoUsd: l.custo_usd === null ? null : Number(l.custo_usd),
+  ...(l.custo_parcial ? { custoParcial: true } : {}),
   pessoaEsperando: l.pessoa_esperando,
   forma: l.forma,
   loteId: l.lote_id,
@@ -282,6 +284,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async contaDaSessao(id: string): Promise<string | null> {
       const [l] = await conn<{ sessao_conta_id: string | null }[]>`select sessao_conta_id from trabalhos where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}`;
       return l?.sessao_conta_id ?? null;
+    },
+
+    /** NOD-273: o trabalho teve turno com consumo e sem custo informado (o Codex) — o custo dele é parcial. */
+    async marcarCustoParcial(id: string): Promise<void> {
+      await conn`
+        update trabalhos set custo_parcial = true
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and not custo_parcial`;
     },
 
     /** ADR-107 (NOD-281): o CLI recusou a sessão; a próxima volta do trabalho vai sem resume, com o histórico. */

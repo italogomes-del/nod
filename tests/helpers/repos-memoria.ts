@@ -114,6 +114,8 @@ export type BancoMemoria = {
   terminalLiberado: Set<string>;
   /** 0035: a sessão do CLI e o total informado, por turno. */
   custoSessao: Map<string, { sessaoCli: string; total: number }>;
+  /** NOD-291: turno → a sessão-mãe da cópia (`turnos.sessao_origem_cli`). */
+  sessaoOrigem: Map<string, string>;
   /** 0036: o Raio-X de cada turno e as preferências de cada pessoa (chave tenant:pessoa). */
   raioX: Map<string, { composicao: ComposicaoRaioX | null; execucao: ExecucaoRaioX | null }>;
   preferencias: Map<string, Preferencias>;
@@ -188,6 +190,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     computadorLiberado: new Set(),
     terminalLiberado: new Set(),
     custoSessao: new Map(),
+    sessaoOrigem: new Map(),
     raioX: new Map(),
     preferencias: new Map(),
     onboarding: new Map(),
@@ -1101,6 +1104,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async definirContaDaSessao(id, contaId) { b.contaDaSessao.set(`trabalho:${id}`, contaId); },
       async contaDaSessao(id) { return b.contaDaSessao.get(`trabalho:${id}`) ?? null;
       },
+      async marcarCustoParcial(id) {
+        const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
+        if (t) t.custoParcial = true;
+      },
       async maquinaDaSessao(id) { return b.maquinaDaSessao.get(`trabalho:${id}`) ?? null; },
       async largarSessao(id) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
@@ -1498,7 +1505,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async totalAnteriorDaSessao(sessaoCli, turnoId) {
         const totais = [...b.custoSessao].filter(([id, c]) => id !== turnoId && c.sessaoCli === sessaoCli && doTenant(b.turnos).some((t) => t.id === id)).map(([, c]) => c.total);
-        return totais.length === 0 ? null : Math.max(...totais);
+        if (totais.length > 0) return Math.max(...totais);
+        // NOD-291: a cópia da sessão desconta o total da mãe até o instante em que saiu dela.
+        const origem = b.sessaoOrigem.get(turnoId);
+        const filho = doTenant(b.turnos).find((t) => t.id === turnoId);
+        if (!origem || origem === sessaoCli || !filho) return null;
+        const daMae = [...b.custoSessao]
+          .filter(([id, c]) => id !== turnoId && c.sessaoCli === origem && doTenant(b.turnos).some((t) => t.id === id && t.criadoEm < filho.criadoEm))
+          .map(([, c]) => c.total);
+        return daMae.length === 0 ? null : Math.max(...daMae);
+      },
+      async registrarSessaoOrigem(id, sessaoCli) {
+        if (doTenant(b.turnos).some((t) => t.id === id)) b.sessaoOrigem.set(id, sessaoCli);
       },
       async concluirTardia(id, a) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
@@ -1657,14 +1675,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return saida;
       },
       async custoPorAgente(janelas) {
-        const somas = new Map<string, { agenteId: string; janela: number; usd: number }>();
-        for (const t of doTenant(b.turnos)) {
-          if (t.ownerId !== escopo.pessoaId || t.custoUsd === null) continue;
+        // NOD-273: espelha o SQL — soma `gastos` pelo instante do gasto (`em`), com tokens e a marca de sem custo.
+        const somas = new Map<string, { agenteId: string; janela: number; usd: number; tokens: number; semCusto: boolean }>();
+        for (const g of doTenant(b.gastos)) {
+          if (g.ownerId !== escopo.pessoaId) continue;
+          const t = doTenant(b.turnos).find((x) => x.id === g.turnoId);
+          if (!t) continue;
           janelas.forEach((j, janela) => {
-            if (t.criadoEm < j.inicio || t.criadoEm >= j.fim) return;
+            if (g.em < j.inicio || g.em >= j.fim) return;
             const chave = `${t.agenteId}:${janela}`;
-            const atual = somas.get(chave) ?? { agenteId: t.agenteId, janela, usd: 0 };
-            atual.usd += t.custoUsd ?? 0;
+            const atual = somas.get(chave) ?? { agenteId: t.agenteId, janela, usd: 0, tokens: 0, semCusto: false };
+            const tokens = g.tokensEntrada + g.tokensSaida;
+            atual.usd += g.custoUsd ?? 0;
+            atual.tokens += tokens;
+            atual.semCusto ||= g.custoUsd === null && tokens > 0;
             somas.set(chave, atual);
           });
         }
@@ -2669,8 +2693,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .map((t) => ({ turnoId: t.id, agenteId: t.agenteId, estado: t.estado, custoUsd: t.custoUsd, criadoEm: t.criadoEm, composicao: null, execucao: b.raioX.get(t.id)?.execucao ?? null }));
       },
       async totalDesde(conversaId, desde) {
-        const com = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.criadoEm >= desde && t.custoUsd !== null);
-        return { custoUsd: com.reduce((s, t) => s + (t.custoUsd ?? 0), 0), turnos: com.length };
+        const comGasto = (id: string) => doTenant(b.gastos).some((g) => g.turnoId === id && g.tokensEntrada + g.tokensSaida > 0);
+        const com = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.criadoEm >= desde && (t.custoUsd !== null || comGasto(t.id)));
+        const parcial = com.some((t) => t.custoUsd === null);
+        return { custoUsd: com.reduce((s, t) => s + (t.custoUsd ?? 0), 0), turnos: com.length, ...(parcial ? { parcial: true } : {}) };
       },
     },
     preferencias: (() => {

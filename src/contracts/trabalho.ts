@@ -56,7 +56,7 @@ export type Trabalho = CamposDeFrente & {
   pasta: string | null;
   /** Última leitura de memória do Mac para o grupo de processos do trabalho (#194). */
   memoriaMb: number | null;
-  custoUsd: number | null;
+  custoUsd: number | null; custoParcial?: boolean; // NOD-273 (2026-10-15): custoParcial = algum turno sem custo informado (o Codex); ausente = false
   /** definido em 2026-10-08 (ADR-085, revisão do #209): a pessoa pediu e está esperando ("Executar agora" numa rotina, ou
    * um pedido a colega feito na conversa com ela). O Mac apertado não segura este trabalho. */
   pessoaEsperando?: boolean;

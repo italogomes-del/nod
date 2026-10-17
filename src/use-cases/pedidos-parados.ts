@@ -39,7 +39,8 @@ export async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPed
   const original = await deps.repos.turnos.buscar(acao.turnoId);
   if (!original || original.estado !== "interrompido") return [];
   const agora = deps.agora();
-  // NOD-281: a autoria leva o executor do turno pai (antes "catcher" fixo, e o relatório lia a retomada como do catcher).
+  // NOD-291 (C23) / NOD-281: a autoria leva o executor em que o turno pai rodou, não um "catcher" fixo (o Raio-X, a trilha
+  // e o relatório liam a retomada como do catcher).
   const autoria = autoriaAgente({ agenteId: original.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: original.executor, decididoPor: REGRA_RETOMADA_AUTOMATICA });
   const events: RuntimeEvent[] = [];
   if (p.cardRetomar?.aberto) {

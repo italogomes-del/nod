@@ -59,7 +59,8 @@ export const registrarRelato: CasoDeUso<EntradaRelato, SaidaRegistrarRelato> = a
     motivoInterrupcao: turno?.motivoInterrupcao ?? null,
     modelo: turno?.modelo ?? null,
     harness: turno?.harness ?? null,
-    executor: mensagem.autoria.executor,
+    // NOD-291: o executor em que o turno rodou; a autoria da mensagem é o fallback (a mensagem sem turno).
+    executor: turno?.executor ?? mensagem.autoria.executor,
     machineId: turno?.machineId ?? mensagem.autoria.machine_id,
     custoUsd: turno?.custoUsd ?? null,
     reenvios: turno?.reenvios ?? null,

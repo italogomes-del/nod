@@ -45,6 +45,21 @@ export function usd(v: number | null): string {
   return `US$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas })}`;
 }
 
+/** NOD-273: "850 tokens", "13 mil tokens", "1.204 mil tokens" — o consumo de quem não informa custo (o Codex). */
+export function tokensLegiveis(n: number): string {
+  if (!Number.isFinite(n) || n < 1000) return `${Math.max(0, Math.round(Number.isFinite(n) ? n : 0)).toLocaleString("pt-BR")} tokens`;
+  return `${Math.round(n / 1000).toLocaleString("pt-BR")} mil tokens`;
+}
+
+/**
+ * NOD-273: o custo de uma frente (ou task). Com turno sem custo informado (o Codex), o valor é só parte: "(parcial)"; sem
+ * nenhum valor e parcial, diz por quê. null = nada a mostrar.
+ */
+export function custoDaFrente(t: { custoUsd: number | null; custoParcial?: boolean }): string | null {
+  if (t.custoUsd === null) return t.custoParcial ? "custo não informado pelo Codex" : null;
+  return `${usd(t.custoUsd)}${t.custoParcial ? " (parcial)" : ""}`;
+}
+
 export function modeloCurto(modelo: string | null): string {
   if (!modelo) return "";
   const m = /(opus|sonnet|haiku|fable)/i.exec(modelo);

@@ -9,7 +9,7 @@ import { textoFormatado } from "../lib/texto-formatado.ts";
 import { aberto, abertosDoBot, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
-import { PARCIAL, usd } from "./modo-dev.ts";
+import { custoDaFrente, PARCIAL, tokensLegiveis, usd } from "./modo-dev.ts";
 
 /**
  * As telas dos trabalhos (ADR-083, épico #188; protótipo "Chat limpo", pranchas K1–K9 e M1–M3): a faixa de Trabalhos em
@@ -195,9 +195,19 @@ export function custoDoTopo(estado: Estado): string {
   const vezes = (v: number | null) => (v === null ? "" : `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}× o normal`);
   const linhas = c.bots.map((b) => {
     const bot = agente(estado, b.agenteId);
-    return `<li class="tt-custo-bot${b.foraDoRitmo ? " fora" : ""}">${bot ? iconeAgente(bot, "sm") : ""}<span class="tt-custo-nome">${esc(bot?.nome ?? "bot")}</span>${b.foraDoRitmo ? `<small>${esc(vezes(b.vezes))}</small>` : b.ritmo === "sem base" ? `<small title="${SEM_BASE}">sem base</small>` : ""}<b>${esc(usd(b.hojeUsd))}</b></li>`;
+    return `<li class="tt-custo-bot${b.foraDoRitmo ? " fora" : ""}">${bot ? iconeAgente(bot, "sm") : ""}<span class="tt-custo-nome">${esc(bot?.nome ?? "bot")}</span>${b.foraDoRitmo ? `<small>${esc(vezes(b.vezes))}</small>` : b.ritmo === "sem base" ? `<small title="${SEM_BASE}">sem base</small>` : ""}${valorDoBot(b)}</li>`;
   }).join("");
-  return `${botao}<div class="tt-custo-detalhe" role="group" aria-label="Custo de hoje por bot"><ul>${linhas || '<li class="mudo">Nenhum gasto hoje.</li>'}</ul><p>Desde a meia-noite. "Acima do normal" é mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário.${c.parcial ? ` ${PARCIAL}` : ""}</p></div>`;
+  return `${botao}<div class="tt-custo-detalhe" role="group" aria-label="Custo de hoje por bot"><ul>${linhas || '<li class="mudo">Nenhum gasto hoje.</li>'}</ul><p>Desde a meia-noite. "Acima do normal" é mais que o dobro da média dos dias com gasto nos últimos 7 (precisa de pelo menos 3) até este horário.${c.parcial ? ` ${PARCIAL} O Codex não informa custo: o que roda nele aparece em tokens.` : ""}</p></div>`;
+}
+
+/**
+ * revisto em 2026-10-15 (NOD-273): o valor de um bot no detalhe. Só dólar: o valor. Só tokens (o Codex não informa custo):
+ * "13 mil tokens · o Codex não informa custo". Os dois: o valor com "(parcial)" e os tokens de quem não informou.
+ */
+function valorDoBot(b: { hojeUsd: number; tokens: number; parcial: boolean }): string {
+  if (b.parcial && b.hojeUsd <= 0) return `<small class="tt-custo-sem">o Codex não informa custo</small><b class="tt-custo-tokens">${esc(tokensLegiveis(b.tokens))}</b>`;
+  if (b.parcial) return `<b>${esc(usd(b.hojeUsd))} (parcial)</b>`;
+  return `<b>${esc(usd(b.hojeUsd))}</b>`;
 }
 
 const FILTROS: { id: FiltroTrabalhos; nome: string }[] = [
@@ -273,7 +283,7 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const abertoCartao = estado.tempoTaskAberto === t.id;
   const botaoStatus = `<button type="button" class="tk-status${fora ? " fora-do-mac" : ""}" data-act="tempo-task" data-id="${esc(t.id)}" aria-expanded="${abertoCartao}" title="Ver o tempo da task">${esc(status)}${ICONE_ABRIR_TEMPO}</button>`;
   const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
-  const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", t.custoUsd !== null ? `${usd(t.custoUsd)} até agora` : ""].filter(Boolean).join(" · ");
+  const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", custoDaFrente(t) !== null ? `${custoDaFrente(t)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
   return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaConta(t, estado.agora)}</div>`;
 }
@@ -359,7 +369,7 @@ export function blocosAoVivoDaTask(estado: Estado, id: string): BlocoDaTimeline[
     : t.estado === "rodando"
       ? `<div class="passo passo-agora"><span class="ponto-trabalho ${esc(bot?.cor ?? "")} pulso-trab" aria-hidden="true"></span><span>${esc(t.ultimoPasso ?? "trabalhando…")}</span></div>`
       : "";
-  const fim = !aberto(t) ? `<div class="linha-centro-wrap"><span class="linha-centro estatica"><span class="linha-ok" aria-hidden="true">${t.estado === "terminado" ? "✓" : "■"}</span><b>${esc(t.titulo)}</b><span>${esc(situacaoDe(t))} · ${esc(tempoDe(t, estado.agora))}${t.custoUsd !== null ? ` · ${esc(usd(t.custoUsd))}` : ""}</span></span></div>` : "";
+  const fim = !aberto(t) ? `<div class="linha-centro-wrap"><span class="linha-centro estatica"><span class="linha-ok" aria-hidden="true">${t.estado === "terminado" ? "✓" : "■"}</span><b>${esc(t.titulo)}</b><span>${esc(situacaoDe(t))} · ${esc(tempoDe(t, estado.agora))}${custoDaFrente(t) !== null ? ` · ${esc(custoDaFrente(t))}` : ""}</span></span></div>` : "";
   return [{ chave: "passos", html: feitos }, { chave: "agora", html: agora }, { chave: "fim", html: fim }].filter((b) => b.html !== "");
 }
 
