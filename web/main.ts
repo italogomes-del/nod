@@ -2354,6 +2354,9 @@ function filtrarBots(texto: string, raiz = "#sidebar"): void {
   if (raiz === "#sidebar") document.getElementById("sidebar")?.toggleAttribute("data-buscando", termo !== "");
 }
 
+/** NOD-45: o timer que devolve o Copiar do card do bloco de código ao repouso, por botão. */
+const timersCopiarCodigo = new WeakMap<HTMLElement, number>();
+
 const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   ...telaOnboarding.acoes,
   "abrir-raio-x": (el) => {
@@ -2507,6 +2510,26 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const antes = el.textContent ?? "";
     try { await navigator.clipboard.writeText(el.dataset.texto ?? ""); el.textContent = "Copiado"; } catch { el.textContent = "Não copiou"; }
     setTimeout(() => { el.textContent = antes; }, 1500);
+  },
+  // NOD-45: o Copiar do card do bloco de código (texto-formatado.ts cardDoCodigo). Lê o textContent do <code> do mesmo
+  // card, e não um data-*: sai o código que a pessoa vê, sem crases, sem a linha da linguagem e sem a última quebra.
+  // Só troca o texto do rótulo (o ícone fica) e o aria-label, para o leitor de tela ouvir o resultado.
+  // O repouso é fixo (não lido do botão) e o timer anterior é cancelado: dois cliques seguidos não prendem o
+  // "Código copiado" no aria-label nem voltam ao "Copiar" no meio do segundo aviso.
+  "copiar-codigo": async (el) => {
+    const estadoEl = el.querySelector(".md-codigo-estado");
+    const mostrar = (texto: string, aria: string): void => {
+      if (estadoEl) estadoEl.textContent = texto;
+      el.setAttribute("aria-label", aria);
+    };
+    try {
+      await navigator.clipboard.writeText(el.closest(".md-codigo")?.querySelector("code")?.textContent ?? "");
+      mostrar("Copiado", "Código copiado");
+    } catch {
+      mostrar("Não copiou", "Não copiou o código");
+    }
+    clearTimeout(timersCopiarCodigo.get(el));
+    timersCopiarCodigo.set(el, window.setTimeout(() => mostrar("Copiar", "Copiar código"), 1500));
   },
   "fechar-espaco": () => fecharEspaco(),
   // definido em 2026-09-25 (jornadas de conexão): "Conectar" abre o login NA HORA — no card do chat, no

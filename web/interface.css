@@ -1017,9 +1017,26 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .md-tabela-rodape { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 10px; padding: 4px 8px 4px 14px; border-top: 1px solid var(--line); background: var(--surface-side); font-size: 11.5px; color: var(--ink-3); }
 .md-copiar { display: inline-flex; align-items: center; gap: 2px; }
 .md-copiar-rot { display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; }
-.md-copiar-rot svg { width: 13px; height: 13px; }
-.md-copiar button { min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
-.md-copiar button:hover, .md-copiar button:focus-visible { background: var(--surface-raised); color: var(--ink); }
+.md-copiar-rot svg, .md-codigo-topo button svg { width: 13px; height: 13px; }
+.md-copiar button, .md-codigo-topo button { min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.md-copiar button:hover, .md-copiar button:focus-visible, .md-codigo-topo button:hover, .md-codigo-topo button:focus-visible { background: var(--surface-raised); color: var(--ink); }
+/* NOD-45: card do bloco de código (texto-formatado.ts cardDoCodigo). Topo com a linguagem em mono à esquerda e o Copiar
+   à direita; o topo tem altura fixa, para o Copiar chegar quando a cerca fecha sem empurrar o código. O botão usa as
+   regras do .md-copiar (rodapé da tabela); o respiro de 4px em cima e embaixo é o do anel de foco, que o overflow do card corta;
+   37px = 28 do botão + 8 de respiro + 1 da borda, com ou sem o Copiar. */
+.md-codigo { margin: 8px 0; max-width: 100%; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface-selected); }
+.md-codigo:first-child { margin-top: 0; }
+.md-codigo:last-child { margin-bottom: 0; }
+.md-codigo-topo { display: flex; align-items: center; gap: 8px; min-height: 37px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--line); background: var(--surface-side); }
+.md-codigo-ling { font: 500 11.5px/1.4 var(--font-mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-codigo-topo button { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.bubble .md-codigo pre, .msg-peer .md-codigo pre { margin: 0; border-radius: 0; background: transparent; }
+.md-codigo pre code { display: block; padding: 0; background: none; border-radius: 0; }
+/* NOD-45: task list só de leitura (texto-formatado.ts itemHtml). A caixa é desenho, não <input>. */
+.md-lista li.md-tarefa { list-style: none; display: flex; align-items: baseline; gap: 8px; margin-left: -20px; }
+.md-caixa { flex: none; display: grid; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 4px; transform: translateY(2px); }
+.md-caixa.feita { background: var(--ink-2); border-color: var(--ink-2); }
+.md-caixa.feita::after { content: ""; width: 3px; height: 7px; margin-top: -2px; border: solid var(--surface); border-width: 0 1.6px 1.6px 0; transform: rotate(45deg); }
 /* Listas e títulos no texto do bot (texto-formatado.ts comListas). */
 .md-lista { margin: 4px 0 8px; padding-left: 22px; }
 .md-lista li { margin: 2px 0; }

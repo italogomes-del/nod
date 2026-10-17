@@ -82,8 +82,25 @@ function codigo(trecho: string, aoVivo: boolean): string {
   const aberto = trecho.slice(3);
   const corpo = fechado ? trecho.slice(3, -3) : aoVivo ? aberto.replace(/`{1,2}$/, "") : aberto.replace(/(^|\n)`{1,2}$/, "$1");
   // Cerca recém-aberta só com a palavra da linguagem ("```ty"): ela não pisca dentro do código antes do \n chegar.
-  const semLinguagem = !fechado && SO_LINGUAGEM.test(corpo) ? "" : corpo.replace(LINGUAGEM, "");
-  return `<pre><code>${esc(semLinguagem)}</code></pre>`;
+  const soAbrindo = !fechado && SO_LINGUAGEM.test(corpo);
+  const linguagem = soAbrindo ? "" : (ROTULO.exec(corpo)?.[1] ?? "");
+  // NOD-45: a última quebra é o fim da linha antes da cerca, não código. Sai nos dois modos, para o aberto e o fechado
+  // terem o mesmo <code> (sem salto quando a cerca fecha) e o Copiar levar o código sem a quebra a mais.
+  const semLinguagem = soAbrindo ? "" : corpo.replace(LINGUAGEM, "").replace(/\n$/, "");
+  return cardDoCodigo(semLinguagem, linguagem, fechado);
+}
+
+/**
+ * NOD-45: o bloco vira um card. No topo, o rótulo da linguagem (só quando casa com ROTULO; fora disso não aparece em
+ * nenhum lugar do HTML) e, com a cerca fechada, o Copiar. main.ts copia o `textContent` do <code> do mesmo card, que
+ * já desfaz o `esc`: o que se cola é o código que o bot escreveu.
+ */
+const ROTULO = /^([A-Za-z0-9_+#.-]{1,20})\n/;
+
+function cardDoCodigo(codigo: string, linguagem: string, fechado: boolean): string {
+  const rotulo = linguagem ? `<span class="md-codigo-ling">${esc(linguagem)}</span>` : "";
+  const copiar = fechado ? `<button type="button" data-act="copiar-codigo" aria-label="Copiar código">${ICONE_COPIAR}<span class="md-codigo-estado">Copiar</span></button>` : "";
+  return `<div class="md-codigo"><div class="md-codigo-topo">${rotulo}${copiar}</div><pre><code>${esc(codigo)}</code></pre></div>`;
 }
 
 /**
@@ -130,7 +147,7 @@ function comListas(texto: string, opcoes: OpcoesTexto): string {
     if (!lista) return;
     const tag = lista.ordenada ? "ol" : "ul";
     const inicio = lista.ordenada && lista.inicio !== 1 ? ` start="${lista.inicio}"` : "";
-    saida.push(`<${tag} class="md-lista"${inicio}>${lista.itens.map((i) => `<li>${emLinha(i, opcoes)}</li>`).join("")}</${tag}>`);
+    saida.push(`<${tag} class="md-lista"${inicio}>${lista.itens.map((i) => itemHtml(i, opcoes)).join("")}</${tag}>`);
     lista = null;
   };
   for (const linha of linhas) {
@@ -161,6 +178,20 @@ function comListas(texto: string, opcoes: OpcoesTexto): string {
   fecharParagrafo();
   fecharLista();
   return saida.join("");
+}
+
+/**
+ * NOD-45: task list GFM só de leitura. "[ ]", "[x]" ou "[X]" no começo do item vira uma caixa desenhada, sem <input>
+ * (o texto é do bot e não há onde guardar o estado), com "a fazer"/"feito" para o leitor de tela. Exige espaço ou fim
+ * depois do "]": "[x](url)" continua link.
+ */
+const CAIXA = /^\[([ xX])\](?=\s|$)\s*/;
+
+function itemHtml(texto: string, opcoes: OpcoesTexto): string {
+  const caixa = CAIXA.exec(texto);
+  if (!caixa) return `<li>${emLinha(texto, opcoes)}</li>`;
+  const feito = caixa[1] !== " ";
+  return `<li class="md-tarefa"><span class="md-caixa${feito ? " feita" : ""}" aria-hidden="true"></span><span class="sr-only">${feito ? "feito" : "a fazer"}</span>${emLinha(texto.slice(caixa[0].length), opcoes)}</li>`;
 }
 
 // ---------------------------------------------------------------- em linha
