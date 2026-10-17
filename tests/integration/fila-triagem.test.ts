@@ -4,8 +4,9 @@ import { varrerPessoa as varrerLeases } from "../../src/adapters/fundo/varredor-
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
-import { entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA, entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS } from "../../src/domain/pedido-parado.ts";
+import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
@@ -364,5 +365,38 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
         expect(parada !== undefined).toBe(recente);
       });
     }
+  });
+
+  it("NOD-274 (C5): o colega bate no limite duas vezes na mesma cadeia — quem pediu lê UMA linha de que ele está sem cota", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await trx`update agentes set harness = 'claude-cli', modelo = 'sonnet' where id = ${m.dev.agenteId}`;
+      // A trava da fila da pessoa ANTES do pedido (QA do #385): `pedirABot` pega a trava `pedir_a_bot` do tenant e o
+      // `reivindicar` logo abaixo pede a da pessoa. Os outros arquivos sob o mesmo tenant e pessoa (turnos-fila,
+      // interrupcao-por-parada) pegam na ordem pessoa → pedir_a_bot; na ordem inversa a suíte paralela dava `deadlock detected`.
+      await trx`select pg_advisory_xact_lock(hashtext(${`${MARLON.tenantId}:${MARLON.pessoaId}`}))`;
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      const T0 = Date.now();
+      const sinais = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false };
+      const bater = async (turnoId: string, voltaEm: number) => {
+        const machineId = randomUUID();
+        const pego = await m.repos.turnos.reivindicar({ machineId, agora: voltaEm });
+        expect(pego?.id).toBe(turnoId);
+        return assentarTurno(m.deps, { turnoId, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "" }, executor: "local", harness: "claude-cli", prontosDaPessoa: ["claude-cli"], resultado: {
+          desfecho: "falha", motivoFalha: "limite_do_plano", limiteVoltaEm: voltaEm, erroCru: "Claude AI usage limit reached", texto: "", sessaoCli: null, custoUsd: 0, sinais,
+          tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [],
+        } });
+      };
+      // Os turnos que ainda estão na fila (o de quem pediu) saem do caminho: só a triagem e as voltas dela são pegas.
+      await trx`update turnos set estado = 'concluido' where estado = 'pendente' and id <> ${triagem} and conversa_id in ${trx([m.chico.conversaId, m.dev.conversaId, m.livre.conversaId, m.ocupado.conversaId])}`;
+      expect((await bater(triagem, T0 + 3_600_000)).data.esperaDaCota).toBe("espera");
+      const volta = (await m.repos.turnos.listarDaConversa(m.dev.conversaId, 500)).find((t) => t.retomaTurnoId === triagem && t.estado === "pendente");
+      expect(volta?.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)).toBe(true);
+      expect((await bater(volta!.id, T0 + 2 * 3_600_000)).data.esperaDaCota).toBe("espera");
+      // A espera continua (a segunda volta nasce com a hora nova), mas o aviso a quem pediu saiu uma vez só.
+      expect((await m.repos.turnos.listarDaConversa(m.dev.conversaId, 500)).filter((t) => t.retomaTurnoId === triagem && t.acordarEm !== null)).toHaveLength(2);
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId, 500)).filter((x) => /está sem cota do/.test(x.texto ?? ""));
+      expect(avisos).toHaveLength(1);
+    });
   });
 });

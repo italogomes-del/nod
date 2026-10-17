@@ -4,6 +4,7 @@ import type { ResultadoTurno, Turno } from "../../src/contracts/turno.ts";
 import { cotaDasIas, ENTRADA_DA_VOLTA_DA_COTA, portaoDaCota, RETORNO_DO_LOTE } from "../../src/domain/cota-da-ia.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { refazerRetornoDoLote } from "../../src/use-cases/fechar-lote.ts";
+import { repetirBarradosPorIa } from "../../src/use-cases/repetir-barrados-por-ia.ts";
 import { abrirFrentes, devolverResumo } from "../../src/use-cases/frentes.ts";
 import { sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { contexto, depsSobre } from "../helpers/deps-l7.ts";
@@ -53,7 +54,7 @@ async function montar(trx: Trx) {
   };
   const voltasDe = async (t: Turno) => (await repos.turnos.listarDaConversa(ada.conversaId, 500)).filter((x) => x.origem === "retomada" && x.criadoEm >= t.criadoEm && x.id !== t.id && x.acordarEm !== null);
   const sistema = async () => (await repos.mensagens.listarDaConversa(ada.conversaId, 500)).filter((m) => m.kind === "sistema" && /cota|limite|volta/i.test(m.texto ?? "") && m.payload?.kind !== "frentes_terminadas");
-  return { ada, deps, repos, l5, dono, loteId, retorno, bater, voltasDe, sistema, trx };
+  return { ada, deps, repos, l5, dono, loteId, frenteId, retorno, bater, voltasDe, sistema, trx };
 }
 
 describeIntegracao("NOD-258: o retorno do lote espera a cota e não se perde (QA do PR #340)", () => {
@@ -112,6 +113,9 @@ describeIntegracao("NOD-258: o retorno do lote espera a cota e não se perde (QA
       const copia = (await m.repos.turnos.buscar(copiaId))!;
       expect(copia).toMatchObject({ estado: "pendente", decididoPor: RETORNO_DO_LOTE, reenvios: 1, harness: "codex-cli", modelo: "gpt-5" });
       expect(copia.entradaTexto).toContain("Corrigi o login no Safari");
+      // Ajuste do QA: a cópia leva a entrada do retorno de verdade, não o aviso "[nod] A cota do ..." da volta que caiu.
+      expect(copia.entradaTexto).toBe(m.retorno.entradaTexto);
+      expect(copia.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)).toBe(false);
 
       await m.repos.turnos.assentar(copiaId, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
       const antes = (await m.repos.turnos.listarDaConversa(m.ada.conversaId, 500)).length;
@@ -159,10 +163,41 @@ describeIntegracao("NOD-269 B5: a repetição dos barrados por IA deixa de fora 
       const semConta = await barrar(base.conversaId, base.agenteId, "sem_conta");
       const noLimite = await barrar(outra.conversaId, outra.agenteId, "limite_do_plano");
       const semIa = await barrar(terceira.conversaId, terceira.agenteId, null);
+      // Critério 3 (QA do #385): a frente (conversa + trabalho_id) barrada só por falta de IA também fica de fora — ela
+      // espera pelo caminho da task; repetida, viraria fala solta na conversa.
+      const { frenteId } = await montar(trx);
+      const quarta = await agenteComConversa(trx, MARLON, { nome: "Zi" });
+      const frente = (await repos.turnos.enfileirar({ executor: "catcher", conversaId: quarta.conversaId, agenteId: quarta.agenteId, origem: "conversa", trabalhoId: frenteId, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "Frente: revisar", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+      await repos.turnos.assentar(frente.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
       const ids = (await repos.turnos.barradosPorFaltaDeIa(Date.now() - HORA)).map((t) => t.id);
       expect(ids).toContain(semIa);
       expect(ids).not.toContain(semConta);
       expect(ids).not.toContain(noLimite);
+      expect(ids).not.toContain(frente.id);
+    });
+  });
+
+  it("C4: reconectar duas vezes (a IA anunciada pronta) não cria turno nem nota para a recusa por conta e o limite; a falta de IA volta uma vez", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const l5 = depsL5(repos, MARLON, { services: servicosDeTeste({}), trx });
+      const barrar = async (nome: string, motivoFalha: "sem_conta" | "limite_do_plano" | null) => {
+        const a = await agenteComConversa(trx, MARLON, { nome });
+        const t = (await repos.turnos.enfileirar({ executor: "catcher", conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "oi", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+        await repos.turnos.assentar(t.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", ...(motivoFalha ? { motivoFalha } : {}) });
+        return a.conversaId;
+      };
+      const conversas = { semConta: await barrar("Ze", "sem_conta"), noLimite: await barrar("Zu", "limite_do_plano"), semIa: await barrar("Zo", null) };
+      const contar = async (conversaId: string) => ({
+        turnos: (await repos.turnos.listarDaConversa(conversaId, 500)).length,
+        notas: (await repos.mensagens.listarDaConversa(conversaId, 500)).length,
+      });
+      const antes = { semConta: await contar(conversas.semConta), noLimite: await contar(conversas.noLimite), semIa: await contar(conversas.semIa) };
+      for (let i = 0; i < 2; i++) await repetirBarradosPorIa(l5, { executor: "local", prontos: ["claude-cli"] });
+      expect(await contar(conversas.semConta)).toEqual(antes.semConta);
+      expect(await contar(conversas.noLimite)).toEqual(antes.noLimite);
+      // O controle: a fala barrada só por falta de IA é repetida — uma vez, nas duas conexões.
+      expect((await contar(conversas.semIa)).turnos).toBe(antes.semIa.turnos + 1);
     });
   });
 });

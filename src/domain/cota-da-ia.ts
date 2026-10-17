@@ -310,6 +310,9 @@ export function fraseDaEsperaDaCota(p: { ia: string; situacao: Exclude<SituacaoD
   return `a cota do ${nome} ${estado}; o pedido espera na fila até ela renovar${quando}`;
 }
 
+/** O separador que entradaDaVolta põe entre o aviso da volta e o pedido que ela leva. */
+const MARCA_DO_PEDIDO_ORIGINAL = "\n\nPedido original da frente:\n";
+
 /**
  * definido em 2026-10-15 (NOD-269, G2): a entrada da volta da cota. Com sessão retomável (a task já rodou nesta IA), a
  * entrada curta basta: a sessão tem o pedido. Sem ela — o trabalho nunca começou, a sessão é de outra IA, ou não há task
@@ -318,7 +321,19 @@ export function fraseDaEsperaDaCota(p: { ia: string; situacao: Exclude<SituacaoD
  */
 export function entradaDaVolta(p: { base: string; sessaoRetomavel: boolean; pedidoOriginal: string | null }): string {
   if (p.sessaoRetomavel || !p.pedidoOriginal || p.pedidoOriginal.trim() === "") return p.base;
-  return `${p.base}\n\nPedido original da frente:\n${p.pedidoOriginal}`;
+  return `${p.base}${MARCA_DO_PEDIDO_ORIGINAL}${p.pedidoOriginal}`;
+}
+
+/**
+ * NOD-258 (ajuste do QA do PR #340): a entrada a refazer de um retorno do lote. A volta da cota do retorno leva os resumos
+ * depois do aviso "[nod] A cota do ..."; refazer a volta que caiu com essa entrada acordava o dono dizendo que a cota
+ * tinha batido no limite — a queda é outra. Devolve o pedido que a volta leva (a entrada do retorno de verdade) ou, fora
+ * de uma volta da cota, a própria entrada.
+ */
+export function entradaDoRetornoARefazer(entradaTexto: string): string {
+  if (!entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)) return entradaTexto;
+  const i = entradaTexto.indexOf(MARCA_DO_PEDIDO_ORIGINAL);
+  return i >= 0 ? entradaTexto.slice(i + MARCA_DO_PEDIDO_ORIGINAL.length) : entradaTexto;
 }
 
 /**

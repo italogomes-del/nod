@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
 import type { ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
-import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
+import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, entradaDaVoltaDaCota, entradaDoRetornoARefazer, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
 
 const AGORA = Date.UTC(2026, 9, 12, 15, 0);
 const HORA = 3_600_000;
@@ -159,6 +159,18 @@ describe("NOD-274/258/269: o fundo espera a cota, e a volta sabe o pedido", () =
   it("volta com sessão retomável (ou sem pedido) continua curta", () => {
     expect(entradaDaVolta({ base: "[nod] A cota voltou.", sessaoRetomavel: true, pedidoOriginal: "Frente: revisar" })).toBe("[nod] A cota voltou.");
     expect(entradaDaVolta({ base: "[nod] A cota voltou.", sessaoRetomavel: false, pedidoOriginal: "  " })).toBe("[nod] A cota voltou.");
+  });
+
+  it("NOD-258 (ajuste do QA do #340): o retorno a refazer é o pedido que a volta da cota leva, sem o aviso da cota", () => {
+    const resumos = "As frentes do lote terminaram:\n- Login no Safari: Corrigi o login";
+    const volta = entradaDaVolta({ base: entradaDaVoltaDaCota("Claude Code"), sessaoRetomavel: false, pedidoOriginal: resumos });
+    expect(entradaDoRetornoARefazer(volta)).toBe(resumos);
+    // Fora de uma volta da cota (o próprio retorno, ou uma cópia já refeita), a entrada fica como está.
+    expect(entradaDoRetornoARefazer(resumos)).toBe(resumos);
+    expect(entradaDoRetornoARefazer(entradaDaVoltaDaCota("Codex"))).toBe(entradaDaVoltaDaCota("Codex"));
+    // QA do #385: um retorno que não é volta da cota fica inteiro, mesmo se um resumo citar a marca do pedido original.
+    const citaAMarca = "As frentes do lote terminaram:\n- Fila: a volta dizia\n\nPedido original da frente:\nrevisar";
+    expect(entradaDoRetornoARefazer(citaAMarca)).toBe(citaAMarca);
   });
 });
 

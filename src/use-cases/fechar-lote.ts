@@ -5,7 +5,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ehFrente } from "../domain/frente.ts";
 import { decidirFecho, destinoDoLote, entradaDoRetorno, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
 import { trabalhoFinal } from "../domain/trabalho.ts";
-import { RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { entradaDoRetornoARefazer, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { redigir } from "../domain/redacao.ts";
 import { delegacaoDoTurno } from "./apoio-l7.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -184,7 +184,8 @@ export async function refazerRetornoDoLote(deps: DepsFecho, turno: Turno): Promi
     trabalhoId: raiz.trabalhoId ?? null,
     prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
     profundidade: raiz.profundidade,
-    entradaTexto: raiz.entradaTexto,
+    // A volta da cota que caiu é refeita com a entrada do retorno (os resumos), sem o aviso da cota.
+    entradaTexto: entradaDoRetornoARefazer(raiz.entradaTexto),
     entradaConfianca: raiz.entradaConfianca,
     sobProcuracaoDe: raiz.sobProcuracaoDe ?? null,
     modelo: agente?.modelo ?? raiz.modelo,
