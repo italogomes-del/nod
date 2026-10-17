@@ -16,6 +16,7 @@ import type { Deps } from "./tipos.ts";
  *    responde sozinho, e a recusa não muda nada no banco;
  * 3. tirar da fila e entregar andam juntos (SAVEPOINT): se a entrega não sai (resultado já entregue), o pedido volta à
  *    fila como estava. Quem pediu excluído é a exceção — não há a quem entregar, e o pedido sai da fila mesmo assim.
+ *    Quem pediu parado pela pessoa (NOD-256, F1.1) conta como entregue: a resposta fica como peer_ask, sem continuação.
  * A resposta vai pelo caminho de sempre (entregar: a peer_ask e a continuação de quem pediu). Se o turno que chama leu
  * conteúdo de fora (ADR-062), o pedido herda a marca e a continuação de quem pediu também.
  */
@@ -60,7 +61,8 @@ export async function responderPedido(deps: Deps, input: ContextoFerramenta & Ar
         await deps.repos.turnos.contaminar(absorvido.id, agora);
       }
       const r = await entregarRespostaDeclarada(deps, { tarefa: absorvido, texto: input.texto });
-      if ("ignorado" in r.data && r.data.ignorado !== "remetente_excluido") throw new EntregaNaoSaiu(r.data.ignorado);
+      // NOD-256 (F1.1): quem pediu parado pela pessoa recebe a resposta como peer_ask, sem retomada — a entrega saiu.
+      if ("ignorado" in r.data && r.data.ignorado !== "remetente_excluido" && r.data.ignorado !== "quem_pediu_parado") throw new EntregaNaoSaiu(r.data.ignorado);
       return r;
     });
   } catch (e) {
@@ -72,6 +74,9 @@ export async function responderPedido(deps: Deps, input: ContextoFerramenta & Ar
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: pedido.conversaId, turnoId: pedido.id, dados: { motivo: "absorvido", absorvido_por: chamador.id } }),
     ...(entrega.events ?? []),
   ];
+  if ("ignorado" in entrega.data && entrega.data.ignorado === "quem_pediu_parado") {
+    return { data: { ok: true, instrucao: "Resposta registrada na conversa de quem pediu; o pedido saiu da sua fila. Quem pediu está parado pela pessoa e não segue sozinho. Siga a conversa com a pessoa." }, events };
+  }
   if ("ignorado" in entrega.data) {
     return { data: { ok: false, erro: "remetente_excluido", instrucao: "Quem pediu foi excluído: o pedido saiu da sua fila e a resposta não tem a quem ir. Diga isso à pessoa, se importar." }, events };
   }

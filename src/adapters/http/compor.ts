@@ -597,13 +597,14 @@ export function comporApp(o: OpcoesCompor): App {
       // também devolve o resultado ao remetente; entregarRespostaPeer segue a cadeia e ignora o resto.
       if ((turno.origem === "peer" || turno.origem === "delegacao" || turno.origem === "retomada") && turno.estado === "concluido" && entrega.fala.tipo === "texto" && entrega.fala.texto.trim() !== "") {
         const r = await entregarRespostaPeer(d, { tarefaId: turno.id, texto: entrega.fala.texto });
-        if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
+        // NOD-256 (F1.1): o ignorado "quem_pediu_parado" ainda grava a peer_ask e traz o evento dela; os outros não trazem.
+        events.push(...(r.events ?? []));
       } else if ((turno.origem === "delegacao" || (turno.origem === "retomada" && turno.sobProcuracaoDe)) && !(await repetidoSemResume(d, turno.id))) {
         // ADR-107 (NOD-281, critério 4): a retomada recusada pelo CLI que já voltou à fila sem resume não avisa falha.
         // Revisão da ADR-047: tarefa delegada que parou ou terminou calada avisa o remetente (uma vez por raiz).
         const motivo = turno.estado === "interrompido" ? motivoEmPortugues(turno.motivoFalha ?? turno.motivoInterrupcao ?? "sem_progresso") : "terminou sem resposta";
         const r = await avisarFalhaDelegacao(d, { turnoId: turno.id, motivo });
-        if (!("ignorado" in r.data)) events.push(...(r.events ?? []));
+        events.push(...(r.events ?? []));
       }
       return events;
     },

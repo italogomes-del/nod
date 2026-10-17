@@ -115,9 +115,10 @@ async function responderAoColega(deps: DepsFecho, p: { lote: LoteDeFrentes; aber
   if (frentes.length === 0) frentes.push(...p.frentes);
   const r = await entregarRespostaPeer(deps, { tarefaId: p.abertoPor.id, texto: respostaAoColega(frentes), doLote: p.lote.id });
   if ("ignorado" in r.data) {
-    if (r.data.ignorado === "ja_entregue" || r.data.ignorado === "remetente_excluido") {
+    // NOD-256 (F1.1): com quem pediu parado, a resposta já ficou registrada na conversa dele — o lote está devolvido.
+    if (r.data.ignorado === "ja_entregue" || r.data.ignorado === "remetente_excluido" || r.data.ignorado === "quem_pediu_parado" || r.data.ignorado === "alvo_excluido") {
       await deps.repos.frentes.marcarDevolvido(p.lote.id, null, agora);
-      return [];
+      return r.events ?? [];
     }
     return devolverAoDono(deps, { lote: p.lote, abertoPor: p.abertoPor, frentes, fechaLote: true, cuidado: frentes.some((f) => f.deFora), faltam: 0, total: frentes.length, trabalhoDoRetorno: trabalhoDoRetorno(p.lote, frentes) });
   }

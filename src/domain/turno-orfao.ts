@@ -62,6 +62,25 @@ export function textoDaCausa(causa: CausaOrfao): string {
 }
 
 /**
+ * definido em 2026-10-15 (NOD-257, H5): por que o pedido a colega espera na fila, em palavras curtas para o card do
+ * pedido. `null` quando ele só está na vez dele (ainda não passou do prazo da fila e nada o impede).
+ */
+export type MotivoFila = BloqueioFila | CausaOrfao;
+
+export function motivoDaFila(d: DecisaoTurnoOrfao): MotivoFila | null {
+  return d.tipo === "encerrar" ? d.causa : d.tipo === "observar" ? d.bloqueio : null;
+}
+
+export function textoDoMotivoDaFila(m: MotivoFila): string {
+  switch (m) {
+    case "depois_de": return "espera a task anterior terminar";
+    case "faixa_ocupada": return "espera o bot terminar o que está fazendo";
+    case "condicao_da_maquina": return "espera o computador do bot (cota da IA, Mac fora ou sem recursos)";
+    default: return textoDaCausa(m);
+  }
+}
+
+/**
  * definido em 2026-10-13 (NOD-219, D3): a observação do mesmo turno velho sai no máximo uma vez por hora — o varredor
  * passa a cada minuto, e o log não pode virar ruído.
  */

@@ -12,6 +12,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { maquinaDoBot } from "./maquinas.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
@@ -182,7 +183,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
     const para = agenteDe(estado, p.para)?.nome ?? "agente";
     const alvo = agenteDe(estado, p.para);
-    return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido a colega" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
+    return `<div class="msg-handoff"><div class="handoff-titulo">↗ <b>${esc(de)} → ${esc(para)}</b><span>${p.tarefaId ? "pedido a colega" : "passou a vez"}</span></div><p>${esc(p.motivo)}</p>${p.fila ? `<small class="mudo handoff-fila" role="status">${esc(linhaDaFila(p.fila))}</small>` : ""}${alvo ? botao("abrir-conversa", "Ver conversa de " + esc(para), { classe: "link", dados: { conversa: alvo.conversaId, agente: alvo.id } }) : ""}</div>`;
   }
   if (p?.kind === "passe") return `<div class="msg-passe">⏭ ${paragrafos(m.texto)} <span class="tag tag-cinza">${esc(p.motivo.replaceAll("_", " "))}</span></div>`;
   if (p?.kind === "consentimento") {

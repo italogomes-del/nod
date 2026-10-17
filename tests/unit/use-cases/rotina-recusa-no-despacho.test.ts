@@ -100,14 +100,30 @@ describe("NOD-275: o despacho recusado registra a janela da rotina como 'interro
 });
 
 describe("NOD-251: Parar no turno de rotina registra a janela como 'interrompida' (não 'falhou')", () => {
-  it("parada ativa no despacho: o pendente vira interrompida · parado_pela_pessoa", async () => {
+  // revisto no merge do #334 (NOD-256 CA5, decisão NOD-225): a parada ABERTA que barra a rotina no despacho não cala —
+  // a janela fica 'interrompida' (NOD-251) com o motivo `parada_aberta` e UMA linha na conversa da rotina.
+  it("parada ativa no despacho: o pendente vira interrompida · parada_aberta, com uma linha na conversa", async () => {
     const c = await cenario();
     await c.deps.repos.paradas.ativar({ conversaId: c.conversaId, agora: T0 });
     const r = await c.despachar();
     expect(r.data.plano).toBeNull();
-    expect((await c.execucoes()).map((e) => [e.desfecho, e.motivo])).toEqual([["interrompida", "parado_pela_pessoa"]]);
-    expect(kinds(r.events)).toContain("rotina_executou");
-    expect(c.novas().filter((m) => m.kind === "rotina_execucao")).toEqual([]);
+    expect((await c.execucoes()).map((e) => [e.desfecho, e.motivo])).toEqual([["interrompida", "parada_aberta"]]);
+    expect(kinds(r.events).filter((k) => k === "rotina_executou")).toHaveLength(1);
+    expect(c.novas().filter((m) => m.kind === "rotina_execucao")).toHaveLength(1);
+  });
+
+  it("parada ativa no despacho, mas o interromper não mudou o turno: nada vai ao histórico e nenhuma linha sai", async () => {
+    // Re-QA do #334 pós-merge da main (bde9a03d, decisão da PM de 17/10/2026): a linha `parada_aberta` sai só se o
+    // interromper do despacho mudou o estado. Se outro caminho já levou o turno (interromper devolve null), o despacho
+    // não registra a janela nem fala na conversa — quem mudou o turno cuida do desfecho.
+    const c = await cenario();
+    await c.deps.repos.paradas.ativar({ conversaId: c.conversaId, agora: T0 });
+    c.deps.repos.turnos.interromper = async () => null;
+    const r = await c.despachar();
+    expect(r.data).toMatchObject({ plano: null, motivo: "parada_ativa" });
+    expect(await c.execucoes()).toEqual([]);
+    expect(kinds(r.events).filter((k) => k === "rotina_executou")).toHaveLength(0);
+    expect(c.novas().filter((m) => m.kind === "rotina_execucao")).toHaveLength(0);
   });
 
   it("turno já entregue e parado pela pessoa: interrompida · parado_pela_pessoa, sem a mensagem de erro técnico", async () => {
@@ -139,6 +155,8 @@ describe("o rótulo do histórico diz o motivo em palavras", () => {
     ["nao_autenticado", "interrompida · a IA da máquina estava sem login"],
     ["limite_do_plano", "interrompida · a conta da IA estava no limite"],
     ["parado_pela_pessoa", "interrompida · você parou"],
+    // QA do #334 (NOD-256 CA5): a janela barrada pela parada aberta não mostra o identificador cru no histórico.
+    ["parada_aberta", "interrompida · o bot estava parado por você"],
   ])("%s", (motivo, rotulo) => {
     expect(rotuloExecucao({ desfecho: "interrompida", motivo })).toBe(rotulo);
   });

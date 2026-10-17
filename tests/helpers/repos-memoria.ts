@@ -986,7 +986,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async cancelarRodando(alvo, motivoFim, quando) {
         const alvos = minhasEsperas().filter((x) => x.estado === "rodando" && ("conversaId" in alvo ? x.conversaId === alvo.conversaId : "trabalhoId" in alvo ? x.trabalhoId === alvo.trabalhoId : true));
         for (const e of alvos) Object.assign(e, { estado: "cancelada", motivoFim, terminadoEm: quando });
-        return alvos.map((e) => e.id);
+        return alvos.map((e) => ({ id: e.id, turnoId: e.turnoId }));
       },
       // O varredor das esperas sem notícia se prova no Postgres (tests/integration/esperar-comando.test.ts).
       async semNoticia() { return []; },
@@ -1078,9 +1078,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async filhos(maeId) {
         return doTenant(b.trabalhos).filter((t) => t.trabalhoMaeId === maeId).map(semDonoTrabalho);
       },
-      async mudarEstado(id, estado, em) {
+      async mudarEstado(id, estado, em, opcoes = {}) {
         const t = doTenant(b.trabalhos).find((x) => x.id === id && x.ownerId === escopo.pessoaId);
         if (!t) return null;
+        const finais = ["terminado", "parado", "falhou"];
+        if (finais.includes(t.estado) && !finais.includes(estado) && opcoes.reabrir !== true) return null;
         t.estado = estado;
         if (estado === "rodando" || estado === "precisa_de_voce") t.iniciadoEm ??= em;
         t.terminadoEm = estado === "terminado" || estado === "parado" || estado === "falhou" ? em : null;

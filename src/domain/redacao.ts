@@ -17,6 +17,7 @@ export type ChaveRedacao =
   | "rotina-proxima-execucao"
   | "rotina-passou-em-branco"
   | "rotina-falhou"
+  | "rotina-parada-aberta"
   | "handoff"
   | "passe"
   | "consentimento"
@@ -78,6 +79,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "rotina-proxima-execucao": "Rotina ativa: {resumo} · próxima execução: {proxima} ({fuso}).",
   "rotina-passou-em-branco": "A rotina passou em branco: {motivo}. Nada foi enviado.",
   "rotina-falhou": "A rotina falhou por erro técnico: {motivo}. Nada foi enviado; a próxima execução segue agendada.",
+  // definido em 2026-10-15 (NOD-256, NOD-225): a parada segura a rotina, nunca em silêncio — a linha diz o que destrava.
+  "rotina-parada-aberta": "A rotina não rodou: {bot} está parado por você. Fale com {bot} ou use Executar agora para retomar.",
   handoff: "{de} passou para {para}: {motivo}.",
   passe: "{agente} passou a vez ({motivo}).",
   // definido em 2026-09-24 (ADR-044): {escopo} é a lista `slug.capacidade` do lote; com uma só, o texto é o de antes.

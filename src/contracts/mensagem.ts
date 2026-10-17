@@ -12,6 +12,15 @@ import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
+/**
+ * definido em 2026-10-15 (NOD-257, H5): o pedido a colega parado na fila e o porquê. Não é gravado: `lerConversa` o põe
+ * no payload do handoff na leitura (use-cases/fila-do-pedido.ts). `motivo` nulo = só na vez dele.
+ */
+export type FilaDoPedido = {
+  desde: number;
+  motivo: "depois_de" | "faixa_ocupada" | "condicao_da_maquina" | "agente_excluido" | "geracao_antiga" | null;
+};
+
 export type Confianca = "confiavel" | "nao_confiavel";
 
 export type KindMensagem =
@@ -32,7 +41,7 @@ export type KindMensagem =
 export type PayloadMensagem =
   | { kind: "boas_vindas" }
   /** `trabalhoId` (definido em 2026-10-07, ADR-083): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
-  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string }
+  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string; fila?: FilaDoPedido }
   /**
    * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
    * literal da pessoa, e tarefa/contexto são do remetente (a web rotula "não é instrução da pessoa").

@@ -10,7 +10,7 @@ import { notaPedidosAbertos } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
-export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" };
+export type SaidaEntregaPeer = { mensagem: Mensagem; continuacao: Turno; remetenteAgenteId: string } | { ignorado: "nao_e_tarefa_peer" | "aguardando_pessoa" | "aguardando_colega" | "aguardando_volta" | "aguardando_frentes" | "ja_entregue" | "remetente_excluido" | "quem_pediu_parado" | "alvo_excluido" };
 
 /**
  * definido em 2026-10-12 (ADR-099, I3): a entrega roda também dentro do fecho de um lote de frentes, que só tem repos,
@@ -157,6 +157,20 @@ async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Pr
 
 type Entrega = { tarefa: Turno; texto: string; falha: boolean };
 
+function payloadDaEntrega(alvo: { id: string; nome: string }, tarefa: Turno, origem: { turnoOrigemId: string } | null, delegada: boolean, falha: boolean) {
+  return { kind: "peer_ask" as const, agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true as const, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}) };
+}
+
+/**
+ * definido em 2026-10-15 (NOD-256, F1.1): quem pediu está parado pela pessoa — o turno que pediu foi interrompido pelo
+ * Parar, a task dele está `parada`, ou há parada aberta cobrindo a conversa dele (global ou dela).
+ */
+async function quemPediuParado(deps: DepsEntrega, pediu: Turno | null, conversaId: string): Promise<boolean> {
+  if (pediu?.motivoInterrupcao === "parado_pela_pessoa") return true;
+  if (pediu?.trabalhoId && (await deps.repos.trabalhos.buscar(pediu.trabalhoId))?.estado === "parado") return true;
+  return (await deps.repos.paradas.ativa(deps.escopo.pessoaId, conversaId)) === true;
+}
+
 /**
  * Escreve a entrega na conversa do remetente e abre a continuação dele. Tarefa delegada entrega UMA vez
  * por raiz (revisão da ADR-047): a aprovação decidida durante o long-poll do proxy deixava o turno
@@ -174,7 +188,10 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // revisto em 2026-10-13 (NOD-219, revisão do PR #307): o aviso de FALHA sai mesmo com o colega excluído — é justamente
   // o caso do turno órfão. Buscar só os vivos lançava `nao_encontrado`, desfazia a passada do varredor e envenenava as
   // seguintes (o órfão é o primeiro da fila). O resultado de um colega excluído continua sem entrega.
-  const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId, e.falha), "nao_encontrado", "bot alvo");
+  const alvo = exigir(await deps.repos.agentes.buscar(tarefa.agenteId, true), "nao_encontrado", "bot alvo");
+  // definido em 2026-10-15 (NOD-257, G9): o RESULTADO de um colega excluído não é entregue (o lote das frentes dele fecha
+  // no excluir); quem pediu recebe o aviso de falha "o bot foi excluído" (gerir-agente.ts).
+  if (alvo.excluidoEm && !e.falha) return { data: { ignorado: "alvo_excluido" } };
   // definido em 2026-10-09: quem pediu foi excluído enquanto o colega trabalhava (a Elis, com a fatia 5 do Ze 1 na VM). O
   // 404 desfazia o assentamento inteiro: a máquina tentava entregar de novo, desistia, e o turno do colega caía como
   // "seu Mac parou de responder", com a resposta perdida. Agora a resposta fica na conversa de quem a escreveu e a
@@ -198,6 +215,21 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   // da tarefa), e não mais 1 fixo: abaixo do limite, quem recebeu a resposta ainda pede a outro colega. Quem pediu
   // cumprindo um pedido (delegação) mantém a procuração — o modo, a trava e o aviso de falha seguem a cadeia.
   const pediu = delegada && origem ? await deps.repos.turnos.buscar(origem.turnoOrigemId) : null;
+  // definido em 2026-10-15 (NOD-256, F1.1): quem pediu foi parado pela pessoa (o turno, a task ou a conversa) — a resposta
+  // fica registrada como peer_ask, sem continuação e sem reabrir a task: Parar é final até a pessoa voltar.
+  if (await quemPediuParado(deps, pediu, conversaRemetente.id)) {
+    const registro = await deps.repos.mensagens.criar({
+      conversaId: conversaRemetente.id,
+      turnoId: null,
+      autoria,
+      kind: "peer_ask",
+      texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
+      payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha),
+      confianca: "nao_confiavel",
+    });
+    const eventos = registro ? [evento(deps, "mensagem_criada", autoria, { mensagemId: registro.id, kind: "peer_ask", tarefaId: tarefa.id }, { conversaId: conversaRemetente.id })] : [];
+    return { data: { ignorado: "quem_pediu_parado" }, events: eventos };
+  }
   // NOD-259: e os pedidos dele a colegas ainda sem resposta, de qualquer fio — fora o que está sendo entregue agora.
   const fecho = pediu ? `${await fechoDaContinuacao(deps, pediu, tarefa.id)}${await notaPedidosAbertos(deps, remetente.id, agora, { exceto: [tarefa.id] })}` : "";
   const entradaTexto = !delegada
@@ -237,7 +269,7 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
     autoria,
     kind: "peer_ask",
     texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
-    payload: { kind: "peer_ask", agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(e.falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}) },
+    payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha),
     confianca: "nao_confiavel",
   });
   if (!mensagem) throw new ErroDeDominio("estado_invalido", { cause: "mensagem peer_ask não criada" });
@@ -291,7 +323,7 @@ export function entregarRespostaDeclarada(deps: DepsEntrega, input: { tarefa: Tu
  * resposta do colega abre uma continuação que segue a tarefa e entrega; se ela também falhar, avisa então.
  */
 // revisto em 2026-10-15 (NOD-252): só repos, escopo e relógio — o varredor de lease (DepsQueda) também avisa.
-export const avisarFalhaDelegacao = async (deps: DepsEntrega, input: { turnoId: string; motivo: string; semEsperar?: true }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> => {
+export async function avisarFalhaDelegacao(deps: DepsEntrega, input: { turnoId: string; motivo: string; semEsperar?: true }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
@@ -301,7 +333,7 @@ export const avisarFalhaDelegacao = async (deps: DepsEntrega, input: { turnoId: 
   const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa, null, input.turnoId);
   if (espera) return { data: { ignorado: espera } };
   return entregar(deps, { tarefa, texto: input.motivo, falha: true });
-};
+}
 
 /**
  * definido em 2026-10-15 (NOD-274): o colega que cumpre um pedido ficou sem cota e o pedido espera (retomada com

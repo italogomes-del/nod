@@ -93,7 +93,8 @@ export async function enfileirarNoTrabalho(deps: Deps, t: Trabalho, p: { texto: 
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: "texto", trabalho_id: t.id } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: t.conversaId, turnoId: turno.id, dados: { origem: turno.origem, agente_id: t.agenteId, trabalhoId: t.id } }),
-    ...(await sincronizarTrabalho(deps, t.id)),
+    // NOD-256 (F1.3): só a pessoa reabre a task num estado final; o recado do bot cai antes (mandarParaFrente recusa).
+    ...(await sincronizarTrabalho(deps, t.id, p.deQuem === "pessoa" ? { reabrir: true } : {})),
   ];
   return { turno, events };
 }

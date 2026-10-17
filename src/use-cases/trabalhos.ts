@@ -69,8 +69,10 @@ export async function criarTrabalho(deps: DepsTrabalho, n: Omit<NovoTrabalho, "t
 /**
  * Relê os fatos do trabalho e grava o estado novo, se mudou (com trava de linha: duas sincronizações seguidas não se
  * atropelam). Devolve o evento `trabalho_mudou` só na mudança. Sem trabalho, nada.
+ * definido em 2026-10-15 (NOD-256, F1.3): `reabrir` só no caminho da pessoa (mensagem na task, Retomar); sem ele a task
+ * `parada` fica onde está (`mudarEstado` recusa) — a resposta de um colega ou a sincronização atrasada não a reabrem.
  */
-export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string | null | undefined): Promise<RuntimeEvent[]> {
+export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string | null | undefined, opcoes: { reabrir?: true } = {}): Promise<RuntimeEvent[]> {
   if (!trabalhoId) return [];
   const atual = await deps.repos.trabalhos.buscarTravado(trabalhoId);
   if (!atual) return [];
@@ -78,7 +80,10 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   if (!fatos) return [];
   const novo = estadoDoTrabalho({ ...fatos, estadoAtual: atual.estado, iniciado: atual.iniciadoEm !== null });
   if (novo === atual.estado) return [];
-  const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora());
+  // `terminado`/`falhou` reabrem pelos fatos como antes (turno novo, decisão aberta, resposta de colega);
+  // `parado` é da pessoa e só ela o reabre (`reabrir`).
+  const reabre = opcoes.reabrir === true || atual.estado !== "parado";
+  const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora(), reabre ? { reabrir: true } : {});
   if (!mudou) return [];
   // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
   await resumoSeFaltar(deps, mudou, { perguntaVencida: fatos.perguntaVencida === true });

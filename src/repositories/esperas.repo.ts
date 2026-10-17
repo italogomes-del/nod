@@ -134,15 +134,16 @@ export function esperasRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * O Parar: cancela as que rodam da conversa (todas as do bot dela, tasks inclusive), do trabalho, ou todas da pessoa.
-     * A máquina mata o grupo no próximo puxar (a espera some da lista dela). Devolve os ids cancelados.
+     * A máquina mata o grupo no próximo puxar (a espera some da lista dela). Devolve as canceladas com o turno de cada uma
+     * (NOD-257, H4: o Parar avisa quem pediu quando a espera era de uma delegação).
      */
-    async cancelarRodando(alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }, motivoFim: string, agora: number): Promise<string[]> {
+    async cancelarRodando(alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }, motivoFim: string, agora: number): Promise<{ id: string; turnoId: string }[]> {
       const filtro = "conversaId" in alvo ? conn`and conversa_id = ${alvo.conversaId}` : "trabalhoId" in alvo ? conn`and trabalho_id = ${alvo.trabalhoId}` : conn``;
-      const linhas = await conn<{ id: string }[]>`
+      const linhas = await conn<{ id: string; turno_id: string }[]>`
         update esperas set estado = 'cancelada', motivo_fim = ${motivoFim}, terminado_em = ${data(agora)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'rodando' ${filtro}
-        returning id`;
-      return linhas.map((l) => l.id);
+        returning id, turno_id`;
+      return linhas.map((l) => ({ id: l.id, turnoId: l.turno_id }));
     },
 
     /** As que rodam sem notícia da máquina (esperaSemNoticia), travadas e sem esperar quem já as trava. */

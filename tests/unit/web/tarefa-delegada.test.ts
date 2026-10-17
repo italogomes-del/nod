@@ -5,6 +5,8 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { renderMensagem, renderMensagensAgrupadas, renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderTelaLinha } from "../../../web/telas/trabalhos.ts";
+import { textoDoMotivoDaFila, type MotivoFila } from "../../../src/domain/turno-orfao.ts";
+import { TEXTO_DO_MOTIVO_DA_FILA } from "../../../web/lib/fila-do-pedido.ts";
 
 const autoria = { autor_tipo: "agente" as const, autor_id: "taga", sob_procuracao_de: "marlon", conta_de_execucao: "marlon", executor: "catcher" as const, locality: "local" as const, locality_reason: "tudo_local_nesta_rodada" as const, machine_id: null, decidido_por: "regra:localidade" as const, regra_versao: 1 };
 const estado: Estado = { ...estadoInicial, sessao: { tenantId: "t", pessoaId: "marlon" } };
@@ -78,5 +80,20 @@ describe("'Sempre permitir' não é oferecido para aprovar PR (ADR-047)", () => 
     const html = renderTimeline(conversa, com({ ...base, itensAprovacao: [item("i1", "pr_comentar"), item("i2", "pr_revisar")], nuncaPermanente: ["i2"] }));
     expect(html).toContain("Sempre permitir pr comentar no github");
     expect(html).not.toContain("Sempre permitir estas");
+  });
+});
+
+describe("NOD-257 (H5): o card do pedido a colega diz por que ele espera na fila", () => {
+  const handoff = (fila?: Extract<NonNullable<Mensagem["payload"]>, { kind: "handoff" }>["fila"]): Mensagem => ({ tenantId: "t", id: "h1", conversaId: "c-taga", turnoId: "t-taga", autoria, kind: "handoff", texto: "", payload: { kind: "handoff", de: "taga", para: "dev1", motivo: "revisar o PR 466", tarefaId: "tarefa", ...(fila ? { fila } : {}) }, confianca: "confiavel", parcial: false, criadoEm: 0 });
+
+  it("com o motivo, a linha curta aparece no card; sem fila, nada muda", () => {
+    expect(renderMensagem(handoff({ desde: 0, motivo: "condicao_da_maquina" }), estado)).toContain("Na fila · espera o computador do bot (cota da IA, Mac fora ou sem recursos)");
+    expect(renderMensagem(handoff({ desde: 0, motivo: "faixa_ocupada" }), estado)).toContain("Na fila · espera o bot terminar o que está fazendo");
+    expect(renderMensagem(handoff({ desde: 0, motivo: null }), estado)).toContain("Na fila · na vez dele");
+    expect(renderMensagem(handoff(), estado)).not.toContain("Na fila");
+  });
+
+  it("a tabela da web espelha a do domínio", () => {
+    for (const [m, texto] of Object.entries(TEXTO_DO_MOTIVO_DA_FILA)) expect(texto).toBe(textoDoMotivoDaFila(m as MotivoFila));
   });
 });

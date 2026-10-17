@@ -151,8 +151,8 @@ export async function varrerEsperasSemNoticia(deps: DepsEspera): Promise<{ caida
 }
 
 /** O Parar da conversa (todas as do bot dela), de uma task, ou de tudo da pessoa. */
-export async function cancelarEsperas(deps: Pick<Deps, "repos" | "agora">, alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }): Promise<string[]> {
-  const ids = await deps.repos.esperas.cancelarRodando(alvo, "parada pela pessoa", deps.agora());
-  if (ids.length) log("info", "esperas_canceladas", { quantas: ids.length });
-  return ids;
+export async function cancelarEsperas(deps: Pick<Deps, "repos" | "agora">, alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }): Promise<{ id: string; turnoId: string }[]> {
+  const canceladas = await deps.repos.esperas.cancelarRodando(alvo, "parada pela pessoa", deps.agora());
+  if (canceladas.length) log("info", "esperas_canceladas", { quantas: canceladas.length });
+  return canceladas;
 }

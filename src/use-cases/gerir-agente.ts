@@ -2,8 +2,13 @@ import type { Agente } from "../contracts/agente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { TETO_SECAO_BOT } from "../contracts/ferramentas-criar-bots.ts";
 import { ehNod } from "../domain/nod.ts";
+import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { Trabalho } from "../contracts/trabalho.ts";
+import { delegacaoDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
+import { fecharLoteSePronto } from "./fechar-lote.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** definido em 2026-09-30 (0041): uma ordem da barra tem no máximo isto de bots — muito acima de qualquer grupo real. */
 const MAX_ORDEM = 200;
@@ -27,6 +32,9 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
   const agora = deps.agora();
   const conversa = await deps.repos.conversas.buscarPropriaDoAgente(atual.id);
   const pendentes = input.acao === "excluir" ? (await deps.repos.turnos.pendentesDaPessoa()).filter((t) => t.agenteId === atual.id) : [];
+  // definido em 2026-10-15 (NOD-257, G9): o que o excluir corta — as tasks abertas do bot e os pedidos de colega que ele
+  // tinha na fila ou rodando —, colhido ANTES, porque depois os turnos já estão interrompidos e as tasks paradas.
+  const cortados = input.acao === "excluir" ? await oQueOExcluirCorta(deps, atual.id, conversa?.id ?? null) : null;
   // definido em 2026-09-29 (0039): "não lido" é o "lido até" da conversa, não mais a coluna agentes.nao_lido.
   if (input.acao === "organizar" && input.naoLido !== undefined && conversa) {
     if (input.naoLido) await deps.repos.leituras.marcarNaoLida(conversa.id);
@@ -42,11 +50,45 @@ export const gerirAgente: CasoDeUso<{ agenteId: string; acao: "organizar" | "exc
     agente = await deps.repos.agentes.buscar(atual.id);
   }
   if (!agente) throw new ErroDeDominio("estado_invalido");
-  return { data: { agente }, events: [...pendentes.map((t) => evento(deps.escopo, { kind: "turno_interrompido", autoria: autoriaPessoa(deps.escopo), agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa" } })), evento(deps.escopo, { kind: "agente_atualizado", conversaId: conversa?.id ?? null, autoria: autoriaPessoa(deps.escopo), agora, dados: { agente_id: agente.id, acao: input.acao } })] };
+  const avisos = cortados && input.acao === "excluir" ? await avisarDoExcluir(deps, cortados) : [];
+  return { data: { agente }, events: [...avisos, ...pendentes.map((t) => evento(deps.escopo, { kind: "turno_interrompido", autoria: autoriaPessoa(deps.escopo), agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa" } })), evento(deps.escopo, { kind: "agente_atualizado", conversaId: conversa?.id ?? null, autoria: autoriaPessoa(deps.escopo), agora, dados: { agente_id: agente.id, acao: input.acao } })] };
 };
 
 /** A ordem traz o próprio bot, sem repetir, e só ids em texto: o formato (uuid) o Postgres confere (22P02 → 400). */
 function ordemValida(ordem: unknown, agenteId: string): ordem is string[] {
   return Array.isArray(ordem) && ordem.length > 0 && ordem.length <= MAX_ORDEM && ordem.every((id) => typeof id === "string" && id.length > 0)
     && new Set(ordem).size === ordem.length && ordem.includes(agenteId);
+}
+
+type Cortados = { trabalhos: Trabalho[]; delegacoes: string[] };
+
+async function oQueOExcluirCorta(deps: Deps, agenteId: string, conversaId: string | null): Promise<Cortados> {
+  const trabalhos = await deps.repos.trabalhos.abertosDoAgente(agenteId);
+  const vivos = conversaId ? (await deps.repos.turnos.vivosDaConversa(conversaId)).filter((t) => t.agenteId === agenteId && (t.estado === "pendente" || t.estado === "despachando")) : [];
+  const delegacoes = new Set<string>();
+  for (const t of vivos) {
+    const raiz = await delegacaoDoTurno(deps.repos, t);
+    if (raiz) delegacoes.add(t.id);
+  }
+  // As frentes de um pedido: quem abriu o lote (o turno do pedido, talvez já concluído) é por onde o aviso volta.
+  for (const t of trabalhos) {
+    const lote = t.forma === "frente" && t.loteId ? await deps.repos.frentes.buscarLote(t.loteId) : null;
+    const abertoPor = lote && lote.devolvidoEm === null ? await deps.repos.turnos.buscar(lote.abertoPorTurnoId) : null;
+    if (abertoPor && abertoPor.agenteId === agenteId && (await delegacaoDoTurno(deps.repos, abertoPor))) delegacoes.add(abertoPor.id);
+  }
+  return { trabalhos, delegacoes: [...delegacoes] };
+}
+
+/**
+ * NOD-257 (G9): depois do excluir, as frentes paradas devolvem o lote a quem as abriu (fecharLoteSePronto) e quem pediu
+ * algo ao bot recebe "o bot foi excluído" — uma vez por pedido, sem esperar outro colega da cadeia.
+ */
+async function avisarDoExcluir(deps: Deps, c: Cortados): Promise<RuntimeEvent[]> {
+  const events: RuntimeEvent[] = [];
+  for (const t of c.trabalhos) {
+    const agora = await deps.repos.trabalhos.buscar(t.id);
+    if (agora) events.push(...(await fecharLoteSePronto(deps, agora)));
+  }
+  for (const turnoId of c.delegacoes) events.push(...((await avisarFalhaDelegacao(deps, { turnoId, motivo: "o bot foi excluído", semEsperar: true })).events ?? []));
+  return events;
 }

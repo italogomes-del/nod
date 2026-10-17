@@ -50,7 +50,10 @@ async function delegacaoPendente(trx: Parameters<typeof depsSobreTrx>[0], deps: 
 }
 
 describeIntegracao("NOD-252: a interrupção por parada registra a rotina e avisa a delegação", () => {
-  it("despacho barrado pela parada aberta: rotina → execução 'interrompida' motivo parado_pela_pessoa, sem mensagem", async () => {
+  // O roteiro parar→disparar→despachar é um despacho que chega com a parada já ativa, então cai no mesmo caso do CA5 do
+  // #334 (parada_aberta + 1 linha na conversa). O silencioso (parado_pela_pessoa) fica só para o turno pendente ou em
+  // curso que o Parar derruba. Decisão de produto da Ada (PM), NOD-256/257, 17/10/2026.
+  it("despacho barrado pela parada aberta: rotina → execução 'interrompida' motivo parada_aberta, com 1 linha na conversa", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const a = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Taga" })).data;
@@ -61,8 +64,8 @@ describeIntegracao("NOD-252: a interrupção por parada registra a rotina e avis
       const barrado = (await executar(deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO })).data;
       expect(barrado).toMatchObject({ plano: null, motivo: "parada_ativa", turno: { id: turnoId, motivoInterrupcao: "parado_pela_pessoa" } });
       const execucoes = await deps.repos.rotinaExecucoes.listar(rotina.id);
-      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["interrompida", "parado_pela_pessoa", turnoId]]);
-      expect(await deps.repos.mensagens.listarDaConversa(a.conversa.id)).toHaveLength(mensagensAntes);
+      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["interrompida", "parada_aberta", turnoId]]);
+      expect(await deps.repos.mensagens.listarDaConversa(a.conversa.id)).toHaveLength(mensagensAntes + 1);
     });
   });
 

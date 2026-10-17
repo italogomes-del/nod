@@ -972,8 +972,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * como os adiados do #218 — com o `limite`, pular depois deixava os mesmos 50 velhos na frente e o 51º nunca era
      * observado. Só vale para o velho: um observado que vira impossível (agente excluído no meio) entra de novo.
      */
-    async orfaosCandidatos(agora: number, o: { jaObservados?: readonly string[]; limite?: number } = {}): Promise<OrfaoCandidato[]> {
+    async orfaosCandidatos(agora: number, o: { jaObservados?: readonly string[]; limite?: number; ids?: readonly string[] } = {}): Promise<OrfaoCandidato[]> {
       const jaObservados = [...(o.jaObservados ?? [])];
+      // definido em 2026-10-15 (NOD-257, H5): com `ids`, devolve os fatos desses pendentes, velhos ou não — o card do
+      // pedido a colega mostra por que ele espera na fila (fila-do-pedido.ts).
+      const soEstes = o.ids ? [...o.ids] : null;
       const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean }[]>`
         select x.* from (
           select t.id, t.conversa_id, t.agente_id, t.origem, t.trabalho_id, t.criado_em, t.prazo_em, t.acordar_em,
@@ -988,8 +991,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           left join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
           where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
             and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
+            and (${soEstes === null} or t.id::text = any(${soEstes ?? []}::text[]))
         ) x
-        where x.agente_excluido or x.geracao_antiga or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
+        where ${soEstes !== null} or x.agente_excluido or x.geracao_antiga or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
         order by (x.agente_excluido or x.geracao_antiga) desc, x.criado_em asc, x.id asc
         limit ${o.limite ?? 50}`;
       return linhas.map((l) => ({

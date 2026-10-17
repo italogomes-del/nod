@@ -112,6 +112,9 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
      * tarefa é o turno `delegacao` do dono, fora de trabalho, e a cadeia de retomadas dele não tem turno vivo nem na fila
      * e acabou interrompida (o concluído já entregou ou espera frentes, volta ou colega: não é parado). Até 20, os mais
      * antigos primeiro; `adiados` como no outro (#218).
+     *
+     * definido em 2026-10-15 (NOD-257, H5): a janela de `desde` vale para o ÚLTIMO turno da cadeia, não para o handoff —
+     * um pedido de dois dias que caiu agora ainda aparece. O handoff só limita a busca (IDADE_MAX_PEDIDO_RETOMAVEL_MS, 7 dias).
      */
     async triagensParadas(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
@@ -123,8 +126,8 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           join turnos d on d.tenant_id = h.tenant_id and d.id::text = h.payload->>'tarefaId' and d.origem = 'delegacao' and d.trabalho_id is null
           where h.tenant_id = ${escopo.tenantId} and h.owner_id = ${escopo.pessoaId} and h.kind = 'handoff'
             and h.payload->>'trabalhoId' is null
-            -- NOD-241 (revisão): piso da idade do pedido; sem ele, a janela pela queda faria a cadeia recursiva varrer o histórico todo.
-            and h.criado_em >= ${data(agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS)}
+            -- NOD-241 (revisão) / NOD-257 (H5): piso da idade do pedido; a janela de desde é medida na cadeia, abaixo.
+            and h.criado_em >= ${data(Math.min(desde, agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS))}
             and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)
             and not exists (select 1 from mensagens r where r.tenant_id = h.tenant_id and r.conversa_id = h.conversa_id and r.kind = 'peer_ask'
               and r.payload->>'tarefaId' = h.payload->>'tarefaId')
@@ -160,9 +163,10 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           where c.raiz = p.tarefa_id and q.acordar_em is not null and starts_with(q.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
         ) ec on true
         where u.estado = 'interrompido'
-          -- NOD-241: a janela conta da queda quando o último turno caiu; senão, do pedido (como antes).
-          -- NOD-279 (C22, definido em 2026-10-15): fora da queda, do maior entre o pedido e o fim da espera da cota.
-          and (greatest(p.criado_em, ec.fim) >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
+          -- NOD-241: a janela conta da queda quando o último turno caiu; NOD-257 (H5): ou do último turno da cadeia;
+          -- NOD-279 (C22, definido em 2026-10-15): senão, do maior entre o pedido e o fim da espera da cota.
+          and (greatest(p.criado_em, ec.fim) >= ${data(desde)} or u.criado_em >= ${data(desde)}
+            or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and not exists (select 1 from cadeia c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
             where c.raiz = p.tarefa_id and v.estado in ('pendente', 'despachando'))
         order by p.criado_em, p.handoff_id

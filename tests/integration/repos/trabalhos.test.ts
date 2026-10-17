@@ -28,8 +28,14 @@ describeIntegracao("trabalhos (0060, ADR-083)", () => {
       expect((await repos.trabalhos.listar({ agenteId, terminadosDesde: agora - 1000 })).map((t) => t.id)).toEqual([a!.id, b!.id]);
       expect((await repos.trabalhos.listar({ agenteId, terminadosDesde: agora + 1000 })).map((t) => t.id)).toEqual([a!.id]);
       expect((await repos.trabalhos.abertosDoAgente(agenteId)).map((t) => t.id)).toEqual([a!.id]);
-      // Reaberto (uma mensagem nova para a task): o carimbo de fim sai, o CHECK trabalho_terminado segue de pé.
-      expect((await repos.trabalhos.mudarEstado(b!.id, "rodando", agora))?.terminadoEm).toBeNull();
+      // NOD-256 (F1.3): sair de um estado final sem `reabrir` é recusado — a linha não muda.
+      expect(await repos.trabalhos.mudarEstado(b!.id, "rodando", agora)).toBeNull();
+      expect((await repos.trabalhos.buscar(b!.id))?.estado).toBe("terminado");
+      // Reaberto pela pessoa (uma mensagem nova para a task): o carimbo de fim sai, o CHECK trabalho_terminado segue de pé.
+      expect((await repos.trabalhos.mudarEstado(b!.id, "rodando", agora, { reabrir: true }))?.terminadoEm).toBeNull();
+      // De final para final não é reabrir: passa sem a flag.
+      expect((await repos.trabalhos.mudarEstado(b!.id, "parado", agora))?.estado).toBe("parado");
+      expect((await repos.trabalhos.mudarEstado(b!.id, "falhou", agora))?.estado).toBe("falhou");
 
       expect(await repos.trabalhos.atualizarSessao(a!.id, "sessao-1", "claude-cli")).toBe(true);
       expect(await repos.trabalhos.somarCusto(a!.id, 0.25)).toBe(true);

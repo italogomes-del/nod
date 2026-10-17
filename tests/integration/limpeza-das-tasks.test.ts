@@ -67,7 +67,8 @@ describeIntegracao("limpeza das pastas de task (ADR-088)", () => {
       ]);
 
       // A task reaberta (mensagem nova) sai da lista; quando volta a acabar, o relógio dos 3 dias recomeça.
-      await repos.trabalhos.mudarEstado(antiga, "rodando", agora);
+      // NOD-256 (F1.3): sair de um estado final exige a flag explícita (a mensagem nova da pessoa reabre).
+      await repos.trabalhos.mudarEstado(antiga, "rodando", agora, { reabrir: true });
       expect((await pastasParaLimpar(deps)).map((p) => p.trabalhoId)).toEqual([falhaRecente]);
       await repos.trabalhos.mudarEstado(antiga, "terminado", agora - LIMPAR_APOS_MS + HORA);
       expect(await pastasParaLimpar(deps)).toContainEqual({ trabalhoId: antiga, pasta: "Vera/antiga-aaaaaa", quando: "so_com_pr_mergeado" });

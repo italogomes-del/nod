@@ -8,6 +8,8 @@ import { entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
 import { IDADE_MAX_PEDIDO_RETOMAVEL_MS } from "../../src/domain/pedido-parado.ts";
 import { dispararRotina, registrarDesfechoRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
+import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
+import { gerirAgente } from "../../src/use-cases/gerir-agente.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { abrirFrentes } from "../../src/use-cases/frentes.ts";
 import { pedidoDeColegaDoTurno } from "../../src/use-cases/pedido-de-colega.ts";
@@ -198,6 +200,67 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     });
   });
 
+  it("NOD-257 (G9): excluir o bot com um pedido na fila avisa quem pediu, uma vez, sem esperar", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      await gerirAgente(m.deps, { agenteId: m.dev.agenteId, acao: "excluir" });
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.payload?.kind === "peer_ask" && x.payload.tarefaId === triagem);
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]).toMatchObject({ texto: expect.stringContaining("o bot foi excluído"), payload: { falhou: true } });
+    });
+  });
+
+  it("NOD-257 (G9): excluir o bot com frentes abertas de um pedido devolve o lote a quem pediu", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${triagem}`;
+      const f = await abrirFrentes(m.deps, { turnoId: triagem, agenteId: m.dev.agenteId, conversaId: m.dev.conversaId, frentes: [{ titulo: "PR 7", pedido: "Revise o PR 7." }] });
+      if (!f.data.ok) throw new Error(f.data.instrucao);
+      await m.repos.turnos.assentar(triagem, { estado: "concluido" });
+      await gerirAgente(m.deps, { agenteId: m.dev.agenteId, acao: "excluir" });
+      expect(await m.repos.frentes.buscarLote(f.data.lote_id)).toMatchObject({ devolvidoEm: expect.any(Number) });
+      const avisos = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.payload?.kind === "peer_ask" && x.payload.tarefaId === triagem);
+      expect(avisos).toHaveLength(1);
+    });
+  });
+
+  it("NOD-257 (H5): o card do pedido na fila leva o porquê na leitura da conversa (na vez dele → computador do bot → bot ocupado)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      const fila = async () => (await lerConversa(m.deps, { conversaId: m.chico.conversaId })).data.mensagens.find((x) => x.payload?.kind === "handoff")?.payload;
+      expect(await fila()).toMatchObject({ kind: "handoff", tarefaId: triagem, fila: { motivo: null } });
+      await trx`update turnos set prazo_em = now() - interval '1 minute', criado_em = now() - interval '2 hours' where id = ${triagem}`;
+      expect(await fila()).toMatchObject({ fila: { motivo: "condicao_da_maquina" } });
+      const outro = await m.turnoDe(m.dev);
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${outro.id}`;
+      expect(await fila()).toMatchObject({ fila: { motivo: "faixa_ocupada" } });
+      // Sem turno pendente na cadeia, o card não fala mais de fila.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${triagem}`;
+      expect((await fila()) as object).not.toHaveProperty("fila");
+    });
+  });
+
+  it("NOD-257 (H5): a janela de 24 h vale para o último turno da cadeia — pedido de 2 dias que caiu agora aparece; caído há 2 dias, não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+      await trx`update turnos set estado = 'despachando', lease_ate = now() - interval '2 days', criado_em = now() - interval '2 days' where id = ${triagem}`;
+      await trx`update mensagens set criado_em = now() - interval '2 days' where kind = 'handoff' and payload->>'tarefaId' = ${triagem}`;
+      await m.repos.turnos.interromper(triagem, "maquina_sem_contato");
+      await trx`update turnos set lease_ate = now() - interval '2 days' where id = ${triagem}`;
+      const desde = (): number => Date.now() - 86_400_000;
+      // Caiu há 2 dias e nada mais rodou: fora da janela.
+      expect(await m.repos.pedidosDeColega.triagensParadas(desde(), Date.now())).toEqual([]);
+      // Uma retomada criada agora caiu agora: o pedido (handoff de 2 dias) volta a aparecer.
+      const t = (await m.repos.turnos.buscar(triagem))!;
+      const r = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: t.conversaId, agenteId: t.agenteId, origem: "retomada", retomaTurnoId: triagem, interrompidoCom: "maquina_sem_contato", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "m" });
+      expect((await m.repos.pedidosDeColega.triagensParadas(desde(), Date.now()))[0]).toMatchObject({ tarefaId: triagem, ultimoTurnoId: r!.id });
+    });
+  });
+
   it("o varredor da ADR-084 cobre a triagem que caiu com a máquina: retoma quando as máquinas voltam (o pedido de antes, task de colega, segue em pedidos-parados.test.ts)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
@@ -263,6 +326,8 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     }
   });
 
+  // revisto no merge do #334 com a main (NOD-257 H5 × NOD-279 C22): a janela também conta do último turno da cadeia
+  // (H5). O controle "sem a espera da cota, fica fora" só vale com a volta ANTIGA; volta recente entra pela H5 (abaixo).
   it("NOD-279 (C22): a triagem pedida há 30 h que esperou a cota e caiu fora de MOTIVOS_DE_QUEDA entra; sem a espera da cota, fica fora como antes", async () => {
     for (const comCota of [true, false]) {
       await withRollback(MARLON, async (trx) => {
@@ -273,8 +338,30 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
         await m.repos.turnos.interromper(triagem, "trabalho_incompleto");
         const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.dev.conversaId, agenteId: m.dev.agenteId, origem: "retomada", retomaTurnoId: triagem, prazoEm: agora + 86_400_000, profundidade: 1, entradaTexto: comCota ? entradaDaVoltaDaCota("Claude Code") : "siga", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", acordarEm: agora - 3_600_000 });
         await m.repos.turnos.interromper(volta!.id, "trabalho_incompleto");
+        // a volta nasceu há 30 h também (esperou a cota até 1 h atrás): só a espera da cota a traz para a janela.
+        await trx`update turnos set criado_em = ${new Date(agora - 30 * 3_600_000)} where id in (${triagem}, ${volta!.id})`;
         const parada = (await m.repos.pedidosDeColega.triagensParadas(agora - 86_400_000, agora)).find((p) => p.tarefaId === triagem);
         expect(parada !== undefined).toBe(comCota);
+      });
+    }
+  });
+
+  // QA do #334 (M9: tirar `u.criado_em` da janela sobrevivia): NOD-257 H5/CA3 — pedido de 30 h, sem espera da cota, cujo
+  // último turno da cadeia nasceu há 1 h e caiu fora de MOTIVOS_DE_QUEDA: entra, porque a janela conta do último turno.
+  it("NOD-257 (H5): pedido de 30 h com o último turno da cadeia recente (queda fora de MOTIVOS_DE_QUEDA) entra; com ele antigo, fica fora", async () => {
+    for (const recente of [true, false]) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
+        const agora = Date.now();
+        await trx`update mensagens set criado_em = ${new Date(agora - 30 * 3_600_000)} where kind = 'handoff' and payload->>'tarefaId' = ${triagem}`;
+        await m.repos.turnos.interromper(triagem, "trabalho_incompleto");
+        const volta = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.dev.conversaId, agenteId: m.dev.agenteId, origem: "retomada", retomaTurnoId: triagem, prazoEm: agora + 86_400_000, profundidade: 1, entradaTexto: "siga", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+        await m.repos.turnos.interromper(volta!.id, "trabalho_incompleto");
+        await trx`update turnos set criado_em = ${new Date(agora - 30 * 3_600_000)} where id = ${triagem}`;
+        await trx`update turnos set criado_em = ${new Date(agora - (recente ? 1 : 30) * 3_600_000)} where id = ${volta!.id}`;
+        const parada = (await m.repos.pedidosDeColega.triagensParadas(agora - 86_400_000, agora)).find((p) => p.tarefaId === triagem);
+        expect(parada !== undefined).toBe(recente);
       });
     }
   });

@@ -12,8 +12,8 @@ import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } fr
 import { esperaDoAutomatico, iasParaOAutomatico } from "../domain/inteligencia.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe } from "./autoria-evento.ts";
 import { mensagemExecutorIndisponivel } from "./enviar-mensagem.ts";
-import { registrarInterrupcaoPorParada } from "./interrupcao-por-parada.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { desfechoDaParada } from "./desfecho-da-parada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { IAS_COM_CONTA } from "../contracts/contas-ia.ts";
 import { PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
@@ -134,9 +134,12 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   if (paradaConversa) {
     const interrompido = await deps.repos.turnos.interromper(turno.id, "parado_pela_pessoa");
     const autoria = autoriaPessoa(deps.escopo, executor);
-    // NOD-251: a janela da rotina parada antes de rodar fica no histórico como 'interrompida' (Parar), não some.
-    // NOD-252: e a delegação barrada pela parada avisa quem pediu — só quem interrompeu de fato registra.
-    const daParada = interrompido ? await registrarInterrupcaoPorParada(deps, { turnoId: turno.id }) : [];
+    // NOD-251 + NOD-256 (F2, decisão NOD-225) + merge do #343 (decisão da PM, 17/10/2026): o despacho barrado por uma
+    // parada que JÁ estava aberta segue o #334 — a janela da rotina fica 'interrompida' com o motivo `parada_aberta` e
+    // a linha na conversa; o pedido de colega avisa quem pediu (desfechoDaParada). O turno em curso que o Parar derruba
+    // segue o #343 (parado_pela_pessoa, silencioso; registrarInterrupcaoPorParada em parar.ts/interromper-por-maquina.ts).
+    // NOD-252: só quem interrompeu de fato registra — com despacho e Parar concorrentes, o UPDATE condicional decide.
+    const daParada = interrompido ? await desfechoDaParada(deps, interrompido) : [];
     return {
       data: { plano: null, turno: interrompido ?? turno, motivo: "parada_ativa" },
       events: [evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", origem: turno.origem } }), ...daParada, ...(await sincronizarDoTurno(deps, turno))],

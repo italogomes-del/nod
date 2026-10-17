@@ -244,14 +244,21 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return { vivos: l?.vivos ?? 0, ultimaEm: l?.ultima ? ms(l.ultima) : null };
     },
 
-    /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0063). */
-    async mudarEstado(id: string, estado: EstadoTrabalho, agora: number): Promise<Trabalho | null> {
+    /**
+     * Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0063).
+     * definido em 2026-10-15 (NOD-256, F1.3): sair de um estado final (`terminado`, `parado`, `falhou`) para um aberto só
+     * com `reabrir` — o caminho da pessoa (mensagem na task, Retomar). Sem a flag a linha não muda e volta `null`: a
+     * resposta de um colega ou uma sincronização atrasada não reabrem a task que a pessoa parou.
+     */
+    async mudarEstado(id: string, estado: EstadoTrabalho, agora: number, opcoes: { reabrir?: true } = {}): Promise<Trabalho | null> {
       const final = estado === "terminado" || estado === "parado" || estado === "falhou";
+      const podeSairDoFinal = final || opcoes.reabrir === true;
       const [l] = await conn<Linha[]>`
         update trabalhos set estado = ${estado},
           iniciado_em = case when ${estado === "rodando" || estado === "precisa_de_voce"} then coalesce(iniciado_em, ${data(agora)}) else iniciado_em end,
           terminado_em = ${final ? data(agora) : null}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+          and (estado not in ('terminado', 'parado', 'falhou') or ${podeSairDoFinal})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
     },

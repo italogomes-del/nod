@@ -3,6 +3,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
+import { avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import type { DepsSuaVez } from "./listar-sua-vez.ts";
 import type { CasoDeUso } from "./tipos.ts";
@@ -68,6 +69,10 @@ export async function depoisDeDispensar(deps: DepsSuaVez, input: { decisao: Deci
     if ("execucao" in r.data) {
       rotinaId = r.data.rotina.id;
       events.push(...(r.events ?? []));
+    } else {
+      // definido em 2026-10-15 (NOD-257, H3): a pergunta dispensada de um pedido de colega — quem pediu é avisado (uma
+      // vez; espera outro colega pendente na cadeia). Fora de delegação, avisarFalhaDelegacao não faz nada.
+      events.push(...((await avisarFalhaDelegacao(deps, { turnoId: d.turnoId, motivo: "a pessoa deixou a pergunta sem resposta" })).events ?? []));
     }
   }
   const computadorDevolvido = await devolverComputador(deps, d);

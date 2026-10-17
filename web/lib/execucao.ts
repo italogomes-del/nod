@@ -33,6 +33,8 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   nao_autenticado: "a IA da máquina estava sem login",
   limite_do_plano: "a conta da IA estava no limite",
   parado_pela_pessoa: "você parou",
+  // NOD-256 (F2, decisão NOD-225): a parada aberta segurou a janela (desfechoDaParada) — a linha na conversa diz o resto.
+  parada_aberta: "o bot estava parado por você",
 };
 
 /**

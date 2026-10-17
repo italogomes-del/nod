@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Executor } from "../contracts/evento.ts";
 import type { MotivoBloqueioRotina } from "../contracts/motivos.ts";
+import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { dispararRotina } from "./disparar-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -30,7 +32,17 @@ export const executarRotinaAgora: CasoDeUso<{ rotinaId: string; executor: Execut
     const aberto = await deps.repos.rotinaJanelas.turnoAberto(rotina.id, deps.agora());
     if (aberto) return { data: { conversaId: rotina.conversaId, turnoId: null, bloqueio: null, jaNaFila: { turnoId: aberto.turnoId, instanteAgendado: aberto.instanteAgendado, fusoIana: rotina.fusoIana } } };
   }
+  // definido em 2026-10-15 (NOD-256, NOD-225): "Executar agora" é a pessoa voltando — encerra a parada que cobre a
+  // conversa da rotina (como o Retomar, retomar-turno.ts) e deixa uma linha dizendo isso; sem ela o turno nascia e o
+  // despacho o interrompia de novo.
+  const agora = deps.agora();
+  const antes: RuntimeEvent[] = [];
+  if ((await deps.repos.paradas.encerrarAbertas({ conversaId: rotina.conversaId, agora })) > 0) {
+    const autoria = autoriaPessoa(deps.escopo, input.executor);
+    const linha = await deps.repos.mensagens.criar({ conversaId: rotina.conversaId, autoria, kind: "sistema", texto: "Parada encerrada: você usou Executar agora e a rotina voltou a rodar.", confianca: "confiavel" });
+    if (linha) antes.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: rotina.conversaId, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  }
   const r = await dispararRotina(deps, { rotina, instanteAgendado: Math.floor(deps.agora() / 60_000) * 60_000, machineId: randomUUID(), executor: input.executor, preservarAgenda: true });
   const bloqueio = "bloqueada" in r.data ? { motivo: r.data.bloqueada, propostaId: r.data.propostaId } : null;
-  return { data: { conversaId: rotina.conversaId, turnoId: "turno" in r.data ? r.data.turno.id : null, bloqueio }, events: r.events };
+  return { data: { conversaId: rotina.conversaId, turnoId: "turno" in r.data ? r.data.turno.id : null, bloqueio }, events: [...antes, ...(r.events ?? [])] };
 };

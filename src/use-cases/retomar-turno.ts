@@ -7,6 +7,7 @@ import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fecharGemeas } from "./fechar-gemeas.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
+import { sincronizarTrabalho } from "./trabalhos.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 export type EntradaRetomarTurno = ({ decisaoId: string; turnoId?: undefined } | { turnoId: string; decisaoId?: undefined }) & {
@@ -72,6 +73,8 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     ...(nova ? [evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { origem: "retomada", retoma_turno_id: original.id, reenvios: turno.reenvios } })] : []),
   ];
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: conversa.id, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
+  // definido em 2026-10-15 (NOD-256, F1.3): o Retomar é da pessoa — a task parada volta a rodar com a retomada.
+  events.push(...(await sincronizarTrabalho(deps, turno.trabalhoId, { reabrir: true })));
   if (decisao) {
     const decidida = await deps.repos.decisoes.decidir(decisao.id, { por: deps.escopo.pessoaId, agora });
     if (decidida) {

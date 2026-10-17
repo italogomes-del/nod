@@ -367,7 +367,7 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | MotivoNaoRodouRotina | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | "parada_aberta" | MotivoNaoRodouRotina | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
   /** NOD-274: 'nao_rodou' por cota — quando a cota volta (vai para o histórico). */
@@ -462,6 +462,28 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
   // rotina), mas nada é escrito na conversa — nem a fala do agente (suprimida em assentar-turno.ts)
   // nem este marcador. Uma rotina que roda a cada 5 min e não acha novidade não deve deixar rastro
   // no chat; quem quer conferir que ela rodou olha o histórico.
+  // definido em 2026-10-15 (NOD-256, NOD-225): a interrompida pela parada aberta escreve uma linha na conversa da rotina —
+  // a parada segura a rotina até a pessoa voltar, mas nunca em silêncio.
+  if (desfecho === "interrompida" && motivo === "parada_aberta") {
+    const autoriaParada = autoriaPessoa(deps.escopo.pessoaId, input.regra ?? "regra:parada");
+    const bot = (await deps.repos.agentes.buscar(rotina.agenteId))?.nome ?? "o bot";
+    const linha = await deps.repos.mensagens.criar({
+      conversaId: rotina.conversaId,
+      turnoId: turnoDisparado.id,
+      autoria: autoriaParada,
+      kind: "rotina_execucao",
+      texto: `${redigir("rotina-parada-aberta", agora, { bot })} (${carimbo(agora, rotina.fusoIana)})`,
+      payload: { kind: "rotina_execucao", rotinaId: rotina.id, instanteAgendado, desfecho },
+      confianca: "confiavel",
+    });
+    return {
+      data: { execucao, rotina, podadas },
+      events: [
+        evento(deps, "rotina_executou", autoriaParada, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho, motivo, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
+        ...(linha ? [evento(deps, "mensagem_criada", autoriaParada, { mensagemId: linha.id, kind: "rotina_execucao" }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })] : []),
+      ],
+    };
+  }
   if (SILENCIOSOS.has(desfecho)) {
     const autoriaSilencio = desfecho === "interrompida" ? autoriaPessoa(deps.escopo.pessoaId, input.regra ?? "regra:varredor_lease") : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
     return {
