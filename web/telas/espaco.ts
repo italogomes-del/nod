@@ -95,6 +95,22 @@ export function situacaoCurtaAvisos(a: EstadoAvisos): string {
 }
 
 /**
+ * NOD-115 (protótipo do Gil, 05/10): "Tocar som" logo abaixo do interruptor geral, recuado, para ler como parte dos
+ * avisos. Com os avisos desligados, fica desabilitado na posição guardada e a ajuda diz que a escolha fica guardada.
+ * Só existe quando o estado traz `som` (app do Mac com `definirSom`); no navegador e no app antigo a seção não muda.
+ */
+const AJUDA_SOM = "Desligado, o aviso aparece em silêncio: o banner e o número no Dock continuam.";
+const AJUDA_SOM_TRAVADO = "Ligue os avisos para escolher. Sua escolha fica guardada.";
+
+function renderSom(som: boolean, avisosLigados: boolean): string {
+  return `
+      <div class="avisos-som">
+        <button type="button" class="avisos-interruptor" data-act="alternar-som" role="switch" aria-checked="${som ? "true" : "false"}" aria-describedby="avisos-som-ajuda"${avisosLigados ? "" : " disabled"}><span class="avisos-trilho" aria-hidden="true"></span><span>Tocar som</span></button>
+        <p id="avisos-som-ajuda" class="avisos-som-ajuda">${esc(avisosLigados ? AJUDA_SOM : AJUDA_SOM_TRAVADO)}</p>
+      </div>`;
+}
+
+/**
  * definido em 2026-09-24 ("aviso no Mac"): o interruptor dos avisos e as regras dele em palavras, para
  * a pessoa saber quando o nod vai (e não vai) chamá-la. No app, liga "Avisos no Mac" (o mesmo item do
  * menu); no navegador, pede a permissão no clique. Bloqueado no navegador, o clique não resolve — o
@@ -109,7 +125,7 @@ export function renderAvisos(a: EstadoAvisos): string {
       <div class="avisos-linha">
         <button type="button" class="avisos-interruptor" data-act="alternar-avisos" role="switch" aria-checked="${ligado ? "true" : "false"}"${travado ? " disabled" : ""}><span class="avisos-trilho" aria-hidden="true"></span><span>Avisar quando algo precisar de você</span></button>
         <span class="avisos-situacao situacao-${esc(a.situacao)}" role="status">${esc(SITUACAO[a.onde][a.situacao])}</span>
-      </div>
+      </div>${a.som === undefined ? "" : renderSom(a.som, ligado)}
       <ul class="avisos-regras">
         <li>Só quando o nod não está na frente: com ele aberto, o pedido já aparece na tela.</li>
         <li>No máximo um aviso por minuto; pedidos que chegam juntos viram um aviso só.</li>

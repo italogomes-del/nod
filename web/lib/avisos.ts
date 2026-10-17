@@ -30,7 +30,11 @@ export type Aviso = AvisoDesktop;
 
 /** Onde os avisos saem e se estão ligados — o que "Seu espaço" escreve (web/telas/espaco.ts). */
 export type SituacaoAvisos = "ligados" | "desligados" | "bloqueados" | "indisponiveis";
-export type EstadoAvisos = { onde: "mac" | "navegador"; situacao: SituacaoAvisos };
+/**
+ * `som` (NOD-115): a escolha "Tocar som" guardada neste Mac. Só vem quando a ponte tem `definirSom`; no navegador e no
+ * app antigo fica ausente e a tela não mostra o interruptor.
+ */
+export type EstadoAvisos = { onde: "mac" | "navegador"; situacao: SituacaoAvisos; som?: boolean };
 
 /** O corpo do aviso de UM pedido: a frase do agente, cortada. */
 export const CORPO_MAX = 140;

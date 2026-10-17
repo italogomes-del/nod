@@ -137,4 +137,42 @@ describe("'Avisos' em Seu espaço", () => {
     expect(navegador).toContain("O título da aba mostra quantos pedidos estão abertos.");
     expect(renderAvisos({ onde: "navegador", situacao: "desligados" })).toContain("Desligados");
   });
+
+  const somDe = (html: string): string => html.match(/<button[^>]*data-act="alternar-som"[^>]*>/)?.[0] ?? "";
+
+  it('"Tocar som" aparece com aria-checked do som quando o estado traz som', () => {
+    const ligado = renderAvisos({ onde: "mac", situacao: "ligados", som: true });
+    expect(somDe(ligado)).toContain('role="switch" aria-checked="true"');
+    expect(somDe(ligado)).toContain('aria-describedby="avisos-som-ajuda"');
+    expect(somDe(ligado)).not.toContain("disabled");
+    expect(ligado).toContain("Tocar som");
+    expect(ligado).toContain('id="avisos-som-ajuda"');
+    expect(ligado).toContain("Desligado, o aviso aparece em silêncio: o banner e o número no Dock continuam.");
+    // Logo abaixo do interruptor geral, antes das regras.
+    expect(ligado.indexOf("alternar-avisos")).toBeLessThan(ligado.indexOf("alternar-som"));
+    expect(ligado.indexOf("alternar-som")).toBeLessThan(ligado.indexOf("avisos-regras"));
+    expect(somDe(renderAvisos({ onde: "mac", situacao: "ligados", som: false }))).toContain('aria-checked="false"');
+    // Bloqueado pelo macOS conta como ligado: o som segue escolhível.
+    expect(somDe(renderAvisos({ onde: "mac", situacao: "bloqueados", som: true }))).not.toContain("disabled");
+  });
+
+  it('com avisos desligados, "Tocar som" fica disabled na posição guardada e troca a ajuda', () => {
+    for (const som of [true, false]) {
+      const html = renderAvisos({ onde: "mac", situacao: "desligados", som });
+      expect(somDe(html)).toContain(`aria-checked="${som}"`);
+      expect(somDe(html)).toContain(" disabled");
+      expect(html).toContain("Ligue os avisos para escolher. Sua escolha fica guardada.");
+      expect(html).not.toContain("Desligado, o aviso aparece em silêncio");
+    }
+  });
+
+  it("sem som no estado (navegador ou app antigo) a seção é idêntica à de hoje", () => {
+    for (const a of [{ onde: "mac", situacao: "ligados" }, { onde: "mac", situacao: "desligados" }, { onde: "navegador", situacao: "ligados" }] as const) {
+      const html = renderAvisos(a);
+      expect(html).not.toContain("alternar-som");
+      expect(html).not.toContain("Tocar som");
+      expect(html).toBe(renderAvisos({ ...a, som: undefined }));
+      expect(html).toMatch(/<\/div>\n {6}<ul class="avisos-regras">/);
+    }
+  });
 });

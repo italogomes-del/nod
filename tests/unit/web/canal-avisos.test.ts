@@ -45,6 +45,16 @@ describe("canal de avisos: som (NOD-196)", () => {
     expect(c.estado()).toEqual({ onde: "mac", situacao: "ligados" });
   });
 
+  it("estado() traz som só quando a ponte tem definirSom", async () => {
+    const { canal: antigo } = canal(ponte({ definirSom: undefined }));
+    const { canal: novo } = canal(ponte({ prefs: { som: false, avisos: false } }));
+    await esperarMicrotarefas();
+    expect(antigo.estado()).not.toHaveProperty("som");
+    expect(novo.estado()).toEqual({ onde: "mac", situacao: "desligados", som: false });
+    await novo.alternarSom?.();
+    expect(novo.estado().som).toBe(true);
+  });
+
   it("lê o som da ponte e avisa a página quando ele muda", async () => {
     const mac = ponte({ prefs: { som: false } });
     const { canal: c, aoMudar } = canal(mac);

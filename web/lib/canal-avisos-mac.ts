@@ -48,6 +48,8 @@ export function canalMac(mac: NodDesktop, aoAbrir: (alvo: AlvoAviso) => void, ao
   const definirSom = mac.definirSom?.bind(mac);
   if (definirSom) {
     // App de antes de 2026-10-07 não tem: sem as duas, a tela não oferece o interruptor.
+    const situacao = canal.estado;
+    canal.estado = () => ({ ...situacao(), som: prefs.som });
     canal.som = () => prefs.som;
     canal.alternarSom = () => definirSom(!prefs.som).then(aplicar, () => undefined);
   }

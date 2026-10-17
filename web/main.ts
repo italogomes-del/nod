@@ -2718,6 +2718,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "fechar-erro": () => dispatch({ tipo: "erro", erro: null }),
   // Sem agir(): no navegador, o pedido de permissão precisa sair direto do clique.
   "alternar-avisos": () => canalAvisos.alternar(),
+  // NOD-115: o redesenho vem do aoMudar do canal, quando a ponte devolve as preferências. A seção é refeita: quem
+  // alternou pelo teclado continua no interruptor.
+  "alternar-som": async (el) => {
+    const comFoco = document.activeElement === el;
+    await canalAvisos.alternarSom?.();
+    if (comFoco) document.querySelector<HTMLElement>('[data-act="alternar-som"]')?.focus({ preventScroll: true });
+  },
   "fechar-faixa": () => dispatch({ tipo: "faixa", faixa: null }),
   enviar: () => enviarComposer(),
   "sondar-inventario": () => agir(async () => dispatch({ tipo: "hidratar-inventario", inventario: await api!.inventario(true) })),

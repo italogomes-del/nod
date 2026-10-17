@@ -311,6 +311,11 @@
 .avisos-situacao { font-size: 12px; color: var(--ink-3); }
 .avisos-situacao.situacao-ligados { color: var(--success); }
 .avisos-situacao.situacao-bloqueados { color: var(--warning); }
+/* NOD-115: "Tocar som" recuado sob o interruptor geral (34px do trilho + 10px do vão = 44px), com a ajuda fixa
+   alinhada ao rótulo. Desabilitado, o trilho apaga na posição guardada. */
+.avisos-som { margin: -4px 0 12px 44px; }
+.avisos-som-ajuda { margin: 0 0 0 44px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.avisos-som .avisos-interruptor:disabled .avisos-trilho { opacity: .45; }
 .avisos-regras { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; line-height: 1.7; }
 .me-falha small { color: var(--warning); }
 .me-falha .av-me { background: var(--warning-soft); color: var(--warning); }
