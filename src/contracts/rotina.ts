@@ -1,6 +1,6 @@
 import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
-import type { DesfechoRotina, MotivoBloqueioRotina } from "./motivos.ts";
+import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina } from "./motivos.ts";
 import type { Executor } from "./evento.ts";
 
 export type EstadoRotina = "ativa" | "pausada";
@@ -86,6 +86,9 @@ export type ParadaDaRotina = { desde: EpochMs; naoRodaram: EpochMs[]; fusoIana: 
  * rotina do mesmo agente (esta roda na próxima janela dela).
  */
 export type BloqueioRotina = ParadaDaRotina & { motivo: Exclude<MotivoBloqueioRotina, "aguardando_resposta">; app: string; slug: string; decisaoId: string | null; rodaNaHora: boolean };
+
+/** NOD-243 (2026-10-16): a última janela foi adiada — motivo, quantas seguidas, desde quando e o título da frente que segura. */
+export type EsperaRotinaDto = { motivo: MotivoAdiada; seguidas: number; desde: EpochMs; frente: string | null };
 
 /**
  * definido em 2026-10-15 (pacote A3): no `RotinaDto`, quantos horários do cron passaram desde a janela da execução que

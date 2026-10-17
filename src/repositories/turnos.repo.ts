@@ -54,6 +54,7 @@ interface Linha {
   ligacao_id: string | null;
   trabalho_id: string | null;
   acordar_em: Date | null;
+  pessoa_esperando: boolean;
   decidido_por: string;
   despachado_em?: Date | null;
 }
@@ -63,7 +64,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, decidido_por, despachado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -99,6 +100,7 @@ function paraTurno(l: Linha): Turno {
     ligacaoId: l.ligacao_id,
     trabalhoId: l.trabalho_id,
     acordarEm: msOuNull(l.acordar_em),
+    pessoaEsperando: l.pessoa_esperando,
     decididoPor: l.decidido_por,
     despachadoEm: msOuNull(l.despachado_em ?? null),
   };
@@ -149,6 +151,8 @@ export type NovoTurno = {
   trabalhoId?: string | null;
   /** ADR-086: "me chame às 16:00" — a fila só entrega este turno a partir daqui. Ausente/null = na hora. */
   acordarEm?: number | null;
+  /** NOD-272 (0088): a pessoa está olhando — o portão da cota não segura este turno (tipoParaCota = conversa). */
+  pessoaEsperando?: boolean;
   /**
    * NOD-287 (2026-10-15): o turno que este repete ou continua. A marca da web (0033, ADR-062 §6) dele vem junto no
    * MESMO INSERT — a repetição por limite, troca de conta/IA ou conta ausente retoma a fala com a página no contexto e
@@ -193,13 +197,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, contaminado_em)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, contaminado_em)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
-          ${dataOuNull(t.acordarEm)},
+          ${dataOuNull(t.acordarEm)}, ${t.pessoaEsperando === true},
           ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
@@ -320,7 +324,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
               -- task — espera: o 1% fica para a conversa com a pessoa. Com a IA no limite, TODO o fundo espera (o que já
               -- começou e a volta marcada também), até a janela renovar, em vez de falhar. A conversa com a pessoa (conversa,
               -- sala, a retomada que ela pediu) e a ligação nunca esperam pela cota.
-              ${cota === null ? trx`` : trx`and not (t.origem <> 'ligacao' and (
+              -- NOD-272: o turno que a pessoa está olhando ("Testar agora" e as frentes dele) também nunca espera.
+              ${cota === null ? trx`` : trx`and not (t.origem <> 'ligacao' and not t.pessoa_esperando and (
                 (((t.trabalho_id is null and t.origem in ('rotina', 'delegacao', 'peer'))
                     or exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null))
                   and ${naCota(cota.reserva, cota.autoReserva)})

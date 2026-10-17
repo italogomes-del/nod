@@ -1,7 +1,8 @@
 import type { EsperaDaCotaDaRotina } from "../../src/contracts/cota.ts";
+import type { EsperaRotinaDto } from "../../src/contracts/rotina.ts";
 import type { BloqueioRotina, ExecucaoRotina, ParadaDaRotina, PerguntaPendenteDaRotina } from "../../src/contracts/rotina.ts";
 import { botao, esc } from "./render.ts";
-import { desdeQuando, horaMinuto, listaDeJanelas, quandoVoltaNoFuso } from "./relogio.ts";
+import { desdeQuando, horaMinuto, listaDeJanelas, quandoCurto, quandoVoltaNoFuso } from "./relogio.ts";
 
 /**
  * definido em 2026-09-24 (ADR-045): quem parou a execução interrompida, em palavras — o Mac da pessoa
@@ -16,9 +17,15 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
   // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
   sem_pendencia: "sem pendência aberta, nenhum turno rodou",
-  // definido em 2026-10-15 (NOD-274): a janela que não rodou (desfecho 'nao_rodou', MOTIVOS_NAO_RODOU_ROTINA).
+  // definido em 2026-10-16 (NOD-243/NOD-272): a janela adiada e a execução que a seguinte (ou o Pausar) encerrou.
+  execucao_anterior_aberta: "a execução anterior ainda não tinha terminado",
+  frente_aberta: "uma frente desta rotina ainda estava aberta",
+  vencida: "ficou na fila e a janela seguinte a encerrou",
+  frente_parada: "a frente ficou parada por mais de 24 h",
+  rotina_pausada: "a rotina foi pausada",
+  // definido em 2026-10-15 (NOD-274): a janela que não rodou (desfecho 'nao_rodou', MOTIVOS_NAO_RODOU_ROTINA). A de
+  // execucao_anterior_aberta (C9) virou 'adiada' na integração com o #335; a linha antiga usa o rótulo acima.
   cota_da_ia: "cota",
-  execucao_anterior_aberta: "a execução anterior ainda estava aberta",
   // definido em 2026-10-15 (NOD-270): a pergunta das voltas sem novidade ficou sem resposta e a janela seguinte seguiu.
   voltas_sem_novidade: "pergunta sem resposta, fechada pela janela seguinte",
   // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.
@@ -27,6 +34,12 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   limite_do_plano: "a conta da IA estava no limite",
   parado_pela_pessoa: "você parou",
 };
+
+/**
+ * definido em 2026-10-16 (revisão do Gil no #335, A4): a rotina cuja última janela foi adiada leva tag âmbar no cabeçalho,
+ * como a parada (`tagDaParada`); a linha de espera (`linhaDaEspera`) segue neutra e explica.
+ */
+export const TAG_ESPERANDO = '<span class="tag tag-ambar" title="enquanto a execução anterior não termina, as janelas são adiadas sem gastar crédito">esperando</span>';
 
 /** definido em 2026-10-01 (item 7 da ADR-066): a rotina que só acorda com pendência, na lista de rotinas. */
 export const TAG_SO_COM_PENDENCIA = '<span class="tag tag-cinza" title="sem pendência aberta do bot, a janela passa sem turno e sem custo; Testar agora roda sempre">só com pendência</span>';
@@ -62,7 +75,7 @@ export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & 
     return motivo ? `parada (${motivo})` : "parada";
   }
   const base = e.desfecho.replaceAll("_", " ");
-  const motivo = e.desfecho === "interrompida" || e.motivo === "sem_pendencia" ? motivoDaExecucao(e) : null;
+  const motivo = e.desfecho === "interrompida" || e.desfecho === "adiada" || e.motivo === "sem_pendencia" ? motivoDaExecucao(e) : null;
   return motivo ? `${base} · ${motivo}` : base;
 }
 
@@ -94,6 +107,19 @@ export function linhaNaoRodaram(p: ParadaDaRotina | null, agora: number): string
   if (!p || p.naoRodaram.length === 0) return "";
   const verbo = p.naoRodaram.length === 1 ? "Não rodou" : "Não rodaram";
   return `<p class="dec-nao-rodaram">${esc(`${verbo}: ${listaDeJanelas(p.naoRodaram, agora, p.fusoIana)}. Nenhuma tentativa gastou crédito.`)}</p>`;
+}
+
+/**
+ * definido em 2026-10-16 (NOD-243): a rotina cuja última janela foi adiada diz por quê, na lista — "Esperando a frente
+ * “Revisar PRs” terminar · 3 janelas adiadas desde ontem 13:00." Com uma janela só: "… · a janela de hoje 10:00 foi
+ * adiada." Revisto em 2026-10-16 (revisão do Gil no #335): "terminar" vale para a execução na fila e para a que roda.
+ * Vazio quando a última janela rodou.
+ */
+export function linhaDaEspera(e: EsperaRotinaDto | null, agora: number, fusoIana: string): string {
+  if (!e) return "";
+  const quem = e.motivo === "frente_aberta" ? (e.frente ? `Esperando a frente “${e.frente}” terminar` : "Esperando uma frente desta rotina terminar") : "Esperando a execução anterior terminar";
+  const quantas = e.seguidas === 1 ? `a janela de ${quandoCurto(e.desde, agora, fusoIana)} foi adiada` : `${e.seguidas} janelas adiadas ${desdeQuando(e.desde, agora, fusoIana)}`;
+  return `<div class="rt-linha rt-espera">${esc(`${quem} · ${quantas}.`)}</div>`;
 }
 
 /**

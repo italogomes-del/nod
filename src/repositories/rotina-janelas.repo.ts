@@ -15,6 +15,32 @@ interface Linha {
 /** Resolvido na 0003/L3.5: JanelaRotina.turnoId já é `string | null` no contrato. Alias mantido para quem importou o nome antigo. */
 export type JanelaReivindicada = JanelaRotina;
 
+/** definido em 2026-10-15 (NOD-243): a execução que segura a rotina, com o que o disparo precisa para julgar se venceu. */
+export type TurnoAbertoDaRotina = {
+  turnoId: string;
+  instanteAgendado: number;
+  estado: string;
+  attempted: boolean;
+  acordarEm: number | null;
+  criadoEm: number;
+  trabalhoId: string | null;
+};
+
+/** O turno `t` da janela ainda segura a rotina (ADR-045, ADR-086, ADR-099). */
+const ABERTO = `t.estado in ('pendente', 'despachando')
+            -- ADR-086 (revisão do #212): a execução que marcou uma volta ("me chame às 16:00") ainda está aberta, mesmo
+            -- com o turno da janela já concluído — senão a próxima janela empilhava outra execução por cima.
+            or (t.trabalho_id is not null and exists (select 1 from turnos v where v.tenant_id = t.tenant_id and v.trabalho_id = t.trabalho_id and v.estado in ('pendente', 'despachando')))
+            -- revisto em 2026-10-12 (ADR-099, I7 revista): a execução sem trabalho (o pedido na fila do dono) continua aberta
+            -- enquanto uma retomada dela (a volta marcada, o retorno do lote, a resposta da pessoa) espera ou roda.
+            -- NOD-271: a cadeia segue retoma_turno_id pelo índice turnos_por_retoma (0086).
+            or (t.trabalho_id is null and exists (
+              with recursive c(id, n) as (
+                select t.id, 0
+                union all
+                select r.id, c.n + 1 from c join turnos r on r.tenant_id = t.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
+              ) select 1 from c join turnos v on v.tenant_id = t.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando')))`;
+
 const paraJanela = (l: Linha): JanelaRotina => ({
   tenantId: l.tenant_id,
   rotinaId: l.rotina_id,
@@ -63,34 +89,69 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
     /**
      * O turno de uma janela desta rotina que ainda está pendente ou rodando, ou cujo trabalho ainda tem turno vivo
      * (ADR-045: uma execução aberta por rotina). null = pode abrir outra.
+     * revisto em 2026-10-15 (NOD-243/NOD-271): devolve também o estado do turno da janela — o disparo decide com ele se
+     * a execução anterior venceu (pendente, nunca começou, sem volta marcada) — e só olha as janelas dos últimos 7 dias
+     * com turno ligado: a de antes disso não segura a agenda, e a busca não varre o histórico inteiro a cada janela.
+     * `agora` é o relógio do servidor (o mesmo do disparo), não o now() do banco.
      */
-    async turnoAberto(rotinaId: string): Promise<string | null> {
-      return (await repo.execucaoAberta(rotinaId))?.turnoId ?? null;
+    async turnoAberto(rotinaId: string, agora: number): Promise<TurnoAbertoDaRotina | null> {
+      const [l] = await conn<{ turno_id: string; instante_agendado: Date; estado: string; attempted: boolean; acordar_em: Date | null; criado_em: Date; trabalho_id: string | null }[]>`
+        select j.turno_id, j.instante_agendado, t.estado, t.attempted, t.acordar_em, t.criado_em, t.trabalho_id from rotina_janelas j
+        join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
+        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
+          and j.turno_id is not null and j.instante_agendado > ${data(agora)}::timestamptz - interval '7 days'
+          and (${conn.unsafe(ABERTO)})
+        order by j.instante_agendado desc limit 1`;
+      return l
+        ? { turnoId: l.turno_id, instanteAgendado: ms(l.instante_agendado), estado: l.estado, attempted: l.attempted, acordarEm: l.acordar_em ? ms(l.acordar_em) : null, criadoEm: ms(l.criado_em), trabalhoId: l.trabalho_id }
+        : null;
     },
 
     /**
      * definido em 2026-10-15 (pacote A3): a mesma execução aberta de `turnoAberto`, com o instante da janela dela — a lista
-     * de rotinas conta os horários pulados desde ali (src/domain/janelas-puladas.ts).
+     * de rotinas conta os horários pulados desde ali (src/domain/janelas-puladas.ts). revisto em 2026-10-16 (integração
+     * no #335): lê `turnoAberto` (a mesma régua de 7 dias da NOD-271).
      */
-    async execucaoAberta(rotinaId: string): Promise<{ turnoId: string; instanteAgendado: number } | null> {
-      const [l] = await conn<{ turno_id: string; instante_agendado: Date }[]>`
-        select j.turno_id, j.instante_agendado from rotina_janelas j
-        join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
-        where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
-          and (t.estado in ('pendente', 'despachando')
-            -- ADR-086 (revisão do #212): a execução que marcou uma volta ("me chame às 16:00") ainda está aberta, mesmo
-            -- com o turno da janela já concluído — senão a próxima janela empilhava outra execução por cima.
-            or (t.trabalho_id is not null and exists (select 1 from turnos v where v.tenant_id = t.tenant_id and v.trabalho_id = t.trabalho_id and v.estado in ('pendente', 'despachando')))
-            -- revisto em 2026-10-12 (ADR-099, I7 revista): a execução sem trabalho (o pedido na fila do dono) continua aberta
-            -- enquanto uma retomada dela (a volta marcada, o retorno do lote, a resposta da pessoa) espera ou roda.
-            or (t.trabalho_id is null and exists (
-              with recursive c(id, n) as (
-                select t.id, 0
-                union all
-                select r.id, c.n + 1 from c join turnos r on r.tenant_id = t.tenant_id and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
-              ) select 1 from c join turnos v on v.tenant_id = t.tenant_id and v.id = c.id where v.estado in ('pendente', 'despachando'))))
-        order by j.instante_agendado desc limit 1`;
-      return l ? { turnoId: l.turno_id, instanteAgendado: ms(l.instante_agendado) } : null;
+    async execucaoAberta(rotinaId: string, agora: number): Promise<{ turnoId: string; instanteAgendado: number } | null> {
+      const a = await repo.turnoAberto(rotinaId, agora);
+      return a ? { turnoId: a.turnoId, instanteAgendado: a.instanteAgendado } : null;
+    },
+
+    /**
+     * definido em 2026-10-15 (NOD-272): os turnos ainda pendentes das execuções abertas desta rotina — o da janela, os
+     * do trabalho dela e a cadeia de retomadas. Pausar a rotina encerra estes; o que já está rodando segue até acabar.
+     */
+    async turnosPendentesDaRotina(rotinaId: string, agora: number): Promise<{ turnoId: string; conversaId: string; janelaTurnoId: string }[]> {
+      const linhas = await conn<{ id: string; conversa_id: string; janela_turno_id: string }[]>`
+        with recursive base as (
+          select t.id, t.trabalho_id from rotina_janelas j
+          join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
+          where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
+            and j.turno_id is not null and j.instante_agendado > ${data(agora)}::timestamptz - interval '7 days'
+        ), c(id, raiz, n) as (
+          select b.id, b.id, 0 from base b
+          union all
+          select v.id, b.id, 0 from base b join turnos v on v.tenant_id = ${escopo.tenantId} and v.trabalho_id = b.trabalho_id and v.id <> b.id where b.trabalho_id is not null
+          union all
+          select r.id, c.raiz, c.n + 1 from c join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada' where c.n < 10
+        )
+        select distinct v.id, v.conversa_id, c.raiz as janela_turno_id from c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
+        where v.estado = 'pendente'`;
+      return linhas.map((l) => ({ turnoId: l.id, conversaId: l.conversa_id, janelaTurnoId: l.janela_turno_id }));
+    },
+
+    /**
+     * definido em 2026-10-15 (NOD-271): apaga as janelas desta rotina com mais de 30 dias cujo turno já acabou (ou que
+     * nunca tiveram turno). A trava da janela (ADR-011) só importa enquanto o instante pode voltar a ser disputado.
+     */
+    async podar(rotinaId: string, agora: number): Promise<number> {
+      const r = await conn`
+        delete from rotina_janelas j
+        where j.tenant_id = ${escopo.tenantId} and j.owner_id = ${escopo.pessoaId} and j.rotina_id = ${rotinaId}
+          and j.instante_agendado < ${data(agora)}::timestamptz - interval '30 days'
+          and (j.turno_id is null or not exists (
+            select 1 from turnos t where t.tenant_id = j.tenant_id and t.id = j.turno_id and t.estado in ('pendente', 'despachando')))`;
+      return r.count;
     },
 
     /**

@@ -1056,6 +1056,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const t = doTenant(b.trabalhos).find((x) => x.rotinaId === rotinaId && (x.trabalhoMaeId !== null || x.forma === "frente") && ["na_fila", "rodando", "precisa_de_voce", "fechado_ocioso"].includes(x.estado) && !soColegaAntigo(x));
         return t ? semDonoTrabalho(t) : null;
       },
+      async atividade(id) {
+        const meus = doTenant(b.turnos).filter((t) => t.trabalhoId === id);
+        const vivos = meus.filter((t) => t.estado === "pendente" || t.estado === "despachando").length;
+        return { vivos, ultimaEm: meus.length ? Math.max(...meus.map((t) => t.criadoEm)) : null };
+      },
       async filhos(maeId) {
         return doTenant(b.trabalhos).filter((t) => t.trabalhoMaeId === maeId).map(semDonoTrabalho);
       },
@@ -1373,6 +1378,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           // A retomada herda o trabalho do turno que continua, como o INSERT do repo real.
           trabalhoId: t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? (doTenant(b.turnos).find((r) => r.id === t.retomaTurnoId)?.trabalhoId ?? null) : null,
           acordarEm: t.acordarEm ?? null,
+          pessoaEsperando: t.pessoaEsperando === true,
         };
         b.turnos.push(turno);
         // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
@@ -1959,16 +1965,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
         return doTenant(b.turnos).find((v) => v.id !== raizId && v.id !== exceto && cadeia.has(v.id) && (v.estado === "pendente" || v.estado === "despachando"))?.id ?? null;
       },
-      async turnoAberto(rotinaId) {
-        return (await this.execucaoAberta(rotinaId))?.turnoId ?? null;
-      },
-      // definido em 2026-10-15 (pacote A3): a execução aberta com o instante da janela (a lista conta os horários pulados).
-      async execucaoAberta(rotinaId) {
-        const abertas = doTenant(b.janelas)
-          .filter((j) => j.rotinaId === rotinaId && j.turnoId !== null)
+      async turnoAberto(rotinaId, ref) {
+        const minhas = doTenant(b.janelas).filter((j) => j.rotinaId === rotinaId && j.turnoId !== null);
+        const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
+        const abertas = minhas
+          .filter((j) => j.instanteAgendado > ref - 7 * 86_400_000)
           .filter((j) => {
             const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
-            const vivo = (x: Turno) => x.estado === "pendente" || x.estado === "despachando";
             // ADR-099 (I7 revista): sem trabalho, a cadeia de retomadas da execução (até 10 saltos).
             const cadeia = new Set([t?.id]);
             for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
@@ -1976,8 +1979,43 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
               || (!t.trabalhoId && doTenant(b.turnos).some((v) => cadeia.has(v.id) && vivo(v))));
           })
           .sort((x, y) => y.instanteAgendado - x.instanteAgendado);
-        const a = abertas[0];
-        return a?.turnoId ? { turnoId: a.turnoId, instanteAgendado: a.instanteAgendado } : null;
+        const j = abertas[0];
+        const t = j ? doTenant(b.turnos).find((x) => x.id === j.turnoId) : undefined;
+        return j && t
+          ? { turnoId: t.id, instanteAgendado: j.instanteAgendado, estado: t.estado, attempted: t.sinais.attempted, acordarEm: t.acordarEm ?? null, criadoEm: t.criadoEm, trabalhoId: t.trabalhoId ?? null }
+          : null;
+      },
+      // definido em 2026-10-15 (pacote A3): a execução aberta com o instante da janela (a lista conta os horários pulados).
+      async execucaoAberta(rotinaId, ref) {
+        const a = await this.turnoAberto(rotinaId, ref);
+        return a ? { turnoId: a.turnoId, instanteAgendado: a.instanteAgendado } : null;
+      },
+      async turnosPendentesDaRotina(rotinaId, ref) {
+        const saida: { turnoId: string; conversaId: string; janelaTurnoId: string }[] = [];
+        const vistos = new Set<string>();
+        for (const j of doTenant(b.janelas).filter((x) => x.rotinaId === rotinaId && x.turnoId !== null && x.instanteAgendado > ref - 7 * 86_400_000)) {
+          const t = doTenant(b.turnos).find((x) => x.id === j.turnoId);
+          if (!t) continue;
+          const cadeia = new Set<string>([t.id]);
+          if (t.trabalhoId) for (const v of doTenant(b.turnos)) if (v.trabalhoId === t.trabalhoId) cadeia.add(v.id);
+          for (let n = 0; n < 10; n++) for (const v of doTenant(b.turnos)) if (v.origem === "retomada" && v.retomaTurnoId && cadeia.has(v.retomaTurnoId)) cadeia.add(v.id);
+          for (const v of doTenant(b.turnos)) {
+            if (!cadeia.has(v.id) || v.estado !== "pendente" || vistos.has(v.id)) continue;
+            vistos.add(v.id);
+            saida.push({ turnoId: v.id, conversaId: v.conversaId, janelaTurnoId: t.id });
+          }
+        }
+        return saida;
+      },
+      async podar(rotinaId, ref) {
+        const minhas = doTenant(b.janelas).filter((j) => j.rotinaId === rotinaId);
+        const sai = new Set(minhas.filter((j) => {
+          if (j.instanteAgendado >= ref - 30 * 86_400_000) return false;
+          const t = j.turnoId ? doTenant(b.turnos).find((x) => x.id === j.turnoId) : undefined;
+          return !t || (t.estado !== "pendente" && t.estado !== "despachando");
+        }));
+        b.janelas = b.janelas.filter((j) => !sai.has(j));
+        return sai.size;
       },
     },
 

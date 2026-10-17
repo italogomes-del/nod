@@ -26,7 +26,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const tx: Transacao = (fn) => fn(trx);
 
       const r1 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
       const janelas = await repos.rotinaJanelas.listar(vencida?.id ?? "");
       expect(janelas).toHaveLength(1);
       expect(janelas[0]).toMatchObject({ instanteAgendado: JANELA, machineId: opcoes.machineId, executor: "catcher" });
@@ -39,27 +39,47 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(kinds.map((k) => k.kind).sort()).toEqual(["turno_criado"]);
 
       const r2 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
 
-      // ADR-045: o turno da janela ainda está pendente (o Mac dormiu) → a janela vencida de novo é
-      // PULADA: só reagenda, sem reivindicar nem enfileirar — as execuções não se empilham. (A das 9h
-      // fica de fora: no dia seguinte ela também venceria.)
+      // revisto em 2026-10-16 (NOD-243): o turno da janela ficou pendente um dia inteiro (o Mac dormiu) → VENCEU: a
+      // janela seguinte o encerra ('interrompida · vencida') e roda no lugar dele — as execuções não se empilham.
       await repos.rotinas.atualizarEstado(futura?.id ?? "", "pausada");
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA + 86_400_000);
-      const pulada = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
-      expect(pulada).toEqual({ disparadas: [], deOutroProcesso: [], puladas: [vencida?.id], bloqueadas: [], semPendencia: [], falhas: [] });
-      expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
-      expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
-      expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-21T11:00:00.000Z");
+      const seguinte = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
+      expect(seguinte).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(2);
+      expect((await repos.turnos.buscar(janelas[0]?.turnoId ?? ""))?.estado).toBe("interrompido");
+      expect((await repos.rotinaExecucoes.listar(vencida?.id ?? "")).find((e) => e.turnoId === janelas[0]?.turnoId)).toMatchObject({ desfecho: "interrompida", motivo: "vencida" });
 
-      // Uma janela já reivindicada por outro processo (com o turno dela já terminado): false, silencioso, sem turno novo.
-      await repos.turnos.assentar(janelas[0]?.turnoId ?? "", { estado: "concluido" });
+      // NOD-271: a janela já reivindicada (a agenda voltou para ela): sem turno novo, e a agenda ANDA.
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA);
       const r3 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(2);
+      expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-18T11:00:00.000Z");
+    });
+  });
+
+  it("NOD-243: a execução ainda rodando segura a janela seguinte — adiada, registrada sem turno, e reagenda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const { deps, repos } = depsSobre(trx, MARLON);
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * 1-5", fusoIana: TZ, instrucao: "i", fonte: "f", entregavel: "e", limitesAprovacao: "l", politicaSemDado: "p", proximaExecucao: JANELA });
+      const opcoes = { machineId: randomUUID(), executor: "catcher" as const, services: deps.services, useCases: deps.useCases, agora: () => JANELA + 30_000 };
+      const tx: Transacao = (fn) => fn(trx);
+      expect((await tickPessoa(MARLON, tx, opcoes)).disparadas).toEqual([rotina?.id]);
+      const [janela] = await repos.rotinaJanelas.listar(rotina?.id ?? "");
+      await trx`update turnos set estado = 'despachando', attempted = true where id = ${janela?.turnoId ?? ""}`;
+      const r = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
+      expect(r).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [rotina?.id], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(await repos.rotinaJanelas.listar(rotina?.id ?? "")).toHaveLength(2);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
+      expect((await repos.rotinaExecucoes.listar(rotina?.id ?? ""))[0]).toMatchObject({ desfecho: "adiada", motivo: "execucao_anterior_aberta", turnoId: null });
+      expect(new Date((await repos.rotinas.buscar(rotina?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-21T11:00:00.000Z");
+      const kinds = await trx<{ kind: string }[]>`select kind from events where conversa_id = ${conversaId}`;
+      expect(kinds.map((k) => k.kind)).toContain("rotina_executou");
     });
   });
 

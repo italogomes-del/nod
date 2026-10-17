@@ -38,6 +38,8 @@ export const MOTIVOS_INTERRUPCAO = [
   "trabalho_incompleto",
   /** definido em 2026-09-24: mensagem da fila lida junto com outra no mesmo turno (`absorvido_por`); nada se perdeu. */
   "absorvido",
+  /** 2026-10-15 (NOD-243): turno de rotina pendente, nunca começado, além de max(período, 30 min); a janela seguinte o encerra. */
+  "vencido",
 ] as const;
 export type MotivoInterrupcao = (typeof MOTIVOS_INTERRUPCAO)[number];
 
@@ -88,13 +90,7 @@ export const MOTIVOS_APROVACAO_MANUAL = [
 export type MotivoAprovacaoManual = (typeof MOTIVOS_APROVACAO_MANUAL)[number];
 
 /** Por que uma permissão permanente parou de valer (ADR-042 claim 7). Inativa nunca é apagada. */
-export const MOTIVOS_INATIVIDADE_PERMISSAO = [
-  "revogada_pela_pessoa",
-  "concessao_revogada",
-  "conector_desabilitado",
-  "capacidade_fora_do_catalogo",
-  "agente_excluido",
-] as const;
+export const MOTIVOS_INATIVIDADE_PERMISSAO = ["revogada_pela_pessoa", "concessao_revogada", "conector_desabilitado", "capacidade_fora_do_catalogo", "agente_excluido"] as const;
 export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[number];
 
 /**
@@ -109,19 +105,12 @@ export type MotivoInatividadePermissao = (typeof MOTIVOS_INATIVIDADE_PERMISSAO)[
  * bloqueada ≠ falhou (definido em 2026-09-24, emenda da ADR-044): a janela foi reivindicada e NÃO virou
  * turno — o pré-voo viu que falta conexão ou acesso, ou que a pergunta anterior segue sem resposta
  * (MOTIVOS_BLOQUEIO_ROTINA). Nenhum modelo rodou; não escreve no chat: o card de acesso já está lá.
- * nao_rodou ≠ falhou (definido em 2026-10-15, NOD-274, 0087): a janela passou sem rodar — a cota da IA só volta
- * depois da próxima execução (motivo cota_da_ia, com volta_em), ou a execução anterior ainda estava aberta (motivo
- * execucao_anterior_aberta). Não escreve no chat: a janela fica visível no histórico da rotina.
+ * adiada (2026-10-15, NOD-243): a execução anterior segue aberta (MOTIVOS_ADIADA); a janela é reivindicada SEM turno
+ * e fica no histórico. Não escreve no chat, salvo o aviso único depois de ADIADAS_PARA_AVISAR seguidas.
+ * nao_rodou ≠ falhou (2026-10-15, NOD-274, 0087): a cota da IA só volta depois da próxima execução (cota_da_ia, com
+ * volta_em); não escreve no chat. revisto em 2026-10-16 (#335): a janela pulada pela execução aberta é 'adiada'.
  */
-export const DESFECHOS_ROTINA = [
-  "executou",
-  "passou_em_branco",
-  "sem_novidade",
-  "falhou",
-  "interrompida",
-  "bloqueada",
-  "nao_rodou",
-] as const;
+export const DESFECHOS_ROTINA = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida", "bloqueada", "nao_rodou", "adiada"] as const;
 export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
 
 /**
@@ -132,6 +121,18 @@ export type DesfechoRotina = (typeof DESFECHOS_ROTINA)[number];
  */
 export const MOTIVOS_BLOQUEIO_ROTINA = ["sem_conexao", "sem_acesso", "aguardando_resposta"] as const;
 export type MotivoBloqueioRotina = (typeof MOTIVOS_BLOQUEIO_ROTINA)[number];
+
+/** Por que a janela ficou 'adiada' (2026-10-15, NOD-243): o turno anterior (ou retomada) vivo, ou uma frente dele viva. */
+export const MOTIVOS_ADIADA = ["execucao_anterior_aberta", "frente_aberta"] as const;
+export type MotivoAdiada = (typeof MOTIVOS_ADIADA)[number];
+
+/**
+ * Por que a execução anterior foi encerrada como 'interrompida' pela agenda ou pela pessoa (definido em 2026-10-15,
+ * pacote B2). vencida: pendente nunca começado além de max(período, 30 min) (NOD-243); frente_parada: a frente
+ * dela sem turno vivo há mais de 24 h (NOD-243); rotina_pausada: a pessoa pausou com o turno na fila (NOD-272).
+ */
+export const MOTIVOS_INTERRUPCAO_ROTINA = ["vencida", "frente_parada", "rotina_pausada"] as const;
+export type MotivoInterrupcaoRotina = (typeof MOTIVOS_INTERRUPCAO_ROTINA)[number];
 
 /** Por que a janela ficou 'nao_rodou' (NOD-274): vai em rotina_execucoes.motivo, como MOTIVOS_BLOQUEIO_ROTINA. */
 export const MOTIVOS_NAO_RODOU_ROTINA = ["cota_da_ia", "execucao_anterior_aberta"] as const;

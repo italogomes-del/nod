@@ -96,6 +96,8 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       harness: agente?.harness ?? turno.harness,
       // NOD-206: a frente roda onde roda quem a abriu; o plano grava o executor real.
       executor: turno.executor,
+      // NOD-272: a frente do "Testar agora" herda a pessoa olhando (a cota não a segura, como o turno que a abriu).
+      pessoaEsperando: turno.pessoaEsperando === true,
     });
     if (!novo) throw new ErroDeDominio("estado_invalido", { cause: "turno da frente não criado" });
     if (deFora) await deps.repos.turnos.contaminar(novo.id, agora);

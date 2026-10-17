@@ -255,7 +255,7 @@ export function criarApi(escopo: Escopo) {
     confirmarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/confirmar`),
     recusarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/recusar`),
     criarRotina: (entrada: { agenteId: string; cron: string; fusoIana: string; instrucao: string; fonte: string; entregavel: string; limitesAprovacao: string; politicaSemDado: string }) => post<RespostaMutacao>("rotinas", entrada),
-    executarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/executar`),
+    executarRotina: (id: string, opcoes?: { confirmar?: boolean }) => post<RespostaMutacao>(`rotinas/${id}/executar`, opcoes?.confirmar ? { confirmar: true } : undefined),
     rotinas: () => get<{ rotinas: RotinaDto[] }>("rotinas"),
     execucoes: (rotinaId: string) => get<{ execucoes: ExecucaoRotina[] }>(`rotinas/${rotinaId}/execucoes`),
     pausarRotina: (id: string) => post<RespostaMutacao>(`rotinas/${id}/pausar`),

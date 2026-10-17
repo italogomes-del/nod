@@ -24,8 +24,8 @@ const HORA = 3_600_000;
 async function montar(trx: Tx) {
   const base = await agenteComConversa(trx, MARLON, { nome: "Ze 1" });
   const { deps, repos } = depsSobre(trx, MARLON);
-  const turno = async (o: { trabalhoId?: string | null; origem?: Turno["origem"]; harness?: PreferenciaHarness; modelo?: string; acordarEm?: number }) => {
-    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: o.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: o.modelo ?? "sonnet", harness: o.harness ?? "claude-cli", trabalhoId: o.trabalhoId ?? null, ...(o.acordarEm ? { acordarEm: o.acordarEm } : {}) });
+  const turno = async (o: { trabalhoId?: string | null; origem?: Turno["origem"]; harness?: PreferenciaHarness; modelo?: string; acordarEm?: number; pessoaEsperando?: boolean }) => {
+    const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: base.conversaId, agenteId: base.agenteId, origem: o.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faça", entradaConfianca: "confiavel", modelo: o.modelo ?? "sonnet", harness: o.harness ?? "claude-cli", trabalhoId: o.trabalhoId ?? null, ...(o.acordarEm ? { acordarEm: o.acordarEm } : {}), ...(o.pessoaEsperando ? { pessoaEsperando: true } : {}) });
     if (!t) throw new Error("turno");
     return t;
   };
@@ -103,6 +103,21 @@ describeIntegracao("cota da IA no reivindicar (ADR-099 §7)", () => {
 
       const esperado = await m.passaPelaRegra(todos);
       expect(esperado).toEqual(new Set([conversa.id, retomadaDaPessoa.id]));
+      expect(await m.reivindicarTudo(new Set(todos.map((t) => t.id)))).toEqual(esperado);
+    });
+  });
+
+  it("NOD-272: o \"Testar agora\" (pessoa_esperando) passa até no limite, como a conversa; a mesma rotina sem ela espera", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.preferencias.registrarLimite("claude-cli", { renovaEm: Date.now() + HORA, desde: Date.now() });
+      const testarAgora = await m.turno({ origem: "rotina", pessoaEsperando: true });
+      const daAgenda = await m.turno({ origem: "rotina" });
+      expect(testarAgora.pessoaEsperando).toBe(true);
+      expect(daAgenda.pessoaEsperando).toBe(false);
+      const todos = [testarAgora, daAgenda];
+      const esperado = await m.passaPelaRegra(todos);
+      expect(esperado).toEqual(new Set([testarAgora.id]));
       expect(await m.reivindicarTudo(new Set(todos.map((t) => t.id)))).toEqual(esperado);
     });
   });

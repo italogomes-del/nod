@@ -66,6 +66,7 @@ export async function origemDasFrentes(deps: Pick<Deps, "repos">, turno: Turno):
     return { origem: "colega", turnoOrigem: "delegacao", rotinaId: null, pedidoPorAgenteId: colega.remetenteAgenteId, pedidoPorNome: nome, pessoaEsperando: pessoaEsperaOPedido(deQuemPediu) };
   }
   const rotina = turno.origem === "rotina" || turno.origem === "retomada" ? await rotinaDoTurno(deps.repos, turno.id) : null;
-  if (rotina) return { origem: "rotina", turnoOrigem: "rotina", rotinaId: rotina.rotina.id, pedidoPorAgenteId: null, pedidoPorNome: null, pessoaEsperando: false };
+  // NOD-272: a frente aberta pelo "Testar agora" nasce com a pessoa esperando (o portão do Mac não a segura).
+  if (rotina) return { origem: "rotina", turnoOrigem: "rotina", rotinaId: rotina.rotina.id, pedidoPorAgenteId: null, pedidoPorNome: null, pessoaEsperando: rotina.turnoDisparado.pessoaEsperando === true };
   return { origem: "pessoa", turnoOrigem: "conversa", rotinaId: null, pedidoPorAgenteId: null, pedidoPorNome: null, pessoaEsperando: false };
 }

@@ -169,7 +169,7 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     });
   });
 
-  it("rotina vira um turno de triagem na conversa do dono (sem trabalho); as frentes que ela abrir são da rotina, a execução espera o lote e a próxima janela é pulada", async () => {
+  it("rotina vira um turno de triagem na conversa do dono (sem trabalho); as frentes que ela abrir são da rotina, a execução espera o lote e a próxima janela é adiada (NOD-243)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const agora = Date.now();
@@ -192,9 +192,9 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       // O turno do dono acabou, mas a execução é do retorno do lote.
       await m.repos.turnos.assentar(turno.id, { estado: "concluido" });
       expect((await registrarDesfechoRotina(m.deps, { turnoId: turno.id, desfecho: "executou" })).data).toEqual({ ignorado: "aguardando_frentes" });
-      // A próxima janela do agendador é pulada enquanto a frente da rotina roda.
+      // A próxima janela do agendador é adiada (NOD-243) enquanto a frente da rotina roda.
       const proxima = await dispararRotina(m.deps, { rotina, instanteAgendado: agora + 300_000, machineId: randomUUID(), executor: "catcher" });
-      expect(proxima.data).toMatchObject({ pulada: true, trabalhoAbertoId: f.data.frentes[0]!.trabalho_id });
+      expect(proxima.data).toMatchObject({ adiada: "frente_aberta", trabalhoAbertoId: f.data.frentes[0]!.trabalho_id });
     });
   });
 

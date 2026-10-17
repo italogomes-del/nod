@@ -11,6 +11,9 @@ import { logarTickLento, paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fu
 /** definido em 2026-09-16: tick a cada 30 s — o cron tem granularidade de minuto e o Grok Bot promete "em até um minuto". */
 export const INTERVALO_SCHEDULER_MS = 30_000;
 
+/** definido em 2026-10-16 (NOD-271): a tx de uma rotina acima disto vai para o log — o tick inteiro tem 30 s. */
+const LIMIAR_TX_LENTA_MS = 2_000;
+
 export type OpcoesTick = {
   machineId: string;
   executor: Executor;
@@ -22,12 +25,13 @@ export type OpcoesTick = {
 };
 
 /**
- * `puladas`: rotinas cuja execução anterior ainda estava aberta — só reagendadas (ADR-045).
+ * `adiadas` (definido em 2026-10-16, NOD-243): a execução anterior (ou a frente dela) ainda estava aberta — a janela
+ * vira uma execução 'adiada' no histórico e a rotina é reagendada (antes: `puladas`, sem rastro).
  * `bloqueadas` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno.
  * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): rotina que só acorda com pendência, sem nenhuma — a
  * janela passou sem turno e sem custo.
  */
-export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; puladas: string[]; bloqueadas: string[]; semPendencia: string[]; falhas: string[] };
+export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; adiadas: string[]; bloqueadas: string[]; semPendencia: string[]; falhas: string[] };
 
 /**
  * Um tick para UMA pessoa (o teste chama isto sob withRollback com `tx = (fn) => fn(trx)`): lista
@@ -37,21 +41,27 @@ export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; p
  */
 export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTick): Promise<ResultadoTick> {
   const agora = opcoes.agora();
-  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], puladas: [], bloqueadas: [], semPendencia: [], falhas: [] };
+  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] };
   const vencidas = await tx(async (trx) => criarRepos(trx, escopo).rotinas.ativasVencidas(agora));
   for (const rotina of vencidas) {
+    const inicioTx = Date.now();
     try {
       await tx(async (trx) => {
         const repos = criarRepos(trx, escopo);
         const deps: Deps = { repos, services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
         const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor, aFazer: opcoes.aFazer });
         if ("janelaDeOutro" in r.data) {
+          await repos.events.gravarComOutbox(r.events ?? []);
           resultado.deOutroProcesso.push(rotina.id);
+          // NOD-271: a janela já usada reagenda a rotina — sem isto ela voltava vencida a cada tick.
+          if (r.data.proximaExecucao !== undefined) log("info", "rotina_janela_ja_usada", { rotina_id: rotina.id, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
-        if ("pulada" in r.data) {
-          resultado.puladas.push(rotina.id);
-          log("aviso", "rotina_janela_pulada", { rotina_id: rotina.id, turno_aberto_id: r.data.turnoAbertoId, trabalho_aberto_id: r.data.trabalhoAbertoId ?? null, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
+        // NOD-243: a execução 'adiada' (e o aviso na 3ª seguida) e os eventos vão juntos nesta tx.
+        if ("adiada" in r.data) {
+          await repos.events.gravarComOutbox(r.events ?? []);
+          resultado.adiadas.push(rotina.id);
+          log("aviso", "rotina_adiada", { rotina_id: rotina.id, motivo: r.data.adiada, turno_aberto_id: r.data.turnoAbertoId, trabalho_aberto_id: r.data.trabalhoAbertoId ?? null, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         // Sem turno e sem crédito gasto: a execução 'bloqueada', o card e o evento vão juntos nesta tx.
@@ -75,6 +85,10 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
     } catch (e) {
       resultado.falhas.push(rotina.id);
       log("erro", "rotina_disparo_falhou", { rotina_id: rotina.id, erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+    } finally {
+      // NOD-271: quanto a tx de UMA rotina segurou o tick (o pré-voo e a busca da execução aberta moram aqui).
+      const ms = Date.now() - inicioTx;
+      if (ms >= LIMIAR_TX_LENTA_MS) log("aviso", "rotina_tx_ms", { rotina_id: rotina.id, ms });
     }
   }
   return resultado;

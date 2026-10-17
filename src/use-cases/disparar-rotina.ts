@@ -1,7 +1,9 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { DesfechoRotina, MotivoBloqueioRotina, MotivoFalha, MotivoNaoRodouRotina, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina, MotivoFalha, MotivoInterrupcaoRotina, MotivoNaoRodouRotina, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
 import { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
+import type { TurnoAbertoDaRotina } from "../repositories/rotina-janelas.repo.ts";
+import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { pendenciasDoPrompt } from "../domain/pendencia.ts";
@@ -10,7 +12,8 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, rotinaDoTurno } from "./apoio-l7.ts";
-import { prazoDoColega, registrarJanelaPulada } from "./janela-pulada.ts";
+import { eventoTrabalhoMudou } from "./trabalhos.ts";
+import { prazoDoColega } from "./janela-pulada.ts";
 import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
 import { pendenciasDaRotina, preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -30,7 +33,11 @@ export type EntradaDisparo = {
   aFazer?: boolean;
 };
 /**
- * `pulada`: o turno da execução anterior ainda está aberto; a rotina foi só reagendada (ADR-045).
+ * `adiada` (definido em 2026-10-15, NOD-243; era `pulada`, sem rastro): a execução anterior ainda está aberta — o turno
+ * dela (`turnoAbertoId`) ou uma frente que ela abriu (`trabalhoAbertoId`). A janela vira uma execução 'adiada' com a
+ * causa, e a agenda anda (ADR-045: uma execução aberta por rotina).
+ * `janelaDeOutro`: outro processo (ou o "Testar agora" do mesmo minuto) já usou a janela; `proximaExecucao` presente =
+ * a agenda andou mesmo assim (NOD-271: antes a rotina ficava vencida para sempre).
  * `bloqueada` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno — o
  * motivo, o card de acesso que a destrava (null quando é a pergunta que espera) e a próxima execução.
  * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): a rotina só acorda com pendência e o agente não tinha
@@ -38,8 +45,8 @@ export type EntradaDisparo = {
  */
 export type SaidaDisparo =
   | { turno: Turno; proximaExecucao: number }
-  | { janelaDeOutro: true }
-  | { pulada: true; turnoAbertoId: string | null; trabalhoAbertoId?: string; proximaExecucao: number }
+  | { janelaDeOutro: true; proximaExecucao?: number }
+  | { adiada: MotivoAdiada; turnoAbertoId: string | null; trabalhoAbertoId?: string; proximaExecucao: number }
   | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number }
   | { semPendencia: true; proximaExecucao: number };
 
@@ -107,7 +114,10 @@ async function registrarSemPendencia(deps: Deps, input: EntradaDisparo, agora: n
   return { data: { semPendencia: true, proximaExecucao }, events: [evento(deps, "rotina_executou", autoria, dados, { conversaId: rotina.conversaId })] };
 }
 
-/** definido em 2026-10-15 (NOD-270): a regra que fecha a pergunta das voltas sem novidade quando a janela seguinte chega. */
+/**
+ * A regra da janela seguinte, regra do servidor: fecha a execução que ela venceu (NOD-243) e a pergunta das voltas sem
+ * novidade quando ela chega (definido em 2026-10-15, NOD-270).
+ */
 export const REGRA_JANELA_SEGUINTE = "regra:janela_seguinte" as const;
 
 /**
@@ -131,6 +141,139 @@ async function fecharPerguntasDasVoltas(deps: Deps, rotina: Rotina, agora: numbe
   return events;
 }
 
+/** Quem grava a janela adiada (NOD-243). */
+export const REGRA_ADIADA = "regra:rotina-adiada" as const;
+/** Piso do corte do pendente que nunca começou (decisão da NOD-228, 15/10): max(1 período do cron, 30 min). */
+export const PISO_VENCIDO_MS = 30 * 60_000;
+/** Teto da frente da rotina sem nada vivo (NOD-243): depois disso ela não segura a agenda. */
+export const TETO_FRENTE_PARADA_MS = 24 * 3_600_000;
+/** Adiadas seguidas que viram UM aviso na conversa da rotina (NOD-243). */
+export const ADIADAS_PARA_AVISAR = 3;
+
+type Segura = { motivo: MotivoAdiada; turnoAbertoId: string | null; trabalhoAbertoId?: string; titulo?: string };
+
+/**
+ * O turno da janela anterior venceu (decisão da NOD-228, 15/10): ainda pendente, nunca começou (`attempted` = já foi
+ * pego uma vez e voltou à fila — esse conta como começado), sem volta marcada, e a janela dele ficou para trás mais de
+ * max(1 período do cron, 30 min). O que já começou nunca é cortado.
+ */
+export function execucaoVenceu(aberto: TurnoAbertoDaRotina, rotina: Pick<Rotina, "cron" | "fusoIana">, agora: number): boolean {
+  if (aberto.estado !== "pendente" || aberto.attempted || aberto.acordarEm !== null) return false;
+  const periodo = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: aberto.instanteAgendado }) - aberto.instanteAgendado;
+  return agora - aberto.instanteAgendado >= Math.max(periodo, PISO_VENCIDO_MS);
+}
+
+/**
+ * O que ainda segura a rotina, depois de cortar o que venceu (os eventos do corte vão em `antes`). null = a janela
+ * pode abrir outra execução.
+ */
+async function quemSegura(deps: Deps, rotina: Rotina, instanteAgendado: number, agora: number, antes: RuntimeEvent[]): Promise<Segura | null> {
+  const aberto = await deps.repos.rotinaJanelas.turnoAberto(rotina.id, agora);
+  if (aberto) {
+    if (!execucaoVenceu(aberto, rotina, agora)) return { motivo: "execucao_anterior_aberta", turnoAbertoId: aberto.turnoId };
+    antes.push(...(await encerrarExecucaoAntiga(deps, aberto.turnoId, "vencida")));
+  }
+  // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
+  // não acabou; revisto em 2026-10-12 (ADR-099, I7 revista): e uma frente que o dono abriu para a rotina. revisto em
+  // 2026-10-15 (NOD-243): a frente sem turno vivo há mais de 24 h é parada e deixa de segurar (até 5 por janela).
+  // revisto em 2026-10-16 (NOD-274, C9, integrado no #335): a frente sem turno vivo que só espera um colega há mais de 2
+  // períodos do cron (mín. 2 h) não segura nem é parada — a consulta não a devolve.
+  const colegaAntesDe = agora - prazoDoColega(rotina, instanteAgendado);
+  for (let i = 0; i < 5; i++) {
+    const filha = await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id, colegaAntesDe);
+    if (!filha) return null;
+    const atividade = await deps.repos.trabalhos.atividade(filha.id);
+    const ultima = Math.max(atividade.ultimaEm ?? 0, filha.criadoEm);
+    if (atividade.vivos > 0 || agora - ultima <= TETO_FRENTE_PARADA_MS) return { motivo: "frente_aberta", turnoAbertoId: null, trabalhoAbertoId: filha.id, titulo: filha.titulo };
+    antes.push(...(await pararFrenteDaRotina(deps, filha, agora)));
+  }
+  return null;
+}
+
+/** Fecha a execução antiga como 'interrompida' (silenciosa, como a do varredor) e leva junto o turno, se ainda pendente. */
+async function encerrarExecucaoAntiga(deps: Deps, turnoId: string, motivo: MotivoInterrupcaoRotina): Promise<RuntimeEvent[]> {
+  const events: RuntimeEvent[] = [];
+  if (motivo === "vencida") {
+    const cortado = await deps.repos.turnos.interromper(turnoId, "vencido");
+    if (cortado) events.push(evento(deps, "turno_interrompido", autoriaPessoa(deps.escopo.pessoaId, REGRA_JANELA_SEGUINTE), { motivo: "vencido", estava: "pendente" }, { conversaId: cortado.conversaId, turnoId }));
+  }
+  const r = await registrarDesfechoRotina(deps, { turnoId, desfecho: "interrompida", motivo, regra: REGRA_JANELA_SEGUINTE });
+  events.push(...(r.events ?? []));
+  return events;
+}
+
+/**
+ * A frente da rotina sem nada vivo há mais de 24 h (NOD-243): fica 'parada' e a execução que a abriu (o turno do dono que
+ * abriu o lote) fecha 'interrompida'/'frente_parada'. Não acorda o dono: a janela nova já vai pôr outro pedido na fila.
+ */
+async function pararFrenteDaRotina(deps: Deps, frente: Trabalho, agora: number): Promise<RuntimeEvent[]> {
+  const parada = await deps.repos.trabalhos.mudarEstado(frente.id, "parado", agora);
+  if (!parada) throw new ErroDeDominio("estado_invalido", { cause: "frente da rotina não parou" });
+  const events: RuntimeEvent[] = [eventoTrabalhoMudou(deps, parada)];
+  const lote = frente.loteId ? await deps.repos.frentes.buscarLote(frente.loteId) : null;
+  if (lote) events.push(...(await encerrarExecucaoAntiga(deps, lote.abertoPorTurnoId, "frente_parada")));
+  return events;
+}
+
+/**
+ * A janela adiada (NOD-243): reivindicada como qualquer outra (a trava ADR-011 vale aqui também), UMA execução 'adiada'
+ * com a causa e SEM turno, poda, a agenda anda e o evento `rotina_executou` (a web relê lista e histórico) leva o id de
+ * quem segura. Na 3ª adiada seguida, UM aviso na conversa da rotina; a 4ª e a 5ª não repetem, e uma execução que
+ * roda zera a conta (a sequência é lida do topo do histórico).
+ */
+async function registrarAdiada(deps: Deps, input: EntradaDisparo, segura: Segura, agora: number, antes: RuntimeEvent[]): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
+  const { rotina, instanteAgendado } = input;
+  const ganhou = await deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina.id, instanteAgendado, machineId: input.machineId, executor: input.executor });
+  if (!ganhou) return janelaJaUsada(deps, input, antes);
+  const execucao = await deps.repos.rotinaExecucoes.registrar({ rotinaId: rotina.id, instanteAgendado, turnoId: null, desfecho: "adiada", motivo: segura.motivo, em: agora });
+  if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução adiada não registrada" });
+  await deps.repos.rotinaExecucoes.podar(rotina.id);
+  await deps.repos.rotinaJanelas.podar(rotina.id, agora);
+  const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
+  await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+  const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_ADIADA);
+  const dados = { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: "adiada", motivo: segura.motivo, instanteAgendado, turnoAbertoId: segura.turnoAbertoId, trabalhoAbertoId: segura.trabalhoAbertoId ?? null };
+  const events: RuntimeEvent[] = [...antes, evento(deps, "rotina_executou", autoria, dados, { conversaId: rotina.conversaId })];
+  const recentes = await deps.repos.rotinaExecucoes.listar(rotina.id, ADIADAS_PARA_AVISAR + 1);
+  const seguidas = recentes.findIndex((e) => e.desfecho !== "adiada");
+  if ((seguidas === -1 ? recentes.length : seguidas) === ADIADAS_PARA_AVISAR) {
+    const aviso = await deps.repos.mensagens.criar({
+      conversaId: rotina.conversaId,
+      autoria,
+      kind: "sistema",
+      texto: textoAvisoAdiada(segura),
+      confianca: "confiavel",
+    });
+    if (aviso) events.push(evento(deps, "mensagem_criada", autoria, { mensagem_id: aviso.id, kind: "sistema" }, { conversaId: rotina.conversaId }));
+  }
+  const saida: SaidaDisparo = { adiada: segura.motivo, turnoAbertoId: segura.turnoAbertoId, ...(segura.trabalhoAbertoId ? { trabalhoAbertoId: segura.trabalhoAbertoId } : {}), proximaExecucao };
+  return { data: saida, events };
+}
+
+/** O aviso único das adiadas. revisto em 2026-10-16 (revisão do Gil no #335, A2): "terminar", como a lista. */
+export function textoAvisoAdiada(segura: Pick<Segura, "motivo" | "titulo">): string {
+  const n = ADIADAS_PARA_AVISAR;
+  if (segura.motivo === "frente_aberta") {
+    const frente = segura.titulo ? `a frente “${segura.titulo}”` : "uma frente desta rotina";
+    return `Esta rotina não rodou nas últimas ${n} janelas porque ${frente} ainda não terminou. Ela volta a rodar sozinha quando a frente terminar.`;
+  }
+  return `Esta rotina não rodou nas últimas ${n} janelas porque a execução anterior ainda não terminou. Ela volta a rodar sozinha quando essa execução terminar.`;
+}
+
+/**
+ * A janela já tinha dono (outro processo, ou o "Testar agora" no mesmo minuto do cron). revisto em 2026-10-15
+ * (NOD-271): se a agenda ainda aponta para o passado, ela anda — antes a rotina ficava vencida para sempre e cada tick
+ * perdia a mesma janela em silêncio.
+ */
+async function janelaJaUsada(deps: Deps, input: EntradaDisparo, antes: RuntimeEvent[]): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
+  const { rotina, instanteAgendado } = input;
+  const agora = deps.agora();
+  if (input.preservarAgenda || rotina.proximaExecucao > agora) return { data: { janelaDeOutro: true }, ...(antes.length ? { events: antes } : {}) };
+  const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
+  await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
+  return { data: { janelaDeOutro: true, proximaExecucao }, ...(antes.length ? { events: antes } : {}) };
+}
+
 /**
  * ÚNICO lugar que avalia cron em execução (ADR-011): reivindica a janela canônica (UNIQUE por
  * tenant/rotina/instante — false = outro processo ganhou, silencioso), enfileira o turno origem
@@ -144,27 +287,20 @@ async function fecharPerguntasDasVoltas(deps: Deps, rotina: Rotina, agora: numbe
  */
 export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (deps, input) => {
   const { rotina, instanteAgendado } = input;
-  // definido em 2026-09-24 (ADR-045): UMA execução aberta por rotina, só no caminho do AGENDADOR. Turno
-  // anterior ainda pendente ou rodando (o Mac dormiu no meio) → reagenda sem reivindicar a janela: sem
-  // isto as execuções se empilhavam a cada acordar. "Executar agora" e "Permitir e rodar agora"
-  // (preservarAgenda) são atos da pessoa e nunca são pulados.
+  // definido em 2026-09-24 (ADR-045): UMA execução aberta por rotina, só no caminho do AGENDADOR. "Executar agora" e
+  // "Permitir e rodar agora" (preservarAgenda) são atos da pessoa e nunca são adiados nem cortam nada.
+  // revisto em 2026-10-15 (NOD-243): o que segura a janela deixa rastro (execução 'adiada') e não segura para sempre —
+  // o turno pendente que nunca começou vence na janela seguinte, e a frente sem nada vivo há 24 h deixa de segurar.
+  // revisto em 2026-10-16 (integração da main no #335): a 'adiada' cobre também a janela pulada da NOD-274 (C9), que na
+  // main virava 'nao_rodou'/'execucao_anterior_aberta' — um registro só por janela pulada.
+  const antes: RuntimeEvent[] = [];
   if (!input.preservarAgenda) {
-    const turnoAbertoId = await deps.repos.rotinaJanelas.turnoAberto(rotina.id);
-    // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
-    // não acabou — a execução seguinte, sem ver a anterior, abria a mesma task de novo, a cada janela. revisto em
-    // 2026-10-12 (ADR-099, I7 revista): e enquanto uma frente que o dono abriu para a rotina não acabou.
-    // revisto em 2026-10-16 (NOD-274, C9): a frente sem turno vivo que só espera um colega há mais de 2 períodos do cron
-    // (mín. 2 h) não segura; a janela pulada fica no histórico ('nao_rodou'/'execucao_anterior_aberta').
-    const filha = turnoAbertoId ? null : await deps.repos.trabalhos.filhaAbertaDaRotina(rotina.id, deps.agora() - prazoDoColega(rotina, instanteAgendado));
-    if (turnoAbertoId || filha) {
-      const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(deps.agora(), instanteAgendado) });
-      await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
-      const events = await registrarJanelaPulada(deps, input);
-      return { data: { pulada: true, turnoAbertoId, ...(filha ? { trabalhoAbertoId: filha.id } : {}), proximaExecucao }, events };
-    }
+    const agora = deps.agora();
+    const segura = await quemSegura(deps, rotina, instanteAgendado, agora, antes);
+    if (segura) return registrarAdiada(deps, input, segura, agora, antes);
   }
   const ganhou = await deps.repos.rotinaJanelas.reivindicar({ rotinaId: rotina.id, instanteAgendado, machineId: input.machineId, executor: input.executor });
-  if (!ganhou) return { data: { janelaDeOutro: true } };
+  if (!ganhou) return janelaJaUsada(deps, input, antes);
   const agente = await agenteVisivel(deps.repos, rotina.agenteId);
   const agora = deps.agora();
   // definido em 2026-09-24 (emenda da ADR-044): o pré-voo, depois de reivindicar a janela (ADR-011
@@ -173,12 +309,12 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   const bloqueio = input.aposConceder ? null : await preVooDaRotina(deps, rotina, { agendada: !input.preservarAgenda });
   if (bloqueio) return registrarBloqueio(deps, input, bloqueio, agora);
   const fechoDasVoltas = input.preservarAgenda ? [] : await fecharPerguntasDasVoltas(deps, rotina, agora);
-  const r = await abrirJanela(deps, input, agente, agora);
+  const r = await abrirJanela(deps, input, agente, agora, antes);
   return fechoDasVoltas.length === 0 ? r : { ...r, events: [...fechoDasVoltas, ...(r.events ?? [])] };
 };
 
 /** O resto do disparo, depois do pré-voo: a janela sem pendência ou o turno da rotina. */
-async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<ReturnType<typeof agenteVisivel>>, agora: number): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
+async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<ReturnType<typeof agenteVisivel>>, agora: number, antes: RuntimeEvent[]): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
   const { rotina, instanteAgendado } = input;
   // definido em 2026-10-01 (item 7 da ADR-066): depois do pré-voo (a rotina parada por acesso segue parada, com o
   // card dela) e antes do turno. Só no agendador: "Executar agora" e "Permitir e rodar agora" (preservarAgenda) são
@@ -206,6 +342,9 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
     modelo: agente.modelo,
     harness: agente.harness,
     executor: input.executor,
+    // definido em 2026-10-15 (NOD-272, ADR-085): o "Testar agora" e o "Permitir e rodar agora" são a pessoa olhando a
+    // tela — o turno não espera a reserva da cota nem o portão do Mac, como uma fala dela.
+    pessoaEsperando: input.preservarAgenda === true,
   });
   if (!turno) throw new ErroDeDominio("estado_invalido", { cause: "turno de rotina não criado" });
   await deps.repos.rotinaJanelas.vincularTurno({ rotinaId: rotina.id, instanteAgendado, turnoId: turno.id });
@@ -214,7 +353,7 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
   const autoria = autoriaPessoa(deps.escopo.pessoaId, "regra:scheduler-rotina");
   return {
     data: { turno, proximaExecucao },
-    events: [evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turno.id })],
+    events: [...antes, evento(deps, "turno_criado", autoria, { turnoId: turno.id, rotinaId: rotina.id, origem: "rotina", instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turno.id })],
   };
 }
 
@@ -228,7 +367,7 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | MotivoNaoRodouRotina | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | MotivoNaoRodouRotina | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
   /** NOD-274: 'nao_rodou' por cota — quando a cota volta (vai para o histórico). */
@@ -315,6 +454,9 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
       });
   if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução não registrada" });
   const podadas = await deps.repos.rotinaExecucoes.podar(rotina.id);
+  // NOD-271: as janelas de mais de 30 dias com turno acabado saem junto (a trava da janela só vale enquanto o instante
+  // pode voltar a ser disputado); sem isto `rotina_janelas` só crescia.
+  await deps.repos.rotinaJanelas.podar(rotina.id, agora);
   const dados = { rotinaId: rotina.id, execucaoId: execucao.id, desfecho, motivo, instanteAgendado };
   // definido em 2026-09-21: SILÊNCIO. A execução ficou registrada acima (e aparece no histórico da
   // rotina), mas nada é escrito na conversa — nem a fala do agente (suprimida em assentar-turno.ts)

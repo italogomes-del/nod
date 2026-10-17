@@ -65,8 +65,8 @@ describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante 
       expect(await repos.rotinaJanelas.reivindicar({ rotinaId: r!.id, instanteAgendado: instante, machineId: randomUUID(), executor: "catcher" })).toBe(true);
       const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "rotina", prazoEm: Date.now() + 60_000, profundidade: 0, entradaTexto: "i", entradaConfianca: "confiavel", modelo: "m" });
       await repos.rotinaJanelas.vincularTurno({ rotinaId: r!.id, instanteAgendado: instante, turnoId: turno!.id });
-      expect(await repos.rotinaJanelas.execucaoAberta(r!.id)).toEqual({ turnoId: turno!.id, instanteAgendado: instante });
-      expect(await repos.rotinaJanelas.turnoAberto(r!.id)).toBe(turno!.id);
+      expect(await repos.rotinaJanelas.execucaoAberta(r!.id, instante)).toEqual({ turnoId: turno!.id, instanteAgendado: instante });
+      expect((await repos.rotinaJanelas.turnoAberto(r!.id, instante))?.turnoId).toBe(turno!.id);
 
       const lista = async (agora: number) => {
         const { deps } = depsSobre(trx, MARLON, { agora: () => agora });
@@ -82,7 +82,7 @@ describeIntegracao("rotinaJanelasRepo e rotinaExecucoesRepo: trava por instante 
       // Sem execução aberta (o turno acabou), nada a avisar.
       await repos.rotinas.atualizarEstado(r!.id, "ativa");
       await trx`update turnos set estado = 'concluido' where id = ${turno!.id}`;
-      expect(await repos.rotinaJanelas.execucaoAberta(r!.id)).toBeNull();
+      expect(await repos.rotinaJanelas.execucaoAberta(r!.id, instante)).toBeNull();
       expect(await lista(instante + 3 * 3_600_000)).not.toHaveProperty("janelasPuladas");
     });
   });

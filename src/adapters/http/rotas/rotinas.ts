@@ -71,11 +71,14 @@ export function criarRotasRotinas(deps: DepsRotasL7): Rota[] {
       metodo: "POST",
       padrao: /^\/rotinas\/(?<id>[^/]+)\/executar$/,
       async handler(ctx) {
-        const r = await executar(deps, ctx.escopo, executarRotinaAgora, { rotinaId: uuid(ctx.params.id, "id"), executor: deps.executor?.() ?? "catcher" });
+        // NOD-272: sem `confirmar`, a execução já aberta volta como `jaNaFila` (nada criado) e a web pergunta.
+        const corpo = (await ctx.corpo()) as { confirmar?: unknown } | null;
+        const r = await executar(deps, ctx.escopo, executarRotinaAgora, { rotinaId: uuid(ctx.params.id, "id"), executor: deps.executor?.() ?? "catcher", confirmar: corpo?.confirmar === true });
         // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo, sem turno — `bloqueada` leva o
         // motivo e `propostaId` o card que a destrava; a web abre a conversa onde o card está.
         const bloqueio = r.bloqueio ? { bloqueada: r.bloqueio.motivo, ...(r.bloqueio.propostaId ? { propostaId: r.bloqueio.propostaId } : {}) } : {};
-        const resposta: RespostaMutacao = { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}), ...bloqueio } };
+        const naFila: Record<string, string> = r.jaNaFila ? { jaNaFila: r.jaNaFila.turnoId, jaNaFilaEm: String(r.jaNaFila.instanteAgendado), fusoIana: r.jaNaFila.fusoIana } : {};
+        const resposta: RespostaMutacao = { ok: true, ids: { conversaId: r.conversaId, ...(r.turnoId ? { turnoId: r.turnoId } : {}), ...bloqueio, ...naFila } };
         ctx.json(200, resposta);
       },
     },

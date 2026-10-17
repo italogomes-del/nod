@@ -1,4 +1,6 @@
 import type { RotinaDto } from "../contracts/api.ts";
+import type { EsperaRotinaDto } from "../contracts/rotina.ts";
+import { MOTIVOS_ADIADA, type MotivoAdiada } from "../contracts/motivos.ts";
 import type { Concessao } from "../contracts/concessao.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { Repos } from "../repositories/tipos.ts";
@@ -10,7 +12,7 @@ import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
 import { bloqueioDaRotina, pendenciaAbertaDaRotina } from "./pre-voo-rotina.ts";
-import type { CasoDeUso } from "./tipos.ts";
+import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
  * GET rotinas: o que a policy deixa ver, com a próxima execução calculada pelo servidor (ADR-011).
@@ -26,19 +28,44 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
   const dtos: RotinaDto[] = [];
   for (const rotina of rotinas) {
     let bloqueio: RotinaDto["bloqueio"] = null;
+    let espera: EsperaRotinaDto | null = null;
     let perguntaPendente: RotinaDto["perguntaPendente"];
     let esperaDaCota: RotinaDto["esperaDaCota"];
     if (minhas.includes(rotina)) {
+      espera = await esperaDaRotina(deps, rotina.id);
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
       perguntaPendente = await perguntaQueParou(deps.repos, rotina);
       esperaDaCota = await esperaDaCotaDaRotina(deps.repos, rotina, deps.agora());
     }
     const puladas = await puladasDe(deps, rotina);
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), espera, ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
+
+/**
+ * definido em 2026-10-16 (NOD-243): a lista diz por que a rotina não está rodando — só quando a ÚLTIMA execução foi
+ * 'adiada'. Lê o topo do histórico (as adiadas seguidas) e, se é a frente que segura, o título dela.
+ */
+async function esperaDaRotina(deps: Pick<Deps, "repos">, rotinaId: string): Promise<EsperaRotinaDto | null> {
+  const ultimas = await deps.repos.rotinaExecucoes.listar(rotinaId, ADIADAS_LIDAS);
+  const seguidas: ExecucaoRotina[] = [];
+  for (const e of ultimas) {
+    if (e.desfecho !== "adiada") break;
+    seguidas.push(e);
+  }
+  const ultima = seguidas[0];
+  if (!ultima || !ehMotivoAdiada(ultima.motivo)) return null;
+  const frente = ultima.motivo === "frente_aberta" ? ((await deps.repos.trabalhos.filhaAbertaDaRotina(rotinaId))?.titulo ?? null) : null;
+  return { motivo: ultima.motivo, seguidas: seguidas.length, desde: seguidas[seguidas.length - 1]?.instanteAgendado ?? ultima.instanteAgendado, frente };
+}
+
+const ADIADAS_LIDAS = 10;
+
+function ehMotivoAdiada(m: string | null): m is MotivoAdiada {
+  return m !== null && (MOTIVOS_ADIADA as readonly string[]).includes(m);
+}
 
 /**
  * definido em 2026-10-15 (pacote A3): a rotina ativa com uma execução ainda aberta — o agendador pula as janelas seguintes
@@ -46,7 +73,7 @@ export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDt
  */
 async function puladasDe(deps: Parameters<typeof listarRotinas>[0], rotina: RotinaDto["rotina"]): Promise<number | null> {
   if (rotina.estado !== "ativa" || rotina.excluidoEm !== null) return null;
-  const aberta = await deps.repos.rotinaJanelas.execucaoAberta(rotina.id);
+  const aberta = await deps.repos.rotinaJanelas.execucaoAberta(rotina.id, deps.agora());
   if (!aberta) return null;
   return avisoDeJanelasPuladas(janelasPuladas({ cron: rotina.cron, fusoIana: rotina.fusoIana, desde: aberta.instanteAgendado, agora: deps.agora() }));
 }
@@ -68,7 +95,7 @@ async function perguntaQueParou(repos: Repos, rotina: Rotina): Promise<RotinaDto
  * renovar — a lista mostra "esperando a cota do <IA> · volta às HH:MM" em vez de parecer travada.
  */
 async function esperaDaCotaDaRotina(repos: Repos, rotina: Rotina, agora: number): Promise<RotinaDto["esperaDaCota"]> {
-  const raiz = await repos.rotinaJanelas.turnoAberto(rotina.id);
+  const raiz = (await repos.rotinaJanelas.turnoAberto(rotina.id, agora))?.turnoId ?? null;
   const volta = raiz ? await repos.rotinaJanelas.esperaDaCotaDe(raiz, ENTRADA_DA_VOLTA_DA_COTA, agora) : null;
   return volta ? { ia: iaDaVoltaDaCota(volta.entrada, volta.harness), voltaEm: volta.voltaEm } : undefined;
 }

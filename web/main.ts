@@ -9,6 +9,7 @@ import { iasDaTela, mudarRascunho, ordemDaPessoa, destinoDoPedido, mudaAIaDoBot,
 import { abrirPreviaDaTroca } from "./telas/previa-troca-dialogo.ts";
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
 import { abrirAvisoDosTermos } from "./telas/aviso-termos-dialogo.ts";
+import { abrirRodarMaisUma } from "./telas/rodar-mais-uma-dialogo.ts";
 import { criarContasDoMac } from "./lib/contas-do-mac.ts";
 import { criarContasDaPessoa } from "./lib/contas-da-pessoa.ts";
 import { cifrarCodigo } from "./lib/cifra.ts";
@@ -100,6 +101,7 @@ import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 import { renderLinhaDoDono, renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
+import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 
 /**
  * main.ts: sessão → hidratar → SSE (ADR-016) → laço "dispatch → reidratar o que o reducer invalidou →
@@ -2669,7 +2671,10 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo (`ids.bloqueada`), o teste não roda —
   // a conversa abre com o card de acesso "rotina parada" e o botão que a destrava; "Sua vez" relê.
   "executar-rotina": (el) => agir(async () => {
-    const r = await api!.executarRotina(el.dataset.id ?? "");
+    const id = el.dataset.id ?? "";
+    // NOD-272: com execução já aberta, pergunta antes no diálogo próprio (A1 do Gil no #335); cancelar não roda nada.
+    const r = await executarRotinaComConfirmacao((o) => api!.executarRotina(id, o), (p) => abrirRodarMaisUma(p, el));
+    if (!r) return;
     dispatch({ tipo: "invalidar", quais: ["rotinas", `execucoes:${el.dataset.id ?? ""}`, ...(r.ids.bloqueada ? (["sua-vez", `conversa:${r.ids.conversaId ?? ""}`] as const) : [])] });
     navegar({ tipo: "conversa", conversaId: r.ids.conversaId ?? "", agenteId: el.dataset.agente ?? "" });
   }),

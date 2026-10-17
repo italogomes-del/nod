@@ -1,8 +1,9 @@
-import type { Autoria } from "../contracts/evento.ts";
+import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { EstadoRotina, Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
-import { autoriaPessoa, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { autoriaPessoa, evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
 /**
@@ -27,12 +28,64 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
   }
   const rotina = await deps.repos.rotinas.atualizarEstado(atual.id, input.estado);
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona pausa/ativa" });
+  const corte = rotina.estado === "pausada" ? await cortarFila(deps, rotina.id) : { events: [], cortados: 0, rodando: false };
   await deps.repos.mensagens.criar({
     conversaId: rotina.conversaId,
     autoria: input.autoria ?? autoriaPessoa(deps.escopo.pessoaId),
     kind: "sistema",
-    texto: input.texto ?? (rotina.estado === "ativa" ? textoRotinaAtiva(rotina, agora) : "Rotina pausada: nada será disparado até você reativar."),
+    // revisto em 2026-10-16 (revisão do Gil no #335, A7): o texto de quem pausa por regra (o agente, o varredor) não
+    // esconde o que foi cancelado — a frase do corte vem depois dele.
+    texto: input.texto
+      ? [input.texto, fraseDoCorte(corte)].filter(Boolean).join(" ")
+      : rotina.estado === "ativa" ? textoRotinaAtiva(rotina, agora) : textoPausada(corte),
     confianca: "confiavel",
   });
-  return { data: { rotina } };
+  return { data: { rotina }, events: corte.events };
 };
+
+/** definido em 2026-10-16 (NOD-272): quem segura a fila entra na mensagem — o que foi cancelado e o que ainda termina. */
+export function textoPausada(corte: { cortados: number; rodando: boolean }): string {
+  return ["Rotina pausada: nada será disparado até você reativar.", fraseDoCorte(corte)].filter(Boolean).join(" ");
+}
+
+/** O que a pausa cancelou e o que ainda termina; vazio quando não havia nada aberto. */
+export function fraseDoCorte(corte: { cortados: number; rodando: boolean }): string {
+  const partes: string[] = [];
+  if (corte.cortados === 1) partes.push("A execução que estava na fila foi cancelada.");
+  else if (corte.cortados > 1) partes.push(`As ${corte.cortados} execuções que estavam na fila foram canceladas.`);
+  if (corte.rodando) partes.push("A execução em andamento termina normalmente.");
+  return partes.join(" ");
+}
+
+/**
+ * definido em 2026-10-16 (NOD-272): pausar corta o que a rotina deixou na fila — o turno da janela, a cadeia de retomadas
+ * e os turnos da frente dela que ainda não começaram. Cada um vira 'interrompido' (parado_pela_pessoa) e a execução da
+ * janela fecha 'interrompida'/'rotina_pausada'. O turno que já está despachando não é cortado: termina e registra o seu
+ * desfecho (cortar no meio deixaria efeito externo pela metade).
+ */
+async function cortarFila(deps: Parameters<typeof pausarRotina>[0], rotinaId: string): Promise<{ events: RuntimeEvent[]; cortados: number; rodando: boolean }> {
+  const events: RuntimeEvent[] = [];
+  const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_PAUSAR);
+  const aberto = await deps.repos.rotinaJanelas.turnoAberto(rotinaId, deps.agora());
+  const pendentes = await deps.repos.rotinaJanelas.turnosPendentesDaRotina(rotinaId, deps.agora());
+  const janelas = new Set<string>();
+  for (const p of pendentes) {
+    const cortado = await deps.repos.turnos.interromper(p.turnoId, "parado_pela_pessoa");
+    if (!cortado) continue;
+    events.push(evento(deps, "turno_interrompido", autoria, { motivo: "parado_pela_pessoa", estava: "pendente" }, { conversaId: cortado.conversaId, turnoId: p.turnoId }));
+    janelas.add(p.janelaTurnoId);
+  }
+  let cortados = 0;
+  for (const turnoId of janelas) {
+    // A janela cujo próprio turno ainda despacha registra o desfecho dela ao terminar — e não conta como cancelada
+    // (revisão do Gil no #335, A7: senão a mesma execução saía "cancelada" e "em andamento").
+    if ((await deps.repos.turnos.buscar(turnoId))?.estado === "despachando") continue;
+    const r = await registrarDesfechoRotina(deps, { turnoId, desfecho: "interrompida", motivo: "rotina_pausada", regra: REGRA_PAUSAR });
+    events.push(...(r.events ?? []));
+    cortados++;
+  }
+  // Conta execuções (janelas), não turnos: a retomada e a frente de uma janela são a mesma execução.
+  return { events, cortados, rodando: aberto?.estado === "despachando" };
+}
+
+const REGRA_PAUSAR = "regra:pausar";

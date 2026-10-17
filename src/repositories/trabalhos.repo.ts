@@ -230,6 +230,20 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTrabalho(l) : null;
     },
 
+    /**
+     * definido em 2026-10-15 (NOD-243): o que a frente da rotina ainda tem de vivo — turnos pendentes ou rodando e
+     * comandos esperando — e a última atividade (criação ou último sinal de um turno dela; sem turno, a criação dela).
+     * A frente sem nada vivo há mais de 24 h deixa de segurar a agenda da rotina.
+     */
+    async atividade(id: string): Promise<{ vivos: number; ultimaEm: number | null }> {
+      const [l] = await conn<{ vivos: number; ultima: Date | null }[]>`
+        select
+          (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado in ('pendente', 'despachando'))
+          + (select count(*)::int from esperas e where e.tenant_id = ${escopo.tenantId} and e.trabalho_id = ${id} and e.estado = 'rodando') as vivos,
+          (select max(greatest(t.criado_em, coalesce(t.ultimo_sinal_em, t.criado_em))) from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id}) as ultima`;
+      return { vivos: l?.vivos ?? 0, ultimaEm: l?.ultima ? ms(l.ultima) : null };
+    },
+
     /** Grava o estado e os carimbos: `iniciado_em` na primeira vez que roda; `terminado_em` só nos finais (CHECK da 0063). */
     async mudarEstado(id: string, estado: EstadoTrabalho, agora: number): Promise<Trabalho | null> {
       const final = estado === "terminado" || estado === "parado" || estado === "falhou";

@@ -153,7 +153,8 @@ describeIntegracao(
       }
     });
 
-    it("dentro do prazo: 'nao_rodou'/'execucao_anterior_aberta' sem turno e sem reivindicar a janela; passado o prazo, dispara", async () => {
+    // revisto em 2026-10-16 (integração no #335): a janela pulada é a 'adiada' da NOD-243 — reivindicada, sem turno.
+    it("dentro do prazo: 'adiada'/'frente_aberta' sem turno, janela reivindicada; passado o prazo, dispara", async () => {
       await withRollback(MARLON, async (trx) => {
         const agora = { v: T0 + H };
         const c = await cenario(trx, agora);
@@ -164,7 +165,7 @@ describeIntegracao(
           executor: "catcher",
         });
         expect(pulada.data).toMatchObject({
-          pulada: true,
+          adiada: "frente_aberta",
           trabalhoAbertoId: c.filha.id,
         });
         expect(
@@ -174,8 +175,8 @@ describeIntegracao(
             e.motivo,
             e.turnoId,
           ]),
-        ).toEqual([[T0 + H, "nao_rodou", "execucao_anterior_aberta", null]]);
-        expect(await c.repos.rotinaJanelas.listar(c.rotina.id)).toEqual([]);
+        ).toEqual([[T0 + H, "adiada", "frente_aberta", null]]);
+        expect((await c.repos.rotinaJanelas.listar(c.rotina.id)).map((j) => [j.instanteAgendado, j.turnoId])).toEqual([[T0 + H, null]]);
         await dispararRotina(c.deps, {
           rotina: c.rotina,
           instanteAgendado: T0 + H,

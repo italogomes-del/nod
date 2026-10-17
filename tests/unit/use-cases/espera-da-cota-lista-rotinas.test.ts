@@ -68,7 +68,7 @@ describe("NOD-274 C7: a lista de rotinas mostra a espera da cota", () => {
 
   it("a tela mostra 'esperando a cota do Claude Code · volta às 14:00' no fuso da rotina", () => {
     const r = { id: "r1", tenantId: "t", ownerId: "p", agenteId: "a1", conversaId: "c1", instrucao: "x", cron: "0 8 * * *", fusoIana: TZ, estado: "ativa", exigeAprovacao: false, fonte: "f", entregavel: "e", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, criadoEm: 0, excluidoEm: null, acessos: null, soComPendencia: false } as const;
-    const dto: RotinaDto = { rotina: { ...r }, proximaExecucao: AGORA, bloqueio: null, resumo: "todo dia", esperaDaCota: { ia: "Claude Code", voltaEm: VOLTA } };
+    const dto: RotinaDto = { rotina: { ...r }, proximaExecucao: AGORA, bloqueio: null, resumo: "todo dia", espera: null, esperaDaCota: { ia: "Claude Code", voltaEm: VOLTA } };
     const html = renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [dto] });
     expect(html).toContain("esperando a cota do Claude Code · volta às 14:00");
     expect(html).not.toContain("rotina-parada");
@@ -80,7 +80,7 @@ describe("NOD-274 C7: a lista de rotinas mostra a espera da cota", () => {
 
   const dtoCom = (voltaEm: number): RotinaDto => {
     const r = { id: "r1", tenantId: "t", ownerId: "p", agenteId: "a1", conversaId: "c1", instrucao: "x", cron: "0 8 * * *", fusoIana: TZ, estado: "ativa", exigeAprovacao: false, fonte: "f", entregavel: "e", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA, criadoEm: 0, excluidoEm: null, acessos: null, soComPendencia: false } as const;
-    return { rotina: { ...r }, proximaExecucao: AGORA, bloqueio: null, resumo: "todo dia", esperaDaCota: { ia: "Claude Code", voltaEm } };
+    return { rotina: { ...r }, proximaExecucao: AGORA, bloqueio: null, resumo: "todo dia", espera: null, esperaDaCota: { ia: "Claude Code", voltaEm } };
   };
 
   it("revisão do Gil no #340: a volta em outro dia diz o dia, no fuso da rotina", () => {

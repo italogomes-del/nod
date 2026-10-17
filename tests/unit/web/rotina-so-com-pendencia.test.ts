@@ -15,7 +15,7 @@ const TZ = "America/Sao_Paulo";
 const AGORA = Date.parse("2026-10-01T09:30:00-03:00");
 const H = 3_600_000;
 const rotina = { id: "r1", tenantId: "t", ownerId: "p", agenteId: "a1", conversaId: "c1", instrucao: "Retomar o que ficou pela metade", cron: "*/20 * * * *", fusoIana: TZ, estado: "ativa", exigeAprovacao: true, fonte: "pendências", entregavel: "o trabalho retomado", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA + H, criadoEm: 0, excluidoEm: null, acessos: null } as const;
-const dto = (soComPendencia: boolean): RotinaDto => ({ rotina: { ...rotina, soComPendencia }, proximaExecucao: AGORA + H, bloqueio: null, resumo: `todo dia a cada 20 min (${TZ})` });
+const dto = (soComPendencia: boolean): RotinaDto => ({ rotina: { ...rotina, soComPendencia }, proximaExecucao: AGORA + H, bloqueio: null, resumo: `todo dia a cada 20 min (${TZ})`, espera: null });
 const agente = { id: "a1", tenantId: "t", ownerId: "p", nome: "Dev 1", titulo: "Dev", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c1", confirmado: true, fixado: false, oculto: false, naoLido: false, secao: null } as never;
 const TAG = ">só com pendência</span>";
 

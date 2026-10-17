@@ -24,7 +24,7 @@ const H = 3_600_000;
 
 const bloqueio: BloqueioRotina = { motivo: "sem_acesso", app: "Gmail", slug: "gmail", decisaoId: "d1", rodaNaHora: true, desde: ONTEM_13, naoRodaram: [HOJE_8, ONTEM_18, ONTEM_13], fusoIana: TZ };
 const rotina = { id: "r1", tenantId: "t", ownerId: "p", agenteId: "a1", conversaId: "c1", instrucao: "E-mails às 8h, 13h e 18h", cron: "0 8,13,18 * * *", fusoIana: TZ, estado: "ativa", exigeAprovacao: true, fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: AGORA + H, criadoEm: 0, excluidoEm: null, acessos: null, soComPendencia: false } as const;
-const dto = (b: BloqueioRotina | null): RotinaDto => ({ rotina: { ...rotina }, proximaExecucao: AGORA + H, bloqueio: b, resumo: `todo dia às 08:00, 13:00, 18:00 (${TZ})` });
+const dto = (b: BloqueioRotina | null): RotinaDto => ({ rotina: { ...rotina }, proximaExecucao: AGORA + H, bloqueio: b, resumo: `todo dia às 08:00, 13:00, 18:00 (${TZ})`, espera: null });
 const agente = { id: "a1", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "E-mails", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c1", confirmado: true, fixado: false, oculto: false, naoLido: false, secao: null } as never;
 
 describe("relógio: o dia de calendário da rotina", () => {
@@ -130,5 +130,34 @@ describe("o card do acesso que a rotina pediu", () => {
     expect(rotinasParadasPorAgente(com(item(proposta, parada, "vencido"))).size).toBe(0);
     expect(rotinasParadasPorAgente(com(item({ ...proposta, payload: { ...proposta.payload, rotinaId: undefined } } as Proposta, null))).size).toBe(0);
     expect(SUBTITULO_ROTINA_PARADA).toBe('<span class="sub-rotina-parada">rotina parada</span>');
+  });
+});
+
+// Regression: lacuna de mutação no re-QA do #335 — a tag "esperando" do cabeçalho (A4 do Gil) não tinha teste de render
+// (tirar a tag ou mostrá-la na rotina pausada/parada passava). Found by /qa on 2026-10-16.
+describe("lista de rotinas: a rotina que espera (NOD-243, A4 do Gil no #335)", () => {
+  const espera = { motivo: "execucao_anterior_aberta", seguidas: 3, desde: ONTEM_13, frente: null } as const;
+  const comEspera = (estado: "ativa" | "pausada", b: BloqueioRotina | null): RotinaDto => ({ ...dto(b), rotina: { ...rotina, estado }, espera });
+  const cab = (html: string) => html.match(/<div class="rt-cab">[\s\S]*?<\/div>/)?.[0] ?? "";
+
+  it("ativa e adiada: a tag âmbar 'esperando' no cabeçalho, junto da linha que explica", () => {
+    const html = renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [comEspera("ativa", null)] });
+    expect(cab(html)).toContain('<span class="tag tag-ambar"');
+    expect(cab(html)).toContain(">esperando</span>");
+    expect(html).toContain("Esperando a execução anterior terminar · 3 janelas adiadas desde ontem 13:00.");
+  });
+
+  it("pausada ou parada: sem a tag nem a linha — a pausa e a parada já dizem por que não roda", () => {
+    for (const html of [
+      renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [comEspera("pausada", null)] }),
+      renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [comEspera("ativa", bloqueio)] }),
+    ]) {
+      expect(cab(html)).not.toContain(">esperando</span>");
+      expect(html).not.toContain("Esperando a execução anterior");
+    }
+  });
+
+  it("sem espera: sem a tag", () => {
+    expect(cab(renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [dto(null)] }))).not.toContain(">esperando</span>");
   });
 });

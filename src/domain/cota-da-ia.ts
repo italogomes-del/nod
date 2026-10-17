@@ -151,10 +151,11 @@ export function situacaoDaIa(cota: readonly CotaDaIa[], ia: string): SituacaoDaC
 export type TipoParaCota = "conversa" | "fundo_novo" | "fundo_seguindo";
 
 export function tipoParaCota(
-  t: { origem: OrigemTurno; trabalhoId?: string | null; acordarEm?: number | null; decididoPor?: string | null },
+  t: { origem: OrigemTurno; trabalhoId?: string | null; acordarEm?: number | null; pessoaEsperando?: boolean; decididoPor?: string | null },
   trabalho: { iniciadoEm: number | null } | null,
 ): TipoParaCota {
-  if (t.origem === "ligacao") return "conversa";
+  // NOD-272 (ADR-085): "Testar agora" e "Permitir e rodar agora" — e as frentes que eles abrem — são a pessoa olhando.
+  if (t.origem === "ligacao" || t.pessoaEsperando === true) return "conversa";
   if (t.trabalhoId) return trabalho && trabalho.iniciadoEm === null ? "fundo_novo" : "fundo_seguindo";
   if (t.origem === "rotina" || t.origem === "delegacao" || t.origem === "peer") return "fundo_novo";
   // NOD-258: o retorno do lote é o fim de um trabalho de fundo que já rodou — passa na reserva, espera no limite.

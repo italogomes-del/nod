@@ -5,7 +5,8 @@ import { depsMemoria } from "../../helpers/deps-l7.ts";
 
 /**
  * NOD-274 C9: a frente da rotina sem turno vivo que só espera um colega há mais de 2 períodos do cron (mín. 2 h) não
- * segura a rotina; as janelas puladas antes disso ficam no histórico como 'nao_rodou'/'execucao_anterior_aberta'.
+ * segura a rotina; as janelas puladas antes disso ficam no histórico — revisto em 2026-10-16 (integração no #335): como
+ * a 'adiada'/'frente_aberta' da NOD-243 (antes 'nao_rodou'/'execucao_anterior_aberta').
  */
 const TZ = "America/Sao_Paulo";
 const H = 60 * 60_000;
@@ -46,8 +47,8 @@ describe("NOD-274 C9: frente esperando colega não segura a rotina para sempre",
 
     agora = T0 + H;
     const pulada = await disparar(d, rotina, T0 + H);
-    expect(pulada.data).toMatchObject({ pulada: true, trabalhoAbertoId: frente.id });
-    expect(d.banco.execucoes.map((e) => [e.instanteAgendado, e.desfecho, e.motivo, e.turnoId])).toEqual([[T0 + H, "nao_rodou", "execucao_anterior_aberta", null]]);
+    expect(pulada.data).toMatchObject({ adiada: "frente_aberta", trabalhoAbertoId: frente.id });
+    expect(d.banco.execucoes.map((e) => [e.instanteAgendado, e.desfecho, e.motivo, e.turnoId])).toEqual([[T0 + H, "adiada", "frente_aberta", null]]);
     expect(pulada.events?.map((e) => e.kind)).toEqual(["rotina_executou"]);
     expect(d.banco.mensagens.filter((m) => m.kind === "rotina_execucao")).toHaveLength(0);
     // A mesma janela de novo (outra máquina) não registra duas vezes.
@@ -66,6 +67,6 @@ describe("NOD-274 C9: frente esperando colega não segura a rotina para sempre",
     const d = depsMemoria({ agora: () => agora });
     const { rotina } = await cenario(d, { decisao: true });
     agora = T0 + 5 * H;
-    expect((await disparar(d, rotina, T0 + 5 * H)).data).toMatchObject({ pulada: true });
+    expect((await disparar(d, rotina, T0 + 5 * H)).data).toMatchObject({ adiada: "frente_aberta" });
   });
 });
