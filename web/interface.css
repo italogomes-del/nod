@@ -371,6 +371,21 @@
 .msg-anexo-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .msg-anexo-card { display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 14px 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-decoration: none; color: var(--ink); align-self: flex-end; max-width: 280px; }
 .msg-anexo-card:hover { border-color: var(--line-strong); }
+/* NOD-56 (protótipo do Gil, 2026-10-05): a tela do computador ao fim do turno, rodapé do balão do bot, à esquerda, sem corte. */
+.msg-captura { margin: 8px 0 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.msg-captura-bt { display: block; padding: 0; width: 240px; height: 150px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface-raised); cursor: zoom-in; }
+.msg-captura-bt:hover { border-color: var(--line-strong); }
+.msg-captura-bt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.msg-captura-bt img { display: block; width: 100%; height: 100%; object-fit: contain; color: var(--ink-3); font-size: 11px; }
+.msg-captura figcaption { font-size: 11.5px; color: var(--ink-3); }
+.captura-ampliada { padding: 0; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); max-width: min(1320px, 94vw); max-height: 92vh; overflow: hidden; }
+.captura-ampliada::backdrop { background: var(--backdrop); backdrop-filter: blur(4px); }
+.captura-ampliada-corpo { display: flex; flex-direction: column; }
+.captura-ampliada-corpo img { display: block; width: auto; max-width: 100%; height: auto; max-height: calc(92vh - 58px); object-fit: contain; background: var(--surface-raised); }
+.captura-ampliada-rodape { display: flex; align-items: center; gap: 14px; padding: 12px 16px; font-size: 12.5px; color: var(--ink-3); }
+.captura-ampliada-rodape span { flex: 1; min-width: 0; }
+.captura-ampliada-rodape a { color: var(--ink); }
+@media (max-width: 640px) { .msg-captura-bt { width: min(240px, 100%); height: auto; aspect-ratio: 16 / 10; } }
 @media (max-width: 640px) { .anexo-chip { min-width: 0; max-width: 100%; flex: 1 1 100%; } .msg-anexo-img { width: 132px; height: 88px; } }
 
 /* Cartão de atividade do turno vivo (2026-09-24): o que o agente está FAZENDO, no lugar do balão com o texto corrido. */

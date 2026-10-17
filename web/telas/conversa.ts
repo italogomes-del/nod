@@ -330,11 +330,46 @@ function avisoSemExecutor(m: Mensagem, estado: Estado): string {
  * esquerda (cinza). Os demais kinds (sistema, handoff, negação, rotina…) seguem como linhas discretas.
  * `mostrarAutor` liga o nome do bot dentro do balão — útil em salas com vários agentes.
  */
-/** ADR-046: arquivos que a pessoa mandou, acima do balão. URL escopada pelo tenant da sessão. */
+/** A rota de anexos da conversa (ADR-046), escopada pelo tenant da sessão. */
+function urlDoAnexo(tenant: string, m: Mensagem, id: string): string {
+  return `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`;
+}
+
+/**
+ * NOD-56: a fala do bot só ganha anexo de imagem pela captura da tela ao fim do turno (NOD-200, `assentar-turno.ts`).
+ * Ela sai de `msg-anexos` (acima do balão, à direita, desenhado para a pessoa) e vira o rodapé do balão.
+ */
+const ehCaptura = (m: Mensagem, mime: string): boolean => m.autoria.autor_tipo !== "pessoa" && mime.startsWith("image/");
+
+/** ADR-046: arquivos que a pessoa mandou, acima do balão. A captura do bot não entra aqui (NOD-56). */
 function anexosDe(m: Mensagem, estado: Estado): string {
   const tenant = estado.sessao?.tenantId;
-  if (!m.anexos?.length || !tenant) return "";
-  return renderAnexosDaMensagem(m.anexos, (id) => `/api/t/${encodeURIComponent(tenant)}/conversas/${encodeURIComponent(m.conversaId)}/anexos/${encodeURIComponent(id)}`);
+  const anexos = (m.anexos ?? []).filter((a) => !ehCaptura(m, a.mime));
+  if (!anexos.length || !tenant) return "";
+  return renderAnexosDaMensagem(anexos, (id) => urlDoAnexo(tenant, m, id));
+}
+
+/** NOD-56: o conteúdo do <dialog> da captura ampliada (`captura-ampliada.ts`); puro, para o teste sem DOM. */
+export function htmlCapturaAmpliada(src: string, legenda: string): string {
+  return `<div class="captura-ampliada-corpo"><img src="${esc(src)}" alt="${esc(legenda)}" /><div class="captura-ampliada-rodape"><span>${esc(legenda)}</span><a href="${esc(src)}" target="_blank" rel="noopener">Abrir em nova aba</a><button type="button" class="bt sm" data-captura="fechar">Fechar</button></div></div>`;
+}
+
+/**
+ * NOD-56 (protótipo do Gil, 2026-10-05): a tela do computador ao fim do turno, como miniatura de 240×150 abaixo do
+ * balão do bot, com a legenda neutra. Clicar amplia num <dialog> (`ampliar-captura`). Mais de uma imagem (não acontece
+ * hoje): só a primeira. Sem captura, nada — o balão fica igual.
+ */
+export function capturaDoTurno(m: Mensagem, estado: Estado): string {
+  const tenant = estado.sessao?.tenantId;
+  const captura = m.anexos?.find((a) => ehCaptura(m, a.mime));
+  if (!captura || !tenant) return "";
+  const url = esc(urlDoAnexo(tenant, m, captura.id));
+  const legenda = `Tela do computador ao fim do turno · ${hora(m.criadoEm)}`;
+  // Protótipo (Gil): o alt e a ampliação nomeiam o bot; sem nome conhecido, "do bot".
+  const nome = agenteDe(estado, m.autoria.autor_id)?.nome;
+  const deQuem = nome ? `de ${nome}` : "do bot";
+  const legendaAmpliada = `Tela do computador ${deQuem} ao fim do turno · ${hora(m.criadoEm)}`;
+  return `<figure class="msg-captura"><button type="button" class="msg-captura-bt" data-act="ampliar-captura" data-src="${url}" data-legenda="${esc(legendaAmpliada)}" aria-label="Ampliar tela do computador ao fim do turno" aria-haspopup="dialog"><img src="${url}" alt="${esc(`Tela do computador ${deQuem} ao fim do turno`)}" loading="lazy" width="240" height="150" /></button><figcaption>${esc(legenda)}</figcaption></figure>`;
 }
 
 /**
@@ -428,7 +463,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
   const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 

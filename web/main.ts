@@ -1,4 +1,5 @@
 import "./lib/mascote-elemento.ts";
+import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirComputador } from "./telas/computador.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
@@ -2609,6 +2610,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     if (ta) { escreverNoCampo(ta, el.dataset.texto ?? ""); return enviarComposer(); }
   },
+  // NOD-56: a captura da tela do bot ao fim do turno, ampliada sobre a conversa.
+  "ampliar-captura": (el) => { abrirCapturaAmpliada(el); },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
   // frota relê e o cartão continua dizendo o motivo.
