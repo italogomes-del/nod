@@ -154,6 +154,11 @@ export type NovoTurno = {
   /** NOD-272 (0088): a pessoa está olhando — o portão da cota não segura este turno (tipoParaCota = conversa). */
   pessoaEsperando?: boolean;
   /**
+   * NOD-280 (definido em 2026-10-15): "Rodar no <máquina> desta vez" — a máquina escolhida pela pessoa para ESTE turno
+   * (ADR-090, coluna da 0066). O refazer da nota já nasce com ela; o UPDATE de `rodarDestaVez` só alcança pendentes.
+   */
+  maquinaDestaVez?: string | null;
+  /**
    * NOD-287 (2026-10-15): o turno que este repete ou continua. A marca da web (0033, ADR-062 §6) dele vem junto no
    * MESMO INSERT — a repetição por limite, troca de conta/IA ou conta ausente retoma a fala com a página no contexto e
    * não pode ganhar as aprovações de um turno limpo. A marca é lida no INSERT: se a origem for marcada depois, a
@@ -197,13 +202,13 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, contaminado_em)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
-          ${dataOuNull(t.acordarEm)}, ${t.pessoaEsperando === true},
+          ${dataOuNull(t.acordarEm)}, ${t.maquinaDestaVez ?? null}, ${t.pessoaEsperando === true},
           ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
@@ -882,6 +887,24 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         update turnos set maquina_desta_vez = ${maquinaId}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${conversaId} and estado = 'pendente'`;
       return r.count;
+    },
+
+    /**
+     * NOD-280 (definido em 2026-10-15): "Tentar de novo com <conta>" em Provedores — as falas que esperavam o limite passar
+     * (a cópia adiada da conversa, NOD-268; a retomada da task, ADR-099 §7) saem já. Só as que nasceram de um turno parado
+     * por `limite_do_plano` ou recusado no despacho por `sem_conta` (NOD-269) do mesmo bot e que podem rodar na IA da conta (fixas nela ou no Automático); o "me chame às
+     * 16:00" (ADR-086) fica. Devolve quantas acordaram.
+     */
+    async anteciparEsperasDoLimite(p: { ia: string; agora: number }): Promise<number> {
+      const r = await conn`
+        update turnos t set acordar_em = ${data(p.agora)}
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
+          and t.acordar_em > ${data(p.agora)} and (t.harness = ${p.ia} or t.harness = 'auto')
+          and exists (select 1 from turnos x where x.tenant_id = t.tenant_id and x.conversa_id = t.conversa_id and x.agente_id = t.agente_id
+            and x.estado = 'interrompido' and x.motivo_falha in ('limite_do_plano', 'sem_conta')
+            and (x.id = t.retoma_turno_id or x.retoma_turno_id = t.retoma_turno_id or (t.mensagem_origem_id is not null and x.mensagem_origem_id = t.mensagem_origem_id)))
+        returning t.id`;
+      return r.length;
     },
 
     /** Cancelar da fila: só o que AINDA está pendente — um turno que o laço acabou de reivindicar fica intacto. */

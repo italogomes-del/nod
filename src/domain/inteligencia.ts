@@ -20,7 +20,7 @@ export const RACIOCINIO_RECOMENDADO: EsforcoAgente = "medium";
  */
 export const PRAZO_LIMITE_SEM_HORARIO_MS = 60 * 60_000;
 /** O prazo que o fornecedor diz só vale até 8 dias à frente (a janela semanal do Claude é de 7). */
-const PRAZO_LIMITE_MAXIMO_MS = 8 * 24 * 60 * 60_000;
+export const PRAZO_LIMITE_MAXIMO_MS = 8 * 24 * 60 * 60_000;
 
 const INTEGRADAS: readonly IdHarness[] = HARNESSES.filter((h) => h.integrado).map((h) => h.id);
 /**
@@ -122,6 +122,17 @@ export function reenvioEmLaco(criadosEm: readonly number[], agora: number): bool
 /** Até quando a IA fica no limite: o que o fornecedor disse (no futuro, até 8 dias), senão 1 h. */
 export function prazoDoLimite(voltaEm: number | null | undefined, agora: number): number {
   return typeof voltaEm === "number" && Number.isFinite(voltaEm) && voltaEm > agora && voltaEm <= agora + PRAZO_LIMITE_MAXIMO_MS ? voltaEm : agora + PRAZO_LIMITE_SEM_HORARIO_MS;
+}
+
+/**
+ * NOD-280 (definido em 2026-10-15): até quando a CONTA fica no limite. O fornecedor disse uma hora no futuro: ela, mas nunca
+ * além de 8 dias (a janela semanal do Claude é de 7; antes, a ponte aceitava 31 dias e a conta ficava presa um mês sem
+ * botão). Sem hora (ou no passado): 1 h. Diferente de `prazoDoLimite` (da IA), a hora longa demais é cortada no teto, não
+ * trocada por 1 h — o fornecedor disse que demora.
+ */
+export function prazoDoLimiteDaConta(ate: number | null | undefined, agora: number): number {
+  if (typeof ate !== "number" || !Number.isFinite(ate) || ate <= agora) return agora + PRAZO_LIMITE_SEM_HORARIO_MS;
+  return Math.min(ate, agora + PRAZO_LIMITE_MAXIMO_MS);
 }
 
 /** Os níveis que o modelo aceita (catálogo). Modelo fora do catálogo (um `claude-…` pelo id, o `fable`) = todos. */

@@ -17,11 +17,11 @@ import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
 import { ultimoSinalDoTurno, type MotivoDaQueda } from "../domain/incidente.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_DO_TERMINAL, NATIVAS_DO_TERMINAL_CODEX } from "../domain/nativas.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
-import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, proximaIaNoLimite } from "../domain/inteligencia.ts";
+import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, prazoDoLimiteDaConta, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
 import { ehFundo, ENTRADA_DA_VOLTA_DA_COTA, entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVolta, entradaDaVoltaDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
-import { fraseDaDecisao, PRAZO_SEM_HORARIO_MS } from "../domain/contas-da-ia.ts";
+import { fraseDaDecisao } from "../domain/contas-da-ia.ts";
 import { decidirLimiteDaConta, ehIaComConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
 import type { IaComConta } from "../contracts/contas-ia.ts";
 import { harnessFixado } from "../domain/harness.ts";
@@ -249,7 +249,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       confianca: turno.entradaConfianca,
       parcial: interrompido,
     });
-  } else if (falaTexto.trim() !== "" && turno.origem === "sala" && !tardia) {
+  } else if (falaTexto.trim() !== "" && turno.origem === "sala" && !tardia && desfecho.motivoFalha !== "limite_do_plano") {
+    // NOD-284 (definido em 2026-10-15): a fala cortada pelo limite da conta NÃO passa por aqui — vai como parcial pelo
+    // ramo de baixo, sem disparar os responders (os outros bots respondiam a um "Vou verificar…" pela metade).
     // definido em 2026-09-16 (pendência L7 §4): a fala de um bot numa sala entra por postarNaSala para os
     // responders (menção) e o orçamento do canal rodarem na MESMA tx — nunca por mensagens.criar direto.
     const conversa = await deps.repos.conversas.buscar(turno.conversaId);
@@ -450,7 +452,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     // NOD-171: o limite do plano veio do protocolo e diz quando volta; a frase leva a hora.
     const fraseFornecedor =
       contas && entrega.harness
-        ? fraseDaDecisao(contas, { ia: nomeDaIa(entrega.harness), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) })
+        ? fraseDaDecisao(contas, { ia: nomeDaIa(entrega.harness), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora), origem: turno.origem })
         : desfecho.motivoFalha === "limite_do_plano"
         ? fraseDoLimiteDoPlano(entrega.harness ?? null, resultado.limiteVoltaEm, agora)
         : desfecho.motivoFalha
@@ -633,7 +635,8 @@ async function decidirLimiteNoAssentamento(
   const c = await lerContasDaMaquina(deps, p.machineId);
   const conta = c.contas.find((x) => x.id === p.contaId);
   if (!conta) return null;
-  const voltaEm = p.ate !== null && p.ate > p.agora ? p.ate : p.agora + PRAZO_SEM_HORARIO_MS;
+  // NOD-280: a hora do fornecedor só até 8 dias (antes, até 31: a conta ficava presa um mês).
+  const voltaEm = prazoDoLimiteDaConta(p.ate, p.agora);
   await deps.repos.contasIa.marcarLimite(conta.id, voltaEm);
   if (c.escolhidas[conta.ia] === conta.id) await deps.repos.contasIa.definirEscolhida(conta.ia, null);
   const agente = await deps.repos.agentes.buscar(p.turno.agenteId);

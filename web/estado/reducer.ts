@@ -642,6 +642,16 @@ export function faixaAbertaAoNavegar(aberta: string | null, de: Tela, para: Tela
 }
 
 /**
+ * NOD-280 (critério 9): a conversa aberta tem nota de limite com `contas` (ADR-102). A lista de contas vale para ela: a
+ * conta que entrou na máquina depois da nota vira "Seguir com", e `contas.mudou` relê a lista com a conversa aberta.
+ */
+export function conversaAbertaTemNotaDeContas(estado: Pick<Estado, "tela" | "conversas">): boolean {
+  const t = estado.tela;
+  if (t.tipo !== "conversa" && t.tipo !== "sala" && t.tipo !== "linha") return false;
+  return estado.conversas[t.conversaId]?.mensagens.some((m) => m.payload?.kind === "limite_do_plano" && !!m.payload.contas) ?? false;
+}
+
+/**
  * A conversa que a tela mostra (conversa ou sala), já carregada ou ainda chegando. ADR-083: a tela da task mostra o ao
  * vivo do turno do trabalho, que chega pelos frames da conversa do bot dele — mesmo de outro bot, nunca aberta.
  */
@@ -1260,7 +1270,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("maquinas");
   // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
   // definido em 2026-10-16 (T6): e o cabeçalho do seletor de IA no campo (a conta em uso, só o apelido).
-  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("contas");
+  // NOD-280 (critério 9): e a sala/linha aberta com nota de limite de contas — a nota se recalcula com a lista.
+  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || conversaAbertaTemNotaDeContas(estado))) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));

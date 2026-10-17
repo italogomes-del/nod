@@ -87,6 +87,8 @@ export type BancoMemoria = {
   trocasDeIa: (TrocaDeIa & { tenantId: string; ownerId: string })[];
   /** ADR-102: turnos.conta_id e conversas/trabalhos.sessao_conta_id ("conversa:<id>" / "trabalho:<id>"). */
   contaDoTurno: Map<string, string | null>;
+  /** NOD-280: a máquina "desta vez" de cada turno (o fake não a aplica no reivindicar; os testes a leem daqui). */
+  maquinaDestaVez: Map<string, string>;
   contaDaSessao: Map<string, string | null>;
   /** ADR-107 (0079): conversas/trabalhos.sessao_maquina_id (mesmas chaves) e turnos.harness_efetivo. */
   maquinaDaSessao: Map<string, string | null>;
@@ -165,6 +167,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     contasIa: estadoContasIaMemoria(),
     trocasDeIa: [],
     contaDoTurno: new Map(),
+    maquinaDestaVez: new Map(),
     contaDaSessao: new Map(),
     maquinaDaSessao: new Map(),
     harnessEfetivo: new Map(),
@@ -1381,6 +1384,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           pessoaEsperando: t.pessoaEsperando === true,
         };
         b.turnos.push(turno);
+        if (t.maquinaDestaVez) b.maquinaDestaVez.set(turno.id, t.maquinaDestaVez);
         // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
         if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         return turno;
@@ -1552,8 +1556,21 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
       async rodarDestaVez(conversaId, maquinaId) {
         const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
-        void maquinaId;
+        for (const t of ts) b.maquinaDestaVez.set(t.id, maquinaId);
         return ts.length;
+      },
+      async anteciparEsperasDoLimite(p) {
+        let n = 0;
+        const ts = doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId);
+        for (const t of ts) {
+          if (t.estado !== "pendente" || (t.acordarEm ?? null) === null || t.acordarEm! <= p.agora || !(t.harness === p.ia || (t.harness ?? "auto") === "auto")) continue;
+          const de = ts.some((x) => x.conversaId === t.conversaId && x.agenteId === t.agenteId && x.estado === "interrompido" && (x.motivoFalha === "limite_do_plano" || x.motivoFalha === "sem_conta")
+            && (x.id === t.retomaTurnoId || (t.retomaTurnoId !== null && x.retomaTurnoId === t.retomaTurnoId) || (!!t.mensagemOrigemId && x.mensagemOrigemId === t.mensagemOrigemId)));
+          if (!de) continue;
+          t.acordarEm = p.agora;
+          n += 1;
+        }
+        return n;
       },
       async cancelarPendente(id) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "pendente");

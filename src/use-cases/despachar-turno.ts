@@ -270,7 +270,7 @@ async function semContaNaMaquina(
   }
   // NOD-268 (regressão de 15/10: dez despachos, dez notas iguais): a nota da mesma conta e da mesma volta, ainda aberta,
   // não se repete. Na conversa, a fala espera a conta voltar (1 h sem horário), em silêncio — a nota já diz a hora.
-  const repetida = await notaIgualAberta(deps, { conversaId: turno.conversaId, contaId: sem.de.id, voltaEm: voltaDaNota(sem.decisao, sem.voltaEm, agora) });
+  const repetida = await notaIgualAberta(deps, { conversaId: turno.conversaId, agenteId: turno.agenteId, contaId: sem.de.id, voltaEm: voltaDaNota(sem.decisao, sem.voltaEm, agora) });
   const volta = voltaDaNota(sem.decisao, sem.voltaEm, agora) ?? agora + PRAZO_SEM_HORARIO_MS;
   const adiada = await adiarFala(deps, { turno, executor: p.executor, acordarEm: volta, autoria, agora, texto: null, causa: "sem_conta" });
   // QA do NOD-268: a rotina sem task não espera (adiarFala é só da conversa) e cada execução é um turno novo — com a nota

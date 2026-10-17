@@ -246,7 +246,10 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
   // No filtro, a conta que não está na máquina vira um botão grande (G2-M2).
   const direita = fora && x.maquinas.find((m) => m.id === filtro)?.conectada && !logins
     ? `<button type="button" class="bt sm" data-act="cl-entrar" data-id="${esc(c.id)}" data-maquina="${esc(filtro!)}">Entrar na ${esc(nomeCurto(x.maquinas.find((m) => m.id === filtro)!, x.maquinas))}</button>`
-    : `<span class="contas-estado ${classe}">${esc(estado)}</span>${chaveDaFila(c)}`;
+    : classe === "e-limite"
+      // NOD-280: a conta pode ter voltado antes do prazo — "Tentar de novo" limpa o limite e acorda as falas que esperavam.
+      ? `<span class="contas-estado ${classe}">${esc(estado)}</span><button type="button" class="ob-link" data-act="cl-tentar-de-novo" data-id="${esc(c.id)}">Tentar de novo</button>${chaveDaFila(c)}`
+      : `<span class="contas-estado ${classe}">${esc(estado)}</span>${chaveDaFila(c)}`;
   return `<li class="cl-linha${fora ? " fora" : ""}${logins ? " entrando" : ""}" data-ordem-item="${esc(c.id)}">
       <button type="button" class="cl-alca" data-alca-ordem aria-label="Mover ${esc(nome)} (setas para cima e para baixo)">${ICONE.alca}</button>
       <span class="cl-pos" aria-hidden="true">${pos}</span>

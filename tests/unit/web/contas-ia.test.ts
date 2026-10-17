@@ -5,7 +5,7 @@ import { criarContasDoMac, NOTA_LOGOUT_FALHOU } from "../../../web/lib/contas-do
 import { htmlDoAvisoDosTermos, TERMOS_DA_TROCA } from "../../../web/telas/aviso-termos.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../../../web/telas/cartao-ia.ts";
 import { planoNaTela, renderContasDaIa } from "../../../web/telas/contas-ia.ts";
-import { linhaContaSeguiu, linhaContaTrocada, linhaLimiteSemOutra } from "../../../web/telas/ia-fora.ts";
+import { fraseDoMotivoDaNota, linhaContaSeguiu, linhaContaTrocada, linhaLimiteSemOutra } from "../../../web/telas/ia-fora.ts";
 
 /** ADR-101 (2026-10-12, NOD-211): as contas em Provedores de IA e as linhas do limite na conversa (protótipo v3). */
 const AGORA = 1_760_000_000_000;
@@ -230,13 +230,68 @@ describe("a conversa no limite de uma conta da lista (ADR-102, CMD-1)", () => {
 
   it("um passo por saída: seguir com a conta da máquina, rodar no outro, entrar com ela aqui, ou esperar", () => {
     const html = linhaLimiteSemOutra(nota, p(ui())) ?? "";
-    expect(html).toContain('data-act="cl-seguir" data-id="c2" data-conversa="c1">Seguir com Claude · Leapy</button>');
-    expect(html).toContain('data-act="rodar-desta-vez" data-conversa="c1" data-maquina="m2">Rodar no MacBook desta vez</button>');
+    // NOD-284: todo passo leva o turno da nota.
+    expect(html).toContain('data-act="cl-seguir" data-id="c2" data-conversa="c1" data-turno="t1">Seguir com Claude · Leapy</button>');
+    expect(html).toContain('data-act="rodar-desta-vez" data-conversa="c1" data-maquina="m2" data-turno="t1">Rodar no MacBook desta vez</button>');
+    // NOD-280: "Tentar de novo" com a conta que bateu no limite.
+    expect(html).toContain('data-act="cl-tentar-de-novo" data-id="c1" data-conversa="c1" data-turno="t1">Tentar de novo com Pessoal</button>');
     expect(html).toContain('data-act="cl-entrar-chat" data-id="c3" data-ia="claude-cli"');
     expect(html).toContain("na vm-bots</button>");
     expect(html).toMatch(/ou esperar até \d\d:\d\d/);
     // O apelido é da pessoa, mas passa escapado.
     expect(html).not.toContain("<img");
+  });
+
+  it("re-QA A4 (m25): conta livre que não está em máquina nenhuma ainda ganha 'Entrar com' aqui", () => {
+    const sem = msg("Claude · Pessoal no limite.", {
+      kind: "limite_do_plano", harness: "claude-cli", voltaEm: null,
+      contas: {
+        de: { id: "c1", apelido: "Pessoal", ia: "claude-cli" },
+        livres: [{ id: "c6", apelido: "Nova", ia: "claude-cli", naMaquina: false, outraMaquina: null }],
+        maquina: { id: "m1", nome: "vm-bots" },
+        voltaEm: null,
+      },
+    });
+    const html = linhaLimiteSemOutra(sem, p(ui())) ?? "";
+    expect(html).toContain('data-act="cl-entrar-chat" data-id="c6"');
+    expect(html).toContain("Entrar com Claude · Nova na vm-bots");
+    expect(html).not.toContain("rodar-desta-vez");
+  });
+
+  it("NOD-280: um 'Rodar no X' por máquina, 'Entrar com' por conta e nunca uma conta de outra IA (NOD-224)", () => {
+    const outra = msg("Claude · Pessoal no limite.", {
+      kind: "limite_do_plano", harness: "claude-cli", voltaEm: null,
+      contas: {
+        de: { id: "c1", apelido: "Pessoal", ia: "claude-cli" },
+        livres: [
+          { id: "c3", apelido: "A", ia: "claude-cli", naMaquina: false, outraMaquina: { id: "m2", nome: "MacBook" } },
+          { id: "c4", apelido: "B", ia: "claude-cli", naMaquina: false, outraMaquina: { id: "m2", nome: "MacBook" } },
+          { id: "c5", apelido: "GPT", ia: "codex-cli", naMaquina: true, outraMaquina: null },
+        ],
+        maquina: { id: "m1", nome: "vm-bots" },
+        voltaEm: null,
+      },
+    });
+    const html = linhaLimiteSemOutra(outra, p(ui())) ?? "";
+    expect(html.match(/Rodar no MacBook desta vez/g)).toHaveLength(1);
+    expect(html).toContain("Entrar com Claude · A na vm-bots");
+    expect(html).toContain("Entrar com Claude · B na vm-bots");
+    expect(html).not.toContain("c5");
+    expect(html).toContain("Tentar de novo com Pessoal");
+  });
+
+  it("NOD-280: sem conta livre e sem prazo, a nota ainda oferece 'Tentar de novo'", () => {
+    const so = msg("Claude · Pessoal no limite.", {
+      kind: "limite_do_plano", harness: "claude-cli", voltaEm: null,
+      contas: { de: { id: "c1", apelido: "Pessoal", ia: "claude-cli" }, livres: [], maquina: null, voltaEm: null },
+    });
+    expect(linhaLimiteSemOutra(so, p(ui())) ?? "").toContain('data-act="cl-tentar-de-novo" data-id="c1"');
+  });
+
+  it("NOD-284: o aviso diz por que a nota não refez; refeita, nada a avisar", () => {
+    expect(fraseDoMotivoDaNota("ja_refeito")).toContain("já foi refeita");
+    expect(fraseDoMotivoDaNota("maquina_sem_contato")).toContain("não responde");
+    expect(fraseDoMotivoDaNota(null)).toBeNull();
   });
 
   it("as linhas de conta seguida e escolhida", () => {

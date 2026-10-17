@@ -108,6 +108,10 @@ describeIntegracao("pareamento por código (HTTP real, commita)", () => {
       expect((await srv.chamar(sessao(dona), "PUT", `maquinas/${chaveDaDona}/bots`, { agentes: [1] })).status).toBe(400);
       expect(await (await srv.chamar(sessao(dona), "PUT", `maquinas/${chaveDaDona}/bots`, { agentes: [bot.agenteId] })).json()).toEqual({ movidos: 1 });
       expect(await (await srv.chamar(sessao(outra), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaOutra })).json()).toEqual({ turnos: 0 });
+      // re-QA A4 (m27, NOD-280): com o turno da nota a rota vai pelo caso de uso — turno que não existe é 404 e turno
+      // malformado é 400; nunca o caminho antigo ({ turnos: 0 }) em silêncio.
+      expect((await srv.chamar(sessao(dona), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaDona, turnoId: randomUUID() })).status).toBe(404);
+      expect((await srv.chamar(sessao(dona), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaDona, turnoId: "nao-e-uuid" })).status).toBe(400);
       // null desfaz a escolha.
       const solto = await srv.chamar(sessao(dona), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: null });
       expect(((await solto.json()) as { agente: { maquinaId: string | null } }).agente.maquinaId).toBeNull();

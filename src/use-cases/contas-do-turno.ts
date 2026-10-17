@@ -111,7 +111,10 @@ export function semContaParaOTurno(
 
 /** O payload `contas` da nota de limite (a tela desenha os botões). */
 export function contasDaNota(de: ContaDaPessoa, d: DecisaoDoLimiteDaConta, maquina: { id: string; nome: string } | null, voltaEm: number | null): ContasNoLimite {
-  return { de: { id: de.id, apelido: de.apelido, ia: de.ia }, livres: d.tipo === "perguntar" ? d.livres : [], maquina, voltaEm };
+  // NOD-284: na sala a troca não refaz sozinha; a conta para onde ela iria vira o botão "Seguir com" (só da mesma IA,
+  // NOD-224 — a nota nunca oferece outra IA).
+  const livres = d.tipo === "perguntar" ? d.livres : d.tipo === "trocou" ? [{ id: d.para.id, apelido: d.para.apelido, ia: d.para.ia, naMaquina: true, outraMaquina: null }] : [];
+  return { de: { id: de.id, apelido: de.apelido, ia: de.ia }, livres, maquina, voltaEm };
 }
 
 /**
@@ -119,13 +122,18 @@ export function contasDaNota(de: ContaDaPessoa, d: DecisaoDoLimiteDaConta, maqui
  * do bot nem um "Seguindo com" (`conta_escolhida`, `conta_seguiu`). Uma regra só (NOD-268) para o "Seguir com" não refazer
  * duas vezes e para o despacho não escrever a mesma nota de novo.
  */
-export function notaDeLimite(mensagens: readonly Mensagem[], comTrocaDeIa = false): { nota: Mensagem; pos: number; aberta: boolean } | null {
+export function notaDeLimite(mensagens: readonly Mensagem[], agenteId?: string, comTrocaDeIa = false): { nota: Mensagem; pos: number; aberta: boolean } | null {
   // ADR-108 (R6 a): o "Continuar na conta" do aviso do bot fixo (`troca_de_ia` com o turno da fala) refaz como o "Seguir com".
   const ehNota = (m: Mensagem) => m.payload?.kind === "limite_do_plano" || (comTrocaDeIa && m.payload?.kind === "troca_de_ia");
-  const pos = mensagens.map((m) => ehNota(m) && m.turnoId !== null).lastIndexOf(true);
+  const pos = mensagens.map((m) => ehNota(m) && m.turnoId !== null && (agenteId === undefined || m.autoria.autor_id === agenteId)).lastIndexOf(true);
   if (pos < 0) return null;
-  const respondida = mensagens.slice(pos + 1).some((m) => m.autoria.autor_tipo === "agente" || m.payload?.kind === "conta_escolhida" || m.payload?.kind === "conta_seguiu");
-  return { nota: mensagens[pos]!, pos, aberta: !respondida };
+  const nota = mensagens[pos]!;
+  // NOD-284 (definido em 2026-10-15): numa sala, a fala de OUTRO bot não fecha a nota deste. A nota tem a autoria do bot
+  // do turno; sem ela (nota antiga), vale qualquer agente, como antes.
+  const dono = nota.autoria.autor_tipo === "agente" ? nota.autoria.autor_id : null;
+  const doDono = (m: Mensagem) => dono === null || m.autoria.autor_id === dono || m.turnoId === nota.turnoId;
+  const respondida = mensagens.slice(pos + 1).some((m) => (m.autoria.autor_tipo === "agente" || m.payload?.kind === "conta_escolhida" || m.payload?.kind === "conta_seguiu") && doDono(m));
+  return { nota, pos, aberta: !respondida };
 }
 
 /** O `voltaEm` que a nota grava (o mesmo cálculo de criarNotaDeContas): null quando já passou ou não há hora. */
@@ -138,8 +146,8 @@ export function voltaDaNota(decisao: DecisaoDoLimiteDaConta, voltaEm: number | n
  * NOD-268 (regressão de 15/10: dez despachos, dez notas iguais): a conversa já tem a nota aberta da MESMA conta e do MESMO
  * `voltaEm`? Então outra nota só repetiria a primeira.
  */
-export async function notaIgualAberta(deps: Pick<Deps, "repos">, p: { conversaId: string; contaId: string; voltaEm: number | null }): Promise<boolean> {
-  const n = notaDeLimite(await deps.repos.mensagens.listarDaConversa(p.conversaId, 30));
+export async function notaIgualAberta(deps: Pick<Deps, "repos">, p: { conversaId: string; agenteId?: string; contaId: string; voltaEm: number | null }): Promise<boolean> {
+  const n = notaDeLimite(await deps.repos.mensagens.listarDaConversa(p.conversaId, 30), p.agenteId);
   if (!n?.aberta || n.nota.payload?.kind !== "limite_do_plano") return false;
   return n.nota.payload.contas?.de.id === p.contaId && (n.nota.payload.voltaEm ?? null) === p.voltaEm;
 }
@@ -156,7 +164,7 @@ export async function criarNotaDeContas(deps: Pick<Deps, "repos" | "escopo">, p:
 }): Promise<RuntimeEvent[]> {
   const voltaEm = p.decisao.tipo === "todas_no_limite" ? p.decisao.voltaEm : p.voltaEm;
   const naNota = voltaDaNota(p.decisao, p.voltaEm, p.agora);
-  const texto = fraseDoLimiteDaConta(p.de, p.decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, p.agora), quandoVolta: (t) => quandoDaFrase(t, p.agora), voltaEm });
+  const texto = fraseDoLimiteDaConta(p.de, p.decisao, { maquina: p.maquina?.nome ?? null, quando: (t) => horaDaFrase(t, p.agora), quandoVolta: (t) => quandoDaFrase(t, p.agora), voltaEm, origem: p.turno.origem });
   const aviso = await deps.repos.mensagens.criar({
     conversaId: p.turno.conversaId,
     turnoId: p.turno.id,

@@ -157,6 +157,20 @@ export type ContaLivre = {
   outraMaquina: { id: string; nome: string } | null;
 };
 
+/**
+ * NOD-284 (definido em 2026-10-15): por que um passo da nota de limite ("Seguir com", "Rodar no X desta vez", "Tentar de
+ * novo") não refez a fala. null = refez (ou não havia fala a refazer e a escolha foi gravada).
+ */
+export type MotivoDaNota =
+  | "ja_refeito"
+  | "turno_nao_interrompido"
+  | "conta_de_outra_ia"
+  | "conta_no_limite"
+  | "conta_fora_da_maquina"
+  | "orcamento_da_sala"
+  | "bot_fora_da_sala"
+  | "maquina_sem_contato";
+
 export type ContasNoLimite = {
   de: { id: string; apelido: string; ia: IaComConta };
   livres: ContaLivre[];

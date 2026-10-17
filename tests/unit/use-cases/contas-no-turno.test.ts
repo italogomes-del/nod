@@ -5,7 +5,7 @@ import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../../src/domain/cota-da-ia.ts";
-import { anunciarContasDaMaquina, seguirComConta } from "../../../src/use-cases/contas-ia.ts";
+import { anunciarContasDaMaquina, rodarDestaVezComConta, seguirComConta, tentarDeNovoComConta } from "../../../src/use-cases/contas-ia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { despacharTurno } from "../../../src/use-cases/despachar-turno.ts";
 import { definirInteligenciaDoBot } from "../../../src/use-cases/inteligencia.ts";
@@ -231,6 +231,34 @@ describe("NOD-277: a espera da cota acaba quando a pessoa resolve", () => {
     expect(acordarEm(c, doClaude.id)).toBeNull();
     expect(acordarEm(c, doCodex.id)).toBe(T0 + TRES_DIAS);
     expect(acordarEm(c, marcada.id)).toBe(T0 + TRES_DIAS);
+  });
+
+  // Regression: re-QA do PR #329 pós-main 8f95bf88 — o "Seguir com" da task parada pela cota (Trabalhos, NOD-277) não leva
+  // turno; com o motivo da nota (NOD-284), a tela dizia "nada foi repetido" mesmo tendo acordado a task.
+  it("'Seguir com' da task (sem turno nem nota) acorda a espera e volta sem motivo", async () => {
+    const c = await cenario();
+    const doClaude = await espera(c, "claude-cli");
+    const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    expect(acordarEm(c, doClaude.id)).toBeNull();
+    expect(r.data).toEqual({ turnoId: null, motivo: null });
+  });
+
+  it("'Seguir com' da task numa conversa com a nota antiga já refeita: acorda a espera e volta sem motivo", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, T0 + HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, T0 + HORA);
+    await c.despachar();
+    await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    const doClaude = await espera(c, "claude-cli");
+    const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    expect(acordarEm(c, doClaude.id)).toBeNull();
+    expect(r.data).toEqual({ turnoId: null, motivo: null });
+  });
+
+  it("sem nota, sem tasks e sem espera: o motivo segue (a tela diz que nada foi repetido)", async () => {
+    const c = await cenario();
+    const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId });
+    expect(r.data).toEqual({ turnoId: null, motivo: "turno_nao_interrompido" });
   });
 
   it("conta nova pronta na máquina acorda a espera da IA dela; a corporativa fora da troca automática não", async () => {
@@ -511,6 +539,77 @@ describe("NOD-268: o alarme reenvio_em_laco", () => {
   });
 });
 
+
+describe("NOD-284/NOD-280: os passos da nota refazem a fala certa ou dizem por que não", () => {
+  /** A nota no limite: Claude · Pessoal e o ChatGPT no limite, Claude · Leapy livre na vm-bots. */
+  async function naNota() {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.despachar();
+    await c.deps.repos.agentes.definirMaquina([c.agenteId], c.vm);
+    // Merge da main (#340, NOD-269): a recusa no despacho grava `sem_conta`; a nota e os passos dela valem igual.
+    expect(c.banco.turnos.find((t) => t.id === c.turnoId)).toMatchObject({ estado: "interrompido", motivoFalha: "sem_conta" });
+    return c;
+  }
+
+  it("'Seguir com' pelo turno da nota refaz uma vez; o segundo clique diz que já foi refeita", async () => {
+    const c = await naNota();
+    const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId, turnoId: c.turnoId });
+    expect(r.data).toMatchObject({ motivo: null });
+    expect(r.data.turnoId).not.toBeNull();
+    expect(c.banco.turnos.find((t) => t.id === r.data.turnoId)).toMatchObject({ estado: "pendente", entradaTexto: "revisa o #861", origem: "conversa" });
+    const de2 = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId, turnoId: c.turnoId });
+    expect(de2.data).toEqual({ turnoId: null, motivo: "ja_refeito" });
+    expect(c.banco.turnos.filter((t) => t.estado === "pendente")).toHaveLength(1);
+  });
+
+  it("'Seguir com' numa conta também no limite não refaz nem grava a escolhida", async () => {
+    const c = await naNota();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, AS_14_50);
+    const r = await executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.conversaId, turnoId: c.turnoId });
+    expect(r.data).toEqual({ turnoId: null, motivo: "conta_no_limite" });
+    expect((await c.deps.repos.contasIa.modo()).escolhidas["claude-cli"] ?? null).toBeNull();
+  });
+
+  it("o turno de outra conversa não é refeito por esta nota", async () => {
+    const c = await naNota();
+    await expect(executar(c.deps, seguirComConta, { contaId: c.contas.cLeapy.id, conversaId: c.agenteId, turnoId: c.turnoId })).rejects.toThrow();
+  });
+
+  it("'Rodar no X desta vez': máquina sem contato não refaz; com contato, a fala refeita vai àquela máquina", async () => {
+    const c = await naNota();
+    const sem = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
+    expect(sem.data).toEqual({ turnoId: null, motivo: "maquina_sem_contato" });
+    c.banco.maquinaTokens.find((m) => m.id === c.vm)!.ultimoUsoEm = T0;
+    const r = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
+    expect(r.data.motivo).toBeNull();
+    expect(c.banco.maquinaDestaVez.get(r.data.turnoId!)).toBe(c.vm);
+    expect(c.banco.mensagens.at(-1)?.texto).toBe("Rodando no vm-bots desta vez.");
+  });
+
+  it("'Tentar de novo' com o turno limpa o limite da conta e refaz a fala", async () => {
+    const c = await naNota();
+    const r = await executar(c.deps, tentarDeNovoComConta, { contaId: c.contas.cPessoal.id, conversaId: c.conversaId, turnoId: c.turnoId });
+    expect(r.data.motivo).toBeNull();
+    expect(r.data.turnoId).not.toBeNull();
+    expect((await c.deps.repos.contasIa.buscar(c.contas.cPessoal.id))?.noLimiteAte).toBeNull();
+  });
+
+  it("'Tentar de novo' sem turno (Provedores de IA) limpa o limite e acorda a fala que esperava a conta", async () => {
+    const c = await cenario();
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cPessoal.id, AS_14_50);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.gPessoal.id, AS_14_50 + HORA);
+    await c.deps.repos.contasIa.marcarLimite(c.contas.cLeapy.id, AS_14_50 + 2 * HORA);
+    await c.despachar();
+    const adiado = c.banco.turnos.find((t) => t.estado === "pendente" && t.acordarEm)!;
+    expect(adiado.acordarEm).toBeGreaterThan(T0);
+    const r = await executar(c.deps, tentarDeNovoComConta, { contaId: c.contas.cPessoal.id });
+    expect(r.data.acordados).toBe(1);
+    expect(c.banco.turnos.find((t) => t.id === adiado.id)?.acordarEm).toBeLessThanOrEqual(T0);
+    expect((await c.deps.repos.contasIa.buscar(c.contas.cPessoal.id))?.noLimiteAte).toBeNull();
+  });
+});
 
 /**
  * NOD-253/NOD-283 (2026-10-15): quem para é a CONTA. O bot preso a uma IA nunca recebe a oferta da outra IA (NOD-224), e

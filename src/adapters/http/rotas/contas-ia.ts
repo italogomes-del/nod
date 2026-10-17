@@ -7,7 +7,7 @@ import { cifradoValido, PRAZO_DESCONEXAO_MS, type LoginsNaMaquina } from "../../
 import type { PareamentoDispositivo } from "../../../services/pareamento-dispositivo.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { assertUuid } from "../../../use-cases/apoio-l7.ts";
-import { contasDaPessoa, removerConta, reordenarContas, seguirComConta } from "../../../use-cases/contas-ia.ts";
+import { contasDaPessoa, removerConta, reordenarContas, seguirComConta, tentarDeNovoComConta } from "../../../use-cases/contas-ia.ts";
 import type { Deps } from "../../../use-cases/tipos.ts";
 import type { Rota } from "../roteador.ts";
 import { revogarChaveMaquina } from "../../../use-cases/chaves-maquina.ts";
@@ -125,10 +125,26 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
       padrao: /^\/contas-ia\/(?<id>[^/]+)\/seguir$/,
       async handler(ctx) {
         const contaId = assertUuid(ctx.params.id, "conta");
-        const corpo = (await ctx.corpo()) as { conversaId?: unknown };
+        const corpo = (await ctx.corpo()) as { conversaId?: unknown; turnoId?: unknown };
         const conversaId = assertUuid(corpo.conversaId, "conversa");
-        const r = await deps.dentro(ctx.escopo, (d) => executar(d, (dd, i) => seguirComConta(dd, i), { contaId, conversaId }));
+        // NOD-284: o turno da nota (o botão novo); sem ele, o botão antigo acha a última nota da conversa.
+        const turnoId = corpo.turnoId === undefined || corpo.turnoId === null ? null : assertUuid(corpo.turnoId, "turno");
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, (dd, i) => seguirComConta(dd, i), { contaId, conversaId, turnoId }));
         deps.avisar(ctx.escopo, "seguir");
+        ctx.json(202, r);
+      },
+    },
+    {
+      // NOD-280 (definido em 2026-10-15): "Tentar de novo com <conta>" — na nota (com o turno) ou em Provedores (sem).
+      metodo: "POST",
+      padrao: /^\/contas-ia\/(?<id>[^/]+)\/tentar-de-novo$/,
+      async handler(ctx) {
+        const contaId = assertUuid(ctx.params.id, "conta");
+        const corpo = (await ctx.corpo()) as { conversaId?: unknown; turnoId?: unknown };
+        const turnoId = corpo.turnoId === undefined || corpo.turnoId === null ? null : assertUuid(corpo.turnoId, "turno");
+        const conversaId = turnoId === null ? null : assertUuid(corpo.conversaId, "conversa");
+        const r = await deps.dentro(ctx.escopo, (d) => executar(d, (dd, i) => tentarDeNovoComConta(dd, i), { contaId, conversaId, turnoId }));
+        deps.avisar(ctx.escopo, "tentar_de_novo");
         ctx.json(202, r);
       },
     },

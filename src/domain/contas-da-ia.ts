@@ -144,9 +144,11 @@ export function listaDePosicoes(ps: readonly number[]): string {
  * A frase da conversa, só com posições (ADR-101 item 3). `quando` dá a hora ("14:00", "09/10 às 14:00") e `quandoVolta`
  * a hora com a preposição ("às 14:00", "em 09/10 às 14:00"). Os textos do protótipo v3.
  */
-export function fraseDaDecisao(d: DecisaoNoLimite, p: { ia: string; quando: (t: EpochMs) => string; quandoVolta: (t: EpochMs) => string }): string {
+export function fraseDaDecisao(d: DecisaoNoLimite, p: { ia: string; quando: (t: EpochMs) => string; quandoVolta: (t: EpochMs) => string; origem?: string }): string {
   const ate = (t: EpochMs | null) => (t !== null ? ` até ${p.quando(t)}` : "");
   if (d.tipo === "trocou") {
+    // NOD-284 (suposição da NOD-230, 2026-10-15): a sala não refaz sozinha a fala cortada — nunca "Seguindo com" ali.
+    if (p.origem === "sala") return `Conta ${d.de} do ${p.ia} no limite${ate(d.voltaEm)}. Fale de novo para seguir com a conta ${d.para}.`;
     const fora = d.foraDaTroca.length > 0 ? ` (${d.foraDaTroca.length === 1 ? "conta" : "contas"} ${listaDePosicoes(d.foraDaTroca)} fora da troca automática)` : "";
     return `Conta ${d.de} do ${p.ia} no limite${ate(d.voltaEm)}. Seguindo com a conta ${d.para}${fora}.`;
   }

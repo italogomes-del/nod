@@ -28,7 +28,7 @@ import type { AlvoAviso } from "../src/contracts/desktop.ts";
 import type { Experimentos } from "../src/contracts/raio-x.ts";
 import type { Escopo } from "../src/shared/types.ts";
 import type { FrameSse } from "../src/contracts/frame.ts";
-import { agenteDaTela, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
+import { agenteDaTela, conversaAbertaTemNotaDeContas, conversaDaTela, estadoInicial, invalidacoesAoReconectar, invalidacoesAoRetomar, invalidacoesDaTela, mudouNaTela, reduzir, type Acao, type Estado, type Invalidacao, type NivelGaveta, type SecaoEspaco, type Tela } from "./estado/reducer.ts";
 import { criarApi, ErroApi, observarRede, sessao as sessaoApi, type Api } from "./lib/api.ts";
 import { acaoDoErro, criarRegistroDeErros, detalhesDoErro, ehErroDeRede, erroDaAcao, erroDe as traduzirErro, erroParaRelatar, type ErroNaTela } from "./lib/erro-da-tela.ts";
 import { criarSondaDeRede } from "./lib/sonda-de-rede.ts";
@@ -69,7 +69,7 @@ import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPar
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso, motorDesatualizado, situacaoMotorFora } from "./telas/frota.ts";
-import { ehIa, inventarioDaIa, pedeInstalar } from "./telas/ia-fora.ts";
+import { ehIa, fraseDoMotivoDaNota, inventarioDaIa, pedeInstalar } from "./telas/ia-fora.ts";
 import { renderRotinas } from "./telas/rotinas.ts";
 import { nomesDosMembros, renderCabecalhoSala, renderNovaSala } from "./telas/sala.ts";
 import { abertasPorAgente, perguntasPorAgente, renderChamada, renderIncidentes, renderSuaVez, rotinasParadasPorAgente, SUBTITULO_ESPERANDO, SUBTITULO_ROTINA_PARADA } from "./telas/sua-vez.ts";
@@ -472,6 +472,12 @@ function erroDe(e: unknown): ErroNaTela | null {
  * vira `acao_nao_concluida` no banner — antes virava o "Reconectando… Tentamos de novo sozinhos", que sumia na próxima
  * leitura e deixava a pessoa achando que a ação tinha sido refeita.
  */
+/** NOD-284: o passo da nota não refez a fala — o banner diz por quê, sem jogar exceção (não é falha de rede nem bug). */
+function avisarMotivoDaNota(motivo: Parameters<typeof fraseDoMotivoDaNota>[0]): void {
+  const mensagem = fraseDoMotivoDaNota(motivo);
+  if (mensagem !== null) dispatch({ tipo: "erro", erro: { codigo: `nota_${motivo}`, mensagem } });
+}
+
 function mostrarErro(e: unknown): void {
   const erro = erroDe(e);
   if (erro === null) return;
@@ -776,7 +782,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
   if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
-  if (q === "contas") return secao === "maquinas" || secao === "conexao" || (t.tipo === "conversa" && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
+  if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -2964,12 +2970,23 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "troca-esperar": (el) => decidirTroca(el, "esperar"),
   "troca-levar": (el) => decidirTroca(el, "levar"),
   "troca-outra-ia": (el) => decidirTroca(el, "outra_ia"),
+  // NOD-284: o passo leva o turno da nota; quando o servidor não refaz, a tela diz por quê (nunca "seguindo" sem seguir).
   "cl-seguir": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
-    await api!.seguirComConta(el.dataset.id ?? "", conversaId);
+    const r = await api!.seguirComConta(el.dataset.id ?? "", conversaId, el.dataset.turno || undefined);
+    avisarMotivoDaNota(r?.motivo);
     // definido em 2026-10-15 (NOD-277): o "Seguir com" da task parada pela cota (data-trabalho) relê também a task e a lista.
     const trabalhoId = el.dataset.trabalho;
-    dispatch({ tipo: "invalidar", quais: trabalhoId ? [`conversa:${conversaId}` as Invalidacao, "trabalhos", `trabalho:${trabalhoId}` as Invalidacao] : [`conversa:${conversaId}` as Invalidacao] });
+    const conversa = `conversa:${conversaId}` as Invalidacao;
+    dispatch({ tipo: "invalidar", quais: trabalhoId ? [conversa, "contas", "trabalhos", `trabalho:${trabalhoId}` as Invalidacao] : [conversa, "contas"] });
+  }),
+  // NOD-280: a conta pode ter voltado antes do prazo — limpa o limite dela e refaz a fala da nota.
+  "cl-tentar-de-novo": (el) => agir(async () => {
+    const conversaId = el.dataset.conversa || undefined;
+    const turnoId = el.dataset.turno || undefined;
+    const r = await api!.tentarDeNovoConta(el.dataset.id ?? "", turnoId && conversaId ? { conversaId, turnoId } : {});
+    avisarMotivoDaNota(r?.motivo);
+    dispatch({ tipo: "invalidar", quais: [...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : []), "contas"] });
   }),
   "cl-entrar-chat": (el) => {
     const ia = el.dataset.ia;
@@ -3058,7 +3075,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "rodar-desta-vez": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
-    await api!.rodarDestaVez(conversaId, el.dataset.maquina ?? "");
+    const r = await api!.rodarDestaVez(conversaId, el.dataset.maquina ?? "", el.dataset.turno || undefined, el.dataset.conta || undefined);
+    avisarMotivoDaNota(r?.motivo);
     dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
   }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),

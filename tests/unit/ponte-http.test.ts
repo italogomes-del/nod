@@ -125,6 +125,13 @@ describe("desktop: fronteiras HTTP", () => {
     }
     expect("limiteVoltaEm" in entrega({ ...base, resultado: { ...resultado, motivoFalha: "erro_execucao", limiteVoltaEm: voltaEm } }, "maq", agora).resultado).toBe(false);
   });
+  it("NOD-280 (re-QA A4, m04): hora entre 8 e 31 dias chega cortada em 8 dias, a mesma que o servidor grava", () => {
+    const agora = Date.UTC(2026, 9, 6, 12);
+    const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "" } };
+    const resultado = { desfecho: "falha", motivoFalha: "limite_do_plano", texto: "", sessaoCli: null, custoUsd: null, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+    expect(entrega({ ...base, resultado: { ...resultado, limiteVoltaEm: agora + 20 * 86_400_000 } }, "maq", agora).resultado.limiteVoltaEm).toBe(agora + 8 * 86_400_000);
+    expect(entrega({ ...base, resultado: { ...resultado, limiteVoltaEm: agora + 8 * 86_400_000 } }, "maq", agora).resultado.limiteVoltaEm).toBe(agora + 8 * 86_400_000);
+  });
   it("ADR-101: a decisão das contas no limite atravessa só em turno falho e no formato; fora disso some", () => {
     const agora = Date.UTC(2026, 9, 12, 12);
     const base = { turnoId: "11111111-1111-4111-8111-111111111111", seqLocal: 1, fala: { tipo: "texto", texto: "" } };

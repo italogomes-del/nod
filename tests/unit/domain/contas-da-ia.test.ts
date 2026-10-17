@@ -175,3 +175,13 @@ describe("contaNoLimiteValida (o que vem do Mac pela ponte)", () => {
     expect(contaNoLimiteValida({ tipo: "trocou", de: 1, para: 2, voltaEm: null, foraDaTroca: [], apelido: "Leapy" }, AGORA)).toEqual({ tipo: "trocou", de: 1, para: 2, voltaEm: null, foraDaTroca: [] });
   });
 });
+
+describe("fraseDaDecisao na sala (re-QA A4, m17 — NOD-284)", () => {
+  it("troca na sala nunca diz 'Seguindo com': pede para falar de novo; na conversa segue dizendo 'Seguindo com'", () => {
+    const d = { tipo: "trocou" as const, de: 1, para: 3, voltaEm: null, foraDaTroca: [2] };
+    const naSala = fraseDaDecisao(d, { ia: "Claude Code", quando, quandoVolta: (t) => `às ${quando(t)}`, origem: "sala" });
+    expect(naSala).toBe("Conta 1 do Claude Code no limite. Fale de novo para seguir com a conta 3.");
+    expect(naSala).not.toContain("Seguindo com");
+    expect(frase(d)).toContain("Seguindo com a conta 3");
+  });
+});

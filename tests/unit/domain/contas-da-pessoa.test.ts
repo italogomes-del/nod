@@ -191,6 +191,10 @@ describe("fraseDoLimiteDaConta", () => {
     expect(fraseDoLimiteDaConta(de, { tipo: "todas_no_limite", voltaEm: AGORA + HORA }, p)).toBe("Todas as suas contas estão no limite. A primeira volta às 14:00.");
   });
 
+  it("NOD-284: na sala a troca não refaz sozinha — a frase pede para falar de novo", () => {
+    expect(fraseDoLimiteDaConta(de, { tipo: "outra_ia", para: conta("Pessoal", "codex-cli", 2) }, { ...p, origem: "sala" })).toBe("Claude · Pessoal no limite na vm-bots até 14:00. Fale de novo para seguir com ChatGPT · Pessoal.");
+  });
+
   it("ADR-108 (R7): na mesma IA a linha é leve — quem acabou, quando, e com quem seguiu no mesmo modelo", () => {
     const d = { tipo: "trocou" as const, para: conta("Marlon 20x", "claude-cli", 4) };
     expect(fraseDoLimiteDaConta({ ia: "claude-cli", apelido: "marlonwlv (20x)" }, d, { ...p, quando: () => "20:39", acabouEm: AGORA })).toBe("marlonwlv (20x) acabou às 20:39 → seguindo no Claude · Marlon 20x · mesmo modelo");

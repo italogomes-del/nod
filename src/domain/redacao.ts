@@ -36,6 +36,15 @@ export type ChaveRedacao =
   | "fala-no-limite-espera"
   | "ia-pronta-noutra-maquina"
   | "conta-fora-da-maquina"
+  | "rodando-desta-vez"
+  | "tentando-de-novo"
+  | "nota-ja-refeita"
+  | "nota-turno-nao-interrompido"
+  | "nota-conta-de-outra-ia"
+  | "nota-conta-no-limite"
+  | "nota-orcamento-da-sala"
+  | "nota-bot-fora-da-sala"
+  | "nota-maquina-sem-contato"
   | "negacao-terminal"
   | "decisao-vencida"
   | "retomada"
@@ -105,6 +114,16 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "ia-pronta-noutra-maquina": "O {ia} está no limite da assinatura. O {outra} está pronto noutra máquina, mas este bot roda {maquina}. Sua mensagem volta sozinha {quando}.",
   // NOD-268: "Seguir com" numa conta que não está logada na máquina que pega o turno — refazer só daria outra nota.
   "conta-fora-da-maquina": "A conta {conta} não está {maquina}. Entre com ela lá ou escolha outra conta.",
+  // NOD-280/NOD-284 (definido em 2026-10-15): os passos da nota de limite dizem o que fizeram — ou por que não refizeram.
+  "rodando-desta-vez": "Rodando no {maquina} desta vez.",
+  "tentando-de-novo": "Tentando de novo com {conta}.",
+  "nota-ja-refeita": "Essa fala já foi refeita; nada foi repetido.",
+  "nota-turno-nao-interrompido": "Essa fala não está parada no limite; nada foi repetido.",
+  "nota-conta-de-outra-ia": "{conta} é de outra IA; este bot segue no {ia}. Escolha uma conta do {ia}.",
+  "nota-conta-no-limite": "{conta} também está no limite. Escolha outra conta ou espere ela voltar.",
+  "nota-orcamento-da-sala": "A sala esfriou: {agente} só fala de novo depois que uma pessoa falar na sala.",
+  "nota-bot-fora-da-sala": "{agente} não está mais na sala; nada foi repetido.",
+  "nota-maquina-sem-contato": "O {maquina} não responde agora; nada foi repetido. Escolha outra máquina ou espere ele voltar.",
   "negacao-terminal": "Negado (terminal): {nome} — {motivo}. Não tente outro caminho neste turno.",
   // definido em 2026-09-24: {desfecho} em palavras (varredor-expiracao.ts), nunca o enum com espaços no lugar de "_".
   "decisao-vencida": "Este pedido venceu em {quando} sem resposta — {desfecho}. Você pode reabrir.",

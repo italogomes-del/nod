@@ -7,7 +7,7 @@ import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/co
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
-import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas } from "../../src/contracts/contas-ia.ts";
+import type { CodigoCifrado, ContasIaDto, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
 import type { ComandosDto } from "../../src/contracts/comandos.ts";
@@ -328,7 +328,8 @@ export function criarApi(escopo: Escopo) {
     maquinaPadrao: (maquinaId: string | null) => pedir<{ padraoId: string | null }>("PUT", `${base}/maquinas/padrao`, { maquinaId }),
     verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string; pedidoHaS: number }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
     aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
-    rodarDestaVez: (conversaId: string, maquinaId: string) => post<{ turnos: number }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId }),
+    rodarDestaVez: (conversaId: string, maquinaId: string, turnoId?: string, contaId?: string) =>
+      post<{ turnos: number; turnoId?: string | null; motivo?: MotivoDaNota | null }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId, ...(turnoId ? { turnoId } : {}), ...(contaId ? { contaId } : {}) }),
     // ADR-102: as contas de IA da pessoa em todas as máquinas, o login numa máquina pela tela e o convite da VM.
     contasIa: () => get<ContasIaDto>("contas-ia"),
     ordemContas: (ids: string[]) => pedir<null>("PUT", `${base}/contas-ia/ordem`, { ids }),
@@ -336,7 +337,10 @@ export function criarApi(escopo: Escopo) {
     mudarConta: (id: string, corpo: { apelido?: string; entraNaTrocaAutomatica?: boolean }) => patch<null>(`contas-ia/${encodeURIComponent(id)}`, corpo),
     sairDaConta: (id: string, maquinaId: string) => post<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}/sair`, { maquinaId }),
     removerConta: (id: string) => del<{ ok: true }>(`contas-ia/${encodeURIComponent(id)}`),
-    seguirComConta: (id: string, conversaId: string) => post<unknown>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId }),
+    seguirComConta: (id: string, conversaId: string, turnoId?: string) =>
+      post<{ turnoId?: string | null; motivo?: MotivoDaNota | null }>(`contas-ia/${encodeURIComponent(id)}/seguir`, { conversaId, ...(turnoId ? { turnoId } : {}) }),
+    tentarDeNovoConta: (id: string, p: { conversaId?: string; turnoId?: string }) =>
+      post<{ turnoId?: string | null; motivo?: MotivoDaNota | null; acordados?: number }>(`contas-ia/${encodeURIComponent(id)}/tentar-de-novo`, p),
     // ADR-108 (R4/R6): a escolha no aviso de troca de IA do bot.
     /** Revisão do PR 2 (I2): `trocaId` diz qual aviso (o bot pode ter um por IA). */
     decidirTrocaDeIa: (agenteId: string, decisao: DecisaoDaPessoa, trocaId?: string) => post<{ decisao: string; aplicada: boolean; tasks: number }>(`agentes/${encodeURIComponent(agenteId)}/troca-de-ia`, { decisao, ...(trocaId ? { trocaId } : {}) }),

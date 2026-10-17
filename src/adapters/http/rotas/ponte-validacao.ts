@@ -27,6 +27,7 @@ import { TETO_TAREFAS, TETO_TITULO_TAREFA } from "../../../domain/tarefas-do-bot
 import { LIMIARES_REPETICAO } from "../../../domain/vigia-turno.ts";
 import { usoDoPlanoValido } from "../../../domain/uso-do-plano.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
+import { PRAZO_LIMITE_MAXIMO_MS } from "../../../domain/inteligencia.ts";
 import { TEXTO_ENTREGA_MAX_CHARS } from "../../../shared/constantes.ts";
 import { UUID } from "../roteador.ts";
 import type { TipoAnexo } from "../../../contracts/anexo.ts";
@@ -326,7 +327,9 @@ export function entrega(v: unknown, machineId: string, agora: number = Date.now(
   // (ponte-interna, `erroCruNoLog: false` na ponte das máquinas).
   const erroCru = typeof r.erroCru === "string" && r.erroCru.length <= ERRO_CRU_MAX_CHARS ? r.erroCru : null;
   // NOD-171: extra como o uso do plano. Só com o limite e até 31 dias à frente; fora disso some (a frase fica sem hora).
-  const voltaEm = r.motivoFalha === "limite_do_plano" && Number.isSafeInteger(r.limiteVoltaEm) && Number(r.limiteVoltaEm) > 0 && Number(r.limiteVoltaEm) <= agora + 31 * 86_400_000 ? Number(r.limiteVoltaEm) : null;
+  // NOD-280 (definido em 2026-10-15): o que passa de 8 dias chega cortado em 8 (PRAZO_LIMITE_MAXIMO_MS) — a conta não fica
+  // presa um mês e a frase diz a mesma hora que o servidor grava.
+  const voltaEm = r.motivoFalha === "limite_do_plano" && Number.isSafeInteger(r.limiteVoltaEm) && Number(r.limiteVoltaEm) > 0 && Number(r.limiteVoltaEm) <= agora + 31 * 86_400_000 ? Math.min(Number(r.limiteVoltaEm), agora + PRAZO_LIMITE_MAXIMO_MS) : null;
   // ADR-101 (2026-10-12): a decisão do Mac sobre as contas no limite, só num turno falho; fora do formato some. Não só
   // com `limite_do_plano`: o limite do Codex chega como `erro_execucao` com o texto do fornecedor, e o servidor só a usa
   // quando ele mesmo classifica o turno como limite (assentar-turno).

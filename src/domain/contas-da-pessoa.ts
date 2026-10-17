@@ -224,10 +224,12 @@ export const nomeDaConta = (c: { ia: IaComConta; apelido: string }): string => `
 export function fraseDoLimiteDaConta(
   de: { ia: IaComConta; apelido: string },
   d: DecisaoDoLimiteDaConta,
-  p: { maquina: string | null; quando: (t: EpochMs) => string; quandoVolta: (t: EpochMs) => string; voltaEm: EpochMs | null; acabouEm?: EpochMs },
+  p: { maquina: string | null; quando: (t: EpochMs) => string; quandoVolta: (t: EpochMs) => string; voltaEm: EpochMs | null; origem?: string; acabouEm?: EpochMs },
 ): string {
   const onde = p.maquina ? ` na ${p.maquina}` : "";
   const noLimite = `${nomeDaConta(de)} no limite${onde}${p.voltaEm !== null ? ` até ${p.quando(p.voltaEm)}` : ""}.`;
+  // NOD-284 (suposição da NOD-230, 2026-10-15): a sala não refaz sozinha a fala cortada — nunca "Seguindo com" ali.
+  if ((d.tipo === "trocou" || d.tipo === "outra_ia") && p.origem === "sala") return `${noLimite} Fale de novo para seguir com ${nomeDaConta(d.para)}.`;
   if (d.tipo === "trocou") return `${de.apelido} acabou${p.acabouEm !== undefined ? ` às ${p.quando(p.acabouEm)}` : ""} → seguindo no ${nomeDaConta(d.para)} · mesmo modelo`;
   if (d.tipo === "outra_ia") return `${noLimite} Seguindo com ${nomeDaConta(d.para)}.`;
   if (d.tipo === "perguntar") {

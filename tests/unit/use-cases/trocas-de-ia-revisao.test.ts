@@ -271,6 +271,24 @@ describe("I3: a volta do bot fixo", () => {
   });
 });
 
+// Regression: re-QA do PR #329 (merge 62d2c747) — o "Continuar na conta" do aviso só de tasks acordava as tasks e a tela
+// ainda dizia "Essa fala não está parada no limite; nada foi repetido" (motivo turno_nao_interrompido do núcleo da NOD-284).
+// Found by /qa on 2026-10-16
+// Report: comentário de re-QA no PR #329
+describe("re-QA PR #329: 'Continuar na conta' do aviso de tasks não volta com motivo", () => {
+  it("aviso sem fala da conversa: acorda a task, fecha o aviso e não diz que nada aconteceu", async () => {
+    const c = await cenario({ fixo: true });
+    const task = await c.task();
+    await c.bateNoLimite(task.turnoId, c.conta("Pessoal").id, T0 + 2 * HORA);
+    const r = await executar(c.deps, seguirComConta, { contaId: c.conta("Leapy").id, conversaId: c.conversaId });
+    expect(c.trocas()[0]).toMatchObject({ decisao: "conta" });
+    expect(r.data).toEqual({ turnoId: null, motivo: null });
+    // Sem aviso para fechar nem fala parada, o mesmo clique segue dizendo por que não refez.
+    const outra = await executar(c.deps, seguirComConta, { contaId: c.conta("Leapy").id, conversaId: c.conversaId });
+    expect(outra.data).toEqual({ turnoId: null, motivo: "turno_nao_interrompido" });
+  });
+});
+
 describe("I4: a escolhida fora da fila não vira caminho silencioso", () => {
   it("'Continuar na conta Leapy' grava a escolhida; quando a fila da vm-bots volta, o varredor a solta", async () => {
     const c = await cenario({ fixo: true });

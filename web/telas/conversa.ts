@@ -226,7 +226,7 @@ function linhaDeIa(m: Mensagem, estado: Estado): string | null {
     const ia = ias.find((i) => i.id === p.para);
     return linhaIaTrocada(m, { modelo: ia && bot ? ia.modelos.find((x) => x.id === escolhaEfetiva(ia, inteligenciaDoBot(bot).escolhas).modelo)?.nome ?? null : null });
   }
-  return linhaLimiteSemOutra(m, { nomeDoBot: bot?.nome ?? null, agenteId: bot?.id ?? null, agora: estado.agora, ui: estado.iasMac, ias, fixa: bot ? inteligenciaDoBot(bot).modo === "fixa" : false });
+  return linhaLimiteSemOutra(m, { nomeDoBot: bot?.nome ?? null, agenteId: bot?.id ?? null, agora: estado.agora, ui: estado.iasMac, ias, fixa: bot ? inteligenciaDoBot(bot).modo === "fixa" : false, contasIa: estado.contasIa });
 }
 
 /**

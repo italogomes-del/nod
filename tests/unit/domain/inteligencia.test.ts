@@ -237,3 +237,15 @@ describe("NOD-268: teto de reenvios, espera do Automático e o alarme do laço",
     expect(LACO_TURNOS).toBe(3);
   });
 });
+
+describe("NOD-280: prazoDoLimiteDaConta", () => {
+  it("sem hora ou no passado: uma hora; longe demais: corta em 8 dias; senão a hora dita", async () => {
+    const { prazoDoLimiteDaConta, PRAZO_LIMITE_MAXIMO_MS, PRAZO_LIMITE_SEM_HORARIO_MS } = await import("../../../src/domain/inteligencia.ts");
+    const agora = 1_800_000_000_000;
+    expect(prazoDoLimiteDaConta(null, agora)).toBe(agora + PRAZO_LIMITE_SEM_HORARIO_MS);
+    expect(prazoDoLimiteDaConta(agora - 1, agora)).toBe(agora + PRAZO_LIMITE_SEM_HORARIO_MS);
+    expect(prazoDoLimiteDaConta(agora + 31 * 86_400_000, agora)).toBe(agora + PRAZO_LIMITE_MAXIMO_MS);
+    expect(PRAZO_LIMITE_MAXIMO_MS).toBe(8 * 86_400_000);
+    expect(prazoDoLimiteDaConta(agora + 3_600_000 * 5, agora)).toBe(agora + 3_600_000 * 5);
+  });
+});

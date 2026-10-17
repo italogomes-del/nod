@@ -1,7 +1,7 @@
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { CausaSemIa, Inventario } from "../../src/contracts/inventario.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
-import type { ContasNoLimite } from "../../src/contracts/contas-ia.ts";
+import type { ContasIaDto, ContasNoLimite, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { PayloadTrocaDeIa } from "../../src/contracts/troca-de-ia.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
@@ -184,7 +184,7 @@ export function avisoModeloRecusado(m: Mensagem, p: { nomeDoBot: string | null; 
  * (`data-fica`); o Claude, que pede o código colado, termina em Provedores de IA. Passado o limite (ou uma hora sem prazo),
  * vira um registro sem cor. null quando a mensagem não é desse aviso.
  */
-export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean }): string | null {
+export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean; contasIa?: ContasIaDto | null }): string | null {
   const l = m.payload;
   if (l?.kind !== "limite_do_plano") return null;
   const ia = ehIa(l.harness) ? l.harness : null;
@@ -195,7 +195,8 @@ export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; 
     return `<div class="linha-centro-wrap linha-limite-passou"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(nome)} esteve no limite ${esc(quando)}</span></span></div>`;
   }
   // ADR-102: a conta da lista (servidor) bateu no limite — a frase do servidor e um passo por saída.
-  if (l.contas && (l.contas.livres.length > 0 || l.contas.voltaEm !== null)) return linhaContasNoLimite(m, l.contas, p.agora);
+  // NOD-280: com a nota de contas, a linha sai sempre — mesmo sem conta livre, "Tentar de novo" e a espera ficam.
+  if (l.contas) return linhaContasNoLimite(m, comContasDeAgora(l.contas, p.contasIa ?? null), p.agora);
   if (l.conta?.tipo === "perguntar" && ia) return linhaSeguirComConta(ia, l.conta, m.texto, p);
   // ADR-101: todas as contas da IA no limite — a frase do servidor diz quando a primeira volta; o passo segue o de sempre.
   const limite = l.conta?.tipo === "todas_no_limite" ? m.texto : l.voltaEm !== null ? `${nome} no limite até ${quandoVolta(l.voltaEm, p.agora).replace(/^às /, "")}` : `${nome} chegou ao limite`;
@@ -241,6 +242,24 @@ function linhaSeguirComConta(
 }
 
 /**
+ * NOD-280 (critério 9): a nota é congelada no servidor, mas a conta pode entrar na máquina depois dela. Com a lista de
+ * contas carregada (`GET contas-ia`), "está na máquina do turno" sai dela: a conta "pronta" na máquina da nota vira
+ * "Seguir com"; a que saiu de lá deixa de ser. Sem a lista, sem a máquina na nota ou com a conta fora da lista, vale o
+ * payload. Só a tela se recalcula: o fim do login não refaz o turno sozinho (compor.ts).
+ */
+export function comContasDeAgora(c: ContasNoLimite, contasIa: ContasIaDto | null): ContasNoLimite {
+  const maquina = c.maquina;
+  if (!contasIa || !maquina) return c;
+  const livres = c.livres.map((l) => {
+    const conta = contasIa.contas.find((x) => x.id === l.id);
+    if (!conta) return l;
+    const naMaquina = conta.maquinas.some((x) => x.maquinaId === maquina.id && x.estado === "pronta");
+    return naMaquina === l.naMaquina ? l : { ...l, naMaquina };
+  });
+  return { ...c, livres };
+}
+
+/**
  * ADR-102 (2026-10-13, protótipo CMD-1): a conta bateu no limite e há outra livre do mesmo provedor ("Perguntar antes"),
  * ou só noutra máquina. A frase do servidor ("Claude · Pessoal no limite na vm-bots até 14:00. Seguir com …?") e um passo
  * por saída: "Seguir com <conta>" (logada na máquina do turno; o turno é refeito nela), "Rodar no <máquina> desta vez"
@@ -249,17 +268,46 @@ function linhaSeguirComConta(
 function linhaContasNoLimite(m: Mensagem, c: ContasNoLimite, agora: number): string {
   const sep = '<span aria-hidden="true">·</span>';
   const conversa = esc(m.conversaId);
+  // NOD-280: cada botão leva o turno da nota, para o servidor refazer exatamente a fala cortada (ou dizer por que não).
+  const turno = m.turnoId ? ` data-turno="${esc(m.turnoId)}"` : "";
   const passos: string[] = [];
-  for (const l of c.livres) {
+  const maquinasJa = new Set<string>();
+  // NOD-224: a nota nunca oferece outra IA — só as contas da mesma IA da que bateu no limite.
+  for (const l of c.livres.filter((x) => x.ia === c.de.ia)) {
     const nome = `${PROVEDOR_DA_IA[l.ia].nome} · ${l.apelido}`;
-    if (l.naMaquina) passos.push(`<button type="button" class="linha-link forte" data-act="cl-seguir" data-id="${esc(l.id)}" data-conversa="${conversa}">Seguir com ${esc(nome)}</button>`);
-    else if (l.outraMaquina) {
-      passos.push(`<button type="button" class="linha-link" data-act="rodar-desta-vez" data-conversa="${conversa}" data-maquina="${esc(l.outraMaquina.id)}">Rodar no ${esc(l.outraMaquina.nome)} desta vez</button>`);
-      if (c.maquina) passos.push(`<button type="button" class="linha-link" data-act="cl-entrar-chat" data-id="${esc(l.id)}" data-ia="${l.ia}" data-apelido="${esc(l.apelido)}" data-maquina="${esc(c.maquina.id)}">Entrar com ${esc(nome)} na ${esc(c.maquina.nome)}</button>`);
+    if (l.naMaquina) {
+      passos.push(`<button type="button" class="linha-link forte" data-act="cl-seguir" data-id="${esc(l.id)}" data-conversa="${conversa}"${turno}>Seguir com ${esc(nome)}</button>`);
+      continue;
     }
+    // Um "Rodar no X desta vez" por máquina, por mais contas livres que ela tenha.
+    if (l.outraMaquina && !maquinasJa.has(l.outraMaquina.id)) {
+      maquinasJa.add(l.outraMaquina.id);
+      passos.push(`<button type="button" class="linha-link" data-act="rodar-desta-vez" data-conversa="${conversa}" data-maquina="${esc(l.outraMaquina.id)}"${turno}>Rodar no ${esc(l.outraMaquina.nome)} desta vez</button>`);
+    }
+    if (c.maquina) passos.push(`<button type="button" class="linha-link" data-act="cl-entrar-chat" data-id="${esc(l.id)}" data-ia="${l.ia}" data-apelido="${esc(l.apelido)}" data-maquina="${esc(c.maquina.id)}">Entrar com ${esc(nome)} na ${esc(c.maquina.nome)}</button>`);
   }
+  // NOD-280: a conta pode ter voltado antes do prazo; "Tentar de novo" limpa o limite dela e refaz a fala.
+  passos.push(`<button type="button" class="linha-link" data-act="cl-tentar-de-novo" data-id="${esc(c.de.id)}" data-conversa="${conversa}"${turno}>Tentar de novo com ${esc(c.de.apelido)}</button>`);
   if (c.voltaEm !== null) passos.push(`<span>ou esperar ${esc(quandoVolta(c.voltaEm, agora).replace(/^às /, "até "))}</span>`);
-  return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(m.texto)}</span>${passos.length ? `${sep}${passos.join(sep)}` : ""}</span></div>`;
+  return `<div class="linha-centro-wrap linha-espera" role="status" data-fica><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(m.texto)}</span>${sep}${passos.join(sep)}</span></div>`;
+}
+
+/**
+ * NOD-284: a frase do aviso quando um passo da nota não refez a fala — a nota nunca diz "seguindo" sem ter seguido.
+ * null = refez (nada a avisar).
+ */
+export function fraseDoMotivoDaNota(motivo: MotivoDaNota | null | undefined): string | null {
+  switch (motivo) {
+    case "ja_refeito": return "Essa fala já foi refeita; nada foi repetido.";
+    case "turno_nao_interrompido": return "Essa fala não está parada no limite; nada foi repetido.";
+    case "conta_de_outra_ia": return "Essa conta é de outra IA; escolha uma conta da IA deste bot.";
+    case "conta_no_limite": return "Essa conta também está no limite. Escolha outra ou espere ela voltar.";
+    case "conta_fora_da_maquina": return "Essa conta não está pronta nesta máquina; nada foi repetido.";
+    case "orcamento_da_sala": return "A sala esfriou: o bot só fala de novo depois que uma pessoa falar na sala.";
+    case "bot_fora_da_sala": return "O bot não está mais na sala; nada foi repetido.";
+    case "maquina_sem_contato": return "Essa máquina não responde agora; nada foi repetido. Escolha outra ou espere ela voltar.";
+    default: return null;
+  }
 }
 
 /** ADR-102: o turno seguiu noutra conta sozinho ("Trocar sozinho" ou outra IA), ou na conta que a pessoa escolheu. */

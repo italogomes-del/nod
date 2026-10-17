@@ -9,6 +9,8 @@ import type { MaquinaConectada } from "./ponte.ts";
 import { emitirChaveMaquina, revogarChaveMaquina } from "../../../use-cases/chaves-maquina.ts";
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
+import { assertUuid } from "../../../use-cases/apoio-l7.ts";
+import { rodarDestaVezComConta } from "../../../use-cases/contas-ia.ts";
 
 /**
  * "Minhas chaves" (E1.3, ADR-031): a pessoa da sessão emite, lista e revoga as chaves dos próprios
@@ -188,7 +190,18 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       metodo: "POST",
       padrao: /^\/conversas\/(?<id>[^/]+)\/rodar-desta-vez$/,
       async handler(ctx) {
-        const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
+        const corpo = (await ctx.corpo()) as { maquinaId?: unknown; turnoId?: unknown; contaId?: unknown };
+        // NOD-280 (definido em 2026-10-15): com o turno da nota, refaz aquele turno na máquina escolhida (o interrompido não é
+        // pendente: o UPDATE abaixo não o alcançava). Sem `turnoId` (cliente antigo), o de antes: só os pendentes.
+        if (corpo.turnoId !== undefined && corpo.turnoId !== null) {
+          const conversaId = assertUuid(ctx.params.id, "conversa");
+          const turnoId = assertUuid(corpo.turnoId, "turno");
+          const maquinaId = assertUuid(corpo.maquinaId, "máquina");
+          const contaId = corpo.contaId === undefined || corpo.contaId === null ? null : assertUuid(corpo.contaId, "conta");
+          const r = await deps.dentro(ctx.escopo, (d) => executar(d, (dd, i) => rodarDestaVezComConta(dd, i), { conversaId, turnoId, maquinaId, contaId }));
+          ctx.json(200, { turnos: r.turnoId ? 1 : 0, ...r });
+          return;
+        }
         const n = await deps.dentro(ctx.escopo, async (d) => d.repos.turnos.rodarDestaVez(ctx.params.id ?? "", await exigirChaveViva(d, corpo.maquinaId)));
         log("info", "turno_rodar_desta_vez", { pessoa_id: ctx.escopo.pessoaId, conversa_id: ctx.params.id, turnos: n });
         ctx.json(200, { turnos: n });
