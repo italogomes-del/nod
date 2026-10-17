@@ -229,6 +229,23 @@ function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; orga
     </div>`;
 }
 
+/**
+ * A cota da conta (NOD-302, CA12 da NOD-253): o uso das janelas ainda vigentes e, quando a cota segura o fundo, até quando.
+ * "5 h: 82% · semana: 40% · na reserva, volta às 14:30". Sem leitura (nenhum turno dela rodou ainda), nada.
+ */
+export function linhaDaCota(c: ContaIa, agora: number): string {
+  const q = c.cota;
+  if (!q) return "";
+  const pct = (u: number) => `${Math.min(100, Math.floor(u * 100))}%`;
+  const partes = [q.cincoHoras ? `5 h: ${pct(q.cincoHoras.utilizacao)}` : null, q.semana ? `semana: ${pct(q.semana.utilizacao)}` : null];
+  if (q.situacao !== "livre") {
+    const onde = q.situacao === "limite" ? "no limite" : "na reserva";
+    partes.push(q.voltaEm !== null && q.voltaEm > agora ? `${onde}, volta às ${hora(q.voltaEm)}` : onde);
+  }
+  const texto = partes.filter(Boolean).join(" · ");
+  return texto ? `<div class="cl-cota${q.situacao !== "livre" ? ` c-${q.situacao}` : ""}" data-cota="${q.situacao}">${esc(texto)}</div>` : "";
+}
+
 function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null): string {
   const filtro = x.ui.filtro;
   const fora = filtro !== null && !prontaEm(c, filtro);
@@ -257,6 +274,7 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
       <div class="cl-corpo">
         <div class="cl-nome"><b>${esc(PROVEDOR[c.ia].nome)} · ${esc(c.apelido)}</b>${c.plano ? `<span class="cl-plano">${esc(planoNaTela(c.plano))}</span>` : ""}${c.corporativa ? '<span class="selo">Corporativa</span>' : ""}</div>
         <div class="cl-ident">${ICONE.pessoa}<span>${esc(ident)}</span></div>
+        ${linhaDaCota(c, x.agora)}
         ${filtro ? "" : `<div class="cl-maqs">${pilulas(c, x)}</div>`}
         ${renomear}
         ${x.ui.detalhe === c.id ? detalhes(c, x, d) : ""}

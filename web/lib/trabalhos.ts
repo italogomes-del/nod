@@ -359,11 +359,12 @@ export function pilulaMac(segurando: boolean, esperando: number, comVer = true, 
  * espera e a conversa com a pessoa segue. Diz quando ele volta (a renovação da janela que segura) e quantas tasks esperam.
  * Sem "Ver": não há o que a pessoa ajuste; o uso da IA está em Seu espaço › Conexão. Nada segurando (ou servidor anterior): nada.
  */
-export function pilulaDaCota(cota: TrabalhosDto["cota"], trabalhos: readonly TrabalhoDto[], agora: number): string {
+export function pilulaDaCota(cota: TrabalhosDto["cota"], trabalhos: readonly TrabalhoDto[], agora: number, pedidosNaFila: TrabalhosDto["pedidosNaFila"] = []): string {
   if (!cota) return "";
   const titulo = cota.situacao === "limite" ? "A cota da IA acabou" : "A cota da IA está no fim";
   const volta = cota.voltaEm ? `trabalho de fundo volta ${quandoVolta(cota.voltaEm, agora)}` : "trabalho de fundo volta quando ela renovar";
-  const esperam = trabalhos.filter((t) => t.esperaDaCota === true).length;
+  // NOD-302: o pedido de colega sem task que a cota segura também espera.
+  const esperam = trabalhos.filter((t) => t.esperaDaCota === true).length + (pedidosNaFila?.length ?? 0);
   return pilula(titulo, `${esperam > 0 ? `${esperam} ${esperam === 1 ? "espera" : "esperam"} · ` : ""}${volta} · a conversa com você segue`, null);
 }
 
@@ -500,4 +501,17 @@ export function telaDaTask(atual: Tela, id: string): Extract<Tela, { tipo: "trab
 /** Para onde o Fechar (ou o Esc) da tela da task e da tela provisória leva; null = não é uma delas. */
 export function telaAoFechar(atual: Tela): Tela | null {
   return atual.tipo === "trabalho" || atual.tipo === "linha" ? atual.voltar : null;
+}
+
+/**
+ * O pedido de colega sem task que a cota segura (definido em 2026-10-16, NOD-302, continuação da NOD-253): o servidor manda
+ * à parte (`TrabalhosDto.pedidosNaFila`), e a fila do bot em Trabalhos o mostra "na fila (cota)" com a volta.
+ */
+export function naFilaDaCota(dto: Pick<TrabalhosDto, "pedidosNaFila"> | null | undefined, turnoId: string): NonNullable<TrabalhosDto["pedidosNaFila"]>[number] | undefined {
+  return dto?.pedidosNaFila?.find((p) => p.turnoId === turnoId);
+}
+
+/** "na fila (cota) · volta às 14:00"; sem a hora, "na fila (cota) · volta quando a cota renovar". */
+export function textoNaFilaDaCota(p: { voltaEm: number | null }, agora: number): string {
+  return `na fila (cota) · volta ${p.voltaEm ? quandoVolta(p.voltaEm, agora) : "quando a cota renovar"}`;
 }

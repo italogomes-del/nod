@@ -185,6 +185,34 @@ export type Assentamento = {
   ultimoSinalEm?: number;
 };
 
+/** NOD-213: a IA do turno `t` — a fixada, ou a dona do modelo escolhido (iaDoModelo, pelos `modelosPorIa`), ou o legado. */
+function iaDoTurnoSql(c: Conn) {
+  const porIa = modelosPorIa();
+  return c`(case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end)`;
+}
+
+/**
+ * definido em 2026-10-12 (ADR-099 §7, decisão do Marlon): a cota da IA segura o turno `t`? Com a IA do turno na reserva (99%
+ * de uma janela), trabalho NOVO de fundo — task que nunca rodou, de qualquer origem, e rotina ou pedido de colega sem task —
+ * espera: o 1% fica para a conversa com a pessoa. Com a IA no limite, TODO o fundo espera (o que já começou e a volta
+ * marcada também), até a janela renovar, em vez de falhar. A conversa com a pessoa (conversa, sala, a retomada que ela
+ * pediu), a ligação e o turno que a pessoa está olhando (NOD-272, `pessoa_esperando`) nunca esperam pela cota. NOD-302: um predicado só para o `reivindicar` (que pula) e o
+ * `seguradosPelaCota` (que lista, para a nota e a tela). Mesma regra de `tipoParaCota` e `cotaSegura` (domain/cota-da-ia.ts).
+ */
+function seguradoPelaCotaSql(c: Conn, cota: PortaoDaCota) {
+  const iaDoTurno = iaDoTurnoSql(c);
+  const naCota = (ias: readonly string[], auto: boolean) => c`(case when t.harness = 'auto' and t.modelo = 'auto' then ${auto}::boolean else ${iaDoTurno} = any(${[...ias]}::text[]) end)`;
+  // NOD-272: o turno que a pessoa está olhando ("Testar agora" e as frentes dele) também nunca espera.
+  return c`(t.origem <> 'ligacao' and not t.pessoa_esperando and (
+                (((t.trabalho_id is null and t.origem in ('rotina', 'delegacao', 'peer'))
+                    or exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null))
+                  and ${naCota(cota.reserva, cota.autoReserva)})
+                -- NOD-258: o retorno do lote (decidido_por = RETORNO_DO_LOTE) é fundo que já começou: espera no limite.
+                or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null
+                    or t.decidido_por = ${RETORNO_DO_LOTE})
+                  and ${naCota(cota.limite, cota.autoLimite)})))`;
+}
+
 /** ADR-108: o turno da task está na IA `ia` — fixado nela, ou no Automático com a sessão da task nela. null = qualquer. */
 function daIa(conn: Conn, ia: IdHarness | null) {
   if (ia === null) return conn`true`;
@@ -267,10 +295,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         // definido em 2026-10-12 (ADR-099 §7): o portão da cota. A IA do turno: a fixada, ou (Automático) a regra das IAs que
         // podem pegá-lo, decidida antes (portaoDaCota). Mesma regra de `tipoParaCota` e `cotaSegura` (domain/cota-da-ia.ts).
         const cota = p.cota ?? null;
-        // NOD-213: a IA do turno `auto` com modelo escolhido é a dona do modelo (iaDoModelo, pelos `modelosPorIa`), não o legado.
-        const porIa = modelosPorIa();
-        const iaDoTurno = trx`(case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end)`;
-        const naCota = (ias: readonly string[], auto: boolean) => trx`(case when t.harness = 'auto' and t.modelo = 'auto' then ${auto}::boolean else ${iaDoTurno} = any(${[...ias]}::text[]) end)`;
+        const iaDoTurno = iaDoTurnoSql(trx);
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true,
             -- NOD-276 (J3): a hora em que a máquina pegou o turno; "Trabalhando · há N" conta daqui (criado_em é a fila).
@@ -324,20 +349,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                   ${p.segurarNovo !== true ? trx`` : trx`and t.acordar_em is null and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null)`}
                   and not exists (select 1 from trabalhos x join trabalhos dep on dep.tenant_id = x.tenant_id and dep.id = x.depois_de_trabalho_id
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
-              -- definido em 2026-10-12 (ADR-099 §7, decisão do Marlon): a cota da IA. Com a IA do turno na reserva (99% de uma
-              -- janela), trabalho NOVO de fundo — task que nunca rodou, de qualquer origem, e rotina ou pedido de colega sem
-              -- task — espera: o 1% fica para a conversa com a pessoa. Com a IA no limite, TODO o fundo espera (o que já
-              -- começou e a volta marcada também), até a janela renovar, em vez de falhar. A conversa com a pessoa (conversa,
-              -- sala, a retomada que ela pediu) e a ligação nunca esperam pela cota.
-              -- NOD-272: o turno que a pessoa está olhando ("Testar agora" e as frentes dele) também nunca espera.
-              ${cota === null ? trx`` : trx`and not (t.origem <> 'ligacao' and not t.pessoa_esperando and (
-                (((t.trabalho_id is null and t.origem in ('rotina', 'delegacao', 'peer'))
-                    or exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.iniciado_em is null))
-                  and ${naCota(cota.reserva, cota.autoReserva)})
-                -- NOD-258: o retorno do lote (decidido_por = RETORNO_DO_LOTE) é fundo que já começou: espera no limite.
-                or ((t.trabalho_id is not null or t.origem in ('rotina', 'delegacao', 'peer') or t.acordar_em is not null
-                    or t.decidido_por = ${RETORNO_DO_LOTE})
-                  and ${naCota(cota.limite, cota.autoLimite)})))`}
+              -- definido em 2026-10-12 (ADR-099 §7): a cota da IA segura o fundo (seguradoPelaCotaSql, acima).
+              ${cota === null ? trx`` : trx`and not ${seguradoPelaCotaSql(trx, cota)}`}
             -- Ligação primeiro; depois a fala da pessoa; depois o que não é rotina nem pedido de colega (o turno ou o trabalho
             -- dele); depois a ordem.
             order by (t.origem = 'ligacao') desc,
@@ -359,6 +372,40 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       // `conn.begin` cru — sem prazo, pendurava com o pool cheio, e sem escopo a RLS a fazia achar nada.
       if ("begin" in conn && typeof conn.begin === "function") return abrirTxEscopada(conn, escopo)(dentro);
       return dentro(conn);
+    },
+
+    /**
+     * NOD-302 (continuação da NOD-253): os turnos que a cota segura agora nesta máquina — pendentes, na hora, do bot vivo, com
+     * esta máquina como alvo (ou sem alvo) e que o `reivindicar` pularia só pela cota (`seguradoPelaCotaSql`, o mesmo
+     * predicado). Do mais antigo ao mais novo. A nota "Seguir com…" (fundo-segurado-pela-cota.ts) vai na conversa do mais
+     * antigo de cada bot; a linha a quem pediu, em cada pedido de colega.
+     */
+    async seguradosPelaCota(p: { machineId: string; agora: number; cota: PortaoDaCota; limite?: number }): Promise<Turno[]> {
+      const alvo = alvoDoTurno(conn, p.agora);
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `t.${c}`).join(", "))} from turnos t
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente'
+          and (t.acordar_em is null or t.acordar_em <= ${data(p.agora)})
+          and exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
+          and coalesce(${alvo}, ${p.machineId}) = ${p.machineId}
+          and ${seguradoPelaCotaSql(conn, p.cota)}
+        order by t.criado_em asc, t.id asc
+        limit ${p.limite ?? 200}`;
+      return linhas.map(paraTurno);
+    },
+
+    /**
+     * NOD-302: os pedidos de colega sem task ainda na fila (o turno de triagem `delegacao`, ou `peer`, pendente). A tela de
+     * Trabalhos mostra os que a cota da IA do bot segura como "na fila (cota)".
+     */
+    async pedidosNaFila(p: { agenteId?: string; limite?: number } = {}): Promise<Turno[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from turnos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente' and trabalho_id is null
+          and origem in ('delegacao', 'peer') ${p.agenteId ? conn`and agente_id = ${p.agenteId}` : conn``}
+        order by criado_em asc, id asc
+        limit ${p.limite ?? 100}`;
+      return linhas.map(paraTurno);
     },
 
     /**

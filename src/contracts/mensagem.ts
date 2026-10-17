@@ -87,6 +87,11 @@ export type PayloadMensagem =
   /** ADR-102: a pessoa escolheu "Seguir com <conta>" e o turno foi refeito nela. */
   | { kind: "conta_escolhida"; contaId: string; apelido: string; ia: IaComConta }
   /**
+   * NOD-302 (continuação da NOD-253): na conversa de onde saiu um pedido a colega, a linha de que ele espera na fila pela
+   * cota da IA do colega, com a hora em que ela renova. Uma por turno do pedido (`turnoId`, o do colega).
+   */
+  | { kind: "pedido_na_fila_da_cota"; turnoId: string; agenteId: string; ia: IdHarness; voltaEm: EpochMs | null }
+  /**
    * definido em 2026-10-12 (ADR-101 item 6): a conta em uso bateu no limite, "Trocar sozinho" estava ligado e o turno foi
    * refeito na conta `para`. Só posições; `foraDaTroca` são as contas livres que a troca pulou (corporativas não marcadas).
    */

@@ -240,7 +240,7 @@ export function renderTodosOsTrabalhos(estado: Estado, filtro: FiltroTrabalhos =
   const vazio = filtro === "todos" ? "Nenhum bot está trabalhando agora. Quando um bot abrir uma task, rodar uma rotina ou atender um colega, aparece aqui." : "Nada com este filtro hoje.";
   return `<section class="tela-trabalhos" aria-label="Todos os trabalhos">
     <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoDosTrabalhos(agrupar(todos, estado.agora), memoriaDosBots(estado.trabalhos)))}</p>${custoDoTopo(estado)}</div><div class="tt-filtros" role="group" aria-label="Filtrar trabalhos">${filtros}</div></header>
-    ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora)}${pilula}
+    ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora, estado.trabalhos.pedidosNaFila)}${pilula}
     ${secoes || `<p class="tt-vazio">${vazio}</p>`}
   </section>`;
 }

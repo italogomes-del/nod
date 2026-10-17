@@ -75,3 +75,13 @@ export function entradaDoPedido(p: { pessoaNome: string; remetenteNome: string; 
   const daPessoa = p.pedidos.length > 0 ? [`Mensagem de ${p.pessoaNome} que originou o pedido, literal:`, "<pedido_da_pessoa>", p.pedidos.map(neutralizarPedido).join("\n\n"), "</pedido_da_pessoa>", ""] : [];
   return [...daPessoa, `Pedido de ${p.remetenteNome}:`, "<pedido_do_colega>", doColega, "</pedido_do_colega>"].join("\n");
 }
+
+/**
+ * O pedido de colega em uma linha, lido da entrada que `entradaDoPedido` montou (definido em 2026-10-16, NOD-302): quem
+ * pediu e o pedido, para Trabalhos mostrar o pedido sem task que espera a cota. Entrada de outro formato: a primeira linha.
+ */
+export function pedidoEmUmaLinha(entrada: string, max = 120): { de: string | null; pedido: string } {
+  const m = /(?:^|\n)Pedido de ([^\n]{1,80}):\n<pedido_do_colega>\nPedido: ([^\n]*)/u.exec(entrada);
+  const texto = (m?.[2] ?? entrada.split("\n").find((l) => l.trim()) ?? "").trim();
+  return { de: m?.[1] ?? null, pedido: texto.length > max ? `${texto.slice(0, max - 1).trimEnd()}…` : texto };
+}

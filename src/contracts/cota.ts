@@ -43,7 +43,23 @@ export type EsperaDaConta = { ia: IdHarness | null; iaNome: string; conta: (Cont
  * No `TrabalhosDto`: a cota da IA segurando trabalho de fundo (null = nada segura; ausente = servidor anterior). A pílula
  * diz "a cota da IA está no fim; trabalho de fundo volta às HH:MM".
  */
-export type CotaNosTrabalhos = { cota?: CotaDto | null };
+export type CotaNosTrabalhos = { cota?: CotaDto | null; pedidosNaFila?: PedidoNaFilaDaCota[] };
+
+/**
+ * definido em 2026-10-16 (NOD-302, continuação da NOD-253): o pedido de colega SEM task (a triagem `delegacao`/`peer`) que a
+ * cota da IA de quem recebe segura. Não tem `TrabalhoDto`, então vai à parte: Trabalhos o mostra "na fila (cota)".
+ * `de` = o nome de quem pediu (null = não se sabe); `pedido` = o pedido em uma linha; `voltaEm` = quando a IA renova.
+ */
+export type PedidoNaFilaDaCota = {
+  turnoId: string;
+  agenteId: string;
+  de: string | null;
+  pedido: string;
+  ia: IdHarness | null;
+  situacao: Exclude<SituacaoDaCota, "livre">;
+  voltaEm: EpochMs | null;
+  criadoEm: EpochMs;
+};
 
 /** O custo de um bot hoje e o ritmo dele (definido em 2026-10-12, ADR-099 §7). */
 export type CustoDoBotHoje = {

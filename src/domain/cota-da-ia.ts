@@ -1,11 +1,12 @@
 import type { CotaDaIa, CotaDto, SituacaoDaCota } from "../contracts/cota.ts";
-import type { IdHarness } from "../contracts/harness.ts";
+import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
 import type { EpochMs } from "../contracts/ids.ts";
 import type { LimitesIa } from "../contracts/inteligencia.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
 import type { IaComConta } from "../contracts/contas-ia.ts";
 import { contaDoTurno, type ContaDaPessoa } from "./contas-da-pessoa.ts";
+import { quandoDaFrase } from "./erro-fornecedor.ts";
 import { harnessFixado } from "./harness.ts";
 import { iasParaOAutomatico, PRAZO_LIMITE_SEM_HORARIO_MS } from "./inteligencia.ts";
 
@@ -295,6 +296,18 @@ export function entradaDaVoltaDaCota(nomeDaIa: string): string {
  */
 export function entradaDaTrocaDeConta(nomeDaIa: string, de: number, para: number): string {
   return `${ENTRADA_DA_VOLTA_DA_COTA}${nomeDaIa} chegou ao limite na conta ${de} no meio deste trabalho e o nod seguiu com a conta ${para}. Siga de onde parou; o que já saiu antes do limite continua valendo.`;
+}
+
+/**
+ * NOD-302 (continuação da NOD-253): a espera de um pedido de fundo pela cota, para quem pediu — "a cota do Claude Code
+ * está no fim; o pedido espera na fila até ela renovar, às 14:30". Sem hora (ou já passada), sem hora: nunca uma hora
+ * que já foi. Uma frase só para o `pedir_a_bot` (o colega que pediu) e para a linha na conversa de origem (a pessoa).
+ */
+export function fraseDaEsperaDaCota(p: { ia: string; situacao: Exclude<SituacaoDaCota, "livre">; voltaEm: EpochMs | null; agora: EpochMs }): string {
+  const nome = HARNESSES.find((h) => h.id === p.ia)?.nome ?? "IA";
+  const estado = p.situacao === "limite" ? "chegou ao limite" : "está no fim";
+  const quando = p.voltaEm !== null && p.voltaEm > p.agora ? `, ${quandoDaFrase(p.voltaEm, p.agora)}` : "";
+  return `a cota do ${nome} ${estado}; o pedido espera na fila até ela renovar${quando}`;
 }
 
 /**

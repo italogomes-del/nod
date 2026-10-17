@@ -1,4 +1,6 @@
+import type { SituacaoDaCota } from "./cota.ts";
 import type { EpochMs } from "./ids.ts";
+import type { JanelaDoPlano } from "./uso-do-plano.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102). O servidor guarda a lista (apelido,
@@ -61,6 +63,19 @@ export type ContaIa = {
   entraNaTrocaAutomatica: boolean;
   noLimiteAte: EpochMs | null;
   maquinas: MaquinaDaConta[];
+  /**
+   * NOD-302 (continuação da NOD-253): a cota desta conta pela última leitura que um turno dela trouxe — as janelas ainda
+   * vigentes (5 horas e semana), a situação (livre, reserva ou limite) e quando volta. null = nenhum turno dela leu ainda.
+   */
+  cota?: CotaDaContaDto | null;
+};
+
+export type CotaDaContaDto = {
+  cincoHoras: JanelaDoPlano | null;
+  semana: JanelaDoPlano | null;
+  situacao: SituacaoDaCota;
+  voltaEm: EpochMs | null;
+  medidoEm: EpochMs;
 };
 
 export type ModoDasContas = "perguntar" | "automatico";

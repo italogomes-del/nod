@@ -152,6 +152,31 @@ describeIntegracao("cota da IA no reivindicar (ADR-099 §7)", () => {
     });
   });
 
+  it("NOD-302: seguradosPelaCota lista o que o reivindicar segura (a mesma regra), e pedidosNaFila os pedidos sem task", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.usoDoPlano.gravar(usoDoClaude(0.995), null);
+      const conversa = await m.turno({});
+      const rotinaSemTask = await m.turno({ origem: "rotina" });
+      const pedido = await m.turno({ origem: "delegacao" });
+      const taskNova = await m.turno({ trabalhoId: (await m.task("pessoa", "Revisar o PR")).id });
+      const comecada = await m.turno({ origem: "retomada", trabalhoId: (await m.task("rotina", "Rotina das 9h", true)).id });
+      // NOD-272 no predicado único (merge da main no #369): o "Testar agora" passa no reivindicar e não entra na lista.
+      const testarAgora = await m.turno({ origem: "rotina", pessoaEsperando: true });
+      const todos = [conversa, rotinaSemTask, pedido, taskNova, comecada, testarAgora];
+      const passa = await m.passaPelaRegra(todos);
+      const portao = portaoDaCota(cotaDasIas({ usos: await m.repos.usoDoPlano.listar(), limites: (await m.repos.preferencias.buscar()).iasNoLimite, agora: Date.now() }), ["claude-cli"]);
+      expect(portao).not.toBeNull();
+      const segurados = await m.repos.turnos.seguradosPelaCota({ machineId: randomUUID(), agora: Date.now(), cota: portao! });
+      const meus = new Set(todos.map((t) => t.id));
+      const esperado = new Set(todos.filter((t) => !passa.has(t.id)).map((t) => t.id));
+      expect(esperado).toEqual(new Set([rotinaSemTask.id, pedido.id, taskNova.id]));
+      expect(new Set(segurados.map((t) => t.id).filter((id) => meus.has(id)))).toEqual(esperado);
+      const fila = await m.repos.turnos.pedidosNaFila({ agenteId: m.agenteId });
+      expect(fila.map((t) => t.id)).toEqual([pedido.id]);
+    });
+  });
+
   it("GET trabalhos: a pílula diz quando o fundo volta e a task nova diz que espera a cota", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

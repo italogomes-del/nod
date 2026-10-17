@@ -22,6 +22,7 @@ import { LEASE_MS } from "../../shared/constantes.ts";
 import type { Db, Escopo, Relogio, Tx } from "../../shared/types.ts";
 import { assentarTurno, type SaidaAssentarTurno } from "../../use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../use-cases/despachar-turno.ts";
+import { avisarFundoSeguradoPelaCota, type EntradaFundoSegurado } from "../../use-cases/fundo-segurado-pela-cota.ts";
 import { absorverNaSessao, confirmarNaSessao, gravarFalasDaSessao } from "../../use-cases/sessao-viva.ts";
 import { absorverNoTrabalho, promoverNaRede } from "../../use-cases/coordenar-trabalhos.ts";
 import { eventoPressao, sincronizarTrabalho } from "../../use-cases/trabalhos.ts";
@@ -224,6 +225,27 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * diferentes, e a chave só do Mac fazia o log alternar segurado/solto a cada puxar.
    */
   const segurando = new Map<string, string>();
+  /**
+   * NOD-302: quando cada máquina de cada pessoa (`machineId pessoaId`) olhou pela última vez o fundo que a cota segura (a
+   * nota "Seguir com…" e a linha a quem pediu): no máximo uma vez por leitura da cota (LIMITES_VALEM_MS), não a cada puxar.
+   */
+  const fundoSeguradoVisto = new Map<string, number>();
+
+  /** NOD-302: o aviso do fundo segurado numa tx própria — a falha só loga, o despacho já comitou. */
+  async function avisarFundoSegurado(escopo: Escopo, entrada: EntradaFundoSegurado): Promise<void> {
+    const chave = `${entrada.machineId} ${escopo.pessoaId}`;
+    if (agora() - (fundoSeguradoVisto.get(chave) ?? -Infinity) < LIMITES_VALEM_MS) return;
+    fundoSeguradoVisto.set(chave, agora());
+    try {
+      await abrirTxEscopada(db, escopo)(async (trx) => {
+        const d = depsDe(trx, escopo);
+        const events = await avisarFundoSeguradoPelaCota(d, entrada);
+        if (events.length) await d.repos.events.gravarComOutbox(events);
+      });
+    } catch (e) {
+      log("aviso", "fundo_segurado_aviso_falhou", { pessoa_id: escopo.pessoaId, machine_id: entrada.machineId, erro: e instanceof Error ? e.name : "desconhecido" });
+    }
+  }
   function esquecerVencidos(): void {
     const limite = agora() - LEASE_MS;
     for (const [turnoId, em] of vistos) {
@@ -402,11 +424,15 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const emitidos: string[] = [];
       const planos = deps.services.planos;
       const services: Services = { ...deps.services, planos: { ...planos, emitir: (trx, turnoId, machineId) => (emitidos.push(turnoId), planos.emitir(trx, turnoId, machineId)) } };
+      // NOD-302: a mesma entrada do despacho serve ao aviso do fundo segurado (o mesmo portão da cota).
+      const entradaDaCota: EntradaFundoSegurado = { machineId: maquina.machineId, executor: executorAtual(), harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}) };
+      let filaVazia = false;
       try {
-        return await abrirTxEscopada(db, escopo)(async (trx) => {
+        const plano = await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, machineId: maquina.machineId, executor: executorAtual(), inventario: maquina.inventario, harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, prontosPorMaquina: prontosPorMaquina(pessoaId), ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}), aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { ...entradaDaCota, segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, prontosPorMaquina: prontosPorMaquina(pessoaId), inventario: maquina.inventario, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          filaVazia = r.data.motivo === "fila_vazia";
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {
             vistos.set(r.data.plano.turnoId, agora());
@@ -432,6 +458,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           }
           return r.data.plano;
         });
+        if (!plano && filaVazia && cota.length > 0) await avisarFundoSegurado(escopo, entradaDaCota);
+        return plano;
       } catch (e) {
         if (mudanca) deps.desfazerMemoria?.(pessoaId, mudanca);
         for (const turnoId of emitidos) {

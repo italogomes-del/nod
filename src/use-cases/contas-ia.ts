@@ -1,4 +1,6 @@
-import type { ContaAnunciada, ContaIa, ContasIaDto, MotivoDaNota } from "../contracts/contas-ia.ts";
+import type { ContaAnunciada, ContaIa, ContasIaDto, CotaDaContaDto, MotivoDaNota } from "../contracts/contas-ia.ts";
+import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
+import { cotaDasContas } from "../domain/cota-da-ia.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { MOTIVOS_FALHA_DE_ESPERA } from "../domain/pedido-parado.ts";
@@ -23,7 +25,9 @@ import { seguirNaContaFechaATroca } from "./trocas-de-ia.ts";
 
 /** A lista que a tela mostra: as contas não removidas, em ordem, cada uma com as máquinas onde está logada. */
 export async function contasDaPessoa(d: Deps): Promise<Omit<ContasIaDto, "disponivel">> {
-  const [{ contas, vinculos }, chaves, { modo }] = await Promise.all([d.repos.contasIa.listar(), d.repos.maquinaTokens.listar(), d.repos.contasIa.modo()]);
+  const [{ contas, vinculos }, chaves, { modo }, usos] = await Promise.all([d.repos.contasIa.listar(), d.repos.maquinaTokens.listar(), d.repos.contasIa.modo(), d.repos.usoDoPlano.listarPorConta()]);
+  const agora = d.agora();
+  const cotaPorConta = cotaDaContaNaLista(usos, agora);
   const vivas = new Map(chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
   const lista: ContaIa[] = contas
     .filter((c) => c.removidaEm === null)
@@ -43,8 +47,30 @@ export async function contasDaPessoa(d: Deps): Promise<Omit<ContasIaDto, "dispon
       maquinas: vinculos
         .filter((v) => v.contaId === c.id && v.sairPedidoEm === null && vivas.has(v.maquinaId))
         .map((v) => ({ maquinaId: v.maquinaId, nome: vivas.get(v.maquinaId)!, estado: v.estado })),
+      cota: cotaPorConta.get(c.id) ?? null,
     }));
   return { modo, contas: lista };
+}
+
+/**
+ * A cota de cada conta para a lista (NOD-302, CA12 da NOD-253): a leitura mais recente da conta, só com as janelas ainda
+ * vigentes (a que já renovou não diz nada), e a situação e a volta pela mesma regra do despacho (`cotaDasContas`).
+ */
+export function cotaDaContaNaLista(usos: readonly UsoDoPlano[], agora: number): Map<string, CotaDaContaDto> {
+  const ultima = new Map<string, UsoDoPlano>();
+  for (const u of usos) {
+    if (!u.contaId) continue;
+    const ja = ultima.get(u.contaId);
+    if (!ja || u.medidoEm > ja.medidoEm) ultima.set(u.contaId, u);
+  }
+  const seguram = cotaDasContas({ usos: [...ultima.values()], agora });
+  const vigente = (j: JanelaDoPlano | null): JanelaDoPlano | null => (j && (j.renovaEm === null || j.renovaEm > agora) ? j : null);
+  const out = new Map<string, CotaDaContaDto>();
+  for (const [contaId, u] of ultima) {
+    const s = seguram.get(contaId);
+    out.set(contaId, { cincoHoras: vigente(u.cincoHoras), semana: vigente(u.semana), situacao: s?.situacao ?? "livre", voltaEm: s?.voltaEm ?? null, medidoEm: u.medidoEm });
+  }
+  return out;
 }
 
 /** O anúncio de uma máquina; a ordem das IAs da pessoa acompanha a lista quando ela muda (suposição 3 da ADR-102). */
@@ -219,6 +245,8 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
   }
   const naoServe = contaNaoServe(conta, turno, agora);
   if (naoServe) return { data: { turnoId: null, motivo: naoServe }, events: [] };
+  // NOD-302: a nota do fundo que a cota segura aponta para um turno ainda pendente — não há fala a refazer.
+  if (turno?.estado === "pendente") return seguirNoFundoSegurado(d, { conta, turno, agora });
   if (!turno) {
     await d.repos.contasIa.definirEscolhida(conta.ia, conta.id);
     const acordou = await fecharTrocaDaConta(d, { conta, conversaId: p.conversaId, agenteId: null, agora });
@@ -255,6 +283,40 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
   });
   log("info", "conta_escolhida", { turno_id: turno.id, novo_turno_id: r.data.turnoId, conta_id: conta.id, motivo: r.data.motivo });
   return { data: r.data, events: [...acordou, ...r.events] };
+}
+
+/**
+ * NOD-302 (continuação da NOD-253, portado para o núcleo do #329 em 2026-10-17): a nota "Seguir com…" do fundo que a cota
+ * segura (fundo-segurado-pela-cota.ts) aponta para um turno ainda PENDENTE. Não há o que refazer (`refazerTurnoDaNota` só
+ * refaz o interrompido): a escolhida solta o fundo (a cota passa a olhar essa conta) e o próprio turno sai no próximo
+ * puxar. Como no "Seguir com" do limite (QA do PR #369), a escolha acorda as tasks do bot que esperavam a IA, fecha o aviso
+ * de troca dele (ADR-108) e antecipa as esperas da cota dessa IA. A linha "Seguindo com" fecha a nota (`notaDeLimite`) e
+ * sai uma vez só: o segundo clique, com a nota já fechada, só regrava a escolha. Quem chama segura `contasIa.travar()`.
+ */
+async function seguirNoFundoSegurado(
+  d: Deps,
+  p: { conta: ContaGuardadaNoServidor; turno: Turno; agora: number },
+): Promise<SaidaDaNota> {
+  const { conta, turno, agora } = p;
+  await d.repos.contasIa.definirEscolhida(conta.ia, conta.id);
+  const events = await fecharTrocaDaConta(d, { conta, conversaId: turno.conversaId, agenteId: turno.agenteId, agora });
+  await anteciparPelaEscolha(d, conta.ia, conta.id);
+  const nota = notaDeLimite(await d.repos.mensagens.listarDaConversa(turno.conversaId, 30), turno.agenteId);
+  if (nota?.aberta && nota.nota.turnoId === turno.id) {
+    const autoria = autoriaPessoa(d.escopo, turno.executor);
+    const linha = await d.repos.mensagens.criar({
+      conversaId: turno.conversaId,
+      turnoId: turno.id,
+      autoria,
+      kind: "sistema",
+      texto: `Seguindo com ${nomeDaConta(conta)}.`,
+      payload: { kind: "conta_escolhida", contaId: conta.id, apelido: conta.apelido, ia: conta.ia },
+      confianca: "confiavel",
+    });
+    if (linha) events.push(evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  }
+  log("info", "conta_escolhida_fundo_segurado", { turno_id: turno.id, conta_id: conta.id });
+  return { data: { turnoId: null, motivo: null }, events };
 }
 
 /**

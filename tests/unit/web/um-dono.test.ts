@@ -277,6 +277,18 @@ describe("Trabalhos com uma linha por bot (quadro 05)", () => {
     expect(reduzir(e, { tipo: "bot-trabalhos", agenteId: null }).botAbertoEmTrabalhos).toBeNull();
   });
 
+  it("NOD-302 (CA11 da NOD-253): o pedido de colega sem task que a cota segura fica \"na fila (cota)\", com a volta, e conta na pílula", () => {
+    const voltaEm = new Date(2026, 9, 11, 20, 30).getTime();
+    const pedidosNaFila = [{ turnoId: "p3", agenteId: "ze2", de: "Leonardo", pedido: "Revise o PR 42.", ia: "claude-cli" as const, situacao: "reserva" as const, voltaEm, criadoEm: AGORA - 57 * MIN }];
+    const comCota = base();
+    const e = reduzir({ ...comCota, trabalhos: { ...comCota.trabalhos!, cota: { situacao: "reserva", ias: ["claude-cli"], voltaEm }, pedidosNaFila } }, { tipo: "bot-trabalhos", agenteId: "ze2" });
+    const html = renderTrabalhosPorBot(e);
+    expect(html).toContain('<div class="tb-frente estatica" data-cota="1"><span class="ld-ordem" aria-hidden="true">1</span><span class="tb-frente-titulo">Na fila: pedido do Leonardo</span><span class="tb-frente-passo">na fila (cota) · volta às 20:30</span>');
+    expect(html).toContain("1 espera · trabalho de fundo volta às 20:30");
+    // Sem a cota segurando, a fila de sempre.
+    expect(renderTrabalhosPorBot(reduzir(base(), { tipo: "bot-trabalhos", agenteId: "ze2" }))).not.toContain("na fila (cota)");
+  });
+
   it("o bot que só conversa: trabalhando pelo turno ao vivo da conversa, não pelo GET trabalhos (que fica velho)", () => {
     const comVelho = estadoCom([], [dono({ agenteId: "nod", principal: "trabalhando", conversaTrabalhando: true })], { tela: { tipo: "trabalhos" } });
     expect(renderTrabalhosPorBot(comVelho)).toContain("Livres: Nod");

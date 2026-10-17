@@ -31,7 +31,8 @@ import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
-import { ENTRADA_DA_VOLTA_DA_COTA } from "../../src/domain/cota-da-ia.ts";
+import { cotaSegura, ENTRADA_DA_VOLTA_DA_COTA, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
+import { harnessFixado } from "../../src/domain/harness.ts";
 import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
 import { HARNESS_LEGADO } from "../../src/contracts/harness.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoLegado } from "../../src/domain/inteligencia.ts";
@@ -231,6 +232,16 @@ const semDonoPendencia = ({ ownerId: _dona, resolvidaNoTurnoId: _turno, ...p }: 
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
+  /** A regra de seguradoPelaCotaSql (turnos.repo.ts): a IA fixada (ou a do modelo), o tipo do turno e o portão da cota. */
+  const seguradoPelaCota = (t: Turno, cota: PortaoDaCota): boolean => {
+    if (t.origem === "ligacao") return false;
+    const ia = harnessFixado(t.harness, t.modelo) ?? (t.modelo !== "auto" ? iaDoModelo(t.modelo) : null);
+    const trabalho = t.trabalhoId ? (doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId) ?? null) : null;
+    const auto = t.harness === "auto" && t.modelo === "auto";
+    const naReserva = auto ? cota.autoReserva : cota.reserva.includes(ia ?? "");
+    const noLimite = auto ? cota.autoLimite : cota.limite.includes(ia ?? "");
+    return cotaSegura(tipoParaCota(t, trabalho), noLimite ? "limite" : naReserva ? "reserva" : "livre");
+  };
   /** A linha do índice único propostas_acesso_de_rotina_aberta (0026): pedido de rotina pendente por (dona, agente, app). */
   const acessoDeRotinaAberto = (agenteId: string, conector: string): Proposta | null =>
     doTenant(b.propostas).find((p) => p.agenteId === agenteId && p.estado === "pendente" && p.payload.kind === "acesso" && p.payload.conector === conector && p.payload.rotinaId !== undefined) ?? null;
@@ -1393,12 +1404,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return doTenant(b.turnos).find((t) => t.id === id) ?? null;
       },
       async reivindicar(p) {
+        const cota = p.cota;
         const fimDaFila = (t: Turno) => ["rotina", "delegacao", "peer"].includes(t.origem) || ["rotina", "colega"].includes(doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId)?.origem ?? "");
         const vivos = doTenant(b.turnos);
         const candidatos = vivos
           .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? 0) <= p.agora)
           // ADR-083: a faixa é o trabalho ou, sem ele, a conversa; o trabalho espera o de que depende.
           .filter((t) => {
+            // ADR-099 §7 / NOD-253: o portão da cota (seguradoPelaCotaSql).
+            if (cota && seguradoPelaCota(t, cota)) return false;
             if (!t.trabalhoId) return !vivos.some((d) => d.estado === "despachando" && !d.trabalhoId && d.conversaId === t.conversaId && d.origem !== "ligacao");
             if (vivos.some((d) => d.estado === "despachando" && d.trabalhoId === t.trabalhoId)) return false;
             const dono = doTenant(b.trabalhos).find((x) => x.id === t.trabalhoId);
@@ -1420,6 +1434,20 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         t.leaseAte = p.agora + LEASE_MS;
         t.sinais = { ...t.sinais, attempted: true };
         return t;
+      },
+      // NOD-302: a regra de seguradoPelaCotaSql (o fake não aplica a máquina-alvo, como no reivindicar).
+      async seguradosPelaCota(p) {
+        return doTenant(b.turnos)
+          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? 0) <= p.agora && t.origem !== "ligacao")
+          .filter((t) => seguradoPelaCota(t, p.cota))
+          .sort((x, y) => x.criadoEm - y.criadoEm)
+          .slice(0, p.limite ?? 200);
+      },
+      async pedidosNaFila(p = {}) {
+        return doTenant(b.turnos)
+          .filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && !t.trabalhoId && (t.origem === "delegacao" || t.origem === "peer") && (!p.agenteId || t.agenteId === p.agenteId))
+          .sort((x, y) => x.criadoEm - y.criadoEm)
+          .slice(0, p.limite ?? 100);
       },
       async renovarLease(id, machineId, sinais, em, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.machineId === machineId);

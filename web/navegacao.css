@@ -665,6 +665,9 @@ div.mac-medidor { padding-right: 36px; }
 .cl-nome .selo { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); }
 .cl-ident { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); min-width: 0; }
 .cl-ident span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-cota { font-size: 12px; color: var(--ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.cl-cota.c-reserva { color: var(--ink-2); }
+.cl-cota.c-limite { color: var(--ink-2); font-weight: 500; }
 .cl-maqs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .cl-pil { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 12px; color: var(--ink-2); }
 .cl-pil svg { width: 13px; height: 13px; }

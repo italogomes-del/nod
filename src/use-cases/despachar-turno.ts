@@ -5,7 +5,7 @@ import { HARNESS_LEGADO, HARNESSES, type IdHarness } from "../contracts/harness.
 import type { Inventario } from "../contracts/inventario.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { portaoDaCota } from "../domain/cota-da-ia.ts";
+import { portaoDaCota, type PortaoDaCota } from "../domain/cota-da-ia.ts";
 import { entradaDaFila } from "../domain/entrada-da-fila.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { causaHarnessIndisponivel, harnessFixado, inventarioHarnessSemSonda } from "../domain/harness.ts";
@@ -75,6 +75,20 @@ export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponi
 export type SaidaDespacharTurno = { plano: PlanoTurno; turno: Turno; motivo: null } | { plano: null; turno: Turno | null; motivo: MotivoSemPlano };
 
 /**
+ * As IAs do Automático nesta máquina (0068) e o portão da cota (ADR-099 §7) do despacho. NOD-302: o mesmo cálculo serve ao
+ * aviso do fundo segurado (fundo-segurado-pela-cota.ts), para a nota olhar exatamente o que o `reivindicar` pulou.
+ */
+export function portaoDoDespacho(input: Pick<EntradaDespacharTurno, "harnessesProntos" | "harnessesDaPessoa" | "noLimite" | "cota">): { harnessesAuto: string[] | undefined; cota: PortaoDaCota | null } {
+  const harnessesAuto = input.harnessesProntos && input.noLimite?.length
+    ? iasParaOAutomatico({ prontosMaquina: input.harnessesProntos, prontosPessoa: [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa ?? {}).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)])], noLimite: input.noLimite })
+    : undefined;
+  // ADR-099 §7: o turno do Automático segura pela cota só se todas as IAs que podem pegá-lo nesta máquina seguram (sem a
+  // lista, app anterior: a IA de sempre).
+  const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
+  return { harnessesAuto, cota };
+}
+
+/**
  * PUXAR (ADR-021/024): gate de parada persistida → reivindicar (UPDATE condicional, ADR-010) →
  * gate pré-spawn do inventário (ADR-019) → plano emitido na MESMA tx (services.planos.emitir, L5).
  * Fail-closed (E8.1/EMENDA 10): paradasRepo.ativa devolvendo null (consulta falhou) é tratado como
@@ -92,12 +106,7 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const harnessesAuto = input.harnessesProntos && input.noLimite?.length
-    ? iasParaOAutomatico({ prontosMaquina: input.harnessesProntos, prontosPessoa: [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa ?? {}).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)])], noLimite: input.noLimite })
-    : undefined;
-  // ADR-099 §7: o turno do Automático segura pela cota só se todas as IAs que podem pegá-lo nesta máquina seguram (sem a
-  // lista, app anterior: a IA de sempre).
-  const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
+  const { harnessesAuto, cota } = portaoDoDespacho(input);
   const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
   // NOD-268: o alarme do reenvio em laço (só log; o freio é o teto de reenvios). Revisão do PR #319: a falha da consulta

@@ -63,6 +63,11 @@ describe("triagem na entrada (ADR-099 itens 1a e 8, I7 revista)", () => {
     expect(instrucaoPedidoRecebido("Dev 1", [])).toContain("Pedido entregue a Dev 1: entrou na triagem dele");
     expect(instrucaoPedidoRecebido("Dev 1", [])).not.toContain("Livres agora");
     expect(instrucaoPedidoRecebido("Dev 1", ["Dev 2", "Dev 3"])).toContain("Livres agora: Dev 2 e Dev 3 — se for urgente e Dev 1 estiver ocupado, um deles pode ajudar.");
+    // NOD-302 (CA9 da NOD-253): a cota de quem recebe segura o pedido — a espera e a hora vão a quem pediu.
+    const agora = Date.parse("2026-10-16T12:00:00-03:00");
+    const comCota = instrucaoPedidoRecebido("Dev 1", ["Dev 2"], { ia: "claude-cli", situacao: "limite", voltaEm: agora + 2 * 3_600_000, agora });
+    expect(comCota).toContain("Ele ainda não começa: a cota do Claude Code chegou ao limite; o pedido espera na fila até ela renovar, às 14:00. Diga isso a quem espera a resposta.");
+    expect(comCota).toContain("Livres agora: Dev 2");
   });
 
   describe("catálogo e prompt da triagem", () => {

@@ -470,3 +470,31 @@ describe("NOD-259: o mesmo pedido repetido ao mesmo colega", () => {
     expect(texto).not.toContain("- a Ze 1");
   });
 });
+
+describe("NOD-302 (CA9 da NOD-253): a cota de quem recebe segura o pedido", () => {
+  const uso = (d: D, utilizacao: number, renovaEm: number) =>
+    d.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao, renovaEm }, semana: null, medidoEm: AGORA - 60_000 }, null);
+
+  it("na reserva (99%): o pedido entra e a instrução diz a quem pediu a espera e a hora da volta", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const vera = await bot(d, "Vera");
+    await bot(d, "Tuca");
+    await uso(d, 0.995, AGORA + 2 * 3_600_000);
+    const t = await turno(d, vera.id, vera.conversaId);
+    const r = await pedir(d, vera, t.id, "Tuca", "Revise o PR 42.");
+    expect(r.data).toMatchObject({ ok: true });
+    const instrucao = r.data.ok ? r.data.instrucao : "";
+    expect(instrucao).toMatch(/Ele ainda não começa: a cota do Claude Code está no fim; o pedido espera na fila até ela renovar, às \d{2}:\d{2}\. Diga isso a quem espera a resposta\./);
+    expect(d.banco.turnos.find((x) => x.id === tarefaDoPedido(r.data))).toMatchObject({ estado: "pendente", origem: "delegacao" });
+  });
+
+  it("com a cota livre, a instrução de sempre (sem espera)", async () => {
+    const d = depsMemoria({ agora: () => AGORA });
+    const vera = await bot(d, "Vera");
+    await bot(d, "Tuca");
+    await uso(d, 0.5, AGORA + 2 * 3_600_000);
+    const t = await turno(d, vera.id, vera.conversaId);
+    const r = await pedir(d, vera, t.id, "Tuca", "Revise o PR 42.");
+    expect(r.data.ok && r.data.instrucao).not.toMatch(/ainda não começa/);
+  });
+});

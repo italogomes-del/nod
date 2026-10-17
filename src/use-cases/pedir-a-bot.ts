@@ -2,6 +2,7 @@ import type { Agente } from "../contracts/agente.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { cotaSegura } from "../domain/cota-da-ia.ts";
 import { entradaDoPedido } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { podeRepassar, proximaProfundidade } from "../domain/profundidade.ts";
@@ -10,6 +11,7 @@ import { agenteVisivel, autoriaAgente, autorizarAlvo, evento, PRAZO_DECISAO_MS, 
 import { JANELA_PEDIDOS_ABERTOS_MS } from "./pedidos-abertos.ts";
 import type { Deps } from "./tipos.ts";
 import { ehColega } from "./ver-colegas.ts";
+import { situacaoDoBotPelaCota } from "./cota-dos-bots.ts";
 
 /**
  * Classes de procuração que autorizam pedir a bot de OUTRO dono (ADR-025). definido em 2026-09-29 (ADR-058):
@@ -148,8 +150,12 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
   });
   const livres = await colegasLivres(deps, remetente, alvo.id, agora);
   const aviso = repeticao.tipo === "aviso" ? instrucaoPedidosAbertos(alvo.nome, repeticao.abertos, horarioDoPedido(repeticao.desde, agora)) : "";
+  // NOD-302 (continuação da NOD-253): a cota da IA de quem recebe segura o fundo novo (a triagem do pedido é fundo novo,
+  // tipoParaCota) — quem pediu sabe que o pedido espera e até quando.
+  const cota = await situacaoDoBotPelaCota(deps, alvo);
+  const espera = cota.situacao !== "livre" && cota.ia && cotaSegura("fundo_novo", cota.situacao) ? { ia: cota.ia, situacao: cota.situacao, voltaEm: cota.voltaEm, agora } : undefined;
   return {
-    data: { ok: true, tarefa_id: turno.id, instrucao: [aviso, instrucaoPedidoRecebido(alvo.nome, livres.map((a) => a.nome))].filter(Boolean).join(" "), livres: livres.map((a) => ({ id: a.id, nome: a.nome })) },
+    data: { ok: true, tarefa_id: turno.id, instrucao: [aviso, instrucaoPedidoRecebido(alvo.nome, livres.map((a) => a.nome), espera)].filter(Boolean).join(" "), livres: livres.map((a) => ({ id: a.id, nome: a.nome })) },
     events: [
       evento(deps, "mensagem_criada", autoria, { mensagemId: handoff?.id ?? null, kind: "handoff", tarefaId: turno.id }, { conversaId: input.conversaId, turnoId: input.turnoId }),
       evento(deps, "turno_criado", autoria, { turnoId: turno.id, agenteId: alvo.id, origem: "delegacao", profundidade: turno.profundidade, remetenteAgenteId: remetente.id, mensagemId: mensagem?.id ?? null }, { conversaId: conversaAlvo.id, turnoId: turno.id }),

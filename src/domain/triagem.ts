@@ -1,3 +1,4 @@
+import { fraseDaEsperaDaCota } from "./cota-da-ia.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 
@@ -181,9 +182,11 @@ export function instrucaoEsperaCircular(caminho: readonly string[]): string {
  * responde já, abre uma frente ou espera algo de que depende; e, se houver, os colegas livres agora (sem turno vivo nem
  * frente rodando), para quem tem pressa.
  */
-export function instrucaoPedidoRecebido(alvoNome: string, livres: readonly string[]): string {
+export function instrucaoPedidoRecebido(alvoNome: string, livres: readonly string[], cota?: { ia: string; situacao: "reserva" | "limite"; voltaEm: number | null; agora: number }): string {
   const base = `Pedido entregue a ${alvoNome}: entrou na triagem dele, que decide se responde já, se abre uma frente para o pedido ou se ele espera algo de que depende. A resposta chega a você num novo turno; diga em uma frase o que pediu e encerre, sem repetir o pedido.`;
-  return livres.length > 0 ? `${base} Livres agora: ${emLista(livres)} — se for urgente e ${alvoNome} estiver ocupado, um deles pode ajudar.` : base;
+  // NOD-302 (continuação da NOD-253): a cota da IA de quem recebe segura o pedido agora — quem pediu sabe a espera e a hora.
+  const espera = cota ? ` Ele ainda não começa: ${fraseDaEsperaDaCota(cota)}. Diga isso a quem espera a resposta.` : "";
+  return livres.length > 0 ? `${base}${espera} Livres agora: ${emLista(livres)} — se for urgente e ${alvoNome} estiver ocupado, um deles pode ajudar.` : `${base}${espera}`;
 }
 
 /**

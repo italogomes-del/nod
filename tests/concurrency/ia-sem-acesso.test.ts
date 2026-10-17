@@ -244,4 +244,37 @@ describeIntegracao("a conta da IA entrou e não serve (2026-10-05)", () => {
       await c.laco.parar();
     }
   });
+
+  it("NOD-302 (QA do PR #369): o puxar da máquina que não acha trabalho porque a cota da conta segura o fundo deixa a nota 'Seguir com' na conversa do bot", { timeout: 40_000 }, async () => {
+    const segurado: { conversaId?: string; turnoId?: string } = {};
+    const c = await montar({ "claude-cli": PRONTO }, {
+      contas: [contaClaude(1, "Max"), contaClaude(2, "Team")],
+      claude: () => ({ ...BASE, desfecho: "sucesso", texto: "feito" }),
+      antes: async (trx, machineId) => {
+        const deps = depsSobreTrx(trx, PESSOA, { services });
+        const b = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Ze 1" })).data;
+        criados.agentes.push(b.agente.id);
+        criados.conversas.push(b.conversa.id);
+        const repos = criarRepos(trx, PESSOA);
+        const max = (await repos.contasIa.listar()).contas.find((x) => x.apelido === "Max")!;
+        // "Perguntar antes": a Max no limite e nenhuma escolhida — o Claude segura o fundo desta máquina.
+        await repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 1, renovaEm: Date.now() + 3_600_000 }, semana: null, medidoEm: Date.now() - 1000 }, machineId, max.id);
+        const t = await repos.turnos.enfileirar({ executor: "local", conversaId: b.conversa.id, agenteId: b.agente.id, origem: "rotina", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" });
+        segurado.conversaId = b.conversa.id;
+        segurado.turnoId = t!.id;
+      },
+    });
+    const notas = () => escopado((trx) => trx<{ turno_id: string | null; payload: Record<string, unknown> | null }[]>`select turno_id, payload from mensagens where conversa_id = ${segurado.conversaId!} and payload->>'kind' = 'limite_do_plano'`);
+    try {
+      await esperarAte(async () => (await notas()).length > 0);
+      await new Promise((r) => setTimeout(r, 500));
+      const n = await notas();
+      expect(n).toHaveLength(1);
+      expect(n[0]).toMatchObject({ turno_id: segurado.turnoId, payload: { kind: "limite_do_plano", harness: "claude-cli" } });
+      const [t] = await escopado((trx) => trx<{ estado: string }[]>`select estado from turnos where id = ${segurado.turnoId!}`);
+      expect(t?.estado).toBe("pendente");
+    } finally {
+      await c.laco.parar();
+    }
+  });
 });

@@ -8,9 +8,12 @@ import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../contracts/maquina.ts";
 import type { LeituraMemoria, NivelPressao, ServicoDasMaquinas, Trabalho, TrabalhoDetalheDto, TrabalhoDto, TrabalhosDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { cotaDasIasComContas, cotaParaTela, esperaDaCotaNaTela, iasConhecidas, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
+import type { PedidoNaFilaDaCota } from "../contracts/cota.ts";
+import { cotaParaTela, cotaSegura, esperaDaCotaNaTela, situacaoDaCotaDoTrabalho } from "../domain/cota-da-ia.ts";
 import { ehIaComConta } from "../domain/contas-da-pessoa.ts";
+import { pedidoEmUmaLinha } from "../domain/delegacao.ts";
 import { iasNoLimite } from "../domain/inteligencia.ts";
+import { lerCotaDosBots } from "./cota-dos-bots.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
@@ -247,15 +250,15 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const nivelDisco = memoria?.discoNivel !== undefined ? memoria.discoNivel : nivelDoDisco(disco);
   // ADR-091: o portão olha o pior entre a CPU e a fila; a tela mostra os dois separados.
   const fila = memoria?.fila ?? null;
-  const [preferencias, usos, usosPorConta, lista, modoDasContas, agentes] = await Promise.all([deps.repos.preferencias.buscar(), deps.repos.usoDoPlano.listar(), deps.repos.usoDoPlano.listarPorConta(), deps.repos.contasIa.listar(), deps.repos.contasIa.modo(), deps.repos.agentes.listar()]);
+  const [preferencias, cotaDosBots, agentes] = await Promise.all([deps.repos.preferencias.buscar(), lerCotaDosBots(deps), deps.repos.agentes.listar()]);
   const usoDoMac = memoria === null ? "livre" : preferencias.usoDoMac ?? USO_DO_MAC_PADRAO;
   // definido em 2026-10-12 (ADR-099 §7): a cota da IA, a mesma regra do `reivindicar` (domain/cota-da-ia.ts). A pílula diz
   // quando o fundo volta; a linha da task diz que ela espera a cota.
   // NOD-253 (2026-10-15): a IA com conta da lista segura só quando nenhuma conta dela serve. A tela não sabe a máquina do
-  // próximo turno: conta como logada a conta `pronta` em qualquer máquina da pessoa.
-  const naAlgumaMaquina = new Set(lista.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null).map((v) => v.contaId));
-  const cotaAgora = cotaDasIasComContas({ usos, usosPorConta, limites: preferencias.iasNoLimite, contas: { contas: lista.contas, naMaquina: naAlgumaMaquina, escolhidas: modoDasContas.escolhidas }, agora: deps.agora() });
-  const conhecidas = iasConhecidas(usos, preferencias.iasNoLimite);
+  // próximo turno: conta como logada a conta `pronta` em qualquer máquina da pessoa. NOD-302: a mesma leitura do
+  // `pedir_a_bot` (lerCotaDosBots).
+  const cotaAgora = cotaDosBots.cota;
+  const conhecidas = cotaDosBots.conhecidas;
   const botsPorId = new Map(agentes.map((a) => [a.id, a]));
   const servico = deps.services.maquinas;
   // NOD-260 (D3): as IAs prontas nas máquinas vivas decidem o Automático; a IA do turno pendente mais antigo, a fixa.
@@ -267,6 +270,17 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const situacao = situacaoDaCotaDoTrabalho({ pendente: e?.pendente, bot: bot ? { harness: bot.harness ?? "auto", modelo: bot.modelo } : null, cota: cotaAgora, iasProntas, noLimite, conhecidas });
     return esperaDaCotaNaTela(t, situacao) ? { esperaDaCota: true } : {};
   };
+  // NOD-302: o pedido de colega sem task que a cota segura não tem linha de task — vai à parte, "na fila (cota)".
+  const pedidosNaFila: PedidoNaFilaDaCota[] = [];
+  if (cotaAgora.length > 0) {
+    for (const t of await deps.repos.turnos.pedidosNaFila({ agenteId: input.agenteId })) {
+      const bot = botsPorId.get(t.agenteId);
+      const espera = cotaDosBots.doBot({ harness: t.harness, modelo: t.modelo });
+      if (!bot || bot.excluidoEm || espera.situacao === "livre" || !cotaSegura("fundo_novo", espera.situacao)) continue;
+      const { de, pedido } = pedidoEmUmaLinha(t.entradaTexto);
+      pedidosNaFila.push({ turnoId: t.id, agenteId: t.agenteId, de, pedido, ia: espera.ia, situacao: espera.situacao, voltaEm: espera.voltaEm, criadoEm: t.criadoEm });
+    }
+  }
   // QA do PR 341 (C15): o topo junta as máquinas; a regra "linux só a vermelha" vale para ele quando TODAS as máquinas com
   // leitura são linux (com uma darwin no meio, a pior pode ser dela, e o topo fica com a regra de sempre). Desligada, nada muda.
   const leiturasDoTopo = servico && memoria !== null ? servico.leituras(deps.escopo.pessoaId) : [];
@@ -274,7 +288,7 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const regraDoTopo = topoLinux ? { plataforma: "linux" as const, linuxSoVermelha: servico?.fundoLinuxSoVermelha === true } : {};
   const portao = memoria === null ? portaoDoMac("livre", null) : portaoDoMac(usoDoMac, { memoria: memoria.nivel, processador: piorNivel(processador, fila), discoNivel: nivelDisco }, regraDoTopo);
   const agora = deps.agora();
-  const topo = { cota: cotaParaTela(cotaAgora), pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
+  const topo = { cota: cotaParaTela(cotaAgora), pedidosNaFila, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
   // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
   const bots = input.agenteId ? [input.agenteId] : agentes.filter((a) => a.ownerId === deps.escopo.pessoaId && !a.excluidoEm).map((a) => a.id);
   const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];

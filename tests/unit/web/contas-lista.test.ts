@@ -3,7 +3,8 @@ import type { ContaIa, ContasIaDto, LoginNaMaquina } from "../../../src/contract
 import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import { criarContasDaPessoa, ligarPedeAvisoDosTermos, type ApiContas } from "../../../web/lib/contas-da-pessoa.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { REGRAS_DA_FILA, renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
+import { linhaDaCota, REGRAS_DA_FILA, renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
+import { hora } from "../../../web/lib/render.ts";
 import { renderMaquinas } from "../../../web/telas/maquinas.ts";
 import { renderProvedores } from "../../../web/telas/provedores.ts";
 
@@ -335,5 +336,22 @@ describe("controlador da lista (ADR-102)", () => {
     await m.c.entrar(GPT.id, MAC);
     expect(m.estado.contasUi.nota).toContain("abra o app do nod");
     expect(m.estado.contasUi.logins).toHaveLength(0);
+  });
+});
+
+describe("a cota de cada conta na lista (NOD-302, CA12 da NOD-253)", () => {
+  it("CA12: a linha mostra o uso das janelas e, quando a cota segura, a situação e a volta", () => {
+    const volta = AGORA + 2 * 3_600_000;
+    const comCota = { ...CONTAS, contas: [
+      { ...PESSOAL, cota: { cincoHoras: { utilizacao: 0.995, renovaEm: volta }, semana: { utilizacao: 0.4, renovaEm: AGORA + 86_400_000 }, situacao: "reserva" as const, voltaEm: volta, medidoEm: AGORA } },
+      { ...GPT, cota: { cincoHoras: { utilizacao: 0.12, renovaEm: volta }, semana: null, situacao: "livre" as const, voltaEm: null, medidoEm: AGORA } },
+      LEAPY,
+    ] };
+    const html = renderListaDeContas(ctx({ contas: comCota }));
+    expect(html).toContain(`data-cota="reserva">5 h: 99% · semana: 40% · na reserva, volta às ${hora(volta)}</div>`);
+    expect(html).toContain('data-cota="livre">5 h: 12%</div>');
+    // Sem leitura (nenhum turno da conta rodou), a linha não inventa número.
+    expect(linhaDaCota(LEAPY, AGORA)).toBe("");
+    expect(linhaDaCota({ ...LEAPY, cota: { cincoHoras: { utilizacao: 1, renovaEm: volta }, semana: null, situacao: "limite", voltaEm: volta, medidoEm: AGORA } }, AGORA)).toContain(`no limite, volta às ${hora(volta)}`);
   });
 });

@@ -6,7 +6,7 @@ import { conversaViva, donoDoBot, esperaNaTela, fraseDoDono, frentesDoBot, grupo
 import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { agente, chipTrabalhosDoBot, custoDoTopo, renderFaixaTrabalhos } from "./trabalhos.ts";
 
 /**
@@ -225,7 +225,7 @@ export function renderTrabalhosPorBot(estado: Estado): string {
   const vazio = linhas.length ? "" : `<p class="tt-vazio">Nenhum bot está trabalhando agora. Quando um bot começar uma frente, esperar algo ou precisar de você, aparece aqui.</p>`;
   return `<section class="tela-trabalhos" aria-label="Trabalhos">
     <header class="tt-cab"><div><h1>Trabalhos</h1><p>${esc(resumoPorBot(linhas, memoriaDosBots(estado.trabalhos)))}</p>${custoDoTopo(estado)}</div></header>
-    ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora)}${pilulaDoTopo(estado)}
+    ${pilulaDaCota(estado.trabalhos.cota, todos, estado.agora, estado.trabalhos.pedidosNaFila)}${pilulaDoTopo(estado)}
     ${secoes}${vazio}${livresHtml}
   </section>`;
 }
@@ -265,7 +265,11 @@ function frentesAbertasDoBot(estado: Estado, x: LinhaDoBot, todos: readonly Trab
     const v = esperaNaTela(e, estado.agora);
     return `<div class="tb-frente estatica"><span class="ponto-trabalho fora-do-mac" aria-hidden="true"></span><span class="tb-frente-titulo">${esc(v.titulo)}</span><span class="tb-frente-passo">${esc(v.linhas.at(-1) ?? "")}</span><span class="tb-frente-fim">${esc(v.tempo)}</span></div>`;
   }).join("");
-  const fila = x.dono.fila.map((p, i) => `<div class="tb-frente estatica"><span class="ld-ordem" aria-hidden="true">${i + 1}</span><span class="tb-frente-titulo">Na fila: ${esc(quemPediu(p))}</span><span class="tb-frente-passo"></span><span class="tb-frente-fim">${esc(hora(p.desde))}</span></div>`).join("");
+  const fila = x.dono.fila.map((p, i) => {
+    // NOD-302: o pedido que a cota da IA segura diz "na fila (cota)" e quando volta.
+    const cota = naFilaDaCota(estado.trabalhos, p.turnoId);
+    return `<div class="tb-frente estatica"${cota ? ' data-cota="1"' : ""}><span class="ld-ordem" aria-hidden="true">${i + 1}</span><span class="tb-frente-titulo">Na fila: ${esc(quemPediu(p))}</span><span class="tb-frente-passo">${cota ? esc(textoNaFilaDaCota(cota, estado.agora)) : ""}</span><span class="tb-frente-fim">${esc(hora(p.desde))}</span></div>`;
+  }).join("");
   const corpo = [...abertas.map(frente), daConversa, ...terminadas.map(frente), fila].join("");
   const conversa = `<button type="button" class="tb-abrir-conversa" data-act="abrir-conversa" data-conversa="${esc(x.bot.conversaId)}" data-agente="${esc(x.bot.id)}">Abrir a conversa com ${esc(x.bot.nome)} ›</button>`;
   return `<div class="tb-frentes" role="group" aria-label="Frentes de ${esc(x.bot.nome)}">${corpo || '<p class="tb-sub">Nenhuma frente hoje.</p>'}${conversa}</div>`;
