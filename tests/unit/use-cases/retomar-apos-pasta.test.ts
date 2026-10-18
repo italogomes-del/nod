@@ -26,7 +26,9 @@ describe("retomar depois de abrir a pasta", () => {
     const { deps, bot, proposta, registros } = await preparar([{ caminho: "/Users/m/code/acme", nome: "acme", git: true, onde: "code", modificadoEm: 1 }]);
     const r = await retomarAposPasta(deps, { proposta, pasta: "/Users/m/code/acme" });
     expect(r.data.turnoId).toBeTruthy();
-    expect(registros()).toEqual([expect.objectContaining({ kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: bot.agente.id, pasta: "/Users/m/code/acme", nome: "acme", onde: "code" } })]);
+    expect(registros()).toEqual([expect.objectContaining({ kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: bot.agente.id, pasta: "/Users/m/code/acme", nome: "acme", onde: "code", turnoId: proposta.payload.kind === "pasta" ? proposta.payload.turnoId : undefined } })]);
+    // Chat limpo (PR 4): o turno que pediu vai no registro, a âncora do cartão encolhido.
+    expect(registros()[0]?.payload).toMatchObject({ turnoId: expect.any(String) });
     expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada", "turno_criado"]);
   });
 
@@ -35,7 +37,7 @@ describe("retomar depois de abrir a pasta", () => {
     const r = await retomarAposPasta(deps, { proposta, pasta: "/Users/m/code/acme/" });
     expect(r.data.turnoId).toBeNull();
     // Candidata desconhecida (escolha manual) não tem `onde`: o payload o omite e a web tira do caminho.
-    expect(registros().map((m) => m.payload)).toEqual([{ kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta: "/Users/m/code/acme/", nome: "acme" }]);
+    expect(registros().map((m) => m.payload)).toEqual([{ kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta: "/Users/m/code/acme/", nome: "acme", turnoId: null }]);
     expect(r.events?.map((e) => e.kind)).toEqual(["mensagem_criada"]);
   });
 

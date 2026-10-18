@@ -325,7 +325,7 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     expect((await json<FrotaDto>("GET", "frota")).negacoes).toEqual([expect.objectContaining({ classe: "conector_indisponivel", nome: "quebrado" })]);
   });
 
-  it("aprovação em lista: listar_contatos → pedir_aprovacao (3 itens) encerra o turno; decidir 2 de 3 executa exatamente 2 no conector, escreve o resultado e retoma com --resume; ferramenta não concedida → negação terminal na trilha", { timeout: JORNADA_MS }, async () => {
+  it("aprovação em lista: listar_contatos → pedir_aprovacao (3 itens) encerra o turno; decidir 2 de 3 executa exatamente 2 no conector, escreve o resultado (o cartão encolhido, ancorado no turno) e retoma com --resume; ferramenta não concedida → negação terminal na trilha", { timeout: JORNADA_MS }, async () => {
     const desde = frames.length;
     const itens = ["ana@exemplo.test", "bia@exemplo.test", "caio@exemplo.test"].map((para) => ({
       texto: `e-mail de boas-vindas para ${para}`,
@@ -359,8 +359,14 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     const enviados = (await readFile(arquivoEmails, "utf8")).trim().split("\n").map((l) => JSON.parse(l) as { para: string; texto: string });
     expect(enviados.map((e) => e.para)).toEqual(["ana@exemplo.test", "caio@exemplo.test"]);
     expect(enviados[1]?.texto).toBe("editado");
-    const resultado = (await conversa(vera.conversaId)).mensagens.find((m) => m.kind === "resultado_aprovacao");
+    const lida = (await conversa(vera.conversaId)).mensagens;
+    const resultado = lida.find((m) => m.kind === "resultado_aprovacao");
     expect(resultado?.texto).toContain(`${NOME_PESSOA} aprovou 2 de 3; não enviado: e-mail de boas-vindas para bia@exemplo.test (retirado pela pessoa)`);
+    // Chat limpo, PR 4: o recibo é o cartão encolhido no chat, ancorado no turno que pediu — a fala desse turno vem antes
+    // dele na janela, e a web põe o cartão logo depois dela (web/telas/conversa.ts, comEncolhidosNaAncora).
+    expect(resultado).toMatchObject({ turnoId: t.id, destino: "chat", payload: { kind: "resultado_aprovacao", decisaoId: item?.decisao.id, frase: item?.decisao.frase } });
+    const ancora = lida.slice(0, lida.indexOf(resultado ?? lida[0]!)).filter((m) => m.turnoId === t.id).at(-1);
+    expect(ancora).toMatchObject({ kind: "texto", texto: "aguardando sua aprovação" });
     const retomada = await esperarTurno(decidida.ids.turnoRetomada ?? "");
     expect(retomada).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
     await esperarFrame("decisao.decidida", desde);

@@ -13,6 +13,7 @@ import { decidirPropostaDeBot } from "../../../use-cases/onboarding.ts";
 import { assentarAprovacao, executarItens, marcarEDecidir, retomarPorDecisao, type DesfechoExecutado, type MarcacaoItem } from "../../../use-cases/decidir.ts";
 import { liberarNaTarefa } from "../../../use-cases/liberar-na-tarefa.ts";
 import { permitirSempre } from "../../../use-cases/permitir-sempre.ts";
+import { reciboDaPropostaConfirmada } from "../../../use-cases/proposta-decidida.ts";
 import { recusarProposta } from "../../../use-cases/recusar-proposta.ts";
 import { autoriaDaPessoa } from "../../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../../use-cases/responder-decisao.ts";
@@ -245,6 +246,9 @@ export function criarRotasDecisoes(d: DepsRotasDecisoes): Rota[] {
               if (r.agente) ids.agente = r.agente.id;
               obsoleta = r.obsoleta === true;
             }
+            // Chat limpo (revisão do PR 4): a rotina criada, mudada ou excluída por este botão deixa o recibo da proposta, e o
+            // cartão encolhe ("Confirmado por você") como o de confirmarProposta. Obsoleta (recusada) não grava: só confirmada.
+            if (!recusada(corpo) && atual.tipo !== "perfil") await executar(deps, reciboDaPropostaConfirmada, { propostaId: atual.id });
             // Obsoleta: a pessoa clicou em confirmar, mas a proposta saiu recusada — o frame diz o que ficou no banco.
             // Revisão do épico (S2, 2026-10-08): a task do turno que propôs relê o estado.
             await deps.repos.events.gravarComOutbox([eventoDecidida(deps, decidida, { recusada: recusada(corpo) || obsoleta }), ...(await sincronizarDasDecisoes(deps, [decidida]))]);

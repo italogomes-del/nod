@@ -71,6 +71,7 @@
   .message { gap: 8px; }
   .message > .icon { width: 28px; height: 28px; min-width: 28px; }
   .bubble-wrap { max-width: calc(100% - 36px); min-width: 0; }
+  .msg-encolhido > .cartao-encolhido { margin-left: 36px; width: calc(100% - 36px); }
   .bubble { font-size: 15px; }
   .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .acesso-card, .card-pasta, .welcome-options,
   .liberar-card, .perfil-card, .a-fazer { margin-left: 0; max-width: 100%; }
@@ -110,6 +111,10 @@
   /* ---- O cartão da pergunta (plano "pergunta com botões", tela "Celular", 2026-10-18): linhas de 52 px, letra de 28,
      "Recomendo" embaixo do texto da opção, título 17 px e o × com alvo de 44 px ---- */
   .cartao-pergunta { border-radius: 22px; padding: 16px 14px 14px; }
+  /* O cartão encolhido (chat limpo, PR 4; QA de 2026-10-18) usa as classes da pergunta e herdava o 22 px e o respiro dela;
+     no celular ele segue a medida do protótipo D3A, a mesma do computador. O "Trocar" ganha alvo de toque de 32 px. */
+  .cartao-encolhido { border-radius: 18px; padding: 12px 14px; }
+  .ce-rodape .bt.link { min-height: 32px; }
   .pq-titulo { font-size: 17px; }
   .pq-fechar { width: 44px; height: 44px; margin: -10px -10px -10px 0; }
   .pq-lista { border-radius: 16px; }

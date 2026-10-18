@@ -24,6 +24,9 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "aprovacao.automatica_falhou": { destino: "chat", categoria: null },
   // "Esta mudança não foi aplicada… Peça de novo ao bot": pede ação.
   "proposta.obsoleta": { destino: "chat", categoria: null },
+  // A proposta confirmada ou recusada com payload (`proposta_decidida`, chat limpo PR 4): é o cartão encolhido no lugar
+  // do cartão da proposta. As de antes, sem payload, continuam `proposta.decidida` (Atividade).
+  "proposta.resultado": { destino: "chat", categoria: null },
   artefato: { destino: "chat", categoria: null },
   ligacao: { destino: "chat", categoria: null },
   // /nova: a pessoa pediu e precisa ver que o bot começou do zero.
@@ -138,6 +141,11 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return porRegra(autoria) ? "acesso.automatico" : "acesso.concedido";
       case "pasta_aberta":
         return "acesso.pasta";
+      // "Sempre permitir isto" (PR 4): o recibo da regra que a pessoa criou, como o consentimento manual.
+      case "regra_permanente":
+        return "acesso.concedido";
+      case "proposta_decidida":
+        return "proposta.resultado";
       case "rotina_execucao":
         return payload.desfecho === "falhou" || payload.desfecho === "bloqueada" || payload.desfecho === "interrompida" ? "rotina.falhou" : "rotina.execucao";
       case "rotina_evento":

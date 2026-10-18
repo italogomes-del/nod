@@ -12,6 +12,7 @@ import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
 import type { PayloadRotinaEvento } from "./rotina.ts";
 import type { Destino } from "./destino-no-chat.ts";
 import type { PayloadPedidoRespondido, PayloadPeerPedido } from "./troca-entre-bots.ts";
+import type { AncoraDoConsentimento, PayloadPropostaDecidida, PayloadRegraPermanente } from "./cartao-encolhido.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -48,8 +49,8 @@ export type PayloadMensagem =
   /** ADR-047/058 e chat limpo (PR 3, `nome`): troca-entre-bots.ts. */
   | PayloadPeerPedido
   | { kind: "passe"; motivo: MotivoPasse }
-  /** definido em 2026-09-24 (ADR-044): um consentimento por LOTE de capacidades do mesmo app. */
-  | { kind: "consentimento"; conectorId: string; slug: string; capacidades: string[]; naoInclui: string[] }
+  /** definido em 2026-09-24 (ADR-044): um consentimento por LOTE de capacidades do mesmo app. A âncora: cartao-encolhido.ts. */
+  | ({ kind: "consentimento"; conectorId: string; slug: string; capacidades: string[]; naoInclui: string[] } & AncoraDoConsentimento)
   /** Forma das mensagens gravadas antes de 2026-09-24: uma capacidade por consentimento. */
   | { kind: "consentimento"; conectorId: string; slug: string; capacidade: string; naoInclui: string[] }
   | { kind: "rotina_execucao"; rotinaId: string; instanteAgendado: EpochMs; desfecho: DesfechoRotina }
@@ -137,9 +138,10 @@ export type PayloadMensagem =
   /**
    * definido em 2026-09-25 (card de pasta simplificado): o registro de que a pessoa abriu uma pasta
    * para o agente. O card da proposta some ao permitir; esta linha fica na conversa ("acme aberta
-   * para o Dev 1 · Trocar"). `onde` é a pasta-mãe relativa à pasta pessoal, quando a busca a deu.
+   * para o Dev 1 · Trocar"). `onde` é a pasta-mãe relativa à pasta pessoal, quando a busca a deu. `turnoId` (2026-10-18,
+   * chat limpo PR 4): o turno que pediu, a âncora do cartão encolhido; as gravadas antes não o têm.
    */
-  | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string }
+  | { kind: "pasta_aberta"; propostaId: string; agenteId: string; pasta: string; nome: string; onde?: string; turnoId?: string | null }
   /** definido em 2026-09-28 (ADR-051): só ids — o HTML (até 500 000 caracteres) não viaja com a conversa. */
   | { kind: "artefato"; artefatoId: string; versao: number; titulo: string }
   /** definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a transcrição vem por GET ligacoes/:id/falas. */
@@ -156,7 +158,10 @@ export type PayloadMensagem =
   /** definido em 2026-10-12 (ADR-099, I3): a linha "3 frentes terminaram" (ou "A frente X terminou", com `avisar_a_cada_uma`) na conversa do dono. */
   | { kind: "frentes_terminadas"; loteId: string; frentes: { trabalhoId: string; titulo: string; estado: EstadoTrabalho }[] }
   /** ADR-099 (I3) e chat limpo (PR 3: `resposta`, `turnoRaizId`): troca-entre-bots.ts. */
-  | PayloadPedidoRespondido;
+  | PayloadPedidoRespondido
+  /** Chat limpo, PR 4 (o cartão encolhido): cartao-encolhido.ts. */
+  | PayloadRegraPermanente
+  | PayloadPropostaDecidida;
 
 export type Mensagem = {
   tenantId: TenantId;

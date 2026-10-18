@@ -10,6 +10,7 @@ import { log } from "../obs/log.ts";
 import { carimbo } from "./apoio-l7.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { fecharDecisaoDaProposta } from "./confirmar-pelo-modo.ts";
+import { payloadDaPropostaDecidida } from "./proposta-decidida.ts";
 import { recusarRotinasDoCard } from "./recusar-proposta.ts";
 import { retomarAposPerfil } from "./retomar-apos-perfil.ts";
 import type { Deps } from "./tipos.ts";
@@ -116,12 +117,13 @@ export async function confirmarPerfil(deps: Deps, lida: Proposta): Promise<{ dat
   events.push(...(await retomarAposPerfil(deps, confirmada, ativadas.length)));
 
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
+  // Chat limpo (PR 4): o cartão do perfil encolhe na âncora do turno que o propôs, "Confirmado por você".
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
-    assunto: "proposta.decidida",
     texto: redigir("proposta-confirmada", agora, { pessoa: pessoa?.nome ?? "você", resumo }),
+    payload: await payloadDaPropostaDecidida(deps, confirmada, "confirmada"),
     confianca: "confiavel",
   });
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));

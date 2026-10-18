@@ -319,10 +319,14 @@ describe("tudo que não é balão fica no centro", () => {
     const { e, c } = cenario(variadas);
     for (const b of itens(c, e)) {
       if (ehBalao(b.html)) continue;
+      // O cartão encolhido (chat limpo, PR 4) é o cartão do pedido decidido: fica alinhado às falas do bot, como estava aberto.
+      if (/^\s*<div class="msg-linha msg-encolhido"/.test(b.html)) continue;
       const raiz = /^\s*<(?:div|details|section|span)\s+class="([^"]+)"/.exec(b.html)?.[1]?.split(" ")[0] ?? "";
       expect(Object.keys(CENTRO), `bloco ${b.chave}: ${b.html.slice(0, 80)}`).toContain(raiz);
     }
     for (const [classe, regra] of Object.entries(CENTRO)) expect(css, classe).toMatch(regra);
+    expect(itens(c, e).find((b) => b.chave === "ra")?.html).toContain('class="msg-linha msg-encolhido"');
+    expect(css).toMatch(/\.msg-linha\.msg-encolhido \{ max-width: none; margin-left: 0; margin-right: 0; \}/);
     // O pedido a colega e a resposta dele, por dentro da .msg-linha, também ficam no centro (antes: margem de 52px).
     expect(css).toMatch(/\.msg-handoff, \.msg-peer \{[^}]*margin: 12px auto 22px;/);
     expect(css).not.toMatch(/\.collaboration\{margin:12px 0 20px 64px/);

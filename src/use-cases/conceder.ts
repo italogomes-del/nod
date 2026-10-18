@@ -26,6 +26,12 @@ export type EntradaConcederLote = Omit<EntradaConceder, "capacidade"> & {
    * `decidido_por` e dito no texto, para a trilha não confundir com um clique.
    */
   porRegra?: { regra: `regra:${string}`; regraVersao: number };
+  /**
+   * definido em 2026-10-18 (chat limpo, PR 4): o pedido que este lote atende (decidir-acesso.ts) — a decisão, o turno que
+   * pediu e a frase. Vão no payload do consentimento: o cartão do pedido encolhe no lugar dele, com a frase como título.
+   * Sem a frase quando a pessoa desmarcou parte do pedido: o título sai do que foi concedido.
+   */
+  pedido?: { decisaoId: string; turnoId: string | null; frase?: string };
 };
 
 /**
@@ -86,7 +92,7 @@ export const concederLote: CasoDeUso<EntradaConcederLote, SaidaConcederLote> = a
         escopo: novas.map((cap) => `${conector.slug}.${cap}`).join(", "),
         naoInclui: naoInclui.length === 0 ? "nada mais deste conector" : naoInclui.join("; "),
       }) + (input.porRegra ? " Pela aprovação automática deste bot, sem clique neste pedido." : ""),
-      payload: { kind: "consentimento", conectorId: conector.id, slug: conector.slug, capacidades: novas, naoInclui },
+      payload: { kind: "consentimento", conectorId: conector.id, slug: conector.slug, capacidades: novas, naoInclui, ...(input.pedido ?? {}) },
       confianca: "confiavel",
     });
     if (!mensagem) throw new Error("mensagem de consentimento não criada");

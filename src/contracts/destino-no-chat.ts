@@ -19,6 +19,7 @@ export const ASSUNTOS = [
   "aprovacao.recibo",
   "aprovacao.automatica_falhou",
   "proposta.obsoleta",
+  "proposta.resultado",
   "artefato",
   "ligacao",
   "sessao.nova",

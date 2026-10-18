@@ -85,6 +85,8 @@ import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
 import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
 import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
+import { aplicarEncolhidos, decididaNaConversa, type DecididaNestaAba } from "./lib/foco-do-encolhido.ts";
+import { itensDaRecusa } from "./lib/recusa-da-aprovacao.ts";
 import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
@@ -121,6 +123,14 @@ let live: LiveEvents | null = null;
 let composerDe: string | null = null;
 /** O pedido de foco depois de responder em "Sua vez" (web/lib/foco-da-fila.ts); null sem pedido. */
 let focoDaFila: FocoDaFila | null = null;
+/** Chat limpo (PR 4): os pedidos decididos por um clique nesta conversa, à espera do cartão encolhido (foco e anúncio). */
+let encolhidosPendentes: DecididaNestaAba[] = [];
+
+/** Guarda o pedido decidido pelo clique na conversa; o de "Sua vez" e o de outra tela não contam (web/lib/foco-do-encolhido.ts). */
+function marcarDecidida(el: HTMLElement, id: string | undefined): void {
+  const d = decididaNaConversa(el, id, Date.now());
+  if (d) encolhidosPendentes = [...encolhidosPendentes.filter((x) => x.id !== d.id), d];
+}
 /**
  * O que estava digitado em cada conversa (definido em 2026-09-30): trocar de conversa recriava o campo vazio e a pessoa
  * perdia o texto. Agora ele fica com a conversa de onde ela saiu e volta quando ela volta — também depois de recarregar.
@@ -1190,6 +1200,8 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   if (focoNoBotao && (!document.activeElement || document.activeElement === document.body)) {
     acharBotao(document.querySelectorAll<HTMLButtonElement>("#timeline button[data-act]"), focoNoBotao)?.focus({ preventScroll: true });
   }
+  // Chat limpo (PR 4): o cartão encolhido do pedido decidido nesta conversa recebe o foco e o anúncio no primeiro desenho.
+  if (muda.historicoMuda && encolhidosPendentes.length > 0) encolhidosPendentes = aplicarEncolhidos(document, encolhidosPendentes, Date.now(), anunciar);
   for (const busca of buscas) {
     const campo = document.getElementById(busca.id) as HTMLInputElement | null;
     if (campo) campo.value = busca.valor;
@@ -2784,6 +2796,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const grupos = [...(card?.querySelectorAll<HTMLInputElement>("input[data-caps]") ?? [])];
     const capacidades = grupos.filter((g) => g.checked).flatMap((g) => (g.dataset.caps ?? "").split(",").filter(Boolean));
     if (grupos.length > 0 && capacidades.length === 0) { dispatch({ tipo: "erro", erro: { codigo: "entrada_invalida", mensagem: "Marque pelo menos um grupo para permitir." } }); return; }
+    // Chat limpo (PR 4): o consentimento leva o id desta decisão; o cartão "Acesso permitido" recebe o foco e o anúncio.
+    marcarDecidida(el, id);
     await api!.decidir(id, grupos.length > 0 ? { capacidades } : {});
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "conectores", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
@@ -2809,6 +2823,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const slug = el.dataset.id ?? "";
     const propostaId = el.dataset.proposta ?? "";
     const ato = el.dataset.ato;
+    marcarDecidida(el, propostaId);
     iniciarConexao(slug, async () => {
       const r = await api!.conectores();
       dispatch({ tipo: "hidratar-conectores", conectores: r.conectores, marketplace: r.marketplace, composioConfigurado: r.composioConfigurado });
@@ -2856,6 +2871,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const alvo = conversaAtual();
     const pasta = el.dataset.pasta ?? el.closest("[data-proposta]")?.querySelector<HTMLInputElement>("input[data-pasta-de]:checked")?.value;
     if (!alvo || alvo.salaId || !pasta) return;
+    marcarDecidida(el, el.dataset.id);
     await api!.permitirPasta(el.dataset.id ?? "", pasta);
     dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
   }),
@@ -3076,9 +3092,9 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       const alvo = conversaAtual();
       if (alvo) dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`] });
     }),
-  "confirmar-proposta": (el) => agir(async () => void (await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  "confirmar-proposta": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.confirmarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota", "rotinas", "sua-vez", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   // definido em 2026-09-25: como em "permitir-pasta", o clique que chega com outro pedido correndo é ignorado.
-  "recusar-proposta": (el) => estado.ocupado ? undefined : agir(async () => void (await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  "recusar-proposta": (el) => estado.ocupado ? undefined : agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.recusarProposta(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   fixar: (el) => agir(async () => void (await api!.fixar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["frota"] }))),
   ocultar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "ocultar"); },
   duplicar: (el) => { const a = botGerido(el.dataset.id); if (a) acaoDoBot(a, "duplicar"); },
@@ -3143,12 +3159,23 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "sondar-conector": (el) => agir(async () => void (await api!.sondarConector(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["conectores", "frota"] }))),
   "habilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", true), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
   "desabilitar-conector": (el) => agir(async () => void (await api!.habilitarConector(el.dataset.id ?? "", false), dispatch({ tipo: "invalidar", quais: ["conectores"] }))),
-  "decidir-aprovacao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "") }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
+  "decidir-aprovacao": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "") }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
   // ADR-042: aprova AGORA e grava a regra para as próximas vezes, no mesmo clique.
   // definido em 2026-09-28 (emenda da ADR-037): aprova este passo e libera o computador até o fim da tarefa.
-  "decidir-aprovacao-resto": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), restoDaTarefa: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
-  "decidir-aprovacao-sempre": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), sempre: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
-  "decidir-aprovacao-nenhum": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? "").map((m) => ({ ...m, selecionado: false })) }), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  "decidir-aprovacao-resto": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), restoDaTarefa: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
+  "decidir-aprovacao-sempre": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", { itens: marcacoesDe(el.dataset.id ?? ""), sempre: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] }))),
+  // QA do PR 4 (2026-10-18): o cartão de um item não tem caixa de marcar e mandava `itens: []`, que aprova (web/lib/recusa-da-aprovacao.ts).
+  "decidir-aprovacao-nenhum": (el) => agir(async () => {
+    const id = el.dataset.id ?? "";
+    const itens = itensDaRecusa(marcacoesDe(id), estado.suaVez?.itens.find((i) => i.decisao.id === id)?.itensAprovacao ?? []);
+    if (!itens) {
+      dispatch({ tipo: "erro", erro: { codigo: "estado_invalido", mensagem: "Não deu para recusar agora. Recarregue a página e tente de novo." } });
+      return;
+    }
+    marcarDecidida(el, id);
+    await api!.decidir(id, { itens });
+    dispatch({ tipo: "invalidar", quais: ["sua-vez"] });
+  }),
   // 0062: o filtro por tipo da tela Relatos é atributo na seção (o CSS esconde o resto); nada é redesenhado.
   "filtrar-relatos": (el) => {
     const secao = el.closest<HTMLElement>(".relatos");
@@ -3160,11 +3187,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "decidir-lote": (el) => agir(async () => {
     const card = el.closest<HTMLElement>("[data-proposta]");
     const selecionados = [...(card?.querySelectorAll<HTMLInputElement>("input[data-lote-i]") ?? [])].filter((c) => c.checked).map((c) => Number(c.dataset.loteI));
+    marcarDecidida(el, el.dataset.id);
     await api!.decidir(el.dataset.id ?? "", { selecionados });
     dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", "gestao", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
   }),
-  "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
-  "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  "decidir-proposta": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
+  "recusar-decisao": (el) => agir(async () => void (marcarDecidida(el, el.dataset.id), await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa. Revisto em 2026-10-18
   // (plano "pergunta com botões"): estes são os gestos em volta do cartão e da caixa "Respondendo".
   "composer-outro": () => escolherNoComposer(true),

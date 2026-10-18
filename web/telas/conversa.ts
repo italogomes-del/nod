@@ -23,7 +23,8 @@ import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
-import { renderCardPasta, renderPastaAberta } from "./card-pasta.ts";
+import { renderCardPasta } from "./card-pasta.ts";
+import { dadosDoEncolhido, pedidoDoRecibo, renderCartaoEncolhido, turnoDoEncolhido } from "./cartao-encolhido.ts";
 import { renderCardLote } from "./card-lote.ts";
 import { idsNoPerfil, renderCardPerfil } from "./card-perfil.ts";
 import { renderCardArtefato } from "./card-artefato.ts";
@@ -77,15 +78,14 @@ export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
  * soltos — "Marlon aprovou 0 de 3; não enviado: … (falhou na execução)", "Marlon permitiu para sempre:
  * googlesheets.update_values. Vale já…". Agora cada um é UMA linha: quem decidiu, o quê e como terminou, com o
  * detalhe por item recolhido. O texto redigido continua gravado (e no title) para quem lê a conversa crua.
+ * revisto em 2026-10-18 (chat limpo, PR 4): o recibo com payload vira o cartão encolhido, no lugar do pedido
+ * (web/telas/cartao-encolhido.ts). Ficam aqui as linhas sem cartão: o recibo automático sem payload e o "permitiu para
+ * sempre" de antes de 18/10, sem payload.
  */
 const IC_RECIBO = {
   ok: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 8.5 2.5 2.5L12 5.5"/></svg>',
-  falha: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 4.5v4.2"/><path d="M8 11.3v.2"/></svg>',
-  recusa: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 8h6"/></svg>',
   regra: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7.5" width="9" height="6" rx="1.5"/><path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 4.9-.7"/></svg>',
 } as const;
-
-const DESFECHO_NO_RECIBO: Record<string, string> = { executado: "feito", retirado_pela_pessoa: "você tirou", sensivel_nao_aprovado: "dado pessoal, não aprovado", falhou_na_execucao: "falhou ao executar" };
 
 function quemDecidiu(m: Mensagem, estado: Estado): string {
   if (m.autoria.autor_id === estado.sessao?.pessoaId) return "Você";
@@ -93,30 +93,12 @@ function quemDecidiu(m: Mensagem, estado: Estado): string {
   return nome ? nome.charAt(0).toUpperCase() + nome.slice(1) : "Alguém";
 }
 
-function reciboDaDecisao(m: Mensagem, p: Extract<NonNullable<Mensagem["payload"]>, { kind: "resultado_aprovacao" }>, estado: Estado): string {
-  const total = p.itens.length;
-  const feitos = p.itens.filter((i) => i.desfecho === "executado").length;
-  const aprovados = p.itens.filter((i) => i.desfecho === "executado" || i.desfecho === "falhou_na_execucao").length;
-  const tipo = aprovados === 0 ? "recusa" : feitos === aprovados ? "ok" : "falha";
-  const verbo = aprovados === 0 ? "recusou" : "aprovou";
-  const oque = p.frase ?? (total === 1 && p.itens[0]?.texto ? p.itens[0].texto : `${total} ${total === 1 ? "ação" : "ações"}`);
-  const estadoFinal = tipo === "recusa" ? "" : tipo === "ok" ? (total > 1 ? `${feitos} de ${total} feitas` : "feito") : feitos === 0 ? "não saiu" : `${aprovados - feitos} de ${aprovados} não saíram`;
-  const linha = `<span class="recibo-ic">${IC_RECIBO[tipo]}</span><span class="recibo-txt"><b>${esc(quemDecidiu(m, estado))} ${verbo}</b> · ${esc(oque)}</span>${estadoFinal ? `<span class="recibo-estado">${esc(estadoFinal)}</span>` : ""}`;
-  const comTexto = p.itens.some((i) => i.texto);
-  const detalhe = comTexto
-    ? `<ul class="recibo-itens">${p.itens.map((i) => `<li class="recibo-item-${i.desfecho === "executado" ? "ok" : i.desfecho === "falhou_na_execucao" ? "falha" : "recusa"}"><span>${esc(i.texto ?? "")}</span><small>${esc(DESFECHO_NO_RECIBO[i.desfecho] ?? i.desfecho.replaceAll("_", " "))}</small></li>`).join("")}</ul>`
-    : `<p class="recibo-texto">${paragrafos(m.texto)}</p>`;
-  // Um item que deu certo, ou um pedido recusado inteiro, não tem o que abrir: a linha já diz tudo.
-  if ((tipo === "ok" && total === 1) || tipo === "recusa") return `<div class="recibo recibo-${tipo}" title="${esc(m.texto)}">${linha}</div>`;
-  return `<details class="recibo recibo-${tipo}" data-disclosure="recibo-${esc(m.id)}"><summary title="${esc(m.texto)}">${linha}<span class="recibo-ver">detalhes</span></summary>${detalhe}</details>`;
-}
-
 /** Resultado sem payload (o que uma regra aprovou sozinha, itens-na-maquina.ts): a mesma linha, com o texto inteiro. */
 function reciboSemDetalhe(m: Mensagem): string {
   return `<div class="recibo recibo-ok" title="${esc(m.texto)}"><span class="recibo-ic">${IC_RECIBO.ok}</span><span class="recibo-txt">${esc(m.texto)}</span></div>`;
 }
 
-/** "{pessoa} permitiu para sempre: a.b, c.d. Vale já…" (redacao.ts permissao-permanente) vira "Regra nova · sempre permitir editar no Google Sheets". */
+/** "{pessoa} permitiu para sempre: a.b, c.d. Vale já…" (redacao.ts permissao-permanente) vira "Regra nova · sempre permitir editar no Google Sheets". Só as antigas: desde 2026-10-18 a regra tem payload (`regra_permanente`) e encolhe. */
 const PERMITIU = /^(.+?) permitiu para sempre: (.+?)\. Vale já/;
 
 function reciboDaRegra(m: Mensagem, estado: Estado): string | null {
@@ -160,7 +142,6 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     const acoes = aindaFora && dono ? `<div class="mcf-acoes">${botao("religar-computador", "Tentar de novo", { id: p.agenteId, classe: "pri sm" })}${botao("abrir-computador", "Abrir computador", { id: p.agenteId, classe: "sm" })}</div>` : bot && !aindaFora ? '<p class="mudo sm">O computador voltou a responder.</p>' : "";
     return `<div class="msg-computador-fora" role="status"><div class="mcf-titulo"><b>Computador do bot fora do ar</b><span class="mudo">desde ${esc(dataHora(p.desde))}</span></div><p>${paragrafos(m.texto)}</p>${acoes}</div>`;
   }
-  if (p?.kind === "pasta_aberta") return renderPastaAberta(p, estado, agenteDe(estado, p.agenteId));
   // definido em 2026-09-28 (ADR-051): o card do artefato; o iframe entra depois do render (telas/artefatos-vivos.ts).
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
@@ -180,7 +161,6 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
     return `<div class="msg-consentimento"><b>Acesso permitido · ${esc(p.slug)}</b><div>${caps.length === 1 ? esc(caps[0] ?? "") : `${caps.length} ações`}</div><details data-disclosure="consentimento-${esc(m.id)}"><summary>Ver registro de autorização</summary>${paragrafos(m.texto)}</details></div>`;
   }
   if (p?.kind === "rotina_execucao") return `<div class="msg-rotina msg-rotina-${esc(p.desfecho)}">${paragrafos(m.texto)}</div>`;
-  if (p?.kind === "resultado_aprovacao") return reciboDaDecisao(m, p, estado);
   if (m.kind === "resultado_aprovacao") return reciboSemDetalhe(m);
   if (m.kind === "consentimento" && !p) return reciboDaRegra(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "negacao" && p.classe === "plano_ausente") return avisoSemExecutor(m, estado);
@@ -430,7 +410,12 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
     const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
     return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
   }
-  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaFala(m, estado)}${faixaDaMensagem(m, estado)}</div>`;
+  if (m.kind !== "texto") {
+    // Chat limpo (PR 4): o recibo da decisão é o cartão do pedido, encolhido com o resultado — alinhado às falas do bot,
+    // como o cartão aberto estava, e não no centro como as linhas.
+    const encolhido = dadosDoEncolhido(m, estado);
+    return `<div class="msg-linha${encolhido ? " msg-encolhido" : ""}" data-mensagem="${esc(m.id)}">${encolhido ? renderCartaoEncolhido(encolhido, m.id) : corpoMensagem(m, estado)}${acoesDaFala(m, estado)}${faixaDaMensagem(m, estado)}</div>`;
+  }
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
   // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
@@ -711,7 +696,16 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
  * recolhidos (o id da primeira), cada proposta e as decisões. main.ts troca só os pedaços cujo HTML mudou, e a
  * mensagem nova entra sem regravar as outras 199 (web/lib/regioes.ts `regiaoPorBlocos`).
  */
-export type BlocoDaTimeline = { chave: string; html: string };
+export type BlocoDaTimeline = { chave: string; html: string; inicio?: string };
+
+/**
+ * O bloco de uma linha: a chave e, na troca agrupada (chat limpo, PR 3), o id da mensagem em que ela entrou. A chave da
+ * troca é `troca:<turno ou pedido>` e não diz a posição; sem `inicio`, o pedido cuja âncora caía dentro da troca ia para
+ * antes dela (QA do PR 4, 2026-10-18: o cartão do Ze aparecia acima de "Conversou com Leo").
+ */
+function blocoDaLinha(l: LinhaDaConversa): BlocoDaTimeline {
+  return { chave: l.chave ?? l.id, html: l.html, ...(l.chave?.startsWith("troca:") ? { inicio: l.id } : {}) };
+}
 
 /**
  * As mensagens em blocos (revisto em 2026-10-07, #191, chat limpo): `planejarLinhas` (web/telas/linhas-do-chat.ts) diz
@@ -746,7 +740,7 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   const desenhadas = juntarTrocas((conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== ""), planos, estado);
   // Chat limpo (ADR-114): sem aviso genérico no chat, não sobra o que recolher — o que fica pede a pessoa e fica à vista.
   // A sala e o servidor de antes (sem `destino`) continuam recolhendo.
-  return conversaLimpa(mensagens) ? desenhadas.map((l) => ({ chave: l.chave ?? l.id, html: l.html })) : recolherAvisos(desenhadas);
+  return conversaLimpa(mensagens) ? desenhadas.map(blocoDaLinha) : recolherAvisos(desenhadas);
 }
 
 /**
@@ -789,12 +783,13 @@ const AVISOS_PARA_RECOLHER = 3;
 
 /**
  * Linha de sistema recolhível: aviso, vencimento, execução de rotina. O cartão do computador fora do ar e o
- * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também.
+ * registro da pasta aberta (definido em 2026-09-25) têm botões e ficam à vista; a linha "Chat de voz" (2026-10-04) também,
+ * e o cartão encolhido da proposta (2026-10-18, chat limpo PR 4).
  * definido em 2026-10-16 (ADR-108, QA do PR 2): o aviso de troca de IA ainda sem decisão pede uma escolha — fica à vista.
  */
 function linhaDeSistema(m: Mensagem): boolean {
   if (m.kind === "sistema" && m.payload?.kind === "troca_de_ia" && !m.payload.decisao) return false;
-  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
+  return (m.kind === "sistema" && m.payload?.kind !== "computador_fora_do_ar" && m.payload?.kind !== "pasta_aberta" && m.payload?.kind !== "proposta_decidida" && m.payload?.kind !== "ligacao") || m.kind === "rotina_execucao";
 }
 
 /**
@@ -814,11 +809,11 @@ function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
       saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>` });
       i = fim;
     } else if (fim > i) {
-      saida.push(...linhas.slice(i, fim).map((l) => ({ chave: l.chave ?? l.id, html: l.html })));
+      saida.push(...linhas.slice(i, fim).map(blocoDaLinha));
       i = fim;
     } else {
       const l = linhas[i];
-      if (l) saida.push({ chave: l.chave ?? l.id, html: l.html });
+      if (l) saida.push(blocoDaLinha(l));
       i++;
     }
   }
@@ -881,15 +876,20 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const noPerfil = idsNoPerfil(c.propostas);
   const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
   const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
-  const idsDasPropostas = new Set(propostas.map((p) => p.id));
-  const { blocos, ancoradas } = comPedidosAncorados(blocosDasMensagens(c.mensagens, estado, sala), c, estado, idsDasPropostas);
+  // Chat limpo (PR 4): o pedido que já tem o recibo na conversa é o cartão encolhido; o aberto de mesmo id não sai de novo
+  // (a fila "Sua vez" e as propostas são relidas um instante depois do frame da mensagem, e por esse instante os dois
+  // estariam na tela).
+  const decididos = new Set(c.mensagens.map(pedidoDoRecibo).filter((id): id is string => id !== null));
+  const abertas = propostas.filter((p) => !decididos.has(p.id));
+  const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...decididos]);
+  const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala), c), c, estado, idsDasPropostas);
   return [
     { chave: "sep", html: sep },
     ...blocos,
     // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
     { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
     { chave: "acolhimento", html: acolhimento },
-    ...propostas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
+    ...abertas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },
     // revisto em 2026-10-06 (pedido do Marlon): sai a oferta de liberar apps recém-conectados (card-liberar.ts, PR #141).
     // Ela aparecia sozinha em bot novo e a cada reconexão do Mac, porque valia para todo bot sem acesso por 24 h depois de
@@ -903,12 +903,64 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
  * (`turnosEmCurso`); sem turno, a última mensagem anterior ao pedido. Sem nenhuma, o pedido fica na seção do fim.
  */
 function ancoraDoPedido(d: { turnoId: string | null; criadoEm: string }, c: ConversaEstado): string | undefined {
-  const doTurno = d.turnoId ? c.mensagens.filter((m) => m.turnoId === d.turnoId).at(-1)?.id : undefined;
+  // O recibo de outro pedido do mesmo turno (chat limpo, PR 4) não é âncora: ele já é o cartão encolhido, que fica na fala.
+  const doTurno = d.turnoId ? c.mensagens.filter((m) => m.turnoId === d.turnoId && pedidoDoRecibo(m) === null).at(-1)?.id : undefined;
   if (doTurno) return doTurno;
   const origem = d.turnoId ? c.turnosEmCurso.find((t) => t.id === d.turnoId)?.mensagemId : undefined;
   if (origem && c.mensagens.some((m) => m.id === origem)) return origem;
   const criado = Date.parse(d.criadoEm);
   return c.mensagens.filter((m) => m.criadoEm <= criado).at(-1)?.id;
+}
+
+/** Prefixo da chave do cartão encolhido que saiu da posição do recibo para a âncora do pedido. */
+const ENCOLHIDO = "encolhido:";
+
+/**
+ * O cartão encolhido fica na âncora do pedido (definido em 2026-10-18, chat limpo, PR 4; plano, Parte 3 · 3A): a última
+ * mensagem do turno que pediu ANTES do recibo — a mesma de quando o cartão estava aberto (`ancoraDoPedido`). O turno pode
+ * seguir depois da decisão ("Enviado."), e essa fala vem depois do cartão, como no protótipo. Sem turno (recibo antigo,
+ * consentimento sem pedido) ou com a âncora fora da janela, o cartão encolhe na posição do próprio recibo. A mecânica é a
+ * de `comPedidosAncorados`: a âncora que caiu num bloco recolhido leva o cartão para depois do bloco. O recibo que foi
+ * parar dentro de um bloco agrupado (a sala, que recolhe avisos) fica onde está.
+ */
+function comEncolhidosNaAncora(blocos: BlocoDaTimeline[], c: ConversaEstado): BlocoDaTimeline[] {
+  const alvos = new Map<string, number>();
+  c.mensagens.forEach((m, i) => {
+    const turno = turnoDoEncolhido(m);
+    if (!turno || pedidoDoRecibo(m) === null) return;
+    for (let j = i - 1; j >= 0; j--) {
+      const x = c.mensagens[j];
+      if (x?.turnoId === turno && pedidoDoRecibo(x) === null) {
+        alvos.set(m.id, j);
+        return;
+      }
+    }
+  });
+  if (alvos.size === 0) return blocos;
+  const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
+  const inicioDe = blocos.map((b) => (alvos.has(b.chave) ? undefined : posicao.get(inicioDoBloco(b))));
+  const depoisDe = new Map<number, BlocoDaTimeline[]>();
+  const movidos = new Set<string>();
+  for (const b of blocos) {
+    const alvo = alvos.get(b.chave);
+    if (alvo === undefined) continue;
+    let indice = -1;
+    inicioDe.forEach((inicio, i) => { if (inicio !== undefined && inicio <= alvo) indice = i; });
+    // Sem bloco antes da âncora: o cartão fica onde o recibo está.
+    if (indice < 0) continue;
+    movidos.add(b.chave);
+    depoisDe.set(indice, [...(depoisDe.get(indice) ?? []), { chave: `${ENCOLHIDO}${b.chave}`, html: b.html }]);
+  }
+  return blocos.flatMap((b, i) => [...(movidos.has(b.chave) ? [] : [b]), ...(depoisDe.get(i) ?? [])]);
+}
+
+/**
+ * O id da primeira mensagem do bloco: o `inicio` da troca agrupada (PR 3) ou, pela chave, `avisos-<id>` e, desde
+ * 2026-10-07 (#191), `linha:<id>`.
+ */
+function inicioDoBloco({ chave, inicio }: BlocoDaTimeline): string {
+  if (inicio) return inicio;
+  return chave.startsWith("avisos-") ? chave.slice("avisos-".length) : chave.startsWith("linha:") ? chave.slice("linha:".length) : chave;
 }
 
 /**
@@ -920,8 +972,7 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
   const pedidos = pedidosAncoraveis(estado, c.conversa.id, propostas);
   if (pedidos.length === 0) return { blocos, ancoradas: new Set() };
   const posicao = new Map(c.mensagens.map((m, i) => [m.id, i]));
-  // As chaves com prefixo levam o id da primeira mensagem do bloco: `avisos-<id>` e, desde 2026-10-07 (#191), `linha:<id>`.
-  const inicioDe = blocos.map((b) => posicao.get(b.chave.startsWith("avisos-") ? b.chave.slice("avisos-".length) : b.chave.startsWith("linha:") ? b.chave.slice("linha:".length) : b.chave));
+  const inicioDe = blocos.map((b) => posicao.get(inicioDoBloco(b)));
   const depoisDe = new Map<number, typeof pedidos>();
   for (const item of pedidos) {
     const ancora = ancoraDoPedido(item.decisao, c);
@@ -930,6 +981,8 @@ function comPedidosAncorados(blocos: BlocoDaTimeline[], c: ConversaEstado, estad
     let bloco = -1;
     inicioDe.forEach((inicio, i) => { if (inicio !== undefined && inicio <= alvo) bloco = i; });
     if (bloco < 0) continue;
+    // O cartão já encolhido na mesma âncora (chat limpo, PR 4) vem antes: foi pedido antes do que ainda está aberto.
+    while (blocos[bloco + 1]?.chave.startsWith(ENCOLHIDO)) bloco++;
     depoisDe.set(bloco, [...(depoisDe.get(bloco) ?? []), item]);
   }
   const ancoradas = new Set([...depoisDe.values()].flat().map((i) => i.decisao.id));

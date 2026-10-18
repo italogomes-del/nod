@@ -3,6 +3,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { redigir } from "../domain/redacao.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
+import { payloadDaPropostaDecidida } from "./proposta-decidida.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
@@ -49,12 +50,13 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
       sincronizar.push(...(await sincronizarDasDecisoes(deps, [decisao])));
     }
   }
+  // Chat limpo (PR 4): o recibo leva a proposta e o turno que a propôs — o cartão encolhe ali, "Recusado por você".
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
-    assunto: "proposta.decidida",
     texto: redigir("proposta-recusada", agora),
+    payload: await payloadDaPropostaDecidida(deps, proposta, "recusada"),
     confianca: "confiavel",
   });
   events.unshift(evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: proposta.agenteId, acao: "proposta_recusada", proposta_id: proposta.id, kind: proposta.kind } }));

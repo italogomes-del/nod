@@ -61,6 +61,9 @@ export const permitirSempre: CasoDeUso<EntradaPermitirSempre, SaidaPermitirSempr
     turnoId: null,
     kind: "consentimento",
     texto: redigir("permissao-permanente", deps.agora(), { pessoa: pessoa?.nome ?? "a pessoa", ferramentas: nomes.join(", ") }),
+    // definido em 2026-10-18 (chat limpo, PR 4): payload próprio, com a decisão e o turno que pediu — o recibo da regra é
+    // um cartão encolhido na âncora do pedido. A web deixa a regex "permitiu para sempre" só para as linhas antigas.
+    payload: { kind: "regra_permanente", decisaoId: decisao.id, turnoId: decisao.turnoId, acoes: nomes },
     confianca: "confiavel",
     autoria: {
       autor_tipo: "pessoa",

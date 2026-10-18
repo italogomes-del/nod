@@ -10,6 +10,7 @@ import { redigir } from "../domain/redacao.ts";
 import type { ConectorGuardado } from "../contracts/conector.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { garantirPedidoDeAcesso } from "./garantir-pedido-de-acesso.ts";
+import { payloadDaPropostaDecidida } from "./proposta-decidida.ts";
 import { abrirPedidoDeAcesso } from "./pedir-acesso.ts";
 import { decidirPropostaDeBot } from "./onboarding.ts";
 import { confirmarPerfil } from "./confirmar-perfil.ts";
@@ -168,14 +169,11 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: proposta.conversaId, dados: { decisao_id: decisao.id, tipo: "acesso", proposta_id: proposta.id } }));
   }
 
-  const mensagem = await deps.repos.mensagens.criar({
-    conversaId: proposta.conversaId,
-    autoria,
-    kind: "sistema",
-    assunto: "proposta.decidida",
-    texto: proposta.payload.kind === "acesso" ? PEDIDO_DE_ACESSO_ABERTO : redigir("proposta-confirmada", agora, { pessoa: nomePessoa, resumo }),
-    confianca: "confiavel",
-  });
+  // Chat limpo (PR 4): a proposta confirmada leva o payload e o cartão encolhe na âncora do turno que propôs. O pedido
+  // de acesso não: confirmar só abre a decisão (o cartão continua aberto), e "Pedido aberto" fica na Atividade.
+  const mensagem = await deps.repos.mensagens.criar(proposta.payload.kind === "acesso"
+    ? { conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "proposta.decidida", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" }
+    : { conversaId: proposta.conversaId, autoria, kind: "sistema", texto: redigir("proposta-confirmada", agora, { pessoa: nomePessoa, resumo }), payload: await payloadDaPropostaDecidida(deps, proposta, "confirmada"), confianca: "confiavel" });
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
 
   return { data: { proposta, agente, rotina, decisao }, events };

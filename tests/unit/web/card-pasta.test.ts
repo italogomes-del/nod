@@ -125,9 +125,12 @@ describe("registro da pasta aberta", () => {
   const autoria = { autor_tipo: "pessoa", autor_id: "p", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 } as const;
   const registro: Mensagem = { tenantId: "t", id: "m1", conversaId: "c", turnoId: null, autoria, kind: "sistema", texto: "Pasta do projeto aberta para o agente.", payload: { kind: "pasta_aberta", propostaId: "pp", agenteId: "a", pasta: `${HOME}/code/acme/main-repos/acme`, nome: "acme", onde: "code/acme/main-repos" }, confianca: "confiavel", parcial: false, criadoEm: AGORA };
 
-  it("fica na conversa como uma linha, com o local e o Trocar para quem é dona", () => {
+  it("vira o cartão encolhido (chat limpo, PR 4): o pedido, 'acme aberta para Dev 1' com ✓, o local e o Trocar para quem é dona", () => {
     const html = renderMensagem(registro, estado);
-    expect(html).toContain("<b>acme</b> aberta para Dev 1");
+    expect(html).toContain('class="cartao-pergunta respondida cartao-encolhido"');
+    expect(html).toContain('data-cartao-encolhido="pp"');
+    expect(html).toContain(">Abrir o projeto acme</div>");
+    expect(html).toContain('<span class="pq-rotulo">acme aberta para Dev 1</span><svg class="ce-marca ce-ok"');
     expect(html).toContain("code › acme › main-repos");
     expect(html).toContain('data-act="abrir-workspace"');
     expect(html).not.toContain("msg-sistema");
@@ -137,7 +140,7 @@ describe("registro da pasta aberta", () => {
     const aviso = (id: string): Mensagem => ({ ...registro, id, texto: `aviso ${id}`, payload: null });
     const html = renderTimeline(conversa([], [aviso("a1"), aviso("a2"), registro, aviso("a3")]), estado);
     expect(html).not.toContain("avisos do sistema");
-    expect(html).toContain("<b>acme</b> aberta para Dev 1");
+    expect(html).toContain("acme aberta para Dev 1");
   });
 
   it("o aviso de troca de IA ainda sem decisão também não some dentro de \"N avisos do sistema\" (ADR-108, QA de 16/10)", () => {

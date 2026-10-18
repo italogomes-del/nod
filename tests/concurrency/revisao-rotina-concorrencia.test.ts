@@ -216,6 +216,19 @@ describeIntegracao("propostas de rotina confirmadas ao mesmo tempo (NOD-182): FO
     expect(((await resposta.json()) as ErroDto).codigo).toBe("estado_invalido");
     expect(await estadoFinal(c)).toMatchObject({ instrucao: "A", a: "confirmada", b: "recusada", avisos: 1 });
   });
+  it("chat limpo (revisão do PR 4): confirmar pela rota deixa o recibo da proposta (o cartão encolhe); a obsoleta, não", async () => {
+    const c = await cenario();
+    const cookie = `nod_sessao=${cunharCookie(PESSOA, SEGREDO)}`;
+    const decidir = (id: string) => fetch(`${servidor.url}/api/t/${PESSOA.tenantId}/decisoes/${id}/decidir`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: "{}" });
+    expect((await decidir(c.propostas.atualizarA)).status).toBe(200);
+    expect((await decidir(c.propostas.atualizarB)).status).toBe(409);
+    const recibos = await escopado(async (trx) => (await criarRepos(trx, PESSOA).mensagens.listarDaConversa(c.conversaId)).filter((m) => m.payload?.kind === "proposta_decidida"));
+    expect(recibos.map((m) => m.payload)).toEqual([{ kind: "proposta_decidida", propostaId: c.propostas.atualizarA, tipo: "rotina_atualizacao", titulo: "Mudança de rotina · x", estado: "confirmada", turnoId: null }]);
+    expect(recibos[0]?.texto).toMatch(/^Confirmado por .+\. A partir de agora vale: x\.$/);
+    const [l] = await escopado((trx) => trx<{ assunto: string | null }[]>`select assunto from mensagens where id = ${recibos[0]?.id ?? ""}`);
+    expect(l?.assunto).toBe("proposta.resultado");
+  });
+
   it("duas exclusões da mesma revisão pela rota: a segunda fecha a proposta como confirmada, sem card pendente nem segundo aviso", async () => {
     const c = await cenario();
     const segunda = await escopado(async (trx) => {

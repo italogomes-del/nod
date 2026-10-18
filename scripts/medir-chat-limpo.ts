@@ -25,8 +25,10 @@ import type { Escopo, Tx } from "../src/shared/types.ts";
  *  - execução de rotina sem nada para a pessoa (`rotina.execucao`) conta como escondida nas duas (já fica escondida hoje);
  *  - os quatro avisos de destino temporal (limite do plano, troca de IA, computador fora, IA ausente) contam como
  *    visíveis mesmo depois de deixarem de valer (a web os esconde pelo estado de agora);
- *  - agrupamentos da tela não entram: cada recibo conta um item (o cartão encolhido é a Parte 3), e o "N avisos do
- *    sistema · ver" não é desfeito.
+ *  - agrupamentos da tela não entram: cada recibo conta um item, e o "N avisos do sistema · ver" não é desfeito. Desde
+ *    o PR 4 o recibo é o cartão encolhido, no lugar do pedido e não no fim: continua um item (o cartão aberto, que ele
+ *    substitui, não é mensagem e nunca contou). A proposta decidida com payload (`proposta.resultado`) passa a contar na
+ *    coluna "com a tabela"; a de antes (`proposta.decidida`) continua na Atividade.
  *
  * revisto em 2026-10-18 (PR 3, a troca agrupada): na coluna "com a tabela", as mensagens entre bots seguidas (pedido,
  * resposta, `handoff`, `peer_ask`, "Respondi ao pedido" e as falas do turno de delegação), sem item à vista no meio e sem

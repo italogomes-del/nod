@@ -1,6 +1,5 @@
 import type { FrotaDto } from "../../src/contracts/api.ts";
 import type { PayloadPropostaPasta, Proposta } from "../../src/contracts/conversa.ts";
-import type { PayloadMensagem } from "../../src/contracts/mensagem.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { botao, esc } from "../lib/render.ts";
 import { mudouQuando } from "../lib/relogio.ts";
@@ -15,7 +14,6 @@ export const CURTA = 3;
 
 type Agente = FrotaDto["agentes"][number];
 type Candidata = PayloadPropostaPasta["candidatas"][number];
-type PastaAberta = Extract<PayloadMensagem, { kind: "pasta_aberta" }>;
 
 /** "mudou hoje" é o dia de quem olha: o fuso do navegador, escolhido aqui e não no formatador. */
 const FUSO_LOCAL = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -24,7 +22,6 @@ const PASTA = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" strok
 const PASTA_BUSCA = '<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.3l2 2.2h8.7A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><circle cx="11.5" cy="13.5" r="2.3"/><path d="M13.2 15.2l1.8 1.8"/></svg>';
 const RAMO = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="6" r="1.6"/><path d="M4.5 5.1v5.8"/><path d="M11.5 7.6c0 2.2-2 2.9-7 3.3"/></svg>';
 const CADEADO = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>';
-const CHECK = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>';
 
 /**
  * "code › acme › main-repos": a pasta-mãe, relativa à pasta pessoal. Propostas gravadas antes de
@@ -86,11 +83,4 @@ export function renderCardPasta(p: Proposta, c: PayloadPropostaPasta, estado: Es
     titulo: mesmoNome ? `Qual é o ${esc(sugerida.nome)} certo?` : "Qual destas pastas?",
     sub: `Achei ${c.candidatas.length} pastas${mesmoNome ? " com esse nome" : " parecidas"}. Marquei a próxima mais provável.`,
   }, corpo, agente, `${botao("permitir-pasta", "Usar esta pasta", { classe: "pri", id: p.id })}${recusar}`);
-}
-
-/** O registro que fica depois de permitir: "acme aberta para Dev 1 · code › acme · Trocar". */
-export function renderPastaAberta(p: PastaAberta, estado: Estado, agente: Agente | undefined): string {
-  const dono = agente !== undefined && agente.ownerId === estado.sessao?.pessoaId;
-  const onde = ondeLegivel({ caminho: p.pasta, ...(p.onde !== undefined ? { onde: p.onde } : {}) });
-  return `<div class="pasta-aberta" title="${esc(p.pasta)}"><span class="pa-ok">${CHECK}</span><span><b>${esc(p.nome)}</b> aberta para ${esc(agente?.nome ?? "o agente")}</span><small>${esc(onde)}</small>${dono ? botao("abrir-workspace", "Trocar", { classe: "link", id: p.agenteId }) : ""}</div>`;
 }

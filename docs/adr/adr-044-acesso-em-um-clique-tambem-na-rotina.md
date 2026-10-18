@@ -1,6 +1,7 @@
 # ADR-044 — Acesso em um clique, também na rotina
 
-Status: aceito · Data: 2026-09-24 · Emenda ADR-013, ADR-035 e ADR-043. EMENDA 16 inalterada.
+Status: aceito · Data: 2026-09-24 · Emenda ADR-013, ADR-035 e ADR-043. EMENDA 16 inalterada. Emendada em 2026-10-18
+(chat limpo, PR 4: o registro de autorização no cartão encolhido).
 
 ## Contexto
 
@@ -323,3 +324,20 @@ baixo do nome ("só leitura", "pode alterar", "pode ler e alterar"); a lista abe
 "Altera" quando há as duas; "Revogar" tira tudo do app com um `revogarLote` e "Deixar só leitura" tira
 só as de escrita — o que o card de escrita separado permitia antes. A chave é o slug, não o conector:
 dois registros do mesmo app continuam uma ferramenta. A classificação segue o `readOnlyHint` da sonda.
+
+## Emenda de 2026-10-18 — o registro de autorização mora no cartão encolhido
+
+Plano do chat limpo, Parte 3 (PR 4; [ADR-114](adr-114-chat-limpo.md), emenda do PR 4). Depois do Permitir, o cartão do
+pedido de acesso não some mais deixando a linha "Acesso permitido · Gmail" no fim da conversa: ele **encolhe no lugar**
+(a âncora do pedido, a última fala do turno que pediu), com a frase do pedido como título e "Acesso permitido · Gmail ✓"
+como resultado. O consentimento continua sendo a mensagem imutável e citável da ADR-013, gravada na mesma transação da
+concessão; o texto inteiro dela continua legível no cartão encolhido, em **"Ver registro de autorização"**, como era na
+linha. O "Sempre permitir" (ADR-042) segue o mesmo desenho: "Sempre permitir editar no Google Sheets" e "Regra nova",
+com o cadeado e o registro atrás do mesmo "Ver registro de autorização".
+
+Para encolher no lugar, o payload do `consentimento` dado por um pedido (`decidirAcesso` → `concederLote`) ganha a
+decisão, o turno que pediu e a frase do pedido (`decisaoId`, `turnoId`, `frase`); o da tela Conectores, do cartão
+"Liberar" e o da rotina não têm pedido e encolhem onde estão. A regra permanente ganha payload próprio
+(`regra_permanente { decisaoId, turnoId, acoes }`); a linha antiga, sem payload, continua reconhecida pela frase e
+desenhada como antes. O consentimento dado pela aprovação automática (`decidido_por` de regra) não encolhe: não houve
+cartão nem clique, e ele mora na Atividade do bot (ADR-114).

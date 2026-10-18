@@ -184,7 +184,13 @@ const decidirAcessoDaDona: CasoDeUso<EntradaDecidirAcesso, SaidaDecidirAcesso> =
   if (proposta.estado === "pendente") await deps.repos.propostas.decidir(proposta.id, "confirmada");
   const conector = doPedido;
   if (!conector) throw new ErroDeDominio("nao_encontrado", { cause: "conector" });
-  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: input.capacidades ?? p.capacidades, autorTipo: "pessoa", ...(input.porRegra ? { porRegra: input.porRegra } : {}) });
+  // Chat limpo (PR 4): o consentimento leva o pedido, e o cartão encolhe na âncora do turno que pediu. A frase do pedido
+  // só vai quando tudo o que foi pedido foi concedido: com grupos desmarcados, "Ada quer ler e alterar seu Gmail" sobre
+  // "Acesso permitido" diria mais do que foi concedido (ADR-044) — sem a frase, o cartão diz o que foi liberado.
+  const concedidas = input.capacidades ?? p.capacidades;
+  const inteiro = p.capacidades.every((c) => concedidas.includes(c));
+  const pedido = { decisaoId: decisao.id, turnoId: decisao.turnoId, ...(inteiro ? { frase: decisao.frase } : {}) };
+  const lote = await concederLote(deps, { agenteId: proposta.agenteId, conectorId: conector.id, capacidades: concedidas, autorTipo: "pessoa", pedido, ...(input.porRegra ? { porRegra: input.porRegra } : {}) });
   events.push(...(lote.events ?? []));
 
   let turnoId: string | null = null;

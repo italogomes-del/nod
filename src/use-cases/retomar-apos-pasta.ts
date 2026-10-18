@@ -27,7 +27,8 @@ export const retomarAposPasta: CasoDeUso<{ proposta: Proposta; pasta: string }, 
     autoria,
     kind: "sistema",
     texto: "Pasta do projeto aberta para o agente.",
-    payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta, nome, ...(escolhida?.onde !== undefined ? { onde: escolhida.onde } : {}) },
+    // `turnoId` (chat limpo, PR 4): o turno que pediu a pasta, a âncora do cartão encolhido.
+    payload: { kind: "pasta_aberta", propostaId: proposta.id, agenteId: proposta.agenteId, pasta, nome, ...(escolhida?.onde !== undefined ? { onde: escolhida.onde } : {}), turnoId: p.turnoId ?? null },
     confianca: "confiavel",
   });
   if (!registro) throw new Error("registro da pasta aberta não criado");

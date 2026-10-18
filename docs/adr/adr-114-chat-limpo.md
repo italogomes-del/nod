@@ -1,7 +1,8 @@
 # ADR-114 — Chat limpo: na conversa só fala e o que é com você
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
-e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
+PR 4 (ver **Emenda do PR 4**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -146,6 +147,46 @@ da fala que a anunciou", que vale também para a troca que começa num `handoff`
 e o estado aberto sobrevive ao re-render. A mensagem sem `destino` (sala, servidor de antes) segue com as linhas de antes.
 `TipoLinha` ganha `"troca"` (validado em `telemetria-linhas.ts`): "mostrada" a cada troca desenhada (`troca:<chave>`) e
 "aberta" quando a pessoa abre a troca, para o gatilho de 30% da ADR-083. Nenhuma migração: os campos novos são do payload.
+
+## Emenda do PR 4 (2026-10-18) — o cartão encolhe com o resultado
+
+Decidido, o cartão de aprovação, proposta, acesso, pasta ou regra **encolhe no lugar** (protótipo "3A", escolhido pelo
+Marlon) em vez de sumir e deixar um recibo no fim: o título do pedido e uma linha com o resultado ("Aprovado por você ·
+feito 08:14 ✓", "Recusado por você", "Aprovado · 1 de 3 não saiu", "Acesso permitido · Gmail", "Regra nova", "acme
+aberta para o Dev 1", "Confirmado por você"). É o gesto da pergunta respondida: `web/telas/cartao-encolhido.ts` usa as
+classes do cartão dela (`cartao-pergunta respondida`, `pq-escolhida`, `pq-estado`) sem mexer em `cartao-pergunta.ts`.
+"ver o e-mail" do protótipo é "detalhes" (os itens; decisão tomada 4); o acesso e a regra levam "Ver registro de
+autorização" (emenda da ADR-044).
+
+**Onde fica.** Na âncora do pedido: a última mensagem do turno que pediu **antes do recibo** — a mesma de quando o cartão
+estava aberto (`ancoraDoPedido`); o turno que segue depois da decisão ("Enviado.") fica depois do cartão. O recibo leva
+o turno: `resultado_aprovacao` já é gravado no turno da decisão; o `consentimento` do pedido ganha `decisaoId`, `turnoId`
+e `frase`; "permitiu para sempre" ganha o payload `regra_permanente { decisaoId, turnoId, acoes }`; `pasta_aberta` ganha
+`turnoId`; a proposta confirmada ou recusada (`confirmar-proposta.ts`, `confirmar-perfil.ts`, `recusar-proposta.ts`) ganha
+`proposta_decidida { propostaId, tipo, titulo, estado, turnoId }` (o turno da proposta ou, na de rotina, o da decisão de
+mesmo id) e o assunto novo `proposta.resultado`, de destino `chat`; as de antes, sem payload, continuam
+`proposta.decidida` na Atividade. Sem turno (recibo antigo com payload, consentimento sem pedido) ou com a âncora fora
+da janela, o cartão encolhe na posição do próprio recibo. O "permitiu para sempre" antigo (sem payload) continua a linha
+de antes; o recibo automático e o consentimento da aprovação automática continuam na Atividade (não houve cartão). O
+cartão aberto de mesmo id não é desenhado enquanto "Sua vez" não foi relida, e o pedido ainda aberto do mesmo turno vem
+depois do já encolhido. "Preciso da sua decisão para continuar" continua só para o que está aberto.
+
+**Foco e anúncio.** O cartão encolhido nasce num desenho depois do frame e da releitura, quando o botão clicado já não
+existe: o clique **na conversa** guarda o id decidido (`web/lib/foco-do-encolhido.ts`, 2 min) e, no primeiro desenho do
+cartão com ele, o foco vai ao título (`tabindex="-1"`) e a região `aria-live` única da conversa (`#anuncio-pergunta`)
+diz "Aprovado: …"; com o foco já no campo, só o anúncio. Decidido em "Sua vez" ou em outra aba, nada. Só esse cartão
+anima o encolher, uma vez, e `prefers-reduced-motion` desliga.
+
+**Divergências do plano.** O "Pedido aberto; nada foi concedido ainda." da confirmação de um pedido de acesso
+(`confirmar-proposta.ts`, a conexão e o pedido antigo) não vira cartão encolhido: confirmar só abre a decisão, o cartão
+segue aberto, e a linha fica na Atividade como antes (ADR-044: "Confirmado… vale" mentia). O campo do tipo da proposta é
+`tipo`, não `kind` (o nome é do discriminante do payload). O consentimento leva também a `frase` do pedido, para o título
+do cartão não depender de reler a decisão. O cartão da regra tem o título "Sempre permitir editar no Google Sheets" e o
+resultado "Regra nova", em vez da linha única do plano, porque o título é o pedido em todos os cartões. Nenhuma migração.
+
+**Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não vi o resultado da aprovação" ou equivalente — o cartão
+encolheu lá em cima, na fala que pediu, longe do fim onde a pessoa olhava: o recibo volta a ser também uma linha no fim
+(a tela "3C" do protótipo), com o cartão encolhido no lugar.
 
 ## Gatilhos de reversão (PR 2)
 

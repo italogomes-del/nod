@@ -46,6 +46,10 @@ const CASOS: readonly { nome: string; kind: KindMensagem; payload: PayloadMensag
   { nome: "recado", kind: "sistema", payload: { kind: "recado_a_frente", trabalhoId: "t", titulo: "x" }, assunto: "frentes.recado" },
   { nome: "frentes terminadas", kind: "sistema", payload: { kind: "frentes_terminadas", loteId: "l", frentes: [] }, assunto: "frentes.terminadas" },
   { nome: "pedido respondido", kind: "sistema", payload: { kind: "pedido_respondido", loteId: "l", agenteId: "a", nome: "Ada" }, assunto: "pedido.respondido" },
+  // Chat limpo, PR 4: os recibos com a âncora do cartão encolhido.
+  { nome: "consentimento do pedido", kind: "consentimento", payload: { kind: "consentimento", conectorId: "c", slug: "gmail", capacidades: ["ler"], naoInclui: [], decisaoId: "d", turnoId: "t", frase: "f" }, autoria: pessoa, assunto: "acesso.concedido" },
+  { nome: "regra permanente", kind: "consentimento", payload: { kind: "regra_permanente", decisaoId: "d", turnoId: "t", acoes: ["gmail.ler"] }, assunto: "acesso.concedido" },
+  { nome: "proposta decidida", kind: "sistema", payload: { kind: "proposta_decidida", propostaId: "p", tipo: "rotina", titulo: "Rotina · 9h", estado: "confirmada", turnoId: null }, assunto: "proposta.resultado" },
 ];
 
 describe("destino no chat: a tabela", () => {
@@ -76,7 +80,7 @@ describe("destino no chat: a tabela", () => {
       "agente.criado", "turno.orfao", "turno.falhou", "lote.retorno_caiu", "aprovacao.automatica_falhou", "aprovacao.recibo",
       "rotina.evento", "rotina.falhou", "negacao.terminal", "negacao.plano_ausente", "ia.limite_do_plano", "ia.troca",
       "computador.fora_do_ar", "colega.handoff", "colega.pedido", "colega.resposta", "acesso.concedido", "acesso.pasta",
-      "artefato", "ligacao", "ia.fala_espera", "conta.recusada", "proposta.obsoleta",
+      "artefato", "ligacao", "ia.fala_espera", "conta.recusada", "proposta.obsoleta", "proposta.resultado",
     ];
     for (const a of ficam) expect(destinoDe(a), a).toBe("chat");
   });
