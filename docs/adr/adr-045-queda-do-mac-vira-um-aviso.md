@@ -108,6 +108,9 @@ continuam gravando `confiavel` (ADR-044, "Não implementado").
 
 ## Emenda de 2026-09-24 — perguntas viram conversa
 
+> Revista em 2026-10-18 pela emenda "a pergunta vira cartão" (fim deste arquivo): o balão com "Parei aqui", a faixa,
+> o seletor "Responder | Outro assunto", a nota do campo, o clipe desligado e a citação "1 de 2" saíram.
+
 **Contexto.** A pergunta de `pedir_a_pessoa` chegava duas vezes na conversa: a mensagem com o molde da
 E5.2 ("parei: falta X; quem destrava: Y; não vou tentar de novo", ou "parei para perguntar a …") e, logo
 abaixo, um card com a MESMA frase, uma caixa de texto de rótulo técnico ("o dado que faltava", "sua
@@ -195,6 +198,9 @@ têm balão ligado: continuam como texto comum, e a faixa e o campo funcionam po
 pergunta").
 
 ## Emenda de 2026-09-24 — fio da pergunta
+
+> Revista em 2026-10-18 pela emenda "a pergunta vira cartão" (fim deste arquivo): a rodada passou da faixa para o
+> cartão, a faixa "lendo sua mensagem" saiu e o fio de uma rodada resolvido não recolhe mais.
 
 **Contexto.** Conversa de verdade tem idas e vindas: o agente pergunta, a pessoa não entende e pede
 explicação, o agente explica, a pessoa responde — às vezes mais de uma volta. Até aqui a primeira
@@ -340,3 +346,93 @@ da promoção sem ver o `concluido`.
 fechado; com retomada na fila → parcial como antes); integração `aprovacao-na-queda` (varredor duas vezes + entrega tardia → uma
 continuação só e o card fechado) e `retomar-superado` (card antigo + recado novo que conclui → `retomar_superado`, task
 `terminado`, lote fechado; e os fatos só contam o card do último turno terminal).
+
+## Emenda de 2026-10-18 — a pergunta vira cartão (plano "pergunta com botões", PR A)
+
+**Contexto.** Produção, 18/09 a 17/10: 84% das perguntas já vinham com `opcoes`, mas só 25% das respostas foram um
+clique numa opção, e 47% das faltas de dado foram fechadas no ×. Uma pergunta ocupava quatro camadas na tela (balão com
+"Parei aqui", botões com duas frases de instrução, faixa acima do campo repetindo a pergunta, seletor "Responder à
+pergunta | Outro assunto"), e a fila guardava o molde "parei: falta X; quem destrava: Y; não vou tentar de novo". O
+Marlon aprovou em 18/10 o protótipo "Nod — pergunta com botões" (padrão do Grok Bot). Plano: `docs/plano-pergunta-com-botoes.md`
+(PR #388), Partes 1, 2, 3a e 4; a 3b (citação de qualquer fala) e a 5 (ações na fala, reações) ficam para o PR B.
+
+**Decisão.**
+
+- **A pergunta bem feita (Parte 1).** A descrição de `pedir_a_pessoa` pede opções sempre que 2 a 4 respostas cobrirem
+  e um campo novo, `recomendada` (índice em `opcoes`), com o motivo no `texto` e sem citar letra nem posição.
+  `normalizarPedidoAPessoa`, que roda antes do schema, segue a recomendada pela origem (a repetida que saiu aponta para a
+  gêmea que ficou), a põe em PRIMEIRO e grava `recomendada: 0` no payload; índice inválido, opção que saiu por tamanho ou
+  lista vazia: sem recomendada, sem erro. `decisoes.frase` passa a ser o `texto` inteiro, sem corte (a entrada da
+  retomada cita a frase e a retomada de rotina roda em sessão nova); sai `parei-falta-dado` de `redacao.ts`, e a pergunta
+  das voltas sem novidade grava o texto de `perguntaDoAlarme`. `resposta_a_pedido` ganha `via: "opcao" | "texto"` e
+  `opcao` (índice), calculados em `retomarComResposta` (fase 2, pela dona, que lê o balão) com a mesma régua da
+  normalização (`src/domain/opcoes-da-pergunta.ts`: espaços e caixa não contam). `via` no corpo é ignorado: a EMENDA 16
+  continua (a resposta é texto, nunca id de botão). Sem `turnoId` ou sem balão, sem `via`. jsonb, sem migração.
+- **O cartão (Parte 2).** O balão `.pergunta` vira um cartão (`web/telas/cartao-pergunta.ts`): o `texto` como título, o ×
+  (o `dispensar` de antes, `aria-label` "Deixar a pergunta pra lá"), a lista de opções com as letras A a D, "Recomendo" na
+  A quando `recomendada` existe e "Ou responda no chat abaixo" ("Responda no chat abaixo" sem opções). Respondida por
+  opção (`via: "opcao"`, ou texto igual a uma opção no payload antigo): encolhe para a escolhida com ✓, e a fala da pessoa
+  não sai como balão. Respondida com outras palavras: "Respondida por você · HH:MM", e a fala fica com o rótulo de hoje.
+  Vencida: "Sem resposta · …" com o Reabrir, apagada (ADR-007). Deixada pra lá: "Deixada pra lá". Dirigida a outra pessoa
+  (`quem_destrava`): sem opções, "Esperando a resposta de outra pessoa" (`FioDaPergunta.decisorId`, novo). Fora de
+  "aberta", nenhuma opção é clicável; aberta, as opções ficam desligadas enquanto `ocupado`. O estado sai primeiro de
+  `ConversaDto.fios` e só depois de "Sua vez", para as opções não aparecerem um instante depois. Da 2ª rodada, "2ª rodada"
+  no cartão. O pedido de ajuda do computador (`ajudaDoComputador` no payload, gravado por `pedirAjudaDoComputador`) leva
+  "Assumir controle", sem "Ou responda no chat abaixo", e não é respondido pelo campo.
+- **O campo (Parte 2).** Com pergunta aberta o campo não muda: saem a faixa ("está esperando sua resposta", "Ver pergunta",
+  "Deixar pra lá"), a faixa neutra "lendo sua mensagem", o seletor, o placeholder "Responda à…", a borda realçada, a nota
+  e o clipe desligado. O status "Esperando você" do cabeçalho fica. A mensagem digitada continua respondendo (decisão 1 do
+  plano). Letra sozinha ("A", "b", "B.", "c)") vira o texto da opção antes de `responder` (campo da conversa e de "Sua
+  vez"); letra além do total vai como digitada. Mensagem com anexo vai como mensagem comum e a pergunta segue aberta.
+  "N coisas esperam você" fica só para os outros pedidos (aprovação, acesso). Fora da tela, a pílula "Nina perguntou algo
+  ↓" leva ao cartão aberto (só com o cartão no DOM) e ganha da pílula das novas.
+- **"Respondendo" (Parte 3a).** Com duas ou mais perguntas abertas, uma caixa presa ao campo diz "Respondendo" (sem "· N
+  de M", como na tela S2; revisto na QA do PR #389) e o trecho da pergunta, apontando para a MAIS RECENTE (antes, a mais
+  antiga), com "Trocar" e o × que manda a mensagem como assunto novo (o `outroAssunto` de antes; Esc faz o mesmo só com
+  a caixa à vista). Só a pergunta apontada diz "Ou responda no chat abaixo". Substitui a citação "1 de 2" e o "Responder
+  a esta".
+- **"Sua vez" (Parte 4).** O item de pergunta tem o cabeçalho (avatar, nome, "há N", a origem genérica — "rotina",
+  "pedido de outro bot" — e "Abrir conversa", que abre com o campo apontando para ela) e o mesmo cartão, respondendo por
+  `responder`. Sem opções, o campo de resposta dentro do cartão vale para todas: isso desfaz a regra desta emenda de
+  24/09 de não ter segunda caixa de texto na lista. Os balões vêm numa consulta só (`pedidosAPessoaDasDecisoes`,
+  `turno_id = any(…)`, no índice `mensagens_por_turno`) como `SuaVezDto.itens[].pedido`; a decisora que não é dona da
+  conversa não lê o balão (RLS de `mensagens`) e vê a frase (já a fala do bot) e o campo, sem opções nem "Abrir conversa".
+  Saem a etiqueta âmbar e "Responder na conversa"; da 2ª rodada, "2ª rodada" ao lado de "Abrir conversa".
+- **Prazo.** Nenhum "vence em" no cartão, nem na conversa nem em "Sua vez" (correção do orquestrador sobre a decisão 10 do
+  plano: consistência com o protótipo aprovado, que não mostra prazo). O prazo de 24 h com recusa automática continua no
+  servidor e como ordem da fila "Sua vez".
+- **Fio.** O fio de UMA rodada resolvido não recolhe mais em "Pergunta resolvida": o cartão já encolheu para a resposta. O
+  de duas rodadas ou mais recolhe como antes.
+- **Cores.** Só tokens: o cinza claro da letra e da etiqueta do protótipo vira `--surface-raised`, e o cinza do texto
+  apagado vira `--ink-3` (o do protótipo dava 2,9:1 sobre o fundo do cartão). Nenhum token novo; o escuro vem dos tokens.
+
+**Alternativas descartadas.** Manter a faixa só com o prazo: era uma das quatro camadas, e o protótipo não tem prazo.
+Copiar `opcoes` para uma coluna de `decisoes` para a decisora que não é dona ver as opções: migração no PR A para um caso
+raro (decisão 6 do plano). Responder pela letra num atalho de teclado sem foco no campo: fora do escopo.
+
+**Riscos aceitos e gatilhos de reversão** (substituem os desta emenda de 24/09 sobre "Outro assunto" e a citação):
+
+- Prazo mudo: referência de 11% de pedidos vencidos em 30 dias. Se mais de 15% das perguntas vencerem em duas semanas,
+  reavaliar mostrar o prazo no cartão (primeiro com menos de 2 h, como o plano propunha; depois sempre).
+- Mensagem que vira resposta sem querer: com uma pergunta aberta nada no campo avisa. 3 relatos em 14 dias (ADR-041) de
+  mensagem que virou resposta sem querer, e a caixa "Respondendo" passa a aparecer também com uma pergunta só.
+- Resposta à pergunta errada com duas abertas: 3 relatos em 14 dias, e o campo passa a pedir a escolha explícita.
+- O × mais à vista pode subir as dispensas: a meta do plano (menos de um quarto das faltas de dado dispensadas, contra 47%)
+  é o número que acusa.
+- A recomendada em A pode desencontrar um texto que cite posição: a descrição proíbe, e a resposta é o texto da opção.
+- A descrição nova muda o comportamento do modelo sem eval automático: a medição semanal (`via` no payload) é o eval, e
+  uma rodada de `npm run e2e:aceite` antes do merge confere que `recomendada` chega ao payload.
+- Pergunta aberta fora da janela carregada: sem cartão e sem pílula; sobram o "Esperando você" do cabeçalho e "Sua vez".
+- Pedido de ajuda do computador aberto antes do deploy não tem `ajudaDoComputador`: até ser respondido, aparece como
+  pergunta comum (a mensagem digitada o fecharia). Raro e transitório.
+
+**Validação.** unit `domain/opcoes-da-pergunta`, `use-cases/pedir-a-pessoa` (recomendada remapeada, reordem, inválida,
+vazia; frase = texto nos três tipos; payload com `recomendada: 0` e `ajudaDoComputador`; `via` na resposta),
+`chamar-ferramenta`, `domain/redacao`, `domain/voltas-sem-novidade`, `adapters/computadores-*`; web `perguntas-conversa`
+(cada estado do cartão; balão da pessoa escondido com opção; payload antigo; aberto antes de "Sua vez"; letra dentro e
+fora do total; anexo; ocupado; pílula; ajuda do computador; "Respondendo" com Trocar e ×; "Sua vez" com e sem opções,
+sem balão, decisora que não é dona; espelho da régua do ✓), `fio-da-pergunta`, `conversa-depois`, `decisoes-chat`,
+`trabalhos`, `cores-por-token`, `foco-forced-colors`; integração `perguntas-conversa` (frase = texto, `recomendada`,
+`via`/`opcao` no jsonb, `via` do corpo ignorado, sem turno sem `via`), `sua-vez-pergunta` (dois pedidos no mesmo turno,
+RLS da decisora que não é dona), `me-chame-as`, `esperar-comando`; concorrência `e2e-catcher` (pergunta → clique →
+retomada com `via: "opcao"`).

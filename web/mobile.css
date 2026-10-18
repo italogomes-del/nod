@@ -106,6 +106,21 @@
   .composer .box.gravando .send { flex: 1; width: auto; height: 52px; border-radius: 26px; }
   .autocomplete { max-width: calc(100vw - 24px); }
 
+  /* ---- O cartão da pergunta (plano "pergunta com botões", tela "Celular", 2026-10-18): linhas de 52 px, letra de 28,
+     "Recomendo" embaixo do texto da opção, título 17 px e o × com alvo de 44 px ---- */
+  .cartao-pergunta { border-radius: 22px; padding: 16px 14px 14px; }
+  .pq-titulo { font-size: 17px; }
+  .pq-fechar { width: 44px; height: 44px; margin: -10px -10px -10px 0; }
+  .pq-lista { border-radius: 16px; }
+  .pq-opcao { min-height: 52px; padding: 12px; font-size: 16px; }
+  .pq-letra { width: 28px; height: 28px; border-radius: 7px; font-size: 14px; }
+  .pq-texto { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
+  .pq-recomendo { padding: 0; background: none; color: var(--ink-3); font-size: 12.5px; }
+  .pq-rodape { font-size: 14px; }
+  .rp-fechar { width: 44px; height: 44px; }
+  .caixa-respondendo .bt.link { min-height: 44px; }
+  .pq-campo .pq-enviar { width: 44px; height: 40px; }
+
   /* ---- A gaveta do bot: a tela inteira, com o próprio topo (‹, ⋯ e o ícone que fecha) ---- */
   .com-detalhes.detalhes-abertos .detalhes { inset: 0; width: 100%; max-width: none; z-index: 21; height: var(--altura-visivel, 100dvh);
     top: var(--topo-visivel, 0px); box-sizing: border-box;

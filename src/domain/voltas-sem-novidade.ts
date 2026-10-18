@@ -44,12 +44,11 @@ export function alarmeDeVoltas(ultimas: readonly VoltaDaCadeia[], limite: number
   return limite > 0 && ultimas.length >= limite && ultimas.slice(0, limite).every(voltaSemNovidade);
 }
 
-/** A frase da decisão (a fila "Sua vez" e o motivo legível da task em "Precisa de você"). */
-export function fraseDoAlarme(voltas: number, motivo: string): string {
-  return `voltou ${voltas} vezes sem novidade esperando: ${motivo}`;
-}
-
-/** O balão na conversa: a pergunta na voz do bot, com as respostas prontas (`pedido_a_pessoa`). */
+/**
+ * O balão na conversa: a pergunta na voz do bot, com as respostas prontas (`pedido_a_pessoa`). revisto em 2026-10-18
+ * (plano "pergunta com botões", Parte 1): o `texto` também é a frase da decisão (a fila "Sua vez" e o motivo legível da
+ * task em "Precisa de você") — saiu o molde "voltou N vezes sem novidade esperando: …".
+ */
 export function perguntaDoAlarme(voltas: number, motivo: string): { texto: string; opcoes: string[] } {
   return {
     texto: `Voltei ${voltas} vezes para conferir e nada mudou: ${motivo}. Sigo esperando ou paro por aqui?`,

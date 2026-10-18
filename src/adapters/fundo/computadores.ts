@@ -14,7 +14,7 @@ import type { Escopo } from "../../shared/types.ts";
 import { autoriaAgente, evento } from "../../use-cases/autoria-evento.ts";
 import { errosDoSchema, type ResultadoChamada } from "../../use-cases/chamar-ferramenta.ts";
 import { pedirAprovacaoComputador } from "../../use-cases/pedir-aprovacao.ts";
-import { pedirAPessoa } from "../../use-cases/pedir-a-pessoa.ts";
+import { pedirAjudaDoComputador } from "../../use-cases/pedir-a-pessoa.ts";
 import { registrarNegacao } from "../../use-cases/registrar-negacao.ts";
 import { fecharComResposta, retomarComResposta } from "../../use-cases/responder-decisao.ts";
 import type { Deps } from "../../use-cases/tipos.ts";
@@ -378,7 +378,7 @@ export function criarComputadores(o: Opcoes) {
         if (nome === "computador_pedir_ajuda") {
           livre(c, d.agora());
           const motivo = String(args.motivo).slice(0, 1000);
-          const ajuda = await pedirAPessoa(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, tipo: "pergunta", texto: `Abra meu computador para concluir este passo: ${motivo}. Use Assumir controle; depois, Devolver ao bot. Não envie senha ou código aqui.` });
+          const ajuda = await pedirAjudaDoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, tipo: "pergunta", texto: `Abra meu computador para concluir este passo: ${motivo}. Use Assumir controle; depois, Devolver ao bot. Não envie senha ou código aqui.` });
           await d.repos.computadores.configurar(c.id, { controle: "aguardando_pessoa", ajuda: motivo, ajudaDecisaoId: ajuda.data.decisao_id });
           if (ajuda.events?.length) await d.repos.events.gravarComOutbox(ajuda.events);
           await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: "pedir_ajuda", estado: "concluida" });

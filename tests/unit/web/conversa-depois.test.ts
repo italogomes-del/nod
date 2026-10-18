@@ -227,16 +227,16 @@ describe("8. o cabeçalho com uma regra só", () => {
 });
 
 describe("9. 'N coisas esperam você' acima do campo", () => {
-  it("pergunta e aprovação em ordem, cada uma com a sua ação", () => {
-    const pergunta = { ...pedido("q1", { tipo: "pergunta", criadoEm: "2026-10-03T14:30:00Z", itens: [] }), decisao: { ...pedido("q1").decisao, tipo: "pergunta" as const, frase: "parei para perguntar a você: Posso mandar o painel?", criadoEm: "2026-10-03T14:30:00Z" } };
+  it("só os outros pedidos, cada um com a sua ação; a pergunta mora no cartão (plano \"pergunta com botões\", 2026-10-18)", () => {
+    const pergunta = { ...pedido("q1", { tipo: "pergunta", criadoEm: "2026-10-03T14:30:00Z", itens: [] }), decisao: { ...pedido("q1").decisao, tipo: "pergunta" as const, frase: "Posso mandar o painel?", criadoEm: "2026-10-03T14:30:00Z" } };
     const { e } = cenario([], [pergunta, pedido("d1")]);
     const html = renderTopoComposer({ tipo: "resposta", alvo: pergunta as never, indice: 0, perguntas: [pergunta as never] }, e, C);
-    expect(html).toContain('<span class="espera-n">2</span>coisas esperam você');
-    expect(html.indexOf("Posso mandar o painel?")).toBeLessThan(html.indexOf("Atualizar a planilha de metas"));
+    expect(html).toContain('<span class="espera-n">1</span>coisa espera você');
+    expect(html).not.toContain("Posso mandar o painel?");
     expect(html).toContain('data-act="ver-decisao" data-id="d1"');
     expect(html).toContain("Google Sheets · recusa automática em 23h");
-    // Os modos do campo continuam.
-    expect(html).toContain("Responder à pergunta");
+    // O seletor "Responder à pergunta | Outro assunto" e a faixa saíram.
+    expect(html).not.toContain("Responder à pergunta");
     expect(html).not.toContain("está esperando sua resposta");
   });
 
@@ -249,12 +249,11 @@ describe("9. 'N coisas esperam você' acima do campo", () => {
     expect(html).not.toContain(">Ver pedido<");
   });
 
-  it("só pergunta, sem outro pedido: a faixa de sempre", () => {
+  it("só pergunta, sem outro pedido: nada acima do campo", () => {
     const pergunta = { ...pedido("q1"), decisao: { ...pedido("q1").decisao, tipo: "pergunta" as const } };
     const { e } = cenario([], [pergunta]);
     const html = renderTopoComposer({ tipo: "resposta", alvo: pergunta as never, indice: 0, perguntas: [pergunta as never] }, e, C);
-    expect(html).toContain("está esperando sua resposta");
-    expect(html).not.toContain("esperam você");
+    expect(html).toBe("");
   });
 });
 

@@ -17,7 +17,7 @@ import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
-import { desenharFios, linhaDaRetomada, perguntaCitada, rodapeDaPergunta, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
+import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
@@ -456,15 +456,19 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
     ? ""
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
-  // definido em 2026-09-24 (emenda da ADR-045): a pergunta de pedir_a_pessoa é esta fala, desenhada como
-  // pergunta; a mensagem que a respondeu leva o rótulo, e a retomada vira uma linha logo depois.
+  // definido em 2026-09-24 (emenda da ADR-045): a pergunta de pedir_a_pessoa é esta fala; a mensagem que a respondeu
+  // leva o rótulo, e a retomada vira uma linha logo depois. revisto em 2026-10-18 (plano "pergunta com botões", Parte 2):
+  // a fala vira o cartão da pergunta no lugar do balão (o texto não sai duas vezes), e a resposta que foi uma das opções
+  // não sai como balão — o cartão já mostra a escolhida com ✓ (tela "Depois de responder").
   const pergunta = !ehPessoa && m.payload?.kind === "pedido_a_pessoa" ? m.payload : null;
   const resposta = ehPessoa && m.payload?.kind === "resposta_a_pedido" ? m.payload : null;
+  if (resposta && respostaPorOpcao(m, estado)) return "";
   const fila = situacaoNaFila(m, estado);
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
-  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? ` pergunta${perguntaCitada(estado, m.conversaId, pergunta.decisaoId) ? " pergunta-citada" : ""}` : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  const balao = pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${pergunta ? rodapeDaPergunta(m, estado) : ""}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -1031,9 +1035,9 @@ const CLIPE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" strok
  * (ADR-046, só conversa própria) ganha o clipe, a fila de arquivos e o input escondido; a fila é
  * preenchida por web/lib/anexos.ts direto no DOM, porque o composer não se regrava.
  *
- * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe a faixa, os modos e a citação
- * quando há pergunta aberta (web/telas/pergunta.ts), e `data-padrao` / `data-titulo` guardam a dica e
- * a dica do clipe de sempre, para o main voltar a elas quando o campo sai do modo resposta.
+ * definido em 2026-09-24 (emenda da ADR-045): `composer-pergunta` recebe o que fica acima do campo (web/telas/pergunta.ts:
+ * desde 2026-10-18, a caixa "Respondendo" com duas ou mais perguntas abertas e os outros pedidos), e `data-padrao` /
+ * `data-titulo` guardam a dica e a dica do clipe de sempre.
  *
  * definido em 2026-10-11 (ADR-095): o 🎤 do ditado e a pílula da gravação entram em todo composer, escondidos; quem os
  * mostra é web/telas/ditado.ts, quando o servidor diz que o ditado está disponível.

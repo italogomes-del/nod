@@ -1,11 +1,13 @@
 import type { SuaVezDto } from "../contracts/api.ts";
-import type { TipoDecisao } from "../contracts/decisao.ts";
+import type { Decisao, TipoDecisao } from "../contracts/decisao.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
+import type { PedidoDoItem } from "../contracts/pedido.ts";
 import { nuncaPermanente as ehNuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { montarFila } from "../domain/fila-frota.ts";
 import { incidentesVisiveis } from "./dispensar-incidente.ts";
 import { fiosDosItens } from "./fios-da-pergunta.ts";
 import { paradaDoPedido } from "./pre-voo-rotina.ts";
+import { TIPOS_RESPONDIVEIS } from "./responder-decisao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /** O que "Sua vez" e "reabrir" precisam de Deps: a rota (e o teste) montam só isto. */
@@ -28,6 +30,24 @@ export type EntradaSuaVez = {
 };
 
 /**
+ * O balão de cada pergunta da fila (definido em 2026-10-18, plano "pergunta com botões", Parte 4): "Sua vez" desenha o
+ * mesmo cartão da conversa — a fala, as opções, a recomendada — e a origem genérica do turno que perguntou ("rotina",
+ * "peer"; a raiz da cadeia quando o turno é retomada). Uma consulta só pelos turnos; sem balão legível (a decisora que não
+ * é dona da conversa, a sala esfriada, as perguntas antigas) o item fica sem `pedido` e a web mostra a frase.
+ */
+async function pedidosDosItens(deps: DepsSuaVez, decisoes: readonly Decisao[]): Promise<Map<string, PedidoDoItem>> {
+  const daPergunta = decisoes.filter((d) => TIPOS_RESPONDIVEIS.has(d.tipo) && d.turnoId !== null);
+  const baloes = await deps.repos.mensagens.pedidosAPessoaDasDecisoes(daPergunta.flatMap((d) => (d.turnoId ? [d.turnoId] : [])));
+  const saida = new Map<string, PedidoDoItem>();
+  for (const m of baloes) {
+    const p = m.payload;
+    if (p?.kind !== "pedido_a_pessoa" || saida.has(p.decisaoId)) continue;
+    saida.set(p.decisaoId, { texto: m.texto, ...(p.opcoes?.length ? { opcoes: p.opcoes } : {}), ...(p.recomendada !== undefined ? { recomendada: p.recomendada } : {}), ...(p.ajudaDoComputador ? { ajudaDoComputador: true as const } : {}), origem: m.raiz?.origem ?? m.origemTurno ?? null });
+  }
+  return saida;
+}
+
+/**
  * "Sua vez" por PESSOA sob RLS de duas pernas (ADR-007, EMENDA 1): a leitura roda como nod_app com
  * a pessoa da sessão como DECISORA — nunca role privilegiado + filtro na aplicação. Vencida fica
  * visível em cinza com desfecho; reaberta volta ao topo (montarFila). Instantes saem em ISO UTC e
@@ -45,6 +65,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
   const porId = new Map(decisoes.map((d) => [d.id, d]));
   // definido em 2026-09-24 (fio da pergunta): a faixa diz a rodada, e os contadores contam fios.
   const fios = await fiosDosItens(repos, fila.itens.map((i) => i.decisao));
+  const pedidos = await pedidosDosItens(deps, fila.itens.map((i) => i.decisao));
 
   const itens: SuaVezDto["itens"] = [];
   for (const item of fila.itens) {
@@ -64,7 +85,7 @@ export async function listarSuaVez(deps: DepsSuaVez, input: EntradaSuaVez = {}):
     // parada e quais janelas não rodaram — só no aberto; o vencido já pausou a rotina.
     const rotinaParada = proposta && aberta && decisao.tipo === "acesso" ? await paradaDoPedido(repos, proposta) : null;
     const nuncaPermanente = itensAprovacao.filter((i) => ehNuncaPermanente(i.destino.ferramenta)).map((i) => i.id);
-    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente });
+    itens.push({ ...item, decisao, itensAprovacao, proposta, fio: fios.get(decisao.id) ?? null, rotinaParada, nuncaPermanente, pedido: pedidos.get(decisao.id) ?? null });
   }
 
   const foraDoAr = (await repos.inventario.listar())

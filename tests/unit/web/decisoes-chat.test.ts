@@ -378,7 +378,10 @@ describe("fila honesta: vencidos recolhidos, ×N, prazo por tipo e rótulos em p
     expect(relogio("acesso")).toBe("aguardando há 2h · recusa automática em 18h");
     expect(relogio("gate_rotina")).toBe("aguardando há 2h · passa em branco em 18h");
     for (const tipo of ["perfil", "rotina", "rotina_atualizacao", "rotina_exclusao"] as const) expect(relogio(tipo), tipo).toBe("aguardando há 2h · vence em 18h · nada muda sem você");
-    for (const tipo of ["retomar_turno", "pergunta", "falta_de_dado", "permissao"] as const) expect(relogio(tipo), tipo).toBe("aguardando há 2h · vence em 18h");
+    expect(relogio("retomar_turno")).toBe("aguardando há 2h · vence em 18h");
+    // Plano "pergunta com botões" (2026-10-18): a pergunta em "Sua vez" é o cartão, sem "vence em" (o prazo segue no servidor
+    // e como ordem da fila; gatilho na emenda da ADR-045 se mais de 15% das perguntas vencerem).
+    for (const tipo of ["pergunta", "falta_de_dado", "permissao"] as const) expect(renderSuaVez(comItens([aberto("x", tipo, { aguardandoHaMs: 2 * H, recusaAutomaticaEmMs: 18 * H })])), tipo).not.toContain("vence ");
   });
 
   it("vencido em palavras, nunca o enum: quanto tempo faz e o que aconteceu", () => {

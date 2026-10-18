@@ -568,10 +568,10 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     const fila = await json<SuaVezDto>("GET", "sua-vez");
     const falta = fila.itens.find((i) => i.decisao.turnoId === t.id);
     expect(falta?.decisao.tipo, JSON.stringify({ t: t.id, fila: fila.itens.map((i) => [i.decisao.tipo, i.decisao.turnoId, i.estadoColuna]) })).toBe("falta_de_dado");
-    // Emenda da ADR-045: a conversa recebe a FALA do agente ligada à decisão; o molde "parei: falta X; quem
-    // destrava: Y; não vou tentar de novo" (E5.2) ficou só na frase da fila.
+    // Emenda da ADR-045: a conversa recebe a FALA do agente ligada à decisão. Plano "pergunta com botões" (2026-10-18): a
+    // frase da fila é a mesma fala, inteira — o molde "parei: falta X; quem destrava: Y; não vou tentar de novo" saiu.
     expect(dto.mensagens.find((m) => m.payload?.kind === "pedido_a_pessoa" && m.payload.decisaoId === falta?.decisao.id)?.texto).toBe("não achei o orçamento do Q4");
-    expect(falta?.decisao.frase).toBe(`parei: falta orçamento do Q4; quem destrava: ${NOME_PESSOA}; não vou tentar de novo.`);
+    expect(falta?.decisao.frase).toBe("não achei o orçamento do Q4");
     expect(dto.mensagens.some((m) => m.texto.startsWith("parei: falta"))).toBe(false);
 
     const mal = await rodar(vera.conversaId, '[[tool: pedir_a_pessoa {"texto":"posso?"}]] [[texto: parei]]');
@@ -595,5 +595,30 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     expect(dev.registros.find((r) => r.turnoId === retomado.id && r.tipo === "plano_recebido")?.dados.sessaoCli).toBeNull();
     expect((await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.id === falta?.decisao.id)).toBeUndefined();
     expect((await chamar("POST", `decisoes/${UUID_NULO}/responder`, { texto: "x" })).status).toBe(404);
+  });
+
+  it("pergunta com botões (plano #388): a recomendada vai para A no balão e em 'Sua vez'; o clique numa opção responde com o texto dela, grava via 'opcao' e retoma", { timeout: JORNADA_MS }, async () => {
+    const t = await rodar(vera.conversaId, 'O #845 não fica verde. [[tool: pedir_a_pessoa {"tipo":"pergunta","texto":"O #845 não fica verde. Como sigo? Recomendo mergear: na VM o teste passou.","opcoes":["Tentar mais uma vez","Reapontar a pilha para a main","Mergear com o teste rodado na VM"],"recomendada":2}]] [[texto: parei]]');
+    expect(t.estado).toBe("concluido");
+    const balao = (await conversa(vera.conversaId)).mensagens.find((m) => m.turnoId === t.id && m.payload?.kind === "pedido_a_pessoa");
+    const opcoes = ["Mergear com o teste rodado na VM", "Tentar mais uma vez", "Reapontar a pilha para a main"];
+    expect(balao?.payload).toMatchObject({ kind: "pedido_a_pessoa", opcoes, recomendada: 0 });
+    const item = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.turnoId === t.id);
+    expect(item?.pedido).toMatchObject({ texto: "O #845 não fica verde. Como sigo? Recomendo mergear: na VM o teste passou.", opcoes, recomendada: 0 });
+    expect(item?.decisao.frase).toBe("O #845 não fica verde. Como sigo? Recomendo mergear: na VM o teste passou.");
+    // O clique manda o TEXTO da opção (EMENDA 16); um "via" no corpo é ignorado — quem calcula é o servidor.
+    const resposta = await json<RespostaMutacao>("POST", `decisoes/${item?.decisao.id}/responder`, { texto: opcoes[0], via: "texto", opcao: 2 });
+    const retomado = await esperarTurno(resposta.ids.turnoRetomada ?? "");
+    expect(retomado).toMatchObject({ origem: "retomada", retomaTurnoId: t.id, estado: "concluido" });
+    expect(retomado.entradaTexto).toContain("O #845 não fica verde. Como sigo?");
+    expect((await conversa(vera.conversaId)).mensagens.find((m) => m.id === resposta.ids.mensagem)?.payload).toMatchObject({ kind: "resposta_a_pedido", decisaoId: item?.decisao.id, via: "opcao", opcao: 0 });
+    // Outras palavras: via "texto", sem índice.
+    const t2 = await rodar(vera.conversaId, '[[tool: pedir_a_pessoa {"tipo":"pergunta","texto":"Posso apagar a branch b14-rascunho?","opcoes":["Pode apagar","Deixa ela"]}]] [[texto: parei]]');
+    const item2 = (await json<SuaVezDto>("GET", "sua-vez")).itens.find((i) => i.decisao.turnoId === t2.id);
+    const livre = await json<RespostaMutacao>("POST", `decisoes/${item2?.decisao.id}/responder`, { texto: "pode, mas guarda o diff num gist antes" });
+    await esperarTurno(livre.ids.turnoRetomada ?? "");
+    const gravada = (await conversa(vera.conversaId)).mensagens.find((m) => m.id === livre.ids.mensagem)?.payload;
+    expect(gravada).toMatchObject({ kind: "resposta_a_pedido", via: "texto" });
+    expect(gravada && "opcao" in gravada).toBe(false);
   });
 });

@@ -6,7 +6,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { alarmeDeVoltas, fraseDoAlarme, perguntaDoAlarme } from "../domain/voltas-sem-novidade.ts";
+import { alarmeDeVoltas, perguntaDoAlarme } from "../domain/voltas-sem-novidade.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { Deps } from "./tipos.ts";
@@ -134,10 +134,11 @@ export { REGRA_VOLTAS_SEM_NOVIDADE };
  * seguir esperando, a próxima volta começa outra cadeia (a origem passa a ser a retomada da resposta) e a conta zera.
  */
 async function perguntarSemNovidade(deps: DepsVolta, turno: Turno, motivo: string, agora: number): Promise<RuntimeEvent[]> {
-  const decisao = await deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + PRAZO_DECISAO_PADRAO_MS, frase: fraseDoAlarme(VOLTAS_SEM_NOVIDADE, motivo) });
+  // revisto em 2026-10-18 (plano "pergunta com botões", Parte 1): a frase da decisão é a fala do bot, como no pedir_a_pessoa.
+  const { texto, opcoes } = perguntaDoAlarme(VOLTAS_SEM_NOVIDADE, motivo);
+  const decisao = await deps.repos.decisoes.criar({ tipo: "pergunta", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + PRAZO_DECISAO_PADRAO_MS, frase: texto });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "pergunta das voltas sem novidade não criada" });
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: REGRA_VOLTAS_SEM_NOVIDADE });
-  const { texto, opcoes } = perguntaDoAlarme(VOLTAS_SEM_NOVIDADE, motivo);
   const mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "texto", texto, payload: { kind: "pedido_a_pessoa", decisaoId: decisao.id, opcoes }, confianca: "confiavel" });
   // Para medir o gatilho de reversão da ADR-099 (esperas acordando sem fato novo).
   log("info", "voltas_sem_novidade", { turno_id: turno.id, trabalho_id: turno.trabalhoId ?? null, decisao_id: decisao.id, voltas: VOLTAS_SEM_NOVIDADE });

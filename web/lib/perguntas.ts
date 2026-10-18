@@ -60,11 +60,6 @@ export function fiosDaConversa(estado: Estado, conversaId: string): readonly Fio
   return estado.conversas[conversaId]?.fios ?? [];
 }
 
-/** O fio em que o agente está lendo a resposta: a faixa neutra acima do campo, que volta ao modo normal. */
-export function fioLendo(estado: Estado, conversaId: string): FioDaPergunta | undefined {
-  return fiosDaConversa(estado, conversaId).find((f) => f.estado === "lendo_sua_mensagem");
-}
-
 /** "2ª rodada". */
 export function rodadaEscrita(n: number): string {
   return `${n}ª rodada`;
@@ -85,29 +80,91 @@ export function respostaDaPergunta(mensagens: readonly Mensagem[], decisaoId: st
   return mensagens.find((m) => m.payload?.kind === "resposta_a_pedido" && m.payload.decisaoId === decisaoId);
 }
 
+/**
+ * Onde a pergunta está (revisto em 2026-10-18, plano "pergunta com botões", Parte 2). `respondida` diz se a resposta foi
+ * uma das opções (`opcao`, o índice; o balão da pessoa some) ou outras palavras (`opcao` null; a fala dela fica).
+ * `deixada`: dispensada no ×. `de_outra`: aberta, mas dirigida a outra pessoa (quem_destrava). `encerrada`: fechada sem
+ * resposta por outro caminho ou fora do que se sabe.
+ */
 export type EstadoPergunta =
-  | { tipo: "aberta"; item: ItemPergunta }
-  | { tipo: "respondida"; resposta: Mensagem }
-  | { tipo: "vencida"; item: ItemPergunta }
+  | { tipo: "aberta"; item?: ItemPergunta }
+  | { tipo: "respondida"; resposta: Mensagem; opcao: number | null }
+  | { tipo: "vencida"; item?: ItemPergunta }
+  | { tipo: "deixada" }
+  | { tipo: "de_outra" }
   | { tipo: "encerrada" };
 
 /**
- * Onde a pergunta está, sem campo novo: a resposta ligada a ela na conversa é a prova de que foi
- * respondida; senão "Sua vez" diz se está aberta ou vencida. Fora das duas, foi deixada pra lá, é de
- * outra decisora ou saiu da janela de vencidas (ADR-007) — o balão fica, sem linha de estado.
+ * Espelho EXATO de `chaveDaOpcao` / `opcaoRespondida` (src/domain/opcoes-da-pergunta.ts) — a web só importa tipos de src/.
+ * Serve ao payload antigo, sem `via`: a resposta igual a uma opção (espaços e caixa não contam) marca essa opção com ✓.
+ * tests/unit/web/perguntas-conversa.test.ts confere os dois lados com os mesmos casos.
+ */
+export function indiceDaOpcao(resposta: string, opcoes: readonly string[] | undefined): number | null {
+  const chave = (t: string): string => t.replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR");
+  if (!opcoes?.length || chave(resposta) === "") return null;
+  const i = opcoes.findIndex((o) => chave(o) === chave(resposta));
+  return i === -1 ? null : i;
+}
+
+/** Qual opção a resposta escolheu: o `via` do servidor quando existe; senão a comparação do texto (payload antigo). */
+export function opcaoDaResposta(resposta: Mensagem, opcoes: readonly string[] | undefined): number | null {
+  const p = resposta.payload;
+  if (p?.kind !== "resposta_a_pedido") return null;
+  if (p.via === "texto") return null;
+  if (p.via === "opcao" && p.opcao !== undefined && opcoes && p.opcao >= 0 && p.opcao < opcoes.length) return p.opcao;
+  return indiceDaOpcao(resposta.texto, opcoes);
+}
+
+/**
+ * O estado sai primeiro de `ConversaDto.fios`, que vem com a conversa, e só depois de "Sua vez" (revisão de engenharia de
+ * 2026-10-18): antes de "Sua vez" carregar, toda pergunta parecia encerrada, e com o cartão as opções apareceriam um
+ * instante depois, a conversa pulando. A resposta ligada a ela na conversa é a prova de que foi respondida; o fio diz
+ * aberta, deixada ou vencida pela ÚLTIMA rodada; das rodadas anteriores sobra a resposta. Sem fio, "Sua vez" decide.
  */
 export function estadoDaPergunta(estado: Estado, mensagens: readonly Mensagem[], decisaoId: string): EstadoPergunta {
   const resposta = respostaDaPergunta(mensagens, decisaoId);
-  if (resposta) return { tipo: "respondida", resposta };
   const item = estado.suaVez?.itens.find((i) => i.decisao.id === decisaoId);
+  if (resposta) {
+    const balao = mensagemDaPergunta(mensagens, decisaoId);
+    const opcoes = balao?.payload?.kind === "pedido_a_pessoa" ? balao.payload.opcoes : undefined;
+    return { tipo: "respondida", resposta, opcao: opcaoDaResposta(resposta, opcoes) };
+  }
+  const fio = fiosDaConversa(estado, mensagens[0]?.conversaId ?? "").find((f) => f.decisoes.at(-1) === decisaoId);
+  // A pergunta que o bot dirigiu a outra pessoa (quem_destrava): a dona vê o cartão, mas as opções são da decisora.
+  if (fio?.estado === "esperando_voce" && fio.decisorId && fio.decisorId !== estado.sessao?.pessoaId) return { tipo: "de_outra" };
+  if (fio?.estado === "esperando_voce") return item && !aberta(item) ? { tipo: "vencida", item } : { tipo: "aberta", ...(item ? { item } : {}) };
+  if (fio?.estado === "deixada_pra_la") return { tipo: "deixada" };
+  // Reaberta pelo Reabrir do cartão (revisão do PR #389): "Sua vez" já relida diz aberta antes de a conversa reler o
+  // fio — sem isto, o cartão seguia "Sem resposta · Reabrir" e o segundo clique dava 409.
+  if (fio?.estado === "vencida") return item && aberta(item) ? { tipo: "aberta", item } : { tipo: "vencida", ...(item ? { item } : {}) };
   if (!item) return { tipo: "encerrada" };
   return aberta(item) ? { tipo: "aberta", item } : { tipo: "vencida", item };
 }
 
 /**
- * O que a próxima mensagem do campo faz. Sem pergunta aberta, nada muda. Com pergunta, o padrão é
- * RESPONDER a mais antiga (ou a que a pessoa escolheu, `alvoId`); "Outro assunto" manda mensagem comum
- * e deixa a pergunta aberta. `indice` é a posição da citada ("1 de 2").
+ * O pedido de ajuda do computador (`ajudaDoComputador` no payload) se responde com "Assumir controle", nunca com a mensagem
+ * digitada: com ele aberto, o campo manda mensagem comum (revisão de engenharia de 2026-10-18). Lê o balão na conversa ou,
+ * fora dela, o que "Sua vez" trouxe do balão.
+ */
+export function ehAjudaDoComputador(estado: Estado, item: ItemPergunta): boolean {
+  const balao = mensagemDaPergunta(estado.conversas[item.decisao.conversaId]?.mensagens ?? [], item.decisao.id);
+  if (balao?.payload?.kind === "pedido_a_pessoa") return balao.payload.ajudaDoComputador === true;
+  return item.pedido?.ajudaDoComputador === true;
+}
+
+/** As opções da pergunta: as do balão na conversa ou, sem ele, as que "Sua vez" trouxe. */
+export function opcoesDaPergunta(estado: Estado, item: ItemPergunta): readonly string[] {
+  const balao = mensagemDaPergunta(estado.conversas[item.decisao.conversaId]?.mensagens ?? [], item.decisao.id);
+  if (balao?.payload?.kind === "pedido_a_pessoa") return balao.payload.opcoes ?? [];
+  return item.pedido?.opcoes ?? [];
+}
+
+/**
+ * O que a próxima mensagem do campo faz. Sem pergunta aberta, nada muda. Com pergunta, o padrão é RESPONDER (decisão 1 do
+ * plano "pergunta com botões", 2026-10-18: a mensagem digitada continua indo como resposta). Com duas ou mais, a caixa
+ * "Respondendo" aponta para a MAIS RECENTE (antes, a mais antiga), salvo escolha (`alvoId`, pelo "Trocar"); o × dela manda
+ * mensagem comum (`outroAssunto`) e deixa a pergunta aberta. O pedido de ajuda do computador fica fora: não se responde
+ * com texto. `indice` é a posição da apontada.
  */
 export type ModoComposer =
   | { tipo: "normal" }
@@ -115,19 +172,43 @@ export type ModoComposer =
   | { tipo: "resposta"; perguntas: ItemPergunta[]; alvo: ItemPergunta; indice: number };
 
 export function modoDoComposer(estado: Estado, conversaId: string): ModoComposer {
-  const perguntas = perguntasAbertas(estado, conversaId);
-  const maisAntiga = perguntas[0];
-  if (!maisAntiga) return { tipo: "normal" };
+  const perguntas = perguntasAbertas(estado, conversaId).filter((p) => !ehAjudaDoComputador(estado, p));
+  const maisRecente = perguntas.at(-1);
+  if (!maisRecente) return { tipo: "normal" };
   const escolha = estado.composer[conversaId];
-  if (escolha?.outroAssunto) return { tipo: "outro", perguntas };
-  const indice = Math.max(0, perguntas.findIndex((p) => p.decisao.id === escolha?.alvoId));
-  return { tipo: "resposta", perguntas, alvo: perguntas[indice] ?? maisAntiga, indice };
+  // O "outro assunto" só vale com a caixa "Respondendo" à vista (duas ou mais, revisão do PR #389): se uma das duas foi
+  // respondida ou deixada pra lá depois do ×, a escolha sobrava invisível e a mensagem digitada ia como comum sem aviso.
+  if (escolha?.outroAssunto && perguntas.length > 1) return { tipo: "outro", perguntas };
+  const escolhida = perguntas.findIndex((p) => p.decisao.id === escolha?.alvoId);
+  const indice = escolhida === -1 ? perguntas.length - 1 : escolhida;
+  return { tipo: "resposta", perguntas, alvo: perguntas[indice] ?? maisRecente, indice };
+}
+
+/** "Trocar": a próxima pergunta aberta depois da apontada, dando a volta. */
+export function proximaDoComposer(modo: ModoComposer): string | null {
+  if (modo.tipo !== "resposta" || modo.perguntas.length < 2) return null;
+  return modo.perguntas[(modo.indice + 1) % modo.perguntas.length]?.decisao.id ?? null;
 }
 
 export type DestinoEnvio = { tipo: "resposta"; decisaoId: string } | { tipo: "mensagem" };
 
-export function destinoDoEnvio(modo: ModoComposer): DestinoEnvio {
-  return modo.tipo === "resposta" ? { tipo: "resposta", decisaoId: modo.alvo.decisao.id } : { tipo: "mensagem" };
+/**
+ * Anexo com pergunta aberta (decisão 9 do plano, 2026-10-18): a mensagem vai como mensagem comum e a pergunta segue aberta
+ * — a rota `responder` só leva texto, e era isso que o "Outro assunto" fazia. Antes o clipe desligava.
+ */
+export function destinoDoEnvio(modo: ModoComposer, comAnexo = false): DestinoEnvio {
+  return modo.tipo === "resposta" && !comAnexo ? { tipo: "resposta", decisaoId: modo.alvo.decisao.id } : { tipo: "mensagem" };
+}
+
+/**
+ * Letra digitada (plano "pergunta com botões", Parte 2): com opções, "A", "b", "B." ou "c)" sozinhos no campo viram o
+ * texto da opção antes de `responder` — a resposta continua texto (EMENDA 16). Letra além do total vai como foi digitada.
+ * Usada pelo campo da conversa e pelo campo de "Sua vez".
+ */
+export function textoDaLetra(texto: string, opcoes: readonly string[]): string {
+  const m = /^\s*([a-d])\s*[.)]?\s*$/i.exec(texto);
+  if (!m?.[1]) return texto;
+  return opcoes[m[1].toLowerCase().charCodeAt(0) - 97] ?? texto;
 }
 
 /** O que o envio precisa da Api (estrutural: web/lib/api.ts satisfaz, e o teste passa um espião). */
@@ -137,16 +218,12 @@ export type ApiDeEnvio = {
   postarNaSala(salaId: string, texto: string): Promise<unknown>;
 };
 
-/** Por que o clipe fica desligado em modo resposta: POST decisoes/:id/responder só leva texto. */
-export const MOTIVO_SEM_ANEXO = "Na resposta à pergunta vão só palavras. Para mandar arquivos, escolha “Outro assunto”.";
-
-export type ResultadoEnvio = { enviado: "resposta" | "mensagem" } | { recusado: "anexo_na_resposta" };
+export type ResultadoEnvio = { enviado: "resposta" | "mensagem" };
 
 /**
  * Envio do campo. Em modo resposta o texto vai por POST decisoes/:id/responder — a rota que já existe,
  * que fecha a pergunta e cria a retomada; EMENDA 16 intacta: a resposta é o texto da pessoa — e NÃO
- * vira mensagem comum. A rota não leva arquivo: com anexo pronto, recusa por escrito em vez de mandar
- * a resposta e perder o arquivo em silêncio.
+ * vira mensagem comum. Com anexo, vai como mensagem comum (destinoDoEnvio); aqui também, para nada sumir.
  */
 export async function enviarPeloComposer(
   api: ApiDeEnvio,
@@ -156,8 +233,7 @@ export async function enviarPeloComposer(
   anexos: readonly string[] = [],
   idEnvio?: string,
 ): Promise<ResultadoEnvio> {
-  if (destino.tipo === "resposta") {
-    if (anexos.length > 0) return { recusado: "anexo_na_resposta" };
+  if (destino.tipo === "resposta" && anexos.length === 0) {
     await api.responder(destino.decisaoId, texto);
     return { enviado: "resposta" };
   }
@@ -168,7 +244,7 @@ export async function enviarPeloComposer(
   return { enviado: "mensagem" };
 }
 
-/** definido em 2026-09-24: o começo da pergunta na citação do campo — cabe numa linha ao lado de "1 de 2". */
+/** definido em 2026-09-24: o começo da pergunta numa linha curta (o resumo do fio resolvido). */
 export const CITACAO_MAX = 48;
 
 /** "Posso arquivar o PR 7 e avisar o…": corta na palavra; o texto inteiro fica no balão. */

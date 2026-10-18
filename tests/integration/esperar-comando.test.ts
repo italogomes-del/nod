@@ -246,7 +246,7 @@ describeIntegracao("esperar_comando (ADR-099, parte 2)", () => {
       expect(quarta.events.some((e) => e.kind === "decisao_criada")).toBe(true);
       expect((await m.voltas()).filter((t) => t.estado === "pendente")).toEqual([]);
       const [pergunta] = await m.repos.decisoes.doTurno(turnoId);
-      expect(pergunta).toMatchObject({ tipo: "pergunta", frase: "voltou 3 vezes sem novidade esperando: a CI do PR #845" });
+      expect(pergunta).toMatchObject({ tipo: "pergunta", frase: "Voltei 3 vezes para conferir e nada mudou: a CI do PR #845. Sigo esperando ou paro por aqui?" });
     });
   });
 

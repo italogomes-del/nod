@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { VOLTAS_SEM_NOVIDADE } from "../../../src/contracts/ferramentas-trabalho.ts";
-import { alarmeDeVoltas, fraseDoAlarme, perguntaDoAlarme, voltaSemNovidade, type VoltaDaCadeia } from "../../../src/domain/voltas-sem-novidade.ts";
+import { alarmeDeVoltas, perguntaDoAlarme, voltaSemNovidade, type VoltaDaCadeia } from "../../../src/domain/voltas-sem-novidade.ts";
 
 /** ADR-099 §5 (parte 1, definido em 2026-10-12): três voltas seguidas sem nada novo viram pergunta à pessoa. */
 
@@ -34,8 +34,7 @@ describe("voltas sem novidade (ADR-099 §5)", () => {
     expect(alarmeDeVoltas([vazia, vazia, vazia], 0)).toBe(false);
   });
 
-  it("o motivo legível e a pergunta com as respostas prontas", () => {
-    expect(fraseDoAlarme(3, "ver se a CI do #845 passou")).toBe("voltou 3 vezes sem novidade esperando: ver se a CI do #845 passou");
+  it("a pergunta com as respostas prontas (o texto também é a frase da decisão)", () => {
     const p = perguntaDoAlarme(3, "ver se a CI do #845 passou");
     expect(p.texto).toBe("Voltei 3 vezes para conferir e nada mudou: ver se a CI do #845 passou. Sigo esperando ou paro por aqui?");
     expect(p.opcoes).toEqual(["Pode seguir esperando", "Pode parar de esperar"]);

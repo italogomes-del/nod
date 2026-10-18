@@ -9,7 +9,7 @@ import { criarCapturas } from "../../../src/services/capturas.ts";
 
 // NOD-200 (guardador da captura do turno), sobre a mesma máquina falsa do teste da NOD-161. Os casos de uso de aprovação e de pedir à pessoa não são o assunto aqui — só o "aguardar".
 vi.mock("../../../src/use-cases/pedir-aprovacao.ts", () => ({ pedirAprovacaoComputador: async () => ({ data: { estado: "pendente", decisao_id: "decisao-1" } }) }));
-vi.mock("../../../src/use-cases/pedir-a-pessoa.ts", () => ({ pedirAPessoa: async () => ({ data: { decisao_id: "decisao-2", estado: "pendente" } }) }));
+vi.mock("../../../src/use-cases/pedir-a-pessoa.ts", () => ({ pedirAjudaDoComputador: async () => ({ data: { decisao_id: "decisao-2", estado: "pendente" } }) }));
 
 const AGENTE = "agente-1";
 let computador: Computador;

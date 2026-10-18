@@ -222,6 +222,20 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return l ? paraMensagem(l) : null;
     },
 
+    /**
+     * definido em 2026-10-18 (plano "pergunta com botões", Parte 4): os balões `pedido_a_pessoa` dos turnos das perguntas
+     * de "Sua vez" numa consulta só (`turno_id = any(…)`, no índice mensagens_por_turno) — no lugar de uma
+     * pedidoAPessoaDaDecisao por item —, com a origem do turno e a raiz da cadeia de retomadas (a mesma da conversa). A
+     * RLS de mensagens decide o que volta: a decisora que não é dona da conversa não lê o balão (0002), e fica sem ele.
+     */
+    async pedidosAPessoaDasDecisoes(turnoIds: readonly string[]): Promise<Mensagem[]> {
+      if (turnoIds.length === 0) return [];
+      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
+        where tenant_id = ${escopo.tenantId} and turno_id = any(${[...new Set(turnoIds)]}::uuid[]) and payload->>'kind' = 'pedido_a_pessoa'`);
+      return linhas.map(paraMensagemComTurno);
+    },
+
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {
       const [l] = await conn<LinhaMensagem[]>`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} order by criado_em desc, id desc limit 1`;

@@ -820,6 +820,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pedidoAPessoaDaDecisao(turnoId, decisaoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "pedido_a_pessoa" && m.payload.decisaoId === decisaoId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
+      async pedidosAPessoaDasDecisoes(turnoIds) {
+        const ids = new Set(turnoIds);
+        return comTurno(doTenant(b.mensagens).filter((m) => m.turnoId !== null && ids.has(m.turnoId) && m.payload?.kind === "pedido_a_pessoa").sort((x, y) => x.criadoEm - y.criadoEm));
+      },
       async pedidoDaTarefa(turnoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },

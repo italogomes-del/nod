@@ -106,7 +106,10 @@ INV=$(api GET inventario)
 echo "   inventário: $INV"
 [ "$(echo "$INV" | jq -r .estado)" = "pronto" ] || falha "inventário não está pronto — confira \`npm run sonda\` (ausente/nao_autenticado é fail-closed por desenho)"
 echo "$INV" | jq -e 'has("email") | not' >/dev/null && ok "inventário pronto, sem email (ADR-019)"
-CUSTO_SONDA=$(grep '"evento":"sonda_claude_cli"' "$LOG" | tail -1 | jq -r '.custo_usd // 0')
+# Revisto em 2026-10-18 (QA do PR #389): desde a ADR-093 o boot sonda o login sem inferência e não loga
+# `sonda_claude_cli`; sem a linha, o grep saía com 1 e o `pipefail` matava a rodada logo depois do inventário.
+CUSTO_SONDA=$(grep '"evento":"sonda_claude_cli"' "$LOG" | tail -1 | jq -r '.custo_usd // 0' || true)
+CUSTO_SONDA=${CUSTO_SONDA:-0}
 ok "sonda custou US\$ $CUSTO_SONDA"
 
 passo "SSE: canal por pessoa com id streamId:seq (terminal 2 é o arquivo)"

@@ -77,4 +77,19 @@ export function pilulaDasNovas(linha: LinhaNaJanela | null): string {
   return `<button type="button" class="pilula-novas" data-act="rolar-para-novas" title="Subir para a primeira não lida">${SETA_CIMA}<span>${esc(quantas)} · desde ${esc(hora(linha.desde))}</span></button>`;
 }
 
+/** O cartão da pergunta ABERTA mais recente visto da janela: fora dela por baixo (`abaixo`) ou por cima. */
+export type PerguntaNaJanela = { decisaoId: string; nome: string; posicao: "abaixo" | "acima" | "visivel" };
+
+/**
+ * A pílula da pergunta fora da tela (definido em 2026-10-18, plano "pergunta com botões", tela "Pergunta fora da tela"):
+ * "Nina perguntou algo ↓" quando o cartão aberto está no DOM mas fora da janela; leva até ele (`ver-pergunta`). Ganha da
+ * pílula das novas: a pergunta segura o bot. Pergunta fora da janela carregada não tem cartão nem pílula ("Sua vez" responde).
+ */
+export function pilulaDaPergunta(p: PerguntaNaJanela | null): string {
+  if (!p || p.posicao === "visivel") return "";
+  const seta = p.posicao === "abaixo" ? SETA_BAIXO : SETA_CIMA;
+  return `<button type="button" class="pilula-novas pilula-pergunta" data-act="ver-pergunta" data-id="${esc(p.decisaoId)}" title="Ir para a pergunta"><span class="pp-ponto" aria-hidden="true"></span><span>${esc(p.nome)} perguntou algo</span>${seta}</button>`;
+}
+
+const SETA_BAIXO = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg>';
 const SETA_CIMA = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>';

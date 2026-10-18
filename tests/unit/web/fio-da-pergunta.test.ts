@@ -9,9 +9,9 @@ import { aparenciaDoComposer, renderTopoComposer } from "../../../web/telas/perg
 import { perguntasPorAgente, renderChamada, renderSuaVez } from "../../../web/telas/sua-vez.ts";
 
 /**
- * Fio da pergunta na web (emenda da ADR-045, definido em 2026-09-24): a faixa diz a rodada; enquanto o
- * agente lê a resposta, a faixa fica neutra e o campo volta ao normal; o fio aberto ganha um trilho com
- * cabeçalho; o resolvido recolhe num <details> só; e os contadores contam fios, não rodadas.
+ * Fio da pergunta na web (emenda da ADR-045, definido em 2026-09-24): o fio aberto ganha um trilho com
+ * cabeçalho; o resolvido recolhe num <details> só; e os contadores contam fios, não rodadas. Desde 2026-10-18 (plano
+ * "pergunta com botões") a rodada mora no cartão da pergunta, e a faixa acima do campo saiu.
  */
 type Item = SuaVezDto["itens"][number];
 
@@ -72,30 +72,27 @@ function duasRodadas() {
 // Plano "tela limpa" (2026-10-16, T5): a nota padrão do campo é vazia; só o modo resposta tem nota.
 const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "" };
 
-describe("a faixa acima do campo", () => {
-  it("da 2ª rodada em diante: '{agente} ainda está esperando sua resposta · 2ª rodada · vence em …'", () => {
+describe("a rodada e o campo (plano \"pergunta com botões\", 2026-10-18: a faixa saiu)", () => {
+  it("da 2ª rodada em diante o cartão diz '2ª rodada'; a 1ª não diz nada; acima do campo, nada", () => {
     const { mensagens, fio } = duasRodadas();
     const e = cenario(mensagens, [fio("esperando_voce")], [item("d2", { id: "d1", rodada: 2 })]);
-    const topo = renderTopoComposer(modoDoComposer(e, "c"), e, "c");
-    expect(topo).toContain("<b>Nina</b> ainda está esperando sua resposta · 2ª rodada · vence em 22h");
-    expect(topo).not.toContain("há 2h");
-    // A 1ª rodada segue como antes.
+    const html = renderTimeline(e.conversas.c ?? null, e);
+    const cartao = html.slice(html.indexOf('data-cartao-pergunta="d2"'));
+    expect(cartao).toContain('<p class="pq-rodada">2ª rodada</p>');
+    expect(renderTopoComposer(modoDoComposer(e, "c"), e, "c")).toBe("");
+    expect(html).not.toContain("ainda está esperando sua resposta");
+    seq = 0;
     const primeira = cenario([pergunta("p1", "d1", PERGUNTA_1)], [], [item("d1", { id: "d1", rodada: 1 })]);
-    expect(renderTopoComposer(modoDoComposer(primeira, "c"), primeira, "c")).toContain("<b>Nina</b> está esperando sua resposta · há 2h · vence em 22h");
+    expect(renderTimeline(primeira.conversas.c ?? null, primeira)).not.toContain("pq-rodada");
   });
 
-  it("enquanto o agente lê a resposta: faixa neutra 'Pergunta aberta · Nina está lendo sua mensagem' e o campo no modo normal", () => {
+  it("enquanto o agente lê a resposta: sem faixa neutra — o campo no modo normal e nada acima dele", () => {
     const { mensagens, fio } = duasRodadas();
     const e = cenario([...mensagens, resposta("r2", "d2", "Pode.")], [{ ...fio("lendo_sua_mensagem"), mensagens: ["p1", "r1", "e1", "p2", "r2"] }], []);
     const modo = modoDoComposer(e, "c");
     expect(modo.tipo).toBe("normal");
     const a = aparenciaDoComposer(modo, e, PADRAO, "c");
-    expect(a.topo).toContain('class="faixa-pergunta faixa-lendo"');
-    expect(a.topo).toContain("Pergunta aberta · <b>Nina</b> está lendo sua mensagem");
-    expect(a.topo).not.toContain("Deixar pra lá");
-    expect(a).toMatchObject({ resposta: false, placeholder: PADRAO.placeholder, nota: PADRAO.nota, anexoBloqueado: null });
-    // Sem fio em leitura, nada acima do campo.
-    expect(aparenciaDoComposer(modo, cenario(mensagens, [fio("resolvida")], []), PADRAO, "c").topo).toBe("");
+    expect(a).toEqual({ topo: "", placeholder: PADRAO.placeholder, nota: PADRAO.nota });
   });
 });
 
@@ -113,12 +110,12 @@ describe("o fio na conversa", () => {
     expect(html.indexOf('data-mensagem="antes"')).toBeLessThan(html.indexOf('class="fio-aberto"'));
   });
 
-  it("a pergunta que acabou de chegar, sozinha, é só o balão — sem trilho", () => {
+  it("a pergunta que acabou de chegar, sozinha, é só o cartão — sem trilho", () => {
     seq = 0;
     const e = cenario([pergunta("p1", "d1", PERGUNTA_1)], [{ id: "d1", agenteId: "a", estado: "esperando_voce", rodada: 1, decisoes: ["d1"], mensagens: ["p1"] }], [item("d1", { id: "d1", rodada: 1 })]);
     const html = renderTimeline(e.conversas.c ?? null, e);
     expect(html).not.toContain("fio-aberto");
-    expect(html).toContain("Parei aqui até você responder");
+    expect(html).toContain('class="cartao-pergunta aberta"');
   });
 
   it("resolvido: o fio inteiro recolhe num <details> verde 'Pergunta resolvida · “…” · N mensagens · ver conversa' e embaixo 'Nina seguiu com a sua resposta'", () => {

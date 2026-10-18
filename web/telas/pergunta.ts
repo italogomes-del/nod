@@ -1,15 +1,16 @@
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { FioDaPergunta } from "../../src/contracts/pedido.ts";
 import type { Estado } from "../estado/reducer.ts";
-import { ehPergunta, estadoDaPergunta, fioLendo, fiosDaConversa, iconeBalao, inicioDaPergunta, mensagemDaPergunta, modoDoComposer, MOTIVO_SEM_ANEXO, perguntasAbertas, rodadaEscrita, type ItemPergunta, type ModoComposer } from "../lib/perguntas.ts";
-import { emQuanto, haQuanto } from "../lib/relogio.ts";
+import { ehPergunta, estadoDaPergunta, fiosDaConversa, iconeBalao, inicioDaPergunta, mensagemDaPergunta, modoDoComposer, rodadaEscrita, type ItemPergunta, type ModoComposer } from "../lib/perguntas.ts";
+import { emQuanto } from "../lib/relogio.ts";
 import { botao, esc, hora } from "../lib/render.ts";
+import { renderCartaoPergunta, rodapeDaConversa, type SituacaoDoCartao } from "./cartao-pergunta.ts";
 import { rotuloVencido } from "./sua-vez.ts";
 
 /**
- * Perguntas viram conversa (emenda da ADR-045, definido em 2026-09-24; A + B com citação automática,
- * a escolha do dono): a pergunta é o balão do agente, sem card nem segunda caixa de texto; a faixa
- * acima do campo diz quem espera; o campo responde; respostas prontas são botões de um toque.
+ * Perguntas viram conversa (emenda da ADR-045, definido em 2026-09-24). revisto em 2026-10-18 (plano "pergunta com
+ * botões", Partes 2 e 3a): a pergunta é um cartão no lugar do balão (web/telas/cartao-pergunta.ts); acima do campo só
+ * sobram a caixa "Respondendo", com duas ou mais abertas, e a lista dos OUTROS pedidos (aprovação, acesso).
  */
 
 function nomeDoAgente(estado: Estado, id: string): string | undefined {
@@ -20,47 +21,75 @@ function mensagensDe(estado: Estado, conversaId: string): readonly Mensagem[] {
   return estado.conversas[conversaId]?.mensagens ?? [];
 }
 
-/** Com duas ou mais abertas, o balão que o campo está citando ganha realce discreto (o "1 de 2" aponta para ele). */
-export function perguntaCitada(estado: Estado, conversaId: string, decisaoId: string): boolean {
+/**
+ * Com duas ou mais abertas, só a que a caixa "Respondendo" aponta diz "Ou responda no chat abaixo" (tela "Duas perguntas
+ * abertas"); com o × da caixa ("outro assunto"), nenhuma. Com uma só, ou antes de "Sua vez" carregar, a pergunta diz.
+ */
+function respondePeloCampo(estado: Estado, conversaId: string, decisaoId: string): boolean {
   const modo = modoDoComposer(estado, conversaId);
-  return modo.tipo === "resposta" && modo.perguntas.length > 1 && modo.alvo.decisao.id === decisaoId;
+  if (modo.tipo === "normal" || modo.perguntas.length < 2) return modo.tipo !== "outro";
+  return modo.tipo === "resposta" && modo.alvo.decisao.id === decisaoId;
+}
+
+/** A linha "Respondida por você · HH:MM" do cartão respondido com outras palavras. */
+function linhaRespondida(resposta: Mensagem, estado: Estado): string {
+  return `${resposta.autoria.autor_id === estado.sessao?.pessoaId ? "Respondida por você" : "Respondida"} · ${hora(resposta.criadoEm)}`;
+}
+
+/** Onde o cartão está, a partir do estado derivado da pergunta (fios primeiro, "Sua vez" depois). */
+function situacaoDoCartao(m: Mensagem, estado: Estado): SituacaoDoCartao {
+  if (m.payload?.kind !== "pedido_a_pessoa") return { tipo: "encerrada" };
+  const p = m.payload;
+  const opcoes = p.opcoes ?? [];
+  const e = estadoDaPergunta(estado, mensagensDe(estado, m.conversaId), p.decisaoId);
+  switch (e.tipo) {
+    case "aberta": {
+      // O pedido de ajuda do computador se responde com "Assumir controle", não no campo (revisão de engenharia).
+      if (p.ajudaDoComputador) return { tipo: "aberta", rodape: null, ocupado: estado.ocupado, extra: `<div class="pq-acoes">${botao("abrir-computador", "Assumir controle", { classe: "sm", id: m.autoria.autor_id })}</div>` };
+      return { tipo: "aberta", rodape: respondePeloCampo(estado, m.conversaId, p.decisaoId) ? rodapeDaConversa(opcoes.length > 0) : null, ocupado: estado.ocupado };
+    }
+    case "respondida": {
+      const escolhida = e.opcao === null ? undefined : opcoes[e.opcao];
+      return escolhida !== undefined ? { tipo: "respondida_opcao", opcao: escolhida } : { tipo: "respondida_texto", linha: linhaRespondida(e.resposta, estado) };
+    }
+    case "vencida":
+      // ADR-007: vencida continua visível e reabrível — no próprio cartão, apagado.
+      return { tipo: "vencida", linha: e.item ? `Sem resposta · ${rotuloVencido(e.item.decisao, estado.agora)}` : "Sem resposta", reabrir: !e.item || e.item.decisao.estado === "vencida" };
+    case "deixada":
+      return { tipo: "deixada" };
+    case "de_outra":
+      return { tipo: "encerrada", linha: "Esperando a resposta de outra pessoa" };
+    case "encerrada":
+      // definido em 2026-10-16 (re-revisão de design do #342): a pergunta das voltas sem novidade (ADR-099 §5) nasce em
+      // qualquer cadeia de "me chame às". Fechada (janela seguinte, ou vencida antiga), o cartão diz "Fechada sem
+      // resposta"; o complemento da rotina só vem quando a cadeia é de fato de uma rotina. Só com "Sua vez" carregada.
+      return estado.suaVez && m.autoria.decidido_por === REGRA_VOLTAS_SEM_NOVIDADE ? { tipo: "encerrada", linha: rodapeDaFechada(m) } : { tipo: "encerrada" };
+  }
 }
 
 /**
- * Debaixo do balão da pergunta: onde ela está e, aberta, as respostas prontas. "Parei aqui até você
- * responder" é a parada de E5.2 dita pelo agente (ele não tenta de novo); o molde da fila não aparece.
- * Com duas ou mais abertas, a que o campo NÃO está citando ganha "Responder a esta".
+ * O cartão da pergunta no lugar do balão (plano "pergunta com botões", Parte 2): a fala do bot vira o título, e o estado
+ * sai de `ConversaDto.fios` antes de "Sua vez" (sem o salto das opções aparecendo depois).
  */
-export function rodapeDaPergunta(m: Mensagem, estado: Estado): string {
+export function cartaoDaPergunta(m: Mensagem, estado: Estado): string {
   if (m.payload?.kind !== "pedido_a_pessoa") return "";
   const p = m.payload;
-  const situacao = estadoDaPergunta(estado, mensagensDe(estado, m.conversaId), p.decisaoId);
-  switch (situacao.tipo) {
-    case "aberta": {
-      const outra = perguntasAbertas(estado, m.conversaId).length > 1 && !perguntaCitada(estado, m.conversaId, p.decisaoId) ? botao("composer-responder", "Responder a esta", { classe: "link sm", id: p.decisaoId }) : "";
-      const opcoes = p.opcoes?.length
-        ? `<div class="pergunta-opcoes" role="group" aria-label="Respostas prontas">${p.opcoes.map((o) => botao("responder-opcao", esc(o), { classe: "opcao", id: p.decisaoId, dados: { texto: o } })).join("")}</div><p class="pergunta-ou">ou responda com suas palavras aí embaixo</p>`
-        : "";
-      return `<p class="pergunta-estado">Parei aqui até você responder${outra}</p>${opcoes}`;
-    }
-    case "respondida": {
-      const quem = situacao.resposta.autoria.autor_id === estado.sessao?.pessoaId ? "Respondida por você" : "Respondida";
-      return `<p class="pergunta-estado respondida"><span aria-hidden="true">✓</span>${quem} · ${esc(hora(situacao.resposta.criadoEm))}</p>`;
-    }
-    case "vencida": {
-      // ADR-007: vencida continua visível e reabrível — agora no próprio balão, não num card à parte.
-      const d = situacao.item.decisao;
-      const reabrir = d.estado === "vencida" ? botao("reabrir", "Reabrir", { classe: "link sm", id: d.id }) : "";
-      return `<p class="pergunta-estado vencida">Sem resposta · ${esc(rotuloVencido(d, estado.agora))}${reabrir}</p>`;
-    }
-    case "encerrada":
-      // definido em 2026-10-16 (re-revisão de design do #342): a pergunta das voltas sem novidade (ADR-099 §5) nasce em
-      // qualquer cadeia de "me chame às" — task, delegação, espera de CI —, não só em rotina. Fechada (janela seguinte,
-      // "Deixar pra lá" ou vencida antiga), o balão diz "Fechada sem resposta"; o complemento da rotina só vem quando a
-      // cadeia é de fato de uma rotina (origem do turno ou da raiz). Só com "Sua vez" carregada: antes dela, toda
-      // pergunta parece encerrada.
-      return estado.suaVez && m.autoria.decidido_por === REGRA_VOLTAS_SEM_NOVIDADE ? `<p class="pergunta-estado vencida">${esc(rodapeDaFechada(m))}</p>` : "";
-  }
+  const fio = fiosDaConversa(estado, m.conversaId).find((f) => f.decisoes.includes(p.decisaoId));
+  const rodada = fio ? fio.decisoes.indexOf(p.decisaoId) + 1 : 1;
+  const nome = nomeDoAgente(estado, m.autoria.autor_id);
+  return renderCartaoPergunta({ decisaoId: p.decisaoId, titulo: m.texto, opcoes: p.opcoes ?? [], recomendada: p.recomendada === 0, rodada, situacao: situacaoDoCartao(m, estado), ...(nome ? { nome } : {}) });
+}
+
+/**
+ * A resposta que foi uma das opções não sai como balão (tela "Depois de responder"): o cartão já diz qual com ✓. A
+ * resposta com outras palavras fica onde está, com o rótulo "respondendo à pergunta das HH:MM".
+ */
+export function respostaPorOpcao(m: Mensagem, estado: Estado): boolean {
+  if (m.payload?.kind !== "resposta_a_pedido") return false;
+  const e = estadoDaPergunta(estado, mensagensDe(estado, m.conversaId), m.payload.decisaoId);
+  if (e.tipo !== "respondida" || e.resposta.id !== m.id || e.opcao === null) return false;
+  const balao = mensagemDaPergunta(mensagensDe(estado, m.conversaId), m.payload.decisaoId);
+  return balao?.payload?.kind === "pedido_a_pessoa" && (balao.payload.opcoes?.[e.opcao] ?? null) !== null;
 }
 
 /** O rodapé da pergunta das voltas fechada: "Fechada sem resposta", e o complemento só quando a cadeia é de rotina. */
@@ -86,15 +115,6 @@ export function linhaDaRetomada(m: Mensagem, estado: Estado): string {
   return `<div class="msg-sistema msg-retomou">${esc(nome)} retomou com ${resposta}</div>`;
 }
 
-/** O relógio da faixa, interpolado de instantes absolutos (ADR-007); sem tick ainda, usa o da fila. */
-function relogio(item: ItemPergunta, agora: number): { ha: number; vence: number } {
-  if (!agora) return { ha: item.aguardandoHaMs, vence: item.recusaAutomaticaEmMs };
-  return { ha: Math.max(0, agora - Date.parse(item.decisao.criadoEm)), vence: Date.parse(item.decisao.prazoDecisaoEm) - agora };
-}
-
-/** Até onde a faixa mostra a pergunta: cabe numa linha larga do campo sem virar parágrafo. */
-export const TRECHO_FAIXA_MAX = 110;
-
 /**
  * O que a pergunta diz: a fala do balão; sem balão ligado (pergunta de antes da emenda da ADR-045),
  * a frase da fila sem o molde "parei para perguntar a X:", que só repete quem pergunta.
@@ -103,68 +123,32 @@ export function textoDaPergunta(estado: Estado, d: ItemPergunta["decisao"]): str
   return mensagemDaPergunta(mensagensDe(estado, d.conversaId), d.id)?.texto ?? d.frase.replace(/^parei para perguntar a [^:]+:\s*/u, "");
 }
 
+/** definido em 2026-10-18: o trecho da caixa "Respondendo" cabe numa linha do campo; o CSS ainda corta com reticências. */
+export const TRECHO_RESPONDENDO_MAX = 90;
+
 /**
- * A faixa logo acima do campo, enquanto a pergunta está aberta: quem espera, há quanto, até quando e
- * O QUE pergunta (definido em 2026-09-24: sem o trecho, a faixa dizia que a Nina esperava sem dizer
- * pelo quê, e a pergunta estava enterrada debaixo da rotina seguinte). "Ver pergunta" leva ao balão e
- * "Deixar pra lá" fecha sem responder (POST decisoes/:id/dispensar, #46: dispensar não é responder,
- * nada é retomado). Pergunta de antes desta mudança não tem balão ligado: o "Ver pergunta" não aparece,
- * mas o trecho vem da frase da fila. Com a citação à vista (duas ou mais), o trecho sai para não repetir.
+ * A caixa "Respondendo" presa ao campo (plano "pergunta com botões", Parte 3a; tela "Duas perguntas abertas"), no padrão do
+ * Grok: com duas ou mais perguntas abertas, diz a qual a próxima mensagem responde — a mais recente, salvo "Trocar". O ×
+ * manda a mensagem como assunto novo (o `outroAssunto` de antes). Substitui a citação "1 de 2" e o seletor.
+ * revisto em 2026-10-18 (QA do PR #389): só "Respondendo", como na tela S2 do protótipo; o "· N de M" saiu (o trecho já diz
+ * qual é, e "Trocar" passa à outra).
  */
-export function renderFaixaPergunta(item: ItemPergunta, estado: Estado, comTrecho = true): string {
-  const d = item.decisao;
-  const { ha, vence } = relogio(item, estado.agora);
-  const ver = mensagemDaPergunta(mensagensDe(estado, d.conversaId), d.id) ? botao("ver-pergunta", "Ver pergunta", { classe: "link sm", id: d.id }) : "";
-  const deixar = botao("dispensar", "Deixar pra lá", { classe: "link sm", id: d.id, titulo: "Fecha a pergunta sem responder; nada é retomado" });
-  // definido em 2026-09-24 (fio da pergunta): da 2ª rodada em diante a faixa diz a rodada no lugar do
-  // "há quanto" — o relógio de cada rodada recomeça, e "há 2 min" esconderia que a conversa já vem de antes.
-  const rodada = item.fio?.rodada ?? 1;
-  const cabeca = rodada > 1
-    ? `<b>${esc(item.agenteNome)}</b> ainda está esperando sua resposta · ${esc(rodadaEscrita(rodada))} · vence ${esc(emQuanto(vence))}`
-    : `<b>${esc(item.agenteNome)}</b> está esperando sua resposta · ${esc(haQuanto(ha))} · vence ${esc(emQuanto(vence))}`;
-  const texto = comTrecho ? textoDaPergunta(estado, d) : "";
-  const trecho = texto ? `<span class="fp-pergunta" title="${esc(texto)}">“${esc(inicioDaPergunta(texto, TRECHO_FAIXA_MAX))}”</span>` : "";
-  return `<div class="faixa-pergunta"><span class="fp-ic">${iconeBalao(15)}</span><span class="fp-txt">${cabeca}${trecho}</span><span class="fp-acoes">${ver}${deixar}</span></div>`;
+export function renderRespondendo(modo: ModoComposer, estado: Estado): string {
+  if (modo.tipo !== "resposta" || modo.perguntas.length < 2) return "";
+  const texto = textoDaPergunta(estado, modo.alvo.decisao);
+  const trocar = botao("composer-trocar", "Trocar", { classe: "link sm", titulo: "Responder a outra pergunta aberta" });
+  const fechar = `<button type="button" class="rp-fechar" data-act="composer-outro" aria-label="Cancelar a resposta e mandar como mensagem comum" title="Mandar como mensagem comum (Esc)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`;
+  return `<div class="caixa-respondendo" role="group" aria-label="A próxima mensagem responde a esta pergunta"><div class="rp-txt"><span class="rp-rotulo">Respondendo</span><span class="rp-trecho" title="${esc(texto)}">${esc(inicioDaPergunta(texto, TRECHO_RESPONDENDO_MAX))}</span></div>${trocar}${fechar}</div>`;
 }
 
 /**
- * definido em 2026-09-24 (fio da pergunta): respondida, a pergunta continua ABERTA enquanto o agente lê
- * — ele pode seguir ou perguntar de novo. A faixa fica, neutra e sem ações (não há o que responder), e
- * o campo volta ao modo normal.
- */
-export function renderFaixaLendo(fio: FioDaPergunta, estado: Estado): string {
-  const nome = nomeDoAgente(estado, fio.agenteId) ?? "O agente";
-  return `<div class="faixa-pergunta faixa-lendo" role="status"><span class="fp-ic">${iconeBalao(15)}</span><span class="fp-txt">Pergunta aberta · <b>${esc(nome)}</b> está lendo sua mensagem</span></div>`;
-}
-
-function segmento(act: string, rotulo: string, ligado: boolean): string {
-  return `<button type="button" class="seg" data-act="${act}" aria-pressed="${ligado ? "true" : "false"}">${rotulo}</button>`;
-}
-
-/** Com duas ou mais abertas, o campo cita qual está respondendo (a mais antiga, salvo escolha) e em que posição. */
-function renderCitacao(modo: Extract<ModoComposer, { tipo: "resposta" }>, estado: Estado): string {
-  const d = modo.alvo.decisao;
-  const texto = textoDaPergunta(estado, d);
-  const fechar = botao("composer-outro", "×", { classe: "cp-fechar", titulo: "Mandar como mensagem comum (Esc)", aria: "Cancelar a resposta e mandar como mensagem comum" });
-  return `<div class="citacao-pergunta"><span class="cp-txt">Respondendo à <b>${esc(modo.alvo.agenteNome)}</b> · “${esc(inicioDaPergunta(texto))}” · ${modo.indice + 1} de ${modo.perguntas.length}</span>${fechar}</div>`;
-}
-
-/**
- * Acima do campo: a faixa, os dois modos ("Responder à pergunta" | "Outro assunto") e a citação. Sem
- * pergunta esperando, só a faixa neutra do fio em que o agente está lendo (`conversaId` a localiza).
+ * Acima do campo: a caixa "Respondendo" (duas ou mais perguntas abertas) e a lista dos outros pedidos da conversa
+ * (aprovação, acesso). A faixa da pergunta, a faixa "lendo sua mensagem" e o seletor saíram (2026-10-18): a pergunta mora
+ * no cartão; o status "Esperando você" do cabeçalho fica.
  */
 export function renderTopoComposer(modo: ModoComposer, estado: Estado, conversaId?: string): string {
   const outros = conversaId ? outrosPedidos(estado, conversaId) : [];
-  if (modo.tipo === "normal") {
-    const lendo = conversaId ? fioLendo(estado, conversaId) : undefined;
-    return (lendo ? renderFaixaLendo(lendo, estado) : "") + (outros.length ? renderEspera([], outros, estado, modo) : "");
-  }
-  const alvo = modo.tipo === "resposta" ? modo.alvo : modo.perguntas[0];
-  if (!alvo) return "";
-  const modos = `<div class="modo-envio" role="group" aria-label="O que a próxima mensagem faz">${segmento("composer-responder", "Responder à pergunta", modo.tipo === "resposta")}${segmento("composer-outro", "Outro assunto", modo.tipo === "outro")}</div>`;
-  const citacao = modo.tipo === "resposta" && modo.perguntas.length > 1 ? renderCitacao(modo, estado) : "";
-  const topo = outros.length ? renderEspera(modo.perguntas, outros, estado, modo) : renderFaixaPergunta(alvo, estado, !citacao);
-  return `${topo}<div class="composer-modo">${modos}${citacao}</div>`;
+  return (outros.length ? renderEspera(outros, estado) : "") + renderRespondendo(modo, estado);
 }
 
 type ItemDaFila = NonNullable<Estado["suaVez"]>["itens"][number];
@@ -179,64 +163,39 @@ function outrosPedidos(estado: Estado, conversaId: string): ItemDaFila[] {
 const ROTULO_DO_PEDIDO: Partial<Record<ItemDaFila["decisao"]["tipo"], string>> = { aprovacao: "aprovação", acesso: "acesso", gate_rotina: "rotina", retomar_turno: "retomar" };
 
 /**
- * "N coisas esperam você" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): com uma aprovação aberta
- * além da pergunta, a pessoa via a faixa azul da pergunta, o card âmbar na timeline e o cabeçalho, cada um dizendo uma
- * parte. Um ponto só acima do campo, em ordem, com uma ação para cada — a pergunta se responde no campo; o pedido leva
- * ao card dele. Sem outro pedido, a faixa da pergunta continua como era.
+ * "N coisas esperam você" (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): um ponto só acima do campo,
+ * em ordem, com uma ação para cada pedido, que leva ao card dele. revisto em 2026-10-18 (plano "pergunta com botões"):
+ * só os outros pedidos (aprovação, acesso) — a pergunta já está no cartão, e as linhas dela saíram.
  */
-function renderEspera(perguntas: readonly ItemPergunta[], outros: readonly ItemDaFila[], estado: Estado, modo: ModoComposer): string {
-  const linhas: { em: number; html: string }[] = [
-    ...perguntas.map((p) => {
-      const { vence } = relogio(p, estado.agora);
-      const rodada = p.fio?.rodada ?? 1;
-      const texto = textoDaPergunta(estado, p.decisao);
-      const respondendo = modo.tipo === "resposta" && modo.alvo.decisao.id === p.decisao.id;
-      const acao = respondendo
-        ? (mensagemDaPergunta(mensagensDe(estado, p.decisao.conversaId), p.decisao.id) ? botao("ver-pergunta", "Ver pergunta", { classe: "link sm", id: p.decisao.id }) : "")
-        : botao("composer-responder", "Responder", { classe: "link sm", id: p.decisao.id });
-      return { em: Date.parse(p.decisao.criadoEm), html: `<span class="tag tag-azul">pergunta</span><span class="esp-txt" title="${esc(texto)}">${esc(inicioDaPergunta(texto, TRECHO_FAIXA_MAX))}<small>${esc(p.agenteNome)} parou aqui${rodada > 1 ? ` · ${esc(rodadaEscrita(rodada))}` : ""} · vence ${esc(emQuanto(vence))}</small></span>${acao}` };
-    }),
-    ...outros.map((i) => {
-      const d = i.decisao;
-      const vence = estado.agora ? Date.parse(d.prazoDecisaoEm) - estado.agora : i.recusaAutomaticaEmMs;
-      const slug = i.itensAprovacao[0]?.destino.conector;
-      const app = slug ? estado.conectores.find((c) => c.slug === slug)?.nome ?? slug : "";
-      const prazo = d.tipo === "aprovacao" || d.tipo === "acesso" ? `recusa automática ${emQuanto(vence)}` : `vence ${emQuanto(vence)}`;
-      const ver = botao("ver-decisao", d.tipo === "aprovacao" || d.tipo === "gate_rotina" ? "Ver aprovação" : "Ver pedido", { classe: "link sm", id: d.id });
-      return { em: Date.parse(d.criadoEm), html: `<span class="tag tag-ambar">${esc(ROTULO_DO_PEDIDO[d.tipo] ?? "decisão")}</span><span class="esp-txt">${esc(d.frase)}<small>${esc([app, prazo].filter(Boolean).join(" · "))}</small></span>${ver}` };
-    }),
-  ].sort((a, b) => a.em - b.em);
+function renderEspera(outros: readonly ItemDaFila[], estado: Estado): string {
+  const linhas = outros.map((i) => {
+    const d = i.decisao;
+    const vence = estado.agora ? Date.parse(d.prazoDecisaoEm) - estado.agora : i.recusaAutomaticaEmMs;
+    const slug = i.itensAprovacao[0]?.destino.conector;
+    const app = slug ? estado.conectores.find((c) => c.slug === slug)?.nome ?? slug : "";
+    const prazo = d.tipo === "aprovacao" || d.tipo === "acesso" ? `recusa automática ${emQuanto(vence)}` : `vence ${emQuanto(vence)}`;
+    const ver = botao("ver-decisao", d.tipo === "aprovacao" || d.tipo === "gate_rotina" ? "Ver aprovação" : "Ver pedido", { classe: "link sm", id: d.id });
+    return `<span class="tag tag-ambar">${esc(ROTULO_DO_PEDIDO[d.tipo] ?? "decisão")}</span><span class="esp-txt">${esc(d.frase)}<small>${esc([app, prazo].filter(Boolean).join(" · "))}</small></span>${ver}`;
+  });
   const n = linhas.length;
-  return `<section class="espera" aria-label="O que espera você agora"><div class="espera-cab"><span class="espera-n">${n}</span>${n === 1 ? "coisa espera você" : "coisas esperam você"}</div><ol>${linhas.map((l, k) => `<li><span class="espera-ord">${k + 1}</span>${l.html}</li>`).join("")}</ol></section>`;
+  return `<section class="espera" aria-label="O que espera você agora"><div class="espera-cab"><span class="espera-n">${n}</span>${n === 1 ? "coisa espera você" : "coisas esperam você"}</div><ol>${linhas.map((l, k) => `<li><span class="espera-ord">${k + 1}</span>${l}</li>`).join("")}</ol></section>`;
 }
 
 export type AparenciaComposer = {
-  /** HTML da região acima da caixa (vazio sem pergunta aberta). */
+  /** HTML da região acima da caixa: a caixa "Respondendo" e os outros pedidos (vazio sem nada disso). */
   topo: string;
-  /** Borda realçada: a próxima mensagem responde. */
-  resposta: boolean;
   placeholder: string;
   nota: string;
-  /** Com motivo, o clipe fica desligado e o motivo vira a dica dele; null = clipe como sempre. */
-  anexoBloqueado: string | null;
 };
 
 /**
  * Tudo que o modo muda no campo, calculado de uma vez para o main aplicar sem regravar o textarea
- * (web/lib/regioes.ts). Anexos (ADR-045) não cabem na resposta: a rota só leva texto, então o clipe
- * desliga com o motivo à vista em vez de o arquivo sumir.
+ * (web/lib/regioes.ts). revisto em 2026-10-18 (plano "pergunta com botões", Parte 2): com pergunta aberta o campo não
+ * muda — sem placeholder "Responda à…", sem borda realçada, sem a nota e sem o clipe desligado (o anexo vai como
+ * mensagem comum). Risco aceito no plano: nada no campo diz que a próxima mensagem responde (gatilho na ADR-045).
  */
 export function aparenciaDoComposer(modo: ModoComposer, estado: Estado, padrao: { placeholder: string; nota: string }, conversaId?: string): AparenciaComposer {
-  const topo = renderTopoComposer(modo, estado, conversaId);
-  if (modo.tipo !== "resposta") return { topo, resposta: false, placeholder: padrao.placeholder, nota: padrao.nota, anexoBloqueado: null };
-  const nome = modo.alvo.agenteNome;
-  return {
-    topo,
-    resposta: true,
-    placeholder: `Responda à ${nome}…`,
-    nota: `Sua próxima mensagem responde à pergunta, e ${nome} continua de onde parou.`,
-    anexoBloqueado: MOTIVO_SEM_ANEXO,
-  };
+  return { topo: renderTopoComposer(modo, estado, conversaId), placeholder: padrao.placeholder, nota: padrao.nota };
 }
 
 /** Uma linha já desenhada da conversa: o id da mensagem, se é linha de sistema (recolhível) e o HTML. */
@@ -276,7 +235,10 @@ export function desenharFios(linhas: readonly LinhaDaConversa[], estado: Estado,
   const fioDe = new Map<string, FioDaPergunta>();
   for (const fio of fiosDaConversa(estado, conversaId)) {
     const aberto = fio.estado === "esperando_voce" || fio.estado === "lendo_sua_mensagem";
-    if ((aberto && fio.mensagens.length > 1) || fio.estado === "resolvida") for (const id of fio.mensagens) fioDe.set(id, fio);
+    // revisto em 2026-10-18 (plano "pergunta com botões", tela "Depois de responder"): o fio de UMA rodada resolvido não
+    // recolhe — o cartão já encolheu para a resposta (a opção com ✓ ou "Respondida"); recolher o esconderia atrás de
+    // "Pergunta resolvida". O de duas rodadas ou mais recolhe como antes: são as idas e vindas que ocupam a tela.
+    if ((aberto && fio.mensagens.length > 1) || (fio.estado === "resolvida" && fio.rodada > 1)) for (const id of fio.mensagens) fioDe.set(id, fio);
   }
   if (fioDe.size === 0) return [...linhas];
   const saida: LinhaDaConversa[] = [];

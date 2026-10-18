@@ -52,7 +52,7 @@ export async function fiosDaConversa(repos: Repos, mensagens: readonly Mensagem[
     if (!ultima || doFio.length === 0) continue;
     if (ultima.estado === "decidida" && turnos === null) turnos = await repos.turnos.listarDaConversa(ultima.conversaId, TURNOS_RECENTES);
     const retomada = ultima.estado === "decidida" ? estadoDaRetomada(turnos ?? [], mensagens, ultima.id) : null;
-    fios.push({ id, agenteId: ultima.agenteId, estado: estadoDoFio(ultima, retomada), rodada: rodadas.length, decisoes: rodadas.map((d) => d.id), mensagens: doFio.map((m) => m.id) });
+    fios.push({ id, agenteId: ultima.agenteId, estado: estadoDoFio(ultima, retomada), rodada: rodadas.length, decisoes: rodadas.map((d) => d.id), mensagens: doFio.map((m) => m.id), decisorId: ultima.decisorId });
   }
   return fios;
 }

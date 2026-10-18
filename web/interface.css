@@ -434,46 +434,70 @@
 .fila-relogio { width: 12px; height: 12px; border: 1.4px solid var(--ink-3); border-radius: 50%; position: relative; flex: none; }
 .fila-relogio::after { content: ""; position: absolute; left: 4.5px; top: 2px; width: 3.5px; height: 3.5px; border-left: 1.4px solid var(--ink-3); border-bottom: 1.4px solid var(--ink-3); }
 
-/* Perguntas viram conversa (emenda da ADR-045, 2026-09-24): a pergunta é a fala do agente num balão com borda
-   — informação neutra (revisto em 2026-10-04: o azul é só do que é novo), não o âmbar das decisões —, e o campo
-   embaixo responde. */
-.message.pergunta .bubble { background: var(--surface); border: 1px solid var(--line-strong); color: var(--ink); }
-.message.pergunta.pergunta-citada .bubble { border-color: var(--ink); }
-.message.pergunta.realce .bubble { box-shadow: 0 0 0 2px var(--ink); transition: box-shadow .2s ease; }
-.pergunta-estado { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; margin: 6px 4px 0; font-size: 12px; color: var(--ink-3); }
-.pergunta-estado.respondida { color: var(--success); }
-.pergunta-estado .bt.link { font-size: 12px; padding: 0 2px; }
-.pergunta-opcoes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
-.bt.opcao { border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface); color: var(--ink); padding: 5px 12px; font-size: 12.5px; white-space: normal; text-align: left; }
-.bt.opcao:hover, .bt.opcao:focus-visible { background: var(--surface-raised); border-color: var(--ink-3); }
-.pergunta-ou { margin: 6px 4px 0; font-size: 11.5px; color: var(--ink-3); }
+/* O cartão da pergunta (plano "pergunta com botões", 2026-10-18; protótipo aprovado, telas E2, S1, S2 e S4): no lugar
+   do balão, o fundo do balão do bot, raio 20, título 16/500, × cinza no canto, a lista branca com borda e divisórias, a
+   letra num quadrado cinza claro de 26 px e "Recomendo" numa pílula cinza na A. Só tokens (cores-por-token): o cinza claro
+   do protótipo vira --surface-raised e o cinza do texto apagado vira --ink-3 (contraste 4,6:1 sobre --surface-raised). */
+.message.pergunta .bubble-wrap { width: 460px; }
+.cartao-pergunta { width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 16px 16px 14px; border-radius: 20px; background: var(--surface-raised); color: var(--ink); }
+.message.pergunta.realce .cartao-pergunta { box-shadow: 0 0 0 2px var(--ink); transition: box-shadow .2s ease; }
+.pq-cab { display: flex; align-items: flex-start; gap: 12px; }
+.pq-titulo { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
+.pq-fechar { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
+.pq-fechar:hover, .pq-fechar:focus-visible { color: var(--ink); background: var(--surface-selected); }
+.pq-rodada { margin: -6px 0 0; font-size: 12px; color: var(--ink-3); }
+.pq-lista { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.pq-opcao { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 15px; line-height: 1.4; text-align: left; cursor: pointer; }
+.pq-opcao:last-child { border-bottom: 0; }
+.pq-opcao:hover:not(:disabled) { background: var(--surface-side); }
+.pq-opcao:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.pq-opcao:disabled { cursor: default; opacity: .6; }
+.pq-letra { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; background: var(--surface-raised); color: var(--ink-3); font-size: 13px; }
+.pq-texto { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pq-rotulo { min-width: 0; overflow-wrap: anywhere; }
+.pq-recomendo { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); font-size: 11.5px; }
+.pq-rodape { margin: 0; font-size: 13px; color: var(--ink-3); }
+.pq-acoes { display: flex; gap: 8px; }
+.pq-escolhida { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.pq-escolhida .pq-rotulo { flex: 1; }
+.pq-check { flex: none; color: var(--success); }
+.pq-estado { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; margin: 0; font-size: 13px; color: var(--ink-3); }
+.pq-estado .pq-ok { color: var(--success); }
+.pq-estado .bt.link { font-size: 13px; padding: 0 2px; }
+.cartao-pergunta.vencida .pq-titulo, .cartao-pergunta.deixada .pq-titulo, .cartao-pergunta.encerrada .pq-titulo { color: var(--ink-2); }
 .message.respondendo:has(+ .msg-retomou) { margin-bottom: 8px; }
 .resposta-a { margin: 0 4px 4px; font-size: 11.5px; color: var(--ink-3); text-align: right; }
 .msg-retomou { margin-bottom: 25px; }
+/* A pergunta em "Sua vez" (Parte 4, tela "Sua vez com botões"): o cabeçalho solto (avatar, nome, "há N", origem e "Abrir
+   conversa") e o mesmo cartão; sem opções, o campo de resposta dentro do cartão, em pílula. */
+.lista > li.item-pergunta { display: flex; flex-direction: column; gap: 8px; padding: 0; border: 0; border-radius: 0; margin-bottom: 18px; background: none; }
+.sv-cab { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); }
+.sv-quem b { color: var(--ink); font-weight: 600; }
+.sv-acoes { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.sv-acoes .bt.link { color: var(--ink-2); font-size: 13px; padding: 0 2px; text-decoration: underline; text-decoration-color: var(--line-strong); }
+.sv-rodada { font-size: 12px; color: var(--ink-3); }
+.lista > li.item-pergunta.realce .cartao-pergunta { box-shadow: 0 0 0 2px var(--ink); transition: box-shadow .2s ease; }
+.pq-campo { display: flex; align-items: center; gap: 8px; padding: 5px 5px 5px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+/* foco-no-conteiner: .pq-campo */
+.pq-campo .resposta { flex: 1; min-width: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
+.pq-campo:focus-within { border-color: var(--line-strong); outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pq-campo .bt { flex: none; border-radius: 999px; }
+.pq-campo .pq-enviar { width: 36px; height: 30px; min-height: 0; padding: 0; display: grid; place-items: center; }
+/* "Nina perguntou algo ↓" (tela "Pergunta fora da tela"): a pílula das novas com o ponto azul do que espera você.
+   QA do PR 389 (2026-10-18): branca com borda, como na tela S3; no azul cheio das novas o ponto azul sumia. */
+.pilula-novas.pilula-pergunta { gap: 8px; padding: 8px 14px 8px 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 400; }
+.pilula-pergunta .pp-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--signal); flex: none; }
 
-/* Acima do campo, só com pergunta aberta: a faixa (quem espera, há quanto, até quando), os dois modos e,
-   com duas ou mais, a citação da que está sendo respondida. */
+/* Acima do campo: a caixa "Respondendo" (Parte 3a, tela "Duas perguntas abertas") com duas ou mais perguntas abertas — a
+   que a próxima mensagem responde, com "Trocar" e o × que manda como assunto novo — e "N coisas esperam você". */
 .composer-pergunta:empty { display: none; }
-.faixa-pergunta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 8px; padding: 8px 12px;
-  border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); color: var(--ink); font-size: 12.5px; line-height: 1.4; }
-.faixa-pergunta .fp-ic { display: inline-flex; color: var(--ink-2); }
-.faixa-pergunta .fp-txt { flex: 1; min-width: 0; }
-.faixa-pergunta .fp-txt b { font-weight: 600; }
-.faixa-pergunta .fp-pergunta { display: block; margin-top: 2px; color: var(--ink-2); overflow-wrap: anywhere; }
-.faixa-pergunta .fp-acoes { display: flex; gap: 2px; }
-.faixa-pergunta .bt.link { color: var(--ink); font-size: 12px; padding: 2px 6px; }
-.composer-modo { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: 0 0 6px; }
-.modo-envio { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface); }
-.modo-envio .seg { padding: 3px 11px; border-radius: 99px; font-size: 11.5px; color: var(--ink-3); cursor: pointer; }
-.modo-envio .seg:hover { color: var(--ink-2); }
-.modo-envio .seg[aria-pressed="true"] { background: var(--surface-selected); color: var(--ink); font-weight: 500; }
-.citacao-pergunta { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 3px 4px 3px 10px;
-  border-left: 3px solid var(--ink); border-radius: 6px; background: var(--surface-side); font-size: 12px; color: var(--ink-2); }
-.citacao-pergunta .cp-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.citacao-pergunta .cp-txt b { font-weight: 600; }
-.citacao-pergunta .bt.cp-fechar { border: 0; background: none; padding: 0 6px; color: var(--ink-3); font-size: 14px; line-height: 1; }
-.citacao-pergunta .bt.cp-fechar:hover { color: var(--ink); }
-.composer.modo-resposta .box { border-color: var(--ink); }
+.caixa-respondendo { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 8px 8px 14px; border-radius: 16px; background: var(--surface-raised); color: var(--ink); font-size: 14px; }
+.rp-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rp-rotulo { font-size: 12.5px; color: var(--ink-3); }
+.rp-trecho { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caixa-respondendo .bt.link { flex: none; color: var(--ink); font-size: 12.5px; padding: 2px 6px; }
+.rp-fechar { flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); cursor: pointer; }
+.rp-fechar:hover, .rp-fechar:focus-visible { color: var(--ink); background: var(--surface-selected); }
 .composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
 .composer .clipe:disabled:hover { background: transparent; color: var(--ink-2); }
 
@@ -495,13 +519,11 @@
 @media (prefers-reduced-motion: reduce) { .ditado-nivel i { transition: none; } }
 
 /* Fio da pergunta (2026-09-24): aberto, um trilho fino junta as mensagens do fio sob "Pergunta
-   aberta · N mensagens · Xª rodada"; enquanto o agente lê, a faixa acima do campo fica neutra, sem ações;
-   resolvido, o fio recolhe num <details> verde e a linha "{agente} seguiu com a sua resposta" fica embaixo. */
+   aberta · N mensagens · Xª rodada"; resolvido, o fio recolhe num <details> verde e a linha "{agente} seguiu com a sua
+   resposta" fica embaixo. (A faixa neutra "lendo sua mensagem" saiu em 2026-10-18.) */
 .fio-aberto { margin: 0 0 6px; padding: 2px 0 2px 14px; border-left: 2px solid var(--line-strong); }
 .fio-cab { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 11.5px; font-weight: 500; color: var(--ink-2); }
 .fio-cab .fio-ic { display: inline-flex; }
-.faixa-pergunta.faixa-lendo { border-color: var(--line); background: var(--surface-side); color: var(--ink-2); }
-.faixa-pergunta.faixa-lendo .fp-ic { color: var(--ink-3); }
 .fio-resolvido { margin: 4px auto 6px; max-width: 620px; border: 1px solid var(--line); border-radius: 12px; background: var(--success-soft); }
 .fio-resolvido > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 12.5px; color: var(--success); }
 .fio-resolvido > summary::-webkit-details-marker { display: none; }
@@ -517,7 +539,7 @@
 .sub-esperando { color: var(--signal) !important; }
 /* definido em 2026-09-24 (emenda da ADR-044): a rotina do bot parou por falta de acesso — âmbar de "precisa de você". */
 .sub-rotina-parada { color: var(--warning) !important; }
-@media (prefers-reduced-motion: reduce) { .message.pergunta.realce .bubble { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .message.pergunta.realce .cartao-pergunta { transition: none; } }
 
 /* definido em 2026-09-24 (revisão da interface): o chat é a tela principal. Cabeçalho só com o bot e o
    botão do painel; o painel pode ficar escondido; o que espera a pessoa vira um sino, não uma faixa. */
@@ -1183,10 +1205,10 @@ details.recibo[open] .recibo-ver { visibility: hidden; }
 .lugar-faixa-trabalhos:empty { display: none; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap { padding-top: 0; }
 .lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap .composer .box { border-top-left-radius: 0; border-top-right-radius: 0; }
-/* definido em 2026-10-08 (QA do épico): com a faixa da pergunta no alto do campo ("Dev 1 está esperando sua resposta"), a
-   faixa de Trabalhos ficava em cima dela, aberta embaixo, e o campo perdia os cantos de cima sem nada colado nele. */
-.lugar-faixa-trabalhos:has(+ .composer-wrap .faixa-pergunta) .faixa-trab { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 16px; }
-.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap:has(.faixa-pergunta) .composer .box { border-top-left-radius: 28px; border-top-right-radius: 28px; }
+/* definido em 2026-10-08 (QA do épico): com algo no alto do campo (desde 2026-10-18, a caixa "Respondendo" ou "N coisas
+   esperam você"), a faixa de Trabalhos ficava em cima, aberta embaixo, e o campo perdia os cantos de cima sem nada colado. */
+.lugar-faixa-trabalhos:has(+ .composer-wrap .composer-pergunta:not(:empty)) .faixa-trab { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: 16px; }
+.lugar-faixa-trabalhos:has(.faixa-trab) + .composer-wrap:has(.composer-pergunta:not(:empty)) .composer .box { border-top-left-radius: 28px; border-top-right-radius: 28px; }
 .faixa-trab { margin-top: 8px; padding: 4px 4px 4px; border: 1px solid var(--line); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--surface-side); }
 .ft-cab { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 12px; font-size: 12px; color: var(--ink-3); }
 .ft-n { margin-right: auto; font-variant-numeric: tabular-nums; }
@@ -1430,7 +1452,7 @@ span.pilula-memoria { padding-right: 12px; cursor: default; }
 /* NOD-122: alto contraste (forced-colors). O sistema troca os fundos pelas cores dele, então o foco que era só fundo some.
    Aqui o foco ganha contorno em Highlight; nada muda fora deste modo. Gate: tests/unit/web/foco-forced-colors.test.ts. */
 @media (forced-colors: active) {
-  .bot-menu button:focus-visible, .me:focus-visible, .rodape .me:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  .bot-menu button:focus-visible, .me:focus-visible, .rodape .me:focus-visible, .pq-campo:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
   /* O item atual/selecionado era só fundo (ou sombra, que o modo apaga): contorno em CanvasText, por dentro; o foco ganha dele. */
   [aria-current="true"]:not(:focus-visible), [aria-current="page"]:not(:focus-visible), [aria-selected="true"]:not(:focus-visible),
   [aria-pressed="true"]:not(:focus-visible), .app-card.selected { outline: 2px solid CanvasText; outline-offset: -2px; }

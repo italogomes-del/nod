@@ -51,7 +51,6 @@ export type ChaveRedacao =
   | "retomada"
   | "retomada-automatica"
   | "frente-retomada-automatica"
-  | "parei-falta-dado"
   | "anotei"
   | "permissao-permanente"
   | "computador-fora-do-ar"
@@ -135,9 +134,6 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "retomada-automatica": "Este pedido caiu ({motivo}) e foi retomado sozinho quando as máquinas voltaram: tentativa {tentativa} de {maximo}.",
   // definido em 2026-10-12 (ADR-099, I9): a frente de um lote caiu por infraestrutura e o servidor a retomou (frentes-caidas.ts).
   "frente-retomada-automatica": "A frente {titulo} caiu ({motivo}) e foi retomada sozinha quando as máquinas voltaram: tentativa {tentativa} de {maximo}.",
-  // definido em 2026-09-24 (emenda da ADR-045): só a frase curta da fila ("Sua vez", decisoes.frase); na
-  // conversa a pergunta é a fala do próprio agente (pedir-a-pessoa.ts).
-  "parei-falta-dado": "parei: falta {dado}; quem destrava: {quem}; não vou tentar de novo.",
   // definido em 2026-10-03: {tipo} já com artigo e acento ("uma preferência"), nunca o enum cru (lembrar.ts).
   anotei: "Anotei {tipo}: {texto}",
   // definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO da transição; a hora sai no cartão da web.

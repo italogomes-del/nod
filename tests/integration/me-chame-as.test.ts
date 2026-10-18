@@ -171,7 +171,7 @@ describeIntegracao("me chame às (ADR-086)", () => {
       expect(await volta(m, v3!.id, "ver se a CI do #845 passou ainda")).toBeNull();
       expect(await m.voltas()).toHaveLength(3);
       const [pergunta] = await m.repos.decisoes.doTurno(v3!.id);
-      expect(pergunta).toMatchObject({ tipo: "pergunta", estado: "pendente", decisorId: PESSOA_MARLON, frase: "voltou 3 vezes sem novidade esperando: ver se a CI do #845 passou ainda" });
+      expect(pergunta).toMatchObject({ tipo: "pergunta", estado: "pendente", decisorId: PESSOA_MARLON, frase: "Voltei 3 vezes para conferir e nada mudou: ver se a CI do #845 passou ainda. Sigo esperando ou paro por aqui?" });
       const balao = (await m.repos.mensagens.listarDaConversa(m.conversaId)).find((x) => x.payload?.kind === "pedido_a_pessoa");
       expect(balao).toMatchObject({ kind: "texto", turnoId: v3!.id, payload: { decisaoId: pergunta!.id, opcoes: ["Pode seguir esperando", "Pode parar de esperar"] } });
       expect(balao?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: m.agenteId, decidido_por: REGRA_VOLTAS_SEM_NOVIDADE });

@@ -1,4 +1,4 @@
-import { depoisDeRolar, distanciaDoFim, permanenciaDaLinha, pilulaDasNovas, type LinhaNaJanela, type Medida, type Permanencia } from "./rolagem.ts";
+import { depoisDeRolar, distanciaDoFim, permanenciaDaLinha, pilulaDaPergunta, pilulaDasNovas, type LinhaNaJanela, type Medida, type Permanencia, type PerguntaNaJanela } from "./rolagem.ts";
 
 /**
  * A rolagem da conversa na tela (definido em 2026-10-05): o estado "colada no fim" e a pílula da base, ligados à caixa
@@ -32,6 +32,7 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
   // A linha "Novas" e as sugestões moram no histórico: são procuradas quando ele muda, não a cada evento. Procurar na
   // timeline inteira (dezenas de milhares de nós numa conversa longa) a cada quadro de streaming é o que a ADR-061 tirou.
   let linha: HTMLElement | null = null;
+  let cartao: HTMLElement | null = null;
   let vazia = false;
 
   const medida = (): Medida => ({ topo: caixa.scrollTop, altura: caixa.scrollHeight, janela: caixa.clientHeight });
@@ -52,8 +53,19 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
     return { acima: r.bottom <= c.top, vista: linhaVista === chave, total: Number(linha.dataset.total) || 0, desde: Number(linha.dataset.desde) || 0 };
   }
 
+  /** O cartão aberto mais recente (plano "pergunta com botões", 2026-10-18), procurado como a linha "Novas". */
+  function perguntaNaJanela(): PerguntaNaJanela | null {
+    if (!cartao?.isConnected || !cartao.classList.contains("aberta")) return null;
+    const r = cartao.getBoundingClientRect();
+    const c = caixa.getBoundingClientRect();
+    const posicao = r.top >= c.bottom ? "abaixo" : r.bottom <= c.top ? "acima" : "visivel";
+    return { decisaoId: cartao.dataset.cartaoPergunta ?? "", nome: cartao.dataset.nome ?? "O bot", posicao };
+  }
+
   function atualizarPilula(): void {
-    const html = conversa ? pilulaDasNovas(linhaNaJanela()) : "";
+    // A linha "Novas" é medida sempre (é a medida que a dá por vista); a pílula da pergunta ganha da das novas.
+    const novas = conversa ? pilulaDasNovas(linhaNaJanela()) : "";
+    const html = conversa ? pilulaDaPergunta(perguntaNaJanela()) || novas : "";
     if (html === pilulaHtml) return;
     pilulaHtml = html;
     lugarDaPilula.innerHTML = html;
@@ -85,6 +97,7 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
       }
       if (outra || historicoMudou) {
         linha = caixa.querySelector<HTMLElement>(".linha-novas");
+        cartao = [...caixa.querySelectorAll<HTMLElement>(".cartao-pergunta.aberta")].at(-1) ?? null;
         const eraVazia = !outra && vazia;
         vazia = caixa.querySelector(".welcome-options") !== null;
         // A conversa vazia abre nas sugestões, no alto, e não acompanha o fim: quem rola até a opção D e começa a

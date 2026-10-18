@@ -81,7 +81,8 @@ import { rolagemDaBarra, type Faixa } from "./lib/rolagem-barra.ts";
 import { comandoNoTexto, listaDaBarra, nomeDigitado, recentesDaConversa, type ItemDaBarra } from "./lib/barra.ts";
 import { renderDicaBarra, renderListaBarra } from "./telas/barra.ts";
 import type { ComandosDto } from "../src/contracts/comandos.ts";
-import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, MOTIVO_SEM_ANEXO } from "./lib/perguntas.ts";
+import { destinoDoEnvio, enviarPeloComposer, modoDoComposer, opcoesDaPergunta, proximaDoComposer, textoDaLetra } from "./lib/perguntas.ts";
+import { acharBotao, aplicarFocoDaFila, botaoEmFoco, proximoDaFila, VALIDADE_DO_FOCO_MS, type FocoDaFila } from "./lib/foco-da-fila.ts";
 import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
 import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
@@ -115,6 +116,8 @@ const CANCELAR_DESFAZER_MS = 5_000;
 let api: Api | null = null;
 let live: LiveEvents | null = null;
 let composerDe: string | null = null;
+/** O pedido de foco depois de responder em "Sua vez" (web/lib/foco-da-fila.ts); null sem pedido. */
+let focoDaFila: FocoDaFila | null = null;
 /**
  * O que estava digitado em cada conversa (definido em 2026-09-30): trocar de conversa recriava o campo vazio e a pessoa
  * perdia o texto. Agora ele fica com a conversa de onde ela saiu e volta quando ela volta — também depois de recarregar.
@@ -1061,6 +1064,14 @@ function renderPrincipal(): void {
     document.querySelector<HTMLElement>('#composer [data-act="parar-trabalho"]')?.toggleAttribute("hidden", !tr || !aberto(tr));
   }
   document.body.classList.toggle("ocupado", estado.ocupado);
+  // QA do PR #389 (2026-10-18): depois de responder em "Sua vez", o foco vai ao próximo item quando a fila relida chega.
+  if (focoDaFila && aplicarFocoDaFila(document, focoDaFila, Date.now()) === "feito") focoDaFila = null;
+}
+
+function pedirFocoDaFila(respondida: string): void {
+  if (estado.tela.tipo !== "sua-vez") return;
+  const ids = (estado.suaVez?.itens ?? []).filter((i) => i.estadoColuna !== "vencido").map((i) => i.decisao.id);
+  focoDaFila = { respondida, proximo: proximoDaFila(ids, respondida), ate: Date.now() + VALIDADE_DO_FOCO_MS };
 }
 
 type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[] };
@@ -1115,6 +1126,8 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
     campo: guardarCampo(el),
     foco: document.activeElement === el, inicio: el.selectionStart, fim: el.selectionEnd,
   }));
+  // QA do PR #389 (2026-10-18): o botão em foco (a opção do cartão, o ×) volta com o foco depois de regravar.
+  const focoNoBotao = timeline?.contains(document.activeElement) ? botaoEmFoco(document.activeElement as HTMLElement) : null;
   // ADR-051: o iframe do artefato sai antes de a timeline ser regravada e volta sem recarregar (moveBefore),
   // no hidratar() logo abaixo — depois de os <details> reabrirem; sem moveBefore, ele é recriado do cache.
   if (muda.historicoMuda) artefatos.estacionar();
@@ -1137,6 +1150,9 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
     const raiz = el.closest<HTMLElement>("[data-decisao]");
     const contador = raiz?.querySelector("[data-contador]");
     if (contador) contador.textContent = String(raiz?.querySelectorAll("input[data-item]:checked").length ?? 0);
+  }
+  if (focoNoBotao && (!document.activeElement || document.activeElement === document.body)) {
+    acharBotao(document.querySelectorAll<HTMLButtonElement>("#timeline button[data-act]"), focoNoBotao)?.focus({ preventScroll: true });
   }
   for (const busca of buscas) {
     const campo = document.getElementById(busca.id) as HTMLInputElement | null;
@@ -1184,21 +1200,14 @@ function atualizarComposer(): void {
   const nota = document.getElementById("composer-nota");
   const a = aparenciaDoComposer(modoDoComposer(estado, alvo.conversaId), estado, { placeholder: placeholderPadrao(), nota: nota?.dataset.padrao ?? "" }, alvo.conversaId);
   regiao("composer-pergunta", a.topo);
-  caixa.classList.toggle("modo-resposta", a.resposta);
   // ADR-094: no celular o texto de ajuda inteiro quebrava em duas linhas dentro do campo; lá fica o curto, e o leitor de
   // tela continua ouvindo o completo.
-  const placeholder = celular.ativo() ? (a.resposta ? "Sua resposta" : "Mensagem") : a.placeholder;
+  const placeholder = celular.ativo() ? "Mensagem" : a.placeholder;
   if (ta.placeholder !== placeholder) ta.placeholder = placeholder;
   if (ta.getAttribute("aria-label") !== a.placeholder) ta.setAttribute("aria-label", a.placeholder);
-  // Plano "tela limpa" (2026-10-16, T5): a dica "Enter envia…" saiu; a nota só tem texto no modo resposta (vazia, some).
+  // Plano "tela limpa" (2026-10-16, T5): a dica "Enter envia…" saiu. Plano "pergunta com botões" (2026-10-18): a nota do
+  // modo resposta e o clipe desligado também — com pergunta aberta o campo não muda.
   if (nota && nota.textContent !== a.nota) nota.textContent = a.nota;
-  const clipe = caixa.querySelector<HTMLButtonElement>('[data-act="anexar"]');
-  if (clipe) {
-    clipe.disabled = a.anexoBloqueado !== null;
-    const titulo = a.anexoBloqueado ?? clipe.dataset.titulo ?? "";
-    if (titulo) clipe.title = titulo;
-    else clipe.removeAttribute("title");
-  }
   atualizarModoNoComposer();
   atualizarSeletorIa();
   atualizarParar();
@@ -1837,14 +1846,26 @@ function conversaAtual(): { conversaId: string; salaId: string | null } | null {
   return null;
 }
 
-/** Anexo não vai na resposta à pergunta (a rota só leva texto): o motivo aparece escrito, nada some. */
-function recusarAnexoNaResposta(): void {
-  dispatch({ tipo: "erro", erro: { codigo: "anexo_na_resposta", mensagem: MOTIVO_SEM_ANEXO } });
+/**
+ * A caixa "Respondendo" está à vista (duas ou mais perguntas abertas, plano "pergunta com botões", Parte 3a)? É só com ela
+ * que o Esc manda a próxima mensagem como assunto novo, como o × dela: sem a caixa, o Esc mudaria algo que não se vê.
+ */
+function comCaixaRespondendo(conversaId: string): boolean {
+  const modo = modoDoComposer(estado, conversaId);
+  return modo.tipo === "resposta" && modo.perguntas.length > 1;
 }
 
-/** O campo está respondendo a uma pergunta desta conversa (emenda da ADR-045)? */
-function emModoResposta(conversaId: string): boolean {
-  return modoDoComposer(estado, conversaId).tipo === "resposta";
+/**
+ * Depois de responder ou dispensar uma pergunta (plano "pergunta com botões", acessibilidade): o foco volta ao campo da
+ * conversa e a região viva diz o que aconteceu ("Resposta enviada: …").
+ */
+function anunciarPergunta(texto: string): void {
+  const anuncio = document.getElementById("anuncio-pergunta");
+  if (anuncio) {
+    anuncio.textContent = "";
+    window.setTimeout(() => { anuncio.textContent = texto; }, 50);
+  }
+  if (estado.tela.tipo === "conversa" || estado.tela.tipo === "sala") document.getElementById("composer-texto")?.focus();
 }
 
 // ---- o "/" do campo (definido em 2026-09-28; canvas "Comandos /") --------------------------------------------------
@@ -2015,7 +2036,11 @@ async function enviarComposer(): Promise<void> {
     limparDepoisDeEnviar(ta, chave, texto);
     return;
   }
-  const destino = destinoDoEnvio(modoDoComposer(estado, alvo.conversaId));
+  // Anexo com pergunta aberta vai como mensagem comum, e a pergunta segue aberta (decisão 9 do plano "pergunta com botões").
+  const modo = modoDoComposer(estado, alvo.conversaId);
+  const destino = destinoDoEnvio(modo, ids.length > 0);
+  // Letra sozinha ("A", "b.", "c)") vira o texto da opção da pergunta respondida; a resposta continua texto (EMENDA 16).
+  const enviado = destino.tipo === "resposta" && modo.tipo === "resposta" ? textoDaLetra(texto, opcoesDaPergunta(estado, modo.alvo)) : texto;
   const a = api;
   // Só a mensagem comum leva chave; com um envio dela em voo nesta conversa, o segundo (Enter + botão) é ignorado.
   const comum = destino.tipo === "mensagem" && !alvo.salaId;
@@ -2025,16 +2050,13 @@ async function enviarComposer(): Promise<void> {
     let enviou = false;
     let r: Awaited<ReturnType<typeof enviarPeloComposer>>;
     try {
-      r = await enviarPeloComposer(a, alvo, destino, texto, ids, idEnvio);
+      r = await enviarPeloComposer(a, alvo, destino, enviado, ids, idEnvio);
       enviou = true;
     } finally {
       if (idEnvio) envios.concluir(alvo.conversaId, enviou);
     }
-    if ("recusado" in r) {
-      recusarAnexoNaResposta();
-      return;
-    }
     limparDepoisDeEnviar(ta, chave, texto);
+    if (r.enviado === "resposta") anunciarPergunta(`Resposta enviada: ${enviado}`);
     if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
     // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
     dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
@@ -2074,11 +2096,6 @@ function adicionarArquivos(arquivos: readonly File[]): void {
   const alvo = conversaAtual();
   const input = document.getElementById("composer-arquivos") as HTMLInputElement | null;
   if (!alvo || alvo.salaId || !api || !input || arquivos.length === 0) return;
-  // Colar ou arrastar com o campo respondendo: o clipe está desligado pelo mesmo motivo.
-  if (emModoResposta(alvo.conversaId)) {
-    recusarAnexoNaResposta();
-    return;
-  }
   const aceita = (input.dataset.aceita as Aceita | undefined) ?? "tudo";
   const conversaId = alvo.conversaId;
   const fila = anexosPendentes.get(conversaId) ?? [];
@@ -2110,7 +2127,7 @@ function removerAnexo(chave: string): void {
   redesenharAnexos();
 }
 
-/** "Responder à pergunta" / "Outro assunto" / "Responder a esta": muda o que a próxima mensagem faz e volta ao campo. */
+/** "Trocar" e o × da caixa "Respondendo" (Parte 3a): muda o que a próxima mensagem faz e volta ao campo. */
 function escolherNoComposer(outroAssunto: boolean, alvoId?: string): void {
   const alvo = conversaAtual();
   if (!alvo) return;
@@ -2937,29 +2954,45 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "decidir-proposta": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", {}), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", "frota", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
   "recusar-decisao": (el) => agir(async () => void (await api!.decidir(el.dataset.id ?? "", { recusar: true }), dispatch({ tipo: "invalidar", quais: ["sua-vez", "rotinas", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] }))),
-  // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa — sem card
-  // nem caixa própria. Estes são os gestos em volta dele: o modo, o balão, o toque e a vinda de "Sua vez".
-  "composer-responder": (el) => escolherNoComposer(false, el.dataset.id),
+  // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde pelo campo da conversa. Revisto em 2026-10-18
+  // (plano "pergunta com botões"): estes são os gestos em volta do cartão e da caixa "Respondendo".
   "composer-outro": () => escolherNoComposer(true),
+  // Plano "pergunta com botões" (Parte 3a, 2026-10-18): a caixa "Respondendo" passa à próxima pergunta aberta.
+  "composer-trocar": () => {
+    const alvo = conversaAtual();
+    const proxima = alvo ? proximaDoComposer(modoDoComposer(estado, alvo.conversaId)) : null;
+    if (proxima) escolherNoComposer(false, proxima);
+  },
   "ver-pergunta": (el) => verPergunta(el.dataset.id ?? ""),
   // definido em 2026-10-15 (NOD-270): da lista de rotinas ao balão da pergunta que segura a rotina, na conversa dela.
   "ver-pergunta-da-rotina": (el) => verPerguntaNaConversa(el.dataset.conversa ?? "", el.dataset.agente ?? "", el.dataset.id ?? ""),
   "ver-decisao": (el) => verDecisao(el.dataset.id ?? ""),
   // A resposta pronta é TEXTO da pessoa (EMENDA 16): o toque manda as palavras da opção por `responder`.
+  // Desligada enquanto `ocupado` (o cartão desenha as opções com disabled): o clique duplo não manda duas respostas.
   "responder-opcao": (el) =>
-    agir(async () => {
+    estado.ocupado ? undefined : agir(async () => {
       const alvo = conversaAtual();
-      await api!.responder(el.dataset.id ?? "", el.dataset.texto ?? "");
+      const texto = el.dataset.texto ?? "";
+      await api!.responder(el.dataset.id ?? "", texto);
+      pedirFocoDaFila(el.dataset.id ?? "");
       dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota", ...(alvo ? [`conversa:${alvo.conversaId}` as Invalidacao] : [])] });
+      anunciarPergunta(`Resposta enviada: ${texto}`);
     }),
   // A decisora designada que não é dona da conversa responde em "Sua vez" (não lê a conversa de outra pessoa).
+  // Plano "pergunta com botões" (Parte 4, 2026-10-18): o campo do cartão de "Sua vez" vale para toda pergunta sem opções,
+  // e a letra sozinha vira o texto da opção (textoDaLetra), como no campo da conversa.
   responder: (el) =>
     agir(async () => {
-      const texto = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(el.dataset.id ?? "")}"]`)?.value.trim() ?? "";
-      await api!.responder(el.dataset.id ?? "", texto);
+      const id = el.dataset.id ?? "";
+      const digitado = document.querySelector<HTMLInputElement>(`input[data-resposta="${CSS.escape(id)}"]`)?.value.trim() ?? "";
+      const item = estado.suaVez?.itens.find((i) => i.decisao.id === id);
+      const texto = item ? textoDaLetra(digitado, opcoesDaPergunta(estado, item)) : digitado;
+      await api!.responder(id, texto);
+      pedirFocoDaFila(id);
       dispatch({ tipo: "invalidar", quais: ["sua-vez", "frota"] });
+      anunciarPergunta(`Resposta enviada: ${texto}`);
     }),
-  // De "Sua vez": abre a conversa com o campo já respondendo a ESTA pergunta (mesmo abrir da barra lateral).
+  // "Abrir conversa" do cartão de "Sua vez": abre a conversa com o campo já respondendo a ESTA pergunta.
   "responder-na-conversa": (el) => {
     dispatch({ tipo: "composer", conversaId: el.dataset.conversa ?? "", escolha: { outroAssunto: false, alvoId: el.dataset.id ?? null } });
     return ACOES["abrir-conversa"]?.(el);
@@ -3113,7 +3146,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
   }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
-  dispensar: (el) => agir(async () => void (await api!.dispensar(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
+  // revisto em 2026-10-18 (plano "pergunta com botões"): o × do cartão relê também a conversa (o fio diz "Deixada pra lá").
+  dispensar: (el) => agir(async () => {
+    await api!.dispensar(el.dataset.id ?? "");
+    const conversaId = estado.suaVez?.itens.find((i) => i.decisao.id === el.dataset.id)?.decisao.conversaId ?? conversaAtual()?.conversaId;
+    dispatch({ tipo: "invalidar", quais: ["sua-vez", ...(conversaId ? [`conversa:${conversaId}` as Invalidacao] : [])] });
+    if (el.closest(".cartao-pergunta")) anunciarPergunta("Pergunta deixada pra lá");
+  }),
   // Em série: são poucas, e uma recusa no meio não deixa metade gravada sem a tela saber.
   "limpar-vencidos": (el) => agir(async () => {
     for (const id of (el.dataset.ids ?? "").split(",").filter(Boolean)) await api!.dispensar(id);
@@ -3386,14 +3425,11 @@ function areaSoltar(visivel: boolean): void {
   if (!visivel) { area?.remove(); return; }
   if (area || !timeline) return;
   const nome = botGerido(estado.tela.tipo === "conversa" ? estado.tela.agenteId : undefined)?.nome ?? "o bot";
-  const alvo = conversaAtual();
   area = document.createElement("div");
   area.id = "anexo-soltar";
   area.className = "anexo-soltar";
-  // Com o campo respondendo a uma pergunta, soltar não anexa (emenda da ADR-045): a área já diz por quê.
-  area.innerHTML = alvo && emModoResposta(alvo.conversaId)
-    ? `<div><b>Arquivos não vão na resposta à pergunta</b><span>${esc(MOTIVO_SEM_ANEXO)}</span></div>`
-    : `<div><b>Solte para mandar para ${esc(nome)}</b><span>Imagens, PDF e arquivos de texto · até 10 MB cada</span></div>`;
+  // revisto em 2026-10-18 (plano "pergunta com botões"): com pergunta aberta o arquivo também entra — vai como mensagem comum.
+  area.innerHTML = `<div><b>Solte para mandar para ${esc(nome)}</b><span>Imagens, PDF e arquivos de texto · até 10 MB cada</span></div>`;
   timeline.parentElement?.appendChild(area);
 }
 document.addEventListener("dragenter", (ev) => {
@@ -3449,12 +3485,18 @@ document.addEventListener("keydown", (ev) => {
   // Esc dentro da gaveta, num nível interno, volta um nível (o mesmo ‹ do topo).
   if (ev.key === "Escape" && estado.gaveta && (ev.target as HTMLElement).closest?.("#detalhes")) { ev.preventDefault(); voltarNivel(); return; }
   const ta = ev.target as HTMLTextAreaElement;
+  // O campo do cartão de "Sua vez" (plano "pergunta com botões", Parte 4): Enter envia, como o botão ao lado.
+  if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && (ta as HTMLElement).closest?.(".pq-campo")) {
+    ev.preventDefault();
+    (ta as HTMLElement).closest(".pq-campo")?.querySelector<HTMLButtonElement>('[data-act="responder"]')?.click();
+    return;
+  }
   if (ta.id !== "composer-texto") return;
   if (teclaNaBarra(ev, ta)) { ev.preventDefault(); return; }
-  // Esc com o campo respondendo: a próxima mensagem vira mensagem comum (o mesmo "Outro assunto").
+  // Esc com a caixa "Respondendo" à vista: a próxima mensagem vira mensagem comum (o mesmo × da caixa).
   if (ev.key === "Escape") {
     const alvo = conversaAtual();
-    if (alvo && emModoResposta(alvo.conversaId)) {
+    if (alvo && comCaixaRespondendo(alvo.conversaId)) {
       ev.preventDefault();
       escolherNoComposer(true);
     }

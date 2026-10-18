@@ -124,11 +124,12 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(pergunta).toBeDefined();
     expect(pergunta?.decisorId).toBe(c.deps.escopo.pessoaId);
     expect(c.banco.decisoes.some((d) => d.tipo === "permissao")).toBe(false);
-    // Emenda da ADR-045: a conversa recebe a fala do agente LIGADA à decisão; o molde curto fica só na fila.
+    // Emenda da ADR-045: a conversa recebe a fala do agente LIGADA à decisão. Plano "pergunta com botões" (2026-10-18): a
+    // frase da fila é a mesma fala, inteira — o molde "parei para perguntar a …" saiu.
     const fala = c.banco.mensagens.find((m) => m.payload?.kind === "pedido_a_pessoa");
     expect(fala?.payload).toEqual({ kind: "pedido_a_pessoa", decisaoId: pergunta?.id });
     expect(fala?.texto).toBe("(pedido sem texto)");
-    expect(pergunta?.frase.startsWith("parei para perguntar")).toBe(true);
+    expect(pergunta?.frase).toBe("(pedido sem texto)");
     expect(c.banco.mensagens.some((m) => m.texto.startsWith("parei"))).toBe(false);
   });
 

@@ -7,7 +7,8 @@ import { logoApp } from "./marketplace.ts";
 import { pedidosAbertos } from "../lib/avisos.ts";
 import { desdeDaParada, linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem, contarFios, ehPergunta } from "../lib/perguntas.ts";
-import { botao, esc, hora } from "../lib/render.ts";
+import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
+import { renderCartaoPergunta } from "./cartao-pergunta.ts";
 import { emQuanto, foraDoArDesde, haQuanto, nadaEsperando } from "../lib/relogio.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { listaDoLoteParaSuaVez } from "./card-lote.ts";
@@ -401,7 +402,7 @@ function renderAprovacao(item: Item, aberta: boolean, conectores: Estado["conect
   return `<ul class="ap-lista">${itens.map(linha).join("")}</ul>${acoes}`;
 }
 
-function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace">, daMinhaConversa: boolean): string {
+function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conectores" | "marketplace">): string {
   const d = item.decisao;
   const conectores = estado.conectores;
   if (!aberta) return d.estado === "vencida" ? `<div class="acoes">${botao("reabrir", "Reabrir", { id: d.id })}</div>` : "";
@@ -448,15 +449,11 @@ function renderAcoes(item: Item, aberta: boolean, estado: Pick<Estado, "conector
     // Verbo próprio: "Confirmar" não diz que o que se confirma é uma exclusão.
     case "rotina_exclusao":
       return `<div class="acoes">${botao("decidir-proposta", "Excluir rotina", { classe: "pri", id: d.id })}${botao("recusar-decisao", "Manter rotina", { id: d.id })}</div>`;
-    // definido em 2026-09-24 (emenda da ADR-045): a pergunta se responde NA CONVERSA, no campo de sempre —
-    // sem uma segunda caixa de texto aqui. O botão abre a conversa com o campo já respondendo a ela.
-    // Exceção: a decisora designada (quem_destrava, EMENDA 1) não lê a conversa de outra pessoa (RLS
-    // de conversas e mensagens), então para ela a resposta, em texto, continua aqui.
+    // As três de pedir_a_pessoa viram o cartão da pergunta (renderItemPergunta, plano "pergunta com botões", Parte 4).
     case "pergunta":
     case "falta_de_dado":
     case "permissao":
-      if (!daMinhaConversa) return `<div class="acoes"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="${esc(`Responda à ${item.agenteNome}…`)}" aria-label="Sua resposta" />${botao("responder", "Responder", { classe: "pri", id: d.id })}</div>`;
-      return `<div class="acoes">${botao("responder-na-conversa", "Responder na conversa", { classe: "pri", id: d.id, dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>`;
+      return "";
   }
 }
 
@@ -474,27 +471,70 @@ function dispensavel(item: Item): boolean {
   return d.estado === "vencida" || ((d.estado === "pendente" || d.estado === "reaberta") && d.tipo in DISPENSAVEIS_ABERTOS);
 }
 
+/**
+ * A origem genérica do turno que perguntou (plano "pergunta com botões", Parte 4; decisão 7): "rotina", "pedido de outro
+ * bot". Nome e hora ("rotina das 8h", "pedido do Milton") ficam para depois — custam a cadeia de rotinaDoTurno por item.
+ */
+const ORIGEM_DA_PERGUNTA: Partial<Record<NonNullable<NonNullable<Item["pedido"]>["origem"]>, string>> = { rotina: "rotina", peer: "pedido de outro bot", delegacao: "pedido de outro bot", sala: "sala", ligacao: "ligação" };
+
+/** "Posso arquivar o PR 7?": a fala do bot; sem balão legível, a frase da fila (sem o molde antigo "parei para perguntar a X:"). */
+function falaDaPergunta(item: Item): string {
+  return item.pedido?.texto ?? item.decisao.frase.replace(/^parei para perguntar a [^:]+:\s*/u, "");
+}
+
+/**
+ * A pergunta em "Sua vez" (definido em 2026-10-18, plano "pergunta com botões", Parte 4; tela "Sua vez com botões"): o
+ * cabeçalho com o avatar, o nome, "há N", a origem e "Abrir conversa", e embaixo o MESMO cartão da conversa, clicável,
+ * respondendo por `responder`. Sem opções, o campo de resposta dentro do cartão, para todas — desfaz a regra de 24/09
+ * (emenda da ADR-045) de não ter segunda caixa de texto na lista. A decisora designada que não é dona da conversa não lê
+ * o balão (RLS de mensagens): vê a frase (desde a Parte 1, a fala do bot) e o campo, sem opções nem "Abrir conversa".
+ * Saíram a etiqueta âmbar, o "vence em" (o prazo de 24 h continua, como ordem da fila) e "Responder na conversa". Da 2ª
+ * rodada, "2ª rodada" ao lado de "Abrir conversa": a explicação do bot está na conversa.
+ */
+
+/** O ↑ redondo do campo do cartão (tela S4 do protótipo, QA do PR #389): o mesmo envio do campo da conversa, sem a palavra. */
+const SETA_ENVIAR = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+function renderItemPergunta(item: Item, estado: Estado): string {
+  const d = item.decisao;
+  const aberta = item.estadoColuna !== "vencido";
+  const daMinhaConversa = d.ownerId === estado.sessao?.pessoaId;
+  const agente = estado.frota?.agentes.find((a) => a.id === d.agenteId);
+  const pedido = item.pedido ?? null;
+  const opcoes = pedido?.opcoes ?? [];
+  const origem = pedido?.origem ? ORIGEM_DA_PERGUNTA[pedido.origem] : undefined;
+  const rodada = item.fio?.rodada ?? 1;
+  // "Abrir conversa" abre já apontando o campo para ESTA pergunta (com duas ou mais abertas, a caixa "Respondendo" mostra).
+  const abrir = daMinhaConversa && agente ? botao("responder-na-conversa", "Abrir conversa", { classe: "link sm", id: d.id, dados: { conversa: d.conversaId, agente: d.agenteId } }) : "";
+  const cab = `<div class="sv-cab">${agente ? iconeAgente(agente, "sm") : ""}<span class="sv-quem"><b>${esc(item.agenteNome)}</b> ${esc(haQuanto(item.aguardandoHaMs))}${origem ? ` · ${esc(origem)}` : ""}</span><span class="sv-acoes">${rodada > 1 ? `<span class="sv-rodada">${rodada}ª rodada</span>` : ""}${abrir}</span></div>`;
+  const campo = `<div class="pq-campo"><input class="resposta" data-resposta="${esc(d.id)}" placeholder="${esc(`Responder à ${item.agenteNome}`)}" aria-label="Sua resposta" autocomplete="off" />${botao("responder", SETA_ENVIAR, { classe: "pri pq-enviar", id: d.id, aria: "Enviar resposta", titulo: "Enviar" })}</div>`;
+  const ajuda = pedido?.ajudaDoComputador === true;
+  const extra = ajuda
+    ? (daMinhaConversa ? `<div class="pq-acoes">${botao("abrir-computador", "Assumir controle", { classe: "sm", id: d.agenteId })}</div>` : "")
+    : opcoes.length === 0 ? campo : "";
+  const situacao = aberta
+    ? { tipo: "aberta" as const, rodape: null, ocupado: estado.ocupado, extra }
+    : { tipo: "vencida" as const, linha: `Sem resposta · ${rotuloVencido(d, estado.agora)}`, reabrir: d.estado === "vencida", dispensar: dispensavel(item) };
+  const cartao = renderCartaoPergunta({ decisaoId: d.id, titulo: falaDaPergunta(item), opcoes, recomendada: pedido?.recomendada === 0, rodada: 1, situacao, nome: item.agenteNome });
+  return `<li class="item-pergunta dec-${esc(item.estadoColuna)}" data-decisao="${esc(d.id)}">${cab}${cartao}</li>`;
+}
+
 function renderItem(item: Item, estado: Estado, naConversa = false): string {
   const d = item.decisao;
   const aberta = item.estadoColuna !== "vencido";
+  if (ehPergunta(d.tipo)) return renderItemPergunta(item, estado);
   if (aberta && d.tipo === "aprovacao" && item.itensAprovacao.length > 0) return renderCardAprovacao(item, estado);
   const relogio = aberta ? `aguardando ${haQuanto(item.aguardandoHaMs)} · ${PRAZO_POR_TIPO[d.tipo](emQuanto(item.recusaAutomaticaEmMs), item)}` : rotuloVencido(d, estado.agora);
   const parada = d.tipo === "acesso" && aberta ? { marca: marcaRotinaParada(item.proposta, item.rotinaParada, estado.agora), linha: linhaNaoRodaram(item.rotinaParada, estado.agora) } : { marca: "", linha: "" };
   // O "Retomar" aberto já tem "Dispensar" nas ações: o × repetiria o mesmo gesto no mesmo card.
-  const pergunta = aberta && ehPergunta(d.tipo);
-  const daMinhaConversa = d.ownerId === estado.sessao?.pessoaId;
-  const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno")
-    ? botao("dispensar", "×", pergunta ? { classe: "dec-fechar", id: d.id, titulo: "Deixar pra lá: fecha sem responder", aria: "Deixar esta pergunta pra lá" } : { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" })
-    : "";
-  // A pergunta aberta já abre a conversa pelo "Responder na conversa": "abrir conversa" repetiria o gesto.
-  const conversa = pergunta && daMinhaConversa ? undefined : estado.frota?.agentes.find((a) => a.id === d.agenteId);
+  const fechar = dispensavel(item) && !(aberta && d.tipo === "retomar_turno") ? botao("dispensar", "×", { classe: "dec-fechar", id: d.id, titulo: "Tirar da tela", aria: "Dispensar este pedido" }) : "";
+  const conversa = estado.frota?.agentes.find((a) => a.id === d.agenteId);
   return `<li class="decisao dec-${esc(item.estadoColuna)} tipo-${esc(d.tipo)}" data-decisao="${esc(d.id)}">
     <div class="dec-cab"><span class="tag ${aberta ? "tag-ambar" : "tag-cinza"}">${esc(d.tipo === "aprovacao" && item.itensAprovacao.length === 1 ? "aprovação" : TIPO_HUMANO[d.tipo])}</span>${parada.marca}${marcaGemeas(item)}<b>${esc(item.agenteNome)}</b><span class="mudo">${esc(relogio)}</span>${item.estadoColuna === "reaberto" ? '<span class="tag tag-ambar">reaberta</span>' : ""}${fechar}</div>
     <div class="dec-frase">${esc(d.frase)}</div>${parada.linha}
     ${d.tipo === "acesso" && aberta ? detalheAcesso(item.proposta) : ""}
     ${(d.tipo === "rotina" || d.tipo === "rotina_atualizacao") && aberta ? linhasPrecisa(item.proposta, estado) : ""}
     ${d.tipo === "aprovacao" && !aberta ? renderAprovacao(item, false, estado.conectores) : ""}
-    ${renderAcoes(item, aberta, estado, daMinhaConversa)}
+    ${renderAcoes(item, aberta, estado)}
     ${!naConversa && conversa ? `<div class="dec-rodape">${botao("abrir-conversa", "abrir conversa", { classe: "sm", dados: { conversa: d.conversaId, agente: d.agenteId } })}</div>` : ""}
   </li>`;
 }

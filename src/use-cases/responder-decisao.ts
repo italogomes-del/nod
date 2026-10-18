@@ -6,6 +6,7 @@ import { TIPOS_PEDIDO_A_PESSOA } from "../contracts/pedido.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { historicoDoFio, mensagensDoFio, rodadaNoFio } from "../domain/fio-da-pergunta.ts";
+import { opcaoRespondida } from "../domain/opcoes-da-pergunta.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { enfileirarRetomada } from "./enfileirar-retomada.ts";
@@ -31,6 +32,13 @@ export const fecharComResposta: CasoDeUso<{ decisaoId: string; texto: string }, 
   if (!atual) throw new ErroDeDominio("nao_encontrado", { cause: "decisão" });
   if (!TIPOS_RESPONDIVEIS.has(atual.tipo)) throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.tipo} não se responde com texto; use decidir` });
   if (atual.estado !== "pendente" && atual.estado !== "reaberta") throw new ErroDeDominio("estado_invalido", { cause: `decisão ${atual.estado}` });
+  // definido em 2026-10-18 (QA do PR #389): o pedido de ajuda do computador se resolve com "Assumir controle" e "Devolver
+  // ao bot". A web já não o responde pelo campo; aqui fecha a porta para o bundle antigo em cache e o POST direto, que
+  // fechavam a ajuda e deixavam o controle em `aguardando_pessoa`. O "Devolver ao bot" passa: ele limpa
+  // `ajudaDecisaoId` na mesma tx antes de chamar esta fase (adapters/fundo/computadores.ts).
+  if (atual.tipo === "pergunta" && (await deps.repos.computadores.buscarVinculo(atual.agenteId))?.ajudaDecisaoId === atual.id) {
+    throw new ErroDeDominio("estado_invalido", { cause: "pedido de ajuda do computador: resolve-se com Assumir controle e Devolver ao bot" });
+  }
   const agora = deps.agora();
   const decisao = await deps.repos.decisoes.decidir(atual.id, { por: deps.escopo.pessoaId, agora });
   if (!decisao) throw new ErroDeDominio("nao_permitido", { cause: "nem dona nem decisora" });
@@ -58,6 +66,20 @@ async function historicoDaResposta(deps: Deps, d: Decisao): Promise<string[]> {
   const pessoas = await deps.repos.pessoas.listarDoTenant();
   const linhas = historicoDoFio(doFio, (id) => pessoas.find((p) => p.id === id)?.nome ?? "a pessoa");
   return [`Esta pergunta é a ${rodadaNoFio(rodadas, d.id)}ª rodada do mesmo fio. O que já foi dito nele (as ${linhas.length} últimas mensagens, da mais antiga para a mais nova):`, ...linhas];
+}
+
+/**
+ * definido em 2026-10-18 (plano "pergunta com botões", Parte 1): a resposta É uma das opções da pergunta? Mora na fase 2,
+ * que roda pela dona e lê a conversa (a fase 1 roda pela decisora, que pode não ler o balão). `via: "opcao"` com o índice
+ * quando o texto repete uma opção (clique, letra ou digitado igual — a régua da medição do clique); `via: "texto"` com
+ * balão e outra resposta. Sem `turnoId` (pergunta da sala esfriada) ou sem balão, nada: não há opções a comparar.
+ */
+async function viaDaResposta(deps: Deps, d: Decisao, texto: string): Promise<{ via?: "opcao" | "texto"; opcao?: number }> {
+  if (!d.turnoId) return {};
+  const balao = await deps.repos.mensagens.pedidoAPessoaDaDecisao(d.turnoId, d.id);
+  if (balao?.payload?.kind !== "pedido_a_pessoa") return {};
+  const opcao = opcaoRespondida(texto, balao.payload.opcoes);
+  return opcao === null ? { via: "texto" } : { via: "opcao", opcao };
 }
 
 /**
@@ -98,7 +120,7 @@ export const retomarComResposta: CasoDeUso<EntradaRetomarComResposta, SaidaRetom
       executor: input.executor ?? "catcher",
     }));
   }
-  const payload: PayloadMensagem = { kind: "resposta_a_pedido", decisaoId: d.id, agenteId: d.agenteId, perguntaEm: Date.parse(d.criadoEm), retomada: original !== null, ...(turno ? { turnoRetomadaId: turno.id } : {}) };
+  const payload: PayloadMensagem = { kind: "resposta_a_pedido", decisaoId: d.id, agenteId: d.agenteId, perguntaEm: Date.parse(d.criadoEm), retomada: original !== null, ...(turno ? { turnoRetomadaId: turno.id } : {}), ...(await viaDaResposta(deps, d, input.texto)) };
   const mensagem = await deps.repos.mensagens.criar({ conversaId: d.conversaId, turnoId: d.turnoId, autoria, kind: "texto", texto: input.texto, payload, confianca: "confiavel" });
   if (!mensagem) throw new ErroDeDominio("nao_permitido");
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: d.conversaId, turnoId: d.turnoId, dados: { mensagem_id: mensagem.id, kind: "texto", decisao_id: d.id, destravou: true } })];

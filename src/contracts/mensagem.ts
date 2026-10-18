@@ -114,18 +114,20 @@ export type PayloadMensagem =
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
   | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
   /**
-   * definido em 2026-09-24 (emenda da ADR-045, perguntas viram conversa): a fala do agente que É a
-   * pergunta de pedir_a_pessoa. A web a desenha como pergunta, sem card nem caixa de texto; `opcoes`
-   * são as respostas prontas (pedido.ts), e o toque manda o texto da opção como a resposta.
+   * definido em 2026-09-24 (emenda da ADR-045): a fala do agente que É a pergunta de pedir_a_pessoa; `opcoes` são as
+   * respostas prontas (pedido.ts), e o toque manda o texto da opção como a resposta. revisto em 2026-10-18 (plano "pergunta
+   * com botões"): a web desenha um cartão com as opções A a D; `recomendada` é o índice da que o bot recomenda (0: a
+   * normalização a põe em primeiro; payload antigo não tem); `ajudaDoComputador`: o pedido de ajuda do computador do bot,
+   * que se responde com "Assumir controle", nunca com a mensagem digitada.
    */
-  | { kind: "pedido_a_pessoa"; decisaoId: string; opcoes?: string[] }
+  | { kind: "pedido_a_pessoa"; decisaoId: string; opcoes?: string[]; recomendada?: number; ajudaDoComputador?: true }
   /**
-   * A resposta da pessoa, ligada à pergunta (responder-decisao.ts): `perguntaEm` rotula "respondendo à
-   * pergunta das HH:MM" e `retomada` diz se um turno de retomada nasceu junto. `turnoRetomadaId`
-   * (definido em 2026-09-24, fio da pergunta): QUAL turno — é por ele que o fio sabe se o agente ainda
-   * está lendo a resposta. Respostas gravadas antes não o têm: o fio as dá por resolvidas.
+   * A resposta da pessoa, ligada à pergunta (responder-decisao.ts): `perguntaEm` rotula "respondendo à pergunta das HH:MM"
+   * e `retomada` diz se um turno de retomada nasceu junto; `turnoRetomadaId` (2026-09-24, fio da pergunta) diz QUAL. `via`
+   * (2026-10-18): "opcao" quando o texto É uma das opções (espaços e caixa não contam), com o índice em `opcao`; senão
+   * "texto". Calculado no servidor, nunca vindo do corpo; sem balão da pergunta (sala esfriada) ou antes de 18/10, sem `via`.
    */
-  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string }
+  | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string; via?: "opcao" | "texto"; opcao?: number }
   /**
    * definido em 2026-09-25 (card de pasta simplificado): o registro de que a pessoa abriu uma pasta
    * para o agente. O card da proposta some ao permitir; esta linha fica na conversa ("acme aberta
