@@ -81,7 +81,7 @@ async function conexaoDaRotinaViraPedido(deps: Deps, existente: Proposta, p: Pay
   });
   const events = [...g.events];
   if (g.criada) {
-    const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
+    const mensagem = await deps.repos.mensagens.criar({ conversaId: existente.conversaId, autoria, kind: "sistema", assunto: "proposta.decidida", texto: PEDIDO_DE_ACESSO_ABERTO, confianca: "confiavel" });
     if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: deps.agora(), conversaId: existente.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
   }
   return { data: { proposta: g.proposta, agente: null, rotina: null, decisao: g.decisao }, events };
@@ -172,6 +172,7 @@ export const confirmarProposta: CasoDeUso<{ propostaId: string; prazoMs?: number
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
+    assunto: "proposta.decidida",
     texto: proposta.payload.kind === "acesso" ? PEDIDO_DE_ACESSO_ABERTO : redigir("proposta-confirmada", agora, { pessoa: nomePessoa, resumo }),
     confianca: "confiavel",
   });

@@ -7,6 +7,7 @@ import type { Entrega } from "../contracts/ponte.ts";
 import type { ContaNoLimite, Turno } from "../contracts/turno.ts";
 import { comandoDaConversa, textoDaCompactacao, traduzirSaidaDoComando } from "../domain/comandos.ts";
 import { custoDoTurno } from "../domain/custo-turno.ts";
+import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
 import { causaDaEntrega } from "../domain/stream-json.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
@@ -277,7 +278,7 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   const compactacao = resultado.execucao?.compactacoes.at(-1);
   if (!mensagem && !tardia && comandoDoTurno === "compactar" && resultado.desfecho === "sucesso") {
     const agente = await deps.repos.agentes.buscar(turno.agenteId);
-    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: textoDaCompactacao(agente?.nome ?? "O bot", compactacao?.antes ?? null, compactacao?.depois ?? null), confianca: "confiavel" });
+    mensagem = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "compactacao", texto: textoDaCompactacao(agente?.nome ?? "O bot", compactacao?.antes ?? null, compactacao?.depois ?? null), confianca: "confiavel" });
   }
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: mensagem.id, kind: mensagem.kind, parcial: mensagem.parcial } }));
 
@@ -467,6 +468,10 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
       turnoId: turno.id,
       autoria,
       kind: "sistema",
+      // Chat limpo (PR 1, decisão 10): o turno que terminou sem resposta fica no chat; parado pela pessoa ou lido junto
+      // da mensagem seguinte vai para a Atividade. A mesma função do backfill (a queda da máquina tem o assunto dela).
+      // Com o payload do limite, o assunto é o dele.
+      assunto: assuntoDaInterrupcao(motivo),
       // ADR-101: a frase das contas já é uma frase inteira ("Conta 1 do Claude Code no limite até 14:00. Seguir com a conta 2?").
       texto: contas && entrega.harness && fraseFornecedor ? fraseFornecedor : redigir("turno-interrompido", agora, { motivo: fraseFornecedor ?? motivoEmPortugues(motivo) }),
       ...(limite ? { payload: { kind: "limite_do_plano" as const, harness: entrega.harness ?? null, voltaEm: desfecho.motivoFalha === "limite_do_plano" && resultado.limiteVoltaEm && resultado.limiteVoltaEm > agora ? resultado.limiteVoltaEm : null, ...(contas ? { conta: contas } : {}) } } : {}),
@@ -1100,6 +1105,7 @@ async function aposLimiteNoFundo(
     turnoId: turno.id,
     autoria,
     kind: "sistema",
+    assunto: "cota.espera",
     // ADR-101: com outra conta, a linha diz só posições — "Seguindo com a conta 2" (troca) ou "A conta 1 … espera" (perguntar).
     ...(conta?.tipo === "trocou"
       ? { texto: fraseDaDecisao(conta, { ia: nomeDaIa(p.ia), quando: (t) => horaDaFrase(t, agora), quandoVolta: (t) => quandoDaFrase(t, agora) }), payload: { kind: "conta_trocada" as const, harness: p.ia, de: conta.de, para: conta.para, voltaEm: conta.voltaEm, foraDaTroca: conta.foraDaTroca } }

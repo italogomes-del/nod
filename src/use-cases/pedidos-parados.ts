@@ -64,6 +64,7 @@ export async function retomar(deps: Deps, p: PedidoParado, acao: Extract<AcaoPed
     turnoId: turno.id,
     autoria,
     kind: "sistema",
+    assunto: "turno.retomado",
     texto: frente
       ? redigir("frente-retomada-automatica", agora, { titulo: frente.titulo, motivo, tentativa: String(acao.tentativa), maximo: String(MAX_QUEDAS_POR_PEDIDO) })
       : redigir("retomada-automatica", agora, { motivo, tentativa: String(acao.tentativa), maximo: String(MAX_QUEDAS_POR_PEDIDO) }),

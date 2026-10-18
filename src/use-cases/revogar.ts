@@ -40,6 +40,7 @@ export const revogarLote: CasoDeUso<EntradaRevogarLote, SaidaRevogarLote> = asyn
       conversaId: conversa.id,
       autoria: autoriaDaPessoa(deps.escopo),
       kind: "sistema",
+      assunto: "acesso.revogado",
       texto: `Revogado por ${pessoa?.nome ?? "a pessoa"} em ${quandoUtc(agora)}: ${escopo.join(", ")}.`,
       confianca: "confiavel",
     });

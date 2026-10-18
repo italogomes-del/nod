@@ -22,7 +22,7 @@ export const convidarBotParaSala: CasoDeUso<{ salaId: string; agenteId: string }
   const autoria = autoriaPessoa(deps.escopo.pessoaId);
   const mensagem = jaEsta
     ? null
-    : await deps.repos.mensagens.criar({ conversaId: sala.conversaId, autoria, kind: "sistema", texto: `${agente.nome} entrou na sala. Nasce sem nenhum acesso por estar aqui.`, confianca: "confiavel" });
+    : await deps.repos.mensagens.criar({ conversaId: sala.conversaId, autoria, kind: "sistema", assunto: "sala.evento", texto: `${agente.nome} entrou na sala. Nasce sem nenhum acesso por estar aqui.`, confianca: "confiavel" });
   return {
     data: { membro },
     events: mensagem ? [evento(deps, "mensagem_criada", autoria, { mensagemId: mensagem.id, kind: "sistema", salaId: sala.id, agenteId: agente.id }, { conversaId: sala.conversaId })] : [],

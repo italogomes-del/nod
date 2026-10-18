@@ -241,6 +241,7 @@ async function registrarAdiada(deps: Deps, input: EntradaDisparo, segura: Segura
       conversaId: rotina.conversaId,
       autoria,
       kind: "sistema",
+      assunto: "rotina.adiada",
       texto: textoAvisoAdiada(segura),
       confianca: "confiavel",
     });

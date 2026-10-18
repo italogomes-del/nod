@@ -85,7 +85,7 @@ export async function criarBots(deps: Deps, input: ContextoFerramenta & ArgsCria
   }
 
   const nomes = criados.map((c) => c.nome);
-  const msg = await deps.repos.mensagens.criar({ conversaId: input.conversaId, autoria, kind: "sistema", texto: linhaDoDesfecho(quem.nome, pessoa, nomes), confianca: "confiavel" });
+  const msg = await deps.repos.mensagens.criar({ conversaId: input.conversaId, autoria, kind: "sistema", assunto: "bot.criado", texto: linhaDoDesfecho(quem.nome, pessoa, nomes), confianca: "confiavel" });
   if (msg) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { mensagem_id: msg.id, kind: "sistema" } }));
   log("info", "criar_bots", { criados: criados.length, apos_conteudo_de_fora: aposConteudoDeFora });
   return {

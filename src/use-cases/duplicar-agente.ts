@@ -7,7 +7,7 @@ import { ehNod } from "../domain/nod.ts";
 import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
-import { textoRotinaAtiva } from "./apoio-l7.ts";
+import { eventoDeRotina, textoRotinaAtiva } from "./apoio-l7.ts";
 import { autoriaPessoa, evento } from "./autoria-evento.ts";
 import { concederLote } from "./conceder.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -75,7 +75,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não copiada" });
     // Ativa na cópia = a mesma frase de quando a pessoa confirma uma rotina: a conversa diz que ela já roda.
     if (rotina.estado === "ativa") {
-      await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "sistema", texto: textoRotinaAtiva(rotina, agora), confianca: "confiavel" });
+      await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "sistema", texto: textoRotinaAtiva(rotina, agora), payload: eventoDeRotina(rotina, "criada"), confianca: "confiavel" });
     }
     events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: conversa.id, dados: { rotinaId: rotina.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana } }));
   }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Concessao } from "../contracts/concessao.ts";
+import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
@@ -220,6 +221,7 @@ export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarL
     conversaId: lote.conversaId,
     turnoId: lote.turnoId,
     kind: "resultado_aprovacao",
+    assunto: assuntoDoReciboAutomatico(criados, desfechos),
     texto: textoAutomatico(criados, desfechos, lote.regra),
     confianca: "confiavel",
     autoria,
@@ -271,6 +273,16 @@ const PELO_MODO: Readonly<Record<string, string>> = {
   [REGRA_MODO_AUTOMATICO]: " · aprovação automática",
   [REGRA_MODO_TOTAL]: " · sem aprovações",
 };
+
+/**
+ * Chat limpo (PR 1, decisão 10): o recibo do que uma regra aprovou sozinha vai para a Atividade quando tudo saiu; com um
+ * item que falhou na execução ele fica no chat — uma ação em nome da pessoa que não saiu.
+ */
+export function assuntoDoReciboAutomatico(itens: readonly Pick<ItemAprovacao, "id">[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[]): Assunto {
+  // O mesmo critério de textoAutomatico: item sem desfecho conta como falhou na execução.
+  const falhou = itens.some((i) => (desfechos.find((d) => d.itemId === i.id)?.desfecho ?? "falhou_na_execucao") === "falhou_na_execucao");
+  return falhou ? "aprovacao.automatica_falhou" : "aprovacao.automatica";
+}
 
 /** Fala na conversa do que saiu sem perguntar: "precisa ficar no chat" foi requisito explícito. */
 export function textoAutomatico(itens: readonly ItemAprovacao[], desfechos: readonly { itemId: string; desfecho: DesfechoItem }[], regra?: string): string {

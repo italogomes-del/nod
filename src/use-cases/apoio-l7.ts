@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Autoria, DadosEvento, KindEvento, RuntimeEvent } from "../contracts/evento.ts";
-import type { Rotina } from "../contracts/rotina.ts";
+import type { AcaoRotinaEvento, PayloadRotinaEvento, Rotina } from "../contracts/rotina.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { autorizarDelegacao } from "../domain/delegacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
@@ -119,6 +119,14 @@ export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "pro
     fuso: rotina.fusoIana,
   });
   return rotina.soComPendencia ? `${texto} ${TEXTO_SO_COM_PENDENCIA}` : texto;
+}
+
+/**
+ * O payload da linha de rotina que fica no chat (definido em 2026-10-18, chat limpo, PR 1): criar, mudar, pausar,
+ * reativar, apagar e a mudança não aplicada. Sem ele a linha era `sistema` sem payload, como os avisos que saem do chat.
+ */
+export function eventoDeRotina(rotina: Pick<Rotina, "id" | "cron" | "fusoIana">, acao: AcaoRotinaEvento): PayloadRotinaEvento {
+  return { kind: "rotina_evento", rotinaId: rotina.id, acao, resumo: resumoCron(rotina.cron, rotina.fusoIana) };
 }
 
 /** A frase da rotina que só acorda com pendência na linha de sistema da conversa (ativar, atualizar, reativar). */
@@ -254,6 +262,7 @@ export async function fecharRodadaSeAssentou(deps: Pick<Deps, "repos" | "escopo"
       conversaId,
       autoria: autoriaPessoa(deps.escopo.pessoaId, "regra:rodada-sala"),
       kind: "sistema",
+      assunto: "sala.evento",
       texto: TEXTO_DESFECHO[depois],
       confianca: "confiavel",
     });

@@ -55,7 +55,7 @@ async function recusarObsoleta(deps: Deps, proposta: Proposta, p: PayloadPropost
   if (!recusada) throw new ErroDeDominio("estado_invalido", { cause: `proposta ${proposta.estado}` });
   await recusarRotinasDoCard(deps, p);
   const autoria = autoriaPessoa(deps.escopo);
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", texto: TEXTO_PERFIL_MUDOU, confianca: "confiavel" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "proposta.obsoleta", texto: TEXTO_PERFIL_MUDOU, confianca: "confiavel" });
   log("aviso", "proposta_perfil_obsoleta", { proposta_id: proposta.id, agente_id: atual.id });
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: proposta.conversaId, dados: { agente_id: atual.id, acao: "proposta_recusada", proposta_id: proposta.id, kind: "perfil" } }),
@@ -120,6 +120,7 @@ export async function confirmarPerfil(deps: Deps, lida: Proposta): Promise<{ dat
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
+    assunto: "proposta.decidida",
     texto: redigir("proposta-confirmada", agora, { pessoa: pessoa?.nome ?? "você", resumo }),
     confianca: "confiavel",
   });

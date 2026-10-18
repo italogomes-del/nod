@@ -101,7 +101,7 @@ await texto(ada, doBot(ada.agenteId), [
 await texto(ada, pessoaFala, "Ótimo. Daqui pra frente, sempre em reais e sem centavos.");
 await passo(async (repos) => {
   await repos.memorias.criar({ agenteId: ada.agenteId, tipo: "preferencia", texto: "relatórios de vendas sempre em reais, sem centavos", origem: "agente" });
-  await repos.mensagens.criar({ conversaId: ada.conversaId, turnoId: null, autoria: doBot(ada.agenteId), kind: "sistema", texto: "Anotei uma preferência: relatórios de vendas sempre em reais, sem centavos", confianca: "confiavel" });
+  await repos.mensagens.criar({ conversaId: ada.conversaId, turnoId: null, autoria: doBot(ada.agenteId), kind: "sistema", assunto: "memoria.anotada", texto: "Anotei uma preferência: relatórios de vendas sempre em reais, sem centavos", confianca: "confiavel" });
 });
 await texto(ada, pessoaFala, "/uso");
 await texto(ada, pessoaFala, "Monta um painel com isso pra diretoria?");

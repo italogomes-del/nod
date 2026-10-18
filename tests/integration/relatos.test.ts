@@ -115,7 +115,7 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
       const agora = Date.now();
       const a = await agenteComConversa(trx, escopo);
       const m = await a.repos.mensagens.criar({
-        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "sistema",
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "sistema", assunto: "sistema.generico",
         texto: "algo aconteceu", confianca: "confiavel",
       });
 

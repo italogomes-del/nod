@@ -50,6 +50,12 @@ export type ExecucaoRaioX = {
   ferramentasNoInit: number;
   buscaDeFerramentas: boolean;
   duracaoMs: number;
+  /**
+   * definido em 2026-10-18 (chat limpo, PR 1; Parte 5 do plano): quantos blocos escritos antes da última ferramenta
+   * entraram na fala, acima da resposta final (comporFala). Mede a narração no Modo WhatsApp antes de mexer nela. Gravado
+   * sempre, só número; ausente = app do Mac anterior a este campo ou turno sem `result`.
+   */
+  blocosColados?: number;
 };
 
 /**

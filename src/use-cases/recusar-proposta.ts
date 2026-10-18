@@ -53,6 +53,7 @@ export const recusarProposta: CasoDeUso<{ propostaId: string }, { proposta: Prop
     conversaId: proposta.conversaId,
     autoria,
     kind: "sistema",
+    assunto: "proposta.decidida",
     texto: redigir("proposta-recusada", agora),
     confianca: "confiavel",
   });

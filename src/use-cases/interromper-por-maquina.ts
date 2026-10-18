@@ -1,6 +1,7 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Incidente } from "../contracts/incidente.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
 import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda, type QuedaDeMaquina } from "../domain/incidente.ts";
 import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
@@ -69,7 +70,7 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
   const maquina = motivo === "maquina_sem_contato" && turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
   const frase = redigir("turno-interrompido", agora, { motivo: motivo === "maquina_sem_contato" ? motivoDaQuedaEmPortugues(maquina) : motivoEmPortugues(motivo) });
   const decisao = await deps.repos.decisoes.criar({ tipo: "retomar_turno", agenteId: turno.agenteId, conversaId: turno.conversaId, turnoId: turno.id, prazoDecisaoEm: agora + (prazoMs ?? PRAZO_DECISAO_PADRAO_MS), frase });
-  const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: frase, confianca: "confiavel" });
+  const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: assuntoDaInterrupcao(motivo), texto: frase, confianca: "confiavel" });
   if (decisao) events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { decisao_id: decisao.id, tipo: "retomar_turno" } }));
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
   return { decisaoId: decisao?.id ?? null, rotinaId: null, rotina: false };

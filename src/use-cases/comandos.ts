@@ -27,6 +27,7 @@ export const novaSessao: CasoDeUso<{ conversaId: string }, { mensagem: Mensagem 
     conversaId: conversa.id,
     autoria,
     kind: "sistema",
+    assunto: "sessao.nova",
     texto: `Nova sessão · ${agente?.nome ?? "O bot"} começa sem o que vocês conversaram até aqui. As mensagens continuam aqui para você.`,
     confianca: "confiavel",
   });

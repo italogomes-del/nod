@@ -4,7 +4,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import type { Tx } from "../shared/types.ts";
-import { evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
 import { autoriaDeQuemConfirma, fecharDecisaoDaProposta, type PorRegra } from "./confirmar-pelo-modo.ts";
 import type { CasoDeUso, Deps, Services } from "./tipos.ts";
@@ -67,6 +67,7 @@ export const ativarRotina: CasoDeUso<{ propostaId: string; semMensagem?: boolean
       autoria,
       kind: "sistema",
       texto: textoRotinaAtiva(rotina, agora),
+      payload: eventoDeRotina(rotina, "criada"),
       confianca: "confiavel",
     });
   }

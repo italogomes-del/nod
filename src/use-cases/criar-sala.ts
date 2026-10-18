@@ -39,6 +39,7 @@ export const criarSala: CasoDeUso<{ nome: string; agenteIds: string[] }, SaidaCr
     conversaId: conversa.id,
     autoria,
     kind: "sistema",
+    assunto: "sala.evento",
     texto: `Sala "${nome}" criada com ${nomes}. Sem menção, ${agentes[0]?.nome ?? "o primeiro bot"} responde; @Nome dirige a pergunta.`,
     confianca: "confiavel",
   });

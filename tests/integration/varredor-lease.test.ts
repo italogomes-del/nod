@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
+import { assuntoDoTexto } from "../../src/domain/assunto-do-texto.ts";
+import { destinoDe } from "../../src/domain/destino-no-chat.ts";
 import { criarMetricas } from "../../src/obs/metricas.ts";
 import { LEASE_MS } from "../../src/shared/constantes.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
@@ -52,6 +54,12 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
         ["sistema", false],
       ]);
       expect(mensagens[1]?.texto).toContain("seu Mac parou de responder (repouso, sem rede ou nod fechado)");
+      // Chat limpo (QA do PR 1, 2026-10-18): a queda vem com o "Retomar", pede ação e fica no chat; o assunto é o mesmo
+      // que o backfill dá à frase (assuntoDaInterrupcao).
+      const [gravada] = await trx<{ assunto: string | null }[]>`select assunto from mensagens where id = ${mensagens[1]?.id ?? ""}`;
+      expect(gravada?.assunto).toBe("turno.queda_da_maquina");
+      expect(assuntoDoTexto(mensagens[1]?.texto ?? "")).toBe("turno.queda_da_maquina");
+      expect(destinoDe(gravada?.assunto ?? null)).toBe("chat");
       const eventos = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId} and created_at > ${new Date(agora)}`;
       expect(eventos.map((e) => e.kind).sort()).toEqual(["decisao_criada", "mensagem_criada", "turno_interrompido"]);
       // UM aviso, do Mac que voltou (modo local: o varredor roda nele), com a conversa contada.

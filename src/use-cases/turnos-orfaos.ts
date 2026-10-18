@@ -82,7 +82,7 @@ async function encerrar(deps: Deps, c: OrfaoCandidato, causa: CausaOrfao): Promi
   const rotina = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo: null, regra: REGRA_TURNO_ORFAO });
   events.push(...(rotina.events ?? []));
   if ("ignorado" in rotina.data && rotina.data.ignorado === "nao_e_rotina") {
-    const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: redigir("turno-orfao-encerrado", agora, { causa: textoDaCausa(causa) }), confianca: "confiavel" });
+    const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "turno.orfao", texto: redigir("turno-orfao-encerrado", agora, { causa: textoDaCausa(causa) }), confianca: "confiavel" });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
   }
   events.push(...(await sincronizarDoTurno(deps, turno)));

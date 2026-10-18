@@ -234,7 +234,7 @@ export const decidirLoteDeBots: CasoDeUso<{ decisaoId: string; recusar: boolean;
   const texto = input.recusar
     ? `Recusado: ${recusadas.length} ${recusadas.length === 1 ? "mudança" : "mudanças"} nos seus bots.`
     : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`)].join("\n");
-  const msg = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", texto, confianca: "confiavel" });
+  const msg = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "aprovacao.recibo", texto, confianca: "confiavel" });
   events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, turnoId: decidida.turnoId, dados: { decisao_id: decidida.id, tipo: "lote_bots", recusada: input.recusar } }));
   if (msg) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: msg.id, kind: "sistema" } }));
   log("info", "nod_lote_decidido", { feitas: feitas.length, falhas: falhas.length, recusadas: recusadas.length });

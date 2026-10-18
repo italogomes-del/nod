@@ -144,6 +144,7 @@ async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarre
           turnoId: d.turnoId,
           autoria,
           kind: "sistema",
+          assunto: "decisao.vencida",
           texto: redigir("decisao-vencida", agora, { quando: carimbo(agora), desfecho: DESFECHO_HUMANO[tipoDesfecho] ?? tipoDesfecho }),
           confianca: "confiavel",
         });

@@ -46,7 +46,7 @@ export async function adiarFala(
     evento(deps.escopo, { kind: "turno_criado", autoria: autoriaPessoa(deps.escopo, p.executor), agora, conversaId: turno.conversaId, turnoId: novo.id, dados: { origem: "conversa", agente_id: turno.agenteId, repete_turno_id: turno.id, acordar_em: acordarEm } }),
   ];
   if (p.texto) {
-    const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria: p.autoria, kind: "sistema", texto: p.texto, confianca: "confiavel" });
+    const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria: p.autoria, kind: "sistema", assunto: "ia.fala_espera", texto: p.texto, confianca: "confiavel" });
     if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria: p.autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   }
   // Só códigos e ids.

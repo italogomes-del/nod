@@ -242,6 +242,15 @@ const juntarBlocos = (partes: readonly string[]) => partes.map((p) => p.trim()).
  * de qualquer tamanho — a resposta a uma mensagem do meio que não pôde sair como fala na hora.
  */
 export function comporFala(antesDaUltimaFerramenta: readonly string[], final: string, obrigatorios: ReadonlySet<number> = new Set()): string {
+  return comporFalaContada(antesDaUltimaFerramenta, final, obrigatorios).texto;
+}
+
+/**
+ * comporFala e quantos blocos ela colou acima da final (definido em 2026-10-18, chat limpo, PR 1): o Raio-X grava o
+ * número na execução do turno (`blocosColados`) para a semana de medição da narração no Modo WhatsApp (Parte 5 do plano).
+ * A `composicao` não serve: é gravada na emissão do plano, antes de a fala existir.
+ */
+export function comporFalaContada(antesDaUltimaFerramenta: readonly string[], final: string, obrigatorios: ReadonlySet<number> = new Set()): { texto: string; colados: number } {
   const alvo = normalizar(final);
   const relatorios: string[] = [];
   for (const [i, bloco] of antesDaUltimaFerramenta.entries()) {
@@ -251,7 +260,7 @@ export function comporFala(antesDaUltimaFerramenta: readonly string[], final: st
     if (alvo.includes(n) || relatorios.some((r) => normalizar(r).includes(n))) continue;
     relatorios.push(t);
   }
-  return relatorios.length === 0 ? final : juntarBlocos([...relatorios, final]);
+  return relatorios.length === 0 ? { texto: final, colados: 0 } : { texto: juntarBlocos([...relatorios, final]), colados: relatorios.length };
 }
 
 /**
@@ -357,8 +366,10 @@ export function classificarResultado(entrada: {
     const final = doResult || juntarBlocos(depois) || juntarBlocos(todos) || deltas;
     const anteriores = blocos.filter((b) => b.posicao < ultimaFerramenta);
     const antes = anteriores.map((b) => b.texto);
+    const fala = comporFalaContada(antes, final, new Set(anteriores.flatMap((b, i) => (b.obrigatorio ? [i] : []))));
     const base = {
-      texto: comporFala(antes, final, new Set(anteriores.flatMap((b, i) => (b.obrigatorio ? [i] : [])))),
+      texto: fala.texto,
+      blocosColados: fala.colados,
       sessaoCli,
       sinais,
       custoUsd: result.custoUsd,

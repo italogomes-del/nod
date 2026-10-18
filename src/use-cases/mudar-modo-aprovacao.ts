@@ -38,6 +38,7 @@ export const mudarModoAprovacao: CasoDeUso<{ agenteId: string; modo: unknown }, 
       turnoId: null,
       autoria,
       kind: "sistema",
+      assunto: "aprovacao.modo",
       texto: `${pessoa?.nome ?? "A pessoa"} mudou as aprovações de ${agente.nome} para ${ROTULO_MODO[input.modo]}: ${EFEITO[input.modo]}`,
       confianca: "confiavel",
     });

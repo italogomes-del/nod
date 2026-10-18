@@ -53,7 +53,7 @@ async function cenario(trx: Tx) {
   if (!gmail) throw new Error("conector");
   await repos.conectores.registrarSonda(gmail.id, { ok: true, catalogo: [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_SEND_EMAIL", false)], agora: AGORA });
   await repos.conectores.habilitar(gmail.id, true);
-  const msg = await repos.mensagens.criar({ conversaId: nina.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "sistema", texto: "acesso", confianca: "confiavel" });
+  const msg = await repos.mensagens.criar({ conversaId: nina.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "sistema", assunto: "acesso.concedido", texto: "acesso", confianca: "confiavel" });
   await repos.concessoes.conceder({ agenteId: nina.agenteId, conectorId: gmail.id, capacidade: "GMAIL_FETCH_EMAILS", mensagemId: msg?.id ?? "" });
   // Um bot ainda sem perfil não é colega de ninguém.
   await agenteComConversa(trx, MARLON, { nome: "Rascunho" });

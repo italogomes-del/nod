@@ -554,7 +554,8 @@ export function criarClaudeCliDriver(lig: LigacaoClaudeCli): Driver {
                   // NOD-179: o último uso do plano que o CLI informou no turno, com o instante em que a linha chegou.
                   const usoDoPlano = ultimoUsoDoPlano(eventos, "claude-cli", (i) => inicio + (momentos[i] ?? 0));
                   // definido em 2026-10-05: a recusa da conta não vira fala do bot; vira falha com a causa em código.
-                  return { ...comContaSemAcesso(r), ...(execucao ? { execucao } : {}), ...(comandos ? { comandos } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
+                  // Chat limpo (PR 1): quantos blocos a fala colou acima da final vai junto, na execução do Raio-X.
+                  return { ...comContaSemAcesso(r), ...(execucao ? { execucao: r.blocosColados !== undefined ? { ...execucao, blocosColados: r.blocosColados } : execucao } : {}), ...(comandos ? { comandos } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
                 };
                 const mcpJson = await escreverMcpConfig(tmpdir, { url: lig.urlNod, tokenDeTurno: plano.tokenDeTurno, proxyPath: lig.proxyPath, nodePath: lig.nodePath, electronComoNode: lig.electronComoNode });
                 // Fail-closed: sem --autocompact no help da versão instalada, o turno roda sem ela.

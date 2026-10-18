@@ -249,6 +249,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
       turnoId: decisao.turnoId,
       autoria: autoriaEspera,
       kind: "sistema",
+      assunto: "aprovacao.recibo",
       texto: `Aprovado. ${noMac.length === 1 ? "1 ação aguarda" : `${noMac.length} ações aguardam`} seu Mac: com o app nod aberto e o gh logado, o GitHub recebe em instantes e o resultado aparece aqui.`,
       confianca: "confiavel",
     });

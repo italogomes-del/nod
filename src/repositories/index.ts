@@ -3,6 +3,7 @@ import { computadoresRepo } from "./computadores.repo.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { agentesRepo } from "./agentes.repo.ts";
 import { anexosRepo } from "./anexos.repo.ts";
+import { atividadeRepo } from "./atividade.repo.ts";
 import { artefatosRepo } from "./artefatos.repo.ts";
 import { catcherRepo } from "./catcher.repo.ts";
 import { concessoesRepo } from "./concessoes.repo.ts";
@@ -64,6 +65,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     conversas: conversasRepo(conn, escopo),
     mensagens: mensagensRepo(conn, escopo),
     anexos: anexosRepo(conn, escopo),
+    atividade: atividadeRepo(conn, escopo),
     artefatos: artefatosRepo(conn, escopo),
     propostas: propostasRepo(conn, escopo),
     relatos: relatosRepo(conn, escopo),

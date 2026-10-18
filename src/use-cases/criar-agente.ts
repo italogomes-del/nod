@@ -80,6 +80,8 @@ export const criarAgenteSemReserva: CasoDeUso<EntradaCriarAgente, SaidaCriarAgen
     autoria: input.interativo ? autoriaDoAgente(deps.escopo, agente.id, { decididoPor: "regra:boas_vindas" }) : autoria,
     kind: input.interativo ? "texto" : "sistema",
     payload: input.interativo ? { kind: "boas_vindas" } : null,
+    // Chat limpo (PR 1, decisão 10): a primeira linha da conversa fica no chat; sem ela a conversa nova abre vazia.
+    assunto: "agente.criado",
     texto: input.mensagem && !input.interativo ? input.mensagem : input.interativo ? `Oi! Eu sou ${nome}. Acabamos de nos conhecer. Para que você quer minha ajuda? Pode escolher uma opção ou me contar do seu jeito.` : confirmado ? `${nome} está pronto. O perfil que você definiu já está salvo; envie a primeira tarefa.` : redigir("agente-nasceu", agora),
     confianca: "confiavel",
   });

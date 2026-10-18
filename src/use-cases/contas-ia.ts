@@ -187,7 +187,7 @@ export async function refazerTurnoDaNota(
     if (!(await d.repos.turnos.cancelarPendente(t.id))) return { data: { turnoId: null, motivo: "ja_refeito" }, events };
     events.push(evento(d.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", substituido_por_escolha: true } }));
   }
-  const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: p.linha.texto, ...(p.linha.payload ? { payload: p.linha.payload } : {}), confianca: "confiavel" });
+  const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "conta.nota", texto: p.linha.texto, ...(p.linha.payload ? { payload: p.linha.payload } : {}), confianca: "confiavel" });
   if (linha) events.push(evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   const novo = await d.repos.turnos.enfileirar({
     conversaId: turno.conversaId,
@@ -264,7 +264,7 @@ export async function seguirComConta(d: Deps, p: { contaId: string; conversaId: 
     // O mesmo clique de novo não repete a linha.
     const recentes = await d.repos.mensagens.listarDaConversa(p.conversaId, 30);
     if (!recentes.some((m) => m.kind === "sistema" && m.turnoId === turno.id && m.texto === texto)) {
-      const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto, confianca: "confiavel" });
+      const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "conta.recusada", texto, confianca: "confiavel" });
       if (linha) events.push(evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
     }
     log("info", "conta_fora_da_maquina", { turno_id: turno.id, conta_id: conta.id, maquina_id: fora.id });

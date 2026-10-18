@@ -278,7 +278,7 @@ export const encerrarLigacao: CasoDeUso<{ ligacaoId: string; motivo: MotivoFimLi
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "ligacao_mudou", autoria, agora, conversaId: l.conversaId, dados: { ligacao_id: l.id, estado: l.estado, motivo: l.motivoFim } })];
   // Só quem encerrou de fato chega aqui (o repo devolve a linha uma vez): a 2ª chamada não duplica o aviso.
   const texto = l.motivoFim ? textoDoFim(l.motivoFim) : null;
-  const aviso = texto ? await deps.repos.mensagens.criar({ conversaId: l.conversaId, autoria, kind: "sistema", texto, confianca: "confiavel" }) : null;
+  const aviso = texto ? await deps.repos.mensagens.criar({ conversaId: l.conversaId, autoria, kind: "sistema", assunto: "ligacao", texto, confianca: "confiavel" }) : null;
   if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: l.conversaId, dados: { mensagem_id: aviso.id, kind: "sistema", ligacao_id: l.id } }));
   // Auditoria A3 (definido em 2026-10-15): o turno-cérebro que nenhuma máquina pegou não roda mais — sai na mesma tx que
   // fecha a ligação. Pendente, ele envenenava a fila da máquina com voz (despacharTurno também o assenta, para o que já

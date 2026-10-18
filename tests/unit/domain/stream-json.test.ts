@@ -227,6 +227,15 @@ describe("fala inteira: relatório antes da última ferramenta + texto final", (
   const relatorio = `Relatório das tasks: ${"NOD-101 aberto há 3 dias, sem revisão; ".repeat(10)}fim.`;
   const texto = (eventos: EventoStream[]) => classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).texto;
 
+  it("chat limpo (PR 1): o resultado diz quantos blocos colou acima da final (blocosColados, para o Raio-X)", () => {
+    const colados = (eventos: EventoStream[]) => classificarResultado({ eventos, exitCode: 0, signal: null, stderr: "" }).blocosColados;
+    expect(colados([init, ...bloco("Buscando…"), ...ferramenta("u1"), ok("Achei.")])).toBe(0);
+    expect(colados([init, ...bloco(relatorio), ...ferramenta("u1"), ok("Anotado.")])).toBe(1);
+    expect(colados([init, ...bloco(relatorio), ...ferramenta("u1"), ...bloco(`${relatorio} Mais.`), ...ferramenta("u2"), ok("Anotado.")])).toBe(2);
+    // Sem `result` (interrompido) não há composição: o campo não vem.
+    expect(classificarResultado({ eventos: [init, ...bloco(relatorio)], exitCode: null, signal: "SIGTERM", stderr: "" }).blocosColados).toBeUndefined();
+  });
+
   it("o parser devolve texto_bloco para o bloco de texto completo e continua devolvendo tool_use", () => {
     const evs = eventosDe("relatorio-lembrar.jsonl");
     const blocos = evs.filter((e) => e.tipo === "texto_bloco");

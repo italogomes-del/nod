@@ -39,7 +39,7 @@ export const executarRotinaAgora: CasoDeUso<{ rotinaId: string; executor: Execut
   const antes: RuntimeEvent[] = [];
   if ((await deps.repos.paradas.encerrarAbertas({ conversaId: rotina.conversaId, agora })) > 0) {
     const autoria = autoriaPessoa(deps.escopo, input.executor);
-    const linha = await deps.repos.mensagens.criar({ conversaId: rotina.conversaId, autoria, kind: "sistema", texto: "Parada encerrada: você usou Executar agora e a rotina voltou a rodar.", confianca: "confiavel" });
+    const linha = await deps.repos.mensagens.criar({ conversaId: rotina.conversaId, autoria, kind: "sistema", assunto: "parada", texto: "Parada encerrada: você usou Executar agora e a rotina voltou a rodar.", confianca: "confiavel" });
     if (linha) antes.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: rotina.conversaId, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   }
   const r = await dispararRotina(deps, { rotina, instanteAgendado: Math.floor(deps.agora() / 60_000) * 60_000, machineId: randomUUID(), executor: input.executor, preservarAgenda: true });

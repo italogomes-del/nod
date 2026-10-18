@@ -173,6 +173,13 @@ describe("ponte: execução na entrega", () => {
     expect(execucao({ ...valida, extra: "x", chamadas: [{ ...valida.chamadas[0], segredo: "y" }] })).toEqual(valida);
   });
 
+  it("chat limpo (PR 1): blocosColados atravessa quando é inteiro; ausente (app antigo) continua valendo", () => {
+    expect(execucao({ ...valida, blocosColados: 2 })).toEqual({ ...valida, blocosColados: 2 });
+    expect(execucao(valida)).not.toHaveProperty("blocosColados");
+    expect(execucao({ ...valida, blocosColados: -1 })).toBeUndefined();
+    expect(execucao({ ...valida, blocosColados: "2" })).toBeUndefined();
+  });
+
   it("fora do formato vira undefined, e a entrega segue sem ela — o turno nunca cai pelo Raio-X", () => {
     expect(execucao({ ...valida, janela: -1 })).toBeUndefined();
     expect(execucao({ ...valida, chamadas: [{ ...valida.chamadas[0], ferramentas: [{ nome: "x".repeat(201), resultadoChars: 1, erro: false }] }] })).toBeUndefined();

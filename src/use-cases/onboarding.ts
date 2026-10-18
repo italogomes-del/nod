@@ -206,7 +206,7 @@ export const decidirPropostaDeBot: CasoDeUso<{ propostaId: string; recusar: bool
   const r = await criarBotDoOnboarding(deps, { nome, descricao, forma: p.forma, cor: p.cor, voz: p.voz });
   await deps.repos.propostas.decidir(proposta.id, "confirmada");
   const events: RuntimeEvent[] = [...(r.events ?? [])];
-  const linha = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", texto: `Bot ${r.data.agente.nome} criado.`, confianca: "confiavel" });
+  const linha = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "bot.criado", texto: `Bot ${r.data.agente.nome} criado.`, confianca: "confiavel" });
   if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   return { data: { agenteId: r.data.agente.id }, events };
 };

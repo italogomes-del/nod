@@ -51,7 +51,7 @@ async function githubDoDev1(repos: Repos, dev1: { agenteId: string; conversaId: 
   const criado = await repos.conectores.criar({ nome: "GitHub", slug: "github", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
   const sondado = await repos.conectores.registrarSonda(criado?.id ?? "", { ok: true, catalogo: [cap("pr_ver", true), cap("pr_comentar", false), cap("pr_revisar", false)], agora: AGORA });
   if (!sondado) throw new Error("conector");
-  const m = await repos.mensagens.criar({ conversaId: dev1.conversaId, autoria: { autor_tipo: "pessoa", autor_id: PESSOA_MARLON, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:localidade", regra_versao: 1 }, kind: "sistema", texto: "acesso", confianca: "confiavel" });
+  const m = await repos.mensagens.criar({ conversaId: dev1.conversaId, autoria: { autor_tipo: "pessoa", autor_id: PESSOA_MARLON, sob_procuracao_de: null, conta_de_execucao: PESSOA_MARLON, executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:localidade", regra_versao: 1 }, kind: "sistema", assunto: "acesso.concedido", texto: "acesso", confianca: "confiavel" });
   for (const capacidade of ["pr_ver", "pr_comentar"]) await repos.concessoes.conceder({ agenteId: dev1.agenteId, conectorId: sondado.id, capacidade, mensagemId: m?.id ?? "" });
   return sondado;
 }

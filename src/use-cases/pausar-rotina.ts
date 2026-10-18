@@ -2,7 +2,7 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { EstadoRotina, Rotina } from "../contracts/rotina.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
-import { autoriaPessoa, evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { autoriaPessoa, evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import type { CasoDeUso } from "./tipos.ts";
 
@@ -38,6 +38,7 @@ export const pausarRotina: CasoDeUso<{ rotinaId: string; estado: EstadoRotina; a
     texto: input.texto
       ? [input.texto, fraseDoCorte(corte)].filter(Boolean).join(" ")
       : rotina.estado === "ativa" ? textoRotinaAtiva(rotina, agora) : textoPausada(corte),
+    payload: eventoDeRotina(rotina, rotina.estado === "ativa" ? "ativada" : "pausada"),
     confianca: "confiavel",
   });
   return { data: { rotina }, events: corte.events };

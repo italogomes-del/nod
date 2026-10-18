@@ -54,6 +54,7 @@ export const retomarTurno: CasoDeUso<EntradaRetomarTurno, SaidaRetomarTurno> = a
     conversaId: conversa.id,
     autoria,
     kind: "sistema",
+    assunto: "turno.retomado",
     texto: redigir("retomada", agora, { motivo: original.motivoInterrupcao ?? "desconhecido" }),
     confianca: "confiavel",
   });

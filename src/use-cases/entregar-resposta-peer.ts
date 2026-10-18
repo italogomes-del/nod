@@ -352,6 +352,6 @@ export async function avisarEsperaAoRemetente(deps: DepsEntrega, p: { turno: Tur
   const conversa = origem ? await deps.repos.conversas.buscar(origem.conversaOrigemId) : await deps.repos.conversas.buscarPropriaDoAgente(remetente.id);
   if (!conversa) return [];
   const autoria = autoriaAgente(tarefa.agenteId, deps.escopo.pessoaId, tarefa.sobProcuracaoDe ?? null);
-  const linha = await deps.repos.mensagens.criar({ conversaId: conversa.id, turnoId: origem?.turnoOrigemId ?? null, autoria, kind: "sistema", texto: p.texto, confianca: "confiavel" });
+  const linha = await deps.repos.mensagens.criar({ conversaId: conversa.id, turnoId: origem?.turnoOrigemId ?? null, autoria, kind: "sistema", assunto: "cota.espera", texto: p.texto, confianca: "confiavel" });
   return linha ? [evento(deps, "mensagem_criada", autoria, { mensagem_id: linha.id, kind: "sistema" }, { conversaId: conversa.id, turnoId: origem?.turnoOrigemId ?? null })] : [];
 }

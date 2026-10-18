@@ -172,7 +172,7 @@ export async function refazerRetornoDoLote(deps: DepsFecho, turno: Turno): Promi
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
   if (turno.reenvios >= 1) {
     const frentes = await deps.repos.frentes.frentesDoLote(lote.id);
-    const m = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", texto: redigir("retorno-do-lote-caiu", agora, { frentes: frentes.map((f) => f.titulo).join(", ") || "nenhuma" }), confianca: "confiavel" });
+    const m = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "lote.retorno_caiu", texto: redigir("retorno-do-lote-caiu", agora, { frentes: frentes.map((f) => f.titulo).join(", ") || "nenhuma" }), confianca: "confiavel" });
     return m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: m.id, kind: "sistema" } })] : [];
   }
   const agente = await deps.repos.agentes.buscar(turno.agenteId);

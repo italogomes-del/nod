@@ -263,9 +263,12 @@ export function execucao(v: unknown): ExecucaoRaioX | undefined {
   if (!inteiro(x.chamadasOmitidas) || !inteiroOuNull(x.janela) || !inteiro(x.ferramentasNoInit) || !inteiro(x.duracaoMs) || typeof x.buscaDeFerramentas !== "boolean") return undefined;
   if (!(x.modelo === null || texto(x.modelo, 100)) || !(x.versaoCli === null || texto(x.versaoCli, 100))) return undefined;
   if (!(custo === null || (typeof custo === "number" && Number.isFinite(custo) && custo >= 0))) return undefined;
+  // Chat limpo (PR 1): opcional (o app do Mac de antes não manda); presente, tem de ser inteiro não negativo.
+  if (x.blocosColados !== undefined && !inteiro(x.blocosColados)) return undefined;
   return {
     chamadas, chamadasOmitidas: x.chamadasOmitidas, compactacoes, janela: x.janela, modelo: x.modelo, versaoCli: x.versaoCli,
     custoSessaoUsd: custo, ferramentasNoInit: x.ferramentasNoInit, buscaDeFerramentas: x.buscaDeFerramentas, duracaoMs: x.duracaoMs,
+    ...(x.blocosColados !== undefined ? { blocosColados: x.blocosColados as number } : {}),
   };
 }
 

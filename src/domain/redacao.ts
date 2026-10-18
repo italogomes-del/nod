@@ -194,6 +194,14 @@ export function motivoDaQuedaEmPortugues(maquina: MaquinaDaQueda | null): string
   return maquina?.plataforma === "linux" ? `a máquina ${maquina.nome} parou de responder (desligada, sem rede ou motor parado)` : MOTIVO_EM_PORTUGUES.maquina_sem_contato;
 }
 
+/**
+ * O molde cru de uma chave, com os `{param}` por preencher (definido em 2026-10-18, chat limpo): o backfill do assunto
+ * reconhece uma linha antiga pelo molde inteiro (src/domain/assunto-do-texto.ts), sem copiar o texto do catálogo.
+ */
+export function moldeDaRedacao(chave: ChaveRedacao): string {
+  return CATALOGO[chave];
+}
+
 export function redigir(chave: ChaveRedacao, _agora: number, params: Readonly<Record<string, string>> = {}): string {
   let texto = CATALOGO[chave];
   for (const [k, v] of Object.entries(params)) texto = texto.split(`{${k}}`).join(v);

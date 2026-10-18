@@ -27,7 +27,7 @@ async function cenario(trx: Trx, opcoes: { dono?: "pessoa" | "empresa"; consenti
   if (opcoes.consentir !== false) await repos.ligacoes.consentir(VERSAO_CONSENTIMENTO_VOZ, Date.now());
   const { deps } = depsSobre(trx, MARLON);
   const resposta = async (texto: string, extra: { parcial?: boolean; kind?: "texto" | "sistema" } = {}) =>
-    (await repos.mensagens.criar({ conversaId, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: extra.kind ?? "texto", texto, confianca: "confiavel", parcial: extra.parcial }))?.id ?? "";
+    (await repos.mensagens.criar({ conversaId, autoria: autoriaAgente(agenteId, PESSOA_MARLON), kind: extra.kind ?? "texto", assunto: "sistema.generico", texto, confianca: "confiavel", parcial: extra.parcial }))?.id ?? "";
   return { repos, deps, agenteId, conversaId, resposta };
 }
 

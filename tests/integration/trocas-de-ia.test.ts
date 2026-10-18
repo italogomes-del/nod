@@ -92,7 +92,7 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
       const m = await montar(trx);
       const base = { agenteId: m.agenteId, conversaId: m.conversaId, iaDe: "claude-cli" as const, iaPara: "codex-cli" as const, recomendacao: "esperar" as const, voltaEm: AGORA + HORA, aplicarEm: null, fixo: false, machineId: null, agora: AGORA };
       const { troca } = await m.repos.trocasDeIa.abrir(base);
-      const linha = await m.repos.mensagens.criar({ conversaId: m.conversaId, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "sistema", texto: "aviso", confianca: "confiavel" });
+      const linha = await m.repos.mensagens.criar({ conversaId: m.conversaId, autoria: { autor_tipo: "pessoa", autor_id: MARLON.pessoaId, sob_procuracao_de: null, conta_de_execucao: MARLON.pessoaId, executor: "local", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "pessoa", regra_versao: 1 }, kind: "sistema", assunto: "sistema.generico", texto: "aviso", confianca: "confiavel" });
       await m.repos.trocasDeIa.definirMensagem(troca.id, linha!.id);
       expect(await m.repos.trocasDeIa.esperaDecidida(m.agenteId, "claude-cli")).toBeNull();
       await m.repos.trocasDeIa.fechar(troca.id, "esperar", AGORA + 60_000);

@@ -1,5 +1,6 @@
 import type { EstadoLigacao, FalaLigacao, Ligacao } from "../contracts/ligacao.ts";
 import type { MotivoFimLigacao } from "../contracts/voz.ts";
+import { assuntoDe } from "../domain/destino-no-chat.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms, msOuNull } from "./conversao.ts";
 
@@ -232,7 +233,7 @@ export function ligacoesRepo(conn: Conn, escopo: Escopo) {
     /** A linha "Chat de voz" é criada no início e atualizada no fim (duração e estado). */
     async atualizarLinha(mensagemId: string, payload: { kind: "ligacao"; ligacaoId: string; duracaoMs: number | null; estado: EstadoLigacao }, texto: string): Promise<void> {
       await conn`
-        update mensagens set payload = ${conn.json(payload)}, texto = ${texto}
+        update mensagens set payload = ${conn.json(payload)}, texto = ${texto}, assunto = ${assuntoDe("sistema", payload, null)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${mensagemId} and kind = 'sistema'`;
     },
   };

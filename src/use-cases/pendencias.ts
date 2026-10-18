@@ -103,7 +103,7 @@ async function resolverPeloBot(
   const texto = estado === "feita"
     ? redigir("pendencia-feita", agora, { texto: semPontoFinal(p.texto), como: comoFrase(motivo) })
     : redigir("pendencia-descartada", agora, { texto: semPontoFinal(p.texto), motivo: comoFrase(motivo) });
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: p.conversaId, turnoId: input.turnoId, autoria, kind: "sistema", texto, confianca: "confiavel" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: p.conversaId, turnoId: input.turnoId, autoria, kind: "sistema", assunto: "pendencia", texto, confianca: "confiavel" });
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: p.conversaId, turnoId: input.turnoId, dados: { agente_id: input.agenteId, acao: estado === "feita" ? "pendencia_concluida" : "pendencia_descartada", pendencia_id: p.id } })];
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: p.conversaId, turnoId: input.turnoId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
   return { data: { ok: true }, events };
@@ -136,7 +136,7 @@ export const descartarPendenciaPelaPessoa: CasoDeUso<{ agenteId: string; pendenc
   const resolvida = await deps.repos.pendencias.resolver(p.id, { estado: "descartada", por: "pessoa", turnoId: null, motivo: null, agora });
   if (!resolvida) throw new ErroDeDominio("estado_invalido", { cause: "pendência já resolvida" });
   const autoria = autoriaPessoa(deps.escopo);
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: p.conversaId, turnoId: null, autoria, kind: "sistema", texto: redigir("pendencia-descartada-pela-pessoa", agora, { texto: semPontoFinal(p.texto) }), confianca: "confiavel" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: p.conversaId, turnoId: null, autoria, kind: "sistema", assunto: "pendencia", texto: redigir("pendencia-descartada-pela-pessoa", agora, { texto: semPontoFinal(p.texto) }), confianca: "confiavel" });
   const events: RuntimeEvent[] = [evento(deps.escopo, { kind: "agente_atualizado", autoria, agora, conversaId: p.conversaId, dados: { agente_id: p.agenteId, acao: "pendencia_descartada", pendencia_id: p.id } })];
   if (mensagem) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: p.conversaId, dados: { mensagem_id: mensagem.id, kind: "sistema" } }));
   return { data: { pendencia: resolvida, mensagem }, events };

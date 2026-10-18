@@ -10,7 +10,7 @@ import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { normalizarAcessosDeclarados } from "../domain/rotina-acessos.ts";
 import { podeCriarRotina } from "../domain/rotina-limites.ts";
 import { validarRotinaNormalizada, type RotinaNormalizada } from "../domain/rotina-texto.ts";
-import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
+import { agenteVisivel, assertUuid, autoriaAgente, autoriaPessoa, carimbo, evento, eventoDeRotina, PRAZO_DECISAO_MS, textoRotinaAtiva } from "./apoio-l7.ts";
 import { ativarRotina } from "./ativar-rotina.ts";
 import { confirmacaoPeloModo } from "./confirmar-pelo-modo.ts";
 import { alvoDoParaBot } from "./onboarding-contexto.ts";
@@ -199,6 +199,7 @@ export const criarRotinaPelaPessoa: CasoDeUso<EntradaRotina & { agenteId: string
     autoria,
     kind: "sistema",
     texto: textoRotinaAtiva(rotina, deps.agora()),
+    payload: eventoDeRotina(rotina, "criada"),
     confianca: "confiavel",
   });
   return {

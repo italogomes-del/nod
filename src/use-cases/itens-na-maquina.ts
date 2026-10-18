@@ -3,7 +3,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { DesfechoItem } from "../contracts/motivos.ts";
 import { argumentosComTextoFinal, assentarAprovacao } from "./decidir.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
-import { textoAutomatico } from "./pedir-aprovacao.ts";
+import { assuntoDoReciboAutomatico, textoAutomatico } from "./pedir-aprovacao.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -52,7 +52,7 @@ async function fecharSeTerminou(deps: Deps, decisaoId: string, porRegra: boolean
   const agora = deps.agora();
   const autoria = autoriaDoAgente(deps.escopo, decisao.agenteId);
   const desfechos = itens.map((i) => ({ itemId: i.id, desfecho: i.desfecho ?? "falhou_na_execucao" }));
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: decisao.conversaId, turnoId: decisao.turnoId, kind: "resultado_aprovacao", texto: textoAutomatico(itens, desfechos, decisao.desfecho?.tipo === "decidida_por_regra" ? decisao.desfecho.regra : undefined), confianca: "confiavel", autoria });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: decisao.conversaId, turnoId: decisao.turnoId, kind: "resultado_aprovacao", assunto: assuntoDoReciboAutomatico(itens, desfechos), texto: textoAutomatico(itens, desfechos, decisao.desfecho?.tipo === "decidida_por_regra" ? decisao.desfecho.regra : undefined), confianca: "confiavel", autoria });
   return {
     events: [{ tenantId: deps.escopo.tenantId, id: randomUUID(), createdAt: agora, kind: "mensagem_criada", autoria, pessoaDestinoId: deps.escopo.pessoaId, conversaId: decisao.conversaId, turnoId: decisao.turnoId, dados: { decisao_id: decisao.id, mensagem_id: mensagem?.id ?? null, itens: itens.length, executados: itens.filter((i) => i.desfecho === "executado").length } }],
   };

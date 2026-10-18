@@ -180,7 +180,7 @@ export const postarNaSala: CasoDeUso<EntradaPost, SaidaPost> = async (deps, inpu
   if (passes.length > 0 && turnos.length === 0) await fecharRodadaSeAssentou(deps, sala.conversaId, "em_andamento");
   else if (candidatos.length === 0 && autoria.autor_tipo === "pessoa" && sala.politica === "so_mencoes") {
     // Silêncio é estado renderizado (ADR-029): a pessoa lê por que ninguém respondeu.
-    await deps.repos.mensagens.criar({ conversaId: sala.conversaId, autoria: autoriaPessoa(deps.escopo.pessoaId, "regra:rodada-sala"), kind: "sistema", texto: "Ninguém foi mencionado: nesta sala só menção (@Nome) dispara resposta.", confianca: "confiavel" });
+    await deps.repos.mensagens.criar({ conversaId: sala.conversaId, autoria: autoriaPessoa(deps.escopo.pessoaId, "regra:rodada-sala"), kind: "sistema", assunto: "sala.evento", texto: "Ninguém foi mencionado: nesta sala só menção (@Nome) dispara resposta.", confianca: "confiavel" });
   }
   return { data: { mensagem, turnos, passes, negacoes, orcamento, decisaoTeto }, events };
 };

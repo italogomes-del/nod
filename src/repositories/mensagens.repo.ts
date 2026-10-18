@@ -1,6 +1,8 @@
 import type { Autoria } from "../contracts/evento.ts";
+import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
+import { assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
 
@@ -25,10 +27,12 @@ export interface LinhaMensagem {
   confianca: Confianca;
   parcial: boolean;
   criado_em: Date;
+  /** 0091 (chat limpo): o que a mensagem é; null = fala ou linha sem backfill. Fica no servidor: a web recebe o destino. */
+  assunto: string | null;
 }
 
 export const COLUNAS_MENSAGEM =
-  "tenant_id, id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, criado_em";
+  "tenant_id, id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao, executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, criado_em, assunto";
 
 export function paraMensagem(l: LinhaMensagem): Mensagem {
   return {
@@ -57,14 +61,12 @@ export function paraMensagem(l: LinhaMensagem): Mensagem {
   };
 }
 
-export type NovaMensagem = {
+type BaseNovaMensagem = {
   id?: string;
   conversaId: string;
   turnoId?: string | null;
   autoria: Autoria;
-  kind: KindMensagem;
   texto: string;
-  payload?: PayloadMensagem | null;
   /** NOT NULL no banco (ADR-026): quem grava DECLARA a confiança do conteúdo. */
   confianca: Confianca;
   parcial?: boolean;
@@ -74,6 +76,27 @@ export type NovaMensagem = {
    */
   idEnvio?: string;
 };
+
+/** Os kinds em que, sem payload, só quem grava sabe o que a linha é: o aviso de sistema e o recibo automático. */
+type KindQueEscolheAssunto = "sistema" | "resultado_aprovacao";
+
+/**
+ * definido em 2026-10-18 (chat limpo, PR 1; ADR-114, decisão 9): `sistema` e `resultado_aprovacao` sem payload EXIGEM o
+ * `assunto` no tipo — o compilador obriga cada produtor a escolher, sem padrão implícito (um aviso novo que devia ficar
+ * no chat não cai na Atividade em silêncio). Com payload, o assunto sai do payload e da autoria (assuntoDe) e o
+ * `assunto` dado é ignorado; o terceiro ramo é o do payload condicional (`...(x ? { payload } : {})`).
+ */
+export type NovaMensagem =
+  | (BaseNovaMensagem & { kind: Exclude<KindMensagem, KindQueEscolheAssunto>; payload?: PayloadMensagem | null; assunto?: Assunto })
+  | (BaseNovaMensagem & { kind: KindQueEscolheAssunto; payload: PayloadMensagem; assunto?: Assunto })
+  | (BaseNovaMensagem & { kind: KindMensagem; payload?: PayloadMensagem | null; assunto: Assunto });
+
+/** O assunto gravado: o do payload quando há; senão o que o produtor escolheu; senão o do kind (fala = null). */
+export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem | null; autoria: Pick<Autoria, "decidido_por">; assunto?: Assunto }): Assunto | null {
+  const payload = m.payload ?? null;
+  if (payload) return assuntoDe(m.kind, payload, m.autoria);
+  return m.assunto ?? assuntoDe(m.kind, null, m.autoria);
+}
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
 type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null };
@@ -118,10 +141,11 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       const a = m.autoria;
       const [l] = await conn<LinhaMensagem[]>`
         insert into mensagens (tenant_id, id, owner_id, conversa_id, turno_id, autor_tipo, autor_id, sob_procuracao_de, conta_de_execucao,
-          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, id_envio)
+          executor, locality, locality_reason, machine_id, decidido_por, regra_versao, kind, texto, payload, confianca, parcial, id_envio, assunto)
         values (${escopo.tenantId}, ${m.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${m.conversaId}, ${m.turnoId ?? null}, ${a.autor_tipo}, ${a.autor_id},
           ${a.sob_procuracao_de}, ${a.conta_de_execucao}, ${a.executor}, ${a.locality}, ${a.locality_reason}, ${a.machine_id}, ${a.decidido_por},
-          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false}, ${m.idEnvio ?? null})
+          ${a.regra_versao}, ${m.kind}, ${m.texto}, ${m.payload === undefined || m.payload === null ? null : conn.json(m.payload)}, ${m.confianca}, ${m.parcial ?? false}, ${m.idEnvio ?? null},
+          ${assuntoDaNova(m)})
         ${m.idEnvio ? conn`on conflict (tenant_id, conversa_id, id_envio) where id_envio is not null do nothing` : conn``}
         returning ${conn.unsafe(COLUNAS_MENSAGEM)}`;
       return l ? paraMensagem(l) : null;
@@ -150,12 +174,16 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraMensagem);
     },
 
-    /** listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083). */
-    async listarComTurno(conversaId: string, limite = 200): Promise<Mensagem[]> {
+    /**
+     * listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083).
+     * `comDestino` (definido em 2026-10-18, chat limpo, PR 1): a conversa é própria e cada mensagem leva o destino da
+     * tabela DESTINO, resolvido aqui; a sala não leva (lá a conversa entre bots é o assunto). A janela não muda neste PR.
+     */
+    async listarComTurno(conversaId: string, limite = 200, opcoes: { comDestino?: boolean } = {}): Promise<Mensagem[]> {
       const linhas = await selectComTurno(conn, escopo.tenantId, conn`
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
         order by criado_em desc, id desc limit ${limite}`);
-      return linhas.map(paraMensagemComTurno);
+      return linhas.map((l) => (opcoes.comDestino ? { ...paraMensagemComTurno(l), destino: destinoDe(l.assunto) } : paraMensagemComTurno(l)));
     },
 
     /**
@@ -266,7 +294,9 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
      * conversa que parou depois (o "Continuar na conta" refaz essa fala); a que já tem turno fica com ele.
      */
     async atualizarSistema(id: string, m: { texto: string; payload: NonNullable<NovaMensagem["payload"]>; turnoId?: string | null }): Promise<boolean> {
-      const r = await conn`update mensagens set texto = ${m.texto}, payload = ${conn.json(m.payload)}, turno_id = coalesce(turno_id, ${m.turnoId ?? null})
+      // Chat limpo (PR 1): o payload regravado recalcula o assunto (a troca de IA decidida continua "ia.troca").
+      const r = await conn`update mensagens set texto = ${m.texto}, payload = ${conn.json(m.payload)}, turno_id = coalesce(turno_id, ${m.turnoId ?? null}),
+          assunto = ${assuntoDe("sistema", m.payload, null)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and kind = 'sistema'`;
       return r.count === 1;
     },

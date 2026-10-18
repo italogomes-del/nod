@@ -110,3 +110,12 @@ export type PerguntaPendenteDaRotina = { decisaoId: string; desde: EpochMs; tipo
  * "Ver aprovação" no primeiro caso, para o rótulo não contradizer o card que o atalho abre.
  */
 export type TipoPendenciaDaRotina = "pergunta" | "aprovacao";
+
+/**
+ * definido em 2026-10-18 (plano do chat limpo, PR 1): a linha de rotina que fica no chat — criar, mudar, pausar,
+ * reativar, apagar e a mudança que não foi aplicada (a rotina mudou depois da proposta). Antes era `sistema` sem payload,
+ * igual aos avisos que saem do chat. `resumo` é a periodicidade em palavras (resumoCron), não o texto da linha: a rotina
+ * não tem nome próprio. A falha e o bloqueio continuam `rotina_execucao` com o desfecho.
+ */
+export type AcaoRotinaEvento = "criada" | "mudada" | "pausada" | "ativada" | "excluida" | "nao_aplicada";
+export type PayloadRotinaEvento = { kind: "rotina_evento"; rotinaId: string; acao: AcaoRotinaEvento; resumo: string };

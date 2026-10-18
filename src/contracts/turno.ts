@@ -131,6 +131,11 @@ export type ResultadoTurno = {
   causaSemIa?: CausaSemIa;
   /** Modo dev (0036): cada chamada à API e as compactações do turno. Ausente no Codex e no catcher. */
   execucao?: ExecucaoRaioX;
+  /**
+   * definido em 2026-10-18 (chat limpo, PR 1): quantos blocos escritos antes da última ferramenta `comporFala` colou acima
+   * da resposta final. Só o classificador do Claude Code o preenche (com `result`); o driver o põe na execução do Raio-X.
+   */
+  blocosColados?: number;
   /** O "/" do chat (0038): o catálogo do Mac, só quando mudou desde a última entrega deste app. */
   comandos?: CatalogoDeComandos;
   /** NOD-179: o uso do plano que o CLI informou no turno (último `rate_limit`). Ausente quando o CLI não informou. */

@@ -7,7 +7,7 @@ import { revisaoDaRotina } from "../domain/revisao-rotina.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { log } from "../obs/log.ts";
-import { evento, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
+import { evento, eventoDeRotina, exigir, textoRotinaAtiva } from "./apoio-l7.ts";
 import { concederAcessosDaRotina } from "./conceder-acessos-da-rotina.ts";
 import { autoriaDeQuemConfirma, fecharDecisaoDaProposta, type PorRegra } from "./confirmar-pelo-modo.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -45,7 +45,7 @@ async function recusarObsoleta(deps: Deps, proposta: Proposta, atual: Rotina, po
   const agora = deps.agora();
   await deps.repos.propostas.decidir(proposta.id, "recusada");
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, porRegra);
-  const mensagem = await deps.repos.mensagens.criar({ conversaId: atual.conversaId, autoria, kind: "sistema", texto: TEXTO_ROTINA_MUDOU, confianca: "confiavel" });
+  const mensagem = await deps.repos.mensagens.criar({ conversaId: atual.conversaId, autoria, kind: "sistema", texto: TEXTO_ROTINA_MUDOU, payload: eventoDeRotina(atual, "nao_aplicada"), confianca: "confiavel" });
   log("aviso", "proposta_rotina_obsoleta", { proposta_id: proposta.id, rotina_id: atual.id });
   const events: RuntimeEvent[] = [];
   if (mensagem) events.push(evento(deps, "mensagem_criada", autoria, { mensagem_id: mensagem.id, kind: "sistema" }, { conversaId: atual.conversaId }));
@@ -138,6 +138,7 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
     autoria,
     kind: "sistema",
     texto: `Rotina atualizada. ${textoRotinaAtiva(rotina, agora)}`,
+    payload: eventoDeRotina(rotina, "mudada"),
     confianca: "confiavel",
   });
   const events: RuntimeEvent[] = [
@@ -184,6 +185,7 @@ export const aplicarExclusaoRotina: CasoDeUso<{ propostaId: string; porRegra?: P
     autoria,
     kind: "sistema",
     texto: `Rotina excluída: ${resumoCron(rotina.cron, rotina.fusoIana)}. Nada mais será disparado por ela.`,
+    payload: eventoDeRotina(rotina, "excluida"),
     confianca: "confiavel",
   });
   const events: RuntimeEvent[] = [

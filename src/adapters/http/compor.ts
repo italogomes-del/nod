@@ -93,6 +93,7 @@ import type { Rota } from "./roteador.ts";
 import { criarRotasAgentes } from "./rotas/agentes.ts";
 import { criarRotasPendencias } from "./rotas/pendencias.ts";
 import { criarRotasTrabalhos } from "./rotas/trabalhos.ts";
+import { criarRotasAtividade } from "./rotas/atividade.ts";
 import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
@@ -1116,6 +1117,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...(aFazer ? criarRotasPendencias(depsRotas) : []),
     ...criarRotasConversas(depsRotas),
     ...criarRotasTrabalhos(depsRotas),
+    ...criarRotasAtividade(depsRotas),
     ...criarRotasArtefatos(depsRotas),
     ...criarRotasRelatos(depsRotas),
     ...criarRotasPropostas(depsRotas),

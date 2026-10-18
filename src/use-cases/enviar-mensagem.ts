@@ -203,7 +203,9 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
   const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
-    deps.repos.mensagens.listarComTurno(conversa.id, input.limite),
+    // Chat limpo (PR 1): na conversa própria cada mensagem leva o destino resolvido no servidor; a web ainda não o usa
+    // (a tela vem no PR 2) e a janela é a mesma de antes. Na sala, nada muda.
+    deps.repos.mensagens.listarComTurno(conversa.id, input.limite, { comDestino: conversa.tipo === "propria" }),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.turnos.vivosDaConversa(conversa.id),
     deps.repos.propostas.pendentesDaConversa(conversa.id),

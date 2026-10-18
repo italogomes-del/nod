@@ -35,6 +35,7 @@ export const liberarNaTarefa: CasoDeUso<{ decisao: Decisao }, { liberado: boolea
     turnoId: decisao.turnoId,
     autoria,
     kind: "sistema",
+    assunto: "acesso.concedido",
     texto: `${pessoa?.nome ?? "A pessoa"} liberou ${liberados.join(" e ")} até o fim desta tarefa.`,
     confianca: "confiavel",
   });

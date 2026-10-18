@@ -44,6 +44,7 @@ export const registrarMemoria: CasoDeUso<EntradaRegistrarMemoria, { memoria: Mem
       turnoId: input.turnoId,
       autoria,
       kind: "sistema",
+      assunto: "memoria.anotada",
       texto: redigir("anotei", agora, { tipo: TIPO_NA_FRASE[memoria.tipo], texto: memoria.texto }),
       confianca: "confiavel",
     });

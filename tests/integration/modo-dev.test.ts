@@ -40,6 +40,8 @@ const EXECUCAO: ExecucaoRaioX = {
   ferramentasNoInit: 40,
   buscaDeFerramentas: true,
   duracaoMs: 31_000,
+  // Chat limpo (PR 1): o número de blocos que a fala colou acima da final é gravado e volta no GET do Raio-X.
+  blocosColados: 1,
 };
 
 /**

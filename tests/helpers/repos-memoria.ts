@@ -229,6 +229,10 @@ export function reposMemoria(escopo?: Escopo): Repos {
 }
 
 const agora = () => Date.now();
+/** O que só existe no Postgres (consulta de faixa e de índice): o fake falha alto em vez de inventar resposta. */
+const soNoPostgres = async (): Promise<never> => {
+  throw new Error("só no Postgres: use tests/integration");
+};
 /** ADR-086: o pedido de volta anotado em cada turno (no Postgres, turnos.despertar_em/despertar_motivo). */
 const despertares = new Map<string, { em: number; motivo: string }>();
 const iso = (n: number) => new Date(n).toISOString();
@@ -3015,6 +3019,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async triagensParadas() {
         return [];
       },
+    },
+    // Chat limpo (PR 1): a Atividade é consulta de faixa e de índice no Postgres (tests/integration/atividade.test.ts).
+    atividade: {
+      faixaDoDia: soNoPostgres,
+      mensagens: soNoPostgres,
+      contarMensagens: soNoPostgres,
+      negacoesDeConector: soNoPostgres,
+      contarNegacoesDeConector: soNoPostgres,
+      trabalhos: soNoPostgres,
+      contarTrabalhos: soNoPostgres,
     },
   } satisfies Repos;
 

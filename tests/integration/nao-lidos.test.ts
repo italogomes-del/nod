@@ -29,7 +29,7 @@ describeIntegracao("não lidos: o que chegou depois do lido até", () => {
       const { data: b } = await criarAgente(d, { dono: "pessoa", nome: "Leitor" });
       const c = b.conversa.id;
       await d.repos.mensagens.criar({ conversaId: c, autoria: autoriaPessoa(MARLON), kind: "texto", texto: "revisa o PR", confianca: "confiavel" });
-      await d.repos.mensagens.criar({ conversaId: c, autoria: autoriaDoAgente(MARLON, b.agente.id), kind: "sistema", texto: "Lembrei disso.", confianca: "confiavel" });
+      await d.repos.mensagens.criar({ conversaId: c, autoria: autoriaDoAgente(MARLON, b.agente.id), kind: "sistema", assunto: "memoria.anotada", texto: "Lembrei disso.", confianca: "confiavel" });
       const primeira = await falaDoBot(d, MARLON, c, b.agente.id, "Começando.");
       const segunda = await falaDoBot(d, MARLON, c, b.agente.id, "Pronto: o PR pode entrar.");
 

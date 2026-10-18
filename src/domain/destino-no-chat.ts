@@ -1,0 +1,208 @@
+import type { Autoria } from "../contracts/evento.ts";
+import type { KindMensagem, PayloadMensagem } from "../contracts/mensagem.ts";
+import { ASSUNTOS, type Assunto, type Destino, type RegraDeDestino } from "../contracts/destino-no-chat.ts";
+
+/**
+ * Para onde cada assunto vai (definido em 2026-10-18, plano do chat limpo, PR 1; ADR-114). Só no servidor: a web recebe
+ * o destino pronto no DTO. No chat ficam só falas, conversa com outros bots, rotinas (criar, mudar, pausar, apagar e a
+ * falha), o que é com você e entregas; o resto vai para a Atividade do bot. Mudar uma regra é mudar esta tabela.
+ *
+ * Ficam no chat também (revisão de engenharia de 18/10, decisão 10): a criação do bot (é a primeira linha da conversa), o
+ * turno que terminou sem resposta para a pessoa (órfão, interrompido por falha, retorno do lote que caiu) e o recibo
+ * automático com item que falhou (uma ação em nome da pessoa que não saiu). E o que pede ação da pessoa (orquestrador,
+ * 18/10, QA do PR 1): a queda da máquina (card "Retomar") e a pergunta vencida ("você pode reabrir"). Na dúvida entre chat e Atividade, chat: um
+ * aviso a mais polui, um aviso escondido de quem precisava agir é pior.
+ */
+export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
+  "colega.handoff": { destino: "chat", categoria: null },
+  "colega.pedido": { destino: "chat", categoria: null },
+  "colega.resposta": { destino: "chat", categoria: null },
+  "acesso.concedido": { destino: "chat", categoria: null },
+  "acesso.revogado": { destino: "chat", categoria: null },
+  "acesso.pasta": { destino: "chat", categoria: null },
+  "aprovacao.recibo": { destino: "chat", categoria: null },
+  "aprovacao.automatica_falhou": { destino: "chat", categoria: null },
+  // "Esta mudança não foi aplicada… Peça de novo ao bot": pede ação.
+  "proposta.obsoleta": { destino: "chat", categoria: null },
+  artefato: { destino: "chat", categoria: null },
+  ligacao: { destino: "chat", categoria: null },
+  // /nova: a pessoa pediu e precisa ver que o bot começou do zero.
+  "sessao.nova": { destino: "chat", categoria: null },
+  // A sala nunca aplica a tabela (só a conversa própria); o assunto existe para o backfill e a medição.
+  "sala.evento": { destino: "chat", categoria: null },
+  "rotina.evento": { destino: "chat", categoria: null },
+  "rotina.falhou": { destino: "chat", categoria: null },
+  // O aviso único de janelas adiadas (NOD-243): diz por que a rotina não roda e quando volta.
+  "rotina.adiada": { destino: "chat", categoria: null },
+  "rotina.execucao": { destino: "atividade", categoria: null },
+  "agente.criado": { destino: "chat", categoria: null },
+  "bot.criado": { destino: "atividade", categoria: null },
+  "turno.orfao": { destino: "chat", categoria: null },
+  "turno.falhou": { destino: "chat", categoria: null },
+  "turno.interrompido": { destino: "atividade", categoria: "bloqueios" },
+  // A queda da máquina vem com o card "Retomar" e diz "você pode reabrir": pede ação (decidido pelo orquestrador em 18/10,
+  // no lugar do Marlon, na QA do PR 1). Se o card for dispensado ou vencer, a linha continua dizendo o que houve.
+  "turno.queda_da_maquina": { destino: "chat", categoria: null },
+  "turno.retomado": { destino: "atividade", categoria: "bloqueios" },
+  "lote.retorno_caiu": { destino: "chat", categoria: null },
+  passe: { destino: "atividade", categoria: "bloqueios" },
+  parada: { destino: "atividade", categoria: "bloqueios" },
+  "negacao.ferramenta": { destino: "atividade", categoria: "bloqueios" },
+  "negacao.conector": { destino: "atividade", categoria: "bloqueios" },
+  // O turno parou (ADR-029): fica.
+  "negacao.terminal": { destino: "chat", categoria: null },
+  "negacao.plano_ausente": { destino: "chat", categoria: null, temporal: true },
+  "ia.trocada": { destino: "atividade", categoria: "maquina_ia" },
+  "ia.troca": { destino: "chat", categoria: null, temporal: true },
+  "ia.limite_do_plano": { destino: "chat", categoria: null, temporal: true },
+  // A fala da pessoa espera a hora do limite (NOD-268): ela não teve resposta e a linha diz quando volta.
+  "ia.fala_espera": { destino: "chat", categoria: null },
+  "conta.trocada": { destino: "atividade", categoria: "maquina_ia" },
+  "conta.seguiu": { destino: "atividade", categoria: "maquina_ia" },
+  "conta.escolhida": { destino: "atividade", categoria: "maquina_ia" },
+  "conta.nota": { destino: "atividade", categoria: "maquina_ia" },
+  // "Seguir com" numa conta que não está na máquina: o clique não fez nada e a linha diz o que fazer.
+  "conta.recusada": { destino: "chat", categoria: null },
+  "cota.pedido_na_fila": { destino: "atividade", categoria: "maquina_ia" },
+  "cota.espera": { destino: "atividade", categoria: "maquina_ia" },
+  "computador.fora_do_ar": { destino: "chat", categoria: null, temporal: true },
+  "trabalho.aberto": { destino: "anexo", categoria: "frentes" },
+  "frentes.abertas": { destino: "anexo", categoria: "frentes" },
+  "frentes.terminadas": { destino: "anexo", categoria: "frentes" },
+  "frentes.recado": { destino: "anexo", categoria: "frentes" },
+  "pedido.respondido": { destino: "anexo", categoria: null },
+  "memoria.anotada": { destino: "atividade", categoria: null },
+  "memoria.task_fechada": { destino: "atividade", categoria: null },
+  compactacao: { destino: "atividade", categoria: null },
+  "proposta.decidida": { destino: "atividade", categoria: null },
+  pendencia: { destino: "atividade", categoria: null },
+  inteligencia: { destino: "atividade", categoria: null },
+  "aprovacao.modo": { destino: "atividade", categoria: null },
+  "aprovacao.automatica": { destino: "atividade", categoria: null },
+  "acesso.automatico": { destino: "atividade", categoria: null },
+  // "Você pode reabrir": a pergunta vencida ainda pede ação da pessoa (decidido pelo orquestrador em 18/10, no lugar do
+  // Marlon, na QA do PR 1; o plano mandava para a Atividade porque o cartão já diz "Sem resposta").
+  "decisao.vencida": { destino: "chat", categoria: null },
+  "sistema.generico": { destino: "atividade", categoria: null },
+};
+
+/** `null` é fala ou linha sem backfill: fica no chat. Valor fora da tabela (gravado por um código mais novo) também. */
+export function destinoDe(assunto: string | null): Destino {
+  return assunto !== null && Object.hasOwn(DESTINO, assunto) ? DESTINO[assunto as Assunto].destino : "chat";
+}
+
+/** Os assuntos que a Atividade lista: o que sai do chat (atividade e anexo) e os de destino temporal. */
+export const ASSUNTOS_DA_ATIVIDADE: readonly Assunto[] = ASSUNTOS.filter((a) => DESTINO[a].destino !== "chat" || DESTINO[a].temporal === true);
+
+/**
+ * O assunto do aviso "Turno interrompido: {motivo}" pelo código do motivo (definido em 2026-10-18, QA do PR 1: o produtor
+ * gravava `turno.falhou` e o backfill `turno.queda_da_maquina` para a mesma queda). O produtor (assentar-turno.ts,
+ * interromper-por-maquina.ts) e o backfill (assunto-do-texto.ts, depois de traduzir a frase de volta ao código) passam por
+ * aqui, então a linha nova e a antiga têm o mesmo assunto. Parado pela pessoa ou lido junto da seguinte: Atividade; a queda
+ * da máquina ou do servidor: a dela (chat, com o "Retomar"); qualquer outro motivo, inclusive o desconhecido: falhou (chat).
+ */
+export function assuntoDaInterrupcao(motivo: string): Assunto {
+  if (motivo === "parado_pela_pessoa" || motivo === "absorvido") return "turno.interrompido";
+  if (motivo === "maquina_sem_contato" || motivo === "reinicio_servidor") return "turno.queda_da_maquina";
+  return "turno.falhou";
+}
+
+/** Regra de aprovação automática ou de outra regra do servidor (ADR-013): `decidido_por` não é a pessoa. */
+const porRegra = (autoria: Pick<Autoria, "decidido_por"> | null): boolean => autoria !== null && autoria.decidido_por !== "pessoa";
+
+/**
+ * O assunto que o kind, o payload e a autoria determinam. `null` = fala (texto, pergunta, resposta, boas-vindas). Para
+ * `sistema` sem payload o produtor escolhe (o tipo de NovaMensagem exige); aqui cai em `sistema.generico`, que só o
+ * backfill de uma linha sem casamento alcança. O `consentimento` da aprovação automática tem o mesmo payload do manual
+ * e só se distingue pela autoria (conceder.ts).
+ */
+export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, autoria: Pick<Autoria, "decidido_por"> | null): Assunto | null {
+  if (payload) {
+    switch (payload.kind) {
+      case "handoff":
+        return "colega.handoff";
+      case "peer_pedido":
+        return "colega.pedido";
+      case "peer_ask":
+        return "colega.resposta";
+      case "passe":
+        return "passe";
+      case "parada":
+        return "parada";
+      case "consentimento":
+        return porRegra(autoria) ? "acesso.automatico" : "acesso.concedido";
+      case "pasta_aberta":
+        return "acesso.pasta";
+      case "rotina_execucao":
+        return payload.desfecho === "falhou" || payload.desfecho === "bloqueada" || payload.desfecho === "interrompida" ? "rotina.falhou" : "rotina.execucao";
+      case "rotina_evento":
+        return "rotina.evento";
+      case "resultado_aprovacao":
+        return "aprovacao.recibo";
+      case "negacao":
+        if (payload.classe === "plano_ausente") return "negacao.plano_ausente";
+        if (payload.terminal) return "negacao.terminal";
+        return payload.classe === "conector_indisponivel" ? "negacao.conector" : "negacao.ferramenta";
+      case "ia_trocada":
+        return "ia.trocada";
+      case "troca_de_ia":
+        return "ia.troca";
+      case "limite_do_plano":
+        return "ia.limite_do_plano";
+      case "conta_trocada":
+        return "conta.trocada";
+      case "conta_seguiu":
+        return "conta.seguiu";
+      case "conta_escolhida":
+        return "conta.escolhida";
+      case "pedido_na_fila_da_cota":
+        return "cota.pedido_na_fila";
+      case "computador_fora_do_ar":
+        return "computador.fora_do_ar";
+      case "artefato":
+        return "artefato";
+      case "ligacao":
+        return "ligacao";
+      case "trabalho_aberto":
+        return "trabalho.aberto";
+      case "frentes_abertas":
+        return "frentes.abertas";
+      case "frentes_terminadas":
+        return "frentes.terminadas";
+      case "recado_a_frente":
+        return "frentes.recado";
+      case "pedido_respondido":
+        return "pedido.respondido";
+      case "boas_vindas":
+      case "pedido_a_pessoa":
+      case "resposta_a_pedido":
+        return null;
+    }
+  }
+  switch (kind) {
+    case "texto":
+      return null;
+    case "handoff":
+      return "colega.handoff";
+    case "peer_ask":
+      return "colega.resposta";
+    case "passe":
+      return "passe";
+    case "parada":
+      return "parada";
+    // "permitiu para sempre" (permitir-sempre.ts) é consentimento sem payload: recibo da pessoa, fica (Parte 3).
+    case "consentimento":
+      return porRegra(autoria) ? "acesso.automatico" : "acesso.concedido";
+    case "rotina_execucao":
+      return "rotina.execucao";
+    // Sem payload, só o recibo automático grava (o produtor escolhe entre tudo saiu e item que falhou); a reserva fica.
+    case "resultado_aprovacao":
+      return "aprovacao.recibo";
+    case "negacao":
+      return "negacao.ferramenta";
+    case "artefato":
+      return "artefato";
+    case "sistema":
+      return "sistema.generico";
+  }
+}
