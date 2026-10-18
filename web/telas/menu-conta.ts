@@ -14,7 +14,7 @@ export type DadosMenuConta = {
   conexao: string;
   avisos: string;
   modoDev: boolean;
-  /** ADR-111: as chaves de experimento, logo abaixo do Modo dev. Ausente = as duas desligadas. */
+  /** ADR-111: as chaves de experimento, logo abaixo do Modo dev (ADR-112: e o Modo WhatsApp). Ausente = todas desligadas. */
   experimentos?: Experimentos;
   banco: { texto: string; regime: string } | null;
   /** ADR-085: o que o item Este Mac diz à direita ("Equilibrado", ou "Ocupado" quando segura trabalho novo). */
@@ -34,6 +34,8 @@ export function faixaDeConectores(nomes: readonly string[]): string {
 const EXPERIMENTOS: readonly { chave: keyof Experimentos; icone: string; nome: string; dica: string }[] = [
   { chave: "calibracao", icone: ICONE.escudo, nome: "Calibração", dica: "Experimento: o bot diz que não achou em vez de afirmar que algo não existe." },
   { chave: "memoriaLonga", icone: ICONE.livro, nome: "Memória longa", dica: "Experimento: sem sessão retomada, o bot recebe as falas recentes inteiras (até 8 mil caracteres) e os anexos de antes." },
+  // definido em 2026-10-17 (ADR-112): a terceira chave, logo abaixo das duas da ADR-111.
+  { chave: "whatsapp", icone: ICONE.balao, nome: "Modo WhatsApp", dica: "Experimento: respostas curtas, como no WhatsApp — uma a três frases, sem títulos nem listas." },
 ];
 
 export function htmlMenuConta(d: DadosMenuConta): string {

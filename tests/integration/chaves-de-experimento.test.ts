@@ -37,10 +37,10 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
   it("a preferência: cada chave muda sozinha, nasce desligada e recusa o que não é booleano", async () => {
     await withRollback(escopo, async (trx) => {
       const m = await montar(trx);
-      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false });
-      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: false });
+      expect((await m.repos.preferencias.buscar()).experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false });
+      expect((await gravarPreferencias(m.deps, { experimentos: { calibracao: true } })).data.experimentos).toEqual({ calibracao: true, memoriaLonga: false, whatsapp: false });
       const ambas = (await gravarPreferencias(m.deps, { experimentos: { memoriaLonga: true } })).data;
-      expect(ambas.experimentos).toEqual({ calibracao: true, memoriaLonga: true });
+      expect(ambas.experimentos).toEqual({ calibracao: true, memoriaLonga: true, whatsapp: false });
       expect(ambas.modoDev).toBe(false);
       for (const ruim of [{}, [], { calibracao: "sim" }, { outra: true }, null]) {
         await expect(gravarPreferencias(m.deps, { experimentos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });
@@ -57,7 +57,7 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
       expect(p.promptSistema).toContain("a".repeat(1000));
       expect(p.promptSistema).not.toContain("FIM-DA-TABELA");
       expect(p.entrada.anexos).toBeUndefined();
-      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: false, memoriaLonga: false, anexosAnteriores: 0 });
+      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: false, memoriaLonga: false, whatsapp: false, anexosAnteriores: 0 });
     });
   });
 
@@ -69,7 +69,7 @@ describeIntegracao("chaves de experimento (ADR-111)", () => {
       expect(p.promptSistema).toContain(LINHA_CALIBRACAO);
       expect(p.promptSistema).toContain("FIM-DA-TABELA");
       expect(p.entrada.anexos).toEqual([{ id: m.anexo.id, nome: "playbook.md", mime: "text/markdown", tamanho: 10, anterior: true }]);
-      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: true, memoriaLonga: true, anexosAnteriores: 1 });
+      expect((await m.repos.raioX.doTurno(m.turno.id))?.composicao?.experimentos).toEqual({ calibracao: true, memoriaLonga: true, whatsapp: false, anexosAnteriores: 1 });
     });
   });
 

@@ -285,6 +285,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // Só no turno sem sessão (a janela vazia não muda nada) e fora da ligação, que tem o próprio histórico curto.
   const experimentos = preferencias.experimentos ?? EXPERIMENTOS_DESLIGADOS;
   const memoriaLonga = experimentos.memoriaLonga && modo !== "ligacao";
+  // ADR-112: a chave "Modo WhatsApp" (0089) — só o prompt de texto; a ligação tem o próprio prompt, que não muda.
+  const whatsapp = experimentos.whatsapp && modo !== "ligacao";
   const cortes = cortarFalas(janela.map((m) => m.texto), memoriaLonga);
   const comAnexo = (m: (typeof janela)[number], i: number) => {
     const nomes = (anexosDaJanela.get(m.id) ?? []).map((a) => a.nome);
@@ -388,6 +390,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     sessaoCli,
     anexos: [...metasDosAnexos, ...anteriores],
     ...(experimentos.calibracao ? { calibracao: true } : {}),
+    ...(whatsapp ? { whatsapp: true } : {}),
     contextoConversa,
     pessoaNome,
     maquina: input.maquina ?? null,
@@ -469,7 +472,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   guardarPlanoSeSuportado(deps.services.tokenTurno, plano);
   // Modo dev (0036): o que este plano manda ao modelo, por parte. Os textos só com o modo dev da pessoa ligado.
   const { modoDev } = preferencias;
-  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, anexosAnteriores: anteriores.length } }));
+  await deps.repos.raioX.gravarComposicao(turno.id, composicaoDoPlano(plano, { modo, comTexto: modoDev, experimentos: { calibracao: experimentos.calibracao, memoriaLonga, whatsapp, anexosAnteriores: anteriores.length } }));
 
   const evento: RuntimeEvent = {
     tenantId: deps.escopo.tenantId,

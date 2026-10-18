@@ -19,12 +19,13 @@ export const lerPreferencias: CasoDeUso<Record<string, never>, Preferencias> = a
 /**
  * revisto em 2026-10-16 (ADR-111, 0088): `experimentos`, as chaves do menu da conta — `{calibracao?, memoriaLonga?}`, cada
  * uma booleana; a que vier muda sozinha. Objeto vazio, com chave desconhecida ou valor fora do tipo é entrada inválida.
+ * ADR-112 (0089): `whatsapp`, do mesmo jeito.
  */
 function lerExperimentos(v: unknown): Partial<Experimentos> | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== "object" || v === null || Array.isArray(v)) throw new ErroDeDominio("entrada_invalida", { cause: "experimentos" });
   const chaves = Object.keys(v);
-  const validas: readonly string[] = ["calibracao", "memoriaLonga"];
+  const validas: readonly string[] = ["calibracao", "memoriaLonga", "whatsapp"];
   if (chaves.length === 0 || chaves.some((k) => !validas.includes(k) || typeof (v as Record<string, unknown>)[k] !== "boolean")) throw new ErroDeDominio("entrada_invalida", { cause: "experimentos" });
   return v as Partial<Experimentos>;
 }

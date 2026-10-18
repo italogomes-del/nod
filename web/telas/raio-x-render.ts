@@ -185,10 +185,11 @@ function abaEnviado(r: RaioXTurno): string {
     ? `Fica na sessão do Claude Code no Mac, não no nod.${compactacoes.length ? ` Depois de cada compactação, o que sobrou: ${compactacoes.map((k) => (k.depois !== null ? mil(k.depois) : "?")).join(" → ")} tokens.` : ""}`
     : "Sessão nova: as últimas falas vão dentro do prompt, na seção “Contexto recente da conversa”.";
   const anexos = c.entrada.anexos ? ` · ${c.entrada.anexos} ${c.entrada.anexos === 1 ? "anexo" : "anexos"}` : "";
-  // ADR-111: as chaves de experimento que valeram neste turno — é o que deixa comparar turnos com e sem elas.
+  // ADR-111: as chaves de experimento que valeram neste turno — é o que deixa comparar turnos com e sem elas. ADR-112: o
+  // Modo WhatsApp também (ausente nos turnos de antes da 0089 = desligado; na ligação não vale, o prompt é o de voz).
   const x = c.experimentos;
   const experimentos = x
-    ? `<p class="rx-quadro">Experimentos: Calibração <b>${x.calibracao ? "ligada" : "desligada"}</b> · Memória longa <b>${x.memoriaLonga ? "ligada" : "desligada"}</b>${x.memoriaLonga && c.sessaoRetomada ? " (sem efeito: a sessão foi retomada)" : ""}${x.anexosAnteriores ? ` · ${x.anexosAnteriores} ${x.anexosAnteriores === 1 ? "anexo anterior voltou" : "anexos anteriores voltaram"}` : ""}</p>`
+    ? `<p class="rx-quadro">Experimentos: Calibração <b>${x.calibracao ? "ligada" : "desligada"}</b> · Memória longa <b>${x.memoriaLonga ? "ligada" : "desligada"}</b>${x.memoriaLonga && c.sessaoRetomada ? " (sem efeito: a sessão foi retomada)" : ""}${x.anexosAnteriores ? ` · ${x.anexosAnteriores} ${x.anexosAnteriores === 1 ? "anexo anterior voltou" : "anexos anteriores voltaram"}` : ""} · Modo WhatsApp <b>${x.whatsapp ? "ligado" : "desligado"}</b></p>`
     : "";
   return `<p class="rx-intro">Na ordem em que o Claude Code monta cada chamada. Tamanho em caracteres, exato; tokens estimados a ${CARACTERES_POR_TOKEN} caracteres por token.</p>${semTexto}${experimentos}
     <section class="rx-secao rx-lista"><div class="rx-secao-cab"><h3>1 · Prompt de sistema do nod</h3><span class="rx-num">${esc(mil(c.promptChars))} caract.</span></div>${prompt}</section>

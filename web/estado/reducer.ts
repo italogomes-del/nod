@@ -327,7 +327,7 @@ export type Estado = {
   botAbertoEmTrabalhos: string | null;
   /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
   usoDoMac: UsoDoMac;
-  /** ADR-111: as chaves de experimento do menu da conta (Calibração e Memória longa), lidas de `GET preferencias`. */
+  /** ADR-111: as chaves de experimento do menu da conta (Calibração, Memória longa e, ADR-112, Modo WhatsApp), lidas de `GET preferencias`. */
   experimentos: Experimentos;
   /** O cartão do tempo aberto no topo da task (protótipo "Nod — tempo da task"): o id da task, ou null. */
   tempoTaskAberto: string | null;
@@ -486,7 +486,7 @@ export const estadoInicial: Estado = {
   frenteAberta: null,
   botAbertoEmTrabalhos: null,
   usoDoMac: "equilibrado",
-  experimentos: { calibracao: false, memoriaLonga: false },
+  experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false },
   tempoTaskAberto: null,
   custoAberto: false,
 };

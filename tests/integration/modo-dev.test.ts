@@ -89,8 +89,8 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       expect(semTexto.execucao).toBeNull();
       await executar(deps, assentarTurno, { turnoId: t1, machineId: maquina, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado(0.5, randomUUID()) });
 
-      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false } });
-      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false } });
+      expect((await executar(deps, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } });
+      expect((await executar(deps, gravarPreferencias, { modoDev: true })).data).toEqual({ modoDev: true, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } });
       // Corpo vazio é recusado. ADR-099 (I10): `faixaTrabalhosRecolhida` saiu do contrato — vinda sozinha, é corpo vazio.
       await expect(executar(deps, gravarPreferencias, {})).rejects.toMatchObject({ codigo: "entrada_invalida" });
       await expect(executar(deps, gravarPreferencias, { faixaTrabalhosRecolhida: true } as never)).rejects.toMatchObject({ codigo: "entrada_invalida" });
@@ -127,7 +127,7 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
       const daAna = depsSobreTrx(trx, ANA);
       await esperarErro(() => raioXDoTurno(daAna, { turnoId }), "nao_encontrado");
       expect(await trx`select 1 from turno_raio_x where turno_id = ${turnoId}`).toHaveLength(0);
-      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false } });
+      expect((await executar(daAna, lerPreferencias, {})).data).toEqual({ modoDev: false, avisosFechados: [], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } });
       expect((await executar(daAna, raioXDaConversa, { conversaId: criado.conversa.id, desde: 0 })).data).toEqual({ turnos: [], desde: { custoUsd: 0, turnos: 0 } });
     });
   });
@@ -135,10 +135,10 @@ describeIntegracao("modo dev (0035 + 0036): o custo de cada turno e o Raio-X", (
   it("0059: o aviso fechado fica com a pessoa — sem repetir, sem apagar o modo dev, privado e com chave fechada", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
-      expect((await executar(deps, fecharAviso, { chave: "modo:total" })).data).toEqual({ modoDev: false, avisosFechados: ["modo:total"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false } });
+      expect((await executar(deps, fecharAviso, { chave: "modo:total" })).data).toEqual({ modoDev: false, avisosFechados: ["modo:total"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } });
       await executar(deps, gravarPreferencias, { modoDev: true });
       await executar(deps, fecharAviso, { chave: "modo:total" });
-      expect((await executar(deps, fecharAviso, { chave: "modo:automatico" })).data).toEqual({ modoDev: true, avisosFechados: ["modo:total", "modo:automatico"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false } });
+      expect((await executar(deps, fecharAviso, { chave: "modo:automatico" })).data).toEqual({ modoDev: true, avisosFechados: ["modo:total", "modo:automatico"], usoDoMac: "equilibrado", maquinaPadraoId: null, ordemIas: null, iasNoLimite: {}, experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false } });
       expect((await executar(deps, lerPreferencias, {})).data.avisosFechados).toEqual(["modo:total", "modo:automatico"]);
       for (const chave of ["", "Modo:total", "modo:total; drop", "x".repeat(80), 42]) await esperarErro(() => fecharAviso(deps, { chave }), "entrada_invalida");
 

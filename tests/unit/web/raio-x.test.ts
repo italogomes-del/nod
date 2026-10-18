@@ -94,4 +94,11 @@ describe("Raio-X do turno (revisão contra o canvas, D2 e D3)", () => {
     expect(html).not.toContain("1.000 mil");
     expect(html).not.toContain("rx-pesada\"><span class=\"rx-cor");
   });
+
+  it("ADR-112: \"O que foi enviado\" diz se o Modo WhatsApp valeu; turno de antes da 0089 lê desligado", () => {
+    const com = (experimentos: NonNullable<RaioXTurno["composicao"]>["experimentos"]): RaioXTurno => ({ ...CLARICE, composicao: { ...CLARICE.composicao!, experimentos } });
+    expect(renderRaioX(com({ calibracao: true, memoriaLonga: false, whatsapp: true, anexosAnteriores: 0 }), "Clarice")).toContain("Calibração <b>ligada</b> · Memória longa <b>desligada</b> · Modo WhatsApp <b>ligado</b>");
+    expect(renderRaioX(com({ calibracao: false, memoriaLonga: false, anexosAnteriores: 0 }), "Clarice")).toContain("Modo WhatsApp <b>desligado</b>");
+    expect(renderRaioX(CLARICE, "Clarice")).not.toContain("Modo WhatsApp");
+  });
 });

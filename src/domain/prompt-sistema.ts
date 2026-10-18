@@ -233,6 +233,11 @@ export type EntradaPromptSistema = {
   harness?: IdHarness | null;
   /** ADR-111: a chave "Calibração" da pessoa (0088) — entra a LINHA_CALIBRACAO na parte estável. Ausente = sem a linha. */
   calibracao?: boolean;
+  /**
+   * ADR-112: a chave "Modo WhatsApp" da pessoa (0089) — a LINHA_WHATSAPP entra no lugar da "Formatação:" e a linha do
+   * "Progresso:" deixa de pedir relatório completo. Ausente = o prompt de sempre.
+   */
+  whatsapp?: boolean;
 };
 
 /**
@@ -241,6 +246,22 @@ export type EntradaPromptSistema = {
  * correção no resumo pedido em seguida. O modelo existia; a busca é que estava atrás do que a pessoa via.
  */
 export const LINHA_CALIBRACAO = "Calibração: quando a pessoa citar algo que você não conhece ou que a busca não achou (um modelo, uma versão, um produto, uma pessoa), diga que não encontrou e com o que comparou no lugar; não afirme que não existe nem corrija a pessoa por isso. O que ela vê pode ser mais novo que o seu conhecimento e que o índice da busca. Corrija a pessoa só com evidência direta, e diga qual é.";
+
+/**
+ * definido em 2026-10-17 (ADR-112): a linha da chave "Modo WhatsApp", no lugar da "Formatação:". Motivo medido: em 17/10
+ * o Marlon achou as respostas do Nod longas e com cara de relatório perto das do Rakazo/Grok Bot. Teste offline (prompt
+ * `conversa-manual`, Sonnet 5.5, sem ferramentas, 10 mensagens × 2 rodadas): hoje mediana de 1.229 caracteres e 85% das
+ * respostas com lista; "Be concise." no fim −27% e 80% com lista; esta linha −64% (444 caracteres), 0% com lista, 0% com
+ * tabela. Efeito colateral visto: num pedido de rotina o bot propôs direto (assumiu dias úteis) em vez de perguntar.
+ */
+export const LINHA_WHATSAPP = "Tom: escreva como alguém respondendo no WhatsApp: uma a três frases curtas. Sem títulos, tabelas ou listas, a não ser que a pessoa peça ou o conteúdo seja uma tabela de fato. Não repita o pedido, não anuncie o que vai fazer e não ofereça ajuda extra no fim. Na resposta final diga o resultado e o que precisa da pessoa; detalhe só se ela pedir. Conteúdo longo vai num artefato ou link. A conversa mostra **negrito**, `código` e links; ponha o link no próprio nome, como [PR #481](https://…).";
+
+/** definido em 2026-09-28 (ADR-053): a conversa mostra link e tabela; a URL solta ainda funciona, mas o nome lê melhor. */
+const LINHA_FORMATACAO = "Formatação: a conversa mostra **negrito**, *itálico*, `código`, blocos de código, tabelas em markdown (cabeçalho e linha |---|) e links http(s). Ao citar uma mensagem, tarefa, PR ou página, ponha o link no próprio nome, como [PR #481](https://…), em vez de colar a URL solta.";
+
+/** O fecho da linha "Progresso:" sem o Modo WhatsApp: o relatório completo na resposta final. ADR-112: com ele, só a ordem. */
+const PROGRESSO_RELATORIO = "O relatório completo vai só na resposta final, depois da última ferramenta.";
+const PROGRESSO_WHATSAPP = "A resposta final vai depois da última ferramenta.";
 
 /** Uma task aberta do bot como entra no prompt da conversa: id (para mandar_para_frente), título, estado e o último passo. */
 /** `cuidado` (revisão do épico, S24): título e último passo vindos de colega ou de task que leu conteúdo de fora. */
@@ -271,8 +292,8 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   const volatil: string[] = [];
   linhas.push(linhaDeIdentidade(entrada.agente, entrada.pessoaNome));
   linhas.push(LINHA_IDIOMA);
-  // definido em 2026-09-28 (ADR-053): a conversa mostra link e tabela; a URL solta ainda funciona, mas o nome lê melhor.
-  linhas.push("Formatação: a conversa mostra **negrito**, *itálico*, `código`, blocos de código, tabelas em markdown (cabeçalho e linha |---|) e links http(s). Ao citar uma mensagem, tarefa, PR ou página, ponha o link no próprio nome, como [PR #481](https://…), em vez de colar a URL solta.");
+  // ADR-112: com o Modo WhatsApp, a linha do tom (que já diz o que a conversa mostra) entra no lugar da "Formatação:".
+  linhas.push(entrada.whatsapp ? LINHA_WHATSAPP : LINHA_FORMATACAO);
   if (entrada.calibracao) linhas.push(LINHA_CALIBRACAO);
   const queFaz = linhaDoQueFaz(entrada.agente.descricao);
   if (queFaz) linhas.push(queFaz);
@@ -420,7 +441,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
   // definido em 2026-09-28: o relatório escrito antes de uma ferramenta (lembrar, depois "Anotado.")
   // sumia da fala; o classificador agora o recupera (NARRACAO_MAX_CHARS em stream-json.ts), e a última
   // frase pede ao modelo que não dependa disso.
-  if (nomes.length > 0) linhas.push("Progresso: o texto que você escreve entre chamadas de ferramenta aparece para a pessoa como etapas, uma linha cada. Narre cada passo em uma frase curta começando por um verbo (\"Categorizando lote de 11 e-mails\"), sem repetir contadores nem escrever \"Continuando\". O relatório completo vai só na resposta final, depois da última ferramenta. Não chame ferramenta depois do relatório; se precisar, reescreva o relatório inteiro no fim.");
+  if (nomes.length > 0) linhas.push("Progresso: o texto que você escreve entre chamadas de ferramenta aparece para a pessoa como etapas, uma linha cada. Narre cada passo em uma frase curta começando por um verbo (\"Categorizando lote de 11 e-mails\"), sem repetir contadores nem escrever \"Continuando\". " + (entrada.whatsapp ? PROGRESSO_WHATSAPP : PROGRESSO_RELATORIO) + " Não chame ferramenta depois do relatório; se precisar, reescreva o relatório inteiro no fim.");
   const memorias = [...entrada.memorias].sort((a, b) => a.criadoEm - b.criadoEm || a.id.localeCompare(b.id)).slice(0, MEMORIAS_NO_PROMPT);
   if (memorias.length > 0) {
     volatil.push(cabecalhoDaMemoria());
@@ -466,7 +487,7 @@ export function partesDoPromptSistema(entrada: EntradaPromptSistema): { estavel:
 const PREFIXOS_DAS_SECOES: readonly (readonly [SecaoDoPrompt, readonly string[]])[] = [
   // definido em 2026-10-04 (ADR-072): "Fala:", "Ligação:", "Primeira ligação:", "Colegas no nod" e "Apps conectados" são
   // do prompt de voz (prompt-ligacao.ts); o de texto nunca começa linha assim.
-  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "Calibração:", "O que você faz:", "Fala:"]],
+  ["identidade", ["Você é ", "Responda sempre em", "Formatação:", "Tom:", "Calibração:", "O que você faz:", "Fala:"]],
   ["modo", [...Object.values(INSTRUCAO_MODO).map((t) => t.slice(0, 40)), "Modo de pedido de colega:", "Aprovações:", "Ligação:", "Primeira ligação:"]],
   ["computador", ["Seu computador está", "Você tem um computador", "Pastas do computador"]],
   ["colegas", ["Colaboração:", "Diretório de colegas", "Limite da corrente:", "Quem receber um pedido seu", "Colegas no nod"]],
