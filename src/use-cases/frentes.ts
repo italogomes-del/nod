@@ -4,9 +4,9 @@ import type { CasoNod, ContextoFerramenta } from "../contracts/servicos.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, textoFrentesAbertas } from "../domain/frente.ts";
+import { ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, textoFrentesAbertas, tituloDoLote } from "../domain/frente.ts";
 import { validarResumo } from "../domain/resumo-da-frente.ts";
-import { podeAbrirTask, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, trabalhoAberto } from "../domain/trabalho.ts";
+import { podeAbrirTask, TETO_TASKS_POR_EXECUCAO_DE_ROTINA, tituloOuNada, trabalhoAberto } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { origemDasFrentes } from "./pedido-de-colega.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
@@ -32,7 +32,7 @@ const NAO_ABRE = "Você já está numa frente, e uma frente não abre outra (só
  * (decisão 1: o limite é a capacidade da máquina); a execução de rotina continua com o teto dela. A frente, a task de
  * colega, da pessoa ou da rede não abre (o catálogo já tira a ferramenta; isto é a 2ª camada).
  */
-async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly FrentePedida[], p: { avisarACadaUma: boolean; depoisDe?: string }): Promise<Aberto | Recusa> {
+async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly FrentePedida[], p: { avisarACadaUma: boolean; depoisDe?: string; tituloDoLote?: string }): Promise<Aberto | Recusa> {
   const turno = await deps.repos.turnos.buscar(ctx.turnoId);
   if (!turno || turno.agenteId !== ctx.agenteId) throw new ErroDeDominio("nao_permitido", { cause: "turno de outro bot" });
   const atual = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
@@ -57,7 +57,10 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
   }
   const agente = await deps.repos.agentes.buscar(turno.agenteId);
   const conversaId = await conversaDoBot(deps, turno);
-  const lote = await deps.repos.frentes.criarLote({ agenteId: turno.agenteId, abertoPorTurnoId: turno.id, trabalhoId: deRotina ? atual.id : null, avisarACadaUma: p.avisarACadaUma });
+  // Plano chat limpo (PR 5, 2026-10-18): o `titulo_do_lote` passa pela regra do título (primeira linha, até 80, com letra);
+  // vazio ou sem letra vira null, e a tela cai no título da frente ou em "N frentes".
+  const titulo = p.tituloDoLote === undefined ? null : tituloOuNada(p.tituloDoLote);
+  const lote = await deps.repos.frentes.criarLote({ agenteId: turno.agenteId, abertoPorTurnoId: turno.id, trabalhoId: deRotina ? atual.id : null, avisarACadaUma: p.avisarACadaUma, titulo });
   if (!lote) throw new ErroDeDominio("estado_invalido", { cause: "lote de frentes não criado" });
   const agora = deps.agora();
   // A marca de quem leu algo de fora (ADR-062) atravessa para cada frente, como no pedido a colega.
@@ -104,12 +107,12 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
     events.push(evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId, turnoId: novo.id, dados: { origem: novo.origem, agente_id: turno.agenteId, trabalhoId: trabalho.id } }));
     trabalhos.push(trabalho);
   }
-  events.push(...(await linhaFrentesAbertas(deps, { turno, conversaId, loteId: lote.id, trabalhos })));
+  events.push(...(await linhaFrentesAbertas(deps, { turno, conversaId, loteId: lote.id, tituloDoLote: tituloDoLote(lote.titulo, trabalhos.length, trabalhos[0]?.titulo ?? ""), trabalhos })));
   return { ok: true, loteId: lote.id, trabalhos, events };
 }
 
 /** A linha única do lote na conversa do dono (mensagem `sistema`, payload `frentes_abertas`), no lugar de uma por frente. */
-async function linhaFrentesAbertas(deps: Deps, p: { turno: Turno; conversaId: string; loteId: string; trabalhos: readonly Trabalho[] }): Promise<RuntimeEvent[]> {
+async function linhaFrentesAbertas(deps: Deps, p: { turno: Turno; conversaId: string; loteId: string; tituloDoLote: string; trabalhos: readonly Trabalho[] }): Promise<RuntimeEvent[]> {
   const autoria = autoriaAgente({ agenteId: p.turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:trabalhos" });
   const m = await deps.repos.mensagens.criar({
     conversaId: p.conversaId,
@@ -117,7 +120,7 @@ async function linhaFrentesAbertas(deps: Deps, p: { turno: Turno; conversaId: st
     autoria,
     kind: "sistema",
     texto: textoFrentesAbertas(p.trabalhos.map((t) => t.titulo)),
-    payload: { kind: "frentes_abertas", loteId: p.loteId, origem: p.trabalhos[0]?.origem ?? "pessoa", frentes: p.trabalhos.map((t) => ({ trabalhoId: t.id, titulo: t.titulo })) },
+    payload: { kind: "frentes_abertas", loteId: p.loteId, origem: p.trabalhos[0]?.origem ?? "pessoa", frentes: p.trabalhos.map((t) => ({ trabalhoId: t.id, titulo: t.titulo })), tituloDoLote: p.tituloDoLote },
     confianca: "confiavel",
   });
   return m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora: deps.agora(), conversaId: p.conversaId, turnoId: p.turno.id, dados: { mensagem_id: m.id, kind: "sistema", lote_id: p.loteId } })] : [];
@@ -127,7 +130,7 @@ const lista = (ts: readonly Trabalho[]): string => ts.map((t) => `"${t.titulo}"`
 
 /** Ferramenta `abrir_frentes` (I2): um lote para o pedido, N frentes. */
 export const abrirFrentes: CasoNod<Deps, "abrir_frentes"> = async (deps, input) => {
-  const r = await abrirLote(deps, input, input.frentes ?? [], { avisarACadaUma: input.avisar_a_cada_uma === true });
+  const r = await abrirLote(deps, input, input.frentes ?? [], { avisarACadaUma: input.avisar_a_cada_uma === true, tituloDoLote: input.titulo_do_lote });
   if (!r.ok) return { data: { ok: false, erro: r.erro === "nao_abre" ? "nao_abre_frente" : r.erro === "teto_de_tasks" ? "teto_de_tasks" : "sem_frentes", instrucao: r.instrucao } };
   const quais = r.trabalhos.length === 1 ? `Começou a frente ${lista(r.trabalhos)}` : `Começou ${r.trabalhos.length} frentes para este pedido: ${lista(r.trabalhos)}`;
   return {

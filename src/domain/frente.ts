@@ -121,6 +121,17 @@ export function textoFrentesAbertas(titulos: readonly string[]): string {
   return `Começou ${titulos.length} frentes: ${lista}`;
 }
 
+/**
+ * O título do lote (definido em 2026-10-18, plano chat limpo, PR 5, decisão 17): o `titulo_do_lote` que o modelo mandou
+ * (`lotes_de_frentes.titulo`, 0092; null = não mandou ou sem letra); sem ele, uma frente dá o título dela e várias dão
+ * "N frentes". É o que a pílula do PR 8 e o progresso na fala do PR 7 mostram, mesmo com a fala que abriu o lote fora da
+ * janela.
+ */
+export function tituloDoLote(titulo: string | null, frentes: number, primeira: string): string {
+  if (titulo) return titulo;
+  return frentes === 1 ? primeira : `${frentes} frentes`;
+}
+
 /** definido em 2026-10-12 (I2): da última fala da frente, o resumo sem chamada leva até isto (o teto do texto é 1000). */
 export const CORTE_DA_ULTIMA_FALA = 600;
 

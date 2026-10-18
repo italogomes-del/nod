@@ -46,7 +46,9 @@ export const TETO_BYTES_RESUMO = 16000;
  * - `avisarACadaUma`: o dono pediu o resultado de cada frente quando ela termina (frentes independentes e de duração
  *   muito diferente); false = todas voltam juntas, quando a última termina;
  * - `retornoTurnoId`: o turno de retorno (UNIQUE: um por lote); `devolvidoEm`: quando o lote foi devolvido (com ou sem
- *   turno de retorno).
+ *   turno de retorno);
+ * - `titulo`: o `titulo_do_lote` que o modelo mandou (0092, plano chat limpo, PR 5); null = não mandou. A tela usa
+ *   `tituloDoLote` (src/domain/frente.ts), que cai no título da frente ou em "N frentes".
  */
 export type LoteDeFrentes = {
   id: string;
@@ -54,6 +56,7 @@ export type LoteDeFrentes = {
   abertoPorTurnoId: string;
   trabalhoId: string | null;
   avisarACadaUma: boolean;
+  titulo: string | null;
   retornoTurnoId: string | null;
   criadoEm: EpochMs;
   devolvidoEm: EpochMs | null;

@@ -351,3 +351,26 @@ describe("validação pelo subconjunto JSON Schema", () => {
     expect(errosDoSchema({ type: "object" }, [])).toEqual(["$: esperado object, veio array"]);
   });
 });
+
+describe("abrir_frentes: o título pede 2 a 5 palavras, mas o teto continua 200 (plano chat limpo, PR 5, decisão 15)", () => {
+  const frente = (titulo: string) => ({ titulo, pedido: "Refaça os roteiros de animação do hero." });
+  it("título longo (até 200) e titulo_do_lote passam: a chamada não falha por um título comprido", () => {
+    const longo = "Refazer os roteiros de animação do hero com o tom novo que a pessoa pediu ontem à noite, ".repeat(3).slice(0, 200);
+    expect(longo).toHaveLength(200);
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente(longo), frente("Roteiros de animação")], titulo_do_lote: "frentes de hero" })).toMatchObject({ ok: true });
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente("Roteiros")] })).toMatchObject({ ok: true });
+    // Sem minLength no titulo_do_lote: vazio não derruba a chamada (vira "sem título" no caso de uso).
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente("Roteiros")], titulo_do_lote: "" })).toMatchObject({ ok: true });
+  });
+  it("acima de 200, no título ou no titulo_do_lote, é erro de schema (o CHECK trabalho_titulo da 0063 e o lote_titulo da 0092)", () => {
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente("x".repeat(201))] })).toMatchObject({ ok: false, erros: ["$.frentes[0].titulo: máximo 200 caracteres"] });
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente("Roteiros")], titulo_do_lote: "x".repeat(201) })).toMatchObject({ ok: false, erros: ["$.titulo_do_lote: máximo 200 caracteres"] });
+    expect(validarArgsNod("abrir_frentes", { frentes: [frente("")] })).toMatchObject({ ok: false });
+  });
+  it("as descrições pedem o título como a pessoa diria e o lote em poucas palavras", () => {
+    const schema = FERRAMENTAS_NOD.abrir_frentes;
+    expect(schema.properties.frentes.items.properties?.titulo?.description).toContain("2 a 5 palavras");
+    expect(schema.properties.titulo_do_lote.description).toContain("2 a 4 palavras");
+    expect(schema.required).toEqual(["frentes"]);
+  });
+});

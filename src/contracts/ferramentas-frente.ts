@@ -10,11 +10,15 @@ import type { ArgsMandarParaTask, ResultadoMandarParaTask } from "./ferramentas-
  * - `mandar_para_frente` substitui `mandar_para_task` (mesmos argumentos; `mandar_para_task` continua como sinônimo);
  * - `devolver_resumo` é só da frente: o que ela devolve ao dono, em fatos curtos.
  * O teto do título (200) é o CHECK trabalho_titulo da 0063; o do pedido, o mesmo de `abrir_task`.
+ * revisto em 2026-10-18 (plano chat limpo, PR 5, decisões 15 e 17): o título pede 2 a 5 palavras na DESCRIÇÃO, e o teto
+ * continua 200 — um teto de 60 faria a chamada inteira falhar na validação (`validarArgsNod`) e o modelo podia desistir
+ * das frentes e fazer o trabalho na conversa; o tamanho é medido e a tela corta. `titulo_do_lote` (opcional, sem
+ * `minLength` pelo mesmo motivo: vazio vira "sem título") vai para `lotes_de_frentes.titulo` (0092).
  */
 const FRENTE: JsonSchema = {
   type: "object",
   properties: {
-    titulo: { type: "string", description: "Título curto da frente, como a pessoa diria (ex.: \"Dashboard de churn\").", minLength: 1, maxLength: 200 },
+    titulo: { type: "string", description: "Título da frente em 2 a 5 palavras, como a pessoa diria (ex.: \"Roteiros de animação\"). Não repita o pedido.", minLength: 1, maxLength: 200 },
     pedido: { type: "string", description: "O que esta frente faz, autocontido: ela não vê esta conversa. Inclua nomes, links e o que a pessoa já disse.", minLength: 1, maxLength: 8000 },
     repo: { type: "string", description: "Opcional: o repositório em que ela trabalha (ex.: dono/repo).", minLength: 1, maxLength: 200 },
     branch_base: { type: "string", description: "Opcional: o branch de onde ela parte (padrão: origin/main).", minLength: 1, maxLength: 200 },
@@ -32,6 +36,7 @@ export const FERRAMENTAS_FRENTE = {
       "Abre frentes para UM pedido: cada frente é um trabalho que roda à parte, com sessão e pasta próprias, enquanto você segue livre. Use para o que leva mais que alguns minutos ou mexe em arquivos e código; partes independentes do mesmo pedido vão juntas, numa chamada só. Devolve na hora; cada frente devolve um resumo curto quando termina.",
     properties: {
       frentes: { type: "array", minItems: 1, items: FRENTE, description: "As frentes deste pedido, uma por parte independente." },
+      titulo_do_lote: { type: "string", description: "Opcional: o que este pedido faz, em 2 a 4 palavras (ex.: \"frentes de hero\"). Útil com mais de uma frente.", maxLength: 200 },
       avisar_a_cada_uma: { type: "boolean", description: "Opcional: true quando as frentes são independentes e você quer o resultado de cada uma quando ela termina; o padrão é voltarem juntas, quando a última termina." },
     },
     required: ["frentes"],
@@ -63,7 +68,7 @@ export const FERRAMENTAS_FRENTE = {
 } as const satisfies Record<string, JsonSchema>;
 
 export type FrentePedida = { titulo: string; pedido: string; repo?: string; branch_base?: string; pode_empurrar?: boolean };
-export type ArgsAbrirFrentes = { frentes: FrentePedida[]; avisar_a_cada_uma?: boolean };
+export type ArgsAbrirFrentes = { frentes: FrentePedida[]; titulo_do_lote?: string; avisar_a_cada_uma?: boolean };
 export type ArgsDevolverResumo = { feito: string; pr?: number; sha?: string; branch?: string; falta?: string };
 
 export type ResultadoAbrirFrentes =

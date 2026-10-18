@@ -151,8 +151,8 @@ export type PayloadMensagem =
    * `sistema`; a web abre a tela do trabalho ao clicar.
    */
   | { kind: "trabalho_aberto"; trabalhoId: string; titulo: string; origem: OrigemTrabalho }
-  /** definido em 2026-10-12 (ADR-099, I2): a linha única "Começou N frentes: …" do lote que o dono abriu (abrir_frentes), no lugar de uma "Abriu a task" por frente. */
-  | { kind: "frentes_abertas"; loteId: string; origem: OrigemTrabalho; frentes: { trabalhoId: string; titulo: string }[] }
+  /** definido em 2026-10-12 (ADR-099, I2): a linha única "Começou N frentes: …" do lote que o dono abriu (abrir_frentes). `tituloDoLote` (chat limpo, PR 5, 2026-10-18): resolvido na abertura; ausente nas linhas de antes. */
+  | { kind: "frentes_abertas"; loteId: string; origem: OrigemTrabalho; frentes: { trabalhoId: string; titulo: string }[]; tituloDoLote?: string }
   /** definido em 2026-10-12 (ADR-099, I2): a cópia, na conversa do dono, do recado que ele repassou a uma frente. */
   | { kind: "recado_a_frente"; trabalhoId: string; titulo: string }
   /** definido em 2026-10-12 (ADR-099, I3): a linha "3 frentes terminaram" (ou "A frente X terminou", com `avisar_a_cada_uma`) na conversa do dono. */

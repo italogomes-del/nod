@@ -10,12 +10,13 @@ interface LinhaLote {
   aberto_por_turno_id: string;
   trabalho_id: string | null;
   avisar_a_cada_uma: boolean;
+  titulo: string | null;
   retorno_turno_id: string | null;
   criado_em: Date;
   devolvido_em: Date | null;
 }
 
-const COLUNAS_LOTE = "id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma, retorno_turno_id, criado_em, devolvido_em";
+const COLUNAS_LOTE = "id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma, titulo, retorno_turno_id, criado_em, devolvido_em";
 
 const paraLote = (l: LinhaLote): LoteDeFrentes => ({
   id: l.id,
@@ -23,6 +24,7 @@ const paraLote = (l: LinhaLote): LoteDeFrentes => ({
   abertoPorTurnoId: l.aberto_por_turno_id,
   trabalhoId: l.trabalho_id,
   avisarACadaUma: l.avisar_a_cada_uma,
+  titulo: l.titulo,
   retornoTurnoId: l.retorno_turno_id,
   criadoEm: ms(l.criado_em),
   devolvidoEm: msOuNull(l.devolvido_em),
@@ -34,6 +36,8 @@ export type NovoLote = {
   /** null (padrão) = lote da conversa do dono. */
   trabalhoId?: string | null;
   avisarACadaUma?: boolean;
+  /** O `titulo_do_lote` do modelo, já normalizado (`tituloOuNada`); null (padrão) = sem título (0092). */
+  titulo?: string | null;
 };
 
 /** O que o fecho do lote lê de cada frente: o estado, o resumo e se ela leu conteúdo de fora (ADR-047). */
@@ -60,8 +64,8 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
   return {
     async criarLote(n: NovoLote): Promise<LoteDeFrentes | null> {
       const [l] = await conn<LinhaLote[]>`
-        insert into lotes_de_frentes (tenant_id, owner_id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma)
-        values (${escopo.tenantId}, ${escopo.pessoaId}, ${n.agenteId}, ${n.abertoPorTurnoId}, ${n.trabalhoId ?? null}, ${n.avisarACadaUma === true})
+        insert into lotes_de_frentes (tenant_id, owner_id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma, titulo)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${n.agenteId}, ${n.abertoPorTurnoId}, ${n.trabalhoId ?? null}, ${n.avisarACadaUma === true}, ${n.titulo ?? null})
         returning ${conn.unsafe(COLUNAS_LOTE)}`;
       return l ? paraLote(l) : null;
     },

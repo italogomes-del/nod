@@ -88,6 +88,12 @@ export type FrenteNaLinhaAberta = {
   acordaMotivo?: string | null;
   /** O lote (o pedido) a que a frente pertence; null = sem lote (a task de antes, migrada pela 0072). */
   lote?: LoteNaTela | null;
+  /**
+   * definido em 2026-10-18 (plano chat limpo, PR 5, decisão 17): o título do lote — o `titulo_do_lote` do modelo, senão o
+   * título da frente (lote de uma) ou "N frentes". null = sem lote. A pílula precisa dele mesmo com a fala que abriu o
+   * lote fora da janela.
+   */
+  tituloDoLote?: string | null;
 };
 
 /** O que o `TrabalhosDto` ganha (ADR-099, I10): o dono de cada bot pedido (todos os da pessoa, ou o `agenteId`). */

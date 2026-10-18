@@ -24,13 +24,197 @@ export function trabalhoFinal(estado: EstadoTrabalho): boolean {
 }
 
 /**
- * definido em 2026-10-07: o título vem do que o bot ou a pessoa escreveu — a primeira linha, sem espaço repetido,
- * cortada em 80 caracteres com reticências (a faixa e a linha do chat têm uma linha só). Vazio vira "Trabalho".
+ * definido em 2026-10-07: a primeira linha não vazia, sem espaço repetido, cortada em 80 caracteres com reticências (a
+ * faixa e a linha do chat têm uma linha só). Vazio vira "Trabalho". É a regra do último passo e do nome da rotina; o
+ * título do trabalho é `tituloDoTrabalho`, que também recusa o que não tem letra.
  */
-export function tituloDoTrabalho(texto: string): string {
+export function linhaCurta(texto: string): string {
   const primeira = texto.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).find((l) => l !== "") ?? "";
   if (primeira === "") return "Trabalho";
-  return primeira.length > 80 ? `${primeira.slice(0, 79).trimEnd()}…` : primeira;
+  return primeira.length > 80 ? `${cortar(primeira, 79).trimEnd()}…` : primeira;
+}
+
+/**
+ * Os primeiros `n` caracteres (unidades UTF-16) sem partir um par substituto: a letra fora do plano básico ("𝐀", o CJK
+ * da extensão B) cortada ao meio deixava meia letra no título, que o UTF-8 do Postgres e do JSON trocam por "�".
+ * definido em 2026-10-18 (revisão do PR 5).
+ */
+function cortar(texto: string, n: number): string {
+  if (texto.length <= n) return texto;
+  const ultimo = texto.charCodeAt(n - 1);
+  return texto.slice(0, ultimo >= 0xd800 && ultimo <= 0xdbff ? n - 1 : n);
+}
+
+const TEM_LETRA = /\p{L}/u;
+
+// definido em 2026-10-18 (revisão do PR 5): caractere de controle (o NUL que o Postgres recusa em `text` e em `jsonb`, o que
+// derrubava o `abrir_frentes` inteiro) vira espaço, menos a quebra de linha; o invisível de formatação (inversão de
+// direção U+202E, espaço de largura zero) e o preenchimento do hangul, que conta como letra e dava um título em branco,
+// saem. O ZWJ fica: une as sequências de emoji.
+const CONTROLE = /[\p{Cc}]/gu;
+const INVISIVEL = /[\p{Cf}\u115F\u1160\u3164\uFFA0]/gu;
+function semInvisiveis(texto: string): string {
+  return texto.replace(CONTROLE, (c) => (c === "\n" ? "\n" : " ")).replace(INVISIVEL, (c) => (c === "\u200D" ? c : ""));
+}
+
+/**
+ * O título do trabalho: a `linhaCurta` do que o bot ou a pessoa escreveu. revisto em 2026-10-18 (plano chat limpo, PR 5):
+ * título sem letra ("??", "...", só emoji) cai no reserva — o "??" que o modelo mandou (o `minLength 1` aceita) virava a
+ * linha da frente.
+ */
+export function tituloDoTrabalho(texto: string, reserva = "Trabalho"): string {
+  return tituloOuNada(texto) ?? reserva;
+}
+
+/** A regra de `tituloDoTrabalho` sem o reserva: null quando o texto não tem letra (o título do lote é opcional). */
+export function tituloOuNada(texto: string): string | null {
+  const visivel = semInvisiveis(texto);
+  const linha = linhaCurta(visivel);
+  return TEM_LETRA.test(linha) && visivel.trim() !== "" ? linha : null;
+}
+
+/** definido em 2026-10-18 (plano chat limpo, PR 5): o título provisório tem até 6 palavras e 40 caracteres. */
+export const PALAVRAS_TITULO_PROVISORIO = 6;
+export const CARACTERES_TITULO_PROVISORIO = 40;
+/** O reserva do título provisório, quando a mensagem não tem letra (só link, emoji, "??" ou nada). */
+export const TITULO_PROVISORIO_RESERVA = "Frente da conversa";
+
+// A saudação do começo ("Oi", "Bom dia", "E aí", "Tudo bem?"), com o vocativo curto que vem depois ("Oi Nina,").
+// revisto em 2026-10-18 (QA do PR 5): também a do espanhol ("Hola, ¿puedes arreglar…" dava "Hola, ¿puedes arreglar el
+// login"), com o "¿"/"¡" de abertura, que sai como a outra pontuação.
+const SAUDACAO = /^(oi+|h?ol[aá]|opa|e a[ií]|eai|fala|salve|hey|hi|hello|bom dia|boa tarde|boa noite|buenos d[ií]as|buenas tardes|buenas noches|buenas|tudo (?:bem|bom|certo|joia|jóia)|beleza|blz)(?=[\s,.!?;:…¡¿]|$)[\s,.!?;:…¡¿]*/iu;
+// revisto em 2026-10-18 (revisão do PR 5): "fala", "salve" e "hello" também são verbo ou palavra do pedido ("Salve o
+// arquivo em PDF", "Fala sobre o projeto", "Hello world em Rust"): só são saudação seguidas de pontuação, do fim ou de um
+// vocativo ("Fala Nina, …"). E o vocativo não começa por palavra de ligação ("Oi, as planilhas, …" não perde "as planilhas").
+const SAUDACAO_AMBIGUA = new Set(["fala", "salve", "hello"]);
+const VOCATIVO = /^(?:@?([\p{L}\p{N}_-]+)(?:\s+[\p{L}\p{N}_-]+)?)\s*[,!]+\s*/u;
+const LINK = /\b(?:https?:\/\/|www\.)\S+/giu;
+// O que sobra do link em markdown ("[veja aqui](" depois que o link saiu) vira espaço; a ênfase ("**Urgente**",
+// "`deploy`") só sai.
+const RESTO_DE_LINK = /\]\(|[[\]]/gu;
+const ENFASE = /[*`]+/gu;
+// Fim de oração: ponto, exclamação, interrogação, reticências, ponto e vírgula ou dois-pontos seguidos de espaço (ou no
+// fim), a pontuação de largura cheia do chinês e do japonês (sem espaço depois) e a quebra de linha. "v1.2" e "12:30" não
+// cortam.
+const FIM_DE_ORACAO = /[.!?…;:](?=\s|$)|[。！？；：]|\n/gu;
+// A pontuação do fim sai por laço (`semPontuacaoNoFim`), não por /[…]+$/: com a âncora no fim o regex é quadrático numa
+// sequência longa de pontuação no meio do texto (medido em 2026-10-18 na guarda do teste: razão 16 com a entrada 4x).
+const PONTUACAO = /[\s.,;:!?¡¿…\-–—"'“”‘’()[\]*_`。！？；：，、「」『』（）]/u;
+const PONTUACAO_INICIAL = /^[\s.,;:!?¡¿…\-–—"'“”‘’()[\]*_`#>。！？；：，、「」『』（）]+/u;
+// Palavra de ligação que não fecha título ("Refazer os roteiros de" → "Refazer os roteiros"); as do espanhol e do inglês
+// entram desde a revisão do PR 5 (2026-10-18: "arregla el login y" acabava no "y").
+const LIGACAO = new Set([
+  "a", "o", "as", "os", "ao", "aos", "de", "da", "do", "das", "dos", "e", "ou", "em", "no", "na", "nos", "nas", "para", "pra", "pro", "com", "por", "pelo", "pela", "que", "um", "uma", "se", "mas",
+  "y", "el", "la", "los", "las", "del", "al", "con", "en", "and", "the", "of", "to", "an", "for", "with", "or", "in", "on",
+]);
+
+// Emoji (com o seletor de variação e o ZWJ das sequências) sai do título: não é palavra.
+// revisto em 2026-10-18 (revisão do PR 5): também o tom de pele, as bandeiras (indicadores regionais) e as tags
+// ("👍🏽 refazer" deixava "🏽 refazer").
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]|\p{Emoji_Modifier}|\p{Regional_Indicator}|[\u{E0020}-\u{E007F}]/gu;
+
+function semPontuacaoNoFim(texto: string): string {
+  let fim = texto.length;
+  while (fim > 0 && PONTUACAO.test(texto.charAt(fim - 1))) fim--;
+  return texto.slice(0, fim);
+}
+
+/** Espaço junto e sem pontuação nas pontas. */
+function aparar(texto: string): string {
+  return semPontuacaoNoFim(texto.replace(/\s+/g, " ").replace(PONTUACAO_INICIAL, ""));
+}
+
+function semSaudacao(texto: string): string {
+  let t = texto.replace(PONTUACAO_INICIAL, "");
+  for (let i = 0; i < 3; i++) {
+    const m = SAUDACAO.exec(t);
+    if (!m) break;
+    const resto = t.slice(m[0].length);
+    const v = VOCATIVO.exec(resto);
+    const vocativo = v && !LIGACAO.has((v[1] ?? "").toLowerCase()) ? v[0] : null;
+    // "Salve o arquivo": sem pontuação depois, sem vocativo e com mais texto, é o pedido, não a saudação.
+    if (SAUDACAO_AMBIGUA.has((m[1] ?? "").toLowerCase()) && !/[,.!?;:…]/u.test(m[0]) && resto.trim() !== "" && vocativo === null) break;
+    t = (vocativo ? resto.slice(vocativo.length) : resto).replace(PONTUACAO_INICIAL, "");
+  }
+  return t;
+}
+
+/**
+ * As linhas que dizem o pedido: sem as de dentro de um bloco de código (```) e sem as citadas ("> …"), salvo quando só há
+ * citação (ou só código). definido em 2026-10-18 (revisão do PR 5): "```ts" virava o título "Ts" e a citação tomava o lugar do pedido.
+ */
+function linhasDoPedido(texto: string): string[] {
+  const proprias: string[] = [];
+  const citadas: string[] = [];
+  const codigo: string[] = [];
+  let noCodigo = false;
+  for (const bruta of texto.split("\n")) {
+    const l = bruta.trim();
+    // A cerca abre ou fecha o bloco; "```npm test``` falhou" (fechada na mesma linha) é texto.
+    if (l.startsWith("```") && !l.includes("```", 3)) {
+      noCodigo = !noCodigo;
+      continue;
+    }
+    if (l === "") continue;
+    (noCodigo ? codigo : l.startsWith(">") ? citadas : proprias).push(l);
+  }
+  return proprias.length > 0 ? proprias : citadas.length > 0 ? citadas : codigo;
+}
+
+/**
+ * A primeira oração com letra. Oração sem letra ("??") é pulada; o rótulo curto antes de dois-pontos ("Bug: o login
+ * quebra", "Pedido: refazer o hero") fica com o que vem depois — uma vez só, para o laço seguir linear. revisto em
+ * 2026-10-18 (revisão do PR 5): antes, "Bug: …" dava o título "Bug", e o "??\nFaz o deploy. Depois…" pegava a mensagem
+ * inteira.
+ */
+function primeiraOracao(corpo: string): string {
+  FIM_DE_ORACAO.lastIndex = 0;
+  let inicio = 0;
+  let rotulo = true;
+  for (;;) {
+    const m = FIM_DE_ORACAO.exec(corpo);
+    const ate = m ? m.index : corpo.length;
+    const oracao = aparar(corpo.slice(inicio, ate));
+    const ehRotulo = rotulo && m !== null && (m[0] === ":" || m[0] === "：") && TEM_LETRA.test(oracao) && oracao.split(" ").length < 3;
+    if (ehRotulo) rotulo = false;
+    else if (TEM_LETRA.test(oracao) || !m) return oracao;
+    else inicio = ate + m[0].length;
+  }
+}
+
+/**
+ * O título provisório da frente que nasce da rede de 2 min (definido em 2026-10-18, plano chat limpo, PR 5): a frente da
+ * rede é o turno do dono promovido, e o título vinha da mensagem crua da pessoa ("Os resultados estão ficando muito
+ * bons, mas…", até 80 caracteres). Agora: sem links, código, citação e a saudação do começo, a primeira oração com letra,
+ * até 6 palavras e 40 caracteres, sem palavra de ligação nem pontuação no fim, com a primeira letra maiúscula. Sem letra,
+ * "Frente da conversa". Fica o provisório até o fim: nenhum modelo renomeia a frente da rede (decisão 16 do plano).
+ */
+/**
+ * O pedido que o "Abrir task com isto" da fala manda (`textoAbrirTask` em web/telas/acoes-da-fala.ts, ADR-113):
+ * "Abre uma task com isto: «começo da fala…»". definido em 2026-10-18 (rebase do PR 5 sobre o #392): o título sai do
+ * assunto citado; sem isso, a primeira oração dava "Abre uma task com isto".
+ */
+const PEDIDO_TASK_DA_FALA = /^Abre uma task com isto: «([^»]+)»$/u;
+
+export function tituloProvisorio(texto: string): string {
+  texto = PEDIDO_TASK_DA_FALA.exec(texto.trim())?.[1] ?? texto;
+  const limpo = linhasDoPedido(semInvisiveis(texto).replace(LINK, " ").replace(EMOJI, " ")).join("\n").replace(RESTO_DE_LINK, " ").replace(ENFASE, "");
+  const corpo = semSaudacao(limpo);
+  const frase = primeiraOracao(corpo);
+  if (!TEM_LETRA.test(frase)) return TITULO_PROVISORIO_RESERVA;
+  // A vírgula fecha a oração quando o que vem antes já diz algo (3 palavras ou mais): "Faz o deploy, depois roda os
+  // testes" → "Faz o deploy". Antes disso ela é vocativo ou aposto e fica ("Hoje, refaça os roteiros").
+  const virgula = frase.indexOf(", ");
+  const base = virgula > 0 && frase.slice(0, virgula).split(" ").length >= 3 ? frase.slice(0, virgula) : frase;
+  const palavras = base.split(" ").slice(0, PALAVRAS_TITULO_PROVISORIO);
+  while (palavras.length > 1 && palavras.join(" ").length > CARACTERES_TITULO_PROVISORIO) palavras.pop();
+  while (palavras.length > 1 && LIGACAO.has(semPontuacaoNoFim(palavras.at(-1)!.toLowerCase()))) palavras.pop();
+  let titulo = semPontuacaoNoFim(palavras.join(" "));
+  if (titulo.length > CARACTERES_TITULO_PROVISORIO) titulo = semPontuacaoNoFim(cortar(titulo, CARACTERES_TITULO_PROVISORIO));
+  if (!TEM_LETRA.test(titulo)) return TITULO_PROVISORIO_RESERVA;
+  // "ß" e "ﬁ" viram duas letras na maiúscula e passariam dos 40: ficam como estão.
+  const inicial = titulo.charAt(0).toLocaleUpperCase("pt-BR");
+  return (inicial.length === 1 ? inicial : titulo.charAt(0)) + titulo.slice(1);
 }
 
 /**

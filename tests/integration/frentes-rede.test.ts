@@ -50,6 +50,7 @@ async function montar(trx: Trx, harness: IdHarness) {
 describeIntegracao("a rede de 2 min promove a frente, com ou sem bifurcar (ADR-099, I8)", () => {
   // QA do PR 392 (2026-10-18, ADR-113 §8): o "Abrir task com isto" vai como mensagem comum citando a fala; quando a rede
   // promove esse turno, o título sai do texto da pessoa sem o prefixo da citação. Só com o pedido, saía "Abre uma task com isto.".
+  // Revisto no rebase do PR 5 (título curto): o título provisório sai do assunto citado.
   it("o turno do 'Abrir task com isto' promovido vira frente com o assunto da fala no título", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx, "codex-cli");
@@ -57,24 +58,28 @@ describeIntegracao("a rede de 2 min promove a frente, com ou sem bifurcar (ADR-0
       const vivo = await m.turno({ texto: comCitacao(textoAbrirTask({ texto: falaCitada }), trechoDaCitacao(falaCitada)) });
       await m.despachar(vivo.id);
       const frente = (await m.promover(vivo.id, { sessaoCli: null, maquinaBifurca: false })).data.trabalho!;
-      expect(frente.titulo).toBe("Abre uma task com isto: «O deploy de ontem quebrou o login do app quando a…»");
+      expect(frente.titulo).toBe("O deploy de ontem quebrou");
     });
   });
 
   it("Codex (sem retomar sessão): promove a frente num lote aberto pelo próprio turno; a próxima fala da pessoa sai sem sessão e com o histórico", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx, "codex-cli");
-      await m.falaDaPessoa("levante os números do trimestre");
-      const vivo = await m.turno();
+      // Plano chat limpo (PR 5): o título deixa de ser a mensagem crua (cortada em 80) e vira o provisório.
+      const pedido = "Oi Ada, os resultados estão ficando muito bons, mas preciso que você levante os números do trimestre e compare com o ano passado";
+      await m.falaDaPessoa(pedido);
+      const vivo = await m.turno({ texto: pedido });
       const p = await m.despachar(vivo.id);
       expect(p.harness).toBe("codex-cli");
       expect(p.entrada.sessaoCli).toBeNull();
 
       const r = await m.promover(vivo.id, { sessaoCli: null, maquinaBifurca: false });
       const frente = r.data.trabalho!;
-      expect(frente).toMatchObject({ origem: "rede", forma: "frente", estado: "rodando", sessaoCli: null, titulo: "levante os números do trimestre" });
+      expect(frente).toMatchObject({ origem: "rede", forma: "frente", estado: "rodando", sessaoCli: null, titulo: "Os resultados estão ficando muito bons" });
+      expect(frente.titulo).not.toBe(pedido);
       expect(frente.loteId).toBeTruthy();
-      expect(await m.repos.frentes.buscarLote(frente.loteId!)).toMatchObject({ abertoPorTurnoId: vivo.id, trabalhoId: null, avisarACadaUma: false });
+      // O lote da rede não tem título (sem `nomear_frente`): a tela usa o título da frente.
+      expect(await m.repos.frentes.buscarLote(frente.loteId!)).toMatchObject({ abertoPorTurnoId: vivo.id, trabalhoId: null, avisarACadaUma: false, titulo: null });
       expect((await m.repos.turnos.buscar(vivo.id))?.trabalhoId).toBe(frente.id);
       // A linha na conversa do dono: "Virou a frente".
       const linha = (await m.repos.mensagens.listarDaConversa(m.conversaId, 50)).find((x) => x.payload?.kind === "trabalho_aberto");
@@ -157,8 +162,22 @@ describeIntegracao("a rede de 2 min promove a frente, com ou sem bifurcar (ADR-0
 
       expect((await m.promover(retomada.id, { sessaoCli: null, maquinaBifurca: false, modo: "rotina" })).data.trabalho).toBeNull();
       const frente = (await m.promover(retomada.id, { sessaoCli: null, maquinaBifurca: false })).data.trabalho!;
-      expect(frente).toMatchObject({ forma: "frente", origem: "rede", titulo: "revise o contrato da Acme" });
+      // O provisório sai da raiz da cadeia (o que a pessoa pediu), nunca da entrada "[nod] …" da retomada.
+      expect(frente).toMatchObject({ forma: "frente", origem: "rede", titulo: "Revise o contrato da Acme" });
       expect(await m.repos.frentes.buscarLote(frente.loteId!)).toMatchObject({ abertoPorTurnoId: retomada.id });
+    });
+  });
+
+  it("mensagem só com link, só com emoji ou vazia: a frente da rede vira 'Frente da conversa' (plano chat limpo, PR 5)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      // Um bot por mensagem: a conversa tem um turno do dono despachando por vez.
+      for (const texto of ["https://github.com/gamefik/nod/pull/391", "🎉🎉", ""]) {
+        const m = await montar(trx, "codex-cli");
+        const vivo = await m.turno({ texto });
+        await m.despachar(vivo.id);
+        const frente = (await m.promover(vivo.id, { sessaoCli: null, maquinaBifurca: false })).data.trabalho!;
+        expect(frente).toMatchObject({ forma: "frente", origem: "rede", titulo: "Frente da conversa" });
+      }
     });
   });
 

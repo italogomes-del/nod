@@ -5,7 +5,7 @@ import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { autoriaAgente, autoriaPessoa } from "../../src/use-cases/autoria-evento.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente } from "../../src/use-cases/frentes.ts";
-import { marcarParado, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
+import { marcarParado, sincronizarTrabalho, trabalhosParaDto } from "../../src/use-cases/trabalhos.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -79,6 +79,76 @@ describeIntegracao("frentes: abrir em lote e devolver o resumo (ADR-099, I2)", (
       expect((await abrirFrentes(m.deps, { ...m.ctx(daFrente.id), frentes: [{ titulo: "x", pedido: "x" }] })).data).toMatchObject({ ok: false, erro: "nao_abre_frente" });
       expect((await abrirTask(m.deps, { ...m.ctx(daFrente.id), titulo: "x", pedido: "x" })).data).toMatchObject({ ok: false, erro: "nao_abre_task" });
       expect((await abrirFrentes(m.deps, { ...m.ctx(dono!.id), frentes: [] })).data).toMatchObject({ ok: false, erro: "sem_frentes" });
+    });
+  });
+
+  it("titulo_do_lote (plano chat limpo, PR 5): gravado no lote e no payload; sem ele, 'N frentes' ou o título da frente", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dto = async (trabalhoId: string) => (await trabalhosParaDto(m.deps, [(await m.repos.trabalhos.buscar(trabalhoId))!]))[0]!;
+      const payloadDo = async (loteId: string) => (await m.repos.mensagens.listarDaConversa(m.conversaId)).find((x) => x.payload?.kind === "frentes_abertas" && x.payload.loteId === loteId)?.payload;
+
+      // Com título: espaço junto, gravado no lote, no payload e no DTO de cada frente.
+      const com = await abrirFrentes(m.deps, { ...m.ctx((await m.turno())!.id), frentes: TRES, titulo_do_lote: "  frentes   de release " });
+      if (!com.data.ok) throw new Error(com.data.instrucao);
+      expect((await m.repos.frentes.buscarLote(com.data.lote_id))?.titulo).toBe("frentes de release");
+      expect(await payloadDo(com.data.lote_id)).toMatchObject({ kind: "frentes_abertas", tituloDoLote: "frentes de release" });
+      expect(await dto(com.data.frentes[1]!.trabalho_id)).toMatchObject({ tituloDoLote: "frentes de release", lote: { id: com.data.lote_id, frentes: 3 } });
+
+      // Sem título (ou vazio, ou "??"): o lote fica null e a tela diz "N frentes".
+      for (const titulo_do_lote of [undefined, "", "??"]) {
+        const sem = await abrirFrentes(m.deps, { ...m.ctx((await m.turno())!.id), frentes: TRES.slice(0, 2), ...(titulo_do_lote === undefined ? {} : { titulo_do_lote }) });
+        if (!sem.data.ok) throw new Error(sem.data.instrucao);
+        expect((await m.repos.frentes.buscarLote(sem.data.lote_id))?.titulo).toBeNull();
+        expect(await payloadDo(sem.data.lote_id)).toMatchObject({ tituloDoLote: "2 frentes" });
+        expect((await dto(sem.data.frentes[0]!.trabalho_id)).tituloDoLote).toBe("2 frentes");
+      }
+
+      // Uma frente só, sem título: o do lote é o da frente. O sinônimo abrir_task também.
+      const uma = await abrirFrentes(m.deps, { ...m.ctx((await m.turno())!.id), frentes: [TRES[2]!] });
+      if (!uma.data.ok) throw new Error(uma.data.instrucao);
+      expect(await payloadDo(uma.data.lote_id)).toMatchObject({ tituloDoLote: "Notas da versão" });
+      expect((await dto(uma.data.frentes[0]!.trabalho_id)).tituloDoLote).toBe("Notas da versão");
+      const task = await abrirTask(m.deps, { ...m.ctx((await m.turno())!.id), titulo: "Changelog", pedido: "Escreva o changelog." });
+      if (!task.data.ok) throw new Error(task.data.instrucao);
+      expect((await dto(task.data.trabalho_id)).tituloDoLote).toBe("Changelog");
+    });
+  });
+
+  it("a abertura não falha com títulos longos (o teto continua 200): a frente fica com a linha curta e o lote, idem", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const longo = `Refazer os roteiros de animação do hero com o tom novo ${"e mais detalhes ".repeat(12)}`.slice(0, 200);
+      expect(longo.length).toBe(200);
+      const r = await abrirFrentes(m.deps, { ...m.ctx((await m.turno())!.id), frentes: [{ titulo: longo, pedido: "Refaça os roteiros." }, { titulo: "??", pedido: "Revise." }], titulo_do_lote: longo });
+      if (!r.data.ok) throw new Error(`deveria abrir: ${r.data.instrucao}`);
+      const [primeira, semLetra] = r.data.frentes;
+      expect(primeira!.titulo).toHaveLength(80);
+      expect(primeira!.titulo.endsWith("…")).toBe(true);
+      // Título sem letra ("??") cai no reserva da frente.
+      expect(semLetra!.titulo).toBe("Trabalho");
+      expect((await m.repos.frentes.buscarLote(r.data.lote_id))?.titulo).toBe(primeira!.titulo);
+
+      // Revisão do PR 5: o NUL que o modelo mande no título ou no titulo_do_lote não derruba a chamada (o Postgres o recusa
+      // em text e em jsonb); vira espaço.
+      const nul = await abrirFrentes(m.deps, { ...m.ctx((await m.turno())!.id), frentes: [{ titulo: "Roteiros\u0000novos", pedido: "Refaça." }], titulo_do_lote: "frentes\u0000de hero" });
+      if (!nul.data.ok) throw new Error(`deveria abrir: ${nul.data.instrucao}`);
+      expect(nul.data.frentes[0]!.titulo).toBe("Roteiros novos");
+      expect((await m.repos.frentes.buscarLote(nul.data.lote_id))?.titulo).toBe("frentes de hero");
+    });
+  });
+
+  it("o CHECK lote_titulo da 0092: nulo ou de 1 a 200 caracteres", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = (await m.turno())!;
+      const inserir = (titulo: string | null) =>
+        trx.savepoint((sp) => sp`insert into lotes_de_frentes (tenant_id, owner_id, agente_id, aberto_por_turno_id, titulo)
+          values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${m.agenteId}, ${dono.id}, ${titulo}) returning titulo`);
+      await expect(inserir(null)).resolves.toEqual([{ titulo: null }]);
+      await expect(inserir("x".repeat(200))).resolves.toHaveLength(1);
+      await expect(inserir("")).rejects.toMatchObject({ code: "23514", constraint_name: "lote_titulo" });
+      await expect(inserir("x".repeat(201))).rejects.toMatchObject({ code: "23514", constraint_name: "lote_titulo" });
     });
   });
 

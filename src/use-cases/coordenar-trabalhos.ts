@@ -6,7 +6,7 @@ import type { Turno } from "../contracts/turno.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { molduraDaFrente, semLinhaDeEmpurrar, seguimentoNaRede } from "../domain/frente.ts";
-import { promoveNaRede, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
+import { promoveNaRede, tituloProvisorio, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import { ehUuid } from "./apoio-l7.ts";
 import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -306,7 +306,10 @@ export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; 
   const segue = seguimentoNaRede(capacidades, input.maquinaBifurca === true);
   // A retomada (uma decisão respondida, a resposta de um colega) tem entrada do nod: o título vem do que a pessoa pediu.
   // ADR-113: a fala que respondeu a outra tem "(respondendo a: «…»)" na entrada; o título é só o que a pessoa escreveu.
-  const titulo = semCitacao(turno.origem === "retomada" ? ((await deps.repos.turnos.raizDaCadeia(turno.id))?.entradaTexto ?? turno.entradaTexto) : turno.entradaTexto);
+  // revisto em 2026-10-18 (plano chat limpo, PR 5): o título é o provisório (até 6 palavras e 40 caracteres, sem
+  // saudação), não a mensagem crua cortada em 80; fica assim até o fim (sem `nomear_frente`, decisão 16 do plano).
+  const pedido = turno.origem === "retomada" ? ((await deps.repos.turnos.raizDaCadeia(turno.id))?.entradaTexto ?? turno.entradaTexto) : turno.entradaTexto;
+  const titulo = tituloProvisorio(semCitacao(pedido));
   const lote = await deps.repos.frentes.criarLote({ agenteId: turno.agenteId, abertoPorTurnoId: turno.id, trabalhoId: null, avisarACadaUma: false });
   if (!lote) throw new ErroDeDominio("estado_invalido", { cause: "lote da rede não criado" });
   const { trabalho, events } = await criarTrabalho(deps, {

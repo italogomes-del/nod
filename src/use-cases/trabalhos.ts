@@ -18,7 +18,8 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
-import { estadoDoTrabalho, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
+import { tituloDoLote } from "../domain/frente.ts";
+import { estadoDoTrabalho, linhaCurta, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { colegaComCota } from "./cota-do-colega.ts";
@@ -190,9 +191,9 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
     return {
       ...publico,
       pedidoPorNome: e?.pedidoPorNome ?? null,
-      rotinaNome: e?.rotinaNome ? tituloDoTrabalho(e.rotinaNome) : null,
+      rotinaNome: e?.rotinaNome ? linhaCurta(e.rotinaNome) : null,
       // O nome da última ferramenta do turno vivo (o processo sabe) ganha da última fala, que pode ser de minutos atrás.
-      ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? tituloDoTrabalho(e.ultimaFala) : null),
+      ultimoPasso: (vivo ? deps.services.trabalhosVivos?.ultimaFerramenta(vivo) : null) ?? (e?.ultimaFala ? linhaCurta(e.ultimaFala) : null),
       turnoVivoId: vivo,
       // revisto em 2026-10-08 (ADR-085): a memória é a do processo vivo. Sem turno vivo (esperando você, um colega ou a
       // vez na fila) não há processo, e a última leitura gravada fazia "Todos os trabalhos" somar vários GB que o Mac
@@ -206,6 +207,7 @@ export async function trabalhosParaDto(deps: Pick<Deps, "repos" | "services" | "
       esperandoComando: e?.esperandoComando ?? null,
       acordaMotivo: e?.acordaMotivo ?? null,
       lote: e?.lote ?? null,
+      tituloDoLote: e?.lote ? tituloDoLote(e.loteTitulo ?? null, e.lote.frentes, t.titulo) : null,
       esperandoComputadorDe: (e?.turnosAbertos ?? []).map((id) => deps.services.computadores?.esperandoPor?.(id) ?? null).find((x) => x !== null) ?? null,
       // definido em 2026-10-15 (NOD-277): só quando espera a cota — a task sem espera segue sem o campo.
       ...(esperasDaCota.has(t.id) ? { esperaDaConta: esperasDaCota.get(t.id)! } : {}),

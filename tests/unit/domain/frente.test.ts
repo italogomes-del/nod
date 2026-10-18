@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { BRANCH_NA_FRENTE_ATUAL, branchDaFrente, CORTE_DA_ULTIMA_FALA, DONO_INTEGRA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, semLinhaDeEmpurrar, textoFrentesAbertas } from "../../../src/domain/frente.ts";
+import { BRANCH_NA_FRENTE_ATUAL, branchDaFrente, CORTE_DA_ULTIMA_FALA, DONO_INTEGRA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, semLinhaDeEmpurrar, textoFrentesAbertas, tituloDoLote } from "../../../src/domain/frente.ts";
 import { errosDoSchema } from "../../../src/domain/schema-args.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
@@ -75,6 +75,13 @@ describe("regras puras das frentes (ADR-099, I2)", () => {
     expect(ehFrente({ forma: "task" })).toBe(false);
     expect(ehFrente({})).toBe(false);
     expect(ehFrente(null)).toBe(false);
+  });
+
+  it("o título do lote (plano chat limpo, PR 5): o do modelo; sem ele, a frente (uma) ou 'N frentes'", () => {
+    expect(tituloDoLote("frentes de hero", 5, "Hero da home")).toBe("frentes de hero");
+    expect(tituloDoLote(null, 1, "Roteiros de animação")).toBe("Roteiros de animação");
+    expect(tituloDoLote(null, 3, "Login no Safari")).toBe("3 frentes");
+    expect(tituloDoLote("frentes de hero", 1, "Hero da home")).toBe("frentes de hero");
   });
 
   it("a linha do lote: uma frente pelo nome, várias pela contagem e a lista", () => {

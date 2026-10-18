@@ -2919,7 +2919,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       const semDonoLote = ({ tenantId: _t, ownerId: _d, ...l }: LoteDeFrentes & { tenantId: string; ownerId: string }): LoteDeFrentes => ({ ...l });
       return {
         async criarLote(n: NovoLote) {
-          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null };
+          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, titulo: n.titulo ?? null, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null };
           b.lotes.push(linha);
           return semDonoLote(linha);
         },

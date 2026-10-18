@@ -8,23 +8,23 @@
     "volatil": 1178
   },
   "conversa-automatico": {
-    "estavel": 16083,
+    "estavel": 16162,
     "volatil": 1099
   },
   "conversa-calibracao": {
-    "estavel": 15415,
+    "estavel": 15494,
     "volatil": 1099
   },
   "conversa-manual": {
-    "estavel": 15033,
+    "estavel": 15112,
     "volatil": 1099
   },
   "conversa-total": {
-    "estavel": 15822,
+    "estavel": 15901,
     "volatil": 1099
   },
   "conversa-whatsapp": {
-    "estavel": 15223,
+    "estavel": 15302,
     "volatil": 1099
   },
   "criacao-de-bot": {
@@ -40,11 +40,11 @@
     "volatil": 0
   },
   "rotina-com-inventario": {
-    "estavel": 8664,
+    "estavel": 8676,
     "volatil": 1590
   },
   "segundo-turno": {
-    "estavel": 15822,
+    "estavel": 15901,
     "volatil": 455
   },
   "sem-terminal-computador-fora": {

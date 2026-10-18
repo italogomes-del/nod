@@ -138,6 +138,8 @@ export type ExtrasTrabalho = {
   acordaMotivo?: string | null;
   /** ADR-099 (I10): o lote da frente; null = sem lote. */
   lote?: LoteNaTela | null;
+  /** Plano chat limpo (PR 5, 0092): o `titulo_do_lote` gravado; null = sem lote ou o modelo não mandou. */
+  loteTitulo?: string | null;
 };
 
 /**
@@ -447,7 +449,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         maquina_viva_id: string | null; maquina_alvo_id: string | null; pendente_harness: string | null; pendente_modelo: string | null;
         colega_nome: string | null; colega_desde: Date | null; colega_trabalho_id: string | null; colega_tarefa_id?: string | null; trabalhou_ms: string | number | null; acorda_em: Date | null;
         espera_motivo: string | null; espera_desde: Date | null; acorda_motivo: string | null;
-        lote_id: string | null; lote_criado_em: Date | null; lote_frentes: number | null; lote_abertas: number | null;
+        lote_id: string | null; lote_criado_em: Date | null; lote_frentes: number | null; lote_abertas: number | null; lote_titulo: string | null;
       }[]>`
         select w.id, a.nome as pedido_por_nome, r.instrucao as rotina_instrucao, f.texto as ultima_fala, v.id as turno_vivo_id,
           v.machine_id as maquina_viva_id, case when pe.tem then pe.alvo else bt.alvo end as maquina_alvo_id,
@@ -461,7 +463,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
           ab.abertos, ab.acorda_em, es.motivo as espera_motivo, es.criado_em as espera_desde, am.motivo as acorda_motivo,
-          lt.id as lote_id, lt.criado_em as lote_criado_em, lt.frentes as lote_frentes, lt.abertas as lote_abertas
+          lt.id as lote_id, lt.criado_em as lote_criado_em, lt.frentes as lote_frentes, lt.abertas as lote_abertas, lt.titulo as lote_titulo
         from trabalhos w
         left join agentes a on a.tenant_id = w.tenant_id and a.id = w.pedido_por_agente_id
         left join rotinas r on r.tenant_id = w.tenant_id and r.id = w.rotina_id
@@ -515,11 +517,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         ) am on true
         -- ADR-099 (I10): o lote (o pedido) da frente — quando o dono o abriu e quantas frentes dele seguem abertas.
         left join lateral (
-          select l.id, l.criado_em, count(o.id)::int as frentes,
+          select l.id, l.criado_em, l.titulo, count(o.id)::int as frentes,
             (count(o.id) filter (where o.estado in ('na_fila', 'rodando', 'precisa_de_voce', 'fechado_ocioso')))::int as abertas
           from lotes_de_frentes l join trabalhos o on o.tenant_id = l.tenant_id and o.lote_id = l.id
           where l.tenant_id = w.tenant_id and l.id = w.lote_id
-          group by l.id, l.criado_em
+          group by l.id, l.criado_em, l.titulo
         ) lt on true
         where w.tenant_id = ${escopo.tenantId} and w.id = any(${[...ids]}::uuid[])`;
       return new Map(
@@ -541,6 +543,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             pendente: l.pendente_harness !== null && l.pendente_modelo !== null ? { harness: l.pendente_harness, modelo: l.pendente_modelo } : null,
             acordaMotivo: l.acorda_motivo,
             lote: l.lote_id && l.lote_criado_em ? { id: l.lote_id, abertoEm: ms(l.lote_criado_em), frentes: l.lote_frentes ?? 0, abertas: l.lote_abertas ?? 0 } : null,
+            loteTitulo: l.lote_titulo,
           },
         ]),
       );

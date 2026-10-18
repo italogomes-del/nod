@@ -169,7 +169,7 @@ describeIntegracao("revisão #188 pela ponte: a rede de 2 min", () => {
     m.avancar(2_000);
     await m.renovar(retomada);
     const promovido = await m.ler((r) => r.turnos.buscar(retomada));
-    expect(await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!))).toMatchObject({ forma: "frente", titulo: "revise o contrato" });
+    expect(await m.ler((r) => r.trabalhos.buscar(promovido!.trabalhoId!))).toMatchObject({ forma: "frente", titulo: "Revise o contrato" }); // o título provisório (plano chat limpo, PR 5)
   });
 
   it("S15: o turno que devia bifurcar e voltou recusado faz a conversa largar a sessão (o próximo plano sai em sessão nova, sem bifurcar)", async () => {

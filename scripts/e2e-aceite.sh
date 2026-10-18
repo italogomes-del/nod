@@ -44,6 +44,9 @@ command -v psql >/dev/null || { echo "psql é obrigatório"; exit 1; }
 [ -f .env ] || { echo "copie .env.example para .env"; exit 1; }
 set -a; . ./.env; set +a
 export NOD_EXECUTOR=claude-cli
+# Revisto em 2026-10-18 (QA do PR #393): a porta do .env vale para o servidor E para o curl; antes o API saía do
+# ambiente de antes do .env e, com NOD_API_PORT só no .env, o script falava com a 8888 enquanto o servidor ouvia outra.
+API="http://127.0.0.1:${NOD_API_PORT}"
 
 passo() { printf '\n== %s\n' "$*"; }
 ok() { printf '   ok: %s\n' "$*"; }
@@ -83,7 +86,9 @@ encerrar() {
 trap encerrar EXIT
 
 passo "PREPARO: compose, migrações, seed"
-npm run -s docker:up >/dev/null
+# Revisto em 2026-10-18 (QA do PR #393): com o banco efêmero (docs/ambiente-local-persistente.md) o compose principal
+# não sobe — numa worktree ele tentava criar outro `nod-postgres` e parava a rodada; quem migra e semeia é o efêmero.
+if [ "${NOD_BANCO_AMBIENTE:-}" != "efemero" ]; then npm run -s docker:up >/dev/null; fi
 npm run -s db:migrate >/dev/null
 npm run -s db:migrate:test >/dev/null
 npm run -s db:seed >/dev/null
@@ -148,6 +153,30 @@ R=$(api POST "conversas/$C/mensagens" '{"texto":"Em uma linha: qual preferência
 T2=$(echo "$R" | jq -r .ids.turno); E2=$(esperar_turno "$T2"); ok "turno 2 → $E2"
 [ "$(api GET "conversas/$C/mensagens" | jq -r .conversa.sessaoCli)" = "$S1" ] && ok "sessaoCli preservada (--resume)"
 api POST "agentes/$A/fixar" >/dev/null && api POST "agentes/$A/ocultar" '{"oculto":false}' >/dev/null && ok "Pin/Hide respondem"
+
+# Definido em 2026-10-18 (QA do PR #393, plano chat limpo PR 5): o título que o modelo dá às frentes com o pedido de
+# "2 a 5 palavras" e se ele manda o `titulo_do_lote`. O pedido não dita títulos; as frentes são paradas logo que abrem
+# (o que importa é a abertura, e cada frente rodando custaria um turno a mais).
+passo "FRENTES: abrir_frentes com título de 2 a 5 palavras e titulo_do_lote; as frentes param logo"
+# A conversa tem que estar parada: com a sessão viva (ADR-067) o pedido entra no turno que ainda roda (a retomada do perfil
+# confirmado) e o turno dele volta "interrompido · absorvido" — medido na 1ª rodada de 2026-10-18, o modelo nem viu o pedido.
+ociosa() { api GET "conversas/$C/mensagens" | jq -r 'if ([.turnosEmCurso[] | select(.trabalhoId == null)] | length) == 0 then "sim" else empty end'; }
+esperar "conversa sem turno do dono rodando" 240 ociosa >/dev/null || obs "a conversa não ficou parada em 240 s"
+R=$(api POST "conversas/$C/mensagens" '{"texto":"Os resultados estão ficando muito bons. Por hora podemos seguir com as 5 opções que você mandou, mas preciso de duas coisas longas e independentes: refazer os roteiros de animação do hero com mais calma, em 5 cenas, e escrever os textos da página de preços em português e em inglês. Use a ferramenta abrir_frentes para as duas, numa chamada só, e me diga em uma frase o que começou."}')
+TF=$(echo "$R" | jq -r .ids.turno); EF=$(esperar_turno "$TF" 240); ok "turno das frentes → $EF"
+LF=$(api GET "conversas/$C/mensagens" | jq -c '[.mensagens[] | select(.payload.kind=="frentes_abertas")][-1].payload // empty')
+if [ -n "$LF" ]; then
+  for W in $(echo "$LF" | jq -r '.frentes[].trabalhoId'); do api POST "trabalhos/$W/parar" >/dev/null || true; done
+  echo "$LF" | jq -r '.frentes[] | "   título: \"\(.titulo)\" (\(.titulo | split(" ") | length) palavras, \(.titulo | length) caracteres)"'
+  TL=$(echo "$LF" | jq -r '.tituloDoLote // empty')
+  [ -n "$TL" ] && ok "titulo do lote: \"$TL\"" || obs "a linha frentes_abertas saiu sem tituloDoLote"
+  echo "$LF" | jq -e '[.frentes[].titulo | split(" ") | length] | all(. <= 5)' >/dev/null && ok "todos os títulos com até 5 palavras" || obs "título com mais de 5 palavras: $(echo "$LF" | jq -c '[.frentes[].titulo]')"
+  TCOL=$(psql "$DATABASE_URL" -qAt -c "select set_config('nod.tenant_id','$T',false); select set_config('nod.pessoa_id','$P',false); select coalesce(titulo, '(null: o modelo não mandou titulo_do_lote)') from lotes_de_frentes where id = '$(echo "$LF" | jq -r .loteId)';" | tail -1)
+  echo "   lotes_de_frentes.titulo: $TCOL"
+  esperar "conversa parada depois das frentes" 240 ociosa >/dev/null || obs "a conversa não ficou parada depois das frentes"
+else
+  obs "o modelo não chamou abrir_frentes neste turno"
+fi
 
 passo "ROTINA POR TEXTO: criar_rotina → proposta + decisão 'rotina' em Sua vez; decidir ativa"
 R=$(api POST "conversas/$C/mensagens" '{"texto":"Use a ferramenta criar_rotina para propor: todo dia útil às 8:00 de America/Sao_Paulo (cron 0 8 * * 1-5) poste aqui um resumo dos PRs abertos; fonte: PRs abertos do time nod; entregável: resumo em tópicos; limites de aprovação: nada sai sem aprovação; se não houver dado, diga que não houve. Depois responda em uma linha."}')

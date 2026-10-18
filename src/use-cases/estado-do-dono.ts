@@ -2,7 +2,7 @@ import type { DonoDto, EsperaDoDonoDto, EstadoDoDono } from "../contracts/dono.t
 import { VOLTAS_SEM_NOVIDADE } from "../contracts/ferramentas-trabalho.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import { estadoDoDono, tentativaDaEspera, ultimaLinha } from "../domain/estado-do-dono.ts";
-import { tituloDoTrabalho, trabalhoAberto } from "../domain/trabalho.ts";
+import { linhaCurta, trabalhoAberto } from "../domain/trabalho.ts";
 import type { FatosCrusDosDonos } from "../repositories/donos.repo.ts";
 import type { Deps } from "./tipos.ts";
 
@@ -24,7 +24,7 @@ export async function donosDosBots(deps: DepsDono, agenteIds: readonly string[],
     const frentes = (abertos ?? (await deps.repos.trabalhos.abertosDoAgente(agenteId))).filter((t) => t.agenteId === agenteId && trabalhoAberto(t.estado));
     const minhas = esperas.filter((e) => e.agenteId === agenteId).map(({ agenteId: _a, ...e }) => e);
     // A rotina aparece pela primeira linha da instrução, como a etiqueta da task (`rotinaNome`).
-    const fila = crus.fila.filter((p) => p.agenteId === agenteId).map(({ agenteId: _a, ...p }) => (p.de === "rotina" && p.nome ? { ...p, nome: tituloDoTrabalho(p.nome) } : p));
+    const fila = crus.fila.filter((p) => p.agenteId === agenteId).map(({ agenteId: _a, ...p }) => (p.de === "rotina" && p.nome ? { ...p, nome: linhaCurta(p.nome) } : p));
     const estado = estadoDoDono({
       agenteId,
       frentes: frentes.map((t) => ({ id: t.id, estado: t.estado, vivo: crus.frentesVivas.has(t.id), iniciadoEm: t.iniciadoEm, criadoEm: t.criadoEm })),
