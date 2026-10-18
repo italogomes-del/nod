@@ -835,6 +835,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async pedidoDaTarefa(turnoId) {
         return doTenant(b.mensagens).filter((m) => m.turnoId === turnoId && m.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
+      async pedidosDeColega(turnoIds) {
+        const saida: Record<string, { agenteId: string; nome: string | null }> = {};
+        for (const id of turnoIds) {
+          const m = doTenant(b.mensagens).filter((x) => x.turnoId === id && x.payload?.kind === "peer_pedido").sort((x, y) => x.criadoEm - y.criadoEm)[0];
+          if (m?.payload?.kind === "peer_pedido") saida[id] = { agenteId: m.autoria.autor_id, nome: m.payload.nome ?? null };
+        }
+        return saida;
+      },
       async marcarParcial(id, parcial) {
         const m = doTenant(b.mensagens).find((x) => x.id === id);
         if (!m) return false;

@@ -3,7 +3,7 @@ import type { LoteDeFrentes } from "../contracts/frente.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ehFrente } from "../domain/frente.ts";
-import { decidirFecho, destinoDoLote, entradaDoRetorno, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
+import { decidirFecho, destinoDoLote, entradaDoRetorno, respostaAoColega, respostaNaTroca, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
 import { trabalhoFinal } from "../domain/trabalho.ts";
 import { entradaDoRetornoARefazer, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -98,7 +98,8 @@ async function devolverAoDono(deps: DepsFecho, p: { lote: LoteDeFrentes; abertoP
 
 /**
  * Lote de um pedido de colega (decisão 7): a resposta, montada dos resumos, vai a quem pediu pelo caminho de sempre
- * (entregarRespostaPeer, a continuação dele) e na conversa do dono fica só "Respondi ao pedido de X". O fio do pedido pode
+ * (entregarRespostaPeer, a continuação dele) e na conversa do dono fica o `pedido_respondido` com a resposta, que a web
+ * desenha dentro da troca agrupada (chat limpo, PR 3). O fio do pedido pode
  * ter aberto mais de um lote: a resposta sai uma vez, quando o último fecha, com as frentes de todos. Se a entrega ainda
  * não pode sair (falta a pessoa decidir algo no fio), o dono acorda com os resumos, e a fala dele entrega depois.
  */
@@ -126,14 +127,18 @@ async function responderAoColega(deps: DepsFecho, p: { lote: LoteDeFrentes; aber
   const quem = await deps.repos.agentes.buscar(r.data.remetenteAgenteId);
   const nome = quem?.nome ?? "um colega";
   const autoria = autoriaAgente({ agenteId: p.abertoPor.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
+  // revisto em 2026-10-18 (chat limpo, PR 3; emenda da ADR-099 item 8): a linha entra na troca agrupada como "Para X", com
+  // o texto entregue e o turno do pedido (a raiz da troca). A confiança é a da fala entregue (ADR-026): não confiável se
+  // uma frente do lote leu conteúdo de fora ou o turno que abriu o lote já estava marcado (a regra de devolverAoDono).
+  const deFora = frentes.some((f) => f.deFora) || (await deps.repos.turnos.contaminado(p.abertoPor.id));
   const m = await deps.repos.mensagens.criar({
     conversaId: p.abertoPor.conversaId,
     turnoId: null,
     autoria,
     kind: "sistema",
     texto: textoPedidoRespondido(nome),
-    payload: { kind: "pedido_respondido", loteId: p.lote.id, agenteId: r.data.remetenteAgenteId, nome },
-    confianca: "nao_confiavel",
+    payload: { kind: "pedido_respondido", loteId: p.lote.id, agenteId: r.data.remetenteAgenteId, nome, resposta: respostaNaTroca(r.data.mensagem.texto), turnoRaizId: p.raiz.id },
+    confianca: deFora ? "nao_confiavel" : "confiavel",
   });
   const linha = m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: p.abertoPor.conversaId, dados: { mensagem_id: m.id, kind: "sistema", lote_id: p.lote.id } })] : [];
   return [...(r.events ?? []), ...linha];

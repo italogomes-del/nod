@@ -1,11 +1,14 @@
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TipoLinha, TrabalhoDto } from "../../src/contracts/trabalho.ts";
+import type { PedidoDeColega } from "../../src/contracts/troca-entre-bots.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
 import { aberto, acoesDeFazer, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { limiteVigente } from "./ia-fora.ts";
 import { custoDaFrente } from "./modo-dev.ts";
+import { linhaDaFila } from "../lib/fila-do-pedido.ts";
+import { textoFormatado } from "../lib/texto-formatado.ts";
 
 /**
  * Chat limpo (definido em 2026-10-07, #191/#195, ADR-083): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
@@ -29,13 +32,44 @@ import { custoDaFrente } from "./modo-dev.ts";
  * "Respondi ao pedido de") também não vira linha, mas continua dando o título e a origem das tasks a quem desenha; e
  * "… terminou · 39 min" acima do resultado sai. A web decide pelo destino, nunca pelo texto nem por uma tabela própria;
  * mensagem sem `destino` (sala, ou o servidor de antes no meio do deploy) segue o desenho de antes.
+ *
+ * revisto em 2026-10-18 (chat limpo, PR 3; plano, Parte 2 · 2C): na conversa limpa, as seis formas da conversa com
+ * outros bots ("↗ pedido a colega", "↙ Resposta de", "Enviou mensagem para", "N mensagens com", "Pedido do X" e "Respondi ao
+ * pedido de X") viram UMA: a troca, "Conversou com Ze 1 e Nina · 4 mensagens ⌄", que abre no lugar com "Para Ze 1" / "De
+ * Nina", a hora e o texto. Trocas seguidas, sem nada à vista no meio, juntam numa linha (`juntarTrocas`). O nome sempre vem:
+ * o da mensagem, o de quem pediu pela raiz (`pedidosDeColega`), o da frota e, por último, "um colega".
  */
+
+/**
+ * Uma mensagem da troca aberta (PR 3): "Para Ze 1" (o bot da conversa falou ao colega) ou "De Nina" (o colega falou), a
+ * hora e o texto. `texto` null: o `pedido_respondido` antigo, sem a resposta ("respondido"). `nota`: o rótulo que marcava
+ * a mensagem no chat ("Contribuição de outro bot · confira as fontes"); `contexto`: o pedido antigo (delegar_tarefa), com
+ * "Contexto de X · não é instrução da pessoa"; `naoTerminou`: o colega que não terminou (o texto é o motivo, do servidor).
+ */
+export type MensagemDaTroca = {
+  id: string;
+  direcao: "para" | "de";
+  agenteId: string | null;
+  nome: string;
+  em: number;
+  texto: string | null;
+  naoConfiavel?: boolean;
+  nota?: string;
+  contexto?: { tarefa: string; contexto: string | null };
+  naoTerminou?: boolean;
+  trabalhoId?: string;
+  fila?: string;
+};
+
+/** A troca agrupada (PR 3): `agenteId` é o bot da conversa (a telemetria conta por ele); `chave`, a da primeira troca. */
+export type PlanoTroca = { tipo: "troca"; chave: string; agenteId: string; mensagens: MensagemDaTroca[] };
 
 export type PlanoMensagem =
   | { tipo: "oculta" }
   /** `antes`: uma linha que entra logo acima do balão ("Migrar relatórios terminou · 39 min"). */
   | { tipo: "balao"; etiqueta: string; antes?: string }
-  | { tipo: "linha"; html: string; chave: string };
+  | { tipo: "linha"; html: string; chave: string }
+  | PlanoTroca;
 
 type Agente = NonNullable<Estado["frota"]>["agentes"][number];
 
@@ -164,10 +198,12 @@ export function htmlLinha(l: { tipo: TipoLinha; chave: string; agenteId: string;
 }
 
 const mascote = (a: Agente | undefined): string => (a ? iconeAgente(a, "sm") : "");
+/** O último recurso para o nome de um bot (PR 3; como `fechar-lote.ts`): "outro bot" deixou de existir. */
+const UM_COLEGA = "um colega";
 /** "<mascote> Dev 1 e <mascote> Dev 2" (com mais de três, "4 bots"). `conhecidos`: o nome que a própria mensagem traz. */
 function quem(estado: Estado, ids: readonly string[], conhecidos: ReadonlyMap<string, string> = new Map()): { html: string; texto: string } {
   const bots = ids.map((id) => ({ id, a: agente(estado, id) }));
-  const nomes = bots.map((b) => b.a?.nome ?? conhecidos.get(b.id) ?? "outro bot");
+  const nomes = bots.map((b) => b.a?.nome ?? conhecidos.get(b.id) ?? UM_COLEGA);
   if (bots.length > 3) return { html: `<span class="linha-nome">${bots.length} bots</span>`, texto: `${bots.length} bots` };
   const partes = bots.map((b, i) => `${mascote(b.a)}<span class="linha-nome">${esc(nomes[i] ?? "")}</span>`);
   const html = partes.length <= 1 ? partes.join("") : `${partes.slice(0, -1).join('<span class="linha-sep">, </span>')}<span class="linha-sep"> e </span>${partes[partes.length - 1]}`;
@@ -198,6 +234,9 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
 
   // ---- rotina, colega e task -----------------------------------------------------------------------------------------
   const nadaParaVoce = new Set<Unidade>();
+  // Chat limpo (PR 3): o pedido recebido e o feito a um colega viram trocas, montadas no fim (`trocasDaConversa`).
+  const recebidas: { u: Unidade; recolhidas: Mensagem[] }[] = [];
+  const pedidas: Mensagem[][] = [];
   for (const u of unidades.values()) {
     if (!u.tipo) continue;
     const execucoes = u.mensagens.flatMap((m) => (m.payload?.kind === "rotina_execucao" ? [m.payload.desfecho] : []));
@@ -231,11 +270,12 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     // execução nem a última fala do turno, ela ainda pode ter algo a dizer.
     const acabou = !(u.trabalho && aberto(u.trabalho)) && (execucoes.length > 0 || (abriramFrentes.size === 0 && u.mensagens.some((m) => m.fimDoTurno === true)));
     if (u.tipo === "rotina" && acabou && baloes.length === 0 && !execucoes.some((d) => DESFECHOS_A_VISTA.has(d)) && recolhidas.length > 0) nadaParaVoce.add(u);
-    if (u.tipo === "colega" && recolhidas[0]) {
+    if (u.tipo === "colega" && recolhidas[0] && limpa) recebidas.push({ u, recolhidas });
+    else if (u.tipo === "colega" && recolhidas[0]) {
       const pedido = u.mensagens.find((m) => m.payload?.kind === "peer_pedido");
       const quemPediu = u.trabalho?.pedidoPorAgenteId ?? (pedido?.autoria.autor_tipo === "agente" ? pedido.autoria.autor_id : null);
       const bot = agente(estado, quemPediu);
-      const nome = u.trabalho?.pedidoPorNome ?? bot?.nome ?? "outro bot";
+      const nome = u.trabalho?.pedidoPorNome ?? bot?.nome ?? UM_COLEGA;
       const n = recolhidas.length;
       const conteudo = `<span>Pedido do</span>${mascote(bot)}<span class="linha-nome">${esc(nome)}</span><span>· ${n} ${n === 1 ? "mensagem" : "mensagens"}</span>`;
       planos.set(recolhidas[0].id, { tipo: "linha", chave: `linha:${recolhidas[0].id}`, html: htmlLinha({ tipo: "bots", chave: `bots:${u.chave}`, agenteId: donoDaConversa ?? "", conteudo, trabalhoId: u.trabalhoId, conversaId, mensagens: recolhidas.map((m) => m.id), titulo: `Pedido do ${nome}` }) });
@@ -257,6 +297,11 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   }
   for (const [k, g] of grupos) {
     const todas = [...g.pedidos, ...g.respostas];
+    if (limpa) {
+      for (const m of todas) planos.set(m.id, { tipo: "oculta" });
+      pedidas.push(todas);
+      continue;
+    }
     const ids = [...new Set(todas.flatMap((m) => (m.payload?.kind === "handoff" ? [m.payload.para] : m.payload?.kind === "peer_ask" ? [m.payload.agenteId] : [])))];
     const nomes = quem(estado, ids, new Map(todas.flatMap((m) => (m.payload?.kind === "peer_ask" ? [[m.payload.agenteId, m.payload.nome] as const] : []))));
     const trabalhoId = trabalhoDoPedido(todas, ids, lista);
@@ -383,7 +428,181 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   // Depois dos agrupamentos de propósito: a execução silenciosa da rotina continua entrando no "… rodou N vezes · nada para
   // você" (uma linha, como antes), e o resto que é Atividade (avisos, negações, trocas de IA que passaram) some aqui.
   if (limpa) for (const m of mensagens) if (!planos.has(m.id) && foraDoChat(m, estado)) planos.set(m.id, { tipo: "oculta" });
+
+  // ---- a conversa com outros bots numa linha (chat limpo, PR 3) --------------------------------------------------------
+  // Cada troca entra no lugar da primeira mensagem dela; as outras já estão escondidas. Sem nenhuma mensagem para mostrar
+  // (o pedido em andamento, com o `peer_pedido` fora da janela), a troca não vira linha.
+  if (limpa) {
+    const ordem = new Map(mensagens.map((m, i) => [m.id, i]));
+    for (const t of trocasDaConversa({ recebidas, pedidas, mensagens, estado, pedidos: estado.conversas[conversaId]?.pedidosDeColega ?? {}, dono: donoDaConversa })) {
+      const [ancora] = [...t.fontes].sort((a, b) => (ordem.get(a.id) ?? 0) - (ordem.get(b.id) ?? 0));
+      for (const m of t.fontes) planos.set(m.id, { tipo: "oculta" });
+      if (ancora && t.mensagens.length > 0) planos.set(ancora.id, { tipo: "troca", chave: t.chave, agenteId: donoDaConversa ?? "", mensagens: [...t.mensagens].sort((a, b) => a.em - b.em) });
+    }
+  }
   return planos;
+}
+
+type Troca = { chave: string; fontes: Mensagem[]; mensagens: MensagemDaTroca[] };
+
+/**
+ * As trocas da conversa limpa (PR 3). **Uma troca é o fio de um pedido**: do lado de quem recebe, a unidade da raiz do
+ * pedido (`m.raiz.turnoId` com origem `delegacao`), com o `pedido_respondido` que aponta para ela (`turnoRaizId`); do lado
+ * de quem pede, o turno de origem (`handoff.tarefaId`, `peer_ask.tarefaId`, como `origemDaTarefa`). O
+ * `pedido_respondido` sem a unidade na janela é uma troca sozinho.
+ */
+function trocasDaConversa(p: { recebidas: readonly { u: Unidade; recolhidas: Mensagem[] }[]; pedidas: readonly Mensagem[][]; mensagens: readonly Mensagem[]; estado: Estado; pedidos: Readonly<Record<string, PedidoDeColega>>; dono: string | null }): Troca[] {
+  const { estado } = p;
+  const respondidos = p.mensagens.filter((m) => m.payload?.kind === "pedido_respondido");
+  const usados = new Set<string>();
+  const trocas: Troca[] = [];
+  for (const { u, recolhidas } of p.recebidas) {
+    const raiz = raizDaUnidade(u);
+    const respostas = respondidos.filter((m) => m.payload?.kind === "pedido_respondido" && raiz !== null && m.payload.turnoRaizId === raiz);
+    for (const m of respostas) usados.add(m.id);
+    const fontes = [...recolhidas, ...respostas];
+    trocas.push({ chave: u.chave, fontes, mensagens: mensagensRecebidas(u, fontes, raiz, p.pedidos, estado, p.dono) });
+  }
+  for (const todas of p.pedidas) {
+    const primeira = todas[0];
+    if (!primeira) continue;
+    const nomes = new Map(todas.flatMap((m) => (m.payload?.kind === "peer_ask" ? [[m.payload.agenteId, m.payload.nome] as const] : [])));
+    trocas.push({ chave: `pedido:${primeira.id}`, fontes: todas, mensagens: todas.flatMap((m) => mensagemDoPedido(m, estado, nomes)) });
+  }
+  for (const m of respondidos) {
+    if (usados.has(m.id) || m.payload?.kind !== "pedido_respondido") continue;
+    trocas.push({ chave: `respondido:${m.id}`, fontes: [m], mensagens: [respondido(m, estado)] });
+  }
+  return trocas;
+}
+
+/** O turno do pedido de uma unidade de colega: a chave `turno:` ou, na unidade de trabalho (pedido antigo), a raiz da delegação. */
+function raizDaUnidade(u: Unidade): string | null {
+  if (u.chave.startsWith("turno:")) return u.chave.slice("turno:".length);
+  const m = u.mensagens.find((x) => x.raiz?.origem === "delegacao" || x.origemTurno === "delegacao");
+  return m?.raiz?.origem === "delegacao" ? m.raiz.turnoId : m?.turnoId ?? null;
+}
+
+const nomeDe = (estado: Estado, id: string | null, ...doServidor: (string | null | undefined)[]): string => doServidor.find((n): n is string => typeof n === "string" && n.trim() !== "") ?? agente(estado, id)?.nome ?? UM_COLEGA;
+
+/**
+ * O lado de quem recebe: "De Ada" no pedido, "Para Ada" na resposta (a última fala do bot que fechou um turno, fora do
+ * turno que só abriu frentes; ou o `pedido_respondido`, que é a resposta do lote), e os pedidos que o próprio bot fez a
+ * outro colega no meio ("Para Tarsila", "De Tarsila"). As falas do meio do turno ficam fora, como antes.
+ */
+function mensagensRecebidas(u: Unidade, fontes: readonly Mensagem[], raiz: string | null, pedidos: Readonly<Record<string, PedidoDeColega>>, estado: Estado, dono: string | null): MensagemDaTroca[] {
+  const pedido = fontes.find((m) => m.payload?.kind === "peer_pedido");
+  const daRaiz = raiz ? pedidos[raiz] : undefined;
+  const quemPediu = (pedido?.autoria.autor_tipo === "agente" ? pedido.autoria.autor_id : null) ?? u.trabalho?.pedidoPorAgenteId ?? daRaiz?.agenteId ?? null;
+  const nome = nomeDe(estado, quemPediu, pedido?.payload?.kind === "peer_pedido" ? pedido.payload.nome : undefined, u.trabalho?.pedidoPorNome, daRaiz?.nome);
+  const abriramFrentes = new Set(u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])));
+  const temRespondido = fontes.some((m) => m.payload?.kind === "pedido_respondido");
+  const finais = fontes.filter((m) => m.kind === "texto" && !m.payload && m.autoria.autor_tipo === "agente" && (dono === null || m.autoria.autor_id === dono) && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId)));
+  const entregue = temRespondido ? undefined : finais[finais.length - 1];
+  const nomesDosPedidos = new Map(fontes.flatMap((m) => (m.payload?.kind === "peer_ask" ? [[m.payload.agenteId, m.payload.nome] as const] : [])));
+  return fontes.flatMap((m): MensagemDaTroca[] => {
+    const p = m.payload;
+    if (p?.kind === "peer_pedido") {
+      return [{ id: m.id, direcao: "de", agenteId: quemPediu, nome, em: m.criadoEm, texto: m.texto, ...(p.delegacao ? { contexto: p.delegacao } : {}) }];
+    }
+    if (p?.kind === "pedido_respondido") return [respondido(m, estado)];
+    if (p?.kind === "handoff" || p?.kind === "peer_ask") return mensagemDoPedido(m, estado, nomesDosPedidos);
+    if (m === entregue) return [{ id: m.id, direcao: "para", agenteId: quemPediu, nome, em: m.criadoEm, texto: m.texto, ...(m.confianca === "nao_confiavel" ? { naoConfiavel: true } : {}) }];
+    return [];
+  });
+}
+
+/** O lado de quem pede: "Para Ze 1" no pedido (`handoff`), "De Ze 1" na resposta (`peer_ask`), ou "não terminou". */
+function mensagemDoPedido(m: Mensagem, estado: Estado, nomes: ReadonlyMap<string, string>): MensagemDaTroca[] {
+  const p = m.payload;
+  if (p?.kind === "handoff") return [{ id: m.id, direcao: "para", agenteId: p.para, nome: nomeDe(estado, p.para, p.nomePara, nomes.get(p.para)), em: m.criadoEm, texto: p.motivo, ...(p.fila ? { fila: linhaDaFila(p.fila) } : {}) }];
+  if (p?.kind !== "peer_ask") return [];
+  const nome = nomeDe(estado, p.agenteId, p.nome);
+  // Revisão do PR 3 (ADR-026): o texto que veio do colega leva a marca "não confiável" que o balão "↙ Resposta de" mostrava.
+  const marca = m.confianca === "nao_confiavel" ? { naoConfiavel: true } : {};
+  if (p.falhou) return [{ id: m.id, direcao: "de", agenteId: p.agenteId, nome, em: m.criadoEm, texto: m.texto.replace(/^[\s\S]*?não concluiu:\s*/, ""), naoTerminou: true, ...marca, ...(p.trabalhoId ? { trabalhoId: p.trabalhoId } : {}) }];
+  return [{ id: m.id, direcao: "de", agenteId: p.agenteId, nome, em: m.criadoEm, texto: m.texto, ...marca, nota: "Contribuição de outro bot · confira as fontes" }];
+}
+
+/** "Para Ada" com a resposta do lote; a linha antiga, sem o texto, diz "respondido". */
+function respondido(m: Mensagem, estado: Estado): MensagemDaTroca {
+  const p = m.payload?.kind === "pedido_respondido" ? m.payload : null;
+  return { id: m.id, direcao: "para", agenteId: p?.agenteId ?? null, nome: nomeDe(estado, p?.agenteId ?? null, p?.nome), em: m.criadoEm, texto: p?.resposta ?? null, ...(m.confianca === "nao_confiavel" ? { naoConfiavel: true } : {}) };
+}
+
+/**
+ * definido em 2026-10-18 (PR 3): a pausa que separa duas trocas vizinhas é a do divisor de data (decisão tomada 6, 30 min
+ * entre itens visíveis): na tela do Eng 1 (protótipo F1), as trocas das 15:02, das 15:40 e das 17:20 ficam em três linhas.
+ */
+export const PAUSA_QUE_SEPARA_TROCAS_MS = 30 * 60_000;
+
+/**
+ * Trocas seguidas, sem nada à vista no meio, juntam numa linha (PR 3; a tela do Eng 1: "Conversou com Ada e Tarsila · 6
+ * mensagens · até 19:23"). Roda sobre as linhas já na ordem da tela (depois de `linhaDepoisDaFala` e dos fios): duas trocas
+ * vizinhas juntam, salvo com uma pausa de PAUSA_QUE_SEPARA_TROCAS_MS ou mais entre a última mensagem de uma e a primeira da
+ * outra; um fio que recolheu a troca muda o HTML e separa. A chave é a da primeira.
+ * revisto em 2026-10-18 (QA do PR 3): a linha "Novas" que entra logo acima de uma troca não a impede de receber as
+ * seguintes (tudo abaixo do "Novas" é novo; antes a troca com o "Novas" ficava sozinha até a próxima carga). Ela só não
+ * junta com a troca de cima, que é anterior ao "Novas".
+ */
+export function juntarTrocas<L extends { id: string; html: string; chave?: string }>(linhas: readonly L[], planos: ReadonlyMap<string, PlanoMensagem>, estado: Estado): L[] {
+  const saida: L[] = [];
+  let atual: { linha: L; plano: PlanoTroca; antes: string } | null = null;
+  for (const l of linhas) {
+    const plano = planos.get(l.id);
+    const so = plano?.tipo === "troca" ? htmlTroca(plano, estado) : null;
+    // O que veio antes do HTML da troca na mesma linha: "" (nada) ou a linha "Novas"; outra mudança não é troca.
+    const antes = so !== null && l.html.endsWith(so) ? l.html.slice(0, l.html.length - so.length) : null;
+    const troca = plano?.tipo === "troca" && antes !== null && (antes === "" || antes.startsWith('<div class="linha-novas"')) ? plano : null;
+    const ultima = atual?.plano.mensagens[atual.plano.mensagens.length - 1];
+    const primeira = troca?.mensagens[0];
+    if (troca && antes === "" && atual && ultima && primeira && primeira.em - ultima.em < PAUSA_QUE_SEPARA_TROCAS_MS) {
+      const junto: PlanoTroca = { ...atual.plano, mensagens: [...atual.plano.mensagens, ...troca.mensagens].sort((a, b) => a.em - b.em) };
+      const linha: L = { ...atual.linha, html: atual.antes + htmlTroca(junto, estado) };
+      saida[saida.length - 1] = linha;
+      atual = { linha, plano: junto, antes: atual.antes };
+      continue;
+    }
+    saida.push(l);
+    atual = troca && antes !== null ? { linha: l, plano: troca, antes } : null;
+  }
+  return saida;
+}
+
+const avatar = (estado: Estado, id: string | null): string => `<span class="troca-avatar ${esc(agente(estado, id)?.cor ?? "")}" aria-hidden="true"></span>`;
+
+/**
+ * A linha da troca (PR 3; protótipo "2C · Agrupada por bot"): "Conversou com <b>Ze 1</b> e <b>Nina</b> · 4 mensagens ⌄",
+ * com um avatar na cor de cada colega (até três). Aberta, é um `<details data-disclosure>` (o estado aberto sobrevive ao
+ * re-render, como os recibos) com cada mensagem: "Para Ze 1" ou "De Nina", a hora e o texto. "· até 19:23" diz a hora da
+ * última quando ela não é a da primeira, e some com a troca aberta (cada mensagem já diz a sua). O colega que não
+ * terminou continua dizendo: "· 1 não terminou" na linha e o motivo dentro.
+ */
+export function htmlTroca(t: PlanoTroca, estado: Estado): string {
+  const colegas: { id: string | null; nome: string }[] = [];
+  for (const m of t.mensagens) if (!colegas.some((c) => (c.id !== null && c.id === m.agenteId) || (c.id === null && m.agenteId === null && c.nome === m.nome))) colegas.push({ id: m.agenteId, nome: m.nome });
+  const nomes = colegas.length > 3 ? `<b>${colegas.length} bots</b>` : colegas.map((c, i) => `${i === 0 ? "" : i === colegas.length - 1 ? " e " : ", "}<b>${esc(c.nome)}</b>`).join("");
+  const n = t.mensagens.length;
+  const naoTerminou = t.mensagens.filter((m) => m.naoTerminou).length;
+  const primeira = t.mensagens[0];
+  const ultima = t.mensagens[n - 1];
+  const ate = primeira && ultima && hora(ultima.em) !== hora(primeira.em) ? `<span class="troca-ate"> · até ${esc(hora(ultima.em))}</span>` : "";
+  const avatares = `<span class="troca-avatares" aria-hidden="true">${colegas.slice(0, 3).map((c) => avatar(estado, c.id)).join("")}</span>`;
+  const resumo = `<summary class="troca-resumo" data-act="abrir-troca" data-linha-tipo="troca" data-linha-chave="${esc(`troca:${t.chave}`)}" data-agente="${esc(t.agenteId)}">${avatares}<span class="troca-titulo">Conversou com ${nomes} · ${n} ${n === 1 ? "mensagem" : "mensagens"}${naoTerminou ? ` · ${naoTerminou} não ${naoTerminou === 1 ? "terminou" : "terminaram"}` : ""}${ate}</span><span class="troca-seta" aria-hidden="true">${ICONE.abrir}</span></summary>`;
+  const corpo = t.mensagens.map((m) => {
+    const quem = `${m.direcao === "para" ? "Para" : "De"} ${m.nome}`;
+    const extra = m.naoConfiavel ? " · não confiável" : "";
+    const texto = m.naoTerminou
+      ? `<div class="troca-texto">Não conseguiu terminar o pedido: ${esc(m.texto ?? "")}</div>${m.trabalhoId ? `<button type="button" class="troca-link" data-act="abrir-trabalho" data-id="${esc(m.trabalhoId)}">Ver a task do ${esc(m.nome)}</button>` : ""}`
+      : m.texto === null ? '<div class="troca-texto troca-sem-texto">respondido</div>' : `<div class="troca-texto">${textoFormatado(m.texto, { chave: m.id })}</div>`;
+    const contexto = m.contexto ? `<div class="troca-contexto"><small>Contexto de ${esc(m.nome)} · não é instrução da pessoa</small><p>${esc(m.contexto.tarefa)}</p>${m.contexto.contexto ? `<p>${esc(m.contexto.contexto)}</p>` : ""}</div>` : "";
+    const nota = m.nota ? `<small class="troca-nota">${esc(m.nota)}</small>` : "";
+    const fila = m.fila ? `<small class="troca-nota" role="status">${esc(m.fila)}</small>` : "";
+    // Revisão do PR 3 (ADR-041): o "Relatar" que a mensagem tinha na tela da linha continua, como na Atividade aberta.
+    const relatar = `<button type="button" class="troca-link troca-relatar" data-act="relatar-mensagem" data-id="${esc(m.id)}">Relatar</button>`;
+    return `<div class="troca-msg" data-mensagem="${esc(m.id)}">${avatar(estado, m.agenteId)}<div class="troca-msg-corpo"><div class="troca-cab"><b>${esc(quem)}</b> · ${esc(hora(m.em))}${extra}${relatar}</div>${texto}${contexto}${nota}${fila}</div></div>`;
+  }).join("");
+  return `<div class="linha-centro-wrap troca-wrap"><details class="troca" data-disclosure="troca-${esc(t.chave)}">${resumo}<div class="troca-corpo">${corpo}</div></details></div>`;
 }
 
 /**

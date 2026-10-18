@@ -62,7 +62,7 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
       expect(tarefa).toMatchObject({ agenteId: m.dev.agenteId, conversaId: m.dev.conversaId, origem: "delegacao", trabalhoId: null, estado: "pendente", sobProcuracaoDe: PESSOA_MARLON, profundidade: 1 });
       expect(await m.repos.trabalhos.abertosDoAgente(m.dev.agenteId)).toEqual([]);
       const [handoff] = (await m.repos.mensagens.listarDaConversa(m.chico.conversaId)).filter((x) => x.kind === "handoff");
-      expect(handoff?.payload).toEqual({ kind: "handoff", de: m.chico.agenteId, para: m.dev.agenteId, motivo: "revise o PR 42", tarefaId: tarefa!.id });
+      expect(handoff?.payload).toEqual({ kind: "handoff", de: m.chico.agenteId, para: m.dev.agenteId, motivo: "revise o PR 42", tarefaId: tarefa!.id, nomePara: await m.nome(m.dev.agenteId) });
       expect(r.data.instrucao).toContain(`Pedido entregue a ${await m.nome(m.dev.agenteId)}: entrou na triagem dele`);
       expect(r.data.livres.map((a) => a.id)).toEqual([m.livre.agenteId]);
       expect(r.data.instrucao).toContain(`Livres agora: ${await m.nome(m.livre.agenteId)}`);

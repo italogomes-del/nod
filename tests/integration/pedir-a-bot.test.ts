@@ -89,8 +89,11 @@ describeIntegracao("pedir_a_bot (ADR-058): quem recebe usa os acessos dele", () 
       expect(tarefa?.entradaTexto).toContain(`<pedido_da_pessoa>\n${PEDIDO}\n</pedido_da_pessoa>`);
 
       const [pedido] = (await repos.mensagens.listarDaConversa(dev1.conversaId)).filter((m) => m.payload?.kind === "peer_pedido");
-      expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id } });
+      expect(pedido).toMatchObject({ turnoId: tarefa?.id, kind: "texto", texto: "revisar o PR 466\n\nhttps://github.com/acme/app/pull/466", payload: { kind: "peer_pedido", conversaOrigemId: taga.conversaId, turnoOrigemId: turnoTaga.id, nome: "Taga" } });
       expect(pedido?.autoria).toMatchObject({ autor_tipo: "agente", autor_id: taga.agenteId, sob_procuracao_de: PESSOA_MARLON, conta_de_execucao: PESSOA_MARLON });
+      // Chat limpo (PR 3): o handoff guarda o nome de quem recebe, como o peer_pedido guarda o de quem pediu.
+      const [handoff] = (await repos.mensagens.listarDaConversa(taga.conversaId)).filter((m) => m.payload?.kind === "handoff");
+      expect(handoff?.payload).toMatchObject({ kind: "handoff", para: dev1.agenteId, tarefaId: tarefa?.id, nomePara: "Dev 1" });
       // ADR-099 (I7 revista): o handoff e o turno de triagem; não nasce task em quem recebe (era + o trabalho_mudou, ADR-083).
       expect((await repos.events.gravarComOutbox(r.events ?? [])).ids).toHaveLength(2);
 

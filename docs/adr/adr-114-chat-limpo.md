@@ -1,7 +1,7 @@
 # ADR-114 — Chat limpo: na conversa só fala e o que é com você
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
-e os gatilhos no PR 2 (ver **Emenda do PR 2**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -135,6 +135,17 @@ o "Relatar"; a linha da trilha não leva "Relatar" (decisão 14).
 
 **O relato** conta 100 itens de chat, como a janela, e leva junto o que estava na Atividade nos mesmos 15 min, desde o
 corte, marcado `naAtividade` no trecho (emenda da ADR-041).
+
+## Emenda do PR 3 (2026-10-18) — a conversa com outros bots numa linha
+
+Na conversa própria, a conversa com outros bots é uma linha por troca, "Conversou com Ze 1 e Nina · 4 mensagens ⌄", que
+abre no lugar (protótipo "2C · Agrupada por bot"); a regra, a resposta do lote e o nome estão na emenda da ADR-099 item 8.
+Na web: `PlanoMensagem` ganha `{ tipo: "troca", chave, agenteId, mensagens }`, o HTML sai de `htmlTroca`
+(`web/telas/linhas-do-chat.ts`) e `juntarTrocas` junta as vizinhas na ordem da tela (depois de "a linha desce para depois
+da fala que a anunciou", que vale também para a troca que começa num `handoff`); aberta, é um `<details data-disclosure>`,
+e o estado aberto sobrevive ao re-render. A mensagem sem `destino` (sala, servidor de antes) segue com as linhas de antes.
+`TipoLinha` ganha `"troca"` (validado em `telemetria-linhas.ts`): "mostrada" a cada troca desenhada (`troca:<chave>`) e
+"aberta" quando a pessoa abre a troca, para o gatilho de 30% da ADR-083. Nenhuma migração: os campos novos são do payload.
 
 ## Gatilhos de reversão (PR 2)
 

@@ -25,3 +25,20 @@ it("agrupa dois colegas pelo turno de origem, preservando respostas tardias e fa
   expect(html).not.toContain("Resposta de b");
   expect(html).toContain('data-mensagens="pedido-b,pedido-c,resposta-b,resposta-c"');
 });
+
+// Chat limpo, PR 3 (plano, Parte 2 · 2C): na conversa limpa (o servidor manda o destino), as duas linhas viram UMA troca,
+// "Conversou com b e c · 4 mensagens", que abre no lugar com cada mensagem; a fala normal continua balão.
+it("na conversa limpa, o pedido aos dois colegas e as respostas viram uma troca só", () => {
+  const base: Mensagem = { id: "m", tenantId: "t", conversaId: "c", turnoId: "turno", kind: "texto", texto: "Conclusão normal", payload: null, confianca: "confiavel", parcial: false, criadoEm: 1, destino: "chat", autoria: { autor_tipo: "agente", autor_id: "a", sob_procuracao_de: null, conta_de_execucao: "p", executor: "catcher", locality: "local", locality_reason: "tudo_local_nesta_rodada", machine_id: null, decidido_por: "regra:teste", regra_versao: 1 } };
+  const mensagens: Mensagem[] = [
+    ...["b", "c"].map((id): Mensagem => ({ ...base, id: `pedido-${id}`, kind: "handoff", texto: `Pergunta para ${id}`, payload: { kind: "handoff", de: "a", para: id, motivo: `revisar ${id}`, tarefaId: `tarefa-${id}`, nomePara: id.toUpperCase() } })),
+    base,
+    ...["b", "c"].map((id): Mensagem => ({ ...base, id: `resposta-${id}`, turnoId: `outro-${id}`, kind: "peer_ask", texto: `Resposta de ${id}`, payload: { kind: "peer_ask", agenteId: id, nome: id.toUpperCase(), naoSupervisionado: true, tarefaId: `tarefa-${id}` } })),
+  ];
+  const html = renderMensagensAgrupadas(mensagens, estadoInicial);
+  expect(html.match(/<details class="troca"/g)).toHaveLength(1);
+  expect(html).toContain("Conversou com <b>B</b> e <b>C</b> · 4 mensagens");
+  expect(html).not.toContain("Enviou mensagem para");
+  expect(html.match(/Conclusão normal/g)).toHaveLength(1);
+  expect(html).toContain("Resposta de b");
+});

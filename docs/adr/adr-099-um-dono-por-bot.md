@@ -104,7 +104,7 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
    - Espera circular (A espera B, B espera A) é detectada no `pedir_a_bot` e recusada com instrução ao bot.
    - O varredor da ADR-084 passa a ler o estado da frente que atende o pedido.
    - **Pedido de colega concluído não acorda o dono:** a resposta vai direto a quem pediu (ADR-084), e na conversa do dono
-     fica só a linha "Respondi ao pedido de X".
+     fica só a linha "Respondi ao pedido de X" (revisto em 2026-10-18: a troca agrupada; ver a emenda do PR 3).
 9. **Frente sem trabalho sai na hora.** Ao terminar, a pasta da frente com zero commits além da base e árvore limpa é
    apagada; com trabalho, segue a limpeza da ADR-096 (guardar antes de apagar). Só com prova afirmativa; na dúvida, fica.
 10. **Tela** ([protótipo](../prototipos/um-dono-por-bot/README.md)):
@@ -137,6 +137,27 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   item 5.
 - **ADR-067:** esperar algo de fora não é mais comando em segundo plano do CLI (item 4). O comando do próprio trabalho
   (testes, build) continua no terminal da frente.
+
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 3) — item 8
+
+- **"Na conversa do dono fica só a linha 'Respondi ao pedido de X'" vira a troca agrupada.** Na conversa própria, a
+  conversa com outros bots é UMA linha por troca, "Conversou com Ada e Tarsila · 6 mensagens · até 19:23", que abre no
+  lugar com cada mensagem ("Para Ada" / "De Tarsila", a hora e o texto). Uma troca é o fio de um pedido: do lado de quem
+  recebe, a raiz do pedido (o turno de `delegacao`) com o pedido, a resposta e os pedidos que o próprio bot fez no meio; do
+  lado de quem pede, o turno de origem (o `handoff` e as `peer_ask`). Trocas vizinhas, sem nada à vista no meio e sem uma
+  pausa de 30 min (a do divisor de data), juntam numa linha. Saem "↗ pedido a colega", "↙ Resposta de", "Enviou mensagem
+  para", "N mensagens com", "Pedido do X" e "Respondi ao pedido de X"; "Contribuição de outro bot · confira as fontes" e
+  "Contexto de X · não é instrução da pessoa" vão para dentro, junto da mensagem que marcam; o colega que não terminou diz
+  "· 1 não terminou" na linha e o motivo dentro. A sala fica como antes (lá a conversa entre bots é o conteúdo).
+- **A resposta do lote entra na troca:** `pedido_respondido` passa a levar `resposta` (o texto entregue, até 2.000
+  caracteres) e `turnoRaizId` (o turno do pedido), com a confiança da fala entregue, não a de sistema. A linha gravada
+  antes, sem eles, conta como mensagem da troca sem texto ("Para Ada · 15:09 · respondido").
+- **O nome sempre vem:** o `peer_pedido` grava `nome` (de quem pediu) e o `handoff`, `nomePara` (de quem recebe), no
+  momento; a leitura da conversa leva `pedidosDeColega` (o autor e o nome do `peer_pedido` de cada turno de delegação da
+  janela, numa consulta à parte, pelo índice `mensagens_por_turno`). A web usa o nome da mensagem, o da raiz, o da frota
+  e, por último, "um colega"; "outro bot" deixou de existir.
+- **Gatilho:** a telemetria das linhas ganha o tipo `troca` (mostrada a cada troca desenhada, aberta quando a pessoa abre
+  a troca), no mesmo gatilho de 30% da ADR-083.
 
 ## Alternativas rejeitadas
 

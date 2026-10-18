@@ -37,7 +37,7 @@ import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inven
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
-import { conversaLimpa, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
+import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 
@@ -439,7 +439,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   const etiqueta = opcoes.etiqueta ? `<span class="etiqueta-origem">${esc(opcoes.etiqueta)}</span>` : "";
   const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
-  const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? "outro bot")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
+  const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? (m.payload?.kind === "peer_pedido" ? m.payload.nome : undefined) ?? "um colega")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
   const tags = ehPessoa || m.payload?.kind === "peer_pedido" || m.payload?.kind === "boas_vindas"
     ? ""
     : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
@@ -735,12 +735,15 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
         ? ""
         : plano.tipo === "linha"
           ? plano.html
-          : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
-    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" ? { chave: plano.chave } : {}) };
+          : plano.tipo === "troca"
+            ? htmlTroca(plano, estado)
+            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
+    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" || plano?.tipo === "troca" ? { chave: plano.tipo === "troca" ? `troca:${plano.chave}` : plano.chave } : {}) };
   });
   const conversaId = mensagens[0]?.conversaId;
   const ordenadas = linhaDepoisDaFala(linhas, mensagens, planos);
-  const desenhadas = (conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== "");
+  // Chat limpo (PR 3): trocas vizinhas na ordem da tela juntam numa linha ("Conversou com Ada e Tarsila · 6 mensagens").
+  const desenhadas = juntarTrocas((conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== ""), planos, estado);
   // Chat limpo (ADR-114): sem aviso genérico no chat, não sobra o que recolher — o que fica pede a pessoa e fica à vista.
   // A sala e o servidor de antes (sem `destino`) continuam recolhendo.
   return conversaLimpa(mensagens) ? desenhadas.map((l) => ({ chave: l.chave ?? l.id, html: l.html })) : recolherAvisos(desenhadas);
@@ -751,12 +754,15 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
  * a task …" (trabalho_aberto) e "Enviou mensagem para …" (handoff) — entra DEPOIS da fala com que o bot a anunciou ("Abri
  * uma task para isso…"), não antes. A linha nasce na hora da ferramenta e a fala no fim do turno, então pela ordem de
  * criação ela vinha em cima. Só desce até a última fala do bot do MESMO turno que ainda está à vista; sem fala, fica.
+ * revisto em 2026-10-18 (chat limpo, PR 3): a troca que começa num handoff desce do mesmo jeito ("Pedi aos dois." e, logo
+ * abaixo, "Conversou com Ze 1 e Nina", como no protótipo 2C).
  */
 function linhaDepoisDaFala(linhas: readonly LinhaDaConversa[], mensagens: readonly Mensagem[], planos: ReadonlyMap<string, PlanoMensagem>): LinhaDaConversa[] {
   const destino = new Map<number, number>();
   mensagens.forEach((m, i) => {
     const k = m.payload?.kind;
-    if (!m.turnoId || planos.get(m.id)?.tipo !== "linha" || (k !== "trabalho_aberto" && k !== "frentes_abertas" && k !== "recado_a_frente" && k !== "handoff")) return;
+    const tipo = planos.get(m.id)?.tipo;
+    if (!m.turnoId || (tipo !== "linha" && tipo !== "troca") || (k !== "trabalho_aberto" && k !== "frentes_abertas" && k !== "recado_a_frente" && k !== "handoff")) return;
     let alvo = -1;
     for (let j = i + 1; j < mensagens.length; j++) {
       const x = mensagens[j];

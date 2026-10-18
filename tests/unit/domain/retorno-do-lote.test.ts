@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { caiuDeVez, decidirFecho, destinoDoLote, entradaDoRetorno, INSTRUCAO_DO_RETORNO, motivoDaFrente, PERGUNTA_DA_QUEDA, respostaAoColega, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../../../src/domain/retorno-do-lote.ts";
+import { RESPOSTA_NA_TROCA_MAX } from "../../../src/contracts/troca-entre-bots.ts";
+import { caiuDeVez, decidirFecho, destinoDoLote, entradaDoRetorno, INSTRUCAO_DO_RETORNO, motivoDaFrente, PERGUNTA_DA_QUEDA, respostaAoColega, respostaNaTroca, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../../../src/domain/retorno-do-lote.ts";
 
 const frente = (id: string, extra: Partial<FrenteNoFecho> = {}): FrenteNoFecho => ({ id, titulo: `Frente ${id}`, estado: "terminado", resumo: { feito: `fiz ${id}` }, deFora: false, motivo: null, ...extra });
 
@@ -122,5 +123,31 @@ describe("retorno do lote (ADR-099, I9): a frente que caiu de vez", () => {
     expect(PERGUNTA_DA_QUEDA).toContain("pedir_a_pessoa");
     expect(entradaDoRetorno({ frentes: [frente("a")], faltam: 0, total: 1 })).not.toContain(PERGUNTA_DA_QUEDA);
     expect(respostaAoColega([caida("a")])).toMatch(/^\(não concluída: .+ \(caiu 3 vezes\)\)/);
+  });
+});
+
+describe("a resposta na troca (chat limpo, PR 3): o texto entregue vai no pedido_respondido até o teto", () => {
+  it("curta, igual (sem os espaços das pontas); longa, cortada no último espaço antes do teto, com reticências", () => {
+    expect(respostaNaTroca("  Login revisado: ok  ")).toBe("Login revisado: ok");
+    const exata = "a".repeat(RESPOSTA_NA_TROCA_MAX);
+    expect(respostaNaTroca(exata)).toBe(exata);
+    const longa = `${"palavra ".repeat(400)}fim`;
+    const cortada = respostaNaTroca(longa);
+    expect(cortada.length).toBeLessThanOrEqual(RESPOSTA_NA_TROCA_MAX);
+    expect(cortada).toMatch(/palavra…$/);
+    // Sem espaço perto do teto (um bloco só), corta no teto mesmo.
+    const bloco = respostaNaTroca("x".repeat(RESPOSTA_NA_TROCA_MAX + 50));
+    expect(bloco).toHaveLength(RESPOSTA_NA_TROCA_MAX);
+    expect(bloco.endsWith("…")).toBe(true);
+  });
+
+  it("revisão do PR 3: o corte no teto não parte um emoji (o Postgres recusa a metade solta no jsonb); a quebra de linha também serve de corte", () => {
+    const emojis = respostaNaTroca("🎉".repeat(RESPOSTA_NA_TROCA_MAX));
+    expect(emojis.endsWith("🎉…")).toBe(true);
+    expect(emojis.length).toBeLessThanOrEqual(RESPOSTA_NA_TROCA_MAX);
+    expect(() => encodeURIComponent(emojis)).not.toThrow();
+    const linhas = respostaNaTroca(`${"palavra\n".repeat(300)}fim`);
+    expect(linhas.endsWith("palavra…")).toBe(true);
+    expect(linhas.length).toBeLessThanOrEqual(RESPOSTA_NA_TROCA_MAX);
   });
 });

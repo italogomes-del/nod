@@ -68,7 +68,8 @@ async function colegasLivres(deps: Deps, remetente: Agente, alvoId: string, agor
  * tinha lido algo de fora (entrada marcada ou turno contaminado), o turno de quem recebe nasce com a mesma marca —
  * ela só pesa no modo manual, e a página lida não se lava pelo pedido (ADR-062).
  * Na conversa do alvo fica o `peer_pedido` (fala do remetente, "remetente · por pessoa", ADR-023); na de
- * origem, o `handoff`. Os dois são texto de modelo e continuam marcados não confiáveis (ADR-026: a marca é
+ * origem, o `handoff`. revisto em 2026-10-18 (chat limpo, PR 3): os dois guardam o nome do outro bot no momento (`nome`,
+ * `nomePara`), para a troca agrupada dizer o nome do bot de outro dono ou já excluído. Os dois são texto de modelo e continuam marcados não confiáveis (ADR-026: a marca é
  * do conteúdo); o que mudou é que ela não reduz mais o catálogo de quem recebe.
  */
 export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
@@ -136,7 +137,7 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     autoria,
     kind: "texto",
     texto: contexto ? `${pedido}\n\n${contexto}` : pedido,
-    payload: { kind: "peer_pedido", conversaOrigemId: input.conversaId, turnoOrigemId: input.turnoId },
+    payload: { kind: "peer_pedido", conversaOrigemId: input.conversaId, turnoOrigemId: input.turnoId, nome: remetente.nome },
     confianca: "nao_confiavel",
   });
   const handoff = await deps.repos.mensagens.criar({
@@ -145,7 +146,7 @@ export const pedirABot: CasoNod<Deps, "pedir_a_bot"> = async (deps, input) => {
     autoria,
     kind: "handoff",
     texto: `${remetente.nome} pediu a ${alvo.nome}: ${pedido}`,
-    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id },
+    payload: { kind: "handoff", de: remetente.id, para: alvo.id, motivo: pedido, tarefaId: turno.id, nomePara: alvo.nome },
     confianca: "nao_confiavel",
   });
   const livres = await colegasLivres(deps, remetente, alvo.id, agora);

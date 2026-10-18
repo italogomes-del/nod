@@ -91,4 +91,4 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
 - **Janela:** a fala do meio de um turno de trabalho não conta mais no limite de 200 da conversa própria (vem como `anexo`
   desde o corte); uma task falante não empurra as falas da conversa para fora.
 - **Gatilho:** o "tipo de linha aberto em mais de 30%" ganha o tipo `atividade` (a Atividade aberta até 60 s depois de
-  abrir a conversa). O PR 3 do plano acrescenta "troca".
+  abrir a conversa). O PR 3 do plano acrescenta "troca" (a conversa com outros bots numa linha, emenda da ADR-099 item 8).

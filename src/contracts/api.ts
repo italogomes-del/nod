@@ -12,12 +12,12 @@ import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem, PedidoDoItem } from "./pedido.ts";
 import type { BloqueioRotina, EsperaRotinaDto, JanelasPuladasDaRotina, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
 import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
+import type { TrocasNaConversa } from "./troca-entre-bots.ts";
 
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
 
-/** Como a tela de entrada se desenha (ADR-030): `google` mostra o botão "Entrar com Google"; `stub` (só desenvolvimento, só
- * em 127.0.0.1) lista as pessoas do cadastro. */
+/** Tela de entrada (ADR-030): `google` mostra "Entrar com Google"; `stub` (só desenvolvimento, em 127.0.0.1) lista as pessoas. */
 export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] };
 
 export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
@@ -54,7 +54,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  */
 export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null };
 
-export type ConversaDto = DonoNaConversa & {
+export type ConversaDto = DonoNaConversa & TrocasNaConversa & {
   conversa: Conversa;
   mensagens: Mensagem[];
   turnosPendentes: TurnoPendenteDto[];

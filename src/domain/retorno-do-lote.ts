@@ -1,6 +1,7 @@
 import type { ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
+import { RESPOSTA_NA_TROCA_MAX } from "../contracts/troca-entre-bots.ts";
 import { ehQueda } from "./pedido-parado.ts";
 import { motivoEmPortugues } from "./redacao.ts";
 import { TEXTO_PERGUNTA_VENCIDA } from "./frente.ts";
@@ -172,6 +173,22 @@ export function respostaAoColega(frentes: readonly FrenteNoFecho[]): string {
   const [unica] = frentes;
   if (frentes.length === 1 && unica) return resumoEmTexto(unica);
   return frentes.map((f) => `- ${f.titulo}: ${resumoEmTexto(f)}`).join("\n");
+}
+
+/**
+ * definido em 2026-10-18 (chat limpo, PR 3): o texto entregue a quem pediu, como vai no `pedido_respondido` da conversa do
+ * dono — até RESPOSTA_NA_TROCA_MAX caracteres, cortado no último espaço (ou quebra de linha) antes do teto e com "…" (o
+ * texto inteiro foi a quem pediu, na peer_ask dele). Revisão do PR 3: o corte no teto, sem espaço perto, nunca parte um
+ * par substituto (emoji): a metade solta vira `\ud83d` no JSON e o Postgres recusa o payload — e o fecho do lote com ele.
+ */
+export function respostaNaTroca(texto: string): string {
+  const t = texto.trim();
+  if (t.length <= RESPOSTA_NA_TROCA_MAX) return t;
+  let corte = t.slice(0, RESPOSTA_NA_TROCA_MAX - 1);
+  const espaco = Math.max(corte.lastIndexOf(" "), corte.lastIndexOf("\n"));
+  if (espaco > RESPOSTA_NA_TROCA_MAX / 2) corte = corte.slice(0, espaco);
+  else if (/[\uD800-\uDBFF]$/.test(corte)) corte = corte.slice(0, -1);
+  return `${corte.trimEnd()}…`;
 }
 
 /** A linha na conversa do dono quando o lote de colega volta direto a quem pediu. */

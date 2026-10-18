@@ -182,7 +182,9 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
 
       const [linha, ...outras] = await m.linhas(bia.conversaId, "pedido_respondido");
       expect(outras).toHaveLength(0);
-      expect(linha).toMatchObject({ kind: "sistema", texto: "Respondi ao pedido de Ada", confianca: "nao_confiavel", payload: { loteId, agenteId: m.ada.agenteId, nome: "Ada" } });
+      // Chat limpo (PR 3): a linha leva o texto entregue e o turno do pedido (a raiz da troca agrupada), com a confiança da
+      // fala entregue — a frente de um pedido de colega conta como de fora (frentesDoLote, `origem = 'colega'`).
+      expect(linha).toMatchObject({ kind: "sistema", texto: "Respondi ao pedido de Ada", confianca: "nao_confiavel", payload: { loteId, agenteId: m.ada.agenteId, nome: "Ada", resposta: resposta!.texto, turnoRaizId: triagem.id } });
       expect(await m.linhas(bia.conversaId, "frentes_terminadas")).toHaveLength(0);
       expect(await m.repos.frentes.buscarLote(loteId)).toMatchObject({ retornoTurnoId: null, devolvidoEm: expect.any(Number) });
     });

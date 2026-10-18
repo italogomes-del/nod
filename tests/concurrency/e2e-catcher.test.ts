@@ -451,6 +451,11 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     expect(resposta.payload).toMatchObject({ kind: "peer_ask", agenteId: tuca.agenteId, nome: "Tuca", delegada: true });
     const tarefa = await turno(resposta.payload?.kind === "peer_ask" ? resposta.payload.tarefaId : "");
     expect(tarefa).toMatchObject({ origem: "delegacao", profundidade: 1, entradaConfianca: "confiavel", sobProcuracaoDe: srv.pessoa.pessoaId, agenteId: tuca.agenteId, conversaId: tuca.conversaId, estado: "concluido" });
+    // Chat limpo (PR 3): o nome vai gravado dos dois lados, e a conversa do Tuca diz quem pediu pelo turno do pedido.
+    const doTuca = await conversa(tuca.conversaId);
+    expect(doTuca.mensagens.find((m) => m.turnoId === tarefa.id && m.payload?.kind === "peer_pedido")?.payload).toMatchObject({ nome: "Vera" });
+    expect(doTuca.pedidosDeColega?.[tarefa.id]).toEqual({ agenteId: vera.agenteId, nome: "Vera" });
+    expect((await conversa(vera.conversaId)).mensagens.find((m) => m.payload?.kind === "handoff" && m.payload.tarefaId === tarefa.id)?.payload).toMatchObject({ nomePara: "Tuca" });
     const dev = await json<{ registros: { turnoId: string; tipo: string; dados: Record<string, unknown> }[] }>("GET", "dev/catcher");
     const doAlvo = dev.registros.find((r) => r.tipo === "plano_recebido" && r.turnoId === tarefa.id)?.dados.ferramentas as string[];
     expect(doAlvo).toContain("mcp__nod__pedir_acesso");
@@ -490,6 +495,7 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     // Na conversa do Tuca, o pedido é a fala do Taga, assinada "Taga · por <pessoa>".
     const naConversaDoAlvo = (await conversa(tuca.conversaId)).mensagens.find((m) => m.turnoId === tarefa.id && m.payload?.kind === "peer_pedido");
     expect(naConversaDoAlvo?.autoria).toMatchObject({ autor_id: taga.agenteId, sob_procuracao_de: srv.pessoa.pessoaId });
+    expect(naConversaDoAlvo?.payload).toMatchObject({ kind: "peer_pedido", nome: "Taga" });
     await esperarTurno(resultado.turnoId ?? "");
 
     // A tarefa que falha no alvo avisa o remetente uma vez, em vez de ele esperar calado.

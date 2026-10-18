@@ -1,6 +1,7 @@
 import type { Autoria } from "../contracts/evento.ts";
 import type { Assunto, Destino } from "../contracts/destino-no-chat.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
+import type { PedidoDeColega } from "../contracts/troca-entre-bots.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
 import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
@@ -140,10 +141,13 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
  * próprio: o trabalho dela é o do turno que ela abriu (`mensagem_origem_id`, índice da 0063). `fimDoTurno` olha só as
  * falas de texto do bot e só turno já encerrado; a janela é a mesma página lida, e a última fala de um turno é sempre a
  * mais nova dele, então ela está na página sempre que alguma fala dele estiver.
+ * revisto em 2026-10-18 (QA do PR 3 do chat limpo): `rz.raiz_id`/`rz.raiz_origem` entram no select. O lateral da raiz
+ * (ADR-099, I7) existia desde 12/10, mas as colunas dele nunca eram lidas, e `raiz` não chegava a mensagem nenhuma: a
+ * retomada de um pedido de colega (quem recebeu pediu a um terceiro) saía da troca e a fala entregue virava balão.
  */
 function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
   return conn<LinhaComTurno[]>`
-    select m.*, t.origem as turno_origem, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id,
+    select m.*, t.origem as turno_origem, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
       (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
         and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
     from (${recorte}) m
@@ -374,6 +378,21 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
         select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
         where tenant_id = ${escopo.tenantId} and turno_id = any(${[...new Set(turnoIds)]}::uuid[]) and payload->>'kind' = 'pedido_a_pessoa'`);
       return linhas.map(paraMensagemComTurno);
+    },
+
+    /**
+     * definido em 2026-10-18 (chat limpo, PR 3; plano, decisão 18): quem pediu cada turno de `delegacao` da janela — o
+     * autor do `peer_pedido` do turno e o nome do payload — numa consulta à parte (`turno_id = any(…)`, no índice
+     * mensagens_por_turno), não na consulta da janela. O nome vem do payload, nunca de um join com `agentes`, que a RLS
+     * esconde quando o bot é de outra pessoa (ADR-099). O pedido antigo, sem `nome`, volta com null.
+     */
+    async pedidosDeColega(turnoIds: readonly string[]): Promise<Record<string, PedidoDeColega>> {
+      if (turnoIds.length === 0) return {};
+      const linhas = await conn<{ turno_id: string; autor_id: string; nome: string | null }[]>`
+        select distinct on (turno_id) turno_id, autor_id, payload->>'nome' as nome from mensagens
+        where tenant_id = ${escopo.tenantId} and turno_id = any(${[...new Set(turnoIds)]}::uuid[]) and payload->>'kind' = 'peer_pedido'
+        order by turno_id, criado_em, id`;
+      return Object.fromEntries(linhas.map((l) => [l.turno_id, { agenteId: l.autor_id, nome: l.nome }]));
     },
 
     async ultimaDaConversa(conversaId: string): Promise<Mensagem | null> {

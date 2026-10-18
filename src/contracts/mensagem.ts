@@ -11,6 +11,7 @@ import type { ContaNoLimite, OrigemTurno } from "./turno.ts";
 import type { PayloadTrocaDeIa } from "./troca-de-ia.ts";
 import type { PayloadRotinaEvento } from "./rotina.ts";
 import type { Destino } from "./destino-no-chat.ts";
+import type { PayloadPedidoRespondido, PayloadPeerPedido } from "./troca-entre-bots.ts";
 import type { DesfechoItem, DesfechoRotina, MotivoFalhaComputador, MotivoNegacao, MotivoPasse } from "./motivos.ts";
 
 /** Marca de confiança é propriedade do CONTEÚDO, nunca do nome da ferramenta (ADR-026). */
@@ -42,13 +43,10 @@ export type KindMensagem =
 /** Payload tipado por kind: estado de controle nunca se lê do texto (Regra 9, GRUPO.passe-tipado). */
 export type PayloadMensagem =
   | { kind: "boas_vindas" }
-  /** `trabalhoId` (definido em 2026-10-07, ADR-083): o trabalho de quem RECEBEU o pedido; a linha "Enviou mensagem para…" abre a tela dele. */
-  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string; fila?: FilaDoPedido }
-  /**
-   * `delegacao` (definido em 2026-09-24, ADR-047): o pedido é tarefa delegada — o texto é a mensagem
-   * literal da pessoa, e tarefa/contexto são do remetente (a web rotula "não é instrução da pessoa").
-   */
-  | { kind: "peer_pedido"; conversaOrigemId: string; turnoOrigemId: string; delegacao?: { tarefa: string; contexto: string | null } }
+  /** `trabalhoId` (2026-10-07, ADR-083): o trabalho de quem RECEBEU o pedido. `nomePara` (2026-10-18, chat limpo PR 3): o nome dele no momento. */
+  | { kind: "handoff"; de: string; para: string; motivo: string; tarefaId?: string; trabalhoId?: string; fila?: FilaDoPedido; nomePara?: string }
+  /** ADR-047/058 e chat limpo (PR 3, `nome`): troca-entre-bots.ts. */
+  | PayloadPeerPedido
   | { kind: "passe"; motivo: MotivoPasse }
   /** definido em 2026-09-24 (ADR-044): um consentimento por LOTE de capacidades do mesmo app. */
   | { kind: "consentimento"; conectorId: string; slug: string; capacidades: string[]; naoInclui: string[] }
@@ -157,11 +155,8 @@ export type PayloadMensagem =
   | { kind: "recado_a_frente"; trabalhoId: string; titulo: string }
   /** definido em 2026-10-12 (ADR-099, I3): a linha "3 frentes terminaram" (ou "A frente X terminou", com `avisar_a_cada_uma`) na conversa do dono. */
   | { kind: "frentes_terminadas"; loteId: string; frentes: { trabalhoId: string; titulo: string; estado: EstadoTrabalho }[] }
-  /**
-   * definido em 2026-10-12 (ADR-099, I3, decisão 7): o lote de um pedido de colega voltou direto a quem pediu — na
-   * conversa do dono fica só a linha "Respondi ao pedido de X" (não confiável: o nome vem de outro bot).
-   */
-  | { kind: "pedido_respondido"; loteId: string; agenteId: string; nome: string };
+  /** ADR-099 (I3) e chat limpo (PR 3: `resposta`, `turnoRaizId`): troca-entre-bots.ts. */
+  | PayloadPedidoRespondido;
 
 export type Mensagem = {
   tenantId: TenantId;

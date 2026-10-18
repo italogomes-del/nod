@@ -140,7 +140,7 @@ const telemetria = criarTelemetria((eventos) => api?.telemetriaLinhas(eventos) ?
 window.addEventListener("pagehide", () => telemetria.descarregar());
 // ADR-114 (chat limpo, PR 2): o gatilho da Atividade — cada abertura da conversa própria e a Atividade aberta até 60 s depois.
 const vigiaAtividade = criarVigiaDaAtividade(telemetria);
-const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" ? v : null);
+const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" || v === "troca" ? v : null);
 
 /** As linhas que o histórico desenhou entram na telemetria (cada chave uma vez por carga). */
 function contarLinhasMostradas(): void {
@@ -3000,6 +3000,12 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
   "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
+  // Chat limpo (PR 3): a troca abre no lugar (o <details> cuida disso); só a abertura conta na telemetria da ADR-083.
+  "abrir-troca": (el) => {
+    if (el.closest("details")?.open) return;
+    const tipo = tipoLinha(el.dataset.linhaTipo);
+    if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
+  },
   "abrir-linha": (el) => {
     const tipo = tipoLinha(el.dataset.linhaTipo);
     if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });

@@ -532,7 +532,6 @@ describe("chat limpo com destino (ADR-114, PR 2)", () => {
       destino(sistema("a-tb-1", t0 + MIN, "Abriu a task Migrar relatórios", { payload: { kind: "trabalho_aberto", trabalhoId: "tb-1", titulo: "Migrar relatórios", origem: "pessoa" }, turnoId: "tc", origemTurno: "conversa" }), "anexo"),
       msg("m1", t0 + 2 * MIN, { turnoId: "tt", origemTurno: "conversa", trabalhoId: "tb-1", texto: "Convertendo o lote 1" }),
       msg("m2", t0 + 40 * MIN, { turnoId: "tt", origemTurno: "conversa", trabalhoId: "tb-1", fimDoTurno: true, texto: "Migração pronta: 33 relatórios" }),
-      destino(sistema("r1", t0 + 41 * MIN, "Respondi ao pedido de Chico", { payload: { kind: "pedido_respondido", loteId: "l", agenteId: "chico", nome: "Chico" } }), "anexo"),
       destino(sistema("f1", t0 + 42 * MIN, "3 frentes terminaram", { payload: { kind: "frentes_terminadas", loteId: "l2", frentes: [{ trabalhoId: "x", titulo: "X", estado: "terminado" }, { trabalhoId: "y", titulo: "Y", estado: "terminado" }] } }), "anexo"),
     ]);
     // O trabalho já saiu da lista: o título vem só do anexo.
@@ -544,7 +543,7 @@ describe("chat limpo com destino (ADR-114, PR 2)", () => {
     const tudo = html(c, e);
     expect(tudo).not.toContain("Abriu a task");
     expect(tudo).not.toContain("terminou ·");
-    expect(tudo).not.toContain("Respondi ao pedido");
+    // O "Respondi ao pedido de" (também `anexo`) entra na troca agrupada do PR 3: ver "a conversa com outros bots numa linha".
     expect(tudo).not.toContain("frentes terminaram");
     const semLista = cenario(ms);
     expect(itens(semLista.c, semLista.e).find((b) => b.chave === "m2")?.html).toContain("da task Migrar relatórios");
@@ -606,5 +605,193 @@ describe("chat limpo com destino (ADR-114, PR 2)", () => {
     expect(blocos[1]!.html).toContain('<span class="etiqueta-origem">da rotina');
     expect(html(c, e)).not.toContain("nada para você");
     expect(html(c, e)).not.toContain("Rotina executou");
+  });
+});
+
+/**
+ * Chat limpo, PR 3 (plano, Parte 2 · 2C; protótipo "2C · Agrupada por bot"): na conversa limpa, a conversa com outros bots
+ * vira UMA linha por troca — "Conversou com Ze 1 e Nina · 4 mensagens ⌄" —, que abre no lugar com "Para Ze 1" / "De
+ * Nina", a hora e o texto. Trocas seguidas juntam; o nome sempre vem ("outro bot" deixou de existir).
+ */
+describe("a conversa com outros bots numa linha (chat limpo, PR 3)", () => {
+  const limpo = (ms: Mensagem[]): Mensagem[] => ms.map((m) => (m.destino ? m : { ...m, destino: "chat" as const }));
+  const frota = (extra: object[] = []) => ({ frota: { agentes: [
+    { id: "leonardo", nome: "Leonardo", conversaId: C, cor: "c-red", forma: "shape-circle" },
+    { id: "ze1", nome: "Ze 1", conversaId: "c-ze1", cor: "c-orange", forma: "shape-square" },
+    { id: "nina", nome: "Nina", conversaId: "c-nina", cor: "c-purple", forma: "shape-square" },
+    { id: "ada", nome: "Ada", conversaId: "c-ada", cor: "c-blue", forma: "shape-square" },
+    { id: "tarsila", nome: "Tarsila", conversaId: "c-tarsila", cor: "c-green", forma: "shape-square" },
+    ...extra,
+  ] } as never });
+  const doLeonardo = (id: string, criadoEm: number, extra: Partial<Mensagem> = {}): Mensagem => msg(id, criadoEm, { autoria: autoriaBot("leonardo"), ...extra });
+  const cena = (ms: Mensagem[], extra: Partial<Estado> = {}, conversa: Partial<ConversaDto> = {}) => {
+    const { e, c } = cenario(limpo(ms), { ...frota(), ...extra }, { conversa: { tenantId: "t", id: C, ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "leonardo", salaId: null, sessaoCli: null, criadoEm: 1 } as never, ...conversa });
+    return itens(c, e);
+  };
+  const html = (blocos: { html: string }[]): string => blocos.map((b) => b.html).join("");
+  const ehTroca = (h: string): boolean => /^\s*<div class="linha-centro-wrap troca-wrap"><details class="troca"/.test(h);
+
+  /** Quem pede (o Leonardo): o pedido a Ze 1 e a Nina no mesmo turno, a fala que anuncia e as duas respostas. */
+  const pedidoAosDois = (): Mensagem[] => [
+    daPessoa("p1", t0),
+    doLeonardo("h-ze", t0 + 1, { turnoId: "t-pede", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "leonardo", para: "ze1", motivo: "Corrige o bug do fuso nas rotinas", tarefaId: "tarefa-ze", nomePara: "Ze 1" } }),
+    doLeonardo("h-nina", t0 + 2, { turnoId: "t-pede", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "leonardo", para: "nina", motivo: "Revisa a tela de rotinas", tarefaId: "tarefa-nina" } }),
+    doLeonardo("b-pedi", t0 + 3, { turnoId: "t-pede", origemTurno: "conversa", fimDoTurno: true, texto: "Pedi aos dois. Te aviso quando voltarem." }),
+    msg("r-ze", t0 + 22 * MIN, { autoria: autoriaBot("ze1"), turnoId: "t-volta-ze", origemTurno: "retomada", kind: "peer_ask", texto: "Abri o PR #912. CI verde em 8 min.", confianca: "nao_confiavel", payload: { kind: "peer_ask", agenteId: "ze1", nome: "Ze 1", naoSupervisionado: true, tarefaId: "tarefa-ze", delegada: true } }),
+    msg("r-nina", t0 + 30 * MIN, { autoria: autoriaBot("nina"), turnoId: "t-volta-nina", origemTurno: "retomada", kind: "peer_ask", texto: "Dois ajustes de espaçamento.", confianca: "nao_confiavel", payload: { kind: "peer_ask", agenteId: "nina", nome: "Nina", naoSupervisionado: true, tarefaId: "tarefa-nina", delegada: true } }),
+    doLeonardo("b-fim", t0 + 31 * MIN, { turnoId: "t-volta-nina", origemTurno: "retomada", fimDoTurno: true, texto: "O Ze 1 abriu o PR #912; a Nina pediu dois ajustes." }),
+  ];
+
+  /** Quem recebe (o Leonardo): o pedido de `de`, uma fala do meio e a resposta, num turno de delegação. */
+  const pedidoRecebido = (de: string, turno: string, criadoEm: number, extra: { nome?: string } = {}): Mensagem[] => [
+    msg(`${turno}-p`, criadoEm, { autoria: { ...autoriaBot(de), sob_procuracao_de: "p" }, turnoId: turno, origemTurno: "delegacao", payload: { kind: "peer_pedido", conversaOrigemId: `c-${de}`, turnoOrigemId: `t-${de}`, ...(extra.nome ? { nome: extra.nome } : {}) }, texto: `Pedido de ${de}`, confianca: "nao_confiavel" }),
+    doLeonardo(`${turno}-m`, criadoEm + MIN, { turnoId: turno, origemTurno: "delegacao", texto: "Olhando…" }),
+    doLeonardo(`${turno}-f`, criadoEm + 2 * MIN, { turnoId: turno, origemTurno: "delegacao", fimDoTurno: true, texto: `Resposta a ${de}` }),
+  ];
+
+  it("quem pede: uma linha no lugar de 'Enviou mensagem para' e 'N mensagens com', depois da fala que anunciou; aberta, Para/De, hora e texto", () => {
+    const blocos = cena(pedidoAosDois());
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "b-pedi", "troca:pedido:h-ze", "b-fim"]);
+    const troca = blocos[2]!.html;
+    expect(ehTroca(troca)).toBe(true);
+    expect(troca).toContain("Conversou com <b>Ze 1</b> e <b>Nina</b> · 4 mensagens");
+    expect(troca).toContain(`<span class="troca-ate"> · até ${new Date(t0 + 30 * MIN).toTimeString().slice(0, 5)}</span>`);
+    expect(troca).toContain('data-disclosure="troca-pedido:h-ze"');
+    expect(troca).toContain('data-act="abrir-troca" data-linha-tipo="troca" data-linha-chave="troca:pedido:h-ze" data-agente="leonardo"');
+    // Na ordem do tempo: Para Ze 1, Para Nina, De Ze 1, De Nina — cada uma com a hora e o texto; o avatar na cor do colega.
+    const ordem = [...troca.matchAll(/<b>((?:Para|De) [^<]+)<\/b> · (\d\d:\d\d)/g)].map((x) => x[1]);
+    expect(ordem).toEqual(["Para Ze 1", "Para Nina", "De Ze 1", "De Nina"]);
+    expect(troca).toContain("Corrige o bug do fuso nas rotinas");
+    expect(troca).toContain("Abri o PR #912. CI verde em 8 min.");
+    expect(troca).toContain('<span class="troca-avatar c-orange" aria-hidden="true"></span>');
+    // Revisão do PR 3 (ADR-041): cada mensagem da troca aberta leva o "Relatar" que tinha na tela da linha.
+    for (const id of ["h-ze", "h-nina", "r-ze", "r-nina"]) expect(troca).toContain(`data-act="relatar-mensagem" data-id="${id}">Relatar</button>`);
+    // "Contribuição de outro bot · confira as fontes" vai para dentro, junto da resposta que marca.
+    expect(troca.match(/Contribuição de outro bot · confira as fontes/g)).toHaveLength(2);
+    // Revisão do PR 3 (ADR-026): a resposta do colega marcada não confiável continua dizendo, como o balão "↙ Resposta de".
+    expect([...troca.matchAll(/<b>((?:Para|De) [^<]+)<\/b> · \d\d:\d\d( · não confiável)?/g)].map((x) => `${x[1]}${x[2] ?? ""}`)).toEqual(["Para Ze 1", "Para Nina", "De Ze 1 · não confiável", "De Nina · não confiável"]);
+    const tudo = html(blocos);
+    for (const velho of ["Enviou mensagem para", "mensagens com", "↗", "↙", "Resposta de", "pedido a colega", "msg-handoff", "msg-peer"]) expect(tudo).not.toContain(velho);
+  });
+
+  it("quem recebe: 'De Chico' no pedido e 'Para Chico' na resposta; a fala do meio fica fora; sem 'Pedido do'", () => {
+    const blocos = cena([daPessoa("p1", t0), doLeonardo("b1", t0 + MIN, { turnoId: "t1", origemTurno: "conversa", fimDoTurno: true }), ...pedidoRecebido("chico", "tk", t0 + 10 * MIN)], frota([{ id: "chico", nome: "Chico", conversaId: "c-chico", cor: "c-brown", forma: "shape-square" }]));
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "b1", "troca:turno:tk"]);
+    const troca = blocos[2]!.html;
+    expect(troca).toContain("Conversou com <b>Chico</b> · 2 mensagens");
+    expect([...troca.matchAll(/<b>((?:Para|De) [^<]+)<\/b>/g)].map((x) => x[1])).toEqual(["De Chico", "Para Chico"]);
+    expect(troca).toContain("Pedido de chico");
+    expect(troca).toContain("Resposta a chico");
+    expect(troca).not.toContain("Olhando…");
+    expect(html(blocos)).not.toContain("Pedido do");
+  });
+
+  it("trocas seguidas, sem nada à vista no meio, juntam numa linha (a tela do Eng 1); uma fala no meio ou uma pausa de 30 min separa", () => {
+    const juntas = cena([...pedidoRecebido("ada", "ta1", t0), ...pedidoRecebido("tarsila", "tt1", t0 + 5 * MIN), ...pedidoRecebido("ada", "ta2", t0 + 10 * MIN)]);
+    expect(juntas).toHaveLength(1);
+    expect(juntas[0]!.chave).toBe("troca:turno:ta1");
+    expect(juntas[0]!.html).toContain("Conversou com <b>Ada</b> e <b>Tarsila</b> · 6 mensagens");
+    expect(juntas[0]!.html).toContain(`até ${new Date(t0 + 12 * MIN).toTimeString().slice(0, 5)}`);
+
+    const fala = cena([...pedidoRecebido("ada", "ta1", t0), doLeonardo("b1", t0 + 4 * MIN, { turnoId: "t1", origemTurno: "conversa", fimDoTurno: true, texto: "Feito, Marlon" }), ...pedidoRecebido("tarsila", "tt1", t0 + 5 * MIN)]);
+    expect(fala.map((b) => b.chave)).toEqual(["troca:turno:ta1", "b1", "troca:turno:tt1"]);
+
+    // Protótipo F1: as trocas das 15:02, das 15:40 e das 17:20 — três linhas (referência: 20 no print, 5 depois da Parte 1).
+    const eng1 = cena([...pedidoRecebido("ada", "e1", t0), ...pedidoRecebido("ada", "e2", t0 + 40 * MIN), ...pedidoRecebido("ada", "e3", t0 + 140 * MIN), ...pedidoRecebido("tarsila", "e4", t0 + 150 * MIN)]);
+    expect(eng1.map((b) => b.chave)).toEqual(["troca:turno:e1", "troca:turno:e2", "troca:turno:e3"]);
+    expect(eng1[2]!.html).toContain("Conversou com <b>Ada</b> e <b>Tarsila</b> · 4 mensagens");
+    expect(html(eng1)).not.toContain("outro bot");
+  });
+
+  // Regressão do QA do PR 3 (18/10): com o "Novas" logo acima da primeira troca, a seguinte (sem nada no meio) ficava
+  // numa segunda linha até a próxima carga, quando o divisor saía e as duas juntavam.
+  it("o 'Novas' acima de uma troca: as seguintes juntam nela, com o divisor em cima; a troca de antes do 'Novas' não junta", () => {
+    const ms = [...pedidoRecebido("ada", "ta1", t0), ...pedidoRecebido("tarsila", "tt1", t0 + 5 * MIN), ...pedidoRecebido("ada", "ta2", t0 + 10 * MIN)];
+    const comNovas = (id: string) => cena(ms, { novasDesde: { [C]: { mensagemId: id, em: t0, total: 3 } } } as never);
+    const primeira = comNovas("ta1-p");
+    expect(primeira).toHaveLength(1);
+    expect(primeira[0]!.html.startsWith('<div class="linha-novas"')).toBe(true);
+    expect(primeira[0]!.html).toContain("Conversou com <b>Ada</b> e <b>Tarsila</b> · 6 mensagens");
+    // O "Novas" na segunda troca: a primeira fica em cima, sozinha; a segunda e a terceira juntam abaixo do divisor.
+    const segunda = comNovas("tt1-p");
+    expect(segunda.map((b) => b.chave)).toEqual(["troca:turno:ta1", "troca:turno:tt1"]);
+    expect(segunda[0]!.html).toContain("Conversou com <b>Ada</b> · 2 mensagens");
+    expect(segunda[1]!.html.startsWith('<div class="linha-novas"')).toBe(true);
+    expect(segunda[1]!.html).toContain("Conversou com <b>Tarsila</b> e <b>Ada</b> · 4 mensagens");
+  });
+
+  it("o nome sempre vem: bot de outro dono pelo payload; pedido fora da janela pela raiz; antigo sem nome pela frota; bot excluído e sem nada, 'um colega'", () => {
+    // Bot de outro dono (fora da frota): o nome gravado no peer_pedido.
+    expect(cena(pedidoRecebido("de-fora", "tf", t0, { nome: "Leonardo da Ana" }))[0]!.html).toContain("Conversou com <b>Leonardo da Ana</b>");
+    // O peer_pedido ficou fora da janela: só as falas do turno de delegação; o nome vem de pedidosDeColega pela raiz.
+    const semPedido = pedidoRecebido("chico", "tr", t0).slice(1);
+    expect(cena(semPedido, {}, { pedidosDeColega: { tr: { agenteId: "ze1", nome: "Ze Antigo" } } })[0]!.html).toContain("<b>Para Ze Antigo</b>");
+    // A raiz sem nome (pedido antigo) cai na frota; a retomada também entra pela raiz.
+    const retomada = doLeonardo("rt", t0 + 5 * MIN, { turnoId: "t-ret", origemTurno: "retomada", raiz: { turnoId: "tr", origem: "delegacao" }, fimDoTurno: true, texto: "Agora sim" });
+    const pelaFrota = cena([...semPedido, retomada], {}, { pedidosDeColega: { tr: { agenteId: "ze1", nome: null } } })[0]!.html;
+    expect(pelaFrota).toContain("Conversou com <b>Ze 1</b> · 1 mensagem");
+    expect(pelaFrota).toContain("Agora sim");
+    // Pedido antigo sem nome de um bot excluído (some da frota): "um colega".
+    const excluido = cena(pedidoRecebido("velho", "tv", t0), frota([{ id: "velho", nome: "Velho", conversaId: "c-velho", cor: "c-red", forma: "shape-circle", excluidoEm: 1 }]));
+    expect(excluido[0]!.html).toContain("Conversou com <b>um colega</b>");
+    expect(html(excluido)).not.toContain("outro bot");
+  });
+
+  it("a resposta do lote entra na troca: pedido_respondido com resposta vira 'Para Chico' (o 'comecei' do turno que abriu frentes não); o antigo, sem texto, diz 'respondido'", () => {
+    const comLote = cena([
+      msg("lp", t0, { autoria: { ...autoriaBot("ada"), sob_procuracao_de: "p" }, turnoId: "tl", origemTurno: "delegacao", payload: { kind: "peer_pedido", conversaOrigemId: "c-ada", turnoOrigemId: "t-ada", nome: "Ada" }, texto: "Revise o login e a CI" }),
+      doLeonardo("lc", t0 + MIN, { turnoId: "tl", origemTurno: "delegacao", fimDoTurno: true, texto: "Comecei duas frentes." }),
+      { ...msg("lf", t0 + MIN, { turnoId: "tl", origemTurno: "delegacao", kind: "sistema", texto: "Começou 2 frentes", payload: { kind: "frentes_abertas", loteId: "l", origem: "colega", frentes: [{ trabalhoId: "f1", titulo: "Login" }, { trabalhoId: "f2", titulo: "CI" }] } }), destino: "anexo" as const },
+      { ...msg("lr", t0 + 40 * MIN, { kind: "sistema", texto: "Respondi ao pedido de Ada", confianca: "nao_confiavel", payload: { kind: "pedido_respondido", loteId: "l", agenteId: "ada", nome: "Ada", resposta: "- Login: ok\n- CI: um teste instável", turnoRaizId: "tl" } }), destino: "anexo" as const },
+    ]);
+    expect(comLote.map((b) => b.chave)).toEqual(["troca:turno:tl"]);
+    const troca = comLote[0]!.html;
+    expect(troca).toContain("Conversou com <b>Ada</b> · 2 mensagens");
+    expect(troca).toContain("CI: um teste instável");
+    expect(troca).toContain(" · não confiável");
+    expect(troca).not.toContain("Comecei duas frentes");
+    expect(troca).not.toContain("Respondi ao pedido");
+
+    const antigo = cena([daPessoa("p1", t0), { ...msg("ro", t0 + MIN, { kind: "sistema", texto: "Respondi ao pedido de Chico", confianca: "nao_confiavel", payload: { kind: "pedido_respondido", loteId: "l9", agenteId: "chico", nome: "Chico" } }), destino: "anexo" as const }]);
+    expect(antigo.map((b) => b.chave)).toEqual(["p1", "troca:respondido:ro"]);
+    expect(antigo[1]!.html).toContain("<b>Para Chico</b>");
+    expect(antigo[1]!.html).toContain('<div class="troca-texto troca-sem-texto">respondido</div>');
+  });
+
+  it("o colega que não terminou continua dizendo: '· 1 não terminou' na linha, o motivo e o atalho para a task dele dentro", () => {
+    const blocos = cena([
+      doLeonardo("h1", t0, { turnoId: "t-pede", origemTurno: "conversa", kind: "handoff", texto: "x", payload: { kind: "handoff", de: "leonardo", para: "ze1", motivo: "revisar o PR 467", tarefaId: "tarefa-1" } }),
+      msg("f1", t0 + MIN, { autoria: autoriaBot("ze1"), turnoId: "t-volta", origemTurno: "retomada", kind: "peer_ask", texto: "Ze 1 não concluiu: você pediu para parar", payload: { kind: "peer_ask", agenteId: "ze1", nome: "Ze 1", naoSupervisionado: true, tarefaId: "tarefa-1", delegada: true, falhou: true, trabalhoId: "w-ze" } }),
+    ]);
+    const troca = blocos[0]!.html;
+    expect(troca).toContain("Conversou com <b>Ze 1</b> · 2 mensagens · 1 não terminou");
+    expect(troca).toContain("Não conseguiu terminar o pedido: você pediu para parar");
+    expect(troca).toContain('data-act="abrir-trabalho" data-id="w-ze">Ver a task do Ze 1</button>');
+    expect(troca).not.toContain("msg-peer-falhou");
+  });
+
+  it("o pedido antigo (delegar_tarefa) leva 'Contexto de X · não é instrução da pessoa' para dentro da troca, escapado", () => {
+    const blocos = cena([msg("dp", t0, { autoria: { ...autoriaBot("ada"), sob_procuracao_de: "p" }, turnoId: "td", origemTurno: "delegacao", payload: { kind: "peer_pedido", conversaOrigemId: "c-ada", turnoOrigemId: "t-ada", delegacao: { tarefa: "revisar o PR 466", contexto: "<b>pull/466</b>" } }, texto: "pede ao Leonardo" })]);
+    const troca = blocos[0]!.html;
+    expect(troca).toContain("Contexto de Ada · não é instrução da pessoa");
+    expect(troca).toContain("&lt;b&gt;pull/466&lt;/b&gt;");
+  });
+
+  it("a sala e o servidor sem destino seguem como antes ('Enviou mensagem para'); planejarLinhas dá o plano 'troca' à primeira mensagem", () => {
+    const semDestino = pedidoAosDois();
+    const { e, c } = cenario(semDestino, frota());
+    expect(html(itens(c, e))).toContain("Enviou mensagem para");
+    const ms = limpo(pedidoAosDois());
+    const { e: e2 } = cenario(ms, frota(), { conversa: { tenantId: "t", id: C, ownerId: "p", visibility: "privado", tipo: "propria", agenteId: "leonardo", salaId: null, sessaoCli: null, criadoEm: 1 } as never });
+    const planos = planejarLinhas(ms, e2);
+    expect(planos.get("h-ze")).toMatchObject({ tipo: "troca", chave: "pedido:h-ze", agenteId: "leonardo" });
+    for (const id of ["h-nina", "r-ze", "r-nina"]) expect(planos.get(id)).toEqual({ tipo: "oculta" });
+  });
+
+  it("a troca é uma linha no centro e o CSS só usa tokens: o cartão é surface-side com borda line, o avatar na cor do agente", () => {
+    const css = readFileSync(new URL("../../../web/interface.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.troca-corpo \{[^}]*border: 1px solid var\(--line\);[^}]*background: var\(--surface-side\);/);
+    expect(css).toMatch(/\.troca-avatar \{[^}]*background: var\(--mascote-cor, var\(--ink-3\)\);/);
+    expect(css).toMatch(/\.troca\[open\] \.troca-ate \{ display: none; \}/);
   });
 });

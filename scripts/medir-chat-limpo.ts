@@ -25,20 +25,30 @@ import type { Escopo, Tx } from "../src/shared/types.ts";
  *  - execução de rotina sem nada para a pessoa (`rotina.execucao`) conta como escondida nas duas (já fica escondida hoje);
  *  - os quatro avisos de destino temporal (limite do plano, troca de IA, computador fora, IA ausente) contam como
  *    visíveis mesmo depois de deixarem de valer (a web os esconde pelo estado de agora);
- *  - agrupamentos da tela não entram: cada mensagem entre bots conta um item (a troca agrupada é a Parte 2), cada recibo
- *    conta um item (o cartão encolhido é a Parte 3), e o "N avisos do sistema · ver" não é desfeito.
+ *  - agrupamentos da tela não entram: cada recibo conta um item (o cartão encolhido é a Parte 3), e o "N avisos do
+ *    sistema · ver" não é desfeito.
+ *
+ * revisto em 2026-10-18 (PR 3, a troca agrupada): na coluna "com a tabela", as mensagens entre bots seguidas (pedido,
+ * resposta, `handoff`, `peer_ask`, "Respondi ao pedido" e as falas do turno de delegação), sem item à vista no meio e sem
+ * pausa de 30 min, contam UM item, como a linha "Conversou com …" da tela. A coluna "hoje" conta como antes.
  */
 
-type LinhaMedida = { conversa_id: string; kind: KindMensagem; payload: PayloadMensagem | null; texto: string; decidido_por: Autoria["decidido_por"]; assunto: string | null; de_trabalho: boolean; primeira: boolean };
+type LinhaMedida = { conversa_id: string; kind: KindMensagem; payload: PayloadMensagem | null; texto: string; decidido_por: Autoria["decidido_por"]; assunto: string | null; de_trabalho: boolean; de_delegacao?: boolean; primeira: boolean; em?: number };
+
+/** Os assuntos da conversa entre bots que a tela junta numa troca (PR 3). */
+const ASSUNTOS_DA_TROCA = new Set(["colega.handoff", "colega.pedido", "colega.resposta", "pedido.respondido"]);
+/** A pausa que separa duas trocas na tela (web/telas/linhas-do-chat.ts, PAUSA_QUE_SEPARA_TROCAS_MS). */
+const PAUSA_TROCA_MS = 30 * 60_000;
 
 export type Medida = { itensHoje: number; falasHoje: number; itensTabela: number; falasTabela: number };
 
 /** O que uma mensagem conta em cada coluna. */
-export function medirMensagem(l: Pick<LinhaMedida, "kind" | "payload" | "texto" | "decidido_por" | "assunto" | "de_trabalho" | "primeira">): { assunto: string | null; hoje: boolean; tabela: boolean; fala: boolean } {
+export function medirMensagem(l: Pick<LinhaMedida, "kind" | "payload" | "texto" | "decidido_por" | "assunto" | "de_trabalho" | "primeira" | "de_delegacao">): { assunto: string | null; hoje: boolean; tabela: boolean; fala: boolean; troca: boolean } {
   const assunto = l.assunto ?? assuntoDaLinhaAntiga({ kind: l.kind, payload: l.payload, texto: l.texto, decididoPor: l.decidido_por, tipoConversa: "propria", primeiraDaConversa: l.primeira }).assunto;
   const fala = l.kind === "texto" && assunto === null;
   const escondidaHoje = (fala && l.de_trabalho) || assunto === "rotina.execucao";
-  return { assunto, fala, hoje: !escondidaHoje, tabela: !escondidaHoje && destinoDe(assunto) === "chat" };
+  const troca = (assunto !== null && ASSUNTOS_DA_TROCA.has(assunto)) || (fala && l.de_delegacao === true && !l.de_trabalho);
+  return { assunto, fala, hoje: !escondidaHoje, tabela: !escondidaHoje && destinoDe(assunto) === "chat", troca };
 }
 
 export function mediana(valores: readonly number[]): number | null {
@@ -52,7 +62,8 @@ export function mediana(valores: readonly number[]): number | null {
 export async function medirDaPessoa(trx: Tx, escopo: Escopo, dias: number, porAssunto: Map<string, number>): Promise<Map<string, Medida>> {
   const linhas = await trx<LinhaMedida[]>`
     select m.conversa_id, m.kind, m.payload, m.texto, m.decidido_por, m.assunto,
-      coalesce(t.trabalho_id, o.trabalho_id) is not null as de_trabalho,
+      coalesce(t.trabalho_id, o.trabalho_id) is not null as de_trabalho, coalesce(t.origem::text = 'delegacao', false) as de_delegacao,
+      (extract(epoch from m.criado_em) * 1000)::float8 as em,
       (m.kind = 'sistema' and m.payload is null and not exists (
         select 1 from mensagens p where p.tenant_id = m.tenant_id and p.conversa_id = m.conversa_id
           and (p.criado_em < m.criado_em or (p.criado_em = m.criado_em and p.id < m.id)))) as primeira
@@ -63,8 +74,19 @@ export async function medirDaPessoa(trx: Tx, escopo: Escopo, dias: number, porAs
       select x.trabalho_id from turnos x where x.tenant_id = m.tenant_id and x.mensagem_origem_id = m.id and m.turno_id is null
       order by x.criado_em limit 1
     ) o on true
-    where m.tenant_id = ${escopo.tenantId} and m.owner_id = ${escopo.pessoaId} and m.criado_em >= now() - make_interval(days => ${dias})`;
+    where m.tenant_id = ${escopo.tenantId} and m.owner_id = ${escopo.pessoaId} and m.criado_em >= now() - make_interval(days => ${dias})
+    order by m.conversa_id, m.criado_em, m.id`;
+  return medirLinhas(linhas, porAssunto);
+}
+
+/**
+ * As medidas por conversa, sobre as linhas em ordem de tempo dentro de cada conversa. Na coluna "com a tabela", uma
+ * sequência de mensagens entre bots conta um item (PR 3): a troca começa na primeira e acaba no próximo item à vista ou
+ * numa pausa de 30 min.
+ */
+export function medirLinhas(linhas: readonly LinhaMedida[], porAssunto: Map<string, number>): Map<string, Medida> {
   const porConversa = new Map<string, Medida>();
+  const ultimaDaTroca = new Map<string, number | null>();
   for (const l of linhas) {
     const r = medirMensagem(l);
     porAssunto.set(r.assunto ?? "(fala)", (porAssunto.get(r.assunto ?? "(fala)") ?? 0) + 1);
@@ -73,9 +95,14 @@ export async function medirDaPessoa(trx: Tx, escopo: Escopo, dias: number, porAs
       m.itensHoje += 1;
       if (r.fala) m.falasHoje += 1;
     }
-    if (r.tabela) {
+    const ultima = ultimaDaTroca.get(l.conversa_id) ?? null;
+    if (r.troca) {
+      if (ultima === null || (l.em ?? 0) - ultima >= PAUSA_TROCA_MS) m.itensTabela += 1;
+      ultimaDaTroca.set(l.conversa_id, l.em ?? 0);
+    } else if (r.tabela) {
       m.itensTabela += 1;
       if (r.fala) m.falasTabela += 1;
+      ultimaDaTroca.set(l.conversa_id, null);
     }
     porConversa.set(l.conversa_id, m);
   }
@@ -132,7 +159,7 @@ async function principal(): Promise<void> {
   const banco = new URL(url);
   escrever(`Banco: ${banco.host}${banco.pathname} · últimos ${dias} dias · só leitura, só contagens`);
   escrever("Não reproduz: fala de task/frente e rotina silenciosa contam como escondidas; os 4 avisos temporais contam como visíveis;");
-  escrever("               mensagens entre bots e recibos contam um item cada (Partes 2 e 3); o recolhimento \"N avisos\" não é desfeito.");
+  escrever("               recibos contam um item cada (Parte 3); o recolhimento \"N avisos\" não é desfeito; \"com a tabela\" junta as trocas entre bots (PR 3).");
   escrever("");
   escrever(`Conversas próprias com 20+ itens visíveis hoje: ${r.conversas} (de ${medidas.length} com alguma mensagem no período)`);
   escrever(`${"".padEnd(28)} ${"hoje".padStart(8)} ${"com a tabela".padStart(14)}`);

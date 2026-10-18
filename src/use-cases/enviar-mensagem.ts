@@ -233,5 +233,22 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos)).get(doBot) ?? null) : null;
   // ADR-113: as reações das falas da janela, numa consulta (o chip "👍 1" embaixo de cada fala).
   const reacoes = await deps.repos.reacoes.dasMensagens(mensagens.map((m) => m.id));
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes } };
+  // Chat limpo (PR 3, plano decisão 18): quem pediu cada turno de delegação da janela (próprio ou raiz), numa consulta à
+  // parte — a troca agrupada diz o nome mesmo com o `peer_pedido` fora da janela. Só na conversa própria.
+  const pedidosDeColega = conversa.tipo === "propria" ? await deps.repos.mensagens.pedidosDeColega(turnosDeDelegacao(mensagens)) : undefined;
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes, ...(pedidosDeColega ? { pedidosDeColega } : {}) } };
 };
+
+/**
+ * Os turnos de delegação da janela: o da própria mensagem ou a raiz da cadeia de retomadas dela (ADR-099, I7 revista), o do
+ * `peer_pedido` (o turno de outra pessoa não vem no join, e a origem fica nula) e a raiz gravada no `pedido_respondido`.
+ */
+function turnosDeDelegacao(mensagens: readonly Mensagem[]): string[] {
+  const ids = new Set<string>();
+  for (const m of mensagens) {
+    if ((m.origemTurno === "delegacao" || m.payload?.kind === "peer_pedido") && m.turnoId) ids.add(m.turnoId);
+    if (m.raiz?.origem === "delegacao") ids.add(m.raiz.turnoId);
+    if (m.payload?.kind === "pedido_respondido" && m.payload.turnoRaizId) ids.add(m.payload.turnoRaizId);
+  }
+  return [...ids];
+}
