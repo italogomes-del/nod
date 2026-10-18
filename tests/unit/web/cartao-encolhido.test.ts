@@ -50,7 +50,7 @@ function cenario(mensagens: Mensagem[], itens: SuaVezDto["itens"] = [], extra: P
   return { e, c: e.conversas[C]! };
 }
 
-const chaves = (c: ConversaEstado, e: Estado): string[] => blocosDoHistorico(c, e).map((b) => b.chave).filter((k) => k !== "sep");
+const chaves = (c: ConversaEstado, e: Estado): string[] => blocosDoHistorico(c, e).map((b) => b.chave).filter((k) => !k.startsWith("sep:"));
 
 describe("cada tipo de cartão encolhido", () => {
   const { e } = cenario([]);
@@ -108,6 +108,13 @@ describe("onde o cartão encolhido fica", () => {
   it("a fala do turno que seguiu depois da decisão ('Enviado.') fica depois do cartão, como no protótipo", () => {
     const { e, c } = cenario([daPessoa("m1", t0), fala("m2", t0 + MIN, "t1"), aprovacao("r", t0 + 2 * MIN, "t1"), fala("m3", t0 + 3 * MIN, "t1")]);
     expect(chaves(c, e)).toEqual(["m1", "m2", "encolhido:r", "m3"]);
+  });
+
+  // Chat limpo, PR 6: o cartão que subiu para a fala que pediu não abre bloco de horário. Decidido três horas depois, o
+  // divisor entra depois dele, antes da fala que seguiu ("Enviado."), e não entre a fala que pediu e o cartão.
+  it("decidido horas depois: o divisor de data vem depois do cartão encolhido, antes da fala que seguiu", () => {
+    const { e, c } = cenario([daPessoa("m1", t0 - 180 * MIN), fala("m2", t0 - 179 * MIN, "t1"), aprovacao("r", t0, "t1"), fala("m3", t0 + MIN, "t1")]);
+    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep:m1", "m1", "m2", "encolhido:r", "sep:m3", "m3"]);
   });
 
   it("âncora fora da janela: o cartão encolhe na posição do próprio recibo", () => {

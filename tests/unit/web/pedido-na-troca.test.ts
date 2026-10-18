@@ -52,7 +52,7 @@ function cenario(mensagens: Mensagem[], itens: SuaVezDto["itens"] = []): { e: Es
   return { e, c: e.conversas[C]! };
 }
 
-const chaves = (c: ConversaEstado, e: Estado): string[] => blocosDoHistorico(c, e).map((b) => b.chave).filter((k) => k !== "sep" && !["a-fazer", "acolhimento", "decisoes", "liberar"].includes(k));
+const chaves = (c: ConversaEstado, e: Estado): string[] => blocosDoHistorico(c, e).map((b) => b.chave).filter((k) => !k.startsWith("sep:") && !["a-fazer", "acolhimento", "decisoes", "liberar"].includes(k));
 
 describe("o pedido cuja âncora cai dentro de uma troca agrupada fica depois dela", () => {
   it("aberto: o cartão do Ze vem depois de 'Conversou com Leo', não em cima", () => {

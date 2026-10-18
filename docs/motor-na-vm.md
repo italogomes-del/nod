@@ -60,7 +60,9 @@ Em **Máquinas**: marque os bots que vão para a VM no último passo do "Conecta
 
 ## 5. O que conferir
 
-- Mande uma mensagem a um bot preso à VM: a resposta mostra "rodou em" a VM e o bot diz que está na máquina Linux.
+- Mande uma mensagem a um bot preso à VM: com o modo dev ligado (⌘⇧D), a faixa embaixo da resposta e o Raio-X mostram
+  "rodou em" a VM (desde 2026-10-18 a etiqueta não fica mais no balão, ADR-114, emenda do PR 6), e o bot diz que está na
+  máquina Linux.
 - Feche o app do Mac: o bot da VM continua respondendo pelo navegador.
 - Pare o serviço na VM (`sudo systemctl stop nod-motor`) e mande uma mensagem: a linha da fila diz "<vm> não responde
   desde HH:MM" e oferece "Rodar em <Mac> desta vez".

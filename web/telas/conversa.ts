@@ -17,7 +17,8 @@ import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
-import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, type LinhaDaConversa } from "./pergunta.ts";
+import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, tempoDasLinhas, type LinhaDaConversa } from "./pergunta.ts";
+import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
 import { chaveDoItem } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
@@ -59,14 +60,6 @@ function versaoMaisRecente(estado: Estado, conversaId: string, artefatoId: strin
   let n = piso;
   for (const m of estado.conversas[conversaId]?.mensagens ?? []) if (m.payload?.kind === "artefato" && m.payload.artefatoId === artefatoId && m.payload.versao > n) n = m.payload.versao;
   return n;
-}
-
-/** Badge de executor (plano): 'catcher' ou 'rodou em <máquina>' — dado tipado da autoria, nunca texto. */
-export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
-  if (m.autoria.autor_tipo !== "agente") return "";
-  if (m.autoria.executor === "catcher") return `<span class="tag tag-catcher" title="executor catcher: sem CLI, sem custo">catcher</span>`;
-  const maquina = m.autoria.machine_id ? m.autoria.machine_id.slice(0, 8) : "esta máquina";
-  return `<span class="tag tag-cinza" title="harness no computador conectado">rodou em ${esc(maquina)}</span>`;
 }
 
 // Ações na fala (ADR-042; desde 2026-10-18, ADR-113): reagir, responder, reportar e ⋯ moram em ./acoes-da-fala.ts.
@@ -425,9 +418,11 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   const sender = `<div class="msg-autor"><b>${esc(autor)}</b><time>${hora(m.criadoEm)}</time>${etiqueta}</div>`;
   const delegacao = m.payload?.kind === "peer_pedido" ? m.payload.delegacao : undefined;
   const contextoDelegado = delegacao ? `<div class="msg-contexto-delegado"><small class="mudo">Contexto de ${esc(agente?.nome ?? (m.payload?.kind === "peer_pedido" ? m.payload.nome : undefined) ?? "um colega")} · não é instrução da pessoa</small><p>${esc(delegacao.tarefa)}</p>${delegacao.contexto ? `<p>${esc(delegacao.contexto)}</p>` : ""}</div>` : "";
+  // Chat limpo (PR 6, 2026-10-18; plano, Parte 5): "rodou em <máquina>" e "catcher" saíram do balão e moram na faixa do
+  // modo dev e no Raio-X (`ondeRodou`, ./modo-dev.ts); "não confiável" e "parcial" ficam, porque dizem algo do texto.
   const tags = ehPessoa || m.payload?.kind === "peer_pedido" || m.payload?.kind === "boas_vindas"
     ? ""
-    : [badgeExecutor(m), m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
+    : [m.confianca === "nao_confiavel" ? '<span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "", m.parcial ? '<span class="tag tag-cinza">parcial</span>' : ""].filter(Boolean).join("");
   const metaTags = tags ? `<div class="meta-tags">${tags}</div>` : "";
   // definido em 2026-09-24 (emenda da ADR-045): a pergunta de pedir_a_pessoa é esta fala; a mensagem que a respondeu
   // leva o rótulo, e a retomada vira uma linha logo depois. revisto em 2026-10-18 (plano "pergunta com botões", Parte 2):
@@ -696,16 +691,11 @@ export function renderMensagensAgrupadas(mensagens: Mensagem[], estado: Estado, 
  * recolhidos (o id da primeira), cada proposta e as decisões. main.ts troca só os pedaços cujo HTML mudou, e a
  * mensagem nova entra sem regravar as outras 199 (web/lib/regioes.ts `regiaoPorBlocos`).
  */
-export type BlocoDaTimeline = { chave: string; html: string; inicio?: string };
-
 /**
- * O bloco de uma linha: a chave e, na troca agrupada (chat limpo, PR 3), o id da mensagem em que ela entrou. A chave da
- * troca é `troca:<turno ou pedido>` e não diz a posição; sem `inicio`, o pedido cuja âncora caía dentro da troca ia para
- * antes dela (QA do PR 4, 2026-10-18: o cartão do Ze aparecia acima de "Conversou com Leo").
+ * `inicio` (QA do PR 4): na troca agrupada, o id da mensagem em que ela entrou (ver `blocoDaLinha`). `tempo` (chat limpo,
+ * PR 6): o que os divisores de data precisam do bloco; o bloco sem ele não abre bloco de horário.
  */
-function blocoDaLinha(l: LinhaDaConversa): BlocoDaTimeline {
-  return { chave: l.chave ?? l.id, html: l.html, ...(l.chave?.startsWith("troca:") ? { inicio: l.id } : {}) };
-}
+export type BlocoDaTimeline = { chave: string; html: string; inicio?: string; tempo?: TempoDoBloco };
 
 /**
  * As mensagens em blocos (revisto em 2026-10-07, #191, chat limpo): `planejarLinhas` (web/telas/linhas-do-chat.ts) diz
@@ -732,7 +722,10 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
           : plano.tipo === "troca"
             ? htmlTroca(plano, estado)
             : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
-    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...(plano?.tipo === "linha" || plano?.tipo === "troca" ? { chave: plano.tipo === "troca" ? `troca:${plano.chave}` : plano.chave } : {}) };
+    // Chat limpo (PR 6): o instante que a linha mostra, para os divisores de data. A troca vai da primeira à última mensagem
+    // dela; a mensagem que sumiu (só sobra, talvez, a linha "Novas") não abre bloco.
+    const tempo = html === "" ? { em: null } : plano?.tipo === "troca" ? { em: plano.mensagens[0]?.em ?? m.criadoEm, ate: plano.mensagens.at(-1)?.em ?? m.criadoEm, instantes: plano.mensagens.map((x) => x.em) } : { em: m.criadoEm };
+    return { id: m.id, sistema: !plano && linhaDeSistema(m), html: (novas?.mensagemId === m.id ? linhaNovas(novas) : "") + html, ...tempo, ...(plano?.tipo === "linha" || plano?.tipo === "troca" ? { chave: plano.tipo === "troca" ? `troca:${plano.chave}` : plano.chave } : {}) };
   });
   const conversaId = mensagens[0]?.conversaId;
   const ordenadas = linhaDepoisDaFala(linhas, mensagens, planos);
@@ -741,6 +734,20 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   // Chat limpo (ADR-114): sem aviso genérico no chat, não sobra o que recolher — o que fica pede a pessoa e fica à vista.
   // A sala e o servidor de antes (sem `destino`) continuam recolhendo.
   return conversaLimpa(mensagens) ? desenhadas.map(blocoDaLinha) : recolherAvisos(desenhadas);
+}
+
+/**
+ * O bloco de uma linha: a chave, o tempo dela (os divisores de data, PR 6) e, na troca agrupada (chat limpo, PR 3), o id
+ * da mensagem em que ela entrou. A chave da troca é `troca:<turno ou pedido>` e não diz a posição; sem `inicio`, o pedido
+ * cuja âncora caía dentro da troca ia para antes dela (QA do PR 4, 2026-10-18: o cartão do Ze aparecia acima de
+ * "Conversou com Leo").
+ */
+function blocoDaLinha(l: LinhaDaConversa): BlocoDaTimeline {
+  return { chave: l.chave ?? l.id, html: l.html, ...(l.chave?.startsWith("troca:") ? { inicio: l.id } : {}), tempo: tempoDoBloco(l.id, l) };
+}
+
+function tempoDoBloco(id: string, t: { em: number | null; ate?: number; instantes?: readonly number[] }): TempoDoBloco {
+  return t.em === null ? { id, em: null } : { id, em: t.em, ate: t.ate ?? t.em, ...(t.instantes ? { instantes: t.instantes } : {}) };
 }
 
 /**
@@ -806,7 +813,7 @@ function recolherAvisos(linhas: readonly LinhaDaConversa[]): BlocoDaTimeline[] {
     while (linhas[fim]?.sistema) fim++;
     if (fim - i >= AVISOS_PARA_RECOLHER) {
       const id = linhas[i]?.id ?? "";
-      saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>` });
+      saida.push({ chave: `avisos-${id}`, html: `<details class="avisos-sistema" data-disclosure="avisos-${esc(id)}"><summary>${fim - i} avisos do sistema · ver</summary>${linhas.slice(i, fim).map((l) => l.html).join("")}</details>`, tempo: tempoDoBloco(id, tempoDasLinhas(linhas.slice(i, fim))) });
       i = fim;
     } else if (fim > i) {
       saida.push(...linhas.slice(i, fim).map(blocoDaLinha));
@@ -861,7 +868,6 @@ export function renderHistoricoDaTimeline(c: ConversaEstado, estado: Estado): st
 
 export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const sala = c.conversa.tipo === "sala";
-  const primeira = c.mensagens[0];
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const acolhimento = agente && !agente.confirmado && c.mensagens.some((m) => m.payload?.kind === "boas_vindas") && !c.mensagens.some((m) => m.kind === "texto" && m.autoria.autor_tipo === "pessoa") ? `<section class="welcome-options"><h2>Por onde começamos?</h2><p>Escolha uma ideia ou escreva no chat.</p>${[
     ["Tarefas do dia a dia", "Lembretes, organização e acompanhamento", "Quero ajuda com tarefas do dia a dia: lembretes e organização."],
@@ -875,7 +881,6 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   // As rotinas que vêm com um perfil (ADR-050) aparecem dentro do card dele, não soltas.
   const noPerfil = idsNoPerfil(c.propostas);
   const propostas = c.propostas.filter((p) => !comDecisaoVencida(p, estado) && !gemeas.has(p.id) && !noPerfil.has(p.id));
-  const sep = primeira ? `<div class="time-sep">${esc(dataHora(primeira.criadoEm))}</div>` : "";
   // Chat limpo (PR 4): o pedido que já tem o recibo na conversa é o cartão encolhido; o aberto de mesmo id não sai de novo
   // (a fila "Sua vez" e as propostas são relidas um instante depois do frame da mensagem, e por esse instante os dois
   // estariam na tela).
@@ -884,8 +889,12 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
   const idsDasPropostas = new Set([...abertas.map((p) => p.id), ...decididos]);
   const { blocos, ancoradas } = comPedidosAncorados(comEncolhidosNaAncora(blocosDasMensagens(c.mensagens, estado, sala), c), c, estado, idsDasPropostas);
   return [
-    { chave: "sep", html: sep },
-    ...blocos,
+    // Chat limpo (PR 6; plano, Parte 5): o divisor do topo e um a cada pausa de 30 min ou troca de dia entre itens à vista,
+    // calculados depois de esconder o que foi para a Atividade, juntar as trocas e encolher os cartões. Vale também na sala
+    // e na conversa do servidor de antes: lá nada some, e o divisor só marca as pausas. "Hoje" e "Ontem" leem o relógio
+    // direto, como `textoFormatado`: o histórico é lembrado com o dia de extra (main.ts, `partesDaTimeline`), e ler
+    // `estado.agora` o refaria inteiro a cada tick de 15 s.
+    ...comDivisores(blocos, Date.now()),
     // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
     { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
     { chave: "acolhimento", html: acolhimento },

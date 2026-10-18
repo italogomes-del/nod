@@ -86,14 +86,14 @@ describe("3. o pedido fica junto do turno que o pediu", () => {
     const mensagens = [msg("m1", "pessoa", 1), msg("m2", "agente", 2, { turnoId: "t1" }), msg("m3", "pessoa", 3), msg("m4", "agente", 4, { turnoId: "t2" })];
     const { e, c } = cenario(mensagens, [pedido("d1", { turnoId: "t1" })]);
     const chaves = blocosDoHistorico(c, e).map((b) => b.chave);
-    expect(chaves).toEqual(["sep", "m1", "m2", "decisao:d1", "m3", "m4"]);
+    expect(chaves).toEqual(["sep:m1", "m1", "m2", "decisao:d1", "m3", "m4"]);
     expect(renderTimeline(c, e)).not.toContain("Preciso da sua decisão para continuar");
   });
 
   it("sem turno, fica depois da última mensagem anterior ao pedido; sem mensagem nenhuma, na seção do fim", () => {
     const mensagens = [msg("m1", "pessoa", Date.parse("2026-10-03T14:30:00Z")), msg("m2", "agente", Date.parse("2026-10-03T14:50:00Z"))];
     const { e, c } = cenario(mensagens, [pedido("d1")]);
-    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep", "m1", "decisao:d1", "m2"]);
+    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep:m1", "m1", "decisao:d1", "m2"]);
     const vazio = cenario([], [pedido("d1")]);
     expect(renderTimeline(vazio.c, vazio.e)).toContain("Preciso da sua decisão para continuar");
   });
@@ -104,12 +104,12 @@ describe("3. o pedido fica junto do turno que o pediu", () => {
     const rotina = (id: string, criadoEm: number) => msg(id, "agente", criadoEm, { turnoId: "tr1", origemTurno: "rotina", trabalhoId: "tb-r1", fimDoTurno: true });
     const mensagens = [msg("m1", "pessoa", 1, { origemTurno: null, trabalhoId: null, fimDoTurno: false }), rotina("r1", 2), msg("m3", "pessoa", 3, { origemTurno: null, trabalhoId: null, fimDoTurno: false })];
     const { e, c } = cenario(mensagens, [pedido("d1", { turnoId: "tr1" })]);
-    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep", "m1", "linha:r1", "decisao:d1", "m3"]);
+    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep:m1", "m1", "linha:r1", "decisao:d1", "m3"]);
   });
 
   it("com o turno ainda rodando, fica embaixo da mensagem que o disparou", () => {
     const { e, c } = cenario([msg("m1", "pessoa", 1), msg("m2", "pessoa", 2)], [pedido("d1", { turnoId: "t9" })], { turnosEmCurso: [{ id: "t9", estado: "despachando", desde: 1, mensagemId: "m1" }] as never });
-    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep", "m1", "decisao:d1", "m2"]);
+    expect(blocosDoHistorico(c, e).map((b) => b.chave)).toEqual(["sep:m1", "m1", "decisao:d1", "m2"]);
   });
 });
 

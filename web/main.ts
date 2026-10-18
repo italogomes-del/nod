@@ -6,6 +6,7 @@ import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/ca
 import { CURTA } from "./telas/card-pasta.ts";
 import { abrirReportarBug } from "./telas/reportar-bug.ts";
 import { abrirRaioX } from "./telas/raio-x.ts";
+import { ondeDoTurno } from "./telas/modo-dev.ts";
 import { iasDaTela, mudarRascunho, ordemDaPessoa, destinoDoPedido, mudaAIaDoBot, pedidoDoMenu, pedidoDoRascunho, rascunhoDe, type MudancaRascunho, type RascunhoInteligencia } from "./telas/inteligencia.ts";
 import { abrirPreviaDaTroca } from "./telas/previa-troca-dialogo.ts";
 import { ehIaMac, type UiIas } from "./telas/cartao-ia.ts";
@@ -2284,7 +2285,7 @@ function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): vo
   }
   if (acao === "raio-x" && api && fala.turnoId) {
     const t = estado.tela;
-    void abrirRaioX(api, fala.turnoId, t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala", ancora);
+    void abrirRaioX(api, fala.turnoId, t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala", ancora, ondeDoTurno(fala, estado.conversas[fala.conversaId]?.mensagens ?? []));
     return;
   }
   if (!api || !bot) return;
@@ -2556,7 +2557,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "abrir-raio-x": (el) => {
     const t = estado.tela;
     const nome = t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala";
-    if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome, el);
+    if (api && el.dataset.id) void abrirRaioX(api, el.dataset.id, nome, el, el.dataset.onde ?? "");
   },
   "alternar-modo-dev": () => agir(alternarModoDev),
   // Modo ligação (definido em 2026-10-04, ADR-071).

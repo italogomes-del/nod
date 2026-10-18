@@ -155,9 +155,10 @@ describe("histórico em blocos com chave: a mensagem nova não regrava as outras
     const bDepois = blocosDoHistorico(conversaDaTela(depois)!, depois);
     const porChave = new Map(bAntes.map((b) => [b.chave, b.html]));
     const iguais = bDepois.filter((b) => porChave.get(b.chave) === b.html).map((b) => b.chave);
-    // O separador de data também fica: a primeira mensagem mudou, mas é do mesmo dia.
-    expect(iguais).toEqual(["sep", "m1", "m2", "m3", "m4"]);
-    expect(bDepois.map((b) => b.chave)).toEqual(["sep", "m1", "m2", "m3", "m4", "m5"]);
+    // O divisor do topo (chat limpo, PR 6) tem a chave da primeira mensagem do bloco (`sep:<id>`): ele nasce de novo com
+    // ela, e as mensagens do meio ficam.
+    expect(iguais).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(bDepois.map((b) => b.chave)).toEqual(["sep:m1", "m1", "m2", "m3", "m4", "m5"]);
     // A string da timeline (a que os testes das telas leem) é a junção dos blocos.
     expect(renderTimeline(conversaDaTela(depois), depois)).toContain(bDepois.map((b) => b.html).join(""));
   });

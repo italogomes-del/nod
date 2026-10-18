@@ -9,6 +9,7 @@ import { limiteVigente } from "./ia-fora.ts";
 import { custoDaFrente } from "./modo-dev.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
+import { mesmoDia, PAUSA_QUE_ABRE_BLOCO_MS } from "./divisores-de-data.ts";
 
 /**
  * Chat limpo (definido em 2026-10-07, #191/#195, ADR-083): o que NÃO é a conversa entre a pessoa e o bot sai do caminho.
@@ -531,21 +532,18 @@ function respondido(m: Mensagem, estado: Estado): MensagemDaTroca {
 }
 
 /**
- * definido em 2026-10-18 (PR 3): a pausa que separa duas trocas vizinhas é a do divisor de data (decisão tomada 6, 30 min
- * entre itens visíveis): na tela do Eng 1 (protótipo F1), as trocas das 15:02, das 15:40 e das 17:20 ficam em três linhas.
- */
-export const PAUSA_QUE_SEPARA_TROCAS_MS = 30 * 60_000;
-
-/**
  * Trocas seguidas, sem nada à vista no meio, juntam numa linha (PR 3; a tela do Eng 1: "Conversou com Ada e Tarsila · 6
  * mensagens · até 19:23"). Roda sobre as linhas já na ordem da tela (depois de `linhaDepoisDaFala` e dos fios): duas trocas
- * vizinhas juntam, salvo com uma pausa de PAUSA_QUE_SEPARA_TROCAS_MS ou mais entre a última mensagem de uma e a primeira da
- * outra; um fio que recolheu a troca muda o HTML e separa. A chave é a da primeira.
+ * vizinhas juntam, salvo com uma pausa de PAUSA_QUE_ABRE_BLOCO_MS ou mais entre a última mensagem de uma e a primeira da
+ * outra — a pausa do divisor de data (./divisores-de-data.ts, decisão tomada 6): na tela do Eng 1 (protótipo F1), as
+ * trocas das 15:02, das 15:40 e das 17:20 ficam em três linhas, cada uma embaixo do seu divisor. Um fio que recolheu a
+ * troca muda o HTML e separa. A chave é a da primeira; `ate` passa a ser a última mensagem da junta (PR 6).
+ * A troca de dia também separa (revisão do PR 6): as trocas das 23:50 e das 00:10 juntas levariam o "Hoje" embora.
  * revisto em 2026-10-18 (QA do PR 3): a linha "Novas" que entra logo acima de uma troca não a impede de receber as
  * seguintes (tudo abaixo do "Novas" é novo; antes a troca com o "Novas" ficava sozinha até a próxima carga). Ela só não
  * junta com a troca de cima, que é anterior ao "Novas".
  */
-export function juntarTrocas<L extends { id: string; html: string; chave?: string }>(linhas: readonly L[], planos: ReadonlyMap<string, PlanoMensagem>, estado: Estado): L[] {
+export function juntarTrocas<L extends { id: string; html: string; chave?: string; ate?: number; instantes?: readonly number[] }>(linhas: readonly L[], planos: ReadonlyMap<string, PlanoMensagem>, estado: Estado): L[] {
   const saida: L[] = [];
   let atual: { linha: L; plano: PlanoTroca; antes: string } | null = null;
   for (const l of linhas) {
@@ -556,9 +554,9 @@ export function juntarTrocas<L extends { id: string; html: string; chave?: strin
     const troca = plano?.tipo === "troca" && antes !== null && (antes === "" || antes.startsWith('<div class="linha-novas"')) ? plano : null;
     const ultima = atual?.plano.mensagens[atual.plano.mensagens.length - 1];
     const primeira = troca?.mensagens[0];
-    if (troca && antes === "" && atual && ultima && primeira && primeira.em - ultima.em < PAUSA_QUE_SEPARA_TROCAS_MS) {
+    if (troca && antes === "" && atual && ultima && primeira && primeira.em - ultima.em < PAUSA_QUE_ABRE_BLOCO_MS && mesmoDia(ultima.em, primeira.em)) {
       const junto: PlanoTroca = { ...atual.plano, mensagens: [...atual.plano.mensagens, ...troca.mensagens].sort((a, b) => a.em - b.em) };
-      const linha: L = { ...atual.linha, html: atual.antes + htmlTroca(junto, estado) };
+      const linha: L = { ...atual.linha, html: atual.antes + htmlTroca(junto, estado), ate: Math.max(atual.linha.ate ?? 0, l.ate ?? 0, junto.mensagens.at(-1)?.em ?? 0), instantes: junto.mensagens.map((x) => x.em) };
       saida[saida.length - 1] = linha;
       atual = { linha, plano: junto, antes: atual.antes };
       continue;

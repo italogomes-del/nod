@@ -66,18 +66,47 @@ export function modeloCurto(modelo: string | null): string {
   return m ? m[1]!.toLowerCase() : modelo;
 }
 
-/** A faixa aparece na ÚLTIMA mensagem do turno na conversa (a fala e, se houve, a linha de interrupção). */
+/**
+ * Onde a fala rodou: "catcher" ou "rodou em <máquina>" — dado tipado da autoria, nunca texto. Vazio para a pessoa.
+ * revisto em 2026-10-18 (chat limpo, PR 6; plano, Parte 5): era a etiqueta `badgeExecutor` no balão; saiu dele e mora só
+ * na faixa do modo dev e no cabeçalho do Raio-X — quem usa o Nod não precisa saber em que máquina a resposta rodou.
+ */
+export function ondeRodou(m: Pick<Mensagem, "autoria">): string {
+  if (m.autoria.autor_tipo !== "agente") return "";
+  if (m.autoria.executor === "catcher") return "catcher";
+  return `rodou em ${m.autoria.machine_id ? m.autoria.machine_id.slice(0, 8) : "esta máquina"}`;
+}
+
+/**
+ * Onde o TURNO rodou (revisão do PR 6): a última fala do bot no turno (`kind: "texto"`), não a mensagem que leva a faixa.
+ * A última mensagem do turno pode ser o recibo da aprovação (`resultado_aprovacao`), gravado pelo servidor com a autoria
+ * padrão do agente (`autoriaDoAgente`: executor "catcher", sem máquina) — e a faixa dizia "catcher" de um turno que rodou
+ * no Mac. Sem fala do bot no turno, nada: melhor sem etiqueta que com a errada.
+ */
+export function ondeDoTurno(m: Mensagem, mensagens: readonly Mensagem[]): string {
+  if (m.kind === "texto" && m.autoria.autor_tipo === "agente") return ondeRodou(m);
+  const fala = m.turnoId ? [...mensagens].reverse().find((x) => x.turnoId === m.turnoId && x.kind === "texto" && x.autoria.autor_tipo === "agente") : undefined;
+  return fala ? ondeRodou(fala) : "";
+}
+
+/**
+ * A faixa aparece na ÚLTIMA mensagem do turno na conversa (a fala e, se houve, a linha de interrupção) que não é da pessoa.
+ * QA do PR 6 (2026-10-18): o recibo da aprovação que a pessoa decide depois da fala é gravado com a autoria dela
+ * (`decidir.ts`) e entra no turno por último; contado como a última, ele não levava a faixa (é da pessoa) e a fala também
+ * não — o turno ficava sem custo e sem o "rodou em", que desde o PR 6 só mora aqui e no Raio-X.
+ */
 export function faixaDaMensagem(m: Mensagem, estado: Estado): string {
   if (!estado.modoDev.ligado || !m.turnoId || m.autoria.autor_tipo === "pessoa") return "";
   const resumo = estado.modoDev.raioX[m.conversaId]?.turnos.find((t) => t.turnoId === m.turnoId);
   if (!resumo) return "";
   const mensagens = estado.conversas[m.conversaId]?.mensagens ?? [];
-  const ultima = [...mensagens].reverse().find((x) => x.turnoId === m.turnoId);
+  const ultima = [...mensagens].reverse().find((x) => x.turnoId === m.turnoId && x.autoria.autor_tipo !== "pessoa");
   if (ultima && ultima.id !== m.id) return "";
-  return renderFaixaDev(resumo);
+  return renderFaixaDev(resumo, ondeDoTurno(m, mensagens));
 }
 
-export function renderFaixaDev(r: ResumoRaioX): string {
+/** `onde` (chat limpo, PR 6): "catcher" ou "rodou em <máquina>", da fala; vai também ao Raio-X pelo `data-onde` do botão. */
+export function renderFaixaDev(r: ResumoRaioX, onde = ""): string {
   const alerta = r.picoContexto !== null && r.janela !== null && r.picoContexto >= r.janela * ALERTA_JANELA;
   // definido em 2026-09-28 (canvas modo-dev, D1): "pico" quando houve compactação — o contexto subiu e desceu no turno.
   const rotulo = r.compactacoes ? "pico" : "contexto";
@@ -88,8 +117,9 @@ export function renderFaixaDev(r: ResumoRaioX): string {
     r.picoContexto !== null ? `<span class="faixa-dev-ctx${alerta ? " dev-alerta" : ""}">${rotulo}${barra}<span>${esc(mil(r.picoContexto))}${r.janela ? ` / ${esc(mil(r.janela))}` : ""}</span></span>` : "",
     r.cachePct !== null ? `<span>${r.cachePct}% do cache</span>` : "",
     r.modelo ? `<span>${esc(modeloCurto(r.modelo))}</span>` : "",
+    onde ? `<span class="faixa-dev-onde"${onde === "catcher" ? ' title="executor catcher: sem CLI, sem custo"' : ' title="harness no computador conectado"'}>${esc(onde)}</span>` : "",
   ].filter(Boolean);
-  return `<div class="faixa-dev${alerta ? " faixa-dev-alerta" : ""}">${partes.join("")}<button type="button" class="faixa-dev-bt" data-act="abrir-raio-x" data-id="${esc(r.turnoId)}">Raio-X</button></div>`;
+  return `<div class="faixa-dev${alerta ? " faixa-dev-alerta" : ""}">${partes.join("")}<button type="button" class="faixa-dev-bt" data-act="abrir-raio-x" data-id="${esc(r.turnoId)}"${onde ? ` data-onde="${esc(onde)}"` : ""}>Raio-X</button></div>`;
 }
 
 /** Na gaveta do bot (desde 2026-10-16, plano "tela limpa"; antes no cabeçalho da conversa): o selo e o total de hoje. */

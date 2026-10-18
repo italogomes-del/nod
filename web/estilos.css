@@ -238,7 +238,6 @@ body.ocupado { cursor: progress; }
 
 .tag { display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
   color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; vertical-align: middle; }
-.tag-catcher { color: var(--ink-2); background: var(--surface-raised); }
 .tag-ambar { color: var(--warning); border-color: var(--warning-line); background: var(--warning-soft); }
 .tag-cinza { color: var(--ink-3); }
 .tag-ok { color: var(--success); border-color: transparent; background: var(--success-soft); }

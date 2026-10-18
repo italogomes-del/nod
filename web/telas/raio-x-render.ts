@@ -204,17 +204,20 @@ function abaEnviado(r: RaioXTurno): string {
 /** O mesmo fechar da gaveta do Marketplace (redondo, fundo suave), com o X no desenho dos ícones do nod. */
 export const BOTAO_FECHAR = '<button type="button" class="rx-fechar" data-rx="fechar" aria-label="Fechar o Raio-X"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>';
 
-function cabecalho(r: RaioXTurno, nome: string): string {
+function cabecalho(r: RaioXTurno, nome: string, onde: string): string {
   const x = r.execucao;
   const fim = x ? ` → ${new Date(r.criadoEm + x.duracaoMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "";
   const quando = `${new Date(r.criadoEm).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${fim}`;
-  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", r.composicao ? (r.composicao.sessaoRetomada ? "sessão retomada" : "sessão nova") : ""].filter(Boolean);
+  const partes = [nome, quando, modeloCurto(x?.modelo ?? r.composicao?.modelo ?? null), x?.versaoCli ? `Claude Code ${x.versaoCli}` : "", r.composicao ? (r.composicao.sessaoRetomada ? "sessão retomada" : "sessão nova") : "", onde].filter(Boolean);
   return `<header class="rx-cab"><div><h2 id="rx-titulo">Raio-X do turno</h2><p class="rx-meta">${partes.map(esc).join(" · ")}</p></div>${BOTAO_FECHAR}</header>`;
 }
 
-/** O conteúdo da gaveta, sem DOM: cabeçalho, as duas abas e o rodapé. */
-export function renderRaioX(r: RaioXTurno, nome: string): string {
-  return `${cabecalho(r, nome)}
+/**
+ * O conteúdo da gaveta, sem DOM: cabeçalho, as duas abas e o rodapé. `onde` (chat limpo, PR 6, 2026-10-18): "catcher" ou
+ * "rodou em <máquina>", da fala que abriu o Raio-X (`ondeRodou`); saiu do balão e fica aqui e na faixa do modo dev.
+ */
+export function renderRaioX(r: RaioXTurno, nome: string, onde = ""): string {
+  return `${cabecalho(r, nome, onde)}
     <div class="rx-abas" role="tablist" aria-label="Raio-X do turno">
       <button type="button" role="tab" id="rx-aba-custo" aria-controls="rx-painel-custo" aria-selected="true" tabindex="0" data-aba="custo">Custo e contexto</button>
       <button type="button" role="tab" id="rx-aba-enviado" aria-controls="rx-painel-enviado" aria-selected="false" tabindex="-1" data-aba="enviado">O que foi enviado</button>

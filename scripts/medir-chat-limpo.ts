@@ -39,7 +39,7 @@ type LinhaMedida = { conversa_id: string; kind: KindMensagem; payload: PayloadMe
 
 /** Os assuntos da conversa entre bots que a tela junta numa troca (PR 3). */
 const ASSUNTOS_DA_TROCA = new Set(["colega.handoff", "colega.pedido", "colega.resposta", "pedido.respondido"]);
-/** A pausa que separa duas trocas na tela (web/telas/linhas-do-chat.ts, PAUSA_QUE_SEPARA_TROCAS_MS). */
+/** A pausa que separa duas trocas na tela (web/telas/divisores-de-data.ts, PAUSA_QUE_ABRE_BLOCO_MS, a mesma do divisor de data). */
 const PAUSA_TROCA_MS = 30 * 60_000;
 
 export type Medida = { itensHoje: number; falasHoje: number; itensTabela: number; falasTabela: number };

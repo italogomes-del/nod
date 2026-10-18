@@ -204,7 +204,21 @@ export function aparenciaDoComposer(modo: ModoComposer, estado: Estado, padrao: 
 
 /** Uma linha já desenhada da conversa: o id da mensagem, se é linha de sistema (recolhível) e o HTML. */
 /** `chave` (definido em 2026-10-07, #191): a chave do bloco quando não é o id da mensagem (as linhas do chat limpo). */
-export type LinhaDaConversa = { id: string; sistema: boolean; html: string; chave?: string };
+/**
+ * `em` e `ate` (chat limpo, PR 6, 2026-10-18): o primeiro e o último instante que a linha mostra, para os divisores de
+ * data (web/telas/divisores-de-data.ts). `em: null` quando a linha só leva a linha "Novas" (a mensagem dela sumiu do chat);
+ * sem `ate`, a linha mostra um instante só. `instantes` (QA do PR 6): cada instante que a linha mostra, quando são vários
+ * (a troca, o fio): a troca de 23:00 cuja resposta chegou às 09:00 mostra 23:00 e 09:00, nada no meio.
+ */
+export type LinhaDaConversa = { id: string; sistema: boolean; html: string; chave?: string; em: number | null; ate?: number; instantes?: readonly number[] };
+
+/** O tempo de várias linhas que viram uma só (o fio, os avisos recolhidos): o primeiro `em` e o maior fim entre elas. */
+export function tempoDasLinhas(linhas: readonly LinhaDaConversa[]): { em: number | null; ate?: number; instantes?: readonly number[] } {
+  const comTempo = linhas.filter((l): l is LinhaDaConversa & { em: number } => l.em !== null);
+  const [primeira] = comTempo;
+  if (!primeira) return { em: null };
+  return { em: primeira.em, ate: Math.max(...comTempo.map((l) => l.ate ?? l.em)), instantes: comTempo.flatMap((l) => l.instantes ?? [l.em]) };
+}
 
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
@@ -257,7 +271,8 @@ export function desenharFios(linhas: readonly LinhaDaConversa[], estado: Estado,
       continue;
     }
     if (fio.estado === "resolvida") {
-      if (!mostrados.has(fio.id)) saida.push({ id: linha.id, sistema: false, html: renderFioResolvido(fio, linhas.filter((l) => fioDe.get(l.id) === fio).map((l) => l.html).join(""), estado, conversaId) });
+      const doFio = linhas.filter((l) => fioDe.get(l.id) === fio);
+      if (!mostrados.has(fio.id)) saida.push({ id: linha.id, sistema: false, html: renderFioResolvido(fio, doFio.map((l) => l.html).join(""), estado, conversaId), ...tempoDasLinhas(doFio) });
       mostrados.add(fio.id);
       i++;
       continue;
@@ -266,7 +281,7 @@ export function desenharFios(linhas: readonly LinhaDaConversa[], estado: Estado,
     while (fim < linhas.length && fioDe.get(linhas[fim]?.id ?? "") === fio) fim++;
     const cab = mostrados.has(fio.id) ? "" : cabecalhoDoFio(fio);
     mostrados.add(fio.id);
-    saida.push({ id: linha.id, sistema: false, html: `<section class="fio-aberto" data-fio="${esc(fio.id)}" aria-label="Pergunta aberta">${cab}${linhas.slice(i, fim).map((l) => l.html).join("")}</section>` });
+    saida.push({ id: linha.id, sistema: false, html: `<section class="fio-aberto" data-fio="${esc(fio.id)}" aria-label="Pergunta aberta">${cab}${linhas.slice(i, fim).map((l) => l.html).join("")}</section>`, ...tempoDasLinhas(linhas.slice(i, fim)) });
     i = fim;
   }
   return saida;

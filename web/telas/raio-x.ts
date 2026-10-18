@@ -70,13 +70,14 @@ function criarGaveta(): HTMLDialogElement {
   return d;
 }
 
-export async function abrirRaioX(api: Api, turnoId: string, nome: string, origem?: HTMLElement): Promise<void> {
+/** `onde`: "catcher" ou "rodou em <máquina>" da fala (`ondeRodou`, ./modo-dev.ts), no cabeçalho; vazio, nada. */
+export async function abrirRaioX(api: Api, turnoId: string, nome: string, origem?: HTMLElement, onde = ""): Promise<void> {
   // Uma gaveta só: abrir o Raio-X de outro turno troca o conteúdo, sem fechar e reabrir.
   const d = gaveta ?? (gaveta = criarGaveta());
   quemAbriu = origem ?? quemAbriu;
   d.dataset.turno = turnoId;
   delete d.dataset.json;
-  tentar = () => abrirRaioX(api, turnoId, nome);
+  tentar = () => abrirRaioX(api, turnoId, nome, undefined, onde);
   d.setAttribute("aria-busy", "true");
   d.innerHTML = `<p class="rx-intro rx-carregando" role="status">Carregando o Raio-X…</p>`;
   document.body.classList.add("com-raio-x");
@@ -97,6 +98,6 @@ export async function abrirRaioX(api: Api, turnoId: string, nome: string, origem
   if (d.dataset.turno !== turnoId) return;
   d.dataset.json = JSON.stringify(r, null, 2);
   d.removeAttribute("aria-busy");
-  d.innerHTML = renderRaioX(r, nome);
+  d.innerHTML = renderRaioX(r, nome, onde);
   d.querySelector<HTMLElement>('[data-rx="fechar"]')?.focus({ preventScroll: true });
 }

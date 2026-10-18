@@ -72,7 +72,7 @@ function cenario(mensagens: Mensagem[], extra: Partial<Estado> = {}, conversa: P
   return { e, c: e.conversas[C]! };
 }
 
-const itens = (c: ConversaEstado, e: Estado) => blocosDoHistorico(c, e).filter((b) => b.chave !== "sep");
+const itens = (c: ConversaEstado, e: Estado) => blocosDoHistorico(c, e).filter((b) => !b.chave.startsWith("sep:"));
 const ehBalao = (html: string): boolean => /^\s*<article class="message /.test(html);
 const ehLinha = (html: string): boolean => /^\s*<div class="linha-centro-wrap"/.test(html);
 

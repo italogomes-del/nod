@@ -42,6 +42,10 @@
 /* Plano "tela limpa" (2026-10-16, T4): a coluna e o campo com a mesma largura, 760 px, como no Grok. */
 .timeline { max-width: 760px; }
 .time-sep { font-size: 11px; margin: 0 0 26px; }
+/* Chat limpo, PR 6 (2026-10-18; protótipos Main e F1): o divisor de data da conversa ("Hoje 08:00", "15:40") é o título do
+   bloco de horário que vem embaixo — um pouco maior que a hora da fala, mais perto do bloco dele que do de cima. Só os da
+   conversa têm role="separator"; os da tela da task seguem como antes. */
+.time-sep[role="separator"] { font-size: 12px; margin: 4px 0 18px; }
 .message { margin: 0 0 25px; gap: 14px; align-items: flex-start; }
 .message > .icon { margin-top: 5px; }
 .bubble-wrap { max-width: min(86%, 760px); min-width: 0; }

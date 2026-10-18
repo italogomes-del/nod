@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -187,6 +187,64 @@ resultado "Regra nova", em vez da linha única do plano, porque o título é o p
 **Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não vi o resultado da aprovação" ou equivalente — o cartão
 encolheu lá em cima, na fala que pediu, longe do fim onde a pessoa olhava: o recibo volta a ser também uma linha no fim
 (a tela "3C" do protótipo), com o cartão encolhido no lugar.
+
+## Emenda do PR 6 (2026-10-18) — etiquetas e divisores de data; a narração fica para depois
+
+**Etiquetas.** "rodou em <máquina>" e "catcher" saem do balão: quem usa o Nod não precisa saber em que máquina a resposta
+rodou. O dado continua o mesmo (a autoria da fala, ADR-016) e aparece na faixa do modo dev, ao lado do custo, e no
+cabeçalho do Raio-X (`ondeRodou`, `web/telas/modo-dev.ts`; o botão da faixa leva `data-onde`). O "onde" é o da última
+fala do bot no turno (`ondeDoTurno`), não o da mensagem que leva a faixa: o recibo da aprovação, gravado com a autoria
+padrão do agente, diria "catcher" (revisão do PR 6). A faixa fica na última mensagem do turno que não é da pessoa: o
+recibo da aprovação que a pessoa decide depois da fala leva a autoria dela e, contado como o último, deixava o turno sem
+faixa (QA do PR 6). "não confiável" e "parcial" ficam: dizem algo do texto que a pessoa está lendo. A linha
+efêmera do turno vivo antes da primeira ferramenta ("trabalhando · catcher · 3 s") não é fala e fica como está.
+
+**Divisores de data** (como o "Today 00:25" do Grok; protótipos Main e F1). Além do topo, um divisor quando o dia muda ou
+quando passam 30 min ou mais (decisão tomada 6) entre dois itens à vista: "Hoje 08:00" no topo e na troca de dia, só
+"15:40" no mesmo dia, "Ontem 22:10", "17/10 15:02" e, de outro ano, "17/10/2025 15:02". Regras:
+
+1. Calculado sobre os blocos já na ordem da tela, depois de esconder o que foi para a Atividade ou é `anexo`, de juntar as
+   trocas e de encolher os cartões (`comDivisores`, `web/telas/divisores-de-data.ts`): um aviso escondido não abre bloco
+   nem segura um bloco aberto. O topo é o primeiro item à vista, não a primeira mensagem da janela.
+2. A pausa conta desde o último instante já mostrado: o fim da troca ("até 15:09"), do fio e dos avisos recolhidos da sala
+   (`LinhaDaConversa` ganha `em` e `ate`); a linha que desce para depois da fala que a anunciou é mais antiga e não abre
+   bloco, nem na virada do dia. O `ate` só vale até o item à vista seguinte: a troca fica na posição do pedido, e a resposta
+   do colega que chega horas depois não esconde os divisores da conversa embaixo dela (revisão do PR 6). Para isso o bloco
+   leva os instantes que mostra (`instantes`: a troca, a junta, o fio) e a pausa conta do último deles antes do item
+   seguinte (QA do PR 6: cortar o `ate` no próprio item seguinte zerava a pausa, e a conversa das 23:45, 44 min depois da
+   troca das 23:00, ficava sem divisor). A linha que junta várias execuções de rotina ("rodou 5 vezes · 09:10 a 09:50") conta pelo instante da primeira:
+   o plano dela não leva as mensagens. O bloco sem tempo — o pedido ancorado e o cartão encolhido que subiu para a fala
+   que pediu — fica embaixo do divisor da fala a que pertence: decidido três horas depois, o divisor entra depois do
+   cartão, antes do "Enviado.".
+3. A pausa é a mesma constante que separa duas trocas vizinhas (`PAUSA_QUE_ABRE_BLOCO_MS`, que substitui
+   `PAUSA_QUE_SEPARA_TROCAS_MS` de `linhas-do-chat.ts`): na tela do Eng 1, as trocas das 15:02, das 15:40 e das 17:20 são
+   três linhas, cada uma embaixo do seu divisor. A troca de dia também separa duas trocas (23:50 e 00:10).
+4. Chave `sep:<id da primeira mensagem do bloco>` (o topo era `sep`): a fala nova sem pausa não mexe em nenhum bloco; com
+   pausa, entram o divisor dela e ela. Quando a mensagem mais antiga sai da janela, o divisor do topo nasce de novo com a
+   chave nova (um `<div>` a mais refeito; antes ele ficava).
+5. `role="separator"` com o texto inteiro no `aria-label` ("Hoje 15:40"), mesmo quando só a hora aparece.
+6. A linha "Novas" fica embaixo do divisor: quando vem no bloco da mensagem e quando fica sozinha no lugar da mensagem que
+   sumiu (esse bloco não tem tempo; o divisor do item seguinte entra antes dele).
+7. **Vale também na sala** e na conversa sem `destino` (servidor de antes): lá nada some, e o divisor só marca as pausas.
+   Decidido nesta entrega (o plano não dizia): a sala não perde nada, e uma régua de tempo só para as duas é mais simples
+   de explicar.
+8. "Hoje" e "Ontem" leem o relógio da máquina, como `textoFormatado`, e não `estado.agora`: o histórico é lembrado com o
+   dia de extra (`partesDaTimeline`, `web/main.ts`), e ler `estado.agora` o refaria inteiro a cada tick de 15 s
+   (`divisores-de-data.test.ts` prova com `lembrar`).
+
+Estilo: `.time-sep[role="separator"]`, 12 px em `--ink-3`, mais perto do bloco de baixo, como no protótipo; o divisor da
+tela da task, sem `role`, continua como antes. Nenhuma migração, nenhum contrato novo.
+
+**Adiado: a narração.** `NARRACAO_MAX_CHARS`/`comporFala` com a chave do Modo WhatsApp (colar só quando a resposta final
+é um toco de até 80 caracteres), a linha "Progresso" sem "relatório" e a emenda da ADR-112 não entram neste PR. O plano
+exige uma semana de medição de `blocosColados` antes (a execução do Raio-X grava desde o PR 1, em produção em 18/10), e o
+Marlon decidiu medir o Modo WhatsApp em produção até ~20/10 sem mudar o comportamento dele no meio. Nem
+`src/domain/stream-json.ts` nem `src/domain/prompt-sistema.ts` mudaram. Entra num PR próprio, com a medição em mãos; o
+critério do plano ("a parcela de falas com bloco colado cai à metade da semana medida") vale para ele.
+
+**Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não sei onde o bot rodou" fora do modo dev: a etiqueta volta
+ao balão só quando a fala rodou numa máquina diferente da de costume do bot (`maquinaPadraoId`). Relatos de conversa
+"picada" pelos divisores: a pausa sobe para 60 min, mudando só a constante.
 
 ## Gatilhos de reversão (PR 2)
 
