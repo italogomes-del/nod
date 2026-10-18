@@ -6,8 +6,9 @@ import { conversaViva, donoDoBot, esperaNaTela, fraseDoDono, frentesDoBot, grupo
 import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { agente, chipTrabalhosDoBot, custoDoTopo, renderFaixaTrabalhos } from "./trabalhos.ts";
+import { conversaLimpa } from "./linhas-do-chat.ts";
 
 /**
  * O dono de cada bot na tela (definido em 2026-10-12, ADR-099 item 10, parte 5; protótipo docs/prototipos/um-dono-por-bot/,
@@ -58,7 +59,9 @@ export function renderLinhaDoDono(estado: Estado, agenteId: string): string {
   const naFaixa = bot?.conversaId ? decisoesNaConversa(estado, bot.conversaId) : 0;
   const visto = naFaixa > 0 ? { ...dono, estado: { ...dono.estado, esperandoVoce: Math.max(0, dono.estado.esperandoVoce - naFaixa) } } : dono;
   const l = linhaDoDono(visto, estado.agora);
-  if (!l) return "";
+  const memoria = pontoDaMemoria(estado, agenteId, bot?.conversaId);
+  // O bot livre não tem linha; a memória do Mac ainda pode pedir a pessoa: a linha vem só com o ponto.
+  if (!l) return memoria ? `<section class="linha-dono so-ponto" aria-label="${esc(memoria.texto)}"><div class="ld-barra">${memoria.html}</div></section>` : "";
   const nome = bot?.nome ?? "bot";
   const aberta = estado.faixaTrabalhosAberta === agenteId;
   const resumo = `${l.texto}${l.extras.length ? ` · ${l.extras.join(" · ")}` : ""}`;
@@ -71,7 +74,41 @@ export function renderLinhaDoDono(estado: Estado, agenteId: string): string {
   const detalhes = `<button type="button" class="ld-detalhes" data-act="faixa-trabalhos" data-recolher="${aberta ? 1 : 0}" aria-expanded="${aberta}" aria-label="${aberta ? "Fechar" : "Ver"} os detalhes de ${esc(nome)}"><span class="ld-detalhes-txt">${aberta ? "fechar" : "detalhes"}</span>${aberta ? ICONE.recolher : ICONE.abrir}</button>`;
   // No celular o detalhe é uma folha por cima da conversa; o fundo escurecido a fecha ao toque (mobile.css).
   const corpo = aberta ? `<button type="button" class="ld-fundo" data-act="faixa-trabalhos" data-recolher="1" tabindex="-1" aria-hidden="true"></button>${detalheDoDono(estado, visto, agenteId, bot)}` : "";
-  return `<section class="linha-dono${aberta ? " aberta" : ""}" data-sinal="${l.sinal}" aria-label="${esc(`${nome}: ${resumo}`)}"><div class="ld-barra">${principal}${detalhes}</div>${corpo}</section>`;
+  return `<section class="linha-dono${aberta ? " aberta" : ""}" data-sinal="${l.sinal}" aria-label="${esc(`${nome}: ${resumo}`)}"><div class="ld-barra">${principal}${memoria?.html ?? ""}${detalhes}</div>${corpo}</section>`;
+}
+
+/**
+ * A memória do Mac no chat limpo (definido em 2026-10-18, chat limpo, PR 2; ADR-114, decisão tomada 5): a pílula "Pouca
+ * memória no seu Mac" morava embaixo da última "Abriu a task", que saiu do chat. Até a pílula da Parte 4 ela é um ponto
+ * discreto na linha do dono, com a frase no `title` e no nome acessível, levando a Trabalhos (o disco cheio que segura
+ * tudo, a Este Mac ou a Máquinas). Amarela e vermelha são ponto: nada de faixa nem texto âmbar no chat. Só quando o bot tem
+ * trabalho aberto (como a pílula de antes) e só na conversa limpa — o servidor de antes continua com a pílula na linha.
+ */
+export function pontoDaMemoria(estado: Estado, agenteId: string, conversaId: string | null | undefined): { html: string; texto: string } | null {
+  const c = conversaId ? estado.conversas[conversaId] : undefined;
+  if (!c?.mensagens || !conversaLimpa(c.mensagens)) return null;
+  const m = memoriaDoMac(estado, agenteId, conversaId);
+  if (!m || m.abertos === 0) return null;
+  return { texto: m.texto, html: `<button type="button" class="ld-memoria ${m.nivel}" ${m.alvo} title="${esc(m.texto)}" aria-label="${esc(m.texto)}"><span class="ld-memoria-ponto" aria-hidden="true"></span></button>` };
+}
+
+/**
+ * O estado da memória (ou do disco cheio que segura tudo) do Mac agora, com a frase, a cor e para onde leva: o ponto da
+ * linha do dono e a linha "Agora" da Atividade (ADR-114) leem daqui. null = nada pede a pessoa.
+ */
+export function memoriaDoMac(estado: Estado, agenteId: string, conversaId: string | null | undefined): { texto: string; nivel: "amarela" | "vermelha"; alvo: string; abertos: number; disco: boolean } | null {
+  const abertos = abertosDoBot(estado, agenteId, conversaId).length;
+  const maquinas = maquinasDe(estado.trabalhos);
+  const legado = estado.trabalhos?.motivoEspera === "disco" && estado.trabalhos.seguraTudoNovo === true;
+  const disco = maquinas ? maquinas.find((m) => m.motivoEspera === "disco" && m.seguraTudoNovo) : legado ? { ehMac: true, nome: "seu Mac" } : undefined;
+  const nivel = maquinas ? leituraDoMac(estado.trabalhos).pressao : estado.pressao;
+  const n = `${abertos} ${abertos === 1 ? "trabalho aberto" : "trabalhos abertos"}`;
+  const alvo = disco ? `data-act="secao-espaco" data-secao="${disco.ehMac ? "este-mac" : "maquinas"}"` : 'data-act="navegar" data-tela="trabalhos"';
+  const texto = disco
+    ? `${disco.ehMac ? "Pouco espaço no disco do seu Mac" : `Pouco espaço no disco em ${disco.nome}`} · nenhuma task nova começa`
+    : nivel === "amarela" ? `Pouca memória no seu Mac · ${n}` : nivel === "vermelha" ? `Seu Mac está quase sem memória · pode travar; ${n}` : null;
+  if (!texto) return null;
+  return { texto, nivel: disco || nivel === "vermelha" ? "vermelha" : "amarela", alvo, abertos, disco: Boolean(disco) };
 }
 
 /** A linha aberta: as seções que têm algo, na ordem do quadro 03 (no celular, uma folha que cobre a tela). */

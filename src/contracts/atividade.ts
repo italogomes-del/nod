@@ -20,6 +20,12 @@ export type ItemDeAtividade = {
   categoria: CategoriaDaAtividade | null;
   titulo: string;
   detalhe: string | null;
+  /**
+   * O texto inteiro da mensagem, quando o `detalhe` não o mostra todo (cortado no teto, ou trocado pela lista do payload):
+   * o clique o abre ali mesmo, com o "Relatar" (definido em 2026-10-18, chat limpo, PR 2; a página é lista, e a web não
+   * tem uma rota para ler uma mensagem solta).
+   */
+  texto?: string;
   /** Negações repetidas (mesma ferramenta, mesma causa) numa linha só. */
   vezes?: number;
   /** O que o clique abre: a frente, ou o texto inteiro da mensagem com o "Relatar" (ADR-041). A trilha não tem alvo. */

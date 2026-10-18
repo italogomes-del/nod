@@ -490,3 +490,121 @@ describe("ADR-099 (I7 revista): a rotina e o pedido de colega sem trabalho segue
     expect(blocos[1]!.html).toMatch(/Pedido do<\/span>.*Chico<\/span><span>· 3 mensagens<\/span>/);
   });
 });
+
+/**
+ * Chat limpo, PR 2 (ADR-114): o servidor manda o destino de cada mensagem da conversa própria. O que é `atividade` some, o
+ * `anexo` não vira linha mas continua dando título e origem, e a mensagem sem destino (sala, servidor de antes) segue o
+ * desenho de antes.
+ */
+describe("chat limpo com destino (ADR-114, PR 2)", () => {
+  const destino = (m: Mensagem, d: NonNullable<Mensagem["destino"]>): Mensagem => ({ ...m, destino: d });
+  const comDestino = (ms: Mensagem[]): Mensagem[] => ms.map((m) => (m.destino ? m : destino(m, "chat")));
+  const sistema = (id: string, criadoEm: number, texto: string, extra: Partial<Mensagem> = {}): Mensagem => msg(id, criadoEm, { kind: "sistema", texto, ...extra });
+  const html = (c: ConversaEstado, e: Estado): string => itens(c, e).map((b) => b.html).join("");
+
+  it("avisos de Atividade somem; o que fica no chat continua; nada de 'N avisos do sistema · ver'", () => {
+    const ms = comDestino([
+      daPessoa("p1", t0), doBot("b1", t0 + MIN, "t1"),
+      destino(sistema("s1", t0 + 2 * MIN, "Anotei uma preferência: em reais"), "atividade"),
+      destino(msg("n1", t0 + 3 * MIN, { kind: "negacao", texto: "Bash negada", payload: { kind: "negacao", classe: "ferramenta_negada", nome: "Bash", motivo: "fora_do_catalogo", terminal: false } }), "atividade"),
+      destino(sistema("s2", t0 + 4 * MIN, "Conversa compactada. Clarice continua daqui, com o resumo."), "atividade"),
+      sistema("o1", t0 + 5 * MIN, "Tirei este pedido da fila: nada foi feito com ele; se ainda precisar, peça de novo."),
+      sistema("o2", t0 + 6 * MIN, "Rotina pausada: todo dia às 9h"),
+      sistema("o3", t0 + 7 * MIN, "Esta mensagem não rodou."),
+    ]);
+    const { e, c } = cenario(ms);
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "b1", "o1", "o2", "o3"]);
+    expect(html(c, e)).not.toContain("avisos do sistema");
+    expect(html(c, e)).not.toContain("Anotei");
+    expect(html(c, e)).not.toContain("Bash negada");
+  });
+
+  it("aba antiga / servidor sem destino: o desenho de antes, com o recolhimento dos avisos", () => {
+    const ms = [daPessoa("p1", t0), sistema("s1", t0 + MIN, "Anotei uma preferência: em reais"), sistema("s2", t0 + 2 * MIN, "aviso 2"), sistema("s3", t0 + 3 * MIN, "aviso 3")];
+    const { e, c } = cenario(ms);
+    expect(html(c, e)).toContain("3 avisos do sistema · ver");
+  });
+
+  it("o anexo não vira linha: sem 'Abriu a task', sem 'terminou · 39 min', e o balão do resultado leva o título da task", () => {
+    const ms = comDestino([
+      daPessoa("p1", t0), doBot("b1", t0 + MIN, "tc"),
+      destino(sistema("a-tb-1", t0 + MIN, "Abriu a task Migrar relatórios", { payload: { kind: "trabalho_aberto", trabalhoId: "tb-1", titulo: "Migrar relatórios", origem: "pessoa" }, turnoId: "tc", origemTurno: "conversa" }), "anexo"),
+      msg("m1", t0 + 2 * MIN, { turnoId: "tt", origemTurno: "conversa", trabalhoId: "tb-1", texto: "Convertendo o lote 1" }),
+      msg("m2", t0 + 40 * MIN, { turnoId: "tt", origemTurno: "conversa", trabalhoId: "tb-1", fimDoTurno: true, texto: "Migração pronta: 33 relatórios" }),
+      destino(sistema("r1", t0 + 41 * MIN, "Respondi ao pedido de Chico", { payload: { kind: "pedido_respondido", loteId: "l", agenteId: "chico", nome: "Chico" } }), "anexo"),
+      destino(sistema("f1", t0 + 42 * MIN, "3 frentes terminaram", { payload: { kind: "frentes_terminadas", loteId: "l2", frentes: [{ trabalhoId: "x", titulo: "X", estado: "terminado" }, { trabalhoId: "y", titulo: "Y", estado: "terminado" }] } }), "anexo"),
+    ]);
+    // O trabalho já saiu da lista: o título vem só do anexo.
+    const t = trabalho("tb-1", { titulo: "Migrar relatórios", estado: "terminado", terminadoEm: t0 + 39 * MIN, custoUsd: 0.88 });
+    const { e, c } = cenario(ms, { trabalhos: { trabalhos: [t], pressao: null, memoriaTotalMb: null } });
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "b1", "m2"]);
+    expect(blocos[2]!.html).toContain('<span class="etiqueta-origem">da task Migrar relatórios</span>');
+    const tudo = html(c, e);
+    expect(tudo).not.toContain("Abriu a task");
+    expect(tudo).not.toContain("terminou ·");
+    expect(tudo).not.toContain("Respondi ao pedido");
+    expect(tudo).not.toContain("frentes terminaram");
+    const semLista = cenario(ms);
+    expect(itens(semLista.c, semLista.e).find((b) => b.chave === "m2")?.html).toContain("da task Migrar relatórios");
+  });
+
+  it("a rotina que abriu frentes não vira resultado antes da hora: o 'comecei…' segue escondido com o anexo", () => {
+    const ms = comDestino([
+      msg("r1", t0, { turnoId: "tr", origemTurno: "rotina", fimDoTurno: true, texto: "Comecei 2 frentes" }),
+      destino(sistema("fa", t0 + 1, "Começou 2 frentes", { turnoId: "tr", origemTurno: "rotina", payload: { kind: "frentes_abertas", loteId: "l", origem: "rotina", frentes: [{ trabalhoId: "f1", titulo: "A" }, { trabalhoId: "f2", titulo: "B" }] } }), "anexo"),
+    ]);
+    const { e, c } = cenario(ms);
+    const tudo = html(c, e);
+    expect(tudo).not.toContain("Comecei 2 frentes");
+    expect(tudo).not.toContain("Começou 2 frentes");
+  });
+
+  it("a sala não tem destino e segue como antes", () => {
+    const ms = [daPessoa("p1", t0), sistema("s1", t0 + MIN, "Anotei")];
+    const { e, c } = cenario(ms, {}, { conversa: { tenantId: "t", id: C, ownerId: "p", visibility: "privado", tipo: "sala", agenteId: null, salaId: "s", sessaoCli: null, criadoEm: 1 } as never });
+    expect(html(c, e)).toContain("Anotei");
+  });
+
+  it("destino que muda com o tempo: o limite que passou, a troca decidida e o computador que voltou saem; enquanto pedem ação, ficam", () => {
+    const limite = (id: string, voltaEm: number) => sistema(id, t0, "Claude no limite", { payload: { kind: "limite_do_plano", harness: "claude-cli", voltaEm } });
+    const ms = comDestino([
+      daPessoa("p1", t0 - MIN),
+      limite("lim-passou", AGORA - MIN), limite("lim-vale", AGORA + 60 * MIN),
+      sistema("fora", t0 + MIN, "Computador fora do ar", { payload: { kind: "computador_fora_do_ar", agenteId: "clarice", desde: t0, motivo: "boot_falhou" } as never }),
+    ]);
+    const voltou = cenario(ms);
+    const chaves = itens(voltou.c, voltou.e).map((b) => b.chave);
+    expect(chaves).toContain("lim-vale");
+    expect(chaves).not.toContain("lim-passou");
+    expect(chaves).not.toContain("fora");
+    const aindaFora = cenario(ms, { frota: { agentes: [{ id: "clarice", nome: "Clarice", conversaId: C, cor: "c-red", forma: "shape-circle", computadorForaDoAr: { desde: t0, motivo: "boot_falhou" } }] } as never });
+    expect(itens(aindaFora.c, aindaFora.e).map((b) => b.chave)).toContain("fora");
+  });
+
+  it("planejarLinhas marca oculta o que é Atividade e deixa sem plano o que é chat", () => {
+    const ms = comDestino([doBot("b1", t0, "t1"), destino(sistema("s1", t0 + MIN, "Anotei"), "atividade")]);
+    const { e } = cenario(ms);
+    const planos = planejarLinhas(ms, e);
+    expect(planos.get("s1")).toEqual({ tipo: "oculta" });
+    expect(planos.has("b1")).toBe(false);
+  });
+
+  /**
+   * Revisão do PR 2 (18/10): a linha "Rotina executou" é o que diz à web que a execução TEVE algo para a pessoa — a
+   * silenciosa (sem_novidade) não grava linha nenhuma. Ela vem na janela como `anexo`: some do chat, e o resultado continua
+   * no balão "da rotina …". Sem ela na janela, o resultado virava "rodou 1 vez · nada para você".
+   */
+  it("a rotina que executou com novidade: o resultado fica no balão 'da rotina'; o marcador (anexo) não vira linha", () => {
+    const [meio, marcador, fim] = execucaoComNovidade(t0);
+    const ms = comDestino([daPessoa("p1", t0 - MIN), meio!, destino(marcador!, "anexo"), fim!]);
+    const { e, c } = cenario(ms);
+    const blocos = itens(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["p1", "r6c"]);
+    expect(blocos[1]!.html).toContain("A Gabriela marcou você no #suporte");
+    expect(blocos[1]!.html).toContain('<span class="etiqueta-origem">da rotina');
+    expect(html(c, e)).not.toContain("nada para você");
+    expect(html(c, e)).not.toContain("Rotina executou");
+  });
+});

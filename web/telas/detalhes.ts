@@ -22,6 +22,16 @@ import { renderAFazerNaGaveta } from "./pendencias.ts";
 import { textoMotivo } from "./negacao.ts";
 import { renderGavetaTrabalhos } from "./trabalhos.ts";
 import { abertosDoBot } from "../lib/trabalhos.ts";
+import { renderAtividade } from "./atividade.ts";
+
+/**
+ * O "N hoje" da linha "Atividade" (ADR-114, chat limpo, PR 2; decisão tomada 1: o dia inteiro). Antes de a contagem chegar
+ * (ou com a rota indisponível), a linha não mostra número.
+ */
+function linhaAtividadeHoje(estado: Estado, agenteId: string): string {
+  const total = estado.atividadeHoje[agenteId]?.total;
+  return typeof total === "number" ? `<span class="gv-meta">${total} hoje</span>` : "";
+}
 
 type Bot = NonNullable<Estado["frota"]>["agentes"][number];
 type Concessoes = Estado["concessoes"][string];
@@ -33,7 +43,7 @@ type Concessoes = Estado["concessoes"][string];
  */
 export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | null {
   if (tipo === "rotina" || tipo === "acesso") return { tipo, id };
-  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos") return { tipo };
+  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos" || tipo === "atividade") return { tipo };
   return null;
 }
 
@@ -92,6 +102,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
       ${linha(`${ICONE.balao}<span class="gv-linha-txt">Pedir ajuda a outro bot</span>`, 'data-act="preencher-prompt" data-texto="Consulte o colega mais adequado da minha equipe para me ajudar com: "')}
       ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, irPara("memoria"), ICONE.seta)}
       ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, irPara("trabalhos"), ICONE.seta)}
+      ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, irPara("atividade"), ICONE.seta) : ""}
     </div></section>`;
 
   // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina (instrução,
@@ -171,6 +182,8 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       return { titulo: "Nova rotina", corpo: renderNovaRotinaNaGaveta(a), rodape: rodapeDeFormulario("Criar rotina"), form: 'data-form="criar-rotina"' };
     case "trabalhos":
       return { titulo: `Trabalhos de ${a.nome}`, corpo: renderGavetaTrabalhos(estado, a.id) };
+    case "atividade":
+      return { titulo: "Atividade", corpo: renderAtividade(estado, a) };
   }
 }
 

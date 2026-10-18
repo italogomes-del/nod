@@ -528,3 +528,32 @@ describe("tempo da task: esperando x trabalhando (protótipo aprovado em 2026-10
     expect(css).toContain(".tk-pop {");
   });
 });
+
+describe("Fazer aqui e Fazer depois (chat limpo, PR 2; ADR-114)", () => {
+  it("saem da linha 'Abriu a task' do chat e ficam no topo da tela da task e embaixo da linha dela em Trabalhos", () => {
+    const antiga = trabalho("antiga", { titulo: "Relatório", criadoEm: HOJE - MIN });
+    const nova = trabalho("nova", { titulo: "Planilha", estado: "na_fila" });
+    const e = estadoCom([antiga, nova]);
+    const topo = renderTopoTrabalho(e, "nova");
+    expect(topo).toContain('data-act="trabalho-fazer-aqui" data-id="nova"');
+    expect(topo).toContain('data-act="trabalho-depois" data-id="nova" data-depois="antiga"');
+    const gaveta = renderGavetaTrabalhos(e, "leo");
+    expect(gaveta).toContain('<div class="tr-item"><button type="button" class="gv-linha tr-linha" data-act="abrir-trabalho" data-id="nova">');
+    expect(gaveta).toContain('data-act="trabalho-fazer-aqui" data-id="nova"');
+    // A task terminada, ou que não foi a pessoa que pediu, não tem os botões.
+    const fim = estadoCom([trabalho("x", { estado: "terminado", terminadoEm: HOJE }), trabalho("r", { origem: "rotina" })]);
+    expect(renderTopoTrabalho(fim, "x")).not.toContain("trabalho-fazer-aqui");
+    expect(renderTopoTrabalho(fim, "r")).not.toContain("trabalho-fazer-aqui");
+  });
+
+  // QA do PR 2: as três frentes de um lote paralelo ganhavam "Fazer depois da <irmã>" e "Fazer aqui" em Trabalhos; no chat de
+  // antes a linha "Começou N frentes" nunca teve os botões.
+  it("a frente de um lote com várias frentes não leva os botões; a frente única do lote leva, como a 'Abriu a task' de antes", () => {
+    const lote = ["a", "b", "c"].map((id, i) => trabalho(id, { titulo: `NOD-${id}`, forma: "frente", loteId: "L", criadoEm: HOJE - (3 - i) * MIN }));
+    const e = estadoCom(lote);
+    for (const id of ["a", "b", "c"]) expect(renderTopoTrabalho(e, id), id).not.toContain("trabalho-fazer-aqui");
+    expect(renderGavetaTrabalhos(e, "leo")).not.toContain("trabalho-depois");
+    const unica = estadoCom([trabalho("u", { titulo: "Roteiros", forma: "frente", loteId: "L2" })]);
+    expect(renderTopoTrabalho(unica, "u")).toContain('data-act="trabalho-fazer-aqui" data-id="u"');
+  });
+});

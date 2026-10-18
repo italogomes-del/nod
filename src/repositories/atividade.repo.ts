@@ -1,7 +1,8 @@
 import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
-import { COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } from "./mensagens.repo.ts";
+import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
+import { colunaPrimeira, COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } from "./mensagens.repo.ts";
 
 /**
  * As três fontes da Atividade do bot num dia (definido em 2026-10-18, chat limpo, PR 1; ADR-114). O dia é uma FAIXA em
@@ -15,6 +16,10 @@ import { COLUNAS_MENSAGEM, paraMensagem, type LinhaMensagem } from "./mensagens.
  *   por conector e causa;
  * - trabalhos: os do bot que começaram ou terminaram no dia (trabalhos_por_conversa), uma linha por começo e uma por fim.
  *
+ * Linha sem assunto (de antes da 0091, que o backfill ainda não alcançou; chat limpo, PR 2): entra como candidata quando
+ * não é fala (kind texto sem payload) e o assunto é resolvido na leitura, como o backfill faria (assuntoNaLeitura); fica
+ * se ele está entre os da Atividade. A contagem resolve as candidatas do mesmo jeito.
+ *
  * As contagens usam os MESMOS filtros das listas: `contagem=1` e o `total` da página batem sempre. Os `coalesce` na não
  * repetição são de propósito: sem eles, a mensagem sem payload dava `not (null)` e sumia (medido em 2026-10-18 no teste
  * de integração: o "Anotei" do dia não aparecia).
@@ -27,6 +32,12 @@ export const MOTIVOS_DE_CONECTOR = ["conector_indisponivel", "timeout_transporte
 export type LinhaNegacaoDeConector = { chave: string; motivo: string; ferramenta: string; conector: string | null; vezes: number; em: Date };
 export type LinhaTrabalhoDoDia = { id: string; titulo: string; forma: "task" | "frente"; origem: string; estado: string; criado_em: Date; terminado_em: Date | null };
 
+/** O assunto da linha se ele é um dos `assuntos` (o gravado, ou o resolvido na leitura na linha sem backfill). */
+function assuntoDaLinha(l: Pick<LinhaMensagem, "assunto" | "kind" | "payload" | "texto" | "decidido_por"> & { primeira: boolean | null }, assuntos: readonly Assunto[]): Assunto | null {
+  const lido = assuntoNaLeitura({ assunto: l.assunto, kind: l.kind, payload: l.payload, texto: l.texto, decididoPor: l.decidido_por, primeiraDaConversa: l.primeira === true });
+  return assuntos.find((a) => a === lido) ?? null;
+}
+
 export function atividadeRepo(conn: Conn, escopo: Escopo) {
   /** Os trabalhos da conversa que começaram ou terminaram no dia (o recorte da fonte 3 e da não repetição). */
   const filtroTrabalhos = (conversaId: string, f: Faixa) => conn`
@@ -36,7 +47,7 @@ export function atividadeRepo(conn: Conn, escopo: Escopo) {
 
   const filtroMensagens = (conversaId: string, f: Faixa, assuntos: readonly string[]) => conn`
     m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId} and m.criado_em >= ${f.ini} and m.criado_em < ${f.fim}
-      and m.assunto = any(${[...assuntos]}::text[])
+      and (m.assunto = any(${[...assuntos]}::text[]) or (m.assunto is null and (m.kind <> 'texto' or m.payload is not null)))
       and not (coalesce(m.payload->>'kind', '') = 'trabalho_aberto' and coalesce(m.payload->>'trabalhoId', '') in (select d.id::text from (${trabalhosDoDia(conversaId, f)}) d))
       and not (coalesce(m.payload->>'kind', '') in ('frentes_abertas', 'frentes_terminadas') and exists (
         select 1 from jsonb_array_elements(coalesce(m.payload->'frentes', '[]'::jsonb)) fr
@@ -55,21 +66,24 @@ export function atividadeRepo(conn: Conn, escopo: Escopo) {
       return l;
     },
 
-    /** As mensagens do dia com o assunto gravado (sempre um dos `assuntos`: o filtro garante). */
+    /** As mensagens do dia com o assunto (o gravado, ou o resolvido na leitura): sempre um dos `assuntos`. */
     async mensagens(conversaId: string, f: Faixa, assuntos: readonly Assunto[], limite: number): Promise<{ mensagem: Mensagem; assunto: Assunto }[]> {
-      const linhas = await conn<LinhaMensagem[]>`
-        select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m.${c}`).join(", "))} from mensagens m
+      const linhas = await conn<(LinhaMensagem & { primeira: boolean | null })[]>`
+        select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m.${c}`).join(", "))}, ${colunaPrimeira(conn, "m")} from mensagens m
         where ${filtroMensagens(conversaId, f, assuntos)}
         order by m.criado_em desc, m.id desc limit ${limite}`;
       return linhas.flatMap((l) => {
-        const assunto = assuntos.find((a) => a === l.assunto);
+        const assunto = assuntoDaLinha(l, assuntos);
         return assunto ? [{ mensagem: paraMensagem(l), assunto }] : [];
       });
     },
 
-    async contarMensagens(conversaId: string, f: Faixa, assuntos: readonly string[]): Promise<number> {
-      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from mensagens m where ${filtroMensagens(conversaId, f, assuntos)}`;
-      return l?.n ?? 0;
+    async contarMensagens(conversaId: string, f: Faixa, assuntos: readonly Assunto[]): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`select count(*)::int as n from mensagens m where ${filtroMensagens(conversaId, f, assuntos)} and m.assunto is not null`;
+      const semAssunto = await conn<(LinhaMensagem & { primeira: boolean | null })[]>`
+        select m.kind, m.payload, m.texto, m.decidido_por, m.assunto, ${colunaPrimeira(conn, "m")} from mensagens m
+        where ${filtroMensagens(conversaId, f, assuntos)} and m.assunto is null`;
+      return (l?.n ?? 0) + semAssunto.filter((x) => assuntoDaLinha(x, assuntos) !== null).length;
     },
 
     /** Uma linha por conector (ou ferramenta, sem conector) e causa, com quantas vezes e a mais recente. */

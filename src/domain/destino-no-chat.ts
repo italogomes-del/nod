@@ -34,7 +34,10 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "rotina.falhou": { destino: "chat", categoria: null },
   // O aviso único de janelas adiadas (NOD-243): diz por que a rotina não roda e quando volta.
   "rotina.adiada": { destino: "chat", categoria: null },
-  "rotina.execucao": { destino: "atividade", categoria: null },
+  // A linha "Rotina executou" (ou "passou em branco"): a silenciosa (sem_novidade) não grava linha nenhuma, então é ela que
+  // diz à web que a execução teve algo para a pessoa — sem ela na janela, o resultado virava "rodou 1 vez · nada para você"
+  // (revisão do PR 2, 18/10). Por isso `anexo`: vem na janela, não vira linha, e aparece na Atividade.
+  "rotina.execucao": { destino: "anexo", categoria: null },
   "agente.criado": { destino: "chat", categoria: null },
   "bot.criado": { destino: "atividade", categoria: null },
   "turno.orfao": { destino: "chat", categoria: null },
@@ -51,10 +54,12 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "negacao.conector": { destino: "atividade", categoria: "bloqueios" },
   // O turno parou (ADR-029): fica.
   "negacao.terminal": { destino: "chat", categoria: null },
-  "negacao.plano_ausente": { destino: "chat", categoria: null, temporal: true },
+  // Os quatro de destino temporal ficam no chat enquanto pedem ação e a Atividade os lista sempre, no filtro "Máquina e IA"
+  // (plano, 1a; QA do PR 2: com categoria null eles só apareciam em "Tudo").
+  "negacao.plano_ausente": { destino: "chat", categoria: "maquina_ia", temporal: true },
   "ia.trocada": { destino: "atividade", categoria: "maquina_ia" },
-  "ia.troca": { destino: "chat", categoria: null, temporal: true },
-  "ia.limite_do_plano": { destino: "chat", categoria: null, temporal: true },
+  "ia.troca": { destino: "chat", categoria: "maquina_ia", temporal: true },
+  "ia.limite_do_plano": { destino: "chat", categoria: "maquina_ia", temporal: true },
   // A fala da pessoa espera a hora do limite (NOD-268): ela não teve resposta e a linha diz quando volta.
   "ia.fala_espera": { destino: "chat", categoria: null },
   "conta.trocada": { destino: "atividade", categoria: "maquina_ia" },
@@ -65,7 +70,7 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "conta.recusada": { destino: "chat", categoria: null },
   "cota.pedido_na_fila": { destino: "atividade", categoria: "maquina_ia" },
   "cota.espera": { destino: "atividade", categoria: "maquina_ia" },
-  "computador.fora_do_ar": { destino: "chat", categoria: null, temporal: true },
+  "computador.fora_do_ar": { destino: "chat", categoria: "maquina_ia", temporal: true },
   "trabalho.aberto": { destino: "anexo", categoria: "frentes" },
   "frentes.abertas": { destino: "anexo", categoria: "frentes" },
   "frentes.terminadas": { destino: "anexo", categoria: "frentes" },
@@ -206,3 +211,11 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
       return "sistema.generico";
   }
 }
+
+/**
+ * Os assuntos por destino (definido em 2026-10-18, chat limpo, PR 2): a janela da conversa (mensagens.repo
+ * `listarComTurno`) conta só o que NÃO está aqui como item de chat, traz os `anexo` desde o corte e deixa os `atividade` de
+ * fora. Assunto nulo (fala ou linha sem backfill) não está em lista nenhuma: conta como chat.
+ */
+export const ASSUNTOS_ANEXO: readonly Assunto[] = ASSUNTOS.filter((a) => DESTINO[a].destino === "anexo");
+export const ASSUNTOS_ATIVIDADE: readonly Assunto[] = ASSUNTOS.filter((a) => DESTINO[a].destino === "atividade");

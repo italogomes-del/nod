@@ -15,6 +15,9 @@ import type { EventoStream } from "../../src/contracts/turno.ts";
  *                                    a mensagem do meio chegar com o turno rodando (decisão S9, 2026-10-07)
  *   [[sessao: <uuid>]]            → o init e o result reportam este `sessaoCli` (sem ele, null: o catcher não
  *                                    fabrica sessão, 0005); uuid inválido é ignorado
+ *   [[negada: Bash]]              → o result traz a ferramenta em `negacoesPermissao`, como o permission_denials do
+ *                                    CLI (definido em 2026-10-18, chat limpo, PR 2: o e2e da negação que vai para a
+ *                                    Atividade precisa de uma negação nativa NÃO terminal, que o proxy não produz)
  *
  * Sem marcador, `roteiroPadrao` responde "catcher: recebi N caracteres; ferramentas: […]".
  */
@@ -25,7 +28,8 @@ export type PassoRoteiro =
   | { tipo: "custo"; custoUsd: number }
   | { tipo: "falha"; subtype: string }
   | { tipo: "espera"; ms: number }
-  | { tipo: "sessao"; id: string };
+  | { tipo: "sessao"; id: string }
+  | { tipo: "negada"; nome: string };
 
 /** definido em 2026-10-07 (S9): teto da pausa de um `[[espera]]`; um roteiro nunca segura o turno mais que isso por marcador. */
 export const ESPERA_MAX_MS = 60_000;
@@ -33,7 +37,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Roteiro = { passos: PassoRoteiro[] };
 
-const ABERTURA = /^\[\[(delta|tool|texto|custo|falha|espera|sessao):/;
+const ABERTURA = /^\[\[(delta|tool|texto|custo|falha|espera|sessao|negada):/;
 
 /**
  * Marcadores com `[[`/`]]` BALANCEADOS (definido em 2026-09-16, L9): um marcador pode carregar outro
@@ -78,6 +82,9 @@ export function interpretarRoteiro(prompt: string): Roteiro {
     else if (tipo === "custo") passos.push({ tipo: "custo", custoUsd: Number(corpo) || 0 });
     else if (tipo === "falha") passos.push({ tipo: "falha", subtype: corpo || "error_during_execution" });
     else if (tipo === "espera") passos.push({ tipo: "espera", ms: Math.min(ESPERA_MAX_MS, Math.max(0, Math.floor(Number(corpo) || 0))) });
+    else if (tipo === "negada") {
+      if (corpo) passos.push({ tipo: "negada", nome: corpo });
+    }
     else if (tipo === "sessao") {
       if (UUID.test(corpo)) passos.push({ tipo: "sessao", id: corpo });
     }
@@ -97,6 +104,11 @@ export function interpretarRoteiro(prompt: string): Roteiro {
     }
   }
   return { passos };
+}
+
+/** As ferramentas que o roteiro diz que o CLI negou (`[[negada: …]]`), na ordem. */
+export function negadasDoRoteiro(roteiro: Roteiro): string[] {
+  return roteiro.passos.flatMap((p) => (p.tipo === "negada" ? [p.nome] : []));
 }
 
 /** O `[[sessao: …]]` do roteiro (o último vale), ou null. */
@@ -153,7 +165,7 @@ export function eventosDoRoteiro(
     custoUsd,
     tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 },
     numTurnos,
-    negacoesPermissao: [], erroCru: null,
+    negacoesPermissao: negadasDoRoteiro(roteiro), erroCru: null,
   });
   return eventos;
 }

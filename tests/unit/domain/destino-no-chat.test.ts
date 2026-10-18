@@ -97,15 +97,17 @@ describe("destino no chat: a tabela", () => {
     expect(DESTINO["sistema.generico"].destino).toBe("atividade");
   });
 
-  it("anexo: frentes, tasks e o pedido respondido vêm na janela sem virar linha", () => {
+  it("anexo: frentes, tasks, o pedido respondido e a linha da execução da rotina vêm na janela sem virar linha", () => {
     const anexos = ASSUNTOS.filter((a) => DESTINO[a].destino === "anexo").sort();
-    expect(anexos).toEqual(["frentes.abertas", "frentes.recado", "frentes.terminadas", "pedido.respondido", "trabalho.aberto"]);
+    expect(anexos).toEqual(["frentes.abertas", "frentes.recado", "frentes.terminadas", "pedido.respondido", "rotina.execucao", "trabalho.aberto"]);
   });
 
   it("a Atividade lista o que sai e os quatro de destino temporal, e nada do resto do chat", () => {
     const temporais = ASSUNTOS.filter((a) => DESTINO[a].temporal).sort();
     expect(temporais).toEqual(["computador.fora_do_ar", "ia.limite_do_plano", "ia.troca", "negacao.plano_ausente"]);
     for (const t of temporais) expect(ASSUNTOS_DA_ATIVIDADE).toContain(t);
+    // QA do PR 2: na Atividade eles entram no filtro "Máquina e IA" (com null, só em "Tudo").
+    for (const t of temporais) expect(DESTINO[t].categoria, t).toBe("maquina_ia");
     expect(ASSUNTOS_DA_ATIVIDADE).toContain("trabalho.aberto");
     expect(ASSUNTOS_DA_ATIVIDADE).not.toContain("agente.criado");
     expect(ASSUNTOS_DA_ATIVIDADE).not.toContain("rotina.evento");

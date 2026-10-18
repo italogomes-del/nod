@@ -123,7 +123,13 @@ const FORA_DO_CATALOGO: readonly Molde[] = [
  * só existe desde 15/10. O que sobrar sem casamento ainda é pego, na criação do bot, pela regra da primeira linha da
  * conversa (o backfill). Uma frase que mudar daqui em diante entra aqui com a forma de antes.
  */
-export const MOLDES_ANTIGOS: readonly Molde[] = [];
+export const MOLDES_ANTIGOS: readonly Molde[] = [
+  // decisao-vencida até e3bc7c86 (24/09): "decisão" e o desfecho entre parênteses. Ficou no chat na QA do PR 1 (pede ação:
+  // "você pode reabrir"); sem este molde, a linha antiga caía em sistema.generico e sumia do chat na leitura do PR 2,
+  // antes do backfill (revisão do PR 2, 18/10). Os outros que passaram para o chat na QA (conta.recusada,
+  // ia.fala_espera, proposta.obsoleta) não mudaram de texto desde que nasceram (conferido no histórico, 18/10).
+  { nome: "decisao-vencida-24-09", molde: "Esta decisão venceu em {quando} sem resposta ({desfecho}). Você pode reabrir.", assunto: "decisao.vencida" },
+];
 
 const escapar = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -193,4 +199,19 @@ export function assuntoDoTexto(texto: string): Assunto | null {
     return typeof m.assunto === "function" ? m.assunto(achado.slice(1)) : m.assunto;
   }
   return null;
+}
+
+/** Uma linha lida para a tela (a janela da conversa, a Atividade, o relato): o assunto gravado e o que o backfill lê. */
+export type LinhaNaLeitura = Omit<LinhaAntiga, "tipoConversa"> & { assunto: string | null };
+
+/**
+ * O assunto de uma linha na LEITURA (definido em 2026-10-18, chat limpo, PR 2; ADR-114, emenda do PR 2): o gravado, ou,
+ * com `assunto` nulo (linha de antes da 0091 que o backfill ainda não alcançou), o MESMO que o backfill gravaria
+ * (assuntoDaLinhaAntiga: kind, payload, autoria e o texto contra os moldes). Assim o aviso antigo sai do chat na tela já no
+ * deploy do PR 2, sem esperar o backfill; quando ele rodar, o gravado é igual e nada muda na tela. Só na conversa própria
+ * (a sala não aplica a tabela). Fala continua null.
+ */
+export function assuntoNaLeitura(l: LinhaNaLeitura): string | null {
+  if (l.assunto !== null) return l.assunto;
+  return assuntoDaLinhaAntiga({ ...l, tipoConversa: "propria" }).assunto;
 }

@@ -3,7 +3,7 @@ import type { Assunto } from "../../../src/contracts/destino-no-chat.ts";
 import type { ItemAprovacao } from "../../../src/contracts/item-aprovacao.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO } from "../../../src/contracts/motivos.ts";
 import { MOTIVOS_FIM_LIGACAO } from "../../../src/contracts/voz.ts";
-import { assuntoDaLinhaAntiga, assuntoDoTexto, MOLDES_ANTIGOS, moldesQueCasam } from "../../../src/domain/assunto-do-texto.ts";
+import { assuntoDaLinhaAntiga, assuntoDoTexto, assuntoNaLeitura, MOLDES_ANTIGOS, moldesQueCasam } from "../../../src/domain/assunto-do-texto.ts";
 import { textoDaCompactacao } from "../../../src/domain/comandos.ts";
 import { linhaDoDesfecho, mensagemDeNascimento } from "../../../src/domain/criar-bots.ts";
 import { assuntoDaInterrupcao, destinoDe } from "../../../src/domain/destino-no-chat.ts";
@@ -167,5 +167,21 @@ describe("assunto pelo texto (backfill)", () => {
 
   it("os moldes antigos também casam com UM molde só", () => {
     for (const m of MOLDES_ANTIGOS) expect(moldesQueCasam(m.molde.replaceAll(/\{[a-zA-Z]+\}/g, "x")).length, m.nome).toBe(1);
+  });
+
+  it("na leitura (PR 2): o assunto gravado vale; sem ele, o mesmo do backfill — o aviso antigo sai do chat antes de o backfill rodar", () => {
+    const base = { decididoPor: "pessoa" as const, primeiraDaConversa: false, payload: null };
+    // O gravado ganha sempre, até de um texto que o mandaria para outro lugar (o produtor sabe o que a linha é).
+    expect(assuntoNaLeitura({ ...base, assunto: "turno.orfao", kind: "sistema", texto: "Anotei uma preferência: x" })).toBe("turno.orfao");
+    // Valor que este código não conhece (gravado por um mais novo) passa adiante; destinoDe o deixa no chat.
+    expect(destinoDe(assuntoNaLeitura({ ...base, assunto: "assunto.do.futuro", kind: "sistema", texto: "x" }))).toBe("chat");
+    expect(assuntoNaLeitura({ ...base, assunto: null, kind: "sistema", texto: "Anotei uma preferência: em reais" })).toBe("memoria.anotada");
+    expect(assuntoNaLeitura({ ...base, assunto: null, kind: "sistema", texto: "Uma frase antiga.", primeiraDaConversa: true })).toBe("agente.criado");
+    expect(assuntoNaLeitura({ ...base, assunto: null, kind: "texto", texto: "Oi" })).toBeNull();
+    // A pergunta vencida com a frase de antes de 24/09 ainda pede ação ("você pode reabrir"): fica no chat.
+    const vencidaAntiga = assuntoNaLeitura({ ...base, assunto: null, kind: "sistema", texto: "Esta decisão venceu em 20/09 às 14:00 sem resposta (recusada por padrão). Você pode reabrir." });
+    expect(vencidaAntiga).toBe("decisao.vencida");
+    expect(destinoDe(vencidaAntiga)).toBe("chat");
+    expect(assuntoNaLeitura({ ...base, assunto: null, kind: "negacao", texto: "Bash negada", payload: { kind: "negacao", classe: "ferramenta_negada", nome: "Bash", motivo: "fora_do_catalogo", terminal: false } })).toBe("negacao.ferramenta");
   });
 });

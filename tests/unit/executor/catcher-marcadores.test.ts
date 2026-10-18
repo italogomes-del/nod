@@ -93,3 +93,12 @@ describe("catcher com os marcadores", () => {
     expect(adapter.aceitaMensagens?.()).toBe(false);
   });
 });
+
+describe("[[negada: …]] (chat limpo, PR 2): a negação nativa não terminal do CLI, para o e2e da Atividade", () => {
+  it("vira o permission_denials do result; nome vazio é ignorado", () => {
+    const roteiro = interpretarRoteiro("[[negada: Bash]] [[negada: ]] [[negada: Write]] [[texto: tentei]]");
+    expect(roteiro.passos).toEqual([{ tipo: "negada", nome: "Bash" }, { tipo: "negada", nome: "Write" }, { tipo: "texto", texto: "tentei" }]);
+    const result = eventosDoRoteiro(roteiro, { sessaoCli: SESSAO, ferramentas: [], modelo: "m" }).at(-1);
+    expect(result).toMatchObject({ tipo: "result", texto: "tentei", negacoesPermissao: ["Bash", "Write"] });
+  });
+});

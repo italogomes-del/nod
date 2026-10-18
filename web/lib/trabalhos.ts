@@ -4,7 +4,7 @@ import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, Trabal
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
 import { cotaDaIa } from "./execucao.ts";
 import { duracaoCurta, quandoCurto } from "./relogio.ts";
-import { esc, hora } from "./render.ts";
+import { botao, esc, hora } from "./render.ts";
 
 /**
  * Trabalhos (ADR-083, épico #188): o que a faixa, a barra, a gaveta, "Todos os trabalhos" e as linhas do chat leem dos
@@ -514,4 +514,28 @@ export function naFilaDaCota(dto: Pick<TrabalhosDto, "pedidosNaFila"> | null | u
 /** "na fila (cota) · volta às 14:00"; sem a hora, "na fila (cota) · volta quando a cota renovar". */
 export function textoNaFilaDaCota(p: { voltaEm: number | null }, agora: number): string {
   return `na fila (cota) · volta ${p.voltaEm ? quandoVolta(p.voltaEm, agora) : "quando a cota renovar"}`;
+}
+
+/**
+ * Os botões da task que a pessoa pediu (#195): "Fazer depois da <outra>" grava `depois_de_trabalho_id` (só quando há outra
+ * task aberta do bot, mais antiga) e "Fazer aqui" cancela a task e manda o pedido como turno da conversa. Só enquanto a task
+ * de origem `pessoa` ainda não terminou. Moravam na linha "Abriu a task" do chat; desde 2026-10-18 (chat limpo, PR 2;
+ * ADR-114) a linha sai do chat e os botões ficam no topo da tela da task e na linha dela em Trabalhos (a linha do chat
+ * continua com eles no servidor de antes).
+ *
+ * Como no chat de antes, só a task sozinha (ou a frente única do lote) leva os botões: a linha "Começou N frentes" nunca os
+ * teve, e cada frente de um lote paralelo com "Fazer depois da <irmã>" e "Fazer aqui" enchia Trabalhos de botões que
+ * desfazem o paralelo que o bot escolheu (QA do PR 2).
+ */
+export function acoesDeFazer(t: TrabalhoDto | undefined, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe">, conversaId: string | null | undefined): string {
+  if (!t || t.origem !== "pessoa" || (t.estado !== "na_fila" && t.estado !== "rodando")) return "";
+  if (t.loteId && trabalhosConhecidos(estado, conversaId).filter((x) => x.loteId === t.loteId).length > 1) return "";
+  const outras = abertosDoBot(estado, t.agenteId, conversaId).filter((x) => x.id !== t.id && x.criadoEm < t.criadoEm);
+  const antes = t.depoisDeTrabalhoId ? trabalhosConhecidos(estado, conversaId).find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
+  const depois = antes
+    ? `<span class="linha-acao-nota">começa depois da ${esc(antes.titulo)}</span>`
+    : outras.length
+      ? botao("trabalho-depois", `Fazer depois da ${esc(outras[outras.length - 1]?.titulo ?? "")}`, { classe: "sm", id: t.id, dados: { depois: outras[outras.length - 1]?.id ?? "" } })
+      : "";
+  return `<div class="linha-acoes">${depois}${botao("trabalho-fazer-aqui", "Fazer aqui", { classe: "sm", id: t.id, titulo: "cancela a task e responde aqui na conversa" })}</div>`;
 }

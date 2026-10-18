@@ -133,3 +133,11 @@ reagir e mais ações"). O relato fica nela, no terceiro botão, com o ícone de
 "Reportar problema nesta resposta" ("nesta mensagem" na fala da pessoa). A ação é a mesma (`relatar-mensagem` →
 `abrirReportarBug`), com o estado técnico de sempre; a linha de sistema (negação, parada) continua se relatando, só com a
 bandeira e o ⋯. Nada muda no que o relato grava.
+
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 2) — o relato na Atividade e a janela de itens de chat
+
+Os itens da Atividade que são mensagem levam o "Relatar" (abertos na lista, ancorados no id da mensagem, como sempre); a
+linha que vem da trilha (app indisponível) não leva na v1. Na conversa própria, a janela do relato (`janelaAte` com
+`comDestino`) conta 100 itens de chat, como a conversa — no Eng 1, 100 mensagens cruas davam umas 5 falas — e leva junto o
+que estava na Atividade nos mesmos 15 min, desde o corte, marcado `naAtividade` no trecho: o relato registra o que a pessoa
+viu. A sala e o relato contado ao Nod continuam com as mensagens cruas.

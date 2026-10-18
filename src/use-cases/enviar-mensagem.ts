@@ -197,14 +197,15 @@ export async function mensagemExecutorIndisponivel(
  * definido em 2026-09-24 (fio da pergunta): + os fios das perguntas com mensagem na janela, já com o estado.
  * definido em 2026-10-07 (ADR-083, S2): cada mensagem leva `origemTurno`, `trabalhoId` e `fimDoTurno`, e a conversa, as
  * tasks abertas do bot dela (a faixa). As falas do meio dos turnos de trabalho continuam na página: quem as esconde é a
- * web, e elas contam no `limite` (documentado: uma task muito falante empurra as mais antigas para fora da janela).
+ * web. revisto em 2026-10-18 (chat limpo, PR 2): na conversa própria elas não contam mais no `limite` (vêm como `anexo`,
+ * desde o corte), e uma task muito falante não empurra as falas da conversa para fora da janela.
  */
 export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, ConversaDto> = async (deps, input) => {
   const conversa = await deps.repos.conversas.buscar(input.conversaId);
   if (!conversa) throw new ErroDeDominio("nao_encontrado");
   const [lidas, turnosPendentes, vivos, propostas] = await Promise.all([
-    // Chat limpo (PR 1): na conversa própria cada mensagem leva o destino resolvido no servidor; a web ainda não o usa
-    // (a tela vem no PR 2) e a janela é a mesma de antes. Na sala, nada muda.
+    // Chat limpo (ADR-114, PR 2): na conversa própria a janela conta só os itens de chat (os avisos que saem moram na
+    // Atividade do bot), traz os `anexo` desde o corte e cada mensagem leva o destino resolvido no servidor. Na sala, nada muda.
     deps.repos.mensagens.listarComTurno(conversa.id, input.limite, { comDestino: conversa.tipo === "propria" }),
     deps.repos.turnos.pendentesRenderizaveis(conversa.id),
     deps.repos.turnos.vivosDaConversa(conversa.id),

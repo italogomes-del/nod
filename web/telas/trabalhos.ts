@@ -6,7 +6,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { custoDaFrente, PARCIAL, tokensLegiveis, usd } from "./modo-dev.ts";
@@ -151,7 +151,13 @@ export function renderGavetaTrabalhos(estado: Estado, agenteId: string): string 
   const todos = trabalhosConhecidos(estado, bot?.conversaId);
   const grupos = agrupar(todos.filter((t) => t.agenteId === agenteId), estado.agora);
   const secoes = GRUPOS.filter((g) => grupos[g.chave].length > 0).map((g) => {
-    const linhas = grupos[g.chave].map((t) => `<button type="button" class="gv-linha tr-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="gv-linha-txt"><b>${tituloDaLinha(t, "gv-titulo")} ${etiqueta(t)}</b><small>${esc(detalheDaLinha(t, todos, estado.agora, estado.trabalhos?.segurando === true))}</small></span></button>`).join("");
+    // Chat limpo (ADR-114, PR 2): "Fazer aqui" e "Fazer depois da …" saíram da linha "Abriu a task" do chat e ficam aqui,
+    // embaixo da linha da task (e no topo da tela dela).
+    const linhas = grupos[g.chave].map((t) => {
+      const linha = `<button type="button" class="gv-linha tr-linha" data-act="abrir-trabalho" data-id="${esc(t.id)}">${pontoTrabalho(t, bot?.cor)}<span class="gv-linha-txt"><b>${tituloDaLinha(t, "gv-titulo")} ${etiqueta(t)}</b><small>${esc(detalheDaLinha(t, todos, estado.agora, estado.trabalhos?.segurando === true))}</small></span></button>`;
+      const fazer = acoesDeFazer(t, estado, bot?.conversaId);
+      return fazer ? `<div class="tr-item">${linha}${fazer}</div>` : linha;
+    }).join("");
     return `<section class="gv-secao tr-grupo" data-grupo="${g.chave}"><h3>${g.titulo} · ${grupos[g.chave].length}</h3><div class="gv-cartao">${linhas}</div></section>`;
   });
   if (!estado.trabalhos && secoes.length === 0) return '<p class="mudo">carregando…</p>';
@@ -285,7 +291,7 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", custoDaFrente(t) !== null ? `${custoDaFrente(t)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
-  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaConta(t, estado.agora)}</div>`;
+  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaConta(t, estado.agora)}${acoesDeFazer(t, estado, t.conversaId)}</div>`;
 }
 
 /**

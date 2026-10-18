@@ -99,3 +99,8 @@ explicitamente **fora** do escopo dela a faixa desta ADR (item 1).
 outro bot da pessoa não some. O Parar do chat também para as tasks do bot (ADR-083), cancela os comandos esperando
 (ADR-099) e não encerra a ligação (ADR-072). Nada disso muda as decisões 1 a 3.
 
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 2)
+
+A linha "■ Parado por você" (mensagem `parada`) sai do chat e vai para a Atividade do bot (categoria Bloqueios, "Parado
+por você · N turnos interrompidos"). A faixa do Parar (`faixa-parada.ts`), enquanto a parada vale, não muda; "esta mensagem
+não rodou" (item 3) fica no chat.

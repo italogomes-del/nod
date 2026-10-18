@@ -180,6 +180,11 @@
   .ld-principal { min-height: 40px; padding-left: 12px; }
   .ld-detalhes-txt { display: none; }
   .ld-detalhes { min-width: 44px; justify-content: center; padding: 0 10px; }
+  .ld-memoria, .linha-dono.so-ponto .ld-memoria { width: 44px; min-height: 40px; }
+  /* A Atividade no celular (a gaveta já é folha por cima da conversa): alvos de toque de 44 px. */
+  .atv-filtro { min-height: 40px; padding: 8px 14px; }
+  .atv-botao { min-height: 44px; }
+  .atv-dia { min-height: 44px; }
   .linha-dono.aberta .ld-detalhe { position: fixed; z-index: 41; left: 0; right: 0; bottom: 0; max-height: 82dvh; padding: 0 10px calc(14px + env(safe-area-inset-bottom));
     border: 0; border-radius: 18px 18px 0 0; background: var(--surface); box-shadow: var(--shadow-pop); }
   .linha-dono.aberta .ld-fundo { display: block; position: fixed; inset: 0; z-index: 40; width: 100%; height: 100%; padding: 0; border: 0; background: var(--backdrop); }

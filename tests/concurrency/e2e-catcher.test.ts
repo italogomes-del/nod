@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { criarCatcherDriver } from "../../src/adapters/executor/drivers/catcher.ts";
+import type { AtividadeDto } from "../../src/contracts/atividade.ts";
 import type { ConversaDto, FrotaDto, RespostaMutacao, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Agente } from "../../src/contracts/agente.ts";
 import type { Conversa } from "../../src/contracts/conversa.ts";
@@ -54,6 +55,8 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
   const chamar = (metodo: string, caminho: string, corpo?: unknown, sessao?: Sessao) => srv.chamar(metodo, caminho, corpo, sessao);
   const json = <T>(metodo: string, caminho: string, corpo?: unknown, sessao?: Sessao) => srv.json<T>(metodo, caminho, corpo, sessao);
   const conversa = (id: string) => json<ConversaDto>("GET", `conversas/${id}/mensagens`);
+  /** A Atividade do bot hoje (ADR-114), no fuso UTC: o dia do relógio do Postgres e do Node coincidem. */
+  const atividadeDeHoje = (agenteId: string) => json<AtividadeDto>("GET", `agentes/${agenteId}/atividade?dia=${new Date().toISOString().slice(0, 10)}&fuso=UTC`);
   const turno = (id: string) => json<{ turno: Turno }>("GET", `turnos/${id}`).then((r) => r.turno);
   const esperarTurno = (id: string, estados: Turno["estado"][] = ["concluido"]) =>
     srv.esperar(async () => {
@@ -199,7 +202,9 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     expect(t.estado).toBe("concluido");
     const lista = await json<{ memorias: Memoria[] }>("GET", `agentes/${vera.agenteId}/memoria`);
     expect(lista.memorias.map((m) => [m.tipo, m.origem, m.texto])).toEqual([["preferencia", "agente", "prefere resumos em tópicos"]]);
-    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "sistema" && m.texto.startsWith("Anotei uma preferência"))).toBe(true);
+    // Chat limpo (ADR-114, PR 2): o "Anotei" sai do chat e mora na Atividade do bot.
+    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.texto.startsWith("Anotei uma preferência"))).toBe(false);
+    expect((await atividadeDeHoje(vera.agenteId)).itens.some((i) => i.titulo === "Anotou na memória" && i.detalhe?.startsWith("Anotei uma preferência"))).toBe(true);
     const m = lista.memorias[0]?.id ?? "";
     expect((await json<{ memoria: Memoria }>("PATCH", `agentes/${vera.agenteId}/memoria/${m}`, { texto: "prefere tópicos curtos" })).memoria.texto).toBe("prefere tópicos curtos");
     const nova = await json<{ memoria: Memoria }>("POST", `agentes/${vera.agenteId}/memoria`, { tipo: "fato", texto: "o time revisa PRs às terças" });
@@ -248,7 +253,10 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     }, { nome: "execução da rotina", timeoutMs: 15_000 });
     expect(execucoes[0]).toMatchObject({ rotinaId, desfecho: "executou" });
     await esperarFrame("rotina.executou", desde);
-    expect((await conversa(vera.conversaId)).mensagens.some((m) => m.kind === "rotina_execucao")).toBe(true);
+    // Chat limpo (ADR-114, PR 2): a linha "Rotina executou" vem na janela como `anexo` (não vira linha; é ela que diz à web
+    // que a execução teve resultado para a pessoa) e aparece na Atividade.
+    expect((await conversa(vera.conversaId)).mensagens.find((m) => m.kind === "rotina_execucao")?.destino).toBe("anexo");
+    expect((await atividadeDeHoje(vera.agenteId)).itens.some((i) => i.titulo === "A rotina rodou")).toBe(true);
     const turnoRotina = await turno(execucoes[0]?.turnoId ?? "");
     expect(turnoRotina).toMatchObject({ origem: "rotina", estado: "concluido" });
     expect((await json<RespostaMutacao>("POST", `rotinas/${rotinaId}/pausar`)).ids.rotinaId).toBe(rotinaId);
@@ -368,6 +376,24 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     expect(frameNegacao.dados).toMatchObject({ classe: "ferramenta_negada", motivo: "fora_do_catalogo", terminal: true });
     const trilhaNegada = await json<{ linhas: { kind: string; ferramenta: string; motivo: string | null }[] }>("GET", `trilha?agente=${vera.agenteId}`);
     expect(trilhaNegada.linhas.some((l) => l.kind === "negacao" && l.ferramenta === "exemplo__apagar_tudo" && l.motivo === "fora_do_catalogo")).toBe(true);
+  });
+
+  it("negação vai para a Atividade (ADR-114, PR 2): a ferramenta negada pelo CLI, não terminal, sai da janela e aparece em GET atividade", { timeout: JORNADA_MS }, async () => {
+    const desde = frames.length;
+    const t = await rodar(vera.conversaId, "[[negada: Bash]] [[texto: tentei pelo terminal]]");
+    expect(t.estado).toBe("concluido");
+    const frame = await esperarFrame("negacao", desde, (f) => f.dados.nome === "Bash");
+    expect(frame.dados).toMatchObject({ classe: "ferramenta_negada", terminal: false });
+    const janela = (await conversa(vera.conversaId)).mensagens;
+    expect(janela.some((m) => m.kind === "negacao" && m.turnoId === t.id)).toBe(false);
+    // A fala do mesmo turno fica no chat.
+    expect(janela.find((m) => m.turnoId === t.id && m.kind === "texto")?.destino).toBe("chat");
+    const atividade = await atividadeDeHoje(vera.agenteId);
+    const negada = atividade.itens.find((i) => i.titulo === "Bash negada");
+    expect(negada).toMatchObject({ categoria: "bloqueios" });
+    expect(negada?.alvo).toEqual({ mensagemId: negada?.id });
+    const contagem = await json<{ total: number }>("GET", `agentes/${vera.agenteId}/atividade?dia=${atividade.dia}&fuso=UTC&contagem=1`);
+    expect(contagem.total).toBe(atividade.total);
   });
 
   it("sala: 2 bots com grant; @menção dirige o turno; sem menção o lead responde e encaminha (handoff visível); o destinatário passa e a rodada assenta; 1 bot → 400 sala_tamanho; outra pessoa → 404 no agente", { timeout: JORNADA_MS }, async () => {
@@ -518,7 +544,9 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
       const c = await conversa(vera.conversaId);
       return c.mensagens.some((m) => m.turnoId === turnoId && m.autoria.autor_tipo === "agente" && m.parcial) ? c : null;
     }, { nome: "fala parcial" });
-    expect(dto.mensagens.find((m) => m.kind === "parada")?.payload).toMatchObject({ kind: "parada", interrompidas: 1, nadaRodando: false });
+    // Chat limpo (ADR-114, PR 2; emenda da ADR-110): a linha "■ Parado por você" vai para a Atividade; a faixa do Parar fica.
+    expect(dto.mensagens.some((m) => m.kind === "parada")).toBe(false);
+    expect((await atividadeDeHoje(vera.agenteId)).itens.some((i) => i.titulo === "Parado por você · 1 turno interrompido" && i.categoria === "bloqueios")).toBe(true);
     const deNovo = await json<FaixaParada>("POST", `conversas/${vera.conversaId}/parar`);
     expect(deNovo.nadaRodando).toBe(true);
 

@@ -79,3 +79,16 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
 - Um tipo de linha (rotina, bots, task) aberto em mais de 30% das vezes em 2 semanas (taxa no Modo dev) volta a ser
   balão. A decisão é manual.
 - Pressão vermelha em mais de 1 dia por semana em algum Mac: reabrir a discussão de um teto.
+
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 2)
+
+- **Item 1:** "uma linha no chat" por trabalho vira um item na Atividade do bot (começou e terminou, um item cada). Na
+  conversa própria a linha "Abriu a task" (e "Virou a frente", "Começou N frentes", "N frentes terminaram", o recado e
+  "… terminou · 39 min") não é mais desenhada; a mensagem continua na janela como `anexo`, dando o título e a origem. Os
+  botões "Fazer aqui" e "Fazer depois da …" vão para o topo da tela da task e para a linha dela em Trabalhos. A linha do
+  dono continua dizendo as frentes que rodam.
+- **Item 7:** a etiqueta "da task …" no balão da pergunta e do resultado fica.
+- **Janela:** a fala do meio de um turno de trabalho não conta mais no limite de 200 da conversa própria (vem como `anexo`
+  desde o corte); uma task falante não empurra as falas da conversa para fora.
+- **Gatilho:** o "tipo de linha aberto em mais de 30%" ganha o tipo `atividade` (a Atividade aberta até 60 s depois de
+  abrir a conversa). O PR 3 do plano acrescenta "troca".

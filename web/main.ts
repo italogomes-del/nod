@@ -102,6 +102,7 @@ import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, re
 import type { TipoLinha } from "../src/contracts/trabalho.ts";
 import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
+import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, fusoLocal, type FiltroAtividade } from "./lib/atividade-do-bot.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
 import { renderLinhaDoDono, renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
@@ -137,6 +138,8 @@ let ambienteBanco: AmbienteBancoDto | null = null;
  */
 const telemetria = criarTelemetria((eventos) => api?.telemetriaLinhas(eventos) ?? Promise.resolve(), (fn, ms) => window.setTimeout(fn, ms));
 window.addEventListener("pagehide", () => telemetria.descarregar());
+// ADR-114 (chat limpo, PR 2): o gatilho da Atividade — cada abertura da conversa própria e a Atividade aberta até 60 s depois.
+const vigiaAtividade = criarVigiaDaAtividade(telemetria);
 const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" ? v : null);
 
 /** As linhas que o histórico desenhou entram na telemetria (cada chave uma vez por carga). */
@@ -422,6 +425,17 @@ const releituraTrabalhos = criarReleituraAdiada(JANELA_TRABALHOS_MS, (fn, ms) =>
   return () => window.clearTimeout(t);
 }, () => void reidratar());
 
+/**
+ * ADR-114 (chat limpo, PR 2): o "N hoje" e a página aberta da Atividade, relidos pelos frames do bot, saem juntos uma vez
+ * por segundo (uma rajada de mensagens e negações vira uma releitura só).
+ */
+const JANELA_ATIVIDADE_MS = 1000;
+const releituraAtividade = criarReleituraAdiada(JANELA_ATIVIDADE_MS, (fn, ms) => {
+  const t = window.setTimeout(fn, ms);
+  return () => window.clearTimeout(t);
+}, () => void reidratar());
+const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:");
+
 function dispatch(acao: Acao): void {
   // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
@@ -453,6 +467,7 @@ function receberFrame(frame: FrameSse): void {
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
   if (estado.invalidacoes === antes.invalidacoes) return;
   if (frame.tipo.startsWith("turno.") && estado.invalidacoes.includes("trabalhos")) releituraTrabalhos.pedir();
+  if (estado.invalidacoes.some((q) => daAtividade(q) && !antes.invalidacoes.includes(q))) releituraAtividade.pedir();
   void reidratar();
 }
 
@@ -684,6 +699,19 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   if (q.startsWith("pendencias:")) return { tipo: "hidratar-pendencias", agenteId: q.slice(11), pendencias: (await api.pendencias(q.slice(11))).pendencias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
+  // ADR-114 (chat limpo, PR 2): a página do dia da Atividade (404: servidor de antes ou bot de outra pessoa — fica
+  // indisponível, sem faixa de erro) e o "N hoje", que é informativo: qualquer falha deixa a linha sem número.
+  if (q.startsWith("atividade:")) {
+    const [agenteId = "", dia = ""] = q.slice(10).split(":");
+    const atividade = await api.atividade(agenteId, dia, fusoLocal()).catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return null; throw e; });
+    return { tipo: "hidratar-atividade", agenteId, dia, atividade };
+  }
+  if (q.startsWith("atividade-hoje:")) {
+    const agenteId = q.slice(15);
+    const dia = diaLocal(Date.now());
+    const total = await api.contagemAtividade(agenteId, dia, fusoLocal()).then((c) => c.total, () => null);
+    return { tipo: "hidratar-atividade-hoje", agenteId, dia, total };
+  }
   return null;
 }
 
@@ -731,7 +759,7 @@ async function reidratar(): Promise<void> {
   if (!api || reidratando) return;
   const pendentes = [...new Set([...estado.invalidacoes, ...invalidacoesDaTela(estado)])];
   // Só o que a tela atual olha entra agora; o resto fica marcado para quando a tela abrir.
-  const relevantes = pendentes.filter((q) => relevante(q) && !(q === "trabalhos" && releituraTrabalhos.pendente()));
+  const relevantes = pendentes.filter((q) => relevante(q) && !(q === "trabalhos" && releituraTrabalhos.pendente()) && !(daAtividade(q) && releituraAtividade.pendente()));
   // definido em 2026-09-30: nada relevante, nada a buscar nem a redesenhar. A conversa de outro bot fica marcada
   // até ser aberta, e antes cada frame caía aqui e redesenhava a tela inteira de forma síncrona.
   if (relevantes.length === 0) return;
@@ -798,6 +826,12 @@ function relevante(q: Invalidacao): boolean {
   // 2026-09-21: o painel de detalhes (tela conversa) também mostra o histórico — é onde a pessoa
   // confere que uma rotina silenciosa (desfecho sem_novidade, que não escreve no chat) rodou.
   if (q.startsWith("execucoes:")) return t.tipo === "rotinas" || t.tipo === "conversa";
+  // ADR-114: o "N hoje" só com o painel do bot à vista; a página, só com a Atividade dele aberta naquele dia.
+  if (q.startsWith("atividade-hoje:")) return t.tipo === "conversa" && t.agenteId === q.slice(15) && painelVisivel();
+  if (q.startsWith("atividade:")) {
+    const v = estado.atividadeVista;
+    return t.tipo === "conversa" && estado.gaveta?.nivel.tipo === "atividade" && !!v && q.slice(10) === chaveDaAtividade(v.agenteId, v.dia);
+  }
   return true;
 }
 
@@ -1402,6 +1436,10 @@ function render(): void {
     return;
   }
   document.querySelector(".app")?.classList.remove("sem-sessao");
+  // ADR-114: a conversa própria à vista conta uma abertura (só quando muda de conversa) para o gatilho da Atividade.
+  const naTela = estado.tela;
+  const doBot = naTela.tipo === "conversa" ? estado.frota?.agentes.find((a) => a.id === naTela.agenteId && a.ownerId === estado.sessao?.pessoaId) : undefined;
+  vigiaAtividade.naTela(doBot && naTela.tipo === "conversa" ? { agenteId: doBot.id, conversaId: naTela.conversaId } : null);
   // NOD-122: quem tem o foco quando a gaveta do app abre é para onde ele volta quando ela fecha.
   const gavetaDoApp = gavetaPrendeFoco(estado.tela);
   if (gavetaDoApp && !gavetaMontada) origemDaGaveta = origemDoFoco();
@@ -2847,12 +2885,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const app = document.querySelector(".app");
     if (!app) return;
     // Estreita, o painel é sobreposto e abre/fecha a cada vez; larga, esconder é preferência que fica.
-    if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); marcarPainelNaPilula(); return; }
+    // ADR-114: o painel que aparece pede o "N hoje" da Atividade (relevante só com ele à vista).
+    if (window.matchMedia("(max-width: 1099px)").matches) { app.classList.toggle("detalhes-abertos"); marcarPainelNaPilula(); void reidratar(); return; }
     const oculto = !app.classList.contains("detalhes-ocultos");
     app.classList.toggle("detalhes-ocultos", oculto);
     painelAberto = !oculto;
     painelAbertoNaHora = false;
     marcarPainelNaPilula();
+    void reidratar();
     try { localStorage.setItem(CHAVE_PAINEL_ABERTO, oculto ? "0" : "1"); } catch { /* sem storage, vale só nesta aba */ }
   },
   "preencher-prompt": (el) => {
@@ -2865,6 +2905,23 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (nivel) abrirNivel(el.dataset.agente ?? "", nivel);
   },
   "gaveta-voltar": () => voltarNivel(),
+  // ADR-114 (chat limpo, PR 2): os filtros, a troca de dia e a mensagem aberta (texto inteiro + Relatar) da Atividade.
+  "atividade-filtro": (el) => {
+    const filtro = el.dataset.filtro;
+    if (filtro === "tudo" || filtro === "frentes" || filtro === "bloqueios" || filtro === "maquina_ia") dispatch({ tipo: "atividade-vista", mudanca: { filtro: filtro satisfies FiltroAtividade } });
+    document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-filtro"][data-filtro="${CSS.escape(filtro ?? "")}"]`)?.focus({ preventScroll: true });
+  },
+  "atividade-dia": (el) => {
+    const dia = el.dataset.dia ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return;
+    dispatch({ tipo: "atividade-vista", mudanca: { dia, aberta: null } });
+    document.querySelector<HTMLElement>("#detalhes .atv-dia-titulo")?.focus({ preventScroll: false });
+  },
+  "atividade-abrir": (el) => {
+    const id = el.dataset.id ?? "";
+    dispatch({ tipo: "atividade-vista", mudanca: { aberta: estado.atividadeVista?.aberta === id ? null : id } });
+    document.querySelector<HTMLElement>(`#detalhes [data-act="atividade-abrir"][data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+  },
   // definido em 2026-09-24 (emenda da ADR-044): parada pelo pré-voo (`ids.bloqueada`), o teste não roda —
   // a conversa abre com o card de acesso "rotina parada" e o botão que a destrava; "Sua vez" relê.
   "executar-rotina": (el) => agir(async () => {
@@ -4127,6 +4184,7 @@ function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");
   else if (painelOculto()) painelAbertoNaHora = true;
   dispatch({ tipo: "gaveta", agenteId: a.id, nivel });
+  if (nivel.tipo === "atividade") vigiaAtividade.atividadeAberta(a.id);
   document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
 }
 

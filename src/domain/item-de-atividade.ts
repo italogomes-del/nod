@@ -121,12 +121,17 @@ function detalheDoPayload(m: Mensagem): string | null {
 export function itemDaMensagem(m: Mensagem, assunto: Assunto): ItemDeAtividade {
   const vezes = m.payload?.kind === "negacao" && m.payload.vezes && m.payload.vezes > 1 ? m.payload.vezes : undefined;
   const alvo = m.payload?.kind === "trabalho_aberto" || m.payload?.kind === "recado_a_frente" ? { trabalhoId: m.payload.trabalhoId } : { mensagemId: m.id };
+  const detalhe = detalheDoPayload(m);
+  // Chat limpo, PR 2: o texto inteiro vai junto quando o detalhe não o mostra todo (o clique abre a mensagem na lista).
+  const inteiro = m.texto.trim();
+  const texto = "mensagemId" in alvo && inteiro !== "" && detalhe !== inteiro.replace(/\s+/g, " ") ? inteiro : undefined;
   return {
     id: m.id,
     em: m.criadoEm,
     categoria: DESTINO[assunto].categoria,
     titulo: tituloDoPayload(m) ?? ROTULO[assunto],
-    detalhe: detalheDoPayload(m),
+    detalhe,
+    ...(texto ? { texto } : {}),
     ...(vezes ? { vezes } : {}),
     alvo,
   };

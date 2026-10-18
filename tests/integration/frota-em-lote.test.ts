@@ -51,4 +51,25 @@ describeIntegracao("frota em lote: consultas fixas, execuções reais", () => {
       expect(frota.find((x) => x.id === semConversa?.id)).toMatchObject({ conversaId: "", naoLido: false, descricaoEstado: "sem acessos · nunca executou", ultimaMensagem: null });
     });
   });
+
+  // QA do PR 2 do chat limpo (ADR-114): a barra mostrava "ferramenta Bash negada…" e "Anotei uma preferência…" como
+  // prévia de um bot cuja conversa já não mostra essas linhas.
+  it("a prévia é a última que o chat mostra: o que mora na Atividade ou é anexo não vira prévia; a linha sem assunto entra", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const a = await agenteComConversa(trx, MARLON, { nome: "Limpo" });
+      const bot = autoriaAgente(a.agenteId, MARLON.pessoaId);
+      const fala = await deps.repos.mensagens.criar({ conversaId: a.conversaId, autoria: bot, kind: "texto", texto: "Respondi a Ingrid.", confianca: "confiavel" });
+      await trx`update mensagens set criado_em = now() - interval '1 minute' where id = ${fala?.id ?? ""}`;
+      await deps.repos.mensagens.criar({ conversaId: a.conversaId, autoria: bot, kind: "sistema", assunto: "memoria.anotada", texto: "Anotei uma preferência: em reais", confianca: "confiavel" });
+      await deps.repos.mensagens.criar({ conversaId: a.conversaId, autoria: bot, kind: "sistema", texto: "ferramenta Bash negada", payload: { kind: "negacao", classe: "ferramenta_negada", nome: "Bash", motivo: "alcance_insuficiente", terminal: false }, confianca: "confiavel" });
+      const previa = async () => (await listarFrota(deps, {})).data.agentes.find((x) => x.id === a.agenteId)?.ultimaMensagem?.previa;
+      expect(await previa()).toBe(previaDaMensagem("Respondi a Ingrid."));
+
+      // Sem backfill (assunto nulo), a linha conta como chat, como na janela.
+      const antiga = await deps.repos.mensagens.criar({ conversaId: a.conversaId, autoria: bot, kind: "sistema", assunto: "sistema.generico", texto: "Linha antiga sem molde.", confianca: "confiavel" });
+      await trx`update mensagens set assunto = null where id = ${antiga?.id ?? ""}`;
+      expect(await previa()).toBe(previaDaMensagem("Linha antiga sem molde."));
+    });
+  });
 });

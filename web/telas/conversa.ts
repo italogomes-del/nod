@@ -37,7 +37,7 @@ import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inven
 import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts";
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
-import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
+import { conversaLimpa, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 
@@ -741,7 +741,9 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   const conversaId = mensagens[0]?.conversaId;
   const ordenadas = linhaDepoisDaFala(linhas, mensagens, planos);
   const desenhadas = (conversaId ? desenharFios(ordenadas, estado, conversaId) : ordenadas).filter((l) => l.html !== "");
-  return recolherAvisos(desenhadas);
+  // Chat limpo (ADR-114): sem aviso genérico no chat, não sobra o que recolher — o que fica pede a pessoa e fica à vista.
+  // A sala e o servidor de antes (sem `destino`) continuam recolhendo.
+  return conversaLimpa(mensagens) ? desenhadas.map((l) => ({ chave: l.chave ?? l.id, html: l.html })) : recolherAvisos(desenhadas);
 }
 
 /**

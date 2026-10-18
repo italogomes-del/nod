@@ -22,6 +22,8 @@ export const ICONE = {
   pontos: svg('<circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none"/>'),
   painel: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M14.5 4.5v15"/>'),
   relogio: svg('<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>', 16),
+  // ADR-114 (chat limpo, PR 2): a linha "Atividade" da gaveta (o pulso do protótipo "Atividade em Atalhos").
+  pulso: svg('<path d="M3 12h4l3 8 4-16 3 8h4"/>', 16),
   brilho: svg('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>', 17),
   balao: svg('<path d="M4 5h16v11H9l-5 4z"/>', 17),
   livro: svg('<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>', 17),

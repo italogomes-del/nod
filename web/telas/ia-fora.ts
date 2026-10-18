@@ -184,12 +184,22 @@ export function avisoModeloRecusado(m: Mensagem, p: { nomeDoBot: string | null; 
  * (`data-fica`); o Claude, que pede o código colado, termina em Provedores de IA. Passado o limite (ou uma hora sem prazo),
  * vira um registro sem cor. null quando a mensagem não é desse aviso.
  */
+/**
+ * O limite do plano ainda vale (a hora em que a IA volta não passou; sem hora, por uma hora desde o aviso). Fora disso a
+ * linha vira registro ("esteve no limite até 14:00") e, na conversa limpa (ADR-114), sai do chat para a Atividade.
+ */
+export function limiteVigente(m: Pick<Mensagem, "payload" | "criadoEm">, agora: number): boolean {
+  const l = m.payload;
+  if (l?.kind !== "limite_do_plano") return false;
+  return l.voltaEm !== null ? l.voltaEm > agora : agora - m.criadoEm < 60 * 60_000;
+}
+
 export function linhaLimiteSemOutra(m: Mensagem, p: { nomeDoBot: string | null; agenteId: string | null; agora: number; ui: UiIas; ias: readonly IaDaPessoa[] | null; fixa: boolean; contasIa?: ContasIaDto | null }): string | null {
   const l = m.payload;
   if (l?.kind !== "limite_do_plano") return null;
   const ia = ehIa(l.harness) ? l.harness : null;
   const nome = ia ? PROVEDOR_DA_IA[ia].nome : "Sua IA";
-  const vigente = l.voltaEm !== null ? l.voltaEm > p.agora : p.agora - m.criadoEm < 60 * 60_000;
+  const vigente = limiteVigente(m, p.agora);
   if (!vigente) {
     const quando = l.voltaEm !== null ? `até ${hora(l.voltaEm)}` : `às ${hora(m.criadoEm)}`;
     return `<div class="linha-centro-wrap linha-limite-passou"><span class="linha-centro estatica"><span class="linha-ic" aria-hidden="true">${ICONE_RELOGIO}</span><span>${esc(nome)} esteve no limite ${esc(quando)}</span></span></div>`;

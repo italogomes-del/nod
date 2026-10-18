@@ -1,4 +1,5 @@
 import type { Agente } from "../../src/contracts/agente.ts";
+import type { AtividadeDto } from "../../src/contracts/atividade.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
 import type { ContasIaDto } from "../../src/contracts/contas-ia.ts";
@@ -28,6 +29,7 @@ import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
+import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
 import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
@@ -116,7 +118,9 @@ export type NivelGaveta =
   | { tipo: "inteligencia" }
   | { tipo: "nova-rotina" }
   /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
-  | { tipo: "trabalhos" };
+  | { tipo: "trabalhos" }
+  /** ADR-114 (chat limpo, PR 2): o que saiu do chat do bot, um dia por vez (web/telas/atividade.ts). */
+  | { tipo: "atividade" };
 
 /**
  * `semJanela` (revisão do PR #264, NOD-208): a janela de login não abriu (bloqueador de pop-up, app desktop ou
@@ -164,7 +168,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -250,6 +254,14 @@ export type Estado = {
   conectando: Record<string, ConexaoApp>;
   /** O nível aberto na gaveta de um bot; outro bot na tela = visão geral. */
   gaveta: { agenteId: string; nivel: NivelGaveta } | null;
+  /**
+   * A Atividade do bot (ADR-114, chat limpo, PR 2): as páginas lidas, por `agenteId:dia` (null = a rota disse 404: servidor
+   * de antes, ou o bot não é da pessoa); o "N hoje" da linha da gaveta por bot (`total` null = indisponível, a linha fica
+   * sem número); e o que a gaveta mostra (dia, filtro e a mensagem aberta).
+   */
+  atividadeDoBot: Record<string, AtividadeDto | null>;
+  atividadeHoje: Record<string, { dia: string; total: number | null }>;
+  atividadeVista: VistaDaAtividade | null;
   avisoConexao: string | null;
   concessoes: Record<string, Concessao[]>;
   /**
@@ -354,6 +366,9 @@ export type Estado = {
 export type Acao =
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
   | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
+  | { tipo: "hidratar-atividade"; agenteId: string; dia: string; atividade: AtividadeDto | null }
+  | { tipo: "hidratar-atividade-hoje"; agenteId: string; dia: string; total: number | null }
+  | { tipo: "atividade-vista"; mudanca: Partial<Pick<VistaDaAtividade, "dia" | "filtro" | "aberta">> }
   | { tipo: "aviso-conexao"; texto: string | null }
   | { tipo: "sessao"; escopo: Escopo | null }
   | { tipo: "navegar"; tela: Tela }
@@ -465,6 +480,9 @@ export const estadoInicial: Estado = {
   composioConfigurado: false,
   conectando: {},
   gaveta: null,
+  atividadeDoBot: {},
+  atividadeHoje: {},
+  atividadeVista: null,
   avisoConexao: null,
   concessoes: {},
   liberacoesDispensadas: {},
@@ -736,12 +754,27 @@ const conv = (f: FrameSse): Invalidacao | null => {
   return id ? `conversa:${id}` : null;
 };
 
+/**
+ * ADR-114 (chat limpo, PR 2): a mensagem nova, a negação (a de conector chega só por esse frame) e o trabalho que mudou na
+ * conversa de um bot releem o "N hoje" dele — só se a linha já foi lida — e a página da Atividade aberta dele. O frame não
+ * diz o assunto: relê a contagem, que é barata (`contagem=1`). O main junta as releituras numa por segundo.
+ */
+function atividadeDoFrame(e: Estado, f: FrameSse): Invalidacao[] {
+  const conversaId = texto(f.dados.conversaId);
+  const bot = conversaId ? e.frota?.agentes.find((a) => a.conversaId === conversaId) : undefined;
+  if (!bot) return [];
+  const quais: Invalidacao[] = [];
+  if (e.atividadeHoje[bot.id]) quais.push(`atividade-hoje:${bot.id}`);
+  if (e.atividadeVista?.agenteId === bot.id) quais.push(`atividade:${chaveDaAtividade(bot.id, e.atividadeVista.dia)}`);
+  return quais;
+}
+
 /** O turno da ligação não é trabalho do bot (ADR-072): não relê Trabalhos. */
 const trabalhosDoTurno = (f: FrameSse): Invalidacao[] => (turnoDeLigacao(f.dados) || f.dados.modo === "ligacao" || f.dados.origem === "ligacao" ? [] : ["trabalhos"]);
 
 const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-09-29 (0039): a mensagem nova também relê os não lidos (o ponto da barra e o ícone do topo).
-  "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos") : e),
+  "mensagem.nova": (e, f) => (conv(f) ? invalidar(e, conv(f), "nao-lidos", ...atividadeDoFrame(e, f)) : e),
   "turno.iniciado": (e, f, agora) => {
     // definido em 2026-10-04 (ADR-072): o turno-cérebro da ligação não é trabalho do bot — nada de "trabalhando", fila ou Parar.
     if (f.dados.modo === "ligacao" || f.dados.origem === "ligacao") return e;
@@ -828,7 +861,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     const vezes = typeof f.dados.vezes === "number" && f.dados.vezes > 1 ? f.dados.vezes : null;
     const vista: NegacaoVista = { classe, nome, motivo: motivo as Negacao["motivo"], desde: typeof f.dados.desde === "number" ? f.dados.desde : agora, terminal: f.dados.terminal === true, conversaId: texto(f.dados.conversaId), vistaEm: agora, ...(causaNativa ? { causa: causaNativa } : {}), ...(vezes ? { vezes } : {}) };
     // definido em 2026-09-16: as 20 mais recentes bastam na tela; o registro completo está na trilha.
-    return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f));
+    return invalidar({ ...e, negacoes: [vista, ...e.negacoes].slice(0, 20) }, conv(f), ...atividadeDoFrame(e, f));
   },
   // definido em 2026-09-24 (emenda da ADR-037): só a SAÚDE (entrou ou saiu do ar) muda a frota — a
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
@@ -871,7 +904,7 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
     // ADR-099 §7: o custo de hoje também (só é buscado com a tela Trabalhos aberta; `relevante` no main).
     // ADR-099 (parte 5): o estado do dono que o frame traz vale na hora (a linha acima do campo, o chip e Trabalhos), antes
     // de a lista e a conversa voltarem do REST.
-    return invalidar(comEstadoDoDono(e, f.dados.estadoDono), "trabalhos", "custo", conv(f), aberta);
+    return invalidar(comEstadoDoDono(e, f.dados.estadoDono), "trabalhos", "custo", conv(f), aberta, ...atividadeDoFrame(e, f));
   },
   // #194: o nível vale na hora (a pílula aparece sem esperar o REST); a lista relê para o total de memória.
   "memoria.mudou": (e, f) => {
@@ -907,7 +940,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
-        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null }) };
+        ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
       // quando ela foi aberta da última vez); W11: sair da tela da task de um bot cuja conversa não está carregada apaga o
@@ -1044,9 +1077,24 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       else delete conectando[acao.slug];
       return { ...estado, conectando, avisoConexao: acao.valor ? null : estado.avisoConexao };
     }
-    case "gaveta":
+    case "gaveta": {
       // O rascunho da Inteligência (2B) e o menu rápido (2A) não sobrevivem à troca de nível.
-      return { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null };
+      // ADR-114: a Atividade abre sempre no dia de hoje, em "Tudo"; sair dela esquece o dia, o filtro e o item aberto.
+      const atividadeVista: VistaDaAtividade | null = acao.nivel?.tipo === "atividade" ? { agenteId: acao.agenteId, dia: diaLocal(estado.agora > 0 ? estado.agora : Date.now()), filtro: "tudo", aberta: null } : null;
+      const depois = { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista };
+      // Reabrir a Atividade relê o dia (a página guardada aparece enquanto a nova não chega): fechada, nenhum frame a relia.
+      return atividadeVista && chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia) in estado.atividadeDoBot ? invalidar(depois, `atividade:${chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia)}`) : depois;
+    }
+    case "hidratar-atividade": {
+      // A página do dia de hoje também é o "N hoje" da linha (o mesmo total, nas mesmas três fontes).
+      const hoje = estado.atividadeHoje[acao.agenteId];
+      const atividadeHoje = acao.atividade && hoje?.dia === acao.dia ? { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.atividade.total } } : estado.atividadeHoje;
+      return { ...estado, atividadeDoBot: { ...estado.atividadeDoBot, [chaveDaAtividade(acao.agenteId, acao.dia)]: acao.atividade }, atividadeHoje };
+    }
+    case "hidratar-atividade-hoje":
+      return { ...estado, atividadeHoje: { ...estado.atividadeHoje, [acao.agenteId]: { dia: acao.dia, total: acao.total } } };
+    case "atividade-vista":
+      return estado.atividadeVista ? { ...estado, atividadeVista: { ...estado.atividadeVista, ...acao.mudanca } } : estado;
     case "lista-de-pasta":
       return { ...estado, listaDePasta: { ...estado.listaDePasta, [acao.propostaId]: acao.lista } };
     case "aviso-conexao":
@@ -1268,6 +1316,14 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   const nivel = t.tipo === "conversa" && estado.gaveta?.agenteId === t.agenteId ? estado.gaveta.nivel : null;
   if (nivel?.tipo === "memoria" && !estado.memorias[estado.gaveta?.agenteId ?? ""]) faltas.push(`memoria:${estado.gaveta?.agenteId ?? ""}`);
   if (nivel?.tipo === "rotina" && !estado.execucoes[nivel.id]) faltas.push(`execucoes:${nivel.id}`);
+  // ADR-114: a página do dia aberto na Atividade; e o "N hoje" da linha "Atividade" do bot da pessoa (o main só busca com o
+  // painel à vista). Lida num dia que já passou (a meia-noite virou com a tela aberta), relê.
+  const vista = estado.atividadeVista;
+  if (nivel?.tipo === "atividade" && vista && !(chaveDaAtividade(vista.agenteId, vista.dia) in estado.atividadeDoBot)) faltas.push(`atividade:${chaveDaAtividade(vista.agenteId, vista.dia)}`);
+  if (t.tipo === "conversa" && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) {
+    const lida = estado.atividadeHoje[t.agenteId];
+    if (!lida || (estado.agora > 0 && lida.dia < diaLocal(estado.agora))) faltas.push(`atividade-hoje:${t.agenteId}`);
+  }
   // definido em 2026-09-25: o marketplace diz quais bots usam cada app, então precisa das concessões de todos os bots da pessoa.
   if (t.tipo === "conectores") for (const a of estado.frota?.agentes ?? []) if (a.ownerId === estado.sessao?.pessoaId && !estado.concessoes[a.id]) faltas.push(`concessoes:${a.id}`);
   // definido em 2026-09-18: as rotinas do bot moram no painel Detalhes da conversa, então precisam

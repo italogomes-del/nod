@@ -2,8 +2,9 @@ import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { TipoLinha, TrabalhoDto } from "../../src/contracts/trabalho.ts";
 import type { Estado } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
-import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, abertosDoBot, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { esc, hora, iconeAgente } from "../lib/render.ts";
+import { aberto, acoesDeFazer, juntar, leituraDoMac, maquinasDe, pilulaDasMaquinas, pilulaMac, pilulaMemoria, seguradoPeloMac, tempoDe, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { limiteVigente } from "./ia-fora.ts";
 import { custoDaFrente } from "./modo-dev.ts";
 
 /**
@@ -22,6 +23,12 @@ import { custoDaFrente } from "./modo-dev.ts";
  * A web nunca adivinha: só agrupa com os campos que o servidor marca (`origemTurno`, `trabalhoId`, `fimDoTurno`). Uma
  * mensagem sem eles (servidor anterior ao épico) segue como antes. As linhas abrem a tela da task (ou, sem trabalho por
  * trás, a tela provisória com as mensagens que a linha recolheu) e contam na telemetria pelos `data-linha-*`.
+ *
+ * revisto em 2026-10-18 (chat limpo, PR 2; ADR-114): na conversa própria o servidor manda o `destino` de cada mensagem. O
+ * que é `atividade` não aparece (mora na Atividade do bot, no painel); o que é `anexo` (as linhas de frente e de task, o
+ * "Respondi ao pedido de") também não vira linha, mas continua dando o título e a origem das tasks a quem desenha; e
+ * "… terminou · 39 min" acima do resultado sai. A web decide pelo destino, nunca pelo texto nem por uma tabela própria;
+ * mensagem sem `destino` (sala, ou o servidor de antes no meio do deploy) segue o desenho de antes.
  */
 
 export type PlanoMensagem =
@@ -43,6 +50,32 @@ const DESFECHOS_A_VISTA = new Set(["falhou", "bloqueada"]);
 function agente(estado: Estado, id: string | null | undefined): Agente | undefined {
   if (!id) return undefined;
   return [...(estado.frota?.agentes ?? []), ...(estado.gestao?.agentes ?? [])].find((a) => a.id === id && !a.excluidoEm);
+}
+
+/**
+ * A conversa é limpa (ADR-114): o servidor mandou o destino (só na conversa própria). Sem ele, o desenho de antes.
+ */
+export function conversaLimpa(mensagens: readonly Pick<Mensagem, "destino">[]): boolean {
+  return mensagens.some((m) => m.destino !== undefined);
+}
+
+/**
+ * A mensagem não vira nada no chat limpo (ADR-114): o destino `atividade` ou `anexo`, e os de destino que muda com o tempo
+ * quando deixaram de valer — o limite do plano que já passou, a troca de IA já decidida, o computador que voltou. Esses
+ * três o servidor marca `chat` (enquanto pedem ação, ficam) e a web esconde pelo estado que já tem. A negação de plano
+ * ausente fica sempre: depois de a IA voltar ela ainda diz "mande a mensagem de novo".
+ */
+export function foraDoChat(m: Mensagem, estado: Estado): boolean {
+  if (m.destino === undefined) return false;
+  if (m.destino !== "chat") return true;
+  const p = m.payload;
+  if (p?.kind === "limite_do_plano") return !limiteVigente(m, estado.agora);
+  if (p?.kind === "troca_de_ia") return Boolean(p.decisao);
+  if (p?.kind === "computador_fora_do_ar") {
+    const bot = agente(estado, p.agenteId);
+    return bot !== undefined && !bot.computadorForaDoAr;
+  }
+  return false;
 }
 
 /** A mensagem veio de um servidor que já marca turno e trabalho (ADR-083)? Sem as marcas, nada muda. */
@@ -158,6 +191,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   for (const m of mensagens) if (m.payload?.kind === "trabalho_aberto") titulos.set(m.payload.trabalhoId, m.payload.titulo);
   for (const m of mensagens) if (m.payload?.kind === "frentes_abertas") for (const f of m.payload.frentes) titulos.set(f.trabalhoId, f.titulo);
   const tituloDe = (u: Unidade): string => u.trabalho?.titulo ?? (u.trabalhoId ? titulos.get(u.trabalhoId) : undefined) ?? "sem título";
+  const limpa = conversaLimpa(mensagens);
   const unidades = unidadesDe(mensagens, conhecidos);
   const unidadeDe = new Map<string, Unidade>();
   for (const u of unidades.values()) for (const m of u.mensagens) unidadeDe.set(m.id, u);
@@ -177,7 +211,8 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const ultimoFim = [...baloes].reverse().find((m) => m.payload?.kind !== "pedido_a_pessoa");
     for (const m of baloes) {
       const t = u.trabalho;
-      const antes = u.tipo === "task" && t && t.estado === "terminado" && m === ultimoFim ? linhaTerminou(t, estado) : undefined;
+      // Chat limpo (ADR-114): o fim da task mora na Atividade e na linha do dono; o balão do resultado fica sem a linha.
+      const antes = !limpa && u.tipo === "task" && t && t.estado === "terminado" && m === ultimoFim ? linhaTerminou(t, estado) : undefined;
       planos.set(m.id, { tipo: "balao", etiqueta, ...(antes ? { antes } : {}) });
     }
     // definido em 2026-10-08 (QA do épico): o aviso de turno interrompido de uma task ("Turno interrompido: você pediu
@@ -247,6 +282,11 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   });
   for (const m of mensagens) {
     if (m.payload?.kind !== "trabalho_aberto" || planos.has(m.id)) continue;
+    // Chat limpo (ADR-114): a abertura é `anexo` — dá o título e a origem acima, mas não vira linha (mora na Atividade).
+    if (m.destino === "anexo") {
+      planos.set(m.id, { tipo: "oculta" });
+      continue;
+    }
     const p = m.payload;
     const t = conhecidos.get(p.trabalhoId);
     const titulo = t?.titulo ?? p.titulo;
@@ -273,6 +313,11 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
   for (const m of mensagens) {
     if (planos.has(m.id)) continue;
     const p = m.payload;
+    // Chat limpo (ADR-114): "Começou N frentes", "N frentes terminaram", o recado e "Respondi ao pedido de" são `anexo`.
+    if (m.destino === "anexo" && (p?.kind === "frentes_abertas" || p?.kind === "frentes_terminadas" || p?.kind === "pedido_respondido" || p?.kind === "recado_a_frente")) {
+      planos.set(m.id, { tipo: "oculta" });
+      continue;
+    }
     if (p?.kind === "frentes_abertas") {
       const dono = donoDaConversa ?? conhecidos.get(p.frentes[0]?.trabalhoId ?? "")?.agenteId ?? "";
       const [unica] = p.frentes;
@@ -333,6 +378,11 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     const conteudo = `<span class="linha-ic" aria-hidden="true">${ICONE.relogio}</span><span><b>${esc(nome)}</b> rodou ${n === 1 ? "1 vez" : `${n} vezes`} · ${esc(horariosDaRotina(instantes))} · nada para você</span>`;
     planos.set(g.primeira.id, { tipo: "linha", chave: `linha:${g.primeira.id}`, html: htmlLinha({ tipo: "rotina", chave: `rotina:${g.unidades[0]?.chave ?? g.primeira.id}`, agenteId: donoDaConversa ?? "", conteudo, trabalhoId: unico, conversaId, mensagens: ids, titulo: nome }) });
   }
+
+  // ---- chat limpo (ADR-114): o que sobrou sem plano e mora na Atividade não aparece -----------------------------------
+  // Depois dos agrupamentos de propósito: a execução silenciosa da rotina continua entrando no "… rodou N vezes · nada para
+  // você" (uma linha, como antes), e o resto que é Atividade (avisos, negações, trocas de IA que passaram) some aqui.
+  if (limpa) for (const m of mensagens) if (!planos.has(m.id) && foraDoChat(m, estado)) planos.set(m.id, { tipo: "oculta" });
   return planos;
 }
 
@@ -358,22 +408,8 @@ function linhaTerminou(t: TrabalhoDto, estado: Estado): string {
   return `<div class="linha-centro-wrap"><span class="linha-centro estatica linha-terminou"><span class="linha-ok" aria-hidden="true">✓</span><b>${esc(t.titulo)}</b><span>terminou · ${esc(tempoDe(t, estado.agora))}${esc(custo)}</span></span></div>`;
 }
 
-/**
- * Os botões da fala que anunciou a task (#195), na própria linha "Abriu a task": "Fazer depois da <outra>" grava
- * `depois_de_trabalho_id` (só quando há outra task aberta do bot, mais antiga) e "Fazer aqui" cancela a task e manda o
- * pedido como turno da conversa. Só enquanto a task de origem `pessoa` ainda não terminou.
- */
-function acoesDaAbertura(t: TrabalhoDto | undefined, estado: Estado, conversaId: string): string {
-  if (!t || t.origem !== "pessoa" || (t.estado !== "na_fila" && t.estado !== "rodando")) return "";
-  const outras = abertosDoBot(estado, t.agenteId, conversaId).filter((x) => x.id !== t.id && x.criadoEm < t.criadoEm);
-  const antes = t.depoisDeTrabalhoId ? trabalhosConhecidos(estado, conversaId).find((x) => x.id === t.depoisDeTrabalhoId) : undefined;
-  const depois = antes
-    ? `<span class="linha-acao-nota">começa depois da ${esc(antes.titulo)}</span>`
-    : outras.length
-      ? botao("trabalho-depois", `Fazer depois da ${esc(outras[outras.length - 1]?.titulo ?? "")}`, { classe: "sm", id: t.id, dados: { depois: outras[outras.length - 1]?.id ?? "" } })
-      : "";
-  return `<div class="linha-acoes">${depois}${botao("trabalho-fazer-aqui", "Fazer aqui", { classe: "sm", id: t.id, titulo: "cancela a task e responde aqui na conversa" })}</div>`;
-}
+/** Os botões da linha "Abriu a task" (#195), no servidor de antes (sem `destino`); no chat limpo eles moram na task. */
+const acoesDaAbertura = (t: TrabalhoDto | undefined, estado: Estado, conversaId: string): string => acoesDeFazer(t, estado, conversaId);
 
 /**
  * "✓ 3 frentes terminaram · 17:55" (definido em 2026-10-12, ADR-099, parte 5, quadro 02): a linha centralizada quando o

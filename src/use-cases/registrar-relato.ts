@@ -12,9 +12,13 @@ function autorDe(m: Mensagem): string {
   return m.autoria.autor_tipo === "pessoa" ? "pessoa" : "agente";
 }
 
-/** O trecho que o relato anexa (o do botão e o contado ao Nod): o tipo do autor e o texto redigido (NOD-158). */
-export function trechoDoRelato(mensagens: readonly Mensagem[]): { mensagens: { id: string; autor: string; kind: string; texto: string; em: number }[] } {
-  return { mensagens: mensagens.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: redigirSegredos(m.texto), em: m.criadoEm })) };
+/**
+ * O trecho que o relato anexa (o do botão e o contado ao Nod): o tipo do autor e o texto redigido (NOD-158).
+ * `naAtividade` (ADR-041, emenda do PR 2 do chat limpo, 2026-10-18): o item estava na Atividade do bot, não no chat — o
+ * relato registra o que a pessoa viu.
+ */
+export function trechoDoRelato(mensagens: readonly Mensagem[]): { mensagens: { id: string; autor: string; kind: string; texto: string; em: number; naAtividade?: true }[] } {
+  return { mensagens: mensagens.map((m) => ({ id: m.id, autor: autorDe(m), kind: m.kind, texto: redigirSegredos(m.texto), em: m.criadoEm, ...(m.destino && m.destino !== "chat" ? { naAtividade: true as const } : {}) })) };
 }
 
 /**
@@ -40,9 +44,11 @@ export const registrarRelato: CasoDeUso<EntradaRelato, SaidaRegistrarRelato> = a
 
   // A janela é resolvida AQUI, ancorada na mensagem apontada: o cliente manda o alcance, nunca o
   // intervalo. Ler sob RLS já filtra o que esta pessoa pode ver.
+  // Chat limpo (PR 2): na conversa própria a janela conta itens de chat e leva os da Atividade marcados (janelaAte).
+  const propria = input.alcance === "janela" && (await deps.repos.conversas.buscar(mensagem.conversaId))?.tipo === "propria";
   const anexadas =
     input.alcance === "janela"
-      ? await deps.repos.mensagens.janelaAte(mensagem.conversaId, mensagem.id, mensagem.criadoEm - JANELA_RELATO_MS)
+      ? await deps.repos.mensagens.janelaAte(mensagem.conversaId, mensagem.id, mensagem.criadoEm - JANELA_RELATO_MS, undefined, { comDestino: propria })
       : [mensagem];
 
   const relato = await deps.repos.relatos.criar({

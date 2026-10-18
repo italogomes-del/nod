@@ -1,3 +1,4 @@
+import type { AtividadeDto, ContagemDaAtividade } from "../../src/contracts/atividade.ts";
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import type { ArtefatoDto } from "../../src/contracts/artefato.ts";
 import type { AcaoComputador, ComputadorDto, ResultadoComputador } from "../../src/contracts/computador.ts";
@@ -248,6 +249,9 @@ export function criarApi(escopo: Escopo) {
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),
     memorias: (agenteId: string) => get<{ memorias: Memoria[] }>(`agentes/${agenteId}/memoria`),
+    // Chat limpo (ADR-114, PR 2): a Atividade do bot, um dia por página, e só o "N hoje" da gaveta (contagem=1).
+    atividade: (agenteId: string, dia: string, fuso: string) => get<AtividadeDto>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}`),
+    contagemAtividade: (agenteId: string, dia: string, fuso: string) => get<ContagemDaAtividade>(`agentes/${encodeURIComponent(agenteId)}/atividade?dia=${encodeURIComponent(dia)}&fuso=${encodeURIComponent(fuso)}&contagem=1`),
     // ADR-113: o "Lembrar disso" da fala manda a conversa, para a linha "Anotei …" aparecer nela.
     criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string, conversaId?: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto, ...(conversaId ? { conversaId } : {}) }),
     editarMemoria: (agenteId: string, id: string, campos: { texto?: string; tipo?: TipoMemoria }) => patch<{ memoria: Memoria }>(`agentes/${agenteId}/memoria/${id}`, campos),

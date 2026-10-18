@@ -791,3 +791,36 @@ div.mac-medidor { padding-right: 36px; }
   .cl-regras ul { padding-left: 16px; }
   .maq-contas { padding-left: 18px; flex-wrap: wrap; }
 }
+
+/* Chat limpo (ADR-114, PR 2): "Fazer aqui" e "Fazer depois da …" embaixo da linha da task em Trabalhos. */
+.gv-cartao .tr-item { display: flex; flex-direction: column; }
+.gv-cartao .tr-item .linha-acoes { justify-content: flex-start; padding: 0 14px 12px 38px; }
+
+/* A Atividade do bot (ADR-114, chat limpo, PR 2; protótipo "Atividade aberta no drawer"): filtros em pílula, a lista do dia
+   com a hora à esquerda, o título e o detalhe em cinza, e "Dia anterior ›" no fim. */
+.atv { display: flex; flex-direction: column; gap: 12px; }
+.atv-filtros { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px; }
+.atv-filtro { min-height: 28px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.atv-filtro:hover { border-color: var(--line-strong); }
+.atv-filtro[aria-pressed="true"] { border-color: var(--action); background: var(--action); color: var(--on-action); }
+.atv .atv-dia-titulo { margin: 0; padding: 4px 8px 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.atv-lista { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.atv-botao { display: flex; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 10px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.atv-botao:hover, .atv-botao:focus-visible { background: var(--surface-raised); }
+.atv-botao.estatico { cursor: default; }
+.atv-botao.estatico:hover { background: none; }
+.atv-agora { display: flex; gap: 10px; padding: 8px; }
+.atv-hora { flex: none; width: 38px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.atv-texto { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.atv-titulo { color: var(--ink); }
+.atv-vezes { color: var(--ink-3); font-size: 12.5px; }
+.atv-detalhe { font-size: 12.5px; color: var(--ink-2); }
+.atv-agora .atv-hora { color: var(--ink-2); }
+.atv-link { padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); cursor: pointer; }
+.atv-link:hover { color: var(--ink); }
+.atv-inteiro { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 8px 10px 56px; font-size: 13px; color: var(--ink-2); }
+.atv-inteiro p { margin: 0; white-space: pre-wrap; }
+.atv .atv-vazio, .atv .atv-mais { margin: 0; padding: 4px 8px; font-size: 13px; }
+.atv-navegacao { display: flex; justify-content: space-between; padding: 0 4px; }
+.atv-dia { min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.atv-dia:hover, .atv-dia:focus-visible { background: var(--surface-raised); color: var(--ink); }

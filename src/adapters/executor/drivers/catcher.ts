@@ -6,7 +6,7 @@ import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
 import { classificarResultado } from "../../../domain/stream-json.ts";
 // Importado por caminho, como o plano autoriza (L3 registrou): o roteiro é módulo puro sem vitest e a
 // gramática dos marcadores tem que ser UMA — copiar aqui faria as duas divergirem.
-import { roteiroPadrao, sessaoDoRoteiro, type Roteiro } from "../../../../tests/helpers/catcher-roteiro.ts";
+import { negadasDoRoteiro, roteiroPadrao, sessaoDoRoteiro, type Roteiro } from "../../../../tests/helpers/catcher-roteiro.ts";
 import { criarClienteNod, type ClienteNod } from "../cliente-nod.ts";
 import { conectarCerebro, type FabricaSocket } from "../cerebro-ligacao.ts";
 import type { SinksTurno } from "../spi.ts";
@@ -180,7 +180,7 @@ export function criarCatcherDriver(o: OpcoesCatcher = {}): Driver {
                   custoUsd,
                   tokens: TOKENS_ZERADOS,
                   numTurnos,
-                  negacoesPermissao: [],
+                  negacoesPermissao: negadasDoRoteiro(roteiro),
                   erroCru: falha,
                 });
               }

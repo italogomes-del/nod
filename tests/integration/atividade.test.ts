@@ -233,14 +233,12 @@ describeIntegracao("Atividade do bot (chat limpo, PR 1)", () => {
       await vera.repos.mensagens.criar({ conversaId: vera.conversaId, autoria: bot, kind: "sistema", assunto: "turno.orfao", texto: "Tirei este pedido da fila", confianca: "confiavel" });
       const deps = depsSobreTrx(trx, MARLON);
       const propria = (await executar(deps, lerConversa, { conversaId: vera.conversaId })).data;
+      // PR 2: a janela conta só o chat — o "Anotei" (Atividade) sai da resposta; o anexo vem, sem virar linha na web.
       expect(propria.mensagens.map((m) => [m.texto, m.destino])).toEqual([
         ["Oi", "chat"],
-        ["Anotei", "atividade"],
         ["Abriu a task X", "anexo"],
         ["Tirei este pedido da fila", "chat"],
       ]);
-      // A janela é a de hoje: nada saiu da resposta neste PR.
-      expect(propria.mensagens).toHaveLength(4);
 
       const sala = await executar(deps, criarSala, { nome: "revisão", agenteIds: [vera.agenteId, tuca.agenteId] });
       const daSala = (await executar(deps, lerConversa, { conversaId: sala.data.conversa.id })).data;

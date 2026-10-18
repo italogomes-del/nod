@@ -1,8 +1,9 @@
 import type { Autoria } from "../contracts/evento.ts";
-import type { Assunto } from "../contracts/destino-no-chat.ts";
+import type { Assunto, Destino } from "../contracts/destino-no-chat.ts";
 import type { Confianca, KindMensagem, Mensagem, PayloadMensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
-import { assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
+import { assuntoNaLeitura } from "../domain/assunto-do-texto.ts";
+import { ASSUNTOS_ANEXO, ASSUNTOS_ATIVIDADE, assuntoDe, destinoDe } from "../domain/destino-no-chat.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { data, ms } from "./conversao.ts";
 
@@ -99,7 +100,35 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null };
+type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; primeira?: boolean | null };
+
+/**
+ * definido em 2026-10-18 (chat limpo, PR 2): teto dos `anexo` que a janela traz desde o corte (o plano, 1b). Os `anexo`
+ * (linhas de frente e task, "Respondi ao pedido", falas do meio das tasks) não viram linha, mas a web precisa deles para
+ * desenhar outra coisa; os mais recentes ficam.
+ */
+export const TETO_ANEXOS_DA_JANELA = 300;
+
+/**
+ * A coluna `primeira` da linha `m` (definido em 2026-10-18, chat limpo, PR 2): é a primeira mensagem da conversa — a da
+ * criação do bot (criar-agente.ts), que o backfill reconhece por isso, qualquer que seja a frase. Só calculada para o que o
+ * backfill ainda não alcançou (`sistema` sem payload e sem assunto): uma consulta no índice mensagens_por_conversa por linha
+ * assim, nenhuma depois do backfill.
+ */
+export function colunaPrimeira(conn: Conn, alias: string) {
+  const m = conn.unsafe(alias);
+  return conn`(${m}.assunto is null and ${m}.kind = 'sistema' and ${m}.payload is null and not exists (
+    select 1 from mensagens o where o.tenant_id = ${m}.tenant_id and o.conversa_id = ${m}.conversa_id
+      and (o.criado_em < ${m}.criado_em or (o.criado_em = ${m}.criado_em and o.id < ${m}.id)))) as primeira`;
+}
+
+/**
+ * O destino de uma linha da conversa própria (definido em 2026-10-18, chat limpo, PR 2): pelo assunto gravado, ou, nulo,
+ * pelo que o backfill gravaria (assuntoNaLeitura). `primeira` só vem quando a consulta a calculou (colunaPrimeira).
+ */
+export function destinoDaLinha(l: LinhaMensagem & { primeira?: boolean | null }): Destino {
+  return destinoDe(assuntoNaLeitura({ assunto: l.assunto, kind: l.kind, payload: l.payload, texto: l.texto, decididoPor: l.decidido_por, primeiraDaConversa: l.primeira === true }));
+}
 
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
   return { ...paraMensagem(l), origemTurno: l.turno_origem, trabalhoId: l.trabalho_id, fimDoTurno: l.fim_do_turno === true, ...(l.raiz_id && l.raiz_origem ? { raiz: { turnoId: l.raiz_id, origem: l.raiz_origem } } : {}) };
@@ -132,6 +161,51 @@ function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>)
       ) select c.id as raiz_id, c.origem as raiz_origem from c where c.n > 0 order by c.n desc limit 1
     ) rz on true
     order by m.criado_em, m.id`;
+}
+
+/**
+ * A fala de um turno de trabalho (task ou frente) na passada do corte (definido em 2026-10-18, chat limpo, PR 2; revisão
+ * de engenharia, item 8): tem assunto nulo, mas a web a esconde (mora na tela da task); conta como `anexo`, senão um dia de
+ * cinco frentes enchia a janela delas. Só a fala do bot: a da pessoa fica no chat (a da rede foi escrita no chat).
+ */
+const falaDeTrabalho = (conn: Conn) => conn`(m.assunto is null and m.kind = 'texto' and m.autor_tipo = 'agente' and t.trabalho_id is not null)`;
+
+/**
+ * O recorte da janela da conversa própria (listarComTurno com `comDestino`): `chat` são os `limite` itens de chat mais
+ * recentes; `corte` é o `criado_em` do mais antigo deles quando a janela encheu (senão, nenhum corte); a resposta é a
+ * união dos dois lados, com a coluna `primeira` para o destino na leitura das linhas sem backfill.
+ *
+ * A janela não tem buracos (revisão do PR 2, 18/10): quando os anexos batem no teto, o mais antigo deles vira o piso e os
+ * itens de chat de antes dele ficam de fora. Sem isso, entre o piso e o corte ficavam as falas da pessoa sem o resultado
+ * da task (a fala do bot num turno de trabalho é anexo), sem a pergunta aberta da task e sem a linha "Rotina executou"
+ * (o resultado virava "nada para você"). No pior caso a janela é mais curta, como a de antes do PR 2, nunca furada.
+ *
+ * Os dois lados são CTEs `materialized` e a resposta é um join pela chave primária, nunca `id in (… union all …)`: medido em
+ * 2026-10-18 (EXPLAIN ANALYZE na conversa sintética do Eng 1, 6.300 linhas), com o `in` o Postgres refazia a passada dos
+ * anexos para cada linha da conversa (6.102 voltas, 5,5 milhões de buffers, 20 s).
+ */
+function recorteDaJanela(conn: Conn, tenantId: string, conversaId: string, limite: number): ReturnType<Conn> {
+  const daConversa = conn`m.tenant_id = ${tenantId} and m.conversa_id = ${conversaId}`;
+  const comTurno = conn`left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id`;
+  const naoContam = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
+  return conn`
+    with chat as materialized (
+      select m.id, m.criado_em from mensagens m ${comTurno}
+      where ${daConversa} and (m.assunto is null or m.assunto <> all(${naoContam}::text[])) and not ${falaDeTrabalho(conn)}
+      order by m.criado_em desc, m.id desc limit ${limite}
+    ), corte as (
+      select case when count(*) >= ${limite} then min(criado_em) end as em from chat
+    ), anexos as materialized (
+      select m.id, m.criado_em from mensagens m ${comTurno}
+      where ${daConversa} and (m.assunto = any(${[...ASSUNTOS_ANEXO]}::text[]) or ${falaDeTrabalho(conn)})
+        and m.criado_em >= coalesce((select em from corte), '-infinity'::timestamptz)
+      order by m.criado_em desc, m.id desc limit ${TETO_ANEXOS_DA_JANELA}
+    ), piso as (
+      select case when count(*) >= ${TETO_ANEXOS_DA_JANELA} then min(criado_em) end as em from anexos
+    )
+    select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m0.${c}`).join(", "))}, ${colunaPrimeira(conn, "m0")}
+    from (select id from chat where criado_em >= coalesce((select em from piso), '-infinity'::timestamptz) union all select id from anexos) j
+    join mensagens m0 on m0.tenant_id = ${tenantId} and m0.id = j.id`;
 }
 
 /** Mensagens com autoria composta (ADR-023/025). A da sala é lida por quem tem grant (perna via sala_id). */
@@ -176,14 +250,29 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
 
     /**
      * listarDaConversa com `origemTurno`, `trabalhoId` e `fimDoTurno` (GET conversas/:id/mensagens, ADR-083).
-     * `comDestino` (definido em 2026-10-18, chat limpo, PR 1): a conversa é própria e cada mensagem leva o destino da
-     * tabela DESTINO, resolvido aqui; a sala não leva (lá a conversa entre bots é o assunto). A janela não muda neste PR.
+     *
+     * `comDestino` (definido em 2026-10-18, chat limpo; ADR-114, emenda do PR 2): a conversa é própria e a janela conta só
+     * o que o chat mostra. As `limite` mais recentes que são item de chat (assunto nulo ou de destino `chat`, menos a fala
+     * de um turno de trabalho, que mora na tela da task) e, desde a mais antiga delas (o corte), os `anexo` e as falas de
+     * trabalho, até TETO_ANEXOS_DA_JANELA; os de destino `atividade` ficam de fora (moram na Atividade do bot). Duas passadas
+     * no índice mensagens_por_conversa (tenant_id, conversa_id, criado_em), sem índice novo. Cada mensagem leva o destino,
+     * resolvido aqui (destinoDaLinha).
+     *
+     * Antes do backfill (assunto nulo nas linhas antigas), o SQL conta a linha sem assunto como chat — conservador: nada
+     * some por causa da janela, só cabem menos itens visíveis nas conversas antigas até o backfill rodar —, e o destino da
+     * linha é resolvido na leitura pelo texto, como o backfill faria, então o aviso antigo também sai do chat na tela.
+     *
+     * A sala não muda: as `limite` mais recentes, sem destino (lá a conversa entre bots é o conteúdo).
      */
     async listarComTurno(conversaId: string, limite = 200, opcoes: { comDestino?: boolean } = {}): Promise<Mensagem[]> {
-      const linhas = await selectComTurno(conn, escopo.tenantId, conn`
-        select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
-        order by criado_em desc, id desc limit ${limite}`);
-      return linhas.map((l) => (opcoes.comDestino ? { ...paraMensagemComTurno(l), destino: destinoDe(l.assunto) } : paraMensagemComTurno(l)));
+      if (!opcoes.comDestino) {
+        const linhas = await selectComTurno(conn, escopo.tenantId, conn`
+          select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
+          order by criado_em desc, id desc limit ${limite}`);
+        return linhas.map(paraMensagemComTurno);
+      }
+      const linhas = await selectComTurno(conn, escopo.tenantId, recorteDaJanela(conn, escopo.tenantId, conversaId, limite));
+      return linhas.map((l) => ({ ...paraMensagemComTurno(l), destino: destinoDaLinha(l) }));
     },
 
     /**
@@ -212,17 +301,40 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
      * 2026-09-21: 18:24:28.352292 no banco contra .352 reconstruído, e a janela voltava vazia).
      * O `limite` é teto de segurança: conversa movimentada não vira dump.
      */
-    async janelaAte(conversaId: string, ancoraId: string, desde: number, limite = 100): Promise<Mensagem[]> {
-      const linhas = await conn<LinhaMensagem[]>`
-        select * from (
-          select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
-          where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId}
-            and criado_em >= ${data(desde)}
-            and (id = ${ancoraId} or criado_em <= (
-              select criado_em from mensagens where tenant_id = ${escopo.tenantId} and id = ${ancoraId}))
-          order by criado_em desc, id desc limit ${limite}
-        ) janela order by criado_em, id`;
-      return linhas.map(paraMensagem);
+    async janelaAte(conversaId: string, ancoraId: string, desde: number, limite = 100, opcoes: { comDestino?: boolean } = {}): Promise<Mensagem[]> {
+      const daJanela = conn`
+        m.tenant_id = ${escopo.tenantId} and m.conversa_id = ${conversaId} and m.criado_em >= ${data(desde)}
+          and (m.id = ${ancoraId} or m.criado_em <= (select criado_em from mensagens where tenant_id = ${escopo.tenantId} and id = ${ancoraId}))`;
+      if (!opcoes.comDestino) {
+        const linhas = await conn<LinhaMensagem[]>`
+          select * from (
+            select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens m where ${daJanela}
+            order by criado_em desc, id desc limit ${limite}
+          ) janela order by criado_em, id`;
+        return linhas.map(paraMensagem);
+      }
+      // ADR-041, emenda do PR 2 do chat limpo (2026-10-18): na conversa própria o relato conta `limite` itens de chat, como a
+      // janela da conversa (no Eng 1, 100 mensagens cruas davam umas 5 falas), e leva junto o que estava na Atividade nos
+      // mesmos 15 min, desde o corte (até TETO_ANEXOS_DA_JANELA), cada um com o destino: o relato registra o que a pessoa viu.
+      const comTurno = conn`left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id`;
+      const naoContam = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
+      const contaNoChat = conn`(m.assunto is null or m.assunto <> all(${naoContam}::text[])) and not ${falaDeTrabalho(conn)}`;
+      const linhas = await conn<(LinhaMensagem & { primeira: boolean | null })[]>`
+        with chat as materialized (
+          select m.id, m.criado_em from mensagens m ${comTurno} where ${daJanela} and ${contaNoChat}
+          order by m.criado_em desc, m.id desc limit ${limite}
+        ), corte as (
+          select case when count(*) >= ${limite} then min(criado_em) end as em from chat
+        ), fora as materialized (
+          select m.id from mensagens m ${comTurno} where ${daJanela} and not (${contaNoChat})
+            and m.criado_em >= coalesce((select em from corte), '-infinity'::timestamptz)
+          order by m.criado_em desc, m.id desc limit ${TETO_ANEXOS_DA_JANELA}
+        )
+        select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m0.${c}`).join(", "))}, ${colunaPrimeira(conn, "m0")}
+        from (select id from chat union all select id from fora) j
+        join mensagens m0 on m0.tenant_id = ${escopo.tenantId} and m0.id = j.id
+        order by m0.criado_em, m0.id`;
+      return linhas.map((l) => ({ ...paraMensagem(l), destino: destinoDaLinha(l) }));
     },
 
     /**
@@ -270,14 +382,22 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return l ? paraMensagem(l) : null;
     },
 
-    /** ultimaDaConversa de várias conversas numa consulta (a prévia da frota, definido em 2026-09-30): um LATERAL por conversa no índice mensagens_por_conversa. */
+    /**
+     * ultimaDaConversa de várias conversas numa consulta (a prévia da frota, definido em 2026-09-30): um LATERAL por conversa
+     * no índice mensagens_por_conversa.
+     *
+     * revisto em 2026-10-18 (QA do PR 2 do chat limpo, ADR-114): a prévia é a última que o chat mostra. O que mora na
+     * Atividade ou é anexo ("Anotei …", a negação, "Virou a frente", "Rotina executou") saiu do chat e não vira prévia; a
+     * linha sem assunto (antes do backfill) continua entrando, como na janela.
+     */
     async ultimasDasConversas(conversaIds: readonly string[]): Promise<Map<string, Mensagem>> {
       if (conversaIds.length === 0) return new Map();
+      const foraDoChat = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
       const linhas = await conn<LinhaMensagem[]>`
         select u.* from unnest(${[...conversaIds]}::uuid[]) as c(id)
         cross join lateral (
           select ${conn.unsafe(COLUNAS_MENSAGEM)} from mensagens
-          where tenant_id = ${escopo.tenantId} and conversa_id = c.id
+          where tenant_id = ${escopo.tenantId} and conversa_id = c.id and (assunto is null or assunto <> all(${foraDoChat}::text[]))
           order by criado_em desc, id desc limit 1
         ) u`;
       return new Map(linhas.map((l) => [l.conversa_id, paraMensagem(l)]));

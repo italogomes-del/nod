@@ -89,10 +89,17 @@ describeIntegracao("limite da assinatura troca de IA (emenda da ADR-036)", () =>
     expect(segundo!.turnoId).not.toBe(primeiro!.turnoId);
     expect(segundo!.entrada.texto).toContain("Resuma a semana");
 
+    // Chat limpo (ADR-114, PR 2): a linha da troca é gravada, mas mora na Atividade do bot (Máquina e IA), fora da janela.
     const conversa = await srv.json<{ mensagens: Mensagem[] }>("GET", `conversas/${conversaId}/mensagens`);
-    const troca = conversa.mensagens.find((m) => m.payload?.kind === "ia_trocada");
-    expect(troca?.payload).toEqual({ kind: "ia_trocada", de: "claude-cli", para: "codex-cli", causa: "limite", renovaEm: renovaEm * 1000 });
+    expect(conversa.mensagens.some((m) => m.payload?.kind === "ia_trocada")).toBe(false);
     expect(conversa.mensagens.some((m) => m.payload?.kind === "limite_do_plano")).toBe(false);
+    const gravadas = await srv.db.begin(async (tx) => {
+      await vincularEscopo(tx, srv.pessoa);
+      return tx<{ payload: Mensagem["payload"] }[]>`select payload from mensagens where conversa_id = ${conversaId} and payload->>'kind' in ('ia_trocada', 'limite_do_plano')`;
+    });
+    expect(gravadas.map((g) => g.payload)).toEqual([{ kind: "ia_trocada", de: "claude-cli", para: "codex-cli", causa: "limite", renovaEm: renovaEm * 1000 }]);
+    const atividade = await srv.json<{ itens: { titulo: string; categoria: string | null }[] }>("GET", `agentes/${agenteId}/atividade?dia=${new Date().toISOString().slice(0, 10)}&fuso=UTC`);
+    expect(atividade.itens).toContainEqual(expect.objectContaining({ titulo: "Trocou de IA", categoria: "maquina_ia" }));
 
     const ias = await srv.json<IasDaPessoa>("GET", "ias");
     expect(ias.ias.find((i) => i.id === "claude-cli")).toMatchObject({ limite: { renovaEm: renovaEm * 1000 }, inventario: { estado: "nao_autenticado", causa: "limite", renovaEm: renovaEm * 1000 } });

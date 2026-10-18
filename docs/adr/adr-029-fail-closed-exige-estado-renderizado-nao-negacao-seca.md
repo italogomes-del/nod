@@ -33,3 +33,12 @@ tools/connectors/gateway/bridge.py (verificado: degrada em silêncio, fail-open)
 
 Alta. É superfície.
 
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 2) — a negação mora na Atividade
+
+A negação continua estado renderizado, com nome, causa e relógio, agora na Atividade do bot (categoria Bloqueios, o painel
+do bot) e no Raio-X. No chat fica só a que parou o turno (`terminal`) e a de plano ausente (o turno não começou; ela segue
+no chat mesmo depois de a IA voltar, porque ainda pede "mande de novo"). A ferramenta negada não terminal sai do chat.
+Conector indisponível passa a ser visível fora do modo dev pela primeira vez: a Atividade lê a `trilha` do bot (uma linha
+por conector e causa, com "N vezes"); antes ele só existia na trilha e nas 20 negações que a web guardava em memória.
+Gatilho de reversão (da ADR-114): 3 relatos em 14 dias de "não vi que o bot foi bloqueado" devolvem a negação ao chat como
+uma linha quando o turno termina sem fala do bot depois dela.

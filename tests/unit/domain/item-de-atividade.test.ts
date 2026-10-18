@@ -27,6 +27,9 @@ describe("itens da Atividade", () => {
     expect(i.titulo).toBe("Anotou na memória");
     expect(i.detalhe?.length).toBe(280);
     expect(i.detalhe?.endsWith("…")).toBe(true);
+    // PR 2: o detalhe cortado leva o texto inteiro junto (o clique abre a mensagem na lista); o que cabe, não.
+    expect(i.texto).toBe(longo);
+    expect(itemDaMensagem(msg({ kind: "sistema", texto: "Anotei um fato: curto" }), "memoria.anotada").texto).toBeUndefined();
     expect(i.categoria).toBeNull();
   });
 

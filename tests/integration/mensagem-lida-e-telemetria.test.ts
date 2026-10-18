@@ -55,9 +55,10 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId } = await agenteComConversa(trx, MARLON, { nome: "Ada" });
       const deps = depsSobre(repos, MARLON, { trx });
-      const ev = (acao: "mostrada" | "aberta", tipo: "rotina" | "bots" | "task", chaveLinha: string) => ({ acao, tipo, agenteId, chaveLinha });
-      const r = await registrarLinhas(deps, { eventos: [ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:2"), ev("aberta", "rotina", "r:1"), ev("mostrada", "bots", "b:1")] });
-      expect(r.data.gravados).toBe(5);
+      const ev = (acao: "mostrada" | "aberta", tipo: "rotina" | "bots" | "task" | "atividade", chaveLinha: string) => ({ acao, tipo, agenteId, chaveLinha });
+      // Chat limpo (PR 2, gatilho da ADR-114): a abertura da conversa é "mostrada" e a Atividade aberta logo depois, "aberta".
+      const r = await registrarLinhas(deps, { eventos: [ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:2"), ev("aberta", "rotina", "r:1"), ev("mostrada", "bots", "b:1"), ev("mostrada", "atividade", `atividade:${agenteId}:1`), ev("mostrada", "atividade", `atividade:${agenteId}:2`), ev("aberta", "atividade", `atividade:${agenteId}:2`)] });
+      expect(r.data.gravados).toBe(8);
       const [linha] = await trx<{ n: number }[]>`select count(*)::int as n from events_outbox e join events v on v.id = e.evento_id where v.kind in ('linha_mostrada', 'linha_aberta') and v.owner_id = ${PESSOA_MARLON}`;
       expect(linha?.n).toBe(0);
       const taxas = (await taxasDasLinhas(deps, {})).data;
@@ -65,6 +66,7 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
         { tipo: "rotina", mostradas: 2, abertas: 1, taxa: 0.5 },
         { tipo: "bots", mostradas: 1, abertas: 0, taxa: 0 },
         { tipo: "task", mostradas: 0, abertas: 0, taxa: null },
+        { tipo: "atividade", mostradas: 2, abertas: 1, taxa: 0.5 },
       ]));
       for (const ruim of [[], [{ ...ev("mostrada", "rotina", "r:1"), tipo: "outra" }], [{ ...ev("mostrada", "rotina", "texto com espaço") }], Array.from({ length: 201 }, () => ev("mostrada", "task", "t:1"))]) {
         await expect(registrarLinhas(deps, { eventos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });

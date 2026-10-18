@@ -104,7 +104,7 @@ export type NovaProsaRelato = {
   /** 0062: o título do relato contado ao Nod; o do botão não tem. */
   titulo?: string | null;
   textoPessoa: string | null;
-  trecho: { mensagens: { id: string; autor: string; kind: string; texto: string; em: number }[] } | null;
+  trecho: { mensagens: { id: string; autor: string; kind: string; texto: string; em: number; naAtividade?: true }[] } | null;
 };
 
 export type NovoDiagnostico = {
