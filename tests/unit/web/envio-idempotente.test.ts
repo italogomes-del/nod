@@ -38,6 +38,18 @@ describe("NOD-156: idEnvio no envio da web", () => {
     expect(envios.iniciar("c2", "oi, tudo bem?", ["a1"])).toBe("chave-4");
   });
 
+  it("ADR-113: a mesma fala com outra citação (ou sem a que tinha) é outra fala; com a mesma, reusa (revisão do PR 392)", () => {
+    const envios = criarEnvios(contador());
+    expect(envios.iniciar("c1", "pega o T3", [], "m1")).toBe("chave-1");
+    envios.concluir("c1", false); // a resposta se perdeu
+    expect(envios.iniciar("c1", "pega o T3", [], "m1")).toBe("chave-1");
+    envios.concluir("c1", false);
+    // Tirou a citação com o × e reenviou: o servidor não pode devolver a mensagem gravada com a citação.
+    expect(envios.iniciar("c1", "pega o T3", [])).toBe("chave-2");
+    envios.concluir("c1", false);
+    expect(envios.iniciar("c1", "pega o T3", [], "m2")).toBe("chave-3");
+  });
+
   it("um segundo envio na mesma conversa com o primeiro em voo é ignorado (devolve null); outra conversa segue", () => {
     const envios = criarEnvios(contador());
     expect(envios.iniciar("c1", "oi", [])).toBe("chave-1");

@@ -7,8 +7,11 @@
 type Pendente = { chave: string; assinatura: string };
 
 export type Envios = {
-  /** A chave deste envio, ou `null` se já há um em voo nesta conversa. */
-  iniciar(conversaId: string, texto: string, anexos: readonly string[]): string | null;
+  /**
+   * A chave deste envio, ou `null` se já há um em voo nesta conversa. `respondeA` (ADR-113) entra na assinatura: a mesma
+   * fala com outra citação (ou sem a que tinha) é outra mensagem, e o servidor não pode devolver a gravada antes.
+   */
+  iniciar(conversaId: string, texto: string, anexos: readonly string[], respondeA?: string): string | null;
   /** Fecha o envio em voo; com `ok`, a chave pendente some e a próxima fala ganha outra. */
   concluir(conversaId: string, ok: boolean): void;
 };
@@ -17,9 +20,9 @@ export function criarEnvios(gerar: () => string = () => crypto.randomUUID()): En
   const pendentes = new Map<string, Pendente>();
   const emVoo = new Set<string>();
   return {
-    iniciar(conversaId, texto, anexos) {
+    iniciar(conversaId, texto, anexos, respondeA) {
       if (emVoo.has(conversaId)) return null;
-      const assinatura = JSON.stringify([texto, [...anexos]]);
+      const assinatura = JSON.stringify([texto, [...anexos], respondeA ?? null]);
       const anterior = pendentes.get(conversaId);
       const chave = anterior && anterior.assinatura === assinatura ? anterior.chave : gerar();
       pendentes.set(conversaId, { chave, assinatura });
@@ -51,7 +54,10 @@ export async function enviarUmaVez(envios: Envios, alvo: string, texto: string, 
   return true;
 }
 
-/** O corpo do POST conversas/:id/mensagens: `anexos` e `idEnvio` só entram quando existem (cliente antigo = só texto). */
-export function corpoDoEnvio(texto: string, anexos: readonly string[] = [], idEnvio?: string): { texto: string; anexos?: readonly string[]; idEnvio?: string } {
-  return { texto, ...(anexos.length ? { anexos } : {}), ...(idEnvio ? { idEnvio } : {}) };
+/**
+ * O corpo do POST conversas/:id/mensagens: `anexos`, `idEnvio` e `respondeA` só entram quando existem (cliente antigo =
+ * só texto). `respondeA` (ADR-113) leva só o id da fala citada: o trecho é do servidor.
+ */
+export function corpoDoEnvio(texto: string, anexos: readonly string[] = [], idEnvio?: string, respondeA?: string): { texto: string; anexos?: readonly string[]; idEnvio?: string; respondeA?: { mensagemId: string } } {
+  return { texto, ...(anexos.length ? { anexos } : {}), ...(idEnvio ? { idEnvio } : {}), ...(respondeA ? { respondeA: { mensagemId: respondeA } } : {}) };
 }

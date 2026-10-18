@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
+import { comCitacao, trechoDaCitacao } from "../../src/domain/citacao.ts";
 import { REDE_MS } from "../../src/domain/trabalho.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
@@ -12,6 +13,7 @@ import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
 import { depsSobre, servicosDeTeste } from "../helpers/l5.ts";
 import { withRollback } from "../helpers/with-rollback.ts";
+import { textoAbrirTask } from "../../web/telas/acoes-da-fala.ts";
 
 /**
  * A rede de 2 min promove o turno do dono a FRENTE, com ou sem bifurcar (definido em 2026-10-12, ADR-099, I8). O teste da
@@ -46,6 +48,19 @@ async function montar(trx: Trx, harness: IdHarness) {
 }
 
 describeIntegracao("a rede de 2 min promove a frente, com ou sem bifurcar (ADR-099, I8)", () => {
+  // QA do PR 392 (2026-10-18, ADR-113 §8): o "Abrir task com isto" vai como mensagem comum citando a fala; quando a rede
+  // promove esse turno, o título sai do texto da pessoa sem o prefixo da citação. Só com o pedido, saía "Abre uma task com isto.".
+  it("o turno do 'Abrir task com isto' promovido vira frente com o assunto da fala no título", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx, "codex-cli");
+      const falaCitada = "O deploy de ontem quebrou o login do app quando a pessoa entra pelo Google. Vale olhar o callback.";
+      const vivo = await m.turno({ texto: comCitacao(textoAbrirTask({ texto: falaCitada }), trechoDaCitacao(falaCitada)) });
+      await m.despachar(vivo.id);
+      const frente = (await m.promover(vivo.id, { sessaoCli: null, maquinaBifurca: false })).data.trabalho!;
+      expect(frente.titulo).toBe("Abre uma task com isto: «O deploy de ontem quebrou o login do app quando a…»");
+    });
+  });
+
   it("Codex (sem retomar sessão): promove a frente num lote aberto pelo próprio turno; a próxima fala da pessoa sai sem sessão e com o histórico", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx, "codex-cli");

@@ -26,6 +26,7 @@ import { pessoasRepo } from "./pessoas.repo.ts";
 import { procuracoesRepo } from "./procuracoes.repo.ts";
 import { propostasRepo } from "./propostas.repo.ts";
 import { relatosRepo } from "./relatos.repo.ts";
+import { reacoesRepo } from "./reacoes.repo.ts";
 import { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
 import { rotinasRepo } from "./rotinas.repo.ts";
@@ -66,6 +67,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     artefatos: artefatosRepo(conn, escopo),
     propostas: propostasRepo(conn, escopo),
     relatos: relatosRepo(conn, escopo),
+    reacoes: reacoesRepo(conn, escopo),
     turnos: turnosRepo(conn, escopo),
     trabalhos: trabalhosRepo(conn, escopo),
     frentes: frentesRepo(conn, escopo),

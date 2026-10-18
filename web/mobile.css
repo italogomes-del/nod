@@ -75,9 +75,10 @@
   .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .acesso-card, .card-pasta, .welcome-options,
   .liberar-card, .perfil-card, .a-fazer { margin-left: 0; max-width: 100%; }
   .bubble pre, .msg-peer pre { max-width: 100%; }
-  /* O "relatar" da mensagem só aparece depois de um toque nela (web/lib/gaveta-bots.ts), dentro da coluna, nunca ao lado. */
+  /* As ações da fala (reagir, responder, reportar e ⋯; ADR-113) só aparecem depois de um toque nela (web/lib/gaveta-bots.ts),
+     dentro da coluna, nunca ao lado, com alvos de 44 px: no toque, o ⋯ fica sempre à vista junto das outras. */
   .msg-actions, .message.you .msg-actions, .msg-linha .msg-actions { display: none; opacity: 1; pointer-events: auto; margin: 0; }
-  .message .msg-actions { top: -12px; right: 0; left: auto; transform: none; }
+  .message .msg-actions, .bubble-wrap:has(> .msg-autor) > .msg-actions { top: -12px; right: 0; left: auto; transform: none; }
   .message.you .msg-actions { left: 0; right: auto; }
   .msg-linha .msg-actions { top: 50%; right: 0; left: auto; transform: translateY(-50%); }
   .message.acoes-a-mostra .msg-actions, .msg-linha.acoes-a-mostra .msg-actions { display: flex; }
@@ -118,6 +119,13 @@
   .pq-recomendo { padding: 0; background: none; color: var(--ink-3); font-size: 12.5px; }
   .pq-rodape { font-size: 14px; }
   .rp-fechar { width: 44px; height: 44px; }
+  /* ADR-113: os chips de reação e a citação acima do balão são alvos de toque (44 px); o menu ⋯ também. */
+  .reacao-chip { min-height: 44px; min-width: 44px; justify-content: center; font-size: 15px; }
+  .citacao-da-fala { min-height: 44px; }
+  .bot-menu.menu-fala button { min-height: 44px; }
+  /* Os emojis do menu também têm 44 de largura (eram ~30): o menu alarga para as cinco rápidas caberem numa linha. */
+  .bot-menu.menu-fala { width: 252px; }
+  .bot-menu.menu-fala .linha-emojis button { min-width: 44px; }
   .caixa-respondendo .bt.link { min-height: 44px; }
   .pq-campo .pq-enviar { width: 44px; height: 40px; }
 

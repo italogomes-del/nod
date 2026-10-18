@@ -7,6 +7,7 @@ import type { Inventario } from "../contracts/inventario.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { OrigemTurno, Turno } from "../contracts/turno.ts";
 import { excedeQuantidade, motorLe, tipoDoAnexo } from "../domain/anexo.ts";
+import { comCitacao, confiancaDaCitacao, trechoDaCitacao } from "../domain/citacao.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { horaDaFrase } from "../domain/erro-fornecedor.ts";
 import { harnessFixado, iaDaNegacao, inventarioHarnessSemSonda, motivoHarnessIndisponivel, motivoSemIaPronta } from "../domain/harness.ts";
@@ -35,6 +36,11 @@ export type EntradaEnviarMensagem = {
   idEnvio?: string;
   /** #313: as IAs de todas as máquinas vivas da pessoa (modo compartilhado) — a negação do bot fixado nomeia a IA DELE. */
   harnessesDaPessoa?: Partial<Record<IdHarness, Inventario>>;
+  /**
+   * ADR-113 (plano "pergunta com botões", Parte 3b): o id da fala a que esta mensagem responde (o "Responder" da barra de
+   * ações). Só o id: o trecho é recalculado aqui, da fala, que tem de ser da MESMA conversa.
+   */
+  respondeA?: string;
 };
 
 export type SaidaEnviarMensagem = { mensagem: Mensagem; turno: Turno; negacao: Mensagem | null };
@@ -71,8 +77,15 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     if (existente) return { data: await envioRepetido(deps, existente, texto, anexoIds), events: [] };
   }
 
+  // ADR-113 (Parte 3b): a citação. A fala citada é lida sob a RLS e tem de ser desta conversa; o trecho sai dela (o do
+  // cliente nunca chega aqui), e citar conteúdo não confiável faz a mensagem e o turno nascerem não confiáveis (ADR-062).
+  const citada = input.respondeA ? await deps.repos.mensagens.buscar(input.respondeA) : null;
+  if (input.respondeA && (!citada || citada.conversaId !== conversa.id)) throw new ErroDeDominio("entrada_invalida", { cause: "respondeA de outra conversa ou inexistente" });
+  const respondeA = citada ? { mensagemId: citada.id, trecho: trechoDaCitacao(citada.texto) } : null;
+  const confianca = citada ? confiancaDaCitacao(citada.confianca) : "confiavel";
+
   const autoria = autoriaPessoa(deps.escopo, executor);
-  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca: "confiavel", idEnvio });
+  const criada = await deps.repos.mensagens.criar({ conversaId: conversa.id, autoria, kind: "texto", texto, confianca, idEnvio, ...(respondeA ? { payload: { kind: "resposta_a_fala", respondeA } } : {}) });
   if (!criada && idEnvio) {
     // Perdeu a corrida: a outra transação gravou a mesma chave e já fez commit.
     const vencedora = await deps.repos.mensagens.buscarPorIdEnvio(conversa.id, idEnvio);
@@ -101,10 +114,11 @@ export const enviarMensagem: CasoDeUso<EntradaEnviarMensagem, SaidaEnviarMensage
     origem,
     prazoEm: agora + (input.prazoMs ?? PRAZO_DECISAO_PADRAO_MS),
     profundidade: 0,
-    entradaTexto: texto,
+    // ADR-113: com sessão retomada o bot só lê a entrada; a citação vai nela, e no histórico pelo payload.
+    entradaTexto: respondeA ? comCitacao(texto, respondeA.trecho) : texto,
     mensagemOrigemId: mensagem.id,
     entradaAnexos: anexos.map((a) => a.id),
-    entradaConfianca: "confiavel",
+    entradaConfianca: confianca,
     modelo: agente.modelo,
     harness: agente.harness,
     executor,
@@ -214,5 +228,7 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   const trabalhos = await trabalhosParaDto(deps, abertos);
   // ADR-099 (I10): o dono do bot da conversa própria — a linha acima do campo (estado, esperas e fila).
   const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos)).get(doBot) ?? null) : null;
-  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono } };
+  // ADR-113: as reações das falas da janela, numa consulta (o chip "👍 1" embaixo de cada fala).
+  const reacoes = await deps.repos.reacoes.dasMensagens(mensagens.map((m) => m.id));
+  return { data: { conversa, mensagens, turnosPendentes, turnosEmCurso, turnosCancelados, propostas, fios, trabalhos, dono, reacoes } };
 };

@@ -155,6 +155,15 @@ export type NegacaoVista = Negacao & { conversaId: string | null; vistaEm: numbe
  */
 export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
 
+/**
+ * definido em 2026-10-18 (ADR-113, plano "pergunta com botões", Parte 3b): a fala a que a PRÓXIMA mensagem do campo
+ * responde, escolhida pelo "Responder" da barra de ações. Fica fora de `composer` de propósito: `hidratar-sua-vez` apaga
+ * a escolha do campo nas conversas sem pergunta aberta, e a citação não pode sumir por ali (revisão de engenharia do
+ * plano). O `trecho` é só para a caixa "Respondendo": o servidor recalcula o dele a partir de `mensagemId`. Vale até o
+ * envio ou o × da caixa.
+ */
+export type CitacaoNoCampo = { mensagemId: string; trecho: string };
+
 export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}`;
 
 export type Estado = {
@@ -284,6 +293,8 @@ export type Estado = {
   faixaParada: FaixaParada | null;
   /** Escolha do campo por conversa (EscolhaComposer); ausente = o padrão. */
   composer: Record<string, EscolhaComposer>;
+  /** A citação do campo por conversa (CitacaoNoCampo); ausente = a mensagem não responde a nenhuma fala. */
+  citacoes: Record<string, CitacaoNoCampo>;
   conexao: { estado: EstadoConexao; tentativa: number; proximaEmMs: number | null };
   /** O que a próxima volta do main precisa buscar por REST (conjunto, sem duplicata). */
   invalidacoes: Invalidacao[];
@@ -392,6 +403,7 @@ export type Acao =
   | { tipo: "chave-emitida"; emitida: ChaveEmitidaDto | null }
   | { tipo: "faixa"; faixa: FaixaParada | null }
   | { tipo: "composer"; conversaId: string; escolha: EscolhaComposer | null }
+  | { tipo: "citar"; conversaId: string; citacao: CitacaoNoCampo | null }
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
   | { tipo: "erro"; erro: ErroNaTela | null }
@@ -471,6 +483,7 @@ export const estadoInicial: Estado = {
   negacoes: [],
   faixaParada: null,
   composer: {},
+  citacoes: {},
   conexao: { estado: "parado", tentativa: 0, proximaEmMs: null },
   invalidacoes: [],
   agora: 0,
@@ -848,6 +861,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "relato.criado": (e) => e,
   // A linha "Chat de voz" da conversa e a ligação viva (a barra lateral marca o bot "Em ligação").
   "ligacao.mudou": (e, f) => invalidar(e, conv(f), "ligacao"),
+  // ADR-113: as reações de uma fala mudaram (noutra aba ou pelo próprio clique) — relê a conversa, que traz o chip.
+  "reacao.mudou": (e, f) => invalidar(e, conv(f)),
   // ADR-083: um trabalho nasceu ou mudou — relê a lista (faixa, barra, gaveta), a conversa do bot (a linha "Abriu a
   // task", a pergunta e o resultado) e a tela da task, se ela já foi aberta.
   "trabalho.mudou": (e, f) => {
@@ -887,6 +902,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, sessao: acao.escopo, chaves: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.chaves : null, maquinas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.maquinas : null, contasIa: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.contasIa : null, detalhesContas: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.detalhesContas : null, relatos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.relatos : null, chaveEmitida: null,
         modoDev: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.modoDev : { ligado: false, raioX: {} },
         naoLidos: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.naoLidos : null, novasDesde: {},
+        citacoes: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.citacoes : {},
         custoHoje: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.custoHoje : undefined,
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
@@ -1083,6 +1099,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       if (acao.escolha) composer[acao.conversaId] = acao.escolha;
       else delete composer[acao.conversaId];
       return { ...estado, composer };
+    }
+    case "citar": {
+      const citacoes = { ...estado.citacoes };
+      if (acao.citacao) citacoes[acao.conversaId] = acao.citacao;
+      else delete citacoes[acao.conversaId];
+      return { ...estado, citacoes };
     }
     case "invalidar":
       return invalidar(estado, ...acao.quais);

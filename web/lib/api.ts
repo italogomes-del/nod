@@ -21,6 +21,7 @@ import type { DecisaoDaPessoa } from "../../src/contracts/troca-de-ia.ts";
 import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
+import type { ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
@@ -201,8 +202,10 @@ export function criarApi(escopo: Escopo) {
     inteligencia: (agenteId: string) => get<{ inteligencia: InteligenciaBot }>(`agentes/${encodeURIComponent(agenteId)}/inteligencia`),
     conversa: (id: string) => get<ConversaDto>(`conversas/${id}/mensagens`),
     /** NOD-156: `idEnvio` é a chave da fala (nasce no compositor); o reenvio com a mesma chave não duplica. */
-    enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string) =>
-      pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio), idEnvio),
+    enviar: (conversaId: string, texto: string, anexos: readonly string[] = [], idEnvio?: string, respondeA?: string) =>
+      pedirDeNovoSeCair<RespostaMutacao>("POST", `${base}/conversas/${conversaId}/mensagens`, corpoDoEnvio(texto, anexos, idEnvio, respondeA), idEnvio),
+    /** ADR-113: põe (`marcada`) ou tira a reação da pessoa numa fala; devolve as reações dela. */
+    reagir: (mensagemId: string, emoji: string, marcada: boolean) => pedir<{ reacoes: ReacaoNaFala[] }>("PUT", `${base}/mensagens/${encodeURIComponent(mensagemId)}/reacoes`, { emoji, marcada }),
     /** ADR-046: o arquivo sobe cru (não em JSON) e volta como metadado; progresso só existe no XHR. */
     subirAnexo: (conversaId: string, arquivo: File, mime: string, aoProgresso?: (fracao: number) => void) => subir(`${base}/conversas/${conversaId}/anexos`, arquivo, mime, aoProgresso),
     urlAnexo: (conversaId: string, anexoId: string) => `${base}/conversas/${encodeURIComponent(conversaId)}/anexos/${encodeURIComponent(anexoId)}`,
@@ -245,7 +248,8 @@ export function criarApi(escopo: Escopo) {
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),
     memorias: (agenteId: string) => get<{ memorias: Memoria[] }>(`agentes/${agenteId}/memoria`),
-    criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto }),
+    // ADR-113: o "Lembrar disso" da fala manda a conversa, para a linha "Anotei …" aparecer nela.
+    criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string, conversaId?: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto, ...(conversaId ? { conversaId } : {}) }),
     editarMemoria: (agenteId: string, id: string, campos: { texto?: string; tipo?: TipoMemoria }) => patch<{ memoria: Memoria }>(`agentes/${agenteId}/memoria/${id}`, campos),
     apagarMemoria: (agenteId: string, id: string) => del<RespostaMutacao>(`agentes/${agenteId}/memoria/${id}`),
     // ADR-064: o "a fazer" do bot — a lista, o Descartar da pessoa e o Fazer agora (vira mensagem na conversa).

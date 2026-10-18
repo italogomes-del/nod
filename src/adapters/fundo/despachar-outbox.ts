@@ -60,6 +60,8 @@ export const FRAME_POR_EVENTO: Record<KindEvento, TipoFrame> = {
   // definido em 2026-10-07 (ADR-083): o frame diz "os trabalhos deste bot mudaram"; a web relê por REST.
   trabalho_mudou: "trabalho.mudou",
   pressao_memoria: "memoria.mudou",
+  // definido em 2026-10-18 (ADR-113): o frame diz "as reações desta fala mudaram"; a web relê a conversa por REST.
+  reacao_mudou: "reacao.mudou",
   // Telemetria das linhas (#191): gravada sem outbox, nunca vira frame. A chave existe porque a tabela é total; se uma
   // linha dessas cair no outbox por engano, o frame inofensivo "agente.mudou" só faz a web reler o bot.
   linha_mostrada: "agente.mudou",

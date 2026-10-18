@@ -1,3 +1,4 @@
+import { renderCaixaCitacao } from "./acoes-da-fala.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
 import type { FioDaPergunta } from "../../src/contracts/pedido.ts";
 import type { Estado } from "../estado/reducer.ts";
@@ -148,7 +149,10 @@ export function renderRespondendo(modo: ModoComposer, estado: Estado): string {
  */
 export function renderTopoComposer(modo: ModoComposer, estado: Estado, conversaId?: string): string {
   const outros = conversaId ? outrosPedidos(estado, conversaId) : [];
-  return (outros.length ? renderEspera(outros, estado) : "") + renderRespondendo(modo, estado);
+  // ADR-113 (Parte 3b): com uma fala citada pelo "Responder", a caixa diz a fala, no lugar da pergunta (a mensagem que
+  // cita vai como mensagem comum, e a pergunta segue aberta). O × da caixa tira a citação e a da pergunta volta.
+  const citacao = conversaId ? estado.citacoes[conversaId] : undefined;
+  return (outros.length ? renderEspera(outros, estado) : "") + (citacao ? renderCaixaCitacao(citacao) : renderRespondendo(modo, estado));
 }
 
 type ItemDaFila = NonNullable<Estado["suaVez"]>["itens"][number];

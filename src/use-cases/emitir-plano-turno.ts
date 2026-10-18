@@ -32,6 +32,7 @@ import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
+import { textoParaOBot } from "../domain/citacao.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
 import type { ComputadorFora } from "../domain/prompt-sistema.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
@@ -287,7 +288,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const memoriaLonga = experimentos.memoriaLonga && modo !== "ligacao";
   // ADR-112: a chave "Modo WhatsApp" (0089) — só o prompt de texto; a ligação tem o próprio prompt, que não muda.
   const whatsapp = experimentos.whatsapp && modo !== "ligacao";
-  const cortes = cortarFalas(janela.map((m) => m.texto), memoriaLonga);
+  // ADR-113 (Parte 3b): a fala da pessoa que respondeu a outra leva "(respondendo a: «trecho»)" também no histórico.
+  const cortes = cortarFalas(janela.map(textoParaOBot), memoriaLonga);
   const comAnexo = (m: (typeof janela)[number], i: number) => {
     const nomes = (anexosDaJanela.get(m.id) ?? []).map((a) => a.nome);
     return nomes.length ? `${cortes[i]} [anexou ${nomes.join(", ")}]` : (cortes[i] ?? "");
@@ -301,7 +303,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   const desdeSuaUltimaVez = vistaAte === null ? [] : mensagens
     .filter((m) => m.criadoEm > vistaAte && m.criadoEm < turno.criadoEm && m.id !== turno.mensagemOrigemId)
     .slice(-HISTORICO_NO_PLANO)
-    .map((m) => ({ autor: autorDe(m), texto: m.texto.slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
+    .map((m) => ({ autor: autorDe(m), texto: textoParaOBot(m).slice(0, TEXTO_DESDE_A_SESSAO), confianca: m.confianca }));
   const contextoConversa = JSON.stringify({ ...(original ? { tarefaOriginal: original.entradaTexto.slice(0, 8000) } : {}), historico, ...(desdeSuaUltimaVez.length ? { desdeSuaUltimaVez } : {}) });
   // revisto em 2026-10-01 (ADR-066): saíram o gate da rotina (E7.3/ADR-044) e a trava da rotina de quem pediu
   // (ADR-058). Quem decide quando o bot para e pergunta é o modo de aprovação, igual em toda origem.

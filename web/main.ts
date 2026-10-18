@@ -15,9 +15,11 @@ import { criarContasDoMac } from "./lib/contas-do-mac.ts";
 import { criarContasDaPessoa } from "./lib/contas-da-pessoa.ts";
 import { cifrarCodigo } from "./lib/cifra.ts";
 import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
+import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
-import { abrirMenu, abrirMenuConta, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirMenu, abrirMenuConta, dialogo, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
 import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo, avisoFechado, fecharAviso, hidratarAvisosFechados } from "./lib/menu-modo.ts";
 import { abrirMenuIa } from "./lib/menu-ia.ts";
@@ -2038,13 +2040,15 @@ async function enviarComposer(): Promise<void> {
   }
   // Anexo com pergunta aberta vai como mensagem comum, e a pergunta segue aberta (decisão 9 do plano "pergunta com botões").
   const modo = modoDoComposer(estado, alvo.conversaId);
-  const destino = destinoDoEnvio(modo, ids.length > 0);
+  // ADR-113 (Parte 3b): a fala citada pelo "Responder" vai junto, como mensagem comum (só na conversa própria).
+  const citacao = alvo.salaId ? null : estado.citacoes[alvo.conversaId] ?? null;
+  const destino = destinoDoEnvio(modo, ids.length > 0, citacao);
   // Letra sozinha ("A", "b.", "c)") vira o texto da opção da pergunta respondida; a resposta continua texto (EMENDA 16).
   const enviado = destino.tipo === "resposta" && modo.tipo === "resposta" ? textoDaLetra(texto, opcoesDaPergunta(estado, modo.alvo)) : texto;
   const a = api;
   // Só a mensagem comum leva chave; com um envio dela em voo nesta conversa, o segundo (Enter + botão) é ignorado.
   const comum = destino.tipo === "mensagem" && !alvo.salaId;
-  const idEnvio = comum ? envios.iniciar(alvo.conversaId, texto, ids) : undefined;
+  const idEnvio = comum ? envios.iniciar(alvo.conversaId, texto, ids, destino.tipo === "mensagem" ? destino.respondeA : undefined) : undefined;
   if (idEnvio === null) return;
   await agir(async () => {
     let enviou = false;
@@ -2060,6 +2064,8 @@ async function enviarComposer(): Promise<void> {
     if (r.enviado === "mensagem") limparAnexos(alvo.conversaId);
     // A escolha do campo vale até este envio: a próxima mensagem volta ao padrão.
     dispatch({ tipo: "composer", conversaId: alvo.conversaId, escolha: null });
+    // Só a citação que foi junto: um "Responder" noutra fala durante o envio fica no campo para a próxima mensagem.
+    if (citacao && estado.citacoes[alvo.conversaId]?.mensagemId === citacao.mensagemId) dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: null });
     dispatch({ tipo: "invalidar", quais: r.enviado === "resposta" ? [`conversa:${alvo.conversaId}`, "sua-vez", "frota"] : [`conversa:${alvo.conversaId}`] });
   });
 }
@@ -2125,6 +2131,127 @@ function removerAnexo(chave: string): void {
   if (item?.previa) URL.revokeObjectURL(item.previa);
   anexosPendentes.set(alvo.conversaId, fila.filter((i) => i.chave !== chave));
   redesenharAnexos();
+}
+
+/** Fala oculta para quem lê a tela: a região viva da pergunta também serve às ações na fala (ADR-113), sem mexer no foco. */
+function anunciar(texto: string): void {
+  const anuncio = document.getElementById("anuncio-pergunta");
+  if (!anuncio) return;
+  anuncio.textContent = "";
+  window.setTimeout(() => { anuncio.textContent = texto; }, 50);
+}
+
+/** A fala de id dado entre as conversas e as tasks carregadas (a barra de ações só leva o id no `data-id`). */
+function falaPorId(id: string): Mensagem | undefined {
+  for (const c of [...Object.values(estado.conversas), ...Object.values(estado.trabalhoDetalhe)]) {
+    const m = c?.mensagens.find((x) => x.id === id);
+    if (m) return m;
+  }
+  return undefined;
+}
+
+/**
+ * "Responder" na fala (ADR-113, Parte 3b). A fala que é uma pergunta ainda aberta aponta o campo para ELA (a mensagem
+ * responde à pergunta, como o "Trocar" da Parte 3a); qualquer outra fala vira citação: a caixa "Respondendo · trecho · ×"
+ * e a mensagem comum com `respondeA`.
+ */
+function responderAFala(fala: Mensagem): void {
+  const alvo = conversaAtual();
+  if (!alvo || alvo.salaId || alvo.conversaId !== fala.conversaId) return;
+  const pergunta = fala.payload?.kind === "pedido_a_pessoa" ? fala.payload.decisaoId : null;
+  const modo = modoDoComposer(estado, alvo.conversaId);
+  if (pergunta && modo.tipo !== "normal" && modo.perguntas.some((p) => p.decisao.id === pergunta)) {
+    dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: null });
+    escolherNoComposer(false, pergunta);
+    return;
+  }
+  dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: citacaoDaFala(fala) });
+  document.getElementById("composer-texto")?.focus();
+}
+
+/** Põe ou tira a reação da pessoa (o chip ou o emoji do menu). A conversa relê pelo frame `reacao.mudou` e aqui também. */
+async function alternarReacao(fala: Mensagem, emoji: string): Promise<void> {
+  if (!api) return;
+  const a = api;
+  const minha = reacoesDaFala(estado, fala).some((r) => r.emoji === emoji && r.minha);
+  await agir(async () => {
+    await a.reagir(fala.id, emoji, !minha);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${fala.conversaId}`] });
+    anunciar(minha ? `Reação ${emoji} tirada` : `Você reagiu com ${emoji}`);
+  });
+}
+
+/**
+ * O seletor da carinha e o menu ⋯ (tela "Responder, reagir e mais ações"): o mesmo menu flutuante dos bots
+ * (`dialogo(…, true)`), aberto ao lado do botão, com setas, Home e End entre os itens e Esc para fechar (o foco volta ao
+ * botão). O "+" troca a linha das quatro rápidas pela lista inteira, sem fechar.
+ */
+function abrirMenuDaFala(ancora: HTMLElement, tipo: "reagir" | "mais"): void {
+  const fala = falaPorId(ancora.dataset.id ?? "");
+  if (!fala) return;
+  const d = dialogo(tipo === "reagir" ? htmlSeletorDeReacao(fala, estado) : htmlMenuDaFala(fala, estado), true);
+  d.classList.add("menu-fala");
+  d.setAttribute("aria-label", tipo === "reagir" ? "Reagir a esta mensagem" : "Mais ações da mensagem");
+  ancora.setAttribute("aria-expanded", "true");
+  d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
+  const posicionar = (): void => {
+    const r = ancora.getBoundingClientRect();
+    d.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12))}px`;
+    d.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - d.offsetHeight - 12))}px`;
+  };
+  posicionar();
+  d.addEventListener("click", (e) => {
+    const alvo = e.target as HTMLElement;
+    if (alvo.closest("[data-reacao-mais]")) {
+      const linha = d.querySelector(".linha-emojis");
+      if (linha) linha.outerHTML = linhaDeEmojis(fala, estado, true);
+      d.querySelector<HTMLButtonElement>(".linha-emojis button")?.focus();
+      posicionar();
+      return;
+    }
+    const emoji = alvo.closest<HTMLElement>("[data-reacao]")?.dataset.reacao;
+    if (emoji) { d.close(); void alternarReacao(fala, emoji); return; }
+    const acao = alvo.closest<HTMLElement>("[data-fala]")?.dataset.fala;
+    if (acao) { d.close(); acaoDoMenuDaFala(fala, acao, ancora); }
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("button")];
+    const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
+    const passo = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : -1;
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + passo + itens.length) % itens.length;
+    itens[proximo]?.focus();
+  });
+}
+
+/** Os itens do ⋯: copiar, abrir task (pelo bot, citando a fala), lembrar e Raio-X. */
+function acaoDoMenuDaFala(fala: Mensagem, acao: string, ancora: HTMLElement): void {
+  const bot = botDaFala(fala, estado);
+  if (acao === "copiar") {
+    void navigator.clipboard.writeText(fala.texto).then(() => anunciar("Texto copiado"), () => anunciar("Não deu para copiar o texto"));
+    return;
+  }
+  if (acao === "raio-x" && api && fala.turnoId) {
+    const t = estado.tela;
+    void abrirRaioX(api, fala.turnoId, t.tipo === "conversa" ? botGerido(t.agenteId)?.nome ?? "agente" : "sala", ancora);
+    return;
+  }
+  if (!api || !bot) return;
+  const a = api;
+  // Decisão 3 do plano (Marlon, 18/10): "Abrir task com isto" passa pelo bot — a mensagem comum cita a fala e o bot usa
+  // abrir_task. Com pergunta aberta, ela NÃO responde à pergunta (destinoDoEnvio com citação).
+  if (acao === "abrir-task") void agir(async () => {
+    rolagem.colar();
+    await a.enviar(fala.conversaId, textoAbrirTask(fala), [], crypto.randomUUID(), fala.id);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${fala.conversaId}`] });
+    anunciar("Pedido enviado: abrir uma task com esta mensagem");
+  });
+  if (acao === "lembrar") void agir(async () => {
+    await a.criarMemoria(bot, "fato", textoParaLembrar(fala), fala.conversaId);
+    dispatch({ tipo: "invalidar", quais: [`conversa:${fala.conversaId}`, `memoria:${bot}`] });
+    anunciar(`Anotado na memória de ${botGerido(bot)?.nome ?? "o bot"}`);
+  });
 }
 
 /** "Trocar" e o × da caixa "Respondendo" (Parte 3a): muda o que a próxima mensagem faz e volta ao campo. */
@@ -2424,6 +2551,27 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       b.classList.toggle("ativo", b === el);
       b.setAttribute("aria-pressed", String(b === el));
     }
+  },
+  // ADR-113 (plano "pergunta com botões", Parte 5): as ações na fala — web/telas/acoes-da-fala.ts desenha, aqui se age.
+  "reagir-fala": (el) => abrirMenuDaFala(el, "reagir"),
+  "mais-da-fala": (el) => abrirMenuDaFala(el, "mais"),
+  "reagir-chip": (el) => {
+    const fala = falaPorId(el.dataset.id ?? "");
+    if (fala && el.dataset.emoji) void alternarReacao(fala, el.dataset.emoji);
+  },
+  "responder-fala": (el) => {
+    const fala = falaPorId(el.dataset.id ?? "");
+    if (fala) responderAFala(fala);
+  },
+  "citacao-cancelar": () => {
+    const alvo = conversaAtual();
+    if (alvo) dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: null });
+    document.getElementById("composer-texto")?.focus();
+  },
+  "ver-fala-citada": (el) => {
+    const balao = document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(el.dataset.id ?? "")}"]`);
+    if (balao) levarAo(balao);
+    else anunciar("Essa mensagem saiu da janela carregada da conversa.");
   },
   "relatar-mensagem": (el) => {
     const id = el.dataset.id;
@@ -3496,6 +3644,12 @@ document.addEventListener("keydown", (ev) => {
   // Esc com a caixa "Respondendo" à vista: a próxima mensagem vira mensagem comum (o mesmo × da caixa).
   if (ev.key === "Escape") {
     const alvo = conversaAtual();
+    // ADR-113: com uma fala citada, o Esc tira a citação (o × da caixa) antes de qualquer outra coisa.
+    if (alvo && estado.citacoes[alvo.conversaId]) {
+      ev.preventDefault();
+      dispatch({ tipo: "citar", conversaId: alvo.conversaId, citacao: null });
+      return;
+    }
     if (alvo && comCaixaRespondendo(alvo.conversaId)) {
       ev.preventDefault();
       escolherNoComposer(true);

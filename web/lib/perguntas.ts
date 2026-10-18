@@ -190,13 +190,18 @@ export function proximaDoComposer(modo: ModoComposer): string | null {
   return modo.perguntas[(modo.indice + 1) % modo.perguntas.length]?.decisao.id ?? null;
 }
 
-export type DestinoEnvio = { tipo: "resposta"; decisaoId: string } | { tipo: "mensagem" };
+/** `respondeA` (ADR-113, Parte 3b): o id da fala que a mensagem comum cita, pelo "Responder" da barra de ações. */
+export type DestinoEnvio = { tipo: "resposta"; decisaoId: string } | { tipo: "mensagem"; respondeA?: string };
 
 /**
  * Anexo com pergunta aberta (decisão 9 do plano, 2026-10-18): a mensagem vai como mensagem comum e a pergunta segue aberta
  * — a rota `responder` só leva texto, e era isso que o "Outro assunto" fazia. Antes o clipe desligava.
  */
-export function destinoDoEnvio(modo: ModoComposer, comAnexo = false): DestinoEnvio {
+export function destinoDoEnvio(modo: ModoComposer, comAnexo = false, citacao?: { mensagemId: string } | null): DestinoEnvio {
+  // ADR-113 (Parte 3b, revisão de engenharia do plano): a mensagem que cita uma fala vai como MENSAGEM COMUM mesmo com
+  // pergunta aberta, e a pergunta segue aberta — é o que faz o "Abrir task com isto" chegar ao bot como pedido. A citação
+  // da própria pergunta aberta não chega aqui: o "Responder" dela aponta o campo para a pergunta (`alvoId`).
+  if (citacao) return { tipo: "mensagem", respondeA: citacao.mensagemId };
   return modo.tipo === "resposta" && !comAnexo ? { tipo: "resposta", decisaoId: modo.alvo.decisao.id } : { tipo: "mensagem" };
 }
 
@@ -213,7 +218,7 @@ export function textoDaLetra(texto: string, opcoes: readonly string[]): string {
 
 /** O que o envio precisa da Api (estrutural: web/lib/api.ts satisfaz, e o teste passa um espião). */
 export type ApiDeEnvio = {
-  enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string): Promise<unknown>;
+  enviar(conversaId: string, texto: string, anexos?: readonly string[], idEnvio?: string, respondeA?: string): Promise<unknown>;
   responder(decisaoId: string, texto: string): Promise<unknown>;
   postarNaSala(salaId: string, texto: string): Promise<unknown>;
 };
@@ -237,8 +242,10 @@ export async function enviarPeloComposer(
     await api.responder(destino.decisaoId, texto);
     return { enviado: "resposta" };
   }
+  const respondeA = destino.tipo === "mensagem" ? destino.respondeA : undefined;
   if (alvo.salaId) await api.postarNaSala(alvo.salaId, texto);
   // NOD-156: a chave só vale para a mensagem comum; resposta e sala têm rotas próprias.
+  else if (respondeA) await api.enviar(alvo.conversaId, texto, anexos, idEnvio, respondeA);
   else if (idEnvio) await api.enviar(alvo.conversaId, texto, anexos, idEnvio);
   else await api.enviar(alvo.conversaId, texto, anexos);
   return { enviado: "mensagem" };

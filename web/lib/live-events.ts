@@ -105,6 +105,7 @@ const TIPOS: Record<TipoFrame, true> = {
   "ligacao.mudou": true,
   "trabalho.mudou": true,
   "memoria.mudou": true,
+  "reacao.mudou": true,
   resumed: true,
 };
 

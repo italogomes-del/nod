@@ -1,3 +1,4 @@
+import { semCitacao } from "../domain/citacao.ts";
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
@@ -304,7 +305,8 @@ export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; 
   if (!promoveNaRede({ origem: turno.origem, modo: input.modo, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades, redeMs: input.redeMs })) return { data: { trabalho: null } };
   const segue = seguimentoNaRede(capacidades, input.maquinaBifurca === true);
   // A retomada (uma decisão respondida, a resposta de um colega) tem entrada do nod: o título vem do que a pessoa pediu.
-  const titulo = turno.origem === "retomada" ? ((await deps.repos.turnos.raizDaCadeia(turno.id))?.entradaTexto ?? turno.entradaTexto) : turno.entradaTexto;
+  // ADR-113: a fala que respondeu a outra tem "(respondendo a: «…»)" na entrada; o título é só o que a pessoa escreveu.
+  const titulo = semCitacao(turno.origem === "retomada" ? ((await deps.repos.turnos.raizDaCadeia(turno.id))?.entradaTexto ?? turno.entradaTexto) : turno.entradaTexto);
   const lote = await deps.repos.frentes.criarLote({ agenteId: turno.agenteId, abertoPorTurnoId: turno.id, trabalhoId: null, avisarACadaUma: false });
   if (!lote) throw new ErroDeDominio("estado_invalido", { cause: "lote da rede não criado" });
   const { trabalho, events } = await criarTrabalho(deps, {

@@ -26,6 +26,7 @@ import type { pessoasRepo } from "./pessoas.repo.ts";
 import type { procuracoesRepo } from "./procuracoes.repo.ts";
 import type { propostasRepo } from "./propostas.repo.ts";
 import type { relatosRepo } from "./relatos.repo.ts";
+import type { reacoesRepo } from "./reacoes.repo.ts";
 import type { rotinaExecucoesRepo } from "./rotina-execucoes.repo.ts";
 import type { rotinaJanelasRepo } from "./rotina-janelas.repo.ts";
 import type { rotinasRepo } from "./rotinas.repo.ts";
@@ -75,6 +76,8 @@ export interface Repos {
   artefatos: ReturnType<typeof artefatosRepo>;
   propostas: ReturnType<typeof propostasRepo>;
   relatos: ReturnType<typeof relatosRepo>;
+  /** 0090 (ADR-113): as reações às falas ("👍 1"). */
+  reacoes: ReturnType<typeof reacoesRepo>;
   turnos: ReturnType<typeof turnosRepo>;
   trabalhos: ReturnType<typeof trabalhosRepo>;
   /** 0071 (ADR-099, partes 3/4): os lotes de frentes e o resumo da frente. */

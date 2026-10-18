@@ -125,3 +125,11 @@ guardar o próprio log e a exportar um diagnóstico local:
 
 Gatilho de reversão: reabrir se o suporte precisar do estado do servidor junto (aí o diagnóstico vira parte do
 relato) ou se 2 MiB não cobrirem o intervalo entre o problema e a exportação.
+
+## Emenda (2026-10-18, ADR-113) — o relato sai do besouro para a bandeira
+
+A barra da fala ganhou reagir, responder e ⋯ ([ADR-113](adr-113-reacoes-e-citacao-na-fala.md), protótipo "Responder,
+reagir e mais ações"). O relato fica nela, no terceiro botão, com o ícone de bandeira no lugar do besouro e o nome
+"Reportar problema nesta resposta" ("nesta mensagem" na fala da pessoa). A ação é a mesma (`relatar-mensagem` →
+`abrirReportarBug`), com o estado técnico de sempre; a linha de sistema (negação, parada) continua se relatando, só com a
+bandeira e o ⋯. Nada muda no que o relato grava.

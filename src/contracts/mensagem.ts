@@ -129,6 +129,11 @@ export type PayloadMensagem =
    */
   | { kind: "resposta_a_pedido"; decisaoId: string; agenteId: string; perguntaEm: EpochMs; retomada: boolean; turnoRetomadaId?: string; via?: "opcao" | "texto"; opcao?: number }
   /**
+   * definido em 2026-10-18 (ADR-113, Parte 3b): a fala da pessoa que responde a outra (o "Responder" da barra). O servidor
+   * recalcula o `trecho` da fala citada (mesma conversa); a entrada e o histórico levam "(respondendo a: «trecho»)".
+   */
+  | { kind: "resposta_a_fala"; respondeA: { mensagemId: string; trecho: string } }
+  /**
    * definido em 2026-09-25 (card de pasta simplificado): o registro de que a pessoa abriu uma pasta
    * para o agente. O card da proposta some ao permitir; esta linha fica na conversa ("acme aberta
    * para o Dev 1 · Trocar"). `onde` é a pasta-mãe relativa à pasta pessoal, quando a busca a deu.

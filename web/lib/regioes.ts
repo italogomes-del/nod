@@ -4,6 +4,8 @@
  * preserva texto, foco e cursor entre frames). Sem framework: strings + delegação de eventos por
  * `data-act` em main.ts. ADR-029 (render por classe): estados de falha viram texto com relógio.
  */
+import { seletoresDoFoco } from "./foco-do-bloco.ts";
+
 const ultimoHtml = new Map<string, string>();
 
 export function regiao(id: string, html: string): void {
@@ -50,6 +52,7 @@ export function blocosMudariam(id: string, blocos: readonly Bloco[]): boolean {
 export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
   const raiz = document.getElementById(id);
   if (!raiz) return;
+  const focado = document.activeElement instanceof HTMLElement && raiz.contains(document.activeElement) ? document.activeElement : null;
   const porChave = new Map((blocosAplicados.get(id) ?? []).filter((b) => b.el.parentNode === raiz).map((b) => [b.chave, b]));
   const vistos = new Set<string>();
   const novos: BlocoNaTela[] = blocos.map((b) => {
@@ -72,4 +75,12 @@ export function regiaoPorBlocos(id: string, blocos: readonly Bloco[]): void {
   }
   blocosAplicados.set(id, novos);
   ultimoHtml.delete(id);
+  // O botão focado morava num bloco refeito (o chip ou a barra da fala que acabou de reagir): o foco volta ao mesmo
+  // botão no bloco novo, em vez de cair no <body> e perder o lugar na conversa (revisão do PR 392, em 2026-10-18).
+  if (focado && !focado.isConnected) {
+    for (const seletor of seletoresDoFoco(focado.dataset)) {
+      const alvo = raiz.querySelector<HTMLElement>(seletor);
+      if (alvo) { alvo.focus({ preventScroll: true }); break; }
+    }
+  }
 }

@@ -4,6 +4,7 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import { lerAnexo, receberAnexo } from "../../../use-cases/anexos.ts";
 import { enviarMensagem, lerConversa } from "../../../use-cases/enviar-mensagem.ts";
 import { parar } from "../../../use-cases/parar.ts";
+import { reagir } from "../../../use-cases/reagir.ts";
 import { UUID, type Rota } from "../roteador.ts";
 import { bytes, lerBruto } from "../util.ts";
 import { corpoObjeto, criarExecutor, texto, type DepsRotas } from "./executar-caso.ts";
@@ -34,6 +35,7 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
           texto: texto(corpo.texto),
           anexos: idsDeAnexo(corpo.anexos),
           idEnvio: idDeEnvio(corpo.idEnvio),
+          respondeA: respondeADoCorpo(corpo.respondeA),
           prazoMs: d.prazoDecisaoMs,
           executor: d.executor,
           harnessesDaPessoa: d.harnessesDaPessoa?.(ctx.escopo.pessoaId),
@@ -75,6 +77,17 @@ export function criarRotasConversas(d: DepsRotas): Rota[] {
       },
     },
     {
+      // ADR-113 (Parte 5 do plano "pergunta com botões"): põe (`marcada: true`) ou tira a reação da pessoa numa fala.
+      // Idempotente, por isso PUT: o mesmo corpo duas vezes deixa o mesmo estado. Responde as reações da fala.
+      metodo: "PUT",
+      padrao: new RegExp(`^/mensagens/${ID}/reacoes$`),
+      async handler(ctx) {
+        const corpo = corpoObjeto(await ctx.corpo());
+        if (typeof corpo.marcada !== "boolean") throw new ErroDeDominio("entrada_invalida", { cause: "marcada" });
+        ctx.json(200, await executar(ctx.escopo, reagir, { mensagemId: ctx.params.id ?? "", emoji: corpo.emoji, marcada: corpo.marcada }));
+      },
+    },
+    {
       metodo: "POST",
       padrao: new RegExp(`^/conversas/${ID}/parar$`),
       async handler(ctx) {
@@ -102,6 +115,17 @@ function idDeEnvio(v: unknown): string | undefined {
   if (v === undefined) return undefined;
   if (typeof v !== "string" || !UUID.test(v)) throw new ErroDeDominio("entrada_invalida", { cause: "idEnvio" });
   return v;
+}
+
+/**
+ * ADR-113 (Parte 3b): `respondeA: { mensagemId }` diz a qual fala a mensagem responde. Só o id vale: o `trecho` que o
+ * cliente mandar é ignorado (o servidor o recalcula da fala). Ausente = mensagem sem citação (cliente antigo).
+ */
+function respondeADoCorpo(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const id = corpoObjeto(v).mensagemId;
+  if (typeof id !== "string" || !UUID.test(id)) throw new ErroDeDominio("entrada_invalida", { cause: "respondeA" });
+  return id;
 }
 
 function decodificar(nome: string): string {

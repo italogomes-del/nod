@@ -43,6 +43,8 @@ export type TipoFrame =
   | "trabalho.mudou"
   /** ADR-083 (#194): a pressão de memória do Mac mudou de nível: {nivel}. Só na mudança. */
   | "memoria.mudou"
+  /** ADR-113: as reações de uma fala mudaram: {conversaId, mensagem_id}. A web relê a conversa (o chip embaixo da fala). */
+  | "reacao.mudou"
   | "resumed";
 
 /**

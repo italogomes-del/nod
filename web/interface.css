@@ -498,6 +498,48 @@
 .caixa-respondendo .bt.link { flex: none; color: var(--ink); font-size: 12.5px; padding: 2px 6px; }
 .rp-fechar { flex: none; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); cursor: pointer; }
 .rp-fechar:hover, .rp-fechar:focus-visible { color: var(--ink); background: var(--surface-selected); }
+
+/* Ações na fala (ADR-113, tela "Responder, reagir e mais ações"). A barra: quatro botões só de ícone, 30 px, ao lado da
+   fala (a posição é a de .msg-actions em estilos.css); o que abriu o menu fica marcado enquanto ele está aberto. */
+.msg-actions { gap: 2px; }
+.msg-actions button.bt { width: 30px; height: 30px; color: var(--ink-2); }
+.msg-actions button.bt:hover { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
+.msg-actions button.bt[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+/* A barra fica ao lado do balão, não da linha do nome: no S6 ela começa 6 px abaixo do topo do balão, com o centro na
+   primeira linha do texto. Com o nome e a hora em cima (.msg-autor, 23–24 px medidos em 2026-10-18 a 1440×900, claro e
+   escuro), o top de 2px de estilos.css a deixava na altura do nome, solta acima do balão (QA do PR 392). */
+.bubble-wrap:has(> .msg-autor) > .msg-actions { top: 29px; }
+/* Com o menu aberto a barra fica à vista (como no S6): o diálogo modal deixa a fala inerte, o :hover dela cai e o foco
+   vai para o menu, e sem isto a barra sumia e o menu flutuava ao lado do nada (revisão do PR 392, em 2026-10-18). */
+.msg-actions:has(button[aria-expanded="true"]) { opacity: 1; pointer-events: auto; transform: translateX(0); }
+.msg-linha .msg-actions:has(button[aria-expanded="true"]) { transform: translate(0, -50%); }
+/* A reação vira um chip embaixo da fala ("👍 1"): o da pessoa sai marcado e o toque tira. */
+.reacoes-da-fala { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 0 10px; }
+.reacao-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.5; cursor: pointer; }
+.reacao-chip .reacao-n { color: var(--ink-2); }
+.reacao-chip.minha { border-color: var(--line-strong); background: var(--surface-raised); }
+.reacao-chip:hover { border-color: var(--line-strong); }
+.reacao-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* O menu ⋯ e o seletor da carinha: as reações rápidas no topo, separadas por uma linha, e os itens com ícone à esquerda. */
+.bot-menu.menu-fala { width: 220px; }
+.menu-fala .linha-emojis { display: flex; justify-content: space-between; padding: 2px 4px 6px; }
+.menu-fala .linha-emojis + button { margin-top: 4px; }
+.menu-fala .linha-emojis:not(:only-child) { border-bottom: 1px solid var(--line); }
+.menu-fala .linha-emojis.todas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.bot-menu.menu-fala .linha-emojis button { width: auto; justify-content: center; gap: 0; padding: 4px 6px; font-size: 18px; line-height: 1.2; }
+.bot-menu.menu-fala .linha-emojis .emoji-mais { color: var(--ink-3); font-size: 15px; }
+.bot-menu.menu-fala .linha-emojis button[aria-checked="true"] { background: var(--surface-selected); }
+.bot-menu.menu-fala button[role="menuitem"]:not(.emoji-mais) { gap: 10px; padding: 8px 10px; }
+.bot-menu.menu-fala button svg { flex: none; color: var(--ink-2); }
+/* A fala da pessoa que respondeu a outra (Parte 3b): o trecho acima do balão, com a seta de retorno; leva à fala citada. */
+.citacao-da-fala { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 0 4px auto; padding: 3px 10px; border: 0; border-left: 2px solid var(--line-strong); border-radius: 8px; background: var(--surface-side); color: var(--ink-2); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.citacao-da-fala .cf-ic { flex: none; display: grid; color: var(--ink-3); }
+.citacao-da-fala .cf-trecho { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.citacao-da-fala:hover { color: var(--ink); }
+.citacao-da-fala:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* O trecho não alarga o balão curto embaixo dele: a coluna fica da largura do trecho, e o balão, da do texto (visto na
+   foto de 2026-10-18: "Pega o T3 primeiro" esticava até a largura da citação). */
+.message.you .citacao-da-fala ~ .bubble { width: fit-content; max-width: 100%; margin-left: auto; }
 .composer .clipe:disabled { opacity: .4; cursor: not-allowed; }
 .composer .clipe:disabled:hover { background: transparent; color: var(--ink-2); }
 

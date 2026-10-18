@@ -3,6 +3,7 @@ import type { Conversa, Proposta } from "./conversa.ts";
 import type { Decisao, ItemFila } from "./decisao.ts";
 import type { EpochMs, IsoUtc } from "./ids.ts";
 import type { IncidenteDto } from "./incidente.ts";
+import type { ReacaoNaFala } from "./reacao.ts";
 import type { Inventario } from "./inventario.ts";
 import type { ItemAprovacao } from "./item-aprovacao.ts";
 import type { Mensagem } from "./mensagem.ts";
@@ -15,10 +16,8 @@ import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
 /** Mutação devolve ids; o estado chega por SSE (ADR-016). */
 export type RespostaMutacao = { ok: true; ids: Record<string, string> };
 
-/**
- * Como a tela de entrada deve se desenhar (ADR-030): `google` mostra o botão "Entrar com Google";
- * `stub` (só desenvolvimento, só em 127.0.0.1) lista as pessoas do cadastro.
- */
+/** Como a tela de entrada se desenha (ADR-030): `google` mostra o botão "Entrar com Google"; `stub` (só desenvolvimento, só
+ * em 127.0.0.1) lista as pessoas do cadastro. */
 export type ModoSessaoDto = { modo: "google" } | { modo: "stub"; pessoas: { id: string; nome: string }[] };
 
 export type AmbienteBancoDto = { regime: "persistente" | "efemero" | "desconhecido"; porta: number | null };
@@ -67,6 +66,7 @@ export type ConversaDto = DonoNaConversa & {
   /** definido em 2026-09-24 (fio da pergunta): os fios com mensagem na janela carregada, com o estado derivado. */
   fios: FioDaPergunta[];
   trabalhos?: TrabalhoDto[]; // ADR-083: trabalhos abertos do bot desta conversa (faixa); ausente = servidor antigo
+  reacoes?: ReacaoNaFala[]; // ADR-113: as reações das falas da janela, agrupadas por emoji; ausente = servidor antigo
 };
 
 export type SuaVezDto = {

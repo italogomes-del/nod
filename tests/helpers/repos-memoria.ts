@@ -21,6 +21,7 @@ import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
+import type { EmojiDeReacao, ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { CredencialTurno } from "../../src/repositories/turno-credenciais.repo.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
@@ -139,6 +140,8 @@ export type BancoMemoria = {
   gastos: (Gasto & { tenantId: string; ownerId: string })[];
   incidentes: (Incidente & { ownerId: string })[];
   relatos: (Relato & { ownerId: string })[];
+  /** 0090 (ADR-113): uma por pessoa, fala e emoji (a regra completa, com a RLS, se prova no Postgres). */
+  reacoes: { tenantId: string; ownerId: string; conversaId: string; mensagemId: string; emoji: EmojiDeReacao; criadoEm: number }[];
   trilha: LinhaTrilha[];
   paradas: (Parada & { tenantId: string })[];
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
@@ -208,6 +211,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     gastos: [],
     incidentes: [],
     relatos: [],
+    reacoes: [],
     trilha: [],
     paradas: [],
     catcher: [],
@@ -2357,6 +2361,31 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async listar() {
         return b.inventario.filter((i) => i.tenantId === escopo.tenantId && i.pessoaId === escopo.pessoaId).map(({ motor, inventario }) => ({ motor, inventario }));
+      },
+    },
+
+    reacoes: {
+      async por(p) {
+        const ja = b.reacoes.some((r) => r.tenantId === escopo.tenantId && r.mensagemId === p.mensagemId && r.ownerId === escopo.pessoaId && r.emoji === p.emoji);
+        if (ja) return false;
+        b.reacoes.push({ tenantId: escopo.tenantId, ownerId: escopo.pessoaId, conversaId: p.conversaId, mensagemId: p.mensagemId, emoji: p.emoji, criadoEm: Date.now() });
+        return true;
+      },
+      async tirar(p) {
+        const antes = b.reacoes.length;
+        b.reacoes = b.reacoes.filter((r) => !(r.tenantId === escopo.tenantId && r.mensagemId === p.mensagemId && r.ownerId === escopo.pessoaId && r.emoji === p.emoji));
+        return b.reacoes.length < antes;
+      },
+      async dasMensagens(ids) {
+        const saida: ReacaoNaFala[] = [];
+        for (const id of ids) {
+          const desta = doTenant(b.reacoes).filter((r) => r.mensagemId === id);
+          for (const emoji of [...new Set(desta.map((r) => r.emoji))]) {
+            const comEle = desta.filter((r) => r.emoji === emoji);
+            saida.push({ mensagemId: id, emoji, total: comEle.length, minha: comEle.some((r) => r.ownerId === escopo.pessoaId) });
+          }
+        }
+        return saida;
       },
     },
 

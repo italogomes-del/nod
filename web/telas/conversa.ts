@@ -39,6 +39,7 @@ import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
 import { planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -67,20 +68,7 @@ export function badgeExecutor(m: Pick<Mensagem, "autoria">): string {
   return `<span class="tag tag-cinza" title="harness no computador conectado">rodou em ${esc(maquina)}</span>`;
 }
 
-/**
- * Ações que aparecem no hover da mensagem (ADR-042). A classe `.msg-actions` já existia em
- * estilos.css desde a folha original, sem nenhum render — este é o primeiro botão a usá-la.
- * Fica dentro de `.bubble-wrap`, não de `.message`, e o CSS o põe na margem LATERAL do balão: o
- * `top: -16px` da regra original cobria o nome e a hora em `.msg-autor`.
- */
-function acoesDaMensagem(m: Mensagem): string {
-  // definido em 2026-09-21: besouro visto de cima — antenas, corpo oval e três pares de pernas em
-  // DIAGONAL, centrado em (12,12). Duas tentativas anteriores falharam por motivos opostos: a
-  // primeira tinha 10 subpaths e virava borrão a 15px; a segunda, simplificada demais (arco solto
-  // por cabeça e pernas horizontais coladas), lia como cadeado. A diagonal é o que faz virar perna.
-  const bug = `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M9.5 4 11 6.5m3.5-2.5L13 6.5m-1 0a5 5 0 015 5v2a5 5 0 01-10 0v-2a5 5 0 015-5zm0 2.5v11M7 10 4.5 8.5M7 13.5H4m3 3.5L4.5 18.5M17 10l2.5-1.5M17 13.5h3m-3 3.5 2.5 1.5"/></svg>`;
-  return `<div class="msg-actions">${botao("relatar-mensagem", bug, { id: m.id, titulo: "Relatar comportamento indesejado", aria: "Relatar comportamento indesejado" })}</div>`;
-}
+// Ações na fala (ADR-042; desde 2026-10-18, ADR-113): reagir, responder, reportar e ⋯ moram em ./acoes-da-fala.ts.
 
 // ---------------------------------------------------------------- recibos das decisões
 
@@ -440,9 +428,9 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // na margem ele parecia de ninguém.
   if (m.payload?.kind === "artefato") {
     const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
-    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
+    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
   }
-  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaMensagem(m)}${faixaDaMensagem(m, estado)}</div>`;
+  if (m.kind !== "texto") return `<div class="msg-linha" data-mensagem="${esc(m.id)}">${corpoMensagem(m, estado)}${acoesDaFala(m, estado)}${faixaDaMensagem(m, estado)}</div>`;
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
   // Autoria composta (ADR-023) aparece inteira: o pedido de colega é "Taga · por você" (ADR-047/058). O bloco de
@@ -468,7 +456,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   const balao = pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m)}${sender}${resposta ? rotuloDaResposta(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
