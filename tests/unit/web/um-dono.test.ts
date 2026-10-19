@@ -1,19 +1,17 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { DonoDto, EsperaDoDonoDto, EstadoDoDono, PedidoNaFilaDto } from "../../../src/contracts/dono.ts";
 import type { FrameSse } from "../../../src/contracts/frame.ts";
 import type { TrabalhoDto } from "../../../src/contracts/trabalho.ts";
 import { esperaDoTrabalho } from "../../../src/domain/trabalho.ts";
 import { aplicarFrame, estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { comFerramenta, comTexto } from "../../../web/lib/atividade.ts";
 import { esperaNaTela, fraseDoDono, linhaDoDono, quemPediu, textoDaFila } from "../../../web/lib/dono.ts";
 import { agrupar, foraDoMac, pontoTrabalho, situacaoDe } from "../../../web/lib/trabalhos.ts";
-import { renderLinhaDoDono, renderTrabalhosPorBot, sinalDoBot } from "../../../web/telas/linha-do-dono.ts";
+import { renderTrabalhosPorBot, sinalDoBot } from "../../../web/telas/linha-do-dono.ts";
 
 /**
- * A tela do um dono por bot (ADR-099 item 10, parte 5; protótipo docs/prototipos/um-dono-por-bot/): a linha acima do
- * campo por prioridade (quadro 08), a linha aberta (quadros 03 e 07), o sinal da barra lateral, Trabalhos por bot
- * (quadro 05) e "esperar não é trabalhar" para a espera de comando.
+ * A tela do um dono por bot (ADR-099 item 10, parte 5; protótipo docs/prototipos/um-dono-por-bot/): as frases por
+ * prioridade (quadro 08), o sinal da barra lateral, Trabalhos por bot (quadro 05) e "esperar não é trabalhar" para a espera
+ * de comando. A linha acima do campo virou a pílula que se alarga (chat limpo, PR 8): tests/unit/web/pilula-do-bot.test.ts.
  */
 
 const MIN = 60_000;
@@ -79,113 +77,9 @@ describe("a linha acima do campo, por prioridade (quadro 08)", () => {
     expect(textoDaFila({ fila: 1 }, 1)).toBe("1 pedido na fila");
   });
 
-  it("HTML: uma linha só, o texto em negrito, o resto em contagem e \"detalhes\"; some quando livre", () => {
-    const e = estadoCom([], [dono({ esperando: 1, motivoEspera: "a CI do #845", desde: AGORA - 38 * MIN, fila: 2 }, [comando()], [pedido(1), pedido(2)])]);
-    const html = renderLinhaDoDono(e, "ze1");
-    expect(html).toContain('<section class="linha-dono" data-sinal="espera"');
-    expect(html).toContain('<span class="ponto-trabalho fora-do-mac"></span>');
-    expect(html).toContain('<b>Esperando a CI do #845</b><span class="ld-extras"> · 38 min · 2 pedidos na fila</span>');
-    expect(html).toContain('data-act="faixa-trabalhos" data-recolher="0" aria-expanded="false"');
-    expect(html).toContain('<span class="ld-detalhes-txt">detalhes</span>');
-    // Fechada, nada do detalhe (nunca uma pilha de cartões).
-    expect(html).not.toContain("ld-detalhe\"");
-    expect(renderLinhaDoDono(estadoCom([], [dono()]), "ze1")).toBe("");
-  });
-
-  it("os pontos: um vivo na cor do bot por frente até 3, acima disso um e o número; azul para você; o número da fila", () => {
-    const linha = (d: DonoDto) => renderLinhaDoDono(estadoCom([], [d]), "ze1");
-    expect(linha(dono({ frentes: 3 })).match(/class="ponto-trabalho c-red pulso-trab"/g)).toHaveLength(3);
-    const cinco = linha(dono({ frentes: 5 }));
-    expect(cinco.match(/class="ponto-trabalho c-red pulso-trab"/g)).toHaveLength(1);
-    expect(cinco).toContain('<span class="ld-n">5</span>');
-    expect(linha(dono({ esperandoVoce: 1 }))).toContain('<span class="ponto-trabalho precisa"></span>');
-    expect(linha(dono({ fila: 2 }, [], [pedido(1), pedido(2)]))).toContain('<span class="ld-pontos ld-num" aria-hidden="true">2</span>');
-  });
-
-  it("\"Esperando você\" leva à mensagem com a pergunta (a decisão mais nova do bot); \"detalhes\" continua abrindo a linha", () => {
-    // A decisão é de outra conversa do bot (uma sala): a faixa do campo desta conversa não a mostra, a linha sim.
-    const decisao = (id: string, criadoEm: number) => ({ decisao: { id, agenteId: "ze1", conversaId: "c-sala", tipo: "pergunta", frase: `Como seguir ${id}?`, criadoEm: new Date(criadoEm).toISOString() }, estadoColuna: "pendente" }) as never;
-    const e = estadoCom([], [dono({ esperandoVoce: 2, fila: 2 }, [], [pedido(1), pedido(2)])], { suaVez: { itens: [decisao("d-velha", AGORA - 60 * MIN), decisao("d-nova", AGORA - 5 * MIN)], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null } });
-    const html = renderLinhaDoDono(e, "ze1");
-    expect(html).toContain('<button type="button" class="ld-principal" data-act="ir-a-pergunta" data-id="d-nova"');
-    expect(html).toContain('<b>Esperando você</b><span class="ld-extras"> · 2 pedidos na fila</span>');
-    expect(html).toContain('class="ld-detalhes" data-act="faixa-trabalhos"');
-    // Aberta, a seção "Esperando você" lista as perguntas e cada uma leva à conversa — sem botões de decidir aqui.
-    const aberta = renderLinhaDoDono({ ...e, faixaTrabalhosAberta: "ze1" }, "ze1");
-    expect(aberta).toContain("<h3>Esperando você</h3>");
-    expect(aberta).toContain('data-act="ir-a-pergunta" data-id="d-velha"');
-    expect(aberta).not.toMatch(/data-act="(decidir|aprovar|responder)/);
-  });
-
-  it("a decisão desta conversa já está na faixa do campo (\"Ze 1 está esperando sua resposta\"): a linha não repete, fica com o resto", () => {
-    const item = { decisao: { id: "d1", agenteId: "ze1", conversaId: "c-ze1", tipo: "pergunta", frase: "Como seguir?", criadoEm: new Date(AGORA).toISOString() }, estadoColuna: "pendente" } as never;
-    const suaVez = { itens: [item], incidentes: [], foraDoAr: [], vazio: false, ultimaDecisaoEm: null };
-    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 1, fila: 1 }, [], [pedido(1)])], { suaVez }), "ze1")).toContain("<b>1 pedido na fila</b>");
-    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 1 })], { suaVez }), "ze1")).toBe("");
-    // A frente parada à espera da pessoa, sem decisão na fila: a linha diz "Esperando você".
-    expect(renderLinhaDoDono(estadoCom([], [dono({ esperandoVoce: 2 })], { suaVez }), "ze1")).toContain("<b>Esperando você</b>");
-  });
-
-  it("sem o dono no servidor (anterior ao I10): a faixa de tasks de antes", () => {
-    const html = renderLinhaDoDono(estadoCom([trabalho("x")], undefined), "ze1");
-    expect(html).toContain("pilula-trab");
-  });
-
-  it("o dono da conversa (relido a cada fala) ganha do de GET trabalhos", () => {
-    const e = estadoCom([], [dono({ fila: 1 }, [], [pedido(1)])]);
-    const comConversa: Estado = { ...e, conversas: { "c-ze1": { dono: dono({ frentes: 2 }) } as never } };
-    expect(renderLinhaDoDono(comConversa, "ze1")).toContain("<b>Trabalhando em 2 frentes</b>");
-  });
 });
 
-describe("a linha aberta: Frentes, Esperando e Na fila (quadros 03 e 07)", () => {
-  const mobile = trabalho("f-mob", { titulo: "Mobile do #845", turnoVivoId: "tv1", ultimoPasso: "rodando os testes de mobile", iniciadoEm: AGORA - 18 * MIN });
-  const t12 = trabalho("f-t12", { titulo: "B14-T1/T2", turnoVivoId: "tv2", ultimoPasso: "rebaseando o #840 sobre o #845", iniciadoEm: AGORA - 17 * MIN });
-  const feita = trabalho("f-ok", { titulo: "B14-T3/T4/T5", estado: "terminado", terminadoEm: AGORA - 40 * MIN });
-  const d = dono({ frentes: 2, esperando: 1, motivoEspera: "a CI do #845", fila: 1 }, [comando()], [pedido(1)]);
-
-  it("cada frente com o título, o último passo e o tempo; as terminadas hoje com ✓ e a hora; a espera e a fila na ordem", () => {
-    const html = renderLinhaDoDono(estadoCom([mobile, t12, feita], [d], { faixaTrabalhosAberta: "ze1" }), "ze1");
-    expect(html).toContain('<section class="linha-dono aberta"');
-    expect(html).toContain("<h3>Frentes · 2 trabalhando</h3>");
-    expect(html).toContain('<b class="ld-item-titulo">Mobile do #845</b><span class="ld-passo">rodando os testes de mobile</span><span class="ld-item-fim">18 min</span>');
-    expect(html).toContain('data-act="frente-aberta" data-id="f-t12"');
-    expect(html).toContain('<span class="ponto-trabalho feito" aria-hidden="true">✓</span><span class="ld-item-titulo">B14-T3/T4/T5</span>');
-    expect(html).toContain("<h3>Esperando</h3>");
-    expect(html).toContain('<code class="ld-comando">gh pr checks 845 --watch</code><span class="ld-item-fim">38 min</span>');
-    expect(html).toContain('<p class="ld-sub mono">última linha: checks · pending · Test and build</p>');
-    expect(html).toContain("volta quando a CI do #845 terminar · tentativa 2 de 3");
-    expect(html).toContain("<h3>Na fila</h3>");
-    expect(html).toContain('<span class="ld-ordem" aria-hidden="true">1</span><span class="ld-item-titulo">Pedido do Leonardo</span>');
-    // A folha do celular: o cabeçalho com Fechar e o fundo que fecha (o CSS só os mostra no celular).
-    expect(html).toContain('class="ld-folha-cab"');
-    expect(html).toContain('class="ld-fundo" data-act="faixa-trabalhos" data-recolher="1"');
-  });
-
-  it("clicar numa frente mostra os passos dela (feitos com ✓, o de agora com o ponto vivo) e o atalho para a tela da task", () => {
-    let a = comTexto(undefined, "Leu a falha da etapa 31 (mobile) na run das 14:44.");
-    a = comFerramenta(a, "Read");
-    a = comTexto(a, "Achou o teste: espera fixa de 30 s no login do aluno.");
-    a = comFerramenta(a, "Grep");
-    a = comTexto(a, "pnpm --filter @gamefik/mobile test");
-    const e = estadoCom([mobile, t12], [d], { faixaTrabalhosAberta: "ze1", frenteAberta: "f-mob", atividades: { "c-ze1": { tv1: a } } });
-    const html = renderLinhaDoDono(e, "ze1");
-    expect(html).toContain('data-act="frente-aberta" data-id="f-mob" aria-expanded="true"');
-    expect(html).toContain('<li><span class="passo-ok" aria-hidden="true">✓</span><span>Leu a falha da etapa 31 (mobile) na run das 14:44.</span></li>');
-    expect(html).toContain('<li class="ld-agora"><span class="ponto-trabalho c-red pulso-trab" aria-hidden="true"></span><span>pnpm --filter @gamefik/mobile test</span></li>');
-    expect(html).toContain('data-act="abrir-trabalho" data-id="f-mob">Abrir a frente</button>');
-    // Só a frente aberta mostra passos.
-    expect(html.match(/class="ld-passos"/g)).toHaveLength(1);
-  });
-
-  it("reducer: abrir uma frente, fechar a linha esquece a frente aberta", () => {
-    let e = reduzir(estadoCom([], []), { tipo: "faixa-trabalhos", agenteId: "ze1" });
-    e = reduzir(e, { tipo: "frente-aberta", id: "f-mob" });
-    expect(e.frenteAberta).toBe("f-mob");
-    e = reduzir(e, { tipo: "faixa-trabalhos", agenteId: null });
-    expect(e.frenteAberta).toBeNull();
-  });
-
+describe("as esperas e a fila em frase (a pílula alargada lê daqui)", () => {
   it("as esperas em frase: comando, volta marcada e colega; quem pediu o que está na fila", () => {
     expect(esperaNaTela(comando({ ultimaLinha: null }), AGORA, "Mobile")).toEqual({ titulo: "gh pr checks 845 --watch", comando: true, linhas: ["volta quando a CI do #845 terminar · tentativa 2 de 3 · da frente Mobile"], tempo: "38 min" });
     const volta = esperaNaTela({ tipo: "volta", trabalhoId: null, motivo: "o deploy terminar", desde: AGORA - 10 * MIN, acordaEm: new Date(2026, 9, 11, 19, 5).getTime() }, AGORA);
@@ -338,21 +232,5 @@ describe("reducer: o estado do dono que chega no frame trabalho.mudou", () => {
     const antes = estadoCom([], [dono({ fila: 1 })]);
     expect(aplicarFrame(antes, frame(undefined), AGORA).trabalhos).toBe(antes.trabalhos);
     expect(aplicarFrame(antes, frame({ agenteId: 3 }), AGORA).trabalhos).toBe(antes.trabalhos);
-  });
-});
-
-describe("CSS da linha do dono", () => {
-  const css = readFileSync(new URL("../../../web/interface.css", import.meta.url), "utf8");
-  const mobile = readFileSync(new URL("../../../web/mobile.css", import.meta.url), "utf8");
-  it("uma linha só que corta com reticências; aberta, o detalhe rola dentro dela", () => {
-    expect(css).toMatch(/\.ld-texto \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
-    expect(css).toMatch(/\.ld-detalhe \{[^}]*overflow-y: auto;/);
-    expect(css).toMatch(/\.ld-folha-cab, \.ld-fundo \{ display: none; \}/);
-  });
-  it("no celular o detalhe vira folha de baixo, com fundo que fecha e \"detalhes\" só a seta", () => {
-    const bloco = mobile.slice(mobile.indexOf("A linha do dono no celular"));
-    expect(bloco).toMatch(/\.linha-dono\.aberta \.ld-detalhe \{ position: fixed;[^}]*bottom: 0;/);
-    expect(bloco).toContain(".linha-dono.aberta .ld-fundo { display: block;");
-    expect(bloco).toContain(".ld-detalhes-txt { display: none; }");
   });
 });

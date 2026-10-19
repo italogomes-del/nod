@@ -184,8 +184,8 @@ function fimDoItem(f: FrenteNaFala): string {
   return texto ? `<span class="progresso-fim">${esc(texto)}</span>` : "";
 }
 
-/** Um item: o ícone, o título (abre a frente), o passo embaixo quando anda, e a hora ou o tempo. */
-function itemDaFrente(f: FrenteNaFala): string {
+/** Um item: o ícone, o título (abre a frente), o passo embaixo quando anda, e a hora ou o tempo. A pílula alargada usa o mesmo. */
+export function itemDaFrente(f: FrenteNaFala): string {
   const curto = tituloCurto(f.titulo);
   const sub = f.passo ? `<span class="progresso-passo">${esc(f.passo)}</span>` : f.estado === "parada" || f.estado === "falhou" || f.estado === "sem_noticia" ? `<span class="progresso-passo">${esc(ROTULO[f.estado])}</span>` : "";
   return `<li class="progresso-item ${f.estado}">${icone(f.estado)}<span class="progresso-corpo"><button type="button" class="progresso-titulo" data-act="abrir-trabalho" data-id="${esc(f.trabalhoId)}"${curto === f.titulo ? "" : ` title="${esc(f.titulo)}"`}>${esc(curto)}</button><span class="sr-only"> (${ROTULO[f.estado]})</span>${sub}</span>${fimDoItem(f)}</li>`;
@@ -196,19 +196,22 @@ function itemDaFrente(f: FrenteNaFala): string {
  * `data-disclosure` (a lista aberta sobrevive ao re-render) e a chave da linha `frentes` na telemetria (ADR-099, gatilho
  * "detalhe das frentes aberto em mais de 30%": no PR 8, a pílula alargada conta no mesmo tipo).
  */
-export function htmlProgresso(frentes: readonly FrenteNaFala[], p: { chave: string; agenteId: string }): string {
+export function htmlProgresso(frentes: readonly FrenteNaFala[], p: { chave: string; agenteId: string; memoria?: MemoriaNoProgresso | null }): string {
   const [unica] = frentes;
   if (!unica) return "";
+  // PR 8: `data-frentes` diz à rolagem de quais frentes este bloco fala — a pílula some quando ele está à vista.
+  const ids = esc(frentes.map((f) => f.trabalhoId).join(" "));
+  const memoria = p.memoria ? `<span class="progresso-memoria ${p.memoria.nivel}" role="img" aria-label="${esc(p.memoria.texto)}" title="${esc(p.memoria.texto)}"></span>` : "";
   if (frentes.length === 1) {
     const curto = tituloCurto(unica.titulo);
     const detalhe = unica.passo ?? (unica.terminouEm && unica.estado !== "sem_noticia" ? `${ROTULO[unica.estado]} às ${hora(unica.terminouEm)}` : ROTULO[unica.estado]);
-    return `<section class="progresso progresso-uma" aria-label="${esc(`Frente ${curto}: ${ROTULO[unica.estado]}`)}"><div class="progresso-item ${unica.estado}">${icone(unica.estado)}<span class="progresso-corpo progresso-em-linha"><button type="button" class="progresso-titulo" data-act="abrir-trabalho" data-id="${esc(unica.trabalhoId)}"${curto === unica.titulo ? "" : ` title="${esc(unica.titulo)}"`}>${esc(curto)}</button><span class="progresso-passo">${esc(detalhe)}</span></span>${unica.tempo ? `<span class="progresso-fim">${esc(unica.tempo)}</span>` : ""}</div></section>`;
+    return `<section class="progresso progresso-uma" data-frentes="${ids}" aria-label="${esc(`Frente ${curto}: ${ROTULO[unica.estado]}`)}"><div class="progresso-item ${unica.estado}">${icone(unica.estado)}<span class="progresso-corpo progresso-em-linha"><button type="button" class="progresso-titulo" data-act="abrir-trabalho" data-id="${esc(unica.trabalhoId)}"${curto === unica.titulo ? "" : ` title="${esc(unica.titulo)}"`}>${esc(curto)}</button><span class="progresso-passo">${esc(detalhe)}</span></span>${memoria}${unica.tempo ? `<span class="progresso-fim">${esc(unica.tempo)}</span>` : ""}</div></section>`;
   }
   const { principal, resto } = resumoDoProgresso(frentes);
   const barra = frentes.map((f) => `<span class="progresso-seg ${f.estado}"></span>`).join("");
-  const texto = `${esc(principal)}${resto.length ? `<span class="progresso-resto"> · ${esc(resto.join(" · "))}</span>` : ""}`;
+  const texto = `${esc(principal)}${memoria}${resto.length ? `<span class="progresso-resto"> · ${esc(resto.join(" · "))}</span>` : ""}`;
   const resumo = `<summary class="progresso-resumo" data-act="abrir-progresso" data-linha-tipo="frentes" data-linha-chave="${esc(`frentes:${p.chave}`)}" data-agente="${esc(p.agenteId)}"><span class="progresso-txt">${texto}</span><span class="progresso-ver">ver as ${frentes.length}</span><span class="progresso-ocultar">ocultar</span></summary>`;
-  return `<section class="progresso" aria-label="${esc(`Frentes: ${principal}`)}"><div class="progresso-barra" aria-hidden="true">${barra}</div><details class="progresso-det" data-disclosure="progresso-${esc(p.chave)}">${resumo}<ul class="progresso-lista">${frentes.map(itemDaFrente).join("")}</ul></details></section>`;
+  return `<section class="progresso" data-frentes="${ids}" aria-label="${esc(`Frentes: ${principal}`)}"><div class="progresso-barra" aria-hidden="true">${barra}</div><details class="progresso-det" data-disclosure="progresso-${esc(p.chave)}">${resumo}<ul class="progresso-lista">${frentes.map(itemDaFrente).join("")}</ul></details></section>`;
 }
 
 /** As aberturas da janela por id, uma vez por lista de mensagens (a tela pede a cada quadro). */
@@ -227,17 +230,27 @@ function aberturasDe(mensagens: readonly Mensagem[]): Map<string, Abertura> {
   return porId;
 }
 
+/**
+ * O ponto da memória do Mac no bloco (PR 8; ADR-114, decisão tomada 5): ao lado do número, com a frase no `title` e no nome
+ * acessível; o texto só na pílula alargada e na Atividade. Amarela e vermelha são ponto, nunca faixa nem texto âmbar.
+ */
+export type MemoriaNoProgresso = { texto: string; nivel: "amarela" | "vermelha" };
+
 /** O bloco da abertura `aberturaId` com o estado de agora; "" se ela não está na janela. */
-export function blocoDaAbertura(aberturaId: string, c: ConversaEstado, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">): string {
+export function blocoDaAbertura(aberturaId: string, c: ConversaEstado, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">, memoria: MemoriaNoProgresso | null = null): string {
   const a = aberturasDe(c.mensagens).get(aberturaId);
-  return a ? htmlProgresso(frentesNaFala(a, c.mensagens, estado, c.conversa.id), { chave: a.id, agenteId: c.conversa.agenteId ?? "" }) : "";
+  if (!a) return "";
+  const frentes = frentesNaFala(a, c.mensagens, estado, c.conversa.id);
+  // O ponto da memória só no bloco que ainda anda: o lote que terminou não tem o que o Mac apertado segure.
+  const anda = frentes.some((f) => f.estado === "rodando" || f.estado === "precisa" || f.estado === "esperando");
+  return htmlProgresso(frentes, { chave: a.id, agenteId: c.conversa.agenteId ?? "", memoria: anda ? memoria : null });
 }
 
 /**
  * Enche os lugares das falas com o bloco, numa string (`renderHistoricoDaTimeline`). Sem abertura na janela devolve os mesmos
- * blocos (a mesma referência); só o bloco da fala com lugar muda de objeto.
+ * blocos (a mesma referência); só o bloco da fala com lugar muda de objeto. `memoria` é o ponto do Mac (PR 8).
  */
-export function comProgressoNaFala<B extends { chave: string; html: string }>(blocos: B[], c: ConversaEstado, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">): B[] {
+export function comProgressoNaFala<B extends { chave: string; html: string }>(blocos: B[], c: ConversaEstado, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">, memoria: MemoriaNoProgresso | null = null): B[] {
   const aberturas = aberturasDe(c.mensagens);
   if (aberturas.size === 0) return blocos;
   let mudou = false;
@@ -249,7 +262,7 @@ export function comProgressoNaFala<B extends { chave: string; html: string }>(bl
       if (!html.includes(lugar)) continue;
       // A troca por função: com uma string, "$&", "$'" e "$`" de um título (escapado pelo HTML, não pelo replace) colariam
       // pedaços da fala no lugar do bloco (revisão do PR 398).
-      const cheio = `${lugar.slice(0, -"</div>".length)}${blocoDaAbertura(id, c, estado)}</div>`;
+      const cheio = `${lugar.slice(0, -"</div>".length)}${blocoDaAbertura(id, c, estado, memoria)}</div>`;
       html = html.replace(lugar, () => cheio);
     }
     if (html === b.html) return b;
@@ -275,7 +288,7 @@ export type LugarNaTela = {
  */
 export function criarProgressoNaTela(ativo: () => unknown = () => (globalThis as { document?: { activeElement: unknown } }).document?.activeElement ?? null): {
   achar(raiz: { querySelectorAll(seletor: string): Iterable<LugarNaTela> } | null): void;
-  desenhar(c: ConversaEstado | null, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">): number;
+  desenhar(c: ConversaEstado | null, estado: Pick<Estado, "trabalhos" | "conversas" | "trabalhoDetalhe" | "atividades" | "agora">, memoria?: MemoriaNoProgresso | null): number;
 } {
   let lugares: LugarNaTela[] = [];
   const desenhado = new WeakMap<LugarNaTela, string>();
@@ -283,12 +296,12 @@ export function criarProgressoNaTela(ativo: () => unknown = () => (globalThis as
     achar(raiz) {
       lugares = raiz ? [...raiz.querySelectorAll("[data-progresso]")] : [];
     },
-    desenhar(c, estado) {
+    desenhar(c, estado, memoria = null) {
       if (!c || lugares.length === 0) return 0;
       let trocados = 0;
       for (const lugar of lugares) {
         if (!lugar.isConnected) continue;
-        const html = blocoDaAbertura(lugar.dataset.progresso ?? "", c, estado);
+        const html = blocoDaAbertura(lugar.dataset.progresso ?? "", c, estado, memoria);
         if (desenhado.get(lugar) === html) continue;
         const aberta = lugar.querySelector("details")?.open === true;
         const foco = ativo() as { dataset?: { act?: string; id?: string } } | null;

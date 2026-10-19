@@ -107,6 +107,9 @@ describe("o bloco mora na fala que abriu as frentes", () => {
     // O marcador não sobra na tela.
     expect(blocos(c, e).some((b) => b.html.includes("<!--progresso:"))).toBe(false);
     expect(renderHistoricoDaTimeline(c, e)).toContain('<section class="progresso"');
+    // PR 8: o bloco diz de quais frentes fala; a rolagem o mede e a pílula some com ele à vista.
+    const ids = /<section class="progresso" data-frentes="([^"]*)"/.exec(b1)?.[1]?.split(" ").sort();
+    expect(ids).toHaveLength(5);
   });
 
   it("estados: a barra enche das prontas para as que rodam, e o resumo diz quais rodam (protótipo '3 de 5 prontas · w3 e w5 rodando')", () => {
@@ -255,7 +258,7 @@ describe("a frente da rede e a frente única", () => {
     ];
     const { e, c } = cenario(ms, lista([trabalho("wr", { titulo: "Migrar relatórios", origem: "rede", ultimoPasso: "convertendo o lote 2", iniciadoEm: AGORA - 8 * MIN })]));
     const p1 = doBloco(c, e, "p1");
-    expect(p1).toContain('<section class="progresso progresso-uma" aria-label="Frente Migrar relatórios: rodando">');
+    expect(p1).toContain('<section class="progresso progresso-uma" data-frentes="wr" aria-label="Frente Migrar relatórios: rodando">');
     // Embaixo do balão (fora dele), antes do fim do artigo.
     expect(p1.indexOf("</div>", p1.indexOf('class="bubble"'))).toBeLessThan(p1.indexOf('<section class="progresso'));
     expect(p1).toContain('<span class="progresso-passo">convertendo o lote 2</span>');
@@ -371,6 +374,22 @@ describe("o progresso na tela troca só o lugar", () => {
     expect(lugar.trocas).toBe(2);
   });
 
+  it("PR 8: o bloco trocado no lugar leva `data-frentes` (a rolagem o mede para a pílula) e o ponto da memória do Mac", () => {
+    const { e, c } = diaDoPrototipo();
+    const tela = criarProgressoNaTela(() => null);
+    const lugar = lugarFalso("fa");
+    tela.achar(raizCom(lugar));
+    expect(tela.desenhar(c, e)).toBe(1);
+    expect(lugar.innerHTML).toMatch(/^<section class="progresso" data-frentes="[^"]+"/);
+    expect(lugar.innerHTML).not.toContain("progresso-memoria");
+    // O ponto chega sem a frente andar: só o lugar é trocado, com o ponto ao lado do número.
+    const memoria = { texto: "Pouca memória no seu Mac · 2 trabalhos abertos", nivel: "amarela" as const };
+    expect(tela.desenhar(c, e, memoria)).toBe(1);
+    expect(lugar.innerHTML).toContain('<span class="progresso-memoria amarela" role="img" aria-label="Pouca memória no seu Mac · 2 trabalhos abertos"');
+    expect(tela.desenhar(c, e, memoria)).toBe(0);
+    expect(blocoDaAbertura("fa", c, e, memoria)).toBe(lugar.innerHTML);
+  });
+
   it("a lista aberta continua aberta e o foco no 'ver as 5' volta depois da troca", () => {
     const { e, c } = diaDoPrototipo();
     let foco: unknown = null;
@@ -403,6 +422,7 @@ describe("o progresso na tela troca só o lugar", () => {
     const regravar = main.slice(main.indexOf("function regravarTimeline("));
     expect(regravar.indexOf("progressoNaTela.achar(")).toBeGreaterThan(-1);
     expect(regravar.indexOf("progressoNaTela.achar(")).toBeLessThan(regravar.indexOf("contarLinhasMostradas()"));
-    expect(main).toMatch(/regravarTimeline\(corpo, partes, \{ cascaMuda, historicoMuda, aoVivoMuda \}\);\n.*\n\s*progressoNaTela\.desenhar\(/);
+    // PR 8: o bloco trocado é medido de novo (`rolagem.progressoTrocado`) quando o desenho troca algum lugar.
+    expect(main).toMatch(/regravarTimeline\(corpo, partes, \{ cascaMuda, historicoMuda, aoVivoMuda \}\);\n(?:\s*\/\/.*\n)*\s*(?:if \()?progressoNaTela\.desenhar\(/);
   });
 });

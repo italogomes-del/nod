@@ -178,26 +178,28 @@
   .linha-espera .linha-centro { max-width: 100%; }
 }
 
-/* A linha do dono no celular (ADR-099, parte 5): a linha cabe numa só (corta com reticências; "detalhes" vira só a seta) e o
-   detalhe abre numa folha de baixo para cima, por cima da conversa, com o fundo escurecido que fecha ao toque. */
+/* A pílula do bot no celular (chat limpo, PR 8): cabe em 390 px (o texto corta com reticências), alvo de 44 px; alargada,
+   vira folha de baixo para cima por cima da conversa, como a linha aberta de antes, com o fundo escurecido que fecha ao
+   toque. A folha sobe com `transform` (não há retângulo da pílula de onde abrir). */
 @media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
-  .linha-dono { margin: 6px 0; }
-  .ld-principal { min-height: 40px; padding-left: 12px; }
-  .ld-detalhes-txt { display: none; }
-  .ld-detalhes { min-width: 44px; justify-content: center; padding: 0 10px; }
-  .ld-memoria, .linha-dono.so-ponto .ld-memoria { width: 44px; min-height: 40px; }
+  .pf-fechada { height: 44px; max-width: calc(100% - 8px); }
+  .pf-memoria { width: 44px; height: 44px; margin: 0 0 0 -10px; }
+  .pf-moldura { position: fixed; z-index: 41; left: 0; right: 0; bottom: 0; }
+  .pf-painel { max-height: 82dvh; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); border: 0; border-radius: 18px 18px 0 0; clip-path: none; opacity: 1;
+    transform: translateY(100%); transition: transform .3s cubic-bezier(.4, 0, .2, 1); }
+  .pilula-frentes[data-estado="aberta"] .pf-painel { clip-path: none; transform: none; transition: transform .34s cubic-bezier(.2, .8, .2, 1); }
+  .pilula-frentes[data-estado="aberta"] .pf-fundo { display: block; position: fixed; inset: 0; z-index: 40; width: 100%; height: 100%; padding: 0; border: 0; background: var(--backdrop); }
+  .pf-cab { min-height: 36px; }
+  .pf-fechar { min-height: 36px; padding: 0 14px; }
+  .pf-lista .progresso-item, .pf-item { min-height: 40px; }
+  .pf-ver, .pf-parar { min-height: 40px; }
+  .stage.com-pilula-frentes > .timeline-wrap { padding-bottom: 78px; }
+  .stage.com-pilula-frentes .pilula-novas { bottom: 66px; }
   /* A Atividade no celular (a gaveta já é folha por cima da conversa): alvos de toque de 44 px. */
   .atv-filtro { min-height: 40px; padding: 8px 14px; }
   .atv-botao { min-height: 44px; }
   .atv-dia { min-height: 44px; }
-  .linha-dono.aberta .ld-detalhe { position: fixed; z-index: 41; left: 0; right: 0; bottom: 0; max-height: 82dvh; padding: 0 10px calc(14px + env(safe-area-inset-bottom));
-    border: 0; border-radius: 18px 18px 0 0; background: var(--surface); box-shadow: var(--shadow-pop); }
-  .linha-dono.aberta .ld-fundo { display: block; position: fixed; inset: 0; z-index: 40; width: 100%; height: 100%; padding: 0; border: 0; background: var(--backdrop); }
-  .linha-dono.aberta .ld-folha-cab { display: flex; position: sticky; top: 0; align-items: center; justify-content: space-between; min-height: 48px; padding: 0 2px 0 8px;
-    background: var(--surface); font-size: 15px; }
-  .ld-folha-fechar { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--ink-3); }
-  .ld-item { min-height: 40px; }
-  .ld-passo, .tb-frente-passo { display: none; }
+  .tb-frente-passo { display: none; }
   .tb-frentes { margin-left: 22px; }
   .tb-frente { min-height: 40px; }
 }

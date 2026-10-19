@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**), a pílula que se alarga no PR 8 (ver **Emenda do PR 8**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -310,11 +310,61 @@ ficava com ~215 px. O aviso de repetição do vigia, à vista embaixo da linha, 
 (`.atividade-vigia p b:first-child`, de 2026-10-06); agora só o título é bloco.
 
 **Fica para o PR 8**, com a pílula: o ponto da memória no bloco (hoje na linha do dono; os dois juntos seriam dois pontos),
-a região `aria-live` que diz "Hero w3 pronta" e a emenda da ADR-099 item 10.
+a região `aria-live` que diz "Hero w3 pronta" e a emenda da ADR-099 item 10 (feitos; ver a **Emenda do PR 8**).
 
 **Gatilho de reversão.** O de 30% da ADR-099, medido agora em "ver as N" (tipo `frentes`): aberto em mais de 30% das vezes em
 2 semanas, a lista volta aberta por padrão. Relatos de "não vejo o que o bot está fazendo" com o cartão ao vivo recolhido
 (3 em 14 dias, ADR-041): o passo de agora volta à vista na linha, ao lado de "está trabalhando".
+
+## Emenda do PR 8 (2026-10-18) — a pílula que se alarga
+
+Plano, Parte 4 · 4c; protótipo D4BE2-pilula-alarga; emenda o item 10 da ADR-099. A linha do dono acima do campo dá lugar à
+pílula do bot (`web/telas/pilula-do-bot.ts`, decisões puras em `web/lib/pilula.ts`, DOM em `web/lib/pilula-na-tela.ts`).
+
+1. **Fechada**, uma pílula clean centrada acima do campo, flutuando sobre a base da timeline (que ganha 70 px de espaço
+   embaixo só com ela à vista): o ponto (vivo com frente rodando, vazado só com espera ou fila), o texto e o resto em
+   cinza, e a seta. O texto prioriza as frentes: um lote, o título dele (`tituloDoLote` do PR 5, que o servidor manda em
+   cada frente do lote — "5 frentes de hero"; sem ele, o da frente sozinha ou "N frentes") e "3 de 5 prontas" (a frente sozinha diz o passo); vários lotes, "2 lotes · 4 de 7 prontas"; sem frentes, a espera ou a fila
+   pela prioridade da linha do dono. O estado de cada frente é o mesmo do bloco na fala (`frentesNaFala`): a pílula e a
+   fala nunca discordam. O total do lote é `lote.frentes`, que conta a frente que já saiu da lista.
+2. **Some quando a fala com o progresso está à vista**, no esquema da pílula da pergunta do #389: os lugares do bloco na
+   fala (`[data-progresso]`, do QA do PR 7) são procurados quando o histórico muda, e o bloco de agora dentro de cada um
+   (`.progresso[data-frentes]`, o filho do lugar) é medido com `getBoundingClientRect` no evento de rolagem que já existe
+   (`criarRolagem`, que avisa só quando o conjunto à vista muda); à vista = pelo menos 24 px do bloco dentro da janela.
+   Todo lote da pílula precisa ter o bloco à vista. Espera e fila a seguram à vista. Como `criarProgressoNaTela` troca o
+   bloco sem regravar a fala, a rolagem nunca guarda o bloco (ele sairia do documento a cada passo de uma frente): o render
+   mede de novo (`rolagem.progressoTrocado`) quando o desenho troca algum lugar, antes de a pílula decidir. O ponto da
+   memória (item 5) entra no bloco pelo mesmo desenho (`criarProgressoNaTela().desenhar(…, memoria)`).
+3. **Alargada** (o clique; `faixaTrabalhosAberta` guarda o estado, que sobrevive ao re-render da região): as frentes, as
+   seções "Esperando" e "Na fila", a frase da memória e o pé com "Ver na conversa ↑" (só com a fala na janela carregada) e
+   "Parar". O painel é absoluto, ancorado acima do campo, com `contain: layout paint`, desenhado no tamanho final; anima
+   `clip-path: inset(…)` saindo do retângulo da pílula (largura medida no clique, em `--pilula-w`) e `opacity`, e as linhas
+   entram uma depois da outra (o "entra" do protótipo). O esqueleto (botão e painel) nasce uma vez por bot e cada desenho
+   troca só o miolo que mudou: regravar o painel a cada passo cortaria a animação e tiraria o foco. Medido em 2026-10-18 no
+   Chrome headless sobre um banco efêmero: o `clip-path` vai do retângulo da pílula ao painel em ~0,42 s e volta em ~0,34 s;
+   com movimento reduzido, na hora. No celular, alargada vira folha de baixo para cima (`transform`), com o fundo que fecha.
+4. **Acessibilidade.** A pílula é `<button aria-expanded aria-controls>`; alargada, `role="region"` com nome ("Frentes de
+   Orquestrador de Sites"), foco no primeiro item; Esc e "fechar" devolvem o foco à pílula. Escondida, ela fica `inert` na
+   saída e `hidden` no fim (nunca só opacidade). Quando ela some (a fala entrou na vista) com o foco nela, aberta ou não, o
+   foco vai para o "ver as N" do bloco (ou o título da frente sozinha); aberta, ela fecha. A região viva única da conversa
+   (`#anuncio-pergunta`, a mesma das ações na fala) diz só quando uma frente do bot termina ("Hero w3 · Terminal retrô
+   pronta", "… parada", "… não terminou"), nunca a cada passo nem ao abrir a conversa. Alvo de 36 px (44 px no celular).
+5. **Memória:** o ponto da memória do Mac sai da linha do dono para o lado da pílula (botão com a frase no `title` e no nome
+   acessível, levando a Trabalhos, Este Mac ou Máquinas) e para o bloco de progresso que ainda anda, ao lado do número
+   (`role="img"` com a frase); a frase inteira só dentro da pílula alargada e na Atividade. O ponto continua amarelo ou
+   vermelho como no PR 2 (o plano dizia "ponto cinza"; mantida a cor do PR 2, que já estava em produção, sem faixa nem
+   texto âmbar).
+6. **"Esperando você" sai da pílula** (decisão tomada 2): a pergunta tem o cartão e a pílula "Nina perguntou algo". Os
+   atalhos que abriam a linha do dono quando a pergunta está fora da janela carregada abrem a pílula, se houver.
+7. **Telemetria:** a pílula com frentes conta "mostrada" quando aparece e "aberta" quando alarga, no tipo `frentes`, chave
+   `frentes:pilula:<lotes>` — o gatilho de 30% da ADR-099 soma "ver as N" e a pílula alargada.
+
+Saem `renderLinhaDoDono`, o detalhe da linha aberta e os passos de cada frente nele (`frenteAberta` no estado); o servidor
+sem o dono (anterior ao I10) continua com a faixa de tasks de antes. `scripts/carga-tela` não foi rodado nesta entrega.
+
+**Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não vi que o bot ainda estava trabalhando" com a fala fora da
+vista e a pílula escondida, ou de "a pílula cobre a conversa": a pílula volta a ficar sempre à vista, em fluxo, como a
+linha do dono.
 
 ## Gatilhos de reversão (PR 2)
 

@@ -159,6 +159,28 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 - **Gatilho:** a telemetria das linhas ganha o tipo `troca` (mostrada a cada troca desenhada, aberta quando a pessoa abre
   a troca), no mesmo gatilho de 30% da ADR-083.
 
+## Emenda (2026-10-18, ADR-114, chat limpo, PR 8) — item 10
+
+- **A linha centralizada de início e fim de frentes sai do chat** (PR 2: "Começou N frentes" e "N frentes terminaram"
+  viraram `anexo`) e **o progresso mora na fala que abriu as frentes** (PR 7): a barra com um segmento por frente e "3 de 5
+  prontas · … · ver as 5" dentro do balão.
+- **A linha acima do campo vira a pílula do bot que se alarga** (`web/telas/pilula-do-bot.ts`; protótipo D4BE2, escolha
+  "4B+4E"). Fechada, uma pílula centrada acima do campo: "● 5 frentes de hero  3 de 5 prontas" (o título do lote do PR 5,
+  senão "N frentes"; vários lotes, "2 lotes · 4 de 7 prontas"). Sem frentes, a espera com o ponto vazado ("Esperando o
+  deploy terminar · 2 min") ou a fila ("1 pedido na fila"), pela mesma prioridade de antes; com frentes, a espera e a fila
+  entram em contagem ao lado. O clique a alarga no lugar: as frentes (rodando primeiro, com o último passo e o tempo;
+  depois as prontas com a hora; separadas por lote quando há mais de um), "Esperando" e "Na fila" como na linha aberta, a
+  frase da memória do Mac, e no pé "Ver na conversa ↑" (rola até a fala e a realça) e "Parar" (a mesma confirmação do
+  Parar do campo, só com as frentes abertas da pílula).
+- **Some quando a fala com o progresso está à vista** e volta quando ela sai; espera e fila não têm fala-âncora e a seguram
+  à vista. Alargada, ela fecha sozinha quando a fala entra na vista, e o foco que estava nela vai para o "ver as N" do bloco.
+- **"Esperando você" sai da pílula**: a pergunta tem o cartão e a pílula "Nina perguntou algo" (#389). O texto "Esperando
+  você" segue na barra lateral e em Trabalhos, como antes.
+- Os passos de cada frente dentro da linha aberta (o clique que abria as etapas) saem: o título da frente abre a tela dela.
+- **Gatilho:** "a pessoa abrindo o detalhe das frentes em mais de 30% das vezes" passa a ser medido em "ver as N" e na
+  pílula alargada (telemetria das linhas, tipo `frentes`; a pílula conta "mostrada" quando aparece com frentes e "aberta"
+  quando alarga, chave `frentes:pilula:<lotes>`).
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é
@@ -193,7 +215,7 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
 
 - Mais de 10% das mensagens da pessoa esperando mais de 5 min na fila do dono em 2 semanas: reabrir uma faixa paralela para
   a pessoa.
-- A pessoa abrindo o detalhe das frentes em mais de 30% das vezes em 2 semanas: as frentes voltam a aparecer como itens
-  próprios.
+- A pessoa abrindo o detalhe das frentes em mais de 30% das vezes em 2 semanas (medido em "ver as N" e na pílula alargada,
+  tipo `frentes`, desde a emenda do PR 8): as frentes voltam a aparecer como itens próprios.
 - Mais de 20% das esperas acordando o dono sem fato novo: rever o `esperar_comando` e a orientação do prompt.
 - A conversa com a pessoa parada por falta de cota mesmo com a reserva, mais de uma vez por semana: rever a reserva de 1%.

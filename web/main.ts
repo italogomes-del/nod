@@ -55,6 +55,9 @@ import { atualizarGaveta } from "./lib/gaveta-render.ts";
 import { blocosMudariam, esquecerRegiao, regiao, regiaoMudaria, regiaoPorBlocos } from "./lib/regioes.ts";
 import { criarRascunhos } from "./lib/rascunhos.ts";
 import { criarRolagem } from "./lib/rolagem-na-tela.ts";
+import { anunciosDeFim, aoEsconder, aoSumir, SEM_PROGRESSO, teclaNaPilula, type ProgressoNaTela } from "./lib/pilula.ts";
+import { criarPilulaNaTela } from "./lib/pilula-na-tela.ts";
+import { memoriaNaPilula, pilulaNaConversa, type Pilula } from "./telas/pilula-do-bot.ts";
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
@@ -103,12 +106,12 @@ import type { Ligacao } from "../src/contracts/ligacao.ts";
 import type { MotivoAvaliacaoLigacao } from "./lib/api.ts";
 import { aceitaDoBot } from "./lib/capacidades.ts";
 import { mimeDe, motivoRecusa, POR_MENSAGEM, renderItens as renderItensAnexo, resumo as resumoAnexos, type Aceita, type ItemAnexo } from "./lib/anexos.ts";
-import type { TipoLinha } from "../src/contracts/trabalho.ts";
-import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId } from "./lib/trabalhos.ts";
+import type { EstadoTrabalho, TipoLinha } from "../src/contracts/trabalho.ts";
+import { aberto, abertosDoBot, leituraDoMac, listaPararTasks, telaAoFechar, telaDaTask, textoPararTasks, trabalhoPorId, trabalhosConhecidos } from "./lib/trabalhos.ts";
 import { criarTelemetria } from "./lib/telemetria-linhas.ts";
 import { chaveDaAtividade, criarVigiaDaAtividade, diaLocal, fusoLocal, type FiltroAtividade } from "./lib/atividade-do-bot.ts";
 import { blocosAoVivoDaTask, blocosDoHistoricoDaTask, htmlAcoesDaTask, renderIconeTrabalhos, renderTelaLinha, renderTodosOsTrabalhos, renderTopoTrabalho } from "./telas/trabalhos.ts";
-import { renderLinhaDoDono, renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
+import { renderTrabalhosPorBot, sinalDoBot } from "./telas/linha-do-dono.ts";
 import { temDonos } from "./lib/dono.ts";
 import { executarRotinaComConfirmacao } from "./lib/executar-rotina.ts";
 
@@ -140,8 +143,26 @@ function marcarDecidida(el: HTMLElement, id: string | undefined): void {
 // NOD-156: a chave de idempotência da fala nasce aqui, uma por fala, e sobrevive ao reenvio depois de uma falha.
 const envios = criarEnvios();
 const rascunhos = criarRascunhos(() => { try { return localStorage; } catch { return null; } });
+/**
+ * O progresso na fala que a timeline mostra agora (chat limpo, PR 8): medido pela rolagem; a pílula do bot some com ele à
+ * vista (web/lib/pilula.ts).
+ */
+let progressoDaFala: ProgressoNaTela = SEM_PROGRESSO;
 /** A conversa acompanha o fim e a pílula da base sobe às não lidas (definido em 2026-10-05, web/lib/rolagem-na-tela.ts). */
-const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !movimentoReduzido());
+const rolagem = criarRolagem(document.getElementById("timeline") as HTMLElement, document.getElementById("pilula-novas") as HTMLElement, () => !movimentoReduzido(), (p) => {
+  progressoDaFala = p;
+  desenharPilula();
+});
+/** A pílula do bot acima do campo (chat limpo, PR 8; web/telas/pilula-do-bot.ts): no lugar da linha do dono. */
+const pilula = criarPilulaNaTela(document.getElementById("faixa-trabalhos") as HTMLElement, document.querySelector(".stage") as HTMLElement, {
+  reduzido: movimentoReduzido,
+  agendar: (fn, ms) => window.setTimeout(fn, ms),
+  cancelar: (id) => window.clearTimeout(id),
+});
+/** A pílula desenhada por último (o clique conta na telemetria com a chave dela e o "Parar" para as frentes dela). */
+let pilulaAtual: { pilula: Pilula; telemetria: string | null } | null = null;
+/** O estado de cada frente do bot na última olhada (a região viva diz quando uma termina); null = conversa nova. */
+let frentesVistas: { conversaId: string; estados: Map<string, EstadoTrabalho> } | null = null;
 let reidratando = false;
 let ambienteBanco: AmbienteBancoDto | null = null;
 /**
@@ -1073,15 +1094,20 @@ function renderPrincipal(): void {
   document.getElementById("cabecalho")?.classList.toggle("cabecalho-pilula", t.tipo === "conversa");
   marcarPainelNaPilula();
   regiao("erro", erro);
-  // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
-  // ADR-099 (parte 5): virou a linha do dono — uma linha só, com o estado de maior prioridade; some com o bot livre.
-  regiao("faixa-trabalhos", t.tipo === "conversa" ? renderLinhaDoDono(estado, t.agenteId) : "");
   const cascaMuda = regiaoMudaria("timeline", corpo);
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
   const aoVivoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-ao-vivo", partes.aoVivo));
   if (historicoMuda || aoVivoMuda) regravarTimeline(corpo, partes, { cascaMuda, historicoMuda, aoVivoMuda });
-  // Chat limpo (PR 7; QA do PR 398): o progresso das frentes muda só o bloco dele, dentro da fala, sem regravá-la.
-  progressoNaTela.desenhar(conversaDaTela(estado), estado);
+  // Chat limpo (PR 7; QA do PR 398): o progresso das frentes muda só o bloco dele, dentro da fala, sem regravá-la. O bloco
+  // trocado é medido de novo antes da pílula (PR 8): ela some com o bloco à vista, e a frente nova do lote muda o bloco.
+  if (progressoNaTela.desenhar(conversaDaTela(estado), estado, memoriaNaFala()) > 0) rolagem.progressoTrocado();
+  // ADR-083 (#195): a faixa de Trabalhos fica colada em cima do campo, só na conversa e só com trabalho aberto do bot.
+  // ADR-099 (parte 5): virou a linha do dono; chat limpo (PR 8): virou a pílula que se alarga, que some com a fala à vista.
+  // Depois da timeline (revisão do PR 400): a medida do progresso na fala é a da timeline que acabou de ser desenhada
+  // (`rolagem.depoisDeDesenhar`). Antes dela, a conversa recém-aberta com a fala à vista usava a medida da tela anterior:
+  // a pílula nascia à vista, contava "mostrada" e escorregava para fora no mesmo quadro. O espaço que ela abre embaixo da
+  // timeline muda o tamanho da caixa, e o ResizeObserver da rolagem mantém no fim quem estava no fim.
+  desenharPilula();
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
     // ADR-095: a gravação é do campo que sai; o texto dela nunca cai no campo de outra conversa.
@@ -1128,6 +1154,12 @@ type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[
 
 /** O progresso das frentes nas falas (chat limpo, PR 7): os lugares são achados quando o histórico é regravado. */
 const progressoNaTela = criarProgressoNaTela();
+
+/** PR 8: o ponto da memória do Mac vai no bloco que ainda anda (com a pílula escondida, é ele que avisa). */
+function memoriaNaFala(): ReturnType<typeof memoriaNaPilula> {
+  const c = conversaDaTela(estado);
+  return c?.conversa.agenteId ? memoriaNaPilula(estado, c.conversa.agenteId, c.conversa.id) : null;
+}
 
 /**
  * A timeline de uma conversa em duas partes (definido em 2026-09-30, web/telas/conversa.ts): a casca fica e
@@ -1198,7 +1230,7 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   // O progresso das frentes entra nos lugares da fala antes de reabrir os <details> e de contar as linhas mostradas.
   if (muda.historicoMuda) {
     progressoNaTela.achar(partes ? document.getElementById("timeline-historico") : null);
-    progressoNaTela.desenhar(conversaDaTela(estado), estado);
+    progressoNaTela.desenhar(conversaDaTela(estado), estado, memoriaNaFala());
   }
   for (const resposta of respostas) {
     const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
@@ -2383,6 +2415,94 @@ function irAoQueEsperaVoce(decisaoId: string | null): void {
   levarAo(escolha.alvo, escolha.realcar);
 }
 
+/**
+ * A pílula do bot (chat limpo, PR 8; web/telas/pilula-do-bot.ts). Desenhada a cada render e quando o progresso na fala entra
+ * ou sai da vista (a rolagem avisa só quando muda). Aberta e com a fala entrando na vista, ela fecha sozinha; se o foco
+ * estava dentro, vai para o "ver as N" do bloco na fala (revisão de engenharia, item 17). A região viva diz quando uma
+ * frente do bot termina.
+ */
+function desenharPilula(): void {
+  const t = estado.tela;
+  if (t.tipo !== "conversa" || !estado.sessao) {
+    pilula.desenhar(null);
+    pilulaAtual = null;
+    frentesVistas = null;
+    return;
+  }
+  anunciarFrentesTerminadas(t.conversaId, t.agenteId);
+  const p = pilulaNaConversa(estado, t.agenteId, progressoDaFala);
+  if (p.tipo !== "pilula") {
+    if (p.tipo === "nada") {
+      const ao = aoSumir({ aberta: estado.faixaTrabalhosAberta === t.agenteId, focoDentro: pilula.focoDentro() });
+      if (ao.foco === "campo") document.getElementById("composer-texto")?.focus({ preventScroll: true });
+      if (ao.fechar) window.setTimeout(() => { if (estado.faixaTrabalhosAberta === t.agenteId && pilulaAtual === null) dispatch({ tipo: "faixa-trabalhos", agenteId: null }); }, 0);
+    }
+    pilula.desenhar(p.tipo === "legado" ? p : null);
+    pilulaAtual = null;
+    return;
+  }
+  let aberta = estado.faixaTrabalhosAberta === t.agenteId;
+  const ao = p.escondida ? aoEsconder({ aberta, focoDentro: pilula.focoDentro() }) : { fechar: false, foco: null };
+  if (ao.foco === "fala") focarProgressoNaFala(p.pilula);
+  if (ao.fechar) {
+    aberta = false;
+    // Fora do render: o estado guarda "fechada" para a próxima vez que a fala sair da vista.
+    window.setTimeout(() => { if (estado.faixaTrabalhosAberta === t.agenteId) dispatch({ tipo: "faixa-trabalhos", agenteId: null }); }, 0);
+  }
+  pilula.desenhar({ tipo: "pilula", partes: p.partes, aberta, escondida: p.escondida });
+  pilulaAtual = { pilula: p.pilula, telemetria: p.partes.telemetria };
+  // ADR-099 (gatilho de 30%): a pílula que fala de frentes conta como "mostrada" quando aparece, no tipo `frentes`.
+  if (!p.escondida && p.partes.telemetria) telemetria.mostrada({ tipo: "frentes", agenteId: t.agenteId, chaveLinha: p.partes.telemetria });
+}
+
+/** "Hero w3 pronta": só quando uma frente do bot da conversa à vista termina, nunca a cada passo (web/lib/pilula.ts). */
+function anunciarFrentesTerminadas(conversaId: string, agenteId: string): void {
+  const frentes = trabalhosConhecidos(estado, conversaId).filter((x) => x.agenteId === agenteId);
+  const { anuncios, estados } = anunciosDeFim(frentesVistas?.conversaId === conversaId ? frentesVistas.estados : null, frentes);
+  frentesVistas = { conversaId, estados };
+  if (anuncios.length) anunciar(anuncios.join(". "));
+}
+
+/** O bloco de progresso na fala de um dos grupos da pílula (o primeiro que a timeline tem), procurado só quando se pede. */
+function progressoDaPilula(p: Pilula, soAVista = false): HTMLElement | null {
+  const timeline = document.getElementById("timeline");
+  for (const g of p.grupos) {
+    for (const id of g.ids) {
+      if (soAVista && !progressoDaFala.aVista.has(id)) continue;
+      const el = timeline?.querySelector<HTMLElement>(`.progresso[data-frentes~="${CSS.escape(id)}"]`);
+      if (el) return el;
+    }
+  }
+  return null;
+}
+
+/** A pílula fechou sozinha com o foco dentro: o foco vai ao "ver as N" do bloco que entrou na vista (ou ao título da frente). */
+function focarProgressoNaFala(p: Pilula): void {
+  const bloco = progressoDaPilula(p, true);
+  bloco?.querySelector<HTMLElement>(".progresso-resumo, .progresso-titulo")?.focus({ preventScroll: true });
+}
+
+/** "Ver na conversa ↑": fecha a pílula, rola até a fala com o progresso e a realça (como o protótipo D4BE2). */
+function verPilulaNaConversa(): void {
+  const p = pilulaAtual?.pilula;
+  const bloco = p ? progressoDaPilula(p) : null;
+  if (!bloco) return;
+  if (estado.faixaTrabalhosAberta) dispatch({ tipo: "faixa-trabalhos", agenteId: null });
+  levarAo(bloco.closest<HTMLElement>(".bubble") ?? bloco);
+}
+
+/** "Parar" da pílula: a mesma lista do Parar do campo, só com as frentes abertas que a pílula mostra. */
+function pararPelaPilula(): void {
+  const p = pilulaAtual?.pilula;
+  if (!p || p.abertas.length === 0) return;
+  const frentes = p.abertas;
+  const parar = (): Promise<void> => agir(async () => {
+    await Promise.allSettled(frentes.map((x) => api!.pararTrabalho(x.id)));
+    dispatch({ tipo: "invalidar", quais: ["trabalhos", ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
+  });
+  pedirGestao(textoPararTasks(frentes, p.nome), `${listaPararTasks(frentes)}<p>O que já foi feito fica.</p>`, frentes.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
+}
+
 /** "Ver aprovação" (definido em 2026-10-03): da lista "N coisas esperam você" ao card do pedido na timeline. */
 function verDecisao(decisaoId: string): void {
   const id = CSS.escape(decisaoId);
@@ -3088,11 +3208,17 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const t = estado.tela;
     dispatch({ tipo: "faixa-trabalhos", agenteId: el.dataset.recolher === "1" || t.tipo !== "conversa" ? null : t.agenteId });
   },
-  // ADR-099 (parte 5): os passos de uma frente na linha do dono aberta, e as frentes de um bot na tela Trabalhos.
-  "frente-aberta": (el) => {
-    const id = el.dataset.id ?? null;
-    dispatch({ tipo: "frente-aberta", id: id && estado.frenteAberta !== id ? id : null });
+  // Chat limpo (PR 8): a pílula do bot alarga e fecha no lugar; alargar conta para o gatilho da ADR-099 (tipo `frentes`).
+  pilula: (el) => {
+    const t = estado.tela;
+    if (t.tipo !== "conversa") return;
+    const abrir = el.dataset.recolher !== "1" && estado.faixaTrabalhosAberta !== t.agenteId;
+    const chave = pilulaAtual?.telemetria;
+    if (abrir && chave) telemetria.aberta({ tipo: "frentes", agenteId: t.agenteId, chaveLinha: chave });
+    dispatch({ tipo: "faixa-trabalhos", agenteId: abrir ? t.agenteId : null });
   },
+  "pilula-ver-na-conversa": () => verPilulaNaConversa(),
+  "pilula-parar": () => pararPelaPilula(),
   "bot-trabalhos": (el) => {
     const id = el.dataset.agente ?? null;
     dispatch({ tipo: "bot-trabalhos", agenteId: id && estado.botAbertoEmTrabalhos !== id ? id : null });
@@ -3728,6 +3854,8 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && ditado.ativo() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); ditado.descartar(); return; }
   // Esc na ligação em tela cheia encolhe para a pílula; nunca desliga (definido em 2026-10-04).
   if (ev.key === "Escape" && telaLigacao.cheia() && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); telaLigacao.encolher(); return; }
+  // Chat limpo (PR 8): Esc dentro da pílula alargada fecha e devolve o foco a ela (web/lib/pilula-na-tela.ts).
+  if (teclaNaPilula(ev.key, estado.faixaTrabalhosAberta !== null) === "fechar" && (ev.target as HTMLElement).closest?.("#faixa-trabalhos")) { ev.preventDefault(); dispatch({ tipo: "faixa-trabalhos", agenteId: null }); return; }
   if (ev.key === "Escape" && estado.espaco && !(ev.target as HTMLElement).closest?.("dialog")) { ev.preventDefault(); fecharEspaco(); return; }
   // definido em 2026-09-25 (revisão do PR #68): Esc fecha a gaveta do app e o "+ Dar acesso" do painel.
   if (ev.key === "Escape" && estado.tela.tipo === "conectores" && estado.tela.gaveta) { ev.preventDefault(); void ACOES["fechar-gaveta"]?.(document.body); return; }

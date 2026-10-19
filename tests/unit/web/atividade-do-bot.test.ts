@@ -7,7 +7,9 @@ import { aplicarFrame, estadoInicial, invalidacoesDaTela, reduzir, type Estado }
 import { criarVigiaDaAtividade, diaLocal, diaSeguinte, fusoLocal, itensDoFiltro, JANELA_DA_ATIVIDADE_MS, rotuloDoDia } from "../../../web/lib/atividade-do-bot.ts";
 import { renderAtividade } from "../../../web/telas/atividade.ts";
 import { nivelDaGaveta, renderDetalhes } from "../../../web/telas/detalhes.ts";
-import { pontoDaMemoria, renderLinhaDoDono } from "../../../web/telas/linha-do-dono.ts";
+import { SEM_PROGRESSO } from "../../../web/lib/pilula.ts";
+import { memoriaNaPilula, pilulaNaConversa } from "../../../web/telas/pilula-do-bot.ts";
+import { htmlProgresso } from "../../../web/telas/progresso-na-fala.ts";
 
 /**
  * A Atividade do bot na gaveta (ADR-114, chat limpo, PR 2): a linha "Atividade · N hoje" em Atalhos, logo abaixo de
@@ -175,39 +177,39 @@ describe("o estado da Atividade (reducer)", () => {
   });
 });
 
-describe("o ponto da memória na linha do dono (decisão tomada 5)", () => {
+describe("o ponto da memória na pílula do bot (decisão tomada 5; PR 8)", () => {
   const msgLimpa = { id: "m", conversaId: C, destino: "chat" } as Mensagem;
   const conversa = (mensagens: Mensagem[]) => ({ [C]: { conversa: { id: C, tipo: "propria", agenteId: "ada" }, mensagens, turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [], fios: [], trabalhos: [], dono: null } }) as never;
-  const trabalhos = (pressao: "amarela" | "vermelha" | "verde") => ({ trabalhos: [{ id: "w", agenteId: "ada", conversaId: C, estado: "rodando", criadoEm: AGORA } as TrabalhoDto], pressao, memoriaTotalMb: null });
+  const trabalhos = (pressao: "amarela" | "vermelha" | "verde") => ({ trabalhos: [{ id: "w", agenteId: "ada", conversaId: C, titulo: "Relatório", estado: "rodando", criadoEm: AGORA } as TrabalhoDto], pressao, memoriaTotalMb: null });
 
-  it("na conversa limpa, com trabalho aberto: um ponto com a frase no title e no nome acessível, levando a Trabalhos", () => {
+  it("na conversa limpa, com trabalho aberto: a frase e para onde leva (Trabalhos)", () => {
     const e = base({ conversas: conversa([msgLimpa]), trabalhos: trabalhos("amarela"), pressao: "amarela" });
-    const p = pontoDaMemoria(e, "ada", C);
-    expect(p?.texto).toBe("Pouca memória no seu Mac · 1 trabalho aberto");
-    expect(p?.html).toContain('class="ld-memoria amarela" data-act="navegar" data-tela="trabalhos" title="Pouca memória no seu Mac · 1 trabalho aberto" aria-label="Pouca memória no seu Mac · 1 trabalho aberto"');
-    expect(p?.html).not.toContain("Pouca memória no seu Mac</");
-    const vermelha = pontoDaMemoria(base({ conversas: conversa([msgLimpa]), trabalhos: trabalhos("vermelha"), pressao: "vermelha" }), "ada", C);
-    expect(vermelha?.html).toContain("ld-memoria vermelha");
+    expect(memoriaNaPilula(e, "ada", C)).toEqual({ texto: "Pouca memória no seu Mac · 1 trabalho aberto", nivel: "amarela", alvo: 'data-act="navegar" data-tela="trabalhos"' });
+    expect(memoriaNaPilula(base({ conversas: conversa([msgLimpa]), trabalhos: trabalhos("vermelha"), pressao: "vermelha" }), "ada", C)?.nivel).toBe("vermelha");
   });
 
   it("sem pressão, sem trabalho aberto ou na conversa sem destino (servidor de antes): nada", () => {
-    expect(pontoDaMemoria(base({ conversas: conversa([msgLimpa]), trabalhos: trabalhos("verde"), pressao: "verde" }), "ada", C)).toBeNull();
-    expect(pontoDaMemoria(base({ conversas: conversa([msgLimpa]), trabalhos: { trabalhos: [], pressao: "amarela", memoriaTotalMb: null }, pressao: "amarela" }), "ada", C)).toBeNull();
-    expect(pontoDaMemoria(base({ conversas: conversa([{ id: "m", conversaId: C } as Mensagem]), trabalhos: trabalhos("amarela"), pressao: "amarela" }), "ada", C)).toBeNull();
+    expect(memoriaNaPilula(base({ conversas: conversa([msgLimpa]), trabalhos: trabalhos("verde"), pressao: "verde" }), "ada", C)).toBeNull();
+    expect(memoriaNaPilula(base({ conversas: conversa([msgLimpa]), trabalhos: { trabalhos: [], pressao: "amarela", memoriaTotalMb: null }, pressao: "amarela" }), "ada", C)).toBeNull();
+    expect(memoriaNaPilula(base({ conversas: conversa([{ id: "m", conversaId: C } as Mensagem]), trabalhos: trabalhos("amarela"), pressao: "amarela" }), "ada", C)).toBeNull();
   });
 
-  it("o bot sem linha do dono ainda mostra o ponto, numa linha só com ele", () => {
+  it("na pílula: um ponto ao lado dela, com a frase no title e no nome acessível; a frase inteira só dentro da alargada", () => {
     const livre = { agenteId: "ada", principal: "livre", frentes: 0, conversaTrabalhando: false, esperandoVoce: 0, esperando: 0, fila: 0, motivoEspera: null, desde: null };
     const e = base({ conversas: conversa([msgLimpa]), trabalhos: { ...trabalhos("amarela"), donos: [{ estado: livre, esperas: [], fila: [] }] } as never, pressao: "amarela" });
-    const html = renderLinhaDoDono(e, "ada");
-    expect(html).toContain('class="linha-dono so-ponto" aria-label="Pouca memória no seu Mac · 1 trabalho aberto"');
-    expect(html).toContain("ld-memoria amarela");
-    // Com a linha do dono (uma frente trabalhando), o ponto entra nela, antes de "detalhes".
-    const comFrente = base({ conversas: conversa([msgLimpa]), trabalhos: { ...trabalhos("amarela"), donos: [{ estado: { ...livre, principal: "trabalhando", frentes: 1 }, esperas: [], fila: [] }] } as never, pressao: "amarela" });
-    const linha = renderLinhaDoDono(comFrente, "ada");
-    expect(linha).not.toContain("so-ponto");
-    expect(linha.indexOf("ld-memoria")).toBeLessThan(linha.indexOf("ld-detalhes"));
-    expect(linha.indexOf("ld-memoria")).toBeGreaterThan(-1);
+    const p = pilulaNaConversa(e, "ada", SEM_PROGRESSO);
+    if (p.tipo !== "pilula") throw new Error("sem pílula");
+    expect(p.partes.memoria).toContain('class="pf-memoria amarela" data-act="navegar" data-tela="trabalhos" title="Pouca memória no seu Mac · 1 trabalho aberto" aria-label="Pouca memória no seu Mac · 1 trabalho aberto"');
+    expect(p.partes.memoria).not.toContain("Pouca memória no seu Mac</");
+    expect(p.partes.botao).not.toContain("memória");
+    expect(p.partes.corpo).toContain('class="pf-memoria-linha amarela" data-act="navegar" data-tela="trabalhos"><span class="pf-memoria-ponto" aria-hidden="true"></span>Pouca memória no seu Mac · 1 trabalho aberto</button>');
+  });
+
+  it("no bloco de progresso na fala: o ponto ao lado do número, só no bloco que ainda anda", () => {
+    const frentes = [{ trabalhoId: "w", titulo: "Relatório", estado: "rodando" as const, passo: "lendo", tempo: "3 min", terminouEm: null }, { trabalhoId: "w2", titulo: "Resumo", estado: "pronta" as const, passo: null, tempo: null, terminouEm: AGORA }];
+    const html = htmlProgresso(frentes, { chave: "a1", agenteId: "ada", memoria: { texto: "Pouca memória no seu Mac · 1 trabalho aberto", nivel: "amarela" } });
+    expect(html).toContain('1 de 2 prontas<span class="progresso-memoria amarela" role="img" aria-label="Pouca memória no seu Mac · 1 trabalho aberto" title="Pouca memória no seu Mac · 1 trabalho aberto"></span>');
+    expect(htmlProgresso(frentes, { chave: "a1", agenteId: "ada" })).not.toContain("progresso-memoria");
   });
 });
 

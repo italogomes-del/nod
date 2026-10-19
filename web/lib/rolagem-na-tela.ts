@@ -1,3 +1,4 @@
+import { chaveDoProgresso, progressoNaTela, SEM_PROGRESSO, type ProgressoNaTela } from "./pilula.ts";
 import { depoisDeRolar, distanciaDoFim, permanenciaDaLinha, pilulaDaPergunta, pilulaDasNovas, type LinhaNaJanela, type Medida, type Permanencia, type PerguntaNaJanela } from "./rolagem.ts";
 
 /**
@@ -18,10 +19,18 @@ export type Rolagem = {
   irParaNovas(): void;
   /** A pessoa já viu a linha "Novas" que entrou acima desta mensagem? */
   jaViu(mensagemId: string): boolean;
+  /**
+   * O progresso na fala trocou de bloco sem regravar a timeline (`criarProgressoNaTela`, PR 7): mede de novo, para a pílula
+   * do bot (PR 8) decidir com o bloco de agora — uma frente nova no lote muda o `data-frentes` sem rolagem nenhuma.
+   */
+  progressoTrocado(): void;
 };
 
-/** `caixa` é a região que rola (#timeline); `lugarDaPilula`, logo acima do campo. */
-export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, suave: () => boolean): Rolagem {
+/**
+ * `caixa` é a região que rola (#timeline); `lugarDaPilula`, logo acima do campo. `aoMudarProgresso` (chat limpo, PR 8) ouve
+ * o progresso na fala entrando e saindo da vista: a pílula do bot some com ele à vista.
+ */
+export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, suave: () => boolean, aoMudarProgresso: (p: ProgressoNaTela) => void = () => undefined): Rolagem {
   let conversa: string | null = null;
   let estado = { colada: true, topoAntes: 0 };
   /** A linha "Novas" (o data-novas dela) que já ficou na janela o bastante nesta visita. */
@@ -34,6 +43,11 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
   let linha: HTMLElement | null = null;
   let cartao: HTMLElement | null = null;
   let vazia = false;
+  // Os lugares do progresso na fala (`[data-progresso]`, PR 8), procurados quando o histórico muda, como a linha "Novas" e o
+  // cartão da pergunta. O lugar fica; o bloco dentro dele é trocado sem regravar a fala (`criarProgressoNaTela`, QA do PR
+  // 398), então a medida lê o bloco de agora pelo lugar (o filho, sem procurar), nunca um nó guardado que já saiu.
+  let lugaresDoProgresso: HTMLElement[] = [];
+  let chaveProgresso = chaveDoProgresso(SEM_PROGRESSO);
 
   const medida = (): Medida => ({ topo: caixa.scrollTop, altura: caixa.scrollHeight, janela: caixa.clientHeight });
 
@@ -62,7 +76,30 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
     return { decisaoId: cartao.dataset.cartaoPergunta ?? "", nome: cartao.dataset.nome ?? "O bot", posicao };
   }
 
+  /** O bloco que o lugar mostra agora (`.progresso[data-frentes]`, o filho dele); null com o lugar vazio. */
+  function blocoNoLugar(lugar: HTMLElement): HTMLElement | null {
+    const el = lugar.isConnected ? lugar.firstElementChild : null;
+    return el instanceof HTMLElement && el.matches(".progresso[data-frentes]") ? el : null;
+  }
+
+  /** Mede os blocos de progresso (poucos, nos lugares achados antes) e avisa só quando o que está à vista mudou. */
+  function medirProgresso(): void {
+    const c = caixa.getBoundingClientRect();
+    const medidas = conversa ? lugaresDoProgresso.flatMap((lugar) => {
+      const el = blocoNoLugar(lugar);
+      if (!el) return [];
+      const r = el.getBoundingClientRect();
+      return [{ ids: (el.dataset.frentes ?? "").split(" ").filter(Boolean), topo: r.top, base: r.bottom }];
+    }) : [];
+    const p = progressoNaTela(medidas, { topo: c.top, base: c.bottom });
+    const chave = chaveDoProgresso(p);
+    if (chave === chaveProgresso) return;
+    chaveProgresso = chave;
+    aoMudarProgresso(p);
+  }
+
   function atualizarPilula(): void {
+    medirProgresso();
     // A linha "Novas" é medida sempre (é a medida que a dá por vista); a pílula da pergunta ganha da das novas.
     const novas = conversa ? pilulaDasNovas(linhaNaJanela()) : "";
     const html = conversa ? pilulaDaPergunta(perguntaNaJanela()) || novas : "";
@@ -98,6 +135,7 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
       if (outra || historicoMudou) {
         linha = caixa.querySelector<HTMLElement>(".linha-novas");
         cartao = [...caixa.querySelectorAll<HTMLElement>(".cartao-pergunta.aberta")].at(-1) ?? null;
+        lugaresDoProgresso = [...caixa.querySelectorAll<HTMLElement>("[data-progresso]")];
         const eraVazia = !outra && vazia;
         vazia = caixa.querySelector(".welcome-options") !== null;
         // A conversa vazia abre nas sugestões, no alto, e não acompanha o fim: quem rola até a opção D e começa a
@@ -141,6 +179,9 @@ export function criarRolagem(caixa: HTMLElement, lugarDaPilula: HTMLElement, sua
     },
     jaViu(mensagemId) {
       return linhaVista === mensagemId;
+    },
+    progressoTrocado() {
+      medirProgresso();
     },
   };
 }

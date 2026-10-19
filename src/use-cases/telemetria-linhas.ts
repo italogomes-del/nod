@@ -16,7 +16,7 @@ export const JANELA_TAXA_MS = 14 * 86_400_000;
 const TIPOS: readonly TipoLinha[] = ["rotina", "bots", "task", "atividade", "troca", "frentes"];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A chave é da web (ids e números juntos por ":"), nunca texto da conversa: curta e fechada. */
-const CHAVE_LINHA = /^[A-Za-z0-9:_-]{1,200}$/;
+export const CHAVE_LINHA = /^[A-Za-z0-9:_-]{1,200}$/;
 
 function validar(v: unknown): EventoLinha {
   const o = typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};

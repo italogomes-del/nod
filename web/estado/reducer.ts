@@ -338,14 +338,10 @@ export type Estado = {
    * O bot cuja faixa de Trabalhos a pessoa abriu nesta visita à conversa; null = pílula. revisto em 2026-10-09 (pedido
    * do Marlon: "o default na UI deve ser a pílula, ela é sempre muito mais sutil"): a faixa nasce recolhida sempre, abre
    * só no clique e fica aberta enquanto a pessoa está na conversa (ida e volta pela tela da task inclusive) — antes era
-   * uma preferência guardada em `PUT preferencias`, e o padrão era aberta. Ver `faixaAbertaAoNavegar`.
+   * uma preferência guardada em `PUT preferencias`, e o padrão era aberta. Ver `faixaAbertaAoNavegar`. Chat limpo (PR 8,
+   * 2026-10-18): é o estado da pílula do bot alargada (web/telas/pilula-do-bot.ts), que sobrevive ao re-render da região.
    */
   faixaTrabalhosAberta: string | null;
-  /**
-   * definido em 2026-10-12 (ADR-099, parte 5): a frente aberta (os passos dela) dentro da linha do dono aberta, acima do
-   * campo; null = nenhuma. Só a tela: some ao navegar para outra conversa.
-   */
-  frenteAberta: string | null;
   /** definido em 2026-10-12 (ADR-099, parte 5): o bot aberto na tela Trabalhos (as frentes dele embaixo da linha). */
   botAbertoEmTrabalhos: string | null;
   /** ADR-085: quanto do Mac os bots podem usar (Seu espaço › Este Mac; `PUT preferencias`). */
@@ -439,8 +435,6 @@ export type Acao =
   | { tipo: "trabalho-sumiu"; id: string }
   /** Abre (o id do bot) ou recolhe (null) a faixa de Trabalhos da conversa. */
   | { tipo: "faixa-trabalhos"; agenteId: string | null }
-  /** ADR-099 (parte 5): abre (o id) ou fecha (null) os passos de uma frente na linha do dono aberta. */
-  | { tipo: "frente-aberta"; id: string | null }
   /** ADR-099 (parte 5): abre (o id do bot) ou fecha (null) as frentes de um bot na tela Trabalhos. */
   | { tipo: "bot-trabalhos"; agenteId: string | null }
   | { tipo: "uso-do-mac"; uso: UsoDoMac }
@@ -514,7 +508,6 @@ export const estadoInicial: Estado = {
   trabalhoDetalhe: {},
   pressao: null,
   faixaTrabalhosAberta: null,
-  frenteAberta: null,
   botAbertoEmTrabalhos: null,
   usoDoMac: "equilibrado",
   experimentos: { calibracao: false, memoriaLonga: false, whatsapp: false },
@@ -1206,9 +1199,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return resolverInicio({ ...estado, tela: t.voltar, invalidacoes: estado.invalidacoes.filter((q) => q !== `trabalho:${acao.id}`) });
     }
     case "faixa-trabalhos":
-      return estado.faixaTrabalhosAberta === acao.agenteId ? estado : { ...estado, faixaTrabalhosAberta: acao.agenteId, frenteAberta: acao.agenteId ? estado.frenteAberta : null };
-    case "frente-aberta":
-      return estado.frenteAberta === acao.id ? estado : { ...estado, frenteAberta: acao.id };
+      return estado.faixaTrabalhosAberta === acao.agenteId ? estado : { ...estado, faixaTrabalhosAberta: acao.agenteId };
     case "bot-trabalhos":
       return estado.botAbertoEmTrabalhos === acao.agenteId ? estado : { ...estado, botAbertoEmTrabalhos: acao.agenteId };
     case "uso-do-mac":
