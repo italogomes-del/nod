@@ -185,6 +185,31 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(c.chamadas.map((x) => x.tool)).toEqual(["enviar", "enviar"]);
   });
 
+  it("modos de aprovação, PR 1: a escrita direta que RODA conta o gatilho (via chamada); a que volta com 'peça aprovação' conta no pedir_aprovacao", async () => {
+    const saida = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const c = await cenario();
+      await c.deps.repos.concessoes.conceder({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", mensagemId: c.consentimentoId });
+      await c.deps.repos.permissoesPermanentes.criar({ agenteId: c.agenteId, conectorId: c.conectorId, capacidade: "enviar", itemOrigemId: "i", mensagemId: c.consentimentoId, regraVersao: 1 });
+      const medidas = () => saida.mock.calls.map((x) => String(x[0])).filter((l) => l.includes("\"revisor_seria_chamado\"")).map((l) => JSON.parse(l) as Record<string, unknown>);
+      // Turno limpo: o envio roda pela regra da pessoa e não teria revisor.
+      expect((await c.chamar("exemplo__enviar", { para: "segredo@fora" })).data).toMatchObject({ ok: true });
+      expect(medidas()).toEqual([]);
+      // A chamada marcou o turno: no manual, a próxima volta com "peça aprovação" e não conta aqui.
+      expect((await c.chamar("exemplo__enviar", { para: "segredo@fora" })).data).toMatchObject({ ok: false });
+      expect(medidas()).toEqual([]);
+      await c.deps.repos.agentes.definirModoAprovacao(c.agenteId, "automatico");
+      // Revisão do PR #402: a chamada recusada pelo schema não roda e não conta (a corrigida contaria de novo).
+      expect((await c.chamar("exemplo__enviar", { para: 42 })).data).toMatchObject({ ok: false });
+      expect(medidas()).toEqual([]);
+      expect((await c.chamar("exemplo__enviar", { para: "segredo@fora" })).data).toMatchObject({ ok: true });
+      expect(medidas()).toEqual([expect.objectContaining({ gatilho: "envio_apos_fora", origem: "app", via: "chamada", modo: "automatico", contaminado: true, contaminado_conversa: true })]);
+      expect(saida.mock.calls.map((x) => String(x[0])).join("\n")).not.toContain("segredo@fora");
+    } finally {
+      saida.mockRestore();
+    }
+  });
+
   it("ADR-066: merge e aprovar PR não têm mais negação direta — no manual pedem a pessoa até com 'Sempre permitir' (nunca permanente); no automático rodam na conversa e numa rotina (merge de PR não é 'apagar'; mesclar registros continua sendo)", async () => {
     const montar = async (capacidade: string, modoTurno: PlanoTurno["modoTurno"]) => {
       const c = await cenario();

@@ -6,13 +6,14 @@ import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
-import { acaoArriscadaNoApp, decidirLote, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirLote, envioParaForaNoApp, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
 import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens, type DesfechoExecutado, type ItemAExecutar } from "./decidir.ts";
+import { medirRevisao } from "./medir-revisao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -77,6 +78,8 @@ const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPe
   const conectorIdPorIdx: (string | null)[] = [];
   // ADR-059: a capacidade de destino é arriscada (apagar, merge, aprovar PR)? Lido do catálogo do CONECTOR.
   const arriscadaPorIdx: boolean[] = [];
+  // PR 1 dos modos de aprovação (medir antes): a escrita que manda algo para fora (envioParaForaNoApp).
+  const envioPorIdx: boolean[] = [];
   let concessoes: Concessao[] | undefined;
   // definido em 2026-09-30 (ADR-062): argumentos conferidos contra o schema do conector ANTES do card. Sem isso, um
   // item sem campo obrigatório virava card, falhava depois do clique e o bot pedia de novo igual (o Milton teve 6
@@ -94,6 +97,7 @@ const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPe
       propostas.push({ texto: item.texto, destino: item.destino, origemSensivel: false });
       conectorIdPorIdx.push(null);
       arriscadaPorIdx.push(false);
+      envioPorIdx.push(false);
       continue;
     }
     const conector = await deps.repos.conectores.buscarPorSlug(item.destino.conector);
@@ -125,6 +129,7 @@ const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPe
     });
     conectorIdPorIdx.push(conector.id);
     arriscadaPorIdx.push(acaoArriscadaNoApp(capacidade));
+    envioPorIdx.push(envioParaForaNoApp(capacidade));
   }
 
   if (errosDeArgs.length > 0) return { saida: { data: { estado: "recusada", erros: errosDeArgs, instrucao: "corrija os argumentos e chame pedir_aprovacao de novo" }, events: [] } };
@@ -136,6 +141,11 @@ const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPe
   const plano = planoDoTurno ? { ...planoDoTurno, semprePermitir: await semprePermitirVivo(deps, input.agenteId, planoDoTurno) } : null;
   // ADR-059: o modo ATUAL do agente, não o do plano — trocar para mais restrito vale já na próxima ação.
   const modo = plano ? (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual" : "manual";
+  if (input.plano) {
+    // O lote vai ao revisor uma vez só (lote misto pergunta tudo, numa revisão só): arriscado se algum item é, senão envio.
+    const candidatos = arriscadaPorIdx.filter((a, idx) => a || envioPorIdx[idx] === true).length;
+    await medirRevisao(deps, input.plano, modo, { origem: "app", via: "pedido", arriscada: arriscadaPorIdx.some(Boolean), credencial: false, envioParaFora: envioPorIdx.some(Boolean), contaminado: contaminado || input.plano.confiancaEntrada !== "confiavel", itens: candidatos });
+  }
   const { automatico, porItem } = decidirLote(propostas.map((p, idx) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel, modo, arriscada: arriscadaPorIdx[idx] === true })));
 
   const decisao = await deps.repos.decisoes.criar({

@@ -15,7 +15,7 @@ import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
 import { LEASE_MS } from "../shared/constantes.ts";
-import type { Conn, Escopo } from "../shared/types.ts";
+import type { Conn, Escopo, Tx } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
 import { data, dataOuNull, ms, msOuNull } from "./conversao.ts";
 
@@ -678,6 +678,31 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
 
     async contaminado(id: string): Promise<boolean> {
       const [l] = await conn<{ sim: boolean }[]>`select contaminado_em is not null as sim from turnos where tenant_id = ${escopo.tenantId} and id = ${id}`;
+      return l?.sim === true;
+    },
+
+    /**
+     * definido em 2026-10-18 (plano dos modos de aprovação, revisão de engenharia, item 11): algum turno da conversa leu
+     * conteúdo de fora na janela (a marca da 0033) ou entrou não confiável dentro dela. A sessão do CLI carrega o e-mail
+     * lido no turno anterior, e a marca do turno não vê isso. Só flags: nenhum texto de mensagem é lido. O corte em
+     * `criado_em` (duas janelas) deixa a consulta no índice `turnos_por_conversa`; um turno aberto há mais de duas
+     * janelas não conta.
+     *
+     * Revisão do PR #402: roda num SAVEPOINT próprio, emitida pelo sql DELE. Quem chama é a medição do PR 1, que só
+     * observa: se a consulta falha (statement_timeout), só o savepoint volta. Emitida pelo `conn` da transação, o
+     * postgres.js guarda o erro no escopo de fora mesmo com o catch de quem chama, e o COMMIT do caso de uso vira
+     * ROLLBACK (o comando aprovado perde a trilha; o card do manual some).
+     */
+    async conversaLeuDeFora(conversaId: string, p: { agora: number; janelaMs: number }): Promise<boolean> {
+      const desde = data(p.agora - p.janelaMs);
+      const consulta = (c: Conn) => c<{ sim: boolean }[]>`
+        select exists (
+          select 1 from turnos
+          where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and criado_em >= ${data(p.agora - 2 * p.janelaMs)}
+            and (contaminado_em >= ${desde} or (entrada_confianca <> 'confiavel' and criado_em >= ${desde}))
+        ) as sim`;
+      const comSavepoint = (conn as Partial<Tx>).savepoint;
+      const [l] = typeof comSavepoint === "function" ? await (conn as Tx).savepoint((s) => consulta(s)) : await consulta(conn);
       return l?.sim === true;
     },
 

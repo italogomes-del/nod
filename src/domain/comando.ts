@@ -267,6 +267,116 @@ export function comandoArriscado(comando: string): string | null {
   return null;
 }
 
+/**
+ * Programas que só embrulham o comando seguinte: `sudo curl …` manda o mesmo que `curl …`. O que vier depois deles com
+ * hífen, com `=` ou só com dígitos (`timeout 30`, `nice -n 5`, `env A=1`) é argumento do embrulho, não o programa.
+ */
+const EMBRULHOS = new Set(["sudo", "doas", "env", "time", "nohup", "command", "exec", "xargs", "nice", "timeout", "caffeinate"]);
+
+const CURL_MANDA = /^(--data(-raw|-binary|-urlencode|-ascii)?|--json|--form(-string)?|--upload-file)(=|$)|^-[a-zA-Z]*[dFT]/;
+const METODO_QUE_MANDA = /^(POST|PUT|PATCH)$/i;
+/** `host:caminho`, `usuario@host:caminho`, `host::modulo` ou `rsync://` — o destino é outra máquina. */
+const REMOTO = /^(?:[^@/\s:]+@)?[^/\s:]+::?|^rsync:\/\//;
+
+/** O programa de um segmento (sem os embrulhos) e os argumentos dele. */
+function programaDoSegmento(palavras: readonly string[]): { programa: string; args: readonly string[] } | null {
+  let i = 0;
+  while (i < palavras.length) {
+    const p = palavras[i]!.replace(/^[({]+/, "");
+    const base = p.slice(p.lastIndexOf("/") + 1);
+    if (EMBRULHOS.has(base) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(p) || (i > 0 && (/^-/.test(p) || /^\d+[smhd]?$/.test(p)))) { i++; continue; }
+    return base === "" ? null : { programa: base, args: palavras.slice(i + 1) };
+  }
+  return null;
+}
+
+/** Shells que rodam o texto de `-c` (e o `eval`): `bash -c "curl -d @x …"` manda o mesmo que o `curl` sozinho. */
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+/** Quantos `bash -c` dentro de `bash -c` são abertos; cada nível relê só o texto de dentro (linear por nível). */
+const NIVEIS_DE_SHELL = 3;
+
+/** `-c`, `-lc`, `-ec`: a opção curta que diz "o próximo argumento é o script". Sem regex com dois `*` (volta atrás). */
+function opcaoDeScript(a: string): boolean {
+  return a.length > 1 && a[0] === "-" && a[1] !== "-" && a.includes("c") && /^-[a-zA-Z]+$/.test(a);
+}
+
+function segmentoEnvia(palavras: readonly string[], nivel: number): boolean {
+  const s = programaDoSegmento(palavras);
+  if (!s) return false;
+  const { programa, args } = s;
+  if (SHELLS.has(programa) || programa === "eval") {
+    // Revisão do PR #402: sem isto, `bash -c 'curl -d @clientes.csv …'` passava como "não manda".
+    if (nivel >= NIVEIS_DE_SHELL) return false;
+    const k = programa === "eval" ? -1 : args.findIndex(opcaoDeScript);
+    if (programa !== "eval" && k < 0) return false;
+    return enviaNoNivel(args.slice(k + 1).join(" "), nivel + 1);
+  }
+  const fixos = args.filter((a) => !a.startsWith("-"));
+  const ultimo = fixos.length >= 2 ? fixos[fixos.length - 1]! : "";
+  switch (programa) {
+    case "curl":
+      return args.some((a, k) => CURL_MANDA.test(a) || ((a === "-X" || a === "--request") && METODO_QUE_MANDA.test(args[k + 1] ?? "")) || /^--request=(POST|PUT|PATCH)$/i.test(a) || /^-X(POST|PUT|PATCH)$/i.test(a));
+    case "wget":
+      return args.some((a) => /^--(post-data|post-file|body-data|body-file)(=|$)|^--method=(POST|PUT|PATCH)$/i.test(a));
+    case "scp":
+    case "rsync":
+      return REMOTO.test(ultimo);
+    case "nc":
+    case "ncat":
+    case "netcat":
+    case "socat":
+      return true;
+    case "gh":
+      return args[0] === "gist" && (args[1] === "create" || args[1] === "new");
+    default:
+      return false;
+  }
+}
+
+const ASPAS = new Set(["\"", "'", "`"]);
+
+/**
+ * A palavra sem as aspas e crases das pontas, num passe só. Revisão do PR #402: era `replace(/^["'`]+|["'`]+$/g, "")`,
+ * e o `["'`]+$` volta atrás a cada aspa de uma sequência no meio da palavra: `$(x` + 63.000 aspas + `y` levou 64 s de
+ * CPU no laço de eventos do servidor (quadrático), no caminho quente do hook.
+ */
+function semAspasNasPontas(p: string): string {
+  let i = 0;
+  let f = p.length;
+  while (i < f && ASPAS.has(p[i]!)) i++;
+  while (f > i && ASPAS.has(p[f - 1]!)) f--;
+  return p.slice(i, f);
+}
+
+/**
+ * O comando manda dados do Mac para fora? (definido em 2026-10-18, plano dos modos de aprovação, revisão de engenharia,
+ * item 10): `curl -d @clientes.csv`, `curl -T`, `wget --post-file`, `scp`/`rsync` para outra máquina, `nc` e `gh gist
+ * create`. A lista de arriscados é contra acidente e nenhum desses está nela: no automático eles rodam até depois de o
+ * bot ler um e-mail. É o gatilho `envio_apos_fora` do terminal (`gatilhoDeRevisao`). Lê palavra por palavra, sem regex
+ * sobre o texto inteiro (linear no tamanho do comando); quando o comando não tokeniza (`$(…)`, crase), parte nos
+ * separadores e nos espaços, porque `curl -d "$(cat ~/x)"` é justamente o envio que importa. `bash -c`, `sh -c` e
+ * `eval` são abertos e o texto de dentro é lido do mesmo jeito, até três níveis.
+ */
+export function enviaPeloTerminal(comando: string): boolean {
+  return enviaNoNivel(comando, 0);
+}
+
+function enviaNoNivel(comando: string, nivel: number): boolean {
+  const tokens = tokenizar(comando);
+  const segmentos: string[][] = [[]];
+  if (tokens) {
+    for (const t of tokens) {
+      if (!t.operador) segmentos[segmentos.length - 1]!.push(t.texto);
+      else segmentos.push([]);
+    }
+  } else {
+    // `$(`, crase e parênteses também separam: `x=$(curl -d @f …)` e `echo $(curl …)` rodam o curl (revisão do PR #402).
+    // A parte sem letra nenhuma (`$`, aspas soltas) não tem programa: não vira segmento (sem lixo para o GC no `$($($(…`).
+    for (const parte of comando.split(/[;&|\n`()]+/)) if (/[A-Za-z]/.test(parte)) segmentos.push(parte.split(/\s+/).filter((p) => p !== "").map(semAspasNasPontas));
+  }
+  return segmentos.some((palavras) => segmentoEnvia(palavras, nivel));
+}
+
 export function classificarComando(comando: string): ClasseComando {
   const texto = comando.trim();
   if (texto === "") return altera("comando vazio");

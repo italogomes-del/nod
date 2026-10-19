@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { classificarComando, comandoArriscado, tocaCredencial } from "../domain/comando.ts";
+import { classificarComando, comandoArriscado, enviaPeloTerminal, tocaCredencial } from "../domain/comando.ts";
 import { NATIVA_MCP_DA_PESSOA } from "../domain/nativas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { decidirPeloModo, REGRA_MODO_TOTAL, type DecisaoDoModo } from "../domain/modo-aprovacao.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
+import { medirRevisao, type OrigemDaRevisao } from "./medir-revisao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -53,8 +54,14 @@ type PedeCard = { card: { agenteNome: string | null; motivo: Extract<DecisaoDoMo
  */
 type Pedido = { tipo: "comando" } | { tipo: "arquivo"; arquivo: string } | { tipo: "mcp" };
 
-/** Os passos 1–4 acima, sem efeito: roda (e por quê) ou pede card. Quem cria o card é `autorizarComando`. */
-async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido): Promise<Permitir | PedeCard> {
+const ORIGEM_DO_PEDIDO: Record<Pedido["tipo"], OrigemDaRevisao> = { comando: "terminal", arquivo: "arquivo", mcp: "mcp" };
+
+/**
+ * Os passos 1–4 acima, sem efeito: roda (e por quê) ou pede card. Quem cria o card é `autorizarComando`. `medir`: o PR 1
+ * do plano dos modos de aprovação conta, no ponto em que o modo seria consultado, o que o Automático novo faria (só o
+ * card do terminal; o `esperar_comando` não abre card e fica sem revisor).
+ */
+async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido, medir = false): Promise<Permitir | PedeCard> {
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
   if (pedido.tipo === "comando" && classificarComando(texto).tipo === "leitura" && !contaminado) return { permitir: true, porque: "leitura" };
   if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { permitir: true, porque: "aprovado" };
@@ -67,6 +74,11 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
     return { permitir: true, porque: "liberado_na_tarefa" };
   }
   const agente = await deps.repos.agentes.buscar(plano.agenteId);
+  if (medir) {
+    // Envio para fora: no terminal, `enviaPeloTerminal`; todo MCP da pessoa (o nome não diz se só lê); gravar arquivo, nunca.
+    const envioParaFora = pedido.tipo === "mcp" || (pedido.tipo === "comando" && enviaPeloTerminal(texto));
+    await medirRevisao(deps, plano, agente?.modoAprovacao, { origem: ORIGEM_DO_PEDIDO[pedido.tipo], arriscada: risco !== null, credencial, envioParaFora, contaminado });
+  }
   // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo.
   const doModo = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial });
   if (doModo?.automatico) return { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" };
@@ -98,7 +110,7 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
   const texto = arquivo !== null ? `Gravar ${arquivo}` : mcp !== null ? mcp : "comando" in entrada ? entrada.comando.trim() : "";
   if (texto === "" || arquivo === "" || texto.length > COMANDO_MAX) throw new ErroDeDominio("entrada_invalida", { cause: arquivo !== null ? "arquivo" : mcp !== null ? "mcp" : "comando" });
   const pedido: Pedido = arquivo !== null ? { tipo: "arquivo", arquivo } : mcp !== null ? { tipo: "mcp" } : { tipo: "comando" };
-  const decidido = await decidirComando(deps, plano, texto, pedido);
+  const decidido = await decidirComando(deps, plano, texto, pedido, true);
   if ("permitir" in decidido) return { data: decidido };
   const { agenteNome, motivo: doModo, risco } = decidido.card;
 

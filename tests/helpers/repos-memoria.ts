@@ -1371,6 +1371,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contaminado(id: string) {
         return b.contaminados.has(id);
       },
+      // A janela de 24 h não é simulada (a marca em memória não guarda o instante): qualquer turno da conversa conta.
+      async conversaLeuDeFora(conversaId: string) {
+        return doTenant(b.turnos).some((t) => t.conversaId === conversaId && (b.contaminados.has(t.id) || t.entradaConfianca !== "confiavel"));
+      },
       // ADR-066: os repositórios em memória não guardam sessão do CLI — a retomada de rotina/delegação começa nova.
       async sessaoDoTurno() {
         return null;

@@ -5,11 +5,12 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
-import { acaoArriscadaNoApp, decidirAprovacao } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp } from "../domain/aprovacao-permanente.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
+import { medirRevisao } from "./medir-revisao.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from "./pedir-aprovacao.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
@@ -253,17 +254,24 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   // direto rodavam sem card no modo manual (só o prompt pedia pedir_aprovacao), e um colega apagava direto no
   // automático o que, pedido por item, pararia em `acao_arriscada`. Quem não passaria sozinho no card recebe a
   // negação transitória "peça aprovação" e cai no pedir_aprovacao, com o motivo gravado no item.
+  let medir: (() => Promise<unknown>) | null = null;
   if (!ferramenta.readOnlyHint) {
     const modo = (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual";
     const capacidade = conector.catalogo.find((c) => c.nome === tool);
     const semprePermitir = await semprePermitirVivo(deps, input.agenteId, plano);
     const destino = { conector: conector.slug, ferramenta: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> };
     const contaminado = await deps.repos.turnos.contaminado(input.turnoId);
-    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada: capacidade ? acaoArriscadaNoApp(capacidade) : true, contaminado });
+    const arriscada = capacidade ? acaoArriscadaNoApp(capacidade) : true;
+    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada, contaminado });
     if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+    // PR 1 dos modos de aprovação (medir antes): a chamada que roda agora conta aqui; a que voltou com "peça aprovação"
+    // conta no lote do pedir_aprovacao, para cada ação contar uma vez só. Depois do schema (revisão do PR #402): a chamada
+    // recusada por argumento não roda, e a corrigida contaria de novo.
+    medir = () => medirRevisao(deps, plano, modo, { origem: "app", via: "chamada", arriscada, credencial: false, envioParaFora: capacidade ? envioParaForaNoApp(capacidade) : false, contaminado: contaminado || plano.confiancaEntrada !== "confiavel" });
   }
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
+  if (medir) await medir();
 
   await registrarChamada(conectorId);
   // definido em 2026-10-01 (ADR-066): chamar um app de fora (Gmail, GitHub, MCP próprio) marca o turno, como a web já

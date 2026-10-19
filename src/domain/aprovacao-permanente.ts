@@ -83,6 +83,16 @@ export function acaoArriscadaNoApp(cap: Pick<CapacidadeConector, "nome" | "readO
   return grupoDaCapacidade(cap) === "apagar";
 }
 
+/**
+ * Ação de app que manda algo para fora (definido em 2026-10-18, plano dos modos de aprovação, Parte 3a): toda escrita que
+ * não é ler nem "Apagar e desfazer" — criar e enviar, comentar, editar e as outras. É o gatilho `envio_apos_fora` do app
+ * (`gatilhoDeRevisao`): depois de o bot ler conteúdo de fora, um e-mail pode pedir a lista de clientes para outro endereço.
+ */
+export function envioParaForaNoApp(cap: Pick<CapacidadeConector, "nome" | "readOnlyHint" | "destructiveHint">): boolean {
+  const grupo = grupoDaCapacidade(cap);
+  return grupo !== "ler" && grupo !== "apagar";
+}
+
 export type DecisaoAutomatica =
   | { automatico: true; regra: RegraAprovacao; versao: number }
   | { automatico: false; motivo: MotivoAprovacaoManual };

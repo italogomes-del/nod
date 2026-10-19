@@ -72,3 +72,45 @@ export function decidirPeloModo(modo: ModoAprovacao | undefined, s: SituacaoDaAc
   if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };
   return { automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO };
 }
+
+/** A ação vai ao revisor do Automático novo por um destes motivos (plano dos modos de aprovação, Parte 3a). */
+export type GatilhoDeRevisao = "arriscado" | "envio_apos_fora";
+
+/**
+ * O que o Automático novo faz com a ação: `credencial` é cartão direto, sem revisor; os outros dois vão ao revisor.
+ * definido em 2026-10-18 (decisão do Marlon sobre a decisão em aberto 5 do plano): credencial no Automático é sempre
+ * cartão na v1, em turno limpo ou não — o "turno limpo" não vê a leitura pelo Bash nem o e-mail lido no turno anterior.
+ */
+export type GatilhoDoAutomatico = "credencial" | GatilhoDeRevisao;
+
+/** O que o Automático novo precisa saber além da `SituacaoDaAcao`. */
+export type SituacaoParaRevisao = SituacaoDaAcao & {
+  /** Escrita num app que não é ler nem apagar, todo MCP da pessoa (ADR-103) e `enviaPeloTerminal` no terminal. */
+  envioParaFora: boolean;
+  /** O turno, ou outro turno da mesma conversa nas últimas 24 h, leu conteúdo de fora (revisão de engenharia, item 11). */
+  contaminado: boolean;
+};
+
+export function vaiAoRevisor(g: GatilhoDoAutomatico | null): g is GatilhoDeRevisao {
+  return g === "arriscado" || g === "envio_apos_fora";
+}
+
+/**
+ * O gatilho do Automático novo para uma ação que, no manual, pediria a pessoa. Puro e sem modo: o PR 1 do plano mede
+ * quantas revisões ele faria em TODO bot, e o PR 3 o chama de dentro de `decidirPeloModo` no ramo do automático (uma
+ * fonte só para o gatilho, revisão de engenharia, item 24). Ordem fechada:
+ *
+ *  1. credencial                    → `credencial` (cartão, nunca o revisor)
+ *  2. arriscada                     → `arriscado`
+ *  3. envio para fora e contaminado → `envio_apos_fora`
+ *  4. senão                         → null (o Automático roda sem perguntar)
+ *
+ * `arriscada` aqui é a de quem chama SEM o alívio da conversa (`conversaComAPessoa`): no Automático novo o apagar pedido na
+ * conversa também vai ao revisor (o A4 do protótipo). Ainda não muda decisão nenhuma.
+ */
+export function gatilhoDeRevisao(s: SituacaoParaRevisao): GatilhoDoAutomatico | null {
+  if (s.credencial) return "credencial";
+  if (s.arriscada) return "arriscado";
+  if (s.envioParaFora && s.contaminado) return "envio_apos_fora";
+  return null;
+}
