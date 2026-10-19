@@ -1,0 +1,1833 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Auditoria do núcleo do Nod</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: relatório de leitura, coluna de texto de ~68ch com sumário fixo à esquerda no desktop; abas para o resumo e os dois relatórios completos. Tokens do design system do Nod (grafite). */
+:root {
+  --surface: #ffffff;
+  --surface-side: #f7f7f8;
+  --surface-raised: #f0f0f2;
+  --line: #e5e5e9;
+  --line-strong: #8e8e96;
+  --ink: #18181b;
+  --ink-2: #5d5d66;
+  --ink-3: #6b6b74;
+  --signal: #1866c0;
+  --signal-soft: #e6f0fb;
+  --warning: #7a4e08;
+  --warning-soft: #fdf5e6;
+  --danger: #c42b1c;
+  --danger-soft: #fdecea;
+  --success: #177040;
+  --success-soft: #e8f5ee;
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: #131315; --surface-side: #18181b; --surface-raised: #232327;
+    --line: #2d2d32; --line-strong: #6a6a73;
+    --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94;
+    --signal: #4ea3f0; --signal-soft: #15283c;
+    --warning: #ebbd6a; --warning-soft: #2a2214;
+    --danger: #f2796b; --danger-soft: #2e1613;
+    --success: #4cc38a; --success-soft: #132a1e;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #131315; --surface-side: #18181b; --surface-raised: #232327;
+  --line: #2d2d32; --line-strong: #6a6a73;
+  --ink: #ededef; --ink-2: #a4a4ac; --ink-3: #8b8b94;
+  --signal: #4ea3f0; --signal-soft: #15283c;
+  --warning: #ebbd6a; --warning-soft: #2a2214;
+  --danger: #f2796b; --danger-soft: #2e1613;
+  --success: #4cc38a; --success-soft: #132a1e;
+}
+* { box-sizing: border-box; }
+body { background: var(--surface); color: var(--ink); font-family: var(--font-sans); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+.topo { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.topo-in { max-width: 1180px; margin: 0 auto; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.marca { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.marca b { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.marca span { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+.abas { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.abas::-webkit-scrollbar { display: none; }
+.aba { appearance: none; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 14px; font-weight: 500; padding: 8px 12px 10px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+.aba:hover { color: var(--ink); }
+.aba[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.aba .n { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); margin-left: 6px; }
+.aba:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+
+.casca { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 80px; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 860px) { .casca { grid-template-columns: minmax(0, 1fr); gap: 0; } .sumario { display: none; } }
+.sumario { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 104px); align-self: start; max-height: calc(100vh - 130px); overflow-y: auto; font-size: 13px; padding-right: 8px; }
+.sumario p { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 8px; font-weight: 600; }
+.sumario ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.sumario a { color: var(--ink-2); text-decoration: none; display: block; padding: 3px 8px; border-radius: 6px; line-height: 1.35; }
+.sumario a:hover { background: var(--surface-raised); color: var(--ink); }
+.sumario a.n3 { padding-left: 20px; font-size: 12.5px; }
+.sumario a.ativo { color: var(--ink); background: var(--surface-raised); }
+
+.texto { min-width: 0; max-width: 72ch; }
+.texto h1 { font-size: 30px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 8px; font-weight: 700; text-wrap: balance; }
+.texto h2 { font-size: 21px; line-height: 1.25; letter-spacing: -.01em; margin: 44px 0 12px; font-weight: 650; text-wrap: balance; padding-top: 16px; border-top: 1px solid var(--line); scroll-margin-top: 120px; }
+.texto h3 { font-size: 17px; line-height: 1.3; margin: 30px 0 8px; font-weight: 600; text-wrap: balance; scroll-margin-top: 120px; }
+.texto h4 { font-size: 15.5px; line-height: 1.35; margin: 26px 0 6px; font-weight: 600; text-wrap: balance; scroll-margin-top: 120px; }
+.texto p, .texto li { color: var(--ink); }
+.texto p { margin: 0 0 12px; }
+.texto ul, .texto ol { margin: 0 0 14px; padding-left: 22px; }
+.texto li { margin: 3px 0; }
+.texto li::marker { color: var(--ink-3); }
+.texto strong { font-weight: 600; }
+.texto a { color: var(--signal); text-underline-offset: 2px; }
+.texto code { font-family: var(--font-mono); font-size: .86em; background: var(--surface-raised); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.texto pre { background: var(--surface-side); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-size: 13px; }
+.texto pre code { background: none; padding: 0; }
+.texto hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+.texto blockquote { margin: 0 0 14px; padding: 4px 14px; border-left: 3px solid var(--line-strong); color: var(--ink-2); }
+.tabela { overflow-x: auto; margin: 0 0 16px; }
+.texto table { border-collapse: collapse; font-size: 13.5px; min-width: 100%; font-variant-numeric: tabular-nums; }
+.texto th, .texto td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.texto th { font-weight: 600; color: var(--ink-2); }
+
+.lede { font-size: 17px; color: var(--ink-2); margin: 0 0 22px; max-width: 64ch; }
+.numeros { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 0 0 8px; }
+@media (max-width: 620px) { .numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.numeros div { background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.numeros b { font-size: 26px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.numeros span { font-size: 12.5px; color: var(--ink-2); line-height: 1.35; }
+.fonte { font-size: 12.5px; color: var(--ink-3); margin: 0 0 6px; }
+
+.alerta { border: 1px solid var(--danger); background: var(--danger-soft); border-radius: 10px; padding: 14px 16px; margin: 22px 0 6px; }
+.alerta h3 { margin: 0 0 6px; font-size: 15.5px; color: var(--ink); }
+.alerta p { margin: 0 0 8px; }
+.alerta p:last-child { margin: 0; }
+
+.padroes { list-style: none; padding: 0 !important; display: flex; flex-direction: column; gap: 14px; counter-reset: p; }
+.padroes li { counter-increment: p; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 10px; margin: 0 !important; }
+.padroes li::before { content: counter(p); font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 50%; width: 24px; height: 24px; display: grid; place-items: center; margin-top: 1px; }
+.padroes li > div { min-width: 0; }
+.padroes li b { display: block; }
+.padroes li span { color: var(--ink-2); }
+
+.lote { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 12px; }
+.lote header { display: flex; gap: 8px 12px; align-items: baseline; flex-wrap: wrap; margin: 0 0 6px; }
+.lote header b { font-size: 15.5px; font-weight: 600; }
+.lote header .tam { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
+.lote ul { margin: 0; }
+.lote li { color: var(--ink); }
+.lote li span { color: var(--ink-2); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.chip.dec { border-color: var(--warning); color: var(--warning); background: var(--warning-soft); }
+.chip.alta { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.chip.ok { border-color: var(--success); color: var(--success); background: var(--success-soft); }
+.id { font-family: var(--font-mono); font-size: .86em; color: var(--ink-2); }
+
+.acoes { list-style: none; padding: 0 !important; display: flex; flex-direction: column; gap: 0; border-top: 1px solid var(--line); }
+.acoes li { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); margin: 0 !important; }
+.acoes li > div { min-width: 0; }
+@media (max-width: 520px) { .acoes li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.quando { font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); padding-top: 2px; }
+.quando.urg { color: var(--danger); font-weight: 500; }
+
+.decisoes { counter-reset: d; list-style: none; padding: 0 !important; columns: 2 280px; column-gap: 32px; }
+.decisoes li { counter-increment: d; break-inside: avoid; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; margin: 0 0 10px !important; }
+.decisoes li::before { content: counter(d); font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); padding-top: 2px; text-align: right; }
+
+.rodape { font-size: 12.5px; color: var(--ink-3); margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--line); }
+.carregando { color: var(--ink-3); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+
+<header class="topo">
+  <div class="topo-in">
+    <div class="marca"><b>Auditoria do núcleo do Nod</b><span>15/10/2026 · origin/main 81a1c532</span></div>
+    <nav class="abas" role="tablist" aria-label="Relatórios">
+      <button class="aba" role="tab" id="aba-resumo" aria-controls="painel-resumo" aria-selected="true" data-painel="resumo">Resumo e plano</button>
+      <button class="aba" role="tab" id="aba-codigo" aria-controls="painel-codigo" aria-selected="false" data-painel="codigo">Auditoria de código<span class="n">92</span></button>
+      <button class="aba" role="tab" id="aba-forense" aria-controls="painel-forense" aria-selected="false" data-painel="forense">Forense de produção<span class="n">23</span></button>
+    </nav>
+  </div>
+</header>
+
+<div class="casca">
+  <aside class="sumario" aria-label="Nesta página"><p>Nesta página</p><ol id="sumario"></ol></aside>
+
+  <main>
+    <section class="texto" id="painel-resumo" role="tabpanel" aria-labelledby="aba-resumo">
+      <h1>O núcleo funciona, mas segura e mata trabalho em silêncio</h1>
+      <p class="lede">Junção de duas auditorias feitas em 15/10: uma lendo o código do núcleo (contas, cota, turnos, frentes, rotinas, pedidos entre bots, máquinas, executor) e outra lendo o banco de produção, só leitura, com os seus 9.794 turnos.</p>
+
+      <div class="numeros">
+        <div><b>92</b><span>achados confirmados no código</span></div>
+        <div><b>23</b><span>achados confirmados em produção</span></div>
+        <div><b>38</b><span>turnos presos pela cota do Claude por ~40 h</span></div>
+        <div><b>2 h</b><span>de servidor fora hoje, 08:07–10:12</span></div>
+      </div>
+      <p class="fonte">Cada achado passou por um autor e por um cético. Confirmado quer dizer conferido linha a linha no código; quase nenhum foi reproduzido rodando o sistema. A1 e A2 foram conferidos também por mim.</p>
+
+      <div class="alerta" role="note">
+        <h3>O servidor ficou duas horas fora hoje</h3>
+        <p>Das 08:07 às 10:12 ninguém conseguia usar o banco. Reiniciei às 10:12. A rotina de Gmail da Clarice fez 14 chamadas que travaram por timeout, cada chamada a conector segura uma conexão dentro de uma transação, e o pool tem só 5 conexões. O Docker marcou o contêiner como doente, mas não reinicia.</p>
+        <p>Essa rotina roda às 8h, 13h e 18h nos dias úteis e pode repetir o problema até o Lote 0 sair.</p>
+      </div>
+
+      <h2 id="r-padroes">Quatro padrões que se repetem</h2>
+      <p>O banco está íntegro: nenhum elo quebrado nas retomadas, os 1.149 trabalhos com estado coerente, o outbox entregando em menos de meio segundo, 93,7% dos turnos terminando bem. O problema aparece nos mesmos quatro padrões nos dois relatórios.</p>
+      <ol class="padroes">
+        <li><div><b>O limite passou da IA para a conta, mas quase todo o resto ainda decide pela IA.</b><span>A conta Team ficou livre enquanto 38 turnos esperavam. Turnos na fila guardam a IA de quando nasceram. Frentes, rotinas sem frente, triagens e o retorno do lote morrem em vez de esperar. Notas prometem "Seguindo com X" e nada segue.</span></div></li>
+        <li><div><b>Estados sem saída e sem aviso.</b><span>Máquina "zumbi" depois de 60 a 90 s sem conexão, turno de ligação que trava a fila, parada que mata rotinas e pedidos no despacho, pedido entre bots que espera para sempre, janelas de rotina que somem do histórico.</span></div></li>
+        <li><div><b>Relógio errado ou fato copiado no nascimento do turno.</b><span>A retomada mede a queda pela criação do turno, então uma frente longa caída é abandonada na hora. Anexo, marca de contaminação, pedido original e IA da sessão não passam para o turno seguinte.</span></div></li>
+        <li><div><b>O que o servidor sabe não chega à tela.</b><span>A barra só relê quando o estado de um trabalho muda, a conexão em tempo real fica meio aberta sem perceber e há botões que não fazem nada.</span></div></li>
+      </ol>
+
+      <h2 id="r-ordem">Ordem de ataque</h2>
+      <p>Por impacto dividido pelo tamanho do PR. Os códigos levam aos relatórios completos, nas outras abas.</p>
+
+      <article class="lote">
+        <header><b>Lote 0 · o servidor não cai por causa de um conector</b><span class="tam">hoje ou amanhã</span></header>
+        <ul>
+          <li>Chamada a conector e execução de itens aprovados fora da transação do banco <span class="id">(C17)</span>.</li>
+          <li>Prazo para pegar conexão do pool e pool maior: falhar a requisição em vez de travar tudo.</li>
+          <li>Healthcheck que reinicia de verdade e monitor externo em <code>/api/saude</code>, previsto na ADR-017.</li>
+          <li>Teto de reenvios no limite <span class="id">(C5 ≈ B1)</span>: já gerou 682 turnos e 682 avisos em 32 minutos.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Lote 1 · a máquina recebe trabalho de novo</b><span class="tam">1–2 dias</span><span class="chip ok">PR em andamento</span></header>
+        <ul>
+          <li><span class="chip alta">A1 regressão</span> Máquina só com o Codex nunca puxa turno e toda mensagem é negada mandando entrar no Claude Code. Vem do commit <code>d14c7b1e</code> de 13/10.</li>
+          <li><span class="id">A2</span> Silêncio de 60 a 90 s deixa a máquina "zumbi": a tela diz pronto, ela nunca mais recebe turno.</li>
+          <li><span class="id">A3</span> Ligação encerrada cedo deixa um turno que trava a fila da máquina com voz.</li>
+          <li><span class="id">A4, A9</span> <code>conectar</code> responde 409 para sempre depois de o processo voltar em menos de 90 s.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Lote 2 · cota por conta e uma regra única de espera</b><span class="tam">3–5 dias</span><span class="chip dec">decisão + ADR-099 §7</span></header>
+        <ul>
+          <li>O portão da cota olha a conta que o turno usaria e passa para outra conta livre da mesma IA quando o modo permite.</li>
+          <li>Todo turno de fundo espera o limite com hora de volta, decidido pelo tipo do turno <span class="id">(G1, C2, C7, D1, H2, C6, D7, D8; forense C2, C9, C11)</span>.</li>
+          <li>Trocar a IA ou a conta do bot reescreve os turnos pendentes dele <span class="id">(forense C3)</span>.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Lote 3 · queda, deploy e retomada</b><span class="tam">3–4 dias</span></header>
+        <ul>
+          <li><span class="id">E1 = C4</span> Gravar a hora da interrupção e usá-la nos três leitores: a retomada automática de frente e de pedido volta a funcionar.</li>
+          <li><span class="id">E2–E6, E8, G3</span> Aprovação com o Mac dormindo, Parar com a máquina fora, deploy de mais de 30 s matando o CLI, adoção depois do deploy.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Lote 4 · pedidos entre bots e Parar</b><span class="tam">2–3 dias</span><span class="chip dec">decisão</span></header>
+        <ul>
+          <li><span class="id">H1</span> Fan-out entrega resultado parcial como final. <span class="id">F1</span> Parar não cancela o pedido ao colega e a resposta reabre o trabalho parado. <span class="id">F2</span> Parada aberta mata rotinas e pedidos.</li>
+          <li>Fechar o pedido quando o colega o trata conversando com a pessoa (seus bugs <span class="id">a5d1121a</span> e <span class="id">e3f3c0e3</span>). Trava de pedido repetido: o Leonardo fez 22 ao Ze 1 em 24 h.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Lote 5 · a tela diz a verdade</b><span class="tam">2–3 dias</span></header>
+        <ul>
+          <li>Conexão em tempo real que percebe quando morre, releitura ao voltar para a janela, HTTP/3 desligado no Caddy.</li>
+          <li>Barra e Trabalhos coerentes com o servidor, custo de hoje com o Codex, notas e botões de contas que funcionam <span class="id">(C1, C3–C5, C8, C9)</span>.</li>
+        </ul>
+      </article>
+      <article class="lote">
+        <header><b>Depois</b><span class="tam">lotes 6–8</span></header>
+        <ul>
+          <li>Rotinas: janelas registradas, pré-voo e voltas, agendador mais leve <span class="id">(I1–I10; C8–C10, C16, C18)</span>.</li>
+          <li>Herança entre turnos e sessão do CLI em produção <span class="chip dec">ADR · B3</span>.</li>
+          <li>Dados: backfill de <code>executor</code> em 2.179 turnos e custo inflado depois de <code>--fork-session</code>.</li>
+        </ul>
+      </article>
+
+      <h2 id="r-hoje">Para destravar à mão hoje</h2>
+      <p>Nada foi executado. Prefira a ação pela tela, que grava os eventos.</p>
+      <ol class="acoes">
+        <li><span class="quando urg">antes 13:00</span><div><b>Rotina de Gmail da Clarice.</b> Pausar até o Lote 0 sair, ou acompanhar a janela das 13:00.</div></li>
+        <li><span class="quando urg">vence 13:15</span><div><b>Pergunta pendente do Leonardo</b> <span class="id">4f191137</span>. Se vencer, a rotina <span class="id">57b9b36b</span> fica presa.</div></li>
+        <li><span class="quando">quando puder</span><div><b>Turno <span class="id">dcdbf4af</span> da Clarice.</b> Parar pela tela para a rotina de 10 minutos voltar a nascer no Codex.</div></li>
+        <li><span class="quando">até 16/10 13:00</span><div><b>19 a 22 pedidos do Leonardo ao Ze 1 e 3 ao Cartola.</b> Se ficarem, saem todos em série quando a cota renovar.</div></li>
+        <li><span class="quando">até 16/10 13:00</span><div><b>9 rotinas presas desde 14/10 10:00.</b> Se ficarem, rodam com a instrução de dois dias atrás. Parar se a janela nova valer mais.</div></li>
+        <li><span class="quando">opcional</span><div><b>Cota do Claude.</b> Esperar a renovação, ou pôr a Team em primeiro e mandar uma fala a um bot do Claude. Inferência pelo código, não testada; a Team é corporativa.</div></li>
+        <li><span class="quando">opcional</span><div><b>Frente <span class="id">a305c426</span> do Milton</b>, na fila desde 14/10 10:56. Usar "Fazer aqui" se não quiser esperar.</div></li>
+      </ol>
+
+      <h2 id="r-decisoes">Decisões de produto pendentes</h2>
+      <ol class="decisoes">
+        <li><div>O portão da cota passa a ser por conta, e a conta corporativa pode ir para o trabalho de fundo?</div></li>
+        <li><div>Rotina sem frente, triagem e retorno do lote esperam o limite ou falham com a hora da volta?</div></li>
+        <li><div>Frente em Automático troca de IA na hora ou espera na sessão?</div></li>
+        <li><div>Bot com IA fixa ganha fallback para outra IA, ou só para outra conta?</div></li>
+        <li><div>A parada vale para rotina e delegação?</div></li>
+        <li><div>Sessão do CLI em produção: por máquina ou sem sessão? Pede ADR.</div></li>
+        <li><div>"Testar agora" fura a reserva da cota?</div></li>
+        <li><div>O que fazer com rotina atrasada além de um período do cron? Pausar depois de N "sem novidade"?</div></li>
+        <li><div>Prazo para turno preso a uma máquina morta?</div></li>
+        <li><div>Sala repete o turno? Turno sem alvo no modo "perguntar" roda onde há conta?</div></li>
+        <li><div>Cópia de bot herda o modo de aprovação?</div></li>
+        <li><div>Religar as pendências, desligadas desde 06/10 com 70 abertas?</div></li>
+      </ol>
+
+      <h2 id="r-lacunas">O que ficou de fora</h2>
+      <ul>
+        <li>Nada foi reproduzido rodando. Antes de priorizar E4, B1, A2 e E5, vale medir em produção a duração do deploy, as cadeias de reenvio e as falhas de renovação e de adoção.</li>
+        <li>Fora do escopo: voz além do A3, computador do bot, conectores e marketplace, segurança do hook, isolamento entre tenants, instalação e atualização do app, modo local.</li>
+        <li>O relato do Breno: a conta dele em produção não tem turnos nem máquinas, e falta saber a que servidor o app dele está ligado.</li>
+        <li>Nenhum achado tem issue no Linear ainda.</li>
+      </ul>
+      <p class="rodape">Arquivos de origem em <code>~/code/nod-auditoria/docs/auditoria-2026-10-15/</code>: README.md, auditoria-de-codigo.md, forense-de-producao.md.</p>
+    </section>
+
+    <section class="texto" id="painel-codigo" role="tabpanel" aria-labelledby="aba-codigo" hidden><p class="carregando">Carregando o relatório…</p></section>
+    <section class="texto" id="painel-forense" role="tabpanel" aria-labelledby="aba-forense" hidden><p class="carregando">Carregando o relatório…</p></section>
+  </main>
+</div>
+
+<script type="text/markdown" id="md-codigo"># Auditoria do núcleo do Nod
+
+Data: 15/10/2026. Base: worktree `nod-auditoria` em `origin/main 81a1c532`. Para: Marlon.
+
+Como ler este relatório. Cada achado passou por um autor, que o encontrou, e por pelo menos um cético, que tentou derrubá-lo lendo o código e, em alguns casos, contando linhas em produção (só leitura). A severidade mostrada é a **final, depois do cético**; a do autor aparece entre parênteses quando mudou. "Confirmado" quer dizer que o caminho foi conferido linha a linha no código. Não quer dizer que foi reproduzido rodando, e quase nenhum foi. A frequência real em produção só é citada quando houve contagem. Os números de linha são do worktree.
+
+---
+
+## 1. Resumo executivo
+
+**Tese.** O caminho feliz do Nod funciona. As falhas se concentram em quatro padrões, e os quatro se repetem em vários subsistemas:
+
+1. **O limite passou da IA para a conta (ADR-102), mas a lógica de espera e de socorro ainda decide pela origem do turno ou pela presença de `trabalho_id`.** Por isso frentes da pessoa, triagens de colega, rotinas sem frente e o retorno do lote morrem em vez de esperar, o que contraria a promessa "nenhuma frente falha por limite" (ADR-099 §7).
+2. **Estados sem saída e sem aviso.** Parada que nunca fecha, card Retomar esquecido, pedido de colega sem resposta, máquina "zumbi", turno da ligação envenenando a fila. Nada avisa a pessoa e nenhum varredor resolve.
+3. **O que um turno carrega é copiado quando ele nasce e não é herdado pelos seguintes.** Ficam para trás o anexo, a marca de contaminação, o pedido original da frente e a IA da sessão. Também se usa o relógio errado: a criação do turno no lugar da queda, do despacho ou do gasto.
+4. **O que o servidor sabe não chega à tela.** A barra e a tela de Trabalhos só releem quando o *estado* de um trabalho muda. Notas prometem "Seguindo com X" sem que nada siga, e botões não fazem nada.
+
+**Os achados que mais ameaçam a confiança no produto:**
+- **A1.** Desde 13/10 (commit d14c7b1e), um Mac ou VM que só tem o Codex pronto anuncia o inventário do Claude como principal. A máquina nunca puxa turno e toda mensagem é negada com "entre no Claude Code". É regressão.
+- **A2.** Se a máquina fica muda entre 60 e 90 s (tampa fechada, troca de Wi-Fi), ela volta "zumbi": aparece online na tela, nunca mais recebe turno, e o servidor nega toda mensagem dizendo "IA ausente".
+- **A3.** Uma ligação que termina antes de o Mac pegar o turno-cérebro deixa esse turno pendente para sempre. A máquina com voz fica travada: todo puxar falha e o bot inteiro para.
+- **G1.** O retorno do lote, que é a resposta integrada depois das frentes, morre se a IA estiver no limite. Como o lote já foi marcado devolvido, o resultado de horas de trabalho nunca chega à pessoa.
+- **E1.** A retomada automática mede a queda pela hora em que o turno *nasceu*. Uma frente longa que cai por infraestrutura é dada como perdida na hora. É o caso que a ADR-099 queria cobrir.
+- **H1 e F1.** Pedidos entre bots entregam um resultado parcial como final quando dois colegas respondem em sequência. Além disso, apertar Parar não cancela o pedido ao colega, e a resposta dele reabre o trabalho que a pessoa parou.
+- **B1 e C1.** Há um laço rápido de "O Claude chegou ao limite · respondendo pelo Codex" quando a máquina-alvo só tem o Claude. E o botão "Rodar no <máquina> desta vez" da nota de contas não faz nada.
+
+**Ordem de ataque sugerida:**
+1. **Lote 1:** máquina e fila (A1, A2, A3, A4). São correções pequenas que destravam bots inteiros.
+2. **Lote 2:** uma regra única de espera por limite (G1, C2, C7, D1, H2, G2 e outros). Precisa de uma emenda curta à ADR-099 §7.
+3. **Lote 3:** queda, deploy e retomada (E1 a E6).
+4. **Lote 4:** pedidos entre bots e Parar (H1, F1, F2, H3, H4, H5).
+5. Depois: notas e botões de contas (lote 5), tela contra servidor (lote 6), rotinas (lote 7), herança entre turnos (lote 8). O resto fica para os lotes 9 a 11.
+
+---
+
+## 2. Padrões de causa raiz
+
+### P1. "Espera por limite" decidida pela origem ou pelo `trabalho_id`, não pelo que o turno é
+`aposLimiteNoFundo` (assentar-turno.ts:636) exige `turno.trabalhoId`. `aposLimite` (assentar-turno.ts:417) exige `origem === 'conversa'`. O pré-spawn (despachar-turno.ts:159) decide pela origem. Isso deixa vários turnos sem nenhum caminho de espera:
+- a frente aberta pela pessoa, que nasce com origem `conversa`: C2, C7;
+- a triagem de pedido de colega: H2;
+- a rotina sem frente: D1;
+- o retorno do lote: G1;
+- o turno de sala: L1.
+
+Quando a espera existe, ela não carrega o pedido original (G2), não acorda quando a pessoa resolve o problema (C6) e conta no teto de voltas (D8).
+**Achados:** C2, C3, C6, C7, D1, D7, G1, G2, H2, L1, D8.
+
+### P2. O portão olha a IA, mas o limite agora é da conta, e a fila olha a máquina sem olhar contas
+- A fila (`reivindicar`) e `iasParaOAutomatico` leem só `ias_no_limite`, que o caminho das contas não grava (C12).
+- A reprovação por `conta_sem_acesso` derruba a IA inteira na máquina (C4, A5).
+- `no_limite_ate` nunca se cura sozinho (C5).
+- A troca de IA no limite usa os prontos da *pessoa*, mas a fila entrega o turno só à *máquina-alvo* (B1, B7).
+- A tela e a fila calculam "espera a cota" de formas diferentes (D3).
+
+**Achados:** B1, B7, C4, C5, C12, D3, A5, K1.
+
+### P3. Estado sem saída e sem aviso
+São situações em que nenhum varredor resolve e a pessoa não vê o motivo:
+- parada aberta indefinida (F2);
+- card Retomar esquecido (G3);
+- pergunta de triagem dispensada (H3);
+- espera de comando cancelada (H4);
+- pedido segurado mais de 24 h (H5);
+- lote de bot excluído (G9);
+- frente de rotina presa que pula janelas para sempre (I7);
+- agenda que trava (I5);
+- 409 permanente (A4);
+- máquina zumbi (A2);
+- turno-cérebro órfão (A3);
+- retomada presa à VM morta (G8);
+- lead da sala excluído (L3).
+
+**Achados:** A2, A3, A4, F2, G3, G8, G9, H3, H4, H5, I5, I7, L3.
+
+### P4. O relógio errado ou o fato copiado no nascimento
+- `lease_ate` é zerado ao interromper, e a queda passa a ser medida pela criação do turno (E1).
+- A tolerância ao reinício conta desde a última resposta, não desde a primeira falha (E4).
+- "Trabalhando há 3 h" conta desde a criação do turno (J3).
+- O custo é atribuído pela data de criação do turno (D5).
+- A leitura "esgotado" vale por uma janela que já renovou (D6).
+- A herança entre turnos falha para contaminação (D2), sessão sem IA (B2), anexo (K2), pedido da frente (G2) e máquina da cópia (M1).
+
+**Achados:** B2, D2, D5, D6, E1, E4, G2, J3, K2, M1.
+
+### P5. Notas e botões que prometem e não cumprem
+- "Seguindo com X" sem que nada siga: C3, L1.
+- "Rodar desta vez" que é um botão morto: C1.
+- "Seguir com" que não refaz, ou refaz o turno errado: C9, L2.
+- A nota não oferece passo nenhum (C8), ou se duplica a cada reconexão (B5).
+- O botão "Tentar de novo" não existe (C5).
+
+**Achados:** B5, C1, C3, C5, C8, C9, L1, L2.
+
+### P6. O fecho trata falha como sucesso, ou sucesso como falha
+- Aprovação vencida vira "terminado" (G5).
+- Entrega parcial é apresentada como final (H1).
+- Parar vira "falhou por erro técnico" (I2).
+- "Executou" é registrado duas vezes (I3).
+- Sucesso tardio vira "parcial" (E8).
+- Recusa no despacho não é tratada como queda (G4).
+- O lote de colega todo parado é entregue como resposta (ver os não verificados).
+
+**Achados:** E8, G4, G5, G7, H1, I2, I3.
+
+### P7. Falha transitória de transporte tratada como definitiva, ou o contrário
+- Exceção na adoção mata o CLI (E5).
+- Um 400 por mais de 1000 ferramentas é repetido por 120 s e depois abandonado (E6).
+- Hook e proxy negam na primeira falha durante o deploy (E7).
+- A oferta de mensagem que se perde não é refeita (E9).
+- A rajada de 409 na abertura (A9).
+
+**Achados:** A4, A9, E4, E5, E6, E7, E9.
+
+### P8. O que o servidor sabe não chega à tela
+- A barra só relê em `trabalho.mudou` (J1).
+- A janela de 24 h só existe no dono (J2).
+- O custo não enxerga o Codex (D4) e o ritmo erra na troca de IA (D9).
+- A frente espera uma máquina fora do ar sem dizer isso (G8, G12).
+- O histórico da rotina não mostra a recusa (I6).
+
+**Achados:** D3, D4, D9, G8, G12, I6, J1, J2, J3.
+
+### P9. Efeito externo em dobro
+- Gate de aprovação que não segura a janela seguinte (I1).
+- Card velho aprovado depois que a ação já saiu (G6).
+- "Testar agora" com execução já pendente (I10).
+- Duplicar pelo Nod com rotinas ativas (M2).
+- Duas cópias com o mesmo nome e a mesma pasta (M3).
+
+**Achados:** G6, I1, I10, M2, M3.
+
+---
+
+## 3. Achados confirmados, por subsistema
+
+Severidade final: **9 altas**, a maioria média, algumas baixas. Dentro de cada subsistema a ordem é da mais grave para a menos grave.
+
+### A. Máquinas, inventário, conexão e fila
+
+#### A1. Mac e motor anunciam o inventário do Claude como principal: máquina só com Codex nunca puxa turno e toda mensagem é negada culpando o Claude (regressão de 13/10)
+- **Severidade:** alta (crítica). **Tipo:** bug.
+- **Cenário:**
+  1. Mac com o Codex logado e o Claude sem login (ou ausente); bot em "Uma IA só: Codex".
+  2. A vigia calcula `principal` = Codex pronto.
+  3. `desktop/main.ts:529` envia `inventario: comContas['claude-cli'] ?? principal`. O inventário do Claude sempre existe no mapa (registry.ts:108-111), então o `??` nunca cai no principal.
+  4. O servidor persiste "Claude nao_autenticado" como inventário principal (ponte.ts:137-140, compor.ts:593).
+  5. "oi" → enviar-mensagem.ts:89-90 → `resolverLocalidade` recusa (localidade-turno.ts:23-24) → "Nenhum trabalho começa… Claude Code sem conta conectada".
+  6. O puxar exige `c.inv.estado === 'pronto'` (ponte.ts:280), então a máquina nunca recebe turno. O despacho também recusaria (despachar-turno.ts:102-103). A VM tem o mesmo problema (motor/main.ts:247).
+- **Mecanismo:** `inventariosComContas` (desktop/contas-locais.ts:57-64) só promove o inventário quando há conta pronta e não escolhe o principal. O servidor confia nesse campo único em três portões. A linha foi introduzida em d14c7b1e (confirmado com `git log -S`).
+- **Impacto:** quem só tem o Codex utilizável, ou tem o Claude deslogado ou desatualizado, não consegue rodar nenhum bot, e a mensagem de erro aponta a IA errada.
+- **Correção:** nos dois anúncios, usar `Object.values(comContas).find(i => i?.estado === 'pronto') ?? comContas['claude-cli'] ?? principal`. No servidor, derivar "alguma IA pronta" de `harnesses` em `lerAnuncio`/`atual()` para não depender do campo único. Teste: anúncio `{claude: nao_autenticado, codex: pronto}` → a máquina puxa e o envio a um bot do Codex é aceito.
+- **Conhecido:** mesmo sintoma das NOD-213 e NOD-220 (concluídas), mas com causa nova e posterior a elas. Não há issue aberta.
+- **Cético:** confirmou a cadeia inteira e o commit. Em produção o dono tem o Claude pronto, então o bug não aparece nos dados dele. Rebaixou para alta porque o alcance se limita a máquinas sem o Claude pronto.
+
+#### A2. Silêncio de 60–90 s deixa a conexão viva com inventário "ausente" para sempre: a máquina para de receber turnos, a tela diz "pronto" e o servidor nega toda mensagem
+- **Severidade:** alta (crítica). **Tipo:** bug.
+- **Cenário:**
+  1. A máquina fica sem falar com o servidor entre 60 e 90 s (tampa fechada por um minuto, troca de Wi-Fi ou VPN).
+  2. Aos 60 s o `varrer` faz `c.inv = ausente()` e persiste; a conexão só é apagada aos 90 s (ponte.ts:426-433).
+  3. A máquina volta dentro da janela. O puxar responde 200 (a conexão existe), mas só reserva turno com inventário `pronto` (ponte.ts:280).
+  4. Nada restaura `c.inv`. Só `conectar`, `inventario` e a entrega com `causaSemIa` escrevem nele (:201, :226, :338).
+  5. O cliente não reanuncia: não recebe 409, a chave da vigia não mudou (vigia-ias.ts:263, 283-290) e não há `powerMonitor`.
+  6. A tela usa `harnesses()`, que lê o anúncio guardado e diz "pronto". O envio usa o `inventario_motores` persistido (ausente) → `resolverLocalidade` recusa (enviar-mensagem.ts:91-93 → localidade-turno.ts:23-25).
+- **Mecanismo:** presença e inventário são a mesma variável, com duas fontes de verdade que divergem justamente nessa janela. Nenhum teste chama `varrer()`.
+- **Impacto:** a máquina para de trabalhar em silêncio por tempo indefinido (horas ou dias numa VM). As mensagens da pessoa recebem uma negação falsa e a tela diz que está tudo bem. Combina com os sintomas de NOD-215 e NOD-216.
+- **Correção:** separar presença de inventário. O `varrer` não sobrescreve `c.inv` (`atual()` e o puxar já filtram por `c.ultimo`). A opção mais simples é o puxar responder 409 `reconectar` quando chega depois de 60 s ou mais de silêncio, o que reaproveita o reanúncio que já existe. No cliente, adicionar `powerMonitor.on('resume')` → reanunciar. Teste: relógio +61 s → puxar → reserva o turno ou responde 409.
+- **Conhecido:** vizinho de NOD-215 e NOD-199 (concluídas); nenhuma cobre a janela de 60 a 90 s.
+- **Cético:** confirmou a cadeia linha a linha. A frequência real (quanto silêncio um sono de tampa produz) não foi medida. Rebaixou para alta porque reabrir o app recupera.
+
+#### A3. Turno-cérebro de uma ligação já encerrada fica pendente para sempre e envenena a fila da máquina com voz
+- **Severidade:** alta (crítica). **Tipo:** bug.
+- **Cenário:**
+  1. A pessoa liga. `ligar` enfileira um turno com origem `ligacao` (ligacoes.ts:190-200).
+  2. A ligação termina antes de o Mac reivindicar o turno: o timeout `cerebroPrimeiroMs` (orquestrador.ts:1431-1435), o deploy ou o Mac dormindo, ou a pessoa desliga.
+  3. `encerrar()` (orquestrador.ts:1923-1960) só limpa o cérebro se ele já estiver anexado (:1952). `ligacoes.encerrar` só atualiza a tabela de ligações.
+  4. No próximo puxar de qualquer máquina com voz, `reivindicar` pega esse turno primeiro: ligação vem antes de tudo e ignora alvo, faixa e cota (turnos.repo.ts:250, 257, 291, 299).
+  5. `emitirPlanoTurno` lança `estado_invalido` (:367-369). `despacharTurno` só captura `executor_indisponivel` (:132-141). A ponte faz rollback e devolve null (ponte-interna.ts:384-396). A rota repete a cada 250 ms (ponte.ts:270-290).
+- **Mecanismo:** três regras se somam: a ligação só limpa o cérebro já anexado, um erro de domínio no plano vira rollback silencioso, e a ligação tem precedência absoluta na fila. Nenhum varredor pega o caso (turno-orfao.ts:50; turnos.repo.ts:661, 692; parar.ts:38).
+- **Impacto:** o bot inteiro, com todas as conversas, rotinas e frentes da pessoa, para de receber turnos no Mac com voz. A tela não mostra nada. As únicas saídas são acidentais: Parar naquela conversa ou excluir o bot.
+- **Correção:**
+  1. Em `despacharTurno` (ou no WHERE do `reivindicar`), um turno de ligação cuja ligação não está `chamando`/`em_curso` é assentado como interrompido e o puxar segue. Isso também resolve o estado que já está preso.
+  2. Em `encerrarLigacao`, interromper na mesma transação os turnos pendentes com aquele `ligacao_id`, usando um motivo próprio.
+  3. Não generalizar para "qualquer ErroDeDominio".
+- **Conhecido:** não. Vizinho de NOD-168 (concluída).
+- **Cético:** confirmou toda a cadeia. Em produção: 17 turnos de ligação, todos concluídos, e 0 pendentes com ligação morta. A janela é estreita.
+
+#### A4. Processo morre sem `desconectar` e volta em menos de 90 s: `conectar` responde 409 para sempre e a máquina fica surda para o servidor
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Cenário:**
+  1. O motor ou o app morre com SIGKILL (OOM, "Forçar Encerrar") enquanto há um turno em voo, e o systemd o sobe de novo em 5 s.
+  2. O laço novo puxa pela mesma conexão e renova `c.ultimo` a cada 250 ms (ponte.ts:278).
+  3. `conectar` recusa enquanto `c.planos` não estiver vazio e `c.ultimo` tiver menos de 90 s (ponte.ts:196-198). `c.planos` só perde ids pela entrega (:342).
+  4. O cliente só passa para a rota `inventario` depois de um `conectar` aceito (ponte-http.ts:122, 130).
+  5. Resultado: 409 → reanúncio → 409 a cada 10 s. Conta nova, IA pronta, capacidades e reprovações nunca chegam ao servidor (compor.ts:625-629).
+- **Impacto:** a máquina roda turnos, mas o servidor não recebe mais nenhum anúncio dela. Só o próximo deploy cura.
+- **Correção:** o cliente manda no `conectar` a lista de turnos que tem em andamento, e o servidor descarta de `c.planos` os ids que o cliente não reconhece. Um processo novo manda lista vazia. Teste em ponte-http.test.ts.
+- **Conhecido:** vizinho de NOD-199 e NOD-214.
+- **Cético:** confirmou. O gatilho exige queda com turno em voo e volta em menos de 90 s, e a situação se cura no deploy seguinte.
+
+#### A5. `inventariosComContas` sobrepõe o veredito da vigia: IA reprovada por `conta_sem_acesso` é anunciada como pronta e o servidor nunca grava `sem_acesso`
+- **Severidade:** média. **Tipo:** risco.
+- **Cenário:**
+  1. Uma organização desativa o uso por assinatura do Claude, mas `claude auth status` continua dizendo logado.
+  2. A vigia ou a sonda reprova a IA com causa `conta_sem_acesso`.
+  3. No anúncio, a promoção ignora a `causa` e anuncia `pronto` (contas-locais.ts:60-61).
+  4. Com `p.conta` presente, o Mac não chama `vigia.reprovar` (desktop/main.ts:499, motor/main.ts:220).
+  5. O servidor reprova só em memória (ponte-interna.ts:233-242), e o próximo anúncio desfaz a reprovação.
+- **Impacto:** a conta bloqueada volta a receber turnos pagos que falham, e a tela mostra "pronta". É regressão da emenda da ADR-019 de 05/10.
+- **Correção:**
+  1. Não promover quando a `causa` for `conta_sem_acesso` ou `teste_falhou`.
+  2. Marcar a conta local como `sem_acesso` e anunciá-la assim.
+  3. Gravar o vínculo como `sem_acesso` no servidor (prometido no item 3 da ADR-101, mas nenhum código escreve esse estado).
+- **Cético:** confirmou. Nenhum teste referencia `inventariosComContas`.
+
+#### A6. "Rodar em X desta vez" na conversa arrasta também os turnos pendentes das frentes
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Cenário:** `rodarDestaVez` marca todos os pendentes da conversa sem filtrar `trabalho_id` (turnos.repo.ts:622-625). Os turnos das frentes moram na conversa do bot (frentes.ts:59, 71-84), então a frente passa a rodar na outra máquina, onde a pasta dela não existe (ADR-090 §7).
+- **Correção:** acrescentar `and trabalho_id is null` no UPDATE e no repositório em memória, mais um teste.
+- **Cético:** só esta variante se sustentou. A variante "turno preso na VM" foi derrubada: a VM pega o turno e o recusa de forma visível. A lista de Trabalhos usa o alvo real.
+
+#### A7. Chave de máquina revogada com turno rodando: incidente "sem contato" que nunca fecha, e o Retomar manda o trabalho para outra máquina
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:**
+  - A revogação é só um UPDATE (chaves-maquina.ts:25-28).
+  - O varredor assenta o turno como `maquina_sem_contato` e abre um incidente com `voltouEm` nulo. `registrarVoltaDasMaquinas` (interromper-por-maquina.ts:168-178) nunca o fecha.
+  - `alvoDoTurno` pula a chave revogada (alvo-da-maquina.ts:14-20), então a retomada vai para outra máquina, sem a pasta.
+- **Correção:** no varredor, se a chave da máquina estiver revogada, assentar com motivo `maquina_removida`, sem incidente e sem card, e fechar os incidentes em curso dessa máquina.
+- **Cético:** confirmou. É caso de canto e o aviso pode ser dispensado com "Entendi".
+
+#### A8. Toda autorização de chave grava `ultimo_uso_em`, e o long-poll reautoriza a cada 250 ms
+- **Severidade:** baixa (média). **Tipo:** melhoria.
+- **Mecanismo:** autorizar-chave-maquina.ts:27-32 e ponte.ts:272-289. Gera cerca de 4 UPDATEs por segundo por máquina ociosa.
+- **Correção:** em `marcarUso`, gravar só se a última marca tiver mais de 30 s. Deve ficar abaixo da janela de 2 min de contas-do-turno.ts:34.
+- **Cético:** produção mostrou 99,95% de HOT updates e 98 tuplas mortas, então não há bloat. Sobra o desperdício de uma transação com escrita por volta.
+
+#### A9. Na abertura do app ou do motor, o laço puxa antes do primeiro `conectar`: um 409 por inicialização, "Reconectando…" e três anúncios em rajada
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** `publicar` chama `aoRegistry` antes de `anunciar` (vigia-ias.ts:262-265). O laço não recebe `anuncio` (desktop/main.ts:491) e puxa antes de conectar (laco.ts:380-392). Recebe 409 (ponte.ts:147-151), e o cliente dispara `reconectar` e `aoFalhar` (ponte-http.ts:156-159; desktop/main.ts:386-393).
+- **Correção:** subir o laço só depois do primeiro anúncio aceito. Enquanto `conectado === false`, não reconectar por causa de um 409 do puxar.
+- **Cético:** confirmou. A ordem depende de uma corrida e o efeito é ruído; mascara 409 reais na investigação.
+
+### B. Harness, IA e sessão do CLI
+
+#### B1. Laço rápido no limite: `aposLimite` repete a fala na IA que só está pronta noutra máquina, mas a fila devolve o turno à máquina-alvo, que só tem a IA no limite
+- **Severidade:** alta. **Tipo:** bug.
+- **Cenário:**
+  1. Mac A (alvo do bot ou da pessoa) só com o Claude; máquina B com o Codex; bot em Automático. O Claude bate no limite.
+  2. `aposLimite` usa `prontosDaPessoa` (ponte-interna.ts:518), que inclui o Codex de B, grava "respondendo pelo Codex" e reenfileira com `reenvios+1` (assentar-turno.ts:412-457).
+  3. A cláusula `alvo = machineId` (turnos.repo.ts:236-240) entrega o turno de volta a A. `iaDoAutomatico` cai em "todas no limite = a primeira pronta" (inteligencia.ts:66-69), que é o Claude, e ele é rejeitado de novo.
+  4. Repete a cada poucos segundos, sem teto de reenvios. O único teto existente está em `aposContaAusente`, assentar-turno.ts:577.
+- **Impacto:** a conversa é inundada de linhas "O Claude chegou ao limite · respondendo pelo Codex" e um `claude -p` rejeitado roda por volta, até o limite renovar ou a pessoa apertar Parar.
+- **Correção:**
+  1. Só trocar se a IA de destino estiver pronta numa máquina que *pode* pegar o turno. Senão, mostrar um aviso com a hora: "o Codex está pronto no B; este bot roda no A".
+  2. Criar um teto de reenvios comum aos caminhos de limite, conta e IA.
+- **Conhecido:** vizinho de NOD-171 e NOD-211.
+- **Cético:** confirmou. Produção tem uma cadeia de `reenvios` de 2 a 30 ou mais, com cerca de 3 s entre cada um, em 12/10 às 18:28. A causa exata daquele laço não foi cruzada.
+
+#### B2. Retomada de rotina ou delegação herda a sessão do turno anterior sem conferir a IA: `--resume` com id de sessão da outra IA
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Cenário:**
+  - Uma rotina no Automático roda no Codex (o Claude estava no limite) e para numa aprovação. Na retomada, o Claude já voltou e é escolhido.
+  - `sessaoDaCadeia` compara só o executor (emitir-plano-turno.ts:223-226). `sessaoDoTurno` não devolve a IA (turnos.repo.ts:485-488).
+  - O Claude recebe `--resume <thread do Codex>`, o que vira `sessao_rejeitada` e a rotina registra "falhou".
+  - No sentido inverso, o Codex abre thread nova e sem histórico (:238).
+- **Correção:** gravar a IA e a conta da sessão no turno e exigir igualdade, como já fazem :216-217. Como defesa adicional, refazer o turno uma vez sem resume quando vier `sessao_rejeitada`.
+- **Cético:** confirmou. Produção não tem nenhuma `sessao_rejeitada` em retomadas, e o uso misto de IAs ainda é raro.
+
+#### B3. Produção (`NOD_MODO=compartilhado`) nunca retoma sessão do CLI
+- **Severidade:** média (alta). **Tipo:** risco. **Precisa de decisão e ADR.**
+- **Mecanismo:**
+  - compor.ts:440-441 usa `permitirResume: !daPonte`, e `daPonte` é verdadeiro sempre no compartilhado.
+  - Todo turno vai com histórico de 20 falas × 1000 caracteres (emitir-plano-turno.ts:236-246).
+  - O `thread/resume` do Codex (ADR-103 §7) nunca é pedido (codex-chat.ts:424-425), mas `sessao_cli` continua sendo gravada.
+- **Impacto:** em todo turno, a pessoa paga o histórico de novo e o bot perde o que fez com ferramentas. O que o Marlon testa no modo local não é o que o cliente vê. Isso também agrava K2 (anexos).
+- **Correção:** decidir entre sessão por máquina (`sessao_maquina_id`, com resume quando o turno cai na mesma máquina) e assumir "sem sessão" (desligar `retomaSessao`, tirar `/compactar` do catálogo, medir o custo). Registrar a escolha em ADR.
+- **Cético:** confirmou que é uma limitação já admitida na ADR-092, não uma regressão. Produção: 26 de 31 conversas com mais de um turno têm sessões distintas.
+
+#### B4. Codex com terminal perde o Bash depois do deploy se o hook pergunta antes de a máquina reconectar
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - `recomporPlano` usa `capacidadesDaMaquina`, que devolve `{}` sem conexão (compor.ts:484; ponte.ts:481-484).
+  - Com isso `terminal=false` (emitir-plano-turno.ts:346), o Bash e o apply_patch saem do plano e a rota responde 403 (interno.ts:204-206).
+  - O plano recomposto fica em cache pelo resto do turno (token-turno.ts:176-177).
+- **Correção:** na recomposição sem conexão viva, passar `undefined` (não sei) em vez de `{}`, ou gravar `terminal` em `turno_credenciais` no despacho. Não guardar em cache um plano recomposto sem conexão.
+- **Cético:** confirmou. A janela vai até 30 s, até o 409 e a reconexão.
+
+#### B5. `repetirBarradosPorIa` repete turnos barrados por falta de conta e duplica a nota "Seguir com…" a cada reconexão
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - `semContaNaMaquina` usa `executor_indisponivel` + `limite_do_plano` (despachar-turno.ts:157).
+  - `barradosPorFaltaDeIa` não filtra `motivo_falha` (turnos.repo.ts:816-824), e é chamada em todo conectar e inventario (ponte.ts:128-133).
+  - Cada deploy gera uma nota nova com botões em cada conversa barrada nos últimos 30 min. No modo "Trocar sozinho", a fala pode rodar sem a pessoa pedir.
+- **Correção:** criar um `motivo_falha` próprio (`sem_conta`) para a recusa por conta, ou excluir `limite_do_plano` da repetição. Ver também C7.
+- **Cético:** confirmou.
+
+#### B6. Bot fixo numa IA que a máquina-alvo não tem, mas outra máquina viva tem: negação "Codex indisponível" com o Codex pronto, repetida a cada anúncio
+- **Severidade:** baixa (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - O alvo reivindica o turno (turnos.repo.ts:236-240).
+  - `recusarPorExecutor` usa o inventário pronto da outra máquina, e o texto sai como "indisponível" (harness.ts:100).
+  - `repeteNosProntos` usa os prontos da pessoa (repetir-barrados-por-ia.ts:51-59).
+- **Correção:** repetir só se a IA fixa estiver pronta na máquina-alvo. Mudar a frase para "o Codex está pronto no <B>; este bot roda no <A>". A sugestão "deixar para B" não serve: o turno ficaria preso, que era o problema da NOD-171.
+- **Cético:** produção não tem nenhum turno com `reenvios` maior ou igual a 2 nesse padrão.
+
+#### B7. Codex app-server: `turn/start` recusado descarta a mensagem de erro, e a guia manda `effort: max` ao gpt-6-astra
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:**
+  - codex-chat.ts:354-357 grava `turno_recusado` e joga fora `r.mensagem`. cliente-app-server.ts:99 faz o mesmo.
+  - `guiaNoMaisPotente` troca o modelo, mas mantém o raciocínio (emitir-plano-turno.ts:303-304, 312).
+- **Correção:** recalcular o raciocínio depois de `modeloEscolhido` e preservar `r.mensagem` (redigida) como `erroCru`. Medir com a sonda o que o 0.162 devolve antes de criar uma classe `modelo_indisponivel`.
+- **Cético:** não confirmou que o app-server recusa. O custo de diagnóstico é certo; o dano à pessoa é hipótese.
+
+#### B8. Frente no Codex perde a sessão a cada troca de conta e a cada volta (ping-pong entre a conta preferida e a substituta)
+- **Severidade:** baixa (média). **Tipo:** melhoria. **Decisão de produto (ADR-101 §5).**
+- **Mecanismo:** `contaEmUsoDaIa` sempre devolve a preferida livre (contas-da-pessoa.ts:52). `mesmaContaDaSessao` só decide se retoma ou não (emitir-plano-turno.ts:213-214).
+- **Correção:** primeiro, avisar na linha de sistema que a frente recomeçou do histórico. Depois, se valer a pena, dar preferência à conta da sessão em frentes do Codex. Isso contraria "a ordem é da pessoa".
+- **Cético:** só a volta é evitável; a ida já é aceita pela ADR-102 R1.
+
+### C. Contas (ADR-101/102)
+
+#### C1. "Rodar no <máquina> desta vez" da nota de contas não faz nada: só marca turno pendente, e o turno já está interrompido
+- **Severidade:** alta. **Tipo:** bug.
+- **Cenário:**
+  1. A Max está no limite no Mac (o alvo); a Team está livre só na VM; modo "perguntar".
+  2. `semContaNaMaquina` assenta o turno como interrompido (despachar-turno.ts:157) e depois cria a nota com o botão (:170).
+  3. O clique chama `rodarDestaVez`, que faz UPDATE `where estado='pendente'` (turnos.repo.ts:622-627) e afeta 0 linhas. A rota devolve `{turnos:0}` e a tela só invalida a conversa (web/main.ts:2828-2832).
+  4. O mesmo acontece com a nota criada no assentamento (assentar-turno.ts:282 antes de :548-550).
+  5. Três contas na mesma VM geram três botões idênticos (ia-fora.ts:253-258).
+- **Impacto:** o caminho previsto para "conta livre só noutra máquina" é um botão morto. Com alvo fixo, reenviar cai na mesma nota.
+- **Correção:**
+  1. Criar o caso de uso `rodarDestaVezComConta`, no molde de `seguirComConta`: acha o turno interrompido por `limite_do_plano`, reenfileira com `maquinaDestaVez`, `reenvios+1` e a guarda `jaRefeito`, e grava a linha "Rodando na <VM> desta vez".
+  2. Deduplicar os botões por máquina.
+- **Cético:** confirmou. O docs/plano-contas-mac-vm.md:258-259 reaproveitou "a rota de hoje" sem notar que o turno já estava interrompido.
+
+#### C2. Frente aberta pela pessoa que chega a uma máquina com a conta no limite não espera: é interrompida, vira "falhou" e fecha o lote
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Cenário:**
+  1. O dono abre frentes a partir da conversa. Elas nascem com origem `conversa` e `trabalho_id` (frentes.ts:86; pedido-de-colega.ts:70).
+  2. A única conta do Claude está no limite e o modo é "perguntar".
+  3. despachar-turno.ts:159 testa `origem !== 'conversa'` e pula `esperarContaNaFrente`, criando a nota (:168-174).
+  4. A frente vira `falhou` (trabalho.ts:124), o lote fecha e o varredor não a recupera (frentes.repo.ts:179).
+- **Mecanismo:** o pré-spawn decide pela origem; o assentamento decide pelo trabalho (assentar-turno.ts:543). O teste cobre só origem `rotina` (contas-no-turno.test.ts:138).
+- **Correção:** `if (turno.trabalhoId || turno.origem !== 'conversa')` → `esperarContaNaFrente`. Teste com `conversa + comTask`.
+- **Conhecido:** citado de passagem no mapa como "ponto fraco 5"; não há issue.
+- **Cético:** confirmou. Rebaixou porque exige a máquina sem nenhuma conta utilizável.
+
+#### C3. Pré-spawn com IA fixa decide "outra_ia": a conversa lê "Seguindo com ChatGPT · B" e nada é refeito; a nota sai sem botão
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - `semContaParaOTurno` passa `naMaquina` inteira, sem filtrar pela IA do turno (contas-do-turno.ts:67).
+  - Com isso a decisão vira `outra_ia` (contas-da-pessoa.ts:136-137) e a frase "Seguindo com" (:181).
+  - `livres` fica vazia (contas-do-turno.ts:95), e o despacho só sabe criar nota (despachar-turno.ts:168-174).
+- **Correção:** filtrar `naMaquina` pelas IAs do turno, como assentar-turno.ts:522-525 já faz, e tirar de `livres` as contas de outra IA. Não refazer no despacho, porque isso quebraria a regra da IA fixa.
+- **Cético:** confirmou. Há contorno: pôr o bot no Automático.
+
+#### C4. Conta corporativa sem acesso (Team) derruba o Claude inteiro na máquina, na memória do servidor, mesmo com a Max pronta
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - ponte-interna.ts:516 chama `reprovarHarness` sem olhar `plano.conta`.
+  - O Mac, com `p.conta`, não reanuncia (main.ts:499).
+  - Nenhum código grava `sem_acesso` (contrato e CHECK da 0074 existem, mas sem escritor).
+  - A reprovação só cai num 409 ou reconexão.
+- **Impacto:** todo turno fixo em Claude dessa máquina é recusado; o Automático só roda no Codex.
+- **Correção:** reprovar a IA só quando o turno não tem conta. Com `contaDoTurnoId`, gravar o vínculo como `sem_acesso`, limpar a escolhida e repetir o turno.
+- **Cético:** confirmou.
+
+#### C5. `no_limite_ate` nunca se cura sozinho: upgrade pago fica preso até o horário gravado
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - `contaDoTurno` só devolve conta livre (contas-da-pessoa.ts:44, 54-62), e o pré-spawn barra antes do CLI (despachar-turno.ts:113-118).
+  - O único limpador é um turno concluído na conta (assentar-turno.ts:325), que nunca roda.
+  - Não há rota nem botão para "tentar de novo".
+  - O prazo pode chegar a 31 dias (ponte-validacao.ts:313), contra 8 dias do caminho por IA (inteligencia.ts:88-90).
+- **Correção:**
+  1. Aplicar o teto de 8 dias (`PRAZO_LIMITE_MAXIMO_MS`) no `marcarLimite`.
+  2. Botão "Tentar de novo com <conta>" na nota e em Provedores, que limpa o limite e refaz o turno.
+  3. Opcional: deixar a conversa sondar a conta no limite quando ela é a única da IA.
+- **Cético:** produção tem 1 conta Max no limite. O dono tem alternativas; o impacto cheio é para quem tem uma conta só.
+
+#### C6. Frente sem conta utilizável dorme até o `no_limite_ate` do fornecedor; "Seguir com" e a troca de modo não a acordam
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:**
+  - No ramo da frente (despachar-turno.ts:159-167; assentar-turno.ts:543), a retomada nasce com `acordar_em` igual à volta do fornecedor, que pode ser dias.
+  - Nenhum código reescreve `acordar_em` (só aparece no INSERT, turnos.repo.ts:167).
+  - `seguirComConta` só refaz turno com origem `conversa` (contas-ia.ts:92).
+- **Correção:** manter a espera sem pergunta, que é decisão do QA da NOD-211 (redacao.ts:72-74), mas dar saída. "Seguir com", trocar para Automático ou logar uma conta nova antecipam a retomada pendente daquela IA, identificada pela IA do turno e não por texto. A linha da task diz "esperando a conta N" e oferece "Seguir com".
+- **Cético:** produção tem 0 retomadas pendentes no futuro hoje.
+
+#### C7. Frente aberta pela pessoa e barrada por conta é repetida como turno de CONVERSA solto, sem trabalho
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - Começa como C2. Depois `barradosPorFaltaDeIa` (turnos.repo.ts:816-823) devolve o turno e `repetirBarradosPorIa` o reenfileira sem `trabalhoId` (repetir-barrados-por-ia.ts:31-45; turnos.repo.ts:172).
+  - O texto "Frente: … Parta de origin/main" roda como fala, na pasta do bot.
+- **Correção:** a correção de C2, mais `trabalho_id is null` em `barradosPorFaltaDeIa`.
+- **Cético:** produção tem 0 ocorrências (o caminho das contas é de 13/10).
+
+#### C8. Nota de limite sem passo quando a conta livre não está numa máquina viva; depois de "Entrar com X", a nota continua com os passos velhos
+- **Severidade:** média. **Tipo:** melhoria.
+- **Mecanismo:**
+  - O botão "Entrar com" está aninhado em `else if (l.outraMaquina)` (ia-fora.ts:253-258).
+  - O comentário promete "em nenhuma: Entrar com ela aqui" (contas-da-pessoa.ts:111).
+  - O payload da nota é congelado na criação (contas-do-turno.ts:72), e o fim do login não refaz nada (compor.ts:641-644).
+- **Correção:** desenhar "Entrar com X na <c.maquina>" sempre que `!l.naMaquina`, e recalcular "Seguir com" a partir de `estado.contasIa`.
+- **Conhecido:** vizinho de C1.
+- **Cético:** confirmou a parte 1; a parte 2 é mais fraca.
+
+#### C9. "Seguir com <conta>" não refaz nem avisa quando uma fala de frente ou colega do próprio bot entrou depois da nota, ou quando há 30 mensagens ou mais depois dela
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** `jaRefeito` conta qualquer fala de agente (contas-ia.ts:90), e a nota é buscada só entre as 30 últimas mensagens (:85; mensagens.repo.ts:144-151).
+- **Correção:** decidir pelo estado do turno (o último interrompido por `limite_do_plano`, mais um turno posterior com a mesma `mensagemOrigemId`). Quando nada for refeito, devolver o motivo.
+- **Cético:** confirmou. A escolha da conta fica gravada; o dano é um botão que não faz nada.
+
+#### C10. Conta removida "de todas" volta sozinha quando uma máquina que já estava logada nela a lê pela primeira vez
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:**
+  - Na primeira leitura, `logadaEm = agora` (desktop/contas-locais.ts:108; padraoDe :80; sincronizar :261).
+  - Isso faz `decidirAnuncio` devolver "voltar" (contas-da-pessoa.ts:161), e o repositório reativa a conta (contas-ia.repo.ts:117-121).
+- **Correção:** na primeira leitura, usar a data de modificação do arquivo de credencial. Carimbar `agora` só quando o login passou pelo Nod.
+- **Cético:** só acontece com estado local zerado (máquina nova ou reinstalação).
+
+#### C11. "Sair desta máquina" e "Remover de todas" não olham turno em curso na conta: a pasta é apagada debaixo do CLI
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** rotas/contas-ia.ts:99-122 e contas-ia.repo.ts:176-187 fazem UPDATEs cegos. `sairDe` → logout e `rm -rf` da pasta (contas-mac.ts:120-128). O `dispose` não faz nada (claude-cli.ts:682-684).
+- **Correção:** no diálogo de confirmação (web/telas/contas-lista.ts:295-328), listar as frentes que estão rodando nessa conta e nessa máquina.
+- **Cético:** o efeito exato no CLI não foi reproduzido. A ação é deliberada e confirmada pela pessoa.
+
+#### C12. A fila ignora as contas: sem alvo, o Mac com a conta no limite pega o turno e o mata com uma nota, enquanto a VM com conta livre estava puxando
+- **Severidade:** baixa (média). **Tipo:** bug. **Decisão de produto.**
+- **Mecanismo:** `reivindicar` (turnos.repo.ts:225-260) não olha contas. `noLimite` vem só de `ias_no_limite` (ponte-interna.ts:262-264). O caminho das contas não grava `ias_no_limite` (assentar-turno.ts:309-321).
+- **Correção:** decidir se no modo "perguntar" o turno sem alvo sempre pergunta ou roda onde há conta livre. No segundo caso, a máquina sem conta utilizável declina o turno enquanto outra máquina viva tiver conta.
+- **Cético:** a inconsistência (o resultado depende do lock) é o defeito real. Produção tem contas espalhadas em 3 máquinas.
+
+### D. Cota, limite e custo
+
+#### D1. Rotina e pedido de colega sem task que batem no limite NO MEIO do turno falham de vez
+- **Severidade:** média (alta). **Tipo:** bug. **Decisão de produto.**
+- **Cenário:**
+  - Rotina das 09:00 num bot fixo no Claude; a janela de 5 h chega a 100% no meio do turno.
+  - `aposLimite` é null porque a origem não é `conversa` (:417). `aposLimiteNoFundo` é null porque não há `trabalhoId` (:636).
+  - Cai no aviso (:358-385). `depoisDeAssentar` grava "falhou" (compor.ts:553-558) e nada roda às 11:30.
+  - No caso do pedido de colega, `avisarFalhaDelegacao` sai na hora (entregar-resposta-peer.ts:275-285).
+- **Correção:** criar a retomada com `acordar_em` igual à renovação, mantendo a cadeia `retoma_turno_id`, e não gravar "falhou" quando houver retomada por cota. Na prática, estender `aposLimiteNoFundo` à rotina sem trabalho.
+- **Cético:** produção tem 13 turnos de rotina sem trabalho interrompidos por limite. Delegação sem trabalho: 0, então o caso do colega é hipótese.
+
+#### D2. A repetição da fala por limite ou troca de conta/IA não herda a marca de contaminação (ADR-062 §6)
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - Cinco caminhos chamam `turnos.enfileirar` sem `contaminar`: assentar-turno.ts:437-452, 485-500, 590-608, 716-731, e repetir-barrados-por-ia.ts:30-44.
+  - Só :660 e enfileirar-retomada.ts:52 herdam a marca.
+  - O turno repetido retoma a sessão com a página de fora no contexto e ganha as aprovações automáticas de um turno limpo (autorizar-comando.ts:58-66).
+- **Correção:** um helper `repetirTurno`, ou um parâmetro `herdaContaminacaoDe` no INSERT. Teste para os cinco caminhos.
+- **Cético:** confirmou. Raro: exige ler a web e bater no limite no mesmo turno.
+
+#### D3. "Esperando a cota da IA" na tela diverge da fila
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - A tela usa `iasConhecidas` (usos mais limites; cota-da-ia.ts:153-155) e a IA *atual* do bot (trabalhos.ts:222-230).
+  - A fila usa as IAs prontas e a IA do turno (turnos.repo.ts:233-234).
+  - O Codex nunca tem leitura (claude-cli.ts:555 é o único driver que a produz).
+- **Impacto:** com Claude e Codex prontos e o Claude no limite, as tasks aparecem "esperando a cota" enquanto rodam no Codex. No inverso, a task fica "na fila" sem motivo.
+- **Correção:** para o Automático, usar `iasParaOAutomatico` com as IAs prontas das máquinas vivas. Para IA fixa, usar o harness do turno pendente mais antigo. Na dúvida, mostrar "livre".
+- **Conhecido:** vizinho do "turno pendente guarda o harness" (15/10).
+
+#### D4. "Custo de hoje" e o total do modo dev não enxergam o Codex
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** o Codex emite `custoUsd: null` (codex-chat.ts:229; codex-ligacao.ts:306; codex-stream.ts:25). A soma filtra `custo_usd is not null` (turnos.repo.ts:807). `custoDosBots` só lista quem tem custo maior que zero (custo-do-dia.ts:92). Os tokens são gravados (turnos.repo.ts:524-525), mas nenhuma leitura os usa.
+- **Correção:** somar os tokens e mostrar "N mil tokens · o Codex não informa custo". O modo dev conta turnos sem o filtro. A frente mista é marcada como parcial.
+- **Conhecido:** vizinho de NOD-125 (backlog).
+- **Cético:** confirmou. É lacuna de exibição.
+
+#### D5. O custo só nasce quando o turno termina e é atribuído pela hora de criação
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - `custoPorAgente` agrupa por `t.criado_em` (turnos.repo.ts:806-807), e o custo só é gravado ao assentar (assentar-turno.ts:282-292).
+  - Hoje parece menor que a média sempre que há turnos longos, e o aviso de ritmo não dispara durante um descontrole.
+- **Correção:** somar a tabela `gastos` por `g.em`. Depois, se quiser, mandar o custo parcial na renovação.
+- **Cético:** produção (14 dias): 105 gastos registrados mais de 2 h depois da criação do turno e 46 que cruzam a meia-noite.
+
+#### D6. A leitura "esgotado" segura o fundo do Claude até 1 h depois da renovação que o fornecedor anunciou; a pílula diz "volta em 3 dias"
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** `vigentes` exclui a janela já renovada (cota-da-ia.ts:51), o que reabre o ramo "esgotado" (:58). O `voltaEm` é o máximo com a semana (:59), e o teste fixa 72 h (cota-da-ia.test.ts:48-49).
+- **Correção:** usar `!janelas.some(utilizacao >= 1)` e `voltaEm = medidoEm + 1 h`. Antes, conferir com uma fixture real do CLI.
+- **Conhecido:** vizinho de NOD-12.
+
+#### D7. Frente em Automático que bate no limite com outra IA pronta é migrada na hora para a outra IA, perdendo a sessão
+- **Severidade:** baixa (média). **Tipo:** risco. **Decisão de produto (ADR-099 §7).**
+- **Mecanismo:** `aposLimite` (:354) vem antes de `aposLimiteNoFundo` (:356) e não olha `trabalhoId`. A frente nasce com origem `conversa`. A sessão só é retomada com o mesmo harness (emitir-plano-turno.ts:216).
+- **Correção:** em `aposLimite`, devolver null quando houver `trabalhoId`, para a frente esperar na sessão dela.
+
+#### D8. A volta criada pelo limite conta no teto de 24 voltas e abre retomada em dobro se uma aprovação chega durante a espera
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** `voltasMarcadas` não distingue a origem da volta (turnos.repo.ts:407-411). `retomadaNaFila` ignora `acordar_em` futuro (:377-383).
+- **Correção:** marcar a origem da volta numa coluna. Em `enfileirarRetomada`, juntar a entrada à volta da cota já pendente e zerar `acordar_em`.
+- **Cético:** produção tem só 3 voltas por cota e nenhum caso de dobro.
+
+#### D9. O aviso de ritmo erra quando o bot muda de IA
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** `ritmoDoBot` divide sempre por 7 e trata um dia no Codex como zero (custo-do-dia.ts:71-76). Resultado: alarme falso de "7×" quando o Claude renova, e silêncio diante de um gasto alto.
+- **Correção:** tirar da média os dias sem custo medido; com menos de 3 dias, "sem base".
+
+#### D10. Turno do Claude cortado antes do primeiro `result` grava custo null e tokens 0
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** stream-json.ts:377 trata a ausência de `result` como custo null. Em produção não há resume que recupere o valor pelo delta.
+- **Correção:** somar os eventos `chamada` (usage por mensagem, stream-json.ts:139-149) e marcar o custo como "desconhecido".
+
+### E. Turnos: queda, lease, deploy e retomada
+
+#### E1. Retomada automática (pedido de colega e frente caída) mede a queda pela CRIAÇÃO do turno, porque interromper e assentar zeram `lease_ate`
+- **Severidade:** alta. **Tipo:** bug.
+- **Cenário:**
+  - Uma frente começa às 10:00 e o Mac dorme às 12:30.
+  - O varredor assenta o turno às 12:31. `frentesCaidas` devolve `quedaEm = coalesce(lease_ate, criado_em)` = 10:00.
+  - `decidirPedidoParado` lê "mais de 2 h" e desiste: o Retomar é fechado, a frente vira "falhou", o lote fecha e o dono acorda.
+  - Variante inversa: um turno novo é retomado antes de a máquina voltar.
+- **Mecanismo:** turnos.repo.ts:528 e :548 zeram o lease. As três consultas usam o coalesce (frentes.repo.ts:160, 165; pedidos-de-colega.repo.ts:115, 120; trabalhos.repo.ts:470, 475). O teste só usa turnos recém-criados (pedidos-parados.test.ts:60).
+- **Impacto:** a retomada só funciona para turnos curtos, o oposto do caso que a ADR-099 queria cobrir.
+- **Correção:** coluna `ultimo_sinal_em`, gravada em `interromper`/`assentar` a partir do `perdidoDesde` que interromper-por-maquina.ts:150 já calcula. As três consultas passam a usá-la no `queda_em` e no sinal. Testes com turno longo e com turno curto.
+- **Cético:** confirmou e manteve alta.
+
+#### E2. Aprovação decidida enquanto o turno ainda está "despachando" numa máquina que já dormiu nunca é continuada
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - `assentarAprovacao` confia no turno vivo (decidir.ts:254-256).
+  - O varredor não chama `continuarAprovacoesDoTurno`, e a entrega tardia retorna antes (assentar-turno.ts:276 vs :392).
+  - `aContinuarDoTurno` busca por `turno_id` exato (decisoes.repo.ts:168-173), e `retomarTurno` não consulta.
+- **Impacto:** o efeito externo já executado nunca chega ao bot, que tende a refazê-lo.
+- **Correção:** chamar `continuarAprovacoesDoTurno` depois de interromper no varredor e no ramo tardio, ou juntar `entradaDaAprovacao` em `retomarTurno`. Garantir uma única retomada.
+- **Cético:** a janela é de até 90 s, e só causa dano se o processo do CLI morreu.
+
+#### E3. Parar (ou excluir o bot) com a máquina fora do ar vira "máquina sem contato": card Retomar, incidente e, depois de um deploy, entrega recusada com 403
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - `renovarLease` congela o lease quando há Parar (turnos.repo.ts:337).
+  - `vencidos` e `motivoDaQueda` ignoram `parar_solicitado_em` (:709-715; incidente.ts:36-38). Só `desfechoDaEntrega` respeita (assentar-turno.ts:124).
+  - Pedido de colega parado é retomado sozinho (pedido-parado.ts:94).
+  - Na adoção, `recusado` vira 403 (ponte-interna.ts:624-625; ponte.ts:326-330).
+- **Correção:** em `interromperPorMaquina`, com Parar pendente, usar o motivo `parado_pela_pessoa`, sem decisão, sem incidente e sem contar queda. Junto de E5, separar adotar para assentar de adotar para rodar.
+- **Conhecido:** ponto fraco 1 do mapa.
+
+#### E4. A tolerância ao reinício é de 30 a 60 s (conta desde a última resposta): deploy de 35 a 60 s mata o CLI, o turno assenta "trabalho_incompleto" sem Retomar e a frente vira "falhou"
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:**
+  - `ultimaResposta` é gravada em ponte-http.ts:153 e :180, e a comparação :185-187 conta a partir dela. Com renovação a cada 30 s, um deploy de D segundos mata o turno com probabilidade (D−30)/30.
+  - A adoção renova o lease antes de assentar (ponte-interna.ts:624), o que leva a `trabalho_incompleto` (assentar-turno.ts:124).
+- **Correção:**
+  1. Servidor: entrega por adoção, interrompida sem motivo e sem Parar, assenta como `reinicio_servidor` com Retomar.
+  2. Cliente: contar a tolerância desde a primeira falha e renovar a cada 10 s enquanto a resposta for "indefinido".
+- **Conhecido:** lacuna de NOD-214 (concluída) e NOD-218 (aberta, deploy sem queda).
+- **Cético:** a duração real do deploy não foi medida; se passar de 35 s com frequência, vira alta.
+
+#### E5. Adoção pós-deploy frágil: exceção transitória vira `{ativo:false}`, que mata o CLI; e "recusado" vira 403 definitivo na entrega
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:** `adocao()` junta exceção, recusado e token ausente em null (ponte.ts:156-165). Na renovação isso vira `{ativo:false}` (:297-298); na entrega, 403 (:326-330). O cliente trata `acao_recusada` como definitivo (ponte-http.ts:106, 184, 211-212).
+- **Correção:** exceção vira 503 (o cliente já lê como transitório) e o 403 fica só para recusa real. Criar um modo de adoção para assentar que aceita Parar pendente.
+- **Cético:** o cenário do Parar antes da adoção é determinístico, mas a janela é curta. A frequência de exceção não foi medida.
+
+#### E6. Entrega com mais de 1000 chamadas de ferramenta é recusada com 400, o cliente a trata como "servidor fora", abandona depois de 120 s e o turno vira "máquina sem contato"
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** stream-json.ts:326 não tem teto. A validação usa `exigir` com limite de 1000 (ponte-validacao.ts:297). O cliente lê 400 como `servidor_fora` (ponte-http.ts:104-110) e tenta por 120 s (:209-213).
+- **Correção:** cortar `ferramentasChamadas` e `negacoesPermissao` com `slice`, sem recusar a entrega. No cliente, `entrada_invalida` é definitivo.
+- **Cético:** produção tem 1 turno com 2333 ferramentas, em cerca de 8,5 mil. Raro, mas sempre o turno mais caro.
+
+#### E7. Hook PreToolUse e proxy MCP não toleram o reinício do servidor
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** um único fetch (hook-nativas.ts:148-156); o catch nega tudo (:237-238).
+- **Correção:** repetir só em ECONNREFUSED (1, 3, 5 s) e negar com "o servidor do nod está reiniciando".
+- **Cético:** o proxy já devolve uma negação transitória (negacao.ts:34-35).
+
+#### E8. Entrega tardia com SUCESSO: a resposta completa é gravada como "parcial", o card Retomar fica aberto e a frente é retomada sozinha
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** assentar-turno.ts:140-142, 218, 276-280. O comportamento é intencional (ADR-010, teste assentar-turno-queda.test.ts:82-97).
+- **Correção:** com tardia, `maquina_sem_contato` e sucesso, fechar por regra o Retomar e não marcar como parcial. Registrar como emenda da ADR-045.
+
+#### E9. Mensagem do meio oferecida numa renovação cuja resposta se perdeu nunca é reoferecida
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** `oferecidas` é um Set sem tempo (ponte-interna.ts:160, 488-491) e o filtro está em sessao-viva.ts:73-76. Também bloqueia a promoção da rede de 2 min.
+- **Correção:** guardar o instante da oferta e reoferecer depois de cerca de 10 s sem confirmação. O cliente já descarta repetidas (laco.ts:213-217).
+
+### F. Parar e cancelamento
+
+#### F1. Parar na Clarice não cancela o pedido ao Milton: a resposta dele reabre a tarefa parada (conversa) ou o trabalho parado (frente)
+- **Severidade:** alta. **Tipo:** bug.
+- **Cenário:**
+  - **A:** a pessoa para a Clarice e escreve outra coisa. O turno do Milton segue, porque está na conversa dele (parar.ts:38, 48). A resposta enfileira uma retomada "Siga a tarefa original" (entregar-resposta-peer.ts:203-219) sem checar parada.
+  - **B:** a pessoa para a frente. A continuação herda o `trabalhoId` (:216). `estadoDoTrabalho` põe `pendentes > 0` antes de `parado` (trabalho.ts:117-118), e `mudarEstado` sai de estado final (trabalhos.repo.ts:207-215).
+- **Impacto:** o trabalho que a pessoa parou volta sozinho e gasta cota. Na variante B, o lote já foi devolvido e o resultado se perde.
+- **Correção:**
+  - Em `entregar()`: se o turno que pediu foi interrompido por `parado_pela_pessoa` ou o trabalho está `parado`, gravar só a `peer_ask` e não abrir continuação.
+  - No Parar, interromper também o turno de delegação nascido dos handoffs abertos.
+  - Como defesa em profundidade, `mudarEstado` não sai de estado final sem ação explícita.
+- **Conhecido:** a invariante está no mapa; a consequência não tem issue.
+- **Cético:** confirmou. A ADR-084 já filtra a task parada no varredor, mas não na entrega normal.
+
+#### F2. Parar no chat do bot deixa uma parada aberta por tempo indefinido: rotinas, "Executar agora" e pedidos de colega morrem no despacho sem registro nem aviso
+- **Severidade:** média (alta). **Tipo:** bug. **Decisão de produto (ADR-083/099).**
+- **Mecanismo:**
+  - `paradas.ativa` cobre a conversa inteira, sem prazo (paradas.repo.ts:67-78).
+  - O despacho interrompe o turno sem chamar `registrarDesfechoRotina` nem `avisarFalhaDelegacao` (despachar-turno.ts:88-96). O mesmo vale para parar.ts:38-45.
+  - Só uma fala da pessoa encerra a parada (enviar-mensagem.ts:78).
+- **Correção:**
+  1. Registrar o desfecho "interrompida" com motivo `parada_aberta` e avisar quem pediu.
+  2. "Executar agora" encerra a parada, como retomar-turno.ts:48.
+  3. A faixa avisa que rotinas e pedidos estão suspensos, ancorada no elemento afetado e sem faixa âmbar.
+- **Cético:** produção: 10 rotinas e 3 delegações interrompidas por `parado_pela_pessoa` entre 24/09 e 08/10. Hoje há 0 paradas abertas.
+
+#### F3. Parar no chat da Clarice cancela os frames ainda não publicados de TODOS os bots da pessoa
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:**
+  - `cancelarPendentesDaPessoa` (parar.ts:65; outbox.repo.ts:73-78) não filtra por conversa.
+  - O outbox só leva frames de UI (parar.ts:66-67), e a tela do Milton fica sem a fala final até recarregar.
+- **Correção:** remover o cancelamento, que não protege nenhum efeito externo, ou restringi-lo à conversa parada.
+- **Cético:** produção tem só 2 linhas canceladas em todo o histórico.
+
+### G. Frentes e lote
+
+#### G1. O retorno do lote não tem rede: sai com a IA no limite, sem conta ou não pronta, morre interrompido, e o lote já está devolvido; os resumos nunca chegam
+- **Severidade:** alta (crítica). **Tipo:** bug.
+- **Cenário:**
+  - As frentes consomem a janela do Claude.
+  - `devolverAoDono` enfileira o retorno (origem `retomada`, sem trabalho, sem `acordar_em`) e marca o lote devolvido na mesma transação (fechar-lote.ts:66-85).
+  - O portão da cota não segura o retorno (turnos.repo.ts:291-296; tipoParaCota em cota-da-ia.ts:82-93).
+  - O CLI rejeita. `aposLimite` é null (:417) e `aposLimiteNoFundo` também (:636), e o turno morre (:358-385).
+  - `fecharLoteSePronto` sai cedo (fechar-lote.ts:30) e ninguém refaz (turnos.repo.ts:819; contas-ia.ts:91).
+- **Impacto:** perda silenciosa do resultado de um lote inteiro, horas de trabalho pago, no cenário mais comum de hoje.
+- **Correção:**
+  1. Tratar o retorno como fundo: o portão o segura no limite e `aposLimiteNoFundo` o aceita sem `trabalhoId`.
+  2. Tornar o lote reabrível, limpando `devolvido_em` quando o retorno morre, ou só marcar devolvido quando o retorno concluir.
+  3. Usar o harness atual do bot, não o de `abertoPor` (:78-79).
+- **Cético:** confirmou. Rebaixou para alta porque exige que o limite coincida com o fecho. Não leu os ramos do despacho (IA fixa, sem conta).
+
+#### G2. A volta da frente pela cota não leva o pedido: se o primeiro turno nunca rodou, a frente acorda só com "siga de onde parou" e o título
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - O pedido só existe em `entrada_texto` (frentes.ts:83-97).
+  - O pré-spawn assenta o turno e cria a volta com texto fixo (despachar-turno.ts:159-167; assentar-turno.ts:642-657; cota-da-ia.ts:165-176).
+  - Sem `sessaoCli`, o histórico vem de `doTrabalho` (mensagens.repo.ts:165-175), que só tem a linha de sistema. O prompt leva só o título (prompt-sistema.ts:413).
+  - Outras retomadas anexam o original (retomar-apos-acesso.ts:26).
+- **Correção:** anexar `Pedido original da frente: …` lido da raiz da cadeia quando não há sessão retomável.
+- **Cético:** produção: das 3 voltas por cota em frentes, 1 tem raiz sem sessão.
+
+#### G3. Card "Retomar" de um turno caído fica aberto depois que um recado posterior da mesma frente roda e conclui: a frente prende em "Sua vez" e o lote não fecha
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:** `enfileirarNoTrabalho` não fecha o card (coordenar-trabalhos.ts:58-97). `fatos.decisao` conta qualquer decisão do trabalho (trabalhos.repo.ts:330-331), e `precisa_de_voce` vence (trabalho.ts:116-119). O varredor perde a frente para sempre (frentes.repo.ts:181-182).
+- **Correção:**
+  1. Ao concluir um turno do trabalho, fechar por regra os `retomar_turno` de turnos anteriores.
+  2. Em `fatos`, só contar o card do último turno terminal.
+- **Cético:** confirmou. Resolve-se sozinho em 24 h.
+
+#### G4. O fecho do lote usa `coalesce(motivo_falha, motivo_interrupcao)` e o varredor usa `motivo_interrupcao`: frente recusada no despacho não é "queda" para o fecho
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** frentes.repo.ts:111-113 contra :160, :181. `ehQueda` só conhece valores de `motivo_interrupcao` (pedido-parado.ts:11, 64-66). Resultado: o dono só sabe da falha quando as outras frentes terminam, e sem `PERGUNTA_DA_QUEDA`.
+- **Correção:** separar os dois campos e criar uma função única `ehQuedaDoTurno`. Validar se login expirado deve gerar uma pergunta própria ("reconecte a conta").
+- **Cético:** latente; 0 casos em produção.
+
+#### G5. Aprovação ou pergunta de uma frente que vence em 24 h leva a frente a "terminado" e o lote devolve como sucesso
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - A decisão vencida some dos fatos (trabalhos.repo.ts:329-330). Com o último turno `concluido`, o estado vira `terminado` (trabalho.ts:122).
+  - `resumoSeFaltar` grava como resumo "Preciso da sua aprovação…". `motivoDaFrente` é null (retorno-do-lote.ts:92-94).
+- **Correção:** só para frente de lote, acordar a frente com "o pedido venceu sem resposta", ou derivar `falhou` com motivo `decisao_vencida`.
+- **Cético:** produção tem 2 frentes nesse estado. Para task avulsa, o comportamento é intencional e testado.
+
+#### G6. Card velho fica aberto depois que a mesma ação já saiu sozinha pelo modo novo: aprovar o card executa a ação de novo
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:** `pedir_aprovacao` cria sempre uma decisão nova (pedir-aprovacao.ts:117-157). Não há gêmea para aprovação (fechar-gemeas.ts). `marcarEDecidir` executa o conector no clique sem conferir se a ação já saiu (decidir.ts:52-100). A troca de modo deixar o card esperando é intencional (mudar-modo-aprovacao.ts:19).
+- **Correção:** em `marcarEDecidir`, se já existe um item executado equivalente num turno posterior da cadeia, fechar o card e dizer "essa ação já foi feita".
+- **Cético:** depende de o bot refazer o pedido; 0 aprovações abertas hoje.
+
+#### G7. "Reabrir" a aprovação vencida de uma frente não reabre a frente nem o lote
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `reabrirDecisao` não sincroniza (reabrir-decisao.ts:36-56). Depois de aprovar, a frente roda de novo, mas o resumo velho fica (resumo-sem-chamada.ts:16) e o lote não devolve (fechar-lote.ts:30).
+- **Correção:** chamar `sincronizarDasDecisoes` ao reabrir e devolver ao dono um "retorno complementar" quando uma frente de lote já devolvido volta a final. É a mesma regra do plausível P5.
+- **Cético:** produção tem 2 decisões vencidas em frentes terminadas.
+
+#### G8. Retomada de frente presa a uma VM que não volta: a frente fica "trabalhando" para sempre, sem "Rodar em outra desta vez"
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:**
+  - O alvo considera a chave viva, sem olhar contato (alvo-da-maquina.ts:17). O estado é derivado como "rodando" (trabalho.ts:116), e a tela diz "trabalhando" (web/lib/trabalhos.ts:149-150).
+  - O chip só existe na mensagem da pessoa (conversa.ts:328-349).
+  - Os órfãos só são observados, por decisão (turno-orfao.ts:9-26).
+  - A ADR-090 §6 promete "esperando <máquina> (sem contato)" também para task.
+- **Correção:** a web mostra "esperando <máquina> · sem contato desde HH:MM" com o atalho de rodar em outra máquina (TrabalhoDto já traz a máquina). Um prazo que vira "precisa de você" é decisão de produto.
+- **Conhecido:** vizinho de NOD-219 e NOD-216.
+- **Cético:** produção tem 38 pendentes com mais de 1 h; a causa não foi verificada.
+
+#### G9. Bot excluído com lote de frentes aberto para um colega: o lote nunca fecha e o remetente fica "rodando" para sempre
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** `agentes.excluir` faz UPDATE direto para `parado`, sem `fecharLoteSePronto` (agentes.repo.ts:156-168). Os varredores não pegam o caso (pedidos-de-colega.repo.ts:131; trabalhos.repo.ts:478-479). `fatos.colega` é verdadeiro com `trabalhoId` nulo (:335-340).
+- **Correção:** a exclusão passa as frentes por `marcarParado`, ou avisa quem pediu com `avisarFalhaDelegacao`.
+- **Cético:** 0 casos em produção.
+
+#### G10. A rede de 2 min promove o próprio turno de retorno do lote a frente: segundo lote e segundo retorno
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** `promoveNaRede` aceita retomada em modo conversa (trabalho.ts:186-189). `promoverNaRede` cria um lote com `abertoPor` igual ao retorno (coordenar-trabalhos.ts:294-329).
+- **Correção:** não promover a retomada que é retorno de lote (`lotes.retorno_turno_id = turno.id`).
+- **Cético:** produção tem 0 lotes da rede abertos por retomada.
+
+#### G11. Frente que muda de máquina continua numa pasta vazia, sem aviso, e na retomada seguinte volta à máquina antiga
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** o mesmo de A6, mais `pastaTrabalho` criada vazia (emitir-plano-turno.ts:348; claude-cli.ts:518). `trabalhos` não registra a máquina.
+- **Correção:** a de A6. Depois, gravar a máquina no trabalho.
+
+#### G12. Frente na fila com a máquina-alvo offline aparece só como "na fila"
+- **Severidade:** baixa (média). **Tipo:** melhoria.
+- **Mecanismo:** `esperaNaMaquina` só olha portões existentes (memoria-mac.ts:410-413). `MaquinaDoTrabalho` não leva presença (trabalhos.ts:245-253).
+- **Correção:** a mesma tela de G8.
+
+### H. Pedidos entre bots
+
+#### H1. Fan-out: a continuação que ainda diz "falta o Dev 3" é entregue como resultado FINAL quando a segunda resposta chega enquanto a primeira continuação roda
+- **Severidade:** alta. **Tipo:** bug.
+- **Cenário:**
+  - O Chico pede ao Dev 2 e ao Dev 3. O Dev 2 responde e nasce C1 ("ainda faltam…"). O Dev 3 responde enquanto C1 roda, e nasce C2 ("consolide").
+  - C1 conclui. `aindaNaoEntrega` só considera retomada com `acordar_em` (entregar-resposta-peer.ts:100), então entrega à Clarice "Dev 2 aprovou; falta o Dev 3".
+  - C2 cai em `ja_entregue` (:180-184).
+- **Impacto:** resultado parcial apresentado como final, e a consolidação é jogada fora, no uso diário Chico→Devs.
+- **Correção:** em `aindaNaoEntrega`, receber o turno assentado e esperar enquanto houver outra retomada viva da cadeia. Teste concorrente.
+- **Conhecido:** a ADR-063 cobre só a ordem sequencial.
+
+#### H2. Triagem de pedido de colega que bate no limite nunca espera: o pré-spawn morre e o varredor retoma 3 vezes em minutos
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - `aposLimiteNoFundo` exige trabalho (assentar-turno.ts:636). O pré-spawn assenta direto (despachar-turno.ts:157).
+  - O varredor trata `executor_indisponivel` como queda (pedido-parado.ts:11, 92-96).
+  - O portão por IA não segura a retomada (turnos.repo.ts:291-296).
+  - Resultado: quem pediu recebe "caiu 3 vezes".
+- **Correção:**
+  1. A triagem sem trabalho espera com `acordar_em`.
+  2. O varredor não trata como queda o `executor_indisponivel` com `motivo_falha = limite_do_plano`, `harness_ausente` ou conta; espera ou avisa uma vez com texto próprio.
+- **Conhecido:** generaliza a "rotina sem frente interrompida" de 15/10.
+- **Cético:** produção tem 0 delegações sem trabalho com limite.
+
+#### H3. Dispensar (×) a pergunta que a triagem fez à pessoa deixa quem pediu esperando para sempre
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** `dispensarDecisao` e `depoisDeDispensar` não olham delegação (dispensar-decisao.ts:35-45, 66-79). O varredor exige o último turno `interrompido` (pedidos-de-colega.repo.ts:132). É regressão da ADR-084 desde a triagem sem task (ADR-099 I7).
+- **Correção:** em `depoisDeDispensar`, se o turno é delegação, chamar `avisarFalhaDelegacao` ("a pessoa deixou a pergunta sem resposta"), sem `semEsperar`.
+- **Cético:** produção tem 6 perguntas em delegações e nenhuma foi dispensada.
+
+#### H4. Parar no chat do bot que RECEBEU o pedido cancela a espera de comando de uma triagem já concluída: nenhuma volta nasce e quem pediu nunca é avisado
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `cancelarRodando` cancela todas as esperas da conversa (esperas.repo.ts:139-146). `cancelarEsperas` não acorda ninguém (esperar-comando.ts:154-158).
+- **Correção:** devolver as esperas canceladas e enfileirar a volta com "a espera foi cancelada pela pessoa" pelo caminho de `acordar`.
+
+#### H5. Pedido segurado na fila (cota, máquina-alvo fora, Mac apertado) é invisível para quem pediu; passadas 24 h, falhas posteriores ficam mudas
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:** `triagensParadas` exige cadeia interrompida (pedidos-de-colega.repo.ts:132-134). Os órfãos só observam (turno-orfao.ts:54-56). A janela de 24 h é ancorada no handoff (:103). Parar e excluir não avisam (parar.ts:41; agentes.repo.ts:149-150).
+- **Correção:** ancorar a janela no último turno da cadeia e mostrar na tela de quem pediu o motivo da espera.
+- **Cético:** produção tem 30 delegações pendentes, 4 com mais de 24 h; a causa não foi verificada.
+
+### I. Rotinas
+
+#### I1. Gate de aprovação aberto não segura a janela seguinte: cada janela reexecuta a rotina e abre outro card idêntico
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** o pré-voo só olha `TIPOS_PEDIDO_A_PESSOA`, que não inclui `aprovacao` (pre-voo-rotina.ts:22, 45-51; contracts/pedido.ts:8). `turnoAberto` não vê o turno concluído (rotina-janelas.repo.ts:67-86). `pedir-aprovacao.ts:117-125` sempre cria uma decisão nova.
+- **Impacto:** um card por janela; aprovar dois deles faz a ação externa duas vezes.
+- **Correção:** usar `TIPOS_QUE_SEGURAM_A_EXECUCAO` (movido para contracts) no pré-voo. Opcional: reaproveitar o card pendente da rotina.
+- **Cético:** produção: 29 aprovações sobrepostas a outra aprovação ainda aberta da mesma rotina, e 343 aprovações de rotina no total.
+
+#### I2. "Parar" durante o turno de uma rotina grava "falhou" e escreve "A rotina falhou por erro técnico"
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** compor.ts:554-561 só trata `maquina_sem_contato` como exceção. disparar-rotina.ts:284 usa "erro_execucao" como fallback, e redacao.ts:60, 119 produz a frase.
+- **Correção:** `parado_pela_pessoa` vira desfecho "interrompida" (silencioso).
+
+#### I3. Rotina que marca volta (`me_chame_as`) registra "executou" antes da volta e escreve "Rotina executou" duas vezes
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `registrarDesfechoRotina` não olha retomada pendente (disparar-rotina.ts:241-248). Escreve uma mensagem a cada registro (:286-294). Ao mesmo tempo, `turnoAberto` considera a execução aberta (rotina-janelas.repo.ts:76-83).
+- **Correção:** devolver `aguardando_volta` usando a mesma consulta de `turnoAberto`, e só escrever a mensagem quando o desfecho muda de classe.
+
+#### I4. Acesso concedido pela tela Conectores não fecha o card do pré-voo: 24 h depois o card vence e pausa a rotina com "ninguém liberou o acesso"
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `vencerPedidoDaRotina` não relê as concessões (decidir-acesso.ts:64-82). `concederLote` não fecha o card (conceder.ts:93).
+- **Correção:** ao vencer, recalcular `faltaDeAcesso` e, se o acesso já existe, fechar como atendido. Ao conceder, fechar os cards cobertos.
+
+#### I5. A agenda da rotina trava para sempre quando "Testar agora" reivindica a janela canônica antes do tick
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** o instante do "Testar agora" é o minuto cheio (executar-rotina-agora.ts:19), igual ao do cron. O turno termina antes do tick, `reivindicar` dá false e o caminho volta `janelaDeOutro` sem reagendar (disparar-rotina.ts:134-135). Repete a cada 30 s, sem log.
+- **Correção:** reagendar no `janelaDeOutro` quando `proximaExecucao <= agora`, e logar. Opcional: o "Testar agora" usar um instante em milissegundos. Teste de que `proxima_execucao > agora`.
+
+#### I6. Turno de rotina recusado no despacho não gera execução: a janela fica sem desfecho e o histórico não mostra que não rodou
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `recusarPorExecutor` e `semContaNaMaquina` (despachar-turno.ts:107-119, 144-175, 177-193) não chamam `registrarDesfechoRotina`.
+- **Correção:** chamar `registrarDesfechoRotina({desfecho: 'falhou', motivo})` na mesma transação, ou num gancho comum de turno terminal.
+- **Conhecido:** vizinho da "rotina interrompida por executor_indisponivel" de 15/10.
+- **Cético:** produção tem **77 janelas** nesse estado, todas sem execução registrada.
+
+#### I7. Frente aberta por uma execução de rotina que fica presa pula todas as janelas seguintes para sempre
+- **Severidade:** média (alta). **Tipo:** risco.
+- **Mecanismo:** `filhaAbertaDaRotina` não tem limite de idade (disparar-rotina.ts:124-131; trabalhos.repo.ts:197-204). Uma frente "rodando" esperando um colega que nunca responde (handoff sem `trabalhoId`, trabalhos.repo.ts:338-344) nunca fecha.
+- **Correção:** consertar a causa no colega e dar à guarda um teto (24 h sem turno vivo); ao passar dele, fechar a execução antiga como "interrompida".
+- **Conhecido:** vizinho de "frentes rodando sem turno" e de "janela pulada sem motivo".
+- **Cético:** produção tem 2 frentes nesse estado, ambas com menos de 24 h.
+
+#### I8. Pausar a rotina não cancela o turno pendente: a tela diz "nada será disparado" e o turno roda quando a máquina volta
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** pausar-rotina.ts:20-38 não toca nos turnos. `reivindicar` não olha o estado da rotina.
+- **Correção:** interromper os pendentes das janelas na mesma transação e, no `reivindicar`, excluir turnos de rotinas pausadas.
+
+#### I9. "Testar agora" e as frentes que ele abre são tratados como fundo novo
+- **Severidade:** baixa (média). **Tipo:** bug. **Decisão: o teste manual fura a reserva?**
+- **Mecanismo:** tipoParaCota (cota-da-ia.ts:82-87); `pessoaEsperando: false` (pedido-de-colega.ts:69). Contraria a ADR-085:38-39.
+- **Correção:** marcar no turno que o disparo foi da pessoa e propagar isso às frentes. Como mínimo, mostrar o motivo da espera na conversa.
+
+#### I10. "Testar agora" com a execução agendada ainda pendente duplica a execução
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** o comportamento é intencional pela ADR-045:48-49. `preservarAgenda` pula a checagem de `turnoAberto` (disparar-rotina.ts:122).
+- **Correção:** perguntar "já há uma execução na fila; rodar mais uma?" em vez de cancelar a pendente.
+
+### J. Tela contra servidor
+
+#### J1. O sinal da barra e a tela de Trabalhos só releem o dono quando o ESTADO de um trabalho muda
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - Os eventos `turno.*` não invalidam `trabalhos` (reducer.ts:697-711, 754-755). Só `trabalho.mudou` leva `estadoDono` (despachar-outbox.ts:100), e `sincronizarTrabalho` não emite nada se o estado não mudou (trabalhos.ts:71).
+  - Uma rotina sem frente fica "1 na fila" depois de concluir. Uma frente que passou a esperar colega continua "Trabalhando".
+- **Correção:** invalidar `trabalhos` em `turno.*` dos bots da pessoa, com debounce, e reler ao entrar na tela de Trabalhos. Opcional: um evento `dono_mudou`.
+- **Conhecido:** vizinho de NOD-216, mas em outra camada.
+
+#### J2. A janela de 24 h do pedido a colega existe só no dono: depois de 24 h a frente vira "1 na fila" enquanto a lista diz "esperando X"
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** donos.repo.ts:94 filtra por 24 h; `fatos.colega` e `extras` não filtram (trabalhos.repo.ts:335-340, 406-415).
+- **Correção:** tirar a janela da consulta do dono.
+
+#### J3. "Trabalhando · há 3 h" conta desde a CRIAÇÃO do turno, não desde o despacho
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** donos.repo.ts:57; enviar-mensagem.ts:193; reducer.ts:710, 943. Não existe coluna de despacho.
+- **Correção:** coluna `despachado_em`, exposta no DTO e no frame. "Na fila há N min" continua usando `criadoEm`.
+
+### K. Anexos
+
+#### K1. Bot em Automático aceita PDF, mas o despacho escolhe a IA sem olhar o anexo: com ordem [Codex, Claude], só o Codex na máquina ou o Claude no limite, todo PDF vai para o Codex
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:**
+  - O servidor só confere o anexo quando a IA é fixa (enviar-mensagem.ts:82-86). A web trata "auto" como Claude (web/lib/capacidades.ts:6-8; anexos.ts:15).
+  - `escolherHarness` não recebe os anexos (emitir-plano-turno.ts:160-172). O Codex troca o PDF por "não pôde ser lido" (anexos-turno.ts:80).
+  - A repetição para outra IA leva o PDF do mesmo jeito.
+- **Correção:** passar os tipos de anexo a `escolherHarness` e preferir uma IA pronta que leia todos. Se nenhuma ler, negar com a causa `anexo_nao_lido` antes de gastar o turno.
+- **Conhecido:** NOD-207 (concluída) cobriu só a IA fixa.
+- **Cético:** produção tem 0 turnos com PDF; o risco é latente.
+
+#### K2. O anexo só existe no turno que nasceu com ele: retomada após card ou queda, pergunta seguinte e frente ou colega perdem o arquivo
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** `enfileirarRetomada` não copia `entradaAnexos` (enfileirar-retomada.ts:30-46). O plano usa só os anexos do turno (emitir-plano-turno.ts:323) e um histórico sem marcador de anexo (:236). Em produção não há sessão (B3). A rota interna só serve os anexos do plano (interno.ts:80). O texto "nada foi reenviado" (decidir.ts:173) engana o modelo.
+- **Correção:**
+  1. A retomada herda e une os anexos.
+  2. Sem sessão, marcar "[anexou X]" no histórico e reanexar os da última fala com arquivo.
+  3. Só dizer "nada foi reenviado" quando houver sessão.
+  4. Frente e colega: decisão de produto.
+
+#### K3. A sessão viva inverte a ordem das falas: o texto mandado depois do print entra ao vivo e o print vira turno próprio depois
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** o filtro de anexo é aplicado fala por fala (sessao-viva.ts:74; turnos.repo.ts:594, 612).
+- **Impacto:** em "olha esse erro" + print seguido de "ignora, já resolvi", o bot responde ao "ignora" e depois investiga o erro.
+- **Correção:** cortar a absorção na primeira fala com anexo (ordenar e usar `takeWhile`; no SQL, `criado_em < min(pendente com anexo)`).
+
+### L. Salas
+
+#### L1. Na sala, a nota "Seguindo com <conta/IA>" é falsa: o turno de sala que bate no limite no meio não é refeito
+- **Severidade:** média. **Tipo:** bug. **Decisão: a sala repete?**
+- **Mecanismo:** todas as repetições exigem origem `conversa` (assentar-turno.ts:417, 470, 548). A frase não olha a origem (contas-da-pessoa.ts:181; contas-da-ia.ts:151). Além disso, a fala parcial roda os responders (:195-203).
+- **Correção:** criar `repetirNaSala` com teto, ou usar a frase "fale de novo para seguir com X". Postar a fala parcial sem disparar os responders.
+
+#### L2. Nota de contas na sala: "Seguir com" grava a escolha para todos os bots em silêncio e não refaz nada; com dois bots, refaria a nota errada
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - `definirEscolhida` roda antes de qualquer checagem (contas-ia.ts:84). A nota buscada é a última (:86), `jaRefeito` aceita qualquer agente (:90) e a origem `sala` é recusada (:91).
+  - O botão não leva `turnoId` (ia-fora.ts:254).
+- **Correção:** levar o `turnoId` no botão e no POST, aceitar `sala`, calcular `jaRefeito` só com o mesmo agente e gravar a escolha só depois de validar.
+
+#### L3. Lead da sala excluído: todo post sem @menção cai no vazio, sem nenhuma linha, e não há como trocar o lead nem a política
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:**
+  - A exclusão não toca as salas (agentes.repo.ts:145-165).
+  - `quemResponde` devolve [] (canal-responde.ts:42), e a linha explicativa só sai na política `so_mencoes` (postar-na-sala.ts:181-184).
+  - `atualizarPolitica` não tem rota (salas.repo.ts:138).
+- **Correção:** escrever o motivo sempre que ninguém responder, reatribuir o lead ao excluir e expor uma rota de lead e política.
+
+#### L4. Turno de sala barrado no despacho nunca é repetido quando a IA ou a conta volta
+- **Severidade:** baixa (média). **Tipo:** bug.
+- **Mecanismo:** `barradosPorFaltaDeIa` só pega origem `conversa` (turnos.repo.ts:819). O comentário sobre "vínculos próprios" (repetir-barrados-por-ia.ts:19) não corresponde a nada. `encaminhar` gasta um handoff mesmo para um destinatário sem IA (encaminhar.ts:58-84).
+- **Correção:** repetir também os turnos de sala, contando "nada do mesmo agente depois", ou gravar um passe tipado. No `encaminhar`, conferir antes se o destinatário tem IA pronta.
+
+### M. Duplicar bot e as mãos do Nod
+
+#### M1. A cópia perde a máquina do bot (`maquina_id`): com IA fixa, toda janela de rotina da cópia é recusada no Mac
+- **Severidade:** média (alta). **Tipo:** bug.
+- **Mecanismo:** `NovoAgente` e o INSERT não têm `maquina_id` (agentes.repo.ts:81-98, 170-174), e duplicar não chama `definirMaquina`. O alvo cai na máquina padrão (alvo-da-maquina.ts:17-19), e o alvo pega o turno sem a IA pronta (turnos.repo.ts:242).
+- **Correção:** na duplicação feita pela dona, copiar `maquina_id` se a chave ainda estiver viva.
+
+#### M2. Duplicar pelo Nod (gerir_bots) no modo automático roda sem caixa nem card: as rotinas ativas passam a rodar em dobro sem aviso
+- **Severidade:** média. **Tipo:** bug.
+- **Mecanismo:** `riscoDaAcao('duplicar')` só considera contaminação mais acessos (lote-bots.ts:134-143). O aviso existe só na web (main.ts:1570). A ADR-034:75-79 condiciona o custo aceito ao aviso.
+- **Correção:** na cópia pedida pelo Nod, as rotinas vêm pausadas e o Nod avisa (é o fallback que a própria ADR-034 prevê).
+
+#### M3. Duplicar duas vezes gera dois bots "Nina (cópia)", com a mesma pasta e nome ambíguo
+- **Severidade:** média. **Tipo:** risco.
+- **Mecanismo:** o nome é fixo (duplicar-agente.ts:34). `pastaDoBot` usa só o nome (nativas.ts:111-114). `pedir_a_bot` responde "nome ambíguo" (apoio-l7.ts:147).
+- **Correção:** escolher o primeiro nome livre ("cópia 2"). A médio prazo, pasta derivada de nome mais id, ou guardada no bot.
+
+#### M4. "Rotina ativa continua ativa, com a aprovação como estava" é falso: a cópia nasce em Manual
+- **Severidade:** baixa (média). **Tipo:** risco.
+- **Mecanismo:** a cópia nasce Manual de propósito (ADR-059 §1; teste mudar-modo-aprovacao.test.ts:45-50). `exige_aprovacao` é copiado, mas ninguém o lê (duplicar-agente.ts:72).
+- **Correção:** manter Manual e avisar na caixa de duplicar. Corrigir o comentário e a ADR-034, e remover o campo morto.
+
+---
+
+## 4. Achados plausíveis (o cético refutou, mas o autor tinha confiança alta)
+
+#### P1. Turno pendente preso a uma máquina-alvo que não volta: rotinas do bot param em silêncio por dias
+- **Severidade do autor:** alta; do cético: baixa.
+- **Cenário:** bot fixado numa VM desligada. O alvo considera a chave viva (alvo-da-maquina.ts:14-20) e só ela pega o turno (turnos.repo.ts:250). `turnoAberto` pula as janelas seguintes, e o varredor de órfãos só observa (turno-orfao.ts:54-56).
+- **Por que o cético derrubou:** "só observar" é decisão da ADR-017/NOD-219, de dois dias atrás, com métrica `turno_velho_na_fila`. A tela mostra "espera pela máquina X". Produção tem 0 máquinas-alvo mortas.
+- **O que falta para confirmar:** dado real de `turno_velho_na_fila{condicao_da_maquina}`. Também vale investigar os 38 pendentes com mais de 2 h vistos hoje. Ver G8.
+
+#### P2. Toda a cadeia (retomadas, voltas, volta da cota, retorno do lote, recado) fica presa ao harness e modelo do turno de origem
+- **Severidade do autor:** média; do cético: baixa.
+- **Mecanismo:** enfileirar-retomada.ts:40-41, assentar-turno.ts:653-655, fechar-lote.ts:78-79, coordenar-trabalhos.ts:80-81.
+- **Por que o cético derrubou:** a cópia é intencional (ADR-036) e protege a sessão da task (emitir-plano-turno.ts:216). O Automático relê a ordem no momento do plano.
+- **O que falta:** uma decisão de produto dizendo que "Uma IA só" deve alcançar as frentes abertas, e uma contagem de frentes esperando a cota com o bot já em outra IA.
+- **Mínimo útil:** um aviso na tela 2B. O retorno do lote (G1) já pede que se use o harness atual.
+
+#### P3. Frente e rotina de bot fixo numa VM sem a IA: retomada sozinha 2 vezes, "caiu 3 vezes"
+- **Severidade do autor:** média; do cético: baixa.
+- **Por que o cético derrubou:** a frente recusada vira `falhou` e `frentesCaidas` só lê `precisa_de_voce` (frentes.repo.ts:179), então a retomada em cadeia não acontece.
+- **O que sobra:** a parte da rotina sem execução registrada, que é I6.
+- **O que falta:** nada. Considere o achado absorvido por I6 e G4.
+
+#### P4. Enquanto a triagem está na fila do Milton, ele não consegue responder à Clarice num turno com a pessoa (espera circular)
+- **Severidade do autor:** média; do cético: baixa.
+- **Por que o cético derrubou:** a recusa é intencional (ADR-099 item 8) e a triagem lê o histórico da conversa com a decisão da pessoa (emitir-plano-turno.ts:238).
+- **O que falta:** mostrar que a triagem ignora esse histórico.
+- **Ajuste barato:** mudar o texto do `espera_circular` no turno com a pessoa.
+
+#### P5. Frente reaberta pela pessoa depois do lote devolvido nunca devolve ao dono
+- **Severidade do autor:** média; do cético: baixa.
+- **Mecanismo:** fechar-lote.ts:30; o comentário em retorno-do-lote.ts:62 prevê "uma frente que voltou a rodar depois".
+- **Por que o cético derrubou:** é a própria pessoa quem reabre e ela vê o resultado.
+- **O que falta:** decisão de produto. A mesma regra de "retorno complementar" resolve G7.
+
+---
+
+## 5. Refutados (não reabrir)
+
+- **O driver descarta `account/rateLimits/updated` do Codex.** É limitação conhecida e adiada nas ADR-085, 076 e 101, sem amostra real do formato. A correção depende de homologar com conta real.
+- **Plano reservado cuja resposta do puxar se perde vira "sem contato".** Produção tem 1 caso em toda a tabela, e reentregar arrisca rodar o turno duas vezes.
+- **Tolerâncias medidas pelo relógio de parede no sono longo.** A entrega toma o `inicio` na hora em que acontece, e no sono longo o turno já foi assentado de qualquer forma. A janela real é de segundos.
+
+### 5b. Não verificados (baixa severidade, pulados pelo cético para poupar cota)
+
+Todos são **não verificados**:
+- Frente cuja conta trocou recebe a linha da "cota renovada". Mecanismo: `aposLimiteNoFundo` escolhe o texto por `conta?.tipo` da ADR-101, ausente no caminho da ADR-102 (assentar-turno.ts:543, 650, 673).
+- Frente de rotina tem `sem_novidade` no catálogo, o que silencia a fala e gera o resumo "terminou sem dizer o que fez" (frente.ts:30; plano-turno.ts:259-260).
+- Depois de o varredor desistir de uma frente, "Tentar de novo agora" não tem caminho no catálogo do dono (frentes-caidas.ts:21-33; plano-turno.ts:101-106).
+- Pergunta pendente da rotina gera uma linha "bloqueada" por janela e lava o histórico de 20 (pre-voo-rotina.ts:70; rotina-execucoes.repo.ts:80-85).
+- Modelo inválido ou IA pronta noutra máquina assentam como `motor_ausente` com frase "X indisponível" (despachar-turno.ts:182, 187; harness.ts:97-100).
+- Um só slot de sessão por conversa e por trabalho: cada troca de IA apaga a sessão da anterior (conversas.repo.ts:103-107; sessao-do-turno.ts:35, 53).
+- Mudar modelo ou raciocínio com turno rodando: o turno vivo regrava a sessão, e o plano só confere a IA (inteligencia.ts:37-41; sessao-do-turno.ts:34-37).
+- O chip "máquina sem IA pronta" manda rodar `nod-motor entrar claude` mesmo para bot do Codex (web/telas/conversa.ts:344-347).
+- O aviso do vigia só vive no frame e some ao recarregar a página (vigia-turno.ts; live-events.ts:69; atividade.ts:28-29).
+- Mac dormindo mais de 30 min: todas as frentes caídas são desistidas, porque os tetos vêm da ADR-084 (pedido-parado.ts:20, 92-96).
+- Horário de verão: a hora repetida dispara duas vezes e a hora inexistente perde a janela (rotina-janela.ts:140-149).
+- Excluir o Milton com pedido pendente avisa a Clarice "você pediu para parar" (agentes.repo.ts:149-152; redacao.ts:109).
+- Lote de pedido de colega todo parado ou falho é entregue como resposta normal (fechar-lote.ts:110; entregar-resposta-peer.ts:232-233).
+- Frente que nunca rodou e espera conta ganha `iniciado_em` e deixa de ser "fundo novo" (trabalho.ts:117-120; trabalhos.repo.ts:207-216).
+- Turno que esperou mais que `prazo_em` na fila sai com `MCP_TOOL_TIMEOUT` de 60 s (plano-turno.ts:307; claude-cli.ts:328-335).
+- A volta do `me_chame_as` entra em `turnosVivos` como "na fila" no web (reducer.ts:697, 707; me-chame-as.ts:122).
+- Pendente de origem `retomada` sem trabalho não entra na fila do dono: a conversa diz "na fila" e a barra diz "livre" (donos.repo.ts:111).
+- A adoção depois do deploy grava `conta_id` num turno que começou sem conta, e o limite cai na conta errada (emitir-plano-turno.ts:162-181).
+- O servidor nunca escreve passe tipado `ausente_offline`/`cota_esgotada`, e a rodada da sala nunca assenta (postar-na-sala.ts:26-31; rodada-sala.ts:39-50).
+- A entrega tardia grava o custo em `gastos` e na frente, mas não em `turnos.custo_usd` (assentar-turno.ts:233-244, 276-280).
+
+---
+
+## 6. Plano de correção proposto
+
+Os lotes agrupam o que mexe nos mesmos arquivos, para cada um caber num PR revisável. **[DECISÃO]** marca o que precisa de decisão de produto ou de ADR nova antes de codar.
+
+**Lote 1: a máquina recebe trabalho de novo (urgente, 1 a 2 dias)**
+- **Itens:** A1, A2, A3, A4, A9.
+- **Arquivos:** desktop/main.ts, motor/main.ts, rotas/ponte.ts, despachar-turno.ts, ligacoes.ts.
+- **Destrava:** quem só tem o Codex volta a rodar; o Mac que dormiu um minuto não fica zumbi; a ligação abortada não trava o bot. São correções pequenas com teste unitário direto e o maior efeito por linha de todo o relatório.
+
+**Lote 2: uma regra única de espera por limite (3 a 5 dias) [DECISÃO: emenda curta à ADR-099 §7]**
+- **Itens:** C2, C7, G1, G2, D1, H2, C6, D7, D8 e a parte de repetição de B5.
+- **Arquivos:** despachar-turno.ts:159, assentar-turno.ts (`aposLimite`, `aposLimiteNoFundo`), fechar-lote.ts, pedido-parado.ts, turnos.repo.ts (`barradosPorFaltaDeIa`, portão da cota), cota-da-ia.ts.
+- **Regra proposta:** todo turno de fundo (frente, retorno do lote, rotina, triagem) espera com `acordar_em`, decidido pelo *tipo do turno* e não pela origem. A volta carrega o pedido quando não há sessão. Qualquer decisão da pessoa sobre contas antecipa a volta. O varredor distingue limite de queda. O lote é reabrível.
+- **Decidir:** (a) a rotina sem frente espera ou falha com a hora de volta; (b) a frente em Automático espera na sessão ou troca de IA na hora.
+- **Destrava:** a promessa "nenhuma frente falha por limite" passa a ser verdade, no caso que mais aparece em produção hoje.
+
+**Lote 3: queda, deploy e retomada (3 a 4 dias)**
+- **Itens:** E1, E2, E3, E4, E5, E6, E8, G3 e o cancelamento de F2 no varredor.
+- **Arquivos:** turnos.repo.ts (`ultimo_sinal_em`), interromper-por-maquina.ts, ponte-interna.ts (adotar), rotas/ponte.ts, ponte-http.ts, assentar-turno.ts.
+- **Destrava:** frente longa caída volta sozinha; Parar com o Mac dormindo não vira "queda"; o deploy não mata turnos como "incompleto". Complementa a NOD-218.
+
+**Lote 4: pedidos entre bots e Parar (2 a 3 dias) [DECISÃO: a parada vale para rotina e delegação?]**
+- **Itens:** H1, F1, F2, H3, H4, H5, G9, F3.
+- **Arquivos:** entregar-resposta-peer.ts, parar.ts, dispensar-decisao.ts, esperar-comando.ts, pedidos-de-colega.repo.ts, agentes.repo.ts (excluir), outbox.repo.ts.
+- **Destrava:** fan-out confiável; Parar significa parar; nenhum pedido fica "esperando para sempre".
+
+**Lote 5: notas e botões de contas (2 a 3 dias) [DECISÃO: a sala repete o turno? o modo "perguntar" sem alvo roda onde há conta?]**
+- **Itens:** C1, C3, C4, C5, C8, C9, B5, L1, L2, C12, A5.
+- **Arquivos:** contas-ia.ts, contas-do-turno.ts, contas-da-pessoa.ts, ia-fora.ts, ponte-interna.ts (`reprovarHarness`), contas-locais.ts.
+- **Destrava:** toda nota de limite tem um passo que funciona e nenhuma promete "Seguindo com" sem seguir. Depende do lote 2, que cuida da parte da frente.
+
+**Lote 6: tela contra servidor (2 dias)**
+- **Itens:** J1, J2, J3, D3, G8, G12, I6 (histórico), D4, D5, D9, D10.
+- **Arquivos:** web/estado/reducer.ts, donos.repo.ts, trabalhos.ts, web/lib/trabalhos.ts, turnos.repo.ts (custo).
+- **Destrava:** a barra e a tela de Trabalhos dizem a verdade, e o custo de hoje inclui o Codex.
+
+**Lote 7: rotinas (2 a 3 dias)**
+- **Itens:** I1, I2, I3, I4, I5, I6, I7, I8, I9, I10.
+- **Arquivos:** disparar-rotina.ts, pre-voo-rotina.ts, compor.ts (`depoisDeAssentar`), decidir-acesso.ts, pausar-rotina.ts.
+- **Destrava:** acabam o efeito externo em dobro e a agenda travada, e o histórico fica honesto.
+- **Decidir:** se o "Testar agora" fura a reserva da cota (I9).
+
+**Lote 8: herança entre turnos (2 a 3 dias) [DECISÃO + ADR: B3, sessão em produção]**
+- **Itens:** D2, B2, K1, K2, K3, B4.
+- **Arquivos:** enfileirar-retomada.ts, turnos.repo.ts (enfileirar, `sessaoDoTurno`), emitir-plano-turno.ts, sessao-viva.ts.
+- **Destrava:** uma retomada é o mesmo pedido, com anexo, contaminação e IA corretos.
+- **B3 vem primeiro:** decidir entre sessão por máquina e "sem sessão" muda o desenho de K2 e B8.
+
+**Lote 9: frentes e fecho (2 dias)**
+- **Itens:** G4, G5, G6, G7, G10, A6/G11.
+- **Destrava:** sucesso e falha da frente chegam corretos ao dono.
+
+**Lote 10: salas, duplicar e máquinas (1 a 2 dias)**
+- **Itens:** L3, L4, M1, M2, M3, M4 [DECISÃO M4: a cópia herda o modo?], A7, A8, C10, C11.
+
+**Lote 11: polimento de harness e transporte (quando houver folga)**
+- **Itens:** B1, que entra no lote 2 se o laço aparecer de novo em produção. E também B6, B7, B8, E7, E9.
+
+**Resumo das decisões de produto pendentes:**
+1. Rotina sem frente, triagem e retorno do lote esperam o limite (lote 2).
+2. Frente em Automático troca de IA ou espera (D7).
+3. Escopo da parada (F2).
+4. Sala repete turno (L1, L4).
+5. Turno sem alvo no modo "perguntar" (C12).
+6. Sessão em produção (B3).
+7. Cópia herda o modo de aprovação (M4).
+8. "Testar agora" fura a reserva (I9).
+9. Prazo para turno preso a máquina morta (G8, P1).
+10. Retorno complementar de frente reaberta (G7, P5).
+
+---
+
+## 7. Lacunas da auditoria
+
+- **Nada foi reproduzido rodando.** Os achados foram confirmados por leitura de código. Só uns poucos tiveram contagem em produção (somente leitura). As frequências citadas sem número são hipótese. Antes de priorizar E4, B1, A2 e E5, vale medir em produção: a duração do deploy, as cadeias de `reenvios`, os eventos `laco_renovar_falhou` e `adocao_falhou`.
+- **Fora do escopo ou com pouca cobertura:**
+  - voz e ligações além do A3;
+  - computador (tela do bot);
+  - conectores e marketplace;
+  - segurança do hook e da cerca do git (só tocada em D2 e B4);
+  - migrações e o gate de destrutivas;
+  - performance do web;
+  - isolamento entre tenants;
+  - app desktop (atualização, instalação);
+  - o modo local (servidor no Mac) em profundidade, porque a análise focou no compartilhado.
+- **Cenários percorridos sem achado consolidado aqui.** Estes títulos aparecem como cenários percorridos, mas não chegaram com veredito à consolidação e precisam de verificação:
+  - tarefa pedida por voz absorvida pelo turno vivo;
+  - decidir o "×N" de acesso fecha a gêmea de outro turno sem retomá-lo;
+  - aprovar, permitir ou escolher pasta depois do Parar morre em silêncio;
+  - renomear o bot muda a pasta dele e deixa os clones fora da cerca;
+  - o deploy drena o motor da VM durante uma frente longa e derruba esperas de comando.
+- **Linear:** conferi as issues do time NOD por título. Os achados não têm issue própria. As relacionadas citadas (NOD-213/220, 214, 215, 216, 199, 207, 211, 219) estão concluídas. Seguem abertas NOD-218 (deploy sem queda), NOD-12 (uso do plano na tela), NOD-10 (contas por bot) e NOD-125 (limite de gasto), vizinhas de E4, D6, B8 e D4.
+- **Achados do dia 15/10 sem issue** (lista de conhecidos do prompt) **não foram re-reportados**: cota por IA e não por conta; pendente com o harness antigo; pedido de colega sem fechamento; janela pulada sem motivo; rotina sem frente interrompida; frentes "rodando" sem turno; EventSource sem watchdog; painel "Esperando <bot>". Vários achados aqui são generalizações deles e estão marcados como "vizinho".
+</script>
+<script type="text/markdown" id="md-forense"># Relatório forense do banco de produção do Nod
+
+Data de referência: 2026-10-15. Dados lidos entre 15/10 01:30 e 09:57 BRT (varreduras read-only; logs do servidor de 14/10 09:00 até 15/10 00:24 BRT). Código de referência: worktree `nod-auditoria`, `origin/main` 81a1c532. Horários neste relatório estão em BRT. Ids são os 8 primeiros caracteres. Nenhum texto de conversa é reproduzido; pessoas não são nomeadas, bots são.
+
+Cada achado passou por um autor (que varreu o banco) e por um cético (que releu o código e, em parte dos casos, reconsultou o banco). A severidade indicada é a do cético; quando o autor divergia, a dele vai entre parênteses. Onde o cético não recontou no banco, o achado diz isso.
+
+---
+
+## 1. Resumo executivo
+
+O núcleo do Nod está íntegro no que diz respeito a consistência de estado: zero turnos com lease vencido fora do varredor (até 08:07 de hoje), zero elos quebrados nas cadeias de retomada, zero trabalhos com estado gravado diferente do derivado (1.149 de 1.149), outbox com 64.526 de 64.528 itens entregues e p50 de 0,3 a 0,5 s, e a taxa de sucesso dos turnos fora do dia 12/10 fica em 93,7 %. O que o banco revela de grave não é corrupção: é **espera silenciosa**. O sistema foi desenhado para segurar trabalho em vez de falhar (ADR-099 §7), e hoje ele segura sem dizer a ninguém que está segurando.
+
+Os achados mais graves, em ordem:
+
+1. **Servidor sem contato com nenhuma máquina desde 08:07 de hoje** (crítico, ao vivo). Varredor de lease, agendador e `puxar` pararam no mesmo segundo; um turno está `despachando` com lease vencido há mais de 100 min e 12 rotinas têm próxima execução no passado. Causa não encontrada no banco; precisa de olho no processo do container.
+2. **Cota semanal do Claude esgotada (renova 16/10 13:00) segura 38 turnos de fundo há ~40 h** — 27 pedidos entre bots, 9 rotinas, 1 frente que a pessoa abriu — enquanto uma segunda conta Claude (Team) está logada, livre e ociosa, porque o portão da cota é por IA e não por conta. Ninguém é avisado: nem o dono, nem quem pediu, nem a lista de rotinas.
+3. **Trocar a IA do bot não vale para o que já está na fila**: o turno carrega o harness de quando foi enfileirado. A rotina mais frequente do tenant (a cada 10 min) ficou um dia útil parada atrás de um turno Claude, embora o bot já fosse Codex e o Codex estivesse livre.
+4. **Frente longa que cai por reinício do servidor ou máquina nunca é retomada**: `interromper` zera `lease_ate` e o varredor passa a ler a criação do turno como a hora da queda, desistindo em menos de 1 s. As 3 retentativas prometidas pela ADR-099 não acontecem para nenhuma frente com mais de 30 min de vida.
+5. **Laço de reenvio sem teto** produziu 682 turnos e 682 avisos iguais em 32 min no dia 12/10. O caminho (`aposLimite`) continua sem trava no main.
+6. **Frente "rodando" sem turno vivo**, esperando um colega preso na cota, pula uma rotina horária há 20 h sem nenhum registro.
+7. **Rotina que delega a cada execução** empilhou 19 pedidos ao mesmo bot (9 num só turno); quando a cota voltar, saem todos em série.
+8. **Custo por turno inflado** após `--fork-session` (até US$ 170 por turno, ~US$ 318 a 708 fantasmas em 21 dias) e **rótulo `executor='catcher'` errado** em 2.179 turnos — ambos contaminam métricas e o dicionário.
+
+O que vale destravar à mão hoje (detalhe na seção 7): conferir e reiniciar o processo do servidor; responder as duas perguntas pendentes do bot Leonardo (uma delas bloqueia a rotina 57b9b36b até 13:15); corrigir o harness do turno dcdbf4af (ou pará-lo) para a rotina da Clarice voltar ao Codex; decidir o que fazer com os 19 pedidos duplicados ao Ze 1 antes de 16/10 13:00; e avaliar pôr a conta Team em primeiro lugar e mandar uma fala a um bot Claude para a leitura de cota se renovar (inferência pelo código, não testada).
+
+---
+
+## 2. Panorama em números (por varredura)
+
+### 2.1 Relatos das pessoas
+56 relatos entre 22/09 18:28 e 15/10 00:53, de 3 pessoas (53 de uma só). 49 pelo botão, 7 contados ao bot. Tipo: bug 50, melhoria 4, dúvida 1. Categoria: outro 45, nao_fez_o_pedido 4, interface 2, travou_ou_parou 1. 48 com turno, 50 com mensagem, só 3 com `turno_diagnosticos`. Versões: 0.2.0-rc.1 (37, até 02/10), 0.4.0-rc.1…rc.11 (12), sem versão (7). Bots mais citados: Chico 11, Clarice 11, Frida 5, Dev 1 4. Sinais fora dos relatos: 254 negações `sem_novidade args_invalidos` (parou em 07/10), 18 `devolver_resumo args_invalidos` (ativo 12–14/10), 24 `Monitor alcance_insuficiente`.
+
+### 2.2 Turnos presos e anomalias de estado
+9.806 turnos: concluído 8.484, interrompido 1.284, pendente 38, despachando 0 (às 05:20). Integridade limpa em todas as 14 checagens (lease vencido, terminais com lease, concluídos com motivo de interrupção, elos quebrados, decisões `retomar_turno` pendentes, esperas sem acordar). 1.450 cadeias de retomada, máx. 7 saltos. Os 38 pendentes: todos claude-cli/opus, `attempted=false`, alvo VM 309ec3dd online. Varredor de lease desde 09/10: p50 98 s entre queda e interrupção (dentro do desenho); antes, com o servidor no Mac que dormia, p90 de 19.507 s.
+
+### 2.3 Como os turnos terminam (24/09 → 15/10)
+8.961 turnos: 86,1 % concluídos, 13,4 % interrompidos. Sem a tempestade de 12/10, interrupção cai a 6,3 %. Motivos: limite_do_plano 771 (685 em 12/10), maquina_sem_contato 134, executor_indisponivel 80, absorvido 78, trabalho_incompleto sem motivo 43, reinicio_servidor 29 (zero desde NOD-214). Sucesso por origem: rotina 96,9 %, retomada 91,5 %, conversa 87 %, delegação 83,5 % (a mais frágil). Custo: US$ 7.296,76 em 21 dias, dos quais ~US$ 318 a 708 são artefato de bifurcação de sessão. `turno_diagnosticos`: 891 linhas; 'session limit' 769, 'weekly limit' 23, 'autocompact is thrashing' 8.
+
+### 2.4 Frentes/trabalhos e lotes
+1.149 trabalhos (130 frentes). Abertos: 6 (4 na_fila presos pela cota, 2 rodando sem turno vivo). Estado gravado = derivado em 100 %. 108 lotes: 3 abertos, 79 devolvidos ao colega com `peer_ask` (fecho OK). 117/117 frentes terminadas com resumo. 5 frentes falharam por queda em 12/10, nenhuma retomada sozinha. Rede de 2 min: 15 frentes, 6 viveram menos de 60 s.
+
+### 2.5 Rotinas (01/10 → 15/10)
+55 rotinas (18 ativas). 4.197 janelas em 14 dias; 75 % dos turnos de rotina terminam 'sem novidade'. Custo US$ 2.597 em 14 dias (f190bf45 sozinha US$ 754 em 1.048 turnos). 87 janelas bloqueadas por 'aguardando_resposta', 51 janelas interrompidas no despacho sem registro de execução. Logs de 14/10: 168 `rotina_janela_pulada` contra 64 disparadas. Zero duplicidade real em 14 dias.
+
+### 2.6 Pedidos entre bots, esperas, decisões
+1.001 handoffs; 72 sem resposta (25 nas últimas 24 h, todos com triagem pendente; 47 antigos de 05–09/10). 48 `esperar_comando`, todas acordaram. 198 `me_chame_as` → 192 voltas; 3 perdidas em reinício. 271 pendências (ferramentas desligadas desde 06/10). 1.148 decisões, 29 vencidas, 2 pendentes (perguntas do alarme de voltas). Zero procurações.
+
+### 2.7 Contas, cota e máquinas
+4 contas: Max (pos. 1, no limite até 16/10 13:00), ChatGPT Plus (pos. 2), Claude Team corporativa (pos. 3, livre), ChatGPT Pro (pos. 4, nunca usada). Modo 'perguntar', nenhuma na troca automática. `uso_do_plano` claude-cli: esgotado, semana 100 %. Máquinas vivas: VM 309ec3dd (último uso 08:07:10) e Mac f9c0837b (mesmo segundo). Inventário de motores não registra o Codex. 91 avisos `409 estado_invalido` em `/api/maquina/*` (reconexão esperada).
+
+### 2.8 Eventos, outbox, incidentes
+Outbox saudável (0 pendentes, 1 retentativa em 30 dias). ~36,7 mil eventos em 7 dias; sequência íntegra (0 duplos, 0 despacho após fim). Os "atrasos" grandes medem transações longas, não entrega. 32 incidentes mac_sem_contato, todos dispensados. Reinício limpo em 14/10 13:24. 2 `falha_interna` sem rota (15:22 e 15:30 de 14/10).
+
+### 2.9 Consolidação dos achados
+29 achados confirmados pelo cético (23 após fundir os que descrevem o mesmo mecanismo em varreduras diferentes), 14 plausíveis (autor com confiança alta, cético refutou como "desenho" ou por falta de prova), 5 refutados, 21 não verificados.
+
+---
+
+## 3. Os relatos de bug das pessoas
+
+Agrupados por sintoma. "Corrigido" significa commit identificado no main; "aberto" significa que o mecanismo continua no HEAD.
+
+**(A) Pedido a colega ou rotina sem resposta — 9 relatos (24/09 → 15/10).** Os 3 mais recentes (14–15/10) são exatamente a fila presa pela cota: o relato e3f3c0e3 aponta a tarefa 20f4696b (Clarice → Milton, 18:14 de 14/10) que nunca foi despachada. **Aberto.** Liga-se aos achados C1 (cota segura o fundo sem aviso), C4 (rotina re-delega), C7 (frente rodando sem turno vivo) e ao não-verificado "pedido absorvido pelo dono".
+
+**(B) Bash/ferramenta negada — 7 relatos (01/10 → 12/10).** Desde 12/10 (commit 77dd5c10) a pílula mostra a causa (`espera_com_sleep`, `git_fora_da_pasta`, `sem_conferencia`). O motivo gravado no enum continua `alcance_insuficiente`, mas o cético mostrou que a causa real já está no evento (`dados->>'causa_nativa'`) e que o bot lê o motivo do hook, não o enum. **Corrigido no essencial**; sobra a métrica lendo a coluna errada (ver plausível P2).
+
+**(C) Memória/histórico — 7 relatos (28/09 → 01/10).** Corrigido por 0030 (28/09), ADR-066 (01/10), NOD-185 (06/10) e NOD-206 (11/10). O resíduo das retomadas "sem lembrar" entre 01/10 e 11/10 é o achado C13 (rótulo `catcher` descartava a sessão). **Corrigido para turnos novos.**
+
+**(D) Bot para no fim do turno com ações pendentes — 6 relatos (30/09 – 01/10).** Respondido por pendências (ADR-064), sessão viva (ADR-067), `me_chame_as` (ADR-086) e frentes (ADR-099). Sem reincidência nos relatos. **Corrigido.**
+
+**(E) Rotinas: aprovar, alterar, "fazer agora" — 7 relatos (22/09 → 15/10).** NOD-182, NOD-197, NOD-159 e 0032 cobrem aprovação e edição. "Fazer agora" com turno aberto: o cético refutou como defeito do servidor (ver R1); o que falta é feedback na UI. A reclamação de 15/10 ("a rotina não rodou") é o achado C3/C6 (janelas puladas em silêncio pela cota). **Parcialmente aberto.**
+
+**(F) Conexão a apps — 4 relatos (24/09 – 01/10).** `conector_indisponivel`/`timeout_transporte` continua (3 no log de 14/10). O cético refutou o retry como decisão registrada da ADR-009 (ver R2). Liga-se ao achado C17 (chamada ao conector dentro da transação).
+
+**(G) Card do limite da IA — 2 relatos (08–09/10).** A tempestade de cards por turno foi contida pelo portão da cota em 12/10 para frentes com task; rotinas sem trabalho e conversas ainda geram 2 cards por execução (13/10) — ver plausível P3. O silêncio que o substituiu é o achado C1. **Trocou de forma.**
+
+**(H) UI — 9 relatos.** Celular (ADR-094, 10/10) e tela da task (#188/#195, 08/10) corrigidos. Copiar listas, opções clicáveis, HTML inline, mensagem enorme após o card e limite de caracteres: sem commit identificado (ver não-verificado N3). **Aberto, sem mecanismo de servidor.**
+
+**(I) VM: `gh` só funciona após restart — 1 relato.** Mecanismo não confirmado. **Lacuna.**
+
+Dado de qualidade que afeta a leitura dos relatos: 16 relatos apontam turnos rotulados `catcher` que rodaram no Mac (achado C13), e 8 relatos que apontam a fala da pessoa ficaram sem turno (achado C12).
+
+---
+
+## 4. Achados confirmados, por área e severidade
+
+Numeração C1…C23. Área entre colchetes. Onde duas varreduras chegaram ao mesmo mecanismo, os achados foram fundidos e isso está indicado.
+
+### Crítico
+
+#### C1. Servidor sem contato com as máquinas e laços de fundo parados desde 15/10 08:07 (ao vivo) [contas-cota-maquinas]
+- **Severidade:** crítica. **Tipo:** risco operacional.
+- **Evidência:** às 09:57, `maquina_tokens.ultimo_uso_em` da VM 309ec3dd e do Mac f9c0837b = 08:07:10 (60 ms de diferença; às 05:30 atualizavam a cada `puxar`). Último evento em `events`: 08:04:08. Turno 74a72899 (rotina codex) `despachando` com `lease_ate` 08:08:40, vencido há mais de 100 min e não varrido. 12 rotinas ativas com `proxima_execucao` no passado (primeira 08:10). Nenhum incidente aberto. O log disponível termina às 00:24 com `nod_encerrado` + `drenagem_concluida` e não há log de subida depois.
+- **Mecanismo:** o varredor de lease (`src/adapters/fundo/varredor-lease.ts:12`, a cada 15 s) e o agendador (`src/adapters/fundo/scheduler-rotina.ts:12`, a cada 30 s) rodam no processo do servidor e não dependem dos clientes; um servidor vivo não deixaria um `despachando` vencido por 100 min nem rotinas vencidas desde 08:10. `boot.ts:308` emite `nod_encerrado` só no desligamento limpo. A carência de boot da NOD-214 só protege nos primeiros 90 s após subir. Causa raiz não encontrada no banco: processo travado, morto, ou deploy que não voltou.
+- **Impacto:** nada é despachado, nenhuma rotina dispara, Parar/retomar não agem, o turno travado não vira incidente. A pessoa vê bots "na fila" sem explicação.
+- **Correção:** imediata — conferir o processo no container (logs desde 08:00, laço de eventos, pool) e reiniciar; a retomada passa pela carência de lease e os turnos órfãos viram `reinicio_servidor`. Estrutural — heartbeat do servidor por tick (agendador/varredor) exposto na tela; alarme externo quando `ultimo_uso_em` de todas as máquinas vivas passar de 2–3 min; healthcheck do compose que olhe o heartbeat, para o Docker reiniciar processo travado e não só morto.
+- **Conhecido:** NOD-214 (carência de boot) não cobre.
+
+### Alta
+
+#### C2. Cota do Claude medida na conta Max segura todo o fundo dos bots fixos há ~40 h: 38 turnos presos, conta Team livre ociosa, ninguém avisado [turnos · colegas · contas-cota-maquinas]
+Funde os achados das varreduras "turnos-presos", "colegas" e "contas-cota-maquinas".
+- **Severidade:** alta (autores: alta; céticos: alta no ângulo da conta, média nos outros dois).
+- **Tipo:** risco de produto + lacuna de visibilidade.
+- **Evidência:** 38 pendentes criados de 14/10 09:19 a 15/10 05:04, todos claude-cli/opus, `attempted=false`, `machine_id` null, agente vivo, alvo VM online: 27 delegações (Ze 1 ×19–20, Cartola ×3, Dev 1 ×4 incluindo as 3 frentes do lote dde087ce, Milton ×1), 9 rotinas, 1 frente aberta pela pessoa (a305c426, desde 10:56) + 1 retomada. `uso_do_plano` claude-cli: `esgotado`, semana 100 %, renova 16/10 13:00, medido 14/10 19:20. Conta Max abd13446 (pos. 1) `no_limite_ate` 16/10 13:00; conta Team 22f39160 (corporativa, pos. 3) `pronta` nas duas máquinas, `no_limite_ate` null, rodou 219 turnos / US$ 189,70 até 14/10 09:50 e parou de ser usada quando a Max entrou (09:54). Logs: `cota_segura claude-cli:reserva` desde 09:56:46 e `:limite` desde 19:20:30. Último despacho de fundo claude-cli: rotina 09:50, delegação 09:18. Bots 'auto' seguiram no Codex a noite inteira. Nenhuma linha de sistema diz que N pedidos estão represados; os 25 handoffs sem resposta não têm `peer_ask`. O cético reconferiu no banco a linha de `uso_do_plano`, as contas e os 38 pendentes.
+- **Mecanismo:** o portão está dentro do `reivindicar` (`src/repositories/turnos.repo.ts:286-296`, ADR-099 §7): IA em 'limite' segura todo o fundo (trabalho_id, origem rotina/delegacao/peer, acordar_em). A cota é lida por harness (`src/domain/cota-da-ia.ts:38-64`, uma linha de `uso_do_plano` por IA); a conta não entra — `contas_ia.no_limite_ate` só pesa na escolha da conta (`emitir-plano-turno.ts:158`). Como o segurar acontece antes do despacho, o turno nunca passa por `semContaNaMaquina`/`criarNotaDeContas` (`despachar-turno.ts:144-174`), então não nasce nota nem botão "Seguir com". `uso_do_plano` só se renova num turno que termina (`assentar-turno.ts:253`, guarda `medido_em` mais novo em `uso-do-plano.repo.ts:22`); sem turno Claude rodando, a leitura velha fica. `pedir-a-bot.ts:130-155` devolve `instrucaoPedidoRecebido` (`triagem.ts:90-93`) sem consultar a cota, embora o item 8 da ADR-099 prometa dizer "espera por falta de recurso". `turno-orfao.ts:54-59` só observa o pendente velho (log `turno_velho_na_fila` 1×/h). A tela mostra a pílula de cota e "esperando a cota da IA" apenas em tasks (`trabalhos.ts:219-232`, `cota-da-ia.ts:142-146`); os turnos de triagem sem trabalho não aparecem. A Team é corporativa com `entra_na_troca_automatica=false` e o modo é 'perguntar' (ADR-101/102), então mesmo um portão por conta não a usaria sem clique da pessoa — isso é escolha dela, e é o ponto que o cético usou para rebaixar outros ângulos.
+- **Impacto:** nenhuma rotina, pedido entre bots ou frente dos bots fixados em claude-cli roda de 14/10 ~09:30 a 16/10 13:00; quem pediu não sabe e repete o pedido (C4); na renovação, 27 triagens + 9 rotinas + 3 frentes disparam juntas e consomem a janela nova de uma vez.
+- **Correção (melhor entre autor e cético):** (1) visibilidade, sem contornar limite — quando o `reivindicar` segura turno de IA fixa pela cota, criar uma vez por bot a nota/decisão "Claude · Max no limite até 16/10 13:00. Seguir com Claude · Team?" (reusa o "Seguir com" que a conversa já tem); linha na conversa de quem pediu ("o pedido espera a cota do Claude, volta ~13:00 de 16/10"); mostrar a delegação sem task como "na fila (cota)" em Trabalhos; mostrar a cota por conta na lista de contas (a pessoa pôs em 1º uma conta a 99 % da semana). (2) Em `pedir-a-bot.ts`, calcular `situacaoDoTurno` para o alvo e, se `cotaSegura('fundo_novo')`, dizer isso na instrução. (3) Decisão de produto do dono: se o portão deve ser consciente da conta (uma IA só segura se nenhuma conta elegível dela está livre) e se a conta corporativa pode absorver fundo; exige `uso_do_plano` por `conta_id` ou cruzamento com `contas_ia.no_limite_ate`. (4) Contorno imediato para a pessoa: pôr a Team em 1º e mandar uma fala a um bot Claude, para a leitura nova soltar o portão (inferência pelo código, não testada).
+- **Conhecido:** ADR-099 §7, ADR-101/102 (cota por IA, troca de conta por consentimento), NOD-219 (observar o pendente velho).
+
+#### C3. Harness congelado no turno: trocar a IA do bot não vale para o que já está na fila — rotina de 10 min da Clarice ficou ~23 h presa atrás de um turno Claude [rotinas · contas-cota-maquinas]
+Funde os achados "turno de rotina carrega a IA copiada" (turnos-presos), "harness congelado" (rotinas) e "turno pendente herda a IA" (contas).
+- **Severidade:** alta (céticos: alta, média e média). **Tipo:** bug.
+- **Evidência:** turno dcdbf4af (rotina f190bf45, cron `*/10 * * * 1-5`, bot Clarice 83075133) criado 14/10 10:00:46 com harness claude-cli/opus; o bot recebeu `agente_atualizado inteligencia fixa codex-cli` às 10:12:59 e hoje é codex-cli/gpt-5.6-sol. O turno segue `pendente` (mesma `geracao_execucao`, sem máquina, sem task). Um "Executar agora" às 18:08 (a520907f) rodou no Codex e concluiu em 6 min sem destravar nada. Nos logs, dcdbf4af é o `turno_aberto_id` de 85 das 86 `rotina_janela_pulada` da f190bf45 (10:10 de 14/10 → 00:20 de 15/10). É o único dos 38 pendentes com harness diferente do agente (o cético reconferiu no banco). O bot Milton alternou codex↔claude às 10:20/10:34 e voltou ao Claude, então seus pendentes estão presos legitimamente.
+- **Mecanismo:** `src/use-cases/disparar-rotina.ts:155-169` enfileira com `modelo: agente.modelo, harness: agente.harness` daquele instante (INSERT em `turnos.repo.ts:166-173`). O `reivindicar` julga cota e harness pronto por `t.harness`/`t.modelo` da linha (`turnos.repo.ts:233-234, 244-245, 294-296`) e nunca relê `agentes.harness`. `definirInteligenciaDoBot` (`src/use-cases/inteligencia.ts:28-47`) grava a nova IA e só zera a sessão do CLI da conversa — não toca turnos pendentes nem avança `geracao_execucao`, logo o NOD-219 (`turno-orfao.ts:55-56`, `turnos.repo.ts:653, 694`) não o vê como órfão. `turnoAberto` (`rotina-janelas.repo.ts:67-72`) conta pendente como execução aberta e `disparar-rotina.ts:122-129` pula a janela só reagendando; "Executar agora" (`preservarAgenda`) ignora a checagem, por isso passa.
+- **Impacto:** a ação natural quando o Claude esgota (trocar a IA) não destrava a rotina; ela fica parada em silêncio e, quando sair, roda no Claude/opus em vez da IA escolhida. O mesmo vale para delegações pendentes de bots que mudarem de IA.
+- **Correção:** (a) em `definirInteligenciaDoBot`, na mesma transação, reescrever `harness`/`modelo` (e limpar `conta_id`) dos turnos `pendente` do bot de origem rotina/delegacao/peer (a conversa fixada pela pessoa fica, pela ADR-036); o teste "sem requeue" só proíbe voltar a `pendente`, não alterar colunas. (b) Mais robusta: no `reivindicar` e no plano, para turno pendente de fundo, resolver a IA pelo agente atual (join em `agentes`). (c) Aviso ancorado na rotina quando N janelas seguidas são puladas por um turno pendente. Qualquer opção toca a regra de cota (ADR-099 §7) e pede validação do dono e teste de concorrência do `reivindicar`.
+- **Conhecido:** ADR-099/ADR-102 não tratam a troca de IA com fila pendente.
+
+#### C4. Frente que cai por infraestrutura nunca é retomada sozinha: `interromper` zera `lease_ate` e o varredor lê a criação do turno como a hora da queda (I9 da ADR-099 inoperante; mesmo defeito nos pedidos a colega) [frentes]
+- **Severidade:** alta (mantida). **Tipo:** bug.
+- **Evidência:** 4 frentes de lote falharam por queda em 12/10 (b7b4ede1 Dev 1, 257c5de9 Ze 1, 6cd25400 Ze 1, f37cf8f9 Dev 1): `turno_interrompido` (reinicio_servidor/maquina_sem_contato) e `decisao_decidida regra:frente_caiu` no mesmo segundo (11:14:57.118→.512; 15:05:07.463→08.219; 17:24:00.973→02.090). `quedas=1`, `retomadas=0`, card Retomar fechado por regra. `perdido_desde` dos eventos estava 1–2 min antes, mas os turnos haviam sido criados 2 h 10 a 3 h 47 antes. 0 de 767 turnos interrompidos desde 12/10 têm `lease_ate`. 59 retomadas automáticas da ADR-084 existem, nenhuma para frente. O dado não foi reconsultado pelo cético; o código foi.
+- **Mecanismo:** `turnos.repo.ts:546-549` (`interromper` grava `lease_ate = null`, chamado por `interromper-por-maquina.ts:139`; o instante real da queda vai só para o evento, `:150`). `frentes.repo.ts:160, 164-165` e `trabalhos.repo.ts:470` calculam `queda_em = coalesce(u.lease_ate, u.criado_em)` → sempre a criação. `domain/pedido-parado.ts:92-96`: quedas<3, mas `agora − quedaEm` > 2 h (`RETOMAR_ATE_MS`, :93) ou > 30 min sem sinal (`DESISTIR_SEM_SINAL_MS`, :95) → desistir. `frentes-caidas.ts:21-33` fecha o card → `domain/trabalho.ts:124` 'falhou' → `fechar-lote.ts:27-46` → `responderAoColega` com motivo. Os testes (`tests/integration/frentes-caidas.test.ts:35-38`) só simulam frente recém-criada, nunca frente antiga que cai.
+- **Impacto:** qualquer frente ou pedido a colega com mais de 30 min de vida quando o servidor ou a máquina cai é dada por perdida na hora; o colega recebe "falhou (reinício do servidor)" e o dono acorda para perguntar à pessoa. Com deploys frequentes (6 reinícios em 12/10) isso derruba frentes longas sistematicamente. Atenuante: o dono é avisado com o motivo, não é silêncio; a sessão do CLI ainda é propagada quando há credencial (`interromper-por-maquina.ts:130-134`).
+- **Correção:** coluna `interrompido_em` gravada em `interromper` e `coalesce(u.interrompido_em, u.lease_ate, u.criado_em)` nos três pontos (opção mais segura; não zerar `lease_ate` pode quebrar quem depende de `lease_ate = null` nos terminais). Teste de integração: frente criada há 3 h cai por `reinicio_servidor`, máquina volta com turno concluído → deve retomar (tentativa 1 de 3). Mesmo teste para pedido a colega.
+- **Conhecido:** nenhum.
+
+#### C5. Laço de reenvio no limite sem teto: 682 turnos e 682 avisos em 32 min numa conversa (12/10 15:28–16:00); o caminho segue sem trava [turnos · contas-cota-maquinas]
+Funde os dois achados sobre a tempestade de 12/10.
+- **Severidade:** alta (autor: crítica; céticos: alta e média). **Tipo:** bug.
+- **Evidência:** cadeia única de reenvios 1→682 (…aa07ba2e r=681, 848d54b4 r=682 concluído às 16:00:00), um a cada ~2,7 s, de 15:28:12 a 16:00:00; todos origem conversa, harness/modelo auto, bot 076566ff (posto em 'auto' às 15:27:51), conversa 0d431581, uma só `mensagem_origem_id`. 696 `turno_despachado` claude-cli/opus na VM, 681 diagnósticos 'session limit · resets 4pm', 682 `turno_interrompido` com `ia_no_limite=claude-cli`, 682 linhas de sistema `ia_trocada claude-cli→codex-cli`. O Codex estava `motor_ausente` na VM até 14/10 (7 turnos codex recusados em 12–13/10). Custo 0. Parou na renovação. Fora desse dia, máx. de reenvios = 4.
+- **Mecanismo:** `assentar-turno.ts:297-321` marca a IA no limite e cai em `aposLimite` (:354, :412-457): com o bot em Automático, `proximaIaNoLimite` (`inteligencia.ts:83-85`) acha o Codex pronto em *alguma* máquina viva (`prontosDaPessoa`, `ponte-interna.ts:518`) e reenfileira a mesma fala com harness 'auto' e `reenvios+1`, sem `acordar_em` e sem teto. O alvo do bot é a VM (ADR-090): o `reivindicar` entrega ao alvo "mesmo sem a IA pronta" (`turnos.repo.ts:223-243`) e o plano escolhe a primeira IA pronta da máquina mesmo no limite (`iaDoAutomatico`, `inteligencia.ts:66-69`). O único teto existente é `reenvios >= 1` em `aposContaAusente` (:577); `aposLimite`, `aposTrocaDeConta` (:485-500) e `repetirNaConversa` (:590-609) não têm. O commit b1f80fb5 (NOD-211/ADR-101) tratou só o laço da troca de conta e está apenas em branches de frente. Hoje, com conta anunciada na máquina, `semContaNaMaquina` corta no 2º turno; máquina sem contas anunciadas ainda cai em `aposLimite`.
+- **Impacto:** centenas de processos CLI e centenas de linhas na conversa em minutos, fila da pessoa monopolizada até a renovação. Volta sempre que a IA alternativa não estiver pronta na máquina-alvo do bot.
+- **Correção:** teto de reenvios por `mensagem_origem_id` (1 ou 2) em `aposLimite`, `aposTrocaDeConta` e `repetirNaConversa`; em `aposLimite`, fixar o harness do turno novo na IA escolhida (ou a máquina que a tem pronta) em vez de 'auto'; no plano/despacho, com todas as IAs da máquina-alvo no limite, adiar com `acordar_em = renovaEm` em vez de rodar a "primeira pronta"; alarme para N turnos da mesma origem em < 5 min; teste de regressão "limite com a outra IA pronta só noutra máquina".
+- **Conhecido:** NOD-211/ADR-101 (só a troca de conta); emenda ADR-036 de 10/10 ("o turno nunca fica preso") não cobre o ciclo.
+
+#### C6. Frente "rodando" sem turno vivo (esperando colega preso na cota) pula a rotina 3ecfa179 a cada hora e deixa a execução das 11:00 sem desfecho [rotinas]
+- **Severidade:** alta (mantida). **Tipo:** bug.
+- **Evidência:** lote 60639abb aberto pelo turno 4c579c6f (janela 11:00 de 14/10, bot Leonardo): frentes d6677d79 e eec8344e terminadas 12:10/12:11; 5966689b e 11fddc51 em `rodando` (iniciadas 12:03/12:04) com 0 turnos vivos (últimos concluídos 12:12:10 e 12:40:33), 0 decisões abertas, 0 esperas, lote nunca devolvido. Handoffs dessas frentes → tarefas 4424eb84, 7ce39427, 6be044b3 para o bot Cartola (4cf78e3c), `pendente/delegacao/claude-cli` desde 12:07–12:34, nenhuma com `peer_ask`. 13 `rotina_janela_pulada` da 3ecfa179 com `trabalho_aberto_id=5966689b` (12:00 de 14/10 → 00:00 de 15/10). O cético reconferiu no banco o estado das frentes e das três delegações.
+- **Mecanismo:** `domain/trabalho.ts:120` (aguardandoColega → 'rodando') com `trabalhos.repo.ts:333-340` (handoff com tarefaId sem `peer_ask` e colega não final); `filhaAbertaDaRotina` (`trabalhos.repo.ts:197-203`) só olha o estado, sem idade nem turno vivo → `disparar-rotina.ts:127-131` devolve `pulada` sem reivindicar janela; a execução das 11:00 não fecha por `disparar-rotina.ts:245-247` (`aguardando_frentes`). O varredor devolve 'esperar' sem prazo para colega na fila (`pedido-parado.ts:83-85`); as delegações são `fundo_novo` (`cota-da-ia.ts:84-85`) e estão seguradas (C2).
+- **Impacto:** rotina horária parada desde 12:00 de 14/10 sem registro; cadeia rotina → frente → colega → cota sem aviso em lugar nenhum; a lista de trabalhos mostra 2 frentes "rodando" há 20 h sem nada rodando e sem ação além de Parar (frente de rotina não tem "Fazer aqui", `coordenar-trabalhos.ts:214`).
+- **Correção:** (a) dar prazo à espera no varredor: colega `na_fila` há mais de N h avisa quem pediu ou devolve a frente como 'falhou/parada por cota', fechando o lote e acordando o dono; (b) em `filhaAbertaDaRotina`, ignorar frente sem turno vivo em espera de colega por mais de 1–2 períodos do cron, ou registrar a janela como 'pulada' com a causa; (c) na frente "rodando", mostrar "esperando Cartola · a cota da IA segura o pedido, volta 16/10 13:00". Contar o pedido de uma frente já iniciada como `fundo_seguindo` é decisão de produto.
+- **Conhecido:** ADR-099 I7 revista (frente segura a rotina por desenho); a espera indefinida não está prevista.
+
+### Média
+
+#### C7. Rotina do Leonardo re-delega ao Ze 1 a cada execução enquanto os anteriores seguem na fila: 19–22 pedidos pendentes ao mesmo bot, 9 num só turno [colegas]
+Funde os dois achados sobre pedido repetido.
+- **Severidade:** média (mantida). **Tipo:** bug.
+- **Evidência:** delegações pendentes Leonardo(076566ff)→Ze 1(72e4ae01): 19 com raiz na rotina cca275ad, de 10 turnos distintos, 14/10 10:02 → 15/10 05:04; o turno a6028245 (16:03) abriu 9 pedidos em 3 s. Em 30–36 h: 27 handoffs ao Ze 1 (8 voltaram) e 6 ao Cartola (3 pendentes). Leonardo é o maior remetente do tenant (139 de 1.001 handoffs) e tem 3 rotinas ativas (`0 * * * *`, `30 * * * *`, `*/30`). O dono do Ze 1 vê "19 pedidos na fila". Contagens não reconferidas pelo cético.
+- **Mecanismo:** `pedir-a-bot.ts:93-99` só recusa `espera_circular` (`cicloDoPedido`, `triagem.ts:49-69`); não há guarda contra pedido ao mesmo alvo com handoff anterior sem `peer_ask`. `abertos()` (`pedidos-de-colega.repo.ts:31-45`) devolve só `{de, para}`, sem id nem horário. A rotina roda na conversa (turno sem trabalho), então `aguardandoColega` não a segura e `turnoAberto` (`rotina-janelas.repo.ts:67-86`) só segue retomadas do próprio turno — a delegação criada no alvo não conta. "Não repita esses pedidos" só vale dentro do fio (`entregar-resposta-peer.ts:116-123`); cada janela é um fio novo. `prazo_em` (24 h) só é observado.
+- **Impacto:** quando a cota voltar, o Ze 1 executa 19 triagens em sequência, boa parte repetida (custo, ruído, respostas duplicadas); a fila do dono fica inflada. Depende do estado de cota para aparecer, mas repete sempre que o alvo ficar indisponível por qualquer motivo.
+- **Correção:** estender `abertos()` com `tarefaId` e `criadoEm`; em `pedirABot`, dentro da trava, contar os abertos do par remetente→alvo e devolver `ok:true` com instrução explícita ("você já tem N pedidos abertos a X desde hh:mm; não peça de novo") e recusar `ja_pedido` só acima de um teto pequeno (3) ou texto quase igual (evita bloquear pedidos distintos legítimos); listar no prompt de rotina/retomada os pedidos ainda sem resposta; opcionalmente a rotina pula a janela quando há pedido aberto ao alvo. Bloquear, absorver ou expirar é decisão de negócio.
+- **Conhecido:** nenhum.
+
+#### C8. Cota segura rotinas por dias em silêncio: 9 rotinas presas desde 14/10 10:00, janelas seguintes puladas sem registro, e o turno velho vai rodar com carimbo de 2 dias [rotinas]
+- **Severidade:** média (autor: crítica). **Tipo:** bug de visibilidade/teto sobre comportamento desenhado.
+- **Evidência:** 9 turnos de rotina pendentes: 82accaad/f827a9fe, 971ecf9b/3a230a2b, 68406301/c8b06a9b, dcdbf4af/f190bf45 (10:00), 323485f0/992769d5 (10:30), a40d894e/5f6f9188 (11:00), 6a7196bc/af013875 (11:30), c38ae4d4/3c082e9a (12:00), e0ddad53/9cd1d259 (22:00). Logs: 168 `rotina_janela_pulada` (f190bf45 86, 3a230a2b 28, f827a9fe 14, c8b06a9b 9, 5f6f9188 6, af013875 6, 9cd1d259 4, 3c082e9a 2) contra 64 disparadas, cada uma apontando o mesmo `turno_aberto_id`. Nenhuma linha em `rotina_janelas`/`rotina_execucoes` dessas rotinas desde 14/10 10:00; `proxima_execucao` segue avançando na lista.
+- **Mecanismo:** `cota-da-ia.ts:82-93` (rotina sem trabalho = `fundo_novo`; limite segura todo o fundo) aplicado em `turnos.repo.ts:286-296`. Enquanto o turno fica pendente, `disparar-rotina.ts:122-132` devolve `pulada`, reagenda e não registra execução nem evento; `scheduler-rotina.ts:49-53` só loga. `turno-orfao.ts:49-56` só observa. A entrada já foi montada com o `instanteAgendado` original (`disparar-rotina.ts:48-50`). Nenhum aviso de cota para rotinas em `src` nem em `web`.
+- **Impacto:** 8 rotinas ativas (todas as de bots fixados em claude-cli) ficam ~51 h sem rodar, sem linha no chat, sem execução no histórico; ao renovar, 9 execuções de 2 dias atrás rodam de uma vez com instrução velha. Atenuante: a causa raiz é a assinatura esgotada e nenhuma correção faz a rotina rodar antes de 16/10 13:00. A ADR-045 define gatilho de revisão em 24 h seguidas de janelas puladas — o pendente de 14/10 10:00 cruzou esse limite às 10:00 de hoje.
+- **Correção:** registrar a janela pulada no histórico com desfecho próprio (`adiada_por_cota`) e o turno que segura; mostrar na lista "aguardando a cota do Claude até 16/10 13:00"; para cron mais curto que a espera, encerrar o pendente como `interrompida` (motivo `cota_da_ia`) após 1 período do cron e deixar a janela nova nascer, ou re-carimbar o `instanteAgendado` ao sair da fila; aviso único por rotina após N puladas seguidas, ancorado na rotina. Deixar a rotina fixada em claude-cli seguir por outra IA livre é decisão do dono.
+- **Conhecido:** ADR-099 §7 (portão), ADR-045 (pulada; gatilho de 24 h).
+
+#### C9. Janelas de rotina interrompidas no despacho (`executor_indisponivel`) somem do histórico: 51 janelas em 14 dias sem execução nem evento; rotina sem conta morre em vez de esperar [rotinas · contas-cota-maquinas]
+Funde os dois achados sobre recusa no despacho.
+- **Severidade:** média (céticos: média e baixa). **Tipo:** bug.
+- **Evidência:** janelas com turno interrompido `executor_indisponivel`: motor_ausente 25 (07/10 10:00 → 09/10 05:00), nao_autenticado 25 (02/10 → 08/10), limite_do_plano 1 (b1706cdb, turno 616c2680 codex, 14/10 13:00) — 0 `rotina_execucoes` e 0 `rotina_executou`. Para comparar: limite_do_plano no assentamento 38 janelas → 38 eventos; maquina_sem_contato 15 → 15; erro_execucao 19 → 19. b1706cdb tem 28 janelas e 26 eventos: faltam exatamente as 2 de executor_indisponivel. Log 14/10 13:00:11: `turno_sem_conta decisao=outra_ia` para 616c2680 (conta codex Plus no limite 12:40→13:40).
+- **Mecanismo:** `despachar-turno.ts:144-174` (`semContaNaMaquina`) e `:177-193` (`recusarPorExecutor`) assentam `interrompido/executor_indisponivel`, emitem `turno_interrompido` e nota/negação na conversa, mas não chamam `registrarDesfechoRotina`, que só roda em `compor.ts:553-561` (entrega do CLI), `varredor-expiracao.ts:138` e `interromper-por-maquina.ts:44`. O turno de rotina nasce sem trabalho (`disparar-rotina.ts:150-170`), e `aposLimiteNoFundo` devolve null sem `trabalhoId` (`assentar-turno.ts:631-636`), então `esperarContaNaFrente` não se aplica e a rotina cai na interrupção, ao contrário da frente que espera a conta voltar.
+- **Impacto:** a lista de execuções e a trilha `rotina_*` não veem essas janelas; a pessoa só vê uma nota solta no chat. Correção ao achado original: `janelasQueNaoRodaram` (`rotina-acessos.ts:114-121`) só conta 'bloqueada' por sem_acesso/sem_conexao, então o card de parada não seria alimentado por 'falhou'.
+- **Correção:** helper que, dado o turno recusado de origem rotina/retomada, chame `registrarDesfechoRotina` com 'interrompida' ou 'falhou' e motivo, nos dois pontos, na mesma transação; para limite_do_plano, tratar a rotina como a frente (reenfileirar com `acordar_em` = volta da conta) em ponto novo, já que `aposLimiteNoFundo` exige task. Decidir se a mensagem 'rotina falhou' duplica a nota já existente (produto).
+- **Conhecido:** nenhum.
+
+#### C10. Pergunta das "voltas sem novidade" bloqueia a rotina por 24 h: 47 janelas bloqueadas na 9cd1d259 e 16 (e contando) na 57b9b36b [rotinas]
+- **Severidade:** média (autor: alta). **Tipo:** bug de interação entre duas regras.
+- **Evidência:** 9cd1d259 (Ada, `*/30 * * * 1-5`): decisão `pergunta` 7a85e952 criada 13/10 21:40:50 no turno 9da860a1 (retomada da rotina), prazo 24 h, vencida 14/10 21:40; 47 eventos `rotina_bloqueada/aguardando_resposta`; depois `passou_em_branco/pergunta_sem_resposta`, e a janela 22:00 virou e0ddad53 (preso pela cota). 57b9b36b (Leonardo, `30 * * * *` UTC): log 14/10 13:15:42 `voltas_sem_novidade` turno 54a9cb59 → decisão 4f191137 pendente (vista 13:31, prazo 15/10 13:15); 16 bloqueadas até 04:30. f697e3b3 teve 24 bloqueadas pelo mesmo motivo em 07 e 09/10. 3ecfa179 tem pergunta pendente e749ec80 (11:19).
+- **Mecanismo:** `me-chame-as.ts:128-147` (ADR-099 §5): na 4ª volta sem novidade, decisão `pergunta` com `PRAZO_DECISAO_PADRAO_MS` 24 h (`autoria-evento.ts:16`). `pre-voo-rotina.ts:44-51, 70`: qualquer pergunta pendente de turno da rotina (tipo em `TIPOS_PEDIDO_A_PESSOA`, `pedido.ts:8`; a rotina é achada seguindo `retomaTurnoId`, `apoio-l7.ts:195-205`) bloqueia a janela com `aguardando_resposta`, por desenho da emenda ADR-044 ("o fio segura a janela", comentário `:55-60`). `disparar-rotina.ts:65-78` grava uma execução 'bloqueada' por janela, sem mensagem.
+- **Impacto:** uma rotina de polling de 30 min fica 24 h sem rodar porque uma execução esperou 3 voltas; o histórico (20 guardadas) vira só 'bloqueada'; não gasta cota nem perde dado. A web já tem o rótulo "aguardando resposta" (`web/lib/execucao.ts:28-31`), não verificado na tela.
+- **Correção:** o pré-voo ignorar a pergunta criada pela regra `voltas_sem_novidade` (a decisão já carrega `regra` e `decididoPor`), para a janela seguinte ser a "volta"; alternativa: prazo dessa pergunta = 1 período do cron. Mostrar na lista "parada: pergunta sem resposta desde X" com atalho ao balão. Validar com o dono se a pausa até a resposta é desejada.
+- **Conhecido:** ADR-099 §5 × emenda ADR-044 — interação não prevista.
+
+#### C11. Bot fixo no Codex com a conta em uso no limite: a nota promete "Seguindo com Claude", nada segue, e a conta Pro livre na mesma VM nunca é oferecida [contas-cota-maquinas]
+- **Severidade:** média (autor: alta). **Tipo:** bug.
+- **Evidência:** 14/10: 4 turnos de bots fixos em codex interrompidos no despacho com `executor_indisponivel + limite_do_plano`, evento `sem_conta=true` — 616c2680 (rotina b1706cdb 13:00) e aa551c05/2d2d179b/53db2897 (conversa da55bff6, 14:30:26/14:32:04/14:32:53); log `turno_sem_conta decisao=outra_ia` nos 4; as 4 notas têm `livres=0` e `de_ia=codex-cli`. A pessoa mandou 3 falas em 2,5 min, cada uma respondida só pela nota, e trocou a IA do bot às 14:32:50; só a 4ª fala (15:43, após a Plus renovar às 15:00) foi respondida. A conta Pro d0acfbfb estava `pronta` na VM desde 10:06 e tem 0 turnos até hoje. O cético confirmou no banco `contas_modo='perguntar'` e as posições das contas.
+- **Mecanismo:** `despachar-turno.ts:155` passa só a IA fixa a `semContaParaOTurno`, mas `contas-do-turno.ts:72` chama `decidirLimiteDaConta` com `naMaquina` inteiro (contas Claude entram), `modo 'perguntar'`, `ordemDoBot: null`; em `contas-da-pessoa.ts:137-141` 'outra_ia' vem antes de 'perguntar' — a Max estava livre às 14:30 → decisão 'outra_ia', `livres` vazio (`contas-do-turno.ts:80`). O despacho (:165-173) só assenta e cria a nota; não recria turno para origem conversa. No assentamento o mesmo caso é tratado certo: `assentar-turno.ts:521-523` filtra `naMaquina` pela IA fixa. `contaEmUsoDaIa` (`contas-da-pessoa.ts:48-57`) fora do modo automático só considera a primeira conta da IA, por isso a Pro só apareceria como "Seguir com", que o bug impede.
+- **Impacto:** bot fixo numa IA fica mudo até a conta renovar, com uma nota que promete uma troca que não acontece; a conta alternativa logada e livre nunca é usada; cada reenvio gera outro turno interrompido; a rotina das 13:00 foi perdida (C9).
+- **Correção:** em `semContaParaOTurno`, com IA fixa, filtrar `naMaquina` pelas contas dessa IA (como `assentar-turno.ts:521-523`) e passar a ordem do bot, extraindo um helper comum aos dois caminhos; assim a decisão só pode ser 'perguntar' (com a Pro em `livres`) ou 'todas_no_limite'. Teste: bot fixo no Codex, Plus no limite, Claude livre, Pro livre → 'perguntar' com a Pro.
+- **Conhecido:** nenhum.
+
+#### C12. Relato que aponta a fala da pessoa perde o turno, os sinais e o diagnóstico — justamente nos "não fez o pedido" [relatos]
+- **Severidade:** média (mantida). **Tipo:** bug.
+- **Evidência:** 8 de 56 relatos com `turno_id` null (144c77af, 850e4105, 51c7599c, a1487887, 8167041a, 18c61745, 427d3f5e, f6ca5551), todos apontando mensagem de autor pessoa; 2 dos 4 `nao_fez_o_pedido` estão nesse grupo. Para 6 deles existe o turno disparado via `turnos.mensagem_origem_id` (986fe8a9, 76f11508, 6f731622, a77460b8, 6ee7ae74, e54a2e07). Contagens não reconferidas pelo cético.
+- **Mecanismo:** `registrar-relato.ts:38-40` lê `mensagem.turnoId` (turno que produziu a fala; null para fala de pessoa) e `:51` grava `turnoId=null`; não consulta `turnos.buscarPorMensagemOrigem` (`turnos.repo.ts:179-184`), que já existe e é usado em `pedir-a-bot.ts:40-43`. O ADR-041 quer que o relato nunca chegue sem turno. Ressalva: `com_diagnostico` baixo (2 de 54) é esperado, porque `turno_diagnosticos` só existe para desfecho ≠ sucesso.
+- **Impacto:** snapshot técnico (estado, sinais, harness, executor, custo, reenvios) vazio em 14 % dos relatos; na categoria mais útil a investigação começa sem turno.
+- **Correção:** se `autor_tipo=pessoa` e `mensagem.turnoId` é null, resolver o turno por `buscarPorMensagemOrigem`, seguir `absorvido_por` até o absorvedor (`turnos.repo.ts:563-612`), usar esse turno para o snapshot; guardar mensagem apontada e turno disparado separados (coluna `turno_disparado_id` ou reuso documentado) e propagar ao evento `relato_criado` (`:90`) e ao listar.
+- **Conhecido:** ADR-041 (objetivo contrariado).
+
+#### C13. `turnos.executor` ficou no DEFAULT `'catcher'` em 2.179 turnos reais e, de 01/10 a 11/10, fez a retomada de rotina/pedido descartar a sessão do CLI [turnos]
+- **Severidade:** média (autor: alta — o dano de comportamento já parou). **Tipo:** bug corrigido para frente + dado histórico errado.
+- **Evidência:** coluna 'catcher' com plano 'local' em 2.179 turnos (16/09 → 11/10 09:56); 'local' com plano 'catcher' em 45. 16 relatos apontam turnos rotulados catcher que rodaram no Mac. Retomadas de cadeia com executor diferente do turno retomado que tinha sessão: semana 28/09 88 de 137; semana 05/10 246 de 597; semana 12/10 0 de 139. O dicionário conta 2.113 "claude-cli/catcher" que rodaram no Mac. 744 turnos de pedido de colega com catcher até 11/10 12:14, todos 'local' depois de 14:10.
+- **Mecanismo:** `0002_dominio.sql:198` (`DEFAULT 'catcher'`); antes de 9c6c7ddc (NOD-206, 11/10 12:11) o INSERT gravava `t.executor ?? "catcher"` e nada escrevia o executor real. `emitir-plano-turno.ts:224-226` só dá `--resume` quando `daCadeia.executor === executor`; pai rotulado catcher + retomada local = sessão descartada e `historico` refeito (:239). `registrarExecutor` (:150-151) corrige para turnos novos. `enfileirar-retomada.ts:47` herdava o rótulo; `pedidos-parados.ts:42` ainda usa `executor: 'catcher'` fixo na autoria da retomada automática.
+- **Impacto:** explica parte do cluster "não lembra o que fez" de 28/09–08/10 (interpretação; prova por relato não feita); contamina dicionário, gastos e Raio-X.
+- **Correção:** backfill `update turnos t set executor = e.dados->>'executor'` a partir de `events turno_despachado` (ou `gastos.executor`), só onde divergir, valor restrito a ('local','catcher'), com contagem antes; `relatos.executor` passar a vir do turno; teste de conformidade `catcher ⇒ custo 0 e sessao_cli null`.
+- **Conhecido:** NOD-206 (#240) corrige só daqui para frente.
+
+#### C14. Custo do turno igual ao total da sessão depois de `--fork-session`: US$ 670 em 4 turnos de 08/10 [turnos]
+- **Severidade:** média (autor: alta — só afeta exibição e métricas). **Tipo:** bug de cálculo.
+- **Evidência:** conversa 47a05226, 08/10: 8530ff60 (10:44) custo = total = US$ 164,22 com 4.582 tokens de saída; db9655a0 (11:38) US$ 166,33; a40678bb (17:16) US$ 169,69; 823a850a (17:32) US$ 169,97. Em cada um `sessaoRetomada=true` e `sessao_cli` novo. O cético reconsultou: a sessão-mãe c25e95e7 chegou a 162,55 (5efd2071, 10:22); 8530ff60 abriu a sessão 3d8013ee em 164,22; o turno seguinte da mesma sessão (9d753610) deu custo 1,51 — a diferença correta. O cético contou 32 turnos com custo = total > US$ 5 desde 24/09, somando US$ 317,75; o autor contou 10 com `sessaoRetomada=true` somando US$ 708,55 (recortes diferentes, ambos a conferir). Dia 08/10: US$ 1.099 → US$ 429 sem os 4 outliers.
+- **Mecanismo:** `claude-cli.ts:256-262, :311`: com bifurcar, `--resume <sessão> --fork-session` e o CLI escolhe id novo; `total_cost_usd` da cópia carrega o histórico da mãe. `assentar-turno.ts:233-234` → `totalAnteriorDaSessao` (`turnos.repo.ts:538-543`) busca `max(custo_sessao_usd)` pelo id novo → null → `custoDoTurno` (`custo-turno.ts:11-17`) devolve o total inteiro. A bifurcação nasce em `emitir-plano-turno.ts:230`.
+- **Impacto:** custo por turno/bot/dia superestimado em até US$ 170 por turno bifurcado; "Hoje com" e custo por bot errados nos dias com rede promovida. Não bloqueia nada.
+- **Correção:** gravar a sessão-mãe no turno (`sessao_origem_cli` = `plano.entrada.sessaoCli` quando bifurcou) e usar `max(custo_sessao_usd)` dela como "anterior"; recalcular os afetados pela diferença contra o maior total da conversa em outra sessão; regra de reversão da ADR-054 passar a olhar "custo = total com sessão retomada e sem anterior no mesmo id". Métrica financeira: validação humana.
+- **Conhecido:** ADR-054 não previu a cópia de sessão (ADR-083, #193).
+
+#### C15. A trava de fundo do Mac/VM bate no teto de 60 min em vez de aliviar: 76 trabalhos novos esperaram exatamente 1 h [turnos]
+- **Severidade:** média (mantida). **Tipo:** gatilho de reversão da ADR-085 disparado (não é bug).
+- **Evidência:** turnos sem `acordar_em` despachados 59–63 min após a criação: 49 rotinas e 27 delegações. Noite de 08→09/10 no Mac 90c92205: todo trabalho novo de fundo por 9 h esperou a hora cheia; VM: 10/10 22:10, 12/10 15:00, 14/10. Fila > 20 min: 168 rotinas e 90 delegações em 21 dias. VM em disco 'amarela' (5,9–6,2 GB livres) continuamente desde 13/10 13:24.
+- **Mecanismo:** `turnos.repo.ts:266-275` (com `segurarFundo`, trabalho novo de rotina/colega espera enquanto `criado_em > agora − ESPERA_MAXIMA_FUNDO_MS`); `memoria-mac.ts:220-224` (`deveSegurar`: amarela segura em qualquer uso ≠ livre), `:231` (teto 60 min), `:238` (30 s entre começos); `:22-33` (no Linux, amarela abaixo de 20 % de MemAvailable); `:262` (disco alerta 10 GB absoluto, por desenho da ADR-096). O uso é por pessoa, não por máquina (`ponte-interna.ts:322-323`), então a VM herda o 'equilibrado' do Mac. A ADR-085:91 diz que `espera_ms` no teto mais de uma vez por semana em 'equilibrado' deve levar a rever os limiares.
+- **Impacto:** +60 min fixos em rotinas e pedidos sempre que a máquina fica 'amarela' por mais de uma hora; na VM sem a pessoa usando, a trava não protege ninguém.
+- **Correção:** na VM (linux), segurar só em 'vermelha' ou tratar o uso como 'livre' (uso por máquina, não por pessoa); medir `fundo_comecou` com `espera_ms` próximo do teto por máquina antes de mexer; ajustar o limiar de memória, não o teto; mostrar na rotina que ela espera a máquina e a hora em que o teto a libera. Sobre o disco da VM: investigar se a limpeza apertada da ADR-096 §3 roda e quanto libera (logs `limpeza_disco_apertado`/`limpeza_feita`); não mudar o limiar absoluto (alternativa descartada na ADR). Decisão do dono.
+- **Conhecido:** ADR-085 (teto e gatilho), ADR-096 (disco), ADR-097.
+
+#### C16. `turnoAberto` é O(janelas × turnos): o agendador fica 18–28 s numa transação a cada janela da rotina de 10 min [rotinas]
+- **Severidade:** média (autor: alta). **Tipo:** bug de desempenho.
+- **Evidência:** 134 `turno_criado` em 3 dias com entrega > 10 s, todos de rotina e sozinhos na transação. f190bf45 (1.423 janelas): atraso instante→turno_criado p50 27,4 s, máx. 82,6 s; tx aberta 18–28 s antes do INSERT (dcdbf4af: outbox 10:00:20, turno 10:00:46). O cético rodou `EXPLAIN ANALYZE`: com turno aberto para na 2ª janela em 25 ms; cada janela sem trabalho paga ~24 ms (Seq Scan em `turnos` 2× por CTE recursiva, 1.849 linhas lidas, 8.089 descartadas); sem turno aberto varre as 1.423 (≈34 s no pior caso). Sem índice em `turnos.retoma_turno_id`.
+- **Mecanismo:** `rotina-janelas.repo.ts:67-87` (join de todas as `rotina_janelas` da rotina com turnos e CTE recursiva por janela sem trabalho); chamado em `disparar-rotina.ts:122-123` dentro da tx por rotina de `scheduler-rotina.ts:44-72`, evento só no fim (:69). Pool `max 5` (`db/client.ts:15`). `rotina_janelas` nunca é podada.
+- **Impacto:** toda rotina começa 20–80 s depois do horário; custo cresce +144 janelas/dia × +500 turnos/dia. "Pool preso" e "commits tardios de outros eventos" são hipótese, não medição.
+- **Correção:** índice parcial `turnos (tenant_id, retoma_turno_id) where origem = 'retomada'`; restringir às janelas recentes (`instante_agendado > now() − N dias` ou últimas K); podar `rotina_janelas`; log do tempo da tx do scheduler por rotina. Migração nova: validar com engenharia.
+- **Conhecido:** ADR-045, ADR-099 I7.
+
+#### C17. Chamada HTTP a conectores e execução de itens aprovados rodam dentro da transação do banco (commits de 15–54 s) [eventos]
+- **Severidade:** média (autor: alta). **Tipo:** risco latente de concorrência + atraso visível.
+- **Evidência:** negações `timeout_transporte` com tx aberta 15–17 s antes do evento (p95 16,7 s, máx. 37,7 s; 5d3081ad 15/10 08:03:53→08:04:08; gmail 7, linear 7, clickup 4). `resultado_aprovacao` decididas por regra com commit 19,9 s, 19,3 s e 53,8 s depois do evento (d2a63fc4, 18706e66, 68a23889, 14/10). Em 7 dias, eventos com commit > 5 s: mensagem_criada 161, trabalho_mudou 97, turno_despachado 51, turno_interrompido 49. Não reconferido pelo cético.
+- **Mecanismo:** `executar-caso.ts:27-33` abre uma tx e roda o caso de uso inteiro nela; `chamar-ferramenta.ts:229` (`contaminar`, lock da linha do turno) e `:239-245` (`conectores.chamar` com orçamento 30 s, 3 tentativas, `constantes.ts:116-121`; negação gravada na mesma tx); `pedir-aprovacao.ts:145` (`executarItens` antes da mensagem em :169). O caminho da pessoa já faz certo: `decisoes.ts:134-141` executa fora da tx ("não segura conexão do banco"), princípio da ADR-001.
+- **Impacto:** a web só vê a mensagem/negação ao commitar (até 54 s); conexões do pool presas até 30 s por chamada externa. Esgotamento do pool e bloqueio de `renovar` pelo lock não foram demonstrados.
+- **Correção:** reaproveitar o padrão de `decisoes.ts`: em `pedir-aprovacao` automático, fase 1 (criar decisão/itens, commit) → `executarItens` fora → fase 2 (desfecho, fechar, mensagem, evento); em `chamar-ferramenta`, trilha + `contaminar` em tx curta → conector fora → desfecho em tx nova (rota `interno.ts` com dois `deps.dentro`). Medir duração de tx com alerta > 5 s antes de mexer no `max` do pool.
+- **Conhecido:** ADR-001 (princípio), ADR-009.
+
+#### C18. Aprovação automática gera retomada redundante no assentamento: 2º turno e 2º `rotina_executou` com o mesmo `execucaoId`, desfecho sobrescrito [rotinas]
+- **Severidade:** média (mantida). **Tipo:** bug.
+- **Evidência:** 112 turnos em 7 dias com dois `rotina_executou` (106 com o mesmo `execucaoId`). d58bbceb encerrado 15:33:43 → retomada 2d9edcf0 criada no mesmo segundo → 2º evento 15:34:27; 999a5b0c → a6028245 (26 s); 4d0ff927 → 38c0584e (41 s); 8e894b0a: 'executou' 05:04:39 e depois 'sem_novidade/ja_relatado' 05:05:27. Havia `resultado_aprovacao` por `regra:modo_total/modo_automatico` nesses turnos. Não reconferido pelo cético.
+- **Mecanismo:** `pedir-aprovacao.ts:~118-190` (ramo automático executa os itens, `fecharPorRegra` — que não escreve `continuada_em`, `decisoes.repo.ts:~190-200` — e devolve 'decidida' sem `reivindicarContinuacao`); no assentamento `assentar-turno.ts:~393` → `continuarAprovacoesDoTurno` (`decidir.ts:186-199`) pega `aContinuarDoTurno` (`decisoes.repo.ts:168-173`: decidida e `continuada_em` null) e enfileira retomada (`enfileirar-retomada.ts:25-53`, sem dedup); a retomada chama `registrarDesfechoRotina` de novo ("uma linha por janela", `disparar-rotina.ts:~250-260`, `atualizarDesfecho` sobrescreve). O 0032 (`decidir.ts:~255`) corrigiu só o caminho da pessoa. A retomada é legítima quando há item executado no Mac (retorno 'pendente').
+- **Impacto:** um turno extra (30–45 s de CLI, custo e cota) por aprovação automática; histórico pode virar 'sem novidade' depois de 'executou'; dois frames por janela.
+- **Correção:** no ramo automático com todos os itens já com desfecho, chamar `reivindicarContinuacao(decisao.id, 'turno', agora)` após `fecharPorRegra`; manter o caso 'pendente' (Mac) sem reivindicar; em `registrarDesfechoRotina`, não rebaixar 'executou' para 'sem_novidade' na mesma janela nem reemitir o evento com o mesmo `execucaoId` se o desfecho não mudou. Testes para modo total e para o Mac.
+- **Conhecido:** 0032 (`continuada_por`).
+
+### Baixa
+
+#### C19. Classificador de erro do fornecedor não reconhece os textos reais do limite do Claude nem o "autocompact is thrashing" [turnos]
+- **Severidade:** baixa (autor: média). **Tipo:** rede de segurança incompleta.
+- **Evidência:** 797 diagnósticos do Claude dizem 'session limit' (769), 'weekly limit' (23) ou 'monthly spend limit' (5); 0 casam com a regex de `limite_de_uso`. Antes da NOD-171 (05/10) 25 limites viraram `erro_execucao` e a fila seguiu despachando; depois, ~2 casos em ~773 sem `rate_limit`. 'autocompact is thrashing' 8 vezes (28/09–08/10).
+- **Mecanismo:** `erro-fornecedor.ts:36-40` e `:41-46` não cobrem as frases do CLI 2.1.x; classe 'desconhecido' (:55-59) desliga o fallback de `ehLimite` (`assentar-turno.ts:297-298`). Mas no Claude o limite vem do protocolo (`stream-json.ts:366-371`, decisão da NOD-171: "pelo estado, nunca pelo texto"); os 695+76 'desconhecido' em `limite_do_plano` são inofensivos porque a frase e o prazo vêm do protocolo (`assentar-turno.ts:369-370`).
+- **Impacto:** só no turno em que o `rate_limit` faltou (~0,3 %) a pessoa lê "erro de execução" sem hora e a IA não sai da ordem.
+- **Correção:** acrescentar só `/(?:session|weekly) limit/i` e `/hit your \w+ limit/i`, com teste nas amostras reais redigidas; "monthly spend limit" como classe própria (teto da organização, frase para o admin, sem marcar a IA no limite com prazo inventado); "autocompact is thrashing" com frase própria ("comece uma conversa nova ou reduza o que o bot lê"), não '/compactar'. Investigar por que o `rate_limit` falta nesses ~0,3 % (`stream-json.ts:296-320`).
+- **Conhecido:** NOD-171/NOD-174.
+
+#### C20. 43 turnos terminam `trabalho_incompleto` sem motivo de falha nem diagnóstico: o CLI morreu sem `result` e a causa não é gravada [turnos]
+- **Severidade:** baixa (autor: média). **Tipo:** lacuna de observabilidade.
+- **Evidência:** 43 interrompidos com `motivo_falha` null (25 catcher até 11/10 12:11, 18 local), todos com `produced_output=true`, `erro_cru` null. Execução perdida p50 4 min, p90 33 min, máx. 80 min. Concentração 11/10 12h–13h (13; janela dos merges #247–#257 e de 20 `maquina_sem_contato`), 08/10 17h–18h (9), 09/10 (6). Não reconferido pelo cético.
+- **Mecanismo:** `stream-json.ts:378` (sem `result`, com init/sinal/interrompidoPeloDriver → interrompido sem motivo); `assentar-turno.ts:124-126` (sem `parar_solicitado_em` e com output → `trabalho_incompleto`, `motivos.ts:37`); `laco.ts:231` (renovação devolveu `ativo=false` → `adapter.interromper()` sem registrar por quê; `ponte.ts:297-298` e `ponte-http.ts:184-187` são as fontes de `ativo:false`). O catcher fixa exitCode 143/0, signal null e stderr vazio (`catcher.ts:187, :296`), então para 25 dos 43 não há sinal nem stderr a gravar.
+- **Impacto:** rótulo que não explica nada; impossível distinguir deploy, memória e bug do CLI no histórico. 0,4 % dos turnos; aviso na conversa existe; 41 de 43 entregaram fala parcial.
+- **Correção:** `causa` fechada na entrega sem `result`, por driver (catcher: `renovacao_negada | interrompido_pelo_driver | reinicio_do_motor`; CLI local: `sinal:<SIG> | exit:<n>` + últimas linhas do stderr redigidas); log e evento em `laco.ts:231` com o motivo da renovação negada; no servidor, "renovar sem plano adotado" assentar como `reinicio_servidor` com causa.
+- **Conhecido:** NOD-214 reduziu a causa 'reinício'; a lacuna de diagnóstico não.
+
+#### C21. Frente de colega que pergunta à pessoa fica presa 24 h e, vencida a decisão, "termina" como concluída: o colega recebe a última fala como resposta, sem motivo [frentes]
+- **Severidade:** baixa (autor: média — 2 casos em todo o histórico). **Tipo:** bug.
+- **Evidência:** fa75c8a8 (Ze 1, lote 8316885e): `pergunta` criada 13/10 01:13, vencida (`expirou_com_alguem_ciente`), frente `terminado` 14/10 01:13:34 com 1.440 min entre o fim do último turno e `terminado_em`; lote devolvido com `peer_ask`. 7e50e4d6 (Eng 1, lote 83d5446d): `permissao` 13/10 00:41, vencida; terminado 14/10 00:42. São as 2 únicas decisões vencidas em frentes de lote (39 decisões).
+- **Mecanismo:** `domain/trabalho.ts:119` (decisão pendente → precisa_de_voce) e `:122` (sem decisão, último turno concluído → terminado); `varredor-expiracao.ts:105-153` vence e chama `sincronizarDasDecisoes` (`trabalhos.ts:106-115`); `domain/frente.ts:136-143` `resumoSemChamada` para terminado devolve só a última fala (falhou/parado têm texto próprio); `retorno-do-lote.ts:92-98` só dá motivo para parado/falhou; `entregar-resposta-peer.ts:275-278, :95` (aviso de falha só para delegação e ignorado com lote aberto).
+- **Impacto:** pergunta/permissão ignorada vira 'terminado' na tela e no retorno; o colega recebe como resultado a pergunta não respondida.
+- **Correção:** ao vencer, gravar no resumo "pergunta ou permissão venceu sem resposta" e tratar como desfecho próprio (ou 'falhou' com motivo) em `resumoSemChamada`/`motivoDaFrente`, levando o motivo ao retorno do lote; não reutilizar `avisarFalhaDelegacao`. Escolher entre 'falhou' e desfecho novo é produto.
+- **Conhecido:** revisão do épico S2 (decisão vencida deixa de segurar a task).
+
+#### C22. Janela de 24 h do varredor e da espera circular conta do handoff, não do despacho: pedido que espera a cota sai da proteção antes de rodar [colegas]
+- **Severidade:** baixa (autor: média — dano projetado, limite documentado). **Tipo:** risco.
+- **Evidência:** o cético contou 24 delegações pendentes com handoff sem `peer_ask` nas últimas 48 h, todas `attempted=false`, `acordar_em` nulo; 27 delegações pendentes no total com `prazo_em` entre 15/10 09:19 e 16/10 05:04. A cota renova em 16/10 13:00, depois de todos os prazos.
+- **Mecanismo:** `pedidos-parados.ts:15` e `pedir-a-bot.ts:51` (janela = `PRAZO_DECISAO_PADRAO_MS`, 24 h) aplicadas a `h.criado_em` (`trabalhos.repo.ts:499`, `pedidos-de-colega.repo.ts:34-40, 103`); `pedido-parado.ts` conta `RETOMAR_ATE_MS` a partir da queda, não do handoff, então o pedido seria retomado se entrasse na consulta.
+- **Impacto:** depois da renovação, uma queda desses 27 pedidos fica muda (nem retomada nem aviso) e dois bots podem se pedir em círculo sem a trava. Ainda não aconteceu.
+- **Correção:** ancorar a janela no primeiro despacho (`greatest(h.criado_em, min(turnos.attempted_em da cadeia))`) ou estendê-la enquanto a cadeia estiver pendente sem despacho. Alternativa: manter 24 h e aceitar o risco documentado. Decisão de produto.
+- **Conhecido:** ADR-084 "Limites", ADR-099 item 8.
+
+#### C23. Rótulo `executor='catcher'` em 2.335 turnos históricos contradiz o contrato do catcher ("sem CLI e sem custo") [turnos]
+Complemento de C13 vindo das varreduras de desfecho e colegas; listado em separado porque a correção é de dados, não de comportamento.
+- **Severidade:** baixa. **Tipo:** qualidade de dado.
+- **Evidência:** 2.335 turnos com `executor='catcher'` (16/09 → 11/10 12:56): 2.179 com `turno_despachado` 'local', 1.755 com `sessao_cli`, 2.088 com `gastos` 'local'; só 129 têm `catcher_registros` (catcher real). 145 `rotina_janelas` com executor catcher até 09/10. 0 novos desde 11/10 12:56.
+- **Mecanismo:** `contracts/evento.ts:5` e `catcher.ts:16-20` definem o catcher como driver de dev/CI; o rótulo veio do palpite `executor ?? 'catcher'` antes do `registrarExecutor` (`turnos.repo.ts:470`). O mecanismo exato da escolha do rótulo na fase do motor interno não foi localizado no HEAD.
+- **Correção:** a mesma migração de C13, excluindo os 129 com `catcher_registros`; CHECK ou teste: catcher ⇒ `custo_usd = 0` e `sessao_cli` null.
+
+---
+
+## 5. Plausíveis (autor com confiança alta; cético refutou como desenho, duplicata ou falta de prova)
+
+Em cada um, o que falta para virar achado.
+
+- **P1. Pedido a colega e rotina presos em silêncio pela cota (ângulo dos relatos).** Refutado como "silêncio": a pílula de cota existe em `web/telas/trabalhos.ts:237` e `linha-do-dono.ts:227` (o autor procurou em `web/src`, que não existe). Sobra o que já está em C2: delegação sem task não aparece em Trabalhos e quem pediu não recebe linha. Falta: ler a UI para confirmar o que o dono dos bots Claude vê.
+- **P2. Negação do Bash/Monitor gravada como `alcance_insuficiente` quando a causa é cerca do git ou sleep.** Refutado: a causa já vai no evento (`dados->>'causa_nativa'`, `assentar-turno.ts:257-266`), `terminal:false` é fixo nesse caminho e o bot lê o motivo do hook, não o enum. Falta: medir no dado se o bot para após a primeira negação (38 tentativas de sleep/Monitor em 3 dias) e agrupar métricas por `causa_nativa`.
+- **P3. Tempestade de cards do limite "virou silêncio".** Refutado pela contagem do cético: depois de 12/10 nenhum card com task, mas rotinas sem trabalho e conversas ainda geram 2 cards por execução (13/10, conversa 0d431581, 6 pares a cada 30 min; 14/10, da55bff6, 3 em 2 min). Falta: entender por que o portão não segurou essas rotinas (cota nula? calculada só pela IA?) e unificar o card com o caminho `aposLimiteNoFundo`, que já tem linha com hora.
+- **P4. Rotinas pulam janelas em silêncio enquanto o turno espera a cota.** Refutado em 01:30 porque o gatilho da ADR-045 (24 h seguidas de pulos) ainda não tinha sido atingido. Atingido às 10:00 de hoje — passa a valer como C8.
+- **P5. Varredor de pedidos parados cego aos pedidos de triagem.** Refutado: `pedidos-parados.ts:91-92` também chama `triagensParadas`, que cobre handoff sem `trabalhoId`. O problema real é o pendente nunca despachado (C2/C6), e `fatos.colega` sem teto de tempo. Falta: saber por que cada pendente não é reivindicado (a métrica `turno_velho_na_fila` da NOD-219 deveria dizer).
+- **P6. Cota semanal congela todo o fundo por ~51 h (ângulo dos desfechos).** Refutado como desenho (ADR-099 §7, ADR-101 §6 "Perguntar antes"); fallback para outra IA em bot fixo é decisão de negócio e jurídica. O que sobra está em C2.
+- **P7. Fundo parado com conta Team ociosa e tela que não aponta a cota (ângulo das frentes).** Refutado como desenho pelos mesmos motivos; a lacuna de visibilidade está em C2 e C6. Falta: confirmar se a pergunta "Seguir com a conta N?" chegou a ser emitida por volta de 19:20 de 14/10 e ficou sem resposta.
+- **P8. Após o Mac/servidor voltar, janelas de até 17 h atrás disparam e morrem por motor ausente.** Refutado: disparar a última janela velha é a regra de 2026-09-16 (`disparar-rotina.ts:110-113`), e a negação aparece na conversa. Sobra: o primeiro tick após boot não espera o inventário (`presenca.ts:36-42`), e o registro da execução está em C9. Falta: provar que os turnos de 08/10 08:52 nasceram antes do inventário ficar pronto.
+- **P9. Fila longa antes do despacho (150 turnos > 30 min) e rotina "relata como se fosse 16:30".** Refutado: a mensagem "Rotina executou em" usa a hora real (`disparar-rotina.ts:279-281`); a rotina lê a fonte quando roda. Sobra: sem corte de idade para turno de rotina pendente. Falta: separar no banco cota de máquina fora como causa da espera.
+- **P10. Polling 24×7 em UTC gasta a cota.** Refutado no mecanismo: os crons em UTC são de hora/meia hora, o fuso não muda janela nenhuma; o servidor não guarda o fuso da pessoa (ADR-007). Sobra uma proposta de produto: aviso ao criar rotina fora do expediente e pausa após N 'sem novidade'. Falta: medir quanto da semana as 7 rotinas consumiram.
+- **P11. Triagem concluída que espera subpedido/lote nunca entrega.** Refutado como limite conhecido (ADR-063 "Não implementado", ADR-084 "pedido > 24 h fica de fora"); os 5 casos de 07/10 são anteriores à ADR-084. Sobra: `pedidosEmAberto` sem prazo. Falta: medir recorrência depois de 08/10.
+- **P12. Disco da VM em alerta (~6 GB) segura frentes por 60 min.** Refutado: limiar absoluto de 10 GB é decisão da ADR-096 para uma VM de 49 GB. Sobra: a VM está estacionada em ~6 GB por dias — a limpeza apertada não está devolvendo espaço. Falta: logs `limpeza_disco_apertado`/`limpeza_feita`.
+- **P13. Portão da cota por IA e não por conta (ângulo dos eventos).** Refutado porque a Team corporativa não marcada não seria elegível de qualquer modo (ADR-101/102). A parte de visibilidade está em C2.
+- **P14. 409 `estado_invalido` em `/api/maquina/*`: uma máquina some a cada ~25 min.** Refutado: é reconexão desenhada (NOD-199); a rota `itens-locais` não renova `ultimo`, e um silêncio > 90 s com timer de 5 s só é compatível com o Mac suspenso. Falta: contagem de turnos `maquina_sem_contato` nessas máquinas nessas janelas; se houver com Mac acordado, avaliar `powerMonitor` no app.
+
+---
+
+## 6. Refutados
+
+- **R1. "Fazer agora" e falas durante turno de rotina aberto não dão retorno** — a absorção de fala por turno de rotina foi corrigida em 07/10 (dc9b923d, ADR-083 §6); "executar agora" reivindica a janela do minuto, e não há janela às 19:10, logo o clique não chegou ao servidor (hipótese de UI, sem mecanismo).
+- **R2. Conectores falham por `timeout_transporte` e o bot segue como se nada fosse** — não repetir timeout é decisão da ADR-009 e o orçamento de 30 s não comporta um retry de 15 s; o modelo recebe a negação; 58 timeouts em 4 semanas apontam lentidão do provedor.
+- **R3. Task aberta pela pessoa e o recado dela esperam a cota como fundo** — é o que o código e a ADR-099 §7 definem ("task que nunca rodou, de qualquer origem"); a tela mostra "esperando a cota da IA"; só a conversa é isenta. Fica uma pergunta de produto.
+- **R4. Codex: um `erro_execucao` marca a conta no limite por 1 h** — os dois turnos tinham "You've hit your usage limit" no erro cru, limite real; o classificador casa esse texto. Sobra uma melhoria: ler o "try again at" do texto em vez do prazo padrão de 1 h.
+- **R5. Quedas do motor na VM em 11/10 coincidem com pressão de memória vermelha** — `pressao_memoria` não grava `machine_id`, a pressão só segura trabalho novo e não afeta o lease; dia de 125 commits e instalador manual do motor. Sobra: `machine_id` no evento de pressão.
+
+---
+
+## 6b. Não verificados (severidade baixa; pulados pelo cético para poupar cota)
+
+Todos marcados como **não verificados**: evidência do autor, mecanismo não confirmado por segunda leitura.
+
+- **N1.** Falas de negação/sistema não entram na sessão do CLI (o bot não "lembra" do que o Nod escreveu por ele) — relato 2cc6b32b; `emitir-plano-turno.ts:239-245` só injeta `desdeSuaUltimaVez` na sessão da conversa.
+- **N2.** Pedido a colega "absorvido" pelo dono: resposta vai para a conversa do dono, não para quem pediu — relato a5d1121a, tarefa 20f4696b; `entregar-resposta-peer.ts:178-192` só sai pelo turno da própria delegação. 841816b3 concluída sem `peer_ask` sem mecanismo achado.
+- **N3.** UI sem correção identificada: copiar listas (79854393), opções clicáveis (3cc49a45), HTML inline (30d8b402), mensagem enorme após o card (cd79ab44), limite de caracteres (210c321e).
+- **N4.** NOD-219 não encerra nem explica o pendente velho: após `prazo_em` só loga `condicao_da_maquina`, sem distinguir cota — `turno-orfao.ts:51-60`; os 3 mais velhos cruzaram o prazo às 09:19 de hoje.
+- **N5.** Rótulo `catcher` em 2.335 turnos: `sessaoDoTurno` (`turnos.repo.ts:485-488`) devolve executor errado e a retomada não faz `--resume` — complemento de C13/C23.
+- **N6.** ADR-009: `produced_output` liga em qualquer `result` (até o de erro) e `rejected` nunca ligou (0/8.961) — `stream-json.ts:207-217`; 771 limites rotulados `trabalho_incompleto` com ~2,7 s de vida.
+- **N7.** Deploys e quedas do servidor derrubam turnos em curso: 29 `reinicio_servidor` em 11–13/10 (0 desde NOD-214) e 17 h de `despachando` sem varredor em 07→08/10 (14 delegações interrompidas de uma vez às 08:51:59).
+- **N8.** `executor='catcher'` em 2.113 turnos reais contradiz o contrato "sem CLI e sem custo" — mecanismo do rótulo na fase do motor interno não localizado.
+- **N9.** Rede de 2 min promove frentes que acabam segundos depois: 6 de 15 viveram < 60 s, cada uma com lote, retomada de retorno (US$ 0,2–0,7) e linhas de sistema — `domain/trabalho.ts:186-189`; 13 sessões em 16 turnos de conversa do Milton em 14/10 (não confirmado que seja `largar_sessao`).
+- **N10.** Frentes "rodando" sem turno vivo há 17 h sem caminho de ação na tela (5966689b, 11fddc51) — complemento de C6.
+- **N11.** Recado à frente na fila vira "retomada" de um turno ainda pendente (c5aaefc6 retoma ef1aae1d): se o primeiro for recusado no despacho, a frente roda só com o recado — `coordenar-trabalhos.ts:63-73`.
+- **N12.** "Executar agora" cria execução concorrente (3 casos) e `rotina_janelas.machine_id` é aleatório (`executar-rotina-agora.ts:19`, `randomUUID()`).
+- **N13.** 47 pedidos antigos (05–09/10) sem resposta nem aviso; 16 com receptor excluído, 5 com receptor sem máquina; `pedidosEmAberto` sem janela segura entregas.
+- **N14.** NOD-206 fechado no dado: 744 turnos de pedido de colega com catcher até 11/10 12:14; só UPDATE histórico opcional.
+- **N15.** Pendências desligadas desde 06/10 (#174): 70 abertas congeladas, 29 de bots excluídos; 4 rotinas `so_com_pendencia` pausadas.
+- **N16.** Alarme de 3 voltas vira pergunta que vence em 24 h e a espera morre em silêncio (7a85e952 vencida; e749ec80 e 4f191137 vencem hoje 11:19 e 13:15) — complemento de C10.
+- **N17.** Volta marcada some quando o turno cai por `reinicio_servidor` (ad387407, 9860fe39, 3110987c) — `me-chame-as.ts:68-71` só cria a volta se concluiu; a retomada automática não herda `despertar_em`.
+- **N18.** `inventario_motores` não reflete o Codex (só claude-cli 2.1.295 e catcher) embora 29 turnos codex tenham rodado na VM; anúncio por máquina fica só em memória.
+- **N19.** `rotina_janelas.machine_id` é o id do processo do agendador (e31016a9 em 1.167 janelas), não a máquina — `scheduler-rotina.ts:47`.
+- **N20.** Métrica de latência do outbox mede a transação, não a entrega (`events_outbox.criado_em = now()` do início da tx) — o despachante está saudável.
+- **N21.** Janela pulada e fila presa são invisíveis: 168 pulos e 39 pendentes sem evento, card ou histórico — complemento de C8/C2.
+
+---
+
+## 7. Lista de ação operacional
+
+Nada abaixo foi executado. Cada item diz o que, onde e por quê. Itens que mexem no banco devem ser feitos com o servidor de pé e, de preferência, pela ação equivalente na UI (Parar, responder), para o sistema gravar eventos e desfechos.
+
+### Destravar hoje (banco/VM, com cautela)
+
+1. **Servidor (C1), primeiro de tudo.** No host da VM: `docker logs` do container nod-nod-1 desde 08:00 BRT; conferir se o processo responde e se o laço de eventos/pool está vivo. Se travado, reiniciar. Ao subir, a carência da NOD-214 assenta o turno 74a72899 (`despachando`, lease 08:08:40) como `reinicio_servidor` e o agendador reagenda as 12 rotinas vencidas. Não mexer em `turnos` antes disso: com o servidor fora, nada do que for alterado ganha evento.
+
+2. **Perguntas pendentes do bot Leonardo (C10, N16).** Responder na UI as decisões 4f191137 (rotina 57b9b36b, vence 13:15) e e749ec80 (rotina 3ecfa179, vence 11:19). Responder destrava a rotina na hora; deixar vencer registra `passou_em_branco` e a próxima janela nasce presa pela cota (C2).
+
+3. **Turno dcdbf4af — rotina f190bf45 da Clarice (C3).** Opções, da menos invasiva para a mais: (a) "Parar" o turno pela UI, para a próxima janela de 10 min nascer já no Codex; (b) `update turnos set harness='codex-cli', modelo='gpt-5.6-sol', conta_id=null where id='dcdbf4af…' and estado='pendente'` — faz o turno sair da cota do Claude na próxima reivindicação, mas roda com a entrada carimbada em 14/10 10:00. Preferir (a).
+
+4. **Os 19 pedidos Leonardo→Ze 1 (C7) e 3 Leonardo→Cartola.** Antes de 16/10 13:00, decidir se os pedidos duplicados devem sair da fila. Lista: os turnos `delegacao` pendentes com `agente_id` = Ze 1 (72e4ae01) e raiz na rotina cca275ad, em especial os 9 abertos pelo turno a6028245 às 16:03 de 14/10. Parar pela UI grava `peer_ask` de aviso ao Leonardo; `update` direto para `interrompido` não grava e deixa o handoff sem resposta para sempre. Se parar, parar os 3 ao Cartola (4424eb84, 7ce39427, 6be044b3) também encerra as frentes 5966689b/11fddc51 como 'falhou' e devolve o lote 60639abb — liberando a rotina 3ecfa179 (C6).
+
+5. **As 9 rotinas presas (C8).** Turnos 82accaad, 971ecf9b, 68406301, dcdbf4af, 323485f0, a40d894e, 6a7196bc, c38ae4d4, e0ddad53. Se ficarem, rodam na renovação com instrução de 2 dias atrás, 9 de uma vez, consumindo a janela nova. Parar pela UI registra a execução como `interrompida` e a próxima janela do cron nasce limpa (presa pela cota até 13:00 de 16/10). Decisão do dono: vale mais a execução velha ou a janela fresca?
+
+6. **Cota do Claude (C2).** Duas saídas sem código: esperar 16/10 13:00, ou pôr a conta Team (22f39160) em 1º e mandar uma fala a um bot Claude — a leitura nova de `uso_do_plano` da Team deve soltar o portão (inferência pelo código; não testada). Atenção: a Team é corporativa; usá-la para fundo é decisão da pessoa, e o modo 'perguntar' continua valendo. Não alterar `uso_do_plano` à mão: a guarda `medido_em` mais novo é a única proteção contra leitura velha.
+
+7. **Frente da pessoa a305c426 (Milton, na_fila desde 10:56 de 14/10).** Tem "Fazer aqui" (origem pessoa). A pessoa pode trazê-la para a conversa se não quiser esperar a cota.
+
+8. **Turno codex 0ce44c33 (rotina f7be2287), pendente há 1 h sem causa apurada.** Conferir após o servidor voltar; pode ser só o item 1.
+
+9. **Saneamento único dos 47 handoffs antigos (N13, P11).** Gravar `peer_ask` de falha para os handoffs de 05–09/10 sem resposta com tarefa terminal ou receptor excluído, para parar de segurar `aguardando_colega` nas cadeias. Decisão do dono; listar antes com `select` por `payload->>'tarefaId'`.
+
+### Precisa de código (ordem sugerida)
+
+1. Heartbeat do servidor + alarme externo + healthcheck por heartbeat (C1).
+2. Teto de reenvios em `aposLimite`/`aposTrocaDeConta`/`repetirNaConversa` e harness fixado no reenvio (C5) — pequeno e evita a próxima tempestade.
+3. `interrompido_em` em `interromper` e `coalesce` nos três leitores (C4) — pequeno, destrava a retomada de frentes longas.
+4. Troca de IA reescreve pendentes de fundo, ou `reivindicar` resolve a IA pelo agente (C3).
+5. Visibilidade da cota: nota "Seguir com a conta N?" ao segurar turno de IA fixa, instrução de `pedir_a_bot` com a espera, delegação sem task em Trabalhos, janela pulada com desfecho `adiada_por_cota`, cota por conta na tela de contas (C2, C8, C6).
+6. `semContaParaOTurno` filtrando pela IA fixa (C11) e `registrarDesfechoRotina` nos dois pontos de recusa do despacho (C9).
+7. Pré-voo ignorar a pergunta das voltas (C10); guarda de pedido repetido por par (C7); prazo à espera por colega na fila (C6).
+8. Índice em `retoma_turno_id` + limite de janelas em `turnoAberto` (C16); conector e `executarItens` fora da transação (C17); `reivindicarContinuacao` no ramo automático (C18).
+9. Backfill de `executor` (C13/C23) e recálculo de custo bifurcado (C14) — migrações de dados, com contagem antes e validação humana no custo.
+10. Relato resolve o turno disparado (C12); classes novas no classificador (C19); causa na entrega sem `result` (C20); desfecho próprio para decisão vencida em frente (C21); janela do varredor ancorada no despacho (C22).
+
+Decisões de produto que o código não deve tomar sozinho: portão da cota por conta e uso da conta corporativa no fundo; fallback de IA em bot fixo; o que fazer com rotina presa além de um período do cron; pausa automática de rotina após N 'sem novidade'; religar pendências.
+
+---
+
+## 8. Lacunas
+
+- **Causa raiz do servidor parado desde 08:07** não está no banco nem nos logs disponíveis (que terminam às 00:24). Precisa do host.
+- **Recontagem no banco pelo cético** só foi feita em parte dos achados (C2, C3, C6, C11, C14, C16, C22, P3, P10). Nos demais, as contagens são do autor e o cético conferiu apenas o mecanismo no código.
+- **UI não lida** em `web/` para a maioria dos achados de visibilidade (pílula de cota para o dono dos bots Claude, rótulo "aguardando resposta", tela da máquina com motivo 'disco').
+- **Relação relato → mecanismo** no cluster memória (C13) é interpretação: não se provou, relato a relato, que a retomada perdeu a sessão.
+- **Custo fantasma**: 10 turnos/US$ 708 (autor) contra 32/US$ 318 (cético) — recortes diferentes; precisa de uma consulta única antes do recálculo.
+- **Logs do motor** não foram lidos (queda de 11/10, R5); `pressao_memoria` sem `machine_id` impede atribuir pressão à VM.
+- **`inventario_motores` sem Codex** (N18) e **`rotina_janelas.machine_id`** sendo o id do agendador (N19) limitam qualquer análise por máquina das rotinas.
+- **Cluster I dos relatos** (`gh` só após restart na VM) e **cluster H** (UI) sem mecanismo.
+- **Por que o portão não segurou rotinas sem trabalho em 13/10** (P3: 2 cards por execução) não foi explicado.
+- **Horários devolvidos pelo driver** em algumas consultas vieram com sufixo Z já convertidos para BRT; contagens são confiáveis, horários individuais citados de consultas do cético podem ter deslocamento de 3 h (anotado onde ocorreu).
+- **Relatos 09–12/10 do cluster B** são da versão sem causa na pílula; não há relato novo depois de 12/10 para dizer se a pílula com causa resolveu a confusão.
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+(function () {
+  const paineis = { resumo: "painel-resumo", codigo: "painel-codigo", forense: "painel-forense" };
+  const renderizados = { resumo: true };
+  const sumario = document.getElementById("sumario");
+  const slug = (t, usados) => {
+    let s = t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "secao";
+    let base = s, i = 2; while (usados.has(s)) s = base + "-" + i++; usados.add(s); return s;
+  };
+  function renderizar(chave) {
+    if (renderizados[chave]) return;
+    const fonte = document.getElementById("md-" + chave);
+    const alvo = document.getElementById(paineis[chave]);
+    if (!fonte) return;
+    let md = fonte.textContent;
+    if (window.marked && typeof window.marked.parse === "function") {
+      alvo.innerHTML = window.marked.parse(md, { gfm: true });
+    } else {
+      const pre = document.createElement("pre"); pre.textContent = md; alvo.replaceChildren(pre);
+    }
+    alvo.querySelectorAll("table").forEach((t) => { const w = document.createElement("div"); w.className = "tabela"; t.parentNode.insertBefore(w, t); w.appendChild(t); });
+    alvo.querySelectorAll("a[href^='http']").forEach((a) => { a.target = "_blank"; a.rel = "noopener"; });
+    const usados = new Set();
+    alvo.querySelectorAll("h1, h2, h3, h4").forEach((h) => { if (!h.id) h.id = chave[0] + "-" + slug(h.textContent, usados); });
+    renderizados[chave] = true;
+  }
+  function montarSumario(chave) {
+    const alvo = document.getElementById(paineis[chave]);
+    const nivel = chave === "resumo" ? "h2" : "h2, h3";
+    sumario.replaceChildren();
+    alvo.querySelectorAll(nivel).forEach((h) => {
+      if (!h.id) return;
+      const li = document.createElement("li"); const a = document.createElement("a");
+      a.href = "#" + h.id; a.textContent = h.textContent.replace(/\s+/g, " ").trim();
+      if (h.tagName === "H3") a.className = "n3";
+      li.appendChild(a); sumario.appendChild(li);
+    });
+  }
+  function abrir(chave, rolar) {
+    if (!paineis[chave]) chave = "resumo";
+    renderizar(chave);
+    document.querySelectorAll(".aba").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.painel === chave)));
+    Object.entries(paineis).forEach(([k, id]) => { document.getElementById(id).hidden = k !== chave; });
+    montarSumario(chave);
+    try { localStorage.setItem("auditoria-aba", chave); } catch (e) {}
+    if (rolar) window.scrollTo({ top: 0 });
+  }
+  document.querySelectorAll(".aba").forEach((b) => b.addEventListener("click", () => abrir(b.dataset.painel, true)));
+  const hash = (location.hash || "").slice(1);
+  let inicial = "resumo";
+  if (hash === "codigo" || hash.startsWith("c-")) inicial = "codigo";
+  else if (hash === "forense" || hash.startsWith("f-")) inicial = "forense";
+  else if (!hash) { try { inicial = localStorage.getItem("auditoria-aba") || "resumo"; } catch (e) {} }
+  abrir(inicial, false);
+  if (hash && document.getElementById(hash)) document.getElementById(hash).scrollIntoView();
+  const obs = new IntersectionObserver((ents) => {
+    ents.forEach((e) => { if (!e.isIntersecting) return; sumario.querySelectorAll("a").forEach((a) => a.classList.toggle("ativo", a.getAttribute("href") === "#" + e.target.id)); });
+  }, { rootMargin: "-120px 0px -70% 0px" });
+  const observar = () => { obs.disconnect(); document.querySelectorAll("main section:not([hidden]) h2[id], main section:not([hidden]) h3[id]").forEach((h) => obs.observe(h)); };
+  observar();
+  document.querySelectorAll(".aba").forEach((b) => b.addEventListener("click", observar));
+})();
+</script>
+
+</body>
+</html>
