@@ -50,7 +50,7 @@ function planoDe(p: { turnoId: string; agenteId: string; conversaId: string }, e
 async function cenario(trx: Trx, modo: ModoAprovacao) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 1" });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
-  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo });
+  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo, confirmado: true });
   const novoTurno = async () => {
     const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "sobe o PR", entradaConfianca: "confiavel", modelo: "m" });
     if (!t) throw new Error("turno");
