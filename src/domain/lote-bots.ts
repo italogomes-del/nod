@@ -13,6 +13,10 @@ import { ehNod, nomeReservadoAoNod } from "./nod.ts";
  * Arriscado, no lote: excluir e mudar o modo de outro bot sempre; dar acesso a um app, e duplicar um bot que tem acessos
  * (a cópia os leva), depois de conteúdo de fora no turno — a cerca 3. O Nod NÃO usa o alívio de `conversaComAPessoa`:
  * pedir na conversa não tira o risco de excluir (decisão do Marlon no /spec de 2026-10-07).
+ *
+ * definido em 2026-10-18 (Fase 4, PR 2; emenda da ADR-059): pôr um bot em "Ignorar todas as aprovações" é sempre card,
+ * em QUALQUER modo do Nod, inclusive no total (`ligar_total`). Na tela, ligar esse modo pede um segundo clique; sem
+ * esta cerca, o Nod em total ligava o modo em outro bot sem a pessoa.
  */
 
 /** O que o lote enxerga de um bot da pessoa. */
@@ -131,7 +135,8 @@ export function resolverBot(alvo: string, bots: readonly BotDoLote[], pessoaId: 
 }
 
 /** O risco de uma ação no lote; null = não é arriscada. */
-export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
+export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo" | "modo">, s: { contaminado: boolean; alvoTemAcessos: boolean }): MotivoCardDoLote | null {
+  if (a.tipo === "mudar_modo" && a.modo === "total") return "ligar_total";
   if (a.tipo === "excluir" || a.tipo === "mudar_modo") return "arriscada";
   if (!s.contaminado) return null;
   // Cerca 3: depois de conteúdo de fora, o que dá ou reaproveita acesso, e o que grava instrução que um bot vai seguir
@@ -143,15 +148,15 @@ export function riscoDaAcao(a: Pick<AcaoLote, "tipo" | "descricao" | "titulo">, 
 }
 
 /**
- * O que roda agora e o que espera a pessoa, pelo modo do Nod. Uma ação cujo alvo é o bot que outra ação (que espera)
- * vai criar também espera: ela só pode rodar depois. Devolve, por ação, `null` (roda agora) ou o motivo do card.
+ * O que roda agora e o que espera a pessoa, pelo modo do Nod (menos `ligar_total`, que espera em todo modo). Uma ação
+ * cujo alvo é o bot que outra ação (que espera) vai criar também espera: ela só pode rodar depois. Devolve, por ação, `null` (roda agora) ou o motivo do card.
  */
 export function decidirLote(acoes: readonly AcaoResolvida[], modo: ModoAprovacao | undefined, riscos: readonly (MotivoCardDoLote | null)[]): (MotivoCardDoLote | null)[] {
   const espera: (MotivoCardDoLote | null)[] = [];
   for (const a of acoes) {
     const risco = riscos[a.i] ?? null;
     const d = decidirPeloModo(modo, { arriscada: risco !== null, credencial: false });
-    let motivo: MotivoCardDoLote | null = d?.automatico ? null : (risco ?? "manual");
+    let motivo: MotivoCardDoLote | null = risco === "ligar_total" ? risco : d?.automatico ? null : (risco ?? "manual");
     if (motivo === null && a.alvoDaAcao !== null && espera[a.alvoDaAcao] !== null) motivo = espera[a.alvoDaAcao] ?? "manual";
     espera.push(motivo);
   }

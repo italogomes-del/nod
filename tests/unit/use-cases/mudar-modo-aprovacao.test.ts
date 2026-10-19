@@ -19,11 +19,37 @@ describe("mudarModoAprovacao (ADR-059)", () => {
     expect(linha?.autoria.autor_tipo).toBe("pessoa");
   });
 
+  it("2026-10-18: a linha gravada usa a frase do menu, e nenhuma diz que o automático para depois de ler a web", async () => {
+    const { deps, banco } = depsEmMemoria();
+    const { agente, conversa } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
+    const linhas: string[] = [];
+    for (const [modo, extra] of [["automatico", {}], ["total", { confirmado: true }], ["manual", {}]] as const) {
+      await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo, ...extra });
+      linhas.push(banco.mensagens.filter((m) => m.conversaId === conversa.id && m.kind === "sistema").at(-1)?.texto ?? "");
+    }
+    expect(linhas[0]).toMatch(/para Aprovar automaticamente: roda sem perguntar o que não for arriscado\. Para no arriscado e no que tocar uma credencial do Mac\.$/);
+    expect(linhas[1]).toMatch(/para Ignorar todas as aprovações: faz tudo sem perguntar\. Não abre arquivos de credencial do Mac, e comandos com elas pedem você\.$/);
+    expect(linhas[2]).toMatch(/para Aprovar manualmente: pede você antes de tudo que muda algo: commit, push, mensagem, arquivo fora da pasta\.$/);
+    for (const l of linhas) expect(l).not.toMatch(/ler a web|depois de ler/);
+  });
+
+  it("2026-10-18: ligar o total exige confirmado: true (o segundo clique); os outros modos não pedem", async () => {
+    const { deps } = depsEmMemoria();
+    const { agente } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
+    for (const confirmado of [undefined, false, "true", 1]) {
+      await esperarErro(() => mudarModoAprovacao(deps, { agenteId: agente.id, modo: "total", confirmado }), "entrada_invalida");
+    }
+    expect((await deps.repos.agentes.buscar(agente.id))?.modoAprovacao ?? "manual").toBe("manual");
+    expect((await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "automatico" })).data.mudou).toBe(true);
+    expect((await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total", confirmado: true })).data.mudou).toBe(true);
+    expect((await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "manual" })).data.mudou).toBe(true);
+  });
+
   it("repetir o mesmo modo não escreve nada", async () => {
     const { deps } = depsEmMemoria();
     const { agente } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
-    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total" });
-    const { data, events } = await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total" });
+    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total", confirmado: true });
+    const { data, events } = await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total", confirmado: true });
     expect(data.mudou).toBe(false);
     expect(events).toEqual([]);
   });
@@ -32,20 +58,20 @@ describe("mudarModoAprovacao (ADR-059)", () => {
     const { deps } = depsEmMemoria();
     const { agente } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
     await esperarErro(() => mudarModoAprovacao(deps, { agenteId: agente.id, modo: "auto" }), "entrada_invalida");
-    await esperarErro(() => mudarModoAprovacao(deps, { agenteId: "00000000-0000-4000-8000-000000000000", modo: "total" }), "nao_encontrado");
+    await esperarErro(() => mudarModoAprovacao(deps, { agenteId: "00000000-0000-4000-8000-000000000000", modo: "total", confirmado: true }), "nao_encontrado");
   });
 
   it("colega que enxerga o bot de equipe não muda o modo dele", async () => {
     const { deps, reposDe } = depsEmMemoria();
     const { agente } = (await executar(deps, criarAgente, { dono: "empresa", nome: "Vera" })).data;
     const daAna = { ...deps, repos: reposDe(ANA), escopo: ANA };
-    await esperarErro(() => mudarModoAprovacao(daAna, { agenteId: agente.id, modo: "total" }), "nao_permitido");
+    await esperarErro(() => mudarModoAprovacao(daAna, { agenteId: agente.id, modo: "total", confirmado: true }), "nao_permitido");
   });
 
   it("excluir volta o bot para Manual (restaurar não devolve autonomia); a cópia nasce em Manual", async () => {
     const { deps } = depsEmMemoria();
     const { agente } = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev 1" })).data;
-    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total" });
+    await executar(deps, mudarModoAprovacao, { agenteId: agente.id, modo: "total", confirmado: true });
     const copia = (await executar(deps, duplicarAgente, { agenteId: agente.id })).data.agente;
     expect(copia.modoAprovacao ?? "manual").toBe("manual");
     await executar(deps, gerirAgente, { agenteId: agente.id, acao: "excluir" });

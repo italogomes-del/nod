@@ -159,7 +159,7 @@ export type PayloadPropostaBot = { kind: "bot"; nome: string; descricao: string;
  * conversa dele); confirmar executa as marcadas, na ordem (gerir-bots.ts, decidirLoteDeBots).
  */
 export type EstadoAcaoNoLote = "esperando" | "feita" | "recusada" | "falhou";
-export type MotivoCardDoLote = "manual" | "arriscada" | "conteudo_de_fora";
+export type MotivoCardDoLote = "manual" | "arriscada" | "conteudo_de_fora" | "ligar_total";
 export type AcaoNoLote = AcaoLote & {
   i: number;
   estado: EstadoAcaoNoLote;

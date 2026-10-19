@@ -16,6 +16,8 @@ const VERBO_DO_LOTE: Record<AcaoNoLote["tipo"], string> = {
 const MODO_HUMANO: Record<NonNullable<AcaoNoLote["modo"]>, string> = { manual: "manual", automatico: "automático", total: "sem aprovações" };
 /** Por que a ação esperou você, quando não foi só o modo manual (QA de 2026-10-07: uma frase por tipo, não uma genérica). */
 function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">): string {
+  // Emenda de 2026-10-18 da ADR-059: ligar o total é sempre da pessoa, em qualquer modo do Nod.
+  if (motivo === "ligar_total") return "Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.";
   if (motivo === "arriscada") return a.tipo === "excluir" ? "Excluir é arriscado: o Nod sempre pergunta antes. Dá para restaurar depois em Gerenciar agentes." : "Mudar o modo de um bot é arriscado: o Nod sempre pergunta antes.";
   return a.tipo === "dar_acesso" ? "O Nod leu conteúdo de fora nesta conversa, então dar acesso a um app espera você." : "O Nod leu conteúdo de fora nesta conversa, então esta mudança espera você.";
 }

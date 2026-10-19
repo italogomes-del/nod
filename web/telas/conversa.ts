@@ -1123,11 +1123,11 @@ export function htmlComposer(placeholder: string, sugestoes: readonly string[] =
   const resumo = aceita ? `<span class="anexos-resumo" id="composer-resumo"></span>` : "";
   // O "/" (definido em 2026-09-28): a lista abre acima do campo; a dica diz o que o comando escrito faz.
   const barra = opcoes.comandos ? '<div class="barra-lista" id="barra-lista" role="listbox" aria-label="Comandos" hidden></div><div class="barra-dica" id="barra-dica" hidden></div>' : "";
-  // ADR-059: o chip do modo de aprovação (só na conversa própria) e o aviso acima do campo; main.ts troca o miolo.
-  const aviso = opcoes.aprovacao ? '<div class="composer-aviso" id="composer-aviso"></div>' : "";
+  // ADR-059: o botão do modo de aprovação (só na conversa própria); main.ts troca o miolo. A faixa acima do campo saiu
+  // em 2026-10-18 (Fase 4, PR 2).
   const chip = opcoes.aprovacao ? HTML_CHIP_MODO : "";
   const seletor = opcoes.aprovacao ? HTML_SELETOR_IA : "";
   const parar = opcoes.aprovacao ? `<button type="button" class="parar-envio" data-act="parar-conversa" aria-label="${esc(rotuloDoParar(opcoes.bot))}" title="Parar o que está rodando nesta conversa" hidden>${QUADRADO}</button>` : "";
-  return `<div class="composer">${aviso}<div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
+  return `<div class="composer"><div class="composer-pergunta" id="composer-pergunta"></div>${barra}<div class="box${aceita ? " com-anexos" : ""}${chip ? " com-modo" : ""}">${lista}${anexar}${chip}<textarea id="composer-texto" rows="1" placeholder="${esc(placeholder)}" data-sugestoes="${esc(JSON.stringify(sugestoes))}"></textarea>${resumo}${seletor}${htmlPilulaDitado()}${htmlBotaoDitado()}${parar}<button class="send" data-act="enviar" aria-label="Enviar">➤</button></div>
   <p class="nota" id="composer-nota" data-padrao=""></p></div>`;
 }

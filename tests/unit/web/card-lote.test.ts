@@ -34,6 +34,12 @@ describe("card do lote do Nod", () => {
     expect(h).toContain('data-act="recusar-decisao"');
   });
 
+  it("2026-10-18: ligar o total pelo Nod diz que só liga com o ok da pessoa", () => {
+    const h = renderCardLote({ id: "p2" }, { kind: "lote_bots", resumo: "Dev 1 sem aprovações", acoes: [acao(0, { tipo: "mudar_modo", alvoNome: "Dev 1", modo: "total", motivo: "ligar_total", botId: "b1" })] }, true);
+    expect(h).toContain("para sem aprovações");
+    expect(h).toContain("Ignorar todas as aprovações só liga com o seu ok: o Nod nunca põe um bot nesse modo sozinho.");
+  });
+
   it("Sua vez lista só as que esperam, antes do botão que aprova todas", () => {
     const h = listaDoLoteParaSuaVez(lote);
     expect(h.match(/<li>/g)).toHaveLength(3);

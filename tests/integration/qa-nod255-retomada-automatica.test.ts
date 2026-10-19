@@ -26,7 +26,7 @@ async function rodar(trx: Trx, modo: ModoAprovacao, naMaquina: boolean) {
   await repos.conectores.registrarSonda(conector?.id ?? "", { ok: true, catalogo: [{ nome: "CLICKUP_CREATE_TASK_COMMENT", descricao: "comenta", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
   const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
   await repos.concessoes.conceder({ agenteId, conectorId: conector?.id ?? "", capacidade: "CLICKUP_CREATE_TASK_COMMENT", mensagemId: consentimento?.id ?? "" });
-  await mudarModoAprovacao(deps, { agenteId, modo });
+  await mudarModoAprovacao(deps, { agenteId, modo, confirmado: true });
   const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "comenta na task", entradaConfianca: "confiavel", modelo: "m" });
   const machineId = randomUUID();
   expect((await repos.turnos.reivindicar({ machineId, agora: Date.now() }))?.id).toBe(turno?.id);

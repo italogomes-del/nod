@@ -98,12 +98,13 @@ export function criarRotasAgentes(d: DepsRotas, desligarComputador?: (escopo: Es
       },
     },
     {
-      // ADR-059: o chip de aprovações do campo. Só a dona; a troca vira linha na conversa do bot.
+      // ADR-059: o botão de aprovações do campo. Só a dona; a troca vira linha na conversa do bot. O total exige
+      // `confirmado: true` (o segundo clique do menu; emenda de 2026-10-18).
       metodo: "POST",
       padrao: new RegExp(`^/agentes/${ID}/modo-aprovacao$`),
       async handler(ctx) {
         const corpo = corpoObjeto(await ctx.corpo());
-        ctx.json(200, await executar(ctx.escopo, mudarModoAprovacao, { agenteId: ctx.params.id ?? "", modo: corpo.modo }));
+        ctx.json(200, await executar(ctx.escopo, mudarModoAprovacao, { agenteId: ctx.params.id ?? "", modo: corpo.modo, confirmado: corpo.confirmado }));
       },
     },
     {

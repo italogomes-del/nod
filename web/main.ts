@@ -21,8 +21,8 @@ import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
 import { abrirMenu, abrirMenuConta, dialogo, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
-import { renderAvisoModo, renderChipModo } from "./telas/aprovacoes.ts";
-import { abrirMenuModo, avisoFechado, fecharAviso, hidratarAvisosFechados } from "./lib/menu-modo.ts";
+import { renderChipModo } from "./telas/aprovacoes.ts";
+import { abrirMenuModo } from "./lib/menu-modo.ts";
 import { abrirMenuIa } from "./lib/menu-ia.ts";
 import { dadosDoSeletor, mioloDoSeletor, pedidoDoSeletor, renderMenuIa } from "./telas/seletor-ia.ts";
 import type { FormaAgente, CorAgente } from "../src/contracts/agente.ts";
@@ -1119,7 +1119,6 @@ function renderPrincipal(): void {
     composerDe = composer?.chave ?? null;
     esquecerRegiao("composer");
     esquecerRegiao("composer-pergunta");
-    esquecerRegiao("composer-aviso");
     regiao("composer", composer?.html ?? "");
     const ta = document.getElementById("composer-texto") as HTMLTextAreaElement | null;
     const rascunho = composerDe ? rascunhos.ler(composerDe) : "";
@@ -1398,15 +1397,16 @@ function abrirSeletorIa(el: HTMLElement): void {
 }
 
 /**
- * ADR-059: o chip do modo de aprovação e o aviso acima do campo seguem o bot da conversa. O composer não se regrava
- * (ADR-020), então o miolo do chip é trocado no próprio nó, só quando muda — o texto digitado fica onde está.
+ * ADR-059: o botão do modo de aprovação segue o bot da conversa. O composer não se regrava (ADR-020), então o miolo do
+ * botão é trocado no próprio nó, só quando muda — o texto digitado fica onde está. revisto em 2026-10-18 (Fase 4, PR 2):
+ * só o ícone, com o nome no `aria-label` e na dica; a faixa acima do campo saiu.
  */
 function atualizarModoNoComposer(): void {
   const chip = document.getElementById("composer-modo") as HTMLButtonElement | null;
   const t = estado.tela;
   const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
   if (!chip) return;
-  if (!bot) { chip.hidden = true; regiao("composer-aviso", ""); return; }
+  if (!bot) { chip.hidden = true; return; }
   const modo = bot.modoAprovacao ?? "manual";
   const dona = bot.ownerId === estado.sessao?.pessoaId;
   const r = renderChipModo(modo, dona);
@@ -1415,20 +1415,18 @@ function atualizarModoNoComposer(): void {
     chip.innerHTML = r.html;
     chip.dataset.modo = modo;
     chip.dataset.dona = String(dona);
-    chip.title = r.titulo;
-    chip.setAttribute("aria-label", `Aprovações: ${r.titulo}`);
+    chip.setAttribute("aria-label", r.titulo);
     chip.setAttribute("aria-disabled", String(!dona));
   }
-  regiao("composer-aviso", avisoFechado(modo) ? "" : renderAvisoModo(bot.nome, modo));
 }
 
 function abrirModoAprovacao(el: HTMLElement): void {
   const t = estado.tela;
   const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
   if (!bot || bot.ownerId !== estado.sessao?.pessoaId) return;
-  // revisto em 2026-10-06: trocar de modo não reabre o aviso fechado — a linha de sistema na conversa já confirma a troca.
-  abrirMenuModo(el, bot.nome, bot.modoAprovacao ?? "manual", (modo) => {
-    void agir(async () => { await mudarGestao(() => api!.mudarModoAprovacao(bot.id, modo)); });
+  // O total só chega aqui com `confirmado` (o segundo clique do menu); a linha de sistema na conversa confirma a troca.
+  abrirMenuModo(el, bot.nome, bot.modoAprovacao ?? "manual", (modo, confirmado) => {
+    void agir(async () => { await mudarGestao(() => api!.mudarModoAprovacao(bot.id, modo, confirmado)); });
   });
 }
 
@@ -1636,7 +1634,6 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   ambienteBanco = await api.ambiente();
   dispatch({ tipo: "sessao", escopo });
   void api.preferencias().then((p) => {
-    hidratarAvisosFechados(p.avisosFechados ?? []);
     if (p.usoDoMac) dispatch({ tipo: "uso-do-mac", uso: p.usoDoMac });
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
@@ -3088,7 +3085,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   "abrir-sala": (el) => navegar({ tipo: "sala", salaId: el.dataset.sala ?? "", conversaId: el.dataset.conversa ?? "" }),
   "menu-agente": (el) => menuDoBot(el),
   "inteligencia": (el) => abrirInteligencia(el.dataset.id),
-  // ADR-059: o chip do campo abre os três modos; o × do aviso o fecha para este bot e este modo.
+  // ADR-059: o botão do campo (e a linha Aprovações do painel) abre os três modos.
   "modo-aprovacao": (el) => abrirModoAprovacao(el),
   // Plano "tela limpa" (2026-10-16, T6): o seletor de IA do campo.
   "seletor-ia": (el) => abrirSeletorIa(el),
@@ -3099,15 +3096,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     if (!tenant || !voz) return;
     const vel = el.closest("form")?.querySelector<HTMLInputElement>('input[name="vozVelocidade"]:checked')?.value ?? "1";
     void new Audio(`/api/t/${encodeURIComponent(tenant)}/voz/amostra?voz=${encodeURIComponent(voz)}&velocidade=${encodeURIComponent(vel)}`).play().catch(() => undefined);
-  },
-  "fechar-aviso-modo": () => {
-    const t = estado.tela;
-    const bot = t.tipo === "conversa" ? botGerido(t.agenteId) : undefined;
-    if (!bot) return;
-    const chave = fecharAviso(bot.modoAprovacao ?? "manual");
-    atualizarModoNoComposer();
-    // Falhou a gravação: o aviso segue fechado nesta tela (cache) e o próximo fechar tenta de novo.
-    void api?.fecharAviso(chave).catch(() => undefined);
   },
   "atualizar-gestao": () => dispatch({ tipo: "invalidar", quais: ["gestao"] }),
   "restaurar-agente": (el) => agir(async () => { await mudarGestao(() => api!.restaurarAgente(el.dataset.id ?? "")); }),

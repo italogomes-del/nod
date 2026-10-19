@@ -60,7 +60,7 @@ export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | 
 type Feito = { botId: string; nome: string; events: RuntimeEvent[] };
 
 /** Executa UMA ação já validada sobre o bot alvo (`botId`; null só em criar). Lança ErroDeDominio quando não dá. */
-async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botId: string | null, ctx: { nodId: string; porRegra: PorRegra | null }): Promise<Feito> {
+async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botId: string | null, ctx: { nodId: string; porRegra: PorRegra | null; pelaPessoa: boolean }): Promise<Feito> {
   const exigirAlvo = (): string => {
     if (!botId) throw new ErroDeDominio("nao_encontrado", { cause: "bot alvo" });
     return botId;
@@ -93,7 +93,10 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       return { botId: exigirAlvo(), nome: a.alvoNome, events: r.events ?? [] };
     }
     case "mudar_modo": {
-      const r = await mudarModoAprovacao(deps, { agenteId: exigirAlvo(), modo: a.modo });
+      // Ligar o total pede a confirmação da pessoa (emenda de 2026-10-18 da ADR-059): só o card aprovado por ela
+      // (`pelaPessoa`, que só decidirLoteDeBots liga) a dá; o modo do Nod nunca. `decidirLote` já manda essa ação ao card;
+      // isto é a segunda cerca. Revisão do PR #401: não usa `porRegra === null`, que também é o Nod no manual.
+      const r = await mudarModoAprovacao(deps, { agenteId: exigirAlvo(), modo: a.modo, confirmado: ctx.pelaPessoa });
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
     }
     case "dar_acesso": {
@@ -120,7 +123,7 @@ async function executarEmOrdem(
   deps: Deps,
   acoes: AcaoNoLote[],
   rodar: (a: AcaoNoLote) => boolean,
-  ctx: { nodId: string; porRegraDe: (a: AcaoNoLote) => PorRegra | null },
+  ctx: { nodId: string; porRegraDe: (a: AcaoNoLote) => PorRegra | null; pelaPessoa: boolean },
 ): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   for (const a of acoes) {
@@ -133,7 +136,7 @@ async function executarEmOrdem(
     }
     const botId = origem ? origem.botId : a.botId;
     try {
-      const feito = await emSavepoint(deps, () => executarAcao(deps, origem ? { ...a, alvoNome: origem.alvoNome } : a, botId, { nodId: ctx.nodId, porRegra: ctx.porRegraDe(a) }));
+      const feito = await emSavepoint(deps, () => executarAcao(deps, origem ? { ...a, alvoNome: origem.alvoNome } : a, botId, { nodId: ctx.nodId, porRegra: ctx.porRegraDe(a), pelaPessoa: ctx.pelaPessoa }));
       a.estado = "feita";
       a.erro = null;
       a.botId = feito.botId;
@@ -177,7 +180,7 @@ export async function gerirBots(deps: Deps, input: ContextoFerramenta & { resumo
     return { ...acao, i, estado: "esperando", motivo: espera[i] ?? null, alvoNome, botId: alvoId, alvoDaAcao };
   });
 
-  const events = await executarEmOrdem(deps, acoes, (a) => espera[a.i] === null, { nodId: ctx.agente.id, porRegraDe: (a) => porRegraDoModo(modo, riscos[a.i] ?? null) });
+  const events = await executarEmOrdem(deps, acoes, (a) => espera[a.i] === null, { nodId: ctx.agente.id, porRegraDe: (a) => porRegraDoModo(modo, riscos[a.i] ?? null), pelaPessoa: false });
   const esperando = acoes.filter((a) => a.estado === "esperando").map((a) => a.i);
   const agora = deps.agora();
   let decisaoId: string | null = null;
@@ -221,7 +224,7 @@ export const decidirLoteDeBots: CasoDeUso<{ decisaoId: string; recusar: boolean;
     for (const a of acoes) if (a.estado === "esperando") a.estado = "recusada";
   } else {
     for (const a of acoes) if (a.estado === "esperando" && !marcadas.has(a.i)) a.estado = "recusada";
-    events.push(...(await executarEmOrdem(deps, acoes, (a) => a.estado === "esperando", { nodId: proposta.agenteId, porRegraDe: () => null })));
+    events.push(...(await executarEmOrdem(deps, acoes, (a) => a.estado === "esperando", { nodId: proposta.agenteId, porRegraDe: () => null, pelaPessoa: true })));
   }
   await deps.repos.propostas.atualizarPayload(proposta.id, { ...proposta.payload, acoes });
   await deps.repos.propostas.decidir(proposta.id, input.recusar ? "recusada" : "confirmada");

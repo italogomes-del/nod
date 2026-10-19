@@ -98,6 +98,24 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
     });
   });
 
+  it("emenda de 2026-10-18 da ADR-059: pôr um bot em total é sempre card, até com o Nod em total; aprovar o card liga", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const d = depsSobreTrx(trx, MARLON);
+      const { ctx } = await nodComTurno(d, { modo: "total" });
+      const dev = await bot(d, "Dev 1");
+      const r = await gerirBots(d, { ...ctx, resumo: "Dev 1 sem aprovações e no automático o Otto", acoes: [{ tipo: "mudar_modo", bot: "Dev 1", modo: "total" }, { tipo: "criar", nome: "Otto", descricao: "x." }] });
+      expect(r.data).toMatchObject({ ok: true, esperando: [0] });
+      if (!r.data.ok) return;
+      expect(r.data.feitas.map((f) => f.i)).toEqual([1]);
+      const card = await d.repos.propostas.buscar(r.data.decisao_id ?? "");
+      expect(card?.payload.kind === "lote_bots" && card.payload.acoes[0]).toMatchObject({ estado: "esperando", motivo: "ligar_total" });
+      expect((await d.repos.agentes.buscar(dev.id))?.modoAprovacao).toBe("manual");
+
+      await executar(d, decidirLoteDeBots, { decisaoId: r.data.decisao_id ?? "", recusar: false });
+      expect((await d.repos.agentes.buscar(dev.id))?.modoAprovacao).toBe("total");
+    });
+  });
+
   it("dar_acesso: com o app conectado roda no automático; depois de conteúdo de fora vira card (cerca 3); app não conectado recusa o lote", async () => {
     await withRollback(MARLON, async (trx) => {
       const d = depsSobreTrx(trx, MARLON);

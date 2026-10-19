@@ -199,4 +199,27 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
       trxAtual = null;
     });
   });
+
+  it("emenda de 2026-10-18 da ADR-059: POST modo-aprovacao exige confirmado: true para o total; manual e automático não pedem", async () => {
+    await withRollback(MARLON, async (trx) => {
+      trxAtual = trx;
+      const marlon = await servidor.entrar("marlon");
+      const { agente } = (await (await servidor.chamar(marlon, "POST", "agentes", { dono: "pessoa" })).json()) as { agente: Agente };
+      const modo = (corpo: Record<string, unknown>) => servidor.chamar(marlon, "POST", `agentes/${agente.id}/modo-aprovacao`, corpo);
+      for (const corpo of [{ modo: "total" }, { modo: "total", confirmado: false }, { modo: "total", confirmado: "true" }]) {
+        const r = await modo(corpo);
+        expect(r.status).toBe(400);
+        expect(((await r.json()) as { codigo: string }).codigo).toBe("entrada_invalida");
+      }
+      expect((await criarRepos(trx, MARLON).agentes.buscar(agente.id))?.modoAprovacao).toBe("manual");
+      const auto = await modo({ modo: "automatico" });
+      expect(auto.status).toBe(200);
+      expect(((await auto.json()) as { agente: Agente; mudou: boolean })).toMatchObject({ mudou: true, agente: { modoAprovacao: "automatico" } });
+      const total = await modo({ modo: "total", confirmado: true });
+      expect(total.status).toBe(200);
+      expect(((await total.json()) as { agente: Agente }).agente.modoAprovacao).toBe("total");
+      expect((await modo({ modo: "manual" })).status).toBe(200);
+      trxAtual = null;
+    });
+  });
 });

@@ -22,6 +22,19 @@ export const ROTULO_MODO: Readonly<Record<ModoAprovacao, string>> = {
   total: "Ignorar todas as aprovações",
 };
 
+/**
+ * O que cada modo faz, dito à pessoa: a descrição do menu do botão (web/telas/aprovacoes.ts, que não importa valores
+ * de src e repete as frases — tests/unit/web/aprovacoes.test.ts confere que são iguais) e a linha gravada na troca.
+ * revisto em 2026-10-18 (Fase 4, PR 2): o texto dizia que o automático para depois de ler a web ou um e-mail; desde
+ * a ADR-066 não para. As frases descrevem o que a regra de hoje faz (`decidirPeloModo`, `nativas.ts` nega a leitura
+ * de arquivo de credencial); as do revisor entram com ele.
+ */
+export const DESCRICAO_MODO: Readonly<Record<ModoAprovacao, string>> = {
+  manual: "Pede você antes de tudo que muda algo: commit, push, mensagem, arquivo fora da pasta.",
+  automatico: "Roda sem perguntar o que não for arriscado. Para no arriscado e no que tocar uma credencial do Mac.",
+  total: "Faz tudo sem perguntar. Não abre arquivos de credencial do Mac, e comandos com elas pedem você.",
+};
+
 export function ehModoAprovacao(x: unknown): x is ModoAprovacao {
   return typeof x === "string" && (MODOS_APROVACAO as readonly string[]).includes(x);
 }

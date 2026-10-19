@@ -223,3 +223,37 @@ Medido com `comandoArriscado` e `tocaCredencial` sobre os blocos bash das skills
 **Como medir de novo:** `npx tsx scripts/medir-arriscados.ts` roda `comandoArriscado` e `tocaCredencial` sobre cada
 bloco ```bash dos SKILL.md do Mac, sem chamar modelo. Toda mudança em `ARRISCADOS` ou `CREDENCIAL` deve vir com essa
 contagem.
+
+## Emenda de 2026-10-18: o botão só com ícone, o texto de hoje e a confirmação do total (Fase 4, PR 2)
+
+**Contexto.** Plano dos modos de aprovação (`docs/plano-modos-de-aprovacao.md`, Parte 2 e a revisão de engenharia de
+18/10) e protótipo aprovado pelo Marlon (canvas "Nod — modos de aprovação", telas "o menu com os três modos" e "o botão
+do modo só com ícone"). O texto do automático estava errado em três lugares — o menu, a faixa acima do campo e a linha
+gravada na troca — e um quarto no manual do Nod: diziam que ele para depois de ler a web ou um e-mail, o que deixou de
+ser verdade na ADR-066. E o Nod em "Ignorar todas" punha outro bot nesse modo sem a pessoa.
+
+**Decisão.** Revê o item 6 (Tela). Nenhuma regra de decisão muda.
+1. **Botão só com ícone.** O chip vira uma pílula de 36 × 32 px com o ícone do modo (mão, ⏩, triângulo), sem o nome
+   curto nem a seta. O nome vai no `aria-label` e numa dica que aparece no hover e no foco do teclado ("Aprovar
+   automaticamente · clique para mudar"; quem não é a dona: "… · só a dona do bot muda"). No total, pílula e ícone em
+   âmbar (`--warning-soft`, `--warning-line`, `--warning`). No celular o alvo de toque é 44 × 44 px, com a pílula no meio
+   (o botão ocupa 36 px no campo e o toque passa 4 px para cada lado, para não cortar o "Mensagem" a 390 px), e a dica
+   não aparece (o nome segue no `aria-label`). O painel do bot continua com "Aprovações · Auto".
+2. **Texto de hoje.** Uma fonte só no servidor, `DESCRICAO_MODO` (`src/domain/modo-aprovacao.ts`), usada na linha
+   gravada na troca; a web repete as frases e um teste confere que são iguais. As frases dizem o que a regra faz hoje
+   (o automático para no arriscado e na credencial; o total não abre arquivo de credencial e pede você nos comandos com
+   ela). As frases do protótipo que falam do revisor e do total sem credencial entram com esses comportamentos.
+3. **Ligar o total pede confirmação dentro do menu.** Clicar no terceiro item não troca o modo: abre, ancorado na
+   opção, o aviso "Um texto de fora, como um e-mail ou um PR, pode levar {nome} a agir por conta própria. Use em bots que
+   trabalham só com o que é seu." e os botões "Ignorar aprovações em {nome}" e "Agora não" (o foco vai para este; Esc
+   fecha só o aviso; o segundo clique de um duplo clique, ou o que chega em menos de 500 ms depois de o aviso abrir, não
+   conta, nem no "Ignorar aprovações" nem no "Agora não", porque o menu sobe e um dos dois cai sob o mouse). `POST agentes/:id/modo-aprovacao` exige `confirmado: true` para o total e responde 400
+   (`entrada_invalida`) sem ele; manual e automático não pedem.
+4. **A faixa acima do campo sai.** A pílula âmbar e a confirmação fazem o papel dela, ancoradas no elemento. As chaves
+   `modo:*` de `preferencias.avisos_fechados` (0059) ficam sem uso; a rota de avisos fechados fica para outros avisos.
+5. **`gerir_bots` que põe um bot no total é sempre card**, em qualquer modo do Nod, inclusive no total (motivo
+   `ligar_total` no lote, `riscoDaAcao`/`decidirLote`). Só o card aprovado pela pessoa passa `confirmado: true` ao caso
+   de uso, que é a segunda cerca.
+
+**Gatilho de reversão.** Uma dona que diga ter ligado o total sem perceber (a confirmação não basta): o total passa a
+pedir também a digitação do nome do bot.

@@ -220,8 +220,6 @@ export function criarApi(escopo: Escopo) {
     // ADR-083: a faixa de Trabalhos recolhida também é preferência (só o campo que mudou vai no corpo).
     // ADR-111: `experimentos` leva só a chave que mudou ({ calibracao }, { memoriaLonga } ou, ADR-112, { whatsapp }).
     gravarPreferencias: (p: Partial<Pick<Preferencias, "modoDev" | "usoDoMac">> & { experimentos?: Partial<Experimentos> }) => pedir<Preferencias>("PUT", `${base}/preferencias`, p),
-    // definido em 2026-10-06 (0059): o aviso fechado fica com a pessoa — o app do Mac limpa o localStorage.
-    fecharAviso: (chave: string) => pedir<Preferencias>("POST", `${base}/preferencias/avisos-fechados`, { chave }),
     raioXDaConversa: (id: string, desde: number) => get<RaioXConversa>(`conversas/${encodeURIComponent(id)}/raio-x?desde=${desde}`),
     raioXDoTurno: (id: string) => get<RaioXTurno>(`turnos/${encodeURIComponent(id)}/raio-x`),
     // O "/" do chat (0038): o catálogo do Mac e os comandos da conversa; a nova sessão é do nod.
@@ -243,8 +241,9 @@ export function criarApi(escopo: Escopo) {
     taxasLinhas: () => get<TaxaDeAbertura[]>("telemetria/linhas"),
     criarAgente: (nome?: string, perfil?: { titulo?: string; descricao?: string; interativo?: boolean }) => post<{ agente: Agente; conversa: Conversa }>("agentes", { dono: "pessoa", nome, ...perfil }),
     editarPerfil: (id: string, perfil: { nome?: string; titulo?: string; descricao?: string; modelo?: string; harness?: PreferenciaHarness; esforco?: string; forma?: FormaAgente; cor?: CorAgente }) => patch<{ agente: Agente }>(`agentes/${id}`, perfil),
-    // ADR-059: o chip de aprovações do campo; o servidor escreve a troca na conversa do bot.
-    mudarModoAprovacao: (id: string, modo: ModoAprovacao) => post<{ agente: Agente; mudou: boolean }>(`agentes/${id}/modo-aprovacao`, { modo }),
+    // ADR-059: o botão de aprovações do campo; o servidor escreve a troca na conversa do bot. O total exige `confirmado`
+    // (o segundo clique do menu, emenda de 2026-10-18): sem ele o servidor responde 400.
+    mudarModoAprovacao: (id: string, modo: ModoAprovacao, confirmado = false) => post<{ agente: Agente; mudou: boolean }>(`agentes/${id}/modo-aprovacao`, confirmado ? { modo, confirmado: true } : { modo }),
     fixar: (id: string, fixado?: boolean) => post<{ agente: Agente }>(`agentes/${id}/fixar`, fixado === undefined ? {} : { fixado }),
     ocultar: (id: string, oculto?: boolean) => post<{ agente: Agente }>(`agentes/${id}/ocultar`, oculto === undefined ? {} : { oculto }),
     duplicar: (id: string) => post<{ agente: Agente; conversa: Conversa }>(`agentes/${id}/duplicar`),

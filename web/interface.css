@@ -1049,38 +1049,55 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .nl-acoes .mudo-bt { color: var(--ink-2); }
 .nl-vazio { margin: 28px 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); max-width: 520px; }
 
-/* definido em 2026-09-29 (ADR-059; canvas "Nod — tela do agente", página "Aprovações"): o chip do modo de aprovação
-   ao lado do clipe, o menu dos três modos acima dele e o aviso acima do campo. Manual é neutro; automático, selecionado (revisto em 2026-10-04: sem azul, que é só do que é novo);
-   sem aprovações, âmbar — a cor diz o risco sem precisar abrir o menu. */
+/* definido em 2026-09-29 (ADR-059; canvas "Nod — tela do agente", página "Aprovações"): o botão do modo de aprovação
+   ao lado do clipe e o menu dos três modos acima dele. Manual é neutro; automático, em tinta (revisto em 2026-10-04: sem
+   azul, que é só do que é novo); ignorar todas, âmbar — a cor diz o risco sem precisar abrir o menu.
+   revisto em 2026-10-18 (Fase 4, PR 2; canvas "Nod — modos de aprovação", telas "o botão do modo só com ícone" e "o menu
+   com os três modos"): só o ícone, numa pílula de 36 × 32 px, com o nome na dica (hover e foco do teclado); no total a
+   pílula e o ícone em âmbar; ligar o total abre a confirmação dentro do menu; a faixa acima do campo saiu. */
 .composer .box.com-modo { padding-left: 8px; }
 .composer .box.com-modo textarea { padding-left: 6px; }
-/* Revisto em 2026-10-16 (plano "tela limpa", T6): sem fundo, igual ao seletor de IA ao lado; o fundo só no hover. */
-.modo-chip { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; border: 0; border-radius: 16px; background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; flex: none; cursor: pointer; white-space: nowrap; }
-.modo-chip:hover, .modo-chip:focus-visible, .modo-chip[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
-.modo-chip[data-modo="automatico"] { color: var(--ink); font-weight: 500; }
-.modo-chip[data-modo="total"] { color: var(--warning); font-weight: 500; }
+.modo-chip { position: relative; display: inline-grid; place-items: center; width: 36px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--ink-2); flex: none; cursor: pointer; }
+.modo-chip[hidden] { display: none; }
+.modo-pilula { display: grid; place-items: center; width: 36px; height: 32px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); transition: background .12s, border-color .12s; }
+.modo-chip:hover .modo-pilula { background: var(--surface-selected); color: var(--ink); }
+.modo-chip[aria-expanded="true"] .modo-pilula { border: 1.5px solid var(--ink); background: var(--surface); color: var(--ink); }
+.modo-chip[data-modo="automatico"] { color: var(--ink); }
+.modo-chip[data-modo="total"] { color: var(--warning); }
+.modo-chip[data-modo="total"] .modo-pilula { border-color: var(--warning-line); background: var(--warning-soft); }
+/* QA do PR 401: no hover a pílula âmbar fica como no protótipo (tela "o botão do modo só com ícone": borda suave e a
+   dica); a borda forte é só do menu aberto. */
+.modo-chip[data-modo="total"][aria-expanded="true"] .modo-pilula { border-color: var(--warning); }
 .modo-chip[aria-disabled="true"] { cursor: default; }
-@media (max-width: 560px) { .modo-chip > span { display: none; } .modo-chip { padding: 0 8px; } }
-.composer-aviso:empty { display: none; }
-.aviso-modo { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 8px; padding: 9px 12px; border: 1px solid var(--line); background: var(--surface-raised); border-radius: 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
-.aviso-modo b { font-weight: 600; }
-.aviso-modo-ic { display: inline-flex; flex: none; margin-top: 2px; color: var(--ink-2); }
-.aviso-modo-txt { flex: 1; min-width: 0; }
-.aviso-modo-fechar { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--ink-3); cursor: pointer; }
-.aviso-modo-fechar:hover, .aviso-modo-fechar:focus-visible { background: var(--surface-selected); color: var(--ink); }
-.aviso-modo.aviso-total { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
-.aviso-total .aviso-modo-ic, .aviso-total .aviso-modo-fechar { color: var(--warning); }
-.bot-menu.modo-menu { width: min(540px, calc(100vw - 24px)); }
-.bot-menu.modo-menu button.modo-item { align-items: flex-start; gap: 12px; padding: 10px 12px; }
+.modo-chip[aria-disabled="true"]:hover .modo-pilula { background: var(--surface-raised); }
+.modo-chip[data-modo="total"][aria-disabled="true"]:hover .modo-pilula { background: var(--warning-soft); }
+/* A dica: o `title` nativo não aparece no foco do teclado, então ela é um elemento, acima do botão (o campo fica no pé
+   da tela). Some com o menu aberto. */
+.modo-dica { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 5; padding: 4px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font-size: 12px; font-weight: 400; line-height: 1.4; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s; }
+.modo-chip:hover .modo-dica, .modo-chip:focus-visible .modo-dica { opacity: 1; transition-delay: .3s; }
+.modo-chip:focus-visible .modo-dica { transition-delay: 0s; }
+.modo-chip[aria-expanded="true"] .modo-dica { opacity: 0; }
+.bot-menu.modo-menu { width: min(540px, calc(100vw - 24px)); padding: 14px 8px 8px; }
+.bot-menu.modo-menu .menu-nome { margin: 0 12px 6px; font-size: 13px; }
+.bot-menu.modo-menu button.modo-item { align-items: flex-start; gap: 14px; padding: 10px 12px; }
 .bot-menu.modo-menu button > span { width: auto; font-size: inherit; }
 .modo-item .modo-ic { display: inline-flex; margin-top: 1px; color: var(--ink-2); }
 .modo-item .modo-txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.modo-item .modo-txt b { font-weight: 400; font-size: 14px; color: var(--ink); }
-.modo-item .modo-txt small { font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
+.modo-item .modo-txt b { font-weight: 400; font-size: 15px; color: var(--ink); }
+.modo-item .modo-txt small { font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 .modo-item .modo-check { display: inline-flex; margin-top: 2px; color: var(--ink); }
 .modo-item.modo-automatico .modo-ic { color: var(--ink); }
 .modo-item.modo-total .modo-ic, .modo-item.modo-total .modo-txt b, .modo-item.modo-total .modo-txt small { color: var(--warning); }
-.modo-menu .modo-rodape { margin: 4px 0 0; padding: 8px 12px 4px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
+/* A confirmação do total, ancorada na opção (borda âmbar suave, sem faixa): o texto em tinta e os dois botões. */
+.modo-confirma { display: flex; flex-direction: column; gap: 8px; margin: 0 12px 4px 46px; padding: 10px 12px; border: 1px solid var(--warning-line); border-radius: 10px; }
+.modo-confirma-txt { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink); }
+.modo-confirma-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.bot-menu.modo-menu .modo-confirma-acoes button { width: auto; min-height: 32px; padding: 7px 14px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--ink); font-size: 13px; line-height: 1.45; }
+.bot-menu.modo-menu .modo-confirma-acoes button:hover, .bot-menu.modo-menu .modo-confirma-acoes button:focus-visible { background: var(--surface-raised); }
+.bot-menu.modo-menu .modo-confirma-acoes button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.bot-menu.modo-menu .modo-confirma-acoes .modo-confirma-sim { border-color: var(--action); background: var(--action); color: var(--on-action); }
+.bot-menu.modo-menu .modo-confirma-acoes .modo-confirma-sim:hover, .bot-menu.modo-menu .modo-confirma-acoes .modo-confirma-sim:focus-visible { background: var(--action); opacity: .88; }
+.modo-menu .modo-rodape { margin: 4px 4px 0; padding: 10px 8px 4px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 /* O porquê de um card que parou mesmo com o modo automático (motivo_manual, 0040). */
 .ap-porque { display: flex; align-items: flex-start; gap: 7px; margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--warning); }
 .ap-porque svg { flex: none; margin-top: 1px; }

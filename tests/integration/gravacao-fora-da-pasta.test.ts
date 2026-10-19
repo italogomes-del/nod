@@ -22,7 +22,7 @@ const ARQUIVO = "/Users/m/code/acme/main-repos/acme/apps/web/filtros.tsx";
 async function cenario(trx: Trx, modo: ModoAprovacao, origem: "conversa" | "delegacao" = "conversa") {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
-  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo });
+  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo, confirmado: true });
   const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem, prazoEm: Date.now() + 600_000, profundidade: origem === "delegacao" ? 1 : 0, entradaTexto: "corrige o filtro", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano: PlanoTurno = {

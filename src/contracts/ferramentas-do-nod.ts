@@ -51,7 +51,7 @@ export const FERRAMENTAS_DO_NOD = {
             entregavel: { type: "string", description: "criar_rotina (opcional): o que sai ao final; padrão, uma mensagem curta na conversa do bot.", minLength: 1 },
             app: { type: "string", description: "dar_acesso: o slug do app já conectado (veja ver_apps_conectados).", minLength: 1 },
             nivel: { type: "string", enum: ["leitura", "escrita"], description: "dar_acesso." },
-            modo: { type: "string", enum: ["manual", "automatico", "total"], description: "mudar_modo." },
+            modo: { type: "string", enum: ["manual", "automatico", "total"], description: "mudar_modo. \"total\" (Ignorar todas as aprovações) sempre espera a pessoa num card." },
           },
           required: ["tipo"],
           additionalProperties: false,

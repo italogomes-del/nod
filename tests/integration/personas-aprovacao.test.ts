@@ -114,7 +114,7 @@ async function montar(trx: Tx, persona: Persona, opcoes: { semprePermitir?: stri
   // O "Sempre permitir" nasce de um card de verdade, clicado quando o bot ainda estava no manual (no automático e
   // no total não há card onde clicar); depois a dona escolhe o modo da persona.
   if (opcoes.semprePermitir?.length) await clicarSemprePermitir(m, opcoes.semprePermitir);
-  for (const a of [bot, colega]) await mudarModoAprovacao(deps, { agenteId: a.agenteId, modo: persona.modo });
+  for (const a of [bot, colega]) await mudarModoAprovacao(deps, { agenteId: a.agenteId, modo: persona.modo, confirmado: true });
   expect((await repos.agentes.buscar(bot.agenteId))?.modoAprovacao).toBe(persona.modo);
   return m;
 }

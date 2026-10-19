@@ -1,73 +1,82 @@
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
-import { chaveAvisoModo, renderMenuModo } from "../telas/aprovacoes.ts";
+import { reagirMenuModo, renderConfirmaTotal, renderMenuModo, type EventoMenuModo } from "../telas/aprovacoes.ts";
 import { dialogo } from "../telas/gestao-agentes.ts";
 
 /**
- * A metade com DOM do chip de aprovações (ADR-059): o menu que abre acima do chip e os avisos fechados. Mora fora
- * de telas/aprovacoes.ts para os testes da web (Node, sem DOM) importarem o render sem puxar `document`.
+ * A metade com DOM do botão de aprovações (ADR-059): o menu que abre acima do botão e a confirmação do total dentro
+ * dele. Mora fora de telas/aprovacoes.ts para os testes da web (Node, sem DOM) importarem o render e a regra
+ * (`reagirMenuModo`) sem puxar `document`.
  */
-export function abrirMenuModo(ancora: HTMLElement, nome: string, atual: ModoAprovacao, escolher: (modo: ModoAprovacao) => void): void {
+export function abrirMenuModo(ancora: HTMLElement, nome: string, atual: ModoAprovacao, escolher: (modo: ModoAprovacao, confirmado: boolean) => void): void {
   const d = dialogo(renderMenuModo(nome, atual), true);
   d.classList.add("modo-menu");
   ancora.setAttribute("aria-expanded", "true");
   d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
-  // O campo fica no pé da tela: o menu abre ACIMA do chip, alinhado à esquerda dele.
+  // O campo fica no pé da tela: o menu abre ACIMA do botão, alinhado à esquerda dele. A confirmação cresce o menu
+  // para baixo; `posicionar` o devolve para cima do botão.
   const r = ancora.getBoundingClientRect();
-  d.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12))}px`;
-  d.style.top = `${Math.max(12, r.top - d.offsetHeight - 8)}px`;
+  const posicionar = () => {
+    d.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12))}px`;
+    d.style.top = `${Math.max(12, r.top - d.offsetHeight - 8)}px`;
+  };
+  posicionar();
   d.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+
+  const itemTotal = () => d.querySelector<HTMLButtonElement>('[data-modo="total"]');
+  const confirmacao = () => d.querySelector<HTMLElement>(".modo-confirma");
+  // Quando a confirmação abriu: o clique que chega logo depois (o segundo de um duplo clique) não conta (reagirMenuModo).
+  let abriuEm = 0;
+  const reagir = (ev: EventoMenuModo) => {
+    const r = reagirMenuModo(atual, confirmacao() !== null, ev);
+    if (r.tipo === "ignorar") return;
+    if (r.tipo === "fechar") d.close();
+    else if (r.tipo === "escolher") { d.close(); escolher(r.modo, r.confirmado); }
+    else if (r.tipo === "abrir-confirmacao") {
+      itemTotal()?.insertAdjacentHTML("afterend", renderConfirmaTotal(nome));
+      abriuEm = performance.now();
+      itemTotal()?.setAttribute("aria-expanded", "true");
+      posicionar();
+      // O foco vai para "Agora não": Enter sem querer não liga o modo.
+      d.querySelector<HTMLButtonElement>('[data-confirma="nao"]')?.focus();
+    } else {
+      confirmacao()?.remove();
+      itemTotal()?.removeAttribute("aria-expanded");
+      posicionar();
+      itemTotal()?.focus();
+    }
+  };
+
   d.addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-modo]");
-    if (!btn) return;
-    const modo = btn.dataset.modo as ModoAprovacao;
-    d.close();
-    if (modo !== atual) escolher(modo);
+    const alvo = e.target as HTMLElement;
+    const clique = { cliques: e.detail, msDesdeAConfirmacao: performance.now() - abriuEm };
+    const confirma = alvo.closest<HTMLButtonElement>("[data-confirma]");
+    if (confirma) { reagir({ tipo: confirma.dataset.confirma === "sim" ? "confirmar" : "agora-nao", ...clique }); return; }
+    const btn = alvo.closest<HTMLButtonElement>("[data-modo]");
+    if (btn) reagir({ tipo: "item", modo: btn.dataset.modo as ModoAprovacao, ...clique });
+  });
+  // Esc com a confirmação aberta fecha só ela. O keydown cancelado não chega a fechar o <dialog>; o `cancel` cobre o
+  // navegador que fecha mesmo assim. `escDaConfirmacao` impede o mesmo Esc de fechar a confirmação e depois o menu (o
+  // `cancel` é a ação padrão do keydown e sai na mesma tarefa; o setTimeout zera a marca logo depois).
+  let escDaConfirmacao = false;
+  d.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !confirmacao()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    escDaConfirmacao = true;
+    setTimeout(() => { escDaConfirmacao = false; });
+    reagir({ tipo: "esc" });
+  });
+  d.addEventListener("cancel", (e) => {
+    if (escDaConfirmacao) { e.preventDefault(); return; }
+    if (confirmacao()) { e.preventDefault(); reagir({ tipo: "esc" }); }
   });
   d.addEventListener("keydown", (e) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
-    e.preventDefault();
-    const itens = [...d.querySelectorAll<HTMLButtonElement>("[data-modo]")];
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("[data-modo], [data-confirma]")];
     const i = itens.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
     const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
     itens[proximo]?.focus();
   });
-}
-
-/**
- * Avisos de modo fechados (revisto em 2026-10-06, pedido do Marlon): por modo, não por bot, e guardados no servidor
- * (0059) — o app do Mac limpa o localStorage a cada conexão, e o aviso voltava a cada abertura, em cada bot, a cada
- * troca de modo. O localStorage fica só de cache, para o aviso não piscar antes de as preferências chegarem.
- */
-const CHAVE_AVISOS = "nod.avisosFechados";
-const fechados = new Set<string>(lerFechados());
-
-function lerFechados(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(CHAVE_AVISOS) ?? "[]") as unknown;
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(-50) : [];
-  } catch {
-    return [];
-  }
-}
-
-function gravarFechados(): void {
-  try { localStorage.setItem(CHAVE_AVISOS, JSON.stringify([...fechados].slice(-50))); } catch { /* o servidor guarda de qualquer jeito */ }
-}
-
-/** As chaves que o servidor devolveu em GET preferencias somam às do cache. */
-export function hidratarAvisosFechados(chaves: readonly string[]): void {
-  for (const c of chaves) fechados.add(c);
-  gravarFechados();
-}
-
-export function avisoFechado(modo: ModoAprovacao): boolean {
-  return fechados.has(chaveAvisoModo(modo));
-}
-
-/** Marca fechado aqui e devolve a chave, que quem chama grava no servidor. */
-export function fecharAviso(modo: ModoAprovacao): string {
-  const chave = chaveAvisoModo(modo);
-  fechados.add(chave);
-  gravarFechados();
-  return chave;
 }

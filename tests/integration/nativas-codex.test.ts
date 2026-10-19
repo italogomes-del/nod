@@ -22,7 +22,7 @@ const PEDIDO_MCP = 'linear: create_issue {"title":"Bug no filtro"}';
 async function cenario(trx: Trx, modo: ModoAprovacao, nativas: readonly string[] = [...NATIVAS_DO_TERMINAL_CODEX, NATIVA_MCP_DA_PESSOA]) {
   const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Dev 2" });
   const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({}), trx });
-  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo });
+  if (modo !== "manual") await mudarModoAprovacao(deps, { agenteId, modo, confirmado: true });
   const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "abre a issue", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano: PlanoTurno = {

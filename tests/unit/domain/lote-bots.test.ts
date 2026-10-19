@@ -91,6 +91,9 @@ describe("risco e modo (ADR-082)", () => {
     const sujo = { contaminado: true, alvoTemAcessos: true };
     expect(riscoDaAcao({ tipo: "excluir" }, limpo)).toBe("arriscada");
     expect(riscoDaAcao({ tipo: "mudar_modo" }, limpo)).toBe("arriscada");
+    expect(riscoDaAcao({ tipo: "mudar_modo", modo: "automatico" }, limpo)).toBe("arriscada");
+    expect(riscoDaAcao({ tipo: "mudar_modo", modo: "total" }, limpo)).toBe("ligar_total");
+    expect(riscoDaAcao({ tipo: "mudar_modo", modo: "total" }, sujo)).toBe("ligar_total");
     expect(riscoDaAcao({ tipo: "dar_acesso" }, limpo)).toBeNull();
     expect(riscoDaAcao({ tipo: "dar_acesso" }, sujo)).toBe("conteudo_de_fora");
     expect(riscoDaAcao({ tipo: "duplicar" }, sujo)).toBe("conteudo_de_fora");
@@ -113,6 +116,20 @@ describe("risco e modo (ADR-082)", () => {
     // O criar espera (conteúdo de fora não pesa no criar, mas um card manual sim) → o acesso ao bot que ele cria espera junto.
     expect(decidirLote(r.acoes, "automatico", ["arriscada", null, null])).toEqual(["arriscada", null, "arriscada"]);
   });
+
+  it("2026-10-18: ligar o total espera a pessoa em todo modo do Nod, inclusive no total; quem depende dele espera junto", () => {
+    const r = valida([{ tipo: "mudar_modo", bot: "Dev 2", modo: "total" }, { tipo: "mudar_modo", bot: "Dev 2", modo: "automatico" }]);
+    if (!r.ok) throw new Error("lote inválido");
+    const limpo = { contaminado: false, alvoTemAcessos: false };
+    const riscos = r.acoes.map((a) => riscoDaAcao(a, limpo));
+    expect(riscos).toEqual(["ligar_total", "arriscada"]);
+    expect(decidirLote(r.acoes, "manual", riscos)).toEqual(["ligar_total", "arriscada"]);
+    expect(decidirLote(r.acoes, "automatico", riscos)).toEqual(["ligar_total", "arriscada"]);
+    expect(decidirLote(r.acoes, "total", riscos)).toEqual(["ligar_total", null]);
+    const ref = valida([{ tipo: "criar", nome: "Novo", descricao: "x", ref: "n" }, { tipo: "mudar_modo", bot: "@n", modo: "total" }]);
+    if (!ref.ok) throw new Error("lote inválido");
+    expect(decidirLote(ref.acoes, "total", ref.acoes.map((a) => riscoDaAcao(a, limpo)))).toEqual([null, "ligar_total"]);
+  });
 });
 
 describe("catálogo e prompt do Nod (ADR-081/082)", () => {
@@ -133,6 +150,20 @@ describe("catálogo e prompt do Nod (ADR-081/082)", () => {
     for (const f of FERRAMENTAS_DO_NOD) expect(comum).not.toContain(f);
     // NOD_GERIR_BOTS=0: o interruptor tira as três.
     for (const f of FERRAMENTAS_DO_NOD) expect(nomes({ ...base, semFerramentasDoNod: true })).not.toContain(f);
+  });
+
+  it("revisão do PR #401: o manual diz ao Nod todo tipo que vira card depois de conteúdo de fora (riscoDaAcao, cerca 3)", () => {
+    const linha = MANUAL_DO_NOD.split("\n").find((l) => l.includes("O seu modo de aprovação decide")) ?? "";
+    const sujo = { contaminado: true, alvoTemAcessos: true };
+    const limpo = { contaminado: false, alvoTemAcessos: false };
+    const termo: Record<string, string> = { dar_acesso: "dar acesso", criar_rotina: "criar rotina", duplicar: "duplicar um bot que tem acessos", editar: "mudar a descrição ou o título" };
+    for (const a of [{ tipo: "dar_acesso" }, { tipo: "criar_rotina" }, { tipo: "duplicar" }, { tipo: "editar", descricao: "x" }] as const) {
+      expect(riscoDaAcao(a, sujo)).toBe("conteudo_de_fora");
+      expect(riscoDaAcao(a, limpo)).toBeNull();
+      expect(linha).toContain(termo[a.tipo]);
+    }
+    expect(linha).toContain("excluir e mudar o modo de um bot viram card sempre");
+    expect(linha).toContain("Pôr um bot em Sem aprovações é sempre card, em qualquer modo seu.");
   });
 
   it("o manual do Nod vai na parte estável só do Nod, e cabe no teto", () => {
