@@ -1,18 +1,8 @@
 {
   "name": "nod — Meus agentes",
-  "install": "npm install && bash scripts/cloud/install-gstack.sh",
-  "terminals": [
-    {
-      "name": "nod-dev",
-      "command": "cd /workspace && npm run dev",
-      "description": "API em :8888 e UI Vite em :5274 (5173 e 5432 são de OUTROS projetos)."
-    },
-    {
-      "name": "static-server",
-      "command": "cd /workspace && python3 -m http.server 8000 --bind 0.0.0.0",
-      "description": "Docs e protótipos HTML em :8000."
-    }
-  ],
+  "user": "ubuntu",
+  "install": "bash scripts/cloud/install.sh",
+  "start": "bash scripts/cloud/start.sh",
   "ports": [
     {
       "name": "meus agentes",
