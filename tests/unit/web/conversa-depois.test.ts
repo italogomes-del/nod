@@ -53,21 +53,34 @@ describe("1. o balão de quem escreve", () => {
 });
 
 describe("2. a parte ao vivo é a Ada falando", () => {
-  it("cartão de atividade com mascote, nome, hora e 'ao vivo' num bloco À PARTE do corpo", () => {
+  it("chat limpo (PR 7): o cartão ao vivo vira uma linha, 'Ada está trabalhando · ver etapas'; o cabeçalho 'ao vivo' sai", () => {
     const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
     const atividade = comFerramenta(comTexto(ATIVIDADE_VAZIA, "Lendo o PR https://github.com/acme/loja/pull/481."), "Consultou GitHub");
     const e: Estado = { ...base, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: "catcher", machineId: null, desde: AGORA - 60_000 } }, atividades: { [C]: { t1: { ...atividade, atual: "Abrindo https://github.com/acme/loja/pull/481 agora" } } } };
     const blocos = blocosAoVivo(c, e);
-    expect(blocos.map((b) => b.chave)).toEqual(["vivo-cab:t1", "vivo:t1"]);
-    expect(blocos[0]!.html).toContain("<b>Ada</b>");
-    expect(blocos[0]!.html).toContain("ao vivo");
-    expect(blocos[0]!.html).toContain('data-estado="trabalhando"');
-    expect(blocos[1]!.html).toContain("atividade-cartao");
-    // A linha "agora" mostra o link como chip.
-    expect(blocos[1]!.html).toMatch(/<p class="atividade-agora">Abrindo <a [^>]*href="https:\/\/github\.com\/acme\/loja\/pull\/481"/);
-    // O relógio do corpo anda; o cabeçalho não muda com ele.
-    const depois = blocosAoVivo(c, { ...e, agora: AGORA + 120_000 });
-    expect(depois[0]!.html).toBe(blocos[0]!.html);
+    expect(blocos.map((b) => b.chave)).toEqual(["vivo:t1"]);
+    const html = blocos[0]!.html;
+    expect(html).not.toContain("ao vivo");
+    expect(html).not.toContain("vivo-cab");
+    expect(html).not.toContain("atividade-cartao");
+    // A linha: o ponto que pulsa, "Ada está trabalhando" e "ver etapas", que abre o que o cartão mostrava.
+    expect(html).toMatch(/<details class="atividade-linha" data-disclosure="atividade-t1"><summary><span class="atividade-pulso" aria-hidden="true"><\/span><span class="atividade-quem">Ada está trabalhando<\/span><span class="atividade-ver">ver etapas<\/span>/);
+    // Recolhido, dentro do <details>: a linha "agora" (com o link como chip) e as etapas.
+    const recolhido = html.slice(html.indexOf("</summary>"), html.indexOf("</details>"));
+    expect(recolhido).toMatch(/<p class="atividade-agora">Abrindo <a [^>]*href="https:\/\/github\.com\/acme\/loja\/pull\/481"/);
+    expect(recolhido).toContain("1 etapa · 1 ferramenta");
+    // Sem relógio na linha: o corpo não muda quando o tempo anda.
+    expect(blocosAoVivo(c, { ...e, agora: AGORA + 120_000 })[0]!.html).toBe(html);
+  });
+
+  it("chat limpo (PR 7): o balão em streaming fica, sem o cabeçalho com mascote, nome e 'ao vivo'", () => {
+    const { e: base, c } = cenario([msg("m1", "pessoa", 1)]);
+    const e: Estado = { ...base, turnosVivos: { t1: { turnoId: "t1", conversaId: C, estado: "rodando", executor: null, machineId: null, desde: AGORA } }, atividades: { [C]: { t1: comTexto(ATIVIDADE_VAZIA, "Olhando") } } };
+    const blocos = blocosAoVivo(c, e);
+    expect(blocos.map((b) => b.chave)).toEqual(["vivo:t1"]);
+    expect(blocos[0]!.html).toContain('class="message bot streaming ao-vivo"');
+    expect(blocos[0]!.html).not.toContain("ao vivo<");
+    expect(blocos[0]!.html).not.toContain("<nod-mascote");
   });
 
   it("10. o streaming já sai formatado: negrito, lista e tabela enquanto o texto chega", () => {

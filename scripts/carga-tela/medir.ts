@@ -5,12 +5,20 @@ import { join } from "node:path";
 import { abrirChrome, avaliar, type Cdp } from "./cdp.ts";
 import { api, botsDeCarga, CONFIG, entrar, escrever, promptStreaming, respostaRica, urlWeb, type Bot, type Sessao } from "./comum.ts";
 
-export const CENARIOS = ["ocioso", "varios-bots", "turno-pesado", "tudo-junto"] as const;
+export const CENARIOS = ["ocioso", "varios-bots", "turno-pesado", "tudo-junto", "frentes"] as const;
 export type Cenario = (typeof CENARIOS)[number];
 
 /** Bots escrevendo ao mesmo tempo fora da tela, e quantos pedaços de texto cada um manda. */
 const ATIVOS = Number(process.env.CARGA_BOTS_ATIVOS ?? 8);
 const DELTAS = Number(process.env.CARGA_DELTAS ?? 160);
+/**
+ * Chat limpo, PR 7 (QA, 2026-10-18): o lote de frentes da conversa aberta, cada uma narrando e chamando ferramenta, para
+ * medir o progresso na fala (web/telas/progresso-na-fala.ts) — quantas vezes a fala inteira é regravada (cada vez perde a
+ * seleção de texto nela), quantas só o bloco é trocado no lugar e, com a web instrumentada (medidas `nod:regravar:*` e
+ * `nod:progresso`), quanto custa cada uma.
+ */
+const FRENTES = Number(process.env.CARGA_FRENTES ?? 5);
+const CICLOS_DA_FRENTE = Number(process.env.CARGA_CICLOS_FRENTE ?? 12);
 /** O turno pesado, na conversa aberta. */
 const DELTAS_PESADO = Number(process.env.CARGA_DELTAS_PESADO ?? 600);
 const TETO_MS = 150_000;
@@ -26,7 +34,9 @@ const TETO_TELA_MS = Number(process.env.CARGA_TETO_TELA_S ?? 300) * 1000;
 // Instalado antes do app: conta os frames do SSE por tipo e mede tarefas longas, quadros e o atraso do laço.
 const INSTRUMENTO = `(() => {
   const c = window.__carga = {};
-  c.reset = () => { c.frames = {}; c.framesTotal = 0; c.longtasks = []; c.rafGaps = []; c.lags = []; c.t0 = performance.now(); };
+  c.reset = () => { c.frames = {}; c.framesTotal = 0; c.longtasks = []; c.rafGaps = []; c.lags = []; c.falaRegravada = 0; c.blocoTrocado = 0; c.t0 = performance.now(); try { performance.clearMeasures(); } catch {} };
+  // O progresso das frentes (chat limpo, PR 7): a fala que sai inteira com o bloco dentro, ou só o bloco trocado no lugar.
+  if (typeof MutationObserver === "function") new MutationObserver((ms) => { for (const m of ms) for (const n of m.removedNodes) { if (n.nodeType !== 1) continue; if (n.matches(".progresso")) c.blocoTrocado++; else if (n.querySelector(".progresso")) c.falaRegravada++; } }).observe(document, { childList: true, subtree: true });
   c.reset();
   const add = EventSource.prototype.addEventListener;
   EventSource.prototype.addEventListener = function (tipo, fn, opts) {
@@ -42,7 +52,10 @@ const INSTRUMENTO = `(() => {
   setInterval(() => { const agora = performance.now(); c.lags.push(Math.max(0, agora - esperado)); esperado = agora + 20; }, 20);
 })();`;
 
-type Coleta = { frames: Record<string, number>; framesTotal: number; longtasks: { inicio: number; dur: number }[]; rafGaps: number[]; lags: number[]; t0: number };
+type Coleta = { frames: Record<string, number>; framesTotal: number; longtasks: { inicio: number; dur: number }[]; rafGaps: number[]; lags: number[]; falaRegravada: number; blocoTrocado: number; t0: number };
+
+/** O que a web instrumentada mediu (performance.measure "nod:regravar:<historico|ao-vivo>", "nod:progresso"). */
+const REGRAVACOES = `(() => { const r = {}; for (const e of performance.getEntriesByType('measure')) { if (!e.name.startsWith('nod:')) continue; const k = e.name.slice(4); const x = r[k] ??= { n: 0, totalMs: 0, maxMs: 0 }; x.n++; x.totalMs += e.duration; x.maxMs = Math.max(x.maxMs, e.duration); } return r; })()`;
 type NoPerfil = { id: number; callFrame: { functionName: string; url: string; lineNumber: number }; children?: number[] };
 type Perfil = { nodes: NoPerfil[]; samples: number[]; timeDeltas: number[] };
 
@@ -114,6 +127,13 @@ async function disparar(s: Sessao, cenario: Cenario, pesada: Bot, ativos: Bot[])
   if (cenario === "turno-pesado" || cenario === "tudo-junto") {
     conversas.push(pesada.conversaId);
     envios.push(api(s, "POST", `conversas/${pesada.conversaId}/mensagens`, { texto: promptStreaming(DELTAS_PESADO, respostaRica(999), "Turno pesado") }));
+  }
+  if (cenario === "frentes") {
+    // Cada frente narra e chama uma ferramenta por ciclo (a narração recomeça a cada ferramenta, como no Claude).
+    const pedido = (i: number): string => Array.from({ length: CICLOS_DA_FRENTE }, (_, k) => `[[delta: Lendo a parte ${k + 1} ]] [[delta: do relatório ${i}. ]] [[tool: ver_colegas {}]] [[espera: 1500]]`).join(" ") + " [[texto: Pronto.]]";
+    const frentes = Array.from({ length: FRENTES }, (_, i) => ({ titulo: `Relatório ${i + 1}`, pedido: pedido(i + 1) }));
+    conversas.push(pesada.conversaId);
+    envios.push(api(s, "POST", `conversas/${pesada.conversaId}/mensagens`, { texto: `Frentes de carga [[tool: abrir_frentes ${JSON.stringify({ frentes })}]] [[texto: Abri ${FRENTES} frentes, uma por relatório.]]` }));
   }
   await Promise.all(envios);
   return conversas;
@@ -208,9 +228,11 @@ export async function medir(rotulo: string, cenarios: readonly Cenario[] = CENAR
         chrome: { tarefaS: r1(delta("TaskDuration")), scriptS: r1(delta("ScriptDuration")), layoutS: r1(delta("LayoutDuration")), estiloS: r1(delta("RecalcStyleDuration")), layouts: delta("LayoutCount"), estilos: delta("RecalcStyleCount"), nos: depois.Nodes, heapMB: r1((depois.JSHeapUsedSize ?? 0) / 1e6) },
         perfil: agregarPerfil(profile),
         dom,
+        ...(cenario === "frentes" ? { frentes: { falaRegravada: c.falaRegravada, porMinuto: r1(c.falaRegravada / (janelaS / 60)), blocoTrocado: c.blocoTrocado, regravacoes: await avaliar<Record<string, { n: number; totalMs: number; maxMs: number }>>(cdp, REGRAVACOES) } } : {}),
       };
       writeFileSync(join(CONFIG.saida, `${rotulo}-${cenario}.json`), JSON.stringify(resumo, null, 2));
       escrever(`[${rotulo}] ${cenario}: turnos ${resumo.duracaoS} s, tela livre em ${telaLivreS} s, ${resumo.frames} frames, maior tarefa ${resumo.tarefasLongas.maxMs} ms, TBT ${resumo.tarefasLongas.tbtMs} ms, tecla p50/p95/max ${resumo.digitacao.p50}/${resumo.digitacao.p95}/${resumo.digitacao.max} ms`);
+      if (resumo.frentes) escrever(`  frentes: fala regravada ${resumo.frentes.falaRegravada}× (${resumo.frentes.porMinuto}/min; cada uma perde a seleção de texto nela), só o bloco trocado ${resumo.frentes.blocoTrocado}×, regravações ${JSON.stringify(resumo.frentes.regravacoes)}`);
       escrever(`  mais caro (próprio): ${resumo.perfil.proprio.slice(0, 8).map((x) => `${x.ms}ms ${x.fn}`).join(" | ")}`);
       await new Promise((r) => setTimeout(r, 2000));
     }

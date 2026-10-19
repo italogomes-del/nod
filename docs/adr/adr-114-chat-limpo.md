@@ -2,7 +2,7 @@
 
 Status: proposto; parte do servidor no PR 1 do [plano do chat limpo](../plano-chat-limpo.md) (PR #390), a tela, a janela
 e os gatilhos no PR 2 (ver **Emenda do PR 2**), a troca agrupada no PR 3 (ver **Emenda do PR 3**), o cartão encolhido no
-PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
+PR 4 (ver **Emenda do PR 4**), as etiquetas e os divisores de data no PR 6 (ver **Emenda do PR 6**), o progresso na fala no PR 7 (ver **Emenda do PR 7**) · Data: 2026-10-18 · Migração 0091. A regra da tela, a janela que conta só o chat e os gatilhos de reversão entram no PR 2, junto da primeira
 mudança visível, com as emendas das ADR-029, ADR-041, ADR-083 e ADR-110. Era a ADR-113 com a migração 0090; renumerada
 em 2026-10-18 porque o PR B da Fase 2 (#392, reações e citação) entra antes com a ADR-113 e a `0090_reacoes.sql`.
 
@@ -245,6 +245,76 @@ critério do plano ("a parcela de falas com bloco colado cai à metade da semana
 **Gatilho de reversão.** 3 relatos em 14 dias (ADR-041) de "não sei onde o bot rodou" fora do modo dev: a etiqueta volta
 ao balão só quando a fala rodou numa máquina diferente da de costume do bot (`maquinaPadraoId`). Relatos de conversa
 "picada" pelos divisores: a pausa sobe para 60 min, mudando só a constante.
+
+## Emenda do PR 7 (2026-10-18) — o progresso mora na fala; o cartão ao vivo vira linha
+
+Plano, Parte 4 · 4b; protótipo "4 · Progresso na fala + pílula que se alarga", no estado com a fala à vista. A pílula que
+se alarga (4c) é o PR 8; até lá a linha do dono acima do campo continua dizendo as frentes.
+
+**O progresso na fala** (`web/telas/progresso-na-fala.ts`). A fala do bot do turno que gravou `frentes_abertas` (a última
+do turno à vista, a mesma que `linhaDepoisDaFala` acha) leva, dentro do balão e depois do texto, um cartão com a barra (um
+segmento por frente: pronta, rodando, precisa de você, esperando, parada, falhou, sem notícia) e "3 de 5 prontas · Hero
+w3 e Hero w5 rodando · ver as 5", que abre a lista no lugar (`<details data-disclosure>`, que sobrevive ao re-render):
+prontas com ✓ e a hora, as que andam com o último passo e o tempo, parada com ■, falhou com !. Cada título abre a frente.
+Regras:
+
+1. O estado vem de `trabalhosConhecidos`; a frente que saiu da lista, de `frentes_terminadas` (anexo, na janela), que
+   também vence a lista quando ela ainda diz "aberta". Sem nenhum dos dois, "sem notícia" — nunca "pronta". O último passo
+   é o da linha do dono (`passoDaFrente`, `web/lib/trabalhos.ts`: a narração do turno vivo da frente, senão `situacaoDe`).
+2. A frente da rede, sem fala antes (as falas do turno promovido são da frente), entra embaixo do balão da pessoa que virou
+   a frente: a mensagem dela leva o `trabalhoId` da rede, e a abertura é o `trabalho_aberto` de origem `rede`.
+3. Sem a abertura na janela, ou sem a fala à vista (a rotina que abriu frentes, cujo "comecei…" segue escondido; o pedido de
+   um colega, dentro da troca; o lote aberto dentro de uma task), não há bloco. Só na conversa limpa: na sala e no servidor
+   sem `destino` continua a linha "Começou N frentes".
+4. Uma frente só (o `abrir_task` de sempre) é uma linha: o ponto, o título e o passo (ou "pronta às 01:09"), sem barra nem
+   "ver as".
+5. Ordem dentro da fala: balão (com o progresso) → reações (decisão 20). No balão da pessoa (rede), o cartão vem embaixo
+   dele, alinhado à direita.
+6. Até dois títulos, somando até 40 caracteres, vão por nome no resumo ("Hero w3 e Hero w5 rodando"); mais que isso, a
+   contagem ("2 rodando"). O protótipo abrevia para "w3 e w5", o que a tela não sabe fazer com um título qualquer.
+
+**Desempenho (ADR-061).** O histórico é lembrado pelo que lê do estado (`web/lib/lembrar.ts`); se o bloco lesse o ao vivo e
+o relógio ali, o histórico seria refeito a cada pedaço de texto de qualquer frente. Ele deixa só um lugar vazio na fala
+(`<div class="progresso-lugar" data-progresso>`, `display: contents`), e na tela o bloco é desenhado dentro dele
+(`criarProgressoNaTela`, de `web/main.ts`): os lugares são achados quando o histórico é regravado, nunca a cada quadro, e a
+cada desenho só o lugar cujo bloco mudou é trocado, com a lista aberta e o foco guardados. A fala não é regravada.
+`comProgressoNaFala` faz o mesmo numa string, para `renderHistoricoDaTimeline`. O teste prova com `lembrar` que mudar
+`atividades` e `agora` não refaz o histórico nem muda a fala, só o bloco do lugar.
+
+QA do PR 7 (2026-10-18), `scripts/carga-tela`, cenário novo `frentes` (5 frentes na conversa de 300 mensagens, cada uma
+narrando e chamando ferramenta por ciclo): na primeira versão o bloco morava dentro do bloco da fala, e a fala inteira era
+regravada 57 vezes por minuto (cada vez perdendo a seleção de texto nela), com o caminho "histórico mudou" de
+`regravarTimeline` rodando 35 vezes em 30 s contra 8 na base (~11 ms cada, máx. 23 ms; sem tarefa longa). Com o lugar
+trocado sozinho, a fala não é regravada nenhuma vez: o bloco é trocado 12 a 28 vezes por rodada a menos de 1 ms cada (máx.
+3,3 ms), e o histórico volta às regravações da base (5 a 7). Os quatro cenários de antes não mudam além do ruído da máquina
+(números no comentário do QA no PR #398). Gatilho de
+reversão: se o lugar trocado sozinho custar mais que regravar a fala no `carga-tela` (`nod:progresso`), o bloco vira um
+`BlocoDaTimeline` próprio embaixo da fala.
+
+**O cartão ao vivo vira linha.** O turno que já chamou ferramenta é "Clarice está trabalhando · ver etapas", com o ponto
+que pulsa (protótipo "Conversa típica"); "ver etapas" abre o que o cartão grande mostrava (o passo de agora, a lista de
+tarefas do bot, a contagem e as etapas). O vigia fica à vista, embaixo da linha, porque pede ação. Sai o cabeçalho
+"● ao vivo" (mascote, nome e hora, num bloco `vivo-cab:` à parte); o balão em streaming fica, alinhado às falas. Sem
+relógio na linha: a presença do cabeçalho da conversa já diz "Trabalhando". O protótipo põe o avatar do bot na linha; aqui é
+o ponto que pulsa do plano — o mascote dentro de um bloco que muda a cada etapa reiniciaria a animação, motivo pelo qual o
+cabeçalho morava à parte.
+
+**Telemetria.** `TipoLinha` ganha `frentes`: o resumo do bloco é "mostrado" (`frentes:<id da abertura>`) e "aberto" no
+clique em "ver as N", para o gatilho da ADR-099 ("detalhe das frentes aberto em mais de 30%"); a pílula alargada do PR 8
+conta no mesmo tipo (o plano chamava o tipo de "pílula"; o nome diz o que o gatilho mede). Nenhuma migração, nenhum
+contrato novo além do tipo.
+
+**Ajustes do QA (2026-10-18).** A largura mínima do cartão vai na coluna da fala (`bubble-wrap` com o lugar do progresso,
+`min(86%, 440px)`): no balão, `min(100%, 440px)` era 100% de uma coluna do tamanho do texto e o cartão de uma fala curta
+ficava com ~215 px. O aviso de repetição do vigia, à vista embaixo da linha, saía em três linhas por um seletor largo
+(`.atividade-vigia p b:first-child`, de 2026-10-06); agora só o título é bloco.
+
+**Fica para o PR 8**, com a pílula: o ponto da memória no bloco (hoje na linha do dono; os dois juntos seriam dois pontos),
+a região `aria-live` que diz "Hero w3 pronta" e a emenda da ADR-099 item 10.
+
+**Gatilho de reversão.** O de 30% da ADR-099, medido agora em "ver as N" (tipo `frentes`): aberto em mais de 30% das vezes em
+2 semanas, a lista volta aberta por padrão. Relatos de "não vejo o que o bot está fazendo" com o cartão ao vivo recolhido
+(3 em 14 dias, ADR-041): o passo de agora volta à vista na linha, ao lado de "está trabalhando".
 
 ## Gatilhos de reversão (PR 2)
 

@@ -201,3 +201,11 @@
   .tb-frentes { margin-left: 22px; }
   .tb-frente { min-height: 40px; }
 }
+
+/* O progresso na fala e a linha do turno vivo no celular (chat limpo, PR 7): alvos de toque de 40 px, sem mudar o desenho. */
+@media (hover: none) and (pointer: coarse) and (max-width: 600px), (hover: none) and (pointer: coarse) and (max-height: 500px) {
+  .progresso-resumo { min-height: 40px; }
+  .progresso-titulo { min-height: 32px; }
+  .atividade-linha > summary { min-height: 40px; }
+  .message.ao-vivo { padding-left: 35px; }
+}

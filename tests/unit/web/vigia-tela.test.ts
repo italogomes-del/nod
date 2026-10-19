@@ -47,6 +47,8 @@ describe("vigia do turno na tela (NOD-73)", () => {
     expect(html).not.toContain("perigo");
     expect(html.match(/class="vigia-ic"/g)).toHaveLength(1);
     expect(html).toContain('class="atividade-pulso parado"');
+    // Chat limpo (PR 7): o cartão virou a linha "… está trabalhando · ver etapas", e o vigia fica à vista, fora do recolhido.
+    expect(html.indexOf("</details>")).toBeLessThan(html.indexOf('class="atividade-vigia"'));
     expect(renderCabecalhoConversa(e, "a")).toContain("sem novidade há 12 min");
     // O relógio da tela anda sem frame novo.
     expect(corpo({ ...e, agora: AGORA + 5 * MIN }, c)).toContain("Sem novidade há 17 min");

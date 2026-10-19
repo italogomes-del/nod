@@ -2,6 +2,7 @@ import type { EsperaDaConta } from "../../src/contracts/cota.ts";
 import type { LeituraDeMaquinaDto, MaquinaDoTrabalho } from "../../src/contracts/maquina.ts";
 import type { EstadoTrabalho, MotivoEsperaMac, NivelPressao, TrabalhoDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { Estado, FiltroTrabalhos, Tela } from "../estado/reducer.ts";
+import { linhaAtual } from "./atividade.ts";
 import { cotaDaIa } from "./execucao.ts";
 import { duracaoCurta, quandoCurto } from "./relogio.ts";
 import { botao, esc, hora } from "./render.ts";
@@ -223,6 +224,16 @@ export function situacaoDe(t: TrabalhoDto, todos: readonly TrabalhoDto[] = [], s
     case "falhou":
       return "não terminou";
   }
+}
+
+/**
+ * O último passo da frente: a narração (ou a última ferramenta) do turno vivo dela, quando roda e o ao vivo chegou; senão
+ * `situacaoDe` (o último passo do servidor, quem ela espera, o estado). A linha do dono (web/telas/linha-do-dono.ts) e o
+ * progresso na fala (chat limpo, PR 7, web/telas/progresso-na-fala.ts) leem daqui.
+ */
+export function passoDaFrente(estado: Pick<Estado, "atividades" | "trabalhos" | "agora">, t: TrabalhoDto, todos: readonly TrabalhoDto[]): string {
+  const a = t.turnoVivoId ? estado.atividades[t.conversaId]?.[t.turnoVivoId] : undefined;
+  return a && t.estado === "rodando" ? linhaAtual(a) : situacaoDe(t, todos, estado.trabalhos?.segurando === true, estado.agora);
 }
 
 /**

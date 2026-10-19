@@ -69,6 +69,7 @@ import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
 import type { Proposta } from "../src/contracts/conversa.ts";
+import { criarProgressoNaTela } from "./telas/progresso-na-fala.ts";
 import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
@@ -151,7 +152,7 @@ const telemetria = criarTelemetria((eventos) => api?.telemetriaLinhas(eventos) ?
 window.addEventListener("pagehide", () => telemetria.descarregar());
 // ADR-114 (chat limpo, PR 2): o gatilho da Atividade — cada abertura da conversa própria e a Atividade aberta até 60 s depois.
 const vigiaAtividade = criarVigiaDaAtividade(telemetria);
-const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" || v === "troca" ? v : null);
+const tipoLinha = (v: string | undefined): TipoLinha | null => (v === "rotina" || v === "bots" || v === "task" || v === "troca" || v === "frentes" ? v : null);
 
 /** As linhas que o histórico desenhou entram na telemetria (cada chave uma vez por carga). */
 function contarLinhasMostradas(): void {
@@ -1079,6 +1080,8 @@ function renderPrincipal(): void {
   const historicoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-historico", partes.historico));
   const aoVivoMuda = cascaMuda || (partes !== null && blocosMudariam("timeline-ao-vivo", partes.aoVivo));
   if (historicoMuda || aoVivoMuda) regravarTimeline(corpo, partes, { cascaMuda, historicoMuda, aoVivoMuda });
+  // Chat limpo (PR 7; QA do PR 398): o progresso das frentes muda só o bloco dele, dentro da fala, sem regravá-la.
+  progressoNaTela.desenhar(conversaDaTela(estado), estado);
   // O composer só é regravado quando a conversa muda: o textarea preserva texto, foco e cursor.
   if (composer?.chave !== composerDe) {
     // ADR-095: a gravação é do campo que sai; o texto dela nunca cai no campo de outra conversa.
@@ -1123,6 +1126,9 @@ function pedirFocoDaFila(respondida: string): void {
 
 type PartesDaTimeline = { historico: BlocoDaTimeline[]; aoVivo: BlocoDaTimeline[] };
 
+/** O progresso das frentes nas falas (chat limpo, PR 7): os lugares são achados quando o histórico é regravado. */
+const progressoNaTela = criarProgressoNaTela();
+
 /**
  * A timeline de uma conversa em duas partes (definido em 2026-09-30, web/telas/conversa.ts): a casca fica e
  * cada parte é uma região por blocos. O histórico vem da lembrança (web/lib/lembrar.ts) e só é refeito quando
@@ -1142,6 +1148,8 @@ function partesDaTimeline(): PartesDaTimeline | null {
   const c = conversaDaTela(estado);
   if (!c) return null;
   // O chip de link do Slack diz "mensagem das HH:MM" no mesmo dia e "de DD/MM" depois: o dia é um extra.
+  // Chat limpo (PR 7): o progresso das frentes na fala lê o ao vivo e o relógio, então não entra aqui — a fala leva só o
+  // lugar dele, que `progressoNaTela` enche depois (web/telas/progresso-na-fala.ts); a fala não é regravada quando uma frente anda.
   const historico = lembrar("timeline-historico", estado, [new Date().toDateString()], (e) => {
     const conversa = conversaDaTela(e);
     return conversa ? blocosDoHistorico(conversa, e) : [];
@@ -1186,6 +1194,11 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   if (partes) {
     if (muda.historicoMuda) regiaoPorBlocos("timeline-historico", partes.historico);
     if (muda.aoVivoMuda) regiaoPorBlocos("timeline-ao-vivo", partes.aoVivo);
+  }
+  // O progresso das frentes entra nos lugares da fala antes de reabrir os <details> e de contar as linhas mostradas.
+  if (muda.historicoMuda) {
+    progressoNaTela.achar(partes ? document.getElementById("timeline-historico") : null);
+    progressoNaTela.desenhar(conversaDaTela(estado), estado);
   }
   for (const resposta of respostas) {
     const el = document.querySelector<HTMLInputElement>(`[data-decisao="${CSS.escape(resposta.decisao)}"] input[${resposta.atributo}="${CSS.escape(resposta.chave)}"]`);
@@ -3017,6 +3030,13 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
   "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
+  // Chat limpo (PR 7): "ver as 5" do progresso na fala abre no lugar, como a troca; a abertura conta para o gatilho da
+  // ADR-099 ("detalhe das frentes aberto em mais de 30%"), no tipo `frentes`.
+  "abrir-progresso": (el) => {
+    if (el.closest("details")?.open) return;
+    const tipo = tipoLinha(el.dataset.linhaTipo);
+    if (tipo) telemetria.aberta({ tipo, agenteId: el.dataset.agente ?? "", chaveLinha: el.dataset.linhaChave ?? "" });
+  },
   // Chat limpo (PR 3): a troca abre no lugar (o <details> cuida disso); só a abertura conta na telemetria da ADR-083.
   "abrir-troca": (el) => {
     if (el.closest("details")?.open) return;

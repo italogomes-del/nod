@@ -6,7 +6,7 @@ import { conversaViva, donoDoBot, esperaNaTela, fraseDoDono, frentesDoBot, grupo
 import { ICONE } from "../lib/icones.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { esc, hora, iconeAgente } from "../lib/render.ts";
-import { aberto, abertosDoBot, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, etiquetaOrigem, maquinasDe, meiaNoiteDe, memoriaDosBots, naFilaDaCota, passoDaFrente, pilulaDaCota, textoNaFilaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, leituraDoMac, pontoTrabalho, seguradoPeloMac, situacaoDe, tempoDe, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { agente, chipTrabalhosDoBot, custoDoTopo, renderFaixaTrabalhos } from "./trabalhos.ts";
 import { conversaLimpa } from "./linhas-do-chat.ts";
 
@@ -153,7 +153,7 @@ const secao = (titulo: string, corpo: string): string => `<div class="ld-secao">
  */
 function linhaDaFrente(estado: Estado, t: TrabalhoDto, todos: readonly TrabalhoDto[], bot: Agente | undefined): string {
   const a = t.turnoVivoId ? estado.atividades[t.conversaId]?.[t.turnoVivoId] : undefined;
-  const passo = a && t.estado === "rodando" ? linhaAtual(a) : situacaoDe(t, todos, estado.trabalhos?.segurando === true, estado.agora);
+  const passo = passoDaFrente(estado, t, todos);
   const tempo = t.estado === "na_fila" ? "" : tempoDe(t, estado.agora);
   const curto = tituloCurto(t.titulo);
   const aberta = estado.frenteAberta === t.id;

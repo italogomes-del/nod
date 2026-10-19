@@ -55,10 +55,10 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId } = await agenteComConversa(trx, MARLON, { nome: "Ada" });
       const deps = depsSobre(repos, MARLON, { trx });
-      const ev = (acao: "mostrada" | "aberta", tipo: "rotina" | "bots" | "task" | "atividade" | "troca", chaveLinha: string) => ({ acao, tipo, agenteId, chaveLinha });
+      const ev = (acao: "mostrada" | "aberta", tipo: "rotina" | "bots" | "task" | "atividade" | "troca" | "frentes", chaveLinha: string) => ({ acao, tipo, agenteId, chaveLinha });
       // Chat limpo (PR 2, gatilho da ADR-114): a abertura da conversa é "mostrada" e a Atividade aberta logo depois, "aberta".
-      const r = await registrarLinhas(deps, { eventos: [ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:2"), ev("aberta", "rotina", "r:1"), ev("mostrada", "bots", "b:1"), ev("mostrada", "atividade", `atividade:${agenteId}:1`), ev("mostrada", "atividade", `atividade:${agenteId}:2`), ev("aberta", "atividade", `atividade:${agenteId}:2`), ev("mostrada", "troca", "troca:turno:1"), ev("aberta", "troca", "troca:turno:1")] });
-      expect(r.data.gravados).toBe(10);
+      const r = await registrarLinhas(deps, { eventos: [ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:1"), ev("mostrada", "rotina", "r:2"), ev("aberta", "rotina", "r:1"), ev("mostrada", "bots", "b:1"), ev("mostrada", "atividade", `atividade:${agenteId}:1`), ev("mostrada", "atividade", `atividade:${agenteId}:2`), ev("aberta", "atividade", `atividade:${agenteId}:2`), ev("mostrada", "troca", "troca:turno:1"), ev("aberta", "troca", "troca:turno:1"), ev("mostrada", "frentes", "frentes:m1"), ev("mostrada", "frentes", "frentes:m2"), ev("aberta", "frentes", "frentes:m2")] });
+      expect(r.data.gravados).toBe(13);
       const [linha] = await trx<{ n: number }[]>`select count(*)::int as n from events_outbox e join events v on v.id = e.evento_id where v.kind in ('linha_mostrada', 'linha_aberta') and v.owner_id = ${PESSOA_MARLON}`;
       expect(linha?.n).toBe(0);
       const taxas = (await taxasDasLinhas(deps, {})).data;
@@ -69,6 +69,8 @@ describeIntegracao("mensagem lida com o turno e telemetria das linhas (#191, S2)
         { tipo: "atividade", mostradas: 2, abertas: 1, taxa: 0.5 },
         // Chat limpo (PR 3): a troca agrupada conta como as outras linhas, para o gatilho da ADR-083.
         { tipo: "troca", mostradas: 1, abertas: 1, taxa: 1 },
+        // Chat limpo (PR 7): "ver as N" do progresso na fala, para o gatilho da ADR-099 (detalhe das frentes aberto).
+        { tipo: "frentes", mostradas: 2, abertas: 1, taxa: 0.5 },
       ]));
       for (const ruim of [[], [{ ...ev("mostrada", "rotina", "r:1"), tipo: "outra" }], [{ ...ev("mostrada", "rotina", "texto com espaço") }], Array.from({ length: 201 }, () => ev("mostrada", "task", "t:1"))]) {
         await expect(registrarLinhas(deps, { eventos: ruim })).rejects.toMatchObject({ codigo: "entrada_invalida" });

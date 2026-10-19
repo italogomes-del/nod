@@ -13,9 +13,9 @@ import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/rend
 import { maquinaDoBot } from "./maquinas.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
-import { duracaoCurta, haQuanto } from "../lib/relogio.ts";
+import { haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
-import { estadoMascoteNaConversa, filaRecente, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
+import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
 import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, tempoDasLinhas, type LinhaDaConversa } from "./pergunta.ts";
 import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
@@ -42,6 +42,7 @@ import { renderLinhaLigacao } from "./ligacao.ts";
 import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
+import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
 
 /** id → nome (agentes da frota + a pessoa da sessão); id desconhecido cai no genérico, nunca no uuid. */
 export function nomesDe(estado: Estado): Record<string, string> {
@@ -393,8 +394,11 @@ export function comChipDeComando(texto: string): string {
 /**
  * `etiqueta` (definido em 2026-10-07, #191/#195): a fala que chega de uma rotina ou de uma task leva "da rotina …" /
  * "da task …" ao lado do nome — é balão porque é para a pessoa, mas não é resposta à última mensagem dela.
+ * `progresso` (chat limpo, PR 7): o marcador do bloco de progresso das frentes que esta fala abriu (./progresso-na-fala.ts).
+ * Na fala do bot ele fica dentro do balão, depois do texto (protótipo "4"); no balão da pessoa (a frente da rede), embaixo
+ * dele. Nos dois, antes das reações: o progresso é conteúdo da fala; a reação é sobre ela (decisão 20 do plano).
  */
-export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false, opcoes: { etiqueta?: string } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false, opcoes: { etiqueta?: string; progresso?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -434,9 +438,13 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   const fila = situacaoNaFila(m, estado);
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
   const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
-  const balao = pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}</div>`;
+  // O progresso vai dentro do balão do bot; no da pessoa (a rede) e no cartão da pergunta (o turno que abriu frentes e
+  // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
+  const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
+  const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
+  const balao = pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
@@ -553,23 +561,29 @@ function comDecisaoVencida(p: Proposta, estado: Estado): boolean {
 const ETAPAS_VISIVEIS = 20;
 
 /**
- * Cartão de atividade (definido em 2026-09-24): o turno que já chamou ferramenta deixa de ser balão.
- * Mostra o que o agente está fazendo agora numa linha, há quanto tempo e as etapas recolhidas.
+ * O turno que já chamou ferramenta vira UMA linha (revisto em 2026-10-18, chat limpo, PR 7; plano, Parte 4 · 4b; protótipo
+ * "Conversa típica"): "Clarice está trabalhando · ver etapas", com o ponto que pulsa. "ver etapas" abre o que o cartão
+ * grande mostrava (definido em 2026-09-24): o que ele está fazendo agora, a lista de tarefas do bot e as etapas feitas.
+ * O vigia fica à vista, fora do recolhido, porque pede ação (o Parar). Sem relógio na linha: a presença do cabeçalho já diz
+ * "Trabalhando", e o corpo não precisa mudar a cada segundo.
  */
-function renderCartaoAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string, parar: string): string {
+function renderLinhaAtividade(t: TurnoVivo, a: AtividadeTurno, estado: Estado, nome: string, parar: string): string {
   const mudo = minutosSemNovidade(a, estado.agora);
   const visiveis = a.etapas.slice(-ETAPAS_VISIVEIS);
   const anteriores = a.totalEtapas - visiveis.length;
   const etapas = visiveis.map((e) => `<li title="${esc(e.texto)}"><span class="atividade-ok" aria-hidden="true">✓</span><span>${esc(resumoEtapa(e.texto))}</span><small>${e.ferramentas === 1 ? "1 ferramenta" : `${e.ferramentas} ferramentas`}</small></li>`).join("");
-  return `<article class="message bot atividade ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><section class="atividade-cartao" aria-label="Atividade de ${esc(nome)}">
-    <div class="atividade-cab"><span class="atividade-pulso${mudo !== null ? " parado" : ""}" aria-hidden="true"></span><b>${esc(nome)} está trabalhando</b><span>· ${esc(duracaoCurta(estado.agora - t.desde))}</span></div>
-    <p class="atividade-agora">${soLinks(linhaAtual(a))}</p>
-    ${renderAvisoDoVigia(a, estado.agora, parar)}
-    ${renderTarefasDoBot(a.tarefas)}
-    <details data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-seta" aria-hidden="true">›</span><span>${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}</span><span class="atividade-ver">Ver etapas</span><span class="atividade-recolher">Recolher</span></summary>
-      <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
+  const contagem = `${a.totalEtapas === 1 ? "1 etapa" : `${a.totalEtapas} etapas`} · ${a.ferramentas === 1 ? "1 ferramenta" : `${a.ferramentas} ferramentas`}`;
+  return `<article class="message bot atividade ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap">
+    <details class="atividade-linha" data-disclosure="atividade-${esc(t.turnoId)}"><summary><span class="atividade-pulso${mudo !== null ? " parado" : ""}" aria-hidden="true"></span><span class="atividade-quem">${esc(nome)} está trabalhando</span><span class="atividade-ver">ver etapas</span><span class="atividade-recolher">ocultar etapas</span></summary>
+      <div class="atividade-etapas" aria-label="Atividade de ${esc(nome)}" role="group">
+        <p class="atividade-agora">${soLinks(linhaAtual(a))}</p>
+        ${renderTarefasDoBot(a.tarefas)}
+        <p class="atividade-conta">${contagem}</p>
+        <ol>${anteriores > 0 ? `<li class="atividade-anteriores">+ ${anteriores} ${anteriores === 1 ? "etapa anterior" : "etapas anteriores"}</li>` : ""}${etapas}</ol>
+      </div>
     </details>
-  </section></div></article>`;
+    ${renderAvisoDoVigia(a, estado.agora, parar)}
+  </div></article>`;
 }
 
 /**
@@ -627,6 +641,8 @@ export function renderTarefasDoBot(tarefas: readonly TarefaDoBot[]): string {
  * que escreveu é regravado. medido em 2026-09-30: acrescentar só o pedaço novo ao balão (em vez de regravá-lo) deixou
  * o turno pesado PIOR — o Chrome refaz o layout do parágrafo inteiro de qualquer jeito, e cada layout ficou mais caro
  * com os nós pequenos acrescentados (2,2 → 2,9 s de layout, 55 → 44 quadros/s; scripts/carga-tela).
+ * revisto em 2026-10-18 (chat limpo, PR 7): sem o cabeçalho "● ao vivo" (mascote, nome, hora) que morava num bloco à parte;
+ * o turno com ferramenta é a linha "… está trabalhando · ver etapas" e o sem ferramenta, o balão em streaming.
  */
 function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
   const chave = `vivo:${t.turnoId}`;
@@ -634,7 +650,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "O agente";
   if (atividade && atividade.ferramentas > 0) {
-    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: renderCartaoAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
+    return [{ chave, html: renderLinhaAtividade(t, atividade, estado, nome, pararDoVigia(c)) }];
   }
   // NOD-73: sem cartão, o aviso de silêncio vira uma linha só, com o Parar.
   const mudo = t.estado === "rodando" ? minutosSemNovidade(atividade, estado.agora) : null;
@@ -642,7 +658,7 @@ function blocosDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): Blo
   if (atividade?.atual) {
     // definido em 2026-10-03: o texto ao vivo já sai formatado (negrito, listas, tabelas, chips), em vez de cru até o
     // fim do turno — o salto da troca pelo balão final some. A memória por chave guarda o último pedaço formatado.
-    return [cabecalhoDoTurnoVivo(t, agente, nome, estado.agora), { chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
+    return [{ chave, html: `<article class="message bot streaming ao-vivo" data-turno="${esc(t.turnoId)}"><div class="bubble-wrap"><div class="bubble">${comCursor(textoFormatado(atividade.atual, { chave, aoVivo: true }))}</div></div></article>${linhaMuda}` }];
   }
   return [{ chave, html: linhaDoTurnoVivo(t, c, estado) + linhaMuda }];
 }
@@ -652,21 +668,6 @@ function comCursor(html: string): string {
   const cursor = '<span class="cursor">▍</span>';
   const fim = /(<\/(?:p|li)>(?:<\/[uo]l>)?)$/.exec(html);
   return fim ? `${html.slice(0, fim.index)}${cursor}${fim[1]}` : `${html}${cursor}`;
-}
-
-/**
- * Quem está falando ao vivo (definido em 2026-10-03, canvas "Uma conversa de verdade · depois"): o cartão de atividade
- * e o balão em streaming começavam na margem, sem mascote, nome nem hora — não pareciam a mesma pessoa das falas de
- * cima. O cabeçalho é um bloco À PARTE do corpo: o corpo muda a cada pedaço e a cada segundo do relógio, e o
- * <nod-mascote> regravado junto reiniciaria a animação; este bloco só muda quando o turno sai da fila.
- */
-function cabecalhoDoTurnoVivo(t: TurnoVivo, agente: FrotaDto["agentes"][number] | undefined, nome: string, agora: number): BlocoDaTimeline {
-  // NOD-216: a mesma regra do mascote da barra — só o turno rodando anima; o recém-chegado pensa; a fila fica parada.
-  const mascote = t.estado === "rodando" ? "trabalhando" : filaRecente(t, agora) ? "pensando" : "na_fila";
-  return {
-    chave: `vivo-cab:${t.turnoId}`,
-    html: `<div class="message bot vivo-cab" data-turno="${esc(t.turnoId)}">${agente ? iconeAgente(agente, "md", mascote) : ""}<div class="msg-autor"><b>${esc(nome)}</b><time>${esc(hora(t.desde))}</time><span class="vivo-selo"><span class="atividade-pulso" aria-hidden="true"></span>ao vivo</span></div></div>`,
-  };
 }
 
 function linhaDoTurnoVivo(t: TurnoVivo, c: ConversaEstado, estado: Estado): string {
@@ -711,17 +712,23 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
   const novas = mensagens[0] ? estado.novasDesde[mensagens[0].conversaId] : undefined;
   // definido em 2026-09-24 (fio da pergunta): o fio aberto ganha o trilho e o resolvido recolhe, antes de
   // recolher os avisos — o <details> do fio não é linha de sistema.
+  // Chat limpo (PR 7; plano, Parte 4 · 4b): a fala que abriu frentes leva o marcador do bloco de progresso, trocado pelo
+  // bloco com o estado de agora fora da lembrança do histórico (`comProgressoNaFala`). Só na conversa limpa: lá as linhas
+  // "Começou N frentes" saíram do chat; na sala e no servidor de antes elas continuam.
+  const ancoras = !sala && conversaLimpa(mensagens) ? ancorasDoProgresso(mensagens, (m) => planos.get(m.id)?.tipo === undefined || planos.get(m.id)?.tipo === "balao") : new Map<string, string[]>();
+  const progressoDe = (id: string): string | undefined => ancoras.get(id)?.map(marcadorDoProgresso).join("");
   const linhas: LinhaDaConversa[] = mensagens.map((m) => {
     const plano = planos.get(m.id);
+    const progresso = progressoDe(m.id);
     const html = !plano
-      ? renderMensagem(m, estado, sala)
+      ? renderMensagem(m, estado, sala, progresso ? { progresso } : {})
       : plano.tipo === "oculta"
         ? ""
         : plano.tipo === "linha"
           ? plano.html
           : plano.tipo === "troca"
             ? htmlTroca(plano, estado)
-            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta });
+            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta, ...(progresso ? { progresso } : {}) });
     // Chat limpo (PR 6): o instante que a linha mostra, para os divisores de data. A troca vai da primeira à última mensagem
     // dela; a mensagem que sumiu (só sobra, talvez, a linha "Novas") não abre bloco.
     const tempo = html === "" ? { em: null } : plano?.tipo === "troca" ? { em: plano.mensagens[0]?.em ?? m.criadoEm, ate: plano.mensagens.at(-1)?.em ?? m.criadoEm, instantes: plano.mensagens.map((x) => x.em) } : { em: m.criadoEm };
@@ -863,7 +870,7 @@ export function blocosAoVivo(c: ConversaEstado, estado: Estado): BlocoDaTimeline
 }
 
 export function renderHistoricoDaTimeline(c: ConversaEstado, estado: Estado): string {
-  return blocosDoHistorico(c, estado).map((b) => b.html).join("");
+  return comProgressoNaFala(blocosDoHistorico(c, estado), c, estado).map((b) => b.html).join("");
 }
 
 export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTimeline[] {
