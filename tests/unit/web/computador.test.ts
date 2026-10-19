@@ -3,8 +3,8 @@ import type { FrotaDto } from "../../../src/contracts/api.ts";
 import type { ComputadorDto, RegistroComputador } from "../../../src/contracts/computador.ts";
 import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { computadorPadrao } from "../../../src/domain/computador.ts";
-import { agruparAtividade, estadoEmPalavras, foraDoAr, mensagemDoLimite, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
+import { computadorPadrao, textoPedidoDeTela } from "../../../src/domain/computador.ts";
+import { agruparAtividade, estadoEmPalavras, foraDoAr, htmlCartaoTela, htmlDialogoComputador, mensagemDoLimite, motivoDoPedidoDeTela, rotuloDaAtividade, tituloDaFalha } from "../../../web/lib/computador.ts";
 import { renderCabecalhoConversa, renderMensagem } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
 
@@ -63,9 +63,50 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
   });
 
   it("painel: o botão Computador do bot (em Ambiente) ganha o chip 'fora do ar'; respondendo, não — e o cabeçalho fica limpo", () => {
-    expect(renderDetalhes(comFrota(nina(FORA)))).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot<\/span><span class="tag tag-vermelha">fora do ar<\/span>/);
+    const dev = (e: Estado): Estado => ({ ...e, modoDev: { ...e.modoDev, ligado: true } });
+    expect(renderDetalhes(dev(comFrota(nina(FORA))))).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot<\/span><span class="tag tag-vermelha">fora do ar<\/span>/);
+    expect(renderDetalhes(comFrota(nina(FORA)))).not.toContain(">Computador do bot</span>");
     expect(renderDetalhes(comFrota(nina(null)))).not.toContain("fora do ar");
     expect(renderCabecalhoConversa(comFrota(nina(FORA)), "a1")).not.toContain("abrir-computador");
+  });
+
+  it("diálogo: a pessoa vê a tela; terminal, arquivos e ligar ficam no modo dev", () => {
+    const html = htmlDialogoComputador("Nina");
+    expect(html).toContain(">Assumir controle</button>");
+    expect(html).toContain(">Devolver ao bot</button>");
+    expect(html).toContain('class="computador-velo computador-uso"');
+    expect(html).toContain('class="computador-toolbar computador-dev-only"');
+    expect(html).toContain('class="computador-lateral computador-dev-only"');
+    expect(html).toContain("<summary>Terminal</summary>");
+    expect(html).toContain("Abrindo a tela de Nina.");
+    expect(html.indexOf("computador-velo")).toBeLessThan(html.indexOf("computador-lateral"));
+  });
+
+  it("painel: a tela do bot fica no topo, com Abrir e as rotinas logo abaixo; o cartão vermelho só fora do ar", () => {
+    const saudavel = renderDetalhes(comFrota(nina(null)));
+    expect(saudavel).toContain('data-tela-bot="a1"');
+    expect(saudavel).toContain("Tela de Nina");
+    expect(saudavel).toContain(">Abrir</span>");
+    expect(saudavel.indexOf("Tela de Nina")).toBeLessThan(saudavel.indexOf("<h3>Rotinas</h3>"));
+    expect(saudavel).toContain("Nada programado ainda. Peça a Nina para fazer algo toda manhã e aparece aqui.");
+    expect(saudavel).not.toContain("<h3>Computador do bot</h3>");
+  });
+
+  // Regression: QA do PR #357 (NOD-306) — a ordem do drawer depois do rebase sobre o chat limpo
+  // Found by /qa on 2026-10-19
+  it("painel: só a tela sobe; identidade, Atalhos (Trabalhos e Atividade) e Rotinas seguem a ordem da main", () => {
+    const html = renderDetalhes(comFrota(nina(null)));
+    const ordem = ['data-tela-bot="a1"', 'class="gv-identidade"', "<h3>Atalhos</h3>", ">Trabalhos</span>", ">Atividade</span>", "<h3>Rotinas</h3>"].map((s) => html.indexOf(s));
+    expect(ordem.every((i) => i >= 0)).toBe(true);
+    expect(ordem).toEqual([...ordem].sort((a, b) => a - b));
+  });
+
+  it("pedido de tela: a frase do servidor vira o motivo do cartão, e outra pergunta não", () => {
+    const frase = textoPedidoDeTela("verificar que é humano no LinkedIn");
+    expect(motivoDoPedidoDeTela(frase)).toBe("verificar que é humano no LinkedIn");
+    expect(motivoDoPedidoDeTela("Posso arquivar o PR?")).toBeNull();
+    expect(htmlCartaoTela("verificar que é humano no LinkedIn", "a1", true)).toContain('data-assumir="1"');
+    expect(htmlCartaoTela("verificar que é humano no LinkedIn", "a1", false)).toContain("A tela voltou para o bot.");
   });
 
   it("painel: a seção Computador do bot aparece só fora do ar, com 'Tentar de novo' e 'Abrir computador'", () => {

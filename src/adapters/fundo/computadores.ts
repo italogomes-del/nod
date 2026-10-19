@@ -3,7 +3,7 @@ import type { AcaoComputador, Computador, ComputadorDto, DriverComputador, Resul
 import { FERRAMENTAS_COMPUTADOR } from "../../contracts/ferramentas-computador.ts";
 import type { MotivoFalhaComputador } from "../../contracts/motivos.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
-import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
+import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, textoPedidoDeTela, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
 import { decidirPeloModo, semRevisor } from "../../domain/modo-aprovacao.ts";
@@ -378,7 +378,7 @@ export function criarComputadores(o: Opcoes) {
         if (nome === "computador_pedir_ajuda") {
           livre(c, d.agora());
           const motivo = String(args.motivo).slice(0, 1000);
-          const ajuda = await pedirAjudaDoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, tipo: "pergunta", texto: `Abra meu computador para concluir este passo: ${motivo}. Use Assumir controle; depois, Devolver ao bot. Não envie senha ou código aqui.` });
+          const ajuda = await pedirAjudaDoComputador(d, { turnoId: plano.turnoId, agenteId: plano.agenteId, conversaId: plano.conversaId, tipo: "pergunta", texto: textoPedidoDeTela(motivo) });
           await d.repos.computadores.configurar(c.id, { controle: "aguardando_pessoa", ajuda: motivo, ajudaDecisaoId: ajuda.data.decisao_id });
           if (ajuda.events?.length) await d.repos.events.gravarComOutbox(ajuda.events);
           await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: "pedir_ajuda", estado: "concluida" });

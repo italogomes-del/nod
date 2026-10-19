@@ -250,6 +250,11 @@ body.ocupado { cursor: progress; }
 .msg-computador-fora .mcf-titulo b { color: var(--danger); font-weight: 600; }
 .msg-computador-fora p { margin: 6px 0 0; line-height: 1.55; color: var(--ink); }
 .msg-computador-fora .mcf-acoes { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.msg-computador { padding: 14px 16px; border: 1px solid var(--line); background: var(--surface-side); border-radius: 16px; }
+.msg-computador .mc-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.msg-computador .mc-cab b { font-weight: 600; }
+.msg-computador p { margin: 8px 0 0; line-height: 1.5; }
+.msg-computador .mcf-acoes { display: flex; gap: 8px; margin-top: 12px; }
 .detalhe-computador-fora { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--danger-line); background: var(--danger-soft); border-radius: 10px; }
 .detalhe-computador-fora .tag { align-self: flex-start; }
 .detalhe-computador-fora p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink); }

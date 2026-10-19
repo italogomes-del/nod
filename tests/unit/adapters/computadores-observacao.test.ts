@@ -2,13 +2,15 @@ import { randomBytes } from "node:crypto";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { AcaoComputador, Computador, DriverComputador, ResultadoComputador } from "../../../src/contracts/computador.ts";
 import { criarComputadores } from "../../../src/adapters/fundo/computadores.ts";
-import { FalhaComputador } from "../../../src/domain/computador.ts";
+import { FalhaComputador, textoPedidoDeTela } from "../../../src/domain/computador.ts";
+import { motivoDoPedidoDeTela } from "../../../web/lib/computador.ts";
 import type { ResultadoChamada } from "../../../src/use-cases/chamar-ferramenta.ts";
 import { MARLON } from "../use-cases/deps-l5.ts";
 
 // NOD-161: os casos de uso de aprovação e de pedir à pessoa não são o assunto aqui — só o "aguardar".
 vi.mock("../../../src/use-cases/pedir-aprovacao.ts", () => ({ pedirAprovacaoComputador: async () => ({ data: { estado: "pendente", decisao_id: "decisao-1" } }) }));
-vi.mock("../../../src/use-cases/pedir-a-pessoa.ts", () => ({ pedirAjudaDoComputador: async () => ({ data: { decisao_id: "decisao-2", estado: "pendente" } }) }));
+const pedidosDeAjuda = vi.hoisted(() => [] as { texto: string }[]);
+vi.mock("../../../src/use-cases/pedir-a-pessoa.ts", () => ({ pedirAjudaDoComputador: async (_d: unknown, p: { texto: string }) => { pedidosDeAjuda.push(p); return { data: { decisao_id: "decisao-2", estado: "pendente" } }; } }));
 
 const AGENTE = "agente-1";
 let computador: Computador;
@@ -151,6 +153,16 @@ it("depois de pedir_ajuda, a próxima observação sai completa", async () => {
   const r = await chamar("computador_observar");
   expect(r.imagem).toBeDefined();
   expect(r.json.tela.texto).toBe(tela.texto);
+});
+
+// Regression: QA do PR #357 (NOD-306) — a frase de computador_pedir_ajuda é a que a web reconhece
+// Found by /qa on 2026-10-19
+it("pedir_ajuda deixa a frase de textoPedidoDeTela: a web tira dela o motivo do cartão Abrir computador", async () => {
+  pedidosDeAjuda.length = 0;
+  await chamar("computador_pedir_ajuda", { motivo: "verificar que é humano no LinkedIn" });
+  expect(pedidosDeAjuda).toHaveLength(1);
+  expect(pedidosDeAjuda[0]!.texto).toBe(textoPedidoDeTela("verificar que é humano no LinkedIn"));
+  expect(motivoDoPedidoDeTela(pedidosDeAjuda[0]!.texto)).toBe("verificar que é humano no LinkedIn");
 });
 
 it("resultado com erro não conta como entregue e a entrada vence em 30 min", async () => {

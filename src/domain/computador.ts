@@ -191,3 +191,15 @@ export function limiteDoAmbiente(env: Readonly<Record<string, string | undefined
 export function computadorPadrao(agenteId: string): ComputadorVisto {
   return { id: null, agenteId, habilitado: true, controle: "bot", politica: "supervisionado", ajuda: null, ajudaDecisaoId: null, ocupadoAte: null, operacaoId: null, criadoEm: null, falhasSeguidas: 0, falhaMotivo: null, indisponivelDesde: null };
 }
+
+/**
+ * definido em 2026-10-16: a frase que `computador_pedir_ajuda` deixa na conversa. A web reconhece o
+ * prefixo e o sufixo (cópia em web/lib/computador.ts; o teste unitário compara) e mostra o cartão
+ * "Abrir computador" no lugar de pedir a senha no chat.
+ */
+export const PREFIXO_PEDIDO_DE_TELA = "Abra meu computador para concluir este passo: ";
+export const SUFIXO_PEDIDO_DE_TELA = ". Use Assumir controle; depois, Devolver ao bot. Não envie senha ou código aqui.";
+
+export function textoPedidoDeTela(motivo: string): string {
+  return `${PREFIXO_PEDIDO_DE_TELA}${motivo}${SUFIXO_PEDIDO_DE_TELA}`;
+}

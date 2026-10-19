@@ -17,10 +17,11 @@ import { haQuanto } from "../lib/relogio.ts";
 import { soLinks, textoFormatado } from "../lib/texto-formatado.ts";
 import { estadoMascoteNaConversa, mascoteAnimado, turnosVivosDaConversa } from "../lib/mascote.ts";
 import { renderFaixaParada } from "./faixa-parada.ts";
+import { htmlCartaoTela, motivoDoPedidoDeTela } from "../lib/computador.ts";
 import { cartaoDaPergunta, desenharFios, linhaDaRetomada, respostaPorOpcao, rotuloDaResposta, tempoDasLinhas, type LinhaDaConversa } from "./pergunta.ts";
 import { comDivisores, type TempoDoBloco } from "./divisores-de-data.ts";
 import { linhaNaoRodaram } from "../lib/execucao.ts";
-import { chaveDoItem } from "../lib/perguntas.ts";
+import { chaveDoItem, estadoDaPergunta } from "../lib/perguntas.ts";
 import { acoesComAcesso, linhasPrecisa } from "./rotina-precisa.ts";
 import { renderCardAcesso } from "./card-acesso.ts";
 import { acaoHumana, detalheAcesso, idsGemeas, marcaGemeas, marcaRotinaParada, pedidosAncoraveis, renderDecisaoAncorada, renderDecisoesDaConversa, rotulosAcesso } from "./sua-vez.ts";
@@ -437,12 +438,16 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   if (resposta && respostaPorOpcao(m, estado)) return "";
   const fila = situacaoNaFila(m, estado);
   // "respondendo", não "resposta": `.resposta` já é o campo do card de Retomar (estilos.css).
-  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  // definido em 2026-10-16: computador_pedir_ajuda não pede senha no balão — vira o cartão "Abrir computador" no lugar
+  // do cartão da pergunta.
+  const motivoTela = pergunta ? motivoDoPedidoDeTela(m.texto) : null;
+  const telaAberta = motivoTela !== null && pergunta ? estadoDaPergunta(estado, estado.conversas[m.conversaId]?.mensagens ?? [], pergunta.decisaoId).tipo === "aberta" : false;
+  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${motivoTela !== null ? " com-tela" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   // O progresso vai dentro do balão do bot; no da pessoa (a rede) e no cartão da pergunta (o turno que abriu frentes e
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
-  const balao = pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}${progressoDentro}</div>`;
+  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta) : pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
     ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;

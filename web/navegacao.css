@@ -249,6 +249,19 @@ div.mac-medidor { padding-right: 36px; }
 .gv-cartao .detalhe-rotina .chave[aria-checked="true"] span { left: 19px; }
 .gv-nota { margin: 8px 4px 0; }
 
+/* Tela do bot no topo do painel (definido em 2026-10-16). O fundo escuro é o monitor, igual nos dois temas. */
+.gv-tela { align-items: stretch; gap: 8px; }
+.tela-preview { position: relative; display: block; width: 100%; aspect-ratio: 1.6; margin: 0; padding: 0; border: 0; border-radius: 16px; overflow: hidden; background: #1c1c1e; cursor: pointer; } /* cor-fixa: monitor escuro nos dois temas */
+.tela-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tela-preview img[hidden] { display: none; }
+.tela-abrir { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.tela-pilula { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; background: #2c2c2e; color: #f4f4f5; font-size: 13px; font-weight: 500; } /* cor-fixa: pílula sobre o monitor escuro */
+.tela-pilula svg { width: 15px; height: 15px; }
+.tela-preview.com-imagem .tela-abrir { opacity: 0; }
+.tela-preview.com-imagem:hover .tela-abrir { opacity: 1; background: #00000088; } /* cor-fixa: véu sobre a miniatura */
+.tela-legenda { margin: 0; text-align: center; font-size: 13px; color: var(--ink-3); }
+.gv-rotina-vazia { margin: 0; padding: 22px 18px; border: 1px dashed var(--line-strong); border-radius: 14px; text-align: center; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+
 /* Os níveis: bloco com rótulo cinza, texto da instrução, execuções com ponto, dl do combinado. */
 .gv-bloco p { margin: 0; }
 .detalhes .gv-bloco .mudo, .detalhes .gv-secao > .mudo { padding: 0 4px; font-size: 13px; line-height: 1.55; }

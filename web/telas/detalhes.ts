@@ -85,8 +85,13 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     <p class="gv-descricao">${esc(a.descricao || "Conte na conversa como este bot pode ajudar você.")}</p>
     ${dona ? `<button type="button" class="gv-pilula" ${irPara("perfil")}>Editar perfil</button>` : ""}</div>`;
 
+  // definido em 2026-10-16: a tela do bot fica no topo do painel, como no Grok — miniatura (ou "Abrir" no
+  // escuro). Depois vêm identidade e Atalhos (Trabalhos e Atividade, chat limpo), como na main.
+  // A imagem ao vivo entra por web/telas/tela-do-bot.ts, sem regravar a gaveta.
+  const tela = dona ? `<section class="gv-secao gv-tela"><button type="button" class="tela-preview${a.computadorForaDoAr ? " tela-fora" : ""}" data-act="abrir-computador" data-id="${esc(a.id)}" data-tela-bot="${esc(a.id)}" aria-label="Abrir a tela de ${esc(a.nome)}"><img alt="" hidden /><span class="tela-abrir"><span class="tela-pilula">${ICONE.monitor}<span>Abrir</span></span></span></button><p class="tela-legenda">Tela de ${esc(a.nome)}</p></section>` : "";
+
   // definido em 2026-09-24 (emenda da ADR-037): fora do ar, o computador do bot abre o painel — é o estado que muda o que
-  // o bot consegue fazer agora. Ligado e respondendo, não ocupa lugar.
+  // o bot consegue fazer agora. A miniatura continua no topo; aqui fica o motivo e o "Tentar de novo".
   const fora = a.computadorForaDoAr && dona ? a.computadorForaDoAr : null;
   const computador = fora
     ? `<section class="gv-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
@@ -117,7 +122,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
     return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small>${esc(quando)}</small></span>`, irPara("rotina", r.id))}${chave}${parada}</li>`;
   };
   const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara("nova-rotina")}>+ Nova</button>` : ""}</div>
-      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : '<p class="mudo">Uma tarefa que se repete? Programe aqui ou peça na conversa.</p>'}
+      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gv-rotina-vazia">Nada programado ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e aparece aqui.</p>`}
     </section>`;
 
   const acessos = grupos
@@ -131,10 +136,11 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
       ${colegas.length ? `<div class="gv-cartao">${colegas.slice(0, 8).map((b) => `<button type="button" class="gv-linha colega" data-act="preencher-prompt" data-texto="Consulte @${esc(b.nome)} sobre: ">${iconeAgente(b, "sm")}<span class="gv-linha-txt"><b>${esc(b.nome)}</b><small>${esc(b.titulo || "Bot da sua equipe")}</small></span></button>`).join("")}</div>` : '<p class="mudo">Crie outro bot para eles trabalharem juntos.</p>'}
     </section>`;
 
+  // definido em 2026-10-16: a miniatura do topo é o computador. A linha em Ambiente fica no Modo dev.
   const modo = MODOS[a.modoAprovacao ?? "manual"];
   const ambiente = dona
     ? `<div class="gv-cartao">
-        ${linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`)}
+        ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
         ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
@@ -149,7 +155,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
   // Plano "tela limpa" (2026-10-16, T2): o selo MODO DEV, o "Hoje com" e as "Linhas abertas" saíram do topo da conversa.
   const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
-  return identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + dev + ambienteHtml;
+  return tela + identidade + onboarding + computador + atalhos + aFazer + rotinasHtml + acessosHtml + colegasHtml + dev + ambienteHtml;
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------

@@ -140,6 +140,25 @@ const server=net.createServer({allowHalfOpen:true},socket=>{
 server.listen('/tmp/nod-computer.sock');
 process.on('SIGTERM',()=>{void guardarCookies().catch(()=>{}).then(()=>context?.close()).finally(()=>{filhos.forEach(p=>p.kill());process.exit(0);});});
 
+/**
+ * definido em 2026-10-16: parar o container deixa exit_type=Crashed no perfil e o Chromium
+ * abre "Restore pages?" no próximo boot. A flag sozinha não basta nesta imagem — a Preferences
+ * é que decide. JSON inválido fica como está: pior que o diálogo é perder o perfil.
+ */
+async function perfilSaiuLimpo() {
+  const arquivo = '/home/node/profile/Default/Preferences';
+  let texto;
+  try { texto = await readFile(arquivo, 'utf8'); } catch { return; }
+  let prefs;
+  try { prefs = JSON.parse(texto); } catch { return; }
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return;
+  const perfil = prefs.profile && typeof prefs.profile === 'object' && !Array.isArray(prefs.profile) ? prefs.profile : (prefs.profile = {});
+  if (perfil.exit_type === 'Normal' && perfil.exited_cleanly === true) return;
+  perfil.exit_type = 'Normal';
+  perfil.exited_cleanly = true;
+  await writeFile(arquivo, JSON.stringify(prefs));
+}
+
 async function subir() {
   await mkdir('/workspace/downloads',{recursive:true});
   await mkdir('/home/node/profile',{recursive:true});
@@ -161,18 +180,32 @@ async function subir() {
   });
   start('Xvfb',[':99','-screen','0','1280x800x24','-nolisten','tcp']);
   await delay(500);
-  start('openbox',[]);
+  // definido em 2026-10-16: sem decoração e maximizado, o recorte da tela é o navegador, não uma janela
+  // no meio do cinza. Medido nesta imagem: janela 1280×760 em 0,30 deixava faixa de wallpaper.
+  await writeFile('/tmp/nod-openbox.xml',`<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <applications>
+    <application class="*">
+      <decor>no</decor>
+      <maximized>yes</maximized>
+    </application>
+  </applications>
+</openbox_config>`);
+  start('openbox',['--config-file','/tmp/nod-openbox.xml']);
   await run('pulseaudio',['--start','--exit-idle-time=-1']);
   await run('pactl',['load-module','module-null-sink','sink_name=nod','sink_properties=device.description=nod']);
   await run('pactl',['set-default-sink','nod']);
   // definido em 2026-09-24 (emenda da ADR-037): um container por volume (ADR-037), então a trava do
   // perfil que sobrou é de um container que já morreu — com ela o Chromium não abre (Nina, 22/09).
   for(const nome of TRAVAS_DO_PERFIL) await unlink(path.join('/home/node/profile',nome)).catch(()=>{});
+  await perfilSaiuLimpo();
   try {
     context = await chromium.launchPersistentContext('/home/node/profile',{
       executablePath:'/usr/bin/chromium',headless:false,viewport:null,acceptDownloads:true,timeout:PRAZO_NAVEGADOR_MS,
       chromiumSandbox:false,proxy:{server:'http://egress:3128',bypass:'localhost,127.0.0.1'},
-      args:['--password-store=gnome-libsecret','--window-size=1280,760','--window-position=0,30','--disable-dev-shm-usage','--disable-quic','--autoplay-policy=no-user-gesture-required'],
+      // definido em 2026-10-16: sem sandbox (cap-drop ALL) o Chromium pinta a faixa "unsupported command-line flag: --no-sandbox". --test-type tira a faixa. Medido nesta imagem: a faixa cobria o about:blank.
+      // --hide-crash-restore-bubble e perfilSaiuLimpo: o container morre no meio da sessão e o Chromium abre "Restore pages?". Medido nesta imagem depois de docker stop.
+      args:['--password-store=gnome-libsecret','--start-maximized','--window-size=1280,800','--window-position=0,0','--disable-dev-shm-usage','--disable-quic','--autoplay-policy=no-user-gesture-required','--test-type','--hide-crash-restore-bubble'],
     });
   } catch(e) { throw falhaDe('navegador_nao_abriu',e); }
   context.setDefaultTimeout(15000);
@@ -183,6 +216,8 @@ async function subir() {
     await context.addCookies(cookies);
   } catch(e) { if(e.code!=='ENOENT') throw falhaDe('cofre_invalido','os cookies guardados não abriram'); }
   page = context.pages()[0] ?? await context.newPage();
+  // A janela já existe; se o openbox não maximizou, o xdotool encosta no framebuffer. Falha aqui não derruba o boot.
+  await exec('xdotool',['search','--onlyvisible','--class','Chromium','windowmove','0','0','windowsize','1280','800'],{timeout:4000}).catch(()=>{});
   context.pages().forEach(acompanhar);
   context.on('page',p=>{acompanhar(p);page=p;mudar();});
   if(falha) return;

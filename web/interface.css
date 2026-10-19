@@ -249,11 +249,11 @@
 .conexao-avancada > summary { cursor: pointer; color: var(--ink-3); font-size: 12px; }
 .conexao-avancada[open] > summary { margin-bottom: 12px; }
 /* definido em 2026-09-18: desktop persistente em diálogo independente do composer. */
-.computador-dialog{width:min(1500px,96vw);max-width:none;max-height:94vh;padding:0;border:1px solid var(--line-strong);border-radius:18px;background:var(--surface-side);color:var(--ink);box-shadow:var(--shadow-pop)}
+.computador-dialog{width:min(1500px,96vw);max-width:96vw;min-width:0;max-height:94vh;overflow:auto;box-sizing:border-box;padding:0;border:1px solid var(--line-strong);border-radius:18px;background:var(--surface-side);color:var(--ink);box-shadow:var(--shadow-pop)}
 .computador-dialog::backdrop{background:var(--backdrop);backdrop-filter:blur(4px)}
 .computador-dialog button{cursor:pointer;border:1px solid var(--line-strong);background:var(--surface);border-radius:7px;padding:7px 11px;color:inherit;font:inherit;white-space:nowrap}
 .computador-dialog button:disabled{opacity:.45;cursor:default}.computador-dialog button:hover:enabled{background:var(--surface-selected)}
-.computador-header{display:flex;align-items:center;gap:16px;padding:22px 26px 12px}.computador-header h2{margin:4px 0;font-size:24px;font-weight:550}.computador-kicker{font-size:10px;letter-spacing:1.8px;color:var(--ink-3)}.computador-status{margin-left:auto;font-size:12px;padding:7px 11px;background:var(--surface-selected);border-radius:20px}
+.computador-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;padding:22px 26px 12px}.computador-header>div{min-width:0;flex:1}.computador-header h2{margin:4px 0;font-size:24px;font-weight:550}.computador-kicker{font-size:10px;letter-spacing:1.8px;color:var(--ink-3)}.computador-sub,.computador-ajuda,.computador-dica{overflow-wrap:anywhere}.computador-status{margin-left:auto;font-size:12px;padding:7px 11px;background:var(--surface-selected);border-radius:20px}
 .computador-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 26px;font-size:12px}.computador-toolbar label{display:flex;align-items:center;gap:8px;margin-left:auto}.computador-dialog select{padding:6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink)}
 .computador-ajuda{margin:5px 26px 10px;font-size:13px;color:var(--ink-2)}.computador-erro:empty{display:none}.computador-erro{margin:10px 26px;color:var(--danger);font-size:13px}
 .computador-layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;padding:8px 26px 24px}.computador-desktop{min-width:0}.computador-url{display:flex;gap:8px;padding:8px;background:var(--surface-selected);border-radius:10px 10px 0 0}.computador-dialog input:not([type=file]),.computador-dialog textarea{font:inherit;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:6px;padding:8px;min-width:0;box-sizing:border-box}.computador-url input{flex:1;font-size:12px!important}.computador-abas{display:flex;gap:3px;overflow-x:auto;background:var(--surface-selected);padding:0 8px 5px}.computador-abas button{overflow:hidden;text-overflow:ellipsis;max-width:190px;font-size:11px;padding:5px 8px}.computador-abas .ativa{background:var(--surface)}
@@ -338,6 +338,27 @@
 .computador-fora summary{cursor:pointer;color:var(--ink-3);font-size:12.5px}
 .computador-tecnico{font-family:var(--font-mono);font-size:12px;line-height:1.8;margin-top:6px!important}
 .computador-atividade .tag{margin-left:4px}
+/* definido em 2026-10-16: sem Modo dev a pessoa só vê a tela, assumir e devolver. O resto é depuração. */
+.computador-dialog:not(.computador-dev) .computador-dev-only{display:none!important}
+.computador-dialog:not(.computador-dev){width:min(1040px,96vw);background:#0e0e10;border:0;overflow:hidden} /* cor-fixa: a moldura é o monitor */
+.computador-dialog:not(.computador-dev) .computador-header{padding:10px 12px 10px 16px;background:var(--surface);gap:10px}
+.computador-dialog:not(.computador-dev) .computador-header h2{margin:0;font-size:15px;font-weight:600}
+.computador-dialog:not(.computador-dev) .computador-header > div{min-width:0}
+.computador-dialog:not(.computador-dev) .computador-layout{display:block;padding:0;gap:0}
+.computador-dialog:not(.computador-dev) .computador-viewport{border:0;border-radius:0;aspect-ratio:1.6}
+.computador-dialog:not(.computador-dev) .computador-erro:not(:empty){margin:0;padding:8px 16px}
+.computador-dialog:not(.computador-dev) audio{display:none}
+.computador-dialog .computador-fechar{border:0;background:transparent;width:32px;height:32px;padding:0;border-radius:8px;font-size:16px}
+.computador-dialog .computador-fechar:hover{background:var(--surface-selected)}
+.computador-dialog .computador-acao{border:0;border-radius:999px;background:var(--action);color:var(--on-action);font-size:13px;padding:7px 14px}
+.computador-dialog .computador-acao:hover{filter:brightness(1.08)}
+.computador-acao[hidden],.computador-velo[hidden]{display:none!important}
+.computador-dialog .computador-velo{position:absolute;z-index:2;left:50%;bottom:16px;width:max-content;transform:translateX(-50%);border:0;border-radius:999px;background:#2c2c2e;color:#f4f4f5;padding:8px 16px;box-shadow:0 8px 28px #0006} /* cor-fixa: pílula sobre a tela */
+.computador-dev .computador-uso{display:none!important}
+.computador-dev-selo{font-size:11px;letter-spacing:.4px;text-transform:uppercase;color:var(--ink-3)}
+.computador-browser-dialog:not([hidden]){position:absolute;z-index:3;left:12px;right:12px;bottom:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px;border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-pop)}
+.computador-browser-dialog p{margin:0;flex:1;min-width:160px;font-size:13px}
+.computador-browser-dialog input{flex:1;min-width:120px}
 
 /* ---- anexos no chat (ADR-046; mockup de 2026-09-24) ---- */
 .stage { position: relative; }

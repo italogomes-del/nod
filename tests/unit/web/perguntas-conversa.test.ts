@@ -5,6 +5,7 @@ import type { TipoDecisao } from "../../../src/contracts/decisao.ts";
 import type { Mensagem, PayloadMensagem } from "../../../src/contracts/mensagem.ts";
 import type { FioDaPergunta, PedidoDoItem } from "../../../src/contracts/pedido.ts";
 import { opcaoRespondida } from "../../../src/domain/opcoes-da-pergunta.ts";
+import { textoPedidoDeTela } from "../../../src/domain/computador.ts";
 import { estadoInicial, reduzir, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
 import { destinoDoEnvio, enviarPeloComposer, indiceDaOpcao, modoDoComposer, proximaDoComposer, textoDaLetra, type ApiDeEnvio } from "../../../web/lib/perguntas.ts";
 import { pilulaDaPergunta, pilulaDasNovas } from "../../../web/lib/rolagem.ts";
@@ -77,6 +78,19 @@ const OPCOES = ["Mergear com o teste rodado na VM", "Reapontar a pilha para a ma
 const umaAberta = (opcoes: string[] | undefined = OPCOES, extra = {}): Estado => cenario([fala("m1", "d1", PERGUNTA, opcoes, AGORA - 2 * H, extra)], [item("d1")]);
 const timeline = (e: Estado): string => renderTimeline(e.conversas.c ?? null, e);
 const PADRAO = { placeholder: "Escreva uma mensagem para Nina…", nota: "" };
+
+describe("o pedido de tela vira o cartão Abrir computador", () => {
+  it("aberta mostra o motivo e o botão que assume a tela; a senha não fica no balão", () => {
+    const motivo = "verificar que é humano no LinkedIn";
+    const html = timeline(cenario([fala("m1", "d1", textoPedidoDeTela(motivo))], [item("d1", { frase: textoPedidoDeTela(motivo) })]));
+    expect(html).toContain("msg-computador");
+    expect(html).toContain(motivo);
+    expect(html).toContain('data-act="abrir-computador"');
+    expect(html).toContain('data-assumir="1"');
+    expect(html).not.toContain("Parei aqui até você responder");
+    expect(html).not.toContain("Não envie senha");
+  });
+});
 
 describe("o cartão da pergunta na conversa (tela E2)", () => {
   it("aberta: um cartão só — título, ×, lista A/B/C e 'Ou responda no chat abaixo'; a fala não sai também como balão", () => {

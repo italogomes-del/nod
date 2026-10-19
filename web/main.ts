@@ -1,6 +1,7 @@
 import "./lib/mascote-elemento.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
-import { abrirComputador } from "./telas/computador.ts";
+import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
+import { definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
 import { CURTA } from "./telas/card-pasta.ts";
@@ -777,6 +778,7 @@ async function alternarModoDev(): Promise<void> {
   if (!api) return;
   const p = await api.gravarPreferencias({ modoDev: !estado.modoDev.ligado });
   dispatch({ tipo: "modo-dev", ligado: p.modoDev });
+  aplicarModoDevNoComputador(p.modoDev);
   const c = conversaDaTela(estado);
   if (p.modoDev && c) await carregarRaioX(c.conversa.id);
 }
@@ -1085,6 +1087,8 @@ function renderPrincipal(): void {
   atualizarGaveta(estado, gavetaSuja);
   document.querySelector(".app")?.classList.toggle("com-detalhes", t.tipo === "conversa");
   document.querySelector(".app")?.classList.toggle("detalhes-ocultos", painelOculto());
+  const donoDaTela = t.tipo === "conversa" && botGerido(t.agenteId)?.ownerId === estado.sessao?.pessoaId;
+  definirTelaDoBot(donoDaTela ? api : null, donoDaTela && t.tipo === "conversa" ? t.agenteId : null);
   // ADR-094: um cabeçalho só. No celular o ☰ da gaveta de bots entra no próprio cabeçalho da tela; tela sem cabeçalho
   // ganha uma faixa só com ele (`so-menu`, que no computador não aparece).
   regiao("cabecalho", botaoAbrirBots() + cabecalho);
@@ -1480,6 +1484,7 @@ function render(): void {
   agendarViradaDoMascote();
   if (!estado.sessao) {
     document.querySelector(".app")?.classList.add("sem-sessao");
+    definirTelaDoBot(null, null);
     regiao("detalhes", "");
     regiao("sidebar", "");
     regiao("cabecalho", "");
@@ -1638,6 +1643,7 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
     atualizarModoNoComposer();
     dispatch({ tipo: "modo-dev", ligado: p.modoDev });
     if (p.experimentos) dispatch({ tipo: "experimentos", experimentos: p.experimentos });
+    aplicarModoDevNoComputador(p.modoDev);
     const c = conversaDaTela(estado);
     if (p.modoDev && c) void carregarRaioX(c.conversa.id);
   }, () => undefined);
@@ -2984,7 +2990,7 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // NOD-56: a captura da tela do bot ao fim do turno, ampliada sobre a conversa.
   "ampliar-captura": (el) => { abrirCapturaAmpliada(el); },
-  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a); },
+  "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado }); },
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
   // frota relê e o cartão continua dizendo o motivo.
   "religar-computador": (el) => agir(async () => {
