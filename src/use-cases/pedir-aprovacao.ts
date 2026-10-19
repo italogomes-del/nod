@@ -6,14 +6,16 @@ import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem, MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { CasoNod } from "../contracts/servicos.ts";
 import { montarItens, type PropostaItem } from "../domain/aprovacao-item.ts";
-import { acaoArriscadaNoApp, decidirLote, envioParaForaNoApp, REGRA_APROVACAO_PERMANENTE, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
-import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL } from "../domain/modo-aprovacao.ts";
+import { acaoArriscadaNoApp, decidirLote, envioParaForaNoApp, REGRA_APROVACAO_PERMANENTE, sempreServe, type DecisaoAutomatica } from "../domain/aprovacao-permanente.ts";
+import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR } from "../domain/modo-aprovacao.ts";
+import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { conectorTocaDadoPessoal } from "../domain/dado-pessoal.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
 import { executarItens, type DesfechoExecutado, type ItemAExecutar } from "./decidir.ts";
-import { medirRevisao } from "./medir-revisao.ts";
+import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
+import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
@@ -68,10 +70,14 @@ export type LoteAutomatico = {
 type EntradaPedido = Parameters<CasoNod<Deps, "pedir_aprovacao">>[1];
 type SaidaPedido = Awaited<ReturnType<CasoNod<Deps, "pedir_aprovacao">>>;
 
-/** A fase 1 devolve a saída final (pendente, recusada) ou o lote automático a executar fora da tx. */
-export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico };
+/**
+ * A fase 1 devolve a saída final (pendente, recusada), o lote automático a executar fora da tx ou (ADR-115, PR 5) o lote
+ * EM REVISÃO: a decisão `em_revisao` e o pedido que a rota põe na caixa do turno depois do commit (nulo = cartão na hora).
+ */
+export type SaidaFase1Pedido = { saida: SaidaPedido } | { lote: LoteAutomatico } | { revisao: { aguardar: string; caixa: PedidoNaCaixa | null }; events: RuntimeEvent[] };
 
-const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPedido): Promise<SaidaFase1Pedido> => {
+/** `comRevisor`: só o caminho da ferramenta (a rota interna sabe esperar a revisão e enfileirar o pedido); os outros, como hoje. */
+const montarFase1 = (computador: boolean, comRevisor = false) => async (deps: Deps, input: EntradaPedido): Promise<SaidaFase1Pedido> => {
   const agora = deps.agora();
   if (!Array.isArray(input.itens) || input.itens.length === 0) throw new ErroDeDominio("entrada_invalida", { cause: "itens vazios" });
   const propostas: PropostaItem[] = [];
@@ -140,13 +146,41 @@ const montarFase1 = (computador: boolean) => async (deps: Deps, input: EntradaPe
   // ADR-062: as regras "Sempre permitir" de AGORA, não as congeladas no plano — o clique vale já neste turno.
   const plano = planoDoTurno ? { ...planoDoTurno, semprePermitir: await semprePermitirVivo(deps, input.agenteId, planoDoTurno) } : null;
   // ADR-059: o modo ATUAL do agente, não o do plano — trocar para mais restrito vale já na próxima ação.
-  const modo = plano ? (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual" : "manual";
+  const agente = plano ? await deps.repos.agentes.buscar(input.agenteId) : null;
+  const modo = agente?.modoAprovacao ?? "manual";
   if (input.plano) {
     // O lote vai ao revisor uma vez só (lote misto pergunta tudo, numa revisão só): arriscado se algum item é, senão envio.
     const candidatos = arriscadaPorIdx.filter((a, idx) => a || envioPorIdx[idx] === true).length;
     await medirRevisao(deps, input.plano, modo, { origem: "app", via: "pedido", arriscada: arriscadaPorIdx.some(Boolean), credencial: false, envioParaFora: envioPorIdx.some(Boolean), contaminado: contaminado || input.plano.confiancaEntrada !== "confiavel", itens: candidatos });
   }
-  const { automatico, porItem } = decidirLote(propostas.map((p, idx) => ({ plano, destino: p.destino, origemSensivel: p.origemSensivel, modo, arriscada: arriscadaPorIdx[idx] === true })));
+  // ADR-115 (PR 5 dos modos de aprovação): o revisor do Automático no lote — a chave ligada, o modo atual automático e o
+  // caminho da ferramenta. Desligada, a decisão é a de hoje, byte a byte. O "contaminado" do envio olha também a conversa
+  // nas últimas 24 h (revisão de engenharia 11); a leitura que falha conta como lida (vai ao revisor).
+  const revisor = comRevisor && input.plano !== undefined && input.plano !== null && deps.services.revisor?.config.ligado === true && modo === "automatico";
+  const contaminadoTurno = contaminado || (input.plano?.confiancaEntrada ?? "confiavel") !== "confiavel";
+  const contaminadoParaRevisor = revisor && !contaminadoTurno && envioPorIdx.some(Boolean)
+    ? await deps.repos.turnos.conversaLeuDeFora(input.conversaId, { agora, janelaMs: JANELA_CONVERSA_DE_FORA_MS }).catch(() => true)
+    : contaminadoTurno;
+  const { automatico, revisar, porItem } = decidirLote(propostas.map((p, idx) => ({
+    plano, destino: p.destino, origemSensivel: p.origemSensivel, modo, arriscada: arriscadaPorIdx[idx] === true,
+    ...(revisor ? { revisor, envioParaFora: envioPorIdx[idx] === true, contaminadoParaRevisor } : {}),
+  })));
+  if (revisar && input.plano) {
+    // O lote inteiro numa revisão só (lote misto continua perguntando tudo, ADR-042): um pedido ao revisor com todos os
+    // itens e o resumo que o bot escreveu; "pede" leva o lote ao cartão, "libera" roda o lote como o automático.
+    const r = await revisarAcaoFase1(deps, {
+      plano: input.plano,
+      tipo: "app",
+      itens: propostas.map((p, idx) => ({ texto: p.texto, destino: p.destino, sempreServe: sempreServe({ destino: p.destino, arriscada: arriscadaPorIdx[idx] === true }, contaminadoTurno) })),
+      acao: { tipo: "apps", itens: propostas.map((p) => ({ app: p.destino.conector, ferramenta: p.destino.ferramenta, argumentos: p.destino.argumentos, textoDoItem: p.texto })), resumo: input.resumo },
+      gatilho: revisar,
+      risco: revisar === "arriscado" ? RISCO_APAGAR_NO_APP : RISCO_DO_GATILHO.envio_apos_fora,
+      contaminado: contaminadoParaRevisor,
+      frase: input.resumo,
+      agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null,
+    });
+    return { revisao: { aguardar: r.data.aguardar, caixa: r.data.revisao }, events: r.events ?? [] };
+  }
 
   const decisao = await deps.repos.decisoes.criar({
     tipo: "aprovacao",
@@ -255,7 +289,7 @@ export const assentarLoteAutomatico = async (deps: Deps, input: EntradaAssentarL
  * Fase 1 do pedir_aprovacao chamado pela ferramenta (NOD-263): a rota interna executa o lote fora da tx e assenta numa nova.
  * O caminho do computador não passa aqui — ele nunca é automático (sem plano, o modo é manual).
  */
-export const pedirAprovacaoFase1 = montarFase1(false);
+export const pedirAprovacaoFase1 = montarFase1(false, true);
 
 /**
  * Composição em UMA tx (fase 1 → executarItens → fase 2) para quem já está fora do caminho da ferramenta: o computador (que
@@ -264,6 +298,8 @@ export const pedirAprovacaoFase1 = montarFase1(false);
 const montarPedido = (computador: boolean): CasoNod<Deps, "pedir_aprovacao"> => async (deps, input) => {
   const f = await montarFase1(computador)(deps, input);
   if ("saida" in f) return f.saida;
+  // Sem `comRevisor` a fase 1 nunca manda ao revisor; se mandasse, a decisão `em_revisao` espera como o `pendente`.
+  if ("revisao" in f) return { data: { estado: "pendente", decisao_id: f.revisao.aguardar, instrucao: "encerre o turno; a decisão retoma depois" }, events: f.events };
   const desfechos = await executarItens(deps.services, f.lote.aExecutar);
   return assentarLoteAutomatico(deps, { lote: f.lote, desfechos });
 };
@@ -282,6 +318,8 @@ const primeiraVersao = (ds: readonly DecisaoAutomatica[]): number => {
 const PELO_MODO: Readonly<Record<string, string>> = {
   [REGRA_MODO_AUTOMATICO]: " · aprovação automática",
   [REGRA_MODO_TOTAL]: " · sem aprovações",
+  // ADR-115 (PR 5): o revisor do Automático liberou (a linha do revisor, PR 4, diz o porquê; esta vai à Atividade).
+  [REGRA_REVISOR]: " · o revisor liberou",
 };
 
 /**

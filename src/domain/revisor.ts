@@ -89,12 +89,23 @@ export const RISCO_DO_GATILHO: Readonly<Record<GatilhoDeRevisao, string>> = {
   envio_apos_fora: "manda dados para fora depois de o bot ler conteúdo de fora",
 };
 
-/** A ação que vai ao revisor. O texto do item (`pedir_aprovacao`, PR 5) é o que o bot escreveu: não confiável. */
+/** O risco em frase fixa do arriscado de app (`acaoArriscadaNoApp`: o grupo "apagar", que inclui arquivar). */
+export const RISCO_APAGAR_NO_APP = "apaga ou arquiva num app";
+
+/** Um item de app como o revisor o lê: o app, a ferramenta, os argumentos e, no `pedir_aprovacao`, o que o bot escreveu. */
+export type ItemDeAppParaRevisor = { app: string; ferramenta: string; argumentos: Record<string, unknown>; textoDoItem?: string };
+
+/**
+ * A ação que vai ao revisor. O texto do item (`pedir_aprovacao`, PR 5) é o que o bot escreveu: não confiável. `apps`
+ * (definido em 2026-10-19, PR 5): o lote do `pedir_aprovacao` vai numa revisão só, com todos os itens e o resumo que o bot
+ * escreveu (a frase do cartão), também não confiável.
+ */
 export type AcaoParaRevisor =
   | { tipo: "comando"; comando: string }
   | { tipo: "arquivo"; caminho: string }
   | { tipo: "mcp"; pedido: string }
-  | { tipo: "app"; app: string; ferramenta: string; argumentos: Record<string, unknown>; textoDoItem?: string };
+  | ({ tipo: "app" } & ItemDeAppParaRevisor)
+  | { tipo: "apps"; itens: readonly ItemDeAppParaRevisor[]; resumo?: string };
 
 export type OrigemParaRevisor = "conversa" | "rotina" | "colega" | "sala";
 
@@ -208,17 +219,30 @@ function textoDaAcao(a: AcaoParaRevisor): string | null {
     case "mcp":
       return a.pedido.length > COMANDO_REVISOR_MAX ? null : `Chamada a um app da pessoa (MCP):\n${limparDado(a.pedido)}`;
     case "app": {
-      const args = JSON.stringify(redigirArgumentos(a.argumentos));
-      const item = a.textoDoItem ? `\nO que o bot escreveu no pedido: ${cortar(limparDado(a.textoDoItem), TEXTO_DE_ARGUMENTO_MAX)}` : "";
-      const texto = `App ${limparDado(a.app)}, ferramenta ${limparDado(a.ferramenta)}, argumentos: ${args}${item}`;
+      const texto = textoDoItemDeApp(a);
+      return texto.length > COMANDO_REVISOR_MAX ? null : texto;
+    }
+    case "apps": {
+      const resumo = a.resumo ? `Resumo que o bot escreveu: ${cortar(limparDado(a.resumo), TEXTO_DE_ARGUMENTO_MAX)}\n` : "";
+      const texto = `${resumo}${a.itens.length === 1 ? "Uma ação" : `${a.itens.length} ações, que rodam juntas ou nenhuma`}:\n${a.itens.map((i, idx) => `${idx + 1}. ${textoDoItemDeApp(i)}`).join("\n")}`;
       return texto.length > COMANDO_REVISOR_MAX ? null : texto;
     }
   }
 }
 
+function textoDoItemDeApp(a: ItemDeAppParaRevisor): string {
+  const args = JSON.stringify(redigirArgumentos(a.argumentos));
+  const item = a.textoDoItem ? `\nO que o bot escreveu no pedido: ${cortar(limparDado(a.textoDoItem), TEXTO_DE_ARGUMENTO_MAX)}` : "";
+  return `App ${limparDado(a.app)}, ferramenta ${limparDado(a.ferramenta)}, argumentos: ${args}${item}`;
+}
+
 /** O que fica em `acoes_pelo_modo.resumo`: a ação, redigida, até 500. */
 export function resumoDaAcao(a: AcaoParaRevisor): string {
-  const bruto = a.tipo === "comando" ? a.comando : a.tipo === "arquivo" ? `Gravar ${a.caminho}` : a.tipo === "mcp" ? a.pedido : `${a.app} · ${a.ferramenta}`;
+  const bruto = a.tipo === "comando" ? a.comando
+    : a.tipo === "arquivo" ? `Gravar ${a.caminho}`
+    : a.tipo === "mcp" ? a.pedido
+    : a.tipo === "app" ? `${a.app} · ${a.ferramenta}`
+    : a.itens.map((i) => `${i.app} · ${i.ferramenta}`).join(", ");
   return cortar(redigirSegredos(bruto.trim()), RESUMO_MAX - 1);
 }
 

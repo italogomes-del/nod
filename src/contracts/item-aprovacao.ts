@@ -36,4 +36,9 @@ export type ItemAprovacao = {
    * seca). NULO = resolvido por regra, sem perguntar. A pessoa lê o motivo no card.
    */
   motivoManual: MotivoAprovacaoManual | null;
+  /**
+   * 0094 (PR 5 dos modos de aprovação): só no item que veio do revisor — "Sempre permitir" serve nele (`sempreServe`,
+   * gravado pelo servidor; a tela não recalcula). Ausente = a regra de sempre do botão.
+   */
+  sempreServe?: boolean;
 };

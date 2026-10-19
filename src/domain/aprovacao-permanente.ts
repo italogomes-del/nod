@@ -4,7 +4,7 @@ import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { grupoDaCapacidade } from "./grupos-de-acesso.ts";
-import { conversaComAPessoa, decidirPeloModo, semRevisor, type RegraDoModo } from "./modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, type GatilhoDeRevisao, type RegraDoModo } from "./modo-aprovacao.ts";
 
 /**
  * DUAS regras nomeadas, não uma (ADR-042 claim 5): os ciclos de vida são opostos.
@@ -96,6 +96,25 @@ export function envioParaForaNoApp(cap: Pick<CapacidadeConector, "nome" | "readO
 export type DecisaoAutomatica =
   | { automatico: true; regra: RegraAprovacao; versao: number }
   | { automatico: false; motivo: MotivoAprovacaoManual };
+/** ADR-115 (PR 5 dos modos de aprovação): o terceiro desfecho do caminho dos apps, só com o revisor ligado. */
+export type DecisaoDoApp = DecisaoAutomatica | { revisar: true; gatilho: GatilhoDeRevisao };
+
+/** "revisar" vira o cartão de hoje (`acao_arriscada`), como `semRevisor`: para quem não tem como esperar o revisor. */
+export function semRevisorNoApp(d: DecisaoDoApp): DecisaoAutomatica {
+  return "revisar" in d ? { automatico: false, motivo: "acao_arriscada" } : d;
+}
+
+/**
+ * "Sempre permitir" serve neste item do revisor? (definido em 2026-10-18, decisão 8 do Marlon; PR 5.) Só no apagar de um
+ * app num turno limpo: é onde a regra por ferramenta de hoje de fato tira o revisor das próximas vezes, porque
+ * `decidirAprovacao` lê `semprePermitir` antes do modo SÓ num turno limpo. No turno contaminado a regra da pessoa cai
+ * antes de ser lida; o envio para fora só vai ao revisor contaminado; o terminal é aprovado um a um; e o cartão de falha
+ * (`revisor_falhou`) nunca oferece a regra (o repositório grava falso nele).
+ */
+export function sempreServe(item: { destino: DestinoItem; arriscada: boolean }, contaminado: boolean): boolean {
+  if (item.destino.conector === "terminal" || item.destino.conector === "computador") return false;
+  return item.arriscada && !contaminado;
+}
 
 export type EntradaAprovacao = {
   /** Ausente = nunca automático. O caminho do computador não carrega plano (ADR-042 claim 1). */
@@ -109,6 +128,15 @@ export type EntradaAprovacao = {
   arriscada?: boolean;
   /** ADR-066: o turno já leu algo de fora (web, e-mail, PR) — só pesa no manual, onde a regra "Sempre permitir" cai. */
   contaminado?: boolean;
+  /**
+   * ADR-115 (PR 5): o revisor do Automático vale neste caminho — a chave `NOD_REVISOR` ligada E quem chama sabe esperar
+   * a revisão (a chamada direta e o `pedir_aprovacao` da ferramenta). Ausente/falso = a decisão de hoje, byte a byte.
+   */
+  revisor?: boolean;
+  /** Só com o revisor: a escrita manda algo para fora (`envioParaForaNoApp`). */
+  envioParaFora?: boolean;
+  /** Só com o revisor: o turno (entrada ou marca) ou a conversa nas últimas 24 h leu conteúdo de fora. Ausente = a marca do turno. */
+  contaminadoParaRevisor?: boolean;
 };
 
 /**
@@ -141,7 +169,7 @@ export type EntradaAprovacao = {
  * pessoa (`conversaComAPessoa(plano.modoTurno)`, emenda de 2026-09-30 da ADR-059): numa rotina ou num pedido de
  * colega, ninguém pediu.
  */
-export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
+export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoDoApp {
   const { plano } = entrada;
   if (!plano) return { automatico: false, motivo: "sem_plano" };
   if (entrada.origemSensivel) return { automatico: false, motivo: "origem_sensivel" };
@@ -154,12 +182,22 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   if (!ferramenta || ferramenta.origem !== "conector") return { automatico: false, motivo: "fora_do_catalogo" };
   if (ferramenta.readOnlyHint) return { automatico: true, regra: REGRA_CONSULTA_SEM_DECISAO, versao: VERSAO_CONSULTA_SEM_DECISAO };
 
+  const deFora = plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true;
   // Emenda de 2026-09-30: apagar que a pessoa pediu NA CONVERSA não é arriscado para o automático.
-  const situacao = { arriscada: entrada.arriscada === true && !conversaComAPessoa(plano.modoTurno), credencial: false };
-  // A regra da PESSOA cai inteira depois de conteúdo de fora; a do CONECTOR (acima) não, porque só lê.
-  // ADR-115: o caminho dos apps só ganha o revisor no PR 5 (com ou sem a chave): aqui o modo decide como hoje.
-  const doModo = semRevisor(decidirPeloModo(entrada.modo, situacao));
-  if (plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true) return doModo ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
+  // ADR-115 (PR 5, decisão 4 do Marlon de 2026-10-18): com o revisor, o alívio sai — o apagar pedido na conversa também
+  // vai a ele (o A4) —, e o envio para fora depois de conteúdo de fora deixa de rodar direto (o A3). Sem o revisor, hoje.
+  const situacao = entrada.revisor === true
+    ? { arriscada: entrada.arriscada === true, credencial: false, envioParaFora: entrada.envioParaFora === true, contaminado: entrada.contaminadoParaRevisor ?? deFora }
+    : { arriscada: entrada.arriscada === true && !conversaComAPessoa(plano.modoTurno), credencial: false };
+  // A regra da PESSOA cai inteira depois de conteúdo de fora; a do CONECTOR (acima) não, porque só lê. Num turno limpo,
+  // "Sempre permitir" vem antes do modo: a regra da pessoa pula o revisor (é onde `sempreServe` diz que ela serve).
+  const doModo = decidirPeloModo(entrada.modo, situacao, entrada.revisor === true);
+  // Revisão do PR 5 (2026-10-19): com o revisor, o envio para fora depois de conteúdo de fora — inclusive só a conversa
+  // nas últimas 24 h, que a marca do turno não vê (a sessão retomada carrega o e-mail do turno anterior) — nunca pula o
+  // revisor pela regra da pessoa: é o A3 com uma regra "Sempre permitir" antiga no envio (de um cartão do manual). O
+  // `sempreServe` já é falso no envio; o apagar num turno limpo segue com a regra (decisão 8 do Marlon).
+  const envioAposFora = entrada.revisor === true && entrada.envioParaFora === true && (entrada.contaminadoParaRevisor ?? deFora);
+  if (deFora || envioAposFora) return doModo ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
   if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return doModo ?? { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
   return doModo ?? { automatico: false, motivo: "sem_regra_permanente" };
@@ -171,8 +209,15 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
  * resto. Os itens que teriam passado guardam o motivo mesmo assim, então a lista continua
  * explicável. Particionar de verdade é follow-up e cabe aqui dentro.
  */
-export function decidirLote(entradas: readonly EntradaAprovacao[]): { automatico: boolean; porItem: DecisaoAutomatica[] } {
-  const porItem = entradas.map(decidirAprovacao);
+export function decidirLote(entradas: readonly EntradaAprovacao[]): { automatico: boolean; revisar: GatilhoDeRevisao | null; porItem: DecisaoAutomatica[] } {
+  const brutas = entradas.map(decidirAprovacao);
+  // ADR-115 (PR 5): o lote inteiro vai numa revisão só quando nenhum item já pede a pessoa por outro motivo — senão o
+  // cartão leva o lote e o revisor não é chamado (o item que iria a ele fica com o motivo de hoje, `acao_arriscada`). O
+  // gatilho do lote é o mais forte: arriscado se algum item é, senão envio depois de conteúdo de fora.
+  const algumCartao = brutas.some((d) => !("revisar" in d) && !d.automatico);
+  const gatilhos = brutas.flatMap((d) => ("revisar" in d ? [d.gatilho] : []));
+  const revisar = !algumCartao && gatilhos.length > 0 ? (gatilhos.includes("arriscado") ? "arriscado" : "envio_apos_fora") : null;
+  const porItem = brutas.map(semRevisorNoApp);
   const automatico = porItem.length > 0 && porItem.every((d) => d.automatico);
-  return { automatico, porItem };
+  return { automatico, revisar, porItem };
 }

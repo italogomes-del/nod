@@ -5,12 +5,15 @@ import type { MotivoNegacao } from "../contracts/motivos.ts";
 import type { Negacao } from "../contracts/negacao.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { USE_CASE_POR_FERRAMENTA, type ContextoFerramenta, type SaidaCasoDeUso } from "../contracts/servicos.ts";
-import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp } from "../domain/aprovacao-permanente.ts";
+import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp, sempreServe } from "../domain/aprovacao-permanente.ts";
+import type { GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
+import { RISCO_APAGAR_NO_APP, RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { conectorTrazConteudoDeFora } from "../domain/conteudo-de-fora.ts";
 import { errosDoSchema } from "../domain/schema-args.ts";
 import { ehErroDeInfraDaTx } from "../db/tx.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
-import { medirRevisao } from "./medir-revisao.ts";
+import { JANELA_CONVERSA_DE_FORA_MS, medirRevisao } from "./medir-revisao.ts";
+import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
 import { normalizarPedidoAPessoa } from "./pedir-a-pessoa.ts";
 import { assentarLoteAutomatico, pedirAprovacaoFase1, type LoteAutomatico } from "./pedir-aprovacao.ts";
 import { semprePermitirVivo } from "./regras-vivas.ts";
@@ -60,7 +63,11 @@ export type EfeitoPendente =
   }
   | { tipo: "lote"; lote: LoteAutomatico };
 
-export type SaidaFase1Chamada = ResultadoChamada | { efeito: EfeitoPendente };
+/**
+ * `emRevisao` (ADR-115, PR 5 dos modos de aprovação): a ação foi ao revisor — a rota responde `{ aguardar }` ao proxy (que
+ * já espera como espera a pessoa) e só DEPOIS do commit põe o pedido na caixa do turno (`caixa` nulo = cartão na hora).
+ */
+export type SaidaFase1Chamada = ResultadoChamada | { efeito: EfeitoPendente } | { emRevisao: { aguardar: string; caixa: PedidoNaCaixa | null } };
 
 type RespostaConector = Awaited<ReturnType<Services["conectores"]["chamar"]>>;
 
@@ -168,6 +175,8 @@ async function despacharNod(deps: Deps, ctx: ContextoFerramenta, nome: NomeFerra
     if (!v.ok) return { erros: v.erros };
     const f = await pedirAprovacaoFase1(deps, { ...ctx, ...v.args });
     if ("lote" in f) return { resultado: { efeito: { tipo: "lote", lote: f.lote } }, events: [] };
+    // ADR-115 (PR 5): o lote foi ao revisor — a mesma espera do `pendente`, sem a tela ver nada até o veredito.
+    if ("revisao" in f) return { resultado: { emRevisao: f.revisao }, events: f.events };
     saida = f.saida;
   } else saida = await rodarValidado(deps, ctx, nome, args);
   if ("erros" in saida) return saida;
@@ -233,7 +242,9 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
     await registrarChamada(null);
     if (plano.executor === "catcher") await deps.repos.catcher.registrar({ turnoId: input.turnoId, tipo: "tool_call", dados: { nome: input.nome, origem: "nod" } });
     // ADR-083: a ferramenta que abre uma decisão põe a task do turno em "precisa de você" na hora.
-    if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
+    // Em revisão a tela não vê nada: a task só vai a "precisa de você" se o revisor pedir (assentarRevisao). Sem pedido
+    // à caixa (Codex, teto, repetida, longo), o cartão já nasceu pendente: sincroniza na hora, como o pendente de sempre.
+    if (FERRAMENTAS_QUE_PEDEM_A_PESSOA.has(ferramenta.nome) && !("emRevisao" in r.resultado && r.resultado.emRevisao.caixa !== null)) r.events.push(...(await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId)));
     return { data: r.resultado, events: [...events, ...r.events] };
   }
 
@@ -255,23 +266,60 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   // automático o que, pedido por item, pararia em `acao_arriscada`. Quem não passaria sozinho no card recebe a
   // negação transitória "peça aprovação" e cai no pedir_aprovacao, com o motivo gravado no item.
   let medir: (() => Promise<unknown>) | null = null;
+  let revisar: { gatilho: GatilhoDeRevisao; arriscada: boolean; contaminadoTurno: boolean; contaminado: boolean; agente: Awaited<ReturnType<Deps["repos"]["agentes"]["buscar"]>> } | null = null;
   if (!ferramenta.readOnlyHint) {
-    const modo = (await deps.repos.agentes.buscar(input.agenteId))?.modoAprovacao ?? "manual";
+    const agente = await deps.repos.agentes.buscar(input.agenteId);
+    const modo = agente?.modoAprovacao ?? "manual";
     const capacidade = conector.catalogo.find((c) => c.nome === tool);
     const semprePermitir = await semprePermitirVivo(deps, input.agenteId, plano);
     const destino = { conector: conector.slug, ferramenta: tool, argumentos: (input.argumentos ?? {}) as Record<string, unknown> };
     const contaminado = await deps.repos.turnos.contaminado(input.turnoId);
     const arriscada = capacidade ? acaoArriscadaNoApp(capacidade) : true;
-    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada, contaminado });
-    if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
+    const envioParaFora = capacidade ? envioParaForaNoApp(capacidade) : false;
+    const contaminadoTurno = contaminado || plano.confiancaEntrada !== "confiavel";
+    // ADR-115 (PR 5 dos modos de aprovação): o revisor do Automático chega à chamada direta — a chave ligada e o modo atual
+    // automático. Desligada, a decisão é a de hoje, byte a byte. O "contaminado" do envio olha também a conversa nas
+    // últimas 24 h (revisão de engenharia 11); a leitura que falha conta como lida (o lado seguro: vai ao revisor).
+    const revisor = deps.services.revisor?.config.ligado === true && modo === "automatico";
+    const contaminadoParaRevisor = revisor && !contaminadoTurno && !arriscada && envioParaFora
+      ? await deps.repos.turnos.conversaLeuDeFora(plano.conversaId, { agora, janelaMs: JANELA_CONVERSA_DE_FORA_MS }).catch(() => true)
+      : contaminadoTurno;
+    const d = decidirAprovacao({ plano: { ...plano, semprePermitir }, destino, origemSensivel: false, modo, arriscada, contaminado, ...(revisor ? { revisor, envioParaFora, contaminadoParaRevisor } : {}) });
+    if ("revisar" in d) revisar = { gatilho: d.gatilho, arriscada, contaminadoTurno, contaminado: contaminadoParaRevisor, agente };
+    else if (!d.automatico) return negar("alcance_insuficiente", "ferramenta_negada", conectorId, true);
     // PR 1 dos modos de aprovação (medir antes): a chamada que roda agora conta aqui; a que voltou com "peça aprovação"
     // conta no lote do pedir_aprovacao, para cada ação contar uma vez só. Depois do schema (revisão do PR #402): a chamada
     // recusada por argumento não roda, e a corrigida contaria de novo.
-    medir = () => medirRevisao(deps, plano, modo, { origem: "app", via: "chamada", arriscada, credencial: false, envioParaFora: capacidade ? envioParaForaNoApp(capacidade) : false, contaminado: contaminado || plano.confiancaEntrada !== "confiavel" });
+    medir = () => medirRevisao(deps, plano, modo, { origem: "app", via: "chamada", arriscada, credencial: false, envioParaFora, contaminado: contaminadoTurno });
   }
   const erros = errosDoSchema(ferramenta.schema, input.argumentos ?? {});
   if (erros.length > 0) return negar("args_invalidos", "ferramenta_negada", conectorId);
   if (medir) await medir();
+
+  if (revisar) {
+    // ADR-115 (PR 5): hoje esta chamada voltava como "peça aprovação" e o modelo a refazia pelo pedir_aprovacao. Agora vira
+    // uma decisão de um item EM REVISÃO (fase 1 do revisor, revisar-acao.ts) e o proxy espera o `aguardar`: libera → o
+    // item roda como no lote automático (a ponte executa fora da tx e assenta); pede → cartão. Some a ida e volta. Nada
+    // roda agora: sem trilha de chamada nem marca de conteúdo de fora (quem as grava é a execução, depois).
+    const { agente } = revisar;
+    const argumentos = (input.argumentos ?? {}) as Record<string, unknown>;
+    const destino = { conector: conector.slug, ferramenta: tool, argumentos, ...(ferramenta.execucao === "maquina" ? { execucao: "maquina" as const } : {}) };
+    const r = await revisarAcaoFase1(deps, {
+      plano,
+      tipo: "app",
+      itens: [{ texto: `Usar ${tool} no ${conector.nome}`, destino, sempreServe: sempreServe({ destino, arriscada: revisar.arriscada }, revisar.contaminadoTurno) }],
+      acao: { tipo: "app", app: conector.slug, ferramenta: tool, argumentos },
+      gatilho: revisar.gatilho,
+      risco: revisar.gatilho === "arriscado" ? RISCO_APAGAR_NO_APP : RISCO_DO_GATILHO.envio_apos_fora,
+      contaminado: revisar.contaminado,
+      frase: `${agente?.nome ?? "O bot"} quer usar ${conector.nome}`,
+      agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null,
+    });
+    // Sem pedido à caixa o cartão já nasceu pendente: a task vai a "precisa de você" na hora (ADR-083), como o
+    // pedir_aprovacao que esta chamada substitui. Com pedido, só se o revisor pedir (assentarRevisao).
+    const daTask = r.data.revisao === null ? await sincronizarTrabalho(deps, (await deps.repos.turnos.buscar(input.turnoId))?.trabalhoId) : [];
+    return { data: { emRevisao: { aguardar: r.data.aguardar, caixa: r.data.revisao } }, events: [...events, ...(r.events ?? []), ...daTask] };
+  }
 
   await registrarChamada(conectorId);
   // definido em 2026-10-01 (ADR-066): chamar um app de fora (Gmail, GitHub, MCP próprio) marca o turno, como a web já
@@ -359,6 +407,8 @@ export const concluirChamada: CasoDeUso<EntradaConcluirChamada, ResultadoChamada
 export const chamarFerramenta: CasoDeUso<EntradaChamarFerramenta, ResultadoChamada> = async (deps, input) => {
   const f1 = await chamarFerramentaFase1(deps, input);
   const data = f1.data;
+  // Em revisão: a resposta do proxy (o pedido à caixa é da rota; quem testa a revisão chama a fase 1 e enfileira).
+  if ("emRevisao" in data) return { data: { aguardar: data.emRevisao.aguardar }, events: f1.events ?? [] };
   if (!("efeito" in data)) return { data, events: f1.events ?? [] };
   const desfecho = await executarEfeito(deps.services, data.efeito);
   const sem = respostaSemFase2(data.efeito, desfecho);

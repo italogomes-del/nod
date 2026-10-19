@@ -7,7 +7,6 @@ import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-la
 import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_AUTOMATICO_COM_REVISOR, VERSAO_MODO_TOTAL, VERSAO_REGRA_REVISOR } from "../../../domain/modo-aprovacao.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import { randomUUID } from "node:crypto";
-import { ErroBancoOcupado } from "../../../db/tx.ts";
 import { contextoAtual, executarComContexto } from "../../../obs/contexto.ts";
 import { log } from "../../../obs/log.ts";
 import type { TokenTurno } from "../../../services/token-turno.ts";
@@ -18,8 +17,9 @@ import { soltarPorMemoria } from "../../../domain/trabalho.ts";
 import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
 import type { PedidoNaCaixa } from "../../../use-cases/revisar-acao.ts";
-import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type EfeitoPendente, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
+import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
+import { assentarComNovaTentativa, TENTATIVAS_FASE2 } from "../../../use-cases/liberar-no-app.ts";
 import type { Rota } from "../roteador.ts";
 import { bytes } from "../util.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
@@ -49,34 +49,8 @@ const CLASSES: readonly ClasseNegacao[] = ["ferramenta_negada", "conector_indisp
 
 const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** NOD-263: quantas vezes a fase 2 tenta gravar o desfecho quando o banco está ocupado, e a espera antes de cada nova tentativa. */
-export const TENTATIVAS_FASE2 = 3;
-const ESPERA_FASE2_MS = [100, 300] as const;
-
-/**
- * A FASE 2 com banco ocupado (NOD-263): repete SÓ a escrita — o efeito já aconteceu e nunca é reenviado (ADR-009); a fase 2 é
- * idempotente (`desfecho is null`, mensagem só quando grava). Esgotou: loga `desfecho_nao_gravado` com o que identifica o
- * efeito e relança (a rota responde 503 como qualquer banco_ocupado). Outro erro relança na hora.
- */
-export async function assentarComNovaTentativa<T>(gravar: () => Promise<T>, o: { correlationId: string; efeito: EfeitoPendente; dormir: (ms: number) => Promise<void> }): Promise<T> {
-  for (let tentativa = 1; ; tentativa++) {
-    try {
-      return await gravar();
-    } catch (e) {
-      if (!(e instanceof ErroBancoOcupado)) throw e;
-      if (tentativa >= TENTATIVAS_FASE2) {
-        log("erro", "desfecho_nao_gravado", {
-          correlation_id: o.correlationId,
-          tentativas: tentativa,
-          tipo: o.efeito.tipo,
-          ...(o.efeito.tipo === "lote" ? { decisao_id: o.efeito.lote.decisaoId, turno_id: o.efeito.lote.turnoId } : { conector_id: o.efeito.conectorId, ferramenta: o.efeito.tool, turno_id: o.efeito.negacao.turnoId }),
-        });
-        throw e;
-      }
-      await o.dormir(ESPERA_FASE2_MS[tentativa - 1] ?? 300);
-    }
-  }
-}
+/** NOD-263: movidas para use-cases/liberar-no-app.ts (PR 5 dos modos de aprovação); reexportadas para quem já importa daqui. */
+export { assentarComNovaTentativa, TENTATIVAS_FASE2 };
 
 /**
  * Rotas INTERNAS (/api/interno/…), autenticadas pelo token de turno no roteador da L1: a
@@ -159,6 +133,13 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             plano,
           });
         });
+        // ADR-115 (PR 5): a ação foi ao revisor. O pedido entra na caixa do turno só agora, depois do commit da fase 1 — o
+        // laço não pode responder por uma decisão que o banco ainda não tem; o proxy recebe o `aguardar` de sempre.
+        if ("emRevisao" in fase1) {
+          if (fase1.emRevisao.caixa) deps.revisor?.enfileirar(fase1.emRevisao.caixa);
+          ctx.json(200, { aguardar: fase1.emRevisao.aguardar });
+          return;
+        }
         if (!("efeito" in fase1)) {
           ctx.json(200, fase1);
           return;

@@ -257,3 +257,12 @@ ser verdade na ADR-066. E o Nod em "Ignorar todas" punha outro bot nesse modo se
 
 **Gatilho de reversão.** Uma dona que diga ter ligado o total sem perceber (a confirmação não basta): o total passa a
 pedir também a digitação do nome do bot.
+
+## Emenda de 2026-10-19: apagar pedido na conversa passa pelo revisor (Fase 4, PR 5)
+
+Revê o item 4 da emenda de 2026-09-30. Com a chave `NOD_REVISOR` ligada ([ADR-115](adr-115-automatico-com-revisor-na-ia-da-pessoa.md),
+seção "PR 5"), apagar ou arquivar num app que a pessoa pediu na conversa deixa de sair sem olhar: vai ao revisor, como o
+apagar de rotina ou de colega (decisão 4 do Marlon, 18/10; o cenário A4 do protótipo). O revisor libera em segundos o que
+a pessoa pediu ou pede o ok dela num cartão. Merge e aprovar PR continuam saindo sozinhos. Com a chave desligada, o item
+4 vale como estava. O gatilho de reversão da emenda de 30/09 ("uma exclusão que a dona diga não ter pedido") passa a valer
+para a exclusão liberada pelo revisor.

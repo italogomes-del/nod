@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Decisao } from "../contracts/decisao.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
-import type { DestinoItem } from "../contracts/item-aprovacao.ts";
+import type { DestinoItem, ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { USO_DO_MAC_PADRAO } from "../contracts/raio-x.ts";
 import { COMANDO_REVISOR_MAX, TETO_REVISOES_POR_TURNO, type FalhaRevisao, type PedidoRevisao } from "../contracts/revisao.ts";
@@ -29,6 +29,7 @@ import { autoriaDoAgente } from "./registrar-negacao.ts";
 import { JANELA_CONVERSA_DE_FORA_MS } from "./medir-revisao.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
+import type { LoteAutomatico } from "./pedir-aprovacao.ts";
 
 /**
  * O revisor do Automático no servidor (definido em 2026-10-18, plano dos modos de aprovação, 3d; ADR-115), em três fases,
@@ -44,18 +45,26 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  *  3. `assentarRevisao`, numa tx NOVA, sob a trava do turno (`buscarTravado`, como decidir.ts): libera só com o turno
  *     `despachando`, sem Parar pedido, o bot vivo e o modo ATUAL automático; senão — e no "pede", na falha e no prazo —
  *     a decisão vira o cartão `pendente` de sempre. Idempotente (`where estado = 'em_revisao'`).
+ *
+ * PR 5 (2026-10-19): os apps — a chamada direta (um item) e o lote do `pedir_aprovacao` (todos os itens, numa revisão
+ * só). Liberar um item de app é chamar o app depois da fase 3: a fase 3 fecha e devolve o `lote`; quem chamou executa
+ * fora da transação e assenta numa nova (`executarLiberacao`, liberar-no-app.ts) — quatro passos, como o NOD-263.
  */
 
 /** O que a rota guarda na caixa do turno depois do commit da fase 1. */
 export type PedidoNaCaixa = { escopo: Escopo; machineId: string; pedido: PedidoRevisao };
 
+/**
+ * Um item da decisão em revisão (o mesmo que o cartão teria). No terminal, um só: `texto` é o comando, `Gravar …` ou o
+ * pedido ao MCP — o que a segunda consulta do hook compara. No app (PR 5), um por ação do lote, com `sempreServe` (0094).
+ */
+export type ItemEmRevisao = { texto: string; destino: DestinoItem; sempreServe?: boolean };
+
 export type EntradaRevisarAcao = {
   plano: PlanoTurno;
-  /** O texto do item (o comando, `Gravar …` ou o pedido ao MCP): é o que a segunda consulta do hook compara. */
-  texto: string;
-  tipo: Extract<TipoAcaoDoModo, "comando" | "arquivo" | "mcp">;
+  tipo: Extract<TipoAcaoDoModo, "comando" | "arquivo" | "mcp" | "app">;
+  itens: readonly ItemEmRevisao[];
   acao: AcaoParaRevisor;
-  destino: DestinoItem;
   gatilho: GatilhoDeRevisao;
   /** Frase fixa do domínio (comandoArriscado, ou a do gatilho). */
   risco: string;
@@ -127,8 +136,12 @@ async function paraOndeVai(deps: Deps, e: EntradaRevisarAcao): Promise<{ naoVai:
   const servico = deps.services.revisor;
   const harness = e.plano.harness ?? "claude-cli";
   if (!servico || harness !== "claude-cli") return { naoVai: { falha: "sem_revisor", frase: harness === "codex-cli" ? FRASE_SEM_REVISOR_NO_CODEX : FRASE_DA_FALHA.sem_revisor } };
-  if (e.texto.length > COMANDO_REVISOR_MAX) return { naoVai: { falha: "longo", frase: FRASE_DA_FALHA.longo } };
-  if (await deps.repos.itensAprovacao.recusadoNaCadeia(e.plano.turnoId, e.texto)) return { naoVai: { falha: "repetida", frase: FRASE_DA_FALHA.repetida } };
+  // No app o corte é o do pedido montado (cada texto em 400, o total em 4.000: `longo` sai de pedidoDoRevisor).
+  if (e.tipo !== "app" && e.itens.some((i) => i.texto.length > COMANDO_REVISOR_MAX)) return { naoVai: { falha: "longo", frase: FRASE_DA_FALHA.longo } };
+  // A mesma ação já recusada na cadeia: no terminal, pelo texto; no app, pelo destino (qualquer item do lote).
+  for (const i of e.itens) {
+    if (await deps.repos.itensAprovacao.recusadoNaCadeia(e.plano.turnoId, e.tipo === "app" ? i.destino : i.texto)) return { naoVai: { falha: "repetida", frase: FRASE_DA_FALHA.repetida } };
+  }
   if ((await deps.repos.acoesPeloModo.revisoesDoTurno(e.plano.turnoId)) >= TETO_REVISOES_POR_TURNO) return { naoVai: { falha: "teto", frase: FRASE_TETO_DO_TURNO } };
   if ((await deps.repos.acoesPeloModo.revisoesDaPessoaDesde(deps.agora() - DIA_MS)) >= servico.config.tetoDia) return { naoVai: { falha: "teto", frase: FRASE_DA_FALHA.teto } };
   const maquina = servico.revisorDoTurno(e.plano.turnoId);
@@ -139,7 +152,7 @@ async function paraOndeVai(deps: Deps, e: EntradaRevisarAcao): Promise<{ naoVai:
   return { machineId: maquina.machineId };
 }
 
-function eventoDecisaoCriada(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId" | "conversaId" | "turnoId">): RuntimeEvent {
+function eventoDecisaoCriada(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId" | "conversaId" | "turnoId">, itens: number): RuntimeEvent {
   return {
     tenantId: deps.escopo.tenantId,
     id: randomUUID(),
@@ -149,7 +162,7 @@ function eventoDecisaoCriada(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId
     pessoaDestinoId: deps.escopo.pessoaId,
     conversaId: decisao.conversaId,
     turnoId: decisao.turnoId,
-    dados: { decisao_id: decisao.id, tipo: "aprovacao", itens: 1, sensiveis: 0 },
+    dados: { decisao_id: decisao.id, tipo: "aprovacao", itens, sensiveis: 0 },
   };
 }
 
@@ -192,13 +205,17 @@ export const revisarAcaoFase1: CasoDeUso<EntradaRevisarAcao, SaidaRevisarAcao> =
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
   // O item nasce com o motivo de quando o revisor NÃO responde: se a fase 3 nunca vier (caixa perdida num deploy), o
   // cartão que o varredor solta já diz a verdade. A fase 3 troca pelo motivo certo.
-  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto: e.texto, destino: e.destino, origemSensivel: false, motivoManual: "revisor_falhou", justificativa: naoVai ? naoVai.frase : FRASE_DA_FALHA.prazo }]);
+  // `sempreServe` (0094): o cartão de falha nunca oferece "Sempre permitir"; o que a fase 3 abre por "pede" fica com a marca.
+  await deps.repos.itensAprovacao.criarLote(decisao.id, e.itens.map((i, idx) => ({
+    idx, texto: i.texto, destino: i.destino, origemSensivel: false, motivoManual: "revisor_falhou" as const, justificativa: naoVai ? naoVai.frase : FRASE_DA_FALHA.prazo,
+    ...(i.sempreServe === undefined ? {} : { sempreServe: naoVai ? false : i.sempreServe }),
+  })));
 
   if (naoVai || "naoVai" in destino || montado?.tipo !== "pedido") {
     const causa = naoVai ?? { falha: "sem_revisor" as const, frase: FRASE_DA_FALHA.sem_revisor };
     await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, veredito: "nao_revisado", falha: causa.falha, motivo: causa.frase });
     log("info", "revisao_sem_revisor", { turno_id: e.plano.turnoId, decisao_id: decisao.id, gatilho: e.gatilho, falha: causa.falha });
-    return { data: { aguardar: decisao.id, revisao: null }, events: [eventoDecisaoCriada(deps, decisao)] };
+    return { data: { aguardar: decisao.id, revisao: null }, events: [eventoDecisaoCriada(deps, decisao, e.itens.length)] };
   }
   const config = deps.services.revisor!.config;
   await deps.repos.acoesPeloModo.registrar({ ...base, decisaoId: decisao.id, revisorModelo: config.modelo, revisorHarness: "claude-cli", revisorMaquina: destino.machineId });
@@ -221,7 +238,12 @@ export type ResultadoRevisao =
   | { tipo: "saida"; saida: string; ms?: number; fichasEntrada?: number; fichasSaida?: number; entregueEm?: number | null }
   | { tipo: "falha"; falha: FalhaRevisao; ms?: number; entregueEm?: number | null };
 
-export type SaidaAssentarRevisao = { estado: "liberada" | "cartao" | "ja_assentada"; veredito: "libera" | "pede" | null };
+/**
+ * `lote` (PR 5): a liberação de itens de APP — a decisão já fechou por `regra:revisor` nesta transação, e quem chamou
+ * executa os itens FORA dela e assenta numa nova (`executarLiberacao`), como o lote automático do NOD-263. No terminal não
+ * há lote: o hook acha o comando liberado na segunda consulta.
+ */
+export type SaidaAssentarRevisao = { estado: "liberada" | "cartao" | "ja_assentada"; veredito: "libera" | "pede" | null; lote?: LoteAutomatico };
 
 export const FRASE_MODO_MUDOU = "O modo do bot mudou durante a revisão; confira você.";
 
@@ -247,10 +269,16 @@ export const assentarRevisao: CasoDeUso<{ decisaoId: string; resultado: Resultad
     if (turnoVivo && modoAutomatico) {
       const fechada = await deps.repos.decisoes.concluirRevisao(decisaoId, { liberar: { regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR }, agora });
       if (!fechada) return { data: { estado: "ja_assentada", veredito: null } };
-      for (const i of itens) await deps.repos.itensAprovacao.marcarRevisao(i.id, { liberado: true });
+      const liberados = [];
+      for (const i of itens) {
+        const doApp = i.destino.conector !== "terminal";
+        const m = await deps.repos.itensAprovacao.marcarRevisao(i.id, doApp ? { liberado: true, executar: true } : { liberado: true });
+        if (doApp && m) liberados.push(m);
+      }
       await deps.repos.acoesPeloModo.concluir(decisaoId, { veredito: "libera", motivo: veredito.motivo, ...medidas });
-      log("info", "revisao_liberou", { turno_id: antes.turnoId, decisao_id: decisaoId, ms: resultado.ms ?? null });
-      return { data: { estado: "liberada", veredito: "libera" } };
+      log("info", "revisao_liberou", { turno_id: antes.turnoId, decisao_id: decisaoId, ms: resultado.ms ?? null, itens_de_app: liberados.length });
+      const lote = liberados.length ? await loteLiberado(deps, fechada, liberados) : null;
+      return { data: { estado: "liberada", veredito: "libera", ...(lote ? { lote } : {}) } };
     }
     falha = "turno";
     frase = turnoVivo ? FRASE_MODO_MUDOU : FRASE_DA_FALHA.turno;
@@ -264,10 +292,23 @@ export const assentarRevisao: CasoDeUso<{ decisaoId: string; resultado: Resultad
   await deps.repos.acoesPeloModo.concluir(decisaoId, { veredito: veredito?.decisao ?? "falhou", falha: pediu ? null : falha, motivo: justificativa, ...medidas });
   log("info", pediu ? "revisao_pediu" : "revisao_falhou", { turno_id: antes.turnoId, decisao_id: decisaoId, falha: pediu ? null : falha, ms: resultado.ms ?? null });
   // O frame só agora: a tela nunca viu a revisão. A task do turno vai a "precisa de você" (revisão de engenharia 23).
-  const events: RuntimeEvent[] = [eventoDecisaoCriada(deps, aberta)];
+  const events: RuntimeEvent[] = [eventoDecisaoCriada(deps, aberta, itens.length)];
   if (turno?.trabalhoId) events.push(...(await sincronizarTrabalho(deps, turno.trabalhoId)));
   return { data: { estado: "cartao", veredito: veredito?.decisao ?? null }, events };
 };
+
+/**
+ * Os itens de app que o revisor liberou, como o lote automático (NOD-263): a regra é `regra:revisor`; a dona é quem
+ * executa (o gh do Mac dela, ADR-048); o GitHub App da organização só atende turno de rotina. Conector que sumiu do
+ * catálogo deixa o item sem conector, e a execução o marca `falhou_na_execucao`.
+ */
+async function loteLiberado(deps: Deps, decisao: Pick<Decisao, "id" | "agenteId" | "conversaId" | "turnoId">, itens: readonly ItemAprovacao[]): Promise<LoteAutomatico | null> {
+  if (!decisao.turnoId) return null;
+  const rotina = (await rotinaDoTurno(deps.repos, decisao.turnoId)) !== null;
+  const aExecutar = [];
+  for (const item of itens) aExecutar.push({ item, conectorId: (await deps.repos.conectores.buscarPorSlug(item.destino.conector))?.id ?? null, dono: deps.escopo, rotina });
+  return { decisaoId: decisao.id, conversaId: decisao.conversaId, turnoId: decisao.turnoId, agenteId: decisao.agenteId, aExecutar, regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR };
+}
 
 /**
  * O passo novo do varredor de expiração: a decisão `em_revisao` mais velha que `recolherMs` (2 × o prazo) vira cartão

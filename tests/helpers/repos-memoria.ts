@@ -1970,6 +1970,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             editadoPor: null,
             desfecho: i.desfecho ?? null,
             motivoManual: i.motivoManual ?? null,
+            ...(i.sempreServe !== undefined && i.sempreServe !== null ? { sempreServe: i.sempreServe } : {}),
           };
           b.itens.push(item);
           criados.push(item);
@@ -1992,7 +1993,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (achados.some((d) => !porRevisor(d))) return "pessoa";
         return achados.some((d) => d.turnoId === turnoId) ? "revisor" : null;
       },
-      async recusadoNaCadeia(turnoId, texto) {
+      async recusadoNaCadeia(turnoId, acao) {
         const cadeia = new Set<string>();
         let atual = doTenant(b.turnos).find((t) => t.id === turnoId) ?? null;
         for (let saltos = 0; atual && saltos < 50; saltos++) {
@@ -2002,7 +2003,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const decisoes = new Map(doTenant(b.decisoes).filter((d) => d.turnoId !== null && cadeia.has(d.turnoId)).map((d) => [d.id, d]));
         return doTenant(b.itens).some((i) => {
           const d = decisoes.get(i.decisaoId);
-          return d && i.destino.conector === "terminal" && i.textoOriginal === texto && (i.motivoManual === "revisor_pediu" || d.estado === "vencida" || (d.estado === "decidida" && (!i.selecionado || i.desfecho === "retirado_pela_pessoa" || i.desfecho === "sensivel_nao_aprovado")));
+          const mesma = typeof acao === "string"
+            ? i.destino.conector === "terminal" && i.textoOriginal === acao
+            : i.destino.conector === acao.conector && i.destino.ferramenta === acao.ferramenta && JSON.stringify(i.destino.argumentos) === JSON.stringify(acao.argumentos);
+          return d && mesma && (i.motivoManual === "revisor_pediu" || d.estado === "vencida" || (d.estado === "decidida" && (!i.selecionado || i.desfecho === "retirado_pela_pessoa" || i.desfecho === "sensivel_nao_aprovado")));
         });
       },
       async marcarRevisao(id, p) {
@@ -2011,10 +2015,11 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if ("liberado" in p) {
           if (item.desfecho !== null) return null;
           item.motivoManual = null;
-          item.desfecho = "executado";
+          item.desfecho = p.executar ? null : "executado";
         } else {
           item.motivoManual = p.motivoManual;
           item.justificativa = p.justificativa;
+          if (p.motivoManual === "revisor_falhou" && item.sempreServe !== undefined) item.sempreServe = false;
         }
         return item;
       },

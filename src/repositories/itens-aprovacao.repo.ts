@@ -19,9 +19,10 @@ interface Linha {
   editado_por: string | null;
   desfecho: DesfechoItem | null;
   motivo_manual: MotivoAprovacaoManual | null;
+  sempre_serve: boolean | null;
 }
 
-const COLUNAS = "tenant_id, id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, marcado_por, marcado_em, editado_por, desfecho, motivo_manual";
+const COLUNAS = "tenant_id, id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, marcado_por, marcado_em, editado_por, desfecho, motivo_manual, sempre_serve";
 
 const paraItem = (l: Linha): ItemAprovacao => ({
   tenantId: l.tenant_id,
@@ -39,6 +40,8 @@ const paraItem = (l: Linha): ItemAprovacao => ({
   editadoPor: l.editado_por,
   desfecho: l.desfecho,
   motivoManual: l.motivo_manual,
+  // 0094: só o item que veio do revisor carrega a marca (nulo = a regra de sempre do botão).
+  ...(l.sempre_serve !== null && l.sempre_serve !== undefined ? { sempreServe: l.sempre_serve } : {}),
 });
 
 /** Item aprovado que espera a máquina da dona (ADR-048): com quando a decisão fechou e se foi por regra. */
@@ -56,6 +59,8 @@ export type NovoItemAprovacao = {
   motivoManual?: MotivoAprovacaoManual | null;
   /** Item resolvido por regra nasce com desfecho; o resto nasce sem. */
   desfecho?: DesfechoItem | null;
+  /** 0094 (PR 5 dos modos de aprovação): o item do revisor diz se "Sempre permitir" serve nele (`sempreServe`). */
+  sempreServe?: boolean | null;
 };
 
 /** Aprovação em lista tipada (E4.1/E4.2). O CHECK item_sensivel_marcado_exige_pessoa vive no banco. */
@@ -65,9 +70,9 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
       const criados: ItemAprovacao[] = [];
       for (const i of itens) {
         const [l] = await conn<Linha[]>`
-          insert into itens_aprovacao (tenant_id, id, owner_id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, motivo_manual, desfecho)
+          insert into itens_aprovacao (tenant_id, id, owner_id, decisao_id, idx, texto_original, texto_final, destino, selecionado, origem_sensivel, justificativa, motivo_manual, desfecho, sempre_serve)
           values (${escopo.tenantId}, ${i.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${decisaoId}, ${i.idx}, ${i.texto}, ${i.texto},
-            ${jsonb(conn, i.destino)}, ${!i.origemSensivel}, ${i.origemSensivel}, ${i.justificativa ?? null}, ${i.motivoManual ?? null}, ${i.desfecho ?? null})
+            ${jsonb(conn, i.destino)}, ${!i.origemSensivel}, ${i.origemSensivel}, ${i.justificativa ?? null}, ${i.motivoManual ?? null}, ${i.desfecho ?? null}, ${i.sempreServe ?? null})
           returning ${conn.unsafe(COLUNAS)}`;
         if (l) criados.push(paraItem(l));
       }
@@ -114,10 +119,15 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-115 (revisão de engenharia 3): a MESMA ação do terminal já levou "pede" do revisor, foi negada pela pessoa ou
-     * venceu na cadeia do turno — então vai direto ao cartão, sem outro sorteio no revisor.
+     * ADR-115 (revisão de engenharia 3): a MESMA ação já levou "pede" do revisor, foi negada pela pessoa ou venceu na
+     * cadeia do turno — então vai direto ao cartão, sem outro sorteio no revisor. No terminal, a mesma ação é o mesmo
+     * texto; no app (PR 5 dos modos de aprovação, 2026-10-19), o mesmo destino: conector, ferramenta e argumentos iguais
+     * (jsonb compara pelo valor, não pela ordem das chaves).
      */
-    async recusadoNaCadeia(turnoId: string, texto: string): Promise<boolean> {
+    async recusadoNaCadeia(turnoId: string, acao: string | Pick<DestinoItem, "conector" | "ferramenta" | "argumentos">): Promise<boolean> {
+      const mesma = typeof acao === "string"
+        ? conn`i.destino->>'conector' = 'terminal' and i.texto_original = ${acao}`
+        : conn`i.destino->>'conector' = ${acao.conector} and i.destino->>'ferramenta' = ${acao.ferramenta} and i.destino->'argumentos' = ${jsonb(conn, acao.argumentos)}`;
       const [l] = await conn<{ sim: boolean }[]>`
         with recursive cadeia(id, retoma_turno_id, saltos) as (
           select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
@@ -128,7 +138,7 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
         select exists (
           select 1 from itens_aprovacao i join decisoes d on d.tenant_id = i.tenant_id and d.id = i.decisao_id
           where i.tenant_id = ${escopo.tenantId} and d.turno_id in (select id from cadeia)
-            and i.destino->>'conector' = 'terminal' and i.texto_original = ${texto}
+            and ${mesma}
             and (i.motivo_manual = 'revisor_pediu' or d.estado = 'vencida'
               or (d.estado = 'decidida' and (not i.selecionado or i.desfecho in ('retirado_pela_pessoa', 'sensivel_nao_aprovado'))))
         ) as sim`;
@@ -136,17 +146,20 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-115 (fase 3 da revisão), pela dona: `liberado` — o item roda sem pessoa (motivo nulo = resolvido por regra,
-     * desfecho executado, que o hook lê); senão o motivo do cartão e a frase (o motivo do revisor ou a da falha).
+     * ADR-115 (fase 3 da revisão), pela dona: `liberado` — o item roda sem pessoa (motivo nulo = resolvido por regra). No
+     * terminal o desfecho já nasce `executado` (é o que o hook lê); no app (`executar`, PR 5) o desfecho fica nulo até o
+     * efeito rodar fora da transação e o assentamento gravá-lo (`assentarLoteAutomatico`), como no lote automático. Senão o
+     * motivo do cartão e a frase (o motivo do revisor ou a da falha); `sempreServe` falso no cartão de falha (0094).
      */
-    async marcarRevisao(id: string, p: { liberado: true } | { motivoManual: Extract<MotivoAprovacaoManual, "revisor_pediu" | "revisor_falhou">; justificativa: string }): Promise<ItemAprovacao | null> {
+    async marcarRevisao(id: string, p: { liberado: true; executar?: true } | { motivoManual: Extract<MotivoAprovacaoManual, "revisor_pediu" | "revisor_falhou">; justificativa: string }): Promise<ItemAprovacao | null> {
       const [l] = "liberado" in p
         ? await conn<Linha[]>`
-          update itens_aprovacao set motivo_manual = null, desfecho = 'executado'
+          update itens_aprovacao set motivo_manual = null, desfecho = ${p.executar ? null : "executado"}
           where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and desfecho is null
           returning ${conn.unsafe(COLUNAS)}`
         : await conn<Linha[]>`
-          update itens_aprovacao set motivo_manual = ${p.motivoManual}, justificativa = ${p.justificativa}
+          update itens_aprovacao set motivo_manual = ${p.motivoManual}, justificativa = ${p.justificativa},
+            sempre_serve = ${p.motivoManual === "revisor_pediu" ? conn`sempre_serve` : conn`case when sempre_serve is null then null else false end`}
           where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
           returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraItem(l) : null;

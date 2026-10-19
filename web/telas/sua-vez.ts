@@ -208,9 +208,19 @@ const REGRA_NAO_PULA: Partial<Record<NonNullable<Item["itensAprovacao"][number][
   sem_plano: "Esta ação chegou sem o plano do turno, então não há regra que se aplique a ela.",
 };
 
+/**
+ * O item veio do revisor do Automático e "Sempre permitir" não serve nele (definido em 2026-10-19, decisão 8 do Marlon;
+ * PR 5 dos modos de aprovação): o servidor grava `sempreServe` no item (só o apagar de app num turno limpo); a tela não
+ * recalcula. Nesses itens o botão nem aparece — só Pode fazer e Agora não.
+ */
+export function revisorSemSempre(i: Pick<Item["itensAprovacao"][number], "motivoManual" | "sempreServe">): boolean {
+  return (i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou") && i.sempreServe !== true;
+}
+
 function botaoSempre(item: Item, conectores: Estado["conectores"]): string {
+  if (item.itensAprovacao.length > 0 && item.itensAprovacao.every(revisorSemSempre)) return "";
   const nunca = new Set(item.nuncaPermanente ?? []);
-  const viram = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nunca.has(i.id));
+  const viram = item.itensAprovacao.filter((i) => !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nunca.has(i.id) && !revisorSemSempre(i));
   const elegiveis = viram.filter((i) => !(i.motivoManual && REGRA_NAO_PULA[i.motivoManual]));
   const nomes = [...new Set(elegiveis.map((i) => `${i.destino.conector}.${i.destino.ferramenta}`))];
   if (nomes.length === 0) {

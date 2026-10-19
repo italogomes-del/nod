@@ -16,8 +16,11 @@ import type { CasoDeUso } from "./tipos.ts";
  */
 const MOTIVOS_QUE_REGRA_NAO_PULA: readonly MotivoAprovacaoManual[] = ["gate_de_rotina", "regra_suspensa_conteudo_nao_confiavel", "fora_do_catalogo", "sem_plano"];
 
-export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino" | "motivoManual">): boolean {
+export function podeVirarRegra(i: Pick<ItemAprovacao, "origemSensivel" | "destino" | "motivoManual" | "sempreServe">): boolean {
   if (i.motivoManual && MOTIVOS_QUE_REGRA_NAO_PULA.includes(i.motivoManual)) return false;
+  // ADR-115 (PR 5, decisão 8 do Marlon): o item do revisor só vira regra onde ela serve (`sempreServe`, 0094) — a web
+  // nem mostra o botão nos outros (`revisorSemSempre` em sua-vez.ts).
+  if ((i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou") && i.sempreServe !== true) return false;
   return !i.origemSensivel && i.destino.conector !== "computador" && i.destino.conector !== "terminal" && !nuncaPermanente(i.destino.ferramenta);
 }
 

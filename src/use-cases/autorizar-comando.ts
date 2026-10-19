@@ -149,7 +149,7 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
     // ADR-115: fase 1 do revisor (revisar-acao.ts) em vez do cartão. O hook não muda: espera a decisão `em_revisao`.
     const { gatilho, contaminado, agente, risco } = decidido.revisar;
     const acao = pedido.tipo === "arquivo" ? { tipo: "arquivo" as const, caminho: pedido.arquivo } : pedido.tipo === "mcp" ? { tipo: "mcp" as const, pedido: texto } : { tipo: "comando" as const, comando: texto };
-    const r = await revisarAcaoFase1(deps, { plano, texto, tipo: pedido.tipo, acao, destino, gatilho, risco: risco ?? RISCO_DO_GATILHO[gatilho], contaminado, frase: fraseDoPedido(agente?.nome ?? null), agente });
+    const r = await revisarAcaoFase1(deps, { plano, tipo: pedido.tipo, itens: [{ texto, destino }], acao, gatilho, risco: risco ?? RISCO_DO_GATILHO[gatilho], contaminado, frase: fraseDoPedido(agente?.nome ?? null), agente });
     return { data: r.data.revisao ? { aguardar: r.data.aguardar, revisao: r.data.revisao } : { aguardar: r.data.aguardar }, events: r.events ?? [] };
   }
   const { agenteNome, motivo: doModo, risco } = decidido.card;

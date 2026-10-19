@@ -134,6 +134,27 @@ describe("decisões no chat", () => {
     expect(misto).not.toContain("Sempre permitir create task comment");
   });
 
+  it("PR 5 dos modos de aprovação: no cartão do revisor 'Sempre permitir' só aparece onde serve (sempreServe gravado pelo servidor)", () => {
+    const base = { tenantId: "t", decisaoId: "d", textoOriginal: "Apagar", textoFinal: "Apagar", selecionado: true, origemSensivel: false, justificativa: "apaga mais do que você pediu", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null };
+    const doRevisor = (motivoManual: "revisor_pediu" | "revisor_falhou", sempreServe: boolean | undefined, id = "i", ferramenta = "delete_task") => ({ ...base, id, idx: 0, destino: { conector: "clickup", ferramenta, argumentos: {} }, motivoManual, ...(sempreServe === undefined ? {} : { sempreServe }) });
+    const html = (itens: ReturnType<typeof doRevisor>[]) => renderTimeline(conversa, { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: itens }] } });
+    // O apagar num turno limpo: o botão vale (a regra pula o revisor da próxima vez).
+    const serve = html([doRevisor("revisor_pediu", true)]);
+    expect(serve).toContain("Sempre permitir delete task no clickup");
+    expect(serve).not.toContain("disabled");
+    // O envio depois de conteúdo de fora, o turno contaminado, a falha e o item sem a marca: nem aparece.
+    for (const itens of [[doRevisor("revisor_pediu", false)], [doRevisor("revisor_falhou", false)], [doRevisor("revisor_pediu", undefined)]]) {
+      const h = html(itens);
+      expect(h).not.toContain('data-act="decidir-aprovacao-sempre"');
+      expect(h).toContain('data-act="decidir-aprovacao"');
+      expect(h).toContain('data-act="decidir-aprovacao-nenhum"');
+    }
+    // Lote misto do revisor: o botão nomeia só o item em que serve.
+    const misto = html([doRevisor("revisor_pediu", true), doRevisor("revisor_pediu", false, "j", "create_task_comment")]);
+    expect(misto).toContain("Sempre permitir delete task no clickup");
+    expect(misto).not.toContain("create task comment no clickup");
+  });
+
   it("card só com item sensível mostra o botão DESABILITADO com o motivo, nunca ausente", () => {
     const sens = { tenantId: "t", id: "i", decisaoId: "d", idx: 0, textoOriginal: "Rel", textoFinal: "Rel", destino: { conector: "slack", ferramenta: "send_message", argumentos: {} }, selecionado: false, origemSensivel: true, justificativa: "dado pessoal", marcadoPor: null, marcadoEm: null, editadoPor: null, desfecho: null, motivoManual: null };
     const e: Estado = { ...estado, suaVez: { ...estado.suaVez!, itens: [{ ...item, decisao: { ...item.decisao, tipo: "aprovacao" }, itensAprovacao: [sens] }] } };

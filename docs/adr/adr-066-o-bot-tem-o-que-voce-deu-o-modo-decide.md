@@ -156,3 +156,14 @@ Quando houver, ela entra como cerca, com o motivo no card.
 - **Pendências visíveis no pedido de colega.** A delegação anota, mas só vê a lista num turno de profundidade 0. Com a
   rotina `so_com_pendencia`, o Dev revê na rotina dele.
 - **A cerca "pedido de outra pessoa"**, enquanto ninguém além da dona puder acionar o bot.
+
+## Emenda de 2026-10-19: no Automático, conteúdo de fora volta a pesar, pelo revisor, só no envio para fora (Fase 4, PR 5)
+
+Com a chave `NOD_REVISOR` ligada ([ADR-115](adr-115-automatico-com-revisor-na-ia-da-pessoa.md), seções do PR 3a e do
+PR 5), o Automático que leu conteúdo de fora (a web, um e-mail, um app de fora; o turno, a entrada ou a conversa nas
+últimas 24 h) manda ao revisor a ação que **envia algo para fora**: o comando (`enviaPeloTerminal`, PR 3a), o MCP da
+pessoa (PR 3a) e a escrita num app que não é ler nem apagar (PR 5). É o que fecha o "o Auto obedece um e-mail" (o A3 do
+protótipo) sem voltar à parada de antes desta ADR: o revisor libera o que a pessoa pediu e só o resto vira cartão. Ler,
+comentar o que a pessoa pediu num turno limpo e o resto que esta ADR soltou continuam soltos; o manual e o total não
+mudam. Com a chave desligada, esta ADR vale como estava. O gatilho de reversão "Incidente" acima passa a apontar para o
+revisor (o gatilho de reversão da ADR-115) antes de mexer em `decidirPeloModo`.

@@ -39,6 +39,8 @@ import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { TokenTurno } from "../../services/token-turno.ts";
 import type { RelatoRevisao, RespostaRelatoRevisao } from "../../contracts/revisao.ts";
 import { assentarRevisao } from "../../use-cases/revisar-acao.ts";
+import { executarLiberacao } from "../../use-cases/liberar-no-app.ts";
+import type { LoteAutomatico } from "../../use-cases/pedir-aprovacao.ts";
 import type { CaixaRevisoes } from "./caixa-revisoes.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
@@ -596,11 +598,22 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         log("aviso", "revisao_relato_de_outra_pessoa", { revisao_id: relato.revisaoId, turno_id: relato.turnoId });
         return { aceito: false };
       }
-      await abrirTxEscopada(db, r.escopo)(async (trx) => {
+      const lote = await abrirTxEscopada(db, r.escopo)(async (trx): Promise<LoteAutomatico | null> => {
         const d = depsDe(trx, r.escopo);
         const s = await assentarRevisao(d, { decisaoId: r.decisaoId, resultado: r.resultado });
         if (s.events?.length) await d.repos.events.gravarComOutbox(s.events);
+        return s.data.lote ?? null;
       });
+      // ADR-115 (PR 5): itens de app liberados — a decisão já fechou acima (passo 1); o efeito roda fora de transação e o
+      // desfecho entra numa nova (passos 2 e 3, executarLiberacao). O relato já foi aceito: um erro aqui fica no log
+      // (desfecho_nao_gravado) e o item sem desfecho, o risco aceito do plano.
+      if (lote) {
+        try {
+          await executarLiberacao({ escopo: r.escopo, services: deps.services, lote, dentro: (fn) => abrirTxEscopada(db, r.escopo)((trx) => fn(depsDe(trx, r.escopo))) });
+        } catch (e) {
+          log("erro", "revisao_execucao_falhou", { decisao_id: r.decisaoId, turno_id: relato.turnoId, erro: e instanceof Error ? e.name : "desconhecido" });
+        }
+      }
       return { aceito: true };
     },
 
