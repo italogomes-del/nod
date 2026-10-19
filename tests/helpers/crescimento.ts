@@ -39,8 +39,22 @@ function cpuMs(f: () => unknown, voltas: number): number {
   return (d.user + d.system) / 1000;
 }
 
-/** Razão custo(gerar(4n)) / custo(gerar(n)), com o menor tempo de `repeticoes` rodadas de cada tamanho. */
+/**
+ * Razão custo(gerar(4n)) / custo(gerar(n)), com o menor tempo de `repeticoes` rodadas de cada tamanho.
+ * revisto em 2026-10-19 (main vermelha duas vezes no runner da GCP, razões 8,04 / 9,1 / 11,9 em código linear que aloca
+ * muito): uma medida acima do teto é refeita até `TENTATIVAS` vezes e vale a menor razão. O código linear às vezes passa
+ * de 8 numa rodada (GC e vizinhos no runner); o quadrático dá ~16 em toda rodada, então refazer não esconde regressão.
+ */
 export function razaoDeCrescimento(gerar: (n: number) => string, executar: (entrada: string) => unknown, n: number, repeticoes = 5): number {
+  let menor = Infinity;
+  for (let t = 0; t < TENTATIVAS && menor >= RAZAO_MAXIMA_LINEAR; t++) menor = Math.min(menor, umaRazao(gerar, executar, n, repeticoes));
+  return menor;
+}
+
+/** Quantas vezes uma razão acima do teto é medida de novo antes de valer (ver `razaoDeCrescimento`). */
+export const TENTATIVAS = 3;
+
+function umaRazao(gerar: (n: number) => string, executar: (entrada: string) => unknown, n: number, repeticoes: number): number {
   const pequena = gerar(n);
   const grande = gerar(n * FATOR_ENTRADA);
   // Calibra as voltas na entrada pequena; de quebra, aquece o JIT e o cache de regex antes de medir.
