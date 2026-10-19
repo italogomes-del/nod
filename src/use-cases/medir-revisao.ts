@@ -27,20 +27,35 @@ export type MedidaDaRevisao = {
   itens?: number;
 };
 
+/** O que o Automático novo vê da ação: o gatilho e a marca de conteúdo de fora que ele usou (a do turno ou a da conversa). */
+export type AvaliacaoDaRevisao = { gatilho: GatilhoDoAutomatico | null; contaminado: boolean; contaminadoConversa: boolean | null };
+
+/**
+ * O gatilho do Automático novo (`gatilhoDeRevisao`) com a marca da conversa nas últimas 24 h (revisão de engenharia, item
+ * 11). A consulta à conversa só roda quando decide: sem credencial, sem arriscado e com envio para fora.
+ */
+export async function avaliarRevisao(deps: Deps, plano: Pick<PlanoTurno, "conversaId">, m: Pick<MedidaDaRevisao, "arriscada" | "credencial" | "envioParaFora" | "contaminado">): Promise<AvaliacaoDaRevisao> {
+  const decideComAConversa = !m.credencial && !m.arriscada && m.envioParaFora;
+  const contaminadoConversa = !decideComAConversa ? null : m.contaminado || (await deps.repos.turnos.conversaLeuDeFora(plano.conversaId, { agora: deps.agora(), janelaMs: JANELA_CONVERSA_DE_FORA_MS }));
+  const contaminado = contaminadoConversa === true || m.contaminado;
+  return { gatilho: gatilhoDeRevisao({ arriscada: m.arriscada, credencial: m.credencial, envioParaFora: m.envioParaFora, contaminado }), contaminado, contaminadoConversa };
+}
+
 /**
  * PR 1 do plano dos modos de aprovação (medir antes): conta o que o Automático novo faria com uma ação que, no manual,
  * pediria a pessoa, em TODO bot e em todo modo, sem mudar decisão nenhuma. Duas linhas de log, nunca com o texto da ação:
  * `revisor_seria_chamado` (gatilho `arriscado` ou `envio_apos_fora`) e `cartao_seria_aberto` (gatilho `credencial`, que
  * no Automático é sempre cartão na v1, decisão do Marlon de 2026-10-18). As duas marcas de conteúdo de fora vão juntas,
  * para medir o custo de cada uma: `contaminado` (o turno) e `contaminado_conversa` (a conversa nas últimas 24 h; nula
- * quando o gatilho não depende dela). O gatilho usa a da conversa. A consulta à conversa só roda quando decide.
+ * quando o gatilho não depende dela). O gatilho usa a da conversa. Devolve a avaliação (o PR 3a decide com ela).
  */
-export async function medirRevisao(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, m: MedidaDaRevisao): Promise<GatilhoDoAutomatico | null> {
+export async function medirRevisao(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, m: MedidaDaRevisao): Promise<AvaliacaoDaRevisao | null> {
   try {
     return await medir(deps, plano, modo, m);
   } catch (e) {
     // Revisão do PR #402: a medição só observa. Um erro nela (a consulta da conversa estourando o statement_timeout,
     // um repositório quebrado) não pode negar nem aprovar nada: fica no log, sem texto, e a decisão segue a de hoje.
+    // (PR 3a: com o revisor ligado, quem decide trata o null do lado seguro — autorizar-comando.ts.)
     log("erro", "medir_revisao_falhou", { turno_id: plano.turnoId, erro: e instanceof Error ? ((e as { code?: string; codigo?: string }).code ?? (e as { codigo?: string }).codigo ?? e.name) : "desconhecido" });
     return null;
   }
@@ -48,12 +63,11 @@ export async function medirRevisao(deps: Deps, plano: Plano, modo: ModoAprovacao
 
 type Plano = Pick<PlanoTurno, "turnoId" | "agenteId" | "conversaId" | "modoTurno" | "harness">;
 
-async function medir(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, m: MedidaDaRevisao): Promise<GatilhoDoAutomatico | null> {
-  const decideComAConversa = !m.credencial && !m.arriscada && m.envioParaFora;
-  // A consulta roda no savepoint dela (turnos.repo.ts): a que falha no Postgres não aborta a transação do caso de uso.
-  const contaminadoConversa = !decideComAConversa ? null : m.contaminado || (await deps.repos.turnos.conversaLeuDeFora(plano.conversaId, { agora: deps.agora(), janelaMs: JANELA_CONVERSA_DE_FORA_MS }));
-  const gatilho = gatilhoDeRevisao({ arriscada: m.arriscada, credencial: m.credencial, envioParaFora: m.envioParaFora, contaminado: contaminadoConversa === true || m.contaminado });
-  if (gatilho === null) return null;
+async function medir(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, m: MedidaDaRevisao): Promise<AvaliacaoDaRevisao> {
+  // A consulta da conversa roda no savepoint dela (turnos.repo.ts): a que falha no Postgres não aborta a transação do caso de uso.
+  const avaliacao = await avaliarRevisao(deps, plano, m);
+  const { gatilho, contaminadoConversa } = avaliacao;
+  if (gatilho === null) return avaliacao;
   log("info", vaiAoRevisor(gatilho) ? "revisor_seria_chamado" : "cartao_seria_aberto", {
     gatilho,
     origem: m.origem,
@@ -69,5 +83,5 @@ async function medir(deps: Deps, plano: Plano, modo: ModoAprovacao | undefined, 
     turno_id: plano.turnoId,
     ...(m.itens !== undefined ? { itens: m.itens } : {}),
   });
-  return gatilho;
+  return avaliacao;
 }

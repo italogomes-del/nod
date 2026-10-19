@@ -242,6 +242,20 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       return l ? paraMensagem(l) : null;
     },
 
+    /**
+     * ADR-115 (o pedido ao revisor): os textos que a PESSOA escreveu na conversa, do mais novo para o mais velho, até
+     * `limite`. Só a fala dela (autor pessoa, kind texto): a dos bots não é pedido de ninguém.
+     * revisto em 2026-10-18 (revisão do PR 3a): só a DONA (`autor_id`). Numa sala de bots de donos diferentes (ADR-027) a
+     * fala de outra pessoa é visível pela RLS, mas não é pedido de quem paga o bot — e esta lista vai à parte CONFIÁVEL do
+     * revisor: outra pessoa da sala não autoriza o arriscado na máquina da dona.
+     */
+    async textosDaPessoa(conversaId: string, limite: number): Promise<string[]> {
+      const linhas = await conn<{ texto: string }[]>`
+        select texto from mensagens where tenant_id = ${escopo.tenantId} and conversa_id = ${conversaId} and autor_tipo = 'pessoa' and autor_id = ${escopo.pessoaId} and kind = 'texto'
+        order by criado_em desc, id desc limit ${limite}`;
+      return linhas.map((l) => l.texto);
+    },
+
     /** Em ordem de criação; `limite` corta pelas mais recentes (a resposta volta crescente). */
     async listarDaConversa(conversaId: string, limite = 200): Promise<Mensagem[]> {
       const linhas = await conn<LinhaMensagem[]>`

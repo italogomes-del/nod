@@ -18,7 +18,12 @@ export type TipoDecisao =
   | "falta_de_dado"
   | "permissao";
 
-export type EstadoDecisao = "pendente" | "decidida" | "vencida" | "reaberta";
+/**
+ * `em_revisao` (definido em 2026-10-18, ADR-115, 0093): a ação arriscada do Automático espera o veredito do revisor, não a
+ * pessoa. Nenhuma lista da tela a mostra (todas filtram pendente/reaberta); vira `pendente` quando o revisor pede, falha
+ * ou passa do prazo, e `decidida` (por regra) quando ele libera. `decisaoEmAberto` (domain/revisor.ts) conta as três.
+ */
+export type EstadoDecisao = "pendente" | "decidida" | "vencida" | "reaberta" | "em_revisao";
 
 /**
  * ABERTAS que a pessoa tira da tela sem responder (× / "Dispensar"; vencida de qualquer tipo sempre

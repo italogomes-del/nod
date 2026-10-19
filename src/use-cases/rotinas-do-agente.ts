@@ -183,7 +183,7 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
     const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}${flag}`);
     // ADR-059 (emenda de 2026-09-30): no automático e no total o modo confirma na hora — a proposta fica como
     // registro do que mudou, fechada pela regra, e a rotina já vale.
-    const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false });
+    const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false, gravaInstrucao: true });
     if (porRegra) {
       const aplicada = await aplicarAtualizacaoRotina(deps, { propostaId: proposta.id, porRegra });
       if (aplicada.data.obsoleta) return obsoleta(events, aplicada.events);

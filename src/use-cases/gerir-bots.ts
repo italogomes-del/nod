@@ -5,7 +5,7 @@ import type { ContextoFerramenta, SaidaCasoDeUso } from "../contracts/servicos.t
 import { ehErroDeDominio, ErroDeDominio } from "../domain/erro.ts";
 import { capacidadesDoNivel } from "../domain/grupos-de-acesso.ts";
 import { decidirLote, riscoDaAcao, validarLote, type AcaoResolvida } from "../domain/lote-bots.ts";
-import { decidirPeloModo } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, semRevisor } from "../domain/modo-aprovacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { semCard, type PorRegra } from "./confirmar-pelo-modo.ts";
@@ -154,7 +154,8 @@ async function executarEmOrdem(
 
 /** A regra do modo que aprovou a ação (para a autoria); null = a pessoa. */
 function porRegraDoModo(modo: Parameters<typeof decidirPeloModo>[0], risco: MotivoCardDoLote | null): PorRegra | null {
-  const d = decidirPeloModo(modo, { arriscada: risco !== null, credencial: false });
+  // ADR-115: o gerir_bots fica sem revisor na v1 (o "revisar" vira o cartão de hoje).
+  const d = semRevisor(decidirPeloModo(modo, { arriscada: risco !== null, credencial: false }));
   return d?.automatico ? { regra: d.regra, regraVersao: d.versao } : null;
 }
 

@@ -6,7 +6,7 @@ import type { PlanoTurno } from "../../contracts/plano-turno.ts";
 import { alteraComputador, computadorPadrao, CONTA_PARA_SAUDE, ehFalhaComputador, type FalhaComputador, instrucaoDaFalha, LIMITE_FALHAS_SEGUIDAS, MOTIVO_FALHA_EM_PORTUGUES, resumirDetalhe, resumoAcaoComputador, validarAcaoComputador } from "../../domain/computador.ts";
 import { ehErroDeDominio, ErroDeDominio } from "../../domain/erro.ts";
 import { deduplicarObservacao, type HashesObservacao } from "../../domain/observacao-computador.ts";
-import { decidirPeloModo } from "../../domain/modo-aprovacao.ts";
+import { decidirPeloModo, semRevisor } from "../../domain/modo-aprovacao.ts";
 import { redigir } from "../../domain/redacao.ts";
 import { log } from "../../obs/log.ts";
 import { computadorLiberadoNaTarefa } from "../../use-cases/liberar-na-tarefa.ts";
@@ -397,7 +397,7 @@ export function criarComputadores(o: Opcoes) {
         // sentido do Mac (o computador é isolado, ADR-037). ADR-066: conteúdo de fora não para o automático nem o total.
         const aprovadaPeloModo = async () => {
           const agente = await d.repos.agentes.buscar(plano.agenteId);
-          return decidirPeloModo(agente?.modoAprovacao, { arriscada: false, credencial: false })?.automatico === true;
+          return semRevisor(decidirPeloModo(agente?.modoAprovacao, { arriscada: false, credencial: false }))?.automatico === true;
         };
         if (alteraComputador(acao) && !liberadaNaTarefa && c.politica === "supervisionado" && !(await aprovadaPeloModo())) {
           const registro = await d.repos.computadores.registrar({ computadorId: c.id, turnoId: plano.turnoId, autor: "bot", tipo: acao.tipo, estado: "pendente", argumentosCifrados: o.cifrar(JSON.stringify(acao)) });

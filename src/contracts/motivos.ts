@@ -80,12 +80,12 @@ export const MOTIVOS_APROVACAO_MANUAL = [
   "gate_de_rotina",
   "fora_do_catalogo",
   "sem_plano",
-  // ADR-055 (0034): comando que altera algo no terminal do Mac da pessoa.
-  "destino_terminal",
+  "destino_terminal", // ADR-055 (0034): comando que altera algo no terminal do Mac da pessoa.
   // ADR-059 (0040): o modo automático aprovaria, mas a ação é arriscada (apagar, forçar, merge, publicar).
   "acao_arriscada",
-  // ADR-059 (0040): o comando toca uma credencial do Mac — pede a pessoa em qualquer modo.
-  "toca_credencial",
+  "toca_credencial", // ADR-059 (0040): o comando toca uma credencial do Mac — pede a pessoa em qualquer modo.
+  // ADR-115 (0093): o revisor do Automático pediu o ok da pessoa; ou não revisou (erro, prazo, teto, sem revisor).
+  "revisor_pediu", "revisor_falhou",
 ] as const;
 export type MotivoAprovacaoManual = (typeof MOTIVOS_APROVACAO_MANUAL)[number];
 

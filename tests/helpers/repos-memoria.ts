@@ -24,6 +24,7 @@ import type { Relato } from "../../src/contracts/relato.ts";
 import type { EmojiDeReacao, ReacaoNaFala } from "../../src/contracts/reacao.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
 import type { CredencialTurno } from "../../src/repositories/turno-credenciais.repo.ts";
+import type { AcaoDoModo } from "../../src/repositories/acoes-pelo-modo.repo.ts";
 import type { Trabalho } from "../../src/contracts/trabalho.ts";
 import type { NovoLote } from "../../src/repositories/frentes.repo.ts";
 import type { LoteDeFrentes, ResumoFrente } from "../../src/contracts/frente.ts";
@@ -101,6 +102,8 @@ export type BancoMemoria = {
   decisoes: (Decisao & { decididaEm: number | null })[];
   varridos: Set<string>;
   itens: ItemAprovacao[];
+  /** ADR-115 (0093): acoes_pelo_modo. */
+  acoesPeloModo: AcaoDoModo[];
   rotinas: Rotina[];
   janelas: JanelaReivindicada[];
   execucoes: ExecucaoRotina[];
@@ -182,6 +185,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     decisoes: [],
     varridos: new Set(),
     itens: [],
+    acoesPeloModo: [],
     rotinas: [],
     janelas: [],
     execucoes: [],
@@ -794,6 +798,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return todas.slice(Math.max(0, todas.length - limite));
       },
+      async textosDaPessoa(conversaId, limite) {
+        return doTenant(b.mensagens).filter((m) => m.conversaId === conversaId && m.autoria.autor_tipo === "pessoa" && m.autoria.autor_id === escopo.pessoaId && m.kind === "texto").sort((x, y) => y.criadoEm - x.criadoEm).slice(0, limite).map((m) => m.texto);
+      },
       async listarComTurno(conversaId, limite = 200) {
         const todas = doTenant(b.mensagens).filter((m) => m.conversaId === conversaId).sort((x, y) => x.criadoEm - y.criadoEm);
         return comTurno(todas.slice(Math.max(0, todas.length - limite)));
@@ -913,6 +920,15 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         p.estado = estado;
         return p;
       },
+      async ultimaMudancaDaRotina(rotinaId) {
+        const confirmadas = doTenant(b.propostas)
+          .filter((p) => p.estado === "confirmada" && p.payload.kind === "rotina_atualizacao" && p.payload.rotinaId === rotinaId)
+          .map((p) => ({ p, d: doTenant(b.decisoes).find((d) => d.id === p.id && d.estado === "decidida") }))
+          .filter((x) => x.d !== undefined)
+          .sort((x, y) => Date.parse(y.d?.desfecho?.em ?? "0") - Date.parse(x.d?.desfecho?.em ?? "0") || y.p.criadoEm - x.p.criadoEm);
+        const ultima = confirmadas[0];
+        return ultima ? { porRegra: ultima.d?.desfecho?.tipo === "decidida_por_regra" } : null;
+      },
       async atualizarPayload(id, payload) {
         const p = doTenant(b.propostas).find((x) => x.id === id && x.kind === payload.kind);
         if (!p) return null;
@@ -1013,6 +1029,43 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       // O varredor das esperas sem notícia se prova no Postgres (tests/integration/esperar-comando.test.ts).
       async semNoticia() { return []; },
+    },
+    acoesPeloModo: {
+      async registrar(a) {
+        const id = randomUUID();
+        b.acoesPeloModo.push({ ...a, veredito: a.veredito ?? null, falha: a.falha ?? null, motivo: a.motivo ?? null, revisorModelo: a.revisorModelo ?? null, revisorHarness: a.revisorHarness ?? null, revisorMaquina: a.revisorMaquina ?? null, id, entregueEm: null, revisorMs: null, fichasEntrada: null, fichasSaida: null, desfechoPessoa: null, criadoEm: agora() });
+        return id;
+      },
+      async daDecisao(decisaoId) {
+        return b.acoesPeloModo.find((a) => a.decisaoId === decisaoId) ?? null;
+      },
+      async doTurno(turnoId) {
+        return b.acoesPeloModo.filter((a) => a.turnoId === turnoId);
+      },
+      async concluir(decisaoId, c) {
+        const a = b.acoesPeloModo.find((x) => x.decisaoId === decisaoId && x.veredito === null);
+        if (!a) return false;
+        Object.assign(a, { veredito: c.veredito, falha: c.falha ?? null, motivo: c.motivo ?? null, entregueEm: c.entregueEm ?? null, revisorMs: c.revisorMs ?? null, fichasEntrada: c.fichasEntrada ?? null, fichasSaida: c.fichasSaida ?? null });
+        return true;
+      },
+      async revisoesDoTurno(turnoId) {
+        return b.acoesPeloModo.filter((a) => a.turnoId === turnoId && a.revisorMaquina !== null).length;
+      },
+      async pedidasNoTurno(turnoId) {
+        return b.acoesPeloModo.filter((a) => a.turnoId === turnoId && a.veredito === "pede").length;
+      },
+      async revisoesDaPessoaDesde(desde) {
+        return b.acoesPeloModo.filter((a) => a.criadoEm >= desde && a.revisorMaquina !== null).length;
+      },
+      async registrarDesfechoPessoa(decisaoId, desfecho) {
+        const a = b.acoesPeloModo.find((x) => x.decisaoId === decisaoId && x.desfechoPessoa === null);
+        if (a) a.desfechoPessoa = desfecho;
+      },
+      async podar(antesDe) {
+        const antes = b.acoesPeloModo.length;
+        b.acoesPeloModo = b.acoesPeloModo.filter((a) => a.criadoEm >= antesDe);
+        return antes - b.acoesPeloModo.length;
+      },
     },
     turnoCredenciais: {
       async gravar(c) {
@@ -1487,6 +1540,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (!t) return { ativo: false, motivo: "lease_vencido" as const };
         // NOD-214: como o repo real — lease vencido só passa na adoção dentro da carência (a sessão do turno não é modelada aqui).
         if (!((t.leaseAte ?? 0) > em || (o.aceitaVencido === true && t.estado === "despachando"))) return { ativo: false, motivo: "lease_vencido" as const };
+        const promptAntes = t.sinais.promptSubmitted;
         t.sinais = {
           attempted: t.sinais.attempted || !!sinais.attempted,
           rejected: t.sinais.rejected || !!sinais.rejected,
@@ -1495,7 +1549,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         };
         const ativo = t.estado === "despachando" && t.pararSolicitadoEm === null;
         if (ativo) t.leaseAte = em + LEASE_MS;
-        return ativo ? { ativo } : { ativo, motivo: "parado" as const };
+        const antes = o.comPromptAntes ? { promptAntes } : {};
+        return ativo ? { ativo, ...antes } : { ativo, motivo: "parado" as const, ...antes };
       },
       async marcarSinal(id, sinal) {
         const t = doTenant(b.turnos).find((x) => x.id === id);
@@ -1755,7 +1810,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           conversaId: d.conversaId,
           turnoId: d.turnoId ?? null,
           tipo: d.tipo,
-          estado: "pendente" as const,
+          estado: d.estado ?? ("pendente" as const),
           prazoDecisaoEm: iso(d.prazoDecisaoEm),
           prazoExecucaoEm: d.prazoExecucaoEm === null || d.prazoExecucaoEm === undefined ? null : iso(d.prazoExecucaoEm),
           frase: d.frase,
@@ -1850,6 +1905,22 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         b.varridos.add(chave);
         return true;
       },
+      async concluirRevisao(id, p) {
+        const d = doTenant(b.decisoes).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "em_revisao");
+        if (!d) return null;
+        if ("liberar" in p) {
+          d.estado = "decidida";
+          d.desfecho = { tipo: "decidida_por_regra", regra: p.liberar.regra, regraVersao: p.liberar.regraVersao, em: new Date(p.agora).toISOString() };
+          d.decididaEm = p.agora;
+        } else {
+          d.estado = "pendente";
+          d.prazoDecisaoEm = new Date(p.pendente.prazoDecisaoEm).toISOString();
+        }
+        return d;
+      },
+      async emRevisaoAntesDe(antesDe) {
+        return doTenant(b.decisoes).filter((d) => d.ownerId === escopo.pessoaId && d.estado === "em_revisao" && Date.parse(d.criadoEm) < antesDe);
+      },
       async fecharPorRegra(id, p) {
         const d = doTenant(b.decisoes).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "reaberta" || (p.tambemVencida === true && x.estado === "vencida")));
         if (!d) return null;
@@ -1908,15 +1979,44 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(decisaoId) {
         return doTenant(b.itens).filter((i) => i.decisaoId === decisaoId).sort((x, y) => x.idx - y.idx);
       },
-      async comandoAprovadoNaCadeia(turnoId, comando) {
+      async aprovadoNaCadeia(turnoId, texto, arquivo) {
         const cadeia = new Set<string>();
         let atual = doTenant(b.turnos).find((t) => t.id === turnoId) ?? null;
         for (let saltos = 0; atual && saltos < 50; saltos++) {
           cadeia.add(atual.id);
           atual = atual.retomaTurnoId ? doTenant(b.turnos).find((t) => t.id === atual?.retomaTurnoId) ?? null : null;
         }
-        const decisoes = new Set(doTenant(b.decisoes).filter((d) => d.turnoId !== null && cadeia.has(d.turnoId)).map((d) => d.id));
-        return doTenant(b.itens).some((i) => decisoes.has(i.decisaoId) && i.destino.conector === "terminal" && i.destino.argumentos.comando === comando && i.selecionado && i.desfecho === "executado");
+        const porRevisor = (d: Decisao) => d.desfecho?.tipo === "decidida_por_regra" && d.desfecho.regra === "regra:revisor";
+        const decisoes = new Map(doTenant(b.decisoes).filter((d) => d.turnoId !== null && cadeia.has(d.turnoId)).map((d) => [d.id, d]));
+        const achados = doTenant(b.itens).filter((i) => decisoes.has(i.decisaoId) && i.destino.conector === "terminal" && i.textoOriginal === texto && ("arquivo" in (i.destino.argumentos ?? {})) === arquivo && i.selecionado && i.desfecho === "executado").map((i) => decisoes.get(i.decisaoId)!);
+        if (achados.some((d) => !porRevisor(d))) return "pessoa";
+        return achados.some((d) => d.turnoId === turnoId) ? "revisor" : null;
+      },
+      async recusadoNaCadeia(turnoId, texto) {
+        const cadeia = new Set<string>();
+        let atual = doTenant(b.turnos).find((t) => t.id === turnoId) ?? null;
+        for (let saltos = 0; atual && saltos < 50; saltos++) {
+          cadeia.add(atual.id);
+          atual = atual.retomaTurnoId ? doTenant(b.turnos).find((t) => t.id === atual?.retomaTurnoId) ?? null : null;
+        }
+        const decisoes = new Map(doTenant(b.decisoes).filter((d) => d.turnoId !== null && cadeia.has(d.turnoId)).map((d) => [d.id, d]));
+        return doTenant(b.itens).some((i) => {
+          const d = decisoes.get(i.decisaoId);
+          return d && i.destino.conector === "terminal" && i.textoOriginal === texto && (i.motivoManual === "revisor_pediu" || d.estado === "vencida" || (d.estado === "decidida" && (!i.selecionado || i.desfecho === "retirado_pela_pessoa" || i.desfecho === "sensivel_nao_aprovado")));
+        });
+      },
+      async marcarRevisao(id, p) {
+        const item = doTenant(b.itens).find((i) => i.id === id);
+        if (!item) return null;
+        if ("liberado" in p) {
+          if (item.desfecho !== null) return null;
+          item.motivoManual = null;
+          item.desfecho = "executado";
+        } else {
+          item.motivoManual = p.motivoManual;
+          item.justificativa = p.justificativa;
+        }
+        return item;
       },
       async pendentesNaMaquina() {
         return doTenant(b.itens).flatMap((item) => {

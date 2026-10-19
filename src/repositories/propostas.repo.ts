@@ -128,6 +128,20 @@ export function propostasRepo(conn: Conn, escopo: Escopo) {
     },
 
     /** Só sai de 'pendente': confirmar/recusar duas vezes devolve null (idempotência para a rota). */
+    /**
+     * ADR-115 (revisão do PR 3a): a última mudança CONFIRMADA da rotina (`rotina_atualizacao`) e se quem a confirmou foi uma
+     * regra (o modo do bot) em vez da pessoa. É o que diz se a instrução atual ainda é palavra da pessoa — o revisor só a
+     * põe na parte confiável quando é. null = a rotina nunca mudou depois de criada.
+     */
+    async ultimaMudancaDaRotina(rotinaId: string): Promise<{ porRegra: boolean } | null> {
+      const [l] = await conn<{ tipo: string | null }[]>`
+        select d.desfecho->>'tipo' as tipo from propostas p join decisoes d on d.tenant_id = p.tenant_id and d.id = p.id
+        where p.tenant_id = ${escopo.tenantId} and p.owner_id = ${escopo.pessoaId} and p.kind = 'rotina_atualizacao' and p.payload->>'rotinaId' = ${rotinaId}
+          and p.estado = 'confirmada' and d.estado = 'decidida'
+        order by d.decidida_em desc nulls last, p.criado_em desc limit 1`;
+      return l ? { porRegra: l.tipo === "decidida_por_regra" } : null;
+    },
+
     async decidir(id: string, estado: "confirmada" | "recusada"): Promise<Proposta | null> {
       const [l] = await conn<Linha[]>`
         update propostas set estado = ${estado} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'pendente' returning ${conn.unsafe(COLUNAS)}`;

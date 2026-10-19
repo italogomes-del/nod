@@ -419,8 +419,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * só na adoção dentro da carência do boot: o lease venceu enquanto o servidor estava fora, mas o turno segue
      * `despachando` (o varredor não o assentou).
      */
-    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean } = {}): Promise<{ ativo: boolean; motivo?: Exclude<MotivoRenovacaoNegada, "sem_plano"> }> {
-      const [l] = await conn<{ ativo: boolean; parado: boolean }[]>`
+    async renovarLease(id: string, machineId: string, sinais: Partial<SinaisTurno>, agora: number, o: { sessaoCli?: string | null; aceitaVencido?: boolean; comPromptAntes?: boolean } = {}): Promise<{ ativo: boolean; motivo?: Exclude<MotivoRenovacaoNegada, "sem_plano">; promptAntes?: boolean }> {
+      // ADR-115 (revisão do PR 3a): `prompt_antes` = o `prompt_submitted` de ANTES desta renovação (o FROM lê a linha
+      // antiga). Só antes dele o segredo do revisor pode ser amarrado (caixa-revisoes.ts): depois, o bot já roda. Vai na
+      // resposta só com `comPromptAntes` (a renovação da ponte), para os outros chamadores verem o formato de sempre.
+      const [l] = await conn<{ ativo: boolean; parado: boolean; prompt_antes: boolean }[]>`
         update turnos set
           lease_ate = case when estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao) then ${data(agora + LEASE_MS)} else lease_ate end,
           attempted = attempted or ${sinais.attempted ?? false},
@@ -428,14 +431,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           prompt_submitted = prompt_submitted or ${sinais.promptSubmitted ?? false},
           produced_output = produced_output or ${sinais.producedOutput ?? false},
           sessao_cli = coalesce(${o.sessaoCli ?? null}, sessao_cli)
+        from (select t0.prompt_submitted as prompt_antes from turnos t0 where t0.tenant_id = ${escopo.tenantId} and t0.id = ${id}) antes
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and machine_id = ${machineId}
           and (lease_ate > ${data(agora)} or (${o.aceitaVencido === true} and estado = 'despachando'))
         returning (estado = 'despachando' and parar_solicitado_em is null and exists (select 1 from agentes a where a.tenant_id = turnos.tenant_id and a.id = turnos.agente_id and a.excluido_em is null and a.geracao_execucao = turnos.geracao_execucao)) as ativo,
-          (estado <> 'despachando' or parar_solicitado_em is not null) as parado`;
+          (estado <> 'despachando' or parar_solicitado_em is not null) as parado, antes.prompt_antes`;
       // NOD-264 (C20): por que negou, em código (vira a causa do turno_interrompido).
       if (!l) return { ativo: false, motivo: "lease_vencido" };
-      if (l.ativo) return { ativo: true };
-      return { ativo: false, motivo: l.parado ? "parado" : "agente_excluido" };
+      const antes = o.comPromptAntes ? { promptAntes: l.prompt_antes } : {};
+      if (l.ativo) return { ativo: true, ...antes };
+      return { ativo: false, motivo: l.parado ? "parado" : "agente_excluido", ...antes };
     },
 
     /** Write-ahead (ADR-009): promptSubmitted é gravado ANTES de escrever no stdin. Só liga, nunca desliga. */

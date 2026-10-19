@@ -5,12 +5,12 @@ import type { ContratoFerramentaNod, NomeFerramentaNod } from "./ferramentas-nod
 import type { FrameSse, TipoFrame } from "./frame.ts";
 import type { MotivoNegacao, MotivoPasse } from "./motivos.ts";
 import type { PlanoTurno } from "./plano-turno.ts";
+import type { ServicoRevisor } from "./revisao.ts";
 import type { Rotina } from "./rotina.ts";
 import type { LeituraDisco, NivelPressao, ServicoDasMaquinas } from "./trabalho.ts";
 
-/** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). */
+/** Identidade derivada do token de turno — o remetente nunca vem do texto (ADR-024). `IdentidadeSemTurno`: o que `cunhar` recebe. */
 export type IdentidadeDeTurno = { turnoId: string; tenantId: string; pessoaId: string; agenteId: string };
-/** O que `cunhar` recebe: a identidade menos o turno (que é o primeiro argumento). */
 export type IdentidadeSemTurno = Omit<IdentidadeDeTurno, "turnoId">;
 
 export type ResultadoSonda = { ok: true; ferramentas: CapacidadeConector[] } | { ok: false; motivo: MotivoNegacao };
@@ -67,6 +67,7 @@ export interface ServicesNod<Trx> {
     trocouUsoDoMac?(pessoaId: string): void;
   };
   /** A tela fala por máquina (2026-10-09): a leitura e o nome de cada máquina (trabalho.ts). Ausente = só a junta. */ maquinas?: ServicoDasMaquinas;
+  /** ADR-115 (2026-10-18): o revisor do Automático (revisao.ts). Ausente ou `config.ligado: false` = a decisão de hoje. */ revisor?: ServicoRevisor;
   relogio: () => number;
   tokenTurno: {
     /** definido em 2026-09-16 (L9, pendência L5 §2): cunhar RECEBE a identidade — `autorizar` a devolve, logo ela entra aqui. */
@@ -101,8 +102,7 @@ export interface ServicesNod<Trx> {
     /** pedir_a_bot (ADR-058) para quem só tem o turnoId. */
     pedir(trx: Trx, p: { turnoId: string; agente: string; pedido: string; contexto?: string }): Promise<{ tarefaId: string }>;
   };
-  /** null = um `turno.delta` guardado para sair junto com os próximos (src/services/barramento.ts, juntarDeltasMs). */
-  barramento: { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse | null };
+  barramento: /** null = um `turno.delta` guardado para sair junto com os próximos (src/services/barramento.ts, juntarDeltasMs). */ { publicar(pessoaId: string, tipo: TipoFrame, dados: Record<string, unknown>): FrameSse | null };
 }
 
 /**

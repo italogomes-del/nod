@@ -6,7 +6,7 @@ import { REGRA_VOLTAS_SEM_NOVIDADE, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../cont
 import type { BloqueioRotina, ParadaDaRotina, Rotina } from "../contracts/rotina.ts";
 import type { Decisao } from "../contracts/decisao.ts";
 import { acaoArriscadaNoApp } from "../domain/aprovacao-permanente.ts";
-import { decidirPeloModo } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, semRevisor } from "../domain/modo-aprovacao.ts";
 import { nomeDoApp } from "../domain/pedido-acesso.ts";
 import { faltaDeAcesso, janelasQueNaoRodaram, necessidadesDaRotina, type ConectorRegistrado, type NecessidadeDaRotina } from "../domain/rotina-acessos.ts";
 import type { Repos } from "../repositories/tipos.ts";
@@ -115,7 +115,8 @@ async function faltaOuConcede(deps: Deps, rotina: Rotina, necessidades: readonly
         const cap = catalogo.find((c) => c.nome === nome);
         return cap ? acaoArriscadaNoApp(cap) : true;
       });
-      const d = decidirPeloModo((await deps.repos.agentes.buscar(rotina.agenteId))?.modoAprovacao, { arriscada, credencial: false });
+      // ADR-115: o pré-voo fica sem revisor na v1 (o "revisar" vira o cartão de hoje).
+      const d = semRevisor(decidirPeloModo((await deps.repos.agentes.buscar(rotina.agenteId))?.modoAprovacao, { arriscada, credencial: false }));
       if (d?.automatico) {
         const r = await decidirAcesso(deps, { decisaoId: g.decisao.id, recusar: false, executor: "catcher", porRegra: { regra: d.regra, regraVersao: d.versao }, semDisparar: true });
         // O disparo segue no mesmo passo e só devolve os eventos do turno: estes vão direto ao outbox (como no computador).

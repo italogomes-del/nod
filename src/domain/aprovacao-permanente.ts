@@ -4,7 +4,7 @@ import type { DestinoItem } from "../contracts/item-aprovacao.ts";
 import type { MotivoAprovacaoManual } from "../contracts/motivos.ts";
 import type { FerramentaPlano, PlanoTurno } from "../contracts/plano-turno.ts";
 import { grupoDaCapacidade } from "./grupos-de-acesso.ts";
-import { conversaComAPessoa, decidirPeloModo, type RegraDoModo } from "./modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, semRevisor, type RegraDoModo } from "./modo-aprovacao.ts";
 
 /**
  * DUAS regras nomeadas, não uma (ADR-042 claim 5): os ciclos de vida são opostos.
@@ -157,10 +157,12 @@ export function decidirAprovacao(entrada: EntradaAprovacao): DecisaoAutomatica {
   // Emenda de 2026-09-30: apagar que a pessoa pediu NA CONVERSA não é arriscado para o automático.
   const situacao = { arriscada: entrada.arriscada === true && !conversaComAPessoa(plano.modoTurno), credencial: false };
   // A regra da PESSOA cai inteira depois de conteúdo de fora; a do CONECTOR (acima) não, porque só lê.
-  if (plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
-  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
+  // ADR-115: o caminho dos apps só ganha o revisor no PR 5 (com ou sem a chave): aqui o modo decide como hoje.
+  const doModo = semRevisor(decidirPeloModo(entrada.modo, situacao));
+  if (plano.confiancaEntrada === "nao_confiavel" || entrada.contaminado === true) return doModo ?? { automatico: false, motivo: "regra_suspensa_conteudo_nao_confiavel" };
+  if (nuncaPermanente(nome, ferramenta.readOnlyHint)) return doModo ?? { automatico: false, motivo: "sem_regra_permanente" };
   if (plano.semprePermitir.includes(nome)) return { automatico: true, regra: REGRA_APROVACAO_PERMANENTE, versao: VERSAO_APROVACAO_PERMANENTE };
-  return decidirPeloModo(entrada.modo, situacao) ?? { automatico: false, motivo: "sem_regra_permanente" };
+  return doModo ?? { automatico: false, motivo: "sem_regra_permanente" };
 }
 
 /**

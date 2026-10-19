@@ -4,9 +4,11 @@ import type { PlanoTurno } from "../contracts/plano-turno.ts";
 import { classificarComando, comandoArriscado, enviaPeloTerminal, tocaCredencial } from "../domain/comando.ts";
 import { NATIVA_MCP_DA_PESSOA } from "../domain/nativas.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { decidirPeloModo, REGRA_MODO_TOTAL, type DecisaoDoModo } from "../domain/modo-aprovacao.ts";
+import { decidirPeloModo, REGRA_MODO_TOTAL, semRevisor, type DecisaoSemRevisor, type GatilhoDeRevisao } from "../domain/modo-aprovacao.ts";
+import { RISCO_DO_GATILHO } from "../domain/revisor.ts";
 import { terminalLiberadoNaTarefa } from "./liberar-na-tarefa.ts";
-import { medirRevisao, type OrigemDaRevisao } from "./medir-revisao.ts";
+import { avaliarRevisao, medirRevisao, type OrigemDaRevisao } from "./medir-revisao.ts";
+import { revisarAcaoFase1, type PedidoNaCaixa } from "./revisar-acao.ts";
 import { PRAZO_DECISAO_MS } from "./pedir-a-pessoa.ts";
 import { autoriaDoAgente } from "./registrar-negacao.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -14,8 +16,13 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
 /** O destino do item de aprovação de um comando: não é conector, é o terminal do Mac da pessoa (ADR-055). */
 export const DESTINO_TERMINAL = { conector: "terminal", ferramenta: "bash" } as const;
 
-/** Por que o comando rodou sem card — vai à trilha e aos testes, nunca ao modelo como permissão. */
-export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" | "modo_automatico" | "modo_total" } | { aguardar: string };
+/**
+ * Por que o comando rodou sem card — vai à trilha e aos testes, nunca ao modelo como permissão. `revisor` (ADR-115): a
+ * segunda consulta do hook achou a ação liberada pelo revisor (a trilha leva `regra:revisor`). `revisao`: o pedido que a
+ * rota põe na caixa do turno depois do commit (a decisão `em_revisao`).
+ */
+export type PorqueRoda = "leitura" | "aprovado" | "revisor" | "liberado_na_tarefa" | "modo_automatico" | "modo_total";
+export type SaidaAutorizarComando = { permitir: true; porque: PorqueRoda } | { aguardar: string; revisao?: PedidoNaCaixa };
 
 /**
  * Cada comando do terminal do Mac da pessoa (definido em 2026-09-28, ADR-055, "terminal de verdade, como o
@@ -28,6 +35,11 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  *  4. ADR-059: o modo do bot aprova (`decidirPeloModo`): no automático, o que não é arriscado num turno limpo;
  *     no total, tudo. Credencial do Mac nunca passa por aqui → card em qualquer modo;
  *  5. senão → card de aprovação na conversa, e o hook espera a resposta no próprio turno.
+ *
+ * ADR-115 (2026-10-18, PR 3a dos modos de aprovação): com a chave `NOD_REVISOR` ligada, o automático manda o arriscado e
+ * o envio para fora depois de conteúdo de fora ao REVISOR (revisar-acao.ts): a decisão nasce `em_revisao`, o hook espera
+ * por ela como espera a pessoa, e a liberação do revisor é achada no passo 2 (só no mesmo turno, enquanto limpo).
+ * Desligada, tudo acima vale exatamente como antes.
  *
  * Turno contaminado pela web (0033) pede até a leitura no manual: um texto de página pode ter mandado o modelo "só
  * olhar" algo que vaza. Plano sem Bash é recusa — o hook de uma máquina antiga não abre porta. O modo é o ATUAL do
@@ -44,8 +56,11 @@ export type SaidaAutorizarComando = { permitir: true; porque: "leitura" | "aprov
  */
 export const COMANDO_MAX = 64_000;
 
-type Permitir = { permitir: true; porque: "leitura" | "aprovado" | "liberado_na_tarefa" | "modo_automatico" | "modo_total" };
-type PedeCard = { card: { agenteNome: string | null; motivo: Extract<DecisaoDoModo, { automatico: false }> | null; risco: string | null } };
+type Permitir = { permitir: true; porque: PorqueRoda };
+type AgenteDoPedido = { nome: string; titulo: string; descricao: string } | null;
+type PedeCard = { card: { agenteNome: string | null; motivo: Extract<DecisaoSemRevisor, { automatico: false }> | null; risco: string | null } };
+/** ADR-115: o modo mandou ao revisor (só com a chave `NOD_REVISOR` ligada). */
+type VaiAoRevisor = { revisar: { gatilho: GatilhoDeRevisao; contaminado: boolean; agente: AgenteDoPedido; risco: string | null } };
 
 /**
  * O que a chamada pede (revisto em 2026-10-14, ADR-103): um comando do terminal, gravar um arquivo, ou usar um app (MCP)
@@ -61,10 +76,17 @@ const ORIGEM_DO_PEDIDO: Record<Pedido["tipo"], OrigemDaRevisao> = { comando: "te
  * do plano dos modos de aprovação conta, no ponto em que o modo seria consultado, o que o Automático novo faria (só o
  * card do terminal; o `esperar_comando` não abre card e fica sem revisor).
  */
-async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido, medir = false): Promise<Permitir | PedeCard> {
+async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedido: Pedido, medir = false): Promise<Permitir | PedeCard | VaiAoRevisor> {
   const contaminado = plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(plano.turnoId));
   if (pedido.tipo === "comando" && classificarComando(texto).tipo === "leitura" && !contaminado) return { permitir: true, porque: "leitura" };
-  if (await deps.repos.itensAprovacao.comandoAprovadoNaCadeia(plano.turnoId, texto)) return { permitir: true, porque: "aprovado" };
+  // revisto em 2026-10-18 (revisão de engenharia 4): pelo texto do item, que acha também a gravação de arquivo aprovada.
+  const aprovado = await deps.repos.itensAprovacao.aprovadoNaCadeia(plano.turnoId, texto, pedido.tipo === "arquivo");
+  if (aprovado === "pessoa") return { permitir: true, porque: "aprovado" };
+  // A liberação do REVISOR vale só enquanto ele vale (revisão do PR 3a): a pessoa que volta o bot para o manual, ou a
+  // chave desligada no meio do turno, faz o mesmo comando seguir a regra de agora — não a liberação de antes.
+  if (aprovado === "revisor" && deps.services.revisor?.config.ligado === true && (await deps.repos.agentes.buscar(plano.agenteId))?.modoAprovacao === "automatico") {
+    return { permitir: true, porque: "revisor" };
+  }
   const risco = pedido.tipo === "comando" ? comandoArriscado(texto) : null;
   const credencial = tocaCredencial(pedido.tipo === "arquivo" ? pedido.arquivo : texto);
   // definido em 2026-09-30 (ADR-062, auditoria das aprovações): "o resto desta tarefa" libera o comando comum, não
@@ -74,13 +96,22 @@ async function decidirComando(deps: Deps, plano: PlanoTurno, texto: string, pedi
     return { permitir: true, porque: "liberado_na_tarefa" };
   }
   const agente = await deps.repos.agentes.buscar(plano.agenteId);
-  if (medir) {
-    // Envio para fora: no terminal, `enviaPeloTerminal`; todo MCP da pessoa (o nome não diz se só lê); gravar arquivo, nunca.
-    const envioParaFora = pedido.tipo === "mcp" || (pedido.tipo === "comando" && enviaPeloTerminal(texto));
-    await medirRevisao(deps, plano, agente?.modoAprovacao, { origem: ORIGEM_DO_PEDIDO[pedido.tipo], arriscada: risco !== null, credencial, envioParaFora, contaminado });
+  // ADR-115: a chave `NOD_REVISOR`. Desligada, a decisão é exatamente a de hoje (envio e contaminado não pesam).
+  const revisor = deps.services.revisor?.config.ligado === true;
+  // Envio para fora: no terminal, `enviaPeloTerminal`; todo MCP da pessoa (o nome não diz se só lê); gravar arquivo, nunca.
+  const envioParaFora = pedido.tipo === "mcp" || (pedido.tipo === "comando" && enviaPeloTerminal(texto));
+  const medida = { origem: ORIGEM_DO_PEDIDO[pedido.tipo], arriscada: risco !== null, credencial, envioParaFora, contaminado };
+  const avaliacao = medir ? await medirRevisao(deps, plano, agente?.modoAprovacao, medida) : revisor ? await avaliarRevisao(deps, plano, medida).catch(() => null) : null;
+  // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo. Com o revisor
+  // ligado, o envio para fora depois de conteúdo de fora (turno ou conversa em 24 h) vai a ele (plano, 3a). Se a leitura
+  // da conversa falhou (avaliação nula), o lado seguro: conta como contaminado — o envio vai ao revisor, nunca roda direto.
+  const contaminadoParaRevisor = avaliacao ? avaliacao.contaminado : revisor || contaminado;
+  const decidido = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial, envioParaFora, contaminado: contaminadoParaRevisor }, revisor);
+  // O `esperar_comando` (medir = false) não abre cartão nem tem revisor: o que seria revisado não roda por ali.
+  if (decidido && "revisar" in decidido && medir) {
+    return { revisar: { gatilho: decidido.gatilho, contaminado: contaminadoParaRevisor, agente: agente ? { nome: agente.nome, titulo: agente.titulo, descricao: agente.descricao } : null, risco } };
   }
-  // ADR-066: conteúdo de fora não para o automático nem o total — só o manual, que já chega aqui pedindo.
-  const doModo = decidirPeloModo(agente?.modoAprovacao, { arriscada: risco !== null, credencial });
+  const doModo = semRevisor(decidido);
   if (doModo?.automatico) return { permitir: true, porque: doModo.regra === REGRA_MODO_TOTAL ? "modo_total" : "modo_automatico" };
   return { card: { agenteNome: agente?.nome ?? null, motivo: doModo ?? null, risco } };
 }
@@ -112,6 +143,15 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
   const pedido: Pedido = arquivo !== null ? { tipo: "arquivo", arquivo } : mcp !== null ? { tipo: "mcp" } : { tipo: "comando" };
   const decidido = await decidirComando(deps, plano, texto, pedido, true);
   if ("permitir" in decidido) return { data: decidido };
+  const destino = { ...DESTINO_TERMINAL, argumentos: arquivo === null ? { comando: texto } : { arquivo } };
+  const fraseDoPedido = (nome: string | null) => `${nome ?? "O bot"} quer ${arquivo !== null ? "gravar um arquivo no seu Mac" : mcp !== null ? "usar um app seu" : "rodar um comando no seu Mac"}`;
+  if ("revisar" in decidido) {
+    // ADR-115: fase 1 do revisor (revisar-acao.ts) em vez do cartão. O hook não muda: espera a decisão `em_revisao`.
+    const { gatilho, contaminado, agente, risco } = decidido.revisar;
+    const acao = pedido.tipo === "arquivo" ? { tipo: "arquivo" as const, caminho: pedido.arquivo } : pedido.tipo === "mcp" ? { tipo: "mcp" as const, pedido: texto } : { tipo: "comando" as const, comando: texto };
+    const r = await revisarAcaoFase1(deps, { plano, texto, tipo: pedido.tipo, acao, destino, gatilho, risco: risco ?? RISCO_DO_GATILHO[gatilho], contaminado, frase: fraseDoPedido(agente?.nome ?? null), agente });
+    return { data: r.data.revisao ? { aguardar: r.data.aguardar, revisao: r.data.revisao } : { aguardar: r.data.aguardar }, events: r.events ?? [] };
+  }
   const { agenteNome, motivo: doModo, risco } = decidido.card;
 
   const agora = deps.agora();
@@ -121,10 +161,10 @@ export const autorizarComando: CasoDeUso<{ plano: PlanoTurno; comando: string } 
     conversaId: plano.conversaId,
     turnoId: plano.turnoId,
     prazoDecisaoEm: agora + PRAZO_DECISAO_MS,
-    frase: `${agenteNome ?? "O bot"} quer ${arquivo !== null ? "gravar um arquivo no seu Mac" : mcp !== null ? "usar um app seu" : "rodar um comando no seu Mac"}`,
+    frase: fraseDoPedido(agenteNome),
   });
   if (!decisao) throw new ErroDeDominio("estado_invalido", { cause: "decisão não criada" });
-  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino: { ...DESTINO_TERMINAL, argumentos: arquivo === null ? { comando: texto } : { arquivo } }, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
+  await deps.repos.itensAprovacao.criarLote(decisao.id, [{ idx: 0, texto, destino, origemSensivel: false, motivoManual: doModo?.motivo ?? "destino_terminal",
     // ADR-059: o porquê do arriscado, em frase fixa do domínio (nunca texto do modelo), para o card dizer o que parou.
     ...(doModo?.motivo === "acao_arriscada" && risco ? { justificativa: risco } : {}) }]);
   const evento: RuntimeEvent = {

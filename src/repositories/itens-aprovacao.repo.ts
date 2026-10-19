@@ -80,11 +80,44 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
-     * ADR-055: este comando já foi aprovado nesta tarefa? Item 'terminal' aprovado (desfecho executado) com o MESMO
-     * texto, numa decisão de um turno da cadeia — este e os que ele retoma. É o que deixa a retomada refazer o
+     * ADR-055: esta ação do terminal já foi aprovada nesta tarefa? Item 'terminal' aprovado (desfecho executado) com o
+     * MESMO texto, numa decisão de um turno da cadeia — este e os que ele retoma. É o que deixa a retomada refazer o
      * comando que a pessoa aprovou depois de a espera no turno acabar, sem um segundo card.
+     * revisto em 2026-10-18 (plano dos modos de aprovação, revisão de engenharia 4): compara `texto_original`, não
+     * `destino.argumentos.comando` — o item de gravar arquivo guarda `{ arquivo }` com o texto `Gravar …`, e a gravação
+     * aprovada nunca era achada na segunda consulta do hook (outro card, e o hook respondia "não liberou"). Vale para
+     * comando, arquivo e MCP. ADR-115: `revisor` = liberada pelo revisor (`regra:revisor`), que vale só no MESMO turno e
+     * enquanto ele não ficou contaminado depois dela; `pessoa` = o clique, que vale na cadeia como sempre.
+     * Revisão do PR 3a: `arquivo` separa a gravação aprovada do comando de mesmo texto (o "comando" `Gravar ~/.bashrc`
+     * aprovado não libera o Write). O "depois dela" segue no `decidida_em`: os dois lados estão no relógio do servidor
+     * (`contaminado_em` e `decidida_em` vêm de `deps.agora()`; `criado_em` é o relógio do banco).
      */
-    async comandoAprovadoNaCadeia(turnoId: string, comando: string): Promise<boolean> {
+    async aprovadoNaCadeia(turnoId: string, texto: string, arquivo: boolean): Promise<"pessoa" | "revisor" | null> {
+      const [l] = await conn<{ por: "pessoa" | "revisor" | null }[]>`
+        with recursive cadeia(id, retoma_turno_id, saltos) as (
+          select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
+          union all
+          select t.id, t.retoma_turno_id, c.saltos + 1 from turnos t join cadeia c on t.tenant_id = ${escopo.tenantId} and t.id = c.retoma_turno_id
+          where c.saltos < 50
+        )
+        select case when d.desfecho->>'regra' = 'regra:revisor' then 'revisor' else 'pessoa' end as por
+        from itens_aprovacao i join decisoes d on d.tenant_id = i.tenant_id and d.id = i.decisao_id
+          join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+        where i.tenant_id = ${escopo.tenantId} and d.turno_id in (select id from cadeia)
+          and i.destino->>'conector' = 'terminal' and i.texto_original = ${texto} and (i.destino->'argumentos' ? 'arquivo') = ${arquivo}
+          and i.selecionado and i.desfecho = 'executado'
+          and (coalesce(d.desfecho->>'regra', '') <> 'regra:revisor'
+            or (d.turno_id = ${turnoId} and (t.contaminado_em is null or t.contaminado_em <= d.decidida_em)))
+        order by (d.desfecho->>'regra' = 'regra:revisor') nulls first
+        limit 1`;
+      return l?.por ?? null;
+    },
+
+    /**
+     * ADR-115 (revisão de engenharia 3): a MESMA ação do terminal já levou "pede" do revisor, foi negada pela pessoa ou
+     * venceu na cadeia do turno — então vai direto ao cartão, sem outro sorteio no revisor.
+     */
+    async recusadoNaCadeia(turnoId: string, texto: string): Promise<boolean> {
       const [l] = await conn<{ sim: boolean }[]>`
         with recursive cadeia(id, retoma_turno_id, saltos) as (
           select id, retoma_turno_id, 0 from turnos where tenant_id = ${escopo.tenantId} and id = ${turnoId}
@@ -95,10 +128,28 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
         select exists (
           select 1 from itens_aprovacao i join decisoes d on d.tenant_id = i.tenant_id and d.id = i.decisao_id
           where i.tenant_id = ${escopo.tenantId} and d.turno_id in (select id from cadeia)
-            and i.destino->>'conector' = 'terminal' and i.destino->'argumentos'->>'comando' = ${comando}
-            and i.selecionado and i.desfecho = 'executado'
+            and i.destino->>'conector' = 'terminal' and i.texto_original = ${texto}
+            and (i.motivo_manual = 'revisor_pediu' or d.estado = 'vencida'
+              or (d.estado = 'decidida' and (not i.selecionado or i.desfecho in ('retirado_pela_pessoa', 'sensivel_nao_aprovado'))))
         ) as sim`;
       return l?.sim === true;
+    },
+
+    /**
+     * ADR-115 (fase 3 da revisão), pela dona: `liberado` — o item roda sem pessoa (motivo nulo = resolvido por regra,
+     * desfecho executado, que o hook lê); senão o motivo do cartão e a frase (o motivo do revisor ou a da falha).
+     */
+    async marcarRevisao(id: string, p: { liberado: true } | { motivoManual: Extract<MotivoAprovacaoManual, "revisor_pediu" | "revisor_falhou">; justificativa: string }): Promise<ItemAprovacao | null> {
+      const [l] = "liberado" in p
+        ? await conn<Linha[]>`
+          update itens_aprovacao set motivo_manual = null, desfecho = 'executado'
+          where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and desfecho is null
+          returning ${conn.unsafe(COLUNAS)}`
+        : await conn<Linha[]>`
+          update itens_aprovacao set motivo_manual = ${p.motivoManual}, justificativa = ${p.justificativa}
+          where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id}
+          returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraItem(l) : null;
     },
 
     async buscar(id: string): Promise<ItemAprovacao | null> {

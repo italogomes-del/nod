@@ -112,6 +112,11 @@ describe("redigirSegredos (NOD-158)", () => {
       "if (password === \"\") return;",
       "Basic auth desligado; senha: obrigatória",
       "PWD=/Users/nod/projeto",
+      // definido em 2026-10-18 (revisão de engenharia 15 dos modos de aprovação): os padrões novos não mordem isto.
+      "git push -u origin feat/login",
+      "mysql -p db_producao",
+      "OLDPWD=/tmp e DB_HOST=localhost",
+      "https://example.com/busca?q=signature&page=2",
       "const token = await obterToken(escopo);\nif (!token) throw new ErroDeDominio(\"nao_permitido\");",
       "Error: stream closed by provider (exit 1)",
       "curto",
@@ -127,9 +132,31 @@ describe("redigirSegredos (NOD-158)", () => {
   // 4000 fica bem acima do maior teto (256), senão o próprio teto ainda pareceria quadrático.
   // São 11 execuções por caso (aquecimento + 5 de cada tamanho): com load ~950 o `eyJ-` passou dos 5 s padrão
   // (medido em 2026-10-07), daí o PRAZO_GUARDA (30 s) por caso. Uma regex quadrática falha pela razão, não pelo prazo.
-  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic "])("o custo de `%s` repetido cresce linear (4000 → 16000 caracteres)", PRAZO_GUARDA, (unidade) => {
+  it.each(["a=", "a-", "a.", "ab-", "a-ke", "eyJ-", "token=", "x://", "senha=", "a_password", "password:\"", "Authorization: Basic ", "APASSWORD", "-u a", "--user ", "sshpass -p", "mysql a -p", "?sig=", "SG.aaaaaaaaaaaaaaaa", "1234567:AA"])("o custo de `%s` repetido cresce linear (4000 → 16000 caracteres)", PRAZO_GUARDA, (unidade) => {
     const razao = razaoDeCrescimento((n) => rep(unidade, Math.ceil(n / unidade.length)), redigirSegredos, 4000);
     expect(razao).toBeLessThan(RAZAO_MAXIMA_LINEAR);
+  });
+});
+
+describe("padrões novos (revisão de engenharia 15 do plano dos modos de aprovação)", () => {
+  it.each([
+    ["PGPASSWORD=s3nh4 psql", "PGPASSWORD=«redigido: 5 caracteres» psql"],
+    ["MYSQL_PWD='s3nh4' mysql", "MYSQL_PWD='«redigido: 5 caracteres»' mysql"],
+    ["curl -u maria:s3nh4 https://x", "curl -u maria:«redigido: 5 caracteres» https://x"],
+    ["curl --user=maria:s3nh4 x", "curl --user=maria:«redigido: 5 caracteres» x"],
+    ["sshpass -p s3nh4 ssh host", "sshpass -p «redigido: 5 caracteres» ssh host"],
+    ["mysql -uroot -ps3nh4 db", "mysql -uroot -p«redigido: 5 caracteres» db"],
+    ["https://b.s3/x?X-Amz-Signature=abc123&y=1", "https://b.s3/x?X-Amz-Signature=«redigido: 6 caracteres»&y=1"],
+    ["https://c.blob/y?sv=1&sig=abc%2F", "https://c.blob/y?sv=1&sig=«redigido: 6 caracteres»"],
+  ])("%s", (entrada, saida) => {
+    expect(redigirSegredos(entrada)).toBe(saida);
+    expect(redigirSegredos(saida)).toBe(saida);
+  });
+
+  it("prefixos de GitLab, Stripe, webhook do Stripe, SendGrid e Telegram", () => {
+    for (const s of [`glpat-${"a1".repeat(10)}`, `rk_live_${"b2".repeat(12)}`, `sk_test_${"c3".repeat(12)}`, `whsec_${"d4".repeat(16)}`, `SG.${"e".repeat(22)}.${"f".repeat(43)}`, `123456789:AA${"g".repeat(33)}`]) {
+      expect(redigirSegredos(`valor ${s} fim`), s).toBe(`valor «redigido: ${s.length} caracteres» fim`);
+    }
   });
 });
 

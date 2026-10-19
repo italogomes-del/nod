@@ -4,6 +4,7 @@ import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, t
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
+import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao } from "../../../contracts/revisao.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
@@ -427,4 +428,47 @@ export function progressoDoLogin(v: unknown): ProgressoDoLogin {
 export function impressoes(v: unknown): string[] {
   exigir(Array.isArray(v) && v.length <= CONTAS_ANUNCIADAS_MAX && v.every((x) => typeof x === "string" && IMPRESSAO.test(x)));
   return v as string[];
+}
+
+/**
+ * ADR-115 (2026-10-18): o relato de uma revisão (`POST revisao`). Ou `saida` (texto cru; acima do teto do servidor ele
+ * vira `saida` inválida na fase 3, nunca 400, para a revisão não ficar presa até o prazo) ou `falha` do laço; a prova é o
+ * hexadecimal do HMAC-SHA256. Fora disso, 400.
+ */
+export function relatoRevisao(v: unknown): RelatoRevisao {
+  const r = objeto(v);
+  const revisaoId = uuid(r.revisaoId);
+  const turnoId = uuid(r.turnoId);
+  exigir(typeof r.prova === "string" && /^[0-9a-f]{64}$/.test(r.prova));
+  exigir(typeof r.ms === "number" && Number.isInteger(r.ms) && r.ms >= 0 && r.ms <= 10 * 60_000);
+  const fichas = (x: unknown): number | undefined => {
+    if (x === undefined) return undefined;
+    exigir(typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= 10_000_000);
+    return x;
+  };
+  const fichasEntrada = fichas(r.fichasEntrada);
+  const fichasSaida = fichas(r.fichasSaida);
+  const comSaida = r.saida !== undefined;
+  exigir(comSaida !== (r.falha !== undefined));
+  if (comSaida) exigir(typeof r.saida === "string" && r.saida.length <= 4 * SAIDA_REVISOR_MAX);
+  else exigir(FALHAS_DO_LACO.some((f) => f === r.falha));
+  return {
+    revisaoId,
+    turnoId,
+    ...(comSaida ? { saida: r.saida as string } : { falha: r.falha as FalhaDoLaco }),
+    ms: r.ms,
+    ...(fichasEntrada !== undefined ? { fichasEntrada } : {}),
+    ...(fichasSaida !== undefined ? { fichasSaida } : {}),
+    prova: r.prova,
+  };
+}
+
+/** ADR-115: os campos do revisor na renovação. Fora do formato viram ausentes — nunca derrubam a renovação (o lease). */
+export function camposDoRevisor(b: Record<string, unknown>): { revisa?: true; segredoRevisao?: string; revisoesRecebidas?: string[] } {
+  const recebidas = Array.isArray(b.revisoesRecebidas) && b.revisoesRecebidas.length <= 64 && b.revisoesRecebidas.every((x) => typeof x === "string" && UUID.test(x)) ? (b.revisoesRecebidas as string[]) : undefined;
+  return {
+    ...(b.revisa === true ? { revisa: true as const } : {}),
+    ...(typeof b.segredoRevisao === "string" && b.segredoRevisao.length <= 256 ? { segredoRevisao: b.segredoRevisao } : {}),
+    ...(recebidas?.length ? { revisoesRecebidas: recebidas } : {}),
+  };
 }

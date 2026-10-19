@@ -106,7 +106,10 @@ import { rotasConectores } from "./rotas/conectores.ts";
 import { criarRotasConversas } from "./rotas/conversas.ts";
 import { criarRotasRelatos } from "./rotas/relatos.ts";
 import { criarRotasDecisoes } from "./rotas/decisoes.ts";
-import type { DentroDeTx } from "./rotas/dentro-de-tx.ts";
+import { executar, type DentroDeTx } from "./rotas/dentro-de-tx.ts";
+import { criarCaixaRevisoes } from "../fundo/caixa-revisoes.ts";
+import { lerConfigRevisor, renovacaoDoLacoLocal } from "../../domain/revisor.ts";
+import { assentarRevisao } from "../../use-cases/revisar-acao.ts";
 import { criarRotaDev } from "./rotas/dev.ts";
 import { criarRotaEventos } from "./rotas/eventos.ts";
 import type { DepsRotas } from "./rotas/executar-caso.ts";
@@ -495,6 +498,28 @@ export function comporApp(o: OpcoesCompor): App {
   const dentro: DentroDeTx = (escopo, fn) => abrirTxEscopada(db, escopo)((trx) => fn(depsDe(trx, escopo)));
 
   /**
+   * ADR-115 (2026-10-18, plano dos modos de aprovação, PR 3a): o revisor do Automático. A chave `NOD_REVISOR` (ligado ou
+   * não) e o modelo (`NOD_MODELO_REVISOR_CLAUDE`) vêm do ambiente; inválido impede o boot. A caixa de pedidos é uma por
+   * processo, dividida por todas as pontes e pelas rotas internas; o prazo de cada pedido vira cartão por aqui.
+   */
+  const configRevisor = lerConfigRevisor(env);
+  const caixaRevisoes = criarCaixaRevisoes({
+    config: configRevisor,
+    agora: relogio,
+    pressao: (id) => trabalhosVivos.daMaquina(id),
+    async vencer({ escopo, decisaoId, resultado }) {
+      try {
+        await dentro(escopo, (d) => executar(d, assentarRevisao, { decisaoId, resultado }));
+      } catch (e) {
+        // A decisão fica `em_revisao`: o varredor de expiração a recolhe em até 2 × o prazo.
+        log("erro", "revisao_vencer_falhou", { decisao_id: decisaoId, erro: e instanceof Error ? e.name : "desconhecido" });
+      }
+    },
+  });
+  services.revisor = caixaRevisoes;
+  log("info", "revisor_modo", { ligado: configRevisor.ligado, modelo: configRevisor.modelo, esforco: configRevisor.esforco ?? null, teto_dia: configRevisor.tetoDia });
+
+  /**
    * definido em 2026-10-12 (NOD-214): o plano do turno adotado depois de um reinício, recomposto pelo emitir do despacho
    * com o token que a máquina já tem e a IA que o despacho escolheu (`turno_credenciais`). null = o turno não está mais
    * despachando ou a credencial sumiu (entregue ou assentado pelo lease enquanto isso).
@@ -581,6 +606,7 @@ export function comporApp(o: OpcoesCompor): App {
     },
     ...(o.redeMs !== undefined ? { redeMs: o.redeMs } : {}),
     fundoLinuxSoVermelha,
+    revisoes: caixaRevisoes,
     async depoisDeAssentar(d, { entrega, saida }) {
       const turno = saida.turno;
       if (!turno || saida.tardia) return [];
@@ -1172,7 +1198,7 @@ export function comporApp(o: OpcoesCompor): App {
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
-    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
+    ...rotasInternas({ dentro, computadores, workspaces, tokens, agora: relogio, revisor: caixaRevisoes, pressao: (pessoaId) => trabalhosVivos.memoria(pessoaId)?.nivel ?? null, longpollMs: env.NOD_LONGPOLL_MS ? numero(env.NOD_LONGPOLL_MS, 20_000) : undefined }),
     ...criarRotasRotinas(depsL7),
     ...criarRotasSalas(depsL7),
     ...criarRotasSuaVez(dentro),
@@ -1229,6 +1255,10 @@ export function comporApp(o: OpcoesCompor): App {
     iniciarPoolDeLacos((ponte) => iniciarLaco({
       ...p,
       ponte,
+      // ADR-115 (plano dos modos de aprovação, redesenho 6): o modo local renova a 1 s, como o app do Mac e o motor — é a
+      // batida que entrega o pedido de revisão ao laço; a 30 s ele estouraria o prazo de 60 s. Só com a chave ligada
+      // (revisão do PR 3a): desligada, nenhum pedido sai, e a batida fica a de hoje (30 s), sem 30× renovações no banco.
+      ...renovacaoDoLacoLocal(configRevisor),
       memoria: memoriaDaMaquina,
       aoDelta: (plano, texto) => publicarDoPlano(plano, "turno.delta", { texto }),
       aoFalaGravada: (plano) => publicarDoPlano(plano, "turno.fala", {}),

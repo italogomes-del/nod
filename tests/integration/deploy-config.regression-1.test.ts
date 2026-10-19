@@ -40,7 +40,8 @@ async function configCom(linha: string): Promise<void> {
 }
 
 describe("deploy.sh e o modelo da ligação no config.env (NOD-164)", () => {
-  it.each(["NOD_MODELO_LIGACAO_CLAUDE=claude-sonnet-5-5 esforco=low", "NOD_MODELO_LIGACAO_CODEX=gpt-6-luna esforco=low"])("sem aspas e com opções: recusa antes de qualquer efeito (%s)", async (linha) => {
+  // ADR-115 (2026-10-18): o modelo do revisor do Automático tem o mesmo formato e a mesma armadilha.
+  it.each(["NOD_MODELO_LIGACAO_CLAUDE=claude-sonnet-5-5 esforco=low", "NOD_MODELO_LIGACAO_CODEX=gpt-6-luna esforco=low", "NOD_MODELO_REVISOR_CLAUDE=claude-sonnet-5-5 esforco=low"])("sem aspas e com opções: recusa antes de qualquer efeito (%s)", async (linha) => {
     await configCom(linha);
     expect(deploy()).toMatch(/NOD_MODELO_LIGACAO_\* com opções precisa estar entre aspas/);
   });
@@ -51,6 +52,7 @@ describe("deploy.sh e o modelo da ligação no config.env (NOD-164)", () => {
     "NOD_MODELO_LIGACAO_CLAUDE=claude-sonnet-4-6",
     "NOD_MODELO_LIGACAO_CLAUDE=claude-sonnet-4-6 # comentário",
     "NOD_MODELO_LIGACAO_CLAUDE=",
+    'NOD_MODELO_REVISOR_CLAUDE="claude-sonnet-5-5 esforco=low"',
   ])("formato aceito passa da checagem (%s)", async (linha) => {
     await configCom(linha);
     const err = deploy();
@@ -66,5 +68,15 @@ describe("ligação Codex desligada em produção (NOD-167)", () => {
     const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
     expect(config).toMatch(/^NOD_LIGACAO_CODEX=0$/m);
     expect(await readFile(DEPLOY, "utf8")).toMatch(/^NOD_LIGACAO_CODEX=\$\{NOD_LIGACAO_CODEX:-0\}$/m);
+  });
+});
+
+describe("revisor do Automático desligado em produção (ADR-115, PR 3a)", () => {
+  it("o config.env traz NOD_REVISOR=desligado e o deploy.sh repassa as três variáveis ao nod.env", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const config = await readFile(fileURLToPath(new URL("../../infra/gcp/config.env", import.meta.url)), "utf8");
+    expect(config).toMatch(/^NOD_REVISOR=desligado$/m);
+    const script = await readFile(DEPLOY, "utf8");
+    for (const v of ["NOD_REVISOR", "NOD_MODELO_REVISOR_CLAUDE", "NOD_REVISOR_TETO_DIA"]) expect(script).toMatch(new RegExp(`^${v}=\\$\\{${v}:-\\}$`, "m"));
   });
 });

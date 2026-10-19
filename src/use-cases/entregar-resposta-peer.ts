@@ -1,3 +1,4 @@
+import { decisaoEmAberto } from "../domain/revisor.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { Mensagem } from "../contracts/mensagem.ts";
 import type { Turno } from "../contracts/turno.ts";
@@ -141,7 +142,8 @@ async function fechoDaContinuacao(deps: DepsEntrega, pediu: Turno, tarefaId: str
 async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Promise<boolean> {
   for (const t of cadeia) {
     const decisoes = await deps.repos.decisoes.doTurno(t.id);
-    if (decisoes.some((d) => d.estado === "pendente" || d.estado === "reaberta")) return true;
+    // ADR-115: a revisão em voo também é espera (vira cartão ou libera; nos dois casos o turno continua).
+    if (decisoes.some((d) => decisaoEmAberto(d.estado))) return true;
   }
   const ids = new Set(cadeia.map((t) => t.id));
   // A proposta de acesso tem decisão de MESMO id (ADR-044); vencida a decisão, a proposta segue "pendente"

@@ -57,6 +57,8 @@ export type NovaDecisao = {
   frase: string;
   /** definido em 2026-09-24 (fio da pergunta, 0024): a primeira decisão do fio, na rodada seguinte de uma pergunta respondida. */
   fioId?: string | null;
+  /** ADR-115 (0093): a decisão nasce esperando o revisor, não a pessoa. Ausente = 'pendente' (o default da coluna). */
+  estado?: "em_revisao";
 };
 
 /** definido em 2026-09-16: vencidas ficam visíveis em cinza por 7 dias (ADR-007: nunca suprimidas de imediato). */
@@ -78,9 +80,9 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
   return {
     async criar(d: NovaDecisao): Promise<Decisao | null> {
       const [l] = await conn<Linha[]>`
-        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase, fio_id)
+        insert into decisoes (tenant_id, id, owner_id, decisor_id, agente_id, conversa_id, turno_id, tipo, prazo_decisao_em, prazo_execucao_em, frase, fio_id, estado)
         values (${escopo.tenantId}, ${d.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${d.decisorId ?? escopo.pessoaId}, ${d.agenteId}, ${d.conversaId},
-          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase}, ${d.fioId ?? null})
+          ${d.turnoId ?? null}, ${d.tipo}, ${data(d.prazoDecisaoEm)}, ${dataOuNull(d.prazoExecucaoEm)}, ${d.frase}, ${d.fioId ?? null}, ${d.estado ?? "pendente"})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
     },
@@ -201,6 +203,34 @@ export function decisoesRepo(conn: Conn, escopo: Escopo) {
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado in ${conn(estados)}
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraDecisao(l) : null;
+    },
+
+    /**
+     * ADR-115 (fase 3 da revisão): a decisão `em_revisao` sai dela UMA vez — `liberar` fecha por regra (decidida, desfecho
+     * `decidida_por_regra`, decidida_por nulo, como `fecharPorRegra`); `pendente` vira o cartão de sempre, com prazo novo.
+     * Idempotente pelo `where estado = 'em_revisao'`: o relato repetido, o prazo e o varredor que correm juntos não
+     * regravam (o segundo volta null). Pela dona, como as escritas de laço.
+     */
+    async concluirRevisao(id: string, p: { liberar: { regra: `regra:${string}`; regraVersao: number }; agora: number } | { pendente: { prazoDecisaoEm: number }; agora: number }): Promise<Decisao | null> {
+      const [l] = "liberar" in p
+        ? await conn<Linha[]>`
+          update decisoes set estado = 'decidida', desfecho = ${conn.json({ tipo: "decidida_por_regra", regra: p.liberar.regra, regraVersao: p.liberar.regraVersao, em: iso(p.agora) } satisfies DesfechoDecisao)}, decidida_em = ${data(p.agora)}
+          where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'em_revisao'
+          returning ${conn.unsafe(COLUNAS)}`
+        : await conn<Linha[]>`
+          update decisoes set estado = 'pendente', prazo_decisao_em = ${data(p.pendente.prazoDecisaoEm)}
+          where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} and estado = 'em_revisao'
+          returning ${conn.unsafe(COLUNAS)}`;
+      return l ? paraDecisao(l) : null;
+    },
+
+    /** ADR-115: as decisões da dona ainda `em_revisao` criadas antes de `antesDe` (o varredor de expiração as recolhe). */
+    async emRevisaoAntesDe(antesDe: number): Promise<Decisao[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS)} from decisoes
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'em_revisao' and criado_em < ${data(antesDe)}
+        order by criado_em limit 100`;
+      return linhas.map(paraDecisao);
     },
 
     /**

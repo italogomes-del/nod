@@ -38,8 +38,10 @@ export function rodadaNoFio(rodadas: readonly Pick<Decisao, "id">[], decisaoId: 
  */
 export function estadoDoFio(ultima: Pick<Decisao, "estado" | "desfecho">, retomada: EstadoTurno | null): EstadoFio {
   switch (ultima.estado) {
+    // ADR-115: em revisão ainda espera (nunca acontece com pergunta, mas o estado existe desde a 0093).
     case "pendente":
     case "reaberta":
+    case "em_revisao":
       return "esperando_voce";
     case "vencida":
       return "vencida";

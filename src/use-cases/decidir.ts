@@ -71,6 +71,10 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   const decidida = await deps.repos.decisoes.decidir(decisao.id, { por: deps.escopo.pessoaId, agora });
   if (!decidida) throw new ErroDeDominio("estado_invalido", { cause: "decisão já decidida" });
   const itens = await deps.repos.itensAprovacao.listar(decisao.id);
+  // ADR-115: o desfecho do cartão que a revisão deixou (a linha em acoes_pelo_modo, quando há; senão nada muda).
+  if (decisao.tipo === "aprovacao" && itens.some((i) => i.motivoManual === "revisor_pediu" || i.motivoManual === "revisor_falhou")) {
+    await deps.repos.acoesPeloModo.registrarDesfechoPessoa(decisao.id, itens.some((i) => i.selecionado) ? "aprovou" : "negou");
+  }
   const aExecutar: ItemAExecutar[] = [];
   const dono = { tenantId: decisao.tenantId, pessoaId: decisao.ownerId };
   const rotina = decisao.turnoId ? (await rotinaDoTurno(deps.repos, decisao.turnoId)) !== null : false;

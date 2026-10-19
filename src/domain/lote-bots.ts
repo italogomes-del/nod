@@ -2,7 +2,7 @@ import type { Agente, ModoAprovacao } from "../contracts/agente.ts";
 import type { MotivoCardDoLote } from "../contracts/conversa.ts";
 import type { AcaoLote, AppConectado, TipoAcaoLote } from "../contracts/ferramentas-do-nod.ts";
 import { MAX_ACOES_LOTE } from "../contracts/ferramentas-do-nod.ts";
-import { decidirPeloModo } from "./modo-aprovacao.ts";
+import { decidirPeloModo, semRevisor } from "./modo-aprovacao.ts";
 import { ehNod, nomeReservadoAoNod } from "./nod.ts";
 
 /**
@@ -155,7 +155,7 @@ export function decidirLote(acoes: readonly AcaoResolvida[], modo: ModoAprovacao
   const espera: (MotivoCardDoLote | null)[] = [];
   for (const a of acoes) {
     const risco = riscos[a.i] ?? null;
-    const d = decidirPeloModo(modo, { arriscada: risco !== null, credencial: false });
+    const d = semRevisor(decidirPeloModo(modo, { arriscada: risco !== null, credencial: false }));
     let motivo: MotivoCardDoLote | null = risco === "ligar_total" ? risco : d?.automatico ? null : (risco ?? "manual");
     if (motivo === null && a.alvoDaAcao !== null && espera[a.alvoDaAcao] !== null) motivo = espera[a.alvoDaAcao] ?? "manual";
     espera.push(motivo);

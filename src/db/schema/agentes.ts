@@ -21,7 +21,7 @@ export const ENUMS_DE_ESTADO = {
   dono_agente: ["pessoa", "empresa"],
   politica_resposta: ["so_mencoes", "lead", "todos"],
   tipo_decisao: ["aprovacao", "acesso", "retomar_turno", "gate_rotina", "perfil", "rotina", "pergunta", "falta_de_dado", "permissao", "rotina_atualizacao", "rotina_exclusao", "bot", "lote_bots"],
-  estado_decisao: ["pendente", "decidida", "vencida", "reaberta"],
+  estado_decisao: ["pendente", "decidida", "vencida", "reaberta", "em_revisao"],
   kind_mensagem: ["texto", "sistema", "handoff", "passe", "consentimento", "rotina_execucao", "resultado_aprovacao", "negacao", "parada", "peer_ask", "artefato"],
   memoria_tipo: ["preferencia", "fato", "resumo"],
   transporte_conector: ["stdio", "http"],

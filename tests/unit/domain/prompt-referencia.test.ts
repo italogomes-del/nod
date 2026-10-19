@@ -115,6 +115,9 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 2. Modo automático e modo total (ADR-059).
   "conversa-automatico": conversa("automatico"),
   "conversa-total": conversa("total"),
+  // ADR-115 (PR 3a dos modos de aprovação): o Automático com o revisor ligado (`NOD_REVISOR`), no Claude. Desligado, o
+  // texto é o de "conversa-automatico", byte a byte.
+  "conversa-automatico-revisor": { ...conversa("automatico"), revisor: true },
   // ADR-111: a chave "Calibração" ligada — a mesma conversa manual com a linha a mais na parte estável.
   "conversa-calibracao": { ...conversa("manual"), calibracao: true },
   // ADR-112: a chave "Modo WhatsApp" ligada — a mesma conversa manual com a linha "Tom:" no lugar da "Formatação:" e o

@@ -1,3 +1,4 @@
+import { decisaoEmAberto } from "../domain/revisor.ts";
 import type { AcessoPedido, ResultadoPedirAcesso } from "../contracts/acesso.ts";
 import type { Conector } from "../contracts/conector.ts";
 import type { PayloadPropostaAcesso, Proposta } from "../contracts/conversa.ts";
@@ -60,7 +61,7 @@ async function pedidoRepetido(deps: Deps, ctx: ContextoFerramenta, pedido: Acess
     const repete = p.payload.turnoId === ctx.turnoId && p.payload.nivel === pedido.nivel && [...new Set(p.payload.capacidades)].sort().join(",") === mesmas;
     if (!repete) continue;
     const decisao = await deps.repos.decisoes.buscar(p.id);
-    if (decisao && decisao.estado !== "pendente" && decisao.estado !== "reaberta") continue;
+    if (decisao && !decisaoEmAberto(decisao.estado)) continue;
     return p;
   }
   return null;

@@ -121,7 +121,7 @@ export const criarRotina: CasoNod<Deps, "criar_rotina"> = async (deps, input) =>
     evento(deps, "proposta_criada", autoria, { propostaId: proposta.id, kind: "rotina", proximaExecucao: payload.proximaExecucao }, { conversaId: input.conversaId, turnoId: input.turnoId }),
   ];
   // ADR-059 (emenda de 2026-09-30): no automático e no total a rotina nasce ativa — o modo confirma na hora.
-  const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false });
+  const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false, gravaInstrucao: true });
   if (porRegra) {
     try {
       const ativada = await ativarRotina(deps, { propostaId: proposta.id, porRegra });

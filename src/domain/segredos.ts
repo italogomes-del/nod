@@ -48,6 +48,13 @@ const PREFIXOS: RegExp[] = [
   // `startsWith("ak_")` do OpenMausBot/electron/main.mjs). O piso de 20 é suposição: a doc não fixa o
   // tamanho, e uma chave curta ainda cai em `COMPOSIO_API_KEY=` ou `x-api-key:`.
   /\bak_[A-Za-z0-9_-]{20,}/g,
+  // definido em 2026-10-18 (plano dos modos de aprovação, revisão de engenharia 15): as lacunas achadas antes de o pedido
+  // ao revisor sair redigido — GitLab, Stripe (restrita e secreta com sublinhado), webhook do Stripe, SendGrid e Telegram.
+  /\bglpat-[A-Za-z0-9_-]{20,}/g,
+  /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}/g,
+  /\bwhsec_[A-Za-z0-9+/=]{20,}/g,
+  /\bSG\.[A-Za-z0-9_-]{16,32}\.[A-Za-z0-9_-]{16,64}/g,
+  /\b\d{6,12}:AA[A-Za-z0-9_-]{30,40}(?![A-Za-z0-9_-])/g,
 ];
 const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})/g;
 /** `Authorization: Basic <base64 de usuario:senha>`. Só depois do cabeçalho: "Basic" solto é prosa. */
@@ -71,6 +78,18 @@ const SUFIXO_KEY = /\b([A-Za-z][A-Za-z0-9_-]{0,64}[_-]key)s?(=)(["']?)([A-Za-z0-
 const FLAG_DE_SEGREDO = /(--(?:token|password|passwd|api-key|apikey|secret|access-key|auth-token)(?:=|\s+))(["']?)(?!-)([A-Za-z0-9._~+/=-]+)\2/gi;
 /** `esquema://usuario:senha@host`: a senha na userinfo da URL. */
 const URL_COM_SENHA = /(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@'"]+:)([^\s/@'"«»]+)(@)/gi;
+/**
+ * definido em 2026-10-18 (revisão de engenharia 15 do plano dos modos de aprovação): `PGPASSWORD=` e `MYSQL_PWD=` (o `\b`
+ * do `SENHA` não casa no meio da palavra), só em maiúsculas — `PWD=/Users/…` é a pasta, não senha.
+ */
+const SENHA_COLADA = /\b([A-Z][A-Z0-9_]{0,64}?PASSW(?:OR)?D|MYSQL_PWD)(=)(["']?)([^\s"'&;«»]+)\3/g;
+/** `curl -u usuario:senha` e `--user usuario:senha`: o usuário fica, a senha sai. */
+const USUARIO_SENHA = /((?:^|\s)(?:-u\s*|--user[=\s]+))(["']?)([^\s:"'«»]{1,128}):([^\s"'«»]+)\2/g;
+/** `sshpass -p senha` e `mysql -psenha` (no mysql, `-p` COLADO é a senha; com espaço, ele pergunta). */
+const SSHPASS = /(\bsshpass\b[^\n|;&]{0,64}?\s-p\s*)(["']?)([^\s"'«»]+)\2/g;
+const MYSQL_P = /(\bmysql(?:dump|admin)?\b[^\n|;&]{0,128}?\s-p)(["']?)([^\s"'«»]+)\2/g;
+/** A assinatura de URL pré-assinada (`?sig=`, `X-Amz-Signature=`, `X-Goog-Signature=`): é a credencial da URL. */
+const ASSINATURA_NA_URL = /([?&](?:sig|signature|X-Amz-Signature|X-Goog-Signature|X-Amz-Security-Token)=)([^&\s"'#«»]+)/gi;
 
 export function redigirSegredos(texto: string): string {
   if (!texto || texto.length < 8) return texto;
@@ -86,6 +105,11 @@ export function redigirSegredos(texto: string): string {
   out = out.replace(SUFIXO_KEY, (_m, k: string, sep: string, q: string, v: string) => `${k}${sep}${q}${mascarar(v)}${q}`);
   out = out.replace(FLAG_DE_SEGREDO, (_m, flag: string, q: string, v: string) => `${flag}${q}${mascarar(v)}${q}`);
   out = out.replace(URL_COM_SENHA, (_m, lead: string, senha: string, arroba: string) => `${lead}${mascarar(senha)}${arroba}`);
+  out = out.replace(SENHA_COLADA, (_m, k: string, sep: string, q: string, v: string) => `${k}${sep}${q}${mascarar(v)}${q}`);
+  out = out.replace(USUARIO_SENHA, (_m, flag: string, q: string, u: string, senha: string) => `${flag}${q}${u}:${mascarar(senha)}${q}`);
+  out = out.replace(SSHPASS, (_m, lead: string, q: string, v: string) => `${lead}${q}${mascarar(v)}${q}`);
+  out = out.replace(MYSQL_P, (_m, lead: string, q: string, v: string) => `${lead}${q}${mascarar(v)}${q}`);
+  out = out.replace(ASSINATURA_NA_URL, (_m, k: string, v: string) => `${k}${mascarar(v)}`);
   return out;
 }
 

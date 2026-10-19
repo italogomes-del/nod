@@ -151,7 +151,8 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       await conn`update turnos set parar_solicitado_em = ${new Date(agora)}
         where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado = 'despachando'`;
       await conn`update propostas set estado = 'recusada' where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado = 'pendente'`;
-      await conn`update decisoes set estado = 'vencida' where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado in ('pendente', 'reaberta')`;
+      // ADR-115: a revisão em voo do bot excluído também vence — senão um "libera" que chegasse depois liberaria.
+      await conn`update decisoes set estado = 'vencida' where tenant_id = ${escopo.tenantId} and agente_id = ${id} and estado in ('pendente', 'reaberta', 'em_revisao')`;
       // definido em 2026-10-08 (revisão do épico, S5): as tasks abertas do bot excluído param junto — os turnos delas
       // acabaram de ser interrompidos acima, e ninguém mais as sincronizaria (ficavam "Trabalhando" na tela para sempre).
       await conn`update trabalhos set estado = 'parado', terminado_em = ${new Date(agora)}

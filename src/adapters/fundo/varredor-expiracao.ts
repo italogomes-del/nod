@@ -16,6 +16,8 @@ import { cuidarDosTurnosOrfaos, type TurnosObservados } from "../../use-cases/tu
 import { PRAZO_DECISAO_PADRAO_MS } from "../../use-cases/autoria-evento.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import { sincronizarDasDecisoes } from "../../use-cases/trabalhos.ts";
+import { recolherRevisoesVelhas } from "../../use-cases/revisar-acao.ts";
+import { RECOLHER_REVISAO_MS } from "../../contracts/revisao.ts";
 import { varrerTrocasDeIa } from "../../use-cases/trocas-de-ia.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -31,7 +33,12 @@ export type OpcoesVarredor = {
   pedidosAdiados?: PedidosAdiados;
   /** NOD-219: quando cada turno velho na fila foi observado (turnos-orfaos.ts); o laço cria um mapa só para o processo. */
   turnosObservados?: TurnosObservados;
+  /** ADR-115: a idade a partir da qual a decisão `em_revisao` vira cartão; ausente = RECOLHER_REVISAO_MS (2 × o prazo). Só o teste muda. */
+  recolherRevisaoMs?: number;
 };
+
+/** ADR-115 (0093): a retenção de `acoes_pelo_modo` (o resumo da ação e o motivo do revisor são texto livre). */
+export const RETENCAO_ACOES_PELO_MODO_MS = 90 * 24 * 60 * 60_000;
 /** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
 
@@ -94,6 +101,19 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
   } catch (e) {
     log("erro", "turnos_orfaos_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
+  // definido em 2026-10-18 (ADR-115, plano dos modos de aprovação 3d): a decisão `em_revisao` mais velha que 2 × o prazo
+  // vira cartão (a caixa do turno se perdeu num deploy) e a dona poda `acoes_pelo_modo` com mais de 90 dias. Em transação
+  // própria: um erro aqui não desfaz os blocos de cima, e o próximo tique tenta de novo.
+  try {
+    await tx(async (trx) => {
+      const deps: Deps = { repos: criarRepos(trx, escopo), services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
+      const r = await recolherRevisoesVelhas(deps, { recolherMs: opcoes.recolherRevisaoMs ?? RECOLHER_REVISAO_MS });
+      if (r.events.length) await deps.repos.events.gravarComOutbox(r.events);
+      await deps.repos.acoesPeloModo.podar(opcoes.agora() - RETENCAO_ACOES_PELO_MODO_MS);
+    });
+  } catch (e) {
+    log("erro", "revisoes_velhas_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
   // definido em 2026-10-16 (ADR-108 R4/R6): os avisos de troca de IA (trocas-de-ia.ts), em transação própria — aplica o
   // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta. Revisão do
   // PR 2 (I5): cada aviso num SAVEPOINT desta tx (o padrão dos órfãos) — o que lança volta sozinho e os outros saem.
@@ -126,6 +146,8 @@ async function varrerDecisoes(escopo: Escopo, tx: Transacao, opcoes: OpcoesVarre
     for (const d of vencidas) {
       resultado.vencidas.push(d.id);
       if (!(await repos.decisoes.marcarVarrida(d.id, "vencida"))) continue;
+      // ADR-115: o cartão que a revisão deixou venceu (a linha em acoes_pelo_modo, quando há, guarda o desfecho).
+      if (d.tipo === "aprovacao") await repos.acoesPeloModo.registrarDesfechoPessoa(d.id, "venceu");
       const tipoDesfecho = d.desfecho?.tipo ?? "expirou_sem_ninguem_ver";
       // ADR-017 #2: uma expiração por decisão vencida, rotulada pela causa que o repo devolveu (pendência L8 §4).
       if (tipoDesfecho === "expirou_sem_ninguem_ver" || tipoDesfecho === "expirou_com_alguem_ciente") {

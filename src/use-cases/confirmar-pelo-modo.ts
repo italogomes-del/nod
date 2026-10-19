@@ -1,7 +1,7 @@
 import type { Decisao } from "../contracts/decisao.ts";
 import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { PlanoTurno } from "../contracts/plano-turno.ts";
-import { conversaComAPessoa, decidirPeloModo, type DecisaoDoModo, type RegraDoModo } from "../domain/modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, semRevisor, type DecisaoSemRevisor, type RegraDoModo } from "../domain/modo-aprovacao.ts";
 import { autoriaAgente, autoriaPessoa } from "./apoio-l7.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDasDecisoes } from "./trabalhos.ts";
@@ -44,13 +44,20 @@ export async function fecharDecisaoDaProposta(deps: Deps, id: string, agora: num
  * Mesma regra e mesmo modo ATUAL do agente que decidem as ações; sem plano (chamada fora de turno), manual.
  * `arriscada` só pesa fora da conversa com a pessoa. Devolve a regra quando o modo confirma; senão, null — e o
  * pedido segue para o card de sempre.
+ *
+ * ADR-115 (2026-10-18): estes caminhos ficam sem revisor na v1 (`semRevisor`: o "revisar" vira o card de hoje). E, com a
+ * chave `NOD_REVISOR` ligada, `gravaInstrucao` (criar ou mudar rotina) num turno contaminado vira card no automático
+ * (revisão de engenharia 9, como a cerca 3 do gerir_bots): a instrução da rotina é o "pedido" em que o revisor confia
+ * depois ("é o que a rotina pede"), e uma página lida pelo bot não pode plantá-la sem a pessoa ver.
  */
-export async function confirmacaoPeloModo(deps: Deps, ctx: { agenteId: string; turnoId: string; plano?: PlanoTurno | null }, o: { arriscada: boolean }): Promise<PorRegra | null> {
+export async function confirmacaoPeloModo(deps: Deps, ctx: { agenteId: string; turnoId: string; plano?: PlanoTurno | null }, o: { arriscada: boolean; gravaInstrucao?: boolean }): Promise<PorRegra | null> {
   if (!ctx.plano) return null;
   const agente = await deps.repos.agentes.buscar(ctx.agenteId);
   const modo = agente?.modoAprovacao;
   if (!modo || modo === "manual") return null;
+  const revisor = deps.services.revisor?.config.ligado === true;
+  const plantada = revisor && o.gravaInstrucao === true && (ctx.plano.confiancaEntrada !== "confiavel" || (await deps.repos.turnos.contaminado(ctx.turnoId)));
   // revisto em 2026-10-01 (ADR-066): conteúdo de fora e a trava herdada não param mais o modo.
-  const d: DecisaoDoModo | null = decidirPeloModo(modo, { arriscada: o.arriscada && !conversaComAPessoa(ctx.plano.modoTurno), credencial: false });
+  const d: DecisaoSemRevisor | null = semRevisor(decidirPeloModo(modo, { arriscada: plantada || (o.arriscada && !conversaComAPessoa(ctx.plano.modoTurno)), credencial: false }, revisor));
   return d?.automatico ? { regra: d.regra, regraVersao: d.versao } : null;
 }

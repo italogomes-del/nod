@@ -11,8 +11,16 @@ import type { ModoTurno } from "../contracts/plano-turno.ts";
  */
 export const REGRA_MODO_AUTOMATICO = "regra:modo_automatico" as const;
 export const VERSAO_MODO_AUTOMATICO = 2 as const;
+/**
+ * definido em 2026-10-18 (plano dos modos de aprovação, 3a): com o revisor ligado o conjunto do automático muda — o
+ * arriscado e o envio para fora depois de conteúdo de fora vão ao revisor em vez de parar ou passar direto.
+ */
+export const VERSAO_MODO_AUTOMATICO_COM_REVISOR = 3 as const;
 export const REGRA_MODO_TOTAL = "regra:modo_total" as const;
 export const VERSAO_MODO_TOTAL = 1 as const;
+/** ADR-115: a ação que o revisor liberou fecha por esta regra (trilha e desfecho da decisão). */
+export const REGRA_REVISOR = "regra:revisor" as const;
+export const VERSAO_REGRA_REVISOR = 1 as const;
 export type RegraDoModo = typeof REGRA_MODO_AUTOMATICO | typeof REGRA_MODO_TOTAL;
 
 /** Nomes que a pessoa lê no menu, na linha da conversa e no prompt. */
@@ -55,15 +63,24 @@ export type SituacaoDaAcao = {
   arriscada: boolean;
   /** O comando toca uma credencial do Mac (`tocaCredencial`). */
   credencial: boolean;
+  /** Só pesa com o revisor ligado: escrita num app que não é ler nem apagar, todo MCP da pessoa, `enviaPeloTerminal`. */
+  envioParaFora?: boolean;
+  /** Só pesa com o revisor ligado: o turno, ou outro turno da conversa nas últimas 24 h, leu conteúdo de fora. */
+  contaminado?: boolean;
 };
 
-export type DecisaoDoModo =
+export type DecisaoSemRevisor =
   | { automatico: true; regra: RegraDoModo; versao: number }
   | { automatico: false; motivo: MotivoAprovacaoManual };
+/** O terceiro desfecho (ADR-115): a ação vai ao revisor. Cada chamador diz o que faz com ele (`semRevisor`). */
+export type DecisaoDoModo = DecisaoSemRevisor | { revisar: true; gatilho: GatilhoDeRevisao };
 
 /**
  * O que o modo decide sobre uma ação que, no manual, pediria a pessoa. `null` = modo manual: vale a regra de sempre,
- * sem mudança nenhuma. Ordem fechada, tudo que para antes do que aprova:
+ * sem mudança nenhuma.
+ *
+ * Revisor DESLIGADO (`revisor` falso, o padrão; a chave `NOD_REVISOR`): a regra de hoje, byte a byte, e `envioParaFora`
+ * e `contaminado` não pesam. Ordem fechada, tudo que para antes do que aprova:
  *
  *  1. credencial do Mac      → para, em QUALQUER modo (ADR-055 §3: credencial nunca foi aprovação, é cerca)
  *  2. total                  → aprova
@@ -75,15 +92,34 @@ export type DecisaoDoModo =
  * automático e o total seguem sem pedir. A trava herdada vira, no manual, a marca de conteúdo de fora que passa
  * de quem pediu para quem recebe (pedir-a-bot.ts). A ordem é igual em toda origem de turno.
  *
+ * Revisor LIGADO (definido em 2026-10-18, plano dos modos de aprovação, 3a; ADR-115): o total segue igual (a credencial
+ * dele continua cartão até o PR 6); no automático, credencial é cartão sem revisor (decisão do Marlon), e o resto segue
+ * `gatilhoDeRevisao` — arriscada ou envio para fora depois de conteúdo de fora → `revisar`; senão aprova, na versão 3.
+ *
  * Quem chama só consulta o modo onde o manual pediria a pessoa: leitura, "o resto desta tarefa" e as regras da
  * ADR-042 continuam valendo antes, e o que o modo não muda (sem plano, origem sensível, concessão) vem antes dele.
  */
-export function decidirPeloModo(modo: ModoAprovacao | undefined, s: SituacaoDaAcao): DecisaoDoModo | null {
+export function decidirPeloModo(modo: ModoAprovacao | undefined, s: SituacaoDaAcao, revisor = false): DecisaoDoModo | null {
   if (!modo || modo === "manual") return null;
   if (s.credencial) return { automatico: false, motivo: "toca_credencial" };
   if (modo === "total") return { automatico: true, regra: REGRA_MODO_TOTAL, versao: VERSAO_MODO_TOTAL };
-  if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };
-  return { automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO };
+  if (!revisor) {
+    if (s.arriscada) return { automatico: false, motivo: "acao_arriscada" };
+    return { automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO };
+  }
+  const gatilho = gatilhoDeRevisao({ arriscada: s.arriscada, credencial: false, envioParaFora: s.envioParaFora === true, contaminado: s.contaminado === true });
+  if (vaiAoRevisor(gatilho)) return { revisar: true, gatilho };
+  return { automatico: true, regra: REGRA_MODO_AUTOMATICO, versao: VERSAO_MODO_AUTOMATICO_COM_REVISOR };
+}
+
+/**
+ * Os caminhos SEM revisor na v1 (plano, 3a): rotina e acesso pelo modo, o pré-voo da rotina, o `gerir_bots` do Nod e o
+ * `esperar_comando`. Neles "revisar" vira o cartão de hoje: o arriscado para (`acao_arriscada`) e o envio depois de
+ * conteúdo de fora também (no `esperar_comando`, que não abre cartão, o comando não roda por ali).
+ */
+export function semRevisor(d: DecisaoDoModo | null): DecisaoSemRevisor | null {
+  if (d === null || !("revisar" in d)) return d;
+  return { automatico: false, motivo: "acao_arriscada" };
 }
 
 /** A ação vai ao revisor do Automático novo por um destes motivos (plano dos modos de aprovação, Parte 3a). */

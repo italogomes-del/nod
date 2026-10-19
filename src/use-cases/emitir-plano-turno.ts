@@ -393,6 +393,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     anexos: [...metasDosAnexos, ...anteriores],
     ...(experimentos.calibracao ? { calibracao: true } : {}),
     ...(whatsapp ? { whatsapp: true } : {}),
+    ...(deps.services.revisor?.config.ligado ? { revisor: true } : {}),
     contextoConversa,
     pessoaNome,
     maquina: input.maquina ?? null,

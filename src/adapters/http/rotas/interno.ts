@@ -4,7 +4,7 @@ import type { ClasseNegacao } from "../../../contracts/negacao.ts";
 import { MOTIVOS_NEGACAO, type MotivoNegacao } from "../../../contracts/motivos.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { esperaEmLaco, motivoDaEsperaNegada } from "../../../domain/espera-em-laco.ts";
-import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_TOTAL } from "../../../domain/modo-aprovacao.ts";
+import { REGRA_MODO_AUTOMATICO, REGRA_MODO_TOTAL, REGRA_REVISOR, VERSAO_MODO_AUTOMATICO, VERSAO_MODO_AUTOMATICO_COM_REVISOR, VERSAO_MODO_TOTAL, VERSAO_REGRA_REVISOR } from "../../../domain/modo-aprovacao.ts";
 import { NATIVA_MCP_DA_PESSOA, NATIVAS_QUE_CONTAMINAM } from "../../../domain/nativas.ts";
 import { randomUUID } from "node:crypto";
 import { ErroBancoOcupado } from "../../../db/tx.ts";
@@ -17,6 +17,7 @@ import type { NivelPressao } from "../../../contracts/trabalho.ts";
 import { soltarPorMemoria } from "../../../domain/trabalho.ts";
 import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
+import type { PedidoNaCaixa } from "../../../use-cases/revisar-acao.ts";
 import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type EfeitoPendente, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
 import type { Rota } from "../roteador.ts";
@@ -40,6 +41,8 @@ export type DepsRotasInternas = {
   dormir?: (ms: number) => Promise<void>;
   /** ADR-083 (#194): a pressão de memória dos Macs da pessoa; amarela ou pior solta a espera longa de uma task. */
   pressao?: (pessoaId: string) => NivelPressao | null;
+  /** ADR-115: onde o pedido de revisão entra DEPOIS do commit da fase 1 (a caixa do processo, caixa-revisoes.ts). */
+  revisor?: { enfileirar(p: PedidoNaCaixa): void };
 };
 
 const CLASSES: readonly ClasseNegacao[] = ["ferramenta_negada", "conector_indisponivel", "plano_ausente"];
@@ -279,6 +282,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           ctx.json(403, { codigo: "nao_permitido", mensagem: motivoDaEsperaNegada(espera, comMeChameAs, comEsperarComando) });
           return;
         }
+        // ADR-115: o pedido ao revisor só entra na caixa depois do commit — o laço não pode responder por uma decisão que
+        // o banco ainda não tem.
+        const paraACaixa: { revisao?: PedidoNaCaixa } = {};
         const aguardar = await deps.dentro(ctx.escopo, async (d) => {
           // ADR-059: o comando que o MODO aprovou leva a regra do modo na trilha. Sem isso ele fica igual a uma
           // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.
@@ -288,14 +294,21 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           const arquivo = ["Write", "Edit", "NotebookEdit", "apply_patch"].includes(ferramenta) && typeof c?.arquivo === "string" ? c.arquivo : null;
           if (rodaComando || arquivo !== null || mcp !== null) {
             const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
-            if ("aguardar" in r) return r.aguardar;
-            if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: VERSAO_MODO_AUTOMATICO };
+            if ("aguardar" in r) {
+              if (r.revisao) paraACaixa.revisao = r.revisao;
+              return r.aguardar;
+            }
+            const comRevisor = d.services.revisor?.config.ligado === true;
+            if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: comRevisor ? VERSAO_MODO_AUTOMATICO_COM_REVISOR : VERSAO_MODO_AUTOMATICO };
             if (r.porque === "modo_total") regra = { regra: REGRA_MODO_TOTAL, regraVersao: VERSAO_MODO_TOTAL };
+            // Revisão de engenharia 21: o comando liberado pelo revisor leva a regra dele, não a da chamada.
+            if (r.porque === "revisor") regra = { regra: REGRA_REVISOR, regraVersao: VERSAO_REGRA_REVISOR };
           }
           await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", ...regra });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
           return null;
         });
+        if (paraACaixa.revisao) deps.revisor?.enfileirar(paraACaixa.revisao);
         ctx.json(200, aguardar ? { aguardar } : { ok: true });
       },
     },

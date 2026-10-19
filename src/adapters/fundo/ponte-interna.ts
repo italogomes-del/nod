@@ -37,6 +37,9 @@ import { USO_DO_MAC_PADRAO } from "../../contracts/raio-x.ts";
 import { ESPACO_FUNDO_MS, portaoDoMac } from "../../domain/memoria-mac.ts";
 import type { Deps, Services, UseCasesNod } from "../../use-cases/tipos.ts";
 import type { TokenTurno } from "../../services/token-turno.ts";
+import type { RelatoRevisao, RespostaRelatoRevisao } from "../../contracts/revisao.ts";
+import { assentarRevisao } from "../../use-cases/revisar-acao.ts";
+import type { CaixaRevisoes } from "./caixa-revisoes.ts";
 
 /** definido em 2026-09-16: versão mínima do app = a do package.json desta rodada; a ponte HTTP compara quando entrar (ADR-021). */
 export const VERSAO_MINIMA_APP = "0.1.0";
@@ -111,6 +114,12 @@ export type DepsPonte = {
    * (`RegraDaPlataforma` em memoria-mac.ts). Ausente = a regra de antes em toda plataforma.
    */
   fundoLinuxSoVermelha?: boolean;
+  /**
+   * ADR-115 (2026-10-18): a caixa de pedidos de revisão do processo (caixa-revisoes.ts), a mesma em todas as pontes. A
+   * renovação entrega os pedidos do turno e registra `revisa`/segredo; `relatarRevisao` recebe o veredito. Ausente = sem
+   * revisor (nenhum pedido sai, e a fase 1 manda tudo ao cartão).
+   */
+  revisoes?: Pick<CaixaRevisoes, "naRenovacao" | "relatar" | "esquecerTurno">;
 };
 
 /**
@@ -486,10 +495,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const confirma = Array.isArray(p.mensagensEntregues);
       const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
-      const { ativo, motivo, mensagens, ids, semMoldura, doDonoSemTrabalho } = await abrirTxEscopada(db, escopo)(async (trx) => {
+      const { ativo, motivo, mensagens, ids, semMoldura, doDonoSemTrabalho, promptAntes } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         // NOD-214: a sessão do CLI fica no turno já na renovação — a entrega pode se perder num reinício.
-        const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora(), p.sessaoCli ? { sessaoCli: p.sessaoCli } : {});
+        const r = await d.repos.turnos.renovarLease(p.turnoId, p.machineId, p.sinais, agora(), { comPromptAntes: true, ...(p.sessaoCli ? { sessaoCli: p.sessaoCli } : {}) });
         // NOD-214: o maior seq de fala gravado vai junto, na mesma tx — o processo novo não grava a mesma fala de novo.
         if (novas.length && tokens.credencialDe) await d.repos.turnoCredenciais.registrarFalas(p.turnoId, novas.at(-1)!.seq);
         if (p.eventos.length) await d.repos.events.gravarComOutbox(p.eventos);
@@ -539,7 +548,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
           if (mudanca) deps.desfazerMemoria?.(escopo.pessoaId, mudanca);
           throw e;
         }
-        return { ativo: r.ativo, motivo: r.motivo, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
+        return { ativo: r.ativo, motivo: r.motivo, promptAntes: r.promptAntes !== false, mensagens: textos, ids, semMoldura, doDonoSemTrabalho: turno !== null && !turno.trabalhoId && (turno.origem === "conversa" || turno.origem === "retomada") };
       });
       // #189: o que o app confirmou já saiu da fila (absorvido): não está mais "oferecido e esperando confirmação".
       if (ativo) for (const id of p.mensagensEntregues ?? []) jaOferecidas.delete(id);
@@ -564,11 +573,35 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       }
       if (novas.length) falasGravadas.set(p.turnoId, novas.at(-1)!.seq);
       if (ativo) vistos.set(p.turnoId, agora());
+      // ADR-115: os pedidos de revisão do turno (reentregues até o laço confirmar) e a marca `revisa` com o segredo. A caixa
+      // mora aqui, não na rota HTTP: no modo local e no e2e o laço fala direto com esta ponte.
+      const revisoes = ativo && deps.revisoes ? deps.revisoes.naRenovacao({ turnoId: p.turnoId, machineId: p.machineId, revisa: p.revisa === true, amarraSegredo: !promptAntes, ...(p.segredoRevisao !== undefined ? { segredo: p.segredoRevisao } : {}), ...(p.revisoesRecebidas ? { recebidas: p.revisoesRecebidas } : {}) }) : [];
       if (confirma && ativo) {
         for (const id of ids) jaOferecidas.add(id);
         oferecidas.set(p.turnoId, jaOferecidas);
       }
-      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(!ativo && motivo ? { motivo } : {}), ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}) };
+      return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(!ativo && motivo ? { motivo } : {}), ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}), ...(revisoes.length ? { revisoes } : {}) };
+    },
+
+    /**
+     * ADR-115: o relato de uma revisão. A caixa confere máquina, turno, uso único, prazo e a prova do segredo do turno;
+     * aceito, a fase 3 roda numa transação NOVA da dona do turno (sob a trava do turno, em assentarRevisao). Ignorado =
+     * `aceito: false` (a máquina não tenta de novo). A falha do banco aqui é lançada: a decisão fica `em_revisao` e o
+     * varredor a recolhe em até 2 × o prazo.
+     */
+    async relatarRevisao(pessoaId: string, machineId: string, relato: RelatoRevisao): Promise<RespostaRelatoRevisao> {
+      const r = deps.revisoes?.relatar(machineId, relato);
+      if (!r?.aceito) return { aceito: false };
+      if (r.escopo.pessoaId !== pessoaId) {
+        log("aviso", "revisao_relato_de_outra_pessoa", { revisao_id: relato.revisaoId, turno_id: relato.turnoId });
+        return { aceito: false };
+      }
+      await abrirTxEscopada(db, r.escopo)(async (trx) => {
+        const d = depsDe(trx, r.escopo);
+        const s = await assentarRevisao(d, { decisaoId: r.decisaoId, resultado: r.resultado });
+        if (s.events?.length) await d.repos.events.gravarComOutbox(s.events);
+      });
+      return { aceito: true };
     },
 
     async entregar(e: Entrega) {
@@ -682,6 +715,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       vistos.delete(e.turnoId);
       adotadosNaEntrega.delete(e.turnoId);
       deps.services.tokenTurno.revogar(e.turnoId);
+      // ADR-115: a revisão que sobrou do turno entregue vira cartão já (o hook não espera mais), e o segredo sai.
+      deps.revisoes?.esquecerTurno(e.turnoId);
       // NOD-200: a captura do turno sai só com o assentar confirmado; na falha fica, como o escopo, para a entrega repetida.
       deps.services.capturas?.esquecer(e.turnoId);
       deps.esquecerTurno?.(e.turnoId);
