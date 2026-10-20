@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { criarRepos } from "../../../src/repositories/index.ts";
-import { LEASE_MS } from "../../../src/shared/constantes.ts";
+import { ESPERA_DECLINIO_MS, LEASE_MS } from "../../../src/shared/constantes.ts";
 import { expectRejected } from "../../helpers/expect-rejected.ts";
 import { agenteComConversa } from "../../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../../helpers/ids.ts";
@@ -259,6 +259,113 @@ describeIntegracao("turnosRepo: a fala da pessoa passa na frente na fila do dono
       const naTask = await repos.turnos.enfileirar(base(conversaId, agenteId, { trabalhoId: trabalho?.id ?? null, mensagemOrigemId: await fala(repos, conversaId, "para a task") }));
       expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(volta?.id);
       expect((await repos.turnos.reivindicar({ machineId: MAQUINA, agora }))?.id).toBe(naTask?.id);
+    });
+  });
+});
+
+// definido em 2026-10-20 (NOD-301): a máquina sem conta livre da IA deixa passar o turno sem alvo por até
+// ESPERA_DECLINIO_MS quando outra máquina viva tem conta livre dela (iasSoNoutraMaquina decide a lista; aqui, a fila).
+describeIntegracao("turnosRepo.reivindicar: declínio do turno sem alvo (NOD-301)", () => {
+  const MAC = randomUUID();
+  const VM = randomUUID();
+  const CLAUDE = { ias: ["claude-cli"], auto: false } as const;
+  const envelhecer = (trx: Parameters<Parameters<typeof withRollback>[1]>[0], id: string, ms: number) => trx`update turnos set criado_em = criado_em - ${`${ms} milliseconds`}::interval where id = ${id}`;
+
+  it("CA1/CA2: com o declínio o Mac não pega e a VM pega; sem ele, o Mac pega como antes", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const t = await repos.turnos.enfileirar(base(conversaId, agenteId));
+      const agora = Date.now();
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: CLAUDE })).toBeNull();
+      expect((await repos.turnos.reivindicar({ machineId: VM, agora, harnessesProntos: ["claude-cli"] }))?.id).toBe(t?.id);
+
+      const outro = await agenteComConversa(trx, MARLON);
+      const t2 = await repos.turnos.enfileirar(base(outro.conversaId, outro.agenteId));
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"] }))?.id).toBe(t2?.id);
+    });
+  });
+
+  it("CA4: turno com alvo (maquina_desta_vez ou a máquina do bot) não declina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const chave = (await repos.maquinaTokens.criar({ nome: "Mac", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!;
+      const destaVez = await repos.turnos.enfileirar(base(conversaId, agenteId, { maquinaDestaVez: chave.id }));
+      expect((await repos.turnos.reivindicar({ machineId: chave.id, agora: Date.now(), harnessesProntos: ["claude-cli"], declinio: CLAUDE }))?.id).toBe(destaVez?.id);
+
+      const outro = await agenteComConversa(trx, MARLON);
+      await repos.agentes.definirMaquina([outro.agenteId], chave.id);
+      const doBot = await repos.turnos.enfileirar(base(outro.conversaId, outro.agenteId));
+      expect((await repos.turnos.reivindicar({ machineId: chave.id, agora: Date.now(), harnessesProntos: ["claude-cli"], declinio: CLAUDE }))?.id).toBe(doBot?.id);
+    });
+  });
+
+  it("CA5: o turno mais velho que ESPERA_DECLINIO_MS volta ao Mac; a volta marcada conta da hora dela", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const t = await repos.turnos.enfileirar(base(conversaId, agenteId));
+      await envelhecer(trx, t!.id, ESPERA_DECLINIO_MS + 1_000);
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora: Date.now(), harnessesProntos: ["claude-cli"], declinio: CLAUDE }))?.id).toBe(t?.id);
+
+      const outro = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const volta = await repos.turnos.enfileirar(base(outro.conversaId, outro.agenteId, { acordarEm: agora - 1_000 }));
+      await envelhecer(trx, volta!.id, 10 * 60_000);
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: CLAUDE })).toBeNull();
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora: agora + ESPERA_DECLINIO_MS, harnessesProntos: ["claude-cli"], declinio: CLAUDE }))?.id).toBe(volta?.id);
+    });
+  });
+
+  it("CA8: a ligação nunca declina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const ligacao = await repos.ligacoes.criar({ iniciadaPor: "pessoa", harness: null, modelo: null, provedorStt: "falso", provedorTts: "falso", voz: "padrao", agenteId, conversaId });
+      const t = await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "ligacao", ligacaoId: ligacao!.id }));
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora: Date.now(), harnessesProntos: ["claude-cli"], aceitaLigacao: true, declinio: CLAUDE }))?.id).toBe(t?.id);
+    });
+  });
+
+  it("CA9: conversa e rotina sem alvo declinam; IA fixa fora da lista e o Automático com auto:false não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      await repos.turnos.enfileirar(base(conversaId, agenteId, { origem: "rotina" }));
+      const outra = await agenteComConversa(trx, MARLON);
+      await repos.turnos.enfileirar(base(outra.conversaId, outra.agenteId));
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: CLAUDE })).toBeNull();
+      // O Codex declinado não segura o turno do Claude.
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: { ias: ["codex-cli"], auto: false } })).not.toBeNull();
+
+      const auto = await agenteComConversa(trx, MARLON);
+      const tAuto = await repos.turnos.enfileirar(base(auto.conversaId, auto.agenteId, { harness: "auto", modelo: "auto" }));
+      const terceira = await agenteComConversa(trx, MARLON);
+      const tAuto2 = await repos.turnos.enfileirar(base(terceira.conversaId, terceira.agenteId, { harness: "auto", modelo: "auto" }));
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli", "codex-cli"], declinio: { ias: ["claude-cli"], auto: false } }))?.id).not.toBeUndefined();
+      // Com todas as IAs do Automático só noutra máquina (auto:true), o Automático declina também.
+      const restante = [tAuto?.id, tAuto2?.id];
+      const pendentes = await trx<{ id: string }[]>`select id from turnos where id = any(${restante as string[]}::uuid[]) and estado = 'pendente'`;
+      expect(pendentes).toHaveLength(1);
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: { ias: ["claude-cli"], auto: true } })).toBeNull();
+    });
+  });
+
+  it("a task com sessão do CLI não declina (a sessão é desta máquina); a sem sessão declina", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const semSessao = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Sem sessão", origem: "pessoa" });
+      await repos.turnos.enfileirar(base(conversaId, agenteId, { trabalhoId: semSessao!.id }));
+      expect(await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: CLAUDE })).toBeNull();
+      const comSessao = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Com sessão", origem: "pessoa", sessaoCli: "sessao-do-mac", sessaoHarness: "claude-cli" });
+      const t = await repos.turnos.enfileirar(base(conversaId, agenteId, { trabalhoId: comSessao!.id }));
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora, harnessesProntos: ["claude-cli"], declinio: CLAUDE }))?.id).toBe(t?.id);
+    });
+  });
+
+  it("lista vazia é o mesmo que sem declínio", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const t = await repos.turnos.enfileirar(base(conversaId, agenteId));
+      expect((await repos.turnos.reivindicar({ machineId: MAC, agora: Date.now(), harnessesProntos: ["claude-cli"], declinio: { ias: [], auto: true } }))?.id).toBe(t?.id);
     });
   });
 });

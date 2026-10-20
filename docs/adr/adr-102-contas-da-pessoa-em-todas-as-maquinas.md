@@ -86,3 +86,21 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
 O e-mail e a organização deixam de ficar só nas máquinas: vão no anúncio e moram em `contas_ia` (0075), e a lista os
 mostra em qualquer máquina. A impressão segue sendo a chave da conta (item 4). Motivo e alternativas na
 [ADR-105](adr-105-email-da-conta-de-ia-no-servidor.md).
+
+## Emenda NOD-301 (2026-10-20) — turno sem alvo e a máquina sem conta livre
+
+Com o turno **sem alvo** (sem `maquina_desta_vez`, sem máquina do bot nem padrão da pessoa), a primeira máquina que
+puxava levava o turno, mesmo sem conta livre da IA dele — e a conversa ganhava a nota de limite enquanto outra máquina
+viva da pessoa tinha conta livre. Agora, **só no modo compartilhado** (no local a VM é só alvo, ADR-092 §2), a máquina
+cuja IA do turno está sem conta livre nela (todas as contas da IA no limite) **deixa passar** o turno por até
+`ESPERA_DECLINIO_MS` (20 s, contados de `greatest(criado_em, acordar_em)`) quando outra máquina com contato recente
+(`CONTATO_RECENTE_MS`) tem a IA pronta e conta livre dela. Passado o prazo, pega como antes e mostra a nota — a outra
+pode não puxar, e o turno não passa fome.
+
+Fica de fora do declínio: a ligação (a voz não espera), o turno com alvo, a task com sessão do CLI (a sessão é da
+máquina que a criou) e a IA que a pessoa toda tem no limite (`ias_no_limite`: nenhuma máquina ajudaria). No Automático
+(`auto/auto`) só declina se todas as IAs que a máquina rodaria estão sem conta livre nela. O cálculo é da ponte, sobre a
+leitura de contas que ela já guarda por 30 s; o filtro é um predicado a mais no `reivindicar` (SKIP LOCKED intacto).
+
+**Gatilho de reversão:** turno sem alvo que espera os 20 s e acaba na máquina sem conta (a outra não pegou) em mais de
+1 em cada 10 declínios em 14 dias — o prazo ou a leitura de "viva" está errado.

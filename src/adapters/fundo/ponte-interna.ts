@@ -7,7 +7,10 @@ import { estadoDaMaquina } from "../../domain/harness.ts";
 import { iasNoLimite } from "../../domain/inteligencia.ts";
 import { cotaDasIasComContas } from "../../domain/cota-da-ia.ts";
 import type { IaComConta } from "../../contracts/contas-ia.ts";
-import type { ContaDaPessoa, VinculoDaConta } from "../../domain/contas-da-pessoa.ts";
+import type { VinculoDaConta } from "../../domain/contas-da-pessoa.ts";
+import type { ContaGuardadaNoServidor } from "../../repositories/contas-ia.repo.ts";
+import { ESPERA_DECLINIO_MS } from "../../shared/constantes.ts";
+import { iasSoNoutraMaquina, type LeituraDasContas } from "../../use-cases/contas-do-turno.ts";
 import type { CotaDaIa } from "../../contracts/cota.ts";
 import type { UsoDoPlano } from "../../contracts/uso-do-plano.ts";
 import type { PlanoTurno } from "../../contracts/plano-turno.ts";
@@ -105,6 +108,12 @@ export type DepsPonte = {
    */
   soComoAlvo?: boolean;
   /**
+   * definido em 2026-10-20 (NOD-301): ligado só no modo compartilhado (compor.ts). A máquina sem conta livre da IA deixa
+   * passar o turno sem alvo por até ESPERA_DECLINIO_MS quando outra máquina viva da pessoa tem conta livre dela
+   * (iasSoNoutraMaquina). No modo local a VM só pega turno com ela como alvo (ADR-092 §2): declinar ali só atrasaria a fala.
+   */
+  declinarSemAlvo?: boolean;
+  /**
    * NOD-214 (carência do lease no boot): quando este processo começou. Nos primeiros LEASE_MS daqui, a adoção aceita o
    * turno de lease vencido que segue `despachando` — o lease venceu enquanto o servidor estava fora, não a máquina.
    * Ausente = sem carência (o modo local: lá o reinício é o nod fechado).
@@ -164,7 +173,7 @@ type LimitesLidos = {
   limites: LimitesIa;
   usos: UsoDoPlano[];
   usosPorConta: UsoDoPlano[];
-  contas: { contas: ContaDaPessoa[]; vinculos: VinculoDaConta[]; escolhidas: Partial<Record<IaComConta, string>> } | null;
+  contas: { contas: ContaGuardadaNoServidor[]; vinculos: VinculoDaConta[]; escolhidas: Partial<Record<IaComConta, string>>; chaves?: LeituraDasContas["chaves"] } | null;
   ate: number;
   lidoEm: number;
 };
@@ -228,6 +237,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   const limitesLidos = new Map<string, LimitesLidos>();
   /** ADR-099 §7: o que a cota segura em cada pessoa agora — o log `cota_segura` sai só na mudança. */
   const cotaVista = new Map<string, string>();
+  /** NOD-301: as IAs que cada máquina de cada pessoa (`machineId pessoaId`) declina agora — o log sai só na mudança. */
+  const declinioVisto = new Map<string, string>();
   /** ADR-085 (revisão do #209): quando o último trabalho novo em segundo plano começou em cada Mac (o espaço entre eles). */
   const ultimoFundo = new Map<string, number>();
   /**
@@ -336,21 +347,24 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
    * 0068: as IAs da pessoa no limite agora; ADR-099 §7: e as que a cota segura (reserva ou limite). Sem leitura (erro do
    * banco), a última que deu certo, ou nenhuma.
    */
-  async function limitesECotaDe(escopo: Escopo, machineId: string): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[] }> {
+  async function limitesECotaDe(escopo: Escopo, machineId: string): Promise<{ noLimite: IdHarness[]; cota: CotaDaIa[]; leituraContas: LeituraDasContas | null }> {
     const guardado = limitesLidos.get(escopo.pessoaId);
     // NOD-253 (2026-10-15): a cota da IA com conta da lista olha a conta que o turno desta máquina usaria.
     const de = (g: LimitesLidos | undefined) => {
       const naMaquina = new Set((g?.contas?.vinculos ?? []).filter((v) => v.maquinaId === machineId && v.estado === "pronta" && v.sairPedidoEm === null).map((v) => v.contaId));
       const contas = g?.contas ? { contas: g.contas.contas, naMaquina, escolhidas: g.contas.escolhidas } : null;
-      return { noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIasComContas({ usos: g?.usos ?? [], usosPorConta: g?.usosPorConta ?? [], limites: g?.limites, contas, agora: agora() }) };
+      // NOD-301: a leitura inteira (com as chaves das máquinas) para o declínio do turno sem alvo.
+      const leituraContas: LeituraDasContas | null = g?.contas?.chaves ? { contas: g.contas.contas, vinculos: g.contas.vinculos, escolhidas: g.contas.escolhidas, chaves: g.contas.chaves } : null;
+      return { noLimite: iasNoLimite(g?.limites, agora()), cota: cotaDasIasComContas({ usos: g?.usos ?? [], usosPorConta: g?.usosPorConta ?? [], limites: g?.limites, contas, agora: agora() }), leituraContas };
     };
     if (guardado && guardado.ate > agora() && guardado.lidoEm > (deps.limitesTrocadosEm?.(escopo.pessoaId) ?? 0)) return de(guardado);
     try {
       const lidoEm = agora();
       const lido = await abrirTxEscopada(db, escopo)(async (trx): Promise<LimitesLidos> => {
         const repos = criarRepos(trx, escopo);
-        const [preferencias, usos, usosPorConta, lista, { escolhidas }] = await Promise.all([repos.preferencias.buscar(), repos.usoDoPlano.listar(), repos.usoDoPlano.listarPorConta(), repos.contasIa.listar(), repos.contasIa.modo()]);
-        return { limites: preferencias.iasNoLimite ?? {}, usos, usosPorConta, contas: { contas: lista.contas, vinculos: lista.vinculos, escolhidas }, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
+        // NOD-301: as chaves das máquinas só no modo que declina (o contato recente decide quem está viva).
+        const [preferencias, usos, usosPorConta, lista, { escolhidas }, chaves] = await Promise.all([repos.preferencias.buscar(), repos.usoDoPlano.listar(), repos.usoDoPlano.listarPorConta(), repos.contasIa.listar(), repos.contasIa.modo(), deps.declinarSemAlvo === true ? repos.maquinaTokens.listar() : Promise.resolve(undefined)]);
+        return { limites: preferencias.iasNoLimite ?? {}, usos, usosPorConta, contas: { contas: lista.contas, vinculos: lista.vinculos, escolhidas, ...(chaves ? { chaves } : {}) }, ate: lidoEm + LIMITES_VALEM_MS, lidoEm };
       });
       limitesLidos.set(escopo.pessoaId, lido);
       return de(lido);
@@ -387,6 +401,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       ultimoFundo.delete(machineId);
       for (const chave of segurando.keys()) if (chave.startsWith(`${machineId} `)) segurando.delete(chave);
       deps.esquecerMaquina?.(machineId);
+      for (const chave of declinioVisto.keys()) if (chave.startsWith(`${machineId} `)) declinioVisto.delete(chave);
     },
 
     async puxar(pessoaId, leituraDoMac): Promise<PlanoTurno | null> {
@@ -436,13 +451,22 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const planos = deps.services.planos;
       const services: Services = { ...deps.services, planos: { ...planos, emitir: (trx, turnoId, machineId) => (emitidos.push(turnoId), planos.emitir(trx, turnoId, machineId)) } };
       // NOD-302: a mesma entrada do despacho serve ao aviso do fundo segurado (o mesmo portão da cota).
+      const porMaquina = prontosPorMaquina(pessoaId);
+      // NOD-301: as IAs que só têm conta livre noutra máquina viva (o `reivindicar` deixa passar o turno sem alvo delas).
+      const soNoutraMaquina = deps.declinarSemAlvo === true && maquina.harnesses ? iasSoNoutraMaquina(lidos.leituraContas, { machineId: maquina.machineId, agora: agora(), noLimite: lidos.noLimite, prontosPorMaquina: porMaquina }) : [];
+      const declinioAgora = soNoutraMaquina.join(" ");
+      const chaveDeclinio = `${maquina.machineId} ${pessoaId}`;
+      if ((declinioVisto.get(chaveDeclinio) ?? "") !== declinioAgora) {
+        declinioVisto.set(chaveDeclinio, declinioAgora);
+        log("info", "declinio_sem_alvo_mudou", { pessoa_id: pessoaId, machine_id: maquina.machineId, ias: declinioAgora, espera_ms: ESPERA_DECLINIO_MS });
+      }
       const entradaDaCota: EntradaFundoSegurado = { machineId: maquina.machineId, executor: executorAtual(), harnessesProntos: maquina.harnesses ? Object.entries(maquina.harnesses).filter(([, i]) => i.estado === "pronto").map(([id]) => id) : undefined, harnessesDaPessoa: maquina.harnesses ? harnessesDaPessoa(pessoaId) : undefined, ...(noLimite.length ? { noLimite } : {}), ...(cota.length ? { cota } : {}) };
       let filaVazia = false;
       try {
         const plano = await abrirTxEscopada(db, escopo)(async (trx) => {
           const d = { ...depsDe(trx, escopo), services };
           if (mudanca?.mudou && leituraDoMac) await d.repos.events.gravarComOutbox([eventoPressao(d, mudanca, leituraDoMac)]);
-          const r = await despacharTurno(d, { ...entradaDaCota, segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, prontosPorMaquina: prontosPorMaquina(pessoaId), inventario: maquina.inventario, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
+          const r = await despacharTurno(d, { ...entradaDaCota, segurarFundo, segurarNovo, fundoSemPrazo, espacarFundo, prontosPorMaquina: porMaquina, ...(soNoutraMaquina.length ? { soNoutraMaquina } : {}), inventario: maquina.inventario, aceitaLigacao: maquina.ligacao === true, ...(deps.soComoAlvo ? { soComoAlvo: true } : {}) });
           filaVazia = r.data.motivo === "fila_vazia";
           if (r.events?.length) await d.repos.events.gravarComOutbox(r.events);
           if (r.data.plano) {

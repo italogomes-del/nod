@@ -48,14 +48,45 @@ export async function lerContas(deps: Pick<Deps, "repos">): Promise<LeituraDasCo
 }
 
 /** As contas vistas pela máquina `machineId`, a partir de uma leitura já feita. */
+/** As máquinas vivas da pessoa (chave não revogada e contato recente), id → nome. */
+export function chavesVivas(l: Pick<LeituraDasContas, "chaves">, agora: number): Map<string, string> {
+  return new Map(l.chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
+}
+
+/** Os vínculos `pronta` sem saída pedida (de todas as máquinas). */
+const vinculosProntos = (l: Pick<LeituraDasContas, "vinculos">): VinculoDaConta[] => l.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
+
+/** As contas `pronta` na máquina `maquinaId`, sem saída pedida. */
+export function prontasNa(l: Pick<LeituraDasContas, "vinculos">, maquinaId: string): Set<string> {
+  return new Set(vinculosProntos(l).filter((v) => v.maquinaId === maquinaId).map((v) => v.contaId));
+}
+
 export function contasDaMaquinaDe(l: LeituraDasContas, machineId: string, agora: number): ContasDaMaquina {
   const nomes = new Map(l.chaves.filter((c) => c.revogadaEm === null).map((c) => [c.id, c.nome]));
-  const vivas = new Map(l.chaves.filter((c) => c.revogadaEm === null && c.ultimoUsoEm !== null && agora - c.ultimoUsoEm < CONTATO_RECENTE_MS).map((c) => [c.id, c.nome]));
-  const prontas = l.vinculos.filter((v) => v.estado === "pronta" && v.sairPedidoEm === null);
-  const naMaquina = new Set(prontas.filter((v) => v.maquinaId === machineId).map((v) => v.contaId));
+  const vivas = chavesVivas(l, agora);
+  const prontas = vinculosProntos(l);
+  const naMaquina = prontasNa(l, machineId);
   const noutraMaquina = new Map<string, { id: string; nome: string }>();
   for (const v of prontas) if (v.maquinaId !== machineId && vivas.has(v.maquinaId) && !noutraMaquina.has(v.contaId)) noutraMaquina.set(v.contaId, { id: v.maquinaId, nome: vivas.get(v.maquinaId)! });
   return { contas: l.contas, vinculos: l.vinculos, escolhidas: l.escolhidas, naMaquina, noutraMaquina, nomeDaMaquina: nomes.get(machineId) ?? null };
+}
+
+/**
+ * definido em 2026-10-20 (NOD-301, emenda da ADR-102): as IAs que esta máquina tem logadas sem conta utilizável agora e
+ * que têm conta em uso (a que a fila escolheria) noutra máquina viva da pessoa com a IA pronta. A máquina deixa passar o
+ * turno sem alvo dessas IAs por até ESPERA_DECLINIO_MS (turnos.repo.ts `reivindicar`), para a outra responder sem nota.
+ * Sem conta anunciada aqui (motor ou app antigo), nada. A IA no limite global da pessoa (`noLimite`) fica de fora: a outra
+ * máquina não a pegaria no Automático (iasParaOAutomatico).
+ */
+export function iasSoNoutraMaquina(l: LeituraDasContas | null, p: { machineId: string; agora: number; noLimite: readonly string[]; prontosPorMaquina: Readonly<Record<string, readonly string[]>> }): IaComConta[] {
+  if (!l) return [];
+  const aqui = contaDoTurno({ contas: l.contas, naMaquina: prontasNa(l, p.machineId), escolhidas: l.escolhidas, ordemDoBot: null, agora: p.agora });
+  if (!aqui) return [];
+  const candidatas = aqui.iasSemConta.filter((ia) => !p.noLimite.includes(ia));
+  if (candidatas.length === 0) return [];
+  const outras = [...chavesVivas(l, p.agora).keys()].filter((m) => m !== p.machineId);
+  const la = outras.map((m) => ({ prontos: p.prontosPorMaquina[m] ?? [], conta: contaDoTurno({ contas: l.contas, naMaquina: prontasNa(l, m), escolhidas: l.escolhidas, ordemDoBot: null, agora: p.agora }) }));
+  return candidatas.filter((ia) => la.some((m) => m.prontos.includes(ia) && (m.conta?.porIa[ia] ?? null) !== null));
 }
 
 export async function lerContasDaMaquina(deps: Pick<Deps, "repos" | "agora">, machineId: string): Promise<ContasDaMaquina> {

@@ -658,7 +658,8 @@ export function comporApp(o: OpcoesCompor): App {
   const ponteHttp = criarPonteHttpServidor({
     criar: (escopo) => criarPonteInterna(db, { ...depsPonte, erroCruNoLog: false, listarPessoas: async () => [{ id: escopo.pessoaId, tenantId: escopo.tenantId }], harnessesDaPessoa: (pessoaId) => ponteHttp.harnessesDaPessoa(pessoaId),
       prontosPorMaquina: (pessoaId) => ponteHttp.prontosPorMaquinaDaPessoa(pessoaId),
-      ...(compartilhado ? {} : { executor: "local" as const, soComoAlvo: true }) }),
+      // NOD-301: no compartilhado, a máquina sem conta livre deixa passar o turno sem alvo para outra com conta livre.
+      ...(compartilhado ? { declinarSemAlvo: true } : { executor: "local" as const, soComoAlvo: true }) }),
     persistir: compartilhado ? (escopo, inv) => dentro(escopo, async (d) => { await d.repos.inventario.registrar("claude-cli", inv); }) : async () => undefined,
     ...(compartilhado ? {} : { descartarSessao: true }),
     // ADR-090 (0067): nos dois modos — no local, a VM também cai, e o aviso a nomeia.

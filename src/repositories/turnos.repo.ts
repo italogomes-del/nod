@@ -14,7 +14,7 @@ import { paraProfundidade } from "../domain/profundidade.ts";
 import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
-import { LEASE_MS } from "../shared/constantes.ts";
+import { ESPERA_DECLINIO_MS, LEASE_MS } from "../shared/constantes.ts";
 import type { Conn, Escopo, Tx } from "../shared/types.ts";
 import { alvoDoTurno } from "./alvo-da-maquina.ts";
 import { data, dataOuNull, ms, msOuNull } from "./conversao.ts";
@@ -288,7 +288,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * 0068: `harnessesAuto` (ausente = os prontos) são as IAs desta máquina que valem para o turno do Automático — sem a
      * que está no limite enquanto a pessoa tiver outra fora dele (iasParaOAutomatico).
      */
-    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; cota?: PortaoDaCota | null }): Promise<Turno | null> {
+    async reivindicar(p: { machineId: string; agora: number; harnessesProntos?: readonly string[]; harnessesAuto?: readonly string[]; harnessesProntosPessoa?: readonly string[]; aceitaLigacao?: boolean; segurarFundo?: boolean; espacarFundo?: boolean; segurarNovo?: boolean; fundoSemPrazo?: boolean; soComoAlvo?: boolean; cota?: PortaoDaCota | null; declinio?: { ias: readonly string[]; auto: boolean } | null }): Promise<Turno | null> {
       const dentro = async (trx: Conn): Promise<Turno | null> => {
         await trx`select pg_advisory_xact_lock(hashtext(${`${escopo.tenantId}:${escopo.pessoaId}`}))`;
         // ADR-090: a máquina-alvo do turno `t` (alvo-da-maquina.ts; a lista de trabalhos usa a mesma regra).
@@ -297,6 +297,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         // podem pegá-lo, decidida antes (portaoDaCota). Mesma regra de `tipoParaCota` e `cotaSegura` (domain/cota-da-ia.ts).
         const cota = p.cota ?? null;
         const iaDoTurno = iaDoTurnoSql(trx);
+        const declinio = p.declinio && p.declinio.ias.length > 0 ? p.declinio : null;
         const [l] = await trx<Linha[]>`
           update turnos set estado = 'despachando', machine_id = ${p.machineId}, lease_ate = ${data(p.agora + LEASE_MS)}, attempted = true,
             -- NOD-276 (J3): a hora em que a máquina pegou o turno; "Trabalhando · há N" conta daqui (criado_em é a fila).
@@ -352,6 +353,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
                     where x.tenant_id = t.tenant_id and x.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))))
               -- definido em 2026-10-12 (ADR-099 §7): a cota da IA segura o fundo (seguradoPelaCotaSql, acima).
               ${cota === null ? trx`` : trx`and not ${seguradoPelaCotaSql(trx, cota)}`}
+              -- definido em 2026-10-20 (NOD-301, emenda da ADR-102): sem conta livre da IA do turno nesta máquina e com conta
+              -- livre dela noutra máquina viva (iasSoNoutraMaquina), o turno sem alvo passa para a outra por até
+              -- ESPERA_DECLINIO_MS, contados de greatest(criado_em, acordar_em) (o Postgres ignora o null: a volta marcada conta
+              -- da hora dela). A ligação nunca declina. A task com sessão do CLI também não: a sessão é desta máquina (ADR-108 E1).
+              ${declinio === null ? trx`` : trx`and not (${alvo} is null and t.origem <> 'ligacao'
+                and greatest(t.criado_em, t.acordar_em) > ${data(p.agora - ESPERA_DECLINIO_MS)}
+                and not exists (select 1 from trabalhos w where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and w.sessao_cli is not null)
+                and ((t.harness = 'auto' and t.modelo = 'auto' and ${declinio.auto}::boolean) or (not (t.harness = 'auto' and t.modelo = 'auto') and ${iaDoTurno} = any(${[...declinio.ias]}::text[]))))`}
             -- Ligação primeiro; depois a fala da pessoa; depois o que não é rotina nem pedido de colega (o turno ou o trabalho
             -- dele); depois a ordem.
             order by (t.origem = 'ligacao') desc,

@@ -138,3 +138,10 @@ export const RETRY_AFTER_MAX_MS = 5_000;
  */
 export const ESPERAS_SONDA_VERIFICAR_MS: readonly number[] = [0, 2_000, 4_000, 8_000];
 export const VERIFICAR_TETO_MS = 20_000;
+
+/**
+ * definido em 2026-10-20 (NOD-301, emenda da ADR-102): por quanto tempo a máquina sem conta livre da IA deixa passar o
+ * turno sem alvo para outra máquina viva da pessoa que tem conta livre. Passado isso (contado de `greatest(criado_em,
+ * acordar_em)`), ela pega como antes e mostra a nota de limite — contra a fome, se a outra não pegar.
+ */
+export const ESPERA_DECLINIO_MS = 20_000;

@@ -69,7 +69,16 @@ export type EntradaDespacharTurno = {
    * vazio = nada segura. A conversa com a pessoa nunca espera por isto.
    */
   cota?: readonly CotaDaIa[];
+  /**
+   * definido em 2026-10-20 (NOD-301): as IAs que esta máquina tem sem conta livre e que têm conta livre noutra máquina viva
+   * da pessoa (iasSoNoutraMaquina, só no modo compartilhado). O turno sem alvo delas passa para a outra por até
+   * ESPERA_DECLINIO_MS. Ausente ou vazio = pega como antes.
+   */
+  soNoutraMaquina?: readonly string[];
 };
+
+/** NOD-301: o que o `reivindicar` deixa passar — as IAs fixas da lista, e o Automático se todas as IAs dele estão nela. */
+export type DeclinioSemAlvo = { ias: readonly string[]; auto: boolean };
 
 export type MotivoSemPlano = "parada_ativa" | "fila_vazia" | "executor_indisponivel" | "ligacao_encerrada";
 export type SaidaDespacharTurno = { plano: PlanoTurno; turno: Turno; motivo: null } | { plano: null; turno: Turno | null; motivo: MotivoSemPlano };
@@ -78,14 +87,19 @@ export type SaidaDespacharTurno = { plano: PlanoTurno; turno: Turno; motivo: nul
  * As IAs do Automático nesta máquina (0068) e o portão da cota (ADR-099 §7) do despacho. NOD-302: o mesmo cálculo serve ao
  * aviso do fundo segurado (fundo-segurado-pela-cota.ts), para a nota olhar exatamente o que o `reivindicar` pulou.
  */
-export function portaoDoDespacho(input: Pick<EntradaDespacharTurno, "harnessesProntos" | "harnessesDaPessoa" | "noLimite" | "cota">): { harnessesAuto: string[] | undefined; cota: PortaoDaCota | null } {
+export function portaoDoDespacho(input: Pick<EntradaDespacharTurno, "harnessesProntos" | "harnessesDaPessoa" | "noLimite" | "cota" | "soNoutraMaquina">): { harnessesAuto: string[] | undefined; cota: PortaoDaCota | null; declinio: DeclinioSemAlvo | null } {
   const harnessesAuto = input.harnessesProntos && input.noLimite?.length
     ? iasParaOAutomatico({ prontosMaquina: input.harnessesProntos, prontosPessoa: [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa ?? {}).filter(([, i]) => i?.estado === "pronto").map(([id]) => id)])], noLimite: input.noLimite })
     : undefined;
   // ADR-099 §7: o turno do Automático segura pela cota só se todas as IAs que podem pegá-lo nesta máquina seguram (sem a
   // lista, app anterior: a IA de sempre).
   const cota = input.cota?.length ? portaoDaCota(input.cota, harnessesAuto ?? input.harnessesProntos ?? [HARNESS_LEGADO]) : null;
-  return { harnessesAuto, cota };
+  // NOD-301: `harnessesAuto` não muda de propósito — tirar as IAs dele deixaria o Automático sem IA nesta máquina e o turno
+  // nunca voltaria a ela depois da espera. O Automático declina só se TODAS as IAs dele aqui só têm conta livre noutra.
+  const ias = input.soNoutraMaquina ?? [];
+  const efetivas = harnessesAuto ?? input.harnessesProntos ?? [];
+  const declinio = ias.length > 0 ? { ias: [...ias], auto: efetivas.length > 0 && efetivas.every((ia) => ias.includes(ia)) } : null;
+  return { harnessesAuto, cota, declinio };
 }
 
 /**
@@ -106,8 +120,8 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
     ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
     : undefined;
-  const { harnessesAuto, cota } = portaoDoDespacho(input);
-  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}) });
+  const { harnessesAuto, cota, declinio } = portaoDoDespacho(input);
+  const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}), ...(declinio ? { declinio } : {}) });
   if (!turno) return { data: { plano: null, turno: null, motivo: "fila_vazia" } };
   // NOD-268: o alarme do reenvio em laço (só log; o freio é o teto de reenvios). Revisão do PR #319: a falha da consulta
   // não derruba o despacho de um turno já reivindicado.
