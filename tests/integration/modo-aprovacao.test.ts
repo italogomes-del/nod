@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import type { ModoAprovacao } from "../../src/contracts/agente.ts";
 import type { PlanoTurno } from "../../src/contracts/plano-turno.ts";
+import { trechoAplicavel } from "../../src/db/migrar.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { NATIVAS_DO_TERMINAL } from "../../src/domain/nativas.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -49,7 +52,7 @@ async function cenario(trx: Trx, modo: ModoAprovacao) {
 }
 
 describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
-  it("a coluna nasce 'manual', aceita só os três modos e a troca vira linha na conversa do bot", async () => {
+  it("a coluna aceita só os três modos e a troca vira linha na conversa do bot (a fábrica parte do 'manual')", async () => {
     await withRollback(MARLON, async (trx) => {
       const c = await cenario(trx, "manual");
       expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("manual");
@@ -57,6 +60,20 @@ describeIntegracao("modo de aprovação do bot (ADR-059)", () => {
       expect((await c.repos.agentes.buscar(c.agenteId))?.modoAprovacao).toBe("automatico");
       expect((await c.repos.mensagens.ultimaDaConversa(c.conversaId))?.texto).toContain("para Aprovar automaticamente");
       await expect(trx`update agentes set modo_aprovacao = 'auto' where id = ${c.agenteId}`).rejects.toMatchObject({ code: "23514" });
+    });
+  });
+
+  it("NOD-316 (0095): o DEFAULT da coluna é 'automatico' — o INSERT sem a coluna (o seed) nasce assim — e a migração não toca nas linhas", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const id = randomUUID();
+      await trx`insert into agentes (tenant_id, id, owner_id, visibility, nome, dono, forma, cor, modelo) values (${TENANT_PADRAO}, ${id}, ${PESSOA_MARLON}, 'privado', 'Cru', 'pessoa', 'shape-hex', 'c-purple', 'm')`;
+      expect((await criarRepos(trx, MARLON).agentes.buscar(id))?.modoAprovacao).toBe("automatico");
+      // Um bot que já estava em manual continua em manual: a 0095 só muda o catálogo, sem UPDATE.
+      const { agenteId } = await agenteComConversa(trx, MARLON, { modo: "manual" });
+      expect((await criarRepos(trx, MARLON).agentes.buscar(agenteId))?.modoAprovacao).toBe("manual");
+      const sql = trechoAplicavel(readFileSync(new URL("../../src/db/migrations/0095_bot_nasce_automatico.sql", import.meta.url), "utf8"));
+      expect(sql).toMatch(/ALTER TABLE agentes ALTER COLUMN modo_aprovacao SET DEFAULT 'automatico'/);
+      expect(sql).not.toMatch(/\bUPDATE\b/i);
     });
   });
 

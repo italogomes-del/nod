@@ -7,6 +7,8 @@ import type { ModoTurno, PlanoTurno } from "../../../src/contracts/plano-turno.t
 
 async function cenario(deps: Deps) {
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+  // NOD-316: o bot nasce em Automático; estes casos partem do Manual, explícito.
+  await deps.repos.agentes.definirModoAprovacao(agente?.id ?? "", "manual");
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const email = await deps.repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
   await deps.repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [

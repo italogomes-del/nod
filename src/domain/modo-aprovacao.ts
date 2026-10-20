@@ -23,6 +23,13 @@ export const REGRA_REVISOR = "regra:revisor" as const;
 export const VERSAO_REGRA_REVISOR = 1 as const;
 export type RegraDoModo = typeof REGRA_MODO_AUTOMATICO | typeof REGRA_MODO_TOTAL;
 
+/**
+ * definido em 2026-10-20 (NOD-316, decisão do Marlon na NOD-231; emenda da ADR-059 §1): todo bot nasce em Aprovar
+ * automaticamente — novo (tela, `criar_bots`, lote, onboarding, o Nod) ou duplicado, sem herdar o modo do original.
+ * A dona muda em Aprovações. O INSERT de `agentes.repo.criar` grava esta constante e o DEFAULT da coluna (0095) é o mesmo.
+ */
+export const MODO_APROVACAO_INICIAL: ModoAprovacao = "automatico";
+
 /** Nomes que a pessoa lê no menu, na linha da conversa e no prompt. */
 export const ROTULO_MODO: Readonly<Record<ModoAprovacao, string>> = {
   manual: "Aprovar manualmente",

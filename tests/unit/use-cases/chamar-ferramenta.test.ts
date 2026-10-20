@@ -16,6 +16,8 @@ const nod = (nome: keyof typeof FERRAMENTAS_NOD): FerramentaPlano => ({ nome, no
 async function cenario(opcoes: OpcoesDepsFalsos = {}, plano: Partial<PlanoTurno> = {}) {
   const { deps, banco, chamadas, contextos } = depsFalsos({ agora: AGORA, ...opcoes });
   const agente = await deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
+  // NOD-316: o bot nasce em Automático; estes casos partem do Manual, explícito.
+  await deps.repos.agentes.definirModoAprovacao(agente?.id ?? "", "manual");
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const conector = await deps.repos.conectores.criar({ nome: "Exemplo", slug: "exemplo", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
   const conectorId = conector?.id ?? "";

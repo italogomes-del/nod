@@ -18,7 +18,8 @@ import { withRollback } from "../helpers/with-rollback.ts";
 
 async function nodComTurno(d: Deps, opcoes: { modo?: ModoAprovacao; origem?: OrigemTurno } = {}) {
   const { nod } = (await executar(d, garantirNod, {})).data;
-  if (opcoes.modo) await d.repos.agentes.definirModoAprovacao(nod.id, opcoes.modo);
+  // NOD-316: o Nod nasce em Automático; estes cenários partem do Manual, explícito, salvo o modo pedido.
+  await d.repos.agentes.definirModoAprovacao(nod.id, opcoes.modo ?? "manual");
   const turno = await d.repos.turnos.enfileirar({ executor: "catcher", conversaId: nod.conversaId, agenteId: nod.id, origem: opcoes.origem ?? "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "pedido", entradaConfianca: "confiavel", modelo: "auto" });
   if (!turno) throw new Error("turno");
   return { ctx: { turnoId: turno.id, agenteId: nod.id, conversaId: nod.conversaId }, nod };
@@ -37,6 +38,14 @@ async function appConectado(d: Deps, slug: string) {
 const doMarlon = async (d: Deps) => (await d.repos.agentes.listar({ incluirOcultos: true })).filter((a) => a.ownerId === MARLON.pessoaId);
 
 describeIntegracao("as mãos do Nod (ADR-082)", () => {
+  it("NOD-316: o Nod da pessoa nasce em Aprovar automaticamente", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const d = depsSobreTrx(trx, MARLON);
+      const { nod } = (await executar(d, garantirNod, {})).data;
+      expect((await d.repos.agentes.buscar(nod.id))?.modoAprovacao).toBe("automatico");
+    });
+  });
+
   it("manual: o pedido do Marlon vira UM card com as 5 ações e nenhum bot novo; aprovar só 2 cria 2 e marca 3 como não feitas", async () => {
     await withRollback(MARLON, async (trx) => {
       const d = depsSobreTrx(trx, MARLON);
@@ -109,7 +118,8 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
       expect(r.data.feitas.map((f) => f.i)).toEqual([1]);
       const card = await d.repos.propostas.buscar(r.data.decisao_id ?? "");
       expect(card?.payload.kind === "lote_bots" && card.payload.acoes[0]).toMatchObject({ estado: "esperando", motivo: "ligar_total" });
-      expect((await d.repos.agentes.buscar(dev.id))?.modoAprovacao).toBe("manual");
+      // NOD-316: o Dev 1 nasceu em Automático e continua nele até o card ser aprovado.
+      expect((await d.repos.agentes.buscar(dev.id))?.modoAprovacao).toBe("automatico");
 
       await executar(d, decidirLoteDeBots, { decisaoId: r.data.decisao_id ?? "", recusar: false });
       expect((await d.repos.agentes.buscar(dev.id))?.modoAprovacao).toBe("total");

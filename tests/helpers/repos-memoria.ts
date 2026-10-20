@@ -34,6 +34,7 @@ import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { cotaSegura, ENTRADA_DA_VOLTA_DA_COTA, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
+import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
 import { harnessFixado } from "../../src/domain/harness.ts";
 import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
 import { HARNESS_LEGADO } from "../../src/contracts/harness.ts";
@@ -457,6 +458,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           esforco: d.esforco,
           inteligencia,
           duplicadoDe: a.duplicadoDe ?? null,
+          // NOD-316: como o INSERT — todo bot nasce no modo inicial.
+          modoAprovacao: MODO_APROVACAO_INICIAL,
           criadoEm: agora(),
         };
         b.agentes.push(agente);

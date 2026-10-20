@@ -44,6 +44,8 @@ async function ninaComRotinas(n: number): Promise<{ agenteId: string; conversaId
   const rotinas = await escopado(async (trx) => {
     const repos = criarRepos(trx, PESSOA);
     await repos.agentes.criar({ id: agenteId, nome: "Nina", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m", confirmado: true });
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await repos.agentes.definirModoAprovacao(agenteId, "manual");
     await repos.conversas.criar({ id: conversaId, tipo: "propria", agenteId });
     const gmail = await repos.conectores.criar({ nome: "Gmail (Composio)", slug: "gmail", transporte: "http", url: "https://example.com/mcp", declaracao: "nao-toca" });
     await repos.conectores.registrarSonda(gmail?.id ?? "", { ok: true, agora: JANELA, catalogo: [cap("GMAIL_FETCH_EMAILS", true), cap("GMAIL_LIST_LABELS", true)] });

@@ -20,7 +20,7 @@ import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
-import { abrirMenu, abrirMenuConta, dialogo, pedirGestao, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirMenu, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
 import { renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo } from "./lib/menu-modo.ts";
@@ -1878,10 +1878,7 @@ function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
     pedirGestao("Mover para", `<p>Escolha uma seção ou escreva um novo nome. Deixe vazio para tirar da seção.</p><label>Seção<input name="secao" value="${esc(a.secao ?? "")}" maxlength="60" list="secoes-bots" placeholder="Sem seção" /></label><datalist id="secoes-bots">${secoes.map((n) => `<option value="${esc(n!)}"></option>`).join("")}</datalist>`, "Mover", async (d) => mudarGestao(() => api!.organizarAgente(a.id, { secao: String(d.get("secao")) }))); return;
   }
   if (acao === "duplicar") {
-    // definido em 2026-09-28 (emenda da ADR-034): a dona leva o bot inteiro; bot de equipe de outra pessoa, só o perfil.
-    const texto = a.ownerId === estado.sessao?.pessoaId
-      ? "<p>A cópia leva perfil, avatar, memória, acessos e rotinas. Rotinas ativas também rodam na cópia. Só o histórico da conversa não vem.</p>"
-      : "<p>A cópia mantém perfil e avatar. Rotinas começam pausadas. Como o bot não é seu, memória e acessos ficam com a dona; o histórico também não vem.</p>";
+    const texto = textoDuplicar(a.ownerId === estado.sessao?.pessoaId);
     pedirGestao(`Duplicar ${a.nome}?`, texto, "Duplicar", async () => {
       const r = await api!.duplicar(a.id);
       await mudarGestao(async () => r);

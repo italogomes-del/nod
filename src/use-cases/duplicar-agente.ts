@@ -17,11 +17,15 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * avatar preservado; conversa própria nova. Histórico e sessão do CLI nunca vêm: a cópia é outra conversa.
  *
  * definido em 2026-09-28 (emenda da ADR-034): a DONA duplicando o próprio bot leva o bot inteiro — memória,
- * acessos (concessões e "Sempre permitir" ativos) e rotinas no MESMO estado: ativa continua ativa, com a
- * aprovação como estava. Cada acesso nasce com consentimento NOVO na conversa da cópia, pelo mesmo
+ * acessos (concessões e "Sempre permitir" ativos) e rotinas no MESMO estado: ativa continua ativa. Cada acesso nasce com consentimento NOVO na conversa da cópia, pelo mesmo
  * caminho do "Dar acesso" (concederLote): o clique em Duplicar é o consentimento, e fica citável ali.
  * Bot de equipe duplicado por OUTRA pessoa segue o ADR-034 original: sem memória nem permissões, rotinas
- * pausadas e com aprovação — quem não deu o acesso não o herda.
+ * pausadas — quem não deu o acesso não o herda.
+ *
+ * revisto em 2026-10-20 (NOD-316, decisão do Marlon na NOD-231; emenda da ADR-059 §1): a cópia nasce em Aprovar
+ * automaticamente (MODO_APROVACAO_INICIAL, gravado por agentes.criar) e NÃO herda o modo do original — nem Manual nem
+ * Ignorar todas; a pessoa muda em Aprovações. O `exige_aprovacao` da rotina (campo morto, ninguém decide por ele) não é
+ * copiado: vale o DEFAULT da coluna.
  */
 export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; conversa: Conversa }> = async (deps, input) => {
   const original = await deps.repos.agentes.buscar(input.agenteId);
@@ -69,7 +73,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
       agenteId: agente.id,
       conversaId: conversa.id,
       estado: dona ? r.estado : "pausada",
-      exigeAprovacao: dona ? r.exigeAprovacao : true,
+      exigeAprovacao: undefined,
       proximaExecucao: proximaJanela({ cron: r.cron, fusoIana: r.fusoIana, agora }),
     });
     if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não copiada" });

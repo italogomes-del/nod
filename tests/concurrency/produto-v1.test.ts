@@ -43,6 +43,8 @@ describeIntegracao("produto v1: formulários e colaboração com servidor comple
 
   it("cria bot interativo e confirma uma rotina de cinco minutos proposta no chat", async () => {
     const bot = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", interativo: true });
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await srv.json("POST", `agentes/${bot.agente.id}/modo-aprovacao`, { modo: "manual" });
     expect(bot.agente.nome).not.toBe("Novo agente");
     const inicial = await srv.json<ConversaDto>("GET", `conversas/${bot.conversa.id}/mensagens`);
     expect(inicial.mensagens.some((m) => m.payload?.kind === "boas_vindas")).toBe(true);

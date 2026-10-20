@@ -19,7 +19,8 @@ async function cenario(o: { modo: ModoAprovacao; slug?: string; modoTurno?: Plan
   const { deps, banco, chamadas } = depsFalsos({ agora: AGORA });
   const agente = await deps.repos.agentes.criar({ nome: "Dev 4", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
   const agenteId = agente?.id ?? "";
-  if (o.modo !== "manual") await deps.repos.agentes.definirModoAprovacao(agenteId, o.modo);
+  // NOD-316: o bot nasce em Automático; o modo do caso é sempre explícito, o Manual também.
+  await deps.repos.agentes.definirModoAprovacao(agenteId, o.modo);
   const conversa = await deps.repos.conversas.criar({ tipo: "propria", agenteId });
   const slug = o.slug ?? "gmail";
   const conector = await deps.repos.conectores.criar({ nome: slug, slug, transporte: "stdio", comando: "node", declaracao: "nao-toca" });

@@ -29,7 +29,9 @@ decisões, nenhum sabendo do outro.
 ## Decisão
 
 1. **Um modo por bot, na coluna `agentes.modo_aprovacao` (0040):** `manual` (o de hoje), `automatico` e `total`.
-   Bot novo e cópia nascem `manual`. Excluir volta para `manual`: restaurar não devolve autonomia, como não devolve
+   Bot novo e cópia nascem `automatico` (emenda 2026-10-20, NOD-316/NOD-231: decisão do Marlon — "todo bot deve
+   nascer como automático, tanto bot novo quanto duplicado"; a cópia não herda o modo do original; a constante
+   `MODO_APROVACAO_INICIAL` e o DEFAULT da coluna, 0095; os bots que já existiam mantiveram o modo). Excluir volta para `manual`: restaurar não devolve autonomia, como não devolve
    concessões (ADR-034). Só a dona muda (`POST agentes/:id/modo-aprovacao`, filtro por `owner_id`), e a troca vira
    uma linha na conversa do bot: é a autoridade sob a qual as próximas ações saem sem clique.
 

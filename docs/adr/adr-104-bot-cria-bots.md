@@ -26,7 +26,7 @@ card de lote.
      (sem diferenciar maiúsculas) ou repetido no pedido; descrição vazia; tetos. Qualquer problema e nada é criado. A
      criação roda num SAVEPOINT só.
    - **Como o bot novo nasce.** Igual a um bot criado pela pessoa: sem apps, sem rotinas, sem memória e em Aprovar
-     manualmente (`criarAgente`, ADR-059). Criar bots não abre acesso a nada.
+     automaticamente (`criarAgente`, ADR-059; emenda 2026-10-20, NOD-316 — era Aprovar manualmente). Criar bots não abre acesso a nada.
 4. **Quem pede não muda.** O prompt (linha da conversa e texto do modo de criação) diz que os bots pedidos são outros e
    proíbe usar `atualizar_perfil` para virar um deles, a não ser que a pessoa peça para o bot mudar.
 5. **Rastro.**

@@ -44,6 +44,8 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
     raizArquivos = await mkdtemp(join(tmpdir(), "nod-computador-http-"));
     srv=await servidorCompleto({computador:driver,env:{NOD_MODO:"compartilhado"},intervalos:{orquestradorMs:3600000,schedulerMs:3600000,expiracaoMs:3600000}});
     bot=await srv.json("POST","agentes",{dono:"pessoa",interativo:true});
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await srv.json("POST",`agentes/${bot.agente.id}/modo-aprovacao`,{modo:"manual"});
   },30000);
   // O plano é lido no PUXAR: desde a emenda da ADR-037 (24/09), computador desligado sai do catálogo —
   // quem liga no meio do teste emite o plano de novo.
@@ -142,7 +144,7 @@ describeIntegracao("computadores: autorização e controle pelo servidor complet
   });
   // NOD-162: o computador só nasce na primeira ferramenta computador_* que executa. Um bot novo por caso, para o
   // vínculo começar nulo; o contador `inicios` conta chamadas de driver.iniciar.
-  const botNovo=async()=>{const b=await srv.json<{agente:Agente;conversa:Conversa}>("POST","agentes",{dono:"pessoa",interativo:true});novos.push(b);return b;};
+  const botNovo=async()=>{const b=await srv.json<{agente:Agente;conversa:Conversa}>("POST","agentes",{dono:"pessoa",interativo:true});novos.push(b);await srv.json("POST",`agentes/${b.agente.id}/modo-aprovacao`,{modo:"manual"});return b;}; // NOD-316: parte do Manual, explícito.
   // Lido por SQL, não pelo GET (até a NOD-192, o GET do painel criava a linha em `computadores`).
   const vinculo=(b:{agente:Agente})=>srv.app.dentro(srv.pessoa,d=>d.tx(async trx=>(await trx<{computador_id:string|null}[]>`select computador_id from agentes where id = ${b.agente.id}`)[0]!.computador_id));
   it("(a) plano emitido e turno sem computador_*: nenhum iniciar e agentes.computador_id nulo",async()=>{

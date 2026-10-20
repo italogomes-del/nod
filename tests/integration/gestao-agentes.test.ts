@@ -111,7 +111,8 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
       const rs = (await d.repos.rotinas.listarDoAgente(copia.agente.id)).sort((x, y) => x.instrucao.localeCompare(y.instrucao));
       expect(rs.map((r) => ({ instrucao: r.instrucao, estado: r.estado, exigeAprovacao: r.exigeAprovacao, conversaId: r.conversaId }))).toEqual([
         { instrucao: "Resumo da semana", estado: "pausada", exigeAprovacao: true, conversaId: copia.conversa.id },
-        { instrucao: "Revisar PRs abertos", estado: "ativa", exigeAprovacao: false, conversaId: copia.conversa.id },
+        // NOD-316: o exige_aprovacao (campo morto) não é copiado — vale o DEFAULT da coluna.
+        { instrucao: "Revisar PRs abertos", estado: "ativa", exigeAprovacao: true, conversaId: copia.conversa.id },
       ]);
       expect((events ?? []).map((e) => e.kind).sort()).toEqual(["agente_atualizado", "concessao_criada", "concessao_criada", "mensagem_criada", "rotina_criada", "rotina_criada"]);
       expect(await d.repos.concessoes.doAgente(b.agente.id)).toHaveLength(3);

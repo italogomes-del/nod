@@ -37,6 +37,8 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     const repos = memoria.repos(MARLON);
     const agente = await repos.agentes.criar({ nome: "Ada", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "m" });
     const agenteId = agente?.id ?? "";
+    // NOD-316: o bot nasce em Automático; estes cenários partem do Manual, explícito.
+    await repos.agentes.definirModoAprovacao(agenteId, "manual");
     const conversaId = (await repos.conversas.criar({ tipo: "propria", agenteId }))?.id ?? "";
     const email = await repos.conectores.criar({ nome: "Email", slug: `email-${agenteId.slice(0, 8)}`, transporte: "stdio", comando: "node", declaracao: "nao-toca" });
     await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: CATALOGO, agora: agora() });

@@ -48,7 +48,8 @@ describeIntegracao("criar_bots (NOD-210, ADR-104)", () => {
         for (const c of r.data.criados) {
           const novo = await d.repos.agentes.buscar(c.bot_id);
           expect(novo).toMatchObject({ nome: c.nome, confirmado: true, dono: "pessoa", ownerId: MARLON.pessoaId });
-          expect(novo?.modoAprovacao ?? "manual").toBe("manual");
+          // NOD-316: nasce em Aprovar automaticamente, qualquer que seja o modo de quem pede.
+          expect(novo?.modoAprovacao).toBe("automatico");
           expect(novo?.secao).toBe(c.secao);
           expect(await d.repos.concessoes.doAgente(c.bot_id)).toEqual([]);
           expect(await d.repos.rotinas.listarDoAgente(c.bot_id)).toEqual([]);

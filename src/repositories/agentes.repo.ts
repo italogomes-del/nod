@@ -2,6 +2,7 @@ import type { IdHarness, PreferenciaHarness } from "../contracts/harness.ts";
 import type { Agente, CorAgente, DonoAgente, EsforcoAgente, FormaAgente, ModoAprovacao, PapelAgente, Visibilidade } from "../contracts/agente.ts";
 import type { EscolhasIa, InteligenciaBot, ModoInteligencia } from "../contracts/inteligencia.ts";
 import { derivadosDa, INTELIGENCIA_PADRAO, inteligenciaDoAgente, inteligenciaDoLegado } from "../domain/inteligencia.ts";
+import { MODO_APROVACAO_INICIAL } from "../domain/modo-aprovacao.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
 import { jsonb, ms } from "./conversao.ts";
 
@@ -170,10 +171,10 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       const i = a.inteligencia ?? inteligenciaDoLegado(INTELIGENCIA_PADRAO, { harness: a.harness ?? "auto", modelo: a.modelo });
       const d = derivadosDa(i);
       const [l] = await conn<Linha[]>`
-        insert into agentes (tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, modelo, harness, esforco, inteligencia_modo, ordem_ias, escolhas_ia, duplicado_de, confirmado)
+        insert into agentes (tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, modelo, harness, esforco, inteligencia_modo, ordem_ias, escolhas_ia, duplicado_de, confirmado, modo_aprovacao)
         values (${escopo.tenantId}, ${a.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${visibility}, ${a.nome}, ${a.titulo ?? ""},
           ${a.descricao ?? ""}, ${a.dono}, ${a.forma}, ${a.cor}, ${d.modelo}, ${d.harness}, ${d.esforco}, ${i.modo}, ${i.ordem ? jsonb(conn, i.ordem) : null}, ${jsonb(conn, i.escolhas)},
-          ${a.duplicadoDe ?? null}, ${a.confirmado ?? false})
+          ${a.duplicadoDe ?? null}, ${a.confirmado ?? false}, ${MODO_APROVACAO_INICIAL})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;
     },

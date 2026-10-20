@@ -55,6 +55,30 @@ describe("duplicarAgente (Grok Bot: Duplicate; a dona leva o bot inteiro, nunca 
     expect((await deps.repos.agentes.listar()).filter((x) => x.fixado).map((x) => x.nome)).toEqual(["Clarice", "Clarice (cópia)", "Milton"]);
   });
 
+  it("NOD-316: a cópia nasce em Automático qualquer que seja o modo do original, e a rotina copiada não leva o exige_aprovacao (vale o default)", async () => {
+    for (const modo of ["manual", "total"] as const) {
+      const { deps } = depsEmMemoria();
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa", nome: "Vera" });
+      await deps.repos.agentes.definirModoAprovacao(criado.agente.id, modo);
+      await deps.repos.rotinas.criar({
+        agenteId: criado.agente.id,
+        conversaId: criado.conversa.id,
+        cron: "0 8 * * 1-5",
+        fusoIana: "America/Sao_Paulo",
+        instrucao: "poste o resumo",
+        fonte: "PRs abertos",
+        entregavel: "resumo",
+        limitesAprovacao: "",
+        politicaSemDado: "diga que não houve",
+        exigeAprovacao: false,
+        proximaExecucao: 0,
+      });
+      const { data } = await executar(deps, duplicarAgente, { agenteId: criado.agente.id });
+      expect(data.agente.modoAprovacao).toBe("automatico");
+      expect(await deps.repos.rotinas.listarDoAgente(data.agente.id)).toMatchObject([{ exigeAprovacao: true, estado: "ativa" }]);
+    }
+  });
+
   it("agente inexistente → nao_encontrado", async () => {
     const { deps } = depsEmMemoria();
     await esperarErro(() => duplicarAgente(deps, { agenteId: "nao-existe" }), "nao_encontrado");

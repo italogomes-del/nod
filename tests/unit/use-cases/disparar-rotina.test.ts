@@ -17,6 +17,8 @@ const JANELA = Date.parse("2026-09-17T08:00:00-03:00");
 
 async function rotinaAtiva(d: ReturnType<typeof depsMemoria>, extra: { fonte?: string } = {}) {
   const agente = await d.deps.repos.agentes.criar({ nome: "Vera", dono: "pessoa", forma: "shape-hex", cor: "c-purple", modelo: "claude-haiku-4-5-20251001" });
+  // NOD-316: o bot nasce em Automático; estes casos partem do Manual, explícito.
+  await d.deps.repos.agentes.definirModoAprovacao(agente?.id ?? "", "manual");
   const conversa = await d.deps.repos.conversas.criar({ tipo: "propria", agenteId: agente?.id ?? "" });
   const rotina = await d.deps.repos.rotinas.criar({
     agenteId: agente?.id ?? "",

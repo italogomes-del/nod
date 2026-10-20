@@ -90,6 +90,8 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     const r = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", nome ? { dono: "pessoa", nome } : { dono: "pessoa" });
     criados.agentes.push(r.agente.id);
     criados.conversas.push(r.conversa.id);
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await json("POST", `agentes/${r.agente.id}/modo-aprovacao`, { modo: "manual" });
     return r;
   };
   /** Escrita direta como a pessoa (o fluxo de aceite usa psql): só onde o produto não tem rota (relógio). */
@@ -483,6 +485,8 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     const criadoTaga = await json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Taga", descricao: "Coordena o time." });
     criados.agentes.push(criadoTaga.agente.id);
     criados.conversas.push(criadoTaga.conversa.id);
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await json("POST", `agentes/${criadoTaga.agente.id}/modo-aprovacao`, { modo: "manual" });
     const taga = { agenteId: criadoTaga.agente.id, conversaId: criadoTaga.conversa.id };
     const pedido = 'Pede ao Tuca para revisar o PR 466. [[tool: pedir_a_bot {"agente":"Tuca","pedido":"revisar o PR 466 [[texto: PR 466 revisado: dois comentários]]","contexto":"https://github.com/acme/app/pull/466"}]] [[texto: Pedi ao Tuca.]]';
     const t = await rodar(taga.conversaId, pedido);

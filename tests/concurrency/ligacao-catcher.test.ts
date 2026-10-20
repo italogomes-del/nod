@@ -106,6 +106,8 @@ async function falarPeloMicrofone(cli: Cliente, seq: { n: number }, quadrosComVo
 
 it("liga, ouve a saudação, fala por texto e por áudio, desliga: linha, transcrição, resumo e turno concluído", async () => {
   const { agente, conversa } = await srv.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+  // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+  await srv.json("POST", `agentes/${agente.id}/modo-aprovacao`, { modo: "manual" });
   criados.agentes.push(agente.id);
   criados.conversas.push(conversa.id);
 
@@ -277,6 +279,8 @@ describe("o cérebro cai no meio da ligação", () => {
 
   it("a frase sai, o aviso chega à mídia, a espera não cria vez, e continuar com a outra IA reabre o cérebro na mesma ligação", async () => {
     const { agente, conversa } = await srv2.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await srv2.json("POST", `agentes/${agente.id}/modo-aprovacao`, { modo: "manual" });
     criados2.agentes.push(agente.id);
     criados2.conversas.push(conversa.id);
     await srv2.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });
@@ -396,6 +400,8 @@ describe("a rede cai com o card na tela (NOD-168)", () => {
 
   it("aprovar durante a queda decide uma vez; o cérebro religado recebe a nota, não a abertura", async () => {
     const { agente, conversa } = await srv3.json<{ agente: Agente; conversa: Conversa }>("POST", "agentes", { dono: "pessoa", nome: "Nina" });
+    // NOD-316: o bot nasce em Automático; este cenário parte do Manual, explícito.
+    await srv3.json("POST", `agentes/${agente.id}/modo-aprovacao`, { modo: "manual" });
     criados3.agentes.push(agente.id);
     criados3.conversas.push(conversa.id);
     await srv3.json("POST", "voz/consentimento", { versao: VERSAO_CONSENTIMENTO_VOZ });

@@ -211,14 +211,19 @@ describeIntegracao("rotas agentes/conversas/propostas/turnos/frota (L6) com serv
         expect(r.status).toBe(400);
         expect(((await r.json()) as { codigo: string }).codigo).toBe("entrada_invalida");
       }
-      expect((await criarRepos(trx, MARLON).agentes.buscar(agente.id))?.modoAprovacao).toBe("manual");
-      const auto = await modo({ modo: "automatico" });
-      expect(auto.status).toBe(200);
-      expect(((await auto.json()) as { agente: Agente; mudou: boolean })).toMatchObject({ mudou: true, agente: { modoAprovacao: "automatico" } });
+      // NOD-316: o bot nasce em Automático, e as recusas não o tiram de lá.
+      expect(agente.modoAprovacao).toBe("automatico");
+      expect((await criarRepos(trx, MARLON).agentes.buscar(agente.id))?.modoAprovacao).toBe("automatico");
+      const manual = await modo({ modo: "manual" });
+      expect(manual.status).toBe(200);
+      expect(((await manual.json()) as { agente: Agente; mudou: boolean })).toMatchObject({ mudou: true, agente: { modoAprovacao: "manual" } });
       const total = await modo({ modo: "total", confirmado: true });
       expect(total.status).toBe(200);
       expect(((await total.json()) as { agente: Agente }).agente.modoAprovacao).toBe("total");
-      expect((await modo({ modo: "manual" })).status).toBe(200);
+      // NOD-316: duplicar pela rota um bot em total devolve uma cópia em Automático — não herda.
+      const copia = (await (await servidor.chamar(marlon, "POST", `agentes/${agente.id}/duplicar`)).json()) as { agente: Agente };
+      expect(copia.agente.modoAprovacao).toBe("automatico");
+      expect((await modo({ modo: "automatico" })).status).toBe(200);
       trxAtual = null;
     });
   });

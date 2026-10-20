@@ -32,7 +32,8 @@ async function cenario(modo: ModoAprovacao) {
     ],
   });
   await repos.conectores.habilitar(clickup.id, true);
-  if (modo !== "manual") await repos.agentes.definirModoAprovacao(agente.id, modo);
+  // NOD-316: o bot nasce em Automático; o modo do caso é sempre explícito, o Manual também.
+  await repos.agentes.definirModoAprovacao(agente.id, modo);
   const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId: conversa.id, agenteId: agente.id, origem: "conversa", prazoEm: AGORA + 600_000, profundidade: 0, entradaTexto: "exclui as tasks de Tech Checkpoint e Tech Weekly", entradaConfianca: "confiavel", modelo: "m" });
   if (!turno) throw new Error("turno");
   const plano = (modoTurno: ModoTurno = "conversa", extra: Partial<PlanoTurno> = {}) => planoDeTeste({ turnoId: turno.id, agenteId: agente.id, conversaId: conversa.id, modoTurno, ...extra });

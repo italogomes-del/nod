@@ -5,6 +5,7 @@ import type { AcaoGestao, BotGerido } from "./gestao.ts";
 import { htmlMenuConta, type DadosMenuConta } from "./menu-conta.ts";
 
 export type { AcaoGestao, BotGerido } from "./gestao.ts";
+export { textoDuplicar } from "./gestao.ts";
 
 export function dialogo(html: string, menu = false): HTMLDialogElement {
   document.getElementById("gestao-dialogo")?.remove();

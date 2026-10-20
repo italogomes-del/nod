@@ -59,7 +59,8 @@ PRÓPRIO bot, "reaproveitar a configuração" deixava de fora justamente o que f
 
 - **A dona duplicando o próprio bot leva o bot inteiro:** perfil e avatar (como antes), memória,
   concessões, regras "Sempre permitir" ativas (ADR-042) e rotinas no **mesmo estado**. Uma rotina
-  ativa continua ativa, com a aprovação como estava. A conversa da cópia registra "Rotina ativa: …",
+  ativa continua ativa. A cópia nasce em Aprovar automaticamente e não herda o modo do original (emenda
+  2026-10-20, NOD-316; ADR-059 §1); a caixa de duplicar diz isso. A conversa da cópia registra "Rotina ativa: …",
   como na confirmação.
 - **Todo acesso nasce com consentimento novo, na conversa da cópia.** Concessões passam por
   `concederLote` (a mesma mensagem e os mesmos eventos de um "Dar acesso"). Regras ganham uma mensagem
