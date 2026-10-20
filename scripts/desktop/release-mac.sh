@@ -126,8 +126,8 @@ cat "$NOTAS"
 passo "Rascunho"
 ALVO=(--target "$SHA")
 [ "$TAG_EXISTE" = 1 ] && ALVO=(--verify-tag)
-PRE=()
-[[ "$VERSAO" == *-* ]] && PRE=(--prerelease)
+# NOD-297: toda desktop-v* sai sem assinatura Apple, então é sempre pré-release (mesmo X.Y.Z sem -rc).
+PRE=(--prerelease)
 gh release create "$TAG" -R "$REPO_GH" "${ALVO[@]}" --draft ${PRE[@]+"${PRE[@]}"} --title "nod $VERSAO (app do Mac)" --notes-file "$NOTAS" \
   "$SAIDA/nod-$VERSAO-mac-x64.dmg" "$SAIDA/nod-$VERSAO-mac-arm64.dmg" "$SAIDA/SHA256SUMS.txt"
 

@@ -16,13 +16,24 @@ Em 2026-09-17, o mantenedor pediu repetir a preview anterior e adiar a distribui
 
 O prefixo `desktop-v` mantém esta distribuição manual fora do workflow assinado de tags `v*`. Não se alteram `forceCodeSigning`, hardened runtime ou notarização da configuração de distribuição estável. Para gerar somente os artefatos desta preview, aplique os overrides explícitos na linha de comando: `CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac dmg --x64 --arm64 --publish never --config.mac.identity=null --config.mac.notarize=false --config.dmg.sign=false`. Os demais passos e requisitos abaixo descrevem a distribuição assinada.
 
+## Qual versão escolher (NOD-297, 19/10)
+
+Decidido pelo mantenedor em 2026-10-19:
+
+- **Funcionalidade nova sobe o minor** (`0.4.x` → `0.5.0`).
+- **Só correção sobe o patch** (`0.5.0` → `0.5.1`).
+- **`-rc.N` só para candidata congelada**: a versão está fechada e falta só o aceite; não é o jeito padrão de numerar.
+- **`1.0.0` fica reservada** para o primeiro app com assinatura Apple e aceite nos dois Macs (NOD-133, NOD-172).
+
 ## Pré-release local: `npm run release:mac`
 
 Definido em 2026-10-13. É o fluxo de hoje, enquanto os secrets da Apple não estão cadastrados e o workflow assinado
 não roda. As rc.1 a rc.9 da 0.4.0 saíram assim.
 
-1. **A versão sobe por PR** (`chore: versão X`, `npm version X --no-git-tag-version`). O app manda `app.getVersion()`
-   no header `x-nod-versao`, então a versão vem antes do build.
+1. **A versão sobe por PR** (`chore: versão X`, `npm version X --no-git-tag-version`), seguindo
+   [Qual versão escolher](#qual-versão-escolher-nod-297-1910): minor para funcionalidade, patch para correção.
+   O app manda `app.getVersion()` no header `x-nod-versao`, então a versão vem antes do build. Toda `desktop-vX` sai
+   como pré-release no GitHub, com ou sem `-rc`, porque não tem assinatura Apple.
 2. **O merge desse PR abre uma issue** "Release do app do Mac pendente: X", atribuída ao mantenedor
    (`.github/workflows/release-pendente.yml`). O passo depois do merge se perdia: a rc.5, a rc.8 e a rc.9 ficaram
    mergeadas sem release.
@@ -58,7 +69,7 @@ O workflow exige assinatura (`forceCodeSigning=true`), hardened runtime e notari
 
 ## 1. Preparar a versão por PR
 
-Escolha a versão antes do build: correção incrementa patch, funcionalidade incrementa minor e quebra de contrato exige planejamento explícito de compatibilidade. Mesmo em `0.x`, documente qualquer quebra. Use `vX.Y.Z` para release estável e `vX.Y.Z-rc.N` para candidata; a versão no `package.json` deve coincidir exatamente com a tag sem o prefixo `v`.
+Escolha a versão antes do build: correção incrementa patch, funcionalidade incrementa minor e quebra de contrato exige planejamento explícito de compatibilidade. Mesmo em `0.x`, documente qualquer quebra. A regra está em [Qual versão escolher](#qual-versão-escolher-nod-297-1910). Use `vX.Y.Z` para release estável e `vX.Y.Z-rc.N` para candidata congelada; `vX.Y.Z` estável (sem pré-release no GitHub) só existe a partir da `1.0.0` assinada. Até lá, e sempre no fluxo sem assinatura, a tag é `desktop-vX.Y.Z` e sai como pré-release; a versão no `package.json` deve coincidir exatamente com a tag sem o prefixo `v`.
 
 Em uma branch `codex/`, atualize pacote e lockfile juntos, sem criar tag antecipada:
 

@@ -16,3 +16,10 @@ it("atual e mínima inválidas falham fechado", () => {
     if (typeof v === "string") expect(versaoAceita("1.2.0", v)).toBe(false);
   }
 });
+
+it("NOD-297: minor e patch sem -rc sobem acima das candidatas anteriores", () => {
+  expect(versaoAceita("0.5.0", "0.1.0")).toBe(true);
+  expect(versaoAceita("0.5.0", "0.4.0-rc.13")).toBe(true);
+  expect(versaoAceita("0.4.0-rc.13", "0.5.0")).toBe(false);
+  expect(versaoAceita("0.5.1", "0.5.0")).toBe(true);
+});
