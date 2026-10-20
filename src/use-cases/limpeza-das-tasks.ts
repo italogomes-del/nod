@@ -65,6 +65,8 @@ export function relatoValido(v: unknown): RelatoLimpeza {
     ...(inteiro(o.guardadas) > 0 ? { guardadas: inteiro(o.guardadas), guardadoBytes: inteiro(o.guardadoBytes) } : {}),
     ...(inteiro(o.guardadosVencidos) > 0 ? { guardadosVencidos: inteiro(o.guardadosVencidos) } : {}),
     ...(inteiro(o.orfasRemovidas) > 0 ? { orfasRemovidas: inteiro(o.orfasRemovidas) } : {}),
+    // NOD-295 A: só a máquina nova manda.
+    ...(inteiro(o.clonesApagados) > 0 ? { clonesApagados: inteiro(o.clonesApagados) } : {}),
     // ADR-106: só a máquina nova manda; zero também é notícia (nenhuma pasta no disco, nada oferecido).
     ...(typeof o.pastasEnviadas === "number" ? { pastasEnviadas: inteiro(o.pastasEnviadas), pastasCortadas: inteiro(o.pastasCortadas), candidatos: inteiro(o.candidatos) } : {}),
   };
@@ -87,6 +89,7 @@ export function camposDoRelato(r: RelatoLimpeza): Record<string, number> {
   if (r.guardadas) { campos.guardadas = r.guardadas; campos.guardado_mb = Math.round((r.guardadoBytes ?? 0) / 1_048_576); }
   if (r.guardadosVencidos) campos.guardados_vencidos = r.guardadosVencidos;
   if (r.orfasRemovidas) campos.orfas_removidas = r.orfasRemovidas;
+  if (r.clonesApagados) campos.clones_apagados = r.clonesApagados;
   if (r.pastasEnviadas !== undefined) { campos.pastas_enviadas = r.pastasEnviadas; campos.pastas_cortadas = r.pastasCortadas ?? 0; campos.candidatos = r.candidatos ?? 0; }
   for (const [m, n] of Object.entries(r.puladas)) if (n) campos[`pulada_${m}`] = n;
   return campos;

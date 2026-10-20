@@ -50,6 +50,11 @@ export type RelatoLimpeza = {
   guardadosVencidos?: number;
   orfasRemovidas?: number;
   /**
+   * NOD-295 A (definido em 2026-10-19): clones (`.git` pasta) dentro da pasta da task provados idênticos ao remoto e
+   * apagados sem guardar (na simulação, os que sairiam). `puladas.clone` passa a contar só os que ficaram.
+   */
+  clonesApagados?: number;
+  /**
    * ADR-106: quantas pastas a máquina mandou (como código), quantas ficaram de fora pelo teto e quantas o servidor
    * ofereceu. O bug de 15/10 passou 3 dias calado ("1 pasta"); com estes números o log mostra o corte.
    */
@@ -65,6 +70,8 @@ export type RelatoLimpeza = {
  * ADR-099 (I5): `sem_prova` (a pasta `sem_trabalho` não provou que não há trabalho; fica, o detalhe vai no log).
  * ADR-106: `clone_sumiu` (a worktree aponta para um clone dentro de `~/nod` que já foi apagado; o git não a enxerga mais
  * e ela só sai guardando antes) e `clone_em_uso` (a pasta tem um clone com worktree viva, travada ou num disco que não
- * está montado fora dela; a pasta fica). `clone` segue sendo a contagem de clones achados na pasta, saiam ou não.
+ * está montado fora dela; a pasta fica). NOD-295 A (2026-10-19): `clone` conta os clones achados na pasta que NÃO
+ * provaram ser idênticos ao remoto (o detalhe vai no log `limpeza_clone_fica`); o clone provado sai e conta em
+ * `clonesApagados`.
  */
 export type MotivoPuladaLimpeza = "suja" | "travada" | "montagem" | "pr_nao_mergeado" | "clone" | "fora_da_pasta" | "aninhado" | "ignorado_valioso" | "head_solto" | "em_uso" | "nao_reconfirmada" | "erro" | "processo_vivo" | "grande_demais" | "sem_prova" | "clone_sumiu" | "clone_em_uso";

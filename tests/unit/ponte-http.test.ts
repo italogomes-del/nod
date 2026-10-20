@@ -584,6 +584,10 @@ describe("ADR-088: a limpeza das pastas de task pela ponte", () => {
     // E viram campos do `limpeza_feita`, zero inclusive; sem eles (máquina antiga), os campos não aparecem.
     expect(camposDoRelato(relatoValido({ pastasEnviadas: 300, pastasCortadas: 2, candidatos: 0 }))).toMatchObject({ pastas_enviadas: 300, pastas_cortadas: 2, candidatos: 0 });
     expect(camposDoRelato(relatoValido({}))).not.toHaveProperty("pastas_enviadas");
+    // NOD-295 A: os clones apagados sem guardar atravessam e viram `clones_apagados`; zero ou inválido some.
+    expect(camposDoRelato(relatoValido({ clonesApagados: 4 }))).toMatchObject({ clones_apagados: 4 });
+    expect(relatoValido({ clonesApagados: -1 })).not.toHaveProperty("clonesApagados");
+    expect(camposDoRelato(relatoValido({}))).not.toHaveProperty("clones_apagados");
   });
 
   it("app: servidor antigo (404) ou resposta estranha vira lista vazia; só itens no formato passam", async () => {

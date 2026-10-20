@@ -19,8 +19,12 @@ export const GUARDADO_MAX_BYTES = 2 * 1024 ** 3;
 export const ORFA_SAI_MS = 30 * 24 * 3_600_000;
 export const ORFA_SAI_APERTADO_MS = 7 * 24 * 3_600_000;
 
-/** O que nunca entra no guardado: dependência e cache de ferramenta, em qualquer nível (o nome basta para o `tar`). */
-export const FORA_DO_GUARDADO: readonly string[] = ["node_modules", ...CACHES_DE_FERRAMENTA];
+/**
+ * O que nunca entra no guardado: dependência e cache de ferramenta, em qualquer nível (o nome basta para o `tar`).
+ * NOD-295 A (2026-10-19): também o Postgres de teste descartável do gamefik (`.local-output/disposable-pg-*`), que o
+ * próprio nome diz que se joga fora — o guardado só é feito sem processo vivo na pasta (`processo_vivo`).
+ */
+export const FORA_DO_GUARDADO: readonly string[] = ["node_modules", ...CACHES_DE_FERRAMENTA, "disposable-pg-*"];
 
 /** O guardado venceu? (pela hora da última mudança do arquivo) */
 export function guardadoVencido(mtime: number, agora: number, apertado: boolean): boolean {

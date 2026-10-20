@@ -1,8 +1,10 @@
-import { lstat, mkdir, readdir, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, mkdir, open, readdir, readFile, readlink, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { MotivoPuladaLimpeza } from "../../contracts/ponte.ts";
+import { algumCwdDentro, caminhoDoRemotoLocal, EXCLUSOES_MAX, lerLsRemote, prerequisitosDoBundle, saiDoGuardado } from "../../domain/clone-refazivel.ts";
 import { FORA_DO_GUARDADO, GUARDADO_MAX_BYTES, guardadoVencido, pedacoDeRef } from "../../domain/guardado.ts";
-import { protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
+import { classificarIgnorado, protegidoPorMontagem } from "../../domain/limpeza-das-tasks.ts";
 import { log } from "../../obs/log.ts";
 import type { ExecutarComando } from "./limpeza-das-tasks.ts";
 
@@ -60,10 +62,57 @@ function processoVivo(pid: number): boolean {
 }
 
 /**
+ * QA do #413 (2026-10-19, bug 3): um processo vivo com o diretório de trabalho dentro de `dir` (um `pnpm dev`, um shell,
+ * um `sleep` que o bot deixou) segura a pasta, mesmo sem `*.pid`. No Linux lê `/proc/<pid>/cwd`; no macOS, `lsof -d cwd`.
+ * Não deu para saber (sem `/proc` legível, sem `lsof`, outra plataforma) = ocupada: na dúvida, fica. O processo de outro
+ * usuário que o `/proc` não deixa ler (EACCES) e o que saiu no meio (ENOENT) são pulados; o próprio processo não conta.
+ */
+export async function processoComCwdDentro(dir: string, lerCwds: () => Promise<string[] | null> = cwdsDosProcessos): Promise<boolean> {
+  const alvo = await realpath(dir).catch(() => null);
+  if (alvo === null) return false;
+  const cwds = await lerCwds();
+  return cwds === null || algumCwdDentro(cwds, alvo);
+}
+
+async function cwdsDosProcessos(): Promise<string[] | null> {
+  if (process.platform === "linux") {
+    let pids: string[];
+    try { pids = (await readdir("/proc")).filter((n) => /^\d+$/.test(n) && Number(n) !== process.pid); } catch { return null; }
+    const cwds: string[] = [];
+    let lidos = 0;
+    for (const pid of pids) {
+      try { cwds.push(await readlink(`/proc/${pid}/cwd`)); lidos++; } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code !== "EACCES" && code !== "ENOENT" && code !== "ESRCH") return null;
+      }
+    }
+    return lidos > 0 || pids.length === 0 ? cwds : null;
+  }
+  if (process.platform === "darwin") {
+    return new Promise((resolver) => {
+      execFile("lsof", ["-w", "-a", "-d", "cwd", "-Fn"], { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (_erro, stdout) => {
+        const linhas = String(stdout ?? "").split("\n");
+        const proprio = `p${process.pid}`;
+        const cwds: string[] = [];
+        let pular = false;
+        for (const l of linhas) {
+          if (l.startsWith("p")) pular = l === proprio;
+          else if (l.startsWith("n") && !pular) cwds.push(l.slice(1));
+        }
+        // O `lsof` sai com 1 quando algum processo não se deixa ler; sem nenhuma linha, não se sabe.
+        resolver(linhas.some((l) => l.startsWith("p")) ? cwds : null);
+      });
+    });
+  }
+  return null;
+}
+
+/**
  * Algum `*.pid` dentro da pasta aponta para um processo vivo (um Postgres de teste, um servidor esquecido)? A primeira
  * linha é o pid (é o formato do `postmaster.pid` e do `ns.pid` que os bots deixam). Pid do próprio processo não conta.
  */
 export async function temProcessoVivo(dir: string, profundidade = 0): Promise<boolean> {
+  if (profundidade === 0 && (await processoComCwdDentro(dir))) return true;
   let entradas;
   try { entradas = await readdir(dir, { withFileTypes: true }); } catch { return false; }
   for (const e of entradas) {
@@ -211,6 +260,222 @@ export async function cloneSumiu(wt: string, raiz: string): Promise<boolean> {
 }
 
 /**
+ * NOD-295 A (definido em 2026-10-19): os remotos do clone permitem refazê-lo? Precisa de ao menos um, e cada URL de
+ * remoto local (`/x`, `file://`) tem de existir FORA de `base` (a pasta que vai sair): o clone de um clone da mesma pasta
+ * perderia os dois. Devolve o motivo da dúvida, ou null.
+ */
+export async function remotosRefazem(clone: string, base: string, executar: ExecutarComando): Promise<string | null> {
+  const r = await executar("git", ["-C", clone, "remote"]);
+  if (r.codigo !== 0) return "erro";
+  const nomes = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  if (nomes.length === 0) return "sem_remoto";
+  const baseReal = await realpath(base).catch(() => base);
+  for (const nome of nomes) {
+    const u = await executar("git", ["-C", clone, "remote", "get-url", "--all", nome]);
+    if (u.codigo !== 0) return "erro";
+    for (const url of u.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "")) {
+      const local = caminhoDoRemotoLocal(url);
+      if (local === null) continue;
+      const alvo = await realpath(resolve(clone, local)).catch(() => null);
+      if (alvo === null || dentroDe(alvo, baseReal) || dentroDe(alvo, base)) return "remoto_local";
+    }
+  }
+  return null;
+}
+
+/** QA do #413: acima disto de pontas no remoto, os ids não cabem com folga na linha de comando — não se prova (fica). */
+const PONTAS_DO_REMOTO_MAX = 20_000;
+/** QA do #413: o `git fetch` das pontas que faltam não roda manutenção, grafo nem submódulo no clone que vai sair. */
+const FETCH_QUIETO = ["-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "fetch.writeCommitGraph=false"];
+
+export type ProvaNoRemoto =
+  | { motivo: string }
+  | {
+      /** As pontas (commits) que o remoto anunciou e que já estão no clone: a base do `--not`. */
+      base: string[];
+      /** Há commit — de ref nenhuma, nem só do reflog — fora do que o remoto alcança. */
+      fora: boolean;
+      /** Há ponta local que não é commit (a tag anotada) e que o remoto não tem. */
+      tagLocal: boolean;
+    };
+
+/**
+ * QA do #413 (2026-10-19, bug 1): o clone está no remoto DE VERDADE? Antes a prova era `--not --remotes`, ou seja, contra
+ * as `refs/remotes/*` locais — e elas mentem: sem rede, com um remoto `https` que não existe, ou com a branch apagada no
+ * servidor (o commit já sumiu de lá), o clone passava por "idêntico" e era apagado sem guardar. Agora:
+ * - `git ls-remote --heads --tags` de cada remoto tem de responder (falhou um, não se prova: `remoto_inacessivel`);
+ * - a base são as pontas anunciadas que já estão no clone; faltando alguma (o remoto andou), elas vêm por `git fetch`
+ *   pelo id, sem gravar ref nenhuma (`--refmap=`, sem FETCH_HEAD) e sem manutenção — o clone não muda de forma visível;
+ * - `fora`: `git rev-list --all --reflog --not <base>` não vazio (inclui `refs/remotes/*` velhas e o stash);
+ * - `tagLocal`: ponta local que não é commit (tag anotada) e cujo objeto o remoto não anunciou.
+ */
+export async function provaNoRemoto(clone: string, executar: ExecutarComando): Promise<ProvaNoRemoto> {
+  const r = await executar("git", ["-C", clone, "remote"]);
+  if (r.codigo !== 0) return { motivo: "erro" };
+  const nomes = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  if (nomes.length === 0) return { motivo: "sem_remoto" };
+  const deQuem = new Map<string, string>();
+  const objetos = new Set<string>();
+  for (const nome of nomes) {
+    const ls = await executar("git", ["-C", clone, "ls-remote", "--heads", "--tags", nome], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    if (ls.codigo !== 0) return { motivo: "remoto_inacessivel" };
+    const lido = lerLsRemote(ls.stdout);
+    for (const o of lido.objetos) objetos.add(o);
+    for (const c of lido.commits) if (!deQuem.has(c)) deQuem.set(c, nome);
+  }
+  if (deQuem.size === 0) return { motivo: "remoto_vazio" };
+  if (deQuem.size > PONTAS_DO_REMOTO_MAX) return { motivo: "remoto_grande_demais" };
+  const pontas = await executar("git", ["-C", clone, "for-each-ref", "--format=%(objectname) %(objecttype)"]);
+  if (pontas.codigo !== 0) return { motivo: "erro" };
+  const tagLocal = pontas.stdout.split("\n").some((l) => { const [sha = "", tipo = ""] = l.trim().split(" "); return sha !== "" && tipo !== "commit" && !objetos.has(sha); });
+  const presentes = async (): Promise<string[] | null> => {
+    const p = await executar("git", ["-C", clone, "rev-list", "--no-walk", "--ignore-missing", ...deQuem.keys()], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    return p.codigo === 0 ? p.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "") : null;
+  };
+  const foraDe = async (base: readonly string[]): Promise<boolean | null> => {
+    const f = await executar("git", ["-C", clone, "rev-list", "-n1", "--all", "--reflog", "--not", ...base], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+    return f.codigo === 0 ? f.stdout.trim() !== "" : null;
+  };
+  let base = await presentes();
+  if (base === null) return { motivo: "erro" };
+  let fora = await foraDe(base);
+  if (fora === null) return { motivo: "erro" };
+  if (fora && base.length < deQuem.size) {
+    const tem = new Set(base);
+    const faltam = new Map<string, string[]>();
+    for (const [c, nome] of deQuem) if (!tem.has(c)) faltam.set(nome, [...(faltam.get(nome) ?? []), c]);
+    for (const [nome, shas] of faltam) {
+      const f = await executar("git", ["-C", clone, ...FETCH_QUIETO, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--refmap=", nome, ...shas], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
+      if (f.codigo !== 0) return { motivo: "remoto_inacessivel" };
+    }
+    base = await presentes();
+    if (base === null) return { motivo: "erro" };
+    fora = await foraDe(base);
+    if (fora === null) return { motivo: "erro" };
+  }
+  return { base, fora, tagLocal };
+}
+
+const PACOTE_DO_GUARDADO = "nod-guardado.bundle";
+/** QA do #413: a ref do HEAD solto dentro do bundle (volta como `refs/guardado/nod/guardado-head-solto`). */
+const HEAD_SOLTO_DO_GUARDADO = "refs/nod/guardado-head-solto";
+const LEIA_DO_GUARDADO = "NOD-GUARDADO-LEIA.txt";
+
+/**
+ * NOD-295 A (definido em 2026-10-19): o guardado do clone sujo sem os objetos que o remoto já tem. Os commits fora do
+ * remoto (branches, tags, stash, `refs/nod/…`) vão num `git bundle` dentro do `.git` e `.git/objects` fica fora do
+ * `tar`; o resto do `.git` (refs, índice, config, reflog) e os arquivos da árvore vão. Para refazer: `git clone` do
+ * remoto e `git fetch .git/nod-guardado.bundle 'refs/*:refs/guardado/*'` (o LEIA ao lado diz isso).
+ *
+ * Só quando é certeza que nada se perde — senão o `.git` vai inteiro, como antes:
+ * - os remotos refazem o clone (`remotosRefazem`), sem `shallow` nem `alternates`;
+ * - nada no índice (o conteúdo só preparado mora só nos objetos);
+ * - nenhum commit que só o reflog alcança (fora de toda ref e de todo remoto).
+ * Devolve as exclusões do `tar` (relativas a `-C <bot>`) e os arquivos criados (saem se a pasta ficar).
+ */
+async function cloneSemObjetos(clone: string, base: string, prefixo: string, executar: ExecutarComando): Promise<{ excluir: string[]; criados: string[] }> {
+  const nada = { excluir: [], criados: [] };
+  const git = join(clone, ".git");
+  if (!(await ausente(join(git, "shallow"))) || !(await ausente(join(git, "objects", "info", "alternates")))) return nada;
+  if ((await remotosRefazem(clone, base, executar)) !== null) return nada;
+  // QA do #413 (achado médio): o índice de uma worktree ligada também mora só nos objetos — com alguma, vai tudo.
+  const wts = await executar("git", ["-C", clone, "worktree", "list", "--porcelain"]);
+  if (wts.codigo !== 0 || wts.stdout.split("\n").filter((l) => l.startsWith("worktree ")).length !== 1) return nada;
+  const indice = await executar("git", ["-C", clone, "diff", "--cached", "--quiet"], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  if (indice.codigo !== 0) return nada;
+  // QA do #413 (achado médio): o HEAD solto num commit que ref nenhuma alcança não voltaria pelo `refs/*` do LEIA (o
+  // bundle o leva só como `HEAD`). Ganha uma ref só enquanto o bundle é feito (`HEAD_SOLTO_DO_GUARDADO`).
+  const headSolto = await executar("git", ["-C", clone, "rev-list", "-n1", "HEAD", "--not", "--glob=refs/*"], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  if (headSolto.codigo !== 0) return nada;
+  const comHeadSolto = headSolto.stdout.trim() !== "";
+  const soReflog = await executar("git", ["-C", clone, "rev-list", "-n1", "--reflog", "--not", "--all"], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  if (soReflog.codigo !== 0 || soReflog.stdout.trim() !== "") return nada;
+  // QA do #413 (bug 2): a base do bundle é o que o remoto DE VERDADE tem (`provaNoRemoto`), não `--remotes` locais — com
+  // a branch apagada no servidor o bundle exigia um commit que ninguém mais tem, e o não enviado se perdia. Sem rede, vai
+  // o `.git` inteiro.
+  const prova = await provaNoRemoto(clone, executar);
+  if ("motivo" in prova) return nada;
+  const fora = await executar("git", ["-C", clone, "rev-list", "-n1", "--all", "--not", ...prova.base], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  if (fora.codigo !== 0) return nada;
+  const criados: string[] = [];
+  if (fora.stdout.trim() !== "") {
+    const pacote = join(git, PACOTE_DO_GUARDADO);
+    if (comHeadSolto && (await executar("git", ["-C", clone, "update-ref", HEAD_SOLTO_DO_GUARDADO, "HEAD"])).codigo !== 0) return nada;
+    const b = await executar("git", ["-C", clone, "bundle", "create", pacote, "--all", "--not", ...prova.base], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
+    if (comHeadSolto) await executar("git", ["-C", clone, "update-ref", "-d", HEAD_SOLTO_DO_GUARDADO]);
+    criados.push(pacote);
+    const confere = b.codigo === 0 ? await executar("git", ["-C", clone, "bundle", "verify", pacote], { prazoMs: PRAZO_GUARDAR_MS, fundo: true }) : b;
+    if (confere.codigo !== 0) {
+      await unlink(pacote).catch(() => undefined);
+      return nada;
+    }
+    // Restaurável sozinho a partir do remoto: todo pré-requisito do bundle é ancestral de uma ponta que o remoto anunciou.
+    if (!(await soExigeDoRemoto(clone, pacote, prova.base, executar))) {
+      await unlink(pacote).catch(() => undefined);
+      return nada;
+    }
+  }
+  const leia = join(git, LEIA_DO_GUARDADO);
+  const urls = (await executar("git", ["-C", clone, "remote", "-v"])).stdout.trim();
+  await writeFile(leia, `Guardado pelo nod (NOD-295) sem .git/objects: o remoto já tem esses objetos.\nPara refazer: git clone <remoto> e, se houver ${PACOTE_DO_GUARDADO} aqui, git fetch .git/${PACOTE_DO_GUARDADO} 'refs/*:refs/guardado/*' (o HEAD solto, se havia, vem em refs/guardado/nod/guardado-head-solto).\nRemotos:\n${urls}\n`, { mode: 0o600 });
+  criados.push(leia);
+  return { excluir: [`${prefixo}/.git/objects`], criados };
+}
+
+/** QA do #413 (bug 2): os pré-requisitos do bundle (cabeçalho até a linha em branco) estão todos sob `base`? */
+async function soExigeDoRemoto(clone: string, pacote: string, base: readonly string[], executar: ExecutarComando): Promise<boolean> {
+  let cabecalho: string;
+  try {
+    const f = await open(pacote, "r");
+    try {
+      const buf = Buffer.alloc(1024 * 1024);
+      const { bytesRead } = await f.read(buf, 0, buf.length, 0);
+      cabecalho = buf.subarray(0, bytesRead).toString("latin1");
+    } finally { await f.close(); }
+  } catch { return false; }
+  const fim = cabecalho.indexOf("\n\n");
+  if (fim < 0) return false;
+  const exigidos = prerequisitosDoBundle(cabecalho.slice(0, fim + 1));
+  if (exigidos.length === 0) return true;
+  if (base.length === 0) return false;
+  const r = await executar("git", ["-C", clone, "rev-list", "-n1", ...exigidos, "--not", ...base], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  return r.codigo === 0 && r.stdout.trim() === "";
+}
+
+/**
+ * NOD-295 A: o que o repositório (clone ou worktree) dentro da pasta tem de ignorado que se refaz (`dist/`, `coverage/`,
+ * os caches; `saiDoGuardado`), como exclusões do `tar`. Na falha do `git status`, nenhuma (vai tudo).
+ */
+async function ignoradosQueSeRefazem(repo: string, prefixo: string, executar: ExecutarComando): Promise<string[]> {
+  const status = await executar("git", ["-C", repo, "status", "--porcelain", "-z", "--ignored=traditional", "--untracked-files=normal"], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+  if (status.codigo !== 0) return [];
+  const excluir: string[] = [];
+  for (const entrada of status.stdout.split("\0")) {
+    if (!entrada.startsWith("!! ")) continue;
+    const caminho = entrada.slice(3);
+    const semEnv = classificarIgnorado(caminho) === "conferir_env" ? !(await temEnvAte(join(repo, caminho))) : false;
+    if (saiDoGuardado(caminho, semEnv)) excluir.push(`${prefixo}/${caminho.replace(/\/+$/, "")}`);
+  }
+  return excluir;
+}
+
+/** Há `.env*` dentro (fora de node_modules)? Passou de 5.000 pastas ou falhou a leitura, conta como sim. */
+async function temEnvAte(dir: string): Promise<boolean> {
+  let vistas = 0;
+  async function descer(d: string): Promise<boolean> {
+    if (++vistas > 5_000) return true;
+    let entradas;
+    try { entradas = await readdir(d, { withFileTypes: true }); } catch { return true; }
+    for (const e of entradas) {
+      if (e.name.startsWith(".env")) return true;
+      if (e.isDirectory() && e.name !== "node_modules" && (await descer(join(d, e.name)))) return true;
+    }
+    return false;
+  }
+  return descer(dir);
+}
+
+/**
  * Guarda a pasta `base` (dentro de `~/nod/<bot>/`) e a apaga. `rotulo` vai no nome das referências (o id da task, ou
  * `orfa`). Devolve o motivo de ter ficado, ou null com o que foi guardado e liberado.
  */
@@ -284,22 +549,39 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   let destino = join(pasta, `${nome}.tar.gz`);
   if (await lstat(destino).then(() => true, () => false)) destino = join(pasta, `${nome}-${o.agora()}.tar.gz`);
   const parcial = `${destino}.parcial`;
-  const excluir = FORA_DO_GUARDADO.map((x) => `--exclude=${x}`);
+  // NOD-295 A: sem o que se refaz — os ignorados regeneráveis de cada repositório e, no clone que o remoto refaz, os
+  // objetos (o que só ele tem vai no pacote ao lado). Os arquivos criados para o guardado saem se a pasta ficar.
+  const enxuto: string[] = [];
+  const criados: string[] = [];
+  const desfazer = async () => { for (const c of criados) await unlink(c).catch(() => undefined); };
+  for (const repo of [...clones, ...achadas]) {
+    const prefixo = relative(bot, repo).split(sep).join("/");
+    enxuto.push(...(await ignoradosQueSeRefazem(repo, prefixo, o.executar)));
+    if (clones.includes(repo)) {
+      const semObjetos = await cloneSemObjetos(repo, base, prefixo, o.executar);
+      enxuto.push(...semObjetos.excluir);
+      criados.push(...semObjetos.criados);
+    }
+  }
+  const excluir = [...FORA_DO_GUARDADO, ...enxuto.slice(0, EXCLUSOES_MAX)].map((x) => `--exclude=${x}`);
   const tar = await o.executar("tar", ["-czf", parcial, ...excluir, "-C", bot, nome], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
   const tamanho = await stat(parcial).then((s) => s.size, () => -1);
   if (tar.codigo !== 0 || tamanho <= 0) {
     await unlink(parcial).catch(() => undefined);
+    await desfazer();
     log("aviso", "limpeza_guardar_falhou", { caminho: relative(o.raiz, base), codigo: tar.codigo });
     return vazio("erro");
   }
   if (tamanho > (o.maxBytes ?? GUARDADO_MAX_BYTES)) {
     await unlink(parcial).catch(() => undefined);
+    await desfazer();
     return vazio("grande_demais");
   }
   // Conferido: o arquivo se lê inteiro (o gzip e o tar fecham).
   const confere = await o.executar("tar", ["-tzf", parcial], { prazoMs: PRAZO_GUARDAR_MS, fundo: true });
   if (confere.codigo !== 0) {
     await unlink(parcial).catch(() => undefined);
+    await desfazer();
     return vazio("erro");
   }
   await rename(parcial, destino);
@@ -307,6 +589,7 @@ export async function guardarEApagar(base: string, rotulo: string, o: OpcoesGuar
   const desistiu = o.antesDeApagar ? await o.antesDeApagar().catch((): MotivoPuladaLimpeza => "erro") : null;
   if (desistiu) {
     await unlink(destino).catch(() => undefined);
+    await desfazer();
     log("info", "limpeza_guardar_desistiu", { rotulo, motivo: desistiu });
     return vazio(desistiu);
   }

@@ -5,12 +5,13 @@ import { link, lstat, readdir, readFile, realpath, rename, rmdir, stat, statfs, 
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { MotivoPuladaLimpeza, PastaParaLimpar, PonteInterna, RelatoLimpeza } from "../../contracts/ponte.ts";
 import type { LeituraDisco, NivelPressao } from "../../contracts/trabalho.ts";
+import { caminhoDoRemotoLocal, temArquivoEscondidoDoStatus } from "../../domain/clone-refazivel.ts";
 import { orfaSai } from "../../domain/guardado.ts";
 import { classificarIgnorado, motivoDaRecusa, ORFA_PARADA_MS, PASTAS_DA_MAQUINA_MAX, passadaPorAperto, pastaDeTask, protegidoPorMontagem, VIGIA_DO_DISCO_MS } from "../../domain/limpeza-das-tasks.ts";
 import { acabaEmMs, comPonto, discoDoStatfs, nivelDoDisco, type PontoDoDisco } from "../../domain/memoria-mac.ts";
 import { log } from "../../obs/log.ts";
 import { caminhoAumentado } from "./caminho.ts";
-import { cloneSumiu, guardarEApagar, vencerGuardados } from "./guardar-antes-de-apagar.ts";
+import { cloneSumiu, guardarEApagar, provaNoRemoto, remotosRefazem, temProcessoVivo, vencerGuardados } from "./guardar-antes-de-apagar.ts";
 
 /**
  * A limpeza das pastas de task no Mac (definido em 2026-10-09, ADR-088, issue #216). O servidor diz quais tasks
@@ -167,7 +168,7 @@ export type OpcoesLimpeza = {
  */
 const SAI_GUARDANDO: ReadonlySet<MotivoPuladaLimpeza> = new Set(["suja", "ignorado_valioso", "head_solto", "aninhado", "clone_sumiu"]);
 
-type Achados = { worktrees: string[]; clones: number };
+type Achados = { worktrees: string[]; clones: string[] };
 
 /** Worktrees (`.git` ARQUIVO) dentro da pasta, sem entrar em node_modules, pasta escondida, link ou na própria worktree. */
 async function procurar(dir: string, profundidade: number, achados: Achados): Promise<void> {
@@ -176,7 +177,7 @@ async function procurar(dir: string, profundidade: number, achados: Achados): Pr
   const git = entradas.find((e) => e.name === ".git");
   if (git) {
     if (git.isFile()) achados.worktrees.push(dir);
-    else if (git.isDirectory()) achados.clones++;
+    else if (git.isDirectory()) achados.clones.push(dir);
     return;
   }
   if (profundidade >= PROFUNDIDADE_MAXIMA) return;
@@ -328,19 +329,101 @@ async function motivoParaFicar(wt: string, p: PastaParaLimpar, dirComum: string,
 }
 
 /**
+ * NOD-295 A (definido em 2026-10-19): o clone (`.git` PASTA) dentro da pasta de uma task é idêntico ao que está no
+ * remoto, e sai sem guardar? Antes todo clone era dúvida e a pasta inteira ia para `~/nod/.guardado` (~1,8 GB por clone
+ * do gamefik, ~20 GB/dia na VM dos bots em 19/10). Critério do Marlon: seguro para qualquer codebase — só sai o que um
+ * `git clone` refaz; na dúvida, fica (e na task encerrada é guardado, como antes). Do mais barato ao mais caro:
+ * - só na task encerrada ou na frente sem trabalho (na de menos tempo o bot ainda pode voltar a ela);
+ * - um `.git` de verdade, que é a raiz do próprio clone (nem `core.worktree` apontando para fora, nem o git subindo
+ *   para o repositório de cima), sem LFS (os objetos do LFS não se conferem pelo git);
+ * - nenhum processo vivo (`*.pid`) e as conferências da worktree (`motivoParaFicar`: montagem, aninhado, alteração ou
+ *   arquivo novo, ignorado que não se refaz, HEAD solto);
+ * - nenhuma worktree do clone que fique (só as que acabaram de sair, `saem`);
+ * - um remoto ao menos, e o local tem de existir fora da pasta (`remotosRefazem`);
+ * - sem stash, e nenhum commit — de ref nenhuma, nem só do reflog — fora de `--remotes` (a mesma prova da worktree
+ *   sem trabalho, ADR-099 I5);
+ * - nenhum arquivo `assume-unchanged`/`skip-worktree` (a alteração neles não aparece no `git status`);
+ * - nenhum outro clone da pasta depende dele (`outroDependeDe`).
+ * Devolve o motivo de ficar (só para o log), ou null.
+ */
+async function cloneParaFicar(clone: string, base: string, p: PastaParaLimpar, montagens: readonly string[], executar: ExecutarComando, saem: ReadonlySet<string>, outros: readonly string[]): Promise<string | null> {
+  if (p.quando !== "encerrada" && p.quando !== "sem_trabalho") return "cedo";
+  const comum = await executar("git", ["-C", clone, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"]);
+  const [dirComum = "", topo = ""] = comum.stdout.trim().split("\n");
+  if (comum.codigo !== 0 || !isAbsolute(dirComum)) return "erro";
+  const proprio = comparavel(await real(clone));
+  if (comparavel(await real(dirComum)) !== comparavel(await real(join(clone, ".git"))) || comparavel(await real(topo)) !== proprio) return "erro";
+  if (!(await lstat(join(clone, ".git", "lfs")).then(() => false, () => true))) return "lfs";
+  if (await temProcessoVivo(clone)) return "processo_vivo";
+  const motivo = await motivoParaFicar(clone, p, dirComum, montagens, executar);
+  if (motivo) return motivo;
+  const lista = await worktreesDoClone(dirComum, executar);
+  if (lista === null) return "erro";
+  const sairam = new Set(await Promise.all([...saem].map(async (s) => comparavel(await real(s)))));
+  for (const w of lista) {
+    const c = comparavel(await real(w.caminho));
+    if (c !== proprio && !sairam.has(c)) return "worktree_viva";
+  }
+  const remotos = await remotosRefazem(clone, base, executar);
+  if (remotos) return remotos;
+  const stash = await executar("git", ["-C", clone, "rev-parse", "--verify", "-q", "refs/stash"]);
+  if (stash.codigo === 0) return "stash";
+  if (stash.codigo !== 1) return "erro";
+  const fora = await executar("git", ["-C", clone, "rev-list", "-n1", "--all", "--reflog", "--not", "--remotes"], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
+  if (fora.codigo !== 0) return "erro";
+  if (fora.stdout.trim() !== "") return "nao_enviado";
+  const marcados = await executar("git", ["-C", clone, "ls-files", "-v"], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
+  if (marcados.codigo !== 0) return "erro";
+  if (temArquivoEscondidoDoStatus(marcados.stdout)) return "escondido_do_status";
+  // QA do #413 (bug 1): o que veio até aqui só comparou com `refs/remotes/*` locais. A prova final é no remoto de verdade
+  // (`ls-remote`, e `fetch` pelo id do que faltar): sem rede, remoto que não existe ou branch apagada no servidor, fica.
+  const prova = await provaNoRemoto(clone, executar);
+  if ("motivo" in prova) return prova.motivo;
+  if (prova.fora) return "nao_enviado_no_remoto";
+  if (prova.tagLocal) return "tag_local";
+  if (await outroDependeDe(clone, outros, executar)) return "base_de_outro";
+  return null;
+}
+
+/**
+ * NOD-295 A: outro clone da pasta usa este como remoto ou empresta os objetos dele (`alternates`, do `git clone
+ * --shared`/`--reference`)? Apagar este quebraria aquele. Na dúvida (não leu), sim.
+ */
+async function outroDependeDe(clone: string, outros: readonly string[], executar: ExecutarComando): Promise<boolean> {
+  const alvo = comparavel(await real(clone));
+  const dentro = async (c: string) => { const x = comparavel(await real(c)); return x === alvo || x.startsWith(`${alvo}/`); };
+  for (const outro of outros) {
+    if (comparavel(await real(outro)) === alvo || !(await existePadrao(outro))) continue;
+    const alternates = await readFile(join(outro, ".git", "objects", "info", "alternates"), "utf8").catch((e: NodeJS.ErrnoException) => (e.code === "ENOENT" ? "" : null));
+    if (alternates === null) return true;
+    for (const l of alternates.split("\n").map((x) => x.trim()).filter((x) => x !== "" && !x.startsWith("#"))) if (await dentro(resolve(outro, ".git", "objects", l))) return true;
+    const urls = await executar("git", ["-C", outro, "config", "--get-regexp", "^remote\\..*\\.url$"]);
+    if (urls.codigo !== 0 && urls.codigo !== 1) return true;
+    for (const linha of urls.stdout.split("\n").filter((x) => x.trim() !== "")) {
+      const local = caminhoDoRemotoLocal(linha.slice(linha.indexOf(" ") + 1));
+      if (local !== null && (await dentro(resolve(outro, local)))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * ADR-099 item 9 (definido em 2026-10-12, I5): a pasta da frente que terminou (`sem_trabalho`) sai na hora só com prova
  * AFIRMATIVA de que não há trabalho nela — a regra do Hermes ("na dúvida, guarda"). Tudo conferido antes de apagar
  * qualquer coisa:
- * - nenhum clone e nada na pasta além das worktrees (só pastas vazias e `.DS_Store`, como em `ficariaVazia`);
+ * - nada na pasta além das worktrees e dos clones (só pastas vazias e `.DS_Store`, como em `ficariaVazia`);
  * - cada worktree passa nas conferências de sempre (`motivoParaFicar`: montagem, travada, aninhado, suja, ignorado que
  *   não se refaz, HEAD solto);
  * - e `git rev-list HEAD --not --remotes` vazio: nenhum commit que não esteja num remoto.
- * Devolve o dir comum de cada worktree provada, ou o porquê da dúvida (só para o log). Na dúvida nada sai: a pasta fica
- * para o caminho da ADR-088/096 (vira `encerrada` em 3 dias, ou em 2 h com o disco apertado, e é guardada antes).
+ * - NOD-295 B (revisto em 2026-10-19): o clone não é mais dúvida por existir. Cada um tem de provar que é idêntico ao
+ *   remoto (`cloneParaFicar`, contando como saídas as worktrees provadas); era ele que fazia toda frente com clone ser
+ *   guardada, mesmo sem nada novo.
+ * Devolve o dir comum de cada worktree provada e os clones provados, ou o porquê da dúvida (só para o log). Na dúvida nada
+ * sai: a pasta fica para o caminho da ADR-088/096 (vira `encerrada` em 3 dias, ou em 2 h com o disco apertado, e é
+ * guardada antes).
  */
-async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string> } | { duvida: string }> {
-  if (achados.clones > 0) return { duvida: "clone" };
-  if (!(await ficariaVazia(base, 0, new Set(achados.worktrees), montagens, false))) return { duvida: "sobras" };
+async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar, achados: Achados, montagens: readonly string[], executar: ExecutarComando): Promise<{ provadas: Map<string, string>; clones: Set<string> } | { duvida: string }> {
+  if (!(await ficariaVazia(base, 0, new Set([...achados.worktrees, ...achados.clones]), montagens, false))) return { duvida: "sobras" };
   const provadas = new Map<string, string>();
   for (const wt of achados.worktrees) {
     if (await cloneSumiu(wt, raiz)) return { duvida: "clone_sumiu" };
@@ -354,7 +437,13 @@ async function provarSemTrabalho(base: string, raiz: string, p: PastaParaLimpar,
     if (fora.stdout.trim() !== "") return { duvida: "nao_enviado" };
     provadas.set(wt, dirComum);
   }
-  return { provadas };
+  const clones = new Set<string>();
+  for (const clone of achados.clones) {
+    const motivo = await cloneParaFicar(clone, base, p, montagens, executar, new Set(achados.worktrees), achados.clones);
+    if (motivo) return { duvida: `clone_${motivo}` };
+    clones.add(clone);
+  }
+  return { provadas, clones };
 }
 
 function relatoVazio(simular: boolean): RelatoLimpeza {
@@ -401,11 +490,12 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
     }
     relato.pastas++;
     if (o.emUso?.(rel)) { pular("em_uso"); continue; }
-    const achados: Achados = { worktrees: [], clones: 0 };
+    const achados: Achados = { worktrees: [], clones: [] };
     await procurar(base, 0, achados);
     const montagens = (await lerMontagens()) ?? [];
     // ADR-099 (I5): a frente sem trabalho só passa daqui com a prova inteira; a dúvida conta uma vez, como `sem_prova`.
     let provadas: Map<string, string> | null = null;
+    let clonesProvados: Set<string> | null = null;
     if (p.quando === "sem_trabalho") {
       const prova = await provarSemTrabalho(base, raiz, p, achados, montagens, o.executar);
       if ("duvida" in prova) {
@@ -414,9 +504,9 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
         continue;
       }
       provadas = prova.provadas;
-      log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: simular ? "simulada" : "apaga", worktrees: provadas.size });
+      clonesProvados = prova.clones;
+      log("info", "limpeza_sem_trabalho", { trabalho_id: p.trabalhoId, decisao: simular ? "simulada" : "apaga", worktrees: provadas.size, clones: clonesProvados.size });
     }
-    for (let i = 0; i < achados.clones; i++) pular("clone");
     const saem = new Set<string>();
     let confirmada: boolean | null = null;
     // ADR-096 §4: montagem, travada ou erro numa worktree seguram a pasta inteira — nem guardar se tenta.
@@ -468,6 +558,43 @@ export async function limparPastas(pastas: readonly PastaParaLimpar[], o: Opcoes
       relato.removidas++;
       relato.liberadoBytes += liberado;
       log("info", "limpeza_worktree_removida", { trabalho_id: p.trabalhoId, pasta: nome, quando: p.quando, liberado_mb: Math.round(liberado / 1_048_576) });
+    }
+    // NOD-295 A: o clone idêntico ao remoto sai sem guardar, depois das worktrees (as dele que saíram não o seguram).
+    // O que fica conta como `clone`; na task encerrada a pasta é guardada com ele, como antes.
+    for (const clone of achados.clones) {
+      if (confirmada === false) break;
+      const motivo = clonesProvados?.has(clone) ? null : await cloneParaFicar(clone, base, p, montagens, o.executar, saem, achados.clones);
+      if (motivo) {
+        pular("clone");
+        log("info", "limpeza_clone_fica", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), motivo });
+        continue;
+      }
+      if (confirmada === null) confirmada = (o.reconfirmar ? await o.reconfirmar(p) : true) && !o.emUso?.(rel);
+      if (!confirmada) { pular("nao_reconfirmada"); break; }
+      if (simular) {
+        const du = await o.executar("du", ["-sk", clone], { prazoMs: PRAZO_MEDIO_MS, fundo: true });
+        const kb = Number.parseInt(du.stdout.trim().split(/\s/)[0] ?? "", 10);
+        const bytes = du.codigo === 0 && Number.isFinite(kb) ? kb * 1024 : 0;
+        relato.clonesApagados = (relato.clonesApagados ?? 0) + 1;
+        relato.estimadoBytes = (relato.estimadoBytes ?? 0) + bytes;
+        saem.add(clone);
+        log("info", "limpeza_simulada_clone", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), quando: p.quando, estimado_mb: Math.round(bytes / 1_048_576) });
+        continue;
+      }
+      const antes = await livre(raiz).catch(() => null);
+      const rm = await o.executar("rm", ["-rf", "--", clone], { prazoMs: PRAZO_REMOVER_MS, fundo: true });
+      if (rm.codigo !== 0 || (await existePadrao(clone))) {
+        // Saiu pela metade: o que sobrou é guardado com a pasta (ou a segura), nunca apagado às cegas.
+        pular("erro");
+        segura = true;
+        log("aviso", "limpeza_clone_falhou", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), codigo: rm.codigo });
+        continue;
+      }
+      const depois = await livre(raiz).catch(() => null);
+      const liberado = antes !== null && depois !== null ? Math.max(0, depois - antes) : 0;
+      relato.clonesApagados = (relato.clonesApagados ?? 0) + 1;
+      relato.liberadoBytes += liberado;
+      log("info", "limpeza_clone_apagado", { trabalho_id: p.trabalhoId, caminho: relative(raiz, clone), quando: p.quando, liberado_mb: Math.round(liberado / 1_048_576) });
     }
     // Nem a pasta que o servidor deixou de oferecer, nem a que ganhou turno vivo.
     if (confirmada === false || o.emUso?.(rel)) continue;
