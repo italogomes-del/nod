@@ -76,7 +76,7 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
       // O evento carrega só escalares: o texto NUNCA sai pela trilha (ADR-004).
       const ev = r.events?.[0];
       expect(ev?.kind).toBe("relato_criado");
-      expect(ev?.dados).toMatchObject({ categoria: "travou_ou_parou", alcance: "mensagem", mensagens_anexadas: 1, com_diagnostico: true });
+      expect(ev?.dados).toMatchObject({ categoria: "travou_ou_parou", alcance: "mensagem", mensagens_anexadas: 1, com_diagnostico: true, turno_via: "mensagem" });
       expect(JSON.stringify(ev?.dados)).not.toContain("devia ter avisado");
 
       // A prosa vive fora do registro, e chega aparada.
@@ -235,6 +235,87 @@ describeIntegracao("relato de comportamento indesejado (ADR-041)", () => {
       expect(mensagem!.autoria.executor).toBe("catcher");
       const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: mensagem!.id, categoria: "outro", alcance: "mensagem" });
       expect(r.data.relato.metadados.executor).toBe("local");
+    });
+  });
+
+  // NOD-292: a fala da pessoa não tem turno_id; o turno que a explica é o que ela disparou (ou o que a absorveu).
+  it("relato sobre a fala da pessoa traz o turno que ela disparou, com estado técnico e diagnóstico (NOD-292)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "faz o relatório", confianca: "confiavel",
+      });
+      expect(m!.turnoId).toBeNull();
+      const turno = await a.repos.turnos.enfileirar({ executor: "local",
+        conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
+        profundidade: 0, entradaTexto: "faz o relatório", entradaConfianca: "confiavel", modelo: "claude-sonnet-4-5", harness: "claude-cli",
+        mensagemOrigemId: m!.id,
+      });
+      await a.repos.turnos.assentar(turno!.id, {
+        estado: "interrompido", motivoInterrupcao: "trabalho_incompleto", motivoFalha: "erro_execucao",
+        sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true },
+        custoUsd: 0.05, tokensEntrada: 10, tokensSaida: 5,
+      });
+      await a.repos.relatos.registrarDiagnostico({ turnoId: turno!.id, erroCru: "api 529", ferramentas: ["Bash"], negacoes: [], sessaoCli: "s9", em: agora });
+
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: m!.id, categoria: "travou_ou_parou", alcance: "mensagem" });
+      expect(r.data.relato.turnoId).toBe(turno!.id);
+      const md = r.data.relato.metadados;
+      expect(md.estadoTurno).toBe("interrompido");
+      expect(md.motivoInterrupcao).toBe("trabalho_incompleto");
+      expect(md.motivoFalha).toBe("erro_execucao");
+      expect(md.sinais).toEqual({ attempted: true, rejected: false, promptSubmitted: true, producedOutput: true });
+      expect(md.custoUsd).toBeCloseTo(0.05);
+      expect(md.reenvios).toBe(0);
+      expect(md.harness).toBe("claude-cli");
+      expect(md.executor).toBe("local");
+      expect(r.data.relato.diagnostico).toEqual({ erroCru: "api 529", ferramentas: ["Bash"], negacoes: [], sessaoCli: "s9" });
+      expect(r.events?.[0]?.turnoId).toBe(turno!.id);
+      expect(r.events?.[0]?.dados).toMatchObject({ com_diagnostico: true, turno_via: "disparado" });
+
+      const naLista = (await a.repos.relatos.listar()).find((x) => x.id === r.data.relato.id);
+      expect(naLista?.turnoId).toBe(turno!.id);
+      expect(naLista?.diagnostico).toEqual({ erroCru: "api 529", ferramentas: ["Bash"], negacoes: [], sessaoCli: "s9" });
+    });
+  });
+
+  it("fala da pessoa lida junto com outra aponta o turno que respondeu por ela (NOD-292)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const fala = async (texto: string) =>
+        (await a.repos.mensagens.criar({ conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto, confianca: "confiavel" }))!;
+      const enfileirar = async (texto: string, mensagemOrigemId: string) =>
+        (await a.repos.turnos.enfileirar({ executor: "catcher",
+          conversaId: a.conversaId, agenteId: a.agenteId, origem: "conversa", prazoEm: agora + 60_000,
+          profundidade: 0, entradaTexto: texto, entradaConfianca: "confiavel", modelo: "m", mensagemOrigemId,
+        }))!;
+      const m1 = await fala("primeira");
+      const m2 = await fala("segunda");
+      const tA = await enfileirar("primeira", m1.id);
+      const tB = await enfileirar("segunda", m2.id);
+      const { absorvidos } = await a.repos.turnos.absorverPendentes(tA, (ts) => ts.join("\n"));
+      expect(absorvidos.map((t) => t.id)).toEqual([tB.id]);
+      await a.repos.relatos.registrarDiagnostico({ turnoId: tA.id, erroCru: "falhou", ferramentas: [], negacoes: [], sessaoCli: null, em: agora });
+
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: m2.id, categoria: "resposta_errada", alcance: "mensagem" });
+      expect(r.data.relato.turnoId).toBe(tA.id);
+      expect(r.events?.[0]?.dados).toMatchObject({ com_diagnostico: true, turno_via: "absorvedor" });
+    });
+  });
+
+  it("fala da pessoa sem turno rende relato sem turno, via nenhum (NOD-292)", async () => {
+    await withRollback(escopo, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, escopo);
+      const m = await a.repos.mensagens.criar({
+        conversaId: a.conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "oi", confianca: "confiavel",
+      });
+      const r = await registrarRelato(deps(trx, escopo, agora), { mensagemId: m!.id, categoria: "outro", alcance: "mensagem" });
+      expect(r.data.relato.turnoId).toBeNull();
+      expect(r.data.relato.diagnostico).toBeNull();
+      expect(r.events?.[0]?.dados).toMatchObject({ com_diagnostico: false, turno_via: "nenhum" });
     });
   });
 });

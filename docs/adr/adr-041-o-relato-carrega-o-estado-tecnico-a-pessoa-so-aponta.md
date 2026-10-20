@@ -141,3 +141,12 @@ linha que vem da trilha (app indisponível) não leva na v1. Na conversa própri
 `comDestino`) conta 100 itens de chat, como a conversa — no Eng 1, 100 mensagens cruas davam umas 5 falas — e leva junto o
 que estava na Atividade nos mesmos 15 min, desde o corte, marcado `naAtividade` no trecho: o relato registra o que a pessoa
 viu. A sala e o relato contado ao Nod continuam com as mensagens cruas.
+
+## Emenda (2026-10-20, NOD-292) — o turno do relato é o que explica a mensagem
+
+O relato copiava o turno de `mensagens.turno_id`, que só a fala do bot tem: o relato sobre a fala da pessoa saía sem
+estado técnico nem diagnóstico, justo quando a pessoa aponta a própria pergunta que não foi respondida. Agora o turno do
+relato é o que EXPLICA a mensagem: o que produziu a fala do bot; o que a fala da pessoa disparou (`mensagem_origem_id`);
+ou, se esse foi lido junto com outro (`absorvido`), o turno que respondeu por ele (`absorvido_por`, até 5 saltos). A fala
+de bot sem turno não busca por origem. O `relato_criado` leva `turno_via` (`mensagem`, `disparado`, `absorvedor`,
+`nenhum`); sem coluna nova — `relatos.turno_id` passa a guardar o turno-alvo.
