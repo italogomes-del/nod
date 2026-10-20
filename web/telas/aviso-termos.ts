@@ -30,7 +30,6 @@ export function htmlDoAvisoDosTermos(ia: IaDesktop): string {
   const links = t.links.map((l) => `<a class="link" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.rotulo)} ↗</a>`).join(" · ");
   return `<h2 id="aviso-termos-titulo">Trocar de conta sozinho no ${esc(PROVEDOR[ia].cli)}?</h2>
     <p>${esc(t.texto)}</p>
-    <p>Contas corporativas só entram na troca se você marcar isso nelas.</p>
     <p>${links}</p>
     <div class="acoes"><button class="bt" data-sim type="button">Ligar mesmo assim</button> <button class="bt pri" data-nao type="button" autofocus>Cancelar</button></div>`;
 }

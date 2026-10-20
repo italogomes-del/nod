@@ -16,7 +16,7 @@ const conta = (posicao: number, extra: Partial<ContasNaTela["contas"][number]> =
 const TRES: ContasNaTela = {
   ia: "claude-cli",
   modo: "perguntar",
-  contas: [conta(1, { apelido: "Pessoal", emUso: true, principal: true }), conta(2, { apelido: "Leapy", plano: "team", corporativa: true, entraNaTroca: false }), conta(3, { apelido: "Reserva", plano: "pro" })],
+  contas: [conta(1, { apelido: "Pessoal", emUso: true, principal: true }), conta(2, { apelido: "Leapy", plano: "team", corporativa: true }), conta(3, { apelido: "Reserva", plano: "pro" })],
   adicionando: null,
   max: 6,
 };
@@ -28,7 +28,7 @@ describe("renderContasDaIa", () => {
     expect(renderContasDaIa("claude-cli", ui({ contas: { "claude-cli": { ...TRES, contas: [conta(1, { principal: true })] } } }), AGORA, false)).toBe("");
   });
 
-  it("a lista na ordem, a corporativa com selo e opt-in desmarcado, o modo padrão e a nota de privacidade", () => {
+  it("a lista na ordem, a corporativa com selo (sem opt-in, NOD-308), o modo padrão e a nota de privacidade", () => {
     const html = renderContasDaIa("claude-cli", ui(), AGORA, true);
     expect(html.indexOf("Pessoal")).toBeLessThan(html.indexOf("Leapy"));
     expect(html).toContain('<span class="selo">Corporativa</span>');
@@ -45,13 +45,14 @@ describe("renderContasDaIa", () => {
     expect(html).toMatch(/data-act="conta-mover" data-ia="claude-cli" data-posicao="3" data-para="4"[^>]*disabled/);
   });
 
-  it("em Trocar sozinho, a corporativa ganha a caixa desmarcada (sem o selo de fora); no limite, diz até quando", () => {
+  it("em Trocar sozinho (NOD-308), a corporativa fica só com o selo, sem caixa nem texto de fora; no limite, diz até quando", () => {
     const c: ContasNaTela = { ...TRES, modo: "automatico", contas: TRES.contas.map((x) => (x.posicao === 1 ? { ...x, emUso: false, noLimiteAte: AGORA + 2 * HORA } : x.posicao === 3 ? { ...x, emUso: true } : x)) };
     const html = renderContasDaIa("claude-cli", ui({ contas: { "claude-cli": c } }), AGORA, true);
     expect(html).not.toContain("Fora da troca automática");
-    expect(html).toMatch(/data-conta-optin="claude-cli" data-posicao="2">/);
-    expect(html).not.toMatch(/data-conta-optin="claude-cli" data-posicao="(1|3)"/);
-    expect(html).toContain("nunca troca sozinho para esta conta");
+    expect(html).not.toContain("data-conta-optin");
+    expect(html).not.toContain("nunca troca sozinho para esta conta");
+    expect(html).not.toContain("Contas corporativas não marcadas ficam de fora");
+    expect(html).toContain('<span class="selo">Corporativa</span>');
     expect(html).toContain("No limite até");
     expect(html).toMatch(/value="automatico" data-conta-modo="claude-cli" checked/);
   });
@@ -108,19 +109,12 @@ describe("a conversa no limite de uma conta", () => {
     expect(linhaLimiteSemOutra(perguntar, p(ui({ contas: { "claude-cli": escolheu } })))).toContain("Seguindo com a conta 2 · mande a mensagem de novo");
   });
 
-  // QA do NOD-211 (2026-10-12, item 4 do plano): em Trocar sozinho, só a corporativa livre — o nod não troca sozinho e
-  // pergunta, oferecendo também a outra IA e a espera (protótipo). Antes só havia o botão da conta.
-  it("Trocar sozinho com só a corporativa livre: a conta, a outra IA e a espera; em Perguntar antes, só a espera", () => {
+  it("uma mensagem antiga com conta fora da troca ainda oferece a conta e a espera, sem o ramo corporativo removido", () => {
     const soCorporativa = msg("Conta 1 do Claude Code no limite até 14:00. A conta 2 está fora da troca automática. Seguir com a conta 2?", { kind: "limite_do_plano", harness: "claude-cli", voltaEm: AGORA + 2 * HORA, conta: { tipo: "perguntar", de: 1, livres: [2], foraDaTroca: [2], voltaEm: AGORA + 2 * HORA } });
-    const comCodex = (estado: "falta_entrar" | "no_limite") => ui({ estados: { "codex-cli": { ia: "codex-cli", estado, mensagem: "", em: 0 } } } as Partial<UiIas>);
-    const html = linhaLimiteSemOutra(soCorporativa, p(comCodex("falta_entrar"))) ?? "";
+    const html = linhaLimiteSemOutra(soCorporativa, p(ui({ estados: { "codex-cli": { ia: "codex-cli", estado: "falta_entrar", mensagem: "", em: 0 } } } as Partial<UiIas>))) ?? "";
     expect(html).toContain('data-posicao="2">Seguir com a conta 2</button>');
-    expect(html).toMatch(/data-act="ia-entrar" data-ia="codex-cli">Continuar pelo ChatGPT</);
+    expect(html).not.toContain("ChatGPT");
     expect(html).toMatch(/ou esperar a conta voltar (às|em \d\d\/\d\d às) \d\d:\d\d/);
-    expect(linhaLimiteSemOutra(soCorporativa, p(comCodex("no_limite")))).not.toContain("também está no limite");
-    const pergunta = linhaLimiteSemOutra(perguntar, p(comCodex("falta_entrar"))) ?? "";
-    expect(pergunta).not.toContain("ChatGPT");
-    expect(pergunta).toContain("ou esperar a conta voltar");
   });
 
   it("todas no limite: a frase do servidor, sem botão de conta", () => {

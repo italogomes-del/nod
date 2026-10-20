@@ -11,7 +11,6 @@ import {
   contaVoltou,
   decidirNoLimite,
   contaCorporativa,
-  entraNaTroca,
   ID_CONTA_PADRAO,
   usarConta,
   type ContasDaIa,
@@ -144,10 +143,10 @@ export function criarContasDoApp(d: DepsContasDoApp) {
       posicao: i + 1,
       apelido: x.apelido,
       plano: x.plano,
-      // v4 (revisão do Gil): a conta 1 corporativa também mostra o selo e o opt-in (contaCorporativa explica a exceção).
+      // v4 (revisão do Gil): a conta 1 corporativa também mostra o selo. NOD-308: o selo é só dado; toda conta entra na troca.
       corporativa: contaCorporativa(x),
       entraNaTrocaAutomatica: x.entraNaTrocaAutomatica,
-      entraNaTroca: entraNaTroca(x),
+      entraNaTroca: true,
       noLimiteAte: x.noLimiteAte !== null && x.noLimiteAte > agora ? x.noLimiteAte : null,
       emUso: x.id === uso,
       principal: x.id === ID_CONTA_PADRAO,
@@ -248,7 +247,7 @@ export function criarContasDoApp(d: DepsContasDoApp) {
       await mudar(ia, { ...daIa(ia), modo: modo satisfies ModoDaTroca });
       return naTela(ia);
     }),
-    /** O opt-in da conta corporativa na troca automática (padrão false). */
+    /** O antigo opt-in da conta corporativa (NOD-308: não pesa mais na troca; fica por compat, sem UI). */
     definirTrocaAutomatica: (ia: IaDesktop, posicao: unknown, ligado: unknown) => emSerie(async () => {
       const id = idDa(ia, posicao);
       if (!id || typeof ligado !== "boolean") return naTela(ia);
@@ -300,7 +299,7 @@ export function criarContasDoApp(d: DepsContasDoApp) {
       d.aoMudar();
       return true;
     }),
-    /** O login da conta nova deu certo e a conta foi lida: ela entra no fim da lista (fora da troca, se corporativa). */
+    /** O login da conta nova deu certo e a conta foi lida: ela entra no fim da lista. */
     concluirAdicao: (ia: IaDesktop, conta: ContaDaIa | null) => emSerie(async () => {
       const novo = emLogin[ia];
       if (!novo) return;

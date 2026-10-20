@@ -76,15 +76,15 @@ describe("aoResultado (a decisão no limite)", () => {
     expect(mudouConta).toEqual(["claude-cli"]);
   });
 
-  it("Trocar sozinho: pula a corporativa não marcada; o turno seguinte já sai na conta 3", async () => {
+  it("Trocar sozinho (NOD-308): a corporativa livre entra como qualquer conta; o turno seguinte já sai na conta 2", async () => {
     const { app, gravados } = montar((c) => { tresContas(c); c["claude-cli"].modo = "automatico"; });
     await app.iniciar();
     app.ambienteDoTurno("claude-cli"); app.registryRefeito(["claude-cli"]);
     const r = app.aoResultado("claude-cli", limite());
-    expect(r?.contaNoLimite).toEqual({ tipo: "trocou", de: 1, para: 3, voltaEm: AGORA + 2 * HORA, foraDaTroca: [2] });
-    expect(app.ambienteDoTurno("claude-cli")).toEqual({ CLAUDE_CONFIG_DIR: `${BASE}/claude-cli/reserva` });
+    expect(r?.contaNoLimite).toEqual({ tipo: "trocou", de: 1, para: 2, voltaEm: AGORA + 2 * HORA, foraDaTroca: [] });
+    expect(app.ambienteDoTurno("claude-cli")).toEqual({ CLAUDE_CONFIG_DIR: `${BASE}/claude-cli/leapy` });
     await espera();
-    expect(gravados.at(-1)?.["claude-cli"].escolhida).toBe("reserva");
+    expect(gravados.at(-1)?.["claude-cli"].escolhida).toBe("leapy");
   });
 
   it("o limite do Codex chega como erro com o texto do fornecedor e também decide", async () => {
@@ -114,12 +114,12 @@ describe("aoResultado (a decisão no limite)", () => {
 });
 
 describe("a lista na tela e as escolhas da pessoa", () => {
-  it("a corporativa aparece marcada e fora da troca até a pessoa ligar o opt-in", async () => {
+  it("a corporativa aparece com o selo e já entra na troca (NOD-308); o opt-in antigo segue aceito por compat", async () => {
     const { app } = montar(tresContas);
     await app.iniciar();
     let tela = app.naTela("claude-cli");
     expect(tela.modo).toBe("perguntar");
-    expect(tela.contas.map((c) => [c.posicao, c.corporativa, c.entraNaTroca, c.emUso])).toEqual([[1, false, true, true], [2, true, false, false], [3, false, true, false]]);
+    expect(tela.contas.map((c) => [c.posicao, c.corporativa, c.entraNaTroca, c.emUso])).toEqual([[1, false, true, true], [2, true, true, false], [3, false, true, false]]);
     tela = await app.definirTrocaAutomatica("claude-cli", 2, true);
     expect(tela.contas[1]).toMatchObject({ entraNaTrocaAutomatica: true, entraNaTroca: true });
     expect((await app.definirTrocaAutomatica("claude-cli", 2, "sim")).contas[1]?.entraNaTrocaAutomatica).toBe(true);
@@ -137,7 +137,7 @@ describe("a lista na tela e as escolhas da pessoa", () => {
     expect((await app.mover("claude-cli", 1, 9)).contas.map((c) => c.apelido)).toEqual(movida.contas.map((c) => c.apelido));
   });
 
-  it("Seguir com a conta 2 (mesmo corporativa não marcada) muda o ambiente dos turnos e avisa a vigia", async () => {
+  it("Seguir com a conta 2 (corporativa) muda o ambiente dos turnos e avisa a vigia", async () => {
     const { app, mudouConta } = montar(tresContas);
     await app.iniciar();
     app.ambienteDoTurno("claude-cli"); app.registryRefeito(["claude-cli"]);
@@ -162,7 +162,7 @@ describe("a lista na tela e as escolhas da pessoa", () => {
 });
 
 describe("adicionar uma conta", () => {
-  it("o login roda na pasta nova enquanto os turnos seguem na conta em uso; ao concluir entra no fim com opt-in false", async () => {
+  it("o login roda na pasta nova enquanto os turnos seguem na conta em uso; ao concluir entra no fim e na troca (NOD-308)", async () => {
     const { app, preparados } = montar();
     await app.iniciar();
     expect(await app.comecarAdicao("claude-cli", "Leapy")).toBe(true);
@@ -176,7 +176,7 @@ describe("adicionar uma conta", () => {
     await app.concluirAdicao("claude-cli", { email: "x@leapy.com.br", organizacao: "Leapy", plano: "Team" } as never);
     const tela = app.naTela("claude-cli");
     expect(tela.adicionando).toBeNull();
-    expect(tela.contas[1]).toMatchObject({ posicao: 2, apelido: "Leapy", plano: "team", corporativa: true, entraNaTrocaAutomatica: false, entraNaTroca: false });
+    expect(tela.contas[1]).toMatchObject({ posicao: 2, apelido: "Leapy", plano: "team", corporativa: true, entraNaTrocaAutomatica: false, entraNaTroca: true });
     expect(app.ambienteDoLogin("claude-cli")).toEqual({});
   });
 
@@ -192,13 +192,13 @@ describe("adicionar uma conta", () => {
     expect(app.naTela("codex-cli").contas[1]).toMatchObject({ apelido: "Acme", corporativa: false, entraNaTroca: true });
   });
 
-  it("conta 1 corporativa mostra o selo e fica fora da troca até marcar; conta 1 sem plano lido não ganha selo (v4)", async () => {
+  it("conta 1 corporativa mostra o selo e entra na troca (NOD-308); conta 1 sem plano lido não ganha selo (v4)", async () => {
     const { app } = montar();
     await app.iniciar();
     expect(app.naTela("claude-cli").contas[0]).toMatchObject({ posicao: 1, corporativa: false });
     const { app: corp } = montar((c) => { (c["claude-cli"].contas[0] as { plano: string | null }).plano = "team"; });
     await corp.iniciar();
-    expect(corp.naTela("claude-cli").contas[0]).toMatchObject({ posicao: 1, corporativa: true, entraNaTrocaAutomatica: false, entraNaTroca: false });
+    expect(corp.naTela("claude-cli").contas[0]).toMatchObject({ posicao: 1, corporativa: true, entraNaTrocaAutomatica: false, entraNaTroca: true });
   });
 
   // QA do NOD-211 (2026-10-12): a adição que falhava voltava calada ao "+ Adicionar outra conta" — sem erro nem "Tentar de novo".
@@ -307,7 +307,7 @@ describe("o trocou espera o registry novo antes da entrega", () => {
     const { app, soltar, timers } = comSondagem();
     await app.iniciar();
     app.ambienteDoTurno("claude-cli"); app.registryRefeito(["claude-cli"]);
-    expect(app.aoResultado("claude-cli", limite())?.contaNoLimite).toMatchObject({ tipo: "trocou", para: 3 });
+    expect(app.aoResultado("claude-cli", limite())?.contaNoLimite).toMatchObject({ tipo: "trocou", para: 2 });
     let pronto = false;
     const espera1 = app.esperarTroca("claude-cli").then(() => { pronto = true; });
     await espera(); await espera();

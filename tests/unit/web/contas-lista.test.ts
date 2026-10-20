@@ -21,7 +21,7 @@ const conta = (id: string, ia: ContaIa["ia"], apelido: string, maquinas: string[
   id, ia, impressao: id.replace(/-/g, "").padEnd(64, "a").slice(0, 64), apelido, email: null, organizacao: null, plano: "Max", corporativa: false, posicao: 1, entraNaTrocaAutomatica: false, noLimiteAte: null,
   maquinas: maquinas.map((m) => ({ maquinaId: m, nome: m === VM ? "vm-bots" : "MacBook", estado: "pronta" as const })), ...o,
 });
-// ADR-108: como a 0080 deixa — a 1ª pessoal de cada IA na fila; a corporativa fora.
+// ADR-108 + NOD-308: a 1ª conta de cada IA na fila; a Leapy (corporativa) é a 2ª do Claude e nasce fora.
 const PESSOAL = conta("aaaaaaaa-0000-4000-8000-000000000001", "claude-cli", "Pessoal", [VM, MAC], { entraNaTrocaAutomatica: true });
 const GPT = conta("aaaaaaaa-0000-4000-8000-000000000002", "codex-cli", "Pessoal", [MAC], { plano: "Plus", entraNaTrocaAutomatica: true });
 const LEAPY = conta("aaaaaaaa-0000-4000-8000-000000000003", "claude-cli", "Leapy", [MAC], { plano: "Team", corporativa: true, noLimiteAte: AGORA + 3_600_000 });
@@ -307,7 +307,7 @@ describe("controlador da lista (ADR-102)", () => {
     expect(m.estado.contasIa?.contas.some((c) => c.id === LEAPY.id)).toBe(false);
   });
 
-  it("ADR-108: ligar a corporativa na fila pede os termos; recusado, nada muda; aceito, liga", async () => {
+  it("ADR-108: ligar a corporativa como 2ª da IA pede os termos; recusado, nada muda; aceito, liga", async () => {
     const recusa = montar({}, { aceita: false });
     await recusa.c.naFila(LEAPY.id, true);
     expect(recusa.chamadas).toEqual(["termos:claude-cli"]);
@@ -329,6 +329,13 @@ describe("controlador da lista (ADR-102)", () => {
     expect(ligarPedeAvisoDosTermos(comSegunda, segunda.id)).toBe(true);
     expect(ligarPedeAvisoDosTermos(comSegunda, LEAPY.id)).toBe(true);
     expect(ligarPedeAvisoDosTermos({ ...CONTAS, contas: [{ ...PESSOAL, entraNaTrocaAutomatica: false }, GPT] }, PESSOAL.id)).toBe(false);
+  });
+
+  it("NOD-308: ligar a corporativa como 1ª da IA não pede os termos; como 2ª pede, igual à pessoal", () => {
+    const so = { ...CONTAS, contas: [GPT, { ...LEAPY, posicao: 1 }] };
+    expect(ligarPedeAvisoDosTermos(so, LEAPY.id)).toBe(false);
+    expect(ligarPedeAvisoDosTermos({ ...CONTAS, contas: [{ ...PESSOAL, entraNaTrocaAutomatica: false }, GPT, LEAPY] }, LEAPY.id)).toBe(false);
+    expect(ligarPedeAvisoDosTermos(CONTAS, LEAPY.id)).toBe(true);
   });
 
   it("o Mac só entra pelo app aberto nele", async () => {

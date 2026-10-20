@@ -41,18 +41,18 @@ export function contasIaMemoria(e: EstadoContasIaMemoria, escopo: Escopo): Retur
         let conta = existente;
         if (decisao === "criar") {
           const posicao = proximaPosicao();
-          // ADR-108: como o repositório, só a 1ª conta pessoal de cada IA nasce na fila.
-          const naFila = !a.corporativa && !minhas().some((c) => c.ia === a.ia && c.removidaEm === null && !c.corporativa);
+          // ADR-108 + NOD-308: como o repositório, só a 1ª conta de cada IA nasce na fila (corporativa ou não).
+          const naFila = !minhas().some((c) => c.ia === a.ia && c.removidaEm === null);
           conta = { ...dono, id: randomUUID(), ia: a.ia, impressao: a.impressao, apelido: a.apelidoSugerido ?? apelidoPadrao(posicao), plano: a.plano, corporativa: a.corporativa, posicao, entraNaTrocaAutomatica: naFila, noLimiteAte: null, removidaEm: null, email: a.email ?? null, organizacao: a.organizacao ?? null };
           e.contas.push(conta);
           mudou = true;
         } else if (decisao === "voltar") {
           // Revisão do PR 2 (C4): volta com a regra de nascimento, não com a marca antiga.
-          const naFila = !a.corporativa && !minhas().some((c) => c.ia === a.ia && c.removidaEm === null && !c.corporativa);
+          const naFila = !minhas().some((c) => c.ia === a.ia && c.removidaEm === null);
           Object.assign(conta!, { removidaEm: null, noLimiteAte: null, posicao: proximaPosicao(), plano: a.plano ?? conta!.plano, corporativa: a.corporativa, entraNaTrocaAutomatica: naFila });
           mudou = true;
         } else if (decisao === "atualizar" && a.plano !== null && (a.plano !== conta!.plano || a.corporativa !== conta!.corporativa)) {
-          Object.assign(conta!, { plano: a.plano, corporativa: a.corporativa, ...(a.corporativa && !conta!.corporativa ? { entraNaTrocaAutomatica: false } : {}) });
+          Object.assign(conta!, { plano: a.plano, corporativa: a.corporativa });
           mudou = true;
         }
         // ADR-105: como o repositório, ausente não apaga.

@@ -5,8 +5,7 @@ import { PROVEDOR, type IaMac, type UiIas } from "./cartao-ia.ts";
 /**
  * As contas de uma IA em Provedores de IA (definido em 2026-10-12, ADR-101, NOD-211; protótipo v3). Embaixo do cartão
  * da IA, só no app do Mac e só com a conta 1 conectada (ou já com outras): a lista na ordem de uso (a ordem é a
- * preferência), o selo "Corporativa" e, com "Trocar sozinho" ligado, o opt-in "Pode entrar na troca automática" (padrão
- * desmarcado; protótipo v4), ▲▼✕,
+ * preferência), o selo "Corporativa" (NOD-308: só o selo; a corporativa entra na troca como qualquer conta), ▲▼✕,
  * "+ Adicionar outra conta" e o modo no limite ("Perguntar antes de trocar", o padrão, ou "Trocar sozinho"). Apelido e
  * plano ficam neste Mac (a nota de privacidade diz). Os cliques (`data-act="conta-…"`) são de web/main.ts.
  */
@@ -26,14 +25,14 @@ export function renderContasDaIa(ia: IaMac, ui: UiIas, agora: number, conectada:
     : c.adicionando
     ? `<div class="contas-login" role="status"><span class="ob-gira" aria-hidden="true"></span><span>Entrando na conta nova${c.adicionando.apelido ? ` (${esc(c.adicionando.apelido)})` : ""}. Termine no navegador; as outras contas continuam conectadas.</span><button type="button" class="bt sm" data-act="ia-cancelar" data-ia="${ia}">Cancelar</button></div>`
     : form !== undefined
-      ? `<form class="contas-nova" data-form="conta-nova" data-ia="${ia}"><b>Nova conta do ${esc(cli)}</b><label>Apelido (opcional, fica só neste Mac)<input name="apelido" maxlength="40" placeholder="ex.: Leapy, Pessoal" value="${esc(form)}" data-conta-apelido="${ia}"></label><p class="mudo sm">Você entra no navegador, como na primeira conta. Uma conta de empresa fica fora da troca automática até você marcar.</p><div class="contas-acoes"><button type="submit" class="bt pri sm">Entrar</button><button type="button" class="bt sm" data-act="conta-form-fechar" data-ia="${ia}">Cancelar</button></div></form>`
+      ? `<form class="contas-nova" data-form="conta-nova" data-ia="${ia}"><b>Nova conta do ${esc(cli)}</b><label>Apelido (opcional, fica só neste Mac)<input name="apelido" maxlength="40" placeholder="ex.: Leapy, Pessoal" value="${esc(form)}" data-conta-apelido="${ia}"></label><p class="mudo sm">Você entra no navegador, como na primeira conta.</p><div class="contas-acoes"><button type="submit" class="bt pri sm">Entrar</button><button type="button" class="bt sm" data-act="conta-form-fechar" data-ia="${ia}">Cancelar</button></div></form>`
       : c.contas.length < c.max
         ? `<button type="button" class="bt sm" data-act="conta-form-abrir" data-ia="${ia}">+ Adicionar outra conta</button>`
         : `<p class="mudo sm">Máximo de ${c.max} contas.</p>`;
   const modo = c.contas.length > 1
     ? `<fieldset class="contas-modo"><legend>Quando uma conta do ${esc(cli)} bate no limite</legend>
         <label><input type="radio" name="conta-modo-${ia}" value="perguntar" data-conta-modo="${ia}"${c.modo === "perguntar" ? " checked" : ""}><span>Perguntar antes de trocar (padrão)<small>O nod para e pergunta na conversa. Você troca com um clique.</small></span></label>
-        <label><input type="radio" name="conta-modo-${ia}" value="automatico" data-conta-modo="${ia}"${c.modo === "automatico" ? " checked" : ""}><span>Trocar sozinho para a próxima<small>O turno que falhou é refeito na próxima conta da lista. Contas corporativas não marcadas ficam de fora. Quando a primeira renovar, o nod volta para ela.</small></span></label>
+        <label><input type="radio" name="conta-modo-${ia}" value="automatico" data-conta-modo="${ia}"${c.modo === "automatico" ? " checked" : ""}><span>Trocar sozinho para a próxima<small>O turno que falhou é refeito na próxima conta da lista. Quando a primeira renovar, o nod volta para ela.</small></span></label>
       </fieldset>`
     : "";
   return `<div class="contas-ia" data-contas="${ia}">
@@ -51,12 +50,9 @@ function linhaDaConta(ia: IaMac, c: ContasNaTela, x: ContaNaTela, agora: number)
     ? ["e-limite", `No limite até ${hora(x.noLimiteAte)}`]
     : x.emUso ? ["e-uso", "Em uso"] : ["e-disp", "Disponível"];
   const plano = x.plano ? `<span class="contas-ident">${esc(planoNaTela(x.plano))}</span>` : "";
-  // v4 (revisão do Gil): sem o selo "Fora da troca automática"; a caixa só aparece com "Trocar sozinho" ligado, que é
-  // quando ela muda algo. O selo "Corporativa" fica sempre (em qualquer posição, a 1 inclusive).
-  const optin = c.modo === "automatico"
-    ? `<label class="contas-optin"><input type="checkbox" data-conta-optin="${ia}" data-posicao="${x.posicao}"${x.entraNaTrocaAutomatica ? " checked" : ""}><span>Pode entrar na troca automática<small>Desmarcada, o nod nunca troca sozinho para esta conta; ela só é usada quando você escolhe. Confira a política da empresa antes de marcar.</small></span></label>`
-    : "";
-  const corporativa = x.corporativa ? `<div class="contas-selos"><span class="selo">Corporativa</span></div>${optin}` : "";
+  // O selo "Corporativa" fica sempre (em qualquer posição, a 1 inclusive). NOD-308: sem a caixa do opt-in; a corporativa
+  // entra na troca como qualquer conta.
+  const corporativa = x.corporativa ? `<div class="contas-selos"><span class="selo">Corporativa</span></div>` : "";
   const icone = (act: string, simbolo: string, aria: string, desabilitado: boolean, dados = "") =>
     `<button type="button" class="contas-ic" data-act="${act}" data-ia="${ia}" data-posicao="${x.posicao}"${dados} aria-label="${esc(aria)}"${desabilitado ? " disabled" : ""}>${simbolo}</button>`;
   const ultima = x.posicao === c.contas.length;

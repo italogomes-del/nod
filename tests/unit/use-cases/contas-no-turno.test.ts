@@ -261,7 +261,7 @@ describe("NOD-277: a espera da cota acaba quando a pessoa resolve", () => {
     expect(r.data).toEqual({ turnoId: null, motivo: "turno_nao_interrompido" });
   });
 
-  it("conta nova pronta na máquina acorda a espera da IA dela; a corporativa fora da troca automática não", async () => {
+  it("conta nova que nasce fora da fila (2ª da IA em diante, corporativa ou pessoal) não acorda a espera da IA dela", async () => {
     const c = await cenario();
     const doCodex = await espera(c, "codex-cli", `${ENTRADA_DA_VOLTA_DA_COTA}Codex chegou ao limite.`);
     const doClaude = await espera(c, "claude-cli");
@@ -270,9 +270,23 @@ describe("NOD-277: a espera da cota acaba quando a pessoa resolve", () => {
     await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, { ...anuncio(9, "codex-cli", "Empresa"), corporativa: true }]);
     expect((await c.deps.repos.contasIa.listar()).contas.length).toBe(ja + 1);
     expect(acordarEm(c, doCodex.id)).toBe(T0 + TRES_DIAS);
+    // NOD-308: a pessoal que nasce fora da fila (3ª do Codex) também não acorda nada sozinha; só a conta na fila acorda.
     await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, { ...anuncio(9, "codex-cli", "Empresa"), corporativa: true }, anuncio(10, "codex-cli", "Nova")]);
-    expect(acordarEm(c, doCodex.id)).toBeNull();
+    expect(acordarEm(c, doCodex.id)).toBe(T0 + TRES_DIAS);
     expect(acordarEm(c, doClaude.id)).toBe(T0 + TRES_DIAS);
+  });
+
+  it("NOD-308: a corporativa NA fila que fica pronta acorda a espera da IA dela, como uma pessoal", async () => {
+    const c = await cenario();
+    const doCodex = await espera(c, "codex-cli", `${ENTRADA_DA_VOLTA_DA_COTA}Codex chegou ao limite.`);
+    const atuais = [anuncio(1, "claude-cli", "Pessoal"), anuncio(2, "codex-cli", "Pessoal"), anuncio(3, "claude-cli", "Leapy")];
+    const empresa = { ...anuncio(9, "codex-cli", "Empresa"), corporativa: true, plano: "Business" };
+    await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, { ...empresa, estado: "sem_login" as const }]);
+    const conta = (await c.deps.repos.contasIa.listar()).contas.find((x) => x.apelido === "Empresa")!;
+    expect(conta).toMatchObject({ corporativa: true, entraNaTrocaAutomatica: false });
+    expect(await c.deps.repos.contasIa.definirTrocaAutomatica(conta.id, true)).toBe(true);
+    await anunciarContasDaMaquina(c.deps, c.vm, [...atuais, empresa]);
+    expect(acordarEm(c, doCodex.id)).toBeNull();
   });
 });
 

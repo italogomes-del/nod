@@ -75,8 +75,8 @@ const prontaNa = (c: ContaIa, maquina: string | null) => c.maquinas.some((v) => 
 /**
  * O que acontece se a conta em uso acabar, espelhando a regra do servidor (`decidirLimiteDaConta` em
  * src/domain/contas-da-pessoa.ts, ADR-101/102), na mesma ordem:
- *  1. "Trocar sozinho" (`modo: automatico`) e outra conta livre da MESMA IA pronta na máquina, que entra na troca
- *     (corporativa só marcada): segue nela ("trocou").
+ *  1. "Trocar sozinho" (`modo: automatico`) e outra conta livre da MESMA IA pronta na máquina, que está na fila
+ *     (corporativa ou não, NOD-308): segue nela ("trocou").
  *  2. No Automático, outra IA pronta e fora do limite: a conversa segue nela ("outra_ia"). O bot fixo não troca de IA.
  *  3. Outra conta livre (o servidor pergunta com as livres de qualquer máquina): o Nod pergunta antes de trocar de conta.
  *     No bot fixo, só as da mesma IA contam.
@@ -93,7 +93,7 @@ export function seguirSeAcabar(estado: Estado, p: { ia: IaDaPessoa; auto: boolea
   const outras = atual ? contas.filter((x) => x.id !== atual.id && livre(x, p.c.agora)) : [];
   const daMesmaIa = outras.filter((x) => x.ia === atual?.ia);
   if (estado.contasIa?.modo === "automatico") {
-    const sozinha = daMesmaIa.find((x) => prontaNa(x, p.maquina) && (!x.corporativa || x.entraNaTrocaAutomatica));
+    const sozinha = daMesmaIa.find((x) => prontaNa(x, p.maquina) && x.entraNaTrocaAutomatica);
     if (sozinha) return { tipo: "conta", apelido: sozinha.apelido };
   }
   if (p.auto) {

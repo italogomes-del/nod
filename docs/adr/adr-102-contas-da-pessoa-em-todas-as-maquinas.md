@@ -32,6 +32,8 @@ Marlon pediu para redesenhar a jornada e escolheu, no protótipo de 13/10 (canva
    (`CLAUDE_CONFIG_DIR`/`CODEX_HOME`). As regras da ADR-101 continuam, por provedor: "Perguntar antes" é o padrão entre
    contas do mesmo provedor; passar de um provedor para o outro continua automático; conta corporativa só entra na troca
    automática marcada. O limite é da conta (vale em todas as máquinas).
+   - **Emenda NOD-308 (2026-10-20; decisão do Marlon na NOD-221 item 3, 19/10): conta corporativa segue a mesma regra da pessoal; não há mais exceção por plano.** A corporativa entra na fila e na troca como
+     qualquer conta (ADR-101 §6, ADR-108 §2).
    - **Emenda NOD-268 (2026-10-15):** a conta escolhida precisa estar na máquina que roda o bot. Com alvo, a conta
      tem que estar pronta nele; sem alvo, em qualquer máquina não revogada. Sem conta na máquina, a nota das contas é
      escrita uma vez (dedup pela nota aberta) e a fala espera com `acordar_em` na volta da conta, em vez de repetir a

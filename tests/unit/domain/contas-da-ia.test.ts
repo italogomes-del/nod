@@ -6,7 +6,6 @@ import {
   contasIniciais,
   decidirNoLimite,
   ehCorporativa,
-  entraNaTroca,
   fraseDaDecisao,
   normalizarContas,
   usarConta,
@@ -29,18 +28,6 @@ describe("ehCorporativa", () => {
   });
 });
 
-describe("entraNaTroca (opt-in padrão false)", () => {
-  it("a pessoal entra; a corporativa só marcada, inclusive a conta 1 (revisão do Gil na v3)", () => {
-    expect(entraNaTroca(conta("padrao", "team"))).toBe(false);
-    expect(entraNaTroca(conta("padrao", null))).toBe(true);
-    expect(entraNaTroca(conta("x", null))).toBe(false);
-    expect(entraNaTroca(conta("padrao", "team", { entraNaTrocaAutomatica: true }))).toBe(true);
-    expect(entraNaTroca(conta("x", "pro"))).toBe(true);
-    expect(entraNaTroca(conta("x", "team"))).toBe(false);
-    expect(entraNaTroca(conta("x", "team", { entraNaTrocaAutomatica: true }))).toBe(true);
-  });
-});
-
 describe("decidirNoLimite", () => {
   it("Perguntar antes (padrão): oferece todas as livres, inclusive a corporativa, e não troca", () => {
     const { cfg, decisao } = decidirNoLimite(tres(), { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
@@ -50,27 +37,19 @@ describe("decidirNoLimite", () => {
     expect(frase(decisao)).toBe("Conta 1 do Claude Code no limite até 14:00. Seguir com a conta 2 ou 3?");
   });
 
-  it("Trocar sozinho: pula a corporativa não marcada e diz que ela ficou fora", () => {
+  it("Trocar sozinho (NOD-308): a corporativa livre entra na ordem como qualquer conta, sem estar marcada", () => {
     const { cfg, decisao } = decidirNoLimite(tres({ modo: "automatico" }), { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
-    expect(decisao).toEqual({ tipo: "trocou", de: 1, para: 3, voltaEm: AGORA + 2 * HORA, foraDaTroca: [2] });
-    expect(cfg.escolhida).toBe("reserva");
-    expect(frase(decisao)).toBe("Conta 1 do Claude Code no limite até 14:00. Seguindo com a conta 3 (conta 2 fora da troca automática).");
+    expect(decisao).toEqual({ tipo: "trocou", de: 1, para: 2, voltaEm: AGORA + 2 * HORA, foraDaTroca: [] });
+    expect(cfg.escolhida).toBe("leapy");
+    expect(frase(decisao)).toBe("Conta 1 do Claude Code no limite até 14:00. Seguindo com a conta 2.");
   });
 
-  it("Trocar sozinho com a corporativa marcada: ela entra na ordem", () => {
-    const base = tres({ modo: "automatico" });
-    base.contas[1] = { ...(base.contas[1] as ContaGuardada), entraNaTrocaAutomatica: true };
-    const { decisao } = decidirNoLimite(base, { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
-    expect(decisao).toMatchObject({ tipo: "trocou", para: 2, foraDaTroca: [] });
-  });
-
-  it("Trocar sozinho e só sobrou a corporativa não marcada: volta a perguntar", () => {
+  it("Trocar sozinho (NOD-308): só sobrou a corporativa livre, troca para ela em vez de perguntar", () => {
     const base = tres({ modo: "automatico" });
     base.contas[2] = { ...(base.contas[2] as ContaGuardada), noLimiteAte: AGORA + 3 * HORA };
     const { cfg, decisao } = decidirNoLimite(base, { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
-    expect(decisao).toEqual({ tipo: "perguntar", de: 1, livres: [2], foraDaTroca: [2], voltaEm: AGORA + 2 * HORA });
-    expect(cfg.escolhida).toBeNull();
-    expect(frase(decisao)).toBe("Conta 1 do Claude Code no limite até 14:00. A conta 2 está fora da troca automática, então o nod não troca sozinho. Seguir com a conta 2?");
+    expect(decisao).toEqual({ tipo: "trocou", de: 1, para: 2, voltaEm: AGORA + 2 * HORA, foraDaTroca: [] });
+    expect(cfg.escolhida).toBe("leapy");
   });
 
   it("todas no limite: diz quando a primeira volta", () => {
@@ -97,11 +76,11 @@ describe("decidirNoLimite", () => {
 describe("contaEmUso, usarConta, contaVoltou", () => {
   it("a preferida volta quando renova; enquanto isso, vale a escolhida", () => {
     const { cfg } = decidirNoLimite(tres({ modo: "automatico" }), { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
-    expect(contaEmUso(cfg, AGORA + HORA).id).toBe("reserva");
+    expect(contaEmUso(cfg, AGORA + HORA).id).toBe("leapy");
     expect(contaEmUso(cfg, AGORA + 2 * HORA).id).toBe("padrao");
   });
 
-  it("Seguir com a conta 2 (escolha da pessoa) vale mesmo sendo corporativa não marcada", () => {
+  it("Seguir com a conta 2 (escolha da pessoa) vale também para a corporativa", () => {
     const { cfg } = decidirNoLimite(tres(), { id: "padrao", ate: AGORA + 2 * HORA, agora: AGORA });
     const usada = usarConta(cfg, 2);
     expect(usada && contaEmUso(usada, AGORA).id).toBe("leapy");

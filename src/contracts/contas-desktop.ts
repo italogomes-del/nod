@@ -8,11 +8,11 @@ export type ContaNaTela = {
   posicao: number;
   apelido: string;
   plano: string | null;
-  /** Plano de empresa ou desconhecido, fora da conta 1: só entra na troca automática marcada. */
+  /** Plano de empresa ou desconhecido, fora da conta 1: só o selo (NOD-308: entra na troca como qualquer conta). */
   corporativa: boolean;
-  /** O opt-in (padrão false). */
+  /** O antigo opt-in da corporativa (NOD-308: não pesa mais; fica por compat). */
   entraNaTrocaAutomatica: boolean;
-  /** O que vale no "Trocar sozinho": conta 1, pessoal, ou corporativa marcada. */
+  /** O que vale no "Trocar sozinho": NOD-308, sempre true (corporativa ou não). */
   entraNaTroca: boolean;
   noLimiteAte: number | null;
   emUso: boolean;

@@ -49,14 +49,14 @@ export const PRONTO_VISIVEL_MS = 6_000;
 const FINAIS = new Set(["pronto", "falhou", "cancelado"]);
 
 /**
- * ADR-108 (termos de uso, ADR-101 §4): ligar uma conta na fila pede o aviso dos termos quando ela é corporativa ou quando
- * já há outra conta da mesma IA na fila (é aí que o nod passa sozinho de uma conta para a outra). A 1ª conta pessoal de
- * cada IA nasce na fila e não pede nada. Desligar nunca pede.
+ * ADR-108 (termos de uso, ADR-101 §4): ligar uma conta na fila pede o aviso dos termos quando já há outra conta da mesma
+ * IA na fila (é aí que o nod passa sozinho de uma conta para a outra). A 1ª conta de cada IA nasce na fila e não pede
+ * nada; NOD-308: a corporativa segue a mesma regra. Desligar nunca pede.
  */
 export function ligarPedeAvisoDosTermos(contas: ContasIaDto, id: string): boolean {
   const c = contas.contas.find((x) => x.id === id);
   if (!c) return false;
-  return c.corporativa || contas.contas.some((x) => x.id !== id && x.ia === c.ia && x.entraNaTrocaAutomatica);
+  return contas.contas.some((x) => x.id !== id && x.ia === c.ia && x.entraNaTrocaAutomatica);
 }
 
 export function criarContasDaPessoa(d: DepsContasDaPessoa) {

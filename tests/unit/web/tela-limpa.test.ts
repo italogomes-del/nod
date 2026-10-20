@@ -186,14 +186,15 @@ describe("T6: o seletor de IA no campo", () => {
   it("'Se acabar' espelha decidirLimiteDaConta: outra conta no Trocar sozinho, outra IA no Automático, perguntar, esperar", () => {
     const frase = (e: Estado) => fraseDoLimite({ ...dadosDoSeletor(e, "a")!, renovaEm: null });
     const fixo = { harness: "claude-cli" as const, modelo: "opus" };
-    // 1. "Trocar sozinho" e outra conta livre do Claude pronta: segue nela (vale também para o fixo: o modelo não muda).
-    const duas = (modo: "automatico" | "perguntar", p: Partial<ContaIa> = {}) => ({ contasIa: { disponivel: true, modo, contas: [conta("Pessoal"), conta("Equipe", { posicao: 1, ...p })] } });
+    // 1. "Trocar sozinho" e outra conta livre do Claude pronta e na fila: segue nela (vale também para o fixo: o modelo não muda).
+    const duas = (modo: "automatico" | "perguntar", p: Partial<ContaIa> = {}) => ({ contasIa: { disponivel: true, modo, contas: [conta("Pessoal", { entraNaTrocaAutomatica: true }), conta("Equipe", { posicao: 1, entraNaTrocaAutomatica: true, ...p })] } });
     expect(dadosDoSeletor(cenario(fixo, duas("automatico")), "a")!.seguir).toEqual({ tipo: "conta", apelido: "Equipe" });
     expect(frase(cenario(fixo, duas("automatico")))).toBe('Se acabar, segue na conta <span class="ia-sel-forte">Equipe</span>.');
     // 2. No modo "perguntar" com outra conta livre: o Nod pergunta antes de trocar de conta.
     expect(frase(cenario(fixo, duas("perguntar")))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
-    // A corporativa não marcada não entra na troca sozinha: o servidor pergunta.
-    expect(frase(cenario(fixo, duas("automatico", { corporativa: true })))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
+    // NOD-308: a corporativa na fila segue como qualquer conta; qualquer conta fora da fila (pessoal ou não) não.
+    expect(dadosDoSeletor(cenario(fixo, duas("automatico", { corporativa: true })), "a")!.seguir).toEqual({ tipo: "conta", apelido: "Equipe" });
+    expect(frase(cenario(fixo, duas("automatico", { entraNaTrocaAutomatica: false })))).toBe("Se acabar, o Nod pergunta antes de trocar de conta.");
     // 3. Automático com outra IA pronta: a conversa segue nela (só o nome da IA).
     expect(frase(cenario())).toBe('Se acabar, a conversa segue no <span class="ia-sel-forte">ChatGPT</span>.');
     // 4. Fixo, sem outra conta da IA: espera a conta voltar.

@@ -38,6 +38,9 @@ apareceram juntos:
    migração **0080** liga, por pessoa e IA, a conta pessoal não removida de menor posição; quem já usava "Trocar
    sozinho" já tinha consentido, então todas as pessoais dele entram. A corporativa só continua na fila para quem estava
    no "Trocar sozinho" e a tinha marcado (revisão do PR 2, C4).
+   **Emenda NOD-308 (2026-10-20; decisão do Marlon na NOD-221 item 3, 19/10): conta corporativa segue a mesma regra da pessoal; não há mais exceção por plano.** A 1ª conta de cada IA nasce na fila, seja pessoal ou
+   corporativa; a 2ª em diante nasce fora. A conta que vira corporativa não sai da fila. A migração **0095** liga a
+   corporativa que estaria na fila se fosse pessoal (1ª ativa da IA, ou quem estava no "Trocar sozinho").
    **A leitura jurídica dos termos (Anthropic: "ordinary, individual usage"; OpenAI: "circumvent rate limits") não foi
    validada: fica sinalizada para o Marlon/jurídico antes de a fila virar padrão para clientes.**
 3. **Outra IA só no Automático (R2).** Bot com IA fixa nunca troca de IA: `decidirLimiteDaConta({ iaFixa })` e

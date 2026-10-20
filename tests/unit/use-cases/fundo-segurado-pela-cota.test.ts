@@ -15,7 +15,7 @@ import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
 /**
  * NOD-302 (continuação da NOD-253, passos 4 e 5): o fundo que a cota por conta segura ganha UMA nota "Seguir com…" na
  * conversa do bot e uma linha na conversa de quem pediu. O exemplo do Marlon: Claude · Pessoal (Max) no limite e
- * Claude · Leapy (Team corporativa) fora da troca automática.
+ * Claude · Leapy (Team corporativa) fora da fila (é a 2ª do Claude; NOD-308: nasce fora por isso, não por ser corporativa).
  */
 const T0 = Date.parse("2026-10-16T12:00:00-03:00");
 const HORA = 3_600_000;
@@ -56,7 +56,18 @@ async function cenario(o: { modo?: "perguntar" | "automatico"; leapyCorporativa?
 }
 
 describe("o fundo que a cota por conta segura (NOD-302, CAs 3–6 da NOD-253)", () => {
-  it("CA3: Team corporativa fora da troca — o fundo fica segurado e a conversa ganha a nota com a Leapy para escolher", async () => {
+  it("NOD-308: a Leapy corporativa ligada na fila recebe o fundo como qualquer conta — nada segura e não há nota", async () => {
+    const c = await cenario({ modo: "automatico", leapyCorporativa: true });
+    expect(await c.deps.repos.contasIa.definirTrocaAutomatica(c.contas.cLeapy.id, true)).toBe(true);
+    await c.uso(c.contas.cPessoal.id, 1, T0 + 2 * HORA);
+    expect(await c.cota()).toEqual([]);
+    const despacho = await c.despachar();
+    expect(despacho.data).toMatchObject({ motivo: null, turno: { id: c.turnoId } });
+    await c.avisar();
+    expect(c.notas()).toHaveLength(0);
+  });
+
+  it("CA3: Team corporativa fora da fila (2ª do Claude) — o fundo fica segurado e a conversa ganha a nota com a Leapy para escolher", async () => {
     const c = await cenario({ modo: "automatico", leapyCorporativa: true });
     await c.uso(c.contas.cPessoal.id, 1, T0 + 2 * HORA);
     expect(await c.cota()).toMatchObject([{ ia: "claude-cli", situacao: "limite" }]);

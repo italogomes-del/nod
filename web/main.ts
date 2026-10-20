@@ -3741,7 +3741,7 @@ document.addEventListener("change", (ev) => {
     if (horario) { horario.disabled = intervalo; horario.required = !intervalo; horario.closest("label")!.hidden = intervalo; }
     return;
   }
-  // ADR-102: o formulário "Adicionar conta", o opt-in na lista única e o "sair das contas" do desconectar.
+  // ADR-102: o formulário "Adicionar conta" e o "sair das contas" do desconectar.
   if (cb.matches("[data-cl-nova-ia]")) {
     if (cb.value === "claude-cli" || cb.value === "codex-cli") contasDaPessoa.mudarNova({ ia: cb.value });
     return;
@@ -3757,12 +3757,7 @@ document.addEventListener("change", (ev) => {
     if (q) dispatch({ tipo: "contas-ui", mudanca: { desconectar: { ...q, sair: cb.checked } } });
     return;
   }
-  // ADR-101 (NOD-211): o opt-in da conta corporativa, o modo no limite e o apelido da conta nova.
-  if (cb.matches("[data-conta-optin]")) {
-    const ia = cb.dataset.contaOptin;
-    if (ehIa(ia)) void contasDoMac.definirTroca(ia, Number(cb.dataset.posicao), cb.checked);
-    return;
-  }
+  // ADR-101 (NOD-211; NOD-308): o modo no limite e o apelido da conta nova. O opt-in corporativo saiu da tela.
   if (cb.matches("[data-conta-modo]")) {
     const ia = cb.dataset.contaModo;
     if (ehIa(ia) && (cb.value === "perguntar" || cb.value === "automatico")) void contasDoMac.definirModo(ia, cb.value);

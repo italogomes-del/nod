@@ -10,9 +10,8 @@ import type { ContaNoLimite } from "../contracts/turno.ts";
  *  1. "Perguntar antes" é o padrão: no limite, o nod oferece as outras contas livres (todas, inclusive as corporativas)
  *     e a pessoa troca com um clique. Nada troca sozinho.
  *  2. "Trocar sozinho" é por IA e vem desligado. Ligado, o turno é refeito na próxima conta ELEGÍVEL da ordem.
- *  3. Conta corporativa (Team, Enterprise, Business, Edu) só é elegível se a pessoa marcar `entraNaTrocaAutomatica`
- *     (padrão false), em qualquer posição da lista (revisão do Gil na v3: a conta 1 corporativa não marcada também fica
- *     fora). Plano desconhecido conta como corporativo.
+ *  3. NOD-308 (decisão do Marlon na NOD-221, 19/10): a conta corporativa (Team, Enterprise, Business, Edu) segue a
+ *     mesma regra da pessoal: toda conta livre é elegível. "Corporativa" fica só como selo na tela.
  *  4. A conta preferida (a 1) volta a ser usada assim que renova: é a conta onde a pessoa escolheu começar, não uma troca.
  */
 
@@ -25,7 +24,7 @@ export type ContaGuardada = {
   apelido: string;
   /** O plano que o CLI informou ("max", "team", "plus", "business"…), minúsculo; null = o CLI não disse. */
   plano: string | null;
-  /** definido em 2026-10-12 (Ada/Marlon): padrão false; só pesa na conta corporativa. */
+  /** definido em 2026-10-12 (Ada/Marlon): o antigo opt-in da corporativa. NOD-308: não pesa mais na troca (fica por compat). */
   entraNaTrocaAutomatica: boolean;
   /** Até quando a conta está no limite (o horário do fornecedor ou o prazo de 1 h); null = livre. */
   noLimiteAte: EpochMs | null;
@@ -70,11 +69,6 @@ export function ehCorporativa(plano: string | null): boolean {
 export const contaCorporativa = (c: Pick<ContaGuardada, "id" | "plano">): boolean =>
   !(c.id === ID_CONTA_PADRAO && c.plano === null) && ehCorporativa(c.plano);
 
-/** A conta entra na troca sozinha? A pessoal sempre; a corporativa só marcada, em qualquer posição (v4, revisão do Gil). */
-export function entraNaTroca(c: ContaGuardada): boolean {
-  return !contaCorporativa(c) || c.entraNaTrocaAutomatica;
-}
-
 const livre = (c: ContaGuardada, agora: EpochMs) => c.noLimiteAte === null || c.noLimiteAte <= agora;
 
 /**
@@ -95,9 +89,9 @@ export const posicaoDa = (cfg: ContasDaIa, id: string): number => cfg.contas.fin
 export type DecisaoNoLimite = ContaNoLimite;
 
 /**
- * Marca a conta `id` no limite até `ate` e decide. "Trocar sozinho" ligado e alguma conta livre elegível: troca para a
- * primeira da ordem. Ligado e só sobrou conta fora da troca: pergunta, dizendo quais estão fora. Desligado: pergunta
- * com todas as livres. Nenhuma livre: todas no limite, com a volta mais cedo (a conta que destrava primeiro).
+ * Marca a conta `id` no limite até `ate` e decide. "Trocar sozinho" ligado e alguma conta livre: troca para a primeira
+ * da ordem (NOD-308: corporativa ou não; `foraDaTroca` segue no contrato, sempre vazio). Desligado: pergunta com todas
+ * as livres. Nenhuma livre: todas no limite, com a volta mais cedo (a conta que destrava primeiro).
  */
 export function decidirNoLimite(cfg: ContasDaIa, p: { id: string; ate: EpochMs | null; agora: EpochMs }): { cfg: ContasDaIa; decisao: DecisaoNoLimite } {
   const contas = cfg.contas.map((c) => (c.id === p.id ? { ...c, noLimiteAte: p.ate ?? p.agora + PRAZO_SEM_HORARIO_MS } : c));
@@ -108,11 +102,9 @@ export function decidirNoLimite(cfg: ContasDaIa, p: { id: string; ate: EpochMs |
     const voltas = contas.map((c) => c.noLimiteAte).filter((t): t is number => t !== null);
     return { cfg: { ...cfg, contas, escolhida: null }, decisao: { tipo: "todas_no_limite", noLimite: contas.map((_, i) => i + 1), voltaEm: voltas.length > 0 ? Math.min(...voltas) : null } };
   }
-  const fora = livres.filter(({ c }) => !entraNaTroca(c)).map(({ i }) => i + 1);
   if (cfg.modo === "automatico") {
-    const alvo = livres.find(({ c }) => entraNaTroca(c));
-    if (alvo) return { cfg: { ...cfg, contas, escolhida: alvo.c.id }, decisao: { tipo: "trocou", de, para: alvo.i + 1, voltaEm: voltaDe, foraDaTroca: fora } };
-    return { cfg: { ...cfg, contas, escolhida: null }, decisao: { tipo: "perguntar", de, livres: livres.map(({ i }) => i + 1), foraDaTroca: fora, voltaEm: voltaDe } };
+    const alvo = livres[0]!;
+    return { cfg: { ...cfg, contas, escolhida: alvo.c.id }, decisao: { tipo: "trocou", de, para: alvo.i + 1, voltaEm: voltaDe, foraDaTroca: [] } };
   }
   // QA do NOD-211 (2026-10-12): a escolha antiga ("Seguir com a conta 2" de ontem) ficava guardada e o turno seguinte
   // ia nela sozinho, enquanto a conversa perguntava. Ao perguntar, nada fica escolhido: quem escolhe agora é a pessoa.

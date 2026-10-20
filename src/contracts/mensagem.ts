@@ -104,7 +104,7 @@ export type PayloadMensagem =
   | { kind: "pedido_na_fila_da_cota"; turnoId: string; agenteId: string; ia: IdHarness; voltaEm: EpochMs | null }
   /**
    * definido em 2026-10-12 (ADR-101 item 6): a conta em uso bateu no limite, "Trocar sozinho" estava ligado e o turno foi
-   * refeito na conta `para`. Só posições; `foraDaTroca` são as contas livres que a troca pulou (corporativas não marcadas).
+   * refeito na conta `para`. Só posições; `foraDaTroca` são as contas livres que a troca pulou (NOD-308: sempre vazia; fica por compat).
    */
   | { kind: "conta_trocada"; harness: IdHarness; de: number; para: number; voltaEm: EpochMs | null; foraDaTroca: number[] }
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }

@@ -99,7 +99,7 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
     });
   });
 
-  it("ADR-108 (revisão do PR 2, C4): a conta que volta segue a regra de nascimento; a que vira corporativa sai da fila", async () => {
+  it("ADR-108 (revisão do PR 2, C4) + NOD-308: a conta que volta segue a regra de nascimento; a que vira corporativa fica na fila", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos } = depsSobre(trx, MARLON);
       const vm = randomUUID();
@@ -117,9 +117,25 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       await repos.contasIa.remover(b!.id, AGORA + 20_000);
       await repos.contasIa.doAnuncio(vm, [anuncio(2, { logadaEm: AGORA + 30_000 })], AGORA + 40_000);
       expect((await repos.contasIa.buscar(b!.id))?.entraNaTrocaAutomatica).toBe(true);
-      // A mesma conta anunciada agora como corporativa (o plano mudou para Team): sai da fila.
+      // NOD-308: a mesma conta anunciada agora como corporativa (o plano mudou para Team) fica na fila.
       await repos.contasIa.doAnuncio(vm, [anuncio(2, { logadaEm: AGORA + 30_000, plano: "Team", corporativa: true })], AGORA + 50_000);
-      expect(await repos.contasIa.buscar(b!.id)).toMatchObject({ corporativa: true, entraNaTrocaAutomatica: false });
+      expect(await repos.contasIa.buscar(b!.id)).toMatchObject({ corporativa: true, entraNaTrocaAutomatica: true });
+    });
+  });
+
+  it("NOD-308: a corporativa segue a regra da pessoal — 1ª da IA nasce na fila, Team como 2ª nasce fora, devolvida segue o nascimento", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      const r = await repos.contasIa.doAnuncio(vm, [anuncio(1, { plano: "Team", corporativa: true }), anuncio(2, { plano: "Enterprise", corporativa: true })], AGORA - 3_600_000);
+      expect(r.prontasAgora.map((c) => [c.corporativa, c.entraNaTrocaAutomatica])).toEqual([[true, true], [true, false]]);
+      const [a, b] = (await repos.contasIa.listar()).contas;
+      expect([a!.entraNaTrocaAutomatica, b!.entraNaTrocaAutomatica]).toEqual([true, false]);
+      // Removidas as duas, a 2ª volta sozinha: é a 1ª ativa da IA e volta na fila, mesmo corporativa.
+      await repos.contasIa.remover(a!.id, AGORA);
+      await repos.contasIa.remover(b!.id, AGORA);
+      await repos.contasIa.doAnuncio(vm, [anuncio(2, { plano: "Enterprise", corporativa: true, logadaEm: AGORA + 5_000 })], AGORA + 10_000);
+      expect((await repos.contasIa.buscar(b!.id))?.entraNaTrocaAutomatica).toBe(true);
     });
   });
 
@@ -127,7 +143,7 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
     await withRollback(MARLON, async (trx) => {
       const { repos } = depsSobre(trx, MARLON);
       const vm = randomUUID();
-      // Conta nova: a 1ª pessoal nasce na fila e a corporativa nasce fora, e o anúncio diz isso.
+      // Conta nova: a 1ª nasce na fila e a corporativa (2ª do Claude) nasce fora, e o anúncio diz isso.
       const r1 = await repos.contasIa.doAnuncio(vm, [anuncio(1), anuncio(3, { plano: "Team", corporativa: true })], AGORA - 3_600_000);
       expect(r1.prontasAgora.map((c) => [c.ia, c.corporativa, c.entraNaTrocaAutomatica])).toEqual([["claude-cli", false, true], ["claude-cli", true, false]]);
       const corp = (await repos.contasIa.listar()).contas.find((c) => c.corporativa)!;
@@ -138,11 +154,11 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       const r2 = await repos.contasIa.doAnuncio(randomUUID(), [anuncio(1), anuncio(3, { plano: "Team", corporativa: true, logadaEm: AGORA + 5_000 })], AGORA + 10_000);
       expect((await repos.contasIa.buscar(corp.id))?.entraNaTrocaAutomatica).toBe(false);
       expect(r2.prontasAgora.find((c) => c.contaId === corp.id)?.entraNaTrocaAutomatica).toBe(false);
-      // A pessoal na fila que passa a ser corporativa, pronta numa máquina nova: sai da fila e o anúncio diz "fora".
+      // NOD-308: a pessoal na fila que passa a ser corporativa, pronta numa máquina nova, fica na fila e o anúncio diz isso.
       const pessoal = (await repos.contasIa.listar()).contas.find((c) => !c.corporativa)!;
       const r3 = await repos.contasIa.doAnuncio(randomUUID(), [anuncio(1, { plano: "Team", corporativa: true })], AGORA + 20_000);
-      expect((await repos.contasIa.buscar(pessoal.id))?.entraNaTrocaAutomatica).toBe(false);
-      expect(r3.prontasAgora).toEqual([{ contaId: pessoal.id, ia: "claude-cli", corporativa: true, entraNaTrocaAutomatica: false }]);
+      expect((await repos.contasIa.buscar(pessoal.id))?.entraNaTrocaAutomatica).toBe(true);
+      expect(r3.prontasAgora).toEqual([{ contaId: pessoal.id, ia: "claude-cli", corporativa: true, entraNaTrocaAutomatica: true }]);
     });
   });
 

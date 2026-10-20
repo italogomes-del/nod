@@ -157,7 +157,7 @@ export type ResultadoTurno = {
 /**
  * definido em 2026-10-12 (ADR-101 item 6): `trocou` = "Trocar sozinho" ligado e o turno deve ser refeito na conta `para`;
  * `perguntar` = há conta livre e a pessoa escolhe; `todas_no_limite` = nenhuma livre. `foraDaTroca`: as livres que a troca
- * sozinha pulou (corporativas não marcadas). `voltaEm`: na troca e na pergunta, quando a conta `de` volta; em todas, a
+ * sozinha pulou (NOD-308: sempre vazia; fica por compat). `voltaEm`: na troca e na pergunta, quando a conta `de` volta; em todas, a
  * primeira que volta.
  */
 export type ContaNoLimite =

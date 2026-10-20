@@ -232,12 +232,7 @@ function linhaSeguirComConta(
   const emUso = ui.contas[ia]?.contas.find((c) => c.emUso)?.posicao;
   const escolhida = emUso !== undefined && livres.includes(emUso) ? emUso : null;
   const sep = '<span aria-hidden="true">·</span>';
-  // QA do NOD-211 (2026-10-12, protótipo, tela "só sobrou a corporativa"): em Trocar sozinho com as livres todas fora da
-  // troca, a pergunta também oferece a outra IA e a espera — antes só havia os botões das contas. Só o passo que age
-  // (a outra IA pronta, a entrar ou a instalar); o que só informa ("também no limite") fica de fora.
-  const outra = conta.foraDaTroca.length > 0 ? acaoSemOutra(ia, { ...p, fixa: true }) : null;
   const extras = [
-    ...(outra && !outra.substitui ? [outra.html] : []),
     ...(conta.voltaEm !== null ? [`<span>ou esperar a conta voltar ${esc(quandoVolta(conta.voltaEm, p.agora))}</span>`] : []),
   ];
   const fim = escolhida !== null

@@ -138,6 +138,10 @@ respeitam a variável, e o resultado volta pelo mesmo caminho (`lerConta`). O qu
      mesmo com "Trocar sozinho" ligado. Plano que o CLI não informou conta como corporativo (o lado seguro). Se só
      sobrarem contas fora da rotação, o nod volta a perguntar ("A conta 2 está fora da troca automática… Seguir com a
      conta 2?") em vez de trocar. A conta 1 da ordem é escolha da pessoa e é sempre usada quando está livre.
+     - **Emenda NOD-308 (2026-10-20; decisão do Marlon na NOD-221 item 3, 19/10): conta corporativa segue a mesma regra da pessoal; não há mais exceção por plano.** A corporativa nasce na fila pela regra
+       da ADR-108 §2 (só a 1ª conta de cada IA nasce na fila), recebe fundo e troca sozinha quando ligada, e a pessoa a
+       tira da fila como qualquer outra. "Corporativa" fica só como selo na tela. A migração **0095** liga a corporativa
+       que estaria na fila se fosse pessoal. A política da Leapy (seção 4) continua não confirmada.
    - **A política da Leapy não está confirmada** (ver a seção 4). Até o Marlon ou o admin confirmar, vale o padrão
      conservador acima. Se a Leapy proibir, a opção some das contas da Leapy. Se a Leapy autorizar, o padrão pode virar
      marcado.

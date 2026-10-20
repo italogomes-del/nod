@@ -472,8 +472,8 @@ div.mac-medidor { padding-right: 36px; }
 .contas-ident { margin-left: 6px; font-weight: 400; color: var(--ink-3); font-size: 12px; }
 .contas-selos { display: flex; gap: 6px; margin-top: 4px; }
 .contas-selos .selo { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); }
-.contas-optin, .contas-modo label { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; }
-.contas-optin small, .contas-modo small { display: block; color: var(--ink-3); font-size: 12px; }
+.contas-modo label { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; }
+.contas-modo small { display: block; color: var(--ink-3); font-size: 12px; }
 .contas-estado { font-size: 12px; border-radius: 999px; padding: 2px 8px; white-space: nowrap; border: 1px solid transparent; }
 .contas-estado.e-uso { background: var(--success-soft); color: var(--success); }
 .contas-estado.e-disp { background: var(--surface-raised); color: var(--ink-2); }

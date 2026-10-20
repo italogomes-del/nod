@@ -84,9 +84,9 @@ export async function anunciarContasDaMaquina(d: Deps, maquinaId: string, anunci
   if (r.mudou) await recalcularOrdemIas(d);
   if (r.sair.length > 0) log("info", "contas_saida_pedida_no_anuncio", { maquina_id: maquinaId, contas: r.sair.length });
   // NOD-277 (definido em 2026-10-15): conta que acabou de ficar pronta nesta máquina acorda a espera da cota da IA dela. A
-  // corporativa fora da troca automática não acorda nada sozinha (NOD-221): ela só recebe esse fundo quando a pessoa a
-  // escolhe ("Seguir com" ou posição 1). O portão da cota continua segurando se o limite persistir.
-  for (const ia of new Set(r.prontasAgora.filter((c) => !c.corporativa || c.entraNaTrocaAutomatica).map((c) => c.ia))) {
+  // conta fora da fila (pessoal ou corporativa, NOD-308) não acorda nada sozinha: ela só recebe esse fundo quando a pessoa
+  // a escolhe ("Seguir com" ou posição 1). O portão da cota continua segurando se o limite persistir.
+  for (const ia of new Set(r.prontasAgora.filter((c) => c.entraNaTrocaAutomatica).map((c) => c.ia))) {
     const acordados = await d.repos.turnos.anteciparEsperasDaCota(ia);
     if (acordados.length > 0) log("info", "espera_da_cota_antecipada", { gatilho: "conta_nova", ia, maquina_id: maquinaId, turnos: acordados.length });
   }

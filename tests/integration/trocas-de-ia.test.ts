@@ -193,13 +193,13 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
     });
   });
 
-  it("conta nova (ADR-108): a 1ª pessoal de cada IA nasce na fila; a 2ª do Claude e a corporativa nascem fora", async () => {
+  it("conta nova (ADR-108 + NOD-308): a 1ª de cada IA nasce na fila, mesmo corporativa; a 2ª em diante nasce fora", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const vm = (await m.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
       await m.repos.contasIa.doAnuncio(vm, [anuncio(1, "claude-cli", "Leapy", true), anuncio(2, "claude-cli", "Pessoal"), anuncio(3, "codex-cli", "Pessoal"), anuncio(4, "claude-cli", "Reserva")], AGORA);
       expect((await m.repos.contasIa.listar()).contas.map((c) => [c.apelido, c.ia, c.entraNaTrocaAutomatica])).toEqual([
-        ["Leapy", "claude-cli", false], ["Pessoal", "claude-cli", true], ["Pessoal", "codex-cli", true], ["Reserva", "claude-cli", false],
+        ["Leapy", "claude-cli", true], ["Pessoal", "claude-cli", false], ["Pessoal", "codex-cli", true], ["Reserva", "claude-cli", false],
       ]);
     });
   });

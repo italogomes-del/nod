@@ -287,8 +287,8 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
 
 /**
  * ADR-108 (R8): o liga/desliga "na fila" da conta. Ligado, o Nod pode passar sozinho para ela quando a anterior da mesma
- * IA acaba; desligado, ela só é usada quando você escolhe ("Seguir com"). Ligar a 2ª da mesma IA ou a corporativa mostra
- * os termos de uso antes (web/lib/contas-da-pessoa.ts).
+ * IA acaba; desligado, ela só é usada quando você escolhe ("Seguir com"). Ligar a 2ª da mesma IA mostra os termos de uso
+ * antes (NOD-308: a corporativa segue a mesma regra) (web/lib/contas-da-pessoa.ts).
  */
 function chaveDaFila(c: ContaIa): string {
   const nome = nomeDaContaNaTela(c);

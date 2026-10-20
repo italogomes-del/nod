@@ -45,8 +45,8 @@ export const ehIaComConta = (v: unknown): v is IaComConta => typeof v === "strin
 
 const livre = (c: Pick<ContaDaPessoa, "noLimiteAte">, agora: EpochMs) => c.noLimiteAte === null || c.noLimiteAte <= agora;
 /**
- * ADR-108 (R1/E2): "na fila" vale para toda conta. A 1ª conta pessoal de cada IA nasce na fila; a 2ª em diante e a
- * corporativa nascem fora e só entram quando a pessoa liga (com o aviso dos termos de uso, ADR-101 §4).
+ * ADR-108 (R1/E2): "na fila" vale para toda conta. A 1ª conta de cada IA nasce na fila; a 2ª em diante nasce fora e só
+ * entra quando a pessoa liga (com o aviso dos termos de uso, ADR-101 §4). NOD-308: a corporativa segue a mesma regra.
  */
 export const naFila = (c: Pick<ContaDaPessoa, "entraNaTrocaAutomatica">): boolean => c.entraNaTrocaAutomatica;
 const emOrdem = <T extends ContaDaPessoa>(contas: readonly T[]): T[] => contas.filter((c) => c.removidaEm === null).sort((a, b) => a.posicao - b.posicao);
