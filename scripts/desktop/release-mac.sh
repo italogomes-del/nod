@@ -14,7 +14,7 @@ set -euo pipefail
 REPO_GH=gamefik/nod
 # O endereço de produção enquanto NOD_DOMINIO está vazio (docs/deploy-gcp.md). A variável de ambiente ou a variável
 # de repositório NOD_SERVIDOR_PADRAO, quando existem, têm precedência.
-SERVIDOR_PRODUCAO=https://34-39-164-139.sslip.io
+SERVIDOR_PRODUCAO=https://app.nodbot.ai
 
 PUBLICAR=1
 NOTAS=""
