@@ -41,6 +41,7 @@ function doTurnoInterrompido(params: readonly string[]): Assunto {
 const DO_CATALOGO: readonly (readonly [ChaveRedacao, Classificador])[] = [
   ["turno-interrompido", doTurnoInterrompido],
   ["turno-orfao-encerrado", "turno.orfao"],
+  ["turno-preso-sem-contato", "turno.orfao"],
   ["retorno-do-lote-caiu", "lote.retorno_caiu"],
   ["agente-nasceu", "agente.criado"],
   ["retomada", "turno.retomado"],

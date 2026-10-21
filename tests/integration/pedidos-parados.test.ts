@@ -62,6 +62,8 @@ async function montar(trx: Tx) {
   const colegaId = tarefa.trabalhoId;
   /** A queda de um turno do colega como a recusa no despacho a deixa: interrompido e o trabalho DELE sincronizado. */
   const cair = async (turnoId: string, motivo: "executor_indisponivel" | "maquina_sem_contato" | "trabalho_incompleto") => {
+    // NOD-314: a queda real vem de um turno que uma máquina pegou (o reivindicar marca `attempted`).
+    await trx`update turnos set attempted = true where id = ${turnoId}`;
     await repos.turnos.interromper(turnoId, motivo);
     await sincronizarTrabalho(deps, colegaId);
   };

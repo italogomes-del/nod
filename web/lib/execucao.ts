@@ -71,7 +71,10 @@ export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | nu
 export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & { voltaEm?: ExecucaoRotina["voltaEm"] }, fusoIana = "UTC"): string {
   // NOD-274: "não rodou · cota, volta 14:00" — a janela que a cota da IA pulou fica visível no histórico.
   if (e.desfecho === "nao_rodou") {
-    const motivo = motivoDaExecucao(e);
+    // NOD-314: o rótulo antigo de maquina_sem_contato ("seu Mac parou de responder") é da queda no meio e não vale para a VM.
+    // Com o NOD-309 a janela também fica 'nao_rodou' por máquina sem contato sem as 24 h (a janela seguinte a fecha): o
+    // rótulo diz só o fato, válido nos dois caminhos.
+    const motivo = e.motivo === "maquina_sem_contato" ? "a máquina ficou sem contato" : motivoDaExecucao(e);
     // NOD-309: toda queda com hora de volta diz a hora (a máquina sem contato não tem: volta quando o Mac voltar).
     const volta = e.voltaEm ? `, volta ${horaMinuto(e.voltaEm, fusoIana)}` : "";
     return motivo ? `não rodou · ${motivo}${volta}` : "não rodou";

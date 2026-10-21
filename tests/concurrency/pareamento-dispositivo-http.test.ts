@@ -112,11 +112,21 @@ describeIntegracao("pareamento por código (HTTP real, commita)", () => {
       // malformado é 400; nunca o caminho antigo ({ turnos: 0 }) em silêncio.
       expect((await srv.chamar(sessao(dona), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaDona, turnoId: randomUUID() })).status).toBe(404);
       expect((await srv.chamar(sessao(dona), "POST", `conversas/${bot.conversaId}/rodar-desta-vez`, { maquinaId: chaveDaDona, turnoId: "nao-e-uuid" })).status).toBe(400);
+      // NOD-314: "rodar em outra desta vez" da task — trabalho que não existe é 404 ANTES de olhar a máquina (QA, achado 6),
+      // trabalho ou chave de outra pessoa é 404, chave sem contato recente é 409.
+      const [w] = await abrirTxEscopada(db, dona)((trx) => trx<{ id: string }[]>`insert into trabalhos (tenant_id, owner_id, agente_id, conversa_id, titulo, origem) values (${dona.tenantId}, ${dona.pessoaId}, ${bot.agenteId}, ${bot.conversaId}, 'Task', 'pessoa') returning id`);
+      if (!w) throw new Error("trabalho");
+      const inexistente = await srv.chamar(sessao(dona), "POST", `trabalhos/${randomUUID()}/rodar-desta-vez`, { maquinaId: chaveDaDona });
+      expect(inexistente.status).toBe(404);
+      expect((await srv.chamar(sessao(outra), "POST", `trabalhos/${w.id}/rodar-desta-vez`, { maquinaId: chaveDaDona })).status).toBe(404);
+      const semContato = await srv.chamar(sessao(dona), "POST", `trabalhos/${w.id}/rodar-desta-vez`, { maquinaId: chaveDaDona });
+      expect(semContato.status).toBe(409);
+      expect(await semContato.json()).toMatchObject({ codigo: "maquina_sem_contato" });
       // null desfaz a escolha.
       const solto = await srv.chamar(sessao(dona), "PUT", `agentes/${bot.agenteId}/maquina`, { maquinaId: null });
       expect(((await solto.json()) as { agente: { maquinaId: string | null } }).agente.maquinaId).toBeNull();
     } finally {
-      await abrirTxEscopada(db, dona)(async (trx) => { await trx`delete from conversas where id = ${bot.conversaId}`; await trx`delete from agentes where id = ${bot.agenteId}`; }).catch(() => undefined);
+      await abrirTxEscopada(db, dona)(async (trx) => { await trx`delete from trabalhos where conversa_id = ${bot.conversaId}`; await trx`delete from conversas where id = ${bot.conversaId}`; await trx`delete from agentes where id = ${bot.agenteId}`; }).catch(() => undefined);
       await abrirTxEscopada(db, outra)((trx) => trx`delete from maquina_tokens where id = ${chaveDaOutra}`);
     }
   });

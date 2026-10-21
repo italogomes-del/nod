@@ -120,3 +120,18 @@ credencial é logada por ela, como no Mac. A VM não é o "computador do bot" (A
 
 Ainda não implementado: juntar "Este Mac" em "Máquinas", o timer de atualização do motor, a rotina com a máquina fora
 do ar ganhar o aviso único (hoje ela espera e vence pela regra de sempre), o caminho B e os computadores dos bots.
+
+## Emenda (2026-10-20, NOD-314): o turno preso a uma máquina sem contato
+
+- **"Desta vez" também na task e no turno preso.** A task na fila de uma máquina sem contato ganha "Rodar em <outra>
+  desta vez" no topo (`POST trabalhos/:id/rodar-desta-vez`): grava `maquina_desta_vez` só nos turnos pendentes dela,
+  uma vez; `agentes.maquina_id` não muda. A outra máquina precisa ser da pessoa e ter contato recente (409 senão).
+- **O pendente preso 24 h sai da fila.** O varredor de órfãos (NOD-219) encerra o pendente cujo alvo (desta vez → bot →
+  padrão) é uma chave viva sem contato há 24 h, contadas do mais recente entre a entrada do turno, a volta marcada e o
+  último contato da chave (`turnos.encerrarPresoSemContato`, UPDATE condicional: o Mac que volta e reivindica ganha). O
+  turno fica `interrompido` com `maquina_sem_contato` e `despachado_em` nulo — o que o separa da queda de um turno que
+  rodou, e por isso não conta como queda nem é retomado pelo pedido parado. A ligação fica de fora.
+- **Uma linha só, por origem.** Conversa: "Tirei este pedido da fila: <máquina> ficou sem contato por mais de 24 h",
+  com o atalho "Rodar em <outra> desta vez" (refaz o turno uma vez). Rotina: execução `nao_rodou` com
+  `maquina_sem_contato`, sem linha no chat (resolve o "aviso único" que estava pendente acima). Pedido de colega: quem
+  pediu recebe um aviso de falha.

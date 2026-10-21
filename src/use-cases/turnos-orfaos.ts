@@ -1,6 +1,7 @@
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { createHash } from "node:crypto";
 import { AVISO_FUNDO_PRESO_MS, decidirFundoPreso, decidirTurnoOrfao, deveObservar, textoDaCausa, type BloqueioFila, type CausaOrfao, type FundoPreso } from "../domain/turno-orfao.ts";
+import { harnessFixado } from "../domain/harness.ts";
 import { PRAZO_DO_FUNDO_MS } from "../shared/constantes.ts";
 import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
@@ -11,6 +12,7 @@ import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import { avisarEsperaAoRemetente, avisarFalhaDelegacao } from "./entregar-resposta-peer.ts";
 import type { Deps } from "./tipos.ts";
 import { sincronizarDoTurno } from "./trabalhos.ts";
+import { ORIGENS_REFAZIVEIS } from "./contas-ia.ts";
 
 /** A regra que encerra o pendente órfão (autoria do evento e da mensagem). */
 export const REGRA_TURNO_ORFAO = "regra:turno-orfao" as const;
@@ -160,22 +162,34 @@ async function desistirDoFundoPreso(deps: Deps, c: FundoPresoCandidato, fundo: F
 
 async function encerrar(deps: Deps, c: OrfaoCandidato, causa: CausaOrfao): Promise<RuntimeEvent[] | null> {
   const agora = deps.agora();
-  const turno = await deps.repos.turnos.encerrarOrfao(c.id, agora);
+  // NOD-314: o preso sem contato tem o próprio UPDATE condicional (o predicado do alvo e das 24 h, refeito no SQL); o do
+  // `encerrarOrfao` é o da geração e não serve.
+  const semContato = causa === "maquina_alvo_sem_contato";
+  const turno = semContato ? await deps.repos.turnos.encerrarPresoSemContato(c.id, agora) : await deps.repos.turnos.encerrarOrfao(c.id, agora);
   if (!turno) return null;
+  const textoCausa = textoDaCausa(causa, c.alvoNome);
   const events: RuntimeEvent[] = [];
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: "catcher", decididoPor: REGRA_TURNO_ORFAO });
-  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: "parado_pela_pessoa", causa, estava: "pendente", trabalho_id: turno.trabalhoId ?? null } }));
-  // Rotina registra a execução interrompida (sem mensagem: o silêncio da ADR de rotinas), com a autoria desta regra. A
-  // ligação nem chega aqui (a consulta e o UPDATE a deixam de fora).
-  const rotina = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo: null, regra: REGRA_TURNO_ORFAO });
+  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: semContato ? "maquina_sem_contato" : "parado_pela_pessoa", causa, estava: "pendente", trabalho_id: turno.trabalhoId ?? null } }));
+  // Rotina registra a execução (sem mensagem: o silêncio da ADR de rotinas), com a autoria desta regra. A ligação nem
+  // chega aqui (a consulta e o UPDATE a deixam de fora). NOD-314: o preso sem contato não rodou — 'nao_rodou' com o
+  // motivo, e a janela seguinte nasce normalmente (a execução fica fechada).
+  const rotina = semContato
+    ? await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "nao_rodou", motivo: "maquina_sem_contato", regra: REGRA_TURNO_ORFAO })
+    : await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo: null, regra: REGRA_TURNO_ORFAO });
   events.push(...(rotina.events ?? []));
   if ("ignorado" in rotina.data && rotina.data.ignorado === "nao_e_rotina") {
-    const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "turno.orfao", texto: redigir("turno-orfao-encerrado", agora, { causa: textoDaCausa(causa) }), confianca: "confiavel" });
+    // NOD-314: uma linha só, com o payload que a web usa para o atalho "Rodar em <outra> desta vez" (refaz o turno uma vez).
+    // QA do NOD-314: o atalho (o payload) só vai onde a nota sabe refazer (conversa e sala); nas outras origens, só o texto.
+    const linha = semContato
+      ? { texto: redigir("turno-preso-sem-contato", agora, { maquina: c.alvoNome?.trim() || "o computador do bot" }), ...(c.alvoMaquinaId && ORIGENS_REFAZIVEIS.includes(turno.origem) ? { payload: { kind: "turno_preso" as const, maquinaId: c.alvoMaquinaId, ia: harnessFixado(turno.harness, turno.modelo) } } : {}) }
+      : { texto: redigir("turno-orfao-encerrado", agora, { causa: textoCausa }) };
+    const aviso = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "turno.orfao", ...linha, confianca: "confiavel" });
     if (aviso) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: aviso.id, kind: "sistema" } }));
   }
   events.push(...(await sincronizarDoTurno(deps, turno)));
   // O pedido de colega não fica esperando para sempre: quem pediu recebe a falha (ignora o que não é delegação).
-  const peer = await avisarFalhaDelegacao(deps, { turnoId: turno.id, motivo: `O pedido não foi feito: ${textoDaCausa(causa)}.`, semEsperar: true });
+  const peer = await avisarFalhaDelegacao(deps, { turnoId: turno.id, motivo: `O pedido não foi feito: ${textoCausa}.`, semEsperar: true });
   events.push(...(peer.events ?? []));
   log("info", "turno_orfao_encerrado", { turno_id: turno.id, agente_id: turno.agenteId, trabalho_id: turno.trabalhoId ?? null, origem: turno.origem, causa, idade_s: Math.round((agora - turno.criadoEm) / 1000) });
   return events;

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-expiracao.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
@@ -301,6 +301,139 @@ describeIntegracao("turnos órfãos na fila (NOD-219, revisão do PR #307): pass
       await excluirPorFora(trx, a.agenteId);
       const terceira = await cuidarDosTurnosOrfaos(deps, { observados, limite: 1 });
       expect(terceira.data.encerrados.map((e) => e.turnoId)).toEqual([ta.id]);
+    });
+  });
+});
+
+/** NOD-314: o bot preso a uma chave que não fala há 24 h. A chave vira o alvo do bot (ADR-090) e o contato é envelhecido. */
+async function presoAoMac(trx: Tx, repos: Repos, agenteId: string, agora: number, semContatoHa = 25 * H) {
+  const c = await repos.maquinaTokens.criar({ nome: "MacBook do Marlon", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) });
+  if (!c) throw new Error("chave");
+  await repos.agentes.definirMaquina([agenteId], c.id);
+  await trx`update maquina_tokens set criado_em = ${new Date(agora - 30 * 24 * H)}, ultimo_uso_em = ${new Date(agora - semContatoHa)} where id = ${c.id}`;
+  return c.id;
+}
+const desdeHa = (trx: Tx, turnoId: string, agora: number, ms: number) => trx`update turnos set criado_em = ${new Date(agora - ms)} where id = ${turnoId}`;
+
+describeIntegracao("turno preso a uma máquina sem contato (NOD-314)", () => {
+  it("conversa: 24 h sem contato encerra com maquina_sem_contato, UMA linha com o payload turno_preso; 23h59 fica", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, MARLON, { nome: "Preso" });
+      const b = await agenteComConversa(trx, MARLON, { nome: "Quase" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      const mac = await presoAoMac(trx, repos, a.agenteId, agora, 3 * 24 * H);
+      await presoAoMac(trx, repos, b.agenteId, agora, 23 * H + 59 * 60_000);
+      const preso = await pendente(repos, a.conversaId, a.agenteId, agora);
+      const quase = await pendente(repos, b.conversaId, b.agenteId, agora);
+      await desdeHa(trx, preso.id, agora, 24 * H);
+      await desdeHa(trx, quase.id, agora, 30 * H);
+
+      const r = await cuidarDosTurnosOrfaos(deps);
+      expect(r.data.encerrados).toContainEqual({ turnoId: preso.id, causa: "maquina_alvo_sem_contato" });
+      expect(r.data.encerrados.map((e) => e.turnoId)).not.toContain(quase.id);
+      expect(await repos.turnos.buscar(preso.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato", leaseAte: null });
+      expect(await repos.turnos.buscar(quase.id)).toMatchObject({ estado: "pendente" });
+      const sistema = (await repos.mensagens.listarDaConversa(a.conversaId)).filter((m) => m.kind === "sistema");
+      expect(sistema).toHaveLength(1);
+      expect(sistema[0]?.texto).toBe("Tirei este pedido da fila: MacBook do Marlon ficou sem contato por mais de 24 h. Nada foi feito com ele.");
+      // QA do NOD-314 (achado 2): a IA fixada do turno ("sonnet" → Claude Code) vai junto; o atalho só oferece máquina com conta dela.
+      expect(sistema[0]?.payload).toEqual({ kind: "turno_preso", maquinaId: mac, ia: "claude-cli" });
+      expect(r.events.find((e) => e.kind === "turno_interrompido" && e.turnoId === preso.id)?.dados).toMatchObject({ motivo: "maquina_sem_contato", causa: "maquina_alvo_sem_contato" });
+
+      await cuidarDosTurnosOrfaos(deps);
+      expect((await repos.mensagens.listarDaConversa(a.conversaId)).filter((m) => m.kind === "sistema")).toHaveLength(1);
+    });
+  });
+
+  it("QA do NOD-314 (achado 3): a retomada presa ganha só o texto — o atalho vai só onde a nota refaz (conversa e sala)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, MARLON, { nome: "Retomada" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      await presoAoMac(trx, repos, a.agenteId, agora, 3 * 24 * H);
+      const t = await repos.turnos.enfileirar({ executor: "catcher", conversaId: a.conversaId, agenteId: a.agenteId, origem: "retomada", prazoEm: agora + 24 * H, profundidade: 0, entradaTexto: "continua", entradaConfianca: "confiavel", modelo: "sonnet" });
+      if (!t) throw new Error("turno");
+      await desdeHa(trx, t.id, agora, 25 * H);
+
+      const r = await cuidarDosTurnosOrfaos(deps);
+      expect(r.data.encerrados).toContainEqual({ turnoId: t.id, causa: "maquina_alvo_sem_contato" });
+      const sistema = (await repos.mensagens.listarDaConversa(a.conversaId)).filter((m) => m.kind === "sistema" && m.turnoId === t.id);
+      expect(sistema).toHaveLength(1);
+      expect(sistema[0]?.texto).toContain("ficou sem contato por mais de 24 h");
+      expect(sistema[0]?.payload ?? null).toBeNull();
+    });
+  });
+
+  it("o Mac que fala no meio (marcarUso) segura o turno; o turno novo atrás de um Mac velho espera 24 h desde que entrou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const a = await agenteComConversa(trx, MARLON, { nome: "Voltou" });
+      const b = await agenteComConversa(trx, MARLON, { nome: "Novo" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      const mac = await presoAoMac(trx, repos, a.agenteId, agora);
+      await presoAoMac(trx, repos, b.agenteId, agora, 3 * 24 * H);
+      const ta = await pendente(repos, a.conversaId, a.agenteId, agora);
+      const tb = await pendente(repos, b.conversaId, b.agenteId, agora);
+      await desdeHa(trx, ta.id, agora, 30 * H);
+      await desdeHa(trx, tb.id, agora, 2 * H);
+      await repos.maquinaTokens.marcarUso(mac, agora - 60_000);
+
+      const r = await cuidarDosTurnosOrfaos(deps);
+      expect(r.data.encerrados.map((e) => e.turnoId)).not.toContain(ta.id);
+      expect(r.data.encerrados.map((e) => e.turnoId)).not.toContain(tb.id);
+      expect(await repos.turnos.encerrarPresoSemContato(ta.id, agora)).toBeNull();
+      expect(await repos.turnos.encerrarPresoSemContato(tb.id, agora)).toBeNull();
+      expect(await repos.turnos.encerrarPresoSemContato(tb.id, agora + 22 * H)).toMatchObject({ estado: "interrompido" });
+    });
+  });
+
+  it("rotina presa: a execução fica nao_rodou/maquina_sem_contato, só com a linha da rotina (NOD-309)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const agora = Date.now();
+      const { agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Rotineira" });
+      const { deps, repos } = depsSobre(trx, MARLON, { agora: () => agora });
+      await presoAoMac(trx, repos, agenteId, agora);
+      const rotina = await repos.rotinas.criar({ agenteId, conversaId, cron: "0 8 * * *", fusoIana: "America/Sao_Paulo", instrucao: "resumo", fonte: "Gmail", entregavel: "resumo", limitesAprovacao: "nada sai sem aprovação", politicaSemDado: "silêncio", proximaExecucao: agora });
+      if (!rotina) throw new Error("rotina");
+      const disparo = await dispararRotina(deps, { rotina, instanteAgendado: agora, machineId: randomUUID(), executor: "catcher" });
+      if (!("turno" in disparo.data)) throw new Error("sem turno");
+      const turnoId = disparo.data.turno.id;
+      await desdeHa(trx, turnoId, agora, 25 * H);
+      const antes = (await repos.mensagens.listarDaConversa(conversaId)).length;
+
+      const r = await cuidarDosTurnosOrfaos(deps);
+      expect(r.data.encerrados).toContainEqual({ turnoId, causa: "maquina_alvo_sem_contato" });
+      const execucoes = await repos.rotinaExecucoes.listar(rotina.id);
+      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["nao_rodou", "maquina_sem_contato", turnoId]]);
+      // Com o NOD-309 (#436) toda janela 'nao_rodou' ganha a linha da rotina ("Não rodou · …"); a do turno órfão não sai.
+      const novas = (await repos.mensagens.listarDaConversa(conversaId)).slice(antes);
+      expect(novas.map((m) => m.kind)).toEqual(["rotina_execucao"]);
+      expect(novas[0]?.texto).toMatch(/^Não rodou · o computador do bot ficou sem contato/);
+    });
+  });
+
+  it("pedido de colega preso: UM aviso a quem pediu, mesmo com duas passadas, e o varredor de pedidos parados não retoma", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await adaPedeAoDev(trx);
+      const agora = Date.now();
+      await presoAoMac(trx, m.repos, m.dev.agenteId, agora);
+      await desdeHa(trx, m.tarefaId, agora, 25 * H);
+      const tx: Transacao = (fn) => fn(trx);
+      const opcoes = { services: m.deps.services, useCases: m.deps.useCases, agora: () => agora };
+
+      await varrerPessoa(MARLON, tx, opcoes);
+      expect(await m.repos.turnos.buscar(m.tarefaId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+      const avisos = await m.avisosDaAda();
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]?.payload).toMatchObject({ kind: "peer_ask", tarefaId: m.tarefaId, falhou: true });
+      const pendentesDoDev = async () => (await trx<{ n: number }[]>`select count(*)::int as n from turnos where agente_id = ${m.dev.agenteId} and estado = 'pendente'`)[0]?.n;
+      expect(await pendentesDoDev()).toBe(0);
+
+      await varrerPessoa(MARLON, tx, opcoes);
+      await varrerPessoa(MARLON, tx, { ...opcoes, agora: () => agora + 10 * 60_000 });
+      expect(await m.avisosDaAda()).toHaveLength(1);
+      expect(await pendentesDoDev()).toBe(0);
     });
   });
 });

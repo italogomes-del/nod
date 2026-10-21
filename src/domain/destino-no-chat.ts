@@ -173,6 +173,8 @@ export function assuntoDe(kind: KindMensagem, payload: PayloadMensagem | null, a
         return "cota.pedido_na_fila";
       case "computador_fora_do_ar":
         return "computador.fora_do_ar";
+      case "turno_preso":
+        return "turno.orfao";
       case "artefato":
         return "artefato";
       case "ligacao":

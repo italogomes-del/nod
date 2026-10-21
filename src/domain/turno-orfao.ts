@@ -11,14 +11,25 @@ import { prazoVenceu } from "./relogio.ts";
  *    com a exclusão, ou que voltou de uma restauração, escapa);
  *  - `geracao_antiga`: o agente vive, mas a geração subiu (excluir e restaurar não a reduz).
  *
- * O pendente que só está preso — a faixa ocupada, o `depois_de` ainda aberto, a cota da IA, o Mac fora, sem memória ou
- * sem disco — pode sair a qualquer momento: NÃO se encerra. Passado o prazo da fila (`prazo_em`), vira observação (log e
- * métrica `turno_velho_na_fila`), para medir antes de decidir outra regra.
+ *
+ * NOD-314 (definido em 2026-10-20, decisão da NOD-229): uma terceira causa, `maquina_alvo_sem_contato` — o pendente preso
+ * a uma máquina-alvo (ADR-090: o "desta vez", a do bot ou a padrão, com a chave viva) que ficou sem contato por 24 h
+ * (`PRAZO_PRESO_SEM_CONTATO_MS`). As 24 h contam do mais recente entre a criação, a volta marcada e o último contato da
+ * máquina: o turno que nasce com o Mac já fora há dias ganha 24 h para o "Rodar em outra desta vez", e o Mac que volta
+ * zera a conta. Sem alvo (qualquer máquina; no modo local, o Mac do servidor, ADR-092) nunca encerra. Ele nunca vai sozinho
+ * para outra máquina: o trabalho pode depender das pastas daquele Mac.
+ *
+ * O pendente que só está preso — a faixa ocupada, o `depois_de` ainda aberto, a cota da IA, o Mac fora há menos de 24 h,
+ * sem memória ou sem disco — pode sair a qualquer momento: NÃO se encerra. Passado o prazo da fila (`prazo_em`), vira
+ * observação (log e métrica `turno_velho_na_fila`), para medir antes de decidir outra regra.
  *
  * A ligação nunca entra (tem o próprio ciclo, a pessoa está na linha), nem a volta marcada para mais tarde (ADR-086):
  * ela ainda não pode sair.
  */
-export type CausaOrfao = "agente_excluido" | "geracao_antiga";
+export type CausaOrfao = "agente_excluido" | "geracao_antiga" | "maquina_alvo_sem_contato";
+
+/** NOD-314: quanto o pendente fica preso a uma máquina-alvo sem contato antes de ser encerrado. */
+export const PRAZO_PRESO_SEM_CONTATO_MS = 24 * 3_600_000;
 
 /**
  * O que segura o pendente velho. `condicao_da_maquina` junta o que o servidor não distingue sem a máquina: a cota da
@@ -39,6 +50,13 @@ export interface FatosTurnoOrfao {
   depoisDeAberto: boolean;
   /** Outro turno da mesma faixa (a conversa sem trabalho, ou o mesmo trabalho) está despachando. */
   faixaOcupada: boolean;
+  /**
+   * NOD-314: o último contato da máquina-alvo do turno (`maquina_tokens.ultimo_uso_em`, ou a criação da chave se ela
+   * nunca falou). `null` = o turno não tem alvo (qualquer máquina pega; no modo local, o Mac do servidor).
+   */
+  alvoUltimoContato: number | null;
+  /** O nome da máquina-alvo, para o texto; `null` sem alvo. */
+  alvoNome: string | null;
 }
 
 export type DecisaoTurnoOrfao =
@@ -51,14 +69,33 @@ export function decidirTurnoOrfao(f: FatosTurnoOrfao, agora: number): DecisaoTur
   if (f.acordarEm !== null && f.acordarEm > agora) return { tipo: "manter" };
   if (f.agenteExcluido) return { tipo: "encerrar", causa: "agente_excluido" };
   if (f.geracaoAntiga) return { tipo: "encerrar", causa: "geracao_antiga" };
+  if (presoSemContato(f, agora)) return { tipo: "encerrar", causa: "maquina_alvo_sem_contato" };
   const velho = prazoVenceu({ natureza: "expiracao-fila", iniciaEm: f.criadoEm, prazoMs: Math.max(0, f.prazoEm - f.criadoEm), pausadoMs: 0, agora });
   if (!velho) return { tipo: "manter" };
   return { tipo: "observar", bloqueio: f.depoisDeAberto ? "depois_de" : f.faixaOcupada ? "faixa_ocupada" : "condicao_da_maquina" };
 }
 
-/** A causa em palavras, para a conversa, o pedido a colega e o evento. */
-export function textoDaCausa(causa: CausaOrfao): string {
-  return causa === "agente_excluido" ? "o bot foi excluído" : "o bot foi reiniciado depois que o pedido entrou na fila";
+/**
+ * NOD-314: desde quando o pendente está preso à máquina-alvo — o mais recente entre a criação, a volta marcada e o último
+ * contato. `null` sem alvo.
+ */
+export function presoDesde(f: Pick<FatosTurnoOrfao, "criadoEm" | "acordarEm" | "alvoUltimoContato">): number | null {
+  if (f.alvoUltimoContato === null) return null;
+  return Math.max(f.criadoEm, f.acordarEm ?? 0, f.alvoUltimoContato);
+}
+
+export function presoSemContato(f: Pick<FatosTurnoOrfao, "criadoEm" | "acordarEm" | "alvoUltimoContato">, agora: number): boolean {
+  const desde = presoDesde(f);
+  return desde !== null && agora - desde >= PRAZO_PRESO_SEM_CONTATO_MS;
+}
+
+/** A causa em palavras, para a conversa, o pedido a colega e o evento. `maquina` nomeia o alvo (sem ele, "o computador do bot"). */
+export function textoDaCausa(causa: CausaOrfao, maquina?: string | null): string {
+  switch (causa) {
+    case "agente_excluido": return "o bot foi excluído";
+    case "geracao_antiga": return "o bot foi reiniciado depois que o pedido entrou na fila";
+    case "maquina_alvo_sem_contato": return `${maquina?.trim() || "o computador do bot"} ficou sem contato por mais de 24 h`;
+  }
 }
 
 /**

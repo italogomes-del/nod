@@ -567,9 +567,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; na_fila: boolean; texto_final: string | null; turno_texto: string | null;
       }[]>`
         select h.payload->>'tarefaId' as tarefa_id, c.id as colega_id, c.estado as colega_estado,
-          u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+          u.id as ultimo_id, -- NOD-314: o pendente que o varredor encerrou preso a uma máquina sem contato nunca rodou: não é queda.
+          (case when u.motivo_interrupcao::text = 'maquina_sem_contato' and not (u.attempted or u.despachado_em is not null) then 'preso_sem_contato' else u.motivo_interrupcao::text end) as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = c.tenant_id and q.trabalho_id = c.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (q.motivo_interrupcao::text <> 'maquina_sem_contato' or q.attempted or q.despachado_em is not null)
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           -- NOD-309 (PR 3): a retomada que a queda no fundo já enfileirou segura o varredor (pedido-parado.ts).
@@ -583,7 +584,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         left join turnos tp on tp.tenant_id = h.tenant_id and tp.id = h.turno_id
         left join trabalhos rp on rp.tenant_id = h.tenant_id and rp.id = tp.trabalho_id
         left join lateral (
-          select t.id, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em, t.attempted, t.despachado_em from turnos t
           where t.tenant_id = c.tenant_id and t.trabalho_id = c.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -610,7 +611,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
           -- NOD-279 (C22, definido em 2026-10-15): fora da queda, a âncora é o maior entre o pedido e o fim da espera da
           -- cota — as 24 h não vencem enquanto o pedido espera a IA renovar. Sem espera da cota, greatest = o pedido.
           and h.criado_em >= ${data(agora - IDADE_MAX_PEDIDO_RETOMAVEL_MS)}
-          and (greatest(h.criado_em, ec.fim) >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
+          and (greatest(h.criado_em, ec.fim) >= ${data(desde)} or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (u.motivo_interrupcao::text <> 'maquina_sem_contato' or u.attempted or u.despachado_em is not null) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and c.estado in ('terminado', 'parado', 'falhou', 'precisa_de_voce')
           and coalesce(rp.estado, '') <> 'parado'
           and exists (select 1 from agentes a where a.tenant_id = h.tenant_id and a.id::text = h.payload->>'de' and a.excluido_em is null)

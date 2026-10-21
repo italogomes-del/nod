@@ -73,6 +73,6 @@ describe("NOD-274: a janela que não rodou aparece no histórico da rotina", () 
     // NOD-309: toda queda do fundo que passa da próxima janela diz o motivo e, quando tem, a hora da volta.
     expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "reinicio_servidor", voltaEm: volta }, "America/Sao_Paulo")).toBe("não rodou · o servidor reiniciou, volta 14:00");
     expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "erro_do_provedor", voltaEm: volta }, "America/Sao_Paulo")).toBe("não rodou · o serviço da IA ficou instável, volta 14:00");
-    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "maquina_sem_contato", voltaEm: null })).toBe("não rodou · seu Mac parou de responder");
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "maquina_sem_contato", voltaEm: null })).toBe("não rodou · a máquina ficou sem contato");
   });
 });

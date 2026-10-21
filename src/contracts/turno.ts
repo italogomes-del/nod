@@ -71,6 +71,8 @@ export type Turno = {
   criadoEm: EpochMs;
   /** NOD-276 (J3): quando a máquina o pegou (`reivindicar`); null/ausente = ainda na fila, ou turno de antes da 0083. */
   despachadoEm?: EpochMs | null;
+  /** QA do NOD-314: a máquina escolhida "desta vez" (ADR-090); ausente = a do bot. */
+  maquinaDestaVez?: string | null;
   /** Fala da pessoa que disparou o turno (0024). Não é `mensagens.turno_id`, que é a fala que o turno produziu. */
   mensagemOrigemId?: string | null;
   /** Turno que respondeu por este, quando ele foi lido junto com outro (motivo 'absorvido'). */

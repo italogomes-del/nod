@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarRepos } from "../../src/repositories/index.ts";
@@ -15,7 +15,7 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  * por id, como os outros testes de concorrência.
  */
 const PESSOA = { tenantId: TENANT_PADRAO, pessoaId: randomUUID() };
-const criados = { agentes: [] as string[], conversas: [] as string[], turnos: [] as string[] };
+const criados = { agentes: [] as string[], conversas: [] as string[], turnos: [] as string[], chaves: [] as string[] };
 
 async function escopado<T>(fn: (trx: Tx) => Promise<T>): Promise<T> {
   const caixa: { valor?: T } = {};
@@ -75,8 +75,9 @@ afterEach(async () => {
     await trx`delete from turnos where id in ${trx(criados.turnos)}`;
     await trx`delete from conversas where id in ${trx(criados.conversas)}`;
     await trx`delete from agentes where id in ${trx(criados.agentes)}`;
+    if (criados.chaves.length) await trx`delete from maquina_tokens where id in ${trx(criados.chaves)}`;
   });
-  criados.agentes.length = criados.conversas.length = criados.turnos.length = 0;
+  criados.agentes.length = criados.conversas.length = criados.turnos.length = criados.chaves.length = 0;
 });
 
 describeIntegracao("concorrência: varredor de órfãos × reivindicar sobre o mesmo pendente (NOD-219)", () => {
@@ -110,6 +111,49 @@ describeIntegracao("concorrência: varredor de órfãos × reivindicar sobre o m
     expect((await varredor.feito)?.estado).toBe("interrompido");
     const maquina = await escopado(async (trx) => criarRepos(trx, PESSOA).turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }));
     expect(maquina).toBeNull();
+    varredor.liberar();
+    await varredor.commit;
+    expect(await estadoDo(turnoId)).toBe("interrompido");
+  });
+});
+
+/** NOD-314: o bot preso a um Mac que não fala há 25 h, e o pendente na fila há 25 h. Devolve a chave (o alvo). */
+async function presoAoMac(agenteId: string, turnoId: string): Promise<string> {
+  const H = 3_600_000;
+  const agora = Date.now();
+  const id = await escopado(async (trx) => {
+    const repos = criarRepos(trx, PESSOA);
+    const c = await repos.maquinaTokens.criar({ nome: "Mac", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) });
+    if (!c) throw new Error("chave");
+    await repos.agentes.definirMaquina([agenteId], c.id);
+    await trx`update maquina_tokens set criado_em = ${new Date(agora - 40 * H)}, ultimo_uso_em = ${new Date(agora - 25 * H)} where id = ${c.id}`;
+    await trx`update turnos set criado_em = ${new Date(agora - 25 * H)} where id = ${turnoId}`;
+    return c.id;
+  });
+  criados.chaves.push(id);
+  return id;
+}
+
+describeIntegracao("concorrência: turno preso a um Mac sem contato × o Mac que volta (NOD-314)", () => {
+  it("o Mac reivindica primeiro (sem commit): o encerrarPresoSemContato espera a linha e, depois do commit, não toca no turno", async () => {
+    const { agenteId, turnoId } = await umPendente();
+    const mac = await presoAoMac(agenteId, turnoId);
+    const maquina = seguraAberta((trx) => criarRepos(trx, PESSOA).turnos.reivindicar({ machineId: mac, agora: Date.now() }));
+    expect((await maquina.feito)?.id).toBe(turnoId);
+    const varredor = escopado(async (trx) => criarRepos(trx, PESSOA).turnos.encerrarPresoSemContato(turnoId, Date.now()));
+    expect(await aindaEsperando(varredor), "o UPDATE do varredor devia esperar a linha travada").toBe(true);
+    maquina.liberar();
+    await maquina.commit;
+    expect(await varredor).toBeNull();
+    expect(await estadoDo(turnoId)).toBe("despachando");
+  });
+
+  it("o varredor encerra primeiro (sem commit): o Mac pula a linha e o turno fica interrompido com maquina_sem_contato", async () => {
+    const { agenteId, turnoId } = await umPendente();
+    const mac = await presoAoMac(agenteId, turnoId);
+    const varredor = seguraAberta((trx) => criarRepos(trx, PESSOA).turnos.encerrarPresoSemContato(turnoId, Date.now()));
+    expect(await varredor.feito).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+    expect(await escopado(async (trx) => criarRepos(trx, PESSOA).turnos.reivindicar({ machineId: mac, agora: Date.now() }))).toBeNull();
     varredor.liberar();
     await varredor.commit;
     expect(await estadoDo(turnoId)).toBe("interrompido");

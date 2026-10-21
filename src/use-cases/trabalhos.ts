@@ -15,6 +15,7 @@ import { pedidoEmUmaLinha } from "../domain/delegacao.ts";
 import { iasNoLimite } from "../domain/inteligencia.ts";
 import { lerCotaDosBots } from "./cota-dos-bots.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
+import { harnessFixado } from "../domain/harness.ts";
 import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
@@ -313,15 +314,27 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     });
     return { data: { trabalhos: dtos, ...topo, donos } };
   }
-  // NOD-260 (G8): o último uso da chave de cada máquina, para "sem contato desde HH:MM" (a regra do chip da conversa).
-  // Achado do QA no #427: o nome da chave, para a máquina que a ponte já esqueceu (90 s sem contato).
-  const chaves = servico.conectada ? await deps.repos.maquinaTokens.listar() : [];
-  const ultimoUso = new Map<string, number | null>(chaves.map((c) => [c.id, c.ultimoUsoEm]));
-  const nomes = new Map(chaves.map((c) => [c.id, c.nome]));
-  const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso, nomes);
+  const { maquinas, ondeRoda, ultimoUso, nomes } = await maquinaDosTrabalhos(deps, servico, usoDoMac);
   // NOD-300: a frente presa a máquina sem contato espera no dono, pela mesma regra (e o mesmo último uso) da linha dela.
   const donos = [...(await donosDosBots(deps, bots, trabalhos, servico.conectada ? resolverDePresenca(servico, deps.escopo, ultimoUso, nomes) : undefined)).values()];
-  const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
+  const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => ({ ...ondeRoda(t, e), ...cotaDoTrabalho(t, e) }));
+  return { data: { trabalhos: dtos, ...topo, maquinas, donos } };
+};
+
+/**
+ * Onde cada trabalho aberto roda ou vai rodar (`maquina`) e a espera do portão daquela máquina (`esperaDoMac`). A lista e
+ * o detalhe da task usam a mesma regra (QA do NOD-314: o detalhe vinha sem `maquina` e o topo da task perdia a espera).
+ */
+async function maquinaDosTrabalhos(deps: Pick<Deps, "escopo" | "repos" | "agora">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0]) {
+  // NOD-260 (G8): o último uso da chave de cada máquina, para "sem contato desde HH:MM" (a regra do chip da conversa).
+  // QA do NOD-314 / achado do QA no #427: e o nome que a pessoa deu à chave, para a máquina sem contato (que a ponte já
+  // esqueceu) não virar "máquina f448f227".
+  const chaves = await deps.repos.maquinaTokens.listar();
+  const ultimoUso = servico.conectada ? new Map(chaves.map((c) => [c.id, c.ultimoUsoEm])) : new Map<string, number | null>();
+  const nomes = new Map(chaves.map((c) => [c.id, c.nome]));
+  const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso, nomes);
+  const agora = deps.agora();
+  const ondeRoda = (t: TrabalhoDto, e: ExtrasTrabalho | undefined): Partial<TrabalhoDto> => {
     if (!trabalhoAberto(t.estado)) return {};
     // Onde roda (o turno vivo) ou vai rodar (o alvo do turno na fila, a regra do reivindicar); sem alvo, no modo local,
     // o Mac do servidor (ADR-092); no compartilhado, qualquer uma (null).
@@ -330,10 +343,12 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     const maquina = espera?.maquinaId ?? id;
     // G12: a espera pela máquina sem contato não é do portão (memória, disco, processador): a linha a diz pela máquina.
     const motivo = espera && espera.motivo !== "sem_contato" ? espera.motivo : null;
-    return { esperaDoMac: motivo, maquina: maquina === null ? null : nomear(maquina), ...cotaDoTrabalho(t, e) };
-  });
-  return { data: { trabalhos: dtos, ...topo, maquinas, donos } };
-};
+    // QA do NOD-314: a IA fixada do turno na fila, para o "desta vez" do topo seguir a regra da conversa.
+    const iaFixada = e?.pendente ? harnessFixado(e.pendente.harness, e.pendente.modelo) : null;
+    return { esperaDoMac: motivo, maquina: maquina === null ? null : nomear(maquina), iaFixada };
+  };
+  return { maquinas, ondeRoda, ultimoUso, nomes };
+}
 
 /**
  * A tela fala por máquina (2026-10-09): cada máquina viva da pessoa com o nome, o portão (pelo "uso do Mac", que vale
@@ -374,7 +389,11 @@ function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquina
 export const detalharTrabalho: CasoDeUso<{ trabalhoId: string }, TrabalhoDetalheDto> = async (deps, input) => {
   const t = await deps.repos.trabalhos.buscar(input.trabalhoId);
   if (!t) throw new ErroDeDominio("nao_encontrado");
-  const [dto] = await trabalhosParaDto(deps, [t]);
+  // QA do NOD-314: o detalhe leva a máquina como a lista (a tela da task prefere o detalhe).
+  const servico = deps.services.maquinas;
+  const usoDoMac = servico ? (deps.services.trabalhosVivos?.memoria(deps.escopo.pessoaId) ? (await deps.repos.preferencias.buscar()).usoDoMac ?? USO_DO_MAC_PADRAO : "livre") : "livre";
+  const onde = servico ? (await maquinaDosTrabalhos(deps, servico, usoDoMac)).ondeRoda : undefined;
+  const [dto] = await trabalhosParaDto(deps, [t], onde);
   const mensagens: Mensagem[] = await deps.repos.mensagens.doTrabalho(t.id);
   return { data: { trabalho: dto!, mensagens } };
 };

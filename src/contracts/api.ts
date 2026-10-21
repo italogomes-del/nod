@@ -52,7 +52,7 @@ export type TurnoPendenteDto = { id: string; motivo: "agente_ocupado_em"; conver
  * Turno aberto da conversa (definido em 2026-09-24): a web recria o "trabalhando" ao recarregar a página no meio de um
  * turno. Sem isto ela só conhecia o turno pelo frame turno.iniciado, que não se repete, e o cartão sumia até o fim.
  */
-export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null };
+export type TurnoEmCursoDto = { id: string; estado: "pendente" | "despachando"; desde: number; mensagemId: string | null; trabalhoId?: string | null; /** NOD-216: só a origem da fila do dono é desmentida por ela. */ origem?: string; /** NOD-276 (J3): quando a máquina o pegou; "Trabalhando · há N" conta daqui. */ despachadoEm?: number | null; /** QA do NOD-314: a máquina escolhida "desta vez" (sobrepõe a do bot no chip da fila). */ maquinaDestaVez?: string | null };
 
 export type ConversaDto = DonoNaConversa & TrocasNaConversa & {
   conversa: Conversa;

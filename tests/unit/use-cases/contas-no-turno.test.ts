@@ -4,6 +4,7 @@ import type { ContaAnunciada } from "../../../src/contracts/contas-ia.ts";
 import type { IdHarness } from "../../../src/contracts/harness.ts";
 import type { ResultadoTurno } from "../../../src/contracts/turno.ts";
 import { assentarTurno } from "../../../src/use-cases/assentar-turno.ts";
+import { destinoDe } from "../../../src/domain/destino-no-chat.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../../../src/domain/cota-da-ia.ts";
 import { anunciarContasDaMaquina, rodarDestaVezComConta, seguirComConta, tentarDeNovoComConta } from "../../../src/use-cases/contas-ia.ts";
 import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
@@ -596,10 +597,37 @@ describe("NOD-284/NOD-280: os passos da nota refazem a fala certa ou dizem por q
     const sem = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
     expect(sem.data).toEqual({ turnoId: null, motivo: "maquina_sem_contato" });
     c.banco.maquinaTokens.find((m) => m.id === c.vm)!.ultimoUsoEm = T0;
+    const criar = vi.spyOn(c.deps.repos.mensagens, "criar");
     const r = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
     expect(r.data.motivo).toBeNull();
     expect(c.banco.maquinaDestaVez.get(r.data.turnoId!)).toBe(c.vm);
-    expect(c.banco.mensagens.at(-1)?.texto).toBe("Rodando no vm-bots desta vez.");
+    expect(c.banco.mensagens.at(-1)?.texto).toBe("Rodando em vm-bots desta vez.");
+    // A nota de limite segue na Atividade (o atalho dela não depende desta linha).
+    expect(criar.mock.calls.at(-1)?.[0].assunto).toBe("conta.nota");
+  });
+
+  it("NOD-314: o turno preso 24 h a um Mac sem contato é refeito uma vez noutra máquina; a queda que rodou não", async () => {
+    const c = await cenario();
+    await c.deps.repos.turnos.assentar(c.turnoId, { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+    c.banco.maquinaTokens.find((m) => m.id === c.vm)!.ultimoUsoEm = T0;
+    const criar = vi.spyOn(c.deps.repos.mensagens, "criar");
+    const r = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
+    expect(r.data.motivo).toBeNull();
+    // QA do NOD-314 (achado 1): a linha do refazer vai para o CHAT (vem em GET /conversas/:id/mensagens), do mesmo turno —
+    // é ela que tira o atalho da linha do preso, também depois de recarregar.
+    const linha = criar.mock.calls.at(-1)?.[0];
+    expect(linha).toMatchObject({ turnoId: c.turnoId, kind: "sistema", texto: "Rodando em vm-bots desta vez." });
+    expect(destinoDe(linha?.assunto ?? null)).toBe("chat");
+    expect(c.banco.maquinaDestaVez.get(r.data.turnoId!)).toBe(c.vm);
+    const de2 = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: c.turnoId, maquinaId: c.vm });
+    expect(de2.data).toEqual({ turnoId: null, motivo: "ja_refeito" });
+
+    // A queda de um turno que rodou (despachado, attempted) volta pelo pedido parado, não por este botão.
+    const caiu = c.banco.turnos.find((t) => t.id === r.data.turnoId)!;
+    await c.deps.repos.turnos.assentar(caiu.id, { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
+    caiu.sinais = { ...caiu.sinais, attempted: true };
+    const queda = await executar(c.deps, rodarDestaVezComConta, { conversaId: c.conversaId, turnoId: caiu.id, maquinaId: c.vm });
+    expect(queda.data).toEqual({ turnoId: null, motivo: "turno_nao_interrompido" });
   });
 
   it("'Tentar de novo' com o turno limpa o limite da conta e refaz a fala", async () => {

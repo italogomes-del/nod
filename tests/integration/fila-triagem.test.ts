@@ -266,7 +266,7 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
-      await trx`update turnos set estado = 'despachando', lease_ate = now() - interval '1 minute' where id = ${triagem}`;
+      await trx`update turnos set estado = 'despachando', attempted = true, lease_ate = now() - interval '1 minute' where id = ${triagem}`;
       await m.repos.turnos.interromper(triagem, "maquina_sem_contato");
       // Sem sinal de volta das máquinas ainda: espera.
       expect((await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now()))[0]).toMatchObject({ tarefaId: triagem, trabalhoColegaId: null, estadoColega: "falhou", quedas: 1, sinalDepoisDaQueda: false });

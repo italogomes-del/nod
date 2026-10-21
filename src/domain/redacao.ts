@@ -11,6 +11,7 @@ export type ChaveRedacao =
   | "sem-acessos-nunca-executou"
   | "turno-interrompido"
   | "turno-orfao-encerrado"
+  | "turno-preso-sem-contato"
   | "parada-nada-rodando"
   | "memoria-nao-e-fonte"
   | "proposta-confirmada"
@@ -74,6 +75,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "sem-acessos-nunca-executou": "sem acessos · nunca executou",
   "turno-interrompido": "Turno interrompido: {motivo}. O que já saiu fica marcado como parcial; nada foi reenviado.",
   // definido em 2026-10-13 (NOD-219): o pendente que nenhuma máquina podia pegar sai da fila com a causa em palavras.
+  // NOD-314: o pendente preso 24 h a uma máquina sem contato. A linha leva o atalho "Rodar em <outra> desta vez" (payload turno_preso).
+  "turno-preso-sem-contato": "Tirei este pedido da fila: {maquina} ficou sem contato por mais de 24 h. Nada foi feito com ele.",
   "turno-orfao-encerrado": "Tirei este pedido da fila: {causa}, e ele não ia mais sair. Nada foi feito com ele; se ainda precisar, peça de novo.",
   "parada-nada-rodando": "Nada estava rodando. Nenhum turno foi interrompido.",
   "permissao-permanente": "{pessoa} permitiu para sempre: {ferramentas}. Vale já, para qualquer destino destas ferramentas, enquanto o bot não tiver lido conteúdo de fora na tarefa.",
@@ -128,7 +131,8 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // NOD-268: "Seguir com" numa conta que não está logada na máquina que pega o turno — refazer só daria outra nota.
   "conta-fora-da-maquina": "A conta {conta} não está {maquina}. Entre com ela lá ou escolha outra conta.",
   // NOD-280/NOD-284 (definido em 2026-10-15): os passos da nota de limite dizem o que fizeram — ou por que não refizeram.
-  "rodando-desta-vez": "Rodando no {maquina} desta vez.",
+  // QA do NOD-314: "em", sem artigo — o nome da máquina é livre ("VM nod", "Mac do Marlon").
+  "rodando-desta-vez": "Rodando em {maquina} desta vez.",
   "tentando-de-novo": "Tentando de novo com {conta}.",
   "nota-ja-refeita": "Essa fala já foi refeita; nada foi repetido.",
   "nota-turno-nao-interrompido": "Essa fala não está parada no limite; nada foi repetido.",

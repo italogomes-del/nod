@@ -85,4 +85,13 @@ describe("fila da conversa com a máquina do bot fora do ar (ADR-090, protótipo
     const e = com("vm", [maquina("vm", "vm-sp", true)]);
     expect(situacaoNaFila(mensagem("m2"), e)).toEqual({ tipo: "na_fila", turnoId: "t2", texto: "Na fila · Ze 1 lê quando terminar o turno atual" });
   });
+
+  it("QA do NOD-314 (achado 7): o turno mandado 'desta vez' para outra máquina espera ESSA máquina, não a do bot", () => {
+    const e = comConversa({ turnosEmCurso: [{ ...emCurso("t2", "m2"), maquinaDestaVez: "mac" }] });
+    const fora = { ...e, frota: { agentes: [{ id: "a", nome: "Ze 1", conversaId: C, maquinaId: "vm" }] } as never, maquinas: { maquinas: [maquina("vm", "vm-sp", true), maquina("mac", "MacBook", false)], padraoId: null } };
+    expect(situacaoNaFila(mensagem("m2"), fora)).toMatchObject({ texto: expect.stringMatching(/^Na fila · MacBook não responde/) });
+    // A do bot fora do ar, mas a desta vez conectada: a fila de sempre (não acusa a do bot).
+    const viva = { ...fora, maquinas: { maquinas: [maquina("vm", "vm-sp", false), maquina("mac", "MacBook", true)], padraoId: null } };
+    expect(situacaoNaFila(mensagem("m2"), viva)).toEqual({ tipo: "na_fila", turnoId: "t2", texto: "Na fila · Ze 1 lê quando terminar o turno atual" });
+  });
 });

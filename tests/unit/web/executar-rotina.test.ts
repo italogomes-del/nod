@@ -69,6 +69,7 @@ describe("rotina adiada na lista (NOD-243)", () => {
     expect(rotuloExecucao({ desfecho: "adiada", motivo: "frente_aberta" })).toBe("adiada · uma frente desta rotina ainda estava aberta");
     expect(rotuloExecucao({ desfecho: "adiada", motivo: "execucao_anterior_aberta" })).toBe("adiada · a execução anterior ainda não tinha terminado");
     expect(rotuloExecucao({ desfecho: "interrompida", motivo: "frente_parada" })).toBe("interrompida · a frente ficou parada por mais de 24 h");
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "maquina_sem_contato" })).toBe("não rodou · a máquina ficou sem contato");
     expect(rotuloExecucao({ desfecho: "interrompida", motivo: "vencida" })).toBe("interrompida · ficou na fila e a janela seguinte a encerrou");
     expect(rotuloExecucao({ desfecho: "interrompida", motivo: "rotina_pausada" })).toBe("interrompida · a rotina foi pausada");
   });

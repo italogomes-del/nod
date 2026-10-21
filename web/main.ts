@@ -597,6 +597,11 @@ function avisarMotivoDaNota(motivo: Parameters<typeof fraseDoMotivoDaNota>[0]): 
   if (mensagem !== null) dispatch({ tipo: "erro", erro: { codigo: `nota_${motivo}`, mensagem } });
 }
 
+/** QA do NOD-314: o motivo do "Rodar em <outra> desta vez" da task (200 sem mover nada). */
+function avisarMotivoDaTask(motivo: string | null | undefined): void {
+  if (motivo === "ja_refeito") dispatch({ tipo: "erro", erro: { codigo: "task_ja_refeito", mensagem: "Esta task já foi mandada para essa máquina; nada foi repetido." } });
+}
+
 function mostrarErro(e: unknown): void {
   const erro = erroDe(e);
   if (erro === null) return;
@@ -914,8 +919,8 @@ function relevante(q: Invalidacao): boolean {
   if (q === "rotinas") return t.tipo === "rotinas" || t.tipo === "conversa";
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
-  if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa";
-  if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
+  if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho";
+  if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
@@ -3596,9 +3601,20 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   "rodar-desta-vez": (el) => agir(async () => {
     const conversaId = el.dataset.conversa ?? "";
-    const r = await api!.rodarDestaVez(conversaId, el.dataset.maquina ?? "", el.dataset.turno || undefined, el.dataset.conta || undefined);
+    const turnoId = el.dataset.turno || undefined;
+    const r = await api!.rodarDestaVez(conversaId, el.dataset.maquina ?? "", turnoId, el.dataset.conta || undefined);
+    // QA do NOD-314: "já refeito" diz que o 1º clique já fez, e o atalho daquele turno some na hora (não só na releitura).
+    if (r?.motivo === "ja_refeito" && turnoId) dispatch({ tipo: "turno-refeito", turnoId });
     avisarMotivoDaNota(r?.motivo);
     dispatch({ tipo: "invalidar", quais: [`conversa:${conversaId}` as Invalidacao] });
+  }),
+  // NOD-314: a task na fila de uma máquina sem contato roda em outra, desta vez; relê a task e a lista.
+  "rodar-trabalho-desta-vez": (el) => agir(async () => {
+    const trabalhoId = el.dataset.id ?? "";
+    const r = await api!.rodarTrabalhoDestaVez(trabalhoId, el.dataset.maquina ?? "");
+    // QA do NOD-314: o 2º clique (os pendentes já iam para ela) diz que já foi, em vez de nada.
+    avisarMotivoDaTask(r?.motivo);
+    dispatch({ tipo: "invalidar", quais: ["trabalhos", `trabalho:${trabalhoId}` as Invalidacao] });
   }),
   reabrir: (el) => agir(async () => void (await api!.reabrir(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["sua-vez"] }))),
   // revisto em 2026-10-18 (plano "pergunta com botões"): o × do cartão relê também a conversa (o fio diz "Deixada pra lá").

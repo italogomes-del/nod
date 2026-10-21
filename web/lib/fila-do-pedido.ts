@@ -10,6 +10,7 @@ export const TEXTO_DO_MOTIVO_DA_FILA: Record<NonNullable<FilaDoPedido["motivo"]>
   condicao_da_maquina: "espera o computador do bot (cota da IA, Mac fora ou sem recursos)",
   agente_excluido: "o bot foi excluído",
   geracao_antiga: "o bot foi reiniciado depois que o pedido entrou na fila",
+  maquina_alvo_sem_contato: "o computador do bot ficou sem contato por mais de 24 h",
 };
 
 export function linhaDaFila(fila: FilaDoPedido): string {

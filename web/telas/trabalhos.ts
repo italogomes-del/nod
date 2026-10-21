@@ -6,8 +6,9 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { duracaoCurta } from "../lib/relogio.ts";
 import { textoFormatado } from "../lib/texto-formatado.ts";
-import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
+import { aberto, abertosDoBot, acoesDeFazer, agrupar, dicaSemContato, emEspera, esperaDaContaDe, esperandoColega, esperandoMaquina, etiquetaOrigem, quandoVolta, textoDaEsperaDaConta, voltaMarcada, filtrar, leituraDoMac, maquinasDe, memoriaDosBots, memoriaLegivel, pilulaDaCota, pilulaDasMaquinas, pilulaMac, pilulaMemoria, pontoTrabalho, resumoDaPilula, seguradoPeloMac, situacaoDe, tempoDe, temposDaTask, tituloCurto, trabalhoPorId, trabalhosConhecidos, type GruposTrabalhos } from "../lib/trabalhos.ts";
 import { renderMensagem, type BlocoDaTimeline } from "./conversa.ts";
+import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { horariosDaRotina } from "./linhas-do-chat.ts";
 import { custoDaFrente, PARCIAL, tokensLegiveis, usd } from "./modo-dev.ts";
 
@@ -291,7 +292,21 @@ export function renderTopoTrabalho(estado: Estado, id: string): string {
   const chip = `<span class="tk-chip">${pontoTrabalho(t, bot?.cor)}${quemPediu}${bot ? iconeAgente(bot, "sm", t.estado === "rodando" && !fora ? "trabalhando" : "disponivel") : ""}<span class="tk-titulo">${esc(t.titulo)}</span>${botaoStatus}</span>`;
   const linha = [`task do ${nome}, ${pedidaPor(t, estado)}`, `com os acessos do ${nome}`, t.pasta ? `pasta ${t.pasta}` : "", custoDaFrente(t) !== null ? `${custoDaFrente(t)} até agora` : ""].filter(Boolean).join(" · ");
   const espera = t.esperandoComputadorDe ? `<p class="tk-espera" role="status">esperando o computador do ${esc(nome)} (em uso por: ${esc(t.esperandoComputadorDe)})</p>` : "";
-  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaConta(t, estado.agora)}${acoesDeFazer(t, estado, t.conversaId)}</div>`;
+  return `<div class="tk-topo">${chip}${abertoCartao ? cartaoDoTempo(t, estado.agora) : ""}<p class="tk-linha">${esc(linha)}</p>${espera}${linhaDaEsperaDaMaquina(t, estado)}${linhaDaEsperaDaConta(t, estado.agora)}${acoesDeFazer(t, estado, t.conversaId)}</div>`;
+}
+
+/**
+ * NOD-314 (definido em 2026-10-20): a task NA FILA esperando uma máquina sem contato ganha, no topo, "Rodar em <outra>
+ * desta vez" — a primeira outra máquina conectada com uma IA pronta (a regra do chip da fila na conversa). Leva só os
+ * turnos pendentes da task, uma vez; a máquina do bot não muda. Sem outra viva, nada (o status já diz a espera). Só no
+ * topo: a linha da lista não ganha botão.
+ */
+export function linhaDaEsperaDaMaquina(t: TrabalhoDto, estado: Pick<Estado, "maquinas" | "contasIa" | "agora">): string {
+  if (t.estado !== "na_fila" || !esperandoMaquina(t)) return "";
+  // QA do NOD-314: a mesma regra da linha do turno preso (conectada, IA pronta e conta pronta nela — da IA fixada do turno).
+  const outra = outraMaquinaDestaVez(estado, t.maquina?.id, t.iaFixada);
+  if (!outra) return "";
+  return `<p class="tk-espera" role="group" aria-label="${esc(`${t.maquina?.nome ?? "A máquina do bot"} está sem contato`)}"><button type="button" class="linha-link forte" data-act="rodar-trabalho-desta-vez" data-id="${esc(t.id)}" data-maquina="${esc(outra.id)}">Rodar em ${esc(outra.nome)} desta vez</button></p>`;
 }
 
 /**

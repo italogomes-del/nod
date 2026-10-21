@@ -335,6 +335,9 @@ export function criarApi(escopo: Escopo) {
     maquinaPadrao: (maquinaId: string | null) => pedir<{ padraoId: string | null }>("PUT", `${base}/maquinas/padrao`, { maquinaId }),
     verDispositivo: (codigo: string) => get<{ nome: string; plataforma: string; pedidoHaS: number }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}`),
     aprovarDispositivo: (codigo: string) => post<{ ok: true }>(`maquinas/dispositivos/${encodeURIComponent(codigo)}/aprovar`),
+    // NOD-314: a task que espera uma máquina sem contato roda os turnos pendentes dela em outra, uma vez.
+    rodarTrabalhoDestaVez: (trabalhoId: string, maquinaId: string) =>
+      post<{ turnos: number; motivo?: "ja_refeito" | null }>(`trabalhos/${encodeURIComponent(trabalhoId)}/rodar-desta-vez`, { maquinaId }),
     rodarDestaVez: (conversaId: string, maquinaId: string, turnoId?: string, contaId?: string) =>
       post<{ turnos: number; turnoId?: string | null; motivo?: MotivoDaNota | null }>(`conversas/${encodeURIComponent(conversaId)}/rodar-desta-vez`, { maquinaId, ...(turnoId ? { turnoId } : {}), ...(contaId ? { contaId } : {}) }),
     // ADR-102: as contas de IA da pessoa em todas as máquinas, o login numa máquina pela tela e o convite da VM.

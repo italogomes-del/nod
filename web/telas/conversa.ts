@@ -11,6 +11,7 @@ import { assinatura } from "../lib/assinatura.ts";
 import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { maquinaDoBot } from "./maquinas.ts";
+import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
@@ -197,7 +198,7 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "artefato") return renderCardArtefato(m, p, versaoMaisRecente(estado, m.conversaId, p.artefatoId, p.versao));
   // definido em 2026-10-04 (ADR-075): a linha "Chat de voz · mm:ss"; a ligação aberta nesta página oferece voltar a ela.
   if (p?.kind === "ligacao") return renderLinhaLigacao(m, p, estado.ligacaoViva?.local === true && estado.ligacaoViva.ligacaoId === p.ligacaoId);
-  if (m.kind === "sistema") return linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
+  if (m.kind === "sistema") return linhaDeIa(m, estado) ?? linhaDaMemoria(m, estado) ?? linhaDoTurnoPreso(m, estado) ?? `<div class="msg-sistema">${paragrafos(m.texto)}</div>`;
   if (p?.kind === "handoff") {
     // definido em 2026-09-24 (ADR-047): a tarefa delegada assina "Taga · por você" — autoria composta (ADR-023).
     const de = m.autoria.sob_procuracao_de ? assinatura(m.autoria, nomesDe(estado)) : agenteDe(estado, p.de)?.nome ?? "agente";
@@ -227,6 +228,32 @@ function corpoMensagem(m: Mensagem, estado: Estado): string {
   if (p?.kind === "peer_ask") return `<div class="msg-peer"><div class="handoff-titulo">↙ <b>${p.falhou ? "Não concluído por" : "Resposta de"} ${esc(p.nome)}</b></div><div>${textoFormatado(m.texto, { chave: m.id })}</div><small class="mudo">Contribuição de outro bot · confira as fontes</small></div>`;
   const naoConfiavel = m.confianca === "nao_confiavel" ? ' <span class="tag tag-ambar" title="conteúdo de conector ou de outro bot">não confiável</span>' : "";
   return `<div class="msg-texto">${paragrafos(m.texto)}${naoConfiavel}${m.parcial ? ' <span class="tag tag-cinza">parcial</span>' : ""}</div>`;
+}
+
+/**
+ * NOD-314 (definido em 2026-10-20): o pedido tirado da fila porque a máquina do bot ficou 24 h sem contato. Com outra
+ * máquina conectada e com IA pronta, um único "Rodar em <outra> desta vez" refaz aquele turno lá, uma vez (o mesmo
+ * `rodar-desta-vez` da nota, com o turno da linha); sem outra viva, só o texto.
+ */
+export function linhaDoTurnoPreso(m: Mensagem, estado: Pick<Estado, "maquinas" | "contasIa" | "agora" | "conversas" | "trabalhoDetalhe"> & Partial<Pick<Estado, "turnosRefeitos">>): string | null {
+  const p = m.payload;
+  if (p?.kind !== "turno_preso") return null;
+  // QA do NOD-314: só a máquina em que o servidor aceita refazer (com conta pronta) e só até refazer — o refazer deixa uma
+  // linha de sistema do MESMO turno depois desta ("Rodando em <máquina> desta vez"); com ela, o atalho some.
+  // QA do NOD-314 (achado 2): com o turno fixado numa IA, só a máquina com conta DELA (o servidor recusa as outras).
+  const outra = outraMaquinaDestaVez(estado, p.maquinaId, p.ia);
+  const botao = outra && m.turnoId && !turnoPresoJaRefeito(m, estado)
+    ? ` <button type="button" class="linha-link" data-act="rodar-desta-vez" data-conversa="${esc(m.conversaId)}" data-maquina="${esc(outra.id)}" data-turno="${esc(m.turnoId)}">Rodar em ${esc(outra.nome)} desta vez</button>`
+    : "";
+  return `<div class="msg-sistema">${paragrafos(m.texto)}${botao}</div>`;
+}
+
+/** QA do NOD-314: o turno da linha já foi refeito? Há outra linha de sistema do mesmo turno, depois desta. */
+function turnoPresoJaRefeito(m: Mensagem, estado: Pick<Estado, "conversas" | "trabalhoDetalhe"> & Partial<Pick<Estado, "turnosRefeitos">>): boolean {
+  // O servidor já disse "ja_refeito" a um clique nesta sessão (a linha do refazer pode ser antiga, da Atividade): some.
+  if (m.turnoId && estado.turnosRefeitos?.includes(m.turnoId)) return true;
+  const vistas = [...(estado.conversas[m.conversaId]?.mensagens ?? []), ...Object.values(estado.trabalhoDetalhe).flatMap((d) => d.mensagens)];
+  return vistas.some((x) => x.id !== m.id && x.turnoId === m.turnoId && x.kind === "sistema" && x.criadoEm >= m.criadoEm);
 }
 
 /**
@@ -416,7 +443,9 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   const agente = c.conversa.agenteId ? agenteDe(estado, c.conversa.agenteId) : undefined;
   const nome = agente?.nome ?? "o agente";
   // ADR-090: o bot trabalha numa máquina que está sem contato — a fila espera por ela, e a linha diz isso.
-  const doBot = agente ? maquinaDoBot(estado, agente) : null;
+  // QA do NOD-314: o turno que a pessoa mandou "desta vez" para outra máquina espera ESSA máquina, não a do bot.
+  const destaVez = emCurso.maquinaDestaVez ? (estado.maquinas?.maquinas ?? []).find((x) => x.id === emCurso.maquinaDestaVez) ?? null : null;
+  const doBot = destaVez ?? (agente ? maquinaDoBot(estado, agente) : null);
   // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
   if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };

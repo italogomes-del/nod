@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { decidirFundoPreso, decidirTurnoOrfao, deveObservar, INTERVALO_OBSERVACAO_TURNO_VELHO_MS, textoDaCausa, type FatosFundoPreso, type FatosTurnoOrfao } from "../../../src/domain/turno-orfao.ts";
+import { decidirFundoPreso, decidirTurnoOrfao, deveObservar, INTERVALO_OBSERVACAO_TURNO_VELHO_MS, motivoDaFila, PRAZO_PRESO_SEM_CONTATO_MS, textoDaCausa, textoDoMotivoDaFila, type FatosFundoPreso, type FatosTurnoOrfao } from "../../../src/domain/turno-orfao.ts";
 
 const AGORA = Date.parse("2026-10-13T12:00:00Z");
 const H = 3_600_000;
 
 /** Um pendente de conversa, com o prazo da fila de 24 h, criado há 6 h, sem nada que o segure. */
-const base: FatosTurnoOrfao = { origem: "conversa", criadoEm: AGORA - 6 * H, prazoEm: AGORA + 18 * H, acordarEm: null, agenteExcluido: false, geracaoAntiga: false, depoisDeAberto: false, faixaOcupada: false };
+const base: FatosTurnoOrfao = { origem: "conversa", criadoEm: AGORA - 6 * H, prazoEm: AGORA + 18 * H, acordarEm: null, agenteExcluido: false, geracaoAntiga: false, depoisDeAberto: false, faixaOcupada: false, alvoUltimoContato: null, alvoNome: null };
 const velho: Partial<FatosTurnoOrfao> = { criadoEm: AGORA - 30 * H, prazoEm: AGORA - 6 * H };
 
 describe("turno órfão na fila (NOD-219): só o pendente impossível de rodar se encerra", () => {
@@ -36,6 +36,38 @@ describe("turno órfão na fila (NOD-219): só o pendente impossível de rodar s
     expect(deveObservar(undefined, AGORA)).toBe(true);
     expect(deveObservar(AGORA - INTERVALO_OBSERVACAO_TURNO_VELHO_MS + 1, AGORA)).toBe(false);
     expect(deveObservar(AGORA - INTERVALO_OBSERVACAO_TURNO_VELHO_MS, AGORA)).toBe(true);
+  });
+});
+
+describe("turno preso a uma máquina sem contato (NOD-314): encerra em 24 h", () => {
+  const S = 1000;
+  /** Pendente de 30 h, preso a uma máquina-alvo que falou pela última vez há `h` horas. */
+  const preso = (contatoHa: number, extra: Partial<FatosTurnoOrfao> = {}): FatosTurnoOrfao => ({ ...base, criadoEm: AGORA - 30 * H, prazoEm: AGORA + H, alvoUltimoContato: AGORA - contatoHa, alvoNome: "Mac do Marlon", ...extra });
+
+  it.each<[string, FatosTurnoOrfao, ReturnType<typeof decidirTurnoOrfao>]>([
+    ["23h59m59s sem contato: não encerra", preso(24 * H - S), { tipo: "manter" }],
+    ["24h00 sem contato: encerra", preso(24 * H), { tipo: "encerrar", causa: "maquina_alvo_sem_contato" }],
+    ["o Mac voltou no meio (contato recente): não encerra", preso(5 * 60_000), { tipo: "manter" }],
+    ["turno de 2 h com o Mac fora há 3 dias: ganha as 24 h dele", preso(72 * H, { criadoEm: AGORA - 2 * H }), { tipo: "manter" }],
+    ["turno de 24 h com o Mac fora há 3 dias: encerra", preso(72 * H, { criadoEm: AGORA - 24 * H }), { tipo: "encerrar", causa: "maquina_alvo_sem_contato" }],
+    ["volta marcada vencida conta: acordou há 1 h", preso(72 * H, { acordarEm: AGORA - H }), { tipo: "manter" }],
+    ["volta marcada vencida há 24 h: encerra", preso(72 * H, { acordarEm: AGORA - 24 * H }), { tipo: "encerrar", causa: "maquina_alvo_sem_contato" }],
+    ["volta marcada para mais tarde nunca entra", preso(72 * H, { acordarEm: AGORA + H }), { tipo: "manter" }],
+    ["sem alvo (qualquer máquina, ou o Mac do servidor): nunca encerra", preso(72 * H, { alvoUltimoContato: null, alvoNome: null }), { tipo: "manter" }],
+    ["ligação nunca entra", preso(72 * H, { origem: "ligacao" }), { tipo: "manter" }],
+    ["agente excluído tem precedência", preso(72 * H, { agenteExcluido: true }), { tipo: "encerrar", causa: "agente_excluido" }],
+    ["geração antiga tem precedência", preso(72 * H, { geracaoAntiga: true }), { tipo: "encerrar", causa: "geracao_antiga" }],
+  ])("%s", (_nome, f, esperado) => {
+    expect(decidirTurnoOrfao(f, AGORA)).toEqual(esperado);
+  });
+
+  it("o prazo é de 24 h", () => expect(PRAZO_PRESO_SEM_CONTATO_MS).toBe(24 * H));
+
+  it("o motivo da fila e o texto nomeiam a máquina", () => {
+    expect(motivoDaFila(decidirTurnoOrfao(preso(25 * H), AGORA))).toBe("maquina_alvo_sem_contato");
+    expect(textoDaCausa("maquina_alvo_sem_contato", "Mac do Marlon")).toBe("Mac do Marlon ficou sem contato por mais de 24 h");
+    expect(textoDaCausa("maquina_alvo_sem_contato")).toBe("o computador do bot ficou sem contato por mais de 24 h");
+    expect(textoDoMotivoDaFila("maquina_alvo_sem_contato")).toBe("o computador do bot ficou sem contato por mais de 24 h");
   });
 });
 

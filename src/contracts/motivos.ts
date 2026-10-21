@@ -134,7 +134,7 @@ export type MotivoAdiada = (typeof MOTIVOS_ADIADA)[number];
 export const MOTIVOS_INTERRUPCAO_ROTINA = ["vencida", "frente_parada", "rotina_pausada"] as const;
 export type MotivoInterrupcaoRotina = (typeof MOTIVOS_INTERRUPCAO_ROTINA)[number];
 
-/** Por que a janela ficou 'nao_rodou' (NOD-274; NOD-309: toda queda do fundo, domain/espera-no-fundo.ts). Vai em rotina_execucoes.motivo. */
+/** Por que a janela ficou 'nao_rodou' (NOD-274; NOD-314: preso 24 h à máquina sem contato; NOD-309: toda queda do fundo, domain/espera-no-fundo.ts). Vai em rotina_execucoes.motivo. */
 export const MOTIVOS_NAO_RODOU_ROTINA = ["cota_da_ia", "execucao_anterior_aberta", "maquina_sem_contato", "reinicio_servidor", "erro_do_provedor"] as const;
 export type MotivoNaoRodouRotina = (typeof MOTIVOS_NAO_RODOU_ROTINA)[number];
 

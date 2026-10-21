@@ -9,6 +9,7 @@ import { ORDEM_IAS_PADRAO } from "../domain/inteligencia.ts";
 import { log } from "../obs/log.ts";
 import type { ContaGuardadaNoServidor, ResultadoDoAnuncio } from "../repositories/contas-ia.repo.ts";
 import type { PayloadMensagem } from "../contracts/mensagem.ts";
+import type { Assunto } from "../contracts/destino-no-chat.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { avaliarOrcamento } from "../domain/canal-orcamento.ts";
 import { harnessFixado } from "../domain/harness.ts";
@@ -130,13 +131,22 @@ export type MotivoNaoRefez = MotivoDaNota;
 
 export type SaidaDaNota = { data: { turnoId: string | null; motivo: MotivoNaoRefez | null }; events: RuntimeEvent[] };
 
-const ORIGENS_REFAZIVEIS: readonly Turno["origem"][] = ["conversa", "sala"];
+/** As origens que a nota refaz. QA do NOD-314: a linha do turno preso só ganha o atalho nelas (turnos-orfaos.ts). */
+export const ORIGENS_REFAZIVEIS: readonly Turno["origem"][] = ["conversa", "sala"];
 
 /**
  * O turno parou na conta: no limite (`limite_do_plano`, no fim do turno) ou recusado no despacho sem conta utilizável
  * (`sem_conta`, NOD-269 na main desde o #340) — os dois deixam a mesma nota de limite na conversa.
  */
 const paradoPelaConta = (turno: Turno): boolean => (MOTIVOS_FALHA_DE_ESPERA as readonly (string | null)[]).includes(turno.motivoFalha ?? null);
+
+/**
+ * NOD-314 (definido em 2026-10-20): o pendente que o varredor de órfãos encerrou, preso 24 h a uma máquina sem contato
+ * (turnos-orfaos.ts). Nunca rodou: `maquina_sem_contato` sem despacho. A queda de um turno que rodou não entra — essa tem
+ * o caminho dela (Retomar, interromper-por-maquina.ts).
+ */
+export const presoSemContato = (turno: Turno): boolean =>
+  turno.motivoInterrupcao === "maquina_sem_contato" && !turno.sinais.attempted && (turno.despachadoEm ?? null) === null;
 
 /** O turno da nota: pelo `turnoId` do botão (NOD-284), na conversa dele. Outro id, ou de outra conversa = não encontrado. */
 async function turnoDaNota(d: Deps, p: { conversaId: string; turnoId: string }): Promise<Turno> {
@@ -163,12 +173,12 @@ function contaNaoServe(conta: Pick<ContaGuardadaNoServidor, "ia" | "noLimiteAte"
  */
 export async function refazerTurnoDaNota(
   d: Deps,
-  p: { turno: Turno; linha: { texto: string; payload?: PayloadMensagem }; maquinaDestaVez?: string | null },
+  p: { turno: Turno; linha: { texto: string; payload?: PayloadMensagem; assunto?: Assunto }; maquinaDestaVez?: string | null },
 ): Promise<SaidaDaNota> {
   const { turno } = p;
   const agora = d.agora();
   const nada = (motivo: MotivoNaoRefez): SaidaDaNota => ({ data: { turnoId: null, motivo }, events: [] });
-  if (turno.estado !== "interrompido" || !paradoPelaConta(turno) || !ORIGENS_REFAZIVEIS.includes(turno.origem)) return nada("turno_nao_interrompido");
+  if (turno.estado !== "interrompido" || !(paradoPelaConta(turno) || presoSemContato(turno)) || !ORIGENS_REFAZIVEIS.includes(turno.origem)) return nada("turno_nao_interrompido");
   const mesmaFala = (t: Turno) => t.id !== turno.id && t.agenteId === turno.agenteId && t.criadoEm >= turno.criadoEm
     && (turno.mensagemOrigemId ? t.mensagemOrigemId === turno.mensagemOrigemId : t.entradaTexto === turno.entradaTexto);
   const posteriores = (await d.repos.turnos.listarDaConversa(turno.conversaId, 50)).filter(mesmaFala);
@@ -187,7 +197,7 @@ export async function refazerTurnoDaNota(
     if (!(await d.repos.turnos.cancelarPendente(t.id))) return { data: { turnoId: null, motivo: "ja_refeito" }, events };
     events.push(evento(d.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: t.conversaId, turnoId: t.id, dados: { motivo: "parado_pela_pessoa", substituido_por_escolha: true } }));
   }
-  const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "conta.nota", texto: p.linha.texto, ...(p.linha.payload ? { payload: p.linha.payload } : {}), confianca: "confiavel" });
+  const linha = await d.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: p.linha.assunto ?? "conta.nota", texto: p.linha.texto, ...(p.linha.payload ? { payload: p.linha.payload } : {}), confianca: "confiavel" });
   if (linha) events.push(evento(d.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
   const novo = await d.repos.turnos.enfileirar({
     conversaId: turno.conversaId,
@@ -363,11 +373,37 @@ export async function rodarDestaVezComConta(d: Deps, p: { conversaId: string; tu
     const serve = c.contas.some((x) => x.removidaEm === null && c.naMaquina.has(x.id) && (fixo === null || x.ia === fixo) && (x.noLimiteAte === null || x.noLimiteAte <= agora));
     if (!serve) return nada("conta_fora_da_maquina");
   }
-  const r = await refazerTurnoDaNota(d, { turno, maquinaDestaVez: p.maquinaId, linha: { texto: redigir("rodando-desta-vez", agora, { maquina: chave.nome }) } });
+  const r = await refazerTurnoDaNota(d, { turno, maquinaDestaVez: p.maquinaId, linha: {
+    texto: redigir("rodando-desta-vez", agora, { maquina: chave.nome }),
+    // QA do NOD-314: a linha do turno preso fica no chat, ao lado da linha do preso — é ela que tira o atalho de lá (a de
+    // `conta.nota` ia para a Atividade e não vinha em GET /conversas/:id/mensagens).
+    ...(presoSemContato(turno) ? { assunto: "turno.orfao" as const } : {}),
+  } });
   // NOD-221 item 3: a corporativa fora da troca, nomeada no botão, é escolha explícita — só depois de refazer de fato.
   if (conta && r.data.turnoId !== null) await d.repos.contasIa.definirEscolhida(conta.ia, conta.id);
   log("info", "turno_rodar_desta_vez", { turno_id: turno.id, novo_turno_id: r.data.turnoId, maquina_id: p.maquinaId, motivo: r.data.motivo });
   return r;
+}
+
+/**
+ * NOD-314 (definido em 2026-10-20; revisto no QA em 2026-10-21): "Rodar em <outra> desta vez" do topo da task. Os turnos
+ * AINDA pendentes do trabalho vão para a máquina escolhida, uma vez; a máquina fixa do bot não muda. A máquina precisa ter
+ * contato recente e — a regra de `rodarDestaVezComConta` — uma conta da IA de cada turno pendente (no Automático, de
+ * qualquer IA) pronta nela e fora do limite: antes a VM só com o Codex levava o turno fixado no Claude, que não rodava lá.
+ * Quem chama já conferiu que o trabalho existe e que a chave é viva e da pessoa.
+ */
+export async function rodarTrabalhoDestaVez(d: Deps, p: { trabalhoId: string; maquinaId: string }): Promise<{ movidos: number; jaNela: number } | "maquina_sem_contato" | "conta_fora_da_maquina"> {
+  await d.repos.contasIa.travar();
+  const agora = d.agora();
+  const chave = (await d.repos.maquinaTokens.listar()).find((c) => c.id === p.maquinaId && c.revogadaEm === null);
+  if (!chave || chave.ultimoUsoEm === null || agora - chave.ultimoUsoEm >= CONTATO_RECENTE_MS) return "maquina_sem_contato";
+  const pendentes = (await d.repos.turnos.doTrabalho(p.trabalhoId)).filter((t) => t.estado === "pendente");
+  if (pendentes.length > 0) {
+    const c = await lerContasDaMaquina(d, p.maquinaId);
+    const serve = (fixo: string | null) => c.contas.some((x) => x.removidaEm === null && c.naMaquina.has(x.id) && (fixo === null || x.ia === fixo) && (x.noLimiteAte === null || x.noLimiteAte <= agora));
+    if (!pendentes.every((t) => serve(harnessFixado(t.harness, t.modelo)))) return "conta_fora_da_maquina";
+  }
+  return d.repos.turnos.rodarDestaVezDoTrabalho(p.trabalhoId, chave.id);
 }
 
 /**

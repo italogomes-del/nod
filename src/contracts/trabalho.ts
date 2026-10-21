@@ -95,10 +95,10 @@ export type TrabalhoDto = Omit<Trabalho, "tenantId" | "sessaoCli" | "sessaoHarne
   esperaDoMac?: MotivoEsperaMac | null;
   /**
    * definido em 2026-10-09 (a tela fala por máquina): onde o trabalho roda (o turno vivo) ou vai rodar (o alvo do turno na
-   * fila, a regra do `reivindicar`) — só na lista de `GET trabalhos`. Com `esperaDoMac`, é a máquina que ele espera aliviar
-   * ("esperando nod-motor-teste aliviar"). null = qualquer máquina (modo compartilhado, sem escolha) ou desconhecida.
+   * fila, a regra do `reivindicar`). Com `esperaDoMac`, a máquina que ele espera aliviar. null = qualquer máquina ou desconhecida.
    */
   maquina?: MaquinaDoTrabalho | null;
+  /** QA do NOD-314: a IA fixada do turno pendente (harnessFixado), para o "desta vez" do topo; null = Automático. */ iaFixada?: string | null;
   /**
    * definido em 2026-10-08 (protótipo "Nod — tempo da task", aprovado pelo Marlon): o colega cuja resposta a task espera
    * (o pedido mais antigo ainda sem volta), para o status curto "esperando Eng 2". Ausente ou null: não espera colega.

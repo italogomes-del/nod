@@ -260,6 +260,13 @@ describe("reducer: trabalhos, a tela da task e a memória", () => {
     expect(iniciado.turnosVivos.t9?.trabalhoId).toBe("migrar");
   });
 
+  it("QA do NOD-314 (achado 2): a tela da task aberta direto hidrata a frota e as contas", () => {
+    const tela: Tela = { tipo: "trabalho", id: "login", voltar: { tipo: "inicio" } };
+    const faltas = invalidacoesDaTela({ ...estadoCom([]), sessao: { tenantId: "t", pessoaId: "p" }, tela });
+    expect(faltas).toContain("maquinas");
+    expect(faltas).toContain("contas");
+  });
+
   it("trabalhos são lidos com a sessão; trocar de pessoa os esquece", () => {
     expect(invalidacoesDaTela({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" } })).toContain("trabalhos");
     const outra = reduzir(estadoCom([trabalho("x")], { pressao: "amarela" }), { tipo: "sessao", escopo: { tenantId: "t", pessoaId: "outra" } });

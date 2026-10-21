@@ -12,7 +12,7 @@ import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
-import type { FatosFundoPreso, FatosTurnoOrfao, FundoPreso } from "../domain/turno-orfao.ts";
+import { PRAZO_PRESO_SEM_CONTATO_MS, type FatosFundoPreso, type FatosTurnoOrfao, type FundoPreso } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
 import { ESPERA_DECLINIO_MS, LEASE_MS } from "../shared/constantes.ts";
@@ -59,6 +59,7 @@ interface Linha {
   pessoa_esperando: boolean;
   decidido_por: string;
   despachado_em?: Date | null;
+  maquina_desta_vez?: string | null;
   tentativas_transitorias?: number;
 }
 
@@ -67,7 +68,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias, maquina_desta_vez";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -107,6 +108,8 @@ function paraTurno(l: Linha): Turno {
     decididoPor: l.decidido_por,
     despachadoEm: msOuNull(l.despachado_em ?? null),
     tentativasTransitorias: l.tentativas_transitorias ?? 0,
+    // QA do NOD-314: só quando há ("Rodar em <outra> desta vez"); o chip da fila diz a máquina deste turno.
+    ...(l.maquina_desta_vez ? { maquinaDestaVez: l.maquina_desta_vez } : {}),
   };
 }
 
@@ -119,6 +122,8 @@ export type OrfaoCandidato = FatosTurnoOrfao & {
   conversaId: string;
   agenteId: string;
   trabalhoId: string | null;
+  /** NOD-314: a máquina-alvo do turno agora (ADR-090), ou `null` sem alvo. */
+  alvoMaquinaId: string | null;
 };
 
 export type NovoTurno = {
@@ -1047,6 +1052,24 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * NOD-314 (definido em 2026-10-20): o mesmo "desta vez" a partir do topo da task — os turnos AINDA pendentes deste
+     * trabalho vão para a máquina escolhida, uma vez. A máquina fixa do bot (`agentes.maquina_id`) não muda. Quem chama já
+     * conferiu que a chave é dela.
+     */
+    // QA do NOD-314: `movidos` = os que mudaram agora; `jaNela` = os pendentes que já iam para essa máquina (o 2º clique).
+    async rodarDestaVezDoTrabalho(trabalhoId: string, maquinaId: string): Promise<{ movidos: number; jaNela: number }> {
+      const r = await conn`
+        update turnos set maquina_desta_vez = ${maquinaId}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${trabalhoId} and estado = 'pendente'
+          and maquina_desta_vez is distinct from ${maquinaId}`;
+      const [j] = await conn<{ n: number }[]>`
+        select count(*)::int as n from turnos
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${trabalhoId} and estado = 'pendente'
+          and maquina_desta_vez = ${maquinaId}`;
+      return { movidos: r.count, jaNela: (j?.n ?? 0) - r.count };
+    },
+
+    /**
      * NOD-280 (definido em 2026-10-15): "Tentar de novo com <conta>" em Provedores — as falas que esperavam o limite passar
      * (a cópia adiada da conversa, NOD-268; a retomada da task, ADR-099 §7) saem já. Só as que nasceram de um turno parado
      * por `limite_do_plano` ou recusado no despacho por `sem_conta` (NOD-269) do mesmo bot e que podem rodar na IA da conta (fixas nela ou no Automático); o "me chame às
@@ -1087,24 +1110,32 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       // definido em 2026-10-15 (NOD-257, H5): com `ids`, devolve os fatos desses pendentes, velhos ou não — o card do
       // pedido a colega mostra por que ele espera na fila (fila-do-pedido.ts).
       const soEstes = o.ids ? [...o.ids] : null;
-      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean }[]>`
-        select x.* from (
-          select t.id, t.conversa_id, t.agente_id, t.origem, t.trabalho_id, t.criado_em, t.prazo_em, t.acordar_em,
+      // NOD-314 (definido em 2026-10-20): a máquina-alvo do turno (ADR-090, a mesma regra do `reivindicar`) e o último
+      // contato dela; o preso há 24 h a um alvo sem contato entra como impossível (domain/turno-orfao.ts).
+      const limitePreso = data(agora - PRAZO_PRESO_SEM_CONTATO_MS);
+      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; origem: OrigemTurno; trabalho_id: string | null; criado_em: Date; prazo_em: Date; acordar_em: Date | null; agente_excluido: boolean; geracao_antiga: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean; alvo_ultimo_contato: Date | null; alvo_nome: string | null; alvo_id: string | null }[]>`
+        select x.*, case when k.id is null then null else coalesce(k.ultimo_uso_em, k.criado_em) end as alvo_ultimo_contato, k.nome as alvo_nome
+        from (
+          select t.id, t.tenant_id, t.conversa_id, t.agente_id, t.origem, t.trabalho_id, t.criado_em, t.prazo_em, t.acordar_em,
             coalesce(a.excluido_em is not null, true) as agente_excluido,
             (a.excluido_em is null and a.geracao_execucao is distinct from t.geracao_execucao) as geracao_antiga,
             (t.trabalho_id is not null and exists (select 1 from trabalhos w join trabalhos dep on dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
               where w.tenant_id = t.tenant_id and w.id = t.trabalho_id and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
             (case when t.trabalho_id is null
               then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao')
-              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada
+              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada,
+            ${alvoDoTurno(conn, agora)} as alvo_id
           from turnos t
           left join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id
           where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
             and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
             and (${soEstes === null} or t.id::text = any(${soEstes ?? []}::text[]))
         ) x
-        where ${soEstes !== null} or x.agente_excluido or x.geracao_antiga or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
-        order by (x.agente_excluido or x.geracao_antiga) desc, x.criado_em asc, x.id asc
+        left join maquina_tokens k on k.tenant_id = x.tenant_id and k.id::text = x.alvo_id
+        where ${soEstes !== null} or x.agente_excluido or x.geracao_antiga
+          or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), coalesce(k.ultimo_uso_em, k.criado_em)) <= ${limitePreso})
+          or (x.prazo_em <= ${data(agora)} and not (x.id::text = any(${jaObservados}::text[])))
+        order by (x.agente_excluido or x.geracao_antiga or (k.id is not null and greatest(x.criado_em, coalesce(x.acordar_em, x.criado_em), coalesce(k.ultimo_uso_em, k.criado_em)) <= ${limitePreso})) desc, x.criado_em asc, x.id asc
         limit ${o.limite ?? 50}`;
       return linhas.map((l) => ({
         id: l.id,
@@ -1119,6 +1150,9 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         geracaoAntiga: l.geracao_antiga,
         depoisDeAberto: l.depois_de_aberto,
         faixaOcupada: l.faixa_ocupada,
+        alvoUltimoContato: msOuNull(l.alvo_ultimo_contato),
+        alvoNome: l.alvo_nome,
+        alvoMaquinaId: l.alvo_id === null || l.alvo_ultimo_contato === null ? null : l.alvo_id,
       }));
     },
 
@@ -1186,6 +1220,25 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.id = ${id} and t.estado = 'pendente' and t.origem <> 'ligacao'
           and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
           and not exists (select 1 from agentes a where a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao)
+        returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `t.${c}`).join(", "))}`;
+      return l ? paraTurno(l) : null;
+    },
+
+    /**
+     * NOD-314 (definido em 2026-10-20): encerra o pendente preso há 24 h a uma máquina-alvo sem contato
+     * (domain/turno-orfao.ts). UPDATE condicional com o predicado refeito no SQL — o alvo de agora (ADR-090), o último
+     * contato dele e as 24 h desde o mais recente entre criação, volta marcada e contato — mais `estado = 'pendente'`: o
+     * Mac que acorda e reivindica no meio, ou que só fala (marcarUso), ganha. Fica `interrompido` com `maquina_sem_contato`
+     * e `despachado_em` nulo, o que o separa da queda de um turno que rodou (MOTIVOS_DE_QUEDA).
+     */
+    async encerrarPresoSemContato(id: string, agora: number): Promise<Turno | null> {
+      const alvo = alvoDoTurno(conn, agora);
+      const [l] = await conn<Linha[]>`
+        update turnos t set estado = 'interrompido', motivo_interrupcao = 'maquina_sem_contato', lease_ate = null
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.id = ${id} and t.estado = 'pendente' and t.origem <> 'ligacao'
+          and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
+          and exists (select 1 from maquina_tokens k where k.tenant_id = t.tenant_id and k.id::text = ${alvo}
+            and greatest(t.criado_em, coalesce(t.acordar_em, t.criado_em), coalesce(k.ultimo_uso_em, k.criado_em)) <= ${data(agora - PRAZO_PRESO_SEM_CONTATO_MS)})
         returning ${conn.unsafe(COLUNAS.split(", ").map((c) => `t.${c}`).join(", "))}`;
       return l ? paraTurno(l) : null;
     },

@@ -10,7 +10,7 @@ import { emitirChaveMaquina, revogarChaveMaquina } from "../../../use-cases/chav
 import type { Rota } from "../roteador.ts";
 import { executar, type DentroDeTx } from "./dentro-de-tx.ts";
 import { assertUuid } from "../../../use-cases/apoio-l7.ts";
-import { rodarDestaVezComConta } from "../../../use-cases/contas-ia.ts";
+import { rodarDestaVezComConta, rodarTrabalhoDestaVez } from "../../../use-cases/contas-ia.ts";
 
 /**
  * "Minhas chaves" (E1.3, ADR-031): a pessoa da sessão emite, lista e revoga as chaves dos próprios
@@ -205,6 +205,31 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const n = await deps.dentro(ctx.escopo, async (d) => d.repos.turnos.rodarDestaVez(ctx.params.id ?? "", await exigirChaveViva(d, corpo.maquinaId)));
         log("info", "turno_rodar_desta_vez", { pessoa_id: ctx.escopo.pessoaId, conversa_id: ctx.params.id, turnos: n });
         ctx.json(200, { turnos: n });
+      },
+    },
+    {
+      // NOD-314 (definido em 2026-10-20): "Rodar em <outra> desta vez" no topo da task que espera uma máquina sem contato.
+      // Só os turnos AINDA pendentes do trabalho vão para a máquina escolhida, uma vez; a máquina fixa do bot não muda.
+      // A máquina precisa ser da pessoa (404) e ter contato recente (409 maquina_sem_contato); sem pendente, 409 nada_na_fila.
+      metodo: "POST",
+      padrao: /^\/trabalhos\/(?<id>[^/]+)\/rodar-desta-vez$/,
+      async handler(ctx) {
+        const trabalhoId = assertUuid(ctx.params.id, "trabalho");
+        const corpo = (await ctx.corpo()) as { maquinaId?: unknown };
+        const maquinaId = assertUuid(corpo.maquinaId, "máquina");
+        // QA do NOD-314: o trabalho inexistente é 404 antes de olhar a máquina; o 2º clique (os pendentes já iam para ela)
+        // é 200 com `motivo: "ja_refeito"` — o mesmo código da nota da conversa, que a tela trata como neutro.
+        // QA do NOD-314 (2026-10-21): e a máquina precisa ter conta da IA do turno (409 conta_fora_da_maquina).
+        const r = await deps.dentro(ctx.escopo, async (d) => {
+          if (!(await d.repos.trabalhos.buscar(trabalhoId))) throw new ErroDeDominio("nao_encontrado", { cause: "trabalho" });
+          return rodarTrabalhoDestaVez(d, { trabalhoId, maquinaId: await exigirChaveViva(d, maquinaId) });
+        });
+        const motivo = typeof r === "string" ? r : r.movidos > 0 ? null : r.jaNela > 0 ? "ja_refeito" : "nada_na_fila";
+        log("info", "turno_rodar_desta_vez", { pessoa_id: ctx.escopo.pessoaId, trabalho_id: trabalhoId, maquina_id: maquinaId, turnos: typeof r === "string" ? 0 : r.movidos, motivo });
+        if (r === "maquina_sem_contato") { ctx.json(409, { codigo: r, mensagem: "Essa máquina também está sem contato agora. Escolha outra ou espere ela voltar." }); return; }
+        if (r === "conta_fora_da_maquina") { ctx.json(409, { codigo: r, mensagem: "Essa máquina não tem uma conta pronta da IA desta task. Escolha outra ou espere a máquina do bot voltar." }); return; }
+        if (motivo === "nada_na_fila") { ctx.json(409, { codigo: motivo, mensagem: "Esta task não tem nada esperando na fila agora." }); return; }
+        ctx.json(200, { turnos: r.movidos, motivo });
       },
     },
   ];

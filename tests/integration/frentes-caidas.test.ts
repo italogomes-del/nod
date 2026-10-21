@@ -39,6 +39,8 @@ async function montar(trx: Trx) {
   /** A queda como o varredor de lease a deixa: interrompido por máquina sem contato, o card "Retomar" e a frente relida. */
   const cair = async (trabalhoId: string) => {
     const t = await turnoVivo(trabalhoId);
+    // NOD-314: a queda real vem de um turno que uma máquina pegou (o reivindicar marca `attempted`).
+    await trx`update turnos set attempted = true where id = ${t.id}`;
     await repos.turnos.interromper(t.id, "maquina_sem_contato");
     const card = await repos.decisoes.criar({ tipo: "retomar_turno", agenteId: t.agenteId, conversaId: t.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() + 86_400_000, frase: "O turno parou." });
     await sincronizarTrabalho(deps, trabalhoId);
@@ -59,7 +61,7 @@ async function montar(trx: Trx) {
    */
   const cairRodando = async (trabalhoId: string, p: { idadeMs: number; sinalEm: number; inicioDoProcesso?: number }) => {
     const t = await turnoVivo(trabalhoId);
-    await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, criado_em = ${new Date(Date.now() - p.idadeMs)},
+    await trx`update turnos set estado = 'despachando', attempted = true, machine_id = ${randomUUID()}, criado_em = ${new Date(Date.now() - p.idadeMs)},
       lease_ate = ${new Date(p.sinalEm + LEASE_MS)} where id = ${t.id}`;
     await trx`update trabalhos set criado_em = ${new Date(Date.now() - p.idadeMs)} where id = ${trabalhoId}`;
     const r = await varrerPessoa(deps.tx, MARLON, p.sinalEm + LEASE_MS + 10, p.inicioDoProcesso !== undefined ? { inicioDoProcesso: p.inicioDoProcesso } : {});

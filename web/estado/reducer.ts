@@ -340,6 +340,8 @@ export type Estado = {
   trabalhos: TrabalhosDto | null;
   /** A tela da task de cada trabalho já aberto (`GET trabalhos/:id`), com as mensagens dele. */
   trabalhoDetalhe: Record<string, TrabalhoDetalheDto>;
+  /** QA do NOD-314: turnos que o servidor disse já refeitos ("ja_refeito") nesta sessão — o atalho do turno preso some. */
+  turnosRefeitos: string[];
   /** Pressão de memória do Mac (#194): do `GET trabalhos` e do frame `memoria.mudou`; null = nenhum Mac falou. */
   pressao: NivelPressao | null;
   /**
@@ -426,6 +428,8 @@ export type Acao =
   | { tipo: "invalidar"; quais: Invalidacao[] }
   | { tipo: "invalidacoes-tratadas"; quais: Invalidacao[] }
   | { tipo: "erro"; erro: ErroNaTela | null }
+  /** QA do NOD-314: o "Rodar em <outra> desta vez" respondeu `ja_refeito`: o atalho daquele turno some. */
+  | { tipo: "turno-refeito"; turnoId: string }
   /** NOD-215: uma chamada caiu por rede (ainda tentando de novo ou já desistiu): vira "Reconectando…", nunca por cima de outro erro. */
   | { tipo: "rede-caiu"; erro: ErroNaTela }
   /** NOD-215: o nod respondeu de novo: o "Reconectando…" some sozinho. */
@@ -518,6 +522,7 @@ export const estadoInicial: Estado = {
   onboardingAberto: false,
   trabalhos: null,
   trabalhoDetalhe: {},
+  turnosRefeitos: [],
   pressao: null,
   faixaTrabalhosAberta: null,
   botAbertoEmTrabalhos: null,
@@ -1184,6 +1189,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, invalidacoes: estado.invalidacoes.filter((q) => !acao.quais.includes(q)) };
     case "erro":
       return { ...estado, erro: acao.erro, ocupado: false };
+    case "turno-refeito":
+      return estado.turnosRefeitos.includes(acao.turnoId) ? estado : { ...estado, turnosRefeitos: [...estado.turnosRefeitos, acao.turnoId] };
     case "rede-caiu":
       // Um erro de outra natureza na tela não é trocado pelo aviso de rede; o "ocupado" fica: a ação segue tentando.
       if (estado.erro !== null && !ehErroDeRede(estado.erro)) return estado;
@@ -1374,11 +1381,12 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "linha" && !estado.conversas[t.conversaId]) faltas.push(`conversa:${t.conversaId}`);
   if (secao === "computadores" && !estado.chaves) faltas.push("chaves");
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
-  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa")) faltas.push("maquinas");
+  // QA do NOD-314: a tela da task também lê a frota ("Rodar em <outra> desta vez" e a linha do turno preso).
+  if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho")) faltas.push("maquinas");
   // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
   // definido em 2026-10-16 (T6): e o cabeçalho do seletor de IA no campo (a conta em uso, só o apelido).
   // NOD-280 (critério 9): e a sala/linha aberta com nota de limite de contas — a nota se recalcula com a lista.
-  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || conversaAbertaTemNotaDeContas(estado))) faltas.push("contas");
+  if (estado.sessao && !estado.contasIa && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado))) faltas.push("contas");
   // O frame relato.criado não invalida nada (é registro), então a seção busca quando ainda não tem.
   if (secao === "relatos" && !estado.relatos) faltas.push("relatos");
   return faltas.filter((f) => !estado.invalidacoes.includes(f));

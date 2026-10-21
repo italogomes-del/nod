@@ -139,9 +139,10 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           join turnos r on r.tenant_id = ${escopo.tenantId} and r.retoma_turno_id = c.id and r.origem = 'retomada'
           where c.n < 10
         )
-        select p.tarefa_id, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+        select p.tarefa_id, u.id as ultimo_id, -- NOD-314: o pendente que o varredor encerrou preso a uma máquina sem contato nunca rodou: não é queda.
+          (case when u.motivo_interrupcao::text = 'maquina_sem_contato' and not (u.attempted or u.despachado_em is not null) then 'preso_sem_contato' else u.motivo_interrupcao::text end) as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
-            where c.raiz = p.tarefa_id and q.estado = 'interrompido' and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            where c.raiz = p.tarefa_id and q.estado = 'interrompido' and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (q.motivo_interrupcao::text <> 'maquina_sem_contato' or q.attempted or q.despachado_em is not null)
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           exists (select 1 from turnos v where v.tenant_id = ${escopo.tenantId} and v.owner_id = p.owner_id
@@ -149,7 +150,7 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal
         from pedidos p
         join lateral (
-          select q.id, q.estado, q.motivo_interrupcao, q.motivo_falha, q.ultimo_sinal_em, q.lease_ate, q.criado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
+          select q.id, q.estado, q.motivo_interrupcao, q.motivo_falha, q.ultimo_sinal_em, q.lease_ate, q.criado_em, q.attempted, q.despachado_em from cadeia c join turnos q on q.tenant_id = ${escopo.tenantId} and q.id = c.id
           where c.raiz = p.tarefa_id and coalesce(q.motivo_interrupcao::text, '') <> 'absorvido'
           order by q.criado_em desc, q.id desc limit 1
         ) u on true
@@ -166,7 +167,7 @@ export function pedidosDeColegaRepo(conn: Conn, escopo: Escopo) {
           -- NOD-241: a janela conta da queda quando o último turno caiu; NOD-257 (H5): ou do último turno da cadeia;
           -- NOD-279 (C22, definido em 2026-10-15): senão, do maior entre o pedido e o fim da espera da cota.
           and (greatest(p.criado_em, ec.fim) >= ${data(desde)} or u.criado_em >= ${data(desde)}
-            or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
+            or (u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (u.motivo_interrupcao::text <> 'maquina_sem_contato' or u.attempted or u.despachado_em is not null) and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}))
           and not exists (select 1 from cadeia c join turnos v on v.tenant_id = ${escopo.tenantId} and v.id = c.id
             where c.raiz = p.tarefa_id and v.estado in ('pendente', 'despachando'))
         order by p.criado_em, p.handoff_id

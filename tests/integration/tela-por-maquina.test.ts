@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { NivelPressao } from "../../src/contracts/trabalho.ts";
 import type { Tx } from "../../src/shared/types.ts";
-import { criarTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
+import { criarTrabalho, detalharTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -46,15 +46,19 @@ async function montar(trx: Tx, c15: { linuxSoVermelha?: boolean } = {}) {
     },
     maquinas: {
       leituras: () => [...leituras].map(([id, l]) => linha(id, l)),
-      identificar: (_: unknown, id: string) => (id === MAC ? { nome: "Este Mac", ehMac: true } : id === vm ? { nome: "nod-motor-teste", ehMac: false } : null),
+      identificar: (_: unknown, id: string) => (id === MAC ? { nome: "Este Mac", ehMac: true } : id === vm && vmConectada.valor ? { nome: "nod-motor-teste", ehMac: false } : null),
       macDoServidor: MAC,
       // C15 (NOD-279): a VM é linux; o Mac, darwin.
       plataforma: (_: unknown, id: string) => (id === vm ? ("linux" as const) : ("darwin" as const)),
       fundoLinuxSoVermelha: c15.linuxSoVermelha === true,
+      // NOD-260 (G8): a VM fala ou não (o Mac do servidor sempre).
+      conectada: (_: unknown, id: string) => id === MAC || vmConectada.valor,
     },
   };
+  const vmConectada = { valor: true };
   const listar = async () => (await listarTrabalhos({ ...deps, services }, {})).data;
-  return { ada, eli, repos, vm, rotina, leituras, listar };
+  const detalhar = async (trabalhoId: string) => (await detalharTrabalho({ ...deps, services }, { trabalhoId })).data;
+  return { ada, eli, repos, vm, rotina, leituras, listar, detalhar, vmConectada, trx };
 }
 
 describeIntegracao("a tela fala por máquina (2026-10-09)", () => {
@@ -135,6 +139,21 @@ describeIntegracao("a tela fala por máquina (2026-10-09)", () => {
       m.leituras.set(MAC, { nivel: "verde", portao: "vermelha", totalMb: 400 });
       const dto = await m.listar();
       expect(dto.trabalhos.find((t) => t.id === daVm.trabalho.id)).toMatchObject({ esperaDoMac: null, maquina: { id: m.vm } });
+    });
+  });
+
+  it("QA do NOD-314: o detalhe da task traz a máquina como a lista, com o nome que a pessoa deu (não 'máquina f448f227')", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const daVm = await m.rotina(m.ada, "Verificar o Slack");
+      const desde = Date.now() - 3_600_000;
+      await trx`update maquina_tokens set ultimo_uso_em = ${new Date(desde)} where id = ${m.vm}`;
+      // Sem contato: a ponte não a conhece mais (identificar null), e o nome vem da chave.
+      m.vmConectada.valor = false;
+      const naLista = (await m.listar()).trabalhos.find((t) => t.id === daVm.trabalho.id);
+      const noDetalhe = (await m.detalhar(daVm.trabalho.id)).trabalho;
+      expect(noDetalhe.maquina).toEqual({ id: m.vm, nome: "nod-motor-teste", ehMac: false, semContatoDesde: desde });
+      expect(noDetalhe.maquina).toEqual(naLista?.maquina);
     });
   });
 });

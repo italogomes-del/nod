@@ -105,6 +105,27 @@ describeIntegracao("onde o bot trabalha (ADR-090)", () => {
     });
   });
 
+  it('NOD-314: "rodar em outra desta vez" da task muda só os pendentes dela e não muda a máquina do bot', async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      const w = await m.repos.trabalhos.criar({ agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Task", origem: "pessoa" });
+      if (!w) throw new Error("trabalho");
+      const daTask = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "faz a task", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
+      if (!daTask) throw new Error("turno");
+      const solto = await m.enfileirar();
+      expect(await m.repos.turnos.rodarDestaVezDoTrabalho(w.id, m.mac)).toEqual({ movidos: 1, jaNela: 0 });
+      // QA do NOD-314: o 2º clique não move nada e diz que já iam para lá.
+      expect(await m.repos.turnos.rodarDestaVezDoTrabalho(w.id, m.mac)).toEqual({ movidos: 0, jaNela: 1 });
+      expect(await m.repos.turnos.rodarDestaVezDoTrabalho(randomUUID(), m.mac)).toEqual({ movidos: 0, jaNela: 0 });
+      expect((await m.repos.turnos.buscar(daTask.id))?.maquinaDestaVez).toBe(m.mac);
+      const destaVez = await trx<{ id: string; maquina_desta_vez: string | null }[]>`select id, maquina_desta_vez from turnos where id in (${daTask.id}, ${solto.id})`;
+      expect(Object.fromEntries(destaVez.map((r) => [r.id, r.maquina_desta_vez]))).toEqual({ [daTask.id]: m.mac, [solto.id]: null });
+      const [agente] = await trx<{ maquina_id: string | null }[]>`select maquina_id from agentes where id = ${m.agenteId}`;
+      expect(agente?.maquina_id).toBe(m.vm);
+    });
+  });
+
   it("cada nível só vale com a chave viva: chave do bot vencida cai no padrão; desta vez revogada cai na máquina do bot", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);

@@ -159,7 +159,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
           -- NOD-282 (G4): os dois motivos separados (o coalesce escondia a recusa no despacho do fecho).
           x.motivo_interrupcao::text as ultimo_interrupcao, x.motivo_falha::text as ultimo_falha,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (q.motivo_interrupcao::text <> 'maquina_sem_contato' or q.attempted or q.despachado_em is not null)
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas
         from trabalhos w
         left join lateral (select x.motivo_interrupcao, x.motivo_falha from turnos x
@@ -238,9 +238,10 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         id: string; estado: EstadoTrabalho; ultimo_id: string; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null; quedas: number;
         card_id: string | null; card_estado: string | null; sinal: boolean; na_fila: boolean;
       }[]>`
-        select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
+        select w.id, w.estado, u.id as ultimo_id, -- NOD-314: o pendente que o varredor encerrou preso a uma máquina sem contato nunca rodou: não é queda.
+          (case when u.motivo_interrupcao::text = 'maquina_sem_contato' and not (u.attempted or u.despachado_em is not null) then 'preso_sem_contato' else u.motivo_interrupcao::text end) as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
-            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+            and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (q.motivo_interrupcao::text <> 'maquina_sem_contato' or q.attempted or q.despachado_em is not null)
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
           -- NOD-309 (PR 3): a retomada que a queda no fundo já enfileirou segura o varredor (pedido-parado.ts).
@@ -251,7 +252,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         from trabalhos w
         join lotes_de_frentes l on l.tenant_id = w.tenant_id and l.id = w.lote_id and l.devolvido_em is null
         join lateral (
-          select t.id, t.estado, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em from turnos t
+          select t.id, t.estado, t.motivo_interrupcao, t.motivo_falha, t.ultimo_sinal_em, t.lease_ate, t.criado_em, t.attempted, t.despachado_em from turnos t
           where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado in ('concluido', 'interrompido')
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
@@ -262,7 +263,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         ) k on true
         where w.tenant_id = ${escopo.tenantId} and w.owner_id = ${escopo.pessoaId} and w.forma = 'frente' and w.estado = 'precisa_de_voce'
           and coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) >= ${data(desde)}
-          and u.estado = 'interrompido' and u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+          and u.estado = 'interrompido' and u.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[]) and (u.motivo_interrupcao::text <> 'maquina_sem_contato' or u.attempted or u.despachado_em is not null)
           and not exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('pendente', 'despachando'))
           and not (w.id::text = any(${[...adiados]}::text[]))
         order by queda_em, w.id

@@ -1309,6 +1309,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async encerrarOrfao() {
         return null;
       },
+      // NOD-314: o preso sem contato depende do alvo (maquina_tokens) e se prova no Postgres, como os órfãos.
+      async encerrarPresoSemContato() {
+        return null;
+      },
       async buscarPorMensagemOrigem(mensagemId: string) {
         return doTenant(b.turnos).filter((t) => t.mensagemOrigemId === mensagemId).sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
@@ -1504,7 +1508,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           tentativasTransitorias: t.tentativasTransitorias ?? 0,
         };
         b.turnos.push(turno);
-        if (t.maquinaDestaVez) b.maquinaDestaVez.set(turno.id, t.maquinaDestaVez);
+        if (t.maquinaDestaVez) { b.maquinaDestaVez.set(turno.id, t.maquinaDestaVez); turno.maquinaDestaVez = t.maquinaDestaVez; }
         // NOD-287: a marca da web do turno de origem nasce junto, como o INSERT do repo real.
         if (t.contaminadoDe && b.contaminados.has(t.contaminadoDe)) b.contaminados.add(turno.id);
         return turno;
@@ -1712,8 +1716,14 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
       async rodarDestaVez(conversaId, maquinaId) {
         const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
-        for (const t of ts) b.maquinaDestaVez.set(t.id, maquinaId);
+        for (const t of ts) { b.maquinaDestaVez.set(t.id, maquinaId); t.maquinaDestaVez = maquinaId; }
         return ts.length;
+      },
+      async rodarDestaVezDoTrabalho(trabalhoId, maquinaId) {
+        const ts = doTenant(b.turnos).filter((t) => t.trabalhoId === trabalhoId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
+        const jaNela = ts.filter((t) => b.maquinaDestaVez.get(t.id) === maquinaId).length;
+        for (const t of ts) { b.maquinaDestaVez.set(t.id, maquinaId); t.maquinaDestaVez = maquinaId; }
+        return { movidos: ts.length - jaNela, jaNela };
       },
       async anteciparEsperasDoLimite(p) {
         let n = 0;
