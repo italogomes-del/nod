@@ -19,7 +19,7 @@ import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
 import { nomeDaMaquina, semContatoDesde as semContatoDaMaquina } from "../domain/presenca-da-maquina.ts";
-import { tituloDoLote } from "../domain/frente.ts";
+import { ehFrente, tituloDoLote } from "../domain/frente.ts";
 import { estadoDoTrabalho, linhaCurta, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
@@ -87,8 +87,13 @@ export async function sincronizarTrabalho(deps: DepsTrabalho, trabalhoId: string
   const reabre = opcoes.reabrir === true || atual.estado !== "parado";
   const mudou = await deps.repos.trabalhos.mudarEstado(trabalhoId, novo, deps.agora(), reabre ? { reabrir: true } : {});
   if (!mudou) return [];
+  // NOD-282 (G7): a frente que já tinha voltado ao dono foi reaberta — o resumo de antes fica guardado, e a volta a final
+  // dela ganha o resumo novo (o retorno complementar compara os dois).
+  if (ehFrente(mudou) && mudou.loteId && trabalhoFinal(atual.estado) && !trabalhoFinal(novo) && (await deps.repos.frentes.buscarLote(mudou.loteId))?.devolvidoEm != null) {
+    await deps.repos.frentes.arquivarResumo(mudou.id);
+  }
   // ADR-099 (I2): a frente que acabou sem devolver_resumo ganha o resumo montado pelo servidor.
-  await resumoSeFaltar(deps, mudou, { perguntaVencida: fatos.perguntaVencida === true });
+  await resumoSeFaltar(deps, mudou, fatos.perguntaVencida ? { perguntaVencida: true, ...(fatos.vencidaTipo ? { vencidaTipo: fatos.vencidaTipo } : {}) } : {});
   // ADR-099 (I3): e fecha o lote dela, se era a vez (o trabalho já está travado; o lote trava por último).
   return [eventoTrabalhoMudou(deps, mudou), ...(await fecharLoteSePronto(deps, mudou))];
 }

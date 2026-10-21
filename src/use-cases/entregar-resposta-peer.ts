@@ -157,7 +157,8 @@ async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Pr
   return false;
 }
 
-type Entrega = { tarefa: Turno; texto: string; falha: boolean };
+/** NOD-282 (G7): `complementar` = a resposta já saiu e esta acrescenta o que mudou (não cai no `ja_entregue`). */
+type Entrega = { tarefa: Turno; texto: string; falha: boolean; complementar?: boolean };
 
 function payloadDaEntrega(alvo: { id: string; nome: string }, tarefa: Turno, origem: { turnoOrigemId: string } | null, delegada: boolean, falha: boolean) {
   return { kind: "peer_ask" as const, agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true as const, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}) };
@@ -205,7 +206,7 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   if (delegada) {
     const entregues = (await deps.repos.mensagens.listarDaConversa(conversaRemetente.id, 500)).filter((m) => m.payload?.kind === "peer_ask" && m.payload.tarefaId === tarefa.id);
     const resultadoSaiu = entregues.some((m) => m.payload?.kind === "peer_ask" && !m.payload.falhou);
-    if (resultadoSaiu || (e.falha && entregues.length > 0)) return { data: { ignorado: "ja_entregue" } };
+    if (!e.complementar && (resultadoSaiu || (e.falha && entregues.length > 0))) return { data: { ignorado: "ja_entregue" } };
   }
   const agora = deps.agora();
   const autoria = autoriaAgente(alvo.id, deps.escopo.pessoaId, delegada ? (tarefa.sobProcuracaoDe ?? null) : remetente.id);
@@ -295,16 +296,17 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
  * a ADR-058 a continuação é a retomada do turno que pediu, no modo e com a trava dele. A autoria da entrega
  * fica "alvo · por pessoa". Turno sem pedido ligado é a própria continuação: nada a entregar.
  */
-export async function entregarRespostaPeer(deps: DepsEntrega, input: { tarefaId: string; texto: string; doLote?: string }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+export async function entregarRespostaPeer(deps: DepsEntrega, input: { tarefaId: string; texto: string; doLote?: string }, opcoes: { complementar?: true } = {}): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const assentado = exigir(await deps.repos.turnos.buscar(input.tarefaId), "nao_encontrado", "tarefa");
   // definido em 2026-09-24 (ADR-047): tarefa delegada entrega também — ela mesma ou a retomada dela.
   const tarefa = assentado.origem === "peer" ? assentado : await delegacaoDoTurno(deps.repos, assentado);
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
   // NOD-239: o turno que assentou agora não espera por ele mesmo; no fecho de lote, quem entrega é o turno que abriu o
   // lote, como antes.
-  const espera = await aindaNaoEntrega(deps, tarefa, input.doLote ?? null, assentado.id);
+  // NOD-282 (G7): o complemento não espera o fio — o resultado dele já saiu; só soma o que mudou.
+  const espera = opcoes.complementar ? null : await aindaNaoEntrega(deps, tarefa, input.doLote ?? null, assentado.id);
   if (espera) return { data: { ignorado: espera } };
-  return entregar(deps, { tarefa, texto: input.texto, falha: false });
+  return entregar(deps, { tarefa, texto: input.texto, falha: false, ...(opcoes.complementar ? { complementar: true } : {}) });
 }
 
 /**

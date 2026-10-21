@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decidirFrenteCaida, decidirPedidoParado, DESISTIR_SEM_SINAL_MS, MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS, type PedidoParado } from "../../../src/domain/pedido-parado.ts";
+import { classificarFimDaFrente, decidirFrenteCaida, decidirPedidoParado, DESISTIR_SEM_SINAL_MS, MAX_QUEDAS_POR_PEDIDO, RETOMAR_ATE_MS, type PedidoParado } from "../../../src/domain/pedido-parado.ts";
 
 /** A regra de src/domain/pedido-parado.ts (2026-10-08): o que fazer com um pedido a colega que parou sem voltar. */
 const AGORA = Date.parse("2026-10-08T15:00:00Z");
@@ -114,5 +114,29 @@ describe("decidirFrenteCaida (ADR-099, I9): a frente de lote que caiu", () => {
 
   it("frente que terminou não é caso do varredor (a I3 já fechou o lote): espera", () => {
     expect(frente({ estadoColega: "terminado", textoFinal: "feito", turnoDoTextoFinal: "t" })).toEqual({ tipo: "esperar" });
+  });
+});
+
+describe("classificarFimDaFrente (NOD-282, G4): a classificação única do fecho e do varredor", () => {
+  it.each([
+    ["executor_indisponivel", "motor_ausente", "recusa_aviso"],
+    ["executor_indisponivel", "nao_autenticado", "recusa_aviso"],
+    ["executor_indisponivel", "limite_do_plano", "recusa_espera"],
+    ["executor_indisponivel", "sem_conta", "recusa_espera"],
+    ["executor_indisponivel", null, "queda"],
+    ["maquina_sem_contato", null, "queda"],
+    ["reinicio_servidor", null, "queda"],
+    ["executor_indisponivel", "erro_do_bot", "queda"],
+    ["pergunta_vencida", null, "outro"],
+    ["parado_pela_pessoa", null, "outro"],
+    [null, null, "outro"],
+  ] as const)("%s + %s → %s", (mi, mf, esperado) => {
+    expect(classificarFimDaFrente(mi, mf)).toBe(esperado);
+  });
+
+  it("o varredor segue a mesma régua: recusa de espera espera, de aviso avisa sem esperar, queda retoma", () => {
+    expect(decidirPedidoParado({ ...base, ultimoMotivoFalha: "limite_do_plano" }, AGORA, legivel)).toEqual({ tipo: "esperar" });
+    expect(decidirPedidoParado({ ...base, ultimoMotivoFalha: "nao_autenticado" }, AGORA, legivel)).toEqual({ tipo: "avisar_falha", motivo: "<nao_autenticado>", semEsperar: true });
+    expect(decidirPedidoParado({ ...base, sinalDepoisDaQueda: true }, AGORA, legivel)).toEqual({ tipo: "retomar", turnoId: "ultimo", tentativa: 2 });
   });
 });

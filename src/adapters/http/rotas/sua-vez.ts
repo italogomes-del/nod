@@ -3,7 +3,7 @@ import type { Escopo } from "../../../shared/types.ts";
 import { depoisDeDispensar, dispensarDecisao } from "../../../use-cases/dispensar-decisao.ts";
 import { dispensarIncidente } from "../../../use-cases/dispensar-incidente.ts";
 import { listarSuaVez, type DepsSuaVez } from "../../../use-cases/listar-sua-vez.ts";
-import { reabrirDecisao } from "../../../use-cases/reabrir-decisao.ts";
+import { depoisDeReabrir, reabrirDecisao } from "../../../use-cases/reabrir-decisao.ts";
 import type { Rota } from "../roteador.ts";
 
 /**
@@ -50,7 +50,15 @@ export function criarRotasSuaVez(comDeps: ComDeps): Rota[] {
           await deps.repos.events.gravarComOutbox(r.events);
           return r;
         });
-        const corpo: RespostaMutacao = { ok: true, ids: { decisaoId: saida.data.decisao.id } };
+        // NOD-282 (G7): reabriu a decisora designada — a sincronia da task é da DONA (owner = pessoa), numa transação dela.
+        const reaberta = saida.data.decisao;
+        if (reaberta.ownerId !== ctx.escopo.pessoaId) {
+          await comDeps({ tenantId: ctx.escopo.tenantId, pessoaId: reaberta.ownerId }, async (deps) => {
+            const r = await depoisDeReabrir(deps, { decisao: reaberta });
+            await deps.repos.events.gravarComOutbox(r.events);
+          });
+        }
+        const corpo: RespostaMutacao = { ok: true, ids: { decisaoId: reaberta.id } };
         ctx.json(200, corpo);
       },
     },

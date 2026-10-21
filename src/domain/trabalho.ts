@@ -1,3 +1,4 @@
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { CapacidadesHarness } from "../contracts/harness.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
@@ -280,6 +281,8 @@ export type FatosTrabalho = {
    * turno terminal. Sem turno vivo, o trabalho falhou com o motivo `pergunta_vencida` — não "terminou" com a pergunta.
    */
   perguntaVencida?: boolean;
+  /** NOD-282 (G5): com `perguntaVencida`, o tipo da decisão que venceu (a aprovação tem texto próprio no resumo). */
+  vencidaTipo?: TipoDecisao;
 };
 
 /** NOD-264 (C21): o motivo da frente que acabou porque a pergunta à pessoa venceu sem resposta. */

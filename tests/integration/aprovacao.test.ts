@@ -92,3 +92,78 @@ describeIntegracao("aprovação em lista tipada: pedir → decidir → executar 
     });
   });
 });
+
+describeIntegracao("NOD-282 (G6): a ação que já saiu numa decisão posterior da mesma faixa não roda de novo", () => {
+  it("o card antigo aprovado depois não chama o conector; com argumentos diferentes, chama; no card de 2, roda só o que falta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const email = await repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+      await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
+      const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
+      await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: consentimento?.id ?? "" });
+      const chamadas: ChamadaConector[] = [];
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ chamadas }), trx });
+      let minuto = 0;
+      const pedir = async (textos: string[]) => {
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+        await repos.turnos.assentar(turno!.id, { estado: "concluido" });
+        const r = await pedirAprovacao(deps, { turnoId: turno!.id, agenteId, conversaId, resumo: `enviar ${textos.join(", ")}`, itens: textos.map((t) => ({ texto: t, destino: destino(t) })) });
+        if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+        // Tudo roda numa transação (o now() é o mesmo): a ordem de criação vem do relógio do teste.
+        await trx`update decisoes set criado_em = now() + make_interval(mins => ${minuto++}) where id = ${r.data.decisao_id}`;
+        return r.data.decisao_id;
+      };
+      const antiga = await pedir(["ana"]);
+      const dupla = await pedir(["ana", "zeca"]);
+      const outra = await pedir(["bia"]);
+      const nova = await pedir(["ana"]);
+      await decidir(deps, { decisaoId: nova });
+      expect(chamadas.map((c) => c.args.texto)).toEqual(["ana"]);
+
+      const r = await decidir(deps, { decisaoId: antiga });
+      expect(chamadas).toHaveLength(1);
+      expect((await repos.itensAprovacao.listar(antiga)).map((i) => i.desfecho)).toEqual(["ja_executado"]);
+      expect(r.data.turnoRetomadaId).toBeNull();
+      const recibo = (await repos.mensagens.listarDaConversa(conversaId, 500)).find((m) => m.kind === "resultado_aprovacao" && m.payload?.kind === "resultado_aprovacao" && m.payload.decisaoId === antiga);
+      expect(recibo?.texto).toBe("Essa ação já foi feita.");
+
+      await decidir(deps, { decisaoId: outra });
+      expect(chamadas.map((c) => c.args.texto)).toEqual(["ana", "bia"]);
+      const d = await decidir(deps, { decisaoId: dupla });
+      expect(chamadas.map((c) => c.args.texto)).toEqual(["ana", "bia", "zeca"]);
+      expect((await repos.itensAprovacao.listar(dupla)).map((i) => i.desfecho)).toEqual(["ja_executado", "executado"]);
+      expect(d.data.turnoRetomadaId).not.toBeNull();
+
+      // A decisão anterior não conta: a "nova" não vira já executada pela "antiga".
+      expect((await repos.itensAprovacao.listar(nova)).map((i) => i.desfecho)).toEqual(["executado"]);
+    });
+  });
+
+  it("executado em outra faixa (uma task) não conta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON, { nome: "Vera" });
+      const email = await repos.conectores.criar({ nome: "Email", slug: "email", transporte: "stdio", comando: "node", declaracao: "nao-toca" });
+      await repos.conectores.registrarSonda(email?.id ?? "", { ok: true, catalogo: [{ nome: "enviar", descricao: "envia", schema: { type: "object" }, readOnlyHint: false }], agora: Date.now() });
+      const consentimento = await repos.mensagens.criar({ conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "consentimento", texto: "ok", confianca: "confiavel" });
+      await repos.concessoes.conceder({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", mensagemId: consentimento?.id ?? "" });
+      const chamadas: ChamadaConector[] = [];
+      const deps = depsSobre(repos, MARLON, { services: servicosDeTeste({ chamadas }), trx });
+      const pedir = async (minuto: number, trabalhoId?: string) => {
+        const turno = await repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m" });
+        if (trabalhoId) await trx`update turnos set trabalho_id = ${trabalhoId} where id = ${turno!.id}`;
+        await repos.turnos.assentar(turno!.id, { estado: "concluido" });
+        const r = await pedirAprovacao(deps, { turnoId: turno!.id, agenteId, conversaId, resumo: "enviar ana", itens: [{ texto: "ana", destino: destino("ana") }] });
+        if (r.data.estado !== "pendente") throw new Error("esperava pendente");
+        await trx`update decisoes set criado_em = now() + make_interval(mins => ${minuto}) where id = ${r.data.decisao_id}`;
+        return r.data.decisao_id;
+      };
+      const [task] = await trx<{ id: string }[]>`insert into trabalhos (tenant_id, owner_id, agente_id, conversa_id, titulo, origem, estado) values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${agenteId}, ${conversaId}, 'T', 'pessoa', 'rodando') returning id`;
+      const daConversa = await pedir(0);
+      const daTask = await pedir(1, task!.id);
+      await decidir(deps, { decisaoId: daTask });
+      await decidir(deps, { decisaoId: daConversa });
+      expect(chamadas).toHaveLength(2);
+      expect((await repos.itensAprovacao.listar(daConversa)).map((i) => i.desfecho)).toEqual(["executado"]);
+    });
+  });
+});

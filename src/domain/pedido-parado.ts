@@ -105,6 +105,25 @@ export function ehQueda(motivo: string | null): boolean {
 }
 
 /**
+ * NOD-282 (G4): como o último turno de uma frente (ou de um pedido a colega) acabou, num lugar só — o fecho do lote
+ * (retorno-do-lote.ts) e o varredor (decidirPedidoParado) leem a mesma classificação:
+ * - `recusa_aviso`: recusado no despacho porque a IA não está instalada ou sem login (MOTIVOS_FALHA_DE_AVISO_UNICO);
+ * - `recusa_espera`: recusado no despacho esperando a cota ou a conta (MOTIVOS_FALHA_DE_ESPERA);
+ * - `queda`: caiu por infraestrutura (MOTIVOS_DE_QUEDA) sem um `motivo_falha` de recusa;
+ * - `outro`: o resto (nenhum motivo, pergunta vencida, erro do bot…).
+ */
+export type FimDaFrente = "queda" | "recusa_aviso" | "recusa_espera" | "outro";
+
+export function classificarFimDaFrente(motivoInterrupcao: string | null, motivoFalha: string | null): FimDaFrente {
+  if (motivoInterrupcao === "executor_indisponivel" && motivoFalha) {
+    if ((MOTIVOS_FALHA_DE_AVISO_UNICO as readonly string[]).includes(motivoFalha)) return "recusa_aviso";
+    if ((MOTIVOS_FALHA_DE_ESPERA as readonly string[]).includes(motivoFalha)) return "recusa_espera";
+  }
+  if (ehQueda(motivoInterrupcao) && !(motivoFalha !== null && (MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(motivoFalha))) return "queda";
+  return "outro";
+}
+
+/**
  * A decisão, sem efeito: o use case (pedidos-parados.ts) aplica. `motivoLegivel` traduz o enum (motivoEmPortugues).
  * - Terminou com fala que não voltou: entrega o resultado. Sem fala: avisa que terminou sem resposta.
  * - Parado: avisa (alguém parou a task do colega).
@@ -125,11 +144,11 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
   if (p.estadoColega === "parado") return { tipo: "avisar_falha", motivo: "a task foi parada antes de terminar", semEsperar: true };
   // NOD-309 (PR 3): a retomada na fila é esperar — ela devolve o resultado, ou a próxima queda passa pela regra de novo.
   if (p.retomadaNaFila) return { tipo: "esperar" };
-  if (p.ultimoMotivo === "executor_indisponivel" && p.ultimoMotivoFalha) {
-    if ((MOTIVOS_FALHA_DE_ESPERA as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "esperar" };
-    if ((MOTIVOS_FALHA_DE_AVISO_UNICO as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "avisar_falha", motivo: motivoLegivel(p.ultimoMotivoFalha), semEsperar: true };
-  }
-  const caiu = ehQueda(p.ultimoMotivo) && p.ultimoTurnoId !== null;
+  // NOD-282 (G4): a mesma classificação do fecho do lote (classificarFimDaFrente).
+  const fim = classificarFimDaFrente(p.ultimoMotivo, p.ultimoMotivoFalha);
+  if (fim === "recusa_espera") return { tipo: "esperar" };
+  if (fim === "recusa_aviso" && p.ultimoMotivoFalha) return { tipo: "avisar_falha", motivo: motivoLegivel(p.ultimoMotivoFalha), semEsperar: true };
+  const caiu = fim === "queda" && p.ultimoTurnoId !== null;
   // Card do "Retomar" já resolvido (a pessoa retomou, dispensou ou ele venceu): a decisão é dela, não da regra.
   const cardDecidido = p.cardRetomar !== null && !p.cardRetomar.aberto;
   if (p.estadoColega === "precisa_de_voce" && (!caiu || cardDecidido)) return { tipo: "esperar" };

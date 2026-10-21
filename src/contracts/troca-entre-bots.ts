@@ -19,7 +19,7 @@ export type PayloadPeerPedido = { kind: "peer_pedido"; conversaOrigemId: string;
  * `turnoRaizId` (o turno do pedido, a raiz da troca) — a linha deixa de ser "Respondi ao pedido de X" e entra na troca
  * como "Para X". A mensagem leva a confiança da fala entregue. Gravados antes não os têm: a troca diz "respondido".
  */
-export type PayloadPedidoRespondido = { kind: "pedido_respondido"; loteId: string; agenteId: string; nome: string; resposta?: string; turnoRaizId?: string };
+export type PayloadPedidoRespondido = { kind: "pedido_respondido"; loteId: string; agenteId: string; nome: string; resposta?: string; turnoRaizId?: string; /** NOD-282 (G7): a resposta complementar de uma frente que terminou depois do retorno. */ complementar?: true };
 
 /** definido em 2026-10-18 (PR 3): o teto do texto da resposta no `pedido_respondido` (o texto inteiro foi a quem pediu). */
 export const RESPOSTA_NA_TROCA_MAX = 2000;

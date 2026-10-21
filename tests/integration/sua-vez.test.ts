@@ -91,6 +91,59 @@ describeIntegracao("Sua vez (listar-sua-vez + reabrir-decisao)", () => {
     });
   });
 
+  it("HTTP: a decisora que não é dona reabre e a fase da dona sincroniza a frente para precisa_de_voce", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const agora = Date.now();
+      const frente = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Revisar o contrato", origem: "pessoa", forma: "frente" });
+      if (!frente) throw new Error("frente");
+      await repos.trabalhos.mudarEstado(frente.id, "falhou", agora);
+      const turno = await repos.turnos.enfileirar({
+        executor: "catcher",
+        conversaId,
+        agenteId,
+        origem: "conversa",
+        prazoEm: agora + DIA,
+        profundidade: 0,
+        entradaTexto: "revise",
+        entradaConfianca: "confiavel",
+        modelo: "sonnet",
+        trabalhoId: frente.id,
+        interrompidoCom: "maquina_sem_contato",
+      });
+      if (!turno) throw new Error("turno");
+      const decisao = await repos.decisoes.criar({
+        tipo: "aprovacao",
+        decisorId: PESSOA_ANA,
+        agenteId,
+        conversaId,
+        turnoId: turno.id,
+        prazoDecisaoEm: agora + 1_000,
+        frase: "enviar o contrato",
+      });
+      if (!decisao) throw new Error("decisão");
+      await repos.decisoes.vencerPendentes(agora + 2_000);
+
+      const escopos: Escopo[] = [];
+      const srv = await servidorDeTeste(criarRotasSuaVez(async (escopo, fn) => {
+        escopos.push(escopo);
+        await vincularEscopo(trx, escopo);
+        return fn(deps(trx, escopo, () => agora + 3_000));
+      }));
+      try {
+        const ana = await srv.entrar("ana");
+        const resposta = await srv.chamar(ana, "POST", `decisoes/${decisao.id}/reabrir`);
+        expect(resposta.status).toBe(200);
+        expect(await resposta.json()).toEqual({ ok: true, ids: { decisaoId: decisao.id } });
+        expect(escopos).toEqual([ANA, MARLON]);
+        expect((await repos.decisoes.buscar(decisao.id))?.estado).toBe("reaberta");
+        expect((await repos.trabalhos.buscar(frente.id))?.estado).toBe("precisa_de_voce");
+      } finally {
+        await srv.close();
+      }
+    });
+  });
+
   it("dispensar tira da fila a vencida (qualquer tipo) e a aberta que se responde com texto; aprovação aberta não sai pelo ×", async () => {
     await withRollback(MARLON, async (trx) => {
       const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);

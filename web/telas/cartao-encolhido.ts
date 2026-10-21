@@ -61,7 +61,7 @@ export function renderCartaoEncolhido(d: DadosDoEncolhido, mensagemId: string): 
 
 type Payload<K extends NonNullable<PayloadMensagem>["kind"]> = Extract<PayloadMensagem, { kind: K }>;
 
-const DESFECHO: Record<string, string> = { executado: "feito", retirado_pela_pessoa: "você tirou", sensivel_nao_aprovado: "dado pessoal, não aprovado", falhou_na_execucao: "falhou ao executar" };
+const DESFECHO: Record<string, string> = { executado: "feito", retirado_pela_pessoa: "você tirou", sensivel_nao_aprovado: "dado pessoal, não aprovado", falhou_na_execucao: "falhou ao executar", ja_executado: "já feita" };
 
 const maiuscula = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -83,13 +83,15 @@ function acoesHumanas(estado: Estado, nomes: readonly { slug: string; ferramenta
 
 function daAprovacao(m: Mensagem, p: Payload<"resultado_aprovacao">, estado: Estado): DadosDoEncolhido {
   const total = p.itens.length;
-  const feitos = p.itens.filter((i) => i.desfecho === "executado").length;
-  const aprovados = p.itens.filter((i) => i.desfecho === "executado" || i.desfecho === "falhou_na_execucao").length;
+  // NOD-282 (G6): "já feita" (a ação saiu numa decisão posterior) conta como feita.
+  const feita = (d: string) => d === "executado" || d === "ja_executado";
+  const feitos = p.itens.filter((i) => feita(i.desfecho)).length;
+  const aprovados = p.itens.filter((i) => feita(i.desfecho) || i.desfecho === "falhou_na_execucao").length;
   const titulo = p.frase ?? (total === 1 && p.itens[0]?.texto ? p.itens[0].texto : `${total} ${total === 1 ? "ação" : "ações"}`);
   const quem = porQuem(m, estado);
   const comTexto = p.itens.some((i) => i.texto);
   const itens = comTexto
-    ? `<ul class="recibo-itens">${p.itens.map((i) => `<li class="recibo-item-${i.desfecho === "executado" ? "ok" : i.desfecho === "falhou_na_execucao" ? "falha" : "recusa"}"><span>${esc(i.texto ?? "")}</span><small>${esc(DESFECHO[i.desfecho] ?? i.desfecho.replaceAll("_", " "))}</small></li>`).join("")}</ul>`
+    ? `<ul class="recibo-itens">${p.itens.map((i) => `<li class="recibo-item-${feita(i.desfecho) ? "ok" : i.desfecho === "falhou_na_execucao" ? "falha" : "recusa"}"><span>${esc(i.texto ?? "")}</span><small>${esc(DESFECHO[i.desfecho] ?? i.desfecho.replaceAll("_", " "))}</small></li>`).join("")}</ul>`
     : `<p class="recibo-texto">${paragrafos(m.texto)}</p>`;
   const detalhes = { rotulo: "detalhes", html: itens, chave: `encolhido-${m.id}` };
   if (aprovados === 0) return { decisaoId: p.decisaoId, titulo, resultado: `Recusado${quem}`, marca: null, anuncio: `Recusado: ${titulo}` };

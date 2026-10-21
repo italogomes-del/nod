@@ -4,7 +4,7 @@ import type { RuntimeEvent } from "../contracts/evento.ts";
 import type { ItemAprovacao } from "../contracts/item-aprovacao.ts";
 import type { DesfechoItem } from "../contracts/motivos.ts";
 import type { Turno } from "../contracts/turno.ts";
-import { redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
+import { argumentosComTextoFinal, mesmaAcao, redigirDesfechoAprovacao } from "../domain/aprovacao-desfecho.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { exigirForaDaTx } from "../db/tx.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -31,6 +31,8 @@ export type ItemAExecutar = {
   rotina?: boolean;
   /** ADR-055: comando no terminal do Mac — aprovar LIBERA; quem roda é o hook do turno, no Mac da pessoa. */
   terminal?: boolean;
+  /** NOD-282 (G6): a mesma ação já saiu numa decisão posterior da mesma faixa — não chama o conector de novo. */
+  jaFeito?: boolean;
 };
 
 export type SaidaMarcarEDecidir = { decisao: Decisao; itens: ItemAprovacao[]; aExecutar: ItemAExecutar[] };
@@ -78,6 +80,9 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   const aExecutar: ItemAExecutar[] = [];
   const dono = { tenantId: decisao.tenantId, pessoaId: decisao.ownerId };
   const rotina = decisao.turnoId ? (await rotinaDoTurno(deps.repos, decisao.turnoId)) !== null : false;
+  // NOD-282 (G6): o que já saiu depois desta decisão, na mesma faixa — só lido se algum item de app foi aprovado.
+  const deApp = (i: ItemAprovacao) => i.destino.conector !== "computador" && i.destino.conector !== "terminal";
+  const depois = decisao.tipo === "aprovacao" && itens.some((i) => i.selecionado && deApp(i)) ? await deps.repos.itensAprovacao.executadosDepois(decisao.id) : [];
   for (const item of itens) {
     if (item.destino.conector === "computador") {
       if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId || typeof item.destino.argumentos.acaoId !== "string") throw new ErroDeDominio("nao_permitido");
@@ -89,6 +94,10 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
     if (item.destino.conector === "terminal") {
       if (decisao.ownerId !== deps.escopo.pessoaId || !decisao.turnoId) throw new ErroDeDominio("nao_permitido");
       aExecutar.push({ item, conectorId: null, terminal: true });
+      continue;
+    }
+    if (item.selecionado && depois.some((feito) => mesmaAcao(feito, item))) {
+      aExecutar.push({ item, conectorId: null, dono, rotina, jaFeito: true });
       continue;
     }
     const conector = item.selecionado ? await deps.repos.conectores.buscarPorSlug(item.destino.conector) : null;
@@ -108,13 +117,7 @@ export const marcarEDecidir: CasoDeUso<EntradaDecidir, SaidaMarcarEDecidir> = as
   return { data: { decisao: decidida, itens, aExecutar }, events: [evento] };
 };
 
-/** E4.3: a ação usa o texto EDITADO — todo argumento string igual ao texto original é trocado pelo final (definido em 2026-09-16). */
-export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unknown> {
-  if (item.textoFinal === item.textoOriginal) return item.destino.argumentos;
-  const saida: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(item.destino.argumentos)) saida[k] = v === item.textoOriginal ? item.textoFinal : v;
-  return saida;
-}
+export { argumentosComTextoFinal };
 
 /**
  * Execução FORA da transação (sem banco): exatamente os itens selecionados vão ao conector
@@ -124,11 +127,15 @@ export function argumentosComTextoFinal(item: ItemAprovacao): Record<string, unk
 export async function executarItens(services: Pick<Services, "conectores" | "computadores" | "github">, aExecutar: readonly ItemAExecutar[]): Promise<DesfechoExecutado[]> {
   // NOD-263: o gh do Mac e o computador do bot também são efeito de fora — a guarda vale para o lote inteiro. Item de
   // terminal só libera o hook (nada sai daqui) e desmarcado não roda: sozinhos, não acusam.
-  if (aExecutar.some((a) => a.item.selecionado && !a.terminal)) exigirForaDaTx({ itens: aExecutar.length, decisao_id: aExecutar[0]?.item.decisaoId });
+  if (aExecutar.some((a) => a.item.selecionado && !a.terminal && !a.jaFeito)) exigirForaDaTx({ itens: aExecutar.length, decisao_id: aExecutar[0]?.item.decisaoId });
   const desfechos: DesfechoExecutado[] = [];
-  for (const { item, conectorId, computador, dono, rotina, terminal } of aExecutar) {
+  for (const { item, conectorId, computador, dono, rotina, terminal, jaFeito } of aExecutar) {
     if (!item.selecionado) {
       desfechos.push({ itemId: item.id, desfecho: item.origemSensivel ? "sensivel_nao_aprovado" : "retirado_pela_pessoa" });
+      continue;
+    }
+    if (jaFeito) {
+      desfechos.push({ itemId: item.id, desfecho: "ja_executado" });
       continue;
     }
     // ADR-055: nada roda no servidor. "executado" é o que o hook lê para soltar o comando (autorizar-comando.ts).
@@ -264,7 +271,11 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
   }
   const pessoa = await deps.repos.pessoas.buscar(deps.escopo.pessoaId);
   const aprovadorNome = pessoa?.nome ?? "A pessoa";
-  const texto = redigirDesfechoAprovacao({ itens, aprovadorNome, agora });
+  // NOD-282 (G6): tudo o que a pessoa aprovou já tinha saído numa decisão posterior — nada saiu de novo, e o bot não
+  // volta para refazer: a conversa só diz que a ação já foi feita.
+  const selecionados = itens.filter((i) => i.selecionado);
+  const tudoJaFeito = selecionados.length > 0 && selecionados.every((i) => i.desfecho === "ja_executado");
+  const texto = tudoJaFeito ? (selecionados.length === 1 ? "Essa ação já foi feita." : "Essas ações já foram feitas.") : redigirDesfechoAprovacao({ itens, aprovadorNome, agora });
   const autoria = autoriaDaPessoa(deps.escopo);
   const mensagem = await deps.repos.mensagens.criar({
     conversaId: decisao.conversaId,
@@ -284,7 +295,7 @@ export const assentarAprovacao: CasoDeUso<EntradaAssentarAprovacao, SaidaAssenta
     // aprovação dada durante a espera virava duas continuações — dez turnos da Ada em três minutos.
     const original = await deps.repos.turnos.buscarTravado(decisao.turnoId);
     const vivo = original?.estado === "despachando";
-    if (original && !vivo && (await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) === "minha") {
+    if (original && !vivo && (await deps.repos.decisoes.reivindicarContinuacao(decisao.id, "retomada", agora)) === "minha" && !tudoJaFeito) {
       const r = await enfileirarRetomada(deps, { original, prazoEm: agora + PRAZO_DECISAO_MS, entradaTexto: entradaDaAprovacao(decisao, itens, texto, original.entradaAnexos.length > 0) });
       turnoRetomadaId = r.turno?.id ?? null;
       if (r.turno && r.nova) events.push(turnoCriado(deps, r.turno.id, decisao, autoria, agora));

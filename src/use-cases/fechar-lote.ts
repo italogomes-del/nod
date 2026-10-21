@@ -3,7 +3,7 @@ import type { LoteDeFrentes } from "../contracts/frente.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ehFrente } from "../domain/frente.ts";
-import { decidirFecho, destinoDoLote, entradaDoRetorno, respostaAoColega, respostaNaTroca, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
+import { decidirFecho, destinoDoLote, entradaComplementar, entradaDoRetorno, respostaAoColega, respostaComplementarAoColega, resumoMudou, respostaNaTroca, textoFrentesTerminadas, textoPedidoRespondido, type FrenteNoFecho } from "../domain/retorno-do-lote.ts";
 import { trabalhoFinal } from "../domain/trabalho.ts";
 import { entradaDoRetornoARefazer, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { redigir } from "../domain/redacao.ts";
@@ -29,7 +29,9 @@ type DepsFecho = Pick<Deps, "repos" | "escopo" | "agora">;
 export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Promise<RuntimeEvent[]> {
   if (!ehFrente(frente) || !frente.loteId || !trabalhoFinal(frente.estado)) return [];
   const lote = await deps.repos.frentes.buscarLoteTravado(frente.loteId);
-  if (!lote || lote.devolvidoEm !== null) return [];
+  if (!lote) return [];
+  // NOD-282 (G7): o lote já voltou ao dono, e esta frente foi reaberta e terminou de novo — o retorno complementar.
+  if (lote.devolvidoEm !== null) return retornoComplementar(deps, lote, frente);
   const abertoPor = await deps.repos.turnos.buscar(lote.abertoPorTurnoId);
   if (!abertoPor) return [];
   const raiz = abertoPor.origem === "peer" ? abertoPor : await delegacaoDoTurno(deps.repos, abertoPor);
@@ -45,6 +47,71 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
     return linhaFrentesTerminadas(deps, { lote, conversaId: abertoPor.conversaId, turnoId: null, agenteId: abertoPor.agenteId, frentes: fecho.frentes });
   }
   return devolverAoDono(deps, { lote, abertoPor, total: frentes.length, frentes: fecho.frentes, fechaLote: fecho.fechaLote, cuidado: fecho.cuidado, faltam: fecho.faltam, trabalhoDoRetorno: trabalhoDoRetorno(lote, frentes) });
+}
+
+/**
+ * definido em 2026-10-20 (NOD-282, G7; decisão do Marlon de 19/10): a frente reaberta (uma aprovação vencida reaberta e
+ * decidida) que volta a final depois do lote devolvido acorda o dono UMA vez, só com ela — "o Y, que tinha ficado
+ * pendente, terminou agora". Sem botão nem card. Uma vez: o resumo arquivado na reabertura (`resumo_anterior`) é
+ * consumido aqui, sob a trava do trabalho e do lote; o fecho repetido não o acha mais. Resumo igual ao de antes: nada.
+ * Dono parado: só a linha. Lote de colega: o complemento vai a quem pediu (sem acordar o dono), com a linha
+ * `pedido_respondido` marcada complementar. Limite registrado: o complementar que cai não é refeito (sem o NOD-258).
+ */
+async function retornoComplementar(deps: DepsFecho, lote: LoteDeFrentes, frente: Trabalho): Promise<RuntimeEvent[]> {
+  const resumos = await deps.repos.frentes.consumirResumoAnterior(frente.id);
+  if (!resumos || !resumoMudou(resumos.anterior, resumos.atual)) return [];
+  const abertoPor = await deps.repos.turnos.buscar(lote.abertoPorTurnoId);
+  if (!abertoPor) return [];
+  const f = (await deps.repos.frentes.frentesDoLote(lote.id)).find((x) => x.id === frente.id);
+  if (!f) return [];
+  const raiz = abertoPor.origem === "peer" ? abertoPor : await delegacaoDoTurno(deps.repos, abertoPor);
+  const destino = destinoDoLote(raiz);
+  const agora = deps.agora();
+  if (destino === "colega" && raiz) {
+    const r = await entregarRespostaPeer(deps, { tarefaId: abertoPor.id, texto: respostaComplementarAoColega(f), doLote: lote.id }, { complementar: true });
+    if ("ignorado" in r.data) return r.events ?? [];
+    const quem = await deps.repos.agentes.buscar(r.data.remetenteAgenteId);
+    const nome = quem?.nome ?? "um colega";
+    const autoria = autoriaAgente({ agenteId: abertoPor.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
+    const deFora = f.deFora || (await deps.repos.turnos.contaminado(abertoPor.id));
+    const m = await deps.repos.mensagens.criar({
+      conversaId: abertoPor.conversaId,
+      turnoId: null,
+      autoria,
+      kind: "sistema",
+      texto: textoPedidoRespondido(nome),
+      payload: { kind: "pedido_respondido", loteId: lote.id, agenteId: r.data.remetenteAgenteId, nome, resposta: respostaNaTroca(r.data.mensagem.texto), turnoRaizId: raiz.id, complementar: true },
+      confianca: deFora ? "nao_confiavel" : "confiavel",
+    });
+    const linha = m ? [evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: abertoPor.conversaId, dados: { mensagem_id: m.id, kind: "sistema", lote_id: lote.id } })] : [];
+    return [...(r.events ?? []), ...linha];
+  }
+  const donoParado = (await deps.repos.paradas.ativa(deps.escopo.pessoaId, abertoPor.conversaId)) !== false;
+  if (donoParado) return linhaFrentesTerminadas(deps, { lote, conversaId: abertoPor.conversaId, turnoId: null, agenteId: abertoPor.agenteId, frentes: [f] });
+  const agente = await deps.repos.agentes.buscar(abertoPor.agenteId);
+  const retorno = await deps.repos.turnos.enfileirar({
+    conversaId: abertoPor.conversaId,
+    agenteId: abertoPor.agenteId,
+    origem: "retomada",
+    retomaTurnoId: abertoPor.id,
+    trabalhoId: trabalhoDoRetorno(lote, [f]),
+    prazoEm: agora + PRAZO_DECISAO_PADRAO_MS,
+    profundidade: abertoPor.profundidade,
+    entradaTexto: entradaComplementar(f),
+    entradaConfianca: abertoPor.entradaConfianca,
+    sobProcuracaoDe: abertoPor.sobProcuracaoDe ?? null,
+    modelo: agente?.modelo ?? abertoPor.modelo,
+    harness: agente ? agente.harness : abertoPor.harness,
+    executor: abertoPor.executor,
+    decididoPor: RETORNO_DO_LOTE,
+  });
+  if (!retorno) return [];
+  if (f.deFora || (await deps.repos.turnos.contaminado(abertoPor.id))) await deps.repos.turnos.contaminar(retorno.id, agora);
+  const autoria = autoriaAgente({ agenteId: abertoPor.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
+  return [
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: abertoPor.conversaId, turnoId: retorno.id, dados: { origem: retorno.origem, agente_id: abertoPor.agenteId, lote_id: lote.id } }),
+    ...(await linhaFrentesTerminadas(deps, { lote, conversaId: abertoPor.conversaId, turnoId: retorno.id, agenteId: abertoPor.agenteId, frentes: [f] })),
+  ];
 }
 
 /**

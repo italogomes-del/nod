@@ -204,6 +204,20 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   avisa. A web relê `trabalhos` pela janela de 1 s e copia o dono lido para a conversa do bot (a linha acima do campo e a
   barra leem o dela).
 
+## Emenda (2026-10-20, NOD-282) — a frente chega certa ao dono
+
+- **Recusa no despacho.** A frente recusada sem login ou sem a IA na máquina (`nao_autenticado`, `motor_ausente`) volta
+  ao dono na hora, só com ela e a pergunta de reconexão; a recusa de espera (`limite_do_plano`, `sem_conta`) não volta
+  sozinha: espera a cota ou a conta, como o pedido a colega (NOD-274). Fecho e varredor seguem a mesma régua
+  (`classificarFimDaFrente`).
+- **Aprovação vencida.** A frente fecha falhou com o texto da aprovação ("o pedido de aprovação venceu sem resposta"); o
+  motivo técnico continua `pergunta_vencida`.
+- **Ação já executada.** Na aprovação decidida tarde, o item cuja ação igual (conector, ferramenta, argumentos) já saiu
+  numa decisão posterior da mesma faixa fecha `ja_executado`, sem chamar o conector; os demais itens rodam.
+- **Retorno complementar.** A frente reaberta (aprovação vencida reaberta) que volta a final depois do lote devolvido
+  acorda o dono uma vez, só com ela ("que tinha ficado pendente"), sem botão nem card; no lote de colega, o complemento
+  vai a quem pediu. Resumo igual ao de antes: nada. Limite: o complementar que cai não é refeito.
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é

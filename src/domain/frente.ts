@@ -1,5 +1,6 @@
 import type { FormaTrabalho, ResumoFrente } from "../contracts/frente.ts";
 import type { CapacidadesHarness } from "../contracts/harness.ts";
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { ErroResumo } from "./resumo-da-frente.ts";
 
@@ -147,9 +148,17 @@ function cortar(texto: string): string {
 /** NOD-264 (C21): o texto do motivo `pergunta_vencida`, no resumo e no retorno do lote. */
 export const TEXTO_PERGUNTA_VENCIDA = "a pergunta à pessoa venceu sem resposta";
 
-export function resumoSemChamada(p: { estado: EstadoTrabalho; ultimaFala: string | null; perguntaVencida?: boolean }): ResumoFrente {
+/** NOD-282 (G5): o texto do mesmo motivo quando o que venceu foi um pedido de aprovação. */
+export const TEXTO_APROVACAO_VENCIDA = "o pedido de aprovação venceu sem resposta";
+
+/** NOD-282 (G5): o texto da decisão que venceu, pelo tipo dela (sem tipo: o da pergunta, o de antes). */
+export function textoDaDecisaoVencida(tipo: TipoDecisao | null | undefined): string {
+  return tipo === "aprovacao" ? TEXTO_APROVACAO_VENCIDA : TEXTO_PERGUNTA_VENCIDA;
+}
+
+export function resumoSemChamada(p: { estado: EstadoTrabalho; ultimaFala: string | null; perguntaVencida?: boolean; vencidaTipo?: TipoDecisao | null }): ResumoFrente {
   // NOD-264 (C21): a pergunta venceu sem resposta — o resumo leva o motivo, nunca a pergunta (a última fala é ela).
-  if (p.estado === "falhou" && p.perguntaVencida) return { feito: `A frente parou: ${TEXTO_PERGUNTA_VENCIDA}.`, falta: "Decidir com a pessoa se abre a frente de novo." };
+  if (p.estado === "falhou" && p.perguntaVencida) return { feito: `A frente parou: ${textoDaDecisaoVencida(p.vencidaTipo)}.`, falta: "Decidir com a pessoa se abre a frente de novo." };
   const fala = p.ultimaFala && p.ultimaFala.trim() !== "" ? cortar(p.ultimaFala) : null;
   if (p.estado === "falhou") {
     return { feito: fala ? `A frente falhou antes de devolver o resumo. Última fala: ${fala}` : "A frente falhou antes de devolver o resumo.", falta: "Conferir o que ficou pela metade e decidir se abre de novo." };

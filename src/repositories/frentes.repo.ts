@@ -1,3 +1,4 @@
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { LoteDeFrentes, ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA, type PedidoParado } from "../domain/pedido-parado.ts";
@@ -51,8 +52,14 @@ export type FrenteDoLote = {
   terminadoEm: number | null;
   /** Um turno da frente leu conteúdo de fora ou nasceu não confiável: o retorno do lote nasce marcado. */
   deFora: boolean;
-  /** definido em 2026-10-12 (I3): o motivo cru do último turno terminal dela (falha, ou interrupção); null = nenhum. */
-  motivo: string | null;
+  /**
+   * definido em 2026-10-12 (I3), revisto pela NOD-282 (G4): os motivos crus do último turno terminal dela, separados —
+   * `pergunta_vencida` no lugar da interrupção quando a última decisão dela venceu (NOD-264); null = nenhum.
+   */
+  motivoInterrupcao: string | null;
+  motivoFalha: string | null;
+  /** NOD-282 (G5): o tipo da decisão vencida (com `pergunta_vencida`); null = nenhuma. */
+  vencidaTipo: TipoDecisao | null;
   /** definido em 2026-10-12 (I9): quantos turnos dela caíram por infraestrutura (o retorno diz "caiu 3 vezes"). */
   quedas: number;
 };
@@ -108,29 +115,59 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
       return r.count === 1;
     },
 
+    /**
+     * NOD-282 (G7): a frente que já tinha voltado ao dono foi reaberta — o resumo de antes fica em `resumo_anterior` (o
+     * vazio `{}` quando ela não tinha resumo) e o atual zera, para a volta a final ganhar o resumo novo.
+     */
+    async arquivarResumo(trabalhoId: string): Promise<boolean> {
+      const r = await conn`
+        update trabalhos set resumo_anterior = coalesce(resumo, '{}'::jsonb), resumo = null
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${trabalhoId} and forma = 'frente'`;
+      return r.count === 1;
+    },
+
+    /**
+     * NOD-282 (G7): consome o resumo arquivado na reabertura (uma vez: a segunda chamada devolve null) e devolve os dois,
+     * o de antes e o atual. É o que deixa o retorno complementar sair uma vez só.
+     */
+    async consumirResumoAnterior(trabalhoId: string): Promise<{ anterior: ResumoFrente | Record<string, never>; atual: ResumoFrente | null } | null> {
+      const [l] = await conn<{ anterior: ResumoFrente | Record<string, never>; atual: ResumoFrente | null }[]>`
+        update trabalhos t set resumo_anterior = null
+        from (select id, resumo_anterior from trabalhos where tenant_id = ${escopo.tenantId} and id = ${trabalhoId}) a
+        where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.id = a.id and t.resumo_anterior is not null
+        returning a.resumo_anterior as anterior, t.resumo as atual`;
+      return l ?? null;
+    },
+
     /** As frentes do lote, na ordem em que nasceram (pelo índice `trabalhos_por_lote`). */
     async frentesDoLote(loteId: string): Promise<FrenteDoLote[]> {
-      const linhas = await conn<{ id: string; titulo: string; estado: EstadoTrabalho; resumo: ResumoFrente | null; terminado_em: Date | null; de_fora: boolean; motivo: string | null; quedas: number }[]>`
-        select w.id, w.titulo, w.estado, w.resumo, w.terminado_em,
+      const linhas = await conn<{ id: string; titulo: string; estado: EstadoTrabalho; resumo: ResumoFrente | null; terminado_em: Date | null; de_fora: boolean; vencida_tipo: TipoDecisao | null; motivo_interrupcao: string | null; motivo_falha: string | null; quedas: number }[]>`
+        select v.*,
+          case when v.vencida_tipo is not null then 'pergunta_vencida' else v.ultimo_interrupcao end as motivo_interrupcao,
+          case when v.vencida_tipo is not null then null else v.ultimo_falha end as motivo_falha
+        from (select w.id, w.titulo, w.estado, w.resumo, w.terminado_em, w.criado_em,
           (w.origem = 'colega' or exists (select 1 from turnos x where x.tenant_id = w.tenant_id and x.trabalho_id = w.id
             and (x.contaminado_em is not null or x.entrada_confianca <> 'confiavel'))) as de_fora,
           -- NOD-264 (C21): a frente que falhou porque a pergunta à pessoa venceu leva esse motivo (nunca a pergunta).
-          case when w.estado = 'falhou' and coalesce((select d.estado = 'vencida' and d.turno_id = (select u.id from turnos u
+          -- NOD-282 (G5): e o tipo da decisão vencida (a aprovação tem texto próprio).
+          case when w.estado = 'falhou' then (select case when d.estado = 'vencida' and d.turno_id = (select u.id from turnos u
                 where u.tenant_id = w.tenant_id and u.trabalho_id = w.id and u.estado in ('concluido', 'interrompido')
-                  and coalesce(u.motivo_interrupcao::text, '') <> 'absorvido' order by u.criado_em desc, u.id desc limit 1)
+                  and coalesce(u.motivo_interrupcao::text, '') <> 'absorvido' order by u.criado_em desc, u.id desc limit 1) then d.tipo end
               from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
               where d.tenant_id = w.tenant_id and t.trabalho_id = w.id and d.tipo <> 'retomar_turno'
-              order by d.criado_em desc, d.id desc limit 1), false) then 'pergunta_vencida'
-          else (select coalesce(x.motivo_falha::text, x.motivo_interrupcao::text) from turnos x
-            where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('concluido', 'interrompido')
-            order by x.criado_em desc, x.id desc limit 1) end as motivo,
+              order by d.criado_em desc, d.id desc limit 1) end as vencida_tipo,
+          -- NOD-282 (G4): os dois motivos separados (o coalesce escondia a recusa no despacho do fecho).
+          x.motivo_interrupcao::text as ultimo_interrupcao, x.motivo_falha::text as ultimo_falha,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas
         from trabalhos w
-        where w.tenant_id = ${escopo.tenantId} and w.lote_id = ${loteId}
-        order by w.criado_em, w.id`;
-      return linhas.map((l) => ({ id: l.id, titulo: l.titulo, estado: l.estado, resumo: l.resumo, terminadoEm: msOuNull(l.terminado_em), deFora: l.de_fora, motivo: l.motivo, quedas: l.quedas }));
+        left join lateral (select x.motivo_interrupcao, x.motivo_falha from turnos x
+          where x.tenant_id = w.tenant_id and x.trabalho_id = w.id and x.estado in ('concluido', 'interrompido')
+          order by x.criado_em desc, x.id desc limit 1) x on true
+        where w.tenant_id = ${escopo.tenantId} and w.lote_id = ${loteId}) v
+        order by v.criado_em, v.id`;
+      return linhas.map((l) => ({ id: l.id, titulo: l.titulo, estado: l.estado, resumo: l.resumo, terminadoEm: msOuNull(l.terminado_em), deFora: l.de_fora, motivoInterrupcao: l.motivo_interrupcao, motivoFalha: l.motivo_falha, vencidaTipo: l.vencida_tipo, quedas: l.quedas }));
     },
 
     /**

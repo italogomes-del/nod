@@ -212,6 +212,26 @@ export function itensAprovacaoRepo(conn: Conn, escopo: Escopo) {
       return l ? paraItem(l) : null;
     },
 
+    /**
+     * NOD-282 (G6): os itens que SAÍRAM (desfecho executado) em decisões criadas depois desta, na mesma conversa e na mesma
+     * faixa — o trabalho do turno de cada decisão, nulo = a conversa (o padrão de fechar-gemeas.ts). A comparação da ação
+     * (mesmaAcao) é do domínio; aqui só o recorte.
+     */
+    async executadosDepois(decisaoId: string): Promise<ItemAprovacao[]> {
+      const linhas = await conn<Linha[]>`
+        select ${conn.unsafe(COLUNAS.split(", ").map((c) => `i.${c}`).join(", "))}
+        from decisoes base
+        left join turnos tb on tb.tenant_id = base.tenant_id and tb.id = base.turno_id
+        join decisoes d on d.tenant_id = base.tenant_id and d.conversa_id = base.conversa_id and d.id <> base.id and d.criado_em > base.criado_em
+        left join turnos td on td.tenant_id = d.tenant_id and td.id = d.turno_id
+        join itens_aprovacao i on i.tenant_id = d.tenant_id and i.decisao_id = d.id
+        where base.tenant_id = ${escopo.tenantId} and base.id = ${decisaoId} and i.desfecho = 'executado'
+          and td.trabalho_id is not distinct from tb.trabalho_id
+        order by d.criado_em, i.idx
+        limit 200`;
+      return linhas.map(paraItem);
+    },
+
     async registrarDesfecho(id: string, desfecho: DesfechoItem): Promise<ItemAprovacao | null> {
       const [l] = await conn<Linha[]>`
         update itens_aprovacao set desfecho = ${desfecho} where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${id} returning ${conn.unsafe(COLUNAS)}`;

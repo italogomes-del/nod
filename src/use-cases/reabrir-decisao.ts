@@ -4,6 +4,7 @@ import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import type { DepsSuaVez } from "./listar-sua-vez.ts";
 import type { CasoDeUso } from "./tipos.ts";
+import { sincronizarDasDecisoes } from "./trabalhos.ts";
 
 /** definido em 2026-09-16: reabrir dá o mesmo prazo de decisão padrão do produto (24 h, NOD_PRAZO_DECISAO_MS do .env.example). */
 export const PRAZO_REABERTURA_MS = 24 * 60 * 60 * 1000;
@@ -52,7 +53,15 @@ export async function reabrirDecisao(deps: DepsSuaVez, input: EntradaReabrir): P
     turnoId: reaberta.turnoId,
     dados: { decisao_id: reaberta.id, tipo: reaberta.tipo, reaberta: true, prazo_decisao_em: reaberta.prazoDecisaoEm },
   };
-  return { data: { decisao: reaberta }, events: [evento] };
+  // NOD-282 (G7): a task do turno relê o estado (a frente que falhou pela aprovação vencida volta a precisar de você). Na
+  // transação da dona; reaberta pela decisora, a rota roda esta fase como a dona (depoisDeReabrir).
+  const sincronia = reaberta.ownerId === deps.escopo.pessoaId ? await sincronizarDasDecisoes(deps, [reaberta]) : [];
+  return { data: { decisao: reaberta }, events: [evento, ...sincronia] };
+}
+
+/** NOD-282 (G7): a fase da dona depois de a decisora reabrir — a task do turno relê o estado. */
+export async function depoisDeReabrir(deps: DepsSuaVez, input: { decisao: Decisao }): Promise<{ events: RuntimeEvent[] }> {
+  return { events: await sincronizarDasDecisoes(deps, [input.decisao]) };
 }
 
 export const reabrirDecisaoComoCaso: CasoDeUso<EntradaReabrir, { decisao: Decisao }> = reabrirDecisao;

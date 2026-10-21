@@ -3,11 +3,12 @@ import { expect, it } from "vitest";
 import type { Turno } from "../../src/contracts/turno.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
-import { INSTRUCAO_DO_RETORNO } from "../../src/domain/retorno-do-lote.ts";
+import { INSTRUCAO_DO_RETORNO, PERGUNTA_DA_RECONEXAO } from "../../src/domain/retorno-do-lote.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { fecharLoteSePronto } from "../../src/use-cases/fechar-lote.ts";
 import { abrirFrentes, devolverResumo } from "../../src/use-cases/frentes.ts";
 import { parar } from "../../src/use-cases/parar.ts";
+import { reabrirDecisao } from "../../src/use-cases/reabrir-decisao.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
 import { criarTrabalho, pararTrabalho, sincronizarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { contexto, depsSobre } from "../helpers/deps-l7.ts";
@@ -214,6 +215,143 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
         expect(plano.entrada.sessaoCli, trabalhoDoLote).toBe("sessao-da-conversa");
         await m.repos.turnos.assentar(retorno!.id, { estado: "concluido" });
       }
+    });
+  });
+});
+
+describeIntegracao("frentes: NOD-282 (G4/G5) — a recusa e a aprovação vencida chegam certas ao dono", () => {
+  const recusar = async (m: Awaited<ReturnType<typeof montar>>, id: string, motivoFalha: "nao_autenticado" | "limite_do_plano") => {
+    const t = await m.turnoDa(id);
+    await m.repos.turnos.assentar(t.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel", motivoFalha });
+    return sincronizarTrabalho(m.deps, id);
+  };
+
+  it("sem login na máquina: a frente volta ao dono na hora, com a pergunta de reconexão e o motivo certo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 2));
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      await recusar(m, ids[0]!, "nao_autenticado");
+      const [retorno, ...mais] = await m.retomadasDe(dono);
+      expect(mais).toHaveLength(0);
+      expect(retorno!.entradaTexto).toContain(PERGUNTA_DA_RECONEXAO);
+      const json = JSON.parse(retorno!.entradaTexto.split("\n")[1]!) as Record<string, unknown>[];
+      expect(json).toHaveLength(1);
+      expect(json[0]).toMatchObject({ titulo: "Login no Safari", estado: "falhou" });
+      expect(json[0]!.motivo).not.toBe("a frente falhou");
+      expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toBeNull();
+    });
+  });
+
+  it("sem cota (recusa de espera): nada volta antes das outras", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono, TRES.slice(0, 2));
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      await recusar(m, ids[0]!, "limite_do_plano");
+      expect(await m.retomadasDe(dono)).toHaveLength(0);
+    });
+  });
+
+  it("aprovação vencida: a frente fecha falhou com o texto da aprovação, não o da pergunta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono, TRES.slice(0, 1));
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const t = await m.turnoDa(ids[0]!);
+      const d = (await m.repos.decisoes.criar({ tipo: "aprovacao", agenteId: t.agenteId, conversaId: t.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() - 1_000, frase: "Posso publicar?" }))!;
+      await m.repos.turnos.assentar(t.id, { estado: "concluido" });
+      await trx`update decisoes set estado = 'vencida' where id = ${d.id}`;
+      await sincronizarTrabalho(m.deps, ids[0]!);
+      expect((await m.repos.trabalhos.buscar(ids[0]!))?.estado).toBe("falhou");
+      const [retorno] = await m.retomadasDe(dono);
+      const json = JSON.parse(retorno!.entradaTexto.split("\n")[1]!) as Record<string, unknown>[];
+      expect(json[0]).toMatchObject({ estado: "falhou", motivo: "o pedido de aprovação venceu sem resposta" });
+      expect(JSON.stringify(json[0])).not.toContain("pergunta");
+    });
+  });
+});
+
+describeIntegracao("frentes: NOD-282 (G7) — a frente reaberta depois do lote devolvido volta uma vez, só com ela", () => {
+  /** A frente única do lote falha pela aprovação vencida (o lote volta ao dono) e a pessoa reabre a aprovação. */
+  const vencerEReabrir = async (m: Awaited<ReturnType<typeof montar>>, dono: Turno) => {
+    const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 1));
+    const id = ids[0]!;
+    await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+    const t = await m.turnoDa(id);
+    const d = (await m.repos.decisoes.criar({ tipo: "aprovacao", agenteId: t.agenteId, conversaId: t.conversaId, turnoId: t.id, prazoDecisaoEm: Date.now() - 1_000, frase: "Posso publicar?" }))!;
+    await m.repos.turnos.assentar(t.id, { estado: "concluido" });
+    await m.repos.decisoes.vencerPendentes(Date.now());
+    await sincronizarTrabalho(m.deps, id);
+    expect((await m.repos.frentes.buscarLote(loteId))?.devolvidoEm).toEqual(expect.any(Number));
+    await reabrirDecisao(m.deps, { decisaoId: d.id });
+    expect((await m.repos.trabalhos.buscar(id))?.estado).toBe("precisa_de_voce");
+    return { loteId, id, decisaoId: d.id };
+  };
+
+  it("reaberta e decidida: o dono recebe UM complemento, só com ela; repetir o fecho ou o sync não duplica", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { id, decisaoId } = await vencerEReabrir(m, dono);
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+
+      await m.repos.frentes.gravarResumo(id, { feito: "Publiquei a página" });
+      await trx`update decisoes set estado = 'decidida' where id = ${decisaoId}`;
+      await sincronizarTrabalho(m.deps, id);
+      expect((await m.repos.trabalhos.buscar(id))?.estado).toBe("terminado");
+      const [, complemento, ...mais] = await m.retomadasDe(dono);
+      expect(mais).toHaveLength(0);
+      expect(complemento!.entradaTexto).toContain('A frente "Login no Safari", que tinha ficado pendente, terminou agora.');
+      const json = JSON.parse(complemento!.entradaTexto.split("\n")[1]!) as Record<string, unknown>[];
+      expect(json).toEqual([expect.objectContaining({ titulo: "Login no Safari", estado: "terminado", feito: "Publiquei a página" })]);
+      expect((await m.linhas(m.ada.conversaId, "frentes_terminadas")).map((l) => l.texto)).toEqual(["A frente Login no Safari falhou", "A frente Login no Safari terminou"]);
+
+      expect(await fecharLoteSePronto(m.deps, (await m.repos.trabalhos.buscar(id))!)).toEqual([]);
+      await sincronizarTrabalho(m.deps, id);
+      expect(await m.retomadasDe(dono)).toHaveLength(2);
+    });
+  });
+
+  it("reaberta e vencida de novo, com o mesmo resumo: nada volta", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { id } = await vencerEReabrir(m, dono);
+      await trx`update decisoes set estado = 'vencida' where id in (select id from decisoes where turno_id in (select id from turnos where trabalho_id = ${id}))`;
+      await sincronizarTrabalho(m.deps, id);
+      expect((await m.repos.trabalhos.buscar(id))?.estado).toBe("falhou");
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+    });
+  });
+
+  it("lote de colega: o complemento vai a quem pediu, com a linha marcada complementar, sem turno no dono", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const bia = await agenteComConversa(trx, MARLON, { nome: "Bia" });
+      const daAda = await m.turnoDaConversa({ texto: "peça à Bia" });
+      await m.repos.turnos.assentar(daAda.id, { estado: "concluido" });
+      const pedido = await pedirABot(m.deps, { ...contexto(m.ada.agenteId, m.ada.conversaId, daAda.id), agente: "Bia", pedido: "Publique a página" });
+      if (!pedido.data.ok) throw new Error(pedido.data.instrucao);
+      const triagem = (await m.repos.turnos.buscar(pedido.data.tarefa_id))!;
+      const { id, decisaoId } = await vencerEReabrir(m, triagem);
+      expect(await m.linhas(m.ada.conversaId, "peer_ask")).toHaveLength(1);
+
+      await m.repos.frentes.gravarResumo(id, { feito: "Publiquei a página" });
+      await trx`update decisoes set estado = 'decidida' where id = ${decisaoId}`;
+      await sincronizarTrabalho(m.deps, id);
+      const respostas = await m.linhas(m.ada.conversaId, "peer_ask");
+      expect(respostas).toHaveLength(2);
+      expect(respostas[1]!.texto).toContain('Complemento: a frente "Login no Safari", que tinha ficado pendente, terminou agora.');
+      expect(respostas[1]!.texto).toContain("Publiquei a página");
+      expect(await m.retomadasDe(triagem)).toHaveLength(0);
+      const linhas = await m.linhas(bia.conversaId, "pedido_respondido");
+      expect(linhas.map((l) => (l.payload as { complementar?: true } | null)?.complementar ?? false)).toEqual([false, true]);
+      await sincronizarTrabalho(m.deps, id);
+      expect(await m.linhas(m.ada.conversaId, "peer_ask")).toHaveLength(2);
     });
   });
 });

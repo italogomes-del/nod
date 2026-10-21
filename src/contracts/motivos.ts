@@ -63,7 +63,7 @@ export type MotivoFalha = (typeof MOTIVOS_FALHA)[number];
 export const MOTIVOS_LOCALIDADE = ["tudo_local_nesta_rodada", "motor_ausente"] as const;
 export type MotivoLocalidade = (typeof MOTIVOS_LOCALIDADE)[number];
 
-export const DESFECHOS_ITEM = ["executado", "retirado_pela_pessoa", "sensivel_nao_aprovado", "falhou_na_execucao"] as const;
+export const DESFECHOS_ITEM = ["executado", "retirado_pela_pessoa", "sensivel_nao_aprovado", "falhou_na_execucao", "ja_executado"] as const;
 export type DesfechoItem = (typeof DESFECHOS_ITEM)[number];
 
 /**

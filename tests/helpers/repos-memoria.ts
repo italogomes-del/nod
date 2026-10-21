@@ -157,6 +157,9 @@ export type BancoMemoria = {
   lotes: (LoteDeFrentes & { tenantId: string; ownerId: string })[];
 };
 
+/** NOD-282 (G7): o resumo_anterior das frentes, por banco em memória. */
+const RESUMOS_ANTERIORES = new WeakMap<object, Map<string, ResumoFrente | Record<string, never>>>();
+
 export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escopo): Repos } {
   const banco: BancoMemoria = {
     pessoas: [],
@@ -2006,6 +2009,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async listar(decisaoId) {
         return doTenant(b.itens).filter((i) => i.decisaoId === decisaoId).sort((x, y) => x.idx - y.idx);
       },
+      async executadosDepois(decisaoId) {
+        const base = doTenant(b.decisoes).find((d) => d.id === decisaoId);
+        if (!base) return [];
+        const faixa = (turnoId: string | null) => (turnoId ? (doTenant(b.turnos).find((t) => t.id === turnoId)?.trabalhoId ?? null) : null);
+        const depois = new Set(doTenant(b.decisoes).filter((d) => d.id !== base.id && d.conversaId === base.conversaId && d.criadoEm > base.criadoEm && faixa(d.turnoId) === faixa(base.turnoId)).map((d) => d.id));
+        return doTenant(b.itens).filter((i) => depois.has(i.decisaoId) && i.desfecho === "executado");
+      },
       async aprovadoNaCadeia(turnoId, texto, arquivo) {
         const cadeia = new Set<string>();
         let atual = doTenant(b.turnos).find((t) => t.id === turnoId) ?? null;
@@ -3059,6 +3069,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
     })(),
     frentes: (() => {
       const meus = () => b.lotes.filter((l) => l.tenantId === escopo.tenantId && l.ownerId === escopo.pessoaId);
+      // NOD-282 (G7): trabalhos.resumo_anterior, guardado ao lado do banco em memória (o Trabalho não carrega a coluna).
+      const resumosAnteriores = RESUMOS_ANTERIORES.get(b) ?? new Map<string, ResumoFrente | Record<string, never>>();
+      RESUMOS_ANTERIORES.set(b, resumosAnteriores);
       const semDonoLote = ({ tenantId: _t, ownerId: _d, ...l }: LoteDeFrentes & { tenantId: string; ownerId: string }): LoteDeFrentes => ({ ...l });
       return {
         async criarLote(n: NovoLote) {
@@ -3081,9 +3094,23 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           t.resumo = resumo;
           return true;
         },
+        async arquivarResumo(trabalhoId: string) {
+          const t = doTenant(b.trabalhos).find((x) => x.id === trabalhoId && x.ownerId === escopo.pessoaId && x.forma === "frente");
+          if (!t) return false;
+          resumosAnteriores.set(t.id, t.resumo ?? {});
+          t.resumo = null;
+          return true;
+        },
+        async consumirResumoAnterior(trabalhoId: string) {
+          const t = doTenant(b.trabalhos).find((x) => x.id === trabalhoId && x.ownerId === escopo.pessoaId);
+          const anterior = t ? resumosAnteriores.get(t.id) : undefined;
+          if (!t || anterior === undefined) return null;
+          resumosAnteriores.delete(t.id);
+          return { anterior, atual: t.resumo ?? null };
+        },
         async frentesDoLote(loteId: string) {
           return doTenant(b.trabalhos).filter((t) => t.loteId === loteId).sort((x, y) => x.criadoEm - y.criadoEm)
-            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivo: null, quedas: 0 }));
+            .map((t) => ({ id: t.id, titulo: t.titulo, estado: t.estado, resumo: t.resumo ?? null, terminadoEm: t.terminadoEm, deFora: t.origem === "colega", motivoInterrupcao: null, motivoFalha: null, vencidaTipo: null, quedas: 0 }));
         },
         // ADR-099 (I9): a consulta das frentes caídas se prova no Postgres (tests/integration/frentes-caidas.test.ts).
         async frentesCaidas() {

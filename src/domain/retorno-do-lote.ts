@@ -1,10 +1,11 @@
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { ResumoFrente } from "../contracts/frente.ts";
 import type { EstadoTrabalho } from "../contracts/trabalho.ts";
 import type { OrigemTurno } from "../contracts/turno.ts";
 import { RESPOSTA_NA_TROCA_MAX } from "../contracts/troca-entre-bots.ts";
-import { ehQueda } from "./pedido-parado.ts";
+import { classificarFimDaFrente } from "./pedido-parado.ts";
 import { motivoEmPortugues } from "./redacao.ts";
-import { TEXTO_PERGUNTA_VENCIDA } from "./frente.ts";
+import { textoDaDecisaoVencida } from "./frente.ts";
 import { MOTIVO_PERGUNTA_VENCIDA, trabalhoFinal } from "./trabalho.ts";
 
 /**
@@ -34,8 +35,14 @@ export type FrenteNoFecho = {
   resumo: ResumoFrente | null;
   /** Leu conteúdo de fora (ADR-047): o retorno nasce marcado e a frente vai com `cuidado`. */
   deFora: boolean;
-  /** O motivo cru do último turno dela (motivo_falha ou motivo_interrupcao); null = nenhum. */
-  motivo?: string | null;
+  /**
+   * NOD-282 (G4): os dois motivos crus do último turno dela, separados (antes um `coalesce`, que escondia a recusa no
+   * despacho). `motivoInterrupcao` = `pergunta_vencida` quando a última decisão dela venceu (NOD-264); null = nenhum.
+   */
+  motivoInterrupcao?: string | null;
+  motivoFalha?: string | null;
+  /** NOD-282 (G5): o tipo da decisão que venceu (com `pergunta_vencida`): a aprovação tem texto próprio. */
+  vencidaTipo?: TipoDecisao | null;
   /** definido em 2026-10-12 (ADR-099, I9): quantos turnos dela caíram por infraestrutura (MOTIVOS_DE_QUEDA). */
   quedas?: number;
 };
@@ -45,8 +52,22 @@ export type FrenteNoFecho = {
  * (3 quedas, mais de 2 h, ou as máquinas não voltaram) ou não havia como retomar. É uma pergunta para a pessoa: o dono
  * acorda na hora, sem esperar as outras frentes do lote (decisão 6, "frente que precisa da pessoa pergunta na hora").
  */
-export function caiuDeVez(f: Pick<FrenteNoFecho, "estado" | "motivo">): boolean {
-  return f.estado === "falhou" && ehQueda(f.motivo ?? null);
+export function caiuDeVez(f: Pick<FrenteNoFecho, "estado" | "motivoInterrupcao" | "motivoFalha">): boolean {
+  return f.estado === "falhou" && classificarFimDaFrente(f.motivoInterrupcao ?? null, f.motivoFalha ?? null) === "queda";
+}
+
+/**
+ * NOD-282 (G4): a frente foi recusada no despacho porque a IA não está instalada ou sem login na máquina
+ * (MOTIVOS_FALHA_DE_AVISO_UNICO). Tentar de novo sem a pessoa agir falha igual: ela volta ao dono na hora, como a que caiu
+ * de vez, com a pergunta de reconexão. A recusa de espera (cota, sem conta) não entra: o varredor espera por ela.
+ */
+export function recusouDeVez(f: Pick<FrenteNoFecho, "estado" | "motivoInterrupcao" | "motivoFalha">): boolean {
+  return f.estado === "falhou" && classificarFimDaFrente(f.motivoInterrupcao ?? null, f.motivoFalha ?? null) === "recusa_aviso";
+}
+
+/** A frente que precisa da pessoa na hora: caiu de vez ou foi recusada sem volta sozinha. */
+function voltaNaHora(f: FrenteNoFecho): boolean {
+  return caiuDeVez(f) || recusouDeVez(f);
 }
 
 export type FechoDoLote =
@@ -84,19 +105,21 @@ export function decidirFecho(p: {
   // O Parar do chat para as frentes uma a uma: a linha sai uma vez, com todas, quando a última para.
   if (p.donoParado) return todas ? { acao: "so_linha", frentes: [...p.frentes] } : { acao: "nada" };
   // revisto em 2026-10-12 (I9): a frente que caiu de vez volta sozinha, na hora, como no `avisarACadaUma`.
-  const sozinha = p.avisarACadaUma || (caiuDeVez(fechou) && !todas);
+  // NOD-282 (G4): e a recusada no despacho sem a IA ou sem login, também.
+  const sozinha = p.avisarACadaUma || (voltaNaHora(fechou) && !todas);
   const volta = sozinha ? [fechou] : todas ? [...p.frentes] : null;
   if (!volta) return { acao: "nada" };
   return { acao: "dono", frentes: volta, fechaLote: todas, cuidado: volta.some((f) => f.deFora), faltam };
 }
 
 /** O motivo legível de uma frente que não terminou bem; null para a que terminou. */
-export function motivoDaFrente(f: Pick<FrenteNoFecho, "estado" | "motivo" | "quedas">): string | null {
+export function motivoDaFrente(f: Pick<FrenteNoFecho, "estado" | "motivoInterrupcao" | "motivoFalha" | "vencidaTipo" | "quedas">): string | null {
   if (f.estado === "parado") return "parada pela pessoa";
   if (f.estado !== "falhou") return null;
-  if (!f.motivo) return "a frente falhou";
-  if (f.motivo === MOTIVO_PERGUNTA_VENCIDA) return TEXTO_PERGUNTA_VENCIDA;
-  const motivo = motivoEmPortugues(f.motivo);
+  if (f.motivoInterrupcao === MOTIVO_PERGUNTA_VENCIDA) return textoDaDecisaoVencida(f.vencidaTipo ?? null);
+  const cru = f.motivoFalha ?? f.motivoInterrupcao ?? null;
+  if (!cru) return "a frente falhou";
+  const motivo = motivoEmPortugues(cru);
   return caiuDeVez(f) && (f.quedas ?? 0) > 1 ? `${motivo} (caiu ${f.quedas} vezes)` : motivo;
 }
 
@@ -128,17 +151,39 @@ const CUIDADO_NO_RETORNO = "As marcadas com cuidado leram conteúdo de fora: o t
 export const PERGUNTA_DA_QUEDA =
   "Uma frente caiu por falha de infraestrutura (a máquina ou a IA saiu do ar) e o Nod parou de retomá-la sozinho: não a reabra por conta própria. Pergunte à pessoa como seguir com pedir_a_pessoa (tipo pergunta), dizendo o motivo, com opções curtas — por exemplo \"Tentar de novo agora\", \"Seguir sem essa parte\" e \"Parar por aqui\".";
 
+/**
+ * NOD-282 (G4): a frente foi recusada no despacho porque a IA não está instalada ou a conta dela não está conectada na
+ * máquina. Tentar de novo sem reconectar falha igual: o dono pergunta à pessoa, com opções de um toque.
+ */
+export const PERGUNTA_DA_RECONEXAO =
+  "Uma frente não rodou: a IA não está instalada ou a conta dela não está conectada na máquina, e tentar de novo sem reconectar falha igual. Não a reabra por conta própria. Pergunte à pessoa com pedir_a_pessoa (tipo pergunta), dizendo o motivo e pedindo para reconectar a conta, com as opções \"Já reconectei, tentar de novo\", \"Seguir sem essa parte\" e \"Parar por aqui\".";
+
+/** O verbo da cabeça da entrada para uma frente só: caiu, não rodou (recusada no despacho) ou terminou. */
+function verboDaFrente(f: FrenteNoFecho): string {
+  return caiuDeVez(f) ? "caiu" : recusouDeVez(f) ? "não rodou" : "terminou";
+}
+
 /** A entrada da retomada do dono: o que voltou, a instrução e os resumos em JSON curto. */
 export function entradaDoRetorno(p: { frentes: readonly FrenteNoFecho[]; faltam: number; total: number }): string {
   const [unica] = p.frentes;
   const cabeca = p.frentes.length === 1 && unica && p.total > 1
-    ? `A frente "${unica.titulo}" deste pedido ${caiuDeVez(unica) ? "caiu" : "terminou"}${p.faltam > 0 ? `; ${p.faltam === 1 ? "falta 1" : `faltam ${p.faltam}`}` : "; era a última"}.`
+    ? `A frente "${unica.titulo}" deste pedido ${verboDaFrente(unica)}${p.faltam > 0 ? `; ${p.faltam === 1 ? "falta 1" : `faltam ${p.faltam}`}` : "; era a última"}.`
     : p.frentes.length === 1 && unica
-      ? `A frente que você abriu para este pedido ${caiuDeVez(unica) ? "caiu" : "terminou"}.`
+      ? `A frente que você abriu para este pedido ${verboDaFrente(unica)}.`
       : `As ${p.frentes.length} frentes que você abriu para este pedido terminaram.`;
   const cuidado = p.frentes.some((f) => f.deFora) ? ` ${CUIDADO_NO_RETORNO}` : "";
-  const pergunta = p.frentes.some(caiuDeVez) ? ` ${PERGUNTA_DA_QUEDA}` : "";
+  const pergunta = `${p.frentes.some(caiuDeVez) ? ` ${PERGUNTA_DA_QUEDA}` : ""}${p.frentes.some(recusouDeVez) ? ` ${PERGUNTA_DA_RECONEXAO}` : ""}`;
   return `[nod] ${cabeca} ${INSTRUCAO_DO_RETORNO}${cuidado}${pergunta}\n${JSON.stringify(p.frentes.map(frenteNoRetorno))}`;
+}
+
+/**
+ * NOD-282 (G7, decisão do Marlon de 2026-10-19): o retorno complementar. A frente reaberta depois de o lote já ter voltado
+ * terminou de novo: o dono acorda uma vez, só com ela, e responde só o que mudou — sem repetir o retorno anterior.
+ */
+export function entradaComplementar(f: FrenteNoFecho): string {
+  const cuidado = f.deFora ? ` ${CUIDADO_NO_RETORNO}` : "";
+  const pergunta = `${caiuDeVez(f) ? ` ${PERGUNTA_DA_QUEDA}` : ""}${recusouDeVez(f) ? ` ${PERGUNTA_DA_RECONEXAO}` : ""}`;
+  return `[nod] A frente "${f.titulo}", que tinha ficado pendente, ${verboDaFrente(f)} agora. O resultado das outras frentes deste pedido já foi entregue: responda a quem fez o pedido só o que mudou com esta, numa mensagem curta, sem repetir o retorno anterior.${cuidado}${pergunta}\n${JSON.stringify([frenteNoRetorno(f)])}`;
 }
 
 /** "3 frentes terminaram" ou "A frente X terminou/parou/falhou" (texto da linha `frentes_terminadas`). */
@@ -194,4 +239,24 @@ export function respostaNaTroca(texto: string): string {
 /** A linha na conversa do dono quando o lote de colega volta direto a quem pediu. */
 export function textoPedidoRespondido(nome: string): string {
   return `Respondi ao pedido de ${nome}`;
+}
+
+/** JSON com as chaves em ordem (o jsonb do banco não guarda a ordem). */
+function canonico(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonico).join(",")}]`;
+  if (v && typeof v === "object") return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonico((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * definido em 2026-10-20 (NOD-282, G7): o retorno complementar só sai se a frente reaberta voltou com outro resumo — o
+ * mesmo resumo de antes não tem nada de novo a contar. `{}` = ela não tinha resumo antes.
+ */
+export function resumoMudou(anterior: ResumoFrente | Record<string, never>, atual: ResumoFrente | null): boolean {
+  return canonico(atual ?? {}) !== canonico(anterior);
+}
+
+/** NOD-282 (G7): a resposta complementar a quem pediu, quando uma frente do pedido terminou depois da resposta. */
+export function respostaComplementarAoColega(f: FrenteNoFecho): string {
+  return `Complemento: a frente "${f.titulo}", que tinha ficado pendente, ${verboDaFrente(f)} agora. ${resumoEmTexto(f)}`;
 }

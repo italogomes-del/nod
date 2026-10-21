@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Agente } from "../../../src/contracts/agente.ts";
 import { FERRAMENTAS_NOD } from "../../../src/contracts/ferramentas-nod.ts";
 import type { Turno } from "../../../src/contracts/turno.ts";
-import { BRANCH_NA_FRENTE_ATUAL, branchDaFrente, CORTE_DA_ULTIMA_FALA, DONO_INTEGRA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, semLinhaDeEmpurrar, textoFrentesAbertas, tituloDoLote } from "../../../src/domain/frente.ts";
+import { BRANCH_NA_FRENTE_ATUAL, branchDaFrente, CORTE_DA_ULTIMA_FALA, DONO_INTEGRA, ehFrente, entradaDaFrente, instrucaoDoResumoInvalido, molduraDaFrente, resumoSemChamada, TEXTO_APROVACAO_VENCIDA, TEXTO_PERGUNTA_VENCIDA, semLinhaDeEmpurrar, textoFrentesAbertas, tituloDoLote } from "../../../src/domain/frente.ts";
 import { errosDoSchema } from "../../../src/domain/schema-args.ts";
 import { montarPlano, type EntradaPlano } from "../../../src/domain/plano-turno.ts";
 import { partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
@@ -191,5 +191,13 @@ describe("cada frente no próprio branch; só o dono integra (ADR-099, I4)", () 
     expect(errosDoSchema(schema, lote({ pode_empurrar: "sim" }))).not.toEqual([]);
     expect(errosDoSchema(schema, lote({ empurrar: true }))).not.toEqual([]);
     expect(schema.properties.frentes.items.properties?.pode_empurrar?.type).toBe("boolean");
+  });
+});
+
+describe("resumoSemChamada (NOD-282, G5): a decisão vencida pelo tipo", () => {
+  it("aprovação vencida leva o texto da aprovação; pergunta ou sem tipo, o da pergunta", () => {
+    expect(resumoSemChamada({ estado: "falhou", ultimaFala: "Posso enviar?", perguntaVencida: true, vencidaTipo: "aprovacao" }).feito).toBe(`A frente parou: ${TEXTO_APROVACAO_VENCIDA}.`);
+    expect(resumoSemChamada({ estado: "falhou", ultimaFala: "Qual?", perguntaVencida: true, vencidaTipo: "pergunta" }).feito).toBe(`A frente parou: ${TEXTO_PERGUNTA_VENCIDA}.`);
+    expect(resumoSemChamada({ estado: "falhou", ultimaFala: "Qual?", perguntaVencida: true }).feito).toBe(`A frente parou: ${TEXTO_PERGUNTA_VENCIDA}.`);
   });
 });

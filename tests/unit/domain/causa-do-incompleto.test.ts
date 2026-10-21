@@ -60,7 +60,7 @@ describe("C21: a pergunta à pessoa que venceu sem resposta", () => {
     expect(r.feito).toContain(TEXTO_PERGUNTA_VENCIDA);
     expect(JSON.stringify(r)).not.toContain(pergunta);
     expect(resumoSemChamada({ estado: "falhou", ultimaFala: pergunta }).feito).toContain(pergunta);
-    const frente = { id: "a", titulo: "Frente a", estado: "falhou" as const, motivo: MOTIVO_PERGUNTA_VENCIDA, quedas: 0, resumo: null };
+    const frente = { id: "a", titulo: "Frente a", estado: "falhou" as const, motivoInterrupcao: MOTIVO_PERGUNTA_VENCIDA, quedas: 0, resumo: null };
     expect(motivoDaFrente(frente)).toBe(TEXTO_PERGUNTA_VENCIDA);
     expect(TEXTO_PERGUNTA_VENCIDA).toBe("a pergunta à pessoa venceu sem resposta");
     expect(respostaAoColega([frente as never])).toContain(TEXTO_PERGUNTA_VENCIDA);

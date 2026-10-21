@@ -1,3 +1,4 @@
+import type { TipoDecisao } from "../contracts/decisao.ts";
 import type { LoteNaTela } from "../contracts/dono.ts";
 import type { MotivoInterrupcao } from "../contracts/motivos.ts";
 import type { Executor } from "../contracts/evento.ts";
@@ -402,7 +403,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
 
     /** O que decide o estado (src/domain/trabalho.ts), numa consulta. */
     async fatos(id: string): Promise<Omit<FatosTrabalho, "estadoAtual" | "iniciado"> | null> {
-      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; pergunta_vencida: boolean; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
+      const [l] = await conn<{ parando: number; despachando: number; pendentes: number; despertar: boolean; comando: boolean; esperando: boolean; decisao: boolean; colega: boolean; pergunta_vencida: boolean; vencida_tipo: TipoDecisao | null; ultimo_estado: EstadoTurno | null; ultimo_motivo: MotivoInterrupcao | null }[]>`
         select
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is not null) as parando,
           (select count(*)::int from turnos t where t.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and t.estado = 'despachando' and t.parar_solicitado_em is null) as despachando,
@@ -418,6 +419,10 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.estado in ('pendente', 'reaberta')
               and (d.tipo <> 'retomar_turno' or t.id = u.id)) as decisao,
           -- NOD-264 (C21): a última pergunta do trabalho venceu sem resposta e foi feita pelo último turno terminal.
+          -- NOD-282 (G5): o tipo dela vem junto (a aprovação vencida tem texto próprio no resumo).
+          (select case when d.estado = 'vencida' and d.turno_id = u.id then d.tipo end from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
+            where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.tipo <> 'retomar_turno'
+            order by d.criado_em desc, d.id desc limit 1) as vencida_tipo,
           coalesce((select d.estado = 'vencida' and d.turno_id = u.id from decisoes d join turnos t on t.tenant_id = d.tenant_id and t.id = d.turno_id
             where d.tenant_id = ${escopo.tenantId} and t.trabalho_id = ${id} and d.tipo <> 'retomar_turno'
             order by d.criado_em desc, d.id desc limit 1), false) as pergunta_vencida,
@@ -438,7 +443,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and coalesce(t.motivo_interrupcao::text, '') <> 'absorvido'
           order by t.criado_em desc, t.id desc limit 1
         ) u on true`;
-      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ...(l.pergunta_vencida ? { perguntaVencida: true } : {}), ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
+      return l ? { parando: l.parando, despachando: l.despachando, pendentes: l.pendentes, aguardandoDespertar: l.despertar, aguardandoComando: l.comando, esperandoOutro: l.esperando, decisaoPendente: l.decisao, aguardandoColega: l.colega, ...(l.pergunta_vencida ? { perguntaVencida: true, ...(l.vencida_tipo ? { vencidaTipo: l.vencida_tipo } : {}) } : {}), ultimo: l.ultimo_estado ? { estado: l.ultimo_estado, motivo: l.ultimo_motivo } : null } : null;
     },
 
     /** Nome de quem pediu, da rotina, a última fala e o turno vivo de cada trabalho, numa consulta. */
