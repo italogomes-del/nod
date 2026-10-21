@@ -85,7 +85,10 @@ export type PayloadLinhaLigacao = { kind: "ligacao"; ligacaoId: string; duracaoM
  * definido em 2026-10-04 (ADR-075): sobe quando muda o provedor ou o suboperador do áudio.
  * revisto em 2026-10-11 (ADR-095): 2 — o ditado no campo de mensagem também manda a fala ao Google; quem aceitou o
  * aviso da ligação (v1) vê o texto novo uma vez, no próximo ditado ou na próxima ligação.
+ * revisto em 2026-10-17 (NOD-106, emenda à ADR-075): 3 — o botão "Ouvir" manda o texto da resposta ao Google fora da
+ * ligação, e o texto v2 só falava da voz do bot "na ligação". Quem aceitou a v2 vê o aviso uma vez, no próximo
+ * ditado, ligação ou "Ouvir".
  */
-export const VERSAO_CONSENTIMENTO_VOZ = 2;
+export const VERSAO_CONSENTIMENTO_VOZ = 3;
 export const TEXTO_CONSENTIMENTO_VOZ =
-  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA); na ligação, a voz do bot também é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";
+  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA). Quando o bot fala, na ligação ou quando você ouve uma resposta, o texto vai ao Google e a voz é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";

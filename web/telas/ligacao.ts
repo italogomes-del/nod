@@ -36,9 +36,9 @@ export const VOZES: typeof VozesNod = [
 ];
 export const VELOCIDADES: typeof VelocidadesVoz = [1, 1.25, 1.5];
 /** Espelho de `VERSAO_CONSENTIMENTO_VOZ` com o tipo da origem: subir lá sem subir aqui não compila. */
-export const VERSAO_CONSENTIMENTO: typeof VersaoConsentimento = 2;
+export const VERSAO_CONSENTIMENTO: typeof VersaoConsentimento = 3;
 export const TEXTO_CONSENTIMENTO: typeof TextoConsentimento =
-  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA); na ligação, a voz do bot também é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";
+  "No ditado e na ligação, sua fala é transcrita pelo Google (nos EUA). Quando o bot fala, na ligação ou quando você ouve uma resposta, o texto vai ao Google e a voz é gerada lá. Nada é gravado: o ditado vira só o texto da sua mensagem, e da ligação fica só a transcrição em texto, que você pode apagar.";
 
 export type AgenteDaLigacao = Pick<Agente, "id" | "nome" | "cor" | "forma">;
 export type LinhaLegenda = { chave: string; autor: "pessoa" | "bot"; texto: string; final: boolean; espera: boolean };

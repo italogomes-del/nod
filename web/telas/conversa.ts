@@ -42,6 +42,7 @@ import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
 import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
 import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { TEXTO_FALHA_LEITURA } from "../lib/ouvir.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
 
@@ -64,7 +65,62 @@ function versaoMaisRecente(estado: Estado, conversaId: string, artefatoId: strin
   return n;
 }
 
+/**
+ * Ouvir uma resposta (NOD-106): só em fala de texto terminada de bot PRÓPRIO, fora de sala, sem artefato, e com a
+ * disponibilidade dizendo `ouvir: true` (ausente ou false = o botão nem é desenhado). "Próprio" é a mesma regra que
+ * busca a disponibilidade (reducer.ts, `disponibilidade:`): `ownerId === sessao.pessoaId`.
+ */
+export function podeOuvir(m: Mensagem, estado: Estado, sala: boolean): boolean {
+  if (sala || m.kind !== "texto" || m.parcial || m.payload?.kind === "artefato") return false;
+  if (m.autoria.autor_tipo !== "agente") return false;
+  const pessoaId = estado.sessao?.pessoaId;
+  if (!pessoaId || !estado.frota?.agentes.some((a) => a.id === m.autoria.autor_id && a.ownerId === pessoaId && !a.excluidoEm)) return false;
+  return estado.disponibilidadeLigacao[m.autoria.autor_id]?.ouvir === true;
+}
+
+const IC_OUVIR = {
+  ouvir: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M4 9.5h3l4.5-4v13L7 14.5H4z"/><path d="M15.5 9a4 4 0 010 6M18 6.5a7.5 7.5 0 010 11"/></svg>',
+  carregando: '<svg aria-hidden="true" class="ouvir-spin" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 2a6 6 0 106 6"/></svg>',
+  tocando: '<svg aria-hidden="true" class="ouvir-barras" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><rect x="2" y="3" width="2.4" height="10" rx="1.2"/><rect x="6.8" y="3" width="2.4" height="10" rx="1.2"/><rect x="11.6" y="3" width="2.4" height="10" rx="1.2"/></svg><svg aria-hidden="true" class="ouvir-parar" viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><rect x="3.5" y="3.5" width="9" height="9" rx="2"/></svg>',
+  info: '<svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 7.2v4"/><path d="M8 4.9v.1"/></svg>',
+} as const;
+
+/**
+ * O botão Ouvir (protótipo do Gil, 16/10). HTML à mão porque `botao()` não tem aria-busy, aria-disabled nem
+ * aria-describedby. Ocioso: alto-falante. Carregando/tocando: pílula "Parar" (o ícone diz o estado, a palavra a ação),
+ * `aria-busy` só no carregando. Ligação viva: `aria-disabled` (continua focável e mostra o motivo), NUNCA `disabled`.
+ * Nunca `aria-pressed`: o rótulo já muda, e os dois juntos fazem o leitor dizer "Parar de ouvir, pressionado".
+ */
+function botaoOuvir(m: Mensagem, estado: Estado): string {
+  const id = esc(m.id);
+  const ativa = estado.leitura?.mensagemId === m.id ? estado.leitura : null;
+  if (ativa) {
+    const carregando = ativa.fase === "carregando";
+    return `<button type="button" class="bt ouvir-ativo ouvir-${ativa.fase}" data-act="ouvir-mensagem" data-id="${id}" aria-label="Parar de ouvir" title="Parar de ouvir"${carregando ? ' aria-busy="true"' : ""}>${carregando ? IC_OUVIR.carregando : IC_OUVIR.tocando}<span>Parar</span></button>`;
+  }
+  if (estado.ligacaoViva) {
+    const dica = `dica-ouvir-${id}`;
+    return `<span class="ouvir-wrap"><button type="button" class="bt" data-act="ouvir-mensagem" data-id="${id}" aria-label="Ouvir a resposta" aria-disabled="true" aria-describedby="${dica}">${IC_OUVIR.ouvir}</button><span class="ouvir-dica" id="${dica}" role="tooltip">Desligue a ligação para ouvir</span></span>`;
+  }
+  return `<button type="button" class="bt" data-act="ouvir-mensagem" data-id="${id}" aria-label="Ouvir a resposta" title="Ouvir a resposta">${IC_OUVIR.ouvir}</button>`;
+}
+
+/** "Não deu para ouvir agora." embaixo do balão que falhou antes do primeiro som (sai em 6 s ou no próximo clique). */
+function avisoDeLeitura(m: Mensagem, estado: Estado): string {
+  return estado.falhaLeitura?.mensagemId === m.id ? `<div class="msg-aviso" role="status">${IC_OUVIR.info}${TEXTO_FALHA_LEITURA}</div>` : "";
+}
+
 // Ações na fala (ADR-042; desde 2026-10-18, ADR-113): reagir, responder, reportar e ⋯ moram em ./acoes-da-fala.ts.
+
+/**
+ * NOD-106: o Ouvir entra na barra de ações da fala (ADR-113), ANTES das outras (a ação mais comum primeiro); com a
+ * leitura ativa, a barra mostra só a pílula "Parar", para ela não pular.
+ */
+function acoesDaMensagem(m: Mensagem, estado: Estado, sala: boolean): string {
+  const ouvir = podeOuvir(m, estado, sala) ? botaoOuvir(m, estado) : "";
+  if (ouvir !== "" && estado.leitura?.mensagemId === m.id) return `<div class="msg-actions" role="group" aria-label="Ações da mensagem">${ouvir}</div>`;
+  return acoesDaFala(m, estado, ouvir);
+}
 
 // ---------------------------------------------------------------- recibos das decisões
 
@@ -399,20 +455,20 @@ export function comChipDeComando(texto: string): string {
  * Na fala do bot ele fica dentro do balão, depois do texto (protótipo "4"); no balão da pessoa (a frente da rede), embaixo
  * dele. Nos dois, antes das reações: o progresso é conteúdo da fala; a reação é sobre ela (decisão 20 do plano).
  */
-export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = false, opcoes: { etiqueta?: string; progresso?: string } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
   // na margem ele parecia de ninguém.
   if (m.payload?.kind === "artefato") {
     const bot = m.autoria.autor_tipo === "agente" ? agenteDe(estado, m.autoria.autor_id) : undefined;
-    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
+    return `<article class="message bot com-artefato" data-mensagem="${esc(m.id)}">${bot ? iconeAgente(bot, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}<div class="msg-autor"><b>${esc(bot?.nome ?? assinatura(m.autoria, nomesDe(estado)))}</b><time>${hora(m.criadoEm)}</time></div>${corpoMensagem(m, estado)}${chipsDeReacao(m, estado)}${faixaDaMensagem(m, estado)}</div></article>`;
   }
   if (m.kind !== "texto") {
     // Chat limpo (PR 4): o recibo da decisão é o cartão do pedido, encolhido com o resultado — alinhado às falas do bot,
     // como o cartão aberto estava, e não no centro como as linhas.
     const encolhido = dadosDoEncolhido(m, estado);
-    return `<div class="msg-linha${encolhido ? " msg-encolhido" : ""}" data-mensagem="${esc(m.id)}">${encolhido ? renderCartaoEncolhido(encolhido, m.id) : corpoMensagem(m, estado)}${acoesDaFala(m, estado)}${faixaDaMensagem(m, estado)}</div>`;
+    return `<div class="msg-linha${encolhido ? " msg-encolhido" : ""}" data-mensagem="${esc(m.id)}">${encolhido ? renderCartaoEncolhido(encolhido, m.id) : corpoMensagem(m, estado)}${acoesDaMensagem(m, estado, sala)}${faixaDaMensagem(m, estado)}</div>`;
   }
   const ehPessoa = m.autoria.autor_tipo === "pessoa";
   const agente = ehPessoa ? undefined : agenteDe(estado, m.autoria.autor_id);
@@ -442,14 +498,16 @@ export function renderMensagem(m: Mensagem, estado: Estado, _mostrarAutor = fals
   // do cartão da pergunta.
   const motivoTela = pergunta ? motivoDoPedidoDeTela(m.texto) : null;
   const telaAberta = motivoTela !== null && pergunta ? estadoDaPergunta(estado, estado.conversas[m.conversaId]?.mensagens ?? [], pergunta.decisaoId).tipo === "aberta" : false;
-  const classes = `message ${ehPessoa ? "you" : "bot"}${pergunta ? " pergunta" : ""}${motivoTela !== null ? " com-tela" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
+  const ouvivel = podeOuvir(m, estado, sala);
+  const lendo = estado.leitura?.mensagemId === m.id && ouvivel;
+  const classes = `message ${ehPessoa ? "you" : "bot"}${ouvivel ? " ouvivel" : ""}${lendo ? " lendo" : ""}${pergunta ? " pergunta" : ""}${motivoTela !== null ? " com-tela" : ""}${resposta ? " respondendo" : ""}${fila ? ` fila-${fila.tipo}` : ""}`;
   // O progresso vai dentro do balão do bot; no da pessoa (a rede) e no cartão da pergunta (o turno que abriu frentes e
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
   const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta) : pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
-    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaFala(m, estado)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
+    ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 

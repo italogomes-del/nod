@@ -101,13 +101,14 @@ const botaoDaBarra = (act: string, icone: string, rotulo: string, m: Mensagem, e
  * 'travou_ou_parou' do relato descreve (ADR-041), e as outras ações não cabem numa linha. Aparece no hover e também com
  * foco (`.msg-actions:focus-within`, estilos.css); no celular, num toque na fala (web/lib/gaveta-bots.ts), com 44 px.
  */
-export function acoesDaFala(m: Mensagem, estado: Estado): string {
+/** `antes`: botões que entram no começo da barra (NOD-106: o Ouvir, desenhado em conversa.ts). */
+export function acoesDaFala(m: Mensagem, estado: Estado, antes = ""): string {
   const reagir = podeReagir(m) ? botaoDaBarra("reagir-fala", ICONE_DA_FALA.reagir, "Reagir", m, ' aria-haspopup="menu" aria-expanded="false"') : "";
   const responder = podeResponder(m, estado) ? botaoDaBarra("responder-fala", ICONE_DA_FALA.responder, "Responder", m) : "";
   // ADR-041: o relato sai do besouro para a bandeira; a ação (abrirReportarBug, com o estado técnico) é a mesma.
   const reportar = botaoDaBarra("relatar-mensagem", ICONE_DA_FALA.reportar, daPessoa(m) ? "Reportar problema nesta mensagem" : "Reportar problema nesta resposta", m);
   const mais = botaoDaBarra("mais-da-fala", ICONE_DA_FALA.mais, "Mais ações", m, ' aria-haspopup="menu" aria-expanded="false"');
-  return `<div class="msg-actions" role="group" aria-label="Ações da mensagem">${reagir}${responder}${reportar}${mais}</div>`;
+  return `<div class="msg-actions" role="group" aria-label="Ações da mensagem">${antes}${reagir}${responder}${reportar}${mais}</div>`;
 }
 
 /** As reações de uma fala na janela carregada (vêm com a conversa). */

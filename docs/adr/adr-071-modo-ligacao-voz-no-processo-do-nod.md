@@ -180,6 +180,7 @@ extra).
 A voz do bot também lê uma resposta pronta do chat, sem ligação: `GET /api/t/:tenant/mensagens/:id/ouvir`. Só o
 servidor (a tela é da NOD-106). Desligado por padrão (`NOD_VOZ_LEITURA=1` liga) e com a mesma abertura das ligações
 (`NOD_LIGACAO`). A disponibilidade da ligação ganha `ouvir`, que não depende do Mac nem da IA.
+*(2026-10-17, NOD-106: a tela chegou, e o aviso de voz subiu para a versão 3 para citar o "ouvir" — ADR-075.)*
 
 - **Mesmo provedor, prioridade `previa`.** A leitura usa o `Sintetizador` das ligações e entra no limitador da cota no
   nível mais baixo, junto da prévia da voz: a ligação ao vivo sempre passa na frente.

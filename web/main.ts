@@ -95,8 +95,10 @@ import { aplicarEncolhidos, decididaNaConversa, type DecididaNestaAba } from "./
 import { itensDaRecusa } from "./lib/recusa-da-aprovacao.ts";
 import { criarEnvios, enviarUmaVez } from "./lib/envio-idempotente.ts";
 import { iniciarMotorLigacao } from "./lib/ligacao.ts";
-import { ICONE_LIGACAO, VELOCIDADES, VOZES } from "./telas/ligacao.ts";
+import { ICONE_LIGACAO, VELOCIDADES, VERSAO_CONSENTIMENTO, VOZES } from "./telas/ligacao.ts";
 import { criarTelaLigacao } from "./telas/ligacao-controle.ts";
+import { pedirConsentimentoVoz } from "./telas/consentimento-voz.ts";
+import { anuncioDaLeitura, criarTocadorDeLeitura, TEXTO_FALHA_LEITURA, type LeituraAtual, type MotivoParada } from "./lib/ouvir.ts";
 import { criarControleDitado } from "./telas/ditado-controle.ts";
 import { juntarAoCampo, textoDaFalha } from "./telas/ditado.ts";
 import { criarTelaOnboarding, guardarFocoDaCamada } from "./telas/onboarding-controle.ts";
@@ -303,6 +305,7 @@ const telaLigacao = criarTelaLigacao({
   agente: (id) => botGerido(id),
   suaVez: () => estado.suaVez,
   aoMudar: () => sincronizarLigacao(),
+  pararLeitura: () => tocador.parar("ligacao"),
   decidirPeloClique: (id, aprovar) => decidirPelaLigacao(id, aprovar),
   aoEncerrar: (l) => {
     dispatch({ tipo: "esquecer-disponibilidade-ligacao", agenteId: l.agenteId });
@@ -313,6 +316,64 @@ const telaLigacao = criarTelaLigacao({
   // Rede de segurança da ligação (2026-10-05): o "Configurar sem voz" do aviso é o mesmo do onboarding.
   configurarSemVoz: () => telaOnboarding.acoes["onboarding-sem-voz"]?.(document.body),
 });
+/**
+ * Ouvir uma resposta (definido em 2026-10-17, NOD-106): o tocador mora fora do reducer (o áudio), mas a fase vai para
+ * `estado.leitura` a cada mudança, para o re-render do SSE manter o "Parar". A região `#anuncio-leitura` diz ao leitor
+ * de tela o que mudou; o foco volta ao botão da mesma resposta quando o clique estava nele.
+ */
+const tocador = criarTocadorDeLeitura({
+  fetch: (url, init) => window.fetch(url, { ...init, credentials: "same-origin" }),
+  criarContexto: () => new AudioContext({ latencyHint: "interactive" }),
+  aoMudar: (atual, motivo) => aoMudarLeitura(atual, motivo),
+});
+let falhaLeituraTimer: number | null = null;
+function aoMudarLeitura(atual: LeituraAtual | null, motivo?: MotivoParada): void {
+  const focoNoOuvir = document.activeElement instanceof HTMLElement && document.activeElement.dataset.act === "ouvir-mensagem" ? document.activeElement.dataset.id : undefined;
+  dispatch({ tipo: "leitura-mudou", leitura: atual });
+  const anuncio = document.getElementById("anuncio-leitura");
+  const texto = anuncioDaLeitura(atual, motivo);
+  if (anuncio && texto !== null) anuncio.textContent = texto;
+  if (focoNoOuvir && document.activeElement !== document.querySelector(`[data-act="ouvir-mensagem"][data-id="${CSS.escape(focoNoOuvir)}"]`)) {
+    document.querySelector<HTMLElement>(`[data-act="ouvir-mensagem"][data-id="${CSS.escape(focoNoOuvir)}"]`)?.focus();
+  }
+}
+function limparFalhaLeitura(): void {
+  if (falhaLeituraTimer !== null) window.clearTimeout(falhaLeituraTimer);
+  falhaLeituraTimer = null;
+  if (estado.falhaLeitura) dispatch({ tipo: "leitura-mudou", leitura: estado.leitura, falha: null });
+}
+/** "Não deu para ouvir agora." embaixo do balão por 6 s (plano da Ada); o próximo clique também tira. */
+function mostrarFalhaLeitura(mensagemId: string): void {
+  if (falhaLeituraTimer !== null) window.clearTimeout(falhaLeituraTimer);
+  // O leitor de tela ouve a falha pela região viva: o role="status" do aviso nasce já preenchido e pode não ser lido.
+  const anuncio = document.getElementById("anuncio-leitura");
+  if (anuncio) anuncio.textContent = TEXTO_FALHA_LEITURA;
+  dispatch({ tipo: "leitura-mudou", leitura: estado.leitura, falha: { mensagemId } });
+  falhaLeituraTimer = window.setTimeout(() => {
+    falhaLeituraTimer = null;
+    if (estado.falhaLeitura?.mensagemId === mensagemId) dispatch({ tipo: "leitura-mudou", leitura: estado.leitura, falha: null });
+  }, 6000);
+}
+async function ouvirMensagem(mensagemId: string): Promise<void> {
+  const tenantId = estado.sessao?.tenantId;
+  if (!tenantId) return;
+  const r = await tocador.ouvir(tenantId, mensagemId);
+  if (r.ok) return;
+  if (r.motivo === "falha") return mostrarFalhaLeitura(mensagemId);
+  // Sem o aviso de voz v3: o mesmo diálogo da ligação e do ditado. O AudioContext destrava dentro do clique em "Concordo".
+  const concordou = await pedirConsentimentoVoz({ titulo: "Antes de ouvir", confirmar: "Concordo e ouvir", aoConcordar: () => tocador.destravar() });
+  if (!concordou || !api) return;
+  try {
+    await api.consentirVoz(VERSAO_CONSENTIMENTO);
+  } catch {
+    return mostrarFalhaLeitura(mensagemId);
+  }
+  // Entre o diálogo e o aceite gravado, a ligação pode ter começado (outro aparelho) ou a sessão ter mudado: não lê.
+  if (estado.ligacaoViva || estado.sessao?.tenantId !== tenantId) return;
+  const depois = await tocador.ouvir(tenantId, mensagemId);
+  if (!depois.ok) mostrarFalhaLeitura(mensagemId);
+}
+window.addEventListener("pagehide", () => tocador.parar("saiu"));
 /**
  * Ditado no campo de mensagem (definido em 2026-10-11, ADR-095): o 🎤 do composer. Como a ligação, mora fora do
  * reducer (o microfone e o canal mudam muitas vezes por segundo); o texto entra no campo pelo caminho do rascunho.
@@ -473,6 +534,8 @@ const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q
 function dispatch(acao: Acao): void {
   // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
+  // NOD-106: a ligação que aparece (até a de outro aparelho) para a leitura; o botão passa a explicar por que não lê.
+  if (acao.tipo === "ligacao-viva" && acao.viva && tocador.atual()) tocador.parar("ligacao");
   estado = reduzir(estado, acao);
   render();
   void reidratar();
@@ -1631,6 +1694,8 @@ function manterRolagemDaBarra(anterior: number): void {
 
 async function iniciarSessao(escopo: Escopo): Promise<void> {
   conexoes.cancelarTodas();
+  // NOD-106: outra pessoa ou outro tenant, a leitura da sessão velha para (o reducer zera o estado, o som ia seguir).
+  if (escopo.tenantId !== estado.sessao?.tenantId || escopo.pessoaId !== estado.sessao?.pessoaId) tocador.parar("saiu");
   // Os rascunhos são da pessoa: outra sessão, outros rascunhos.
   rascunhos.usar(`${escopo.tenantId}.${escopo.pessoaId}`);
   api = criarApi(escopo);
@@ -1836,6 +1901,8 @@ function navegar(tela: Tela): void {
   deixarNaoLida = null;
   // A linha "Novas" some ao navegar (reducer); a conta das levas vai junto.
   levaContada.clear();
+  // NOD-106: sair da conversa para a leitura (a resposta some da tela).
+  if (tocador.atual() && (tela.tipo !== "conversa" || antes.tipo !== "conversa" || antes.conversaId !== tela.conversaId)) tocador.parar("saiu");
   dispatch({ tipo: "navegar", tela });
   lembrarTaskAberta(tela);
   lerConversaDaTela();
@@ -2758,6 +2825,15 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     const balao = document.querySelector<HTMLElement>(`[data-mensagem="${CSS.escape(el.dataset.id ?? "")}"]`);
     if (balao) levarAo(balao);
     else anunciar("Essa mensagem saiu da janela carregada da conversa.");
+  },
+  // NOD-106: com a ligação viva o botão só explica (aria-disabled); na resposta que já lê, para; senão, lê esta.
+  "ouvir-mensagem": (el) => {
+    const id = el.dataset.id;
+    if (!id || el.getAttribute("aria-disabled") === "true" || estado.ligacaoViva) return;
+    if (tocador.atual()?.mensagemId === id) return tocador.parar("parou");
+    tocador.destravar();
+    limparFalhaLeitura();
+    void ouvirMensagem(id);
   },
   "relatar-mensagem": (el) => {
     const id = el.dataset.id;

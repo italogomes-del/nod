@@ -1,10 +1,8 @@
 import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import { iniciarDitado, type MotorDitado } from "../lib/ditado.ts";
 import type { EventoDitado } from "../lib/ditado-protocolo.ts";
-import { esc } from "../lib/render.ts";
 import { formatarTempo, textoDaFalha } from "./ditado.ts";
-import { dialogo } from "./gestao-agentes.ts";
-import { TEXTO_CONSENTIMENTO } from "./ligacao.ts";
+import { pedirConsentimentoVoz } from "./consentimento-voz.ts";
 
 /**
  * Controle do ditado no campo (definido em 2026-10-11, ADR-095): liga o 🎤, a pílula e o ↑ ao motor (web/lib/ditado.ts).
@@ -142,17 +140,17 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   }
 
   function pedirConsentimento(versao: number): void {
-    const dlg = dialogo(`<div class="ligacao-consentimento"><h2>Antes de ditar</h2><p>${esc(TEXTO_CONSENTIMENTO)}</p><div class="acoes"><button class="bt" type="button" data-nao>Agora não</button><button class="bt pri" type="button" data-sim>Concordo e ditar</button></div></div>`);
-    dlg.querySelector("[data-nao]")?.addEventListener("click", () => dlg.close());
-    dlg.querySelector("[data-sim]")?.addEventListener("click", () => {
-      dlg.close();
+    void pedirConsentimentoVoz({
+      titulo: "Antes de ditar",
+      confirmar: "Concordo e ditar",
       // Dentro do clique: o microfone abre já; o canal só conecta depois de o servidor gravar o aceite.
-      const aceite = d.consentir(versao).then(() => {
-        if (disp?.disponivel) disp = { ...disp, consentimentoNecessario: false };
-      });
-      gravar(aceite);
+      aoConcordar: () => {
+        const aceite = d.consentir(versao).then(() => {
+          if (disp?.disponivel) disp = { ...disp, consentimentoNecessario: false };
+        });
+        gravar(aceite);
+      },
     });
-    dlg.querySelector<HTMLButtonElement>("[data-sim]")?.focus();
   }
 
   return {

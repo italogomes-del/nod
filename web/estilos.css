@@ -220,6 +220,33 @@ body.ocupado { cursor: progress; }
 @media (prefers-reduced-motion: reduce) { .msg-actions { transition: opacity .14s ease; transform: none; } }
 /* Toque não tem hover: na ausência dele o ícone fica visível, apagado (a feature não some no iPad). */
 @media (hover: none) { .msg-actions { opacity: .45; pointer-events: auto; transform: none; } }
+/* Ouvir uma resposta (NOD-106, protótipo do Gil 16/10): com a leitura ativa a barra fica visível sem hover, e o botão
+   vira a pílula "Parar" — o ícone diz o estado (spinner = carregando, barras = tocando; no hover, ■), a palavra a ação. */
+.message.lendo .msg-actions { opacity: 1; pointer-events: auto; transform: none; }
+.msg-actions button.bt.ouvir-ativo { width: auto; padding: 0 9px 0 7px; display: inline-flex; align-items: center; gap: 6px;
+  border-color: var(--line-strong); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.msg-actions button.bt.ouvir-ativo:hover { border-color: var(--ink-3); background: var(--surface-raised); color: var(--ink); }
+/* Ligação viva: aria-disabled (não `disabled`), para continuar focável e mostrar o motivo na dica. */
+.msg-actions button.bt[aria-disabled="true"] { color: var(--ink-3); opacity: .5; cursor: not-allowed; }
+.msg-actions button.bt[aria-disabled="true"]:hover { background: none; border-color: transparent; }
+.ouvir-wrap { position: relative; display: inline-flex; }
+/* A barra fica na borda direita da mensagem: a dica cresce para a esquerda, senão vaza da tela (captura de 17/10). */
+.ouvir-dica { position: absolute; right: 0; top: calc(100% + 6px); white-space: nowrap; font-size: 12px; padding: 5px 8px; border-radius: 7px;
+  background: var(--action); color: var(--on-action); box-shadow: var(--shadow-pop); pointer-events: none; opacity: 0; transition: opacity .12s ease; z-index: 2; }
+.ouvir-wrap:hover .ouvir-dica, .ouvir-wrap:focus-within .ouvir-dica { opacity: 1; }
+.ouvir-spin { animation: ouvir-gira .8s linear infinite; transform-origin: 50% 50%; }
+@keyframes ouvir-gira { to { transform: rotate(360deg); } }
+.ouvir-barras rect { transform-origin: 50% 100%; transform-box: fill-box; animation: ouvir-onda 1s ease-in-out infinite; }
+.ouvir-barras rect:nth-child(2) { animation-delay: -.33s; }
+.ouvir-barras rect:nth-child(3) { animation-delay: -.66s; }
+@keyframes ouvir-onda { 0%, 100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+.bt.ouvir-ativo .ouvir-parar { display: none; }
+.bt.ouvir-ativo:hover .ouvir-barras { display: none; }
+.bt.ouvir-ativo:hover .ouvir-parar { display: block; }
+@media (prefers-reduced-motion: reduce) { .ouvir-spin, .ouvir-barras rect { animation: none; } }
+/* Falha antes do primeiro som: linha neutra embaixo do balão (é informação, não um trabalho parado). */
+.msg-aviso { display: flex; align-items: center; gap: 6px; margin: 5px 0 0 2px; font-size: 12px; color: var(--ink-2); }
+.msg-aviso svg { color: var(--ink-3); flex: none; }
 .streaming .cursor { animation: pulsa 1s steps(2) infinite; color: var(--ink-3); }
 
 /* mensagens de sistema / eventos: linhas discretas centradas ou à esquerda, sem balão */

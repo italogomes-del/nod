@@ -58,5 +58,8 @@ describe("ditado na web (ADR-095)", () => {
     expect(TEXTO_CONSENTIMENTO).toBe(TEXTO_CONSENTIMENTO_VOZ);
     expect(VERSAO_CONSENTIMENTO).toBe(VERSAO_CONSENTIMENTO_VOZ);
     expect(TEXTO_CONSENTIMENTO).toMatch(/ditado/i);
+    // NOD-106: v3, o aviso também fala de ouvir uma resposta fora da ligação.
+    expect(VERSAO_CONSENTIMENTO).toBe(3);
+    expect(TEXTO_CONSENTIMENTO).toMatch(/ouve uma resposta/);
   });
 });

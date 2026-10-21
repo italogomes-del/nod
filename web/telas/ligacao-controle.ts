@@ -9,11 +9,12 @@ import type { EstadoLocalLigacao, MotivoAvaliacaoLigacao } from "../lib/ligacao-
 import { esquecerRegiao, regiao, regiaoMudaria } from "../lib/regioes.ts";
 import { esc } from "../lib/render.ts";
 import { duracaoRelogio } from "../lib/relogio.ts";
+import { pedirConsentimentoVoz } from "./consentimento-voz.ts";
 import { dialogo } from "./gestao-agentes.ts";
 import { nomeDaIa, notaNoTerminal, type EstadoSemIa } from "./ligacao-sem-ia.ts";
 import {
   avisoDoEstadoLocal, comLegenda, partesDaLigacao, renderAvaliacao, renderRecusa, renderTranscricao, textoFim,
-  TEXTO_CONSENTIMENTO, TEXTO_SEM_MAC, VELOCIDADES, VOZES,
+  TEXTO_SEM_MAC, VELOCIDADES, VOZES,
   type AgenteDaLigacao, type AvaliacaoLigacao, type CardJanela, type EstadoTelaLigacao,
 } from "./ligacao.ts";
 
@@ -50,6 +51,11 @@ export type DepsTelaLigacao = {
    * da ligação para o caminho sem voz é o onboarding (o servidor encerra a ligação como recusada).
    */
   configurarSemVoz?: () => Promise<void> | void;
+  /**
+   * Ouvir uma resposta (NOD-106): a leitura em curso para ANTES de a ligação abrir a mídia — o ouvir não passa pelo
+   * AEC, e a voz da leitura voltaria como eco no microfone.
+   */
+  pararLeitura?: () => void;
 };
 
 /** definido em 2026-10-05: o aviso neutro "agora usa o …" some sozinho depois de 12 s. */
@@ -314,10 +320,11 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     const api = deps.api();
     if (!api || iniciando || t) return;
     iniciando = true;
+    deps.pararLeitura?.();
     try {
       const d = await api.disponibilidadeLigacao(agenteId);
       if (!d.disponivel) { mostrarRecusa(d.texto); return; }
-      if (d.consentimentoNecessario && !(await pedirConsentimento())) return;
+      if (d.consentimentoNecessario && !(await pedirConsentimentoVoz({ titulo: "Antes da primeira ligação", confirmar: "Concordo e ligar" }))) return;
       if (d.consentimentoNecessario) await api.consentirVoz(d.versaoConsentimento);
       const criada: LigacaoCriada = await api.criarLigacao(agenteId);
       abrirTela(criada.ligacao, "cheia", false);
@@ -334,18 +341,6 @@ export function criarTelaLigacao(deps: DepsTelaLigacao) {
     recusa = esta;
     window.setTimeout(() => { if (recusa === esta) { recusa = null; render(); } }, 8_000);
     render();
-  }
-
-  function pedirConsentimento(): Promise<boolean> {
-    return new Promise((resolver) => {
-      let decidido = false;
-      const d = dialogo(`<div class="ligacao-consentimento"><h2>Antes da primeira ligação</h2><p>${esc(TEXTO_CONSENTIMENTO)}</p><div class="acoes"><button class="bt" type="button" data-nao>Agora não</button><button class="bt pri" type="button" data-sim>Concordo e ligar</button></div></div>`);
-      const fim = (v: boolean) => { if (decidido) return; decidido = true; resolver(v); d.close(); };
-      d.querySelector("[data-nao]")?.addEventListener("click", () => fim(false));
-      d.querySelector("[data-sim]")?.addEventListener("click", () => fim(true));
-      d.addEventListener("close", () => { if (!decidido) { decidido = true; resolver(false); } });
-      d.querySelector<HTMLButtonElement>("[data-sim]")?.focus();
-    });
   }
 
   function abrirAjustes(ancora: HTMLElement): void {

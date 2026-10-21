@@ -71,6 +71,9 @@
   .message { gap: 8px; }
   .message > .icon { width: 28px; height: 28px; min-width: 28px; }
   .bubble-wrap { max-width: calc(100% - 36px); min-width: 0; }
+  /* NOD-106, re-QA de 20/10: a reserva de 216 px do balão ouvível (interface.css) é do desktop, onde a barra fica ao lado.
+     No celular a barra fica dentro da coluna; sem isto o balão encolhia para 150 px em 390 px e o Ouvir e a dica saíam da tela. */
+  .message.bot.ouvivel .bubble-wrap { max-width: calc(100% - 36px); }
   .msg-encolhido > .cartao-encolhido { margin-left: 36px; width: calc(100% - 36px); }
   .bubble { font-size: 15px; }
   .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .acesso-card, .card-pasta, .welcome-options,
@@ -81,9 +84,22 @@
   .msg-actions, .message.you .msg-actions, .msg-linha .msg-actions { display: none; opacity: 1; pointer-events: auto; margin: 0; }
   .message .msg-actions, .bubble-wrap:has(> .msg-autor) > .msg-actions { top: -12px; right: 0; left: auto; transform: none; }
   .message.you .msg-actions { left: 0; right: auto; }
+  /* Devolução do Revisor (PR 381, 20/10): ancorada à direita, numa resposta CURTA a barra (Ouvir + quatro alvos de 44 px)
+     ficava mais larga que o balão e ia de x=-59 a 123 em 390 px. Na fala do bot ela cresce da esquerda para a direita. */
+  .message.bot .msg-actions, .message.bot .bubble-wrap:has(> .msg-autor) > .msg-actions { left: 0; right: auto; }
   .msg-linha .msg-actions { top: 50%; right: 0; left: auto; transform: translateY(-50%); }
   .message.acoes-a-mostra .msg-actions, .msg-linha.acoes-a-mostra .msg-actions { display: flex; }
+  /* NOD-106: com a leitura ativa, o "Parar" fica à vista mesmo sem o toque que mostra as ações. */
+  .message.lendo .msg-actions { display: flex; }
+  .msg-actions button.bt.ouvir-ativo { width: auto; padding: 0 14px 0 12px; }
   .msg-actions button.bt { width: 44px; height: 44px; background: var(--surface); border-color: var(--line); }
+  /* Devolução do Revisor (PR 381, 20/10): com a ligação viva, o Ouvir desabilitado (opacity .5 e, no toque, sem fundo)
+     ficava translúcido por cima de "Nina 14:00" em 390 px. No celular ele fica opaco: o cinza da cor já diz desabilitado. */
+  .msg-actions button.bt[aria-disabled="true"], .msg-actions button.bt[aria-disabled="true"]:hover { opacity: 1; color: var(--ink-3); background: var(--surface); border-color: var(--line); }
+  /* O Ouvir é o primeiro botão da barra. A dica cresce para a direita dele no telefone; para a esquerda ela começava em
+     x=-16 no viewport de 390 px quando os cinco alvos de 44 px estavam visíveis (re-QA de 20/10). */
+  /* width: max-content: sem ela a dica herdava os 44 px do botão e quebrava uma palavra por linha (76 px). */
+  .ouvir-dica { left: 0; right: auto; width: max-content; max-width: calc(100vw - 24px); white-space: normal; }
 
   /* ---- O campo: colado embaixo, acima da barra de gestos e do teclado ---- */
   .composer-wrap { padding: 6px max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }

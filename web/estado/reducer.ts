@@ -28,6 +28,7 @@ import type { NivelPressao, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } f
 import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
 import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
+import type { LeituraAtual } from "../lib/ouvir.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
 import type { EstadoConexao } from "../lib/live-events.ts";
@@ -317,6 +318,13 @@ export type Estado = {
   /** A disponibilidade de ligar para cada bot (só decide se o botão "Ligar" aparece); null = a leitura falhou. */
   disponibilidadeLigacao: Record<string, DisponibilidadeLigacao | null>;
   /**
+   * Ouvir uma resposta (NOD-106): a leitura em curso (o tocador de web/lib/ouvir.ts despacha `leitura-mudou`) e a
+   * falha antes do primeiro som, que desenha "Não deu para ouvir agora." embaixo do balão por 6 s. Fica aqui porque o
+   * render da conversa é puro e lê `Estado`.
+   */
+  leitura: LeituraAtual | null;
+  falhaLeitura: { mensagemId: string } | null;
+  /**
    * Onboarding por ligação (definido em 2026-10-04, ADR-077): o que `GET onboarding` disse. undefined = ainda não leu;
    * null = a leitura falhou ou a rota não existe (falha fechada: o app abre normal). `onboardingAberto` = a camada do
    * onboarding está na frente (resolverInicio abre quando `mostrar`; "Ver o onboarding de novo" reabre).
@@ -425,6 +433,8 @@ export type Acao =
   | { tipo: "ocupado"; valor: boolean }
   | { tipo: "ligacao-viva"; viva: LigacaoVivaNaTela | null }
   | { tipo: "hidratar-disponibilidade-ligacao"; agenteId: string; disponibilidade: DisponibilidadeLigacao | null }
+  /** NOD-106: o tocador mudou de fase (null = ocioso); `falha` grava (ou, com null, tira) o aviso de falha. */
+  | { tipo: "leitura-mudou"; leitura: LeituraAtual | null; falha?: { mensagemId: string } | null }
   | { tipo: "esquecer-disponibilidade-ligacao"; agenteId: string }
   | { tipo: "hidratar-onboarding"; onboarding: EstadoOnboarding | null }
   | { tipo: "onboarding-aberto"; aberto: boolean }
@@ -503,6 +513,8 @@ export const estadoInicial: Estado = {
   ocupado: false,
   ligacaoViva: null,
   disponibilidadeLigacao: {},
+  leitura: null,
+  falhaLeitura: null,
   onboardingAberto: false,
   trabalhos: null,
   trabalhoDetalhe: {},
@@ -950,6 +962,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         carregado: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.carregado : estadoInicial.carregado,
         ligacaoViva: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.ligacaoViva : null,
         disponibilidadeLigacao: acao.escopo?.pessoaId === estado.sessao?.pessoaId ? estado.disponibilidadeLigacao : {},
+        leitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.leitura : null,
+        falhaLeitura: acao.escopo?.pessoaId === estado.sessao?.pessoaId && acao.escopo?.tenantId === estado.sessao?.tenantId ? estado.falhaLeitura : null,
         ...(acao.escopo?.pessoaId === estado.sessao?.pessoaId ? {} : { onboarding: undefined, onboardingAberto: false, onboardingResolvido: false, trabalhos: null, trabalhoDetalhe: {}, pressao: null, atividadeDoBot: {}, atividadeHoje: {}, atividadeVista: null }) };
     case "navegar": {
       // definido em 2026-10-08 (revisão W5): reabrir uma task já vista relê as mensagens dela (o detalhe guardado é de
@@ -1183,6 +1197,13 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       const b = acao.viva;
       const igual = a === b || (a !== null && b !== null && a.ligacaoId === b.ligacaoId && a.local === b.local && a.agenteId === b.agenteId);
       return igual ? estado : { ...estado, ligacaoViva: b };
+    }
+    case "leitura-mudou": {
+      const a = estado.leitura;
+      const b = acao.leitura;
+      const mesma = a === b || (a !== null && b !== null && a.mensagemId === b.mensagemId && a.fase === b.fase);
+      const falhaLeitura = acao.falha === undefined ? estado.falhaLeitura : acao.falha;
+      return mesma && falhaLeitura === estado.falhaLeitura ? estado : { ...estado, leitura: b, falhaLeitura };
     }
     case "hidratar-disponibilidade-ligacao":
       return { ...estado, disponibilidadeLigacao: { ...estado.disponibilidadeLigacao, [acao.agenteId]: acao.disponibilidade } };

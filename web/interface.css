@@ -604,6 +604,9 @@
 .msg-actions button.bt { width: 30px; height: 30px; color: var(--ink-2); }
 .msg-actions button.bt:hover { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
 .msg-actions button.bt[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+/* NOD-106, re-QA de 20/10: o quinto botão ocupa 158 px. Reserva esse trecho da coluna nos balões que têm Ouvir, para
+   Responder, Reportar e ⋯ continuarem dentro dos 760 px também em janelas de 1180/1280. */
+.message.bot.ouvivel .bubble-wrap { max-width: min(calc(100% - 216px), 760px); }
 /* A barra fica ao lado do balão, não da linha do nome: no S6 ela começa 6 px abaixo do topo do balão, com o centro na
    primeira linha do texto. Com o nome e a hora em cima (.msg-autor, 23–24 px medidos em 2026-10-18 a 1440×900, claro e
    escuro), o top de 2px de estilos.css a deixava na altura do nome, solta acima do balão (QA do PR 392). */
