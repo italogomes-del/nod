@@ -101,7 +101,7 @@ export function criarPonteHttpServidor(d: {
    * reanúncio — a composição publica `inventario.mudou` e a tela relê sem recarregar (antes só a troca do interruptor
    * local avisava).
    */
-  inventarioMudou?(escopo: Escopo): void;
+  inventarioMudou?(escopo: Escopo, motivo?: "anuncio" | "presenca"): void;
   /**
    * ADR-102 (2026-10-13): as contas de IA da máquina — o anúncio (no `conectar` e no `inventario`), a puxada de contas
    * (logins pedidos pela tela, saídas e a desconexão), o progresso de um login e as saídas feitas. Ausente = servidor sem
@@ -115,6 +115,13 @@ export function criarPonteHttpServidor(d: {
   };
 }) {
   const conexoes = new Map<string, Conexao>();
+  /**
+   * NOD-300 (definido em 2026-10-20): a última presença avisada de cada máquina (viva = contato há menos de 60 s). Fora
+   * de `conexoes`, que apaga a conexão aos 90 s e cria outra no `conectar`: sem isto, a volta não avisaria. Só na memória
+   * do processo; depois de um reinício começa vazio, e por isso a primeira vista de cada chave (no `conectar` ou na
+   * passada) sempre avisa.
+   */
+  const presencaAvisada = new Map<string, { escopo: Escopo; viva: boolean }>();
   const reservas = new Map<string, { machineId: string; ate: number }>();
   /** Revisão do #209: um aviso por máquina para a leitura com defeito no puxar (ela chega a cada pedido). */
   const leiturasInvalidas = new Set<string>();
@@ -224,7 +231,13 @@ export function criarPonteHttpServidor(d: {
       await d.registrarPlataforma?.(ctx.escopo, id, plataforma);
       await anunciarContas(ctx.escopo, id, b.contas);
       await repetirBarrados(c);
-      avisarSeMudou(ctx.escopo, antes);
+      // Re-QA do NOD-300: a máquina que a memória não sabe viva (primeira vista, ou depois de um reinício da API em que a
+      // tela ainda mostra "sem contato" lido do banco) avisa a presença no `conectar` — com outra máquina da pessoa pronta,
+      // a assinatura das IAs não muda e nada mais avisaria. Marcada viva aqui, a passada seguinte não repete.
+      const estava = presencaAvisada.get(id);
+      presencaAvisada.set(id, { escopo: ctx.escopo, viva: true });
+      if (!estava?.viva) d.inventarioMudou?.(ctx.escopo, "presenca");
+      else avisarSeMudou(ctx.escopo, antes);
       ctx.json(200, { machineId: id, escopo: ctx.escopo, ...(d.contas ? { contasIa: true } : {}) });
     }),
     /**
@@ -457,12 +470,29 @@ export function criarPonteHttpServidor(d: {
       const antes = assinaturaDasIas(ctx.escopo.pessoaId);
       await c.ponte.desconectar(ctx.params.chaveId!);
       conexoes.delete(ctx.params.chaveId!);
+      // NOD-300: a máquina que sai avisa a presença (a barra do dono relê na hora).
+      const estava = presencaAvisada.get(ctx.params.chaveId!);
+      presencaAvisada.set(ctx.params.chaveId!, { escopo: c.escopo, viva: false });
       await persistir(c);
       avisarSeMudou(ctx.escopo, antes);
+      if (estava?.viva) d.inventarioMudou?.(c.escopo, "presenca");
       ctx.json(200, { ok: true });
     }),
   ];
   async function varrer() {
+    // NOD-300: a máquina que perde ou recupera o contato avisa (`inventario.mudou`, motivo "presenca") só na transição,
+    // um aviso por pessoa por passada. Antes do `continue`, para o `puxando` não pular o aviso.
+    const avisar = new Map<string, Escopo>();
+    const transicao = (id: string, escopo: Escopo, viva: boolean) => {
+      const antes = presencaAvisada.get(id);
+      // Re-QA do NOD-300: a chave que a memória não conhece (depois de um reinício) também avisa na primeira vista, viva ou
+      // não — a tela pode estar mostrando o contrário, lido do banco. Gravada aqui, a passada seguinte não repete.
+      if (!antes || antes.viva !== viva) avisar.set(`${escopo.tenantId}:${escopo.pessoaId}`, escopo);
+      presencaAvisada.set(id, { escopo, viva });
+    };
+    for (const [id, c] of conexoes) transicao(id, c.escopo, d.agora() - c.ultimo < 60_000);
+    for (const [id, p] of presencaAvisada) if (p.viva && !conexoes.has(id)) transicao(id, p.escopo, false);
+    for (const escopo of avisar.values()) d.inventarioMudou?.(escopo, "presenca");
     for (const [id, c] of conexoes) {
       if (d.agora() - c.ultimo < 60_000 || c.puxando) continue;
       c.inv = ausente(); c.rebaixada = true;

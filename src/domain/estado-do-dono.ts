@@ -11,13 +11,24 @@ import { voltaSemNovidade, type VoltaDaCadeia } from "./voltas-sem-novidade.ts";
  *
  * Cada frente aberta e a própria conversa contam UMA vez, pelo que estão fazendo:
  * - a frente parada numa decisão (`precisa_de_voce`, `fechado_ocioso`) espera você;
- * - com turno vivo e rodando, trabalha; a conversa com turno vivo também;
+ * - com turno vivo e rodando, trabalha; a conversa com turno vivo também — salvo (NOD-300, definido em 2026-10-20) a
+ *   frente cujo turno vivo está numa máquina sem contato: ela espera, com o motivo "<máquina> · sem contato" desde o
+ *   último contato (uma espera sintética, só para o motivo e o desde; não vira espera da linha aberta);
  * - sem turno vivo e com uma espera (comando, volta marcada, colega), espera — esperar não é trabalhar;
  * - sem turno vivo nem espera (na fila, ou entre um turno e outro), está na fila, com os pedidos ainda não começados.
  */
 
 /** O que o estado lê de cada frente aberta do bot. */
-export type FrenteParaODono = { id: string; estado: EstadoTrabalho; /** Tem turno vivo (despachando) agora. */ vivo: boolean; iniciadoEm: number | null; criadoEm: number };
+export type FrenteParaODono = {
+  id: string;
+  estado: EstadoTrabalho;
+  /** Tem turno vivo (despachando) agora. */
+  vivo: boolean;
+  iniciadoEm: number | null;
+  criadoEm: number;
+  /** NOD-300: a máquina do turno vivo está sem contato (nome e desde). Ausente ou null = fala (ou não se sabe). */
+  semContato?: { maquina: string; desde: number } | null;
+};
 
 export type FatosDoDono = {
   agenteId: string;
@@ -39,6 +50,7 @@ type Situacao = "voce" | "trabalhando" | "esperando" | "fila" | "nada";
 
 function situacaoDaFrente(f: FrenteParaODono, esperando: boolean): Situacao {
   if (f.estado === "precisa_de_voce" || f.estado === "fechado_ocioso") return "voce";
+  if (f.estado === "rodando" && f.vivo && f.semContato) return "esperando";
   if (f.estado === "rodando" && f.vivo) return "trabalhando";
   if (f.estado === "rodando" && esperando) return "esperando";
   if (f.estado === "rodando" || f.estado === "na_fila") return "fila";
@@ -66,7 +78,9 @@ export function estadoDoDono(f: FatosDoDono): EstadoDoDono {
   const esperandoIds = new Set((porSituacao.get("esperando") ?? []).map((x) => x.id));
   const esperasValidas = f.esperas.filter((e) => (e.trabalhoId === null ? !conversaTrabalhando : esperandoIds.has(e.trabalhoId)));
   const conversaEsperando = !conversaTrabalhando && esperasValidas.some((e) => e.trabalhoId === null);
-  const maisAntiga = [...esperasValidas].sort((a, b) => a.desde - b.desde)[0] ?? null;
+  // NOD-300: a frente presa a máquina sem contato entra só no motivo e no desde da linha fechada.
+  const presas = (porSituacao.get("esperando") ?? []).flatMap((x) => (x.vivo && x.semContato ? [{ trabalhoId: x.id, motivo: `${x.semContato.maquina} · sem contato`, desde: x.semContato.desde }] : []));
+  const maisAntiga = [...esperasValidas, ...presas].sort((a, b) => a.desde - b.desde)[0] ?? null;
 
   const esperandoVoce = Math.max(f.decisoes.quantas, quantas("voce"));
   const frentes = quantas("trabalhando");

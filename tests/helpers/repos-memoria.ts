@@ -3131,7 +3131,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return {
           vivos: new Map(vivos.filter((t) => !t.trabalhoId).map((t) => [t.agenteId, t.criadoEm])),
           vivosPropria: new Map(vivos.filter((t) => !t.trabalhoId && doTenant(b.conversas).some((c) => c.id === t.conversaId && c.tipo === "propria")).map((t) => [t.agenteId, t.criadoEm])),
-          frentesVivas: new Set(vivos.flatMap((t) => (t.trabalhoId ? [t.trabalhoId] : []))),
+          frentesVivas: new Map(vivos.flatMap((t) => (t.trabalhoId ? [[t.trabalhoId, t.machineId ?? null] as const] : []))),
           decisoes,
           comandos: [],
           voltas: [],

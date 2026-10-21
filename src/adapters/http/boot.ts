@@ -293,7 +293,7 @@ export async function boot(o: OpcoesBoot = {}): Promise<ServidorNod> {
   const varredorOciosidade = app.computadores
     ? iniciarVarredorOciosidade({ db, computadores: app.computadores, ociosoMin: limiteDoAmbiente(env).ociosoMin, intervaloMs: iv.ociosidadeMs, opcoes: { listarPessoas: o.listarPessoas } })
     : { parar: () => undefined };
-  const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas });
+  const despachante: DespachanteOutbox = iniciarDespachanteOutbox(db, app.barramento, { intervaloMs: iv.outboxMs, listarPessoas: o.listarPessoas, presenca: app.services.maquinas });
 
   log("info", "nod_no_ar", { url, machine_id: machineId, executor: app.idDriver, inventario: inventario.estado });
 

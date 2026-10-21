@@ -118,3 +118,33 @@ describe("NOD-260 (definido em 2026-10-15): o turno de sala não é 'trabalhando
     expect(estado({ conversaTrabalhandoDesde: T0, conversaPropriaTrabalhandoDesde: null, frentes: [frente("na_fila")] })).toMatchObject({ principal: "fila", fila: 1 });
   });
 });
+
+describe("NOD-300: a frente presa a máquina sem contato espera, não trabalha", () => {
+  const presa = (desde: number, extra: Partial<FrenteParaODono> = {}) => frente("rodando", { vivo: true, semContato: { maquina: "VM-1", desde }, ...extra });
+
+  it("CA1: só a frente presa ⇒ esperando, com o motivo da máquina e o desde do último contato", () => {
+    expect(estado({ frentes: [presa(T0 - 720_000)] })).toMatchObject({ principal: "esperando", frentes: 0, esperando: 1, motivoEspera: "VM-1 · sem contato", desde: T0 - 720_000 });
+  });
+
+  it("CA2: uma viva + uma presa ⇒ trabalhando em 1 frente, a presa esperando", () => {
+    expect(estado({ frentes: [frente("rodando", { vivo: true }), presa(T0)] })).toMatchObject({ principal: "trabalhando", frentes: 1, esperando: 1 });
+  });
+
+  it("CA3: a máquina voltou (semContato null) ⇒ trabalhando", () => {
+    expect(estado({ frentes: [frente("rodando", { vivo: true, semContato: null })] })).toMatchObject({ principal: "trabalhando", frentes: 1, esperando: 0 });
+  });
+
+  it("CA4: presa + um comando mais antigo ⇒ o motivo do comando, 2 esperando", () => {
+    const outra = frente("rodando");
+    const r = estado({ frentes: [presa(T0 + 10), outra], esperas: [{ trabalhoId: outra.id, motivo: "a CI do #845", desde: T0 }] });
+    expect(r).toMatchObject({ principal: "esperando", esperando: 2, motivoEspera: "a CI do #845", desde: T0 });
+  });
+
+  it("a espera sintética não vira espera de saída: a presa em precisa_de_voce continua esperando você", () => {
+    expect(estado({ frentes: [frente("precisa_de_voce", { vivo: true, semContato: { maquina: "VM-1", desde: T0 } })] })).toMatchObject({ principal: "esperando_voce", esperandoVoce: 1, esperando: 0 });
+  });
+
+  it("a conversa trabalhando + uma frente presa ⇒ trabalhando, 1 esperando", () => {
+    expect(estado({ conversaTrabalhandoDesde: T0, frentes: [presa(T0)] })).toMatchObject({ principal: "trabalhando", frentes: 0, conversaTrabalhando: true, esperando: 1 });
+  });
+});

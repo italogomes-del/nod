@@ -665,7 +665,8 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-090 (0067): nos dois modos — no local, a VM também cai, e o aviso a nomeia.
     registrarPlataforma: (escopo, chaveId, plataforma) => dentro(escopo, (d) => d.repos.maquinaTokens.registrarPlataforma(chaveId, plataforma)),
     nomeDaChave: (escopo, chaveId) => dentro(escopo, async (d) => (await d.repos.maquinaTokens.identificar(chaveId))?.nome ?? null),
-    inventarioMudou: (escopo) => { barramento.publicar(escopo.pessoaId, "inventario.mudou", { motivo: "anuncio" }); },
+    // NOD-300: "presenca" quando uma máquina perde ou recupera o contato (o varrer da ponte).
+    inventarioMudou: (escopo, motivo) => { barramento.publicar(escopo.pessoaId, "inventario.mudou", { motivo: motivo ?? "anuncio" }); },
     autorizar: autorizarMaquina,
     segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO),
     seguro: env.NOD_LOGIN === "google",

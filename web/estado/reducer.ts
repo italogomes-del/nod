@@ -615,6 +615,22 @@ function reconciliarPelosDonos(estado: Estado, trabalhos: TrabalhosDto, leituraE
 }
 
 /**
+ * NOD-300 (definido em 2026-10-20): o dono lido em `GET trabalhos` vale também para a conversa do bot — a linha acima do
+ * campo e a barra leem o da conversa (web/lib/dono.ts) e, sem isto, a releitura de Trabalhos (a máquina que perdeu o
+ * contato) não mudava a barra. A regra do `comEstadoDoDono`: só as conversas daquele bot ganham objeto novo, e só quando
+ * o dono mudou de fato.
+ */
+export function comDonosNasConversas(e: Estado, donos: readonly DonoDto[] | undefined): Estado {
+  if (!Array.isArray(donos) || donos.length === 0) return e;
+  const porBot = new Map(donos.map((d) => [d.estado.agenteId, d]));
+  const trocadas = Object.entries(e.conversas).flatMap(([id, c]) => {
+    const novo = c.dono ? porBot.get(c.dono.estado.agenteId) : undefined;
+    return novo && JSON.stringify(novo) !== JSON.stringify(c.dono) ? [[id, { ...c, dono: novo }] as const] : [];
+  });
+  return trocadas.length === 0 ? e : { ...e, conversas: { ...e.conversas, ...Object.fromEntries(trocadas) } };
+}
+
+/**
  * QA do PR #302 (NOD-216): o bot que o dono diz trabalhando (ou com fila) e cuja conversa a web ainda não leu tem a
  * conversa pedida (`vivos:`, buscada mesmo fora da tela). Sem isto, depois de um reload a barra mostrava "disponível" o
  * bot que rodava, até a conversa dele abrir: os turnos vivos só vinham da conversa carregada, e `GET trabalhos` só
@@ -860,7 +876,8 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // lateral, o cabeçalho e o painel; as ações comuns do computador não relêem nada.
   "computador.mudou": (e, f) => (f.dados.saude === true ? invalidar(e, "frota") : e),
   // definido em 2026-10-16 (decisão E6): o uso da janela é relido junto com as IAs.
-  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", usoPlano(e), "maquinas"),
+  // NOD-300: e os trabalhos — a máquina que perdeu ou recuperou o contato (motivo "presenca") muda a linha do dono.
+  "inventario.mudou": (e) => invalidar(e, "inventario", "frota", "executor", "ias", usoPlano(e), "maquinas", "trabalhos"),
   // ADR-102: a lista de contas (ou um login numa máquina) mudou. definido em 2026-10-16 (revisão do PR 1): a conta em uso
   // pode ter trocado (limite, login, outra conta na frente), e com ela o uso da janela do anel.
   "contas.mudou": (e) => invalidar(e, "contas", "maquinas", usoPlano(e)),
@@ -1175,7 +1192,7 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return estado.onboardingAberto === acao.aberto ? estado : { ...estado, onboardingAberto: acao.aberto };
     case "hidratar-trabalhos":
       // O servidor manda o nível que vale agora: null (nenhum Mac falou) também limpa o amarelo antigo (revisão W4).
-      return comConversasDosDonos(reconciliarPelosDonos({ ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao }, acao.trabalhos, acao.agora));
+      return comConversasDosDonos(comDonosNasConversas(reconciliarPelosDonos({ ...estado, trabalhos: acao.trabalhos, pressao: acao.trabalhos.pressao }, acao.trabalhos, acao.agora), acao.trabalhos.donos));
     case "hidratar-trabalho": {
       // Página aberta no meio do trabalho: o turno que roda volta a ser vivo, para o ao vivo dele ser guardado e desenhado.
       // definido em 2026-10-08 (revisão W6): o turno do trabalho que não é mais o vivo dele sai, e o que a web já viu

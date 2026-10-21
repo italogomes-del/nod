@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { despacharPessoa } from "../../src/adapters/fundo/despachar-outbox.ts";
 import type { FrameSse } from "../../src/contracts/frame.ts";
 import { criarMetricas } from "../../src/obs/metricas.ts";
 import { criarBarramento } from "../../src/services/barramento.ts";
 import { criarSala } from "../../src/use-cases/criar-sala.ts";
+import type { ServicoDasMaquinas } from "../../src/contracts/trabalho.ts";
 import { lerConversa } from "../../src/use-cases/enviar-mensagem.ts";
 import { abrirFrentes } from "../../src/use-cases/frentes.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
@@ -151,6 +152,51 @@ describeIntegracao("o estado do dono na tela: GET trabalhos, ConversaDto e o fra
       await trx`update turnos set estado = 'despachando', machine_id = ${randomUUID()}, lease_ate = now() + interval '5 minutes' where id = ${naSala?.id ?? ""}`;
       const { data } = await listarTrabalhos(deps, { agenteId: vera.agenteId });
       expect(data.donos?.[0]?.estado).toMatchObject({ principal: "livre", conversaTrabalhando: false, conversaPropriaTrabalhando: false });
+    });
+  });
+
+  it("NOD-300 (CA 8): a frente com turno vivo numa máquina sem contato espera — GET trabalhos, a conversa e o frame dizem o mesmo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const ze = await agenteComConversa(trx, MARLON, { nome: "Ze" });
+      const { deps, repos } = depsSobre(trx, MARLON);
+      await repos.agentes.atualizarPerfil(ze.agenteId, { confirmado: true });
+      const ultimoContato = Date.now() - 12 * 60_000;
+      const vm = (await repos.maquinaTokens.criar({ nome: "VM-1", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
+      await repos.maquinaTokens.marcarUso(vm, ultimoContato);
+      const maquinas: ServicoDasMaquinas = { leituras: () => [], identificar: (_e, id) => (id === vm ? { nome: "VM-1", ehMac: false } : null), macDoServidor: null, conectada: () => false };
+      const comMaquinas = { ...deps, services: { ...deps.services, maquinas } };
+      const dono = (await repos.turnos.enfileirar({ executor: "catcher", conversaId: ze.conversaId, agenteId: ze.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "conserte o login", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+      const r = await abrirFrentes(deps, { ...contexto(ze.agenteId, ze.conversaId, dono.id), frentes: [{ titulo: "Login", pedido: "Conserte o login." }] });
+      if (!r.data.ok) throw new Error("abrir");
+      await repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const login = r.data.frentes[0]!.trabalho_id;
+      const turnoLogin = (await repos.turnos.doTrabalho(login))[0]!;
+      await trx`update turnos set estado = 'despachando', machine_id = ${vm}, lease_ate = now() + interval '5 minutes' where id = ${turnoLogin.id}`;
+      await sincronizarTrabalho(deps, login);
+
+      const esperado = { principal: "esperando", frentes: 0, esperando: 1, motivoEspera: "VM-1 · sem contato", desde: ultimoContato };
+      const { data } = await listarTrabalhos(comMaquinas, {});
+      expect(data.donos?.find((d) => d.estado.agenteId === ze.agenteId)?.estado).toMatchObject(esperado);
+      expect(data.donos?.find((d) => d.estado.agenteId === ze.agenteId)?.esperas).toEqual([]);
+      expect(data.trabalhos.find((t) => t.id === login)?.maquina?.semContatoDesde).toBe(ultimoContato);
+      expect((await lerConversa(comMaquinas, { conversaId: ze.conversaId })).data.dono?.estado).toMatchObject(esperado);
+
+      const barramento = criarBarramento();
+      const frames: FrameSse[] = [];
+      barramento.inscrever(PESSOA_MARLON, (f) => frames.push(f));
+      await repos.events.gravarComOutbox([eventoTrabalhoMudou(deps, (await repos.trabalhos.buscar(login))!)]);
+      await despacharPessoa(trx, MARLON, barramento, { metricas: criarMetricas(), agora: () => Date.now(), presenca: maquinas });
+      const frame = frames.find((f) => f.tipo === "trabalho.mudou" && (f.dados as { trabalhoId?: string }).trabalhoId === login);
+      expect(frame?.dados).toMatchObject({ estadoDono: esperado });
+
+      // Achado do QA no #427: a ponte esquece a máquina 90 s depois do último contato (`identificar` null); o nome vem da chave.
+      const esquecida = { ...comMaquinas, services: { ...deps.services, maquinas: { ...maquinas, identificar: () => null } } };
+      const semPonte = (await listarTrabalhos(esquecida, {})).data;
+      expect(semPonte.donos?.find((d) => d.estado.agenteId === ze.agenteId)?.estado).toMatchObject(esperado);
+      expect(semPonte.trabalhos.find((t) => t.id === login)?.maquina).toMatchObject({ nome: "VM-1", semContatoDesde: ultimoContato });
+
+      // Sem o serviço saber da presença: o estado de antes (trabalhando).
+      expect((await listarTrabalhos(deps, {})).data.donos?.find((d) => d.estado.agenteId === ze.agenteId)?.estado).toMatchObject({ principal: "trabalhando", frentes: 1 });
     });
   });
 });

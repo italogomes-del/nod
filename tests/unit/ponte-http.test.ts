@@ -784,3 +784,129 @@ describe("NOD-245: a adoção que falha por exceção e a entrega grande", () =>
     expect(gravadas.at(-1)).toBe("f2499");
   });
 });
+
+describe("NOD-300: a máquina que perde ou recupera o contato avisa a presença, só na transição", () => {
+  const escopo = { tenantId: "00000000-0000-4000-8000-000000000001", pessoaId: "00000000-0000-4000-8000-000000000002" };
+  const turnoId = "00000000-0000-4000-8000-000000000003";
+  const base = { versaoContrato: 1, nome: "VM-1", inventario: { estado: "pronto", versao: "fake", em: 0 } };
+  function montar(puxar: PonteInternaNod["puxar"] = async () => null) {
+    const relogio = { agora: 1_800_000_000_000 };
+    const maquinas = new Map<string, AnuncioMaquina>();
+    const avisos: string[] = [];
+    const ponte: PonteInternaNod = {
+      conectar: async (m) => { maquinas.set(m.machineId, m); }, puxar, renovar: async () => ({ ativo: true, versaoMinimaApp: VERSAO_MINIMA_APP }),
+      entregar: async () => undefined, desconectar: async () => undefined, maquinasConectadas: () => [...maquinas.values()], escopoDoTurno: () => null,
+    };
+    const p = criarPonteHttpServidor({
+      criar: () => ponte, persistir: async () => undefined, autorizar: async () => ({ ...escopo, chaveId: "m1" }),
+      segredo: "s", seguro: false, agora: () => relogio.agora, delta: () => undefined, ferramenta: () => undefined, tarefas: () => undefined, longpollMs: 2_000,
+      inventarioMudou: (_e, motivo) => { if (motivo === "presenca") avisos.push(motivo); },
+    });
+    const chamar = async (nome: string, chaveId = "m1", corpo: unknown = base) => {
+      const rota = p.rotas.find((r) => r.padrao.test(`/${nome}`));
+      let resposta: { status: number; body: unknown } | null = null;
+      const req = new IncomingMessage(new Socket());
+      req.headers = { authorization: "Bearer k", "x-nod-versao": VERSAO_MINIMA_APP };
+      await rota!.handler({ req, res: new ServerResponse(req), escopo, params: { chaveId }, corpo: async () => corpo, json: (status, body) => { resposta = { status, body }; } });
+      return resposta!;
+    };
+    return { p, chamar, relogio, avisos };
+  }
+
+  it("CA6: aos 61 s um aviso; a passada seguinte não repete; a volta pelo conectar avisa de novo", async () => {
+    const { p, chamar, relogio, avisos } = montar();
+    await chamar("conectar");
+    expect(avisos).toHaveLength(1); // a primeira vista avisa (re-QA: depois de um reinício a tela pode mostrar "sem contato")
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+    avisos.length = 0;
+    relogio.agora += 61_000;
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+    relogio.agora += 15_000;
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+    await chamar("conectar");
+    await p.varrer();
+    expect(avisos).toHaveLength(2);
+  });
+
+  it("a conexão apagada aos 90 s que reconecta avisa a volta", async () => {
+    const { p, chamar, relogio, avisos } = montar();
+    await chamar("conectar");
+    await p.varrer();
+    avisos.length = 0;
+    relogio.agora += 95_000;
+    await p.varrer();
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+    await chamar("conectar");
+    await p.varrer();
+    expect(avisos).toHaveLength(2);
+  });
+
+  it("a máquina no meio de um puxar (`puxando`) também avisa", async () => {
+    let soltar: ((v: PlanoTurno | null) => void) | null = null;
+    const { p, chamar, relogio, avisos } = montar(() => new Promise((r) => { soltar = r; }));
+    await chamar("conectar");
+    await p.varrer();
+    avisos.length = 0;
+    const puxada = chamar("puxar", "m1", {});
+    await vi.waitFor(() => expect(soltar).not.toBeNull());
+    relogio.agora += 61_000;
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+    soltar!({ turnoId } as PlanoTurno);
+    await puxada;
+  });
+
+  it("duas máquinas da mesma pessoa caindo na mesma passada dão um aviso só", async () => {
+    const { p, chamar, relogio, avisos } = montar();
+    await chamar("conectar", "m1");
+    await chamar("conectar", "m2");
+    await p.varrer();
+    avisos.length = 0;
+    relogio.agora += 61_000;
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+  });
+
+  it("o desconectar avisa a máquina que estava viva", async () => {
+    const { p, chamar, avisos } = montar();
+    await chamar("conectar");
+    await p.varrer();
+    avisos.length = 0;
+    await chamar("desconectar", "m1", {});
+    expect(avisos).toHaveLength(1);
+    await p.varrer();
+    expect(avisos).toHaveLength(1);
+  });
+  // Re-QA do NOD-300 (SHA ef74069b): a API reiniciou com a VM-1 sem contato; a VM-2 da mesma pessoa já reconectou pronta.
+  // A volta da VM-1 não mudava a assinatura das IAs e a memória vazia não via transição: nenhum frame, tela parada.
+  it("depois de um reinício, a volta da máquina sem contato avisa mesmo com outra máquina da pessoa pronta", async () => {
+    const { p, chamar, avisos } = montar();
+    await chamar("conectar", "m2");
+    await p.varrer();
+    avisos.length = 0;
+    await chamar("conectar", "m1");
+    expect(avisos).toEqual(["presenca"]);
+    await p.varrer();
+    await p.varrer();
+    expect(avisos).toEqual(["presenca"]);
+  });
+
+  it("depois de um reinício, o reanúncio pelo conectar da máquina já vista viva não repete o aviso", async () => {
+    const { p, chamar, avisos } = montar();
+    await chamar("conectar", "m1");
+    await chamar("conectar", "m1");
+    await p.varrer();
+    expect(avisos).toEqual(["presenca"]);
+  });
+
+  it("depois de um reinício, a máquina que reconecta e sai pelo desconectar avisa a saída", async () => {
+    const { chamar, avisos } = montar();
+    await chamar("conectar", "m1");
+    await chamar("desconectar", "m1", {});
+    expect(avisos).toEqual(["presenca", "presenca"]);
+  });
+});

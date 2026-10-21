@@ -192,6 +192,18 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   da pessoa sai do limite; o portão da cota no `reivindicar` segura de novo se a escolhida ainda estiver no limite. A nova
   tentativa por erro transitório não é acordada: fica com o próprio backoff.
 
+## Emenda (2026-10-20, NOD-300) — item 10
+
+- **A frente presa a máquina sem contato espera, não trabalha.** Frente `rodando` com turno vivo numa máquina sem contato
+  (a regra do chip e de Trabalhos, NOD-260: não conectada há 60 s ou mais, desde o último uso da chave;
+  `src/domain/presenca-da-maquina.ts`) conta como "esperando", com o motivo "<máquina> · sem contato" e o desde do último
+  contato. É uma espera sintética: entra só no motivo e no desde da linha fechada, não vira item de `DonoDto.esperas`. Na
+  dúvida (sem o serviço das máquinas, Mac do servidor, sem último uso), vale o de antes.
+- **A presença avisa.** O varredor da ponte guarda a última presença avisada de cada máquina e publica
+  `inventario.mudou` (`motivo: "presenca"`) só na transição — um aviso por pessoa por passada; o `desconectar` também
+  avisa. A web relê `trabalhos` pela janela de 1 s e copia o dono lido para a conversa do bot (a linha acima do campo e a
+  barra leem o dela).
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é

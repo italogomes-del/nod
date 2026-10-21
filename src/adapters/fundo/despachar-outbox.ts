@@ -8,7 +8,9 @@ import { criarRepos } from "../../repositories/index.ts";
 import type { Barramento } from "../../services/barramento.ts";
 import { OUTBOX_IDADE_MIN_MS, OUTBOX_TETO_TENTATIVAS } from "../../shared/constantes.ts";
 import { ouvirOutbox } from "../../shared/sinal-outbox.ts";
-import { estadoDoDonoAgora } from "../../use-cases/estado-do-dono.ts";
+import type { ServicoDasMaquinas } from "../../contracts/trabalho.ts";
+import type { PresencaDasMaquinas } from "../../domain/presenca-da-maquina.ts";
+import { estadoDoDonoAgora, presencaDasMaquinas } from "../../use-cases/estado-do-dono.ts";
 import type { Conn, Db, Escopo, Relogio } from "../../shared/types.ts";
 import { paraCadaPessoa, type OpcoesLaco } from "./escopos-de-fundo.ts";
 
@@ -85,6 +87,11 @@ export interface OpcoesDespacho {
   limite?: number;
   /** Varre abandono e atualiza a métrica nesta passada (o laço faz isso a cada `abandonoACadaMs`). */
   varrerAbandono?: boolean;
+  /**
+   * NOD-300 (definido em 2026-10-20): a presença das máquinas, para o estado do dono do `trabalho.mudou` dizer
+   * "esperando" com a frente presa a máquina sem contato. Ausente = o estado de antes.
+   */
+  presenca?: Pick<ServicoDasMaquinas, "conectada" | "macDoServidor" | "identificar">;
 }
 
 /** Uma pessoa, uma conexão já escopada: é a unidade que os testes exercitam sob withRollback. */
@@ -94,7 +101,7 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
   const repos = criarRepos(conn, escopo);
   const resultado: ResultadoPassada = { publicados: 0, falhas: 0, abandonadosAgora: 0 };
 
-  const donos = new Map<string, EstadoDoDono | null>();
+  const donos: CacheDosDonos = { estados: new Map(), escopo, ...(opcoes.presenca ? { servico: opcoes.presenca } : {}) };
   for (const item of await repos.outbox.pendentes(opcoes.limite)) {
     try {
       // ADR-099 (I10, definido em 2026-10-12): o `trabalho.mudou` leva o estado do dono do bot, lido na hora de publicar
@@ -123,14 +130,27 @@ export async function despacharPessoa(conn: Conn, escopo: Escopo, barramento: Ba
  * O estado do dono para o frame (ADR-099, I10). Ler não pode segurar o frame nem a transação do despacho: a leitura roda
  * num SAVEPOINT e, na falha, o frame sai sem o estado e a web relê por REST, como antes.
  */
-async function estadoDoDonoNoFrame(conn: Conn, repos: ReturnType<typeof criarRepos>, agora: number, agenteId: unknown, cache: Map<string, EstadoDoDono | null>): Promise<{ estadoDono?: EstadoDoDono }> {
+type CacheDosDonos = {
+  estados: Map<string, EstadoDoDono | null>;
+  escopo: Escopo;
+  servico?: Pick<ServicoDasMaquinas, "conectada" | "macDoServidor" | "identificar">;
+  /** NOD-300: o resolver de presença, montado uma vez por passada (lido dentro do savepoint). */
+  presenca?: PresencaDasMaquinas | undefined;
+  presencaLida?: boolean;
+};
+
+async function estadoDoDonoNoFrame(conn: Conn, repos: ReturnType<typeof criarRepos>, agora: number, agenteId: unknown, cache: CacheDosDonos): Promise<{ estadoDono?: EstadoDoDono }> {
   if (typeof agenteId !== "string") return {};
-  if (!cache.has(agenteId)) {
+  if (!cache.estados.has(agenteId)) {
     let estado: EstadoDoDono | null = null;
     try {
       await conn`savepoint estado_do_dono`;
       try {
-        estado = await estadoDoDonoAgora({ repos, agora: () => agora }, agenteId);
+        if (!cache.presencaLida) {
+          cache.presenca = await presencaDasMaquinas({ repos, escopo: cache.escopo }, cache.servico);
+          cache.presencaLida = true;
+        }
+        estado = await estadoDoDonoAgora({ repos, agora: () => agora }, agenteId, cache.presenca);
         await conn`release savepoint estado_do_dono`;
       } catch (e) {
         await conn`rollback to savepoint estado_do_dono`;
@@ -139,9 +159,9 @@ async function estadoDoDonoNoFrame(conn: Conn, repos: ReturnType<typeof criarRep
     } catch (e) {
       log("aviso", "estado_do_dono_falhou", { agente_id: agenteId, erro: e instanceof Error ? e.name : "desconhecido" });
     }
-    cache.set(agenteId, estado);
+    cache.estados.set(agenteId, estado);
   }
-  const estado = cache.get(agenteId);
+  const estado = cache.estados.get(agenteId);
   return estado ? { estadoDono: estado } : {};
 }
 

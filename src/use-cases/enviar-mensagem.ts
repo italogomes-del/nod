@@ -16,7 +16,7 @@ import { redigir } from "../domain/redacao.ts";
 import { log } from "../obs/log.ts";
 import { autoriaAgente, autoriaPessoa, evento, inventarioAusente, motorDe, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { fiosDaConversa } from "./fios-da-pergunta.ts";
-import { donosDosBots } from "./estado-do-dono.ts";
+import { donosDosBots, presencaDasMaquinas } from "./estado-do-dono.ts";
 import { trabalhosParaDto } from "./trabalhos.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -230,7 +230,8 @@ export const lerConversa: CasoDeUso<{ conversaId: string; limite?: number }, Con
   const abertos = doBot ? await deps.repos.trabalhos.abertosDoAgente(doBot) : [];
   const trabalhos = await trabalhosParaDto(deps, abertos);
   // ADR-099 (I10): o dono do bot da conversa própria — a linha acima do campo (estado, esperas e fila).
-  const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos)).get(doBot) ?? null) : null;
+  // NOD-300: a frente presa a máquina sem contato espera, pela regra do chip.
+  const dono = doBot ? ((await donosDosBots(deps, [doBot], abertos, await presencaDasMaquinas(deps, deps.services.maquinas))).get(doBot) ?? null) : null;
   // ADR-113: as reações das falas da janela, numa consulta (o chip "👍 1" embaixo de cada fala).
   const reacoes = await deps.repos.reacoes.dasMensagens(mensagens.map((m) => m.id));
   // Chat limpo (PR 3, plano decisão 18): quem pediu cada turno de delegação da janela (próprio ou raiz), numa consulta à

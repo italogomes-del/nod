@@ -18,12 +18,13 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { esperaDaConta, iaDaEntrada } from "../domain/espera-da-cota.ts";
 import { acabaLogo, DISCO_ALERTA_MB, DISCO_CRITICO_MB, esperaDoMac, esperaNaMaquina, nivelDoDisco, piorNivel, portaoDoMac, seguravelPeloMac, type PortaoDoMac } from "../domain/memoria-mac.ts";
 import { pastaDoBot } from "../domain/nativas.ts";
+import { nomeDaMaquina, semContatoDesde as semContatoDaMaquina } from "../domain/presenca-da-maquina.ts";
 import { tituloDoLote } from "../domain/frente.ts";
 import { estadoDoTrabalho, linhaCurta, pastaDoTrabalho, textoTrabalhoAberto, tituloDoTrabalho, trabalhoAberto, trabalhoFinal } from "../domain/trabalho.ts";
 import type { ExtrasTrabalho, NovoTrabalho } from "../repositories/trabalhos.repo.ts";
 import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { colegaComCota } from "./cota-do-colega.ts";
-import { donosDosBots } from "./estado-do-dono.ts";
+import { donosDosBots, resolverDePresenca } from "./estado-do-dono.ts";
 import { fecharLoteSePronto } from "./fechar-lote.ts";
 import { resumoSeFaltar } from "./resumo-sem-chamada.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
@@ -298,9 +299,9 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
   const topo = { cota: cotaParaTela(cotaAgora), pedidosNaFila, pressao: memoria?.nivel ?? null, memoriaTotalMb: memoria?.totalMb ?? null, processador, cargaProcessador: memoria?.carga ?? null, usoProcessador: memoria?.uso ?? null, fila, segurando: portao.fundo !== null, motivoEspera: portao.fundo, seguraTudoNovo: portao.tudoNovo !== null, disco: disco && nivelDisco ? { ...disco, nivel: nivelDisco, alertaMb: DISCO_ALERTA_MB, criticoMb: DISCO_CRITICO_MB, acabaEmMs: acabaLogo(memoria?.discoAcabaEmMs) } : null, discoSuportado: memoria?.discoSuportado ?? disco !== null };
   // definido em 2026-10-12 (ADR-099, I10): o dono de cada bot (a linha do bot em Trabalhos), calculado aqui no servidor.
   const bots = input.agenteId ? [input.agenteId] : agentes.filter((a) => a.ownerId === deps.escopo.pessoaId && !a.excluidoEm).map((a) => a.id);
-  const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];
   // Sem o serviço das máquinas (serviço de teste antigo): o portão único de antes.
   if (!servico) {
+    const donos = [...(await donosDosBots(deps, bots, trabalhos)).values()];
     const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
       const motivo = esperaDoMac(t, portao, agora);
       return { ...(motivo ? { esperaDoMac: motivo } : {}), ...cotaDoTrabalho(t, e) };
@@ -308,8 +309,13 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
     return { data: { trabalhos: dtos, ...topo, donos } };
   }
   // NOD-260 (G8): o último uso da chave de cada máquina, para "sem contato desde HH:MM" (a regra do chip da conversa).
-  const ultimoUso = servico.conectada ? new Map((await deps.repos.maquinaTokens.listar()).map((c) => [c.id, c.ultimoUsoEm])) : new Map<string, number | null>();
-  const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso);
+  // Achado do QA no #427: o nome da chave, para a máquina que a ponte já esqueceu (90 s sem contato).
+  const chaves = servico.conectada ? await deps.repos.maquinaTokens.listar() : [];
+  const ultimoUso = new Map<string, number | null>(chaves.map((c) => [c.id, c.ultimoUsoEm]));
+  const nomes = new Map(chaves.map((c) => [c.id, c.nome]));
+  const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso, nomes);
+  // NOD-300: a frente presa a máquina sem contato espera no dono, pela mesma regra (e o mesmo último uso) da linha dela.
+  const donos = [...(await donosDosBots(deps, bots, trabalhos, servico.conectada ? resolverDePresenca(servico, deps.escopo, ultimoUso, nomes) : undefined)).values()];
   const dtos = await trabalhosParaDto(deps, trabalhos, (t, e) => {
     if (!trabalhoAberto(t.estado)) return {};
     // Onde roda (o turno vivo) ou vai rodar (o alvo do turno na fila, a regra do reivindicar); sem alvo, no modo local,
@@ -328,19 +334,12 @@ export const listarTrabalhos: CasoDeUso<{ agenteId?: string }, TrabalhosDto> = a
  * A tela fala por máquina (2026-10-09): cada máquina viva da pessoa com o nome, o portão (pelo "uso do Mac", que vale
  * para todas) e a leitura. Máquina que mandou leitura e já não está conectada fica com o id curto ("máquina 309ec3dd").
  */
-function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0], ultimoUso: ReadonlyMap<string, number | null> = new Map()) {
+function maquinasDaPessoa(deps: Pick<Deps, "escopo">, servico: ServicoDasMaquinas, usoDoMac: Parameters<typeof portaoDoMac>[0], ultimoUso: ReadonlyMap<string, number | null> = new Map(), nomes?: ReadonlyMap<string, string>) {
   // NOD-260 (G8): sem contato = não conectada (contato há 60 s ou mais), desde o último uso da chave. O Mac do servidor
   // fala sempre; sem o serviço saber (`conectada` ausente) ou sem o último uso, null — na dúvida, não acusa.
-  const semContatoDesde = (id: string): number | null => {
-    if (!servico.conectada || id === servico.macDoServidor || servico.conectada(deps.escopo, id)) return null;
-    return ultimoUso.get(id) ?? null;
-  };
-  const nomear = (id: string): MaquinaDoTrabalho => {
-    const conhecida = servico.identificar(deps.escopo, id);
-    const contato = servico.conectada ? { semContatoDesde: semContatoDesde(id) } : {};
-    if (conhecida) return { id, ...conhecida, ...contato };
-    return id === servico.macDoServidor ? { id, nome: "Este Mac", ehMac: true, ...contato } : { id, nome: `máquina ${id.slice(0, 8)}`, ehMac: false, ...contato };
-  };
+  // NOD-300: a regra mora em src/domain/presenca-da-maquina.ts, a mesma do estado do dono.
+  const semContatoDesde = (id: string): number | null => semContatoDaMaquina(servico, deps.escopo, id, ultimoUso);
+  const nomear = (id: string): MaquinaDoTrabalho => ({ ...nomeDaMaquina(servico, deps.escopo, id, nomes), ...(servico.conectada ? { semContatoDesde: semContatoDesde(id) } : {}) });
   const portoes = new Map<string, PortaoDoMac>();
   const maquinas: LeituraDeMaquinaDto[] = servico.leituras(deps.escopo.pessoaId).map((l) => {
     const portao = portaoDoMac(usoDoMac, { memoria: l.nivel, processador: l.portao, discoNivel: l.discoNivel }, { plataforma: servico.plataforma?.(deps.escopo, l.machineId) ?? null, linuxSoVermelha: servico.fundoLinuxSoVermelha === true });

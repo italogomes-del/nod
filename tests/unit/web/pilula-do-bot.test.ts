@@ -57,6 +57,17 @@ const daPilula = (p: PilulaNaConversa) => {
 };
 
 describe("a pílula fechada: o texto prioriza as frentes", () => {
+  it("achado do QA no #427: a frente sozinha presa a máquina sem contato não repete a espera na contagem", () => {
+    const presa = [frente("h", "Login", { loteId: "l2", lote: { id: "l2", abertoEm: AGORA, frentes: 1, abertas: 1 }, turnoVivoId: "tvh", maquina: { id: "vm1", nome: "VM-1", ehMac: false, semContatoDesde: AGORA - 12 * MIN } })];
+    const so = daPilula(pilulaNaConversa(estadoCom(presa, dono({ principal: "esperando", esperando: 1, motivoEspera: "VM-1 · sem contato", desde: AGORA - 12 * MIN })), "orq", SEM_PROGRESSO));
+    const textos = [so.pilula.texto, ...so.pilula.resto];
+    expect(textos.filter((x) => x.includes("sem contato") || /esperando$/.test(x)).length).toBeLessThanOrEqual(1);
+    expect(so.pilula.resto).not.toContain("esperando VM-1 · sem contato");
+    // Com outra espera do bot (a conversa esperando a CI), conta só a outra, sem o motivo (que pode ser o da presa).
+    const duas = daPilula(pilulaNaConversa(estadoCom(presa, dono({ principal: "esperando", esperando: 2, motivoEspera: "VM-1 · sem contato", desde: AGORA - 12 * MIN })), "orq", SEM_PROGRESSO));
+    expect(duas.pilula.resto.slice(1)).toEqual(["1 esperando"]);
+  });
+
   it("um lote: \"5 frentes\" e \"3 de 5 prontas\", com o ponto vivo; o botão abre o painel (aria-expanded, aria-controls)", () => {
     const p = daPilula(pilulaNaConversa(estadoCom(HEROS, dono({ principal: "trabalhando", frentes: 2 })), "orq", SEM_PROGRESSO));
     expect(p.pilula.texto).toBe("5 frentes");

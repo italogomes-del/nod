@@ -500,7 +500,8 @@ function receberFrame(frame: FrameSse): void {
   telaOnboarding.aoFrame();
   // Só quem marcou algo para buscar precisa do REST; um pedaço de texto nunca marca.
   if (estado.invalidacoes === antes.invalidacoes) return;
-  if (frame.tipo.startsWith("turno.") && estado.invalidacoes.includes("trabalhos")) releituraTrabalhos.pedir();
+  // NOD-300: o `inventario.mudou` (a presença das máquinas) também relê Trabalhos pela janela de 1 s.
+  if ((frame.tipo.startsWith("turno.") || frame.tipo === "inventario.mudou") && estado.invalidacoes.includes("trabalhos")) releituraTrabalhos.pedir();
   if (estado.invalidacoes.some((q) => daAtividade(q) && !antes.invalidacoes.includes(q))) releituraAtividade.pedir();
   void reidratar();
 }
@@ -1718,6 +1719,7 @@ async function boot(): Promise<void> {
     // Revisto em 2026-10-09: também com Máquinas aberta, que mostra a leitura de cada máquina.
     // Revisto em 2026-10-11: com Máquinas aberta, a lista também. Máquina que cai ou volta não vira `inventario.mudou` (só a
     // mudança das IAs da pessoa vira), e o cartão ficava em "sem contato" com a VM já de volta e os bots trabalhando nela.
+    // Desde a NOD-300 (2026-10-20) ela vira (motivo "presenca", no varrer da ponte); esta releitura fica como rede.
     if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: estado.espaco?.secao === "maquinas" ? ["trabalhos", "maquinas"] : ["trabalhos"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);

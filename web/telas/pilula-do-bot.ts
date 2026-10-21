@@ -3,7 +3,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { donoDoBot, esperaNaTela, linhaDoDono, quemPediu, textoDaFila, textoDasEsperas, type EsperaNaTela } from "../lib/dono.ts";
 import { pilulaEscondida, type ProgressoNaTela } from "../lib/pilula.ts";
 import { esc, hora } from "../lib/render.ts";
-import { aberto, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { aberto, esperandoMaquina, tituloCurto, trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { memoriaDoMac } from "./linha-do-dono.ts";
 import { conversaLimpa } from "./linhas-do-chat.ts";
 import { frentesNaFala, itemDaFrente, type FrenteNaFala, type MemoriaNoProgresso } from "./progresso-na-fala.ts";
@@ -97,6 +97,13 @@ function estadoDoGrupo(g: GrupoDaPilula): string {
   return `${g.prontas} de ${g.total} prontas`;
 }
 
+/** A frente conta como espera no dono: tem espera dela (comando, volta, colega) ou a máquina do turno vivo está sem contato. */
+function esperaNoDono(dono: NonNullable<ReturnType<typeof donoDoBot>>, trabalhoId: string, todos: readonly TrabalhoDto[]): boolean {
+  if (dono.esperas.some((x) => x.trabalhoId === trabalhoId)) return true;
+  const t = todos.find((x) => x.id === trabalhoId);
+  return Boolean(t && t.estado === "rodando" && t.turnoVivoId && esperandoMaquina(t));
+}
+
 /**
  * A pílula do bot, ou null quando não há nada a dizer (o bot livre, ou só "Esperando você", que tem o cartão). Exige o dono
  * do servidor (ADR-099, I10): sem ele, quem chama desenha a faixa de antes.
@@ -123,7 +130,13 @@ export function pilulaDoBot(estado: Estado, agenteId: string): Pilula | null {
     // contagem, como no bloco da fala ("1 precisa de você"): a linha do dono a dizia com "Esperando você", e com a fala à
     // vista a pílula some (revisão do PR 400). A frente sozinha já diz o estado dela.
     const precisam = um && g.total === 1 ? 0 : grupos.reduce((s, x) => s + x.frentes.filter((f) => f.estado === "precisa").length, 0);
-    const resto = [um ? estadoDoGrupo(g) : `${prontas} de ${total} prontas`, precisam ? (precisam === 1 ? "1 precisa de você" : `${precisam} precisam de você`) : "", e.esperando > 0 ? textoDasEsperas(e) : "", e.fila > 0 ? textoDaFila(e, dono.fila.length) : ""].filter(Boolean);
+    // Achado do QA no #427: a frente sozinha que espera (a máquina sem contato, um comando, um colega) já diz a espera no
+    // estado dela ("esperando VM-1 · sem contato"); a contagem do dono fica só com as outras, sem repetir o motivo.
+    const sozinha = um && g.total === 1 ? g.frentes[0] : undefined;
+    const jaDita = sozinha?.estado === "esperando" && esperaNoDono(dono, sozinha.trabalhoId, todos) ? 1 : 0;
+    const outras = e.esperando - jaDita;
+    const esperasNoResto = outras <= 0 ? "" : jaDita ? `${outras} esperando` : textoDasEsperas(e);
+    const resto = [um ? estadoDoGrupo(g) : `${prontas} de ${total} prontas`, precisam ? (precisam === 1 ? "1 precisa de você" : `${precisam} precisam de você`) : "", esperasNoResto, e.fila > 0 ? textoDaFila(e, dono.fila.length) : ""].filter(Boolean);
     const vivo = grupos.some((x) => x.frentes.some((f) => f.estado === "rodando"));
     return { agenteId, nome, sinal: vivo ? "vivo" : "espera", texto, resto, grupos, esperas, fila, memoria, abertas };
   }

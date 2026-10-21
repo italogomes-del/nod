@@ -234,3 +234,23 @@ describe("reducer: o estado do dono que chega no frame trabalho.mudou", () => {
     expect(aplicarFrame(antes, frame({ agenteId: 3 }), AGORA).trabalhos).toBe(antes.trabalhos);
   });
 });
+
+describe("NOD-300: o dono lido em GET trabalhos vale para a conversa do bot", () => {
+  const conversa = (agenteId: string, d: DonoDto) => ({ conversa: { id: `c-${agenteId}`, tipo: "propria", agenteId }, mensagens: [], turnosPendentes: [], turnosEmCurso: [], turnosCancelados: [], propostas: [], fios: [], trabalhos: [], dono: d }) as never;
+
+  it("a releitura com o dono esperando troca o da conversa do bot e não toca na de outro bot", () => {
+    const daZe2 = dono({ agenteId: "ze2", principal: "trabalhando", frentes: 1 });
+    const antes = estadoCom([], undefined, { conversas: { "c-ze1": conversa("ze1", dono({ principal: "trabalhando", frentes: 1 })), "c-ze2": conversa("ze2", daZe2) } });
+    const esperando = dono({ principal: "esperando", esperando: 1, motivoEspera: "VM-1 · sem contato", desde: AGORA - 12 * MIN });
+    const depois = reduzir(antes, { tipo: "hidratar-trabalhos", trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null, donos: [esperando] }, agora: AGORA });
+    expect(depois.conversas["c-ze1"]?.dono).toEqual(esperando);
+    expect(depois.conversas["c-ze2"]).toBe(antes.conversas["c-ze2"]);
+  });
+
+  it("o mesmo dono não cria objeto novo na conversa", () => {
+    const igual = dono({ principal: "trabalhando", frentes: 1 });
+    const antes = estadoCom([], undefined, { conversas: { "c-ze1": conversa("ze1", igual) } });
+    const depois = reduzir(antes, { tipo: "hidratar-trabalhos", trabalhos: { trabalhos: [], pressao: null, memoriaTotalMb: null, donos: [dono({ principal: "trabalhando", frentes: 1 })] }, agora: AGORA });
+    expect(depois.conversas["c-ze1"]).toBe(antes.conversas["c-ze1"]);
+  });
+});
