@@ -132,7 +132,7 @@ Uma preview sem assinatura usa uma tag `desktop-v<VERSÃO>` (a última publicada
 
 `npm ci` usa as versões exatas de Electron e electron-builder do lockfile. `npm run desktop:build` compila app, preload e proxy e recusa dependências de servidor no bundle desktop. `npm run desktop:dev` permite HTTP somente em loopback para desenvolvimento; o app empacotado aceita só HTTPS.
 
-O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos, testa o proxy com o runtime empacotado, verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
+O workflow `.github/workflows/desktop-release.yml` roda o gate completo com Postgres limpo, roda o smoke da janela (`scripts/desktop/smoke-window.mjs`) antes de empacotar, cria os dois DMGs em runners nativos (cada job empacota só a própria arquitetura com `--mac dmg --<arch>` e confere com `lipo -archs` que o app testado é dela; sem o alvo explícito, o `arch` do `electron-builder.yml` vence a CLI e o job arm64 testava o app x64 pelo Rosetta, NOD-133), testa o proxy com o runtime empacotado (`smoke-proxy.mjs`, prazo em `NOD_SMOKE_PROXY_PRAZO_MS`, padrão 60 s; na falha imprime tempo, stdout, stderr e um `sample` do processo), verifica assinatura e notarização e cria uma **release em rascunho** nas tags `v<VERSÃO>` que correspondem ao `package.json`. Execução manual guarda apenas os artefatos do workflow.
 
 ### Secrets e variável da release assinada (NOD-203)
 

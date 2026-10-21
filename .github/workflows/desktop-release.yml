@@ -70,7 +70,16 @@ jobs:
       - name: Smoke da janela
         timeout-minutes: 5
         run: npx electron scripts/desktop/smoke-window.mjs
-      - run: npx electron-builder --mac --${{ matrix.arch }} --publish never --config.forceCodeSigning=true
+      # NOD-133: o alvo explícito (`dmg`) faz a CLI mandar na arquitetura. Só com `--arm64`, o `arch: [arm64, x64]` do
+      # electron-builder.yml vence (app-builder-lib targetFactory) e cada job empacotava, assinava e notarizava as duas.
+      - name: Empacotar, assinar e notarizar o .app
+        run: |
+          set -euo pipefail
+          npx electron-builder --mac dmg --"$ARCH" --publish never --config.forceCodeSigning=true
+          shopt -s nullglob
+          apps=(release/*/nod.app)
+          dmgs=(release/*.dmg)
+          if [ "${#apps[@]}" -ne 1 ] || [ "${#dmgs[@]}" -ne 1 ]; then echo "::error::esperava só o app e o DMG $ARCH, veio: ${apps[*]} ${dmgs[*]}"; exit 1; fi
       # NOD-203: o electron-builder notariza só o .app; o DMG é notarizado e grampeado aqui. O `--wait` sai com 0
       # mesmo com status Invalid, então o status é conferido pelo verificador. A senha só passa pela expansão do env.
       - name: Notarizar e grampear o DMG
@@ -90,10 +99,24 @@ jobs:
       - name: Verificar assinatura e notarização
         run: |
           set -euo pipefail
-          APP=$(find release -maxdepth 2 -name nod.app -type d -print -quit)
-          test -n "$APP"
+          if [ "$ARCH" = arm64 ]; then APP=release/mac-arm64/nod.app; LIPO=arm64; else APP=release/mac/nod.app; LIPO=x86_64; fi
+          test -d "$APP"
+          # NOD-133: o app testado é o da arquitetura do job, nativo deste runner (nada de Rosetta).
+          VEIO=$(lipo -archs "$APP/Contents/MacOS/nod")
+          if [ "$VEIO" != "$LIPO" ] || [ "$(uname -m)" != "$LIPO" ]; then echo "::error::$APP é $VEIO, o job é $LIPO e o runner é $(uname -m)"; exit 1; fi
           node scripts/desktop/smoke-proxy.mjs "$APP/Contents/MacOS/nod" "$APP/Contents/Resources/app.asar.unpacked/dist/desktop/proxy.mjs"
           node scripts/desktop/verificar-pacote-mac.mjs pacote "$APP" release/nod-*-mac-"$ARCH".dmg
+      - name: Diagnóstico do pacote
+        if: failure()
+        run: |
+          APP=$(find release -maxdepth 2 -name nod.app -type d)
+          for A in $APP; do
+            echo "== $A"
+            lipo -archs "$A/Contents/MacOS/nod" || true
+            codesign -d --entitlements - "$A" || true
+            spctl -a -vv "$A" || true
+          done
+          ls -la release || true
       # Depois do grampo e da verificação: o hash publicado é o do DMG final.
       - name: SHA-256 do DMG
         run: shasum -a 256 release/nod-*-mac-"$ARCH".dmg > "release/SHA256-${ARCH}.txt"
