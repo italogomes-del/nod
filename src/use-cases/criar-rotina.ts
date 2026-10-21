@@ -24,8 +24,6 @@ export type EntradaRotina = {
   entregavel: string;
   limitesAprovacao: string;
   politicaSemDado: string;
-  /** definido em 2026-10-01 (item 7 da ADR-066): só criar_rotina manda; a rota POST rotinas não, e fica false. */
-  soComPendencia?: boolean;
 };
 
 /** Valida no domínio (fuso_invalido / cron_sem_futuro / entrada_invalida) e o limite de 50 por bot (limite_atingido). */
@@ -68,7 +66,6 @@ export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCri
     entregavel: args.entregavel,
     limitesAprovacao: args.limites_aprovacao,
     politicaSemDado: args.politica_sem_dado,
-    ...(args.so_com_pendencia !== undefined ? { soComPendencia: args.so_com_pendencia } : {}),
   });
   const acessos = await acessosDeclarados(deps, args.acessos);
   return {
@@ -83,7 +80,6 @@ export async function prepararRotina(deps: Deps, agenteId: string, args: ArgsCri
     proximaExecucao: normalizada.proximaExecucao,
     resumo: normalizada.resumo,
     ...(acessos !== undefined ? { acessos } : {}),
-    ...(normalizada.soComPendencia ? { soComPendencia: true as const } : {}),
   };
 }
 
@@ -190,7 +186,6 @@ export const criarRotinaPelaPessoa: CasoDeUso<EntradaRotina & { agenteId: string
     limitesAprovacao: normalizada.limitesAprovacao,
     politicaSemDado: normalizada.politicaSemDado,
     proximaExecucao: normalizada.proximaExecucao,
-    soComPendencia: normalizada.soComPendencia,
   });
   if (!rotina) throw new ErroDeDominio("estado_invalido", { cause: "rotina não criada" });
   const autoria = autoriaPessoa(deps.escopo.pessoaId);

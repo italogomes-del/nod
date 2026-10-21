@@ -47,7 +47,7 @@ async function necessidadesAtuais(repos: Repos, rotina: Rotina, registrados: rea
  * em 15/10 na NOD-228): a pergunta das voltas não segura o cron — a janela seguinte é a volta. Ela é reconhecida pelo
  * balão (autoria `decidido_por` da regra), porque a decisão pendente não guarda a regra.
  */
-export async function pendenciasDaRotina(repos: Repos, rotina: Rotina): Promise<{ seguram: Decisao[]; dasVoltas: Decisao[] }> {
+export async function decisoesQueSeguramARotina(repos: Repos, rotina: Rotina): Promise<{ seguram: Decisao[]; dasVoltas: Decisao[] }> {
   const seguram: Decisao[] = [];
   const dasVoltas: Decisao[] = [];
   for (const d of await repos.decisoes.pendentesDaConversa(rotina.conversaId)) {
@@ -59,9 +59,9 @@ export async function pendenciasDaRotina(repos: Repos, rotina: Rotina): Promise<
   return { seguram, dasVoltas };
 }
 
-/** A pendência mais antiga que segura a janela seguinte desta rotina (pendenciasDaRotina), ou null. */
-export async function pendenciaAbertaDaRotina(repos: Repos, rotina: Rotina): Promise<Decisao | null> {
-  return (await pendenciasDaRotina(repos, rotina)).seguram[0] ?? null;
+/** A pendência mais antiga que segura a janela seguinte desta rotina (decisoesQueSeguramARotina), ou null. */
+export async function decisaoQueSeguraARotina(repos: Repos, rotina: Rotina): Promise<Decisao | null> {
+  return (await decisoesQueSeguramARotina(repos, rotina)).seguram[0] ?? null;
 }
 
 export type BloqueioDoPreVoo = { motivo: MotivoBloqueioRotina; propostaId: string | null; events: RuntimeEvent[] };
@@ -82,7 +82,7 @@ export async function preVooDaRotina(deps: Deps, rotina: Rotina, opcoes: { agend
   // ADR-066: cada app que falta e que o modo concede sai do caminho; o primeiro que ele não concede para a janela.
   for (let i = 0; i <= necessidades.length; i++) {
     const bloqueio = await faltaOuConcede(deps, rotina, necessidades);
-    if (bloqueio !== "concedido") return bloqueio ?? (opcoes.agendada && (await pendenciaAbertaDaRotina(deps.repos, rotina)) ? { motivo: "aguardando_resposta", propostaId: null, events: [] } : null);
+    if (bloqueio !== "concedido") return bloqueio ?? (opcoes.agendada && (await decisaoQueSeguraARotina(deps.repos, rotina)) ? { motivo: "aguardando_resposta", propostaId: null, events: [] } : null);
   }
   return null;
 }

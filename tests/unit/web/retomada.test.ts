@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { A_FAZER_LIGADO } from "../../../web/lib/a-fazer.ts";
 import { estadoInicial, invalidacoesAoRetomar, type Estado } from "../../../web/estado/reducer.ts";
 
 /**
@@ -18,14 +17,10 @@ describe("invalidacoesAoRetomar", () => {
       ...base,
       tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" },
       conversas: { c1: {} as never, c2: {} as never },
-      pendencias: { a1: [], a2: [] },
     };
     const q = invalidacoesAoRetomar(e);
     for (const esperado of ["frota", "sua-vez", "nao-lidos", "trabalhos", "ligacao", "conversa:c1", "conversa:c2"]) expect(q).toContain(esperado);
     expect(new Set(q).size).toBe(q.length);
-    // O "a fazer" entra quando ligado (ADR-064; desligado desde 2026-10-06): o da tela e os já lidos.
-    if (A_FAZER_LIGADO) expect(q).toEqual(expect.arrayContaining(["pendencias:a1", "pendencias:a2"]));
-    else expect(q.some((x) => x.startsWith("pendencias:"))).toBe(false);
   });
 
   it("a conversa e a task da tela entram mesmo antes de carregadas", () => {

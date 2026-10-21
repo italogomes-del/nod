@@ -67,8 +67,7 @@ export const verColegas: CasoNod<Deps, "ver_colegas"> = async (deps, input) => {
       nome: a.nome,
       titulo: a.titulo,
       descricao: inteiro ? a.descricao : cortar(a.descricao, DESCRICAO_RESUMIDA),
-      // so_com_pendencia só quando true (definido em 2026-10-01, item 7 da ADR-066), na forma de listar_rotinas.
-      rotinas: rotinas.map((r) => ({ id: r.id, quando: resumoCron(r.cron, r.fusoIana), estado: r.estado, instrucao: cortar(r.instrucao, inteiro ? INSTRUCAO_INTEIRA : INSTRUCAO_ROTINA_NO_PROMPT), ...(r.soComPendencia ? { so_com_pendencia: true as const } : {}) })),
+      rotinas: rotinas.map((r) => ({ id: r.id, quando: resumoCron(r.cron, r.fusoIana), estado: r.estado, instrucao: cortar(r.instrucao, inteiro ? INSTRUCAO_INTEIRA : INSTRUCAO_ROTINA_NO_PROMPT) })),
       apps,
     });
   }

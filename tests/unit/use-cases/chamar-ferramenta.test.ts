@@ -362,6 +362,15 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
 });
 
 describe("validação pelo subconjunto JSON Schema", () => {
+  it("NOD-317: so_com_pendencia saiu do schema, mas o modelo que ainda o mande não derruba criar/atualizar_rotina — o campo é descartado", () => {
+    const rotina = { cron: "0 8 * * *", fuso_iana: "America/Sao_Paulo", instrucao: "i", fonte: "f", entregavel: "e", limites_aprovacao: "l", politica_sem_dado: "p" };
+    expect(validarArgsNod("criar_rotina", { ...rotina, so_com_pendencia: true })).toEqual({ ok: true, args: rotina });
+    const id = "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e";
+    expect(validarArgsNod("atualizar_rotina", { rotina_id: id, instrucao: "nova", so_com_pendencia: false })).toEqual({ ok: true, args: { rotina_id: id, instrucao: "nova" } });
+    // Só ele: outro campo fora do schema continua recusado.
+    expect(validarArgsNod("criar_rotina", { ...rotina, extra: 1 })).toMatchObject({ ok: false });
+  });
+
   it("required, additionalProperties false, enum, minLength, minItems, items, integer e tipos aninhados", () => {
     expect(validarArgsNod("lembrar", { tipo: "fato", texto: "x" })).toEqual({ ok: true, args: { tipo: "fato", texto: "x" } });
     expect(validarArgsNod("lembrar", { tipo: "fato" })).toMatchObject({ ok: false, erros: ["$.texto: obrigatório"] });

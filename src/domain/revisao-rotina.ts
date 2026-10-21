@@ -9,7 +9,7 @@ import { jsonEstavel as estavel } from "./json-estavel.ts";
  * `estado`, `proximaExecucao` e as datas ficam de fora: pausar, reativar ou o tick não invalidam o card.
  * O domínio é puro (ADR-018), então o sha256 chega por parâmetro; quem chama usa `node:crypto`.
  */
-export type CamposDaRevisao = Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "acessos" | "soComPendencia">;
+export type CamposDaRevisao = Pick<Rotina, "cron" | "fusoIana" | "instrucao" | "fonte" | "entregavel" | "limitesAprovacao" | "politicaSemDado" | "acessos">;
 
 /** Acessos são um conjunto: a ordem da lista (e das capacidades dentro de cada um) não muda a revisão. */
 function acessosOrdenados(acessos: CamposDaRevisao["acessos"]): string[] | null {
@@ -30,7 +30,10 @@ export function formaDaRevisao(r: CamposDaRevisao): string {
     limitesAprovacao: r.limitesAprovacao,
     politicaSemDado: r.politicaSemDado,
     acessos: acessosOrdenados(r.acessos),
-    soComPendencia: r.soComPendencia,
+    // revisto em 2026-10-20 (NOD-317): o "só com pendência" saiu da rotina, mas a chave fica, sempre false, para o
+    // hash continuar o mesmo — a proposta aberta guarda a revisão de quando nasceu, e mudar a forma a tornaria
+    // obsoleta (TEXTO_ROTINA_MUDOU) sem a rotina ter mudado.
+    soComPendencia: false,
   });
 }
 

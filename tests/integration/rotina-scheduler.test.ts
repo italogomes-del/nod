@@ -26,7 +26,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const tx: Transacao = (fn) => fn(trx);
 
       const r1 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r1).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], falhas: [] });
       const janelas = await repos.rotinaJanelas.listar(vencida?.id ?? "");
       expect(janelas).toHaveLength(1);
       expect(janelas[0]).toMatchObject({ instanteAgendado: JANELA, machineId: opcoes.machineId, executor: "catcher" });
@@ -39,7 +39,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(kinds.map((k) => k.kind).sort()).toEqual(["turno_criado"]);
 
       const r2 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r2).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(1);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
 
@@ -49,7 +49,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       await repos.rotinas.atualizarEstado(futura?.id ?? "", "pausada");
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA + 86_400_000);
       const seguinte = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
-      expect(seguinte).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(seguinte).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(2);
       expect((await repos.turnos.buscar(janelas[0]?.turnoId ?? ""))?.estado).toBe("interrompido");
       expect((await repos.rotinaExecucoes.listar(vencida?.id ?? "")).find((e) => e.turnoId === janelas[0]?.turnoId)).toMatchObject({ desfecho: "nao_rodou", motivo: "maquina_sem_contato" });
@@ -57,7 +57,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       // NOD-271: a janela já reivindicada (a agenda voltou para ela): sem turno novo, e a agenda ANDA.
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA);
       const r3 = await tickPessoa(MARLON, tx, opcoes);
-      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r3).toEqual({ disparadas: [], deOutroProcesso: [vencida?.id], adiadas: [], bloqueadas: [], falhas: [] });
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(2);
       expect(new Date((await repos.rotinas.buscar(vencida?.id ?? ""))?.proximaExecucao ?? 0).toISOString()).toBe("2026-09-18T11:00:00.000Z");
     });
@@ -74,7 +74,7 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       const [janela] = await repos.rotinaJanelas.listar(rotina?.id ?? "");
       await trx`update turnos set estado = 'despachando', attempted = true where id = ${janela?.turnoId ?? ""}`;
       const r = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
-      expect(r).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [rotina?.id], bloqueadas: [], semPendencia: [], falhas: [] });
+      expect(r).toEqual({ disparadas: [], deOutroProcesso: [], adiadas: [rotina?.id], bloqueadas: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(rotina?.id ?? "")).toHaveLength(2);
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
       expect((await repos.rotinaExecucoes.listar(rotina?.id ?? ""))[0]).toMatchObject({ desfecho: "adiada", motivo: "execucao_anterior_aberta", turnoId: null });

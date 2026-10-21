@@ -127,9 +127,9 @@ export const aplicarAtualizacaoRotina: CasoDeUso<{ propostaId: string; porRegra?
     limitesAprovacao: p.limitesAprovacao,
     politicaSemDado: p.politicaSemDado,
     proximaExecucao,
+    // revisto em 2026-10-20 (NOD-317): o flag do "A fazer" de proposta antiga, se vier no payload, é ignorado — a
+    // proposta aplica o resto e não falha.
     acessos: p.acessos,
-    // definido em 2026-10-01 (item 7 da ADR-066): só vem no payload quando muda; ausente fica como está.
-    soComPendencia: p.soComPendencia,
   });
   if (!rotina) throw new ErroDeDominio("nao_permitido", { cause: "só a dona atualiza a rotina" });
   const autoria = autoriaDeQuemConfirma(deps, proposta.agenteId, input.porRegra);

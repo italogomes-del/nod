@@ -17,7 +17,6 @@ import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ItemAprovacao } from "../../src/contracts/item-aprovacao.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { Mensagem } from "../../src/contracts/mensagem.ts";
-import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina, Rotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
@@ -69,8 +68,6 @@ export type BancoMemoria = {
   /** agentes.geracao_execucao (ADR-034): ausente = 0. */
   geracoes: Map<string, number>;
   memorias: Memoria[];
-  /** 0044 (ADR-064): as pendências do bot, com a dona e o turno que resolveu. */
-  pendencias: (Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null })[];
   conversas: Conversa[];
   mensagens: Mensagem[];
   /** NOD-156: `tenant:conversa:idEnvio` → id da mensagem (a coluna id_envio não sai em Mensagem). */
@@ -166,7 +163,6 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     agentes: [],
     geracoes: new Map(),
     memorias: [],
-    pendencias: [],
     conversas: [],
     mensagens: [],
     idsDeEnvio: new Map(),
@@ -248,7 +244,6 @@ const iso = (n: number) => new Date(n).toISOString();
 const semDono = (l: Artefato & { tenantId: string; ownerId: string }): Artefato => ({ id: l.id, agenteId: l.agenteId, conversaId: l.conversaId, titulo: l.titulo, versaoAtual: l.versaoAtual, criadoEm: l.criadoEm, atualizadoEm: l.atualizadoEm });
 const semDonoEspera = ({ tenantId: _tenant, ownerId: _dona, ...e }: Espera & { tenantId: string; ownerId: string }): Espera => ({ ...e });
 const semDonoTrabalho = ({ ownerId: _dona, ...t }: Trabalho & { ownerId: string }): Trabalho => ({ ...t });
-const semDonoPendencia = ({ ownerId: _dona, resolvidaNoTurnoId: _turno, ...p }: Pendencia & { ownerId: string; resolvidaNoTurnoId: string | null }): Pendencia => ({ ...p });
 
 function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
   const doTenant = <T extends { tenantId: string }>(lista: T[]) => lista.filter((x) => x.tenantId === escopo.tenantId);
@@ -571,57 +566,6 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         if (i === -1) return false;
         b.memorias.splice(i, 1);
         return true;
-      },
-    },
-
-    pendencias: {
-      async criar(n) {
-        const linha = {
-          tenantId: escopo.tenantId,
-          ownerId: escopo.pessoaId,
-          id: randomUUID(),
-          agenteId: n.agenteId,
-          conversaId: n.conversaId,
-          turnoId: n.turnoId,
-          texto: n.texto,
-          aPartirDe: n.aPartirDe,
-          cuidado: n.cuidado,
-          profundidade: n.profundidade as Pendencia["profundidade"],
-          estado: "aberta" as const,
-          resolvidaEm: null,
-          resolvidaPor: null,
-          motivo: null,
-          pedidaEm: null,
-          criadoEm: agora(),
-          resolvidaNoTurnoId: null,
-        };
-        b.pendencias.push(linha);
-        return semDonoPendencia(linha);
-      },
-      async buscar(id) {
-        const p = doTenant(b.pendencias).find((x) => x.id === id);
-        return p ? semDonoPendencia(p) : null;
-      },
-      async abertasDoAgente(agenteId) {
-        return doTenant(b.pendencias)
-          .filter((p) => p.agenteId === agenteId && p.estado === "aberta")
-          .sort((x, y) => y.criadoEm - x.criadoEm || y.id.localeCompare(x.id))
-          .map(semDonoPendencia);
-      },
-      async resolver(id, r) {
-        const p = doTenant(b.pendencias).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "aberta");
-        if (!p) return null;
-        Object.assign(p, { estado: r.estado, resolvidaEm: r.agora, resolvidaPor: r.por, resolvidaNoTurnoId: r.turnoId, motivo: r.motivo });
-        return semDonoPendencia(p);
-      },
-      async marcarPedida(id, quando, repedirAposMs) {
-        const p = doTenant(b.pendencias).find((x) => x.id === id && x.ownerId === escopo.pessoaId && x.estado === "aberta");
-        if (!p || (p.pedidaEm !== null && p.pedidaEm > quando - repedirAposMs)) return null;
-        p.pedidaEm = quando;
-        return semDonoPendencia(p);
-      },
-      async resolvidasNoTurno(turnoId) {
-        return doTenant(b.pendencias).filter((p) => p.resolvidaNoTurnoId === turnoId).length;
       },
     },
 
@@ -2126,7 +2070,6 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           criadoEm: agora(),
           excluidoEm: null,
           acessos: r.acessos ?? null,
-          soComPendencia: r.soComPendencia ?? false,
         };
         b.rotinas.push(rotina);
         return rotina;

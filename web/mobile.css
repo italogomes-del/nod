@@ -77,7 +77,7 @@
   .msg-encolhido > .cartao-encolhido { margin-left: 36px; width: calc(100% - 36px); }
   .bubble { font-size: 15px; }
   .msg-handoff, .msg-peer, .msg-rotina, .msg-consentimento, .connection-card, .acesso-card, .card-pasta, .welcome-options,
-  .liberar-card, .perfil-card, .a-fazer { margin-left: 0; max-width: 100%; }
+  .liberar-card, .perfil-card { margin-left: 0; max-width: 100%; }
   .bubble pre, .msg-peer pre { max-width: 100%; }
   /* As ações da fala (reagir, responder, reportar e ⋯; ADR-113) só aparecem depois de um toque nela (web/lib/gaveta-bots.ts),
      dentro da coluna, nunca ao lado, com alvos de 44 px: no toque, o ⋯ fica sempre à vista junto das outras. */

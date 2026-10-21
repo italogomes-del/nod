@@ -22,7 +22,6 @@ import type { memoriasRepo } from "./memorias.repo.ts";
 import type { mensagensRepo } from "./mensagens.repo.ts";
 import type { outboxRepo } from "./outbox.repo.ts";
 import type { paradasRepo } from "./paradas.repo.ts";
-import type { pendenciasRepo } from "./pendencias.repo.ts";
 import type { pessoasRepo } from "./pessoas.repo.ts";
 import type { procuracoesRepo } from "./procuracoes.repo.ts";
 import type { propostasRepo } from "./propostas.repo.ts";
@@ -71,7 +70,6 @@ export interface Repos {
   outbox: ReturnType<typeof outboxRepo>;
   agentes: ReturnType<typeof agentesRepo>;
   memorias: ReturnType<typeof memoriasRepo>;
-  pendencias: ReturnType<typeof pendenciasRepo>;
   conversas: ReturnType<typeof conversasRepo>;
   mensagens: ReturnType<typeof mensagensRepo>;
   anexos: ReturnType<typeof anexosRepo>;

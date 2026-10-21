@@ -59,10 +59,7 @@ export type ChaveRedacao =
   | "anotei"
   | "permissao-permanente"
   | "computador-fora-do-ar"
-  | "rotina-pausada-sem-acesso"
-  | "pendencia-feita"
-  | "pendencia-descartada"
-  | "pendencia-descartada-pela-pessoa";
+  | "rotina-pausada-sem-acesso";
 
 /** Textos de sistema FIXOS em português; nunca vêm do modelo. `{chave}` é preenchido com params. */
 const CATALOGO: Record<ChaveRedacao, string> = {
@@ -156,11 +153,6 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   // definido em 2026-09-24 (emenda da ADR-044): a linha ÚNICA quando o pedido de acesso da rotina vence —
   // no lugar do "este pedido venceu"; {prazo} é o da decisão ("24h"), {app} o nome que a pessoa lê.
   "rotina-pausada-sem-acesso": "Rotina pausada: ninguém liberou o acesso ao {app} em {prazo}. Reative quando quiser.",
-  // definido em 2026-09-30 (ADR-064): a pendência resolvida deixa rastro na conversa — a pessoa vê que o bot cumpriu
-  // o que deixou para depois, mesmo quando a rotina que cumpriu não teria outra novidade a contar.
-  "pendencia-feita": "Feito: {texto}. {como}",
-  "pendencia-descartada": "Descartei: {texto}. {motivo}",
-  "pendencia-descartada-pela-pessoa": "Você descartou: {texto}",
 };
 
 /**

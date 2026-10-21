@@ -18,7 +18,7 @@ const concessoes: Concessao[] = [
   { tenantId: "t", id: "g1", ownerId: "p", agenteId: "a1", conectorId: "k1", capacidade: "listar_contatos", mensagemId: "m", criadoEm: 0 },
   { tenantId: "t", id: "g2", ownerId: "p", agenteId: "a1", conectorId: "k1", capacidade: "enviar_email", mensagemId: "m", criadoEm: 0 },
 ];
-const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [conector], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora, aFazer: true };
+const base: EntradaPlano = { turno, agente, memorias: [], concessoes, conectores: [conector], modo: "conversa", confianca: "confiavel", profundidade: 0, inventario: { estado: "pronto", versao: "2.1.272", em: agora }, executor: "local", sessaoCli: null, pessoaNome: "Marlon", agora };
 const nomes = (p: ReturnType<typeof montarPlano>) => p.catalogo.ferramentas.map((f) => f.nome);
 
 describe("montarPlano", () => {
@@ -85,7 +85,7 @@ describe("montarPlano", () => {
     for (const n of ["ver_colegas", "pedir_a_bot", "pedir_a_pessoa"]) expect(criacao).toContain(n);
     expect(nomes(montarPlano(base))).not.toContain("atualizar_perfil");
     // ADR-044: pedir_acesso só propõe (a pessoa decide num botão); sem ele a rotina pedia acesso em texto a cada disparo.
-    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "anotar_pendencia", "concluir_pendencia", "descartar_pendencia", "abrir_frentes", "mandar_para_frente", "me_chame_as"]);
+    expect(nomes(montarPlano({ ...base, modo: "rotina" })).filter((n) => !n.includes("__") && n !== "ler_mais")).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"]);
     // ADR-051: a rotina também publica e lê o artefato (a checklist do meio-dia atualiza a da manhã).
     // definido em 2026-09-28: com ferramenta de fora (conector) vem ler_mais, atendida pelo proxy; sem nenhuma, não.
     expect(nomes(montarPlano({ ...base, modo: "rotina" }))).toContain("ler_mais");
@@ -118,62 +118,25 @@ describe("montarPlano", () => {
     expect(montarPlano({ ...base, modo: "sala" }).promptSistema).not.toContain("window.nod.salvar");
   });
 
-  it("2026-10-06: com o \"A fazer\" desligado (o padrão, sem aFazer) nenhuma ferramenta de pendência, nem a regra nem a lista no prompt", () => {
-    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "conferir o PR", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
-    const { aFazer: _ligado, ...semChave } = base;
+  it("NOD-317: o \"A fazer\" saiu — nenhum modo tem ferramenta de pendência, nem o prompt fala dela", () => {
+    for (const modo of Object.keys(FERRAMENTAS_NOD_POR_MODO) as (keyof typeof FERRAMENTAS_NOD_POR_MODO)[]) {
+      expect(FERRAMENTAS_NOD_POR_MODO[modo].filter((n) => n.includes("pendencia")), modo).toEqual([]);
+    }
     for (const modo of ["conversa", "criacao", "rotina", "sala", "delegacao", "ligacao"] as const) {
-      const plano = montarPlano({ ...semChave, modo, pendencias: [pendencia] });
+      const plano = montarPlano({ ...base, modo });
       expect(nomes(plano).filter((n) => n.includes("pendencia")), modo).toEqual([]);
       expect(plano.promptSistema, modo).not.toContain("anotar_pendencia");
-      expect(plano.promptSistema, modo).not.toContain("conferir o PR");
+      expect(plano.promptSistema, modo).not.toContain("Suas pendências abertas");
     }
-  });
-
-  it("ADR-064: anotar_pendencia em todo modo em que o bot trabalha, inclusive no limite de 3; concluir e descartar só onde ele vê a lista", () => {
-    const comLista = ["conversa", "criacao", "rotina"] as const;
-    for (const modo of comLista) {
-      expect(nomes(montarPlano({ ...base, modo })), modo).toEqual(expect.arrayContaining(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]));
-    }
-    for (const modo of ["sala", "delegacao"] as const) {
-      const n = nomes(montarPlano({ ...base, modo, turno: { ...turno, origem: modo === "sala" ? "sala" : "delegacao", profundidade: 1 }, profundidade: 1 }));
-      expect(n, modo).toContain("anotar_pendencia");
-      expect(n, modo).not.toContain("concluir_pendencia");
-      expect(n, modo).not.toContain("descartar_pendencia");
-    }
-    // No limite da corrente (ADR-063) o salto sai; anotar fica: é o jeito de o pedido não se perder.
-    const noLimite = montarPlano({ ...base, modo: "delegacao", turno: { ...turno, origem: "delegacao", profundidade: 3 }, profundidade: 3 });
-    expect(nomes(noLimite)).toContain("anotar_pendencia");
-    expect(nomes(noLimite)).not.toContain("pedir_a_bot");
-    // Turno não confiável: o catálogo não encolhe (ADR-066), as ferramentas do nod ficam.
-    expect(nomes(montarPlano({ ...base, confianca: "nao_confiavel" }))).toEqual(expect.arrayContaining(["anotar_pendencia", "concluir_pendencia", "descartar_pendencia"]));
-  });
-
-  it("ADR-064: a lista das pendências entra na parte dinâmica do prompt, depois da parte estável; sem pendências, nada", () => {
-    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "Cobrar do Dev 1 o parecer do PR #475", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
-    const sem = montarPlano(base).promptSistema;
-    const com = montarPlano({ ...base, pendencias: [pendencia] }).promptSistema;
-    expect(sem).not.toContain("Suas pendências abertas");
-    expect(com).toContain("Suas pendências abertas");
-    expect(com).toContain("\"texto\":\"Cobrar do Dev 1 o parecer do PR #475\"");
-    // A parte estável (tudo antes da lista) é a mesma com e sem pendências: a lista não quebra o cache do CLI.
-    const inicio = com.indexOf("Suas pendências abertas");
-    expect(sem.startsWith(com.slice(0, com.lastIndexOf("\n", inicio)))).toBe(true);
   });
 
   it("NOD-183 (ADR-080): o plano leva as duas partes do prompt; juntadas com \"\\n\" dão o promptSistema, sem marcador", () => {
-    const pendencia = { tenantId: "t", id: "0f8f7c1e-9a51-4d0e-8f3a-5a8a0b1c2d3e", agenteId: "a1", conversaId: "c1", turnoId: "t0", texto: "Cobrar o PR", aPartirDe: null, cuidado: false, profundidade: 0 as const, estado: "aberta" as const, resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: agora - 60_000 };
-    for (const entrada of [base, { ...base, pendencias: [pendencia] }, { ...base, modo: "delegacao" as const, profundidade: 1 as const }]) {
+    for (const entrada of [base, { ...base, modo: "delegacao" as const, profundidade: 1 as const }]) {
       const p = montarPlano(entrada);
       const partes = p.promptSistemaPartes!;
       expect([partes.estavel, partes.volatil].filter((s) => s !== "").join("\n")).toBe(p.promptSistema);
       expect(p.promptSistema).not.toContain("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
     }
-    // A volátil leva as pendências; a estável é a mesma com e sem elas (é o prefixo que o CLI cacheia).
-    const sem = montarPlano(base).promptSistemaPartes!;
-    const com = montarPlano({ ...base, pendencias: [pendencia] }).promptSistemaPartes!;
-    expect(com.estavel).toBe(sem.estavel);
-    expect(com.volatil).toContain("Suas pendências abertas");
-    expect(com.estavel).not.toContain("Suas pendências abertas");
   });
 
   it("agente acordado por rotina pede a colega com o catálogo inteiro, mesmo não confiável; quem recebe (delegacao) tem o catálogo dele e repassa até o limite (ADR-058/062/066)", () => {

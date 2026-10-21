@@ -107,18 +107,13 @@ export function carimbo(instante: number, fusoIana = "UTC"): string {
   return fusoIana === "UTC" ? `${texto} UTC` : texto;
 }
 
-/**
- * Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). A rotina que só acorda com
- * pendência (definido em 2026-10-01, item 7 da ADR-066) diz isso na mesma linha: a "próxima execução" dela só vira
- * turno se houver pendência aberta.
- */
-export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao"> & { soComPendencia?: boolean }, agora: number): string {
-  const texto = redigir("rotina-proxima-execucao", agora, {
+/** Texto fixo de "rotina ativa" com periodicidade, próxima execução e fuso NOMEADO (E7.1). */
+export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "proximaExecucao">, agora: number): string {
+  return redigir("rotina-proxima-execucao", agora, {
     resumo: resumoCron(rotina.cron, rotina.fusoIana),
     proxima: carimbo(rotina.proximaExecucao, rotina.fusoIana),
     fuso: rotina.fusoIana,
   });
-  return rotina.soComPendencia ? `${texto} ${TEXTO_SO_COM_PENDENCIA}` : texto;
 }
 
 /**
@@ -128,9 +123,6 @@ export function textoRotinaAtiva(rotina: Pick<Rotina, "cron" | "fusoIana" | "pro
 export function eventoDeRotina(rotina: Pick<Rotina, "id" | "cron" | "fusoIana">, acao: AcaoRotinaEvento): PayloadRotinaEvento {
   return { kind: "rotina_evento", rotinaId: rotina.id, acao, resumo: resumoCron(rotina.cron, rotina.fusoIana) };
 }
-
-/** A frase da rotina que só acorda com pendência na linha de sistema da conversa (ativar, atualizar, reativar). */
-export const TEXTO_SO_COM_PENDENCIA = "Só acorda quando o bot tem pendência aberta; sem nenhuma, a janela passa sem turno e sem custo.";
 
 export function exigir<T>(valor: T | null | undefined, codigo: "nao_encontrado" | "estado_invalido" = "nao_encontrado", cause?: string): T {
   if (valor === null || valor === undefined) throw new ErroDeDominio(codigo, { cause });

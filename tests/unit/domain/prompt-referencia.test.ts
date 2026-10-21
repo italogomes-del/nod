@@ -17,7 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { ModoAprovacao } from "../../../src/contracts/agente.ts";
 import { partesDoPromptSistema, type EntradaPromptSistema } from "../../../src/domain/prompt-sistema.ts";
 import { MANUAL_DO_NOD } from "../../../src/domain/manual-do-nod.ts";
-import { agente, conectorTarefas, daOrigem, doConector, f, mem, pend } from "./_fixtures-prompt.ts";
+import { agente, conectorTarefas, daOrigem, doConector, f, mem } from "./_fixtures-prompt.ts";
 
 /** Quanto a parte estável pode crescer sobre a referência antes de o teste falhar (sugestão da issue). */
 const LIMITE_CRESCIMENTO_ESTAVEL = 0.1;
@@ -56,7 +56,7 @@ const rotinas = [
 
 /** O kit de um bot de conversa completo: colegas, rotinas, apps, computador, pasta, artefato e pendência. */
 const kitConversa = [
-  f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"),
+  f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"),
   f("publicar_artefato"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"), f("criar_bots"),
   daOrigem("computador_observar", "computador"), daOrigem("workspace_propor_pasta", "workspace"),
   doConector(conectorTarefas, "TAREFAS_LISTAR"),
@@ -65,14 +65,12 @@ const kitConversa = [
 /** O que muda de turno para turno (a parte volátil); o 2º turno do cenário 7 troca só isto. */
 const turno1 = {
   memorias: [mem("mem-1", "o time usa um quadro de tarefas fictício", 1), mem("mem-2", "prefere respostas curtas", 2)],
-  pendencias: [pend("pend-1", "revisar o PR de exemplo #1", 1_700_000_000_000)],
   // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot.
   trabalhosAbertos: [{ id: "trab-1", titulo: "Dashboard de exemplo", estado: "rodando", ultimoPasso: "Rodou um comando" }],
   contextoConversa: '{"historico":[{"autor":"Pessoa Exemplo","texto":"bom dia","confianca":"confiavel"}]}',
 };
 const turno2 = {
   memorias: [...turno1.memorias, mem("mem-3", "o repositório de exemplo usa vitest", 3)],
-  pendencias: [],
   trabalhosAbertos: [],
   contextoConversa: '{"historico":[{"autor":"Pessoa Exemplo","texto":"e o PR?","confianca":"confiavel"}]}',
 };
@@ -129,7 +127,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 4. Rotina acordada, com inventário de rotinas.
   "rotina-com-inventario": {
     agente,
-    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_frentes")],
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("listar_rotinas"), f("pausar_rotina"), f("atualizar_rotina"), f("criar_rotina"), f("pedir_acesso"), f("abrir_frentes")],
     trabalho: { titulo: "Triagem de exemplo", origem: "rotina", trabalhoMaeId: null },
     pessoaNome: "Pessoa Exemplo",
     modo: "rotina",
@@ -137,7 +135,6 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
     conectores: [conectorTarefas],
     rotinas,
     memorias: turno1.memorias,
-    pendencias: turno1.pendencias,
     semTerminal: "rotina",
   },
   // 5. Criação de bot (ADR-050): perfil vazio.
@@ -153,7 +150,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 8. Task filha de uma rotina (ADR-083, #193): não abre outra, e a linha da task diz por quê.
   "task-filha-de-rotina": {
     agente,
-    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("anotar_pendencia")],
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso")],
     pessoaNome: "Pessoa Exemplo",
     modo: "rotina",
     colegas,
@@ -165,7 +162,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 9. Uma frente do dono (ADR-099, I2): devolver_resumo no catálogo, sem me_chame_as, e a linha "Frente atual".
   "frente-do-dono": {
     agente,
-    ferramentas: [f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("anotar_pendencia"), f("publicar_artefato"), f("pedir_acesso"), f("devolver_resumo")],
+    ferramentas: [f("pedir_aprovacao"), f("pedir_a_pessoa"), f("pedir_a_bot"), f("ver_colegas"), f("lembrar"), f("publicar_artefato"), f("pedir_acesso"), f("devolver_resumo")],
     nativas: ["Read", "Edit", "Write", "Bash", "Skill", "Agent"],
     pastaDoBot: "Vera/login-no-safari-abc123",
     pessoaNome: "Pessoa Exemplo",
@@ -192,7 +189,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   },
   "triagem-de-rotina": {
     agente,
-    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("anotar_pendencia"), f("abrir_frentes"), f("mandar_para_frente"), f("me_chame_as")],
+    ferramentas: [f("sem_novidade"), f("pedir_a_bot"), f("ver_colegas"), f("pedir_acesso"), f("abrir_frentes"), f("mandar_para_frente"), f("me_chame_as")],
     pessoaNome: "Pessoa Exemplo",
     modo: "rotina",
     colegas,
@@ -215,7 +212,7 @@ const CENARIOS: Record<string, EntradaPromptSistema> = {
   // 6. Sem terminal (um motivo) e computador fora do ar (ADR-065; emenda da ADR-037).
   "sem-terminal-computador-fora": {
     agente,
-    ferramentas: [f("pedir_aprovacao"), f("anotar_pendencia"), f("lembrar")],
+    ferramentas: [f("pedir_aprovacao"), f("lembrar")],
     pessoaNome: "Pessoa Exemplo",
     modo: "conversa",
     computadorFora: { estado: "fora_do_ar", motivo: "três falhas seguidas ao conectar" },

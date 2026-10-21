@@ -23,7 +23,6 @@ import type { UsoDoPlanoDto } from "../../src/contracts/uso-do-plano.ts";
 import type { IdHarness } from "../../src/contracts/harness.ts";
 import type { Memoria, TipoMemoria } from "../../src/contracts/memoria.ts";
 import type { ReacaoNaFala } from "../../src/contracts/reacao.ts";
-import type { RespostaPendencias } from "../../src/contracts/pendencia.ts";
 import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { MembroSala, Sala } from "../../src/contracts/sala.ts";
@@ -255,10 +254,6 @@ export function criarApi(escopo: Escopo) {
     criarMemoria: (agenteId: string, tipo: TipoMemoria, texto: string, conversaId?: string) => post<{ memoria: Memoria }>(`agentes/${agenteId}/memoria`, { tipo, texto, ...(conversaId ? { conversaId } : {}) }),
     editarMemoria: (agenteId: string, id: string, campos: { texto?: string; tipo?: TipoMemoria }) => patch<{ memoria: Memoria }>(`agentes/${agenteId}/memoria/${id}`, campos),
     apagarMemoria: (agenteId: string, id: string) => del<RespostaMutacao>(`agentes/${agenteId}/memoria/${id}`),
-    // ADR-064: o "a fazer" do bot — a lista, o Descartar da pessoa e o Fazer agora (vira mensagem na conversa).
-    pendencias: (agenteId: string) => get<RespostaPendencias>(`agentes/${agenteId}/pendencias`),
-    descartarPendencia: (agenteId: string, id: string) => post<RespostaMutacao>(`agentes/${agenteId}/pendencias/${id}/descartar`),
-    fazerPendenciaAgora: (agenteId: string, id: string) => post<RespostaMutacao>(`agentes/${agenteId}/pendencias/${id}/fazer-agora`),
     confirmarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/confirmar`),
     recusarProposta: (id: string) => post<RespostaMutacao>(`propostas/${id}/recusar`),
     criarRotina: (entrada: { agenteId: string; cron: string; fusoIana: string; instrucao: string; fonte: string; entregavel: string; limitesAprovacao: string; politicaSemDado: string }) => post<RespostaMutacao>("rotinas", entrada),

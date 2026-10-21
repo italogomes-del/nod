@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resumoCron, validarAtualizacaoRotina, validarRotinaNormalizada } from "../../../src/domain/rotina-texto.ts";
+import { resumoCron, validarRotinaNormalizada } from "../../../src/domain/rotina-texto.ts";
 import { RotinaInvalida } from "../../../src/domain/rotina-janela.ts";
 
 const agora = Date.parse("2026-09-16T12:00:00-03:00");
@@ -37,39 +37,9 @@ describe("rotina-texto", () => {
     expect(resumoCron("0 7 * * *", TZ)).toBe("todo dia às 07:00 (America/Sao_Paulo)");
   });
 
-  it("so_com_pendencia (item 7 da ADR-066): ausente vira false, boolean passa como veio, outro tipo é entrada_invalida", () => {
-    expect(validarRotinaNormalizada({ ...base, cron: "*/20 * * * *" }).soComPendencia).toBe(false);
-    expect(validarRotinaNormalizada({ ...base, cron: "*/20 * * * *", soComPendencia: true }).soComPendencia).toBe(true);
-    expect(validarRotinaNormalizada({ ...base, cron: "*/20 * * * *", soComPendencia: false }).soComPendencia).toBe(false);
-    // "true" em texto não é lido como intenção: o schema diz boolean e o domínio não adivinha.
-    // Pelo JSON, como chegaria de um argumento mal tipado: o tipo do TS não deixaria escrever isto direto.
-    const emTexto: Parameters<typeof validarRotinaNormalizada>[0] = JSON.parse(JSON.stringify({ ...base, cron: "*/20 * * * *", soComPendencia: "true" }));
-    try {
-      validarRotinaNormalizada(emTexto);
-      throw new Error("deveria recusar");
-    } catch (e) {
-      expect(e).toBeInstanceOf(RotinaInvalida);
-      expect((e as RotinaInvalida).codigo).toBe("entrada_invalida");
-    }
-  });
-
-  it("atualizar só o so_com_pendencia é mudança; repetir o valor atual não é; atual sem o campo conta como false", () => {
-    const atual = { ...base, cron: "*/20 * * * *", soComPendencia: false };
-    const liga = validarAtualizacaoRotina({ atual, pedido: { soComPendencia: true }, agora });
-    expect(liga.mudou).toEqual(["soComPendencia"]);
-    expect(liga.normalizada).toMatchObject({ soComPendencia: true, cron: "*/20 * * * *", instrucao: "resumo dos PRs" });
-    const desliga = validarAtualizacaoRotina({ atual: { ...atual, soComPendencia: true }, pedido: { soComPendencia: false }, agora });
-    expect(desliga.mudou).toEqual(["soComPendencia"]);
-    expect(desliga.normalizada.soComPendencia).toBe(false);
-    // O mesmo valor sem nenhum outro campo: proposta vazia, recusada como antes.
-    expect(() => validarAtualizacaoRotina({ atual, pedido: { soComPendencia: false }, agora })).toThrow(RotinaInvalida);
-    const { soComPendencia: _, ...semCampo } = atual;
-    expect(() => validarAtualizacaoRotina({ atual: semCampo, pedido: { soComPendencia: false }, agora })).toThrow(RotinaInvalida);
-    expect(validarAtualizacaoRotina({ atual: semCampo, pedido: { soComPendencia: true }, agora }).mudou).toEqual(["soComPendencia"]);
-    // Mudar outro campo mantém o flag que a rotina já tinha.
-    const outro = validarAtualizacaoRotina({ atual: { ...atual, soComPendencia: true }, pedido: { instrucao: "retome o PR" }, agora });
-    expect(outro.mudou).toEqual(["instrucao"]);
-    expect(outro.normalizada.soComPendencia).toBe(true);
+  it("NOD-317: o so_com_pendencia saiu da rotina — o campo antigo que ainda chegue não entra na rotina normalizada", () => {
+    const comCampo = JSON.parse(JSON.stringify({ ...base, cron: "*/20 * * * *", soComPendencia: true })) as Parameters<typeof validarRotinaNormalizada>[0];
+    expect("soComPendencia" in validarRotinaNormalizada(comCampo)).toBe(false);
   });
 
   it("nenhum parser de intenção sobrevive (Regra 9)", async () => {

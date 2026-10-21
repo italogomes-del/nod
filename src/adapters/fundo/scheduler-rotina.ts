@@ -20,18 +20,14 @@ export type OpcoesTick = {
   services: Services;
   useCases: UseCasesNod;
   agora: Relogio;
-  /** O "A fazer" ligado (NOD_PENDENCIAS=1); ausente = desligado (ver dispararRotina). */
-  aFazer?: boolean;
 };
 
 /**
  * `adiadas` (definido em 2026-10-16, NOD-243): a execução anterior (ou a frente dela) ainda estava aberta — a janela
  * vira uma execução 'adiada' no histórico e a rotina é reagendada (antes: `puladas`, sem rastro).
  * `bloqueadas` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno.
- * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): rotina que só acorda com pendência, sem nenhuma — a
- * janela passou sem turno e sem custo.
  */
-export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; adiadas: string[]; bloqueadas: string[]; semPendencia: string[]; falhas: string[] };
+export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; adiadas: string[]; bloqueadas: string[]; falhas: string[] };
 
 /**
  * Um tick para UMA pessoa (o teste chama isto sob withRollback com `tx = (fn) => fn(trx)`): lista
@@ -41,7 +37,7 @@ export type ResultadoTick = { disparadas: string[]; deOutroProcesso: string[]; a
  */
 export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTick): Promise<ResultadoTick> {
   const agora = opcoes.agora();
-  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] };
+  const resultado: ResultadoTick = { disparadas: [], deOutroProcesso: [], adiadas: [], bloqueadas: [], falhas: [] };
   const vencidas = await tx(async (trx) => criarRepos(trx, escopo).rotinas.ativasVencidas(agora));
   for (const rotina of vencidas) {
     const inicioTx = Date.now();
@@ -49,7 +45,7 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
       await tx(async (trx) => {
         const repos = criarRepos(trx, escopo);
         const deps: Deps = { repos, services: opcoes.services, useCases: opcoes.useCases, tx, escopo, agora: opcoes.agora };
-        const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor, aFazer: opcoes.aFazer });
+        const r = await dispararRotina(deps, { rotina, instanteAgendado: rotina.proximaExecucao, machineId: opcoes.machineId, executor: opcoes.executor });
         if ("janelaDeOutro" in r.data) {
           await repos.events.gravarComOutbox(r.events ?? []);
           resultado.deOutroProcesso.push(rotina.id);
@@ -69,13 +65,6 @@ export async function tickPessoa(escopo: Escopo, tx: Transacao, opcoes: OpcoesTi
           await repos.events.gravarComOutbox(r.events ?? []);
           resultado.bloqueadas.push(rotina.id);
           log("info", "rotina_bloqueada", { rotina_id: rotina.id, motivo: r.data.bloqueada, proposta_id: r.data.propostaId, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
-          return;
-        }
-        // Sem pendência visível: sem turno e sem crédito gasto; a execução 'sem_novidade' e o evento do histórico vão nesta tx.
-        if ("semPendencia" in r.data) {
-          await repos.events.gravarComOutbox(r.events ?? []);
-          resultado.semPendencia.push(rotina.id);
-          log("info", "rotina_sem_pendencia", { rotina_id: rotina.id, instante_agendado: rotina.proximaExecucao, proxima_execucao: r.data.proximaExecucao });
           return;
         }
         await repos.events.gravarComOutbox(r.events ?? []);

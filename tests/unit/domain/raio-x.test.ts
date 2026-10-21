@@ -94,10 +94,8 @@ describe("partesDoPrompt: o prompt de sistema em seções", () => {
     memorias: [{ tenantId: "t", id: "m1", agenteId: "a", tipo: "preferencia", texto: "prefere tópicos", origem: "pessoa", criadoEm: 1 }],
     ferramentas: [
       f("pedir_a_bot"), f("ver_colegas"), f("criar_rotina"), f("pausar_rotina"), f("pedir_acesso"), f("publicar_artefato"),
-      f("anotar_pendencia"), f("concluir_pendencia"),
       f("computador_bash", "computador"), f("pasta_ler", "workspace"), f("gmail__GMAIL_FETCH_EMAILS", "conector"),
     ],
-    pendencias: [{ tenantId: "t", id: "p1", agenteId: "a", conversaId: "c", turnoId: null, texto: "cobrar o parecer", aPartirDe: null, cuidado: false, profundidade: 0, estado: "aberta", resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: 1 }],
     nativas: modo === "conversa" || modo === "criacao" ? ["Read", "Bash", "Skill", "Agent"] : [],
     pastaDoBot: "Clarice",
     pessoaNome: "Marlon",
@@ -110,15 +108,13 @@ describe("partesDoPrompt: o prompt de sistema em seções", () => {
     delegacao: modo === "delegacao" ? { pessoaNome: "Marlon", remetenteNome: "Dev 1" } : null,
   });
 
-  it("toda linha de um prompt completo tem seção (só o JSON do contexto e o das pendências herdam a da linha anterior), em todos os modos", () => {
+  it("toda linha de um prompt completo tem seção (só o JSON do contexto herda a da linha anterior), em todos os modos", () => {
     for (const modo of ["conversa", "criacao", "sala", "rotina", "peer", "delegacao"] as const) {
       const sem = completo(modo).split("\n").filter((l) => secaoDaLinha(l) === null);
       expect(sem.every((l) => l.startsWith("{") || l.startsWith("[{")), `${modo}: ${sem.join(" | ").slice(0, 300)}`).toBe(true);
     }
-    // ADR-064: a regra é das ferramentas (parte estável); a lista, do contexto (parte dinâmica).
-    const linhas = completo("conversa").split("\n");
-    expect(secaoDaLinha(linhas.find((l) => l.startsWith("Pendências:")) ?? "")).toBe("ferramentas");
-    expect(secaoDaLinha(linhas.find((l) => l.startsWith("Suas pendências abertas")) ?? "")).toBe("contexto");
+    // NOD-317: o "A fazer" saiu — nem a regra nem a lista.
+    expect(completo("conversa")).not.toMatch(/^(Pendências:|Suas pendências abertas)/mu);
   });
 
   it("as partes somam o prompt inteiro, na ordem das seções; sem modo dev, sem texto", () => {

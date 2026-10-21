@@ -28,7 +28,6 @@ import { COMANDO_GITHUB_NATIVO, SLUG_GITHUB } from "../contracts/github.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
-import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
 import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
 import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
@@ -66,8 +65,6 @@ export type EntradaEmitirPlano = {
    * (`lerModelosLigacao` sobre o env do servidor). Ausente = MODELOS_LIGACAO_PADRAO. O caso de uso não lê `process.env`.
    */
   modelosLigacao?: ModelosLigacao;
-  /** O "A fazer" ligado (NOD_PENDENCIAS=1, lido pelo compositor). Ausente = desligado: nem ferramentas nem lista. */
-  aFazer?: boolean;
   /** ADR-082: NOD_GERIR_BOTS=0 desliga as ferramentas do Nod (o interruptor de rollback). Ausente = ligadas. */
   semFerramentasDoNod?: boolean;
   /** ADR-104: NOD_CRIAR_BOTS=0 tira criar_bots do catálogo. */
@@ -320,12 +317,6 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     estado: r.estado,
   }));
 
-  // definido em 2026-09-30 (ADR-064): a lista do que o bot deixou para depois entra quando alguém de fora da corrente
-  // de colegas chamou o bot — a pessoa ou uma rotina (profundidade 0: conversa, criação, rotina e as retomadas
-  // delas). É isso que "na próxima rotina ou conversa" quer dizer; no meio de um pedido de colega, ela não aparece.
-  const comPendencias = input.aFazer === true && turno.profundidade === 0 && (modo === "conversa" || modo === "criacao" || modo === "rotina");
-  const pendencias = comPendencias ? pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(agente.id), agora) : [];
-
   // ADR-083 (#193): a conversa coordenadora vê as tasks abertas do bot (com o último passo), a cada turno.
   // revisto em 2026-10-08 (revisão do épico, S12): a task de rotina que pode abrir outras também (a mãe, nunca a filha).
   // revisto em 2026-10-12 (ADR-099, parte 1): a task que só espera (volta marcada, colega) vai como "esperando", não
@@ -411,8 +402,6 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
       const slug = conectores.find((c) => c.id === p.conectorId)?.slug;
       return slug ? [`${slug}__${p.capacidade}`] : [];
     }),
-    pendencias,
-    aFazer: input.aFazer === true,
     semFerramentasDoNod: input.semFerramentasDoNod === true,
     semCriarBots: input.semCriarBots === true,
     pastasAutorizadas: pastas !== null,

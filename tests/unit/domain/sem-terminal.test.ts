@@ -19,18 +19,19 @@ describe("o turno sem terminal diz por quê (ADR-065)", () => {
   it("no pedido de colega a linha diz o motivo, quando o terminal vem e a quem dizer o que ficou de fora", () => {
     const prompt = montarPromptSistema({
       agente: { nome: "Dev 4", titulo: "Dev Sr", descricao: "" }, memorias: [], pessoaNome: "Marlon", modo: "delegacao",
-      ferramentas: [ferramenta("lembrar"), ferramenta("anotar_pendencia")],
+      ferramentas: [ferramenta("lembrar")],
       delegacao: { pessoaNome: "Marlon", remetenteNome: "Chico" },
       semTerminal: "pedido_de_colega",
     });
     const linha = prompt.split("\n").find((l) => l.startsWith("Terminal:")) ?? "";
     expect(linha).toContain("porque é um pedido de colega; no nod, o terminal vem nos turnos que Marlon abre na conversa com você");
-    expect(linha).toContain("anote com anotar_pendencia o que precisa de terminal e diga a Chico, na sua resposta,");
+    expect(linha).not.toContain("anotar_pendencia");
+    expect(linha).toContain("e diga a Chico, na sua resposta,");
     expect(linha).toContain("Não guarde \"sem terminal\" como fato");
     expect(secaoDaLinha(linha)).toBe("ferramentas");
   });
 
-  it("na rotina sem anotar_pendencia a linha não promete a ferramenta, e com o terminal no turno ela não aparece", () => {
+  it("na rotina a linha não promete ferramenta de anotar, e com o terminal no turno ela não aparece", () => {
     const base = { agente: { nome: "Dev 1", titulo: "", descricao: "" }, memorias: [], pessoaNome: "Marlon" } as const;
     const rotina = montarPromptSistema({ ...base, modo: "rotina", ferramentas: [ferramenta("sem_novidade")], semTerminal: "rotina" });
     expect(rotina).toContain("Terminal: este turno não tem terminal, arquivos nem skills porque é uma rotina;");

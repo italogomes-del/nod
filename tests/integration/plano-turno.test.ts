@@ -115,8 +115,7 @@ describeIntegracao("emitirPlanoTurno (ADR-024): interseção, profundidade e tok
       const planoRotina = (await emitirPlanoTurno(deps, { turnoId: rotina?.id ?? "", machineId: "m" })).data;
       // ADR-066: antes, rotina sem janela identificável ligava o gate (fail-closed). Agora não há gate a ligar.
       expect(Object.keys(planoRotina.politicaExecucao).sort()).toEqual(["orcamentoResultadoChars", "prazoMs"]);
-      // ADR-044: pedir_acesso entra na rotina. ADR-051: publicar/ler artefato também. ADR-064: as pendências não, desde
-      // 2026-10-06 (o "A fazer" desligado sem NOD_PENDENCIAS=1).
+      // ADR-044: pedir_acesso entra na rotina. ADR-051: publicar/ler artefato também.
       // ADR-066: ver_colegas também (leitura que não incomoda ninguém).
       expect(planoRotina.catalogo.ferramentas.map((f) => f.nome).filter((n) => !n.includes("__"))).toEqual(["lembrar", "pedir_aprovacao", "pedir_acesso", "ver_colegas", "pedir_a_pessoa", "pedir_a_bot", "sem_novidade", "publicar_artefato", "ler_artefato", "abrir_frentes", "mandar_para_frente", "me_chame_as"]);
 

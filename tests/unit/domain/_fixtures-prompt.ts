@@ -5,7 +5,6 @@
  */
 import type { Conector } from "../../../src/contracts/conector.ts";
 import type { Memoria } from "../../../src/contracts/memoria.ts";
-import type { Pendencia } from "../../../src/contracts/pendencia.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 
 export const agente = { nome: "Vera", titulo: "revisora de PRs", descricao: "Revisa PRs do time nod e responde curto." };
@@ -16,8 +15,6 @@ export const f = (nome: string): FerramentaPlano => ({ nome, nomeMcp: `mcp__nod_
 export const daOrigem = (nome: string, origem: FerramentaPlano["origem"]): FerramentaPlano => ({ ...f(nome), origem });
 
 export const mem = (id: string, texto: string, criadoEm: number): Memoria => ({ tenantId: "t", id, agenteId: "a", tipo: "preferencia", texto, origem: "pessoa", criadoEm });
-
-export const pend = (id: string, texto: string, criadoEm = 1): Pendencia => ({ tenantId: "t", id, agenteId: "a", conversaId: "c", turnoId: null, texto, aPartirDe: null, cuidado: false, profundidade: 0, estado: "aberta", resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm });
 
 /** Conector fictício com duas capacidades; `doConector` dá a ferramenta concedida dele no plano do turno. */
 export const conectorTarefas: Conector = {

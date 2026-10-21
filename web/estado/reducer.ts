@@ -17,7 +17,6 @@ import type { AppComLogo } from "../../src/contracts/marketplace.ts";
 import type { Memoria } from "../../src/contracts/memoria.ts";
 import type { NaoLidosDto } from "../../src/contracts/nao-lidos.ts";
 import type { CausaNativa, Negacao } from "../../src/contracts/negacao.ts";
-import type { Pendencia } from "../../src/contracts/pendencia.ts";
 import type { ExecucaoRotina } from "../../src/contracts/rotina.ts";
 import type { Experimentos, RaioXConversa, UsoDoMac } from "../../src/contracts/raio-x.ts";
 import type { Relato } from "../../src/contracts/relato.ts";
@@ -27,7 +26,6 @@ import type { DonoDto, EstadoDoDono } from "../../src/contracts/dono.ts";
 import type { NivelPressao, TaxaDeAbertura, TrabalhoDetalheDto, TrabalhosDto } from "../../src/contracts/trabalho.ts";
 import type { CustoDoDiaDto } from "../../src/contracts/cota.ts";
 import type { Escopo } from "../../src/shared/types.ts";
-import { A_FAZER_LIGADO } from "../lib/a-fazer.ts";
 import type { LeituraAtual } from "../lib/ouvir.ts";
 import { comFerramenta, comTarefas, comTexto, comVigia, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { chaveDaAtividade, diaLocal, type VistaDaAtividade } from "../lib/atividade-do-bot.ts";
@@ -169,7 +167,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `pendencias:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -272,12 +270,6 @@ export type Estado = {
    */
   liberacoesDispensadas: Record<string, Record<string, number>>;
   memorias: Record<string, Memoria[]>;
-  /**
-   * O "a fazer" de cada bot (definido em 2026-09-30, ADR-064): as pendências abertas, da mais nova para a mais antiga;
-   * ausente = ainda não carregou. `aFazerAberto` é a lista aberta embaixo da última mensagem — estado de tela.
-   */
-  pendencias: Record<string, Pendencia[]>;
-  aFazerAberto: Record<string, boolean>;
   /** Minhas chaves de máquina (ADR-031); null = ainda não carregou. */
   chaves: ChaveMaquinaDto[] | null;
   /** ADR-090: as máquinas da pessoa (chaves vivas + o que as conectadas anunciaram) e o padrão de onde os bots trabalham. */
@@ -409,8 +401,6 @@ export type Acao =
   | { tipo: "hidratar-conectores"; conectores: Conector[]; marketplace?: AppComLogo[]; composioConfigurado?: boolean }
   | { tipo: "hidratar-concessoes"; agenteId: string; concessoes: Concessao[]; liberacoesDispensadas?: Record<string, number> }
   | { tipo: "hidratar-memorias"; agenteId: string; memorias: Memoria[] }
-  | { tipo: "hidratar-pendencias"; agenteId: string; pendencias: Pendencia[] }
-  | { tipo: "a-fazer"; agenteId: string; aberto: boolean }
   | { tipo: "hidratar-salas"; salas: { sala: Sala; membros: MembroSala[] }[] }
   | { tipo: "hidratar-chaves"; chaves: ChaveMaquinaDto[] }
   | { tipo: "hidratar-maquinas"; maquinas: MaquinasDto }
@@ -495,8 +485,6 @@ export const estadoInicial: Estado = {
   concessoes: {},
   liberacoesDispensadas: {},
   memorias: {},
-  pendencias: {},
-  aFazerAberto: {},
   chaves: null,
   maquinas: null,
   conectarMaquina: null,
@@ -900,9 +888,6 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   "contas.mudou": (e) => invalidar(e, "contas", "maquinas", usoPlano(e)),
   "agente.mudou": (e, f) => {
     const agenteId = texto(f.dados.agente_id) ?? texto(f.dados.agenteId);
-    // definido em 2026-09-30 (ADR-064): anotar, resolver ou pedir uma pendência só muda o "a fazer" do bot. A linha de
-    // sistema do resolver e a fala do Fazer agora chegam pelos frames delas (mensagem.nova, turno.iniciado).
-    if (String(f.dados.acao).startsWith("pendencia_")) return agenteId && A_FAZER_LIGADO ? invalidar(e, `pendencias:${agenteId}`) : e;
     const memoria: Invalidacao | null = f.dados.acao === "memoria_criada" && agenteId ? `memoria:${agenteId}` : null;
     const concessoes: Invalidacao | null = f.dados.kind === "concessao_criada" && agenteId ? `concessoes:${agenteId}` : null;
     return invalidar(e, "frota", "gestao", "nao-lidos", ...(["excluir", "restaurar", "duplicado"].includes(String(f.dados.acao)) ? ["rotinas", "salas", "sua-vez"] as const : []), conv(f), memoria, concessoes);
@@ -1135,13 +1120,6 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, concessoes: { ...estado.concessoes, [acao.agenteId]: acao.concessoes }, liberacoesDispensadas: acao.liberacoesDispensadas ? { ...estado.liberacoesDispensadas, [acao.agenteId]: acao.liberacoesDispensadas } : estado.liberacoesDispensadas };
     case "hidratar-memorias":
       return { ...estado, memorias: { ...estado.memorias, [acao.agenteId]: acao.memorias } };
-    case "hidratar-pendencias": {
-      // Sem nenhuma, o indicador some; a lista aberta fecha junto, para a próxima pendência não reabrir sozinha.
-      const aFazerAberto = acao.pendencias.length === 0 && estado.aFazerAberto[acao.agenteId] ? { ...estado.aFazerAberto, [acao.agenteId]: false } : estado.aFazerAberto;
-      return { ...estado, pendencias: { ...estado.pendencias, [acao.agenteId]: acao.pendencias }, aFazerAberto };
-    }
-    case "a-fazer":
-      return { ...estado, aFazerAberto: { ...estado.aFazerAberto, [acao.agenteId]: acao.aberto } };
     case "hidratar-salas":
       return { ...estado, salas: acao.salas, carregado: estado.carregado.salas ? estado.carregado : { ...estado.carregado, salas: true } };
     case "hidratar-nao-lidos":
@@ -1344,8 +1322,6 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   if (t.tipo === "sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "nova-sala" && !estado.carregado.salas) faltas.push("salas");
   if (t.tipo === "conversa" && !estado.concessoes[t.agenteId]) faltas.push(`concessoes:${t.agenteId}`);
-  // ADR-064: o "a fazer" aparece embaixo da última mensagem e na gaveta, então chega junto com a conversa.
-  if (A_FAZER_LIGADO && t.tipo === "conversa" && !estado.pendencias[t.agenteId]) faltas.push(`pendencias:${t.agenteId}`);
   // Modo ligação (2026-10-04): o botão "Ligar" do cabeçalho só aparece com a disponibilidade lida, e só para bot da pessoa.
   if (t.tipo === "conversa" && !(t.agenteId in estado.disponibilidadeLigacao) && estado.frota?.agentes.some((a) => a.id === t.agenteId && a.ownerId === estado.sessao?.pessoaId)) faltas.push(`disponibilidade:${t.agenteId}`);
   // Os níveis da gaveta que leem algo próprio: a memória do bot e o histórico da rotina aberta.
@@ -1406,7 +1382,7 @@ export function invalidacoesAoReconectar(estado: Estado): Invalidacao[] {
 /**
  * O que o stream perdido pode ter mudado (definido em 2026-10-10, ADR-094): quando o servidor não consegue retomar
  * (`resumed:false` — o celular ficou muito tempo em segundo plano e o buffer foi podado), a web relê tudo o que já tinha
- * carregado, não só a tela: os não lidos, "Sua vez", os trabalhos, toda conversa e todo "a fazer" já abertos. Só o que a
+ * carregado, não só a tela: os não lidos, "Sua vez", os trabalhos, e toda conversa já aberta. Só o que a
  * tela olha é buscado na hora (`relevante` no main); o resto fica marcado até a tela abrir.
  */
 export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
@@ -1415,9 +1391,7 @@ export function invalidacoesAoRetomar(estado: Estado): Invalidacao[] {
   const todas: Invalidacao[] = [
     "frota", "sua-vez", "nao-lidos", "inventario", "executor", "ias", "uso-plano", "salas", "rotinas", "ligacao", "trabalhos",
     ...Object.keys(estado.conversas).map((id): Invalidacao => `conversa:${id}`),
-    ...(A_FAZER_LIGADO ? Object.keys(estado.pendencias).map((id): Invalidacao => `pendencias:${id}`) : []),
     ...(t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha" ? [`conversa:${t.conversaId}` as Invalidacao] : []),
-    ...(A_FAZER_LIGADO && t.tipo === "conversa" ? [`pendencias:${t.agenteId}` as Invalidacao] : []),
     ...(t.tipo === "trabalho" ? [`trabalho:${t.id}` as Invalidacao] : []),
   ];
   return [...new Set(todas)];

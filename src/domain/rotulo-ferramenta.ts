@@ -20,9 +20,6 @@ const NOD: Record<string, string> = {
   sem_novidade: "Viu que não há novidade",
   pedir_a_bot: "Pediu ajuda a outro bot",
   ver_colegas: "Viu o que os colegas fazem",
-  anotar_pendencia: "Anotou para depois",
-  concluir_pendencia: "Concluiu uma pendência",
-  descartar_pendencia: "Descartou uma pendência",
   // ADR-083 (#193): a conversa coordena as tasks.
   abrir_task: "Abriu uma task",
   mandar_para_task: "Repassou a uma task",

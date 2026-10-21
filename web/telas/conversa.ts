@@ -34,7 +34,6 @@ import { renderCardArtefato } from "./card-artefato.ts";
 import { faixaDaMensagem } from "./modo-dev.ts";
 import { HTML_CHIP_MODO } from "./aprovacoes.ts";
 import { HTML_SELETOR_IA } from "./seletor-ia.ts";
-import { renderAFazerNaConversa } from "./pendencias.ts";
 import { avisoDeEstado } from "../lib/aviso-estado.ts";
 import { inventarioEmUso } from "./frota.ts";
 import { avisoContaSemAcesso, avisoHarnessFora, avisoModeloRecusado, ehIa, inventarioDaIa, cartaoTrocaDeIa, linhaContaSeguiu, linhaContaTrocada, linhaIaTrocada, linhaLimiteSemOutra, prontaDepois, PROVEDOR_DA_IA, type IdIa } from "./ia-fora.ts";
@@ -540,17 +539,6 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
 }
 
-/**
- * Quando a rotina acorda (definido em 2026-10-01, item 7 da ADR-066): só aparece no card se a rotina nasce só com
- * pendência, ou se a mudança troca o flag — aí em de→para, como o horário e a instrução.
- */
-function linhaAcorda(soComPendencia: boolean | undefined, mudanca = false): string {
-  if (soComPendencia === undefined || (!mudanca && !soComPendencia)) return "";
-  const so = "só com pendência aberta (sem nenhuma, a janela passa sem turno)";
-  const texto = !mudanca ? so : soComPendencia ? `em toda janela → ${so}` : "só com pendência aberta → em toda janela";
-  return `<div class="it"><b>acorda</b>${esc(texto)}</div>`;
-}
-
 function renderProposta(p: Proposta, estado: Estado, propostas: readonly Proposta[]): string {
   const a = agenteDe(estado, p.agenteId);
   // definido em 2026-09-28 (ADR-050): o perfil que traz rotinas é um card só, com as rotinas dentro.
@@ -570,11 +558,11 @@ function renderProposta(p: Proposta, estado: Estado, propostas: readonly Propost
     itens = [c.nome ? `<div class="it"><b>nome</b>${esc(c.nome)}</div>` : "", c.titulo ? `<div class="it"><b>título</b>${esc(c.titulo)}</div>` : "", c.descricao ? `<div class="it"><b>descrição</b>${esc(c.descricao)}</div>` : ""].join("");
   } else if (p.payload.kind === "rotina") {
     const c = p.payload;
-    itens = `<div class="it"><b>quando</b>${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana))} (${esc(c.fusoIana)})</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it"><b>fonte</b>${esc(c.fonte)}</div><div class="it"><b>entregável</b>${esc(c.entregavel)}</div><div class="it"><b>limites de aprovação</b>${esc(c.limitesAprovacao)}</div><div class="it"><b>sem dado</b>${esc(c.politicaSemDado)}</div>${linhaAcorda(c.soComPendencia)}${linhasPrecisa(p, estado)}`;
+    itens = `<div class="it"><b>quando</b>${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana))} (${esc(c.fusoIana)})</div><div class="it"><b>instrução</b>${esc(c.instrucao)}</div><div class="it"><b>fonte</b>${esc(c.fonte)}</div><div class="it"><b>entregável</b>${esc(c.entregavel)}</div><div class="it"><b>limites de aprovação</b>${esc(c.limitesAprovacao)}</div><div class="it"><b>sem dado</b>${esc(c.politicaSemDado)}</div>${linhasPrecisa(p, estado)}`;
   } else if (p.payload.kind === "rotina_atualizacao") {
     const c = p.payload;
     // de→para: a pessoa confirma sem precisar abrir outra tela para lembrar como era.
-    itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhaAcorda(c.soComPendencia, true)}${linhasPrecisa(p, estado)}`;
+    itens = `<div class="it"><b>quando</b>${esc(c.antes.resumo)} → ${esc(c.resumo)} · próxima execução ${esc(dataHora(c.proximaExecucao, c.fusoIana ?? ""))}</div><div class="it"><b>instrução</b>${c.instrucao && c.instrucao !== c.antes.instrucao ? `${esc(c.antes.instrucao)} → ${esc(c.instrucao)}` : esc(c.antes.instrucao)}</div>${linhasPrecisa(p, estado)}`;
   } else if (p.payload.kind === "bot") {
     // definido em 2026-10-04 (ADR-077): o bot que a Nina propõe no onboarding — nome e o que faz; nasce pela decisão.
     const c = p.payload;
@@ -994,8 +982,6 @@ export function blocosDoHistorico(c: ConversaEstado, estado: Estado): BlocoDaTim
     // direto, como `textoFormatado`: o histórico é lembrado com o dia de extra (main.ts, `partesDaTimeline`), e ler
     // `estado.agora` o refaria inteiro a cada tick de 15 s.
     ...comDivisores(blocos, Date.now()),
-    // ADR-064: o "a fazer" do bot fica logo abaixo da última mensagem da conversa própria dele.
-    { chave: "a-fazer", html: c.conversa.tipo === "propria" && c.conversa.agenteId ? renderAFazerNaConversa(estado, c.conversa.agenteId) : "" },
     { chave: "acolhimento", html: acolhimento },
     ...abertas.map((p) => ({ chave: `proposta:${p.id}`, html: renderProposta(p, estado, c.propostas) })),
     { chave: "decisoes", html: renderDecisoesDaConversa(estado, c.conversa.id, idsDasPropostas, ancoradas) },

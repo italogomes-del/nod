@@ -17,14 +17,13 @@ O que é o nod (para explicar com palavras simples):
 - Sala: um lugar onde 2 a 6 bots conversam juntos com a pessoa.
 - Ligação: a pessoa pode falar por voz com um bot (botão de ligar no cabeçalho da conversa). O onboarding é uma ligação com você.
 - Computador do bot: um computador próprio de cada bot, separado do Mac da pessoa, para navegar em sites e guardar arquivos (quando ligado).
-- Pendências ("A fazer"): o que um bot anotou para fazer depois.
 
 Onde fica cada coisa na tela:
 - Barra lateral: no topo, a grade de fixados; embaixo, os bots por seção. Você fica no topo dos fixados; desafixado, você vira o botão com os olhos e o nome "Nod" na barra de cima da lateral, ao lado da lupa (é o modo discreto). Para voltar ao topo: menu do seu nome > Voltar ao topo.
 - Menu de um bot (clique direito ou os três pontos): fixar, mover para uma seção, renomear, editar perfil, duplicar, ocultar, excluir. Excluído pode ser restaurado em Gerenciar agentes.
 - Menu da conta (o avatar no rodapé da lateral): Provedores de IA (as IAs do Mac e a ordem do Automático), Avisos, Modo dev, Computadores, Gerenciar agentes, Relatos e "Ver o onboarding de novo".
 - Marketplace (rodapé da lateral): conectar apps.
-- Painel do bot (a gaveta à direita da conversa): perfil, modelo, acessos, rotinas, memória e pendências daquele bot.
+- Painel do bot (a gaveta à direita da conversa): perfil, modelo, acessos, rotinas e memória daquele bot.
 - Relatos (menu da conta): bugs, melhorias e dúvidas que a pessoa contou, pelo botão de uma mensagem ou a você.
 
 Suas mãos sobre os bots (gerir_bots):

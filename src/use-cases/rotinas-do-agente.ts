@@ -37,8 +37,6 @@ export const listarRotinasDoAgente: CasoNod<Deps, "listar_rotinas"> = async (dep
         quando: resumoCron(r.cron, r.fusoIana),
         estado: r.estado,
         instrucao: r.instrucao,
-        // definido em 2026-10-01 (item 7 da ADR-066): só quando true — o comum não muda a forma do inventário.
-        ...(r.soComPendencia ? { so_com_pendencia: true as const } : {}),
       })),
     },
   };
@@ -136,8 +134,6 @@ function obsoleta(daProposta: readonly RuntimeEvent[], daAplicacao: readonly Run
  * O QUE a rotina faz sozinha não é reversível em um clique, então a pessoa confirma.
  * definido em 2026-09-24 (emenda da ADR-044, "rotina nasce com o acesso"): `acessos` é a lista NOVA,
  * validada como em criar_rotina; só entra no payload se muda a declaração. Aplicar concede o que é novo.
- * `so_com_pendencia` (definido em 2026-10-01, item 7 da ADR-066): só entra no payload se muda; trocar só ele é
- * mudança, e a frase do card diz para que lado.
  */
 export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = async (deps, input) => {
   try {
@@ -155,11 +151,9 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
         entregavel: input.entregavel,
         limitesAprovacao: input.limites_aprovacao,
         politicaSemDado: input.politica_sem_dado,
-        soComPendencia: input.so_com_pendencia,
       },
       agora: deps.agora(),
     });
-    const mudaFlag = normalizada.soComPendencia !== atual.soComPendencia;
     const payload: PayloadPropostaRotinaAtualizacao = {
       kind: "rotina_atualizacao",
       rotinaId: atual.id,
@@ -173,14 +167,12 @@ export const atualizarRotinaPeloAgente: CasoNod<Deps, "atualizar_rotina"> = asyn
       proximaExecucao: normalizada.proximaExecucao,
       resumo: normalizada.resumo,
       ...(mudaAcessos && acessos ? { acessos } : {}),
-      ...(mudaFlag ? { soComPendencia: normalizada.soComPendencia } : {}),
       antes: { resumo: resumoCron(atual.cron, atual.fusoIana), instrucao: atual.instrucao },
       // NOD-159: a confirmação só aplica se a rotina ainda for a que o card mostra.
       revisao: revisaoAtual(atual),
     };
     const precisa = payload.acessos?.length ? ` · precisa de ${payload.acessos.map((a) => `${nomeDoApp(a.conector)} (${a.nivel})`).join(", ")}` : "";
-    const flag = mudaFlag ? (normalizada.soComPendencia ? " · passa a acordar só com pendência aberta" : " · volta a acordar em toda janela") : "";
-    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}${flag}`);
+    const { proposta, events } = await propor(deps, input, payload, `Mudança de rotina proposta: de ${payload.antes.resumo} para ${normalizada.resumo} · próxima execução ${carimbo(normalizada.proximaExecucao, normalizada.fusoIana)}${precisa}`);
     // ADR-059 (emenda de 2026-09-30): no automático e no total o modo confirma na hora — a proposta fica como
     // registro do que mudou, fechada pela regra, e a rotina já vale.
     const porRegra = await confirmacaoPeloModo(deps, input, { arriscada: false, gravaInstrucao: true });

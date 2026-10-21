@@ -13,12 +13,8 @@ import type { Deps } from "./tipos.ts";
  * assentar-turno.ts (não grava a fala) e disparar-rotina.ts (desfecho 'sem_novidade', sem marcador).
  *
  * Nenhuma mensagem é criada aqui, de propósito: a execução aparece só no histórico da rotina.
- *
- * definido em 2026-09-30 (ADR-064): o turno que concluiu ou descartou uma pendência TEVE novidade — o turno não
- * fica silencioso, e a fala final dele chega à conversa. A chamada responde ok, mas não marca nada.
  */
 export const semNovidade: CasoNod<Deps, "sem_novidade"> = async (deps, input) => {
-  if ((await deps.repos.pendencias.resolvidasNoTurno(input.turnoId)) > 0) return { data: { ok: true } };
   await deps.repos.turnos.marcarSemNovidade(input.turnoId, input.motivo);
   const autoria = autoriaAgente(input.agenteId, deps.escopo.pessoaId);
   const events: RuntimeEvent[] = [evento(deps, "rotina_sem_novidade", autoria, { motivo: input.motivo }, { conversaId: input.conversaId, turnoId: input.turnoId })];

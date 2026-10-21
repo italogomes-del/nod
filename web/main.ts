@@ -698,18 +698,6 @@ async function agir(fn: () => Promise<void>): Promise<void> {
   }
 }
 
-/**
- * ADR-064: a pendência pedida há menos de 30 s (outra aba, outro clique) ou já resolvida volta 409. O que a pessoa
- * queria já aconteceu, então não há faixa de erro: a lista relê e mostra como ficou.
- */
-async function semConflito(fn: () => Promise<unknown>): Promise<void> {
-  try {
-    await fn();
-  } catch (e) {
-    if (!(e instanceof ErroApi && e.status === 409)) throw e;
-  }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Reidratação: o reducer diz O QUE mudou; aqui busca-se por REST e despacha o hidratar.
 
@@ -799,7 +787,6 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   // QA do PR #302 (NOD-216): a conversa do bot que o dono diz trabalhando, lida fora da tela para a barra animar.
   if (q.startsWith("vivos:")) return { tipo: "hidratar-conversa", conversa: await api.conversa(q.slice(6)), agora };
   if (q.startsWith("memoria:")) return { tipo: "hidratar-memorias", agenteId: q.slice(8), memorias: (await api.memorias(q.slice(8))).memorias };
-  if (q.startsWith("pendencias:")) return { tipo: "hidratar-pendencias", agenteId: q.slice(11), pendencias: (await api.pendencias(q.slice(11))).pendencias };
   if (q.startsWith("concessoes:")) return { tipo: "hidratar-concessoes", agenteId: q.slice(11), ...(await api.concessoes(q.slice(11))) };
   if (q.startsWith("execucoes:")) return { tipo: "hidratar-execucoes", rotinaId: q.slice(10), execucoes: (await api.execucoes(q.slice(10))).execucoes };
   // ADR-114 (chat limpo, PR 2): a página do dia da Atividade (404: servidor de antes ou bot de outra pessoa — fica
@@ -925,8 +912,6 @@ function relevante(q: Invalidacao): boolean {
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
   if (q.startsWith("memoria:")) return t.tipo === "conversa" && estado.gaveta?.agenteId === q.slice(8) && estado.gaveta.nivel.tipo === "memoria";
   if (q.startsWith("concessoes:")) return t.tipo === "conversa" && t.agenteId === q.slice(11) ? true : t.tipo === "conectores";
-  // ADR-064: o "a fazer" só aparece na conversa do bot (embaixo da última mensagem e na gaveta).
-  if (q.startsWith("pendencias:")) return t.tipo === "conversa" && t.agenteId === q.slice(11);
   // 2026-09-21: o painel de detalhes (tela conversa) também mostra o histórico — é onde a pessoa
   // confere que uma rotina silenciosa (desfecho sem_novidade, que não escreve no chat) rodou.
   if (q.startsWith("execucoes:")) return t.tipo === "rotinas" || t.tipo === "conversa";
@@ -3354,21 +3339,6 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] });
     }),
   "apagar-memoria": (el) => agir(async () => void (gavetaSuja = null, await api!.apagarMemoria(el.dataset.agente ?? "", el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: [`memoria:${el.dataset.agente ?? ""}`] }))),
-  // ADR-064: o "a fazer" do bot. Abrir e fechar a lista é da tela; Fazer agora e Descartar vão ao servidor, e o clique que
-  // chega com outro pedido correndo é ignorado, como em "permitir-pasta".
-  "a-fazer": (el) => dispatch({ tipo: "a-fazer", agenteId: el.dataset.agente ?? "", aberto: el.dataset.abrir === "1" }),
-  "pendencia-fazer-agora": (el) => estado.ocupado ? undefined : agir(async () => {
-    const agenteId = el.dataset.agente ?? "";
-    await semConflito(() => api!.fazerPendenciaAgora(agenteId, el.dataset.id ?? ""));
-    // A fala "Fazer agora: …" entra na conversa e o bot começa: a lista fecha para a pessoa ver o que acontece.
-    dispatch({ tipo: "a-fazer", agenteId, aberto: false });
-    dispatch({ tipo: "invalidar", quais: [`pendencias:${agenteId}`, ...(conversaAtual() ? [`conversa:${conversaAtual()?.conversaId}` as Invalidacao] : [])] });
-  }),
-  "pendencia-descartar": (el) => estado.ocupado ? undefined : agir(async () => {
-    const agenteId = el.dataset.agente ?? "";
-    await semConflito(() => api!.descartarPendencia(agenteId, el.dataset.id ?? ""));
-    dispatch({ tipo: "invalidar", quais: [`pendencias:${agenteId}`] });
-  }),
   "pausar-rotina": (el) => agir(async () => void (await api!.pausarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ativar-rotina": (el) => agir(async () => void (await api!.ativarRotina(el.dataset.id ?? ""), dispatch({ tipo: "invalidar", quais: ["rotinas"] }))),
   "ver-execucoes": (el) => {

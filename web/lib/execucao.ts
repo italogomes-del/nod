@@ -15,8 +15,6 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   pedido_dispensado: "o pedido foi dispensado sem resposta",
   // definido em 2026-09-24 (fio da pergunta): a pergunta da execução venceu sem resposta (varredor-expiracao.ts).
   pergunta_sem_resposta: "ninguém respondeu a pergunta",
-  // definido em 2026-10-01 (item 7 da ADR-066): a rotina só acorda com pendência e não havia nenhuma — sem turno.
-  sem_pendencia: "sem pendência aberta, nenhum turno rodou",
   // definido em 2026-10-16 (NOD-243/NOD-272): a janela adiada e a execução que a seguinte (ou o Pausar) encerrou.
   execucao_anterior_aberta: "a execução anterior ainda não tinha terminado",
   frente_aberta: "uma frente desta rotina ainda estava aberta",
@@ -46,8 +44,6 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
  */
 export const TAG_ESPERANDO = '<span class="tag tag-ambar" title="enquanto a execução anterior não termina, as janelas são adiadas sem gastar crédito">esperando</span>';
 
-/** definido em 2026-10-01 (item 7 da ADR-066): a rotina que só acorda com pendência, na lista de rotinas. */
-export const TAG_SO_COM_PENDENCIA = '<span class="tag tag-cinza" title="sem pendência aberta do bot, a janela passa sem turno e sem custo; Testar agora roda sempre">só com pendência</span>';
 
 /**
  * definido em 2026-09-24 (emenda da ADR-044): por que a janela ficou 'bloqueada' — o rótulo do histórico
@@ -84,7 +80,7 @@ export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & 
     return motivo ? `parada (${motivo})` : "parada";
   }
   const base = e.desfecho.replaceAll("_", " ");
-  const motivo = e.desfecho === "interrompida" || e.desfecho === "adiada" || e.motivo === "sem_pendencia" ? motivoDaExecucao(e) : null;
+  const motivo = e.desfecho === "interrompida" || e.desfecho === "adiada" ? motivoDaExecucao(e) : null;
   return motivo ? `${base} · ${motivo}` : base;
 }
 
@@ -136,7 +132,7 @@ export function linhaDaEspera(e: EsperaRotinaDto | null, agora: number, fusoIana
  * "Parada: pergunta sem resposta desde ontem 13:00." e o atalho ao balão na conversa da rotina.
  */
 export function linhaPerguntaPendente(p: PerguntaPendenteDaRotina, agora: number, fusoIana: string): string {
-  return `<div class="rt-linha">${esc(`Parada: ${nomeDaPendencia(p)} sem resposta ${desdeQuando(p.desde, agora, fusoIana)}.`)}</div>`;
+  return `<div class="rt-linha">${esc(`Parada: ${nomeDaEspera(p)} sem resposta ${desdeQuando(p.desde, agora, fusoIana)}.`)}</div>`;
 }
 
 /**
@@ -149,18 +145,18 @@ const NOME_DA_PENDENCIA: Record<PerguntaPendenteDaRotina["tipo"], string> = { pe
  * definido em 2026-10-16 (re-revisão de design do #342, ajuste A): o Record protege na compilação, não em execução — um
  * DTO sem `tipo` (servidor antigo, deploy fora de ordem) diria "undefined". Tipo ausente ou desconhecido vira "pergunta".
  */
-function nomeDaPendencia(p: PerguntaPendenteDaRotina): string {
+function nomeDaEspera(p: PerguntaPendenteDaRotina): string {
   return (NOME_DA_PENDENCIA as Partial<Record<string, string>>)[p.tipo] ?? "pergunta";
 }
 
 /** A tag "parada · pergunta sem resposta" (ou "aprovação sem resposta") da rotina parada por uma pendência. */
 export function tagParadaPergunta(p: PerguntaPendenteDaRotina): string {
-  return `<span class="tag tag-ambar" title="as janelas seguintes esperam a sua resposta; nenhuma gastou crédito">${esc(`parada · ${nomeDaPendencia(p)} sem resposta`)}</span>`;
+  return `<span class="tag tag-ambar" title="as janelas seguintes esperam a sua resposta; nenhuma gastou crédito">${esc(`parada · ${nomeDaEspera(p)} sem resposta`)}</span>`;
 }
 
 /** O atalho ao balão: "Ver pergunta" ou "Ver aprovação" (o mesmo rótulo de web/telas/pergunta.ts). */
-export function rotuloVerPendencia(p: PerguntaPendenteDaRotina): string {
-  return `Ver ${nomeDaPendencia(p)}`;
+export function rotuloVerEspera(p: PerguntaPendenteDaRotina): string {
+  return `Ver ${nomeDaEspera(p)}`;
 }
 
 /**

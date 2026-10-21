@@ -1,12 +1,11 @@
 import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
-import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina, MotivoFalha, MotivoInterrupcaoRotina, MotivoNaoRodouRotina, MotivoSemNovidade, MotivoSemPendencia } from "../contracts/motivos.ts";
+import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina, MotivoFalha, MotivoInterrupcaoRotina, MotivoNaoRodouRotina, MotivoSemNovidade } from "../contracts/motivos.ts";
 import { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO } from "../contracts/pedido.ts";
 import type { ExecucaoRotina, Rotina } from "../contracts/rotina.ts";
 import type { TurnoAbertoDaRotina } from "../repositories/rotina-janelas.repo.ts";
 import type { Trabalho } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
-import { pendenciasDoPrompt } from "../domain/pendencia.ts";
 import { blocoPedidosAbertos, type PedidoAbertoNoPrompt } from "../domain/triagem.ts";
 import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
@@ -15,7 +14,7 @@ import { agenteVisivel, autoriaAgente, autoriaPessoa, carimbo, evento, PRAZO_DEC
 import { eventoTrabalhoMudou } from "./trabalhos.ts";
 import { prazoDoColega } from "./janela-pulada.ts";
 import { pedidosAbertosDoBot } from "./pedidos-abertos.ts";
-import { pendenciasDaRotina, preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
+import { decisoesQueSeguramARotina, preVooDaRotina, REGRA_PRE_VOO, type BloqueioDoPreVoo } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 export type EntradaDisparo = {
@@ -29,8 +28,6 @@ export type EntradaDisparo = {
    * pessoa conceder não passa pelo pré-voo — ela acabou de clicar "Permitir e rodar agora".
    */
   aposConceder?: boolean;
-  /** O "A fazer" ligado (NOD_PENDENCIAS=1). Ausente = desligado: a rotina "só com pendência" não acorda pelo agendador. */
-  aFazer?: boolean;
 };
 /**
  * `adiada` (definido em 2026-10-15, NOD-243; era `pulada`, sem rastro): a execução anterior ainda está aberta — o turno
@@ -40,15 +37,12 @@ export type EntradaDisparo = {
  * a agenda andou mesmo assim (NOD-271: antes a rotina ficava vencida para sempre).
  * `bloqueada` (definido em 2026-09-24, emenda da ADR-044): o pré-voo parou a janela sem turno — o
  * motivo, o card de acesso que a destrava (null quando é a pergunta que espera) e a próxima execução.
- * `semPendencia` (definido em 2026-10-01, item 7 da ADR-066): a rotina só acorda com pendência e o agente não tinha
- * nenhuma visível — a janela passou sem turno (registrarSemPendencia) e a agenda andou.
  */
 export type SaidaDisparo =
   | { turno: Turno; proximaExecucao: number }
   | { janelaDeOutro: true; proximaExecucao?: number }
   | { adiada: MotivoAdiada; turnoAbertoId: string | null; trabalhoAbertoId?: string; proximaExecucao: number }
-  | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number }
-  | { semPendencia: true; proximaExecucao: number };
+  | { bloqueada: MotivoBloqueioRotina; propostaId: string | null; proximaExecucao: number };
 
 /**
  * Entrada de um turno de rotina é a instrução normalizada mais o contexto fixo (fonte, entregável,
@@ -89,31 +83,6 @@ async function registrarBloqueio(deps: Deps, input: EntradaDisparo, bloqueio: Bl
   };
 }
 
-/** Quem decidiu que a janela passa sem turno: regra do servidor, não fala do modelo. */
-export const REGRA_SEM_PENDENCIA = "regra:rotina-sem-pendencia" as const;
-
-/**
- * A janela da rotina que só acorda com pendência e não tem nenhuma (definido em 2026-10-01, item 7 da ADR-066): UMA
- * execução 'sem_novidade' com motivo 'sem_pendencia' e SEM turno — nenhum modelo rodou, custo zero —, poda para as
- * 20, a agenda anda como num disparo normal e NENHUMA mensagem no chat (o mesmo silêncio de sem_novidade). Só o
- * agendador chega aqui, então a agenda sempre anda.
- * O evento é `rotina_executou`, com os mesmos dados da execução silenciosa de registrarDesfechoRotina: o despachante
- * já o leva ao frame 'rotina.executou', que faz a web reler a lista e o histórico da rotina. Um kind novo só
- * repetiria esse efeito com mais uma entrada em FRAME_POR_EVENTO; o motivo nos dados diferencia quem lê a trilha.
- */
-async function registrarSemPendencia(deps: Deps, input: EntradaDisparo, agora: number): Promise<{ data: SaidaDisparo; events: RuntimeEvent[] }> {
-  const { rotina, instanteAgendado } = input;
-  const motivo: MotivoSemPendencia = "sem_pendencia";
-  const execucao = await deps.repos.rotinaExecucoes.registrar({ rotinaId: rotina.id, instanteAgendado, turnoId: null, desfecho: "sem_novidade", motivo, em: agora });
-  if (!execucao) throw new ErroDeDominio("estado_invalido", { cause: "execução sem pendência não registrada" });
-  await deps.repos.rotinaExecucoes.podar(rotina.id);
-  const proximaExecucao = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: Math.max(agora, instanteAgendado) });
-  await deps.repos.rotinas.reagendar(rotina.id, proximaExecucao);
-  const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_SEM_PENDENCIA);
-  const dados = { rotinaId: rotina.id, execucaoId: execucao.id, desfecho: "sem_novidade", motivo, instanteAgendado };
-  return { data: { semPendencia: true, proximaExecucao }, events: [evento(deps, "rotina_executou", autoria, dados, { conversaId: rotina.conversaId })] };
-}
-
 /**
  * A regra da janela seguinte, regra do servidor: fecha a execução que ela venceu (NOD-243) e a pergunta das voltas sem
  * novidade quando ela chega (definido em 2026-10-15, NOD-270).
@@ -130,7 +99,7 @@ export const REGRA_JANELA_SEGUINTE = "regra:janela_seguinte" as const;
 async function fecharPerguntasDasVoltas(deps: Deps, rotina: Rotina, agora: number): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const autoria = autoriaPessoa(deps.escopo.pessoaId, REGRA_JANELA_SEGUINTE);
-  for (const d of (await pendenciasDaRotina(deps.repos, rotina)).dasVoltas) {
+  for (const d of (await decisoesQueSeguramARotina(deps.repos, rotina)).dasVoltas) {
     const fechada = await deps.repos.decisoes.fecharPorRegra(d.id, { regra: REGRA_JANELA_SEGUINTE, regraVersao: 1, agora });
     if (!fechada || fechada.turnoId === null) continue;
     await deps.repos.decisoes.reivindicarContinuacao(fechada.id, "turno", agora);
@@ -309,8 +278,7 @@ async function janelaJaUsada(deps: Deps, input: EntradaDisparo, antes: RuntimeEv
  * (servidor fora do ar) NÃO são repostas — uma rotina das 8h que só rodou às 14h é uma execução,
  * não seis. A execução em `rotina_execucoes` só nasce com desfecho (executou | falhou |
  * passou_em_branco): o enum não tem 'pendente', e a janela com turno_id é o registro do "em curso".
- * A janela que o pré-voo para nasce 'bloqueada', sem turno (registrarBloqueio). A da rotina `soComPendencia` sem
- * pendência visível nasce 'sem_novidade'/'sem_pendencia', também sem turno (registrarSemPendencia).
+ * A janela que o pré-voo para nasce 'bloqueada', sem turno (registrarBloqueio).
  */
 export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (deps, input) => {
   const { rotina, instanteAgendado } = input;
@@ -340,16 +308,9 @@ export const dispararRotina: CasoDeUso<EntradaDisparo, SaidaDisparo> = async (de
   return fechoDasVoltas.length === 0 ? r : { ...r, events: [...fechoDasVoltas, ...(r.events ?? [])] };
 };
 
-/** O resto do disparo, depois do pré-voo: a janela sem pendência ou o turno da rotina. */
+/** O resto do disparo, depois do pré-voo: o turno da rotina. */
 async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<ReturnType<typeof agenteVisivel>>, agora: number, antes: RuntimeEvent[]): Promise<{ data: SaidaDisparo; events?: RuntimeEvent[] }> {
   const { rotina, instanteAgendado } = input;
-  // definido em 2026-10-01 (item 7 da ADR-066): depois do pré-voo (a rotina parada por acesso segue parada, com o
-  // card dela) e antes do turno. Só no agendador: "Executar agora" e "Permitir e rodar agora" (preservarAgenda) são
-  // atos da pessoa e rodam sempre. Visível = a mesma regra do prompt: aberta e com a_partir_de já passado.
-  // revisto em 2026-10-06: com o "A fazer" desligado o bot não anota nem vê pendência, então a rotina não acorda.
-  if (rotina.soComPendencia && !input.preservarAgenda && (input.aFazer !== true || pendenciasDoPrompt(await deps.repos.pendencias.abertasDoAgente(rotina.agenteId), agora).length === 0)) {
-    return registrarSemPendencia(deps, input, agora);
-  }
   // revisto em 2026-10-12 (ADR-099 item 1 e decisão 3, I7 revista; era um trabalho por execução, ADR-083 S7/S13): a rotina
   // é um alarme que põe um pedido na fila do dono — um turno curto "rodar <rotina>" na conversa dela (a do bot, ou a sala),
   // sem trabalho, que o `reivindicar` põe depois das falas da pessoa. O dono faz o que é rápido ali mesmo ou abre frentes
@@ -388,13 +349,13 @@ async function abrirJanela(deps: Deps, input: EntradaDisparo, agente: Awaited<Re
  * `pedido_dispensado` (definido em 2026-09-24): a pessoa dispensou, ainda aberto, o pedido que a
  * execução fez (dispensar-decisao.ts). `pergunta_sem_resposta` (mesma data, fio da pergunta): a
  * pergunta da execução venceu sem resposta (varredor-expiracao.ts). rotina_execucoes.motivo é text com
- * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração. `sem_pendencia` (definido em 2026-10-01, item 7
- * da ADR-066) hoje só nasce em registrarSemPendencia, sem turno; está na união para o histórico ter um tipo só.
+ * CHECK '^[a-z_]+$' (0002): os valores novos passam sem migração. O motivo antigo do "A fazer" (removido na NOD-317)
+ * segue no histórico como texto livre; nada novo o grava.
  */
 export type EntradaDesfecho = {
   turnoId: string;
   desfecho: DesfechoRotina;
-  motivo?: MotivoFalha | MotivoSemNovidade | MotivoSemPendencia | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | "parada_aberta" | MotivoNaoRodouRotina | null;
+  motivo?: MotivoFalha | MotivoSemNovidade | MotivoAdiada | MotivoInterrupcaoRotina | "maquina_sem_contato" | "reinicio_servidor" | "ninguem_respondeu_o_gate" | "pedido_dispensado" | "pergunta_sem_resposta" | "voltas_sem_novidade" | "parado_pela_pessoa" | "parada_aberta" | MotivoNaoRodouRotina | null;
   /** A regra que interrompeu (autoria do evento de `interrompida`); sem ela, a do varredor de lease. NOD-219: `regra:turno-orfao`. */
   regra?: `regra:${string}`;
   /** NOD-274: 'nao_rodou' por cota — quando a cota volta (vai para o histórico). */

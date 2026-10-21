@@ -84,10 +84,27 @@ export const VERSAO_REGRA_CHAMADA = 1 as const;
 export { errosDoSchema } from "../domain/schema-args.ts";
 
 /**
+ * Campos que saíram do schema e que um modelo com catálogo antigo (ou memória de conversa) ainda pode mandar: são
+ * descartados antes da validação, porque o schema é `additionalProperties: false` e recusaria a chamada inteira.
+ * definido em 2026-10-20 (NOD-317): o `so_com_pendencia` de criar_rotina/atualizar_rotina, do "A fazer" removido.
+ */
+const CAMPOS_REMOVIDOS: Partial<Record<NomeFerramentaNod, readonly string[]>> = {
+  criar_rotina: ["so_com_pendencia"],
+  atualizar_rotina: ["so_com_pendencia"],
+};
+
+function semCamposRemovidos(nome: NomeFerramentaNod, args: unknown): unknown {
+  const removidos = CAMPOS_REMOVIDOS[nome];
+  if (!removidos || typeof args !== "object" || args === null || Array.isArray(args)) return args;
+  return Object.fromEntries(Object.entries(args).filter(([k]) => !removidos.includes(k)));
+}
+
+/**
  * Parse validado: devolve os args TIPADOS da ferramenta nod ou a lista de erros. O único `as` deste
  * arquivo vive aqui, depois de o schema ter sido conferido — é a fronteira entre JSON e contrato.
  */
-export function validarArgsNod<N extends NomeFerramentaNod>(nome: N, args: unknown): { ok: true; args: ContratoFerramentaNod[N]["args"] } | { ok: false; erros: string[] } {
+export function validarArgsNod<N extends NomeFerramentaNod>(nome: N, argsDoModelo: unknown): { ok: true; args: ContratoFerramentaNod[N]["args"] } | { ok: false; erros: string[] } {
+  const args = semCamposRemovidos(nome, argsDoModelo);
   const erros = errosDoSchema(FERRAMENTAS_NOD[nome], args);
   if (erros.length > 0) return { ok: false, erros };
   return { ok: true, args: args as ContratoFerramentaNod[N]["args"] };
@@ -118,9 +135,6 @@ const DESPACHO: Despacho = {
   ver_colegas: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ver_colegas](deps, { ...ctx, ...args }),
   publicar_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.publicar_artefato](deps, { ...ctx, ...args }),
   ler_artefato: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.ler_artefato](deps, { ...ctx, ...args }),
-  anotar_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_pendencia](deps, { ...ctx, ...args }),
-  concluir_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.concluir_pendencia](deps, { ...ctx, ...args }),
-  descartar_pendencia: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.descartar_pendencia](deps, { ...ctx, ...args }),
   iniciar_tarefa: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.iniciar_tarefa](deps, { ...ctx, ...args }),
   desligar: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.desligar](deps, { ...ctx, ...args }),
   anotar_entrevista: (deps, ctx, args) => deps.useCases[USE_CASE_POR_FERRAMENTA.anotar_entrevista](deps, { ...ctx, ...args }),

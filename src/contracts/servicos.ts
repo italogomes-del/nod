@@ -144,9 +144,6 @@ export interface UseCasesNod<Deps> {
   verColegas: CasoNod<Deps, "ver_colegas">;
   publicarArtefato: CasoNod<Deps, "publicar_artefato">;
   lerArtefato: CasoNod<Deps, "ler_artefato">;
-  anotarPendencia: CasoNod<Deps, "anotar_pendencia">;
-  concluirPendencia: CasoNod<Deps, "concluir_pendencia">;
-  descartarPendencia: CasoNod<Deps, "descartar_pendencia">;
   iniciarTarefa: CasoNod<Deps, "iniciar_tarefa">;
   desligar: CasoNod<Deps, "desligar">;
   anotarEntrevista: CasoNod<Deps, "anotar_entrevista">;
@@ -182,9 +179,6 @@ export const USE_CASE_POR_FERRAMENTA = {
   ver_colegas: "verColegas",
   publicar_artefato: "publicarArtefato",
   ler_artefato: "lerArtefato",
-  anotar_pendencia: "anotarPendencia",
-  concluir_pendencia: "concluirPendencia",
-  descartar_pendencia: "descartarPendencia",
   iniciar_tarefa: "iniciarTarefa",
   desligar: "desligar",
   anotar_entrevista: "anotarEntrevista",

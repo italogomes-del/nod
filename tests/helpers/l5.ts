@@ -10,7 +10,6 @@ import { criarTokenTurno, type TokenTurno } from "../../src/services/token-turno
 import type { Repos } from "../../src/repositories/tipos.ts";
 import type { Escopo, Transacao, Tx } from "../../src/shared/types.ts";
 import { lerArtefato, publicarArtefato } from "../../src/use-cases/artefatos.ts";
-import { anotarPendencia, concluirPendencia, descartarPendencia } from "../../src/use-cases/pendencias.ts";
 import { desligar, iniciarTarefa } from "../../src/use-cases/ferramentas-ligacao.ts";
 import { anotarEntrevista, concluirEntrevista, proporBot } from "../../src/use-cases/onboarding.ts";
 import { abrirFrentes, abrirTask, devolverResumo, mandarParaFrente, mandarParaTask } from "../../src/use-cases/frentes.ts";
@@ -123,9 +122,6 @@ export function useCasesDeTeste(sobrescrita: Partial<UseCasesNod> = {}): UseCase
     verColegas: async () => ({ data: { colegas: [] } }),
     publicarArtefato,
     lerArtefato,
-    anotarPendencia,
-    concluirPendencia,
-    descartarPendencia,
     iniciarTarefa,
     desligar,
     anotarEntrevista,

@@ -40,16 +40,6 @@ const ACESSOS: JsonSchema = {
   },
 };
 
-/**
- * definido em 2026-10-01 (item 7 da ADR-066, migração 0045): rotina de retomar trabalho pela metade. O Dev que
- * acordava de 20 em 20 min só para perguntar "tem algo pra mim?" gastava ~US$ 0,30 por execução, quase sempre em
- * sem_novidade; com o flag, a janela sem pendência visível passa sem turno.
- */
-const SO_COM_PENDENCIA: JsonSchema = {
-  type: "boolean",
-  description: "true = a rotina só acorda quando você tem pendência aberta (anotar_pendencia); sem pendência, a execução passa sem turno e sem custo. Use para rotina de retomar trabalho pela metade.",
-};
-
 export const FERRAMENTAS_ROTINA = {
   criar_rotina: {
     type: "object",
@@ -63,7 +53,6 @@ export const FERRAMENTAS_ROTINA = {
       limites_aprovacao: { type: "string", description: "O que exige aprovação antes de sair.", minLength: 1 },
       politica_sem_dado: { type: "string", description: "O que fazer quando não houver dado.", minLength: 1 },
       acessos: ACESSOS,
-      so_com_pendencia: SO_COM_PENDENCIA,
       para_bot: PARA_BOT,
     },
     required: ["cron", "fuso_iana", "instrucao", "fonte", "entregavel", "limites_aprovacao", "politica_sem_dado"],
@@ -103,7 +92,6 @@ export const FERRAMENTAS_ROTINA = {
       limites_aprovacao: { type: "string", description: "Novo limite do que exige aprovação.", minLength: 1 },
       politica_sem_dado: { type: "string", description: "Nova política para quando não houver dado.", minLength: 1 },
       acessos: { ...ACESSOS, description: "A lista NOVA e inteira de apps que a rotina lê ou altera." },
-      so_com_pendencia: SO_COM_PENDENCIA,
     },
     required: ["rotina_id"],
     additionalProperties: false,
@@ -126,8 +114,6 @@ export type ArgsCriarRotina = {
   limites_aprovacao: string;
   politica_sem_dado: string;
   acessos?: ArgsPedirAcesso[];
-  /** Ausente = false: a rotina acorda em toda janela (0045). */
-  so_com_pendencia?: boolean;
   /** ADR-077: só no onboarding, o bot novo da pessoa (o nome dele). */
   para_bot?: string;
 };
@@ -136,11 +122,8 @@ export type ArgsListarRotinas = object;
 export type ArgsPausarRotina = { rotina_id: string };
 export type ArgsReativarRotina = { rotina_id: string };
 
-/**
- * A rotina como o modelo a lê de volta: mesma forma do inventário do prompt de sistema. `so_com_pendencia` só
- * aparece quando true (definido em 2026-10-01, item 7 da ADR-066): ausente é o comum, e o inventário não muda.
- */
-export type RotinaListada = { id: string; quando: string; estado: "ativa" | "pausada"; instrucao: string; so_com_pendencia?: true };
+/** A rotina como o modelo a lê de volta: mesma forma do inventário do prompt de sistema. */
+export type RotinaListada = { id: string; quando: string; estado: "ativa" | "pausada"; instrucao: string };
 export type ResultadoListarRotinas = { rotinas: RotinaListada[] };
 /** `ja_estava` distingue "pausei agora" de "já estava pausada": o modelo não deve anunciar mudança que não houve. */
 export type ResultadoAlternarRotina = { rotina_id: string; estado: "ativa" | "pausada"; ja_estava: boolean; proxima_execucao: number | null } | { erro: CodigoErro };
@@ -155,8 +138,6 @@ export type ArgsAtualizarRotina = {
   limites_aprovacao?: string;
   politica_sem_dado?: string;
   acessos?: ArgsPedirAcesso[];
-  /** Presente troca (true ou false); ausente fica como está. */
-  so_com_pendencia?: boolean;
 };
 export type ArgsExcluirRotina = { rotina_id: string };
 

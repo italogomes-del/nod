@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Conector } from "../../../src/contracts/conector.ts";
-import type { Pendencia } from "../../../src/contracts/pendencia.ts";
 import type { FerramentaPlano } from "../../../src/contracts/plano-turno.ts";
 import { INSTRUCAO_ROTINA_NO_PROMPT, MEMORIAS_NO_PROMPT, montarPromptSistema, partesDoPromptSistema, secaoDaLinha } from "../../../src/domain/prompt-sistema.ts";
 import { agente, f, mem } from "./_fixtures-prompt.ts";
@@ -276,12 +275,11 @@ describe("montarPromptSistema: o limite da corrente entre bots (ADR-063)", () =>
 describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefixo)", () => {
   const colegas = [{ id: "dev2", nome: "Dev 2", titulo: "Dev", descricao: "implementa" }];
   const conectores: Conector[] = [];
-  const kit = [f("pedir_a_bot"), f("ver_colegas"), f("anotar_pendencia"), f("criar_rotina"), f("pedir_acesso"), f("publicar_artefato"), f("computador_observar")].map((x) => (x.nome === "computador_observar" ? { ...x, origem: "computador" as const } : x));
-  const pend = (texto: string): Pendencia => ({ tenantId: "t", id: `p-${texto}`, agenteId: "a", conversaId: "c", turnoId: null, texto, aPartirDe: null, cuidado: false, profundidade: 0, estado: "aberta", resolvidaEm: null, resolvidaPor: null, motivo: null, pedidaEm: null, criadoEm: 1 });
+  const kit = [f("pedir_a_bot"), f("ver_colegas"), f("criar_rotina"), f("pedir_acesso"), f("publicar_artefato"), f("computador_observar")].map((x) => (x.nome === "computador_observar" ? { ...x, origem: "computador" as const } : x));
   const base = { agente: { ...agente, modoAprovacao: "total" as const }, ferramentas: kit, nativas: ["Read"], pessoaNome: "Marlon", colegas, conectores };
   /** As entradas de turno: tudo que muda de um turno para outro do mesmo bot. */
-  const turnoA = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Cecília" }, profundidade: 0 as const, computadorFora: { estado: "fora_do_ar" as const, motivo: "sem rede" }, semTerminal: "pedido_de_colega" as const, pendencias: [pend("revisar o PR")], memorias: [mem("m1", "o time usa Linear", 1)], contextoConversa: '{"historico":[]}' };
-  const turnoB = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Chico" }, profundidade: 2 as const, computadorFora: { estado: "desligado" as const }, semTerminal: "conteudo_de_fora" as const, pendencias: [pend("outra coisa")], memorias: [mem("m2", "prefere curto", 2)], contextoConversa: '{"historico":[{"autor":"Chico"}]}' };
+  const turnoA = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Cecília" }, profundidade: 0 as const, computadorFora: { estado: "fora_do_ar" as const, motivo: "sem rede" }, semTerminal: "pedido_de_colega" as const, memorias: [mem("m1", "o time usa Linear", 1)], contextoConversa: '{"historico":[]}' };
+  const turnoB = { delegacao: { pessoaNome: "Marlon", remetenteNome: "Chico" }, profundidade: 2 as const, computadorFora: { estado: "desligado" as const }, semTerminal: "conteudo_de_fora" as const, memorias: [mem("m2", "prefere curto", 2)], contextoConversa: '{"historico":[{"autor":"Chico"}]}' };
 
   it("critério 1: dois turnos que só diferem nas entradas voláteis têm a parte estável idêntica, e ela é o prefixo dos dois", () => {
     for (const modo of ["conversa", "rotina", "delegacao"] as const) {
@@ -300,7 +298,6 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
       expect(a.volatil.some((l) => l.startsWith("Terminal: este turno não tem terminal")), modo).toBe(true);
       expect(a.estavel.some((l) => l.startsWith("Terminal:") || l.startsWith("Seu computador está") || l.startsWith("Modo de pedido de colega:")), modo).toBe(false);
       expect(volatil).toContain("o time usa Linear");
-      expect(volatil).toContain("revisar o PR");
       expect(volatil).toContain("Contexto recente da conversa");
       expect(partesDoPromptSistema({ ...base, ...turnoB, modo }).volatil.join("\n")).toContain("Quem receber um pedido seu agora");
     }
@@ -314,10 +311,10 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     expect(p.estavel.join("\n")).toBe(partesDoPromptSistema({ ...base, ...turnoB, ferramentas: semPedir, profundidade: 1, modo: "delegacao" }).estavel.join("\n"));
   });
 
-  it("a parte volátil segue a ordem da spec: delegação, limite, aviso do último passe, computador fora, sem terminal, memória, pendências, contexto", () => {
+  it("a parte volátil segue a ordem da spec: delegação, limite, aviso do último passe, computador fora, sem terminal, memória, contexto", () => {
     const v = partesDoPromptSistema({ ...base, ...turnoB, modo: "delegacao" }).volatil;
     const i = (prefixo: string) => v.findIndex((l) => l.startsWith(prefixo));
-    const ordem = ["Modo de pedido de colega:", "Quem receber um pedido seu", "Seu computador está", "Memória (", "Suas pendências abertas", "Contexto recente da conversa"].map(i);
+    const ordem = ["Modo de pedido de colega:", "Quem receber um pedido seu", "Seu computador está", "Memória (", "Contexto recente da conversa"].map(i);
     for (const n of ordem) expect(n).toBeGreaterThanOrEqual(0);
     expect([...ordem].sort((x, y) => x - y)).toEqual(ordem);
   });
@@ -327,12 +324,13 @@ describe("NOD-155: o prompt em parte estável e parte volátil (cache por prefix
     // Profundidade 1 para não cair no aviso do último passe, a única frase que saiu da linha da Colaboração.
     // É um retrato fixo: quem mudar de propósito o TEXTO de uma linha do prompt regenera estes hashes com o mesmo
     // `digital`; uma falha aqui sem mudança de texto quer dizer que uma linha sumiu ou duplicou. Regenerado em 2026-10-06:
-    // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação.
+    // linha nova do "já liberei" (pedir_acesso na hora) em conversa e delegação. Regenerado em 2026-10-20 (NOD-317): saiu a
+    // menção a anotar_pendencia na linha do terminal (a entrada não tem mais pendências nem a ferramenta).
     const digital = (s: string) => createHash("sha256").update([...s.split("\n")].sort().join("\n")).digest("hex");
     const esperado = {
-      conversa: "74d76b0ef12af0c0278b07b8338198a9a9a31daec1f529beeef816b40852b7d8",
-      rotina: "6fab7fec27c5acc8285b61f6edbf1818db32abd5915d251c1bfd9ac698a7613a",
-      delegacao: "efeb97808aec8c9bae528d82e7fbdea444e69601d690163ab00c9d06b461e758",
+      conversa: "0e0e252b5eb153ef1792b706dc190782babd2e6babeb719451745e6331f453bb",
+      rotina: "05614ad1a349add1ff9f0abc624a732f01f18a8d9369bc820efb71aa54c6f07f",
+      delegacao: "a5a59c89e0dd5b66610d01c29d01012c01b8324b269a2fbdd923746177e9751c",
     };
     const obtido = { conversa: "", rotina: "", delegacao: "" };
     for (const modo of ["conversa", "rotina", "delegacao"] as const) obtido[modo] = digital(montarPromptSistema({ ...base, ...turnoA, profundidade: 1, modo }));

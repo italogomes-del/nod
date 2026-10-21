@@ -4,7 +4,7 @@ import type { ModoAprovacao } from "./agente.ts";
 /**
  * As ferramentas que só o Nod tem (definido em 2026-10-07, ADR-081/082): as mãos dele sobre os bots da pessoa
  * (gerir_bots, ver_apps_conectados) e a caixa de bugs, melhorias e dúvidas (registrar_relato). Moram fora de
- * ferramentas-nod.ts pelo gatilho de 200 linhas da EMENDA 26, como ferramentas-pendencia.ts: são espalhadas em
+ * ferramentas-nod.ts pelo gatilho de 200 linhas da EMENDA 26, como ferramentas-artefato.ts: são espalhadas em
  * FERRAMENTAS_NOD e a lista continua FECHADA. Entram no catálogo só quando o bot do turno é o Nod e quem fala é a pessoa
  * (plano-turno.ts, FERRAMENTAS_DO_NOD); o caso de uso confere de novo (cerca 2).
  *

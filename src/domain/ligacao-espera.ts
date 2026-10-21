@@ -46,7 +46,6 @@ export const FERRAMENTAS_COM_FALA = [
   "pedir_a_bot",
   "listar_rotinas",
   "atualizar_rotina",
-  "anotar_pendencia",
   "conector",
 ] as const;
 export type FerramentaComFala = (typeof FERRAMENTAS_COM_FALA)[number];
@@ -89,7 +88,6 @@ const GRUPOS: readonly Grupo[] = [
   { categoria: "ferramenta", ferramenta: "pedir_a_bot", textos: ["Vou pedir ajuda pra um colega…", "Tô chamando um colega…"] },
   { categoria: "ferramenta", ferramenta: "listar_rotinas", textos: ["Deixa eu ver as rotinas…", "Tô olhando suas rotinas…"] },
   { categoria: "ferramenta", ferramenta: "atualizar_rotina", textos: ["Tô ajustando a rotina…", "Deixa eu mudar essa rotina…"] },
-  { categoria: "ferramenta", ferramenta: "anotar_pendencia", textos: ["Vou anotar isso pra depois…", "Anotando aqui…"] },
   { categoria: "ferramenta", ferramenta: "conector", textos: ["Tô olhando no app…", "Só um instante, tô vendo no app…", "Consultando aqui no app…"] },
   {
     categoria: "tarefa_longa",

@@ -11,7 +11,7 @@ import { avisoDeJanelasPuladas, janelasPuladas } from "../domain/janelas-puladas
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
-import { bloqueioDaRotina, pendenciaAbertaDaRotina } from "./pre-voo-rotina.ts";
+import { bloqueioDaRotina, decisaoQueSeguraARotina } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
 /**
@@ -86,7 +86,7 @@ async function puladasDe(deps: Parameters<typeof listarRotinas>[0], rotina: Roti
 async function perguntaQueParou(repos: Repos, rotina: Rotina): Promise<RotinaDto["perguntaPendente"]> {
   const [ultima] = await repos.rotinaExecucoes.listar(rotina.id, 1);
   if (ultima?.desfecho !== "bloqueada" || ultima.motivo !== "aguardando_resposta") return undefined;
-  const d = await pendenciaAbertaDaRotina(repos, rotina);
+  const d = await decisaoQueSeguraARotina(repos, rotina);
   return d ? { decisaoId: d.id, desde: Date.parse(d.criadoEm), tipo: TIPOS_GATE_ROTINA.has(d.tipo) ? "aprovacao" : "pergunta" } : undefined;
 }
 

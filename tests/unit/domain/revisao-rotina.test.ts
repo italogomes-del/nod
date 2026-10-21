@@ -28,7 +28,6 @@ const ROTINA: Rotina = {
   criadoEm: 500,
   excluidoEm: null,
   acessos: [GMAIL, SLACK],
-  soComPendencia: false,
 };
 const rev = (r: Rotina) => revisaoDaRotina(r, sha256);
 
@@ -59,7 +58,6 @@ describe("revisaoDaRotina", () => {
     ["acessos (sai um app)", { acessos: [GMAIL] }],
     ["acessos (nulo, rotina sem declaração)", { acessos: null }],
     ["acessos (nível)", { acessos: [{ ...GMAIL, nivel: "escrita" as const }, SLACK] }],
-    ["soComPendencia", { soComPendencia: true }],
   ] satisfies [string, Partial<Rotina>][])("muda quando muda %s", (_campo, mudanca) => {
     expect(rev({ ...ROTINA, ...mudanca })).not.toBe(rev(ROTINA));
   });
