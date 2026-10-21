@@ -15,14 +15,15 @@ source ./config.env
 
 segredo() { gcloud secrets versions access latest --secret="$1" --project="$PROJETO"; }
 
-IP_PUBLICO="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)"
-PROVISORIO="${IP_PUBLICO//./-}.sslip.io"
+ip_publico() { curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip; }
 # Sem domínio, o provisório é o endereço. Com domínio, o Caddy serve os dois (NOD-173): Macs antigos têm o provisório.
+# Aí ele é opcional: sem metadata (fora da VM), o deploy segue só com o domínio.
+NOD_ENDERECO_PROVISORIO=""
 if [ -z "${NOD_DOMINIO:-}" ]; then
-  NOD_DOMINIO="$PROVISORIO"
-  NOD_ENDERECO_PROVISORIO=""
-else
-  NOD_ENDERECO_PROVISORIO="$PROVISORIO"
+  IP_PUBLICO="$(ip_publico)"
+  NOD_DOMINIO="${IP_PUBLICO//./-}.sslip.io"
+elif IP_PUBLICO="$(ip_publico 2>/dev/null)" && [ -n "$IP_PUBLICO" ]; then
+  NOD_ENDERECO_PROVISORIO="${IP_PUBLICO//./-}.sslip.io"
 fi
 export NOD_DOMINIO NOD_ENDERECO_PROVISORIO
 export NOD_IMAGEM="$REGISTRO/nod:$TAG"
