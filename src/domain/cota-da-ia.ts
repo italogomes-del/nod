@@ -290,6 +290,43 @@ export function entradaDaVoltaDaCota(nomeDaIa: string): string {
 }
 
 /**
+ * definido em 2026-10-20 (NOD-309): o começo da entrada da volta que o ERRO TRANSITÓRIO do provedor marca (assentar-turno,
+ * aposErroTransitorioNoFundo) — sobrecarga, 5xx, rede. Prefixo próprio, de propósito: o backoff não é cota, e quem acorda as
+ * esperas da cota (anteciparEsperasDaCota, reescreverFundoDoBot, levarTasksDoBot) casa só ENTRADA_DA_VOLTA_DA_COTA. Como a
+ * da cota, a volta não é do bot: não conta como volta marcada nem como "volta sem novidade" (turnos.repo).
+ */
+export const ENTRADA_DA_NOVA_TENTATIVA = "[nod] Nova tentativa: ";
+
+/**
+ * NOD-309: a entrada da nova tentativa. Sem sessão retomável, a volta leva o pedido original (entradaDaVolta) — e o texto
+ * pede para não repetir o que já saiu: sem trava técnica de idempotência neste escopo, é a instrução que segura (risco
+ * aceito no plano).
+ */
+export function entradaDaNovaTentativa(nomeDaIa: string, tentativa: number, maximo: number): string {
+  return `${ENTRADA_DA_NOVA_TENTATIVA}o serviço do ${nomeDaIa} ficou instável no meio deste trabalho e o nod tentou de novo (tentativa ${tentativa} de ${maximo}). Siga de onde parou; o que já saiu continua valendo. Não repita efeito externo que já foi feito (mensagem enviada, item criado ou alterado): confira antes.`;
+}
+
+/**
+ * definido em 2026-10-20 (NOD-309, PR 3): o começo da entrada da retomada que a QUEDA da infraestrutura marca no fundo —
+ * reinício do servidor ou máquina sem contato no meio do turno (interromper-por-maquina, aposQuedaNoFundo). Prefixo próprio
+ * pelo mesmo motivo da nova tentativa: não é cota, e "Seguir com"/conta nova não têm o que acordar.
+ */
+export const ENTRADA_DA_RETOMADA_DA_QUEDA = "[nod] Retomada após queda: ";
+
+/** NOD-309: a entrada da retomada depois da queda. Mesma instrução de não repetir efeito externo (risco aceito no plano). */
+export function entradaDaRetomadaDaQueda(motivo: string): string {
+  return `${ENTRADA_DA_RETOMADA_DA_QUEDA}este trabalho foi interrompido no meio (${motivo}) e o nod o pôs de volta na fila. Siga de onde parou; o que já saiu continua valendo. Não repita efeito externo que já foi feito (mensagem enviada, item criado ou alterado): confira antes.`;
+}
+
+/** Os prefixos das voltas que o nod marca para o fundo (cota, nova tentativa, retomada da queda), nunca uma do bot. */
+export const PREFIXOS_DA_VOLTA_DO_FUNDO = [ENTRADA_DA_VOLTA_DA_COTA, ENTRADA_DA_NOVA_TENTATIVA, ENTRADA_DA_RETOMADA_DA_QUEDA] as const;
+
+/** NOD-309: a entrada é uma volta que o nod marcou para o fundo, nunca uma do bot. */
+export function ehVoltaDoFundo(entradaTexto: string): boolean {
+  return PREFIXOS_DA_VOLTA_DO_FUNDO.some((p) => entradaTexto.startsWith(p));
+}
+
+/**
  * definido em 2026-10-12 (ADR-101, QA do NOD-211): a entrada da volta da task cuja conta parou e o Mac já seguiu com outra
  * conta da mesma IA ("Trocar sozinho"). Começa com ENTRADA_DA_VOLTA_DA_COTA, para contar como a volta da cota (e não como
  * volta sem novidade). Só posições (ADR-019): o apelido mora no Mac.
@@ -331,7 +368,7 @@ export function entradaDaVolta(p: { base: string; sessaoRetomavel: boolean; pedi
  * de uma volta da cota, a própria entrada.
  */
 export function entradaDoRetornoARefazer(entradaTexto: string): string {
-  if (!entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)) return entradaTexto;
+  if (!ehVoltaDoFundo(entradaTexto)) return entradaTexto;
   const i = entradaTexto.indexOf(MARCA_DO_PEDIDO_ORIGINAL);
   return i >= 0 ? entradaTexto.slice(i + MARCA_DO_PEDIDO_ORIGINAL.length) : entradaTexto;
 }

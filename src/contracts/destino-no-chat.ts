@@ -57,6 +57,8 @@ export const ASSUNTOS = [
   "conta.recusada",
   "cota.pedido_na_fila",
   "cota.espera",
+  // NOD-309: o fundo que espera por outra queda (erro do provedor, máquina, reinício) e volta sozinho.
+  "fundo.espera",
   "computador.fora_do_ar",
   // Frentes e tasks: a web precisa delas na janela para desenhar outra coisa (anexo).
   "trabalho.aberto",

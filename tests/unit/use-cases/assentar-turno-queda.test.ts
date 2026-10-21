@@ -7,6 +7,7 @@ import { criarAgente } from "../../../src/use-cases/criar-agente.ts";
 import { dispararRotina } from "../../../src/use-cases/disparar-rotina.ts";
 import { interromperPorMaquina } from "../../../src/use-cases/interromper-por-maquina.ts";
 import { enfileirarRetomada } from "../../../src/use-cases/enfileirar-retomada.ts";
+import { ENTRADA_DA_RETOMADA_DA_QUEDA } from "../../../src/domain/cota-da-ia.ts";
 import { depsEmMemoria, executar, MARLON } from "../../helpers/deps-l6.ts";
 
 const T0 = Date.parse("2026-09-24T03:10:00-03:00");
@@ -46,14 +47,19 @@ async function cenario(tipo: "rotina" | "conversa") {
 }
 
 describe("assentarTurno: entrega depois de o Mac cair (ADR-045)", () => {
-  it("rotina: lease vencido e entrega cortada → interrompida no histórico, NADA na conversa (nem a fala), sem decisão, UM aviso", async () => {
+  // revisto em 2026-10-20 (NOD-309, PR 3): a rotina caída deixa de ser calada — volta à fila sozinha, com UMA linha
+  // na conversa (a da máquina), sem card e sem fechar a execução no histórico (ela fecha quando a volta terminar).
+  it("rotina: lease vencido e entrega cortada → volta à fila sozinha, UMA linha da máquina (nem a fala), sem decisão, UM aviso", async () => {
     const c = await cenario("rotina");
     c.passar(LEASE_MS + 20_000);
     const r = await c.entregar(cortado);
     expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
-    expect(c.banco.mensagens).toHaveLength(c.antes);
+    const novas = c.banco.mensagens.slice(c.antes);
+    expect(novas.map((m) => m.kind)).toEqual(["sistema"]);
+    expect(novas[0]?.texto).toContain("Esta execução da rotina fica na fila");
     expect(c.banco.decisoes).toEqual([]);
-    expect(c.banco.execucoes.map((e) => [e.rotinaId, e.desfecho, e.motivo])).toEqual([[c.rotinaId, "interrompida", "maquina_sem_contato"]]);
+    expect(c.banco.execucoes).toEqual([]);
+    expect(c.banco.turnos.filter((t) => t.retomaTurnoId === c.turnoId).map((t) => [t.estado, t.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA)])).toEqual([["pendente", true]]);
     expect(c.banco.incidentes).toMatchObject([{ rotinas: 1, conversas: 0, comecouEm: T0, voltouEm: T0 + LEASE_MS + 20_000 }]);
     expect(r.events.filter((e) => e.kind === "turno_interrompido")).toHaveLength(1);
   });
@@ -87,17 +93,20 @@ describe("assentarTurno: entrega depois de o Mac cair (ADR-045)", () => {
     await interromperPorMaquina(cortada.deps, { turnos: [vencido!] });
     const tardia = await cortada.entregar(cortado);
     expect(tardia.data.tardia).toBe(true);
-    expect(cortada.banco.mensagens).toHaveLength(cortada.antes);
-    expect(cortada.banco.execucoes).toHaveLength(1);
+    // NOD-309 (PR 3): só a linha da máquina; a fala cortada não entra e a retomada segue na fila.
+    expect(cortada.banco.mensagens.slice(cortada.antes).map((m) => [m.kind, m.texto.includes("fica na fila")])).toEqual([["sistema", true]]);
+    expect(cortada.banco.turnos.filter((t) => t.retomaTurnoId === cortada.turnoId).map((t) => t.estado)).toEqual(["pendente"]);
 
-    // NOD-264 (E8): sem retomada criada, o sucesso tardio conclui o turno e a fala entra inteira.
+    // NOD-264 (E8): o sucesso tardio conclui o turno e a fala entra inteira. NOD-309 (PR 3): a retomada da queda,
+    // ainda na fila, é absorvida — o trabalho terminou e não roda de novo.
     const pronta = await cenario("rotina");
     pronta.passar(LEASE_MS + 20_000);
     const [outro] = await pronta.deps.repos.turnos.vencidos(pronta.deps.agora());
     await interromperPorMaquina(pronta.deps, { turnos: [outro!] });
     const r = await pronta.entregar(pronto);
     expect(r.data).toMatchObject({ tardia: true, turno: { estado: "concluido", motivoInterrupcao: null } });
-    expect(pronta.banco.mensagens.slice(pronta.antes).map((m) => [m.texto, m.parcial])).toEqual([["Resumo: 3 e-mails novos.", false]]);
+    expect(pronta.banco.mensagens.slice(pronta.antes).filter((m) => !m.texto.includes("fica na fila")).map((m) => [m.texto, m.parcial])).toEqual([["Resumo: 3 e-mails novos.", false]]);
+    expect(pronta.banco.turnos.filter((t) => t.retomaTurnoId === pronta.turnoId).map((t) => [t.estado, t.motivoInterrupcao])).toEqual([["interrompido", "absorvido"]]);
   });
 
   describe("NOD-264 (E8): sucesso tardio depois da queda", () => {
@@ -164,12 +173,14 @@ describe("NOD-245: entrega de um turno ADOTADO depois do reinício do servidor",
     expect(c.banco.incidentes).toEqual([]);
   });
 
-  it("rotina: entrega adotada cortada → execução interrompida/reinicio_servidor, registrada UMA vez", async () => {
+  it("rotina: entrega adotada cortada → reinicio_servidor, volta à fila sozinha e calada (NOD-309, PR 3)", async () => {
     const c = await cenario("rotina");
     c.passar(30_000);
     const r = await c.entregar(cortado, { adotada: true });
     expect(r.data.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
-    expect(c.banco.execucoes.map((e) => [e.rotinaId, e.desfecho, e.motivo])).toEqual([[c.rotinaId, "interrompida", "reinicio_servidor"]]);
+    expect(c.banco.execucoes).toEqual([]);
+    expect(c.banco.mensagens).toHaveLength(c.antes);
+    expect(c.banco.turnos.filter((t) => t.retomaTurnoId === c.turnoId).map((t) => t.estado)).toEqual(["pendente"]);
     expect(c.banco.incidentes).toEqual([]);
   });
 });

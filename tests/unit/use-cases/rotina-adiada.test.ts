@@ -49,7 +49,9 @@ describe("execucaoVenceu (NOD-243)", () => {
 });
 
 describe("rotina adiada (NOD-243)", () => {
-  it("CA: a execução que venceu na fila é encerrada ('interrompida · vencida') e a janela nova roda", async () => {
+  // revisto em 2026-10-20 (NOD-309, PR 4): o pendente que a máquina não puxou não fecha calado como 'interrompida ·
+  // vencida' — a janela fica 'nao_rodou · maquina_sem_contato', com UMA linha "Não rodou · …" na conversa da rotina.
+  it("CA: a execução que venceu na fila (a máquina não puxou) fica 'não rodou · máquina sem contato' e a janela nova roda", async () => {
     const r = relogio(JANELA + 30_000);
     const d = depsMemoria({ agora: r.agora });
     const rotina = await rotinaAtiva(d);
@@ -61,8 +63,10 @@ describe("rotina adiada (NOD-243)", () => {
     expect("turno" in segunda.data).toBe(true);
     expect(d.banco.turnos.find((t) => t.id === t1.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "vencido" });
     const execs = await d.deps.repos.rotinaExecucoes.listar(rotina.id);
-    expect(execs.find((e) => e.turnoId === t1.id)).toMatchObject({ desfecho: "interrompida", motivo: "vencida" });
+    expect(execs.find((e) => e.turnoId === t1.id)).toMatchObject({ desfecho: "nao_rodou", motivo: "maquina_sem_contato", voltaEm: null });
     expect((segunda.events ?? []).map((e) => e.kind)).toContain("turno_interrompido");
+    const linhas = d.banco.mensagens.filter((m) => m.conversaId === rotina.conversaId && m.texto.startsWith("Não rodou · "));
+    expect(linhas.map((m) => m.texto)).toEqual([expect.stringContaining("Não rodou · o computador do bot ficou sem contato, volta na próxima execução da agenda.")]);
   });
 
   it("CA: a frente da rotina sem nada vivo há mais de 24 h é parada e deixa de segurar", async () => {

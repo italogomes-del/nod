@@ -166,13 +166,21 @@ async function linhaFrentesTerminadas(deps: DepsFecho, p: { lote: LoteDeFrentes;
  * linha ao dono diz onde ficaram os resumos. `devolvido_em` nunca volta a null (o UNIQUE de um retorno por lote fica).
  */
 export async function refazerRetornoDoLote(deps: DepsFecho, turno: Turno): Promise<RuntimeEvent[]> {
-  // A queda da máquina (maquina_sem_contato) já tem o caminho dela (interromper-por-maquina.ts): refazer aqui duplicaria.
-  // NOD-245: idem `reinicio_servidor` — a entrega do turno adotado que o deploy derrubou segue a mesma regra de queda.
-  if (turno.decididoPor !== RETORNO_DO_LOTE || turno.estado !== "interrompido" || turno.pararSolicitadoEm !== null || turno.motivoInterrupcao === "maquina_sem_contato" || turno.motivoInterrupcao === "reinicio_servidor") return [];
+  if (turno.decididoPor !== RETORNO_DO_LOTE) return [];
+  // NOD-309 (0098, emenda da ADR-099 §7): o lote só está entregue quando o retorno CONCLUI — `devolvido_em` é a trava de
+  // um retorno por lote e marca a hora em que ele entrou na fila, não a em que o dono leu.
+  if (turno.estado === "concluido") {
+    await deps.repos.frentes.marcarRetornoConcluido(turno.id, deps.agora());
+    return [];
+  }
+  // revisto em 2026-10-20 (NOD-309, PR 3): vale para toda queda, também a da máquina e o reinício (antes ficavam com o
+  // card "Retomar", que vencia em 24 h). A queda que o varredor assenta já passa o lote para a retomada
+  // (interromper-por-maquina, aposQuedaNoFundo): aqui o lote não aponta mais para este turno e nada se duplica.
+  if (turno.estado !== "interrompido" || turno.pararSolicitadoEm !== null) return [];
   // A volta da cota de um retorno passa o lote para ela (aposLimiteNoFundo): o lote aponta sempre para o último.
   const raiz = turno;
   const lote = await deps.repos.frentes.loteDoRetorno(raiz.id);
-  if (!lote) return [];
+  if (!lote || lote.retornoConcluidoEm) return [];
   const agora = deps.agora();
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: deps.escopo.pessoaId, executor: "catcher", decididoPor: "regra:frentes" });
   if (turno.reenvios >= 1) {

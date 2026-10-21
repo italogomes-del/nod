@@ -89,3 +89,42 @@ export const INTERVALO_OBSERVACAO_TURNO_VELHO_MS = 3_600_000;
 export function deveObservar(ultimaObservacao: number | undefined, agora: number): boolean {
   return ultimaObservacao === undefined || agora - ultimaObservacao >= INTERVALO_OBSERVACAO_TURNO_VELHO_MS;
 }
+
+/**
+ * definido em 2026-10-20 (NOD-309, PR 4, emenda da ADR-045): o trabalho de FUNDO pendente que a condição da máquina
+ * segura antes do despacho (o Mac fora, sem a faixa ocupada nem a task anterior aberta) não fica no escuro:
+ *  - passados 10 min na fila, UM aviso por cadeia — "fica na fila e retoma quando o Mac voltar" (abaixo dos 30 min do
+ *    pedido parado, para quem pediu não esperar calado). A cota da IA tem a nota dela ("Seguir com…") e não entra aqui;
+ *  - o pedido de colega, a frente e o retorno do lote parados há mais de 24 h desde o começo da cadeia (NOD-229,
+ *    `PRAZO_DO_FUNDO_MS`) desistem: o turno sai da fila e quem pediu recebe a falha. A task e a rotina só recebem o
+ *    aviso (a task é da pessoa; a rotina tem a janela seguinte, que a encerra como 'não rodou').
+ */
+export type FundoPreso = "rotina" | "colega" | "frente" | "lote" | "task";
+
+export const AVISO_FUNDO_PRESO_MS = 10 * 60_000;
+
+export interface FatosFundoPreso {
+  fundo: FundoPreso | null;
+  criadoEm: number;
+  acordarEm: number | null;
+  /** O primeiro turno da cadeia (a raiz): o prazo de 24 h conta dele. */
+  inicioDaCadeia: number;
+  /** A cadeia já ganhou a linha "fica na fila" (assunto `fundo.espera`, desta passada ou da queda no meio do turno). */
+  avisado: boolean;
+  /** Uma conta de IA da pessoa está no limite: a cota tem a nota dela. */
+  cotaNoLimite: boolean;
+  depoisDeAberto: boolean;
+  faixaOcupada: boolean;
+}
+
+export type DecisaoFundoPreso = { tipo: "nada" } | { tipo: "avisar" } | { tipo: "desistir" };
+
+export function decidirFundoPreso(f: FatosFundoPreso, agora: number, prazoDoFundoMs: number): DecisaoFundoPreso {
+  if (f.fundo === null || f.depoisDeAberto || f.faixaOcupada) return { tipo: "nada" };
+  if (f.acordarEm !== null && f.acordarEm > agora) return { tipo: "nada" };
+  const desiste = f.fundo === "colega" || f.fundo === "frente" || f.fundo === "lote";
+  if (desiste && agora - f.inicioDaCadeia >= prazoDoFundoMs) return { tipo: "desistir" };
+  if (!f.avisado && !f.cotaNoLimite && agora - f.criadoEm >= AVISO_FUNDO_PRESO_MS) return { tipo: "avisar" };
+  return { tipo: "nada" };
+}
+

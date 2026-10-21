@@ -128,22 +128,34 @@ describeIntegracao("NOD-258: o retorno do lote espera a cota e não se perde (QA
     });
   });
 
-  it("critério 4 (bordas): a queda da máquina e o Parar não refazem o retorno; o concluído também não", async () => {
+  it("critério 4 (bordas, revisto em 2026-10-20 — NOD-309, PR 3): a queda da máquina e o reinício refazem o retorno; o Parar não; o concluído marca o lote entregue", async () => {
+    for (const motivo of ["maquina_sem_contato", "reinicio_servidor"] as const) {
+      await withRollback(MARLON, async (trx) => {
+        const m = await montar(trx);
+        await m.repos.turnos.assentar(m.retorno.id, { estado: "interrompido", motivoInterrupcao: motivo });
+        const evs = await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!);
+        expect(evs.map((e) => e.kind)).toEqual(["turno_criado"]);
+        const lote = await m.repos.frentes.buscarLote(m.loteId);
+        expect(lote?.retornoTurnoId).not.toBe(m.retorno.id);
+        expect((await m.repos.turnos.buscar(lote!.retornoTurnoId!))).toMatchObject({ estado: "pendente", origem: "retomada" });
+      });
+    }
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const total = async () => (await m.repos.turnos.listarDaConversa(m.ada.conversaId, 500)).length;
       const antes = await total();
-      await m.repos.turnos.assentar(m.retorno.id, { estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
-      expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
-      // NOD-245: a entrega do turno adotado que o reinício do servidor derrubou também segue a regra de queda.
-      await trx`update turnos set motivo_interrupcao = 'reinicio_servidor' where id = ${m.retorno.id}`;
-      expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
-      await trx`update turnos set motivo_interrupcao = 'executor_indisponivel', parar_solicitado_em = now() where id = ${m.retorno.id}`;
+      await m.repos.turnos.assentar(m.retorno.id, { estado: "interrompido", motivoInterrupcao: "executor_indisponivel" });
+      await trx`update turnos set parar_solicitado_em = now() where id = ${m.retorno.id}`;
       expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
       await trx`update turnos set estado = 'concluido', parar_solicitado_em = null where id = ${m.retorno.id}`;
       expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
       expect(await total()).toBe(antes);
-      expect((await m.repos.frentes.buscarLote(m.loteId))?.retornoTurnoId).toBe(m.retorno.id);
+      const lote = await m.repos.frentes.buscarLote(m.loteId);
+      expect(lote?.retornoTurnoId).toBe(m.retorno.id);
+      expect(lote?.retornoConcluidoEm).not.toBeNull();
+      // Entregue, uma queda tardia do mesmo turno não refaz nada.
+      await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'reinicio_servidor' where id = ${m.retorno.id}`;
+      expect(await refazerRetornoDoLote(m.l5, (await m.repos.turnos.buscar(m.retorno.id))!)).toEqual([]);
     });
   });
 });

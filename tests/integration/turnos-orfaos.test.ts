@@ -304,3 +304,56 @@ describeIntegracao("turnos órfãos na fila (NOD-219, revisão do PR #307): pass
     });
   });
 });
+
+/**
+ * definido em 2026-10-20 (NOD-309, PR 4, emenda da ADR-045): o fundo pendente que a máquina segura antes do despacho —
+ * o bot vivo, ninguém puxou. Aos 10 min, UMA linha por cadeia ("fica na fila e retoma quando o Mac voltar") e uma a quem
+ * pediu; passadas 24 h, o pedido de colega sai da fila e quem pediu recebe a falha uma vez.
+ */
+describeIntegracao("NOD-309 (PR 4): o fundo que a máquina segura antes do despacho", () => {
+  const atrasar = (trx: Tx, turnoId: string, ms: number) => trx`update turnos set criado_em = now() - ${`${Math.round(ms / 1000)} seconds`}::interval where id = ${turnoId}`;
+
+  it("10 min: o pedido de colega ganha UMA linha na conversa do colega e UMA a quem pediu; a conversa comum não", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await adaPedeAoDev(trx);
+      const comum = await pendente(m.repos, m.dev.conversaId, m.dev.agenteId, Date.now());
+      await atrasar(trx, m.tarefaId, 11 * 60_000);
+      await atrasar(trx, comum.id, 11 * 60_000);
+      const primeira = await cuidarDosTurnosOrfaos(m.deps);
+      expect(primeira.data.avisados).toEqual([{ turnoId: m.tarefaId, fundo: "colega" }]);
+      await cuidarDosTurnosOrfaos(m.deps);
+      const doDev = (await m.repos.mensagens.listarDaConversa(m.dev.conversaId)).filter((x) => x.kind === "sistema" && x.texto.includes("fica na fila"));
+      expect(doDev.map((x) => x.texto)).toEqual(["O computador do bot está sem contato. Este pedido fica na fila e retoma quando o contato voltar, de onde parou."]);
+      expect(doDev[0]?.autoria).toMatchObject({ decidido_por: "regra:fundo-preso" });
+      const daAda = (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.texto.includes("fica na fila"));
+      expect(daAda).toHaveLength(1);
+      expect(await m.repos.turnos.buscar(m.tarefaId)).toMatchObject({ estado: "pendente" });
+    });
+  });
+
+  it("10 min com uma conta no limite: a nota da cota fala, não esta linha", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await adaPedeAoDev(trx);
+      await atrasar(trx, m.tarefaId, 11 * 60_000);
+      const conta = randomUUID();
+      await trx`insert into contas_ia (tenant_id, owner_id, id, ia, impressao, apelido, posicao, no_limite_ate) values (${TENANT_PADRAO}, ${PESSOA_MARLON}, ${conta}, 'claude-cli', ${"a".repeat(64)}, 'pessoal', 1, now() + interval '1 hour')`;
+      const r = await cuidarDosTurnosOrfaos(m.deps);
+      expect(r.data.avisados ?? []).toEqual([]);
+    });
+  });
+
+  it("24 h: o pedido de colega sai da fila ('vencido') e quem pediu recebe a falha UMA vez", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await adaPedeAoDev(trx);
+      await atrasar(trx, m.tarefaId, 25 * H);
+      const r = await cuidarDosTurnosOrfaos(m.deps);
+      expect(r.data.desistidos).toEqual([{ turnoId: m.tarefaId, fundo: "colega" }]);
+      await cuidarDosTurnosOrfaos(m.deps);
+      expect(await m.repos.turnos.buscar(m.tarefaId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "vencido" });
+      const falhas = (await m.avisosDaAda()).filter((x) => (x.payload as { falhou?: boolean } | null)?.falhou === true);
+      expect(falhas).toHaveLength(1);
+      const doDev = (await m.repos.mensagens.listarDaConversa(m.dev.conversaId)).filter((x) => x.kind === "sistema" && x.texto.startsWith("Tirei este pedido da fila"));
+      expect(doDev.map((x) => x.texto)).toEqual([expect.stringContaining("ficou mais de 24 h esperando o computador do bot")]);
+    });
+  });
+});

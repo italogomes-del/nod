@@ -194,16 +194,17 @@ describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda,
       expect(caido).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor", leaseAte: null });
       // A queda é o último sinal (lease_ate − LEASE_MS), não a criação do turno 3 h atrás.
       expect(await m.ultimoSinal(caido.id)).toBe(sinalEm);
-      expect(await m.estado(ci)).toBe("precisa_de_voce");
+      // revisto em 2026-10-20 (NOD-309, PR 3): a queda já põe a retomada da frente na fila; o varredor
+      // vê a retomada e espera, antes e depois do sinal de vida, sem retomar de novo nem fechar.
+      const retomada = await m.turnoVivo(ci);
+      expect(retomada).toMatchObject({ origem: "retomada", trabalhoId: ci, estado: "pendente", retomaTurnoId: caido.id });
+      expect(await m.estado(ci)).not.toBe("precisa_de_voce");
       expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [] });
       await m.sinalDeVida();
-      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [ci], fechadas: [] });
-      const retomada = await m.turnoVivo(ci);
-      expect(retomada).toMatchObject({ origem: "retomada", trabalhoId: ci, estado: "pendente" });
+      expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [] });
+      expect((await m.turnoVivo(ci)).id).toBe(retomada.id);
       const card = (await m.repos.decisoes.doTurno(caido.id)).find((d) => d.tipo === "retomar_turno");
-      expect(card?.desfecho).not.toMatchObject({ regra: REGRA_FRENTE_CAIU });
-      const aviso = (await m.repos.mensagens.listarDaConversa(m.ada.conversaId, 500)).filter((x) => x.turnoId === retomada.id && x.kind === "sistema");
-      expect(aviso[0]?.texto).toContain(`tentativa 2 de ${MAX_QUEDAS_POR_PEDIDO}`);
+      expect(card?.desfecho ?? null).not.toMatchObject({ regra: REGRA_FRENTE_CAIU });
     });
   });
 
@@ -218,8 +219,10 @@ describeIntegracao("frentes de lote que caem: o varredor retoma e, na 3ª queda,
       await m.terminar(login, "Login corrigido");
       const caido = await m.cairRodando(ci, { idadeMs: 10 * 60_000, sinalEm: Date.now() });
       expect(caido.motivoInterrupcao).toBe("maquina_sem_contato");
+      // revisto em 2026-10-20 (NOD-309, PR 3): a retomada já está na fila desde a queda; o varredor não
+      // a duplica nem a fecha.
       expect((await cuidarDasFrentesCaidas(m.deps)).data).toEqual({ retomadas: [], fechadas: [] });
-      expect(await m.estado(ci)).toBe("precisa_de_voce");
+      expect(await m.turnoVivo(ci)).toMatchObject({ origem: "retomada", retomaTurnoId: caido.id });
     });
   });
 

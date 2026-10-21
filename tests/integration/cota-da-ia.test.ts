@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { OrigemTrabalho } from "../../src/contracts/trabalho.ts";
 import type { Turno } from "../../src/contracts/turno.ts";
-import { cotaDasIas, cotaSegura, entradaDaVoltaDaCota, portaoDaCota, situacaoDoTurno, tipoParaCota } from "../../src/domain/cota-da-ia.ts";
+import { cotaDasIas, cotaSegura, ENTRADA_DA_NOVA_TENTATIVA, entradaDaVoltaDaCota, portaoDaCota, situacaoDoTurno, tipoParaCota } from "../../src/domain/cota-da-ia.ts";
 import type { Tx } from "../../src/shared/types.ts";
 import { lerCustoDoDia } from "../../src/use-cases/custo-do-dia.ts";
 import { criarTrabalho, listarTrabalhos } from "../../src/use-cases/trabalhos.ts";
@@ -119,6 +119,25 @@ describeIntegracao("cota da IA no reivindicar (ADR-099 §7)", () => {
       const esperado = await m.passaPelaRegra(todos);
       expect(esperado).toEqual(new Set([testarAgora.id]));
       expect(await m.reivindicarTudo(new Set(todos.map((t) => t.id)))).toEqual(esperado);
+    });
+  });
+
+  // definido em 2026-10-20 (NOD-309, PR 4): o fundo no Automático (auto/auto) acorda com "Seguir com"/conta nova de
+  // qualquer IA; a volta da nova tentativa (backoff do erro transitório) não é cota e não acorda.
+  it("NOD-309 (PR 4): anteciparEsperasDaCota acorda a volta auto/auto; a da nova tentativa fica com o backoff", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const w = await m.task("rotina", "Rotina das 9h", true);
+      const base = { executor: "catcher" as const, conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada" as const, prazoEm: Date.now() + 600_000, profundidade: 0 as const, entradaConfianca: "confiavel" as const, trabalhoId: w.id, acordarEm: Date.now() + HORA };
+      const auto = await m.repos.turnos.enfileirar({ ...base, entradaTexto: entradaDaVoltaDaCota("Claude"), modelo: "auto", harness: "auto" });
+      const fixa = await m.repos.turnos.enfileirar({ ...base, entradaTexto: entradaDaVoltaDaCota("Codex"), modelo: "gpt-5", harness: "codex-cli" });
+      const tentativa = await m.repos.turnos.enfileirar({ ...base, entradaTexto: `${ENTRADA_DA_NOVA_TENTATIVA}a IA ficou fora do ar.`, modelo: "auto", harness: "auto" });
+      if (!auto || !fixa || !tentativa) throw new Error("turno");
+      const acordados = await m.repos.turnos.anteciparEsperasDaCota("claude-cli");
+      expect(acordados).toContain(auto.id);
+      expect(acordados).not.toContain(fixa.id);
+      expect(acordados).not.toContain(tentativa.id);
+      expect((await m.repos.turnos.buscar(tentativa.id))?.acordarEm).not.toBeNull();
     });
   });
 

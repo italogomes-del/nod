@@ -115,7 +115,7 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "retorno-do-lote-caiu": "O retorno do lote caiu duas vezes e não foi refeito de novo. Os resumos ficaram em cada frente: {frentes}.",
   // definido em 2026-10-20 (NOD-309): o fundo espera por toda queda, com UM aviso por cadeia. {pedido} já com artigo
   // ("Este pedido", "Esta frente", "Esta execução da rotina"); {quando} = "às 14:30" (quandoDaFrase).
-  "fundo-espera-maquina": "{maquina} está sem contato. {pedido} fica na fila e retoma quando o Mac voltar, de onde parou.",
+  "fundo-espera-maquina": "{maquina} está sem contato. {pedido} fica na fila e retoma quando o contato voltar, de onde parou.",
   "fundo-nova-tentativa": "O serviço do {ia} está instável. {pedido} tenta de novo {quando}: tentativa {tentativa} de {maximo}.",
   "fundo-desistiu": "{pedido} caiu ({motivo}) e parou de tentar: {porque}. Peça de novo quando quiser.",
   // NOD-309: a janela que nenhuma queda pode rodar a tempo — uma linha por janela, na conversa da rotina e no histórico.

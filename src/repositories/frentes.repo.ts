@@ -199,13 +199,15 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
     async frentesCaidas(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
         id: string; estado: EstadoTrabalho; ultimo_id: string; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null; quedas: number;
-        card_id: string | null; card_estado: string | null; sinal: boolean;
+        card_id: string | null; card_estado: string | null; sinal: boolean; na_fila: boolean;
       }[]>`
         select w.id, w.estado, u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
           (select count(*)::int from turnos q where q.tenant_id = w.tenant_id and q.trabalho_id = w.id and q.estado = 'interrompido'
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
+          -- NOD-309 (PR 3): a retomada que a queda no fundo já enfileirou segura o varredor (pedido-parado.ts).
+          exists (select 1 from turnos n where n.tenant_id = w.tenant_id and n.trabalho_id = w.id and n.estado in ('pendente', 'despachando')) as na_fila,
           exists (select 1 from turnos v where v.tenant_id = w.tenant_id and v.owner_id = w.owner_id
             and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal
@@ -238,6 +240,7 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
         quedaEm: msOuNull(l.queda_em),
         quedas: l.quedas,
         cardRetomar: l.card_id ? { id: l.card_id, aberto: l.card_estado === "pendente" || l.card_estado === "reaberta" } : null,
+        retomadaNaFila: l.na_fila,
         sinalDepoisDaQueda: l.sinal,
         textoFinal: null,
         turnoDoTextoFinal: null,

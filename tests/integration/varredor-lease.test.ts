@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { varrerPessoa } from "../../src/adapters/fundo/varredor-lease.ts";
+import { ENTRADA_DA_RETOMADA_DA_QUEDA } from "../../src/domain/cota-da-ia.ts";
 import { assuntoDoTexto } from "../../src/domain/assunto-do-texto.ts";
 import { destinoDe } from "../../src/domain/destino-no-chat.ts";
 import { criarMetricas } from "../../src/obs/metricas.ts";
@@ -107,7 +108,9 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
     });
   });
 
-  it("rotina: 0 decisões, 0 mensagens, 1 execução 'interrompida' motivo maquina_sem_contato, aviso com a rotina; idempotente", async () => {
+  // revisto em 2026-10-20 (NOD-309, PR 3, emenda da ADR-045): a rotina não cai mais calada nem perde a janela — volta para a
+  // fila sozinha (pendente até a máquina puxar), com UMA linha na conversa da rotina; a execução fica aberta para a volta.
+  it("rotina: 0 decisões, a retomada na fila, UMA linha 'retoma quando o contato voltar', execução aberta, aviso com a rotina; idempotente", async () => {
     await withRollback(MARLON, async (trx) => {
       const agora = Date.now();
       const deps = depsSobreTrx(trx, MARLON, { relogio: () => agora });
@@ -120,15 +123,19 @@ describeIntegracao("varredor de lease (ADR-010/021, E9.4; ADR-045): conversa com
       expect(r).toMatchObject({ interrompidos: [turnoId], decisoes: [] });
       expect(await deps.repos.turnos.buscar(turnoId)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
       expect(await deps.repos.decisoes.pendentesDaConversa(criado.conversa.id)).toEqual([]);
-      expect(await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).toHaveLength(mensagensAntes);
-      const execucoes = await deps.repos.rotinaExecucoes.listar(rotina.id);
-      expect(execucoes.map((e) => [e.desfecho, e.motivo, e.turnoId])).toEqual([["interrompida", "maquina_sem_contato", turnoId]]);
+      const novas = (await deps.repos.mensagens.listarDaConversa(criado.conversa.id)).slice(mensagensAntes);
+      expect(novas.map((m) => m.texto)).toEqual([expect.stringMatching(/está sem contato\. Esta execução da rotina fica na fila e retoma quando o contato voltar/)]);
+      const volta = (await deps.repos.turnos.listarDaConversa(criado.conversa.id, 50)).find((t) => t.origem === "retomada" && t.retomaTurnoId === turnoId);
+      expect(volta).toMatchObject({ estado: "pendente" });
+      expect(volta!.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA)).toBe(true);
+      expect(await deps.repos.rotinaExecucoes.listar(rotina.id)).toEqual([]);
       expect(await deps.repos.incidentes.visiveis(0)).toMatchObject([{ id: r.incidenteId, rotinas: 1, conversas: 0, agentes: [criado.agente.id] }]);
-      const eventos = await trx<{ kind: string }[]>`select kind from events where turno_id = ${turnoId} and created_at > ${new Date(agora)}`;
-      expect(eventos.map((e) => e.kind).sort()).toEqual(["rotina_executou", "turno_interrompido"]);
+      const eventos = await trx<{ kind: string; dados: Record<string, unknown> }[]>`select kind, dados from events where turno_id = ${turnoId} and created_at > ${new Date(agora)}`;
+      expect(eventos.map((e) => e.kind).sort()).toEqual(["mensagem_criada", "turno_interrompido"]);
+      expect(eventos.find((e) => e.kind === "turno_interrompido")?.dados).toMatchObject({ espera_no_fundo: "maquina_sem_contato", espera_da_cota: "espera", volta_turno_id: volta!.id });
 
       expect(await varrerPessoa(deps.tx, MARLON, agora + LEASE_MS + 5000)).toEqual({ interrompidos: [], decisoes: [] });
-      expect(await deps.repos.rotinaExecucoes.listar(rotina.id)).toHaveLength(1);
+      expect(await deps.repos.rotinaExecucoes.listar(rotina.id)).toHaveLength(0);
       expect(await deps.repos.incidentes.visiveis(0)).toMatchObject([{ rotinas: 1 }]);
     });
   });

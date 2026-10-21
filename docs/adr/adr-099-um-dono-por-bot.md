@@ -181,6 +181,17 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   pílula alargada (telemetria das linhas, tipo `frentes`; a pílula conta "mostrada" quando aparece com frentes e "aberta"
   quando alarga, chave `frentes:pilula:<lotes>`).
 
+## Emenda (2026-10-20, NOD-309) — item 7
+
+- **O retorno do lote é refeito em toda queda.** `marcarDevolvido` continua na hora de enfileirar o retorno (é a trava do
+  UNIQUE contra duas frentes fechando juntas), mas o lote só conta como entregue com `lotes_de_frentes.retorno_concluido_em`
+  preenchido, gravado quando o turno de retorno assenta `concluido`. Enquanto ele for nulo, `refazerRetornoDoLote` vale
+  para qualquer queda (cota, reinício, máquina, transitório), não só a da cota, com a regra de espera do fundo da ADR-045
+  (emenda de 2026-10-20).
+- **Cota da IA no Automático:** `anteciparEsperasDaCota` passa a acordar também o fundo em `auto/auto` quando qualquer IA
+  da pessoa sai do limite; o portão da cota no `reivindicar` segura de novo se a escolhida ainda estiver no limite. A nova
+  tentativa por erro transitório não é acordada: fica com o próprio backoff.
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é

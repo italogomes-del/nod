@@ -69,6 +69,8 @@ export async function enfileirarRetomada(deps: Pick<Deps, "repos" | "agora">, r:
     // ADR-083: a retomada continua no trabalho do turno que retoma (a mesma faixa, a mesma sessão).
     trabalhoId: r.original.trabalhoId ?? null,
     ...(r.reenvios !== undefined ? { reenvios: r.reenvios } : {}),
+    // NOD-309: o teto de tentativas transitórias conta por cadeia — a retomada herda o contador da origem.
+    tentativasTransitorias: r.original.tentativasTransitorias ?? 0,
     executor: r.executor ?? r.original.executor,
     // definido em 2026-09-30 (ADR-062, auditoria das aprovações): a marca da web (0033) também não se lava. Ela mora na
     // linha do turno, e a retomada nascia limpa, embora retome a MESMA sessão pelo --resume, com a página ainda no

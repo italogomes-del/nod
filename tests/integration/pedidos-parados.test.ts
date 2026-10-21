@@ -153,7 +153,7 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
     });
   });
 
-  it("NOD-241 (CA2): o pedido de antes cujo colega rodava havia 3 h e caiu no reinício do servidor é retomado, sem avisar falha", async () => {
+  it("NOD-241 (CA2): o pedido de antes cujo colega rodava havia 3 h e caiu no reinício do servidor é retomado sozinho na queda, sem avisar falha", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const sinalEm = Date.now();
@@ -162,11 +162,15 @@ describeIntegracao("pedidos a colega parados (2026-10-08)", () => {
       const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1 });
       expect(v.interrompidos).toEqual([m.tarefa.id]);
       expect(await m.repos.turnos.buscar(m.tarefa.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "reinicio_servidor" });
-      expect(await m.estado(m.colegaId)).toBe("precisa_de_voce");
+      // revisto em 2026-10-20 (NOD-309, PR 3): a queda já enfileira a retomada do colega na hora; o
+      // varredor de pedidos parados vê a retomada na fila e espera, sem retomar de novo nem avisar falha.
+      const voltas = await trx<{ id: string }[]>`select id from turnos where retoma_turno_id = ${m.tarefa.id} and estado = 'pendente'`;
+      expect(voltas).toHaveLength(1);
+      expect(await m.estado(m.colegaId)).not.toBe("precisa_de_voce");
       expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
       await m.sinalDeVida();
-      const r = await cuidarDosPedidosParados(m.deps);
-      expect(r.data).toEqual({ retomados: [m.tarefa.id], avisados: [], entregues: [] });
+      expect((await cuidarDosPedidosParados(m.deps)).data).toEqual({ retomados: [], avisados: [], entregues: [] });
+      expect(await trx`select id from turnos where retoma_turno_id = ${m.tarefa.id}`).toHaveLength(1);
       expect(await m.pecasDaAda()).toHaveLength(0);
     });
   });

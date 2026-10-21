@@ -73,6 +73,7 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "conta.recusada": { destino: "chat", categoria: null },
   "cota.pedido_na_fila": { destino: "atividade", categoria: "maquina_ia" },
   "cota.espera": { destino: "atividade", categoria: "maquina_ia" },
+  "fundo.espera": { destino: "atividade", categoria: "maquina_ia" },
   "computador.fora_do_ar": { destino: "chat", categoria: "maquina_ia", temporal: true },
   "trabalho.aberto": { destino: "anexo", categoria: "frentes" },
   "frentes.abertas": { destino: "anexo", categoria: "frentes" },

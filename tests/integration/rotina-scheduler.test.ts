@@ -44,14 +44,15 @@ describeIntegracao("scheduler de rotina (ADR-011): relógio injetado, uma janela
       expect(await repos.turnos.listarDaConversa(conversaId)).toHaveLength(1);
 
       // revisto em 2026-10-16 (NOD-243): o turno da janela ficou pendente um dia inteiro (o Mac dormiu) → VENCEU: a
-      // janela seguinte o encerra ('interrompida · vencida') e roda no lugar dele — as execuções não se empilham.
+      // janela seguinte o encerra e roda no lugar dele — as execuções não se empilham. revisto em 2026-10-20 (NOD-309, PR 4):
+      // a máquina não puxou o turno, então a janela fica 'nao_rodou · maquina_sem_contato', não mais 'interrompida · vencida'.
       await repos.rotinas.atualizarEstado(futura?.id ?? "", "pausada");
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA + 86_400_000);
       const seguinte = await tickPessoa(MARLON, tx, { ...opcoes, agora: () => JANELA + 86_400_000 + 30_000 });
       expect(seguinte).toEqual({ disparadas: [vencida?.id], deOutroProcesso: [], adiadas: [], bloqueadas: [], semPendencia: [], falhas: [] });
       expect(await repos.rotinaJanelas.listar(vencida?.id ?? "")).toHaveLength(2);
       expect((await repos.turnos.buscar(janelas[0]?.turnoId ?? ""))?.estado).toBe("interrompido");
-      expect((await repos.rotinaExecucoes.listar(vencida?.id ?? "")).find((e) => e.turnoId === janelas[0]?.turnoId)).toMatchObject({ desfecho: "interrompida", motivo: "vencida" });
+      expect((await repos.rotinaExecucoes.listar(vencida?.id ?? "")).find((e) => e.turnoId === janelas[0]?.turnoId)).toMatchObject({ desfecho: "nao_rodou", motivo: "maquina_sem_contato" });
 
       // NOD-271: a janela já reivindicada (a agenda voltou para ela): sem turno novo, e a agenda ANDA.
       await repos.rotinas.reagendar(vencida?.id ?? "", JANELA);

@@ -18,7 +18,9 @@ import { limparPessoaE2E } from "./limpeza-e2e.ts";
 /**
  * ADR-045, terceiro modo: o varredor de lease e a entrega tardia (o Mac acordou e entregou) disputam o
  * MESMO turno de rotina em duas conexões de verdade. Os dois caminhos terminam igual e a janela tem
- * exatamente UMA execução 'interrompida' — nunca duas, nunca um impasse. Pessoa própria por rodada
+ * exatamente UMA execução 'interrompida' — nunca duas, nunca um impasse.
+ * revisto em 2026-10-20 (NOD-309, PR 3): a rotina caída volta à fila sozinha — o invariante passa a ser UMA retomada
+ * pendente (nunca duas), nenhuma execução fechada ainda e UMA linha "fica na fila" da máquina. Pessoa própria por rodada
  * (uuid aleatório, sem linha em pessoas); linhas COMMITADAS e apagadas por dono no fim.
  */
 const T0 = Date.parse("2026-09-24T03:10:00-03:00");
@@ -59,7 +61,8 @@ async function contagens(escopo: Escopo, rotinaId: string, turnoId: string) {
     const execucoes = await repos.rotinaExecucoes.listar(rotinaId, 100);
     const [decisoes] = await trx<{ n: number }[]>`select count(*)::int as n from decisoes where turno_id = ${turnoId}`;
     const [mensagens] = await trx<{ n: number }[]>`select count(*)::int as n from mensagens where turno_id = ${turnoId}`;
-    return { execucoes: execucoes.map((e) => [e.desfecho, e.motivo]), incidentes: (await repos.incidentes.visiveis(0)).map((i) => [i.rotinas, i.conversas]), decisoes: decisoes?.n, mensagens: mensagens?.n, turno: await repos.turnos.buscar(turnoId) };
+    const retomadas = await trx<{ estado: string }[]>`select estado from turnos where retoma_turno_id = ${turnoId}`;
+    return { execucoes: execucoes.map((e) => [e.desfecho, e.motivo]), retomadas: retomadas.map((r) => r.estado), incidentes: (await repos.incidentes.visiveis(0)).map((i) => [i.rotinas, i.conversas]), decisoes: decisoes?.n, mensagens: mensagens?.n, turno: await repos.turnos.buscar(turnoId) };
   });
 }
 
@@ -68,7 +71,7 @@ afterEach(async () => {
 });
 
 describeIntegracao("concorrência (ADR-045): varredor de lease × entrega tardia do mesmo turno de rotina", () => {
-  it("ao mesmo tempo, cinco rodadas: as duas transações terminam (sem impasse) e fica UMA 'interrompida', UM aviso, zero decisão e zero mensagem", async () => {
+  it("ao mesmo tempo, cinco rodadas: as duas transações terminam (sem impasse) e fica UMA retomada, UM aviso, zero decisão e UMA linha", async () => {
     for (let i = 0; i < 5; i++) {
       const f = await rotinaRodando();
       const agora = T0 + LEASE_MS + 1;
@@ -81,10 +84,11 @@ describeIntegracao("concorrência (ADR-045): varredor de lease × entrega tardia
       expect(entrega.status, String(entrega.status === "rejected" ? entrega.reason : "")).toBe("fulfilled");
       const c = await contagens(f.escopo, f.rotinaId, f.turnoId);
       expect(c.turno).toMatchObject({ estado: "interrompido", motivoInterrupcao: "maquina_sem_contato" });
-      expect(c.execucoes).toEqual([["interrompida", "maquina_sem_contato"]]);
+      expect(c.execucoes).toEqual([]);
+      expect(c.retomadas).toEqual(["pendente"]);
       expect(c.incidentes).toEqual([[1, 0]]);
       expect(c.decisoes).toBe(0);
-      expect(c.mensagens).toBe(0);
+      expect(c.mensagens).toBe(1);
     }
   });
 
@@ -113,11 +117,12 @@ describeIntegracao("concorrência (ADR-045): varredor de lease × entrega tardia
     expect((await entrega).data.tardia).toBe(false);
     expect(await varredura).toMatchObject({ interrompidos: [], decisoes: [] });
     const c = await contagens(f.escopo, f.rotinaId, f.turnoId);
-    expect(c.execucoes).toEqual([["interrompida", "maquina_sem_contato"]]);
+    expect(c.execucoes).toEqual([]);
+    expect(c.retomadas).toEqual(["pendente"]);
     expect(c.incidentes).toEqual([[1, 0]]);
   });
 
-  it("o varredor trava primeiro: a entrega ESPERA e chega tardia — sem fala na conversa e sem segunda execução", async () => {
+  it("o varredor trava primeiro: a entrega ESPERA e chega tardia — sem fala na conversa e sem segunda retomada", async () => {
     const f = await rotinaRodando();
     const agora = T0 + LEASE_MS + 1;
     let varreu = () => undefined as void;
@@ -142,8 +147,9 @@ describeIntegracao("concorrência (ADR-045): varredor de lease × entrega tardia
     expect((await varredura).interrompidos).toEqual([f.turnoId]);
     expect((await entrega).data.tardia).toBe(true);
     const c = await contagens(f.escopo, f.rotinaId, f.turnoId);
-    expect(c.execucoes).toEqual([["interrompida", "maquina_sem_contato"]]);
+    expect(c.execucoes).toEqual([]);
+    expect(c.retomadas).toEqual(["pendente"]);
     expect(c.incidentes).toEqual([[1, 0]]);
-    expect(c.mensagens).toBe(0);
+    expect(c.mensagens).toBe(1);
   });
 });

@@ -171,7 +171,10 @@ async function quemSegura(deps: Deps, rotina: Rotina, instanteAgendado: number, 
   const aberto = await deps.repos.rotinaJanelas.turnoAberto(rotina.id, agora);
   if (aberto) {
     if (!execucaoVenceu(aberto, rotina, agora)) return { motivo: "execucao_anterior_aberta", turnoAbertoId: aberto.turnoId };
-    antes.push(...(await encerrarExecucaoAntiga(deps, aberto.turnoId, "vencida")));
+    // revisto em 2026-10-20 (NOD-309, PR 4): o pendente vencido que a máquina ou a cota segurou não fecha calado como
+    // 'interrompida/vencida' — a janela fica 'nao_rodou' com o motivo e a hora da volta, com a linha na conversa.
+    const preso = await presoAntesDoDespacho(deps, aberto.turnoId, agora);
+    antes.push(...(await encerrarExecucaoAntiga(deps, aberto.turnoId, "vencida", preso)));
   }
   // definido em 2026-10-08 (revisão do épico, S12): também enquanto uma task que uma execução anterior abriu (filha)
   // não acabou; revisto em 2026-10-12 (ADR-099, I7 revista): e uma frente que o dono abriu para a rotina. revisto em
@@ -190,14 +193,37 @@ async function quemSegura(deps: Deps, rotina: Rotina, instanteAgendado: number, 
   return null;
 }
 
-/** Fecha a execução antiga como 'interrompida' (silenciosa, como a do varredor) e leva junto o turno, se ainda pendente. */
-async function encerrarExecucaoAntiga(deps: Deps, turnoId: string, motivo: MotivoInterrupcaoRotina): Promise<RuntimeEvent[]> {
+/** definido em 2026-10-20 (NOD-309, PR 4): o que segurou o pendente vencido antes do despacho, quando foi a máquina ou a cota. */
+export type PresoAntesDoDespacho = { motivo: "cota_da_ia" | "maquina_sem_contato"; voltaEm: number | null };
+
+/**
+ * definido em 2026-10-20 (NOD-309, PR 4): o pendente vencido nunca começou e não marcou volta. Se o que o segurava era a
+ * faixa (outro turno da conversa despachando) ou a task anterior, é o corte de sempre (null). Senão é a condição da
+ * máquina (domain/turno-orfao.ts), que o servidor só separa em duas: uma conta da pessoa no limite → cota (volta quando
+ * a primeira renova); nenhuma → a máquina não puxou o turno (sem hora: volta quando ela responder).
+ */
+async function presoAntesDoDespacho(deps: Deps, turnoId: string, agora: number): Promise<PresoAntesDoDespacho | null> {
+  const [fatos] = await deps.repos.turnos.orfaosCandidatos(agora, { ids: [turnoId], limite: 1 });
+  if (fatos && (fatos.depoisDeAberto || fatos.faixaOcupada)) return null;
+  const { contas } = await deps.repos.contasIa.listar();
+  const renovam = contas.filter((c) => c.noLimiteAte !== null && c.noLimiteAte > agora).map((c) => c.noLimiteAte as number);
+  return renovam.length > 0 ? { motivo: "cota_da_ia", voltaEm: Math.min(...renovam) } : { motivo: "maquina_sem_contato", voltaEm: null };
+}
+
+/**
+ * Fecha a execução antiga como 'interrompida' (silenciosa, como a do varredor) e leva junto o turno, se ainda pendente.
+ * revisto em 2026-10-20 (NOD-309, PR 4): com `preso` (a máquina ou a cota segurou o pendente), a execução fica
+ * 'nao_rodou' com o motivo e a volta — o turno sai `vencido` do mesmo jeito.
+ */
+async function encerrarExecucaoAntiga(deps: Deps, turnoId: string, motivo: MotivoInterrupcaoRotina, preso: PresoAntesDoDespacho | null = null): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   if (motivo === "vencida") {
     const cortado = await deps.repos.turnos.interromper(turnoId, "vencido");
-    if (cortado) events.push(evento(deps, "turno_interrompido", autoriaPessoa(deps.escopo.pessoaId, REGRA_JANELA_SEGUINTE), { motivo: "vencido", estava: "pendente" }, { conversaId: cortado.conversaId, turnoId }));
+    if (cortado) events.push(evento(deps, "turno_interrompido", autoriaPessoa(deps.escopo.pessoaId, REGRA_JANELA_SEGUINTE), { motivo: "vencido", estava: "pendente", ...(preso ? { preso_por: preso.motivo } : {}) }, { conversaId: cortado.conversaId, turnoId }));
   }
-  const r = await registrarDesfechoRotina(deps, { turnoId, desfecho: "interrompida", motivo, regra: REGRA_JANELA_SEGUINTE });
+  const r = preso
+    ? await registrarDesfechoRotina(deps, { turnoId, desfecho: "nao_rodou", motivo: preso.motivo, voltaEm: preso.voltaEm, regra: REGRA_JANELA_SEGUINTE })
+    : await registrarDesfechoRotina(deps, { turnoId, desfecho: "interrompida", motivo, regra: REGRA_JANELA_SEGUINTE });
   events.push(...(r.events ?? []));
   return events;
 }
@@ -388,7 +414,26 @@ const MOTIVO_EM_BRANCO: Readonly<Record<string, string>> = {
  * máquina parou no meio — quem avisa é o aviso único do incidente, não uma linha por execução. nao_rodou (definido em
  * 2026-10-15, NOD-274): a janela não rodou (cota ou execução anterior aberta) — fica no histórico, com a hora da volta.
  */
-const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_novidade", "interrompida", "nao_rodou"]);
+// revisto em 2026-10-20 (NOD-309, PR 4, emenda da ADR-099 §7): 'nao_rodou' saiu daqui — a janela que não rodou escreve
+// UMA linha na conversa da rotina ("Não rodou · <motivo>, volta HH:MM"), a rotina caída não fica mais calada.
+const SILENCIOSOS: ReadonlySet<DesfechoRotina> = new Set<DesfechoRotina>(["sem_novidade", "interrompida"]);
+
+/** definido em 2026-10-20 (NOD-309, PR 4): por que a janela não rodou, na linha "Não rodou · …". */
+const MOTIVO_NAO_RODOU: Readonly<Record<MotivoNaoRodouRotina, string>> = {
+  cota_da_ia: "a cota da IA chegou ao limite",
+  execucao_anterior_aberta: "a execução anterior ainda estava aberta",
+  maquina_sem_contato: "o computador do bot ficou sem contato",
+  reinicio_servidor: "o servidor reiniciou",
+  erro_do_provedor: "a IA ficou fora do ar",
+};
+
+/** "às 14:00" (no fuso da rotina; "em 21/10 às 14:00" se for outro dia) ou, sem hora, na próxima execução da agenda. */
+export function quandoVoltaARotina(voltaEm: number | null, agora: number, fusoIana: string): string {
+  if (voltaEm === null) return "na próxima execução da agenda";
+  const [dia, hora] = carimbo(voltaEm, fusoIana).replace(/ UTC$/, "").split(" ");
+  const sufixo = fusoIana === "UTC" ? " UTC" : "";
+  return carimbo(agora, fusoIana).startsWith(dia ?? "") ? `às ${hora}${sufixo}` : `em ${(dia ?? "").slice(0, 5)} às ${hora}${sufixo}`;
+}
 
 /** Moram em contracts/pedido.ts desde a NOD-255 (o pré-voo também as lê); reexportadas para quem já importava daqui. */
 export { TIPOS_GATE_ROTINA, TIPOS_QUE_SEGURAM_A_EXECUCAO };
@@ -482,6 +527,29 @@ export async function registrarDesfechoRotina(deps: Pick<Deps, "repos" | "escopo
       events: [
         evento(deps, "rotina_executou", autoriaParada, { rotinaId: rotina.id, execucaoId: execucao.id, desfecho, motivo, instanteAgendado }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
         ...(linha ? [evento(deps, "mensagem_criada", autoriaParada, { mensagemId: linha.id, kind: "rotina_execucao" }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })] : []),
+      ],
+    };
+  }
+  // definido em 2026-10-20 (NOD-309, PR 4): a janela que não rodou — cota, máquina sem contato, reinício, IA fora do ar —
+  // escreve uma linha, uma por janela (o mesmo desfecho de novo volta `inalterado`, acima). A autoria é a da regra que
+  // decidiu (a janela seguinte, o varredor) ou a do agente, quando o próprio turno assentou.
+  if (desfecho === "nao_rodou") {
+    const autoriaNaoRodou = input.regra ? autoriaPessoa(deps.escopo.pessoaId, input.regra) : autoriaAgente(rotina.agenteId, deps.escopo.pessoaId);
+    const motivoTexto = motivo && Object.hasOwn(MOTIVO_NAO_RODOU, motivo) ? MOTIVO_NAO_RODOU[motivo as MotivoNaoRodouRotina] : motivoEmPortugues(motivo ?? "erro_execucao");
+    const linha = await deps.repos.mensagens.criar({
+      conversaId: rotina.conversaId,
+      turnoId: turnoDisparado.id,
+      autoria: autoriaNaoRodou,
+      kind: "rotina_execucao",
+      texto: `${redigir("rotina-nao-rodou", agora, { motivo: motivoTexto, quando: quandoVoltaARotina(execucao.voltaEm ?? input.voltaEm ?? null, agora, rotina.fusoIana) })} (${carimbo(agora, rotina.fusoIana)})`,
+      payload: { kind: "rotina_execucao", rotinaId: rotina.id, instanteAgendado, desfecho },
+      confianca: "confiavel",
+    });
+    return {
+      data: { execucao, rotina, podadas },
+      events: [
+        evento(deps, "rotina_executou", autoriaNaoRodou, dados, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id }),
+        ...(linha ? [evento(deps, "mensagem_criada", autoriaNaoRodou, { mensagemId: linha.id, kind: "rotina_execucao" }, { conversaId: rotina.conversaId, turnoId: turnoDisparado.id })] : []),
       ],
     };
   }

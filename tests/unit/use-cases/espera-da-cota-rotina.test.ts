@@ -64,8 +64,11 @@ describe("NOD-274: a rotina sem task no limite (QA do PR #340)", () => {
     expect(c.banco.turnos.filter((t) => t.retomaTurnoId === c.turnoId)).toHaveLength(0);
     expect(await c.deps.repos.rotinaExecucoes.listar(c.rotinaId)).toMatchObject([{ desfecho: "nao_rodou", motivo: "cota_da_ia", voltaEm: T0 + 3 * HORA }]);
     expect(r.events.map((e) => e.kind)).toContain("rotina_executou");
-    // Silencioso no chat: o histórico da rotina mostra a janela.
+    // revisto em 2026-10-20 (NOD-309, PR 4): nenhum aviso de sistema, mas a janela não fica calada — UMA linha "Não
+    // rodou · <motivo>, volta HH:MM" na conversa da rotina (kind rotina_execucao), além do histórico.
     expect(c.sistema()).toHaveLength(0);
+    const linhas = c.banco.mensagens.filter((m) => m.kind === "rotina_execucao" && m.texto.startsWith("Não rodou · "));
+    expect(linhas.map((m) => m.texto)).toEqual([expect.stringMatching(/^Não rodou · a cota da IA chegou ao limite, volta (às|em \d\d\/\d\d às) \d\d:\d\d\. A rotina segue a agenda\./)]);
   });
 
   it("critério 2 (borda): a volta exatamente na próxima janela conta como depois", async () => {

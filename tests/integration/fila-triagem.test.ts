@@ -295,7 +295,9 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
     });
   }
 
-  it("NOD-241 (CA2): a triagem que rodava havia 3 h e caiu no reinício do servidor é retomada quando as máquinas voltam", async () => {
+  // revisto em 2026-10-20 (NOD-309, PR 3): a triagem é pedido de colega, trabalho de fundo — o reinício a devolve à fila
+  // na hora (a volta do fundo), sem esperar o cuidarDosPedidosParados nem as máquinas voltarem; ele não retoma de novo.
+  it("NOD-241 (CA2), revisto na NOD-309: a triagem que rodava havia 3 h e caiu no reinício do servidor volta à fila sozinha, uma vez", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const triagem = tarefaDoPedido((await m.pedir(m.chico, (await m.turnoDe(m.chico)).id, await m.nome(m.dev.agenteId))).data);
@@ -304,12 +306,14 @@ describeIntegracao("fila do dono: a triagem na entrada (ADR-099, I7 revista)", (
         lease_ate = ${new Date(sinalEm + LEASE_MS)} where id = ${triagem}`;
       const v = await varrerLeases(m.deps.tx, MARLON, sinalEm + LEASE_MS + 10, { inicioDoProcesso: sinalEm + 1 });
       expect(v.interrompidos).toContain(triagem);
-      expect((await m.repos.pedidosDeColega.triagensParadas(Date.now() - 86_400_000, Date.now())).find((p) => p.tarefaId === triagem)).toMatchObject({ ultimoMotivo: "reinicio_servidor", quedaEm: sinalEm, sinalDepoisDaQueda: false });
+      const voltas = await trx<{ estado: string }[]>`select estado from turnos where retoma_turno_id = ${triagem}`;
+      expect(voltas.map((x) => x.estado)).toEqual(["pendente"]);
       const outro = await m.turnoDe(m.livre);
       await m.repos.turnos.assentar(outro.id, { estado: "concluido" });
       const r = await cuidarDosPedidosParados(m.deps);
-      expect(r.data.retomados).toEqual([triagem]);
+      expect(r.data.retomados).toEqual([]);
       expect(r.data.avisados).toEqual([]);
+      expect(await trx`select id from turnos where retoma_turno_id = ${triagem}`).toHaveLength(1);
     });
   });
 

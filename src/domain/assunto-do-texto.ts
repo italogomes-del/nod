@@ -61,6 +61,10 @@ const DO_CATALOGO: readonly (readonly [ChaveRedacao, Classificador])[] = [
   ["cota-no-limite-espera-rotina", "cota.espera"],
   ["cota-no-limite-rotina-nao-rodou", "cota.espera"],
   ["pedido-a-colega-espera-cota", "cota.espera"],
+  // NOD-309: as outras quedas do fundo (erro do provedor, máquina, reinício).
+  ["fundo-nova-tentativa", "fundo.espera"],
+  ["fundo-espera-maquina", "fundo.espera"],
+  ["rotina-nao-rodou", "rotina.adiada"],
   ["fala-no-limite-espera", "ia.fala_espera"],
   ["ia-pronta-noutra-maquina", "ia.fala_espera"],
   ["conta-fora-da-maquina", "conta.recusada"],

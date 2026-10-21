@@ -143,7 +143,9 @@ describeIntegracao("trabalhos: sessão, pasta, retomada e parada (#192, ADR-083)
     });
   });
 
-  it("S6: a máquina que cai numa task não fecha o \"Retomar\" da conversa nem o de outra task; a task fica precisa_de_voce", async () => {
+  // revisto em 2026-10-20 (NOD-309, PR 3): a task é trabalho de fundo — a queda a devolve à fila sozinha, sem "Retomar";
+  // a conversa segue com o dela, e a queda da task não o fecha.
+  it("S6: a máquina que cai numa task não fecha o \"Retomar\" da conversa; a task volta à fila sozinha (NOD-309)", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const w = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Caiu", origem: "pessoa" })).trabalho;
@@ -159,9 +161,11 @@ describeIntegracao("trabalhos: sessão, pasta, retomada e parada (#192, ADR-083)
       const task = vencidos.find((t) => t.id === daTask!.id)!;
       const r = await interromperPorMaquina(m.deps, { turnos: [task] });
       const pendentes = (await m.repos.decisoes.pendentesDaConversa(m.conversaId)).filter((d) => d.tipo === "retomar_turno").map((d) => d.turnoId);
-      expect(pendentes.sort()).toEqual([daConversa!.id, daTask!.id].sort());
-      expect((await m.repos.trabalhos.buscar(w.id))?.estado).toBe("precisa_de_voce");
-      expect(r.events.some((e) => e.kind === "trabalho_mudou")).toBe(true);
+      expect(pendentes).toEqual([daConversa!.id]);
+      expect(r.events.some((e) => e.kind === "turno_criado")).toBe(true);
+      const voltas = await trx<{ estado: string; trabalho_id: string }[]>`select estado, trabalho_id from turnos where retoma_turno_id = ${daTask!.id}`;
+      expect(voltas).toEqual([{ estado: "pendente", trabalho_id: w.id }]);
+      expect((await m.repos.trabalhos.buscar(w.id))?.estado).not.toBe("precisa_de_voce");
     });
   });
 });

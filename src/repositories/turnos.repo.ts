@@ -5,13 +5,14 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
-import { ENTRADA_DA_VOLTA_DA_COTA, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
 import { porChegada } from "../domain/ordem-das-falas.ts";
+import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../domain/pedido-parado.ts";
 import { paraProfundidade } from "../domain/profundidade.ts";
-import type { FatosTurnoOrfao } from "../domain/turno-orfao.ts";
+import type { FatosFundoPreso, FatosTurnoOrfao, FundoPreso } from "../domain/turno-orfao.ts";
 import type { VoltaDaCadeia } from "../domain/voltas-sem-novidade.ts";
 import { abrirTxEscopada } from "../db/tx.ts";
 import { ESPERA_DECLINIO_MS, LEASE_MS } from "../shared/constantes.ts";
@@ -110,6 +111,9 @@ function paraTurno(l: Linha): Turno {
 }
 
 /** NOD-219: um pendente que o varredor de órfãos olha, com os fatos de domain/turno-orfao.ts. */
+/** NOD-309 (PR 4): o pendente de fundo que a máquina segura, com os fatos de `decidirFundoPreso` (cotaNoLimite vem do caso de uso). */
+export type FundoPresoCandidato = FatosFundoPreso & { id: string; conversaId: string; agenteId: string; trabalhoId: string | null; raizId: string };
+
 export type OrfaoCandidato = FatosTurnoOrfao & {
   id: string;
   conversaId: string;
@@ -488,6 +492,24 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     },
 
     /**
+     * NOD-309 (PR 3): quantas vezes a cadeia (a raiz e as retomadas dela, em qualquer profundidade) caiu por infraestrutura, fora `exceto` — o teto
+     * de quedas da espera no fundo (MAX_QUEDAS_POR_PEDIDO). A mesma régua das consultas de pedido parado e frente caída.
+     */
+    async quedasDaCadeia(raizId: string, exceto: string): Promise<number> {
+      const [l] = await conn<{ n: number }[]>`
+        with recursive cadeia as (
+          select id from turnos where tenant_id = ${escopo.tenantId} and id = ${raizId}
+          union
+          select t.id from turnos t join cadeia c on t.retoma_turno_id = c.id where t.tenant_id = ${escopo.tenantId}
+        )
+        select count(*)::int as n from turnos q join cadeia c on c.id = q.id
+        where q.tenant_id = ${escopo.tenantId} and q.id <> ${exceto} and q.estado = 'interrompido'
+          and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
+          and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])`;
+      return l?.n ?? 0;
+    },
+
+    /**
      * NOD-277 (definido em 2026-10-15): trocar a IA ou o modelo do bot vale para o fundo que já está na fila. Os turnos
      * `pendente` de fundo do bot sem task — de rotina, de pedido de colega e as retomadas deles — passam
      * para a IA nova, perdem a conta gravada (o próximo plano escolhe de novo) e, se esperavam a cota (o marcador da volta
@@ -521,8 +543,11 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * NOD-277/NOD-279 (definido em 2026-10-15): a espera da cota acaba quando a pessoa resolve — "Seguir com <conta>", conta
      * nova na máquina, trocar a IA do bot. Zera o `acordar_em` dos pendentes do dono marcados como volta da cota
-     * (`ENTRADA_DA_VOLTA_DA_COTA`) cuja IA (a mesma expressão do `reivindicar`: a fixada, ou a dona do modelo; auto/auto não
-     * tem IA e não é tocado) é `ia`. `turnoId` restringe a um turno (a aprovação que se junta à volta, NOD-279 D8). O portão
+     * (`ENTRADA_DA_VOLTA_DA_COTA`) cuja IA (a mesma expressão do `reivindicar`: a fixada, ou a dona do modelo) é `ia`.
+     * revisto em 2026-10-20 (NOD-309, PR 4): o fundo no Automático (auto/auto) também acorda — qualquer IA liberada pode
+     * servi-lo, e o portão da cota no `reivindicar` segura de novo se nenhuma puder. Antes ele ficava a espera inteira
+     * mesmo com "Seguir com" ou conta nova. A volta da nova tentativa (`ENTRADA_DA_NOVA_TENTATIVA`, o backoff do erro
+     * transitório) não tem o marcador da cota e nunca acorda aqui. `turnoId` restringe a um turno (a aprovação que se junta à volta, NOD-279 D8). O portão
      * da cota segue valendo: se o limite persistir, o turno acordado continua segurado. A volta marcada pelo bot
      * (`me_chame_as`, esperar comando) não tem o marcador e não acorda. Devolve os ids acordados.
      */
@@ -534,8 +559,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           and starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
           ${opcoes.turnoId === undefined ? conn`` : conn`and t.id = ${opcoes.turnoId}`}
           ${opcoes.agenteId === undefined ? conn`` : conn`and t.agente_id = ${opcoes.agenteId}`}
-          ${ia === null ? conn`` : conn`and (case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end) = ${ia}
-            and not (t.harness = 'auto' and t.modelo = 'auto')`}
+          ${ia === null ? conn`` : conn`and ((t.harness = 'auto' and t.modelo = 'auto')
+            or (case when t.harness <> 'auto' then t.harness else coalesce((select x.ia from unnest(${porIa.modelos}::text[], ${porIa.ias}::text[]) as x(modelo, ia) where x.modelo = t.modelo), ${HARNESS_LEGADO}) end) = ${ia})`}
         returning t.id`;
       return linhas.map((l) => l.id);
     },
@@ -549,7 +574,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const [l] = await conn<Linha[]>`
         select ${conn.unsafe(COLUNAS)} from turnos
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and trabalho_id = ${trabalhoId} and origem = 'retomada' and estado = 'pendente'
-          and acordar_em is not null and starts_with(entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})
+          -- NOD-309: a volta da nova tentativa (erro transitório) e a retomada da queda também recebem a aprovação, em vez de abrir uma segunda.
+          and acordar_em is not null and exists (select 1 from unnest(${[...PREFIXOS_DA_VOLTA_DO_FUNDO]}::text[]) p where starts_with(entrada_texto, p))
         order by criado_em asc, id asc limit 1`;
       return l ? paraTurno(l) : null;
     },
@@ -591,7 +617,7 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     async voltasMarcadas(retomaTurnoId: string): Promise<number> {
       const [l] = await conn<{ n: number }[]>`
         select count(*)::int as n from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId} and acordar_em is not null
-          and not starts_with(entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA})`;
+          and not exists (select 1 from unnest(${[...PREFIXOS_DA_VOLTA_DO_FUNDO]}::text[]) p where starts_with(entrada_texto, p))`;
       return l?.n ?? 0;
     },
 
@@ -607,7 +633,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           exists (select 1 from decisoes d where d.tenant_id = t.tenant_id and d.turno_id = t.id) as perguntou,
           exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.turno_id = t.id and m.kind = 'handoff') as pediu_a_colega,
           -- ADR-099 §7: a volta que a cota no limite marcou (não o bot) não conta como sem novidade.
-          starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) as por_cota
+          -- NOD-309: a nova tentativa e a retomada da queda também são do nod, não do bot.
+          exists (select 1 from unnest(${[...PREFIXOS_DA_VOLTA_DO_FUNDO]}::text[]) p where starts_with(t.entrada_texto, p)) as por_cota
         from turnos t
         where t.tenant_id = ${escopo.tenantId} and t.retoma_turno_id = ${retomaTurnoId} and t.acordar_em is not null
         order by t.criado_em desc, t.id desc limit ${limite}`;
@@ -857,6 +884,16 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
      * retomada automática), e nunca para 'pendente' (sem requeue). Quem chama já conferiu que não há retomada criada.
      */
     async concluirTardia(id: string, a: Omit<Assentamento, "estado" | "motivoInterrupcao" | "motivoFalha">): Promise<Turno | null> {
+      // definido em 2026-10-20 (NOD-309, PR 3): a queda do fundo já põe a retomada na fila. Se ela ainda não saiu
+      // (pendente, com a entrada da retomada da queda) e é a única que aponta para este turno, o sucesso tardio a
+      // absorve: o trabalho terminou e não roda de novo. Já despachada, vale a regra de antes (a fala vira parcial).
+      await conn`
+        update turnos r set estado = 'interrompido', motivo_interrupcao = 'absorvido', absorvido_por = ${id}, lease_ate = null
+        where r.tenant_id = ${escopo.tenantId} and r.owner_id = ${escopo.pessoaId} and r.retoma_turno_id = ${id}
+          and r.estado = 'pendente' and starts_with(r.entrada_texto, ${ENTRADA_DA_RETOMADA_DA_QUEDA})
+          and exists (select 1 from turnos t where t.tenant_id = ${escopo.tenantId} and t.id = ${id} and t.estado = 'interrompido'
+            and t.motivo_interrupcao in ('maquina_sem_contato', 'reinicio_servidor'))
+          and (select count(*) from turnos o where o.tenant_id = ${escopo.tenantId} and o.retoma_turno_id = ${id}) = 1`;
       const [l] = await conn<Linha[]>`
         update turnos set
           estado = 'concluido',
@@ -879,10 +916,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       return l ? paraTurno(l) : null;
     },
 
-    /** NOD-264 (E8): algum turno já retoma este (na fila, rodando ou acabado)? */
+    /**
+     * NOD-264 (E8): algum turno já retoma este (na fila, rodando ou acabado)?
+     * revisto em 2026-10-20 (NOD-309, PR 3): a retomada da queda única e ainda pendente não conta — o sucesso tardio a
+     * absorve (concluirTardia).
+     */
     async temRetomada(retomaTurnoId: string): Promise<boolean> {
       const [l] = await conn<{ tem: boolean }[]>`
-        select exists (select 1 from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId}) as tem`;
+        select count(*) > 0 and not (count(*) = 1 and bool_and(estado = 'pendente' and starts_with(entrada_texto, ${ENTRADA_DA_RETOMADA_DA_QUEDA}))) as tem
+        from turnos where tenant_id = ${escopo.tenantId} and retoma_turno_id = ${retomaTurnoId}`;
       return l?.tem ?? false;
     },
 
@@ -1074,6 +1116,58 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
         acordarEm: msOuNull(l.acordar_em),
         agenteExcluido: l.agente_excluido,
         geracaoAntiga: l.geracao_antiga,
+        depoisDeAberto: l.depois_de_aberto,
+        faixaOcupada: l.faixa_ocupada,
+      }));
+    },
+
+    /**
+     * definido em 2026-10-20 (NOD-309, PR 4): o trabalho de fundo pendente há mais de `avisoMs` que o `reivindicar` pode
+     * pegar (bot vivo, mesma geração) mas ninguém pegou — a condição da máquina o segura. Devolve os fatos da regra
+     * (domain/turno-orfao.ts, decidirFundoPreso): o tipo de fundo (pela raiz da cadeia), o começo da cadeia, se ela já
+     * ganhou a linha `fundo.espera`. Só volta o que ainda tem o que fazer: sem aviso, ou passado o prazo do fundo.
+     */
+    async fundosPresos(agora: number, p: { avisoMs: number; prazoMs: number; limite?: number }): Promise<FundoPresoCandidato[]> {
+      const linhas = await conn<{ id: string; conversa_id: string; agente_id: string; trabalho_id: string | null; raiz_id: string; fundo: FundoPreso | null; criado_em: Date; acordar_em: Date | null; inicio: Date; avisado: boolean; depois_de_aberto: boolean; faixa_ocupada: boolean }[]>`
+        select x.* from (
+          select t.id, t.conversa_id, t.agente_id, t.trabalho_id, r.id as raiz_id, t.criado_em, t.acordar_em, r.criado_em as inicio,
+            (case when ${RETORNO_DO_LOTE} in (coalesce(t.decidido_por, ''), coalesce(r.decidido_por, '')) then 'lote'
+              when r.origem in ('delegacao', 'peer') then 'colega'
+              when t.trabalho_id is not null and w.forma = 'frente' then 'frente'
+              when t.trabalho_id is not null then 'task'
+              when r.origem = 'rotina' then 'rotina' end) as fundo,
+            exists (select 1 from mensagens m where m.tenant_id = t.tenant_id and m.conversa_id = t.conversa_id and m.assunto = 'fundo.espera'
+              and m.turno_id in (select c.id from turnos c where c.tenant_id = t.tenant_id and (c.id = r.id or c.retoma_turno_id = r.id))) as avisado,
+            (t.trabalho_id is not null and exists (select 1 from trabalhos dep where dep.tenant_id = w.tenant_id and dep.id = w.depois_de_trabalho_id
+              and dep.estado not in ('terminado', 'parado', 'falhou'))) as depois_de_aberto,
+            (case when t.trabalho_id is null
+              then exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.conversa_id = t.conversa_id and d.trabalho_id is null and d.estado = 'despachando' and d.origem <> 'ligacao')
+              else exists (select 1 from turnos d where d.tenant_id = t.tenant_id and d.trabalho_id = t.trabalho_id and d.estado = 'despachando') end) as faixa_ocupada
+          from turnos t
+          join agentes a on a.tenant_id = t.tenant_id and a.id = t.agente_id and a.excluido_em is null and a.geracao_execucao = t.geracao_execucao
+          join turnos r on r.tenant_id = t.tenant_id and r.id = coalesce(t.retoma_turno_id, t.id)
+          left join trabalhos w on w.tenant_id = t.tenant_id and w.id = t.trabalho_id
+          where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.estado = 'pendente' and t.origem <> 'ligacao'
+            and t.pessoa_esperando = false and t.parar_solicitado_em is null
+            and (t.acordar_em is null or t.acordar_em <= ${data(agora)})
+            and t.criado_em <= ${data(agora - p.avisoMs)}
+        ) x
+        where x.fundo is not null and not x.depois_de_aberto and not x.faixa_ocupada
+          and (not x.avisado or (x.fundo in ('colega', 'frente', 'lote') and x.inicio <= ${data(agora - p.prazoMs)}))
+        order by x.criado_em asc, x.id asc
+        limit ${p.limite ?? 50}`;
+      return linhas.map((l) => ({
+        id: l.id,
+        conversaId: l.conversa_id,
+        agenteId: l.agente_id,
+        trabalhoId: l.trabalho_id,
+        raizId: l.raiz_id,
+        fundo: l.fundo,
+        criadoEm: ms(l.criado_em),
+        acordarEm: msOuNull(l.acordar_em),
+        inicioDaCadeia: ms(l.inicio),
+        avisado: l.avisado,
+        cotaNoLimite: false,
         depoisDeAberto: l.depois_de_aberto,
         faixaOcupada: l.faixa_ocupada,
       }));

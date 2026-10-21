@@ -1,10 +1,16 @@
-import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { Autoria, RuntimeEvent } from "../contracts/evento.ts";
 import type { Incidente } from "../contracts/incidente.ts";
 import type { Turno } from "../contracts/turno.ts";
 import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
 import { destinoDaQueda, juntarQuedas, motivoDaQueda, ultimoSinalDoTurno, type MotivoDaQueda, type QuedaDeMaquina } from "../domain/incidente.ts";
 import { motivoDaQuedaEmPortugues, motivoEmPortugues, redigir } from "../domain/redacao.ts";
+import { ehVoltaDoFundo, entradaDaRetomadaDaQueda } from "../domain/cota-da-ia.ts";
+import { decidirEsperaNoFundo } from "../domain/espera-no-fundo.ts";
+import { trabalhoAberto } from "../domain/trabalho.ts";
+import { log } from "../obs/log.ts";
 import { rotinaDoTurno } from "./apoio-l7.ts";
+import { avisarEsperaAoRemetente } from "./entregar-resposta-peer.ts";
+import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
 import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
 import { continuarAprovacoes } from "./decidir.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
@@ -38,17 +44,25 @@ export type SaidaQuedaDaMaquina = {
 type Caido = { turno: Turno; motivo: MotivoDaQueda; perdidoDesde: number; maquinaPresente: boolean };
 
 /**
- * O que acontece com UM turno derrubado. Rotina: só o histórico — execução 'interrompida', sem decisão
+ * O que acontece com UM turno derrubado. Fundo (NOD-309, PR 3): volta para a fila sozinho (aposQuedaNoFundo); só o que a
+ * regra do fundo devolve (não é fundo, o teto ou o prazo acabou, a continuação de uma aprovação já o retoma) segue abaixo.
+ * Rotina: só o histórico — execução 'interrompida', sem decisão
  * e sem mensagem; a próxima janela roda sozinha, então "Retomar" não faz sentido. Conversa: a retomada
  * anterior da MESMA conversa fecha por regra e nasce uma, com a frase na conversa — a pessoa estava
  * esperando aquela resposta. Ligação: só o histórico, como na entrega (ADR-072).
  */
-async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | null }, prazoMs: number | undefined, events: RuntimeEvent[]): Promise<{ decisaoId: string | null; rotinaId: string | null; rotina: boolean }> {
+async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | null }, prazoMs: number | undefined, continuadas: number, events: RuntimeEvent[]): Promise<{ decisaoId: string | null; rotinaId: string | null; rotina: boolean }> {
   const { turno, motivo } = c;
   const agora = deps.agora();
   await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
   const autoria = autoriaAgente({ agenteId: turno.agenteId, contaDeExecucao: turno.ownerId, executor: "catcher", machineId: turno.machineId, decididoPor: "regra:varredor_lease" });
-  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo, machine_id: turno.machineId, perdido_desde: c.perdidoDesde } }));
+  // NOD-309 (PR 3, emenda da ADR-045): o trabalho de fundo não ganha "Retomar" nem cai calado — volta para a fila sozinho.
+  const noFundo = continuadas > 0 ? null : await aposQuedaNoFundo(deps, c, autoria);
+  events.push(evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo, machine_id: turno.machineId, perdido_desde: c.perdidoDesde, ...(noFundo?.dados ?? {}) } }));
+  if (noFundo) {
+    events.push(...noFundo.events);
+    return { decisaoId: null, rotinaId: c.rotinaId, rotina: c.rotinaId !== null };
+  }
   if (c.rotinaId) {
     const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "interrompida", motivo });
     events.push(...(r.events ?? []));
@@ -77,6 +91,72 @@ async function consequencias(deps: DepsQueda, c: Caido & { rotinaId: string | nu
 }
 
 /**
+ * definido em 2026-10-20 (NOD-309, PR 3, emenda da ADR-045): o trabalho de FUNDO derrubado no meio do turno — rotina,
+ * pedido de colega, frente e retorno do lote — volta para a fila sozinho, pela regra única do fundo
+ * (domain/espera-no-fundo.ts). Reinício do servidor: a retomada entra agora. Máquina sem contato: entra agora também e
+ * fica pendente até a máquina voltar a puxar — é o "quando o Mac voltar"; a linha diz isso uma vez por cadeia (a task
+ * sempre, é o fio dela) e quem pediu ao colega lê uma vez. O reinício não avisa (ADR-045: não é culpa do Mac, e a volta
+ * é imediata). A rotina cuja volta passaria da próxima janela fica `nao_rodou` com o motivo; o teto (3 quedas por cadeia)
+ * ou o prazo (24 h) devolve null, e vale o caminho de antes (o "Retomar", o histórico da rotina, o aviso do pedido parado).
+ * Quem pediu Parar não chega aqui (aposParada); a ligação não é fundo.
+ */
+async function aposQuedaNoFundo(deps: DepsQueda, c: Caido & { rotinaId: string | null }, autoria: Autoria): Promise<{ dados: Record<string, string | number | null>; events: RuntimeEvent[] } | null> {
+  const { turno, motivo } = c;
+  if (turno.pararSolicitadoEm !== null || !(await fundoNaCadeia(deps, turno))) return null;
+  const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  if (turno.trabalhoId && (!trabalho || !trabalhoAberto(trabalho.estado))) return null;
+  const agora = deps.agora();
+  const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
+  const raiz = await raizDaCadeia(deps, turno);
+  const daRotina = c.rotinaId ? await rotinaDoTurno(deps.repos, turno.id) : null;
+  const quedas = await deps.repos.turnos.quedasDaCadeia(raiz.id, turno.id);
+  const decisao = decidirEsperaNoFundo({
+    causa: motivo,
+    tentativasTransitorias: turno.tentativasTransitorias ?? 0,
+    quedas,
+    agora,
+    inicioDaCadeia: raiz.criadoEm,
+    ehRotina: daRotina !== null,
+    proximaExecucao: daRotina?.rotina.proximaExecucao ?? null,
+    aleatorio: 0,
+  });
+  const chave = turno.trabalhoId ? "frente" : daRotina ? "rotina" : "pedido";
+  if (decisao.tipo === "desistir") {
+    log("aviso", "fundo_desistiu", { turno_id: turno.id, causa: motivo, motivo: decisao.motivo, quedas, fundo: chave });
+    return null;
+  }
+  await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+  if (decisao.tipo === "nao_rodou") {
+    const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "nao_rodou", motivo: decisao.motivo, ...(decisao.voltaEm !== null ? { voltaEm: decisao.voltaEm } : {}) });
+    log("info", "fundo_rotina_nao_rodou", { turno_id: turno.id, rotina_id: daRotina?.rotina.id ?? null, causa: motivo, volta_em: decisao.voltaEm });
+    return { dados: { espera_no_fundo: motivo, espera_da_cota: "nao_rodou", volta_em: decisao.voltaEm }, events: r.events ?? [] };
+  }
+  const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === turno.harness) : false;
+  const base = entradaDaRetomadaDaQueda(motivoEmPortugues(motivo));
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: agora, agora });
+  const events: RuntimeEvent[] = [
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: agora } }),
+  ];
+  if (motivo === "maquina_sem_contato") {
+    const jaEsperou = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto);
+    const identificada = turno.machineId ? await deps.repos.maquinaTokens.identificar(turno.machineId) : null;
+    const maquina = identificada?.plataforma === "linux" ? `A máquina ${identificada.nome}` : "O Mac";
+    const pedido = chave === "frente" ? "Esta task" : chave === "rotina" ? "Esta execução da rotina" : "Este pedido";
+    if (chave === "frente" || !jaEsperou) {
+      const linha = await deps.repos.mensagens.criar({ conversaId: turno.conversaId, turnoId: turno.id, autoria, kind: "sistema", assunto: "fundo.espera", texto: redigir("fundo-espera-maquina", agora, { maquina, pedido }), confianca: "confiavel" });
+      if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+    }
+    if (!jaEsperou) {
+      const agente = await deps.repos.agentes.buscar(turno.agenteId);
+      events.push(...(await avisarEsperaAoRemetente(deps, { turno, texto: redigir("fundo-espera-maquina", agora, { maquina, pedido: `O pedido a ${agente?.nome ?? "o colega"}` }) })));
+    }
+  }
+  // Risco do plano (laço de retomada): o teto de quedas por cadeia segura; o log mede a tentativa.
+  log("info", "fundo_retomado", { turno_id: turno.id, volta_turno_id: volta.id, causa: motivo, tentativa: decisao.tentativa, fundo: chave });
+  return { dados: { espera_no_fundo: motivo, espera_da_cota: "espera", volta_turno_id: volta.id, volta_em: decisao.voltaEm, tentativa: decisao.tentativa }, events };
+}
+
+/**
  * Ordem das travas, a MESMA nas duas portas (varredor e entrega): linhas de turno → trava por pessoa
  * dos incidentes → decisões → janelas. O varredor interrompe todos os turnos antes de entrar aqui; a
  * entrega já tem a linha do turno. Assim ninguém segura a trava por pessoa esperando uma linha de
@@ -95,11 +175,12 @@ async function aplicar(deps: DepsQueda, caidos: readonly Caido[], prazoMs: numbe
   const emOrdem = [...classificados.filter((c) => c.rotinaId === null), ...classificados.filter((c) => c.rotinaId !== null)];
   const quedas: QuedaDeMaquina[] = [];
   for (const c of emOrdem) {
-    const r = await consequencias(deps, c, prazoMs, events);
     // NOD-261 (E2): a aprovação decidida enquanto o turno ainda aparecia "despachando" (assentarAprovacao confiou no turno
     // vivo) segue agora, numa continuação só: reivindicarContinuacao dá a decisão a uma chamada, e a entrega tardia
     // depois disto não continua de novo. Com a continuação na fila, o "Retomar" deste turno sai por regra.
+    // NOD-309 (PR 3): a continuação vem antes — com ela na fila, o fundo não ganha uma segunda retomada (refaria o efeito).
     const continuacao = await continuarAprovacoes(deps, c.turno);
+    const r = await consequencias(deps, c, prazoMs, continuacao.continuadas, events);
     events.push(...continuacao.events);
     if (continuacao.continuadas > 0 && r.decisaoId) {
       const fechada = await deps.repos.decisoes.fecharPorRegra(r.decisaoId, { regra: REGRA_APROVACAO_CONTINUADA, regraVersao: 1, agora: deps.agora() });

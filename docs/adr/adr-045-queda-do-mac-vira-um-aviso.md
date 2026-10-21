@@ -436,3 +436,37 @@ sem balão, decisora que não é dona; espelho da régua do ✓), `fio-da-pergun
 `via`/`opcao` no jsonb, `via` do corpo ignorado, sem turno sem `via`), `sua-vez-pergunta` (dois pedidos no mesmo turno,
 RLS da decisora que não é dona), `me-chame-as`, `esperar-comando`; concorrência `e2e-catcher` (pergunta → clique →
 retomada com `via: "opcao"`).
+
+## Emenda de 2026-10-20 — o fundo não se perde por nenhuma queda (NOD-309)
+
+**Contexto.** O card "Retomar" desta ADR valia para toda queda, inclusive a do trabalho que ninguém está olhando: rotina,
+pedido de colega, frente e retorno do lote ficavam parados até alguém clicar, e a rotina que caía ficava calada
+(`interrompida`, só no histórico). O pendente de rotina sem prazo era o gatilho de reversão citado acima ("dar prazo ao
+turno de rotina pendente em vez de pular para sempre"). Plano de engenharia da NOD-309, PRs 1 a 4 (#423, #436).
+
+**Decisão.**
+
+- **O fundo retoma sozinho** (`src/domain/espera-no-fundo.ts`, `src/use-cases/volta-do-fundo.ts`). Toda queda do fundo —
+  cota, reinício do servidor, máquina sem contato e erro transitório do fornecedor (5xx, 529, rede) — vira ESPERA com
+  volta marcada (ou "quando a máquina voltar"), um aviso por cadeia e um teto: 3 transitórias com backoff, 3 quedas de
+  infraestrutura e 24 h desde o início da cadeia (`PRAZO_DO_FUNDO_MS`; a cota não tem teto de 24 h, só a hora de volta).
+  Passado o teto, `falhou` com um aviso só a quem pediu. A conversa com a pessoa fica como antes: card "Retomar". O Parar
+  (`parado_pela_pessoa`) nunca retoma. `espera_da_cota` vira caso de `espera_no_fundo`.
+- **A rotina caída deixa de ser calada.** A volta que cai em ou depois da próxima execução fecha a janela como
+  `nao_rodou` com motivo (`cota_da_ia`, `execucao_anterior_aberta`, `maquina_sem_contato`, `reinicio_servidor`,
+  `erro_do_provedor`) e grava UMA linha na conversa da rotina: "Não rodou · <motivo>, volta às HH:MM. A rotina segue a
+  agenda." (`rotina-nao-rodou`; outro dia, "em DD/MM às HH:MM"; sem hora, "na próxima execução da agenda"). A janela
+  repetida não grava de novo (o desfecho já assentado devolve `inalterado`). Sem empilhar: a agenda segue.
+- **O pendente ganha destino com motivo** (`decidirFundoPreso`, `cuidarDosTurnosOrfaos`). O turno de fundo que a máquina
+  segura antes do despacho (nunca rodou) avisa aos 10 min (`AVISO_FUNDO_PRESO_MS`, assunto `fundo.espera`, uma vez por
+  cadeia; ao remetente também, no pedido de colega) — menos quando alguma conta da IA está no limite, porque a nota da cota
+  já fala. Pedido de colega, frente e retorno do lote desistem em 24 h (`vencido`, aviso único a quem pediu); task e
+  rotina só avisam (a rotina fica com a janela seguinte). A janela de rotina presa antes do despacho fecha `nao_rodou`:
+  `cota_da_ia` (volta no menor `no_limite_ate`) se alguma conta da pessoa está no limite, senão `maquina_sem_contato` sem
+  hora — o servidor não distingue as duas antes do despacho. Faixa ocupada ou execução anterior aberta continuam
+  `interrompida`/`vencido`.
+- **A entrega tardia com sucesso** (emenda de 15/10) absorve a retomada pendente da mesma cadeia.
+
+**Gatilho de reversão.** Se, em 14 dias de log, mais de 5% das cadeias de fundo terminarem `falhou` por
+`tentativas_esgotadas`/`quedas_esgotadas` com o fornecedor de pé, o teto é curto: subir. Se a pessoa clicar "Retomar" num
+fundo que já tinha volta marcada em mais de 10% das quedas, a espera automática está lenta demais para quem olha.

@@ -21,6 +21,15 @@ const base: PedidoParado = {
 const decidir = (p: Partial<PedidoParado>) => decidirPedidoParado({ ...base, ...p }, AGORA, legivel);
 
 describe("decidirPedidoParado", () => {
+  it("NOD-309 (PR 3): retomada já na fila (a queda no fundo a enfileirou) = esperar, mesmo com sinal, queda velha ou no teto", () => {
+    expect(decidir({ retomadaNaFila: true, sinalDepoisDaQueda: true })).toEqual({ tipo: "esperar" });
+    expect(decidir({ retomadaNaFila: true, quedaEm: AGORA - 3 * 3_600_000 })).toEqual({ tipo: "esperar" });
+    expect(decidir({ retomadaNaFila: true, estadoColega: "precisa_de_voce", quedas: 9 })).toEqual({ tipo: "esperar" });
+    expect(decidirFrenteCaida({ ...base, retomadaNaFila: true, sinalDepoisDaQueda: true }, AGORA, legivel)).toEqual({ tipo: "esperar" });
+    // Sem ela, a regra de antes: retoma quando as máquinas voltam.
+    expect(decidir({ sinalDepoisDaQueda: true })).toMatchObject({ tipo: "retomar" });
+  });
+
   it("terminou: entrega a fala final; sem fala, avisa que terminou sem resposta", () => {
     expect(decidir({ estadoColega: "terminado", textoFinal: "feito", turnoDoTextoFinal: "t9" })).toEqual({ tipo: "entregar_resultado", turnoId: "t9", texto: "feito" });
     expect(decidir({ estadoColega: "terminado" })).toEqual({ tipo: "avisar_falha", motivo: "terminou sem resposta" });

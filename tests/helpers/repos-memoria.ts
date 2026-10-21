@@ -33,7 +33,8 @@ import { ORCAMENTO_INICIAL } from "../../src/domain/canal-orcamento.ts";
 import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
-import { cotaSegura, ENTRADA_DA_VOLTA_DA_COTA, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
+import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../../src/domain/pedido-parado.ts";
+import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
 import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
 import { harnessFixado } from "../../src/domain/harness.ts";
 import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
@@ -1297,6 +1298,10 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async orfaosCandidatos() {
         return [];
       },
+      // NOD-309 (PR 4): como os órfãos, o fundo preso se prova no Postgres (tests/integration/turnos-orfaos.test.ts).
+      async fundosPresos() {
+        return [];
+      },
       async encerrarOrfao() {
         return null;
       },
@@ -1308,6 +1313,16 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async travarRetomadas() {
         // Em memória tudo roda em série: não há o que travar.
+      },
+      async quedasDaCadeia(raizId: string, exceto: string) {
+        const todos = doTenant(b.turnos);
+        const cadeia = new Set([raizId]);
+        for (let mudou = true; mudou;) {
+          mudou = false;
+          for (const t of todos) if (t.retomaTurnoId && cadeia.has(t.retomaTurnoId) && !cadeia.has(t.id)) { cadeia.add(t.id); mudou = true; }
+        }
+        return todos.filter((t) => cadeia.has(t.id) && t.id !== exceto && t.estado === "interrompido"
+          && (MOTIVOS_DE_QUEDA as readonly string[]).includes(t.motivoInterrupcao ?? "") && !(MOTIVOS_FALHA_SEM_QUEDA as readonly string[]).includes(t.motivoFalha ?? "")).length;
       },
       async reescreverFundoDoBot(agenteId: string, para: { harness: NonNullable<Turno["harness"]>; modelo: string }) {
         const todos = doTenant(b.turnos);
@@ -1330,12 +1345,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const iaDe = (t: Turno): string | null => (t.harness ?? "auto") !== "auto" ? t.harness! : t.modelo === "auto" ? null : (iaDoModelo(t.modelo) ?? HARNESS_LEGADO);
         const alvo = doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.estado === "pendente" && (t.acordarEm ?? null) !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)
           && (opcoes.turnoId === undefined || t.id === opcoes.turnoId) && (opcoes.agenteId === undefined || t.agenteId === opcoes.agenteId)
-          && (ia === null || iaDe(t) === ia));
+          && (ia === null || iaDe(t) === null || iaDe(t) === ia));
         for (const t of alvo) t.acordarEm = null;
         return alvo.map((t) => t.id);
       },
       async voltaDaCotaNaFila(trabalhoId: string) {
-        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.trabalhoId === trabalhoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? null) !== null && t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA))
+        return doTenant(b.turnos).filter((t) => t.ownerId === escopo.pessoaId && t.trabalhoId === trabalhoId && t.origem === "retomada" && t.estado === "pendente" && (t.acordarEm ?? null) !== null && ehVoltaDoFundo(t.entradaTexto))
           .sort((x, y) => x.criadoEm - y.criadoEm)[0] ?? null;
       },
       async retomadaNaFila(retomaTurnoId: string) {
@@ -1351,7 +1366,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return despertares.get(id) ?? null;
       },
       async voltasMarcadas(retomaTurnoId: string) {
-        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null && !t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)).length;
+        return doTenant(b.turnos).filter((t) => t.retomaTurnoId === retomaTurnoId && t.acordarEm != null && !ehVoltaDoFundo(t.entradaTexto)).length;
       },
       async ultimasVoltas(retomaTurnoId: string, limite: number) {
         return doTenant(b.turnos)
@@ -1363,7 +1378,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
             marcouVolta: despertares.has(t.id) || b.esperas.some((e) => e.tenantId === escopo.tenantId && e.turnoId === t.id),
             perguntou: doTenant(b.decisoes).some((d) => d.turnoId === t.id),
             pediuAColega: doTenant(b.mensagens).some((m) => m.turnoId === t.id && m.kind === "handoff"),
-            porCota: t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA),
+            porCota: ehVoltaDoFundo(t.entradaTexto),
           }));
       },
       async contarTasksNaIa(agenteId, iaDe) {
@@ -1603,7 +1618,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async concluirTardia(id, a) {
         const t = doTenant(b.turnos).find((x) => x.id === id && x.estado === "interrompido" && (x.motivoInterrupcao === "maquina_sem_contato" || x.motivoInterrupcao === "reinicio_servidor"));
-        if (!t || doTenant(b.turnos).some((r) => r.retomaTurnoId === id)) return null;
+        if (!t) return null;
+        const filhas = doTenant(b.turnos).filter((r) => r.retomaTurnoId === id);
+        // NOD-309 (PR 3): a retomada da queda ainda na fila, única, é absorvida pelo sucesso tardio.
+        if (filhas.length === 1 && filhas[0]!.estado === "pendente" && filhas[0]!.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA)) {
+          Object.assign(filhas[0]!, { estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: id, leaseAte: null });
+        } else if (filhas.length > 0) return null;
         t.estado = "concluido";
         t.motivoInterrupcao = null;
         t.motivoFalha = null;
@@ -1618,7 +1638,8 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return t;
       },
       async temRetomada(retomaTurnoId) {
-        return doTenant(b.turnos).some((r) => r.retomaTurnoId === retomaTurnoId);
+        const filhas = doTenant(b.turnos).filter((r) => r.retomaTurnoId === retomaTurnoId);
+        return filhas.length > 0 && !(filhas.length === 1 && filhas[0]!.estado === "pendente" && filhas[0]!.entradaTexto.startsWith(ENTRADA_DA_RETOMADA_DA_QUEDA));
       },
       async interromper(id, motivo, o = {}) {
         const t = doTenant(b.turnos).find((x) => x.id === id && (x.estado === "pendente" || x.estado === "despachando"));

@@ -11,7 +11,7 @@ import { assuntoDaInterrupcao } from "../domain/destino-no-chat.ts";
 import { causaDaEntrega } from "../domain/stream-json.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { recusaDoArquivo } from "../domain/anexo.ts";
-import { classificarErroFornecedor, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
+import { classificarErroFornecedor, ehErroTransitorio, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase, horaMinuto, quandoDaFrase } from "../domain/erro-fornecedor.ts";
 import { descreverNegacao } from "../domain/estado-degradacao.ts";
 import { iaDaNegacao } from "../domain/harness.ts";
 import { negacoesDoTurno } from "../domain/negacao-nativa.ts";
@@ -21,7 +21,7 @@ import { motivoEmPortugues, redigir } from "../domain/redacao.ts";
 import { iasNoLimite, inteligenciaDoAgente, ordemEfetiva, podeReenviar, prazoDoLimite, prazoDoLimiteDaConta, proximaIaNoLimite } from "../domain/inteligencia.ts";
 import { usoDoPlanoValido } from "../domain/uso-do-plano.ts";
 import { trabalhoAberto } from "../domain/trabalho.ts";
-import { ehFundo, ENTRADA_DA_VOLTA_DA_COTA, entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVolta, entradaDaVoltaDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { ehVoltaDoFundo, ENTRADA_DA_VOLTA_DA_COTA, entradaDaNovaTentativa, entradaDaTrocaDeConta, entradaDaTrocaDeIa, entradaDaVoltaDaCota } from "../domain/cota-da-ia.ts";
 import { fraseDaDecisao } from "../domain/contas-da-ia.ts";
 import { decidirLimiteDaConta, ehIaComConta, fraseDoLimiteDaConta, type ContaDaPessoa, type DecisaoDoLimiteDaConta } from "../domain/contas-da-pessoa.ts";
 import type { IaComConta } from "../contracts/contas-ia.ts";
@@ -32,12 +32,15 @@ import { avisarTrocaDeIa, contaForaDaFila, maquinaDasTasks, outraIaParaAsTasks, 
 import { adiarFala } from "./adiar-fala.ts";
 import { alvoDoBot } from "./alvo-do-bot.ts";
 import { log } from "../obs/log.ts";
-import { rotinaDoTurno, SALTOS_DE_RETOMADA } from "./apoio-l7.ts";
+import { decidirEsperaNoFundo } from "../domain/espera-no-fundo.ts";
+import { TENTATIVAS_TRANSITORIAS_MAX } from "../shared/constantes.ts";
+import { rotinaDoTurno } from "./apoio-l7.ts";
 import { registrarDesfechoRotina } from "./disparar-rotina.ts";
 import { avisarEsperaAoRemetente } from "./entregar-resposta-peer.ts";
-import { autoriaAgente, autoriaPessoa, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento.ts";
+import { autoriaAgente, autoriaPessoa, evento } from "./autoria-evento.ts";
 import { aposQuedaDaMaquina } from "./interromper-por-maquina.ts";
 import { postarNaSala } from "./postar-na-sala.ts";
+import { enfileirarVoltaDoFundo, entradaDaVoltaDoFundo, fundoNaCadeia, raizDaCadeia } from "./volta-do-fundo.ts";
 import { continuarAprovacoesDoTurno } from "./decidir.ts";
 import { confirmarNaSessao } from "./sessao-viva.ts";
 import { emSavepoint } from "./savepoint.ts";
@@ -382,6 +385,9 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
   // para a ordem de todos os bots até `renovaEm`; um turno que dá certo na IA a tira do limite antes do prazo.
   const ehLimite = desfecho.estado === "interrompido" && !quedaDaMaquina && !resultado.causaSemIa
     && (desfecho.motivoFalha === "limite_do_plano" || (desfecho.motivoFalha !== null && classificarErroFornecedor(resultado.erroCru) === "limite_de_uso"));
+  // NOD-309: o erro transitório do provedor (sobrecarga, 5xx, rede) — o fundo tenta de novo em vez de falhar. Nunca o limite
+  // (ehLimite vem antes) nem a conta sem acesso.
+  const transitorio = desfecho.estado === "interrompido" && !quedaDaMaquina && !resultado.causaSemIa && !ehLimite && desfecho.motivoFalha !== null && ehErroTransitorio(resultado.erroCru);
   let limite: { ia: IdHarness; renovaEm: number; semHora: boolean } | null = null;
   let limiteMudou = false;
   let trocou: RuntimeEvent[] | null = null;
@@ -447,7 +453,12 @@ export const assentarTurno: CasoDeUso<EntradaAssentarTurno, SaidaAssentarTurno> 
     events.push(...trocou);
   } else if (desfecho.motivoInterrupcao === "sessao_rejeitada" && (trocou = await aposSessaoRejeitada(deps, { turno, executor, autoria, agora, custoUsd }))) {
     events.push(...trocou);
+  } else if (transitorio && (trocou = await aposErroTransitorioNoFundo(deps, { turno: assentado, ia: entrega.harness ?? null, motivoInterrupcao: desfecho.motivoInterrupcao, motivoFalha: desfecho.motivoFalha, autoria, agora, custoUsd }))?.some((e) => e.kind === "turno_interrompido")) {
+    // NOD-309: o fundo que caiu num erro transitório do provedor tenta de novo sozinho (ou a janela da rotina fica nao_rodou).
+    events.push(...trocou);
   } else if (desfecho.estado === "interrompido") {
+    // NOD-309: o fundo que desistiu do transitório já avisou quem pediu (fundo-desistiu); a conversa fica com o aviso de sempre.
+    if (trocou && transitorio) events.push(...trocou);
     await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
     const motivo = desfecho.motivoFalha ?? desfecho.motivoInterrupcao ?? "sem_progresso";
     // NOD-174: falha do fornecedor com classe conhecida ganha a frase com ação ("sua conta do Claude Code saiu deste
@@ -1059,37 +1070,7 @@ async function aposLimiteNoFundo(
   const base = conta?.tipo === "trocou" ? entradaDaTrocaDeConta(nomeDaIa(p.ia), conta.de, conta.para) : levada ? entradaDaTrocaDeIa(nomeDaIa(p.ia), nomeDaIa(levada)) : entradaDaVoltaDaCota(nomeDaIa(p.ia));
   // Já é uma volta da cota (a cadeia esperou antes): o aviso a quem pediu já saiu — uma vez por cadeia.
   const jaEsperou = turno.origem === "retomada" && turno.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
-  const volta = await deps.repos.turnos.enfileirar({
-    conversaId: turno.conversaId,
-    agenteId: turno.agenteId,
-    origem: "retomada",
-    retomaTurnoId,
-    trabalhoId: turno.trabalhoId ?? null,
-    prazoEm: p.renovaEm + PRAZO_DECISAO_PADRAO_MS,
-    profundidade: turno.profundidade,
-    entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }),
-    entradaConfianca: turno.entradaConfianca,
-    sobProcuracaoDe: turno.sobProcuracaoDe ?? null,
-    // NOD-279 D7 revisto pelo ADR-108 (#358): a volta segue com a inteligência do turno. A task com sessão já fica na IA da
-    // sessão pela guarda do despacho e do plano (segurarTaskNaIaDaSessao); fixar o harness aqui a tiraria do Automático e
-    // anularia o "levar" (a task sem sessão seguiria presa na IA no limite).
-    modelo: turno.modelo,
-    harness: turno.harness,
-    executor: turno.executor,
-    acordarEm: p.renovaEm,
-    // NOD-258: a volta do retorno do lote continua retorno do lote (portão da cota, refazer uma vez).
-    ...(turno.decididoPor === RETORNO_DO_LOTE ? { decididoPor: RETORNO_DO_LOTE, reenvios: turno.reenvios } : {}),
-    // A marca de quem leu algo de fora (ADR-062) segue para a volta no mesmo INSERT (NOD-287).
-    contaminadoDe: turno.id,
-  });
-  if (!volta) throw new ErroDeDominio("estado_invalido", { cause: "retomada depois do limite não criada" });
-  // NOD-258: o lote passa a apontar para a volta — se ela cair, refazerRetornoDoLote acha o lote por ela.
-  if (turno.decididoPor === RETORNO_DO_LOTE) {
-    const lote = await deps.repos.frentes.loteDoRetorno(turno.id);
-    if (lote) await deps.repos.frentes.trocarRetorno(lote.id, volta.id);
-  }
-  // A entrada de fora também marca a volta, como na volta marcada (me-chame-as.ts).
-  if (turno.entradaConfianca !== "confiavel") await deps.repos.turnos.contaminar(volta.id, agora);
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: p.renovaEm, agora });
   const events: RuntimeEvent[] = [
     evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, ia_no_limite: p.ia, renova_em: p.renovaEm, volta_turno_id: volta.id, espera_da_cota: "espera", custo_usd: p.custoUsd } }),
     evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: p.renovaEm } }),
@@ -1124,38 +1105,89 @@ async function aposLimiteNoFundo(
 }
 
 /**
- * NOD-274: o turno é trabalho de fundo pelo tipo dele (ehFundo) ou, sendo uma retomada, pelo da raiz da cadeia — a volta
- * de uma rotina ou de um pedido de colega tem origem 'retomada' e continua sendo fundo. A retomada de uma conversa não.
+ * O trabalho de FUNDO caiu num erro TRANSITÓRIO do provedor — sobrecarga, 5xx, corte de rede (definido em 2026-10-20,
+ * NOD-309, emenda da ADR-045). Antes virava "falhou" com uma linha e ninguém tentava de novo. Agora segue a regra única do
+ * fundo (domain/espera-no-fundo.ts): nova tentativa com backoff (~1, 5, 15 min, ±25%), até 3 por cadeia
+ * (`tentativas_transitorias`, herdado pela volta), dentro de 24 h desde o começo da cadeia. A rotina cuja tentativa passa da
+ * próxima janela fica `nao_rodou · erro_do_provedor` (sem empilhar). A volta leva o marcador ENTRADA_DA_NOVA_TENTATIVA —
+ * nunca o da cota, que "Seguir com"/conta nova acordariam antes da hora. Um aviso por cadeia: a linha na conversa do bot
+ * (fora a task, que é o fio dela e leva a hora nova) e o aviso a quem pediu. null = não é fundo, a pessoa pediu Parar, a
+ * task fechou, ou o teto/prazo acabou — então vale o aviso de sempre (o "falhou" com a frase do erro), e quem pediu ao
+ * colega lê a desistência uma vez (fundo-desistiu).
  */
-export async function fundoNaCadeia(deps: Deps, turno: Turno): Promise<boolean> {
-  if (ehFundo(turno)) return true;
-  if (turno.origem !== "retomada" || !turno.retomaTurnoId) return false;
-  return ehFundo(await raizDaCadeia(deps, turno));
-}
-
-/**
- * NOD-269 (G2): a entrada da volta do fundo. O pedido vem da raiz da cadeia (o da frente, da rotina, do colega); o
- * retorno do lote é ele mesmo o pedido (os resumos das frentes), e a volta de uma volta reaproveita a entrada dela, que
- * já leva o pedido — nunca "Pedido original" aninhado.
- */
-function entradaDaVoltaDoFundo(p: { turno: Turno; raiz: Turno; base: string; sessaoRetomavel: boolean }): string {
-  const { turno } = p;
-  if (turno.origem === "retomada" && turno.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA)) {
-    return p.sessaoRetomavel ? p.base : turno.entradaTexto.includes("\n\nPedido original da frente:\n") ? `${p.base}${turno.entradaTexto.slice(turno.entradaTexto.indexOf("\n\nPedido original da frente:\n"))}` : p.base;
+async function aposErroTransitorioNoFundo(
+  deps: Deps,
+  p: { turno: Turno; ia: IdHarness | null; motivoInterrupcao: MotivoInterrupcao | null; motivoFalha: MotivoFalha | null; autoria: Autoria; agora: number; custoUsd: number | null; aleatorio?: number },
+): Promise<RuntimeEvent[] | null> {
+  const { turno, autoria, agora } = p;
+  if (turno.pararSolicitadoEm !== null || !(await fundoNaCadeia(deps, turno))) return null;
+  const trabalho = turno.trabalhoId ? await deps.repos.trabalhos.buscar(turno.trabalhoId) : null;
+  if (turno.trabalhoId && (!trabalho || !trabalhoAberto(trabalho.estado))) return null;
+  const retomaTurnoId = turno.retomaTurnoId ?? turno.id;
+  const raiz = await raizDaCadeia(deps, turno);
+  const daRotina = turno.trabalhoId ? null : await rotinaDoTurno(deps.repos, turno.id);
+  const tentativas = turno.tentativasTransitorias ?? 0;
+  const decisao = decidirEsperaNoFundo({
+    causa: "erro_transitorio",
+    tentativasTransitorias: tentativas,
+    quedas: 0,
+    agora,
+    inicioDaCadeia: raiz.criadoEm,
+    ehRotina: daRotina !== null,
+    proximaExecucao: daRotina?.rotina.proximaExecucao ?? null,
+    aleatorio: p.aleatorio ?? Math.random(),
+  });
+  const ia = p.ia ? nomeDaIa(p.ia) : "IA";
+  const chave = turno.trabalhoId ? "frente" : daRotina ? "rotina" : "pedido";
+  const pedido = chave === "frente" ? "Esta task" : chave === "rotina" ? "Esta execução da rotina" : "Este pedido";
+  if (decisao.tipo === "desistir") {
+    log("aviso", "fundo_desistiu", { turno_id: turno.id, causa: "erro_transitorio", motivo: decisao.motivo, tentativas, fundo: chave });
+    // Quem pediu ao colega lê UMA vez que parou de tentar; a conversa do bot fica com o aviso de sempre (quem chamou).
+    const porque = decisao.motivo === "prazo_esgotado" ? "passou de 24 h tentando" : `já tentou ${TENTATIVAS_TRANSITORIAS_MAX} vezes`;
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    const aviso = await avisarEsperaAoRemetente(deps, { turno, texto: redigir("fundo-desistiu", agora, { pedido: `O pedido a ${agente?.nome ?? "o colega"}`, motivo: `o serviço do ${ia} ficou instável`, porque }) });
+    return aviso.length > 0 ? aviso : null;
   }
-  const pedido = turno.decididoPor === RETORNO_DO_LOTE ? turno.entradaTexto : p.raiz.origem === "retomada" ? null : p.raiz.entradaTexto;
-  return entradaDaVolta({ base: p.base, sessaoRetomavel: p.sessaoRetomavel, pedidoOriginal: pedido });
-}
-
-/** NOD-269: o primeiro turno da cadeia de retomadas (o que trouxe o pedido). Mesmo teto de saltos de rotinaDoTurno. */
-async function raizDaCadeia(deps: Deps, turno: Turno): Promise<Turno> {
-  let atual = turno;
-  for (let saltos = 0; atual.origem === "retomada" && atual.retomaTurnoId && saltos < SALTOS_DE_RETOMADA; saltos++) {
-    const anterior = await deps.repos.turnos.buscar(atual.retomaTurnoId);
-    if (!anterior) break;
-    atual = anterior;
+  await deps.repos.turnos.travarRetomadas(retomaTurnoId);
+  await deps.repos.mensagens.marcarParciaisDoTurno(turno.id);
+  if (decisao.tipo === "nao_rodou") {
+    const r = await registrarDesfechoRotina(deps, { turnoId: turno.id, desfecho: "nao_rodou", motivo: decisao.motivo, ...(decisao.voltaEm !== null ? { voltaEm: decisao.voltaEm } : {}) });
+    log("info", "fundo_rotina_nao_rodou", { turno_id: turno.id, rotina_id: daRotina?.rotina.id ?? null, causa: "erro_transitorio", volta_em: decisao.voltaEm });
+    return [
+      evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, espera_da_cota: "nao_rodou", espera_no_fundo: "erro_transitorio", volta_em: decisao.voltaEm, tentativa: tentativas + 1, custo_usd: p.custoUsd } }),
+      ...(r.events ?? []),
+    ];
   }
-  return atual;
+  // A tentativa transitória sempre tem hora (agora + backoff).
+  const voltaEm = decisao.voltaEm ?? agora;
+  const sessaoRetomavel = trabalho ? trabalho.sessaoCli !== null && (trabalho.sessaoHarness === null || trabalho.sessaoHarness === p.ia) : false;
+  const base = entradaDaNovaTentativa(ia, decisao.tentativa, TENTATIVAS_TRANSITORIAS_MAX);
+  const volta = await enfileirarVoltaDoFundo(deps, { turno, retomaTurnoId, entradaTexto: entradaDaVoltaDoFundo({ turno, raiz, base, sessaoRetomavel }), acordarEm: voltaEm, tentativasTransitorias: decisao.tentativa, agora });
+  const events: RuntimeEvent[] = [
+    // `espera_da_cota` fica como alias de `espera_no_fundo` enquanto quem lê (compor, a web) lê os dois.
+    evento(deps.escopo, { kind: "turno_interrompido", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { motivo: p.motivoInterrupcao, motivo_falha: p.motivoFalha, volta_turno_id: volta.id, espera_da_cota: "espera", espera_no_fundo: "erro_transitorio", volta_em: voltaEm, tentativa: decisao.tentativa, custo_usd: p.custoUsd } }),
+    evento(deps.escopo, { kind: "turno_criado", autoria, agora, conversaId: turno.conversaId, turnoId: volta.id, dados: { origem: volta.origem, agente_id: turno.agenteId, retoma_turno_id: retomaTurnoId, trabalho_id: turno.trabalhoId ?? null, acordar_em: voltaEm } }),
+  ];
+  // Um aviso por cadeia: a cadeia que já esperou (a cota ou outra tentativa) não ganha outra linha. A task leva a hora nova.
+  const jaEsperou = turno.origem === "retomada" && ehVoltaDoFundo(turno.entradaTexto);
+  const quando = quandoDaFrase(voltaEm, agora);
+  const linha = chave !== "frente" && jaEsperou ? null : await deps.repos.mensagens.criar({
+    conversaId: turno.conversaId,
+    turnoId: turno.id,
+    autoria,
+    kind: "sistema",
+    assunto: "fundo.espera",
+    texto: redigir("fundo-nova-tentativa", agora, { ia, pedido, quando, tentativa: String(decisao.tentativa), maximo: String(TENTATIVAS_TRANSITORIAS_MAX) }),
+    confianca: "confiavel",
+  });
+  if (linha) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: turno.conversaId, turnoId: turno.id, dados: { mensagem_id: linha.id, kind: "sistema" } }));
+  if (!jaEsperou) {
+    const agente = await deps.repos.agentes.buscar(turno.agenteId);
+    events.push(...(await avisarEsperaAoRemetente(deps, { turno, texto: redigir("fundo-nova-tentativa", agora, { ia, pedido: `O pedido a ${agente?.nome ?? "o colega"}`, quando, tentativa: String(decisao.tentativa), maximo: String(TENTATIVAS_TRANSITORIAS_MAX) }) })));
+  }
+  // Risco do plano (laço de retomada): o teto e o contador por cadeia seguram; o log mede a tentativa.
+  log("info", "fundo_retomado", { turno_id: turno.id, volta_turno_id: volta.id, causa: "erro_transitorio", tentativa: decisao.tentativa, volta_em: voltaEm, fundo: chave, harness: p.ia });
+  return events;
 }
 
 /**

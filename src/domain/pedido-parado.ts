@@ -69,6 +69,12 @@ export type PedidoParado = {
   quedaEm: number | null;
   /** Quantos turnos do trabalho do colega caíram por infraestrutura. */
   quedas: number;
+  /**
+   * definido em 2026-10-20 (NOD-309, PR 3): um turno do trabalho do colega já está na fila (pendente ou despachando) — a
+   * retomada que a queda no fundo enfileirou sozinha (interromper-por-maquina), a volta da cota ou a nova tentativa. A
+   * regra espera: retomar de novo daria duas retomadas do mesmo trabalho. Ausente = nenhum (a triagem já filtra na consulta).
+   */
+  retomadaNaFila?: boolean;
   /** O card "Retomar" do último turno, se houver. */
   cardRetomar: { id: string; aberto: boolean } | null;
   /**
@@ -102,6 +108,7 @@ export function ehQueda(motivo: string | null): boolean {
  * A decisão, sem efeito: o use case (pedidos-parados.ts) aplica. `motivoLegivel` traduz o enum (motivoEmPortugues).
  * - Terminou com fala que não voltou: entrega o resultado. Sem fala: avisa que terminou sem resposta.
  * - Parado: avisa (alguém parou a task do colega).
+ * - Já há retomada na fila (NOD-309): espera.
  * - Caiu por infraestrutura, com o card "Retomar" ainda aberto ou sem card: retoma sozinho quando as máquinas voltam,
  *   até MAX_QUEDAS_POR_PEDIDO e só nas últimas RETOMAR_ATE_MS; esgotado, mais velho, ou sem sinal de volta em
  *   DESISTIR_SEM_SINAL_MS, avisa.
@@ -116,6 +123,8 @@ export function decidirPedidoParado(p: PedidoParado, agora: number, motivoLegive
     return { tipo: "avisar_falha", motivo: "terminou sem resposta" };
   }
   if (p.estadoColega === "parado") return { tipo: "avisar_falha", motivo: "a task foi parada antes de terminar", semEsperar: true };
+  // NOD-309 (PR 3): a retomada na fila é esperar — ela devolve o resultado, ou a próxima queda passa pela regra de novo.
+  if (p.retomadaNaFila) return { tipo: "esperar" };
   if (p.ultimoMotivo === "executor_indisponivel" && p.ultimoMotivoFalha) {
     if ((MOTIVOS_FALHA_DE_ESPERA as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "esperar" };
     if ((MOTIVOS_FALHA_DE_AVISO_UNICO as readonly string[]).includes(p.ultimoMotivoFalha)) return { tipo: "avisar_falha", motivo: motivoLegivel(p.ultimoMotivoFalha), semEsperar: true };

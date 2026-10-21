@@ -559,7 +559,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async pedidosAColegaParados(desde: number, agora: number, adiados: readonly string[] = []): Promise<PedidoParado[]> {
       const linhas = await conn<{
         tarefa_id: string; colega_id: string; colega_estado: EstadoTrabalho; ultimo_id: string | null; ultimo_motivo: string | null; ultimo_motivo_falha: string | null; queda_em: Date | null;
-        quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; texto_final: string | null; turno_texto: string | null;
+        quedas: number; card_id: string | null; card_estado: string | null; sinal: boolean; na_fila: boolean; texto_final: string | null; turno_texto: string | null;
       }[]>`
         select h.payload->>'tarefaId' as tarefa_id, c.id as colega_id, c.estado as colega_estado,
           u.id as ultimo_id, u.motivo_interrupcao as ultimo_motivo, u.motivo_falha as ultimo_motivo_falha, coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em) as queda_em,
@@ -567,6 +567,8 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
             and q.motivo_interrupcao::text = any(${[...MOTIVOS_DE_QUEDA]}::text[])
             and coalesce(q.motivo_falha::text, '') <> all(${[...MOTIVOS_FALHA_SEM_QUEDA]}::text[])) as quedas,
           k.id as card_id, k.estado as card_estado,
+          -- NOD-309 (PR 3): a retomada que a queda no fundo já enfileirou segura o varredor (pedido-parado.ts).
+          exists (select 1 from turnos n where n.tenant_id = c.tenant_id and n.trabalho_id = c.id and n.estado in ('pendente', 'despachando')) as na_fila,
           exists (select 1 from turnos v where v.tenant_id = c.tenant_id and v.owner_id = c.owner_id and u.id is not null
             and v.criado_em > coalesce(u.ultimo_sinal_em, u.lease_ate, u.criado_em)
             and (v.estado = 'concluido' or (v.estado = 'despachando' and v.lease_ate > ${data(agora)}))) as sinal,
@@ -622,6 +624,7 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         quedaEm: msOuNull(l.queda_em),
         quedas: l.quedas,
         cardRetomar: l.card_id ? { id: l.card_id, aberto: l.card_estado === "pendente" || l.card_estado === "reaberta" } : null,
+        retomadaNaFila: l.na_fila,
         sinalDepoisDaQueda: l.sinal,
         textoFinal: l.texto_final,
         turnoDoTextoFinal: l.turno_texto,
