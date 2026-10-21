@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import { criarAgente } from "../../src/use-cases/criar-agente.ts";
@@ -16,6 +17,8 @@ import type { Deps } from "../../src/use-cases/tipos.ts";
 import { concederLote } from "../../src/use-cases/conceder.ts";
 import { permitirSempre } from "../../src/use-cases/permitir-sempre.ts";
 import { autoriaDoAgente } from "../../src/use-cases/registrar-negacao.ts";
+import { pastaDoBot } from "../../src/domain/nativas.ts";
+import { resolverAlvo } from "../../src/use-cases/apoio-l7.ts";
 
 const cap = (nome: string, readOnlyHint: boolean): CapacidadeConector => ({ nome, descricao: nome, schema: { type: "object" }, readOnlyHint });
 
@@ -138,6 +141,72 @@ describeIntegracao("gestão de agentes: ciclo de vida e organização", () => {
       expect(await outra.repos.permissoesPermanentes.ativasDoAgente(copia.agente.id)).toHaveLength(0);
       expect(await outra.repos.mensagens.listarDaConversa(copia.conversa.id)).toHaveLength(0);
       expect(await outra.repos.rotinas.listarDoAgente(copia.agente.id)).toMatchObject([{ estado: "pausada", exigeAprovacao: true }]);
+    });
+  });
+
+  it("NOD-289 (M1): a dona leva a máquina do original se a chave está viva; revogada ou vencida, sem máquina", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const chave = async () => (await d.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
+      const [viva, revogada, vencida] = [await chave(), await chave(), await chave()];
+      await d.repos.maquinaTokens.revogar(revogada, Date.now());
+      await d.repos.maquinaTokens.vencerEm(vencida, Date.now() - 60_000);
+      for (const [maquina, esperado] of [[viva, viva], [revogada, null], [vencida, null]] as const) {
+        const { data: b } = await criarAgente(d, { dono: "pessoa", nome: `Maq ${randomBytes(3).toString("hex")}` });
+        await d.repos.agentes.definirMaquina([b.agente.id], maquina);
+        const { data: copia } = await duplicarAgente(d, { agenteId: b.agente.id });
+        expect((await d.repos.agentes.buscar(copia.agente.id))?.maquinaId ?? null).toBe(esperado);
+      }
+    });
+  });
+
+  it("NOD-289 (M1): bot de equipe duplicado por outra pessoa nasce sem máquina", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const viva = (await d.repos.maquinaTokens.criar({ nome: "vm-bots", prefixo: randomBytes(4).toString("hex"), hash: randomBytes(32) }))!.id;
+      const { data: b } = await criarAgente(d, { dono: "empresa", nome: `Equipe maq ${randomBytes(3).toString("hex")}` });
+      await d.repos.agentes.definirMaquina([b.agente.id], viva);
+      await vincularEscopo(tx, ANA);
+      const outra = depsSobreTrx(tx, ANA);
+      const { data: copia } = await duplicarAgente(outra, { agenteId: b.agente.id });
+      expect((await outra.repos.agentes.buscar(copia.agente.id))?.maquinaId ?? null).toBeNull();
+    });
+  });
+
+  it("NOD-289 (M3): duplicar duas vezes dá '(cópia)' e '(cópia 2)', pastas distintas e cada um achável pelo nome", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const nome = `Eng ${randomBytes(3).toString("hex")}`;
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome });
+      const um = (await duplicarAgente(d, { agenteId: b.agente.id })).data.agente;
+      const dois = (await duplicarAgente(d, { agenteId: b.agente.id })).data.agente;
+      expect([um.nome, dois.nome]).toEqual([`${nome} (cópia)`, `${nome} (cópia 2)`]);
+      expect(pastaDoBot(um.nome)).not.toBe(pastaDoBot(dois.nome));
+      expect((await resolverAlvo(d.repos, b.agente, um.nome)).id).toBe(um.id);
+      expect((await resolverAlvo(d.repos, b.agente, dois.nome)).id).toBe(dois.id);
+      // Nome de 60 caracteres: as cópias seguem cabendo e únicas.
+      const { data: longo } = await criarAgente(d, { dono: "pessoa", nome: `L${randomBytes(3).toString("hex")}`.padEnd(60, "x") });
+      const l1 = (await duplicarAgente(d, { agenteId: longo.agente.id })).data.agente.nome;
+      const l2 = (await duplicarAgente(d, { agenteId: longo.agente.id })).data.agente.nome;
+      expect(l1.length).toBeLessThanOrEqual(60);
+      expect(l2.length).toBeLessThanOrEqual(60);
+      expect(l1).not.toBe(l2);
+    });
+  });
+
+  it("NOD-289 (M2): pedida com rotinasPausadas, a cópia da dona vem com as rotinas pausadas e sem 'Rotina ativa'", async () => {
+    await withRollback(MARLON, async (tx) => {
+      const d = depsSobreTrx(tx, MARLON);
+      const { data: b } = await criarAgente(d, { dono: "pessoa", nome: `Rot ${randomBytes(3).toString("hex")}` });
+      await d.repos.rotinas.criar({ agenteId: b.agente.id, conversaId: b.conversa.id, cron: "*/5 * * * *", fusoIana: "UTC", instrucao: "UAT", fonte: "teste", entregavel: "chat", limitesAprovacao: "sem externos", politicaSemDado: "avisar", proximaExecucao: Date.now() + 300000 });
+      const { data: copia } = await duplicarAgente(d, { agenteId: b.agente.id, rotinasPausadas: true });
+      expect(copia.rotinasPausadasNaCopia).toBe(1);
+      expect(await d.repos.rotinas.listarDoAgente(copia.agente.id)).toMatchObject([{ estado: "pausada" }]);
+      expect((await d.repos.mensagens.listarDaConversa(copia.conversa.id)).some((m) => /^Rotina ativa/.test(m.texto))).toBe(false);
+      // Regressão: sem a opção (a caixa da dona), a rotina segue ativa.
+      const { data: daCaixa } = await duplicarAgente(d, { agenteId: b.agente.id });
+      expect(daCaixa.rotinasPausadasNaCopia).toBe(0);
+      expect(await d.repos.rotinas.listarDoAgente(daCaixa.agente.id)).toMatchObject([{ estado: "ativa" }]);
     });
   });
 

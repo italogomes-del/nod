@@ -34,6 +34,13 @@ describe("card do lote do Nod", () => {
     expect(h).toContain('data-act="recusar-decisao"');
   });
 
+  it("NOD-289: o duplicar diz que as rotinas da cópia vêm pausadas", () => {
+    const h = renderCardLote({ id: "p3" }, { kind: "lote_bots", resumo: "Duplicar", acoes: [acao(0, { tipo: "duplicar", alvoNome: "Dev 1" })] }, true);
+    expect(h).toContain("leva memória, acessos e rotinas do original; as rotinas vêm pausadas");
+    // NOD-316: a cópia não herda o modo do original.
+    expect(h).toContain("começa em Aprovar automaticamente; mude em Aprovações");
+  });
+
   it("2026-10-18: ligar o total pelo Nod diz que só liga com o ok da pessoa", () => {
     const h = renderCardLote({ id: "p2" }, { kind: "lote_bots", resumo: "Dev 1 sem aprovações", acoes: [acao(0, { tipo: "mudar_modo", alvoNome: "Dev 1", modo: "total", motivo: "ligar_total", botId: "b1" })] }, true);
     expect(h).toContain("para sem aprovações");

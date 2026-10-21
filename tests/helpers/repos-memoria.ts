@@ -459,6 +459,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           esforco: d.esforco,
           inteligencia,
           duplicadoDe: a.duplicadoDe ?? null,
+          ...(a.maquinaId ? { maquinaId: a.maquinaId } : {}),
           // NOD-316: como o INSERT — todo bot nasce no modo inicial.
           modoAprovacao: MODO_APROVACAO_INICIAL,
           criadoEm: agora(),

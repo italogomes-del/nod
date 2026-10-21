@@ -57,7 +57,10 @@ export function linhaDaAcao(a: Pick<AcaoNoLote, "tipo" | "alvoNome" | "secao" | 
   return `${VERBO[a.tipo]} ${a.alvoNome}${extra}`;
 }
 
-type Feito = { botId: string; nome: string; events: RuntimeEvent[] };
+type Feito = { botId: string; nome: string; events: RuntimeEvent[]; aviso?: string };
+
+/** NOD-289 (M2): o que a pessoa precisa saber da cópia pedida ao Nod. */
+export const AVISO_ROTINAS_PAUSADAS = "rotinas da cópia vieram pausadas; ative em Rotinas";
 
 /** Executa UMA ação já validada sobre o bot alvo (`botId`; null só em criar). Lança ErroDeDominio quando não dá. */
 async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botId: string | null, ctx: { nodId: string; porRegra: PorRegra | null; pelaPessoa: boolean }): Promise<Feito> {
@@ -73,8 +76,10 @@ async function executarAcao(deps: Deps, a: AcaoLote & { alvoNome: string }, botI
       return { botId: r.data.agente.id, nome: r.data.agente.nome, events };
     }
     case "duplicar": {
-      const r = await duplicarAgente(deps, { agenteId: exigirAlvo() });
-      return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [] };
+      // NOD-289 (M2): pelo Nod as rotinas da cópia vêm sempre pausadas, com ou sem card — sem a caixa da dona, ativas
+      // rodariam em dobro sem ninguém ver.
+      const r = await duplicarAgente(deps, { agenteId: exigirAlvo(), rotinasPausadas: true });
+      return { botId: r.data.agente.id, nome: r.data.agente.nome, events: r.events ?? [], ...(r.data.rotinasPausadasNaCopia > 0 ? { aviso: AVISO_ROTINAS_PAUSADAS } : {}) };
     }
     case "editar": {
       const r = await editarPerfil(deps, { agenteId: exigirAlvo(), nome: a.nome, titulo: a.titulo, descricao: a.descricao, modelo: a.modelo, esforco: a.esforco === undefined ? undefined : a.esforco === "" ? null : a.esforco });
@@ -140,6 +145,7 @@ async function executarEmOrdem(
       a.estado = "feita";
       a.erro = null;
       a.botId = feito.botId;
+      if (feito.aviso) a.aviso = feito.aviso;
       // QA de 2026-10-07: no duplicar o card e o desfecho falam do ORIGINAL ("Duplicar Dev 1"); a cópia só vira alvo de "@ref".
       if (a.tipo === "criar") a.alvoNome = feito.nome;
       events.push(...feito.events);
@@ -195,13 +201,14 @@ export async function gerirBots(deps: Deps, input: ContextoFerramenta & { resumo
     events.push(evento(deps.escopo, { kind: "proposta_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { proposta_id: proposta.id, kind: "lote_bots", acoes: esperando.length } }));
     if (decisao) events.push(evento(deps.escopo, { kind: "decisao_criada", autoria, agora, conversaId: input.conversaId, turnoId: input.turnoId, dados: { decisao_id: decisao.id, tipo: "lote_bots" } }));
   }
-  const feitas = acoes.filter((a) => a.estado === "feita").map((a) => ({ i: a.i, tipo: a.tipo, bot_id: a.botId, nome: a.alvoNome }));
+  const feitas = acoes.filter((a) => a.estado === "feita").map((a) => ({ i: a.i, tipo: a.tipo, bot_id: a.botId, nome: a.alvoNome, ...(a.aviso ? { aviso: a.aviso } : {}) }));
   const falhas = acoes.filter((a) => a.estado === "falhou").map((a) => ({ i: a.i, erro: a.erro ?? "falhou" }));
   log("info", "nod_gerir_bots", { acoes: acoes.length, feitas: feitas.length, esperando: esperando.length, falhas: falhas.length, modo: modo ?? "manual" });
   const instrucao = esperando.length > 0
     ? `${feitas.length ? `Feito agora: ${feitas.length}. ` : ""}${esperando.length} ${esperando.length === 1 ? "mudança espera" : "mudanças esperam"} a pessoa no card desta conversa. Diga isso em uma frase (o que fez e o que espera) e encerre o turno; o card executa sozinho quando ela aprovar.`
     : `Tudo feito (${feitas.length}${falhas.length ? `, ${falhas.length} com falha` : ""}). Conte em poucas linhas o que mudou${falhas.length ? " e o que não deu certo" : ""}.`;
-  return { data: { ok: true, feitas, esperando, falhas, decisao_id: decisaoId, instrucao }, events };
+  const comAviso = feitas.some((f) => f.aviso) ? `${instrucao} Repita os avisos de feitas.` : instrucao;
+  return { data: { ok: true, feitas, esperando, falhas, decisao_id: decisaoId, instrucao: comAviso }, events };
 }
 
 /**
@@ -237,7 +244,7 @@ export const decidirLoteDeBots: CasoDeUso<{ decisaoId: string; recusar: boolean;
   const autoria = autoriaPessoa(deps.escopo);
   const texto = input.recusar
     ? `Recusado: ${recusadas.length} ${recusadas.length === 1 ? "mudança" : "mudanças"} nos seus bots.`
-    : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`)].join("\n");
+    : [`${feitas.length} de ${daVez.length} ${daVez.length === 1 ? "mudança feita" : "mudanças feitas"}.`, ...feitas.map((a) => `✓ ${linhaDaAcao(a)}${a.aviso ? ` (${a.aviso})` : ""}`), ...falhas.map((a) => `✗ ${linhaDaAcao(a)} — não deu certo (${a.erro ?? "falhou"})`), ...recusadas.map((a) => `– ${linhaDaAcao(a)} (desmarcada)`)].join("\n");
   const msg = await deps.repos.mensagens.criar({ conversaId: proposta.conversaId, autoria, kind: "sistema", assunto: "aprovacao.recibo", texto, confianca: "confiavel" });
   events.push(evento(deps.escopo, { kind: "decisao_decidida", autoria, agora, conversaId: proposta.conversaId, turnoId: decidida.turnoId, dados: { decisao_id: decidida.id, tipo: "lote_bots", recusada: input.recusar } }));
   if (msg) events.push(evento(deps.escopo, { kind: "mensagem_criada", autoria, agora, conversaId: proposta.conversaId, dados: { mensagem_id: msg.id, kind: "sistema" } }));

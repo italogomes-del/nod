@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { Agente } from "../contracts/agente.ts";
 import type { Conversa } from "../contracts/conversa.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
 import { nuncaPermanente } from "../domain/aprovacao-permanente.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
+import { nomeDaCopia } from "../domain/nome-da-copia.ts";
 import { ordemComCopia } from "../domain/ordem-barra.ts";
 import { redigir } from "../domain/redacao.ts";
 import { proximaJanela } from "../domain/rotina-janela.ts";
@@ -22,20 +24,28 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * Bot de equipe duplicado por OUTRA pessoa segue o ADR-034 original: sem memória nem permissões, rotinas
  * pausadas — quem não deu o acesso não o herda.
  *
+ * NOD-289 (auditoria de 15/10): a cópia da DONA vai para a mesma máquina do original (ADR-090) se a chave dela estiver
+ * viva — revogada ou vencida, sem máquina; de outra pessoa, sem máquina. O nome é o primeiro livre entre "X (cópia)",
+ * "X (cópia 2)"… (nome-da-copia.ts), e a pasta distinta sai junto. Pedida ao Nod (`rotinasPausadas`, gerir_bots, com ou
+ * sem card), as rotinas da cópia vêm pausadas — sem caixa, ativas rodariam em dobro sem ninguém ver (o gatilho de
+ * reversão da ADR-034) — e `rotinasPausadasNaCopia` diz quantas estavam ativas no original, para o aviso.
+ *
  * revisto em 2026-10-20 (NOD-316, decisão do Marlon na NOD-231; emenda da ADR-059 §1): a cópia nasce em Aprovar
  * automaticamente (MODO_APROVACAO_INICIAL, gravado por agentes.criar) e NÃO herda o modo do original — nem Manual nem
  * Ignorar todas; a pessoa muda em Aprovações. O `exige_aprovacao` da rotina (campo morto, ninguém decide por ele) não é
  * copiado: vale o DEFAULT da coluna.
  */
-export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; conversa: Conversa }> = async (deps, input) => {
+export const duplicarAgente: CasoDeUso<{ agenteId: string; rotinasPausadas?: boolean }, { agente: Agente; conversa: Conversa; rotinasPausadasNaCopia: number }> = async (deps, input) => {
   const original = await deps.repos.agentes.buscar(input.agenteId);
   if (!original) throw new ErroDeDominio("nao_encontrado");
   // ADR-081: o Nod é um por pessoa; a cópia seria um bot comum se passando por ele.
   if (ehNod(original)) throw new ErroDeDominio("nod_protegido", { cause: "duplicar" });
   const dona = original.ownerId === deps.escopo.pessoaId;
+  const existentes = (await deps.repos.agentes.listar({ incluirOcultos: true, incluirExcluidos: true })).map((a) => a.nome);
+  const maquinaId = dona && original.maquinaId && (await chaveViva(deps, original.maquinaId)) ? original.maquinaId : null;
 
   const agente = await deps.repos.agentes.criar({
-    nome: `${original.nome.slice(0, 52)} (cópia)`,
+    nome: nomeDaCopia(original.nome, existentes, randomUUID()),
     titulo: original.titulo,
     descricao: original.descricao,
     dono: original.dono,
@@ -47,6 +57,7 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     ...(original.inteligencia ? { inteligencia: original.inteligencia } : {}),
     duplicadoDe: original.id,
     confirmado: original.confirmado,
+    maquinaId,
   });
   if (!agente) throw new ErroDeDominio("estado_invalido", { cause: "cópia não criada" });
   if (dona) await porLogoAbaixo(deps, original, agente.id);
@@ -66,13 +77,16 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     events.push(...(await copiarRegrasPermanentes(deps, original.id, agente.id, conversa.id)));
   }
 
+  let rotinasPausadasNaCopia = 0;
   for (const r of await deps.repos.rotinas.listarDoAgente(original.id)) {
+    const pausar = !dona || input.rotinasPausadas === true;
+    if (pausar && r.estado === "ativa") rotinasPausadasNaCopia++;
     const rotina = await deps.repos.rotinas.criar({
       ...r,
       id: undefined,
       agenteId: agente.id,
       conversaId: conversa.id,
-      estado: dona ? r.estado : "pausada",
+      estado: pausar ? "pausada" : r.estado,
       exigeAprovacao: undefined,
       proximaExecucao: proximaJanela({ cron: r.cron, fusoIana: r.fusoIana, agora }),
     });
@@ -83,8 +97,13 @@ export const duplicarAgente: CasoDeUso<{ agenteId: string }, { agente: Agente; c
     }
     events.push(evento(deps.escopo, { kind: "rotina_criada", autoria, agora, conversaId: conversa.id, dados: { rotinaId: rotina.id, proximaExecucao: rotina.proximaExecucao, fusoIana: rotina.fusoIana } }));
   }
-  return { data: { agente: (await deps.repos.agentes.buscar(agente.id)) ?? agente, conversa }, events };
+  return { data: { agente: (await deps.repos.agentes.buscar(agente.id)) ?? agente, conversa, rotinasPausadasNaCopia }, events };
 };
+
+/** A chave da máquina ainda vale? `listar()` já trata a vencida como revogada (ADR-102). */
+async function chaveViva(deps: Deps, maquinaId: string): Promise<boolean> {
+  return (await deps.repos.maquinaTokens.listar()).some((c) => c.id === maquinaId && c.revogadaEm === null);
+}
 
 /**
  * definido em 2026-10-06 (pedido do Marlon): a cópia entra no grupo do original (fixados ou a mesma seção) logo abaixo

@@ -25,7 +25,7 @@ function motivoDoLote(a: AcaoNoLote, motivo: Exclude<MotivoCardDoLote, "manual">
 function detalheDaAcao(a: AcaoNoLote): string {
   switch (a.tipo) {
     case "criar": return [a.secao ? `em ${a.secao}` : "", a.descricao ?? ""].filter(Boolean).join(" · ");
-    case "duplicar": return "leva memória, rotinas e acessos do original";
+    case "duplicar": return "leva memória, acessos e rotinas do original; as rotinas vêm pausadas; começa em Aprovar automaticamente; mude em Aprovações";
     case "editar": return [a.nome ? `nome: ${a.nome}` : "", a.titulo !== undefined ? `título: ${a.titulo || "—"}` : "", a.modelo ? `modelo: ${a.modelo}` : "", a.esforco !== undefined ? `esforço: ${a.esforco || "padrão"}` : "", a.descricao ? "descrição nova" : ""].filter(Boolean).join(" · ");
     case "mover": return a.secao ? `para ${a.secao}` : "para fora da seção";
     case "excluir": return "dá para restaurar depois em Gerenciar agentes";

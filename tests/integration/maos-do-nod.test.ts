@@ -107,6 +107,34 @@ describeIntegracao("as mãos do Nod (ADR-082)", () => {
     });
   });
 
+  it("NOD-289 (M2): duplicar pelo Nod deixa as rotinas da cópia pausadas e avisa, no automático e pelo card", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const d = depsSobreTrx(trx, MARLON);
+      const { ctx } = await nodComTurno(d, { modo: "automatico" });
+      const dev = await bot(d, "Dev 1");
+      const conversaDev = await d.repos.conversas.buscarPropriaDoAgente(dev.id);
+      await d.repos.rotinas.criar({ agenteId: dev.id, conversaId: conversaDev!.id, cron: "*/5 * * * *", fusoIana: "UTC", instrucao: "Revisar PRs", fonte: "teste", entregavel: "chat", limitesAprovacao: "sem externos", politicaSemDado: "avisar", proximaExecucao: Date.now() + 300000 });
+
+      const r = await gerirBots(d, { ...ctx, resumo: "Duplicar o Dev 1", acoes: [{ tipo: "duplicar", bot: "Dev 1" }] });
+      expect(r.data).toMatchObject({ ok: true, esperando: [], feitas: [{ i: 0, aviso: "rotinas da cópia vieram pausadas; ative em Rotinas" }] });
+      if (!r.data.ok) return;
+      expect(r.data.instrucao).toContain("Repita os avisos de feitas.");
+      const copia = (await doMarlon(d)).find((a) => a.nome === "Dev 1 (cópia)");
+      expect(await d.repos.rotinas.listarDoAgente(copia!.id)).toMatchObject([{ estado: "pausada" }]);
+      const conversaCopia = await d.repos.conversas.buscarPropriaDoAgente(copia!.id);
+      expect((await d.repos.mensagens.listarDaConversa(conversaCopia!.id)).some((m) => /^Rotina ativa/.test(m.texto))).toBe(false);
+
+      // Pelo card (Nod no manual, a pessoa aprova): as rotinas também vêm pausadas, e o recibo diz isso.
+      await d.repos.agentes.definirModoAprovacao(ctx.agenteId, "manual");
+      const card = await gerirBots(d, { ...ctx, resumo: "Duplicar de novo", acoes: [{ tipo: "duplicar", bot: "Dev 1" }] });
+      if (!card.data.ok || !card.data.decisao_id) throw new Error("sem card");
+      await executar(d, decidirLoteDeBots, { decisaoId: card.data.decisao_id, recusar: false });
+      const segunda = (await doMarlon(d)).find((a) => a.nome === "Dev 1 (cópia 2)");
+      expect(await d.repos.rotinas.listarDoAgente(segunda!.id)).toMatchObject([{ estado: "pausada" }]);
+      expect((await d.repos.mensagens.ultimaDaConversa(ctx.conversaId))?.texto).toContain("✓ Duplicar Dev 1 (rotinas da cópia vieram pausadas; ative em Rotinas)");
+    });
+  });
+
   it("emenda de 2026-10-18 da ADR-059: pôr um bot em total é sempre card, até com o Nod em total; aprovar o card liga", async () => {
     await withRollback(MARLON, async (trx) => {
       const d = depsSobreTrx(trx, MARLON);

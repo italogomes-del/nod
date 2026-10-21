@@ -106,7 +106,8 @@ export type ArgsGerirBots = { resumo: string; acoes: AcaoLote[] };
 export type ResultadoGerirBots =
   | {
       ok: true;
-      feitas: { i: number; tipo: TipoAcaoLote; bot_id: string | null; nome: string }[];
+      /** `aviso`: o que a pessoa precisa saber da ação feita (NOD-289: "rotinas da cópia vieram pausadas"). */
+      feitas: { i: number; tipo: TipoAcaoLote; bot_id: string | null; nome: string; aviso?: string }[];
       esperando: number[];
       falhas: { i: number; erro: string }[];
       decisao_id: string | null;

@@ -97,6 +97,8 @@ export type NovoAgente = {
   inteligencia?: InteligenciaBot;
   duplicadoDe?: string | null;
   confirmado?: boolean;
+  /** NOD-289 (M1): a máquina-alvo (ADR-090) já no INSERT — a cópia da dona herda a do original se a chave estiver viva. */
+  maquinaId?: string | null;
 };
 
 /**
@@ -171,10 +173,10 @@ export function agentesRepo(conn: Conn, escopo: Escopo) {
       const i = a.inteligencia ?? inteligenciaDoLegado(INTELIGENCIA_PADRAO, { harness: a.harness ?? "auto", modelo: a.modelo });
       const d = derivadosDa(i);
       const [l] = await conn<Linha[]>`
-        insert into agentes (tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, modelo, harness, esforco, inteligencia_modo, ordem_ias, escolhas_ia, duplicado_de, confirmado, modo_aprovacao)
+        insert into agentes (tenant_id, id, owner_id, visibility, nome, titulo, descricao, dono, forma, cor, modelo, harness, esforco, inteligencia_modo, ordem_ias, escolhas_ia, duplicado_de, confirmado, maquina_id, modo_aprovacao)
         values (${escopo.tenantId}, ${a.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${visibility}, ${a.nome}, ${a.titulo ?? ""},
           ${a.descricao ?? ""}, ${a.dono}, ${a.forma}, ${a.cor}, ${d.modelo}, ${d.harness}, ${d.esforco}, ${i.modo}, ${i.ordem ? jsonb(conn, i.ordem) : null}, ${jsonb(conn, i.escolhas)},
-          ${a.duplicadoDe ?? null}, ${a.confirmado ?? false}, ${MODO_APROVACAO_INICIAL})
+          ${a.duplicadoDe ?? null}, ${a.confirmado ?? false}, ${a.maquinaId ?? null}, ${MODO_APROVACAO_INICIAL})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraAgente(l) : null;
     },

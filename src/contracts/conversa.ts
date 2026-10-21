@@ -172,6 +172,8 @@ export type AcaoNoLote = AcaoLote & {
   /** O índice da ação que cria o alvo (alvo por "@ref"); null = alvo existente ou criar. */
   alvoDaAcao: number | null;
   erro?: string | null;
+  /** O que a pessoa precisa saber da ação feita (NOD-289: as rotinas da cópia vieram pausadas). */
+  aviso?: string;
 };
 export type PayloadPropostaLoteBots = { kind: "lote_bots"; resumo: string; acoes: AcaoNoLote[]; turnoId?: string };
 

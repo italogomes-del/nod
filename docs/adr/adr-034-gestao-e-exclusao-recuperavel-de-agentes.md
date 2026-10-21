@@ -79,6 +79,16 @@ do clique.
 **Gatilho de reversão.** Se aparecer efeito externo duplicado por rotina copiada ativa (dois envios da
 mesma coisa), volta a regra de copiar as rotinas pausadas, mantendo a cópia de memória e acessos.
 
+**Emenda de 2026-10-20 (NOD-289, auditoria de 15/10).** A cópia da dona vai para a mesma máquina do
+original (`maquina_id`, ADR-090) só se a chave dela estiver viva; revogada ou vencida (ADR-102), ou bot
+de outra pessoa, a cópia nasce sem máquina. Pedida ao Nod (`gerir_bots`, com ou sem card), as rotinas
+da cópia vêm sempre pausadas e o resultado avisa "rotinas da cópia vieram pausadas; ative em Rotinas":
+sem a caixa da dona, ninguém via a rotina rodar em dobro (aplica o gatilho de reversão acima a esse
+caminho). A caixa da dona continua como está. O nome é o primeiro livre entre "X (cópia)",
+"X (cópia 2)"…, dentro de 60 caracteres, comparando a pasta sem maiúsculas com todos os bots (ocultos e
+excluídos inclusive), e a pasta distinta sai junto. O "computador do bot" que fica de fora acima é o de
+computer-use (ADR-037), não a máquina-alvo.
+
 ## Emenda de 2026-09-29 — não lido é o "lido até" da conversa
 
 A marcação manual (`agentes.nao_lido`, 0011) era o único não lido: nada marcava quando o bot respondia,
