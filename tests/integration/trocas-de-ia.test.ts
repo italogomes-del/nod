@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import type { ContaAnunciada } from "../../src/contracts/contas-ia.ts";
 import type { PreferenciaHarness } from "../../src/contracts/harness.ts";
 import type { Inventario } from "../../src/contracts/inventario.ts";
-import { ENTRADA_DA_VOLTA_DA_COTA, entradaDaVoltaDaCota } from "../../src/domain/cota-da-ia.ts";
+import { ENTRADA_DA_VOLTA_DA_COTA, entradaDaVoltaDaCota, MARCA_DO_PEDIDO_ORIGINAL } from "../../src/domain/cota-da-ia.ts";
 import { INTELIGENCIA_PADRAO } from "../../src/domain/inteligencia.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { definirInteligenciaDoBot } from "../../src/use-cases/inteligencia.ts";
@@ -178,6 +178,16 @@ describeIntegracao("trocas de IA (0080, ADR-108)", () => {
       const outraCota = await m.task();
       expect(await m.repos.turnos.acordarEsperasDaCota(m.agenteId, "claude-cli")).toBe(1);
       expect(await ver(outraCota.turnoId)).toMatchObject({ acordarEm: null, harness: "auto" });
+    });
+  });
+
+  it("NOD-310: 'levar' troca o aviso da volta e preserva o pedido original da frente", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const comPedido = await m.task({ entrada: `${entradaDaVoltaDaCota("Claude Code")}${MARCA_DO_PEDIDO_ORIGINAL}implementa a NOD-310` });
+      await m.repos.turnos.levarTasksDoBot({ agenteId: m.agenteId, iaDe: "claude-cli", harness: "codex-cli", modelo: "auto", entradaDaVolta: `${ENTRADA_DA_VOLTA_DA_COTA}Claude Code … passou este trabalho para o Codex.` });
+      const t = (await m.repos.turnos.buscar(comPedido.turnoId))!;
+      expect(t.entradaTexto).toBe(`${ENTRADA_DA_VOLTA_DA_COTA}Claude Code … passou este trabalho para o Codex.${MARCA_DO_PEDIDO_ORIGINAL}implementa a NOD-310`);
     });
   });
 

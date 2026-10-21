@@ -184,6 +184,13 @@ async function procurar(dir: string, profundidade: number, achados: Achados): Pr
   for (const e of entradas) if (e.isDirectory() && e.name !== "node_modules" && !e.name.startsWith(".")) await procurar(join(dir, e.name), profundidade + 1, achados);
 }
 
+/** NOD-310: as worktrees dentro da pasta de uma task (a passagem de bastão lê o estado do git delas). */
+export async function worktreesNaPasta(dir: string): Promise<string[]> {
+  const achados: Achados = { worktrees: [], clones: [] };
+  await procurar(dir, 0, achados);
+  return achados.worktrees;
+}
+
 /**
  * Revisão do #225: há `.git` (arquivo ou pasta) ABAIXO da raiz da worktree, fora de node_modules? Entra em pasta
  * escondida e ignorada (`.claude/worktrees/agent-1` é o caso real). `true` também quando a busca passou do limite.

@@ -11,6 +11,10 @@ import { CHECAGEM_MENSAGENS_MS, RENOVACAO_INDEFINIDO_MS, RENOVACAO_MS, TEXTO_ENT
 import type { Relogio } from "../../shared/types.ts";
 import { INTERVALO_AMOSTRA_MEMORIA_MS, type FonteMemoria } from "./amostrador-memoria.ts";
 import type { Adapter, IdDriver, Registry, RegistroDriver } from "./spi.ts";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { estadoDoGit } from "./estado-do-git.ts";
+import { criarExecutarComando } from "./limpeza-das-tasks.ts";
 
 /**
  * Laço puxar → rodar → renovar → entregar (ADR-021: o app puxa, o servidor nunca disca) sobre uma
@@ -70,9 +74,17 @@ export type OpcoesLaco = {
    * volta com `contaAusente` e o servidor refaz noutra, R6). Ausente esta opção, ou plano sem conta: o registry de sempre.
    */
   registroDaConta?: (plano: PlanoTurno) => Promise<RegistroDriver | "ausente" | null>;
+  /**
+   * NOD-310: o "Estado do branch" da passagem de bastão (só no plano com `entrada.passagem.git`). Ausente = o git e o gh
+   * desta máquina na pasta `~/nod/<pastaDoBot>` (estado-do-git.ts); injetável no teste.
+   */
+  estadoDoGit?: (plano: PlanoTurno) => Promise<string | null>;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
 };
+
+const estadoDoGitPadrao = (plano: PlanoTurno): Promise<string | null> =>
+  estadoDoGit(join(homedir(), "nod", plano.pastaDoBot!), criarExecutarComando(process.env, homedir()));
 
 export type Laco = {
   parar(): Promise<void>;
@@ -336,6 +348,16 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       const capacidades = registro.driver.meta.capacidades ?? capacidadesDe(registro.driver.meta.id);
       aceitando = capacidades.mensagemNoMeio;
       medirGrupo = capacidades.processoProprio;
+      // NOD-310 (emenda da ADR-108 §5): o turno com passagem de bastão leva o estado do git e do PR da pasta da task,
+      // lido nesta máquina agora (o servidor não vê o disco). Vale igual para todo driver. Nunca derruba o turno.
+      if (plano.entrada.passagem?.git && plano.pastaDoBot) {
+        try {
+          const git = await (o.estadoDoGit ?? estadoDoGitPadrao)(plano);
+          if (git) plano = { ...plano, entrada: { ...plano.entrada, texto: `${plano.entrada.texto}\n\n${git}` } };
+        } catch (erro) {
+          log("aviso", "laco_estado_do_git_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
+        }
+      }
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
       o.aoIniciarTurno?.(plano, adapter);

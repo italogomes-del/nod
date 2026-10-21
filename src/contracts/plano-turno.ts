@@ -111,7 +111,12 @@ export type PlanoTurno = {
    * `bifurcar` (definido em 2026-10-07, ADR-083, rede de 2 min): continuar `sessaoCli` numa CÓPIA (`--fork-session` no
    * Claude), porque a original segue com o trabalho promovido. Só vem com harness que declara `bifurcaSessao`.
    */
-  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente; bifurcar?: boolean };
+  /**
+   * `passagem` (definido em 2026-10-20, NOD-310, emenda da ADR-108 §5): o texto já leva a passagem de bastão do servidor
+   * (a task tinha sessão e este turno não a retoma). `git: true` = o executor anexa o "Estado do branch" lido na pasta da
+   * task antes de chamar o driver. Ausente = turno comum; executor antigo ignora.
+   */
+  entrada: { texto: string; sessaoCli: string | null; modelo: string; anexos?: AnexoMeta[]; esforco?: EsforcoAgente; bifurcar?: boolean; passagem?: { git: boolean } };
   /**
    * revisto em 2026-10-01 (ADR-066, "o bot tem o que você deu; o modo decide"): saíram o gate da rotina
    * (`efeitoExternoSoPorAprovacao`, EMENDA 15) e a trava herdada (ADR-058/059). Quem decide quando o bot para e

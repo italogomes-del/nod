@@ -5,7 +5,7 @@ import type { Executor } from "../contracts/evento.ts";
 import type { Confianca } from "../contracts/mensagem.ts";
 import type { MotivoFalha, MotivoInterrupcao, MotivoLocalidade, MotivoSemNovidade } from "../contracts/motivos.ts";
 import type { EstadoTurno, OrigemTurno, Profundidade, SinaisTurno, Turno } from "../contracts/turno.ts";
-import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
+import { ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, MARCA_DO_PEDIDO_ORIGINAL, PREFIXOS_DA_VOLTA_DO_FUNDO, type PortaoDaCota, RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import type { SomaDoDia } from "../domain/custo-do-dia.ts";
 import { modelosPorIa } from "../domain/ia-do-modelo.ts";
 import { ESPERA_MAXIMA_FUNDO_MS } from "../domain/memoria-mac.ts";
@@ -663,7 +663,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const linhas = await conn<{ id: string }[]>`
         update turnos t set harness = ${p.harness}, modelo = ${p.modelo},
           acordar_em = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then null else t.acordar_em end,
-          entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta} else t.entrada_texto end
+          entrada_texto = case when starts_with(t.entrada_texto, ${ENTRADA_DA_VOLTA_DA_COTA}) then ${p.entradaDaVolta}::text || case when strpos(t.entrada_texto, ${MARCA_DO_PEDIDO_ORIGINAL}::text) > 0 then substr(t.entrada_texto, strpos(t.entrada_texto, ${MARCA_DO_PEDIDO_ORIGINAL}::text)) else '' end
+            else t.entrada_texto end
         where t.tenant_id = ${escopo.tenantId} and t.owner_id = ${escopo.pessoaId} and t.agente_id = ${p.agenteId} and t.estado = 'pendente' and t.trabalho_id is not null
           and ${daIa(conn, p.iaDe)}
         returning t.id`;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
 import type { ContaDaPessoa } from "../../../src/domain/contas-da-pessoa.ts";
-import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, entradaDaVoltaDaCota, entradaDoRetornoARefazer, esperaDaCotaNaTela, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
+import { cotaDasIas, cotaDasIasComContas, cotaParaTela, cotaSegura, ehFundo, entradaDaVolta, entradaDaVoltaDaCota, entradaDoRetornoARefazer, entradaLevadaComPedido, esperaDaCotaNaTela, MARCA_DO_PEDIDO_ORIGINAL, iasConhecidas, LEITURA_SEM_HORARIO_VALE_MS, portaoDaCota, RETORNO_DO_LOTE, situacaoDoTurno, tipoParaCota, type TipoParaCota } from "../../../src/domain/cota-da-ia.ts";
 
 const AGORA = Date.UTC(2026, 9, 12, 15, 0);
 const HORA = 3_600_000;
@@ -206,5 +206,12 @@ describe("cotaDasIasComContas (NOD-253)", () => {
 
   it("sem conta da lista na máquina: a regra de antes (a leitura por IA)", () => {
     expect(cotaDasIasComContas({ usos: [uso(0.995)], usosPorConta: [], limites: {}, agora: AGORA, contas: null })).toEqual(cotaDasIas({ usos: [uso(0.995)], limites: {}, agora: AGORA }));
+  });
+});
+
+describe("NOD-310: entradaLevadaComPedido (o dublê do levarTasksDoBot)", () => {
+  it("troca o aviso e preserva o pedido original; sem a marca, só o aviso novo", () => {
+    expect(entradaLevadaComPedido(`aviso velho${MARCA_DO_PEDIDO_ORIGINAL}faz a A1`, "aviso novo")).toBe(`aviso novo${MARCA_DO_PEDIDO_ORIGINAL}faz a A1`);
+    expect(entradaLevadaComPedido("aviso velho", "aviso novo")).toBe("aviso novo");
   });
 });

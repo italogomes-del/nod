@@ -348,7 +348,7 @@ export function fraseDaEsperaDaCota(p: { ia: string; situacao: Exclude<SituacaoD
 }
 
 /** O separador que entradaDaVolta põe entre o aviso da volta e o pedido que ela leva. */
-const MARCA_DO_PEDIDO_ORIGINAL = "\n\nPedido original da frente:\n";
+export const MARCA_DO_PEDIDO_ORIGINAL = "\n\nPedido original da frente:\n";
 
 /**
  * definido em 2026-10-15 (NOD-269, G2): a entrada da volta da cota. Com sessão retomável (a task já rodou nesta IA), a
@@ -359,6 +359,15 @@ const MARCA_DO_PEDIDO_ORIGINAL = "\n\nPedido original da frente:\n";
 export function entradaDaVolta(p: { base: string; sessaoRetomavel: boolean; pedidoOriginal: string | null }): string {
   if (p.sessaoRetomavel || !p.pedidoOriginal || p.pedidoOriginal.trim() === "") return p.base;
   return `${p.base}${MARCA_DO_PEDIDO_ORIGINAL}${p.pedidoOriginal}`;
+}
+
+/**
+ * NOD-310: a entrada nova da task levada ("Levar as tasks", ADR-108) guarda o pedido original que a volta já levava
+ * (o sufixo depois de MARCA_DO_PEDIDO_ORIGINAL). Antes o UPDATE trocava a entrada inteira e o pedido se perdia.
+ */
+export function entradaLevadaComPedido(entradaAtual: string, entradaNova: string): string {
+  const i = entradaAtual.indexOf(MARCA_DO_PEDIDO_ORIGINAL);
+  return i >= 0 ? `${entradaNova}${entradaAtual.slice(i)}` : entradaNova;
 }
 
 /**

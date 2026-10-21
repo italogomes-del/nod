@@ -881,3 +881,56 @@ describe("NOD-245: depois de um `indefinido`, a renovação seguinte não espera
     await laco.parar();
   });
 });
+
+describe("NOD-310: o estado do git na passagem de bastão", () => {
+  function captura() {
+    const entradas: string[] = [];
+    const driver: Driver = {
+      meta: { id: "catcher", locality: "ambos" },
+      async create(): Promise<Instance> {
+        return {
+          sondar: async () => ({ estado: "pronto", versao: "x", em: 0 }),
+          adapter: (plano: PlanoTurno): Adapter => ({
+            async rodarTurno() {
+              entradas.push(plano.entrada.texto);
+              return { desfecho: "sucesso", texto: "ok", sessaoCli: null, sinais: { ...SINAIS_ZERADOS, attempted: true, producedOutput: true }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+            },
+            interromper: async () => {},
+          }),
+          dispose: async () => {},
+        };
+      },
+    };
+    return { driver, entradas };
+  }
+
+  it("com passagem.git, a seção do branch entra na entrada antes do adapter; sem o campo, a entrada fica intacta", async () => {
+    const { driver, entradas } = captura();
+    const comPassagem = { ...planoDeTeste("g1", "PASSAGEM"), pastaDoBot: "Eng 1/task-x" };
+    comPassagem.entrada = { ...comPassagem.entrada, passagem: { git: true } };
+    const semPassagem = { ...planoDeTeste("g2", "comum"), pastaDoBot: "Eng 1/task-y" };
+    const lidos: string[] = [];
+    const ponte = ponteFalsa([comPassagem, semPassagem]);
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driver), pessoaId: "p", machineId: "m1", relogio: Date.now,
+      estadoDoGit: async (p) => { lidos.push(p.turnoId); return "Estado do branch: PR #42 já existe"; },
+      dormir: async () => new Promise((r) => setTimeout(r, 1)),
+    });
+    await esperarAte(() => ponte.entregas.length === 2);
+    await laco.parar();
+    expect(entradas).toEqual(["PASSAGEM\n\nEstado do branch: PR #42 já existe", "comum"]);
+    expect(lidos).toEqual(["g1"]);
+  });
+
+  it("o estado do git que lança não derruba o turno", async () => {
+    const { driver, entradas } = captura();
+    const plano = { ...planoDeTeste("g3", "PASSAGEM"), pastaDoBot: "Eng 1/task-z" };
+    plano.entrada = { ...plano.entrada, passagem: { git: true } };
+    const ponte = ponteFalsa([plano]);
+    const laco = iniciarLaco({ ponte, registry: await registryCom(driver), pessoaId: "p", machineId: "m1", relogio: Date.now, estadoDoGit: async () => { throw new Error("git"); }, dormir: async () => new Promise((r) => setTimeout(r, 1)) });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(entradas).toEqual(["PASSAGEM"]);
+    expect(ponte.entregas[0]?.resultado.desfecho).toBe("sucesso");
+  });
+});

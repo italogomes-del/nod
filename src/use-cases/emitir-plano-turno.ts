@@ -44,6 +44,9 @@ import { contaDoPlano, escolherContaDoTurno, lerContasDaMaquina } from "./contas
 import type { IaComConta } from "../contracts/contas-ia.ts";
 import { conectorPublico } from "./registrar-conector.ts";
 import { ehColega } from "./ver-colegas.ts";
+import { juntarPassagem, montarPassagemDeBastao } from "../domain/passagem-de-bastao.ts";
+import { dadosDaPassagem } from "./passagem-de-bastao.ts";
+import { log } from "../obs/log.ts";
 
 export type EntradaEmitirPlano = {
   turnoId: string;
@@ -429,6 +432,23 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
 
   parcial.workspaceId = workspaceId;
   if (bifurcar) parcial.entrada = { ...parcial.entrada, bifurcar: true };
+  // NOD-310 (emenda da ADR-108 §5): a task que já teve sessão e este turno não a retoma (levada para a outra IA, outra
+  // conta, outra máquina) — a IA nova recebe a passagem de bastão. Um ponto só cobre o clique, o varredor, o seletor e o
+  // R4. Falha ao ler: o plano sai sem ela (nunca derruba a emissão).
+  // Achado 4 do QA do PR #432: a sessão recusada (sessao_rejeitada) é largada em assentar-turno (largarSessao) — o turno
+  // seguinte do trabalho também é uma IA sem o contexto e recebe a passagem.
+  // Achado 1 do Revisor: a leitura dos turnos do trabalho também fica dentro do try.
+  if (trabalho && !sessaoCli && modo !== "ligacao") {
+    try {
+      const teveSessao = !!trabalho.sessaoCli || (await deps.repos.turnos.doTrabalho(trabalho.id)).filter((t) => t.id !== turno.id).at(-1)?.motivoInterrupcao === "sessao_rejeitada";
+      if (teveSessao) {
+        const passagem = montarPassagemDeBastao(await dadosDaPassagem(deps, trabalho, guardados), { entrada: parcial.entrada.texto });
+        parcial.entrada = { ...parcial.entrada, texto: juntarPassagem(parcial.entrada.texto, passagem), passagem: { git: true } };
+      }
+    } catch (erro) {
+      log("aviso", "passagem_de_bastao_falhou", { turno_id: turno.id, trabalho_id: trabalho.id, erro: erro instanceof Error ? erro.name : "desconhecido" });
+    }
+  }
   if (input.ghNaMaquina) {
     // O login do gh serve à dona: só o conector github DELA roda na máquina; o de outra pessoa, nunca.
     const meu = guardados.find((c) => c.slug === SLUG_GITHUB && c.comando === COMANDO_GITHUB_NATIVO && c.ownerId === deps.escopo.pessoaId);

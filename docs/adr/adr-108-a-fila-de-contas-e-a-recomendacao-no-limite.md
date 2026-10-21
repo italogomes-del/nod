@@ -59,6 +59,14 @@ apareceram juntos:
    (fixa naquele turno, modelo pela escolha do bot) e acorda só as esperas da cota (prefixo `ENTRADA_DA_VOLTA_DA_COTA`),
    com uma entrada que diz que a task mudou de IA; o "me chame às" (ADR-086) mantém a hora. A decisão é
    `UPDATE … WHERE decidido_em IS NULL`: o clique e o varredor ao mesmo tempo, um vence e o outro não aplica nada.
+   **Emenda (2026-10-20, NOD-310): a passagem de bastão.** Ao levar a task (clique, varredor, seletor ou R4), o
+   primeiro turno sem a sessão anterior recebe uma passagem de bastão montada pelo nod com os dados do trabalho
+   (pedido, progresso, decisões, erros, efeitos externos) e pelo executor com o estado do git e do PR. Teto ~3k tokens
+   (9 mil caracteres do servidor + 3 mil do git), mais recentes primeiro. Não chama a IA que parou. O gatilho é
+   `trabalho.sessaoCli && !entrada.sessaoCli` fora da ligação (`emitirPlanoTurno`); o plano marca
+   `entrada.passagem.git` e o executor anexa o "Estado do branch" (git e `gh pr list`, 5 s por comando) antes do
+   driver. O "Levar" preserva o "Pedido original da frente" da entrada ao trocar o aviso. Código:
+   `src/domain/passagem-de-bastao.ts`, `src/use-cases/passagem-de-bastao.ts`, `src/adapters/executor/estado-do-git.ts`.
 6. **Trocar a IA do bot pelo seletor com tasks em andamento (R5, E8).** `PUT /agentes/:id/inteligencia` aceita
    `levarTasks?: boolean`, separado no caso de uso antes da validação estrita. A web pergunta "Só daqui em diante"
    (padrão) ou "Levar as tasks também".

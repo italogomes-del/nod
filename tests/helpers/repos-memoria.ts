@@ -34,7 +34,7 @@ import { seguravelPeloMac } from "../../src/domain/memoria-mac.ts";
 import { ateOPrimeiroAnexo, porChegada } from "../../src/domain/ordem-das-falas.ts";
 import type { PedidoAberto } from "../../src/domain/triagem.ts";
 import { MOTIVOS_DE_QUEDA, MOTIVOS_FALHA_SEM_QUEDA } from "../../src/domain/pedido-parado.ts";
-import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
+import { cotaSegura, ehVoltaDoFundo, ENTRADA_DA_RETOMADA_DA_QUEDA, ENTRADA_DA_VOLTA_DA_COTA, entradaLevadaComPedido, tipoParaCota, type PortaoDaCota } from "../../src/domain/cota-da-ia.ts";
 import { MODO_APROVACAO_INICIAL } from "../../src/domain/modo-aprovacao.ts";
 import { harnessFixado } from "../../src/domain/harness.ts";
 import { iaDoModelo } from "../../src/domain/ia-do-modelo.ts";
@@ -1389,7 +1389,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         const ids: string[] = [];
         for (const t of tasksNaIa(p.agenteId, p.iaDe)) {
           const daCota = t.entradaTexto.startsWith(ENTRADA_DA_VOLTA_DA_COTA);
-          Object.assign(t, { harness: p.harness, modelo: p.modelo, ...(daCota ? { acordarEm: null, entradaTexto: p.entradaDaVolta } : {}) });
+          Object.assign(t, { harness: p.harness, modelo: p.modelo, ...(daCota ? { acordarEm: null, entradaTexto: entradaLevadaComPedido(t.entradaTexto, p.entradaDaVolta) } : {}) });
           ids.push(t.id);
         }
         return ids;
