@@ -146,15 +146,20 @@ porque o repo é privado e os minutos do plano Free acabaram. Ela tem três runn
 que sobe o Postgres na porta 5434 do host). Fica na rede `nod-ci`, separada da `nod-vpc`, sem service
 account; o deploy se autentica pelo WIF, como antes. O `desktop-release` continua no runner do GitHub.
 
+Desde 2026-10-21 há uma segunda VM igual, `nod-ci-runner-2`, com `nod-ci-3` (label `nod-ci`) e
+`nod-ci-integracao-2` (label `nod-integracao`): a integração era o gargalo, com PRs de bots esperando na fila do
+único runner com Postgres. Cada VM tem no máximo um runner de integração, por causa da porta 5434.
+
 ```bash
 # Criar ou recriar (idempotente; precisa do gh com admin no repo)
 infra/gcp/runner/provisionar-runner.sh
+RUNNER_VM=nod-ci-runner-2 RUNNERS="nod-ci-3:nod-ci nod-ci-integracao-2:nod-integracao" infra/gcp/runner/provisionar-runner.sh
 # Entrar na VM e ver os runners
 gcloud compute ssh nod-ci-runner --zone=southamerica-east1-b --tunnel-through-iap --project=nod-producao
 sudo systemctl list-units 'actions.runner.*'
 ```
 
-Para recriar do zero: apague a VM, remova os três runners em Settings › Actions › Runners e rode o script.
+Para recriar do zero: apague a VM, remova os runners dela em Settings › Actions › Runners e rode o script.
 
 ## Operar
 
@@ -176,4 +181,4 @@ num serviço externo (UptimeRobot, Better Stack). O passo a passo e o reinício 
 em [runbook-producao.md](runbook-producao.md#7-monitor-externo-e-reinício-automático).
 
 Custo esperado, coberto pelos créditos do programa GFS: VM `e2-medium`, Cloud SQL `db-custom-1-3840`
-com 10 GB SSD, IP fixo e tráfego baixo, mais o runner do CI (`e2-standard-4`, disco de 100 GB).
+com 10 GB SSD, IP fixo e tráfego baixo, mais as duas VMs de runner do CI (`e2-standard-4`, disco de 100 GB cada).

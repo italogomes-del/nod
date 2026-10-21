@@ -10,8 +10,12 @@ G="${GCLOUD:-gcloud}"
 gc() { "$G" --project="$PROJETO" --quiet "$@"; }
 passo() { printf '\n== %s\n' "$*"; }
 
-RUNNER_VM=nod-ci-runner
-# definido em 2026-10-06: 4 vCPU / 16 GB para os 3 jobs do ci em paralelo; dá para subir sem recriar.
+# 1ª VM (2026-10-06): nod-ci-runner com nod-ci-1, nod-ci-2 e nod-ci-integracao.
+# 2ª VM (2026-10-21): a integração era o gargalo (um só runner com Postgres), então ela tem mais um de cada:
+#   RUNNER_VM=nod-ci-runner-2 RUNNERS="nod-ci-3:nod-ci nod-ci-integracao-2:nod-integracao" infra/gcp/runner/provisionar-runner.sh
+RUNNER_VM="${RUNNER_VM:-nod-ci-runner}"
+RUNNERS="${RUNNERS:-nod-ci-1:nod-ci nod-ci-2:nod-ci nod-ci-integracao:nod-integracao}"
+# definido em 2026-10-06: 4 vCPU / 16 GB para 3 jobs do ci em paralelo; dá para subir sem recriar.
 RUNNER_TIPO="${RUNNER_TIPO:-e2-standard-4}"
 RUNNER_REDE=nod-ci
 RUNNER_SUBREDE=nod-ci-sa-east1
@@ -35,13 +39,14 @@ if ! gc compute instances describe "$RUNNER_VM" --zone="$ZONA" >/dev/null 2>&1; 
     --boot-disk-size=100GB --boot-disk-type=pd-balanced \
     --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring \
     --metadata-from-file=startup-script=./startup.sh \
-    --metadata="github-repo=$GITHUB_REPO,runner-token=$TOKEN"
+    --metadata="^;^github-repo=$GITHUB_REPO;runner-token=$TOKEN;runners=$RUNNERS"
 fi
 
 passo "Runners registrados"
+NOMES=$(for r in $RUNNERS; do printf '"%s",' "${r%%:*}"; done)
 for _ in $(seq 1 60); do
-  n=$(gh api "repos/$GITHUB_REPO/actions/runners" -q '[.runners[]|select(.name|startswith("nod-ci-"))|select(.status=="online")]|length')
-  [ "$n" -ge 3 ] && break
+  n=$(gh api "repos/$GITHUB_REPO/actions/runners" -q "[.runners[]|select(.name|IN(${NOMES%,}))|select(.status==\"online\")]|length")
+  [ "$n" -ge "$(wc -w <<<"$RUNNERS")" ] && break
   sleep 10
 done
 gh api "repos/$GITHUB_REPO/actions/runners" -q '.runners[]|"\(.name) \(.status) \([.labels[].name]|join(","))"'

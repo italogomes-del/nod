@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Startup da VM do runner (provisionar-runner.sh). Roda como root a cada boot; só instala e registra uma vez.
-# Três runners na mesma VM para os 3 jobs do ci rodarem em paralelo:
+# Os runners da VM vêm da metadata "runners" (nome:label separados por espaço). Sem ela, os três da 1ª VM:
 #   nod-ci-1 e nod-ci-2 (label nod-ci): lint, unit e deploy;
-#   nod-ci-integracao (label nod-integracao): o único que sobe o Postgres na porta 5434 do host, então dois
-#   jobs de integração nunca disputam a porta.
+#   nod-ci-integracao (label nod-integracao): sobe o Postgres na porta 5434 do host, então cada VM tem no
+#   máximo um runner de integração e dois jobs de integração nunca disputam a porta.
 set -euo pipefail
 MARCA=/var/lib/nod-runner-pronto
 [ -f "$MARCA" ] && exit 0
@@ -11,6 +11,7 @@ MARCA=/var/lib/nod-runner-pronto
 meta() { curl -fsS -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"; }
 REPO=$(meta github-repo)
 TOKEN=$(meta runner-token)
+RUNNERS=$(meta runners 2>/dev/null || echo "nod-ci-1:nod-ci nod-ci-2:nod-ci nod-ci-integracao:nod-integracao")
 VERSAO=2.338.0
 
 export DEBIAN_FRONTEND=noninteractive
@@ -34,9 +35,7 @@ registrar() { # nome label
   fi
   (cd "$dir" && ./svc.sh install runner && ./svc.sh start)
 }
-registrar nod-ci-1 nod-ci
-registrar nod-ci-2 nod-ci
-registrar nod-ci-integracao nod-integracao
+for r in $RUNNERS; do registrar "${r%%:*}" "${r#*:}"; done
 
 # Limpeza semanal de imagens e volumes que os jobs deixam para trás.
 echo '0 4 * * 0 root docker system prune -af --volumes >/dev/null 2>&1' >/etc/cron.d/nod-docker-prune
