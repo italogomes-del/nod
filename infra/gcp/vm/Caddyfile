@@ -8,7 +8,9 @@
 	}
 }
 
-{$NOD_DOMINIO} {
+# NOD-173 (2026-10-21): com o domínio definitivo, o endereço provisório <ip-com-traços>.sslip.io continua servido
+# (NOD_ENDERECO_PROVISORIO, vazio sem domínio): os Macs da preview e da 0.4.0 têm ele gravado e só trocam ao reconectar.
+{$NOD_DOMINIO} {$NOD_ENDERECO_PROVISORIO} {
 	# As métricas levam tenant_id e pessoa_id: ficam só dentro da VM (definido em 2026-10-04, plano do modo ligação).
 	@metricas path /metrics /api/metrics
 	respond @metricas 404

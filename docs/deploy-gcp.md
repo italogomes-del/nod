@@ -134,6 +134,10 @@ derivado do IP fixo `nod-ip`. Para trocar:
    emite o certificado novo.
 4. No app do Mac, conecte de novo com o endereço novo.
 
+Com o domínio preenchido, o Caddy continua servindo também o `<ip-com-traços>.sslip.io` no mesmo site
+(`NOD_ENDERECO_PROVISORIO`, montado pelo `deploy.sh`), para os Macs que ainda têm o endereço antigo gravado. O login
+Google pelo endereço antigo volta para o domínio novo, porque o callback é um só.
+
 ## Runner do CI
 
 Desde 2026-10-06 o `ci` e o `deploy` rodam num runner próprio, a VM `nod-ci-runner` (`e2-standard-4`),

@@ -15,11 +15,16 @@ source ./config.env
 
 segredo() { gcloud secrets versions access latest --secret="$1" --project="$PROJETO"; }
 
+IP_PUBLICO="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)"
+PROVISORIO="${IP_PUBLICO//./-}.sslip.io"
+# Sem domínio, o provisório é o endereço. Com domínio, o Caddy serve os dois (NOD-173): Macs antigos têm o provisório.
 if [ -z "${NOD_DOMINIO:-}" ]; then
-  IP_PUBLICO="$(curl -fsS -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)"
-  NOD_DOMINIO="${IP_PUBLICO//./-}.sslip.io"
+  NOD_DOMINIO="$PROVISORIO"
+  NOD_ENDERECO_PROVISORIO=""
+else
+  NOD_ENDERECO_PROVISORIO="$PROVISORIO"
 fi
-export NOD_DOMINIO
+export NOD_DOMINIO NOD_ENDERECO_PROVISORIO
 export NOD_IMAGEM="$REGISTRO/nod:$TAG"
 
 GOOGLE_ID="$(segredo nod-google-client-id 2>/dev/null || true)"

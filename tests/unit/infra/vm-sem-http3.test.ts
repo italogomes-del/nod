@@ -23,6 +23,13 @@ describe("VM sem HTTP/3 (NOD-254)", () => {
     expect(caddy).not.toMatch(/\bh3\b/);
   });
 
+  it("Caddyfile serve o domínio e o endereço provisório no mesmo site (NOD-173)", () => {
+    const caddy = semComentarios(ler("infra/gcp/vm/Caddyfile"));
+    expect(caddy).toMatch(/^\{\$NOD_DOMINIO\} \{\$NOD_ENDERECO_PROVISORIO\} \{$/m);
+    expect(semComentarios(ler("infra/gcp/vm/compose.yml"))).toMatch(/NOD_ENDERECO_PROVISORIO: \$\{NOD_ENDERECO_PROVISORIO:-\}/);
+    expect(semComentarios(ler("infra/gcp/vm/deploy.sh"))).toMatch(/export NOD_DOMINIO NOD_ENDERECO_PROVISORIO/);
+  });
+
   it("compose.yml não publica nenhuma porta UDP", () => {
     const compose = semComentarios(ler("infra/gcp/vm/compose.yml"));
     expect(compose).toMatch(/"443:443"/);

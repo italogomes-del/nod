@@ -30,6 +30,7 @@ services:
       - "443:443"
     environment:
       NOD_DOMINIO: ${NOD_DOMINIO:?defina NOD_DOMINIO}
+      NOD_ENDERECO_PROVISORIO: ${NOD_ENDERECO_PROVISORIO:-}
     volumes:
       - /opt/nod/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
