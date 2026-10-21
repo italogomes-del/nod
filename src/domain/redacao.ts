@@ -34,6 +34,10 @@ export type ChaveRedacao =
   | "cota-no-limite-rotina-nao-rodou"
   | "pedido-a-colega-espera-cota"
   | "retorno-do-lote-caiu"
+  | "fundo-espera-maquina"
+  | "fundo-nova-tentativa"
+  | "fundo-desistiu"
+  | "rotina-nao-rodou"
   | "fala-no-limite-espera"
   | "ia-pronta-noutra-maquina"
   | "conta-fora-da-maquina"
@@ -109,6 +113,13 @@ const CATALOGO: Record<ChaveRedacao, string> = {
   "pedido-a-colega-espera-cota": "{agente} está sem cota do {ia}. Seu pedido espera e volta sozinho {quando}.",
   // definido em 2026-10-15 (NOD-258): o retorno do lote caiu de novo depois de refeito uma vez; os resumos não somem.
   "retorno-do-lote-caiu": "O retorno do lote caiu duas vezes e não foi refeito de novo. Os resumos ficaram em cada frente: {frentes}.",
+  // definido em 2026-10-20 (NOD-309): o fundo espera por toda queda, com UM aviso por cadeia. {pedido} já com artigo
+  // ("Este pedido", "Esta frente", "Esta execução da rotina"); {quando} = "às 14:30" (quandoDaFrase).
+  "fundo-espera-maquina": "{maquina} está sem contato. {pedido} fica na fila e retoma quando o Mac voltar, de onde parou.",
+  "fundo-nova-tentativa": "O serviço do {ia} está instável. {pedido} tenta de novo {quando}: tentativa {tentativa} de {maximo}.",
+  "fundo-desistiu": "{pedido} caiu ({motivo}) e parou de tentar: {porque}. Peça de novo quando quiser.",
+  // NOD-309: a janela que nenhuma queda pode rodar a tempo — uma linha por janela, na conversa da rotina e no histórico.
+  "rotina-nao-rodou": "Não rodou · {motivo}, volta {quando}. A rotina segue a agenda.",
   // definido em 2026-10-15 (NOD-268): a fala da pessoa passou do teto de reenvios (ou todas as IAs da máquina do bot estão
   // no limite) e espera a hora do limite, com UMA linha, em vez de girar de IA em IA.
   "fala-no-limite-espera": "O {ia} está no limite da assinatura. Sua mensagem espera e volta sozinha {quando}.",

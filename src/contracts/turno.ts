@@ -79,6 +79,8 @@ export type Turno = {
   acordarEm?: number | null; // ADR-086: a volta marcada ("me chame às 16:00") — a fila só a entrega a partir daqui
   /** NOD-272 (0088): a pessoa está olhando ("Testar agora", "Permitir e rodar agora" e as frentes deles) — conta como conversa na cota. */
   pessoaEsperando?: boolean;
+  /** NOD-309 (0098): quantas vezes a cadeia deste turno já caiu por erro transitório do provedor. Ausente = 0. */
+  tentativasTransitorias?: number;
   /**
    * definido em 2026-10-15 (NOD-258): a regra que criou o turno (`turnos.decidido_por`). Só uma é lida hoje: o retorno do
    * lote (RETORNO_DO_LOTE, domain/cota-da-ia.ts), que é fundo para a cota sem coluna nova. Ausente = não lido.

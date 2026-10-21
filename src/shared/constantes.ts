@@ -127,6 +127,16 @@ export const ORCAMENTO_CONECTOR_MS = 30_000;
 export const RETRY_AFTER_MAX_MS = 5_000;
 
 /**
+ * Espera no fundo por toda queda (NOD-309, emenda da ADR-045). definido em 2026-10-20: o erro transitório do provedor
+ * (sobrecarga, 5xx, rede) volta depois de ~1, ~5 e ~15 min (jitter de ±25%, o mesmo dos conectores), no máximo 3 vezes
+ * por cadeia; reinício do servidor e máquina sem contato, até MAX_QUEDAS_POR_PEDIDO (3) quedas; e a cadeia inteira de
+ * pedido de colega, frente e retorno do lote desiste em 24 h (NOD-229). A cota não tem teto aqui: ela tem hora de volta.
+ */
+export const ESPERAS_TRANSITORIAS_NO_FUNDO_MS: readonly number[] = [60_000, 5 * 60_000, 15 * 60_000];
+export const TENTATIVAS_TRANSITORIAS_MAX = 3;
+export const PRAZO_DO_FUNDO_MS = 24 * 60 * 60_000;
+
+/**
  * Sonda logo depois do login do Composio (NOD-208). definido em 2026-10-12: logo depois do `fixarConta`, a
  * sessão do tool router ainda pode não expor as ferramentas do toolkit (só os meta COMPOSIO_*) ou responder
  * devagar — os conectores do Breno ficaram desligados assim e, minutos depois, a mesma chamada respondeu na

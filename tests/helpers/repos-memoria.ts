@@ -1482,6 +1482,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           trabalhoId: t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? (doTenant(b.turnos).find((r) => r.id === t.retomaTurnoId)?.trabalhoId ?? null) : null,
           acordarEm: t.acordarEm ?? null,
           pessoaEsperando: t.pessoaEsperando === true,
+          tentativasTransitorias: t.tentativasTransitorias ?? 0,
         };
         b.turnos.push(turno);
         if (t.maquinaDestaVez) b.maquinaDestaVez.set(turno.id, t.maquinaDestaVez);
@@ -3039,7 +3040,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       const semDonoLote = ({ tenantId: _t, ownerId: _d, ...l }: LoteDeFrentes & { tenantId: string; ownerId: string }): LoteDeFrentes => ({ ...l });
       return {
         async criarLote(n: NovoLote) {
-          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, titulo: n.titulo ?? null, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null };
+          const linha = { tenantId: escopo.tenantId, ownerId: escopo.pessoaId, id: randomUUID(), agenteId: n.agenteId, abertoPorTurnoId: n.abertoPorTurnoId, trabalhoId: n.trabalhoId ?? null, avisarACadaUma: n.avisarACadaUma === true, titulo: n.titulo ?? null, retornoTurnoId: null, criadoEm: agora(), devolvidoEm: null, retornoConcluidoEm: null as number | null };
           b.lotes.push(linha);
           return semDonoLote(linha);
         },
@@ -3084,6 +3085,13 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           const l = meus().find((x) => x.id === loteId && x.devolvidoEm !== null);
           if (!l) return false;
           l.retornoTurnoId = retornoTurnoId;
+          return true;
+        },
+        // NOD-309: como o repo real — o retorno concluído marca o lote entregue, uma vez só.
+        async marcarRetornoConcluido(retornoTurnoId: string, em: number) {
+          const l = meus().find((x) => x.retornoTurnoId === retornoTurnoId && x.devolvidoEm !== null && x.retornoConcluidoEm === null);
+          if (!l) return false;
+          l.retornoConcluidoEm = em;
           return true;
         },
       };

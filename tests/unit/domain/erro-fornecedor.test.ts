@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../../../src/domain/erro-fornecedor.ts";
+import { CLASSES_ERRO_FORNECEDOR, classificarErroFornecedor, ehErroTransitorio, FRASE_ERRO_FORNECEDOR, fraseDoErroFornecedor, fraseDoLimiteDoPlano, horaDaFrase } from "../../../src/domain/erro-fornecedor.ts";
 import { redigir } from "../../../src/domain/redacao.ts";
 import { redigirSegredos } from "../../../src/domain/segredos.ts";
 
@@ -27,17 +27,27 @@ const AMOSTRAS: Record<(typeof CLASSES_ERRO_FORNECEDOR)[number], string[]> = {
     "Your input exceeds the context window of this model. Please adjust your input and try again.",
     "context_length_exceeded",
   ],
-  sobrecarga: [
+  transitorio: [
     'success | API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
     "error_during_execution | Repeated 529 Overloaded errors",
     "unexpected status 503 Service Unavailable: upstream connect error",
+    // NOD-309: 5xx e rede.
+    'success | API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}',
+    "unexpected status 502 Bad Gateway",
+    "API Error: 504 Gateway Timeout",
+    "success | API Error: Connection error. (cause: read ECONNRESET)",
+    "request to https://api.anthropic.com/v1/messages failed, reason: connect ETIMEDOUT 160.79.104.10:443",
+    "socket hang up",
+    "TypeError: fetch failed",
+    "stream disconnected before completion: error sending request",
   ],
   desconhecido: [
     "success | Credit balance is too low",
     // 429 da API não é o plano: sem "usage limit", fica a frase de sempre.
     'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}',
     "error_max_turns",
-    "stream disconnected before completion: error sending request",
+    // "500" solto (contagem de tokens) não é 5xx.
+    "prompt used 500 tokens of cache",
     "user cancelled MCP tool call",
   ],
 };
@@ -58,17 +68,27 @@ describe("erro do fornecedor em classe fechada (NOD-174)", () => {
     }
   });
 
-  it("texto que bate em duas classes segue a ordem login > limite > contexto > sobrecarga", () => {
+  it("texto que bate em duas classes segue a ordem login > limite > contexto > transitório", () => {
     expect(classificarErroFornecedor("529 overloaded; then 401 Unauthorized")).toBe("login_expirado");
     expect(classificarErroFornecedor("usage limit reached; 401 Unauthorized")).toBe("login_expirado");
     expect(classificarErroFornecedor("Overloaded… You've hit your usage limit")).toBe("limite_de_uso");
     expect(classificarErroFornecedor("Overloaded… Prompt is too long")).toBe("contexto_cheio");
   });
 
+  it("NOD-309: só o transitório repete; contexto cheio e login expirado nunca, mesmo junto de um 5xx ou de rede", () => {
+    for (const a of AMOSTRAS.transitorio) expect(ehErroTransitorio(a), a).toBe(true);
+    for (const classe of ["login_expirado", "limite_de_uso", "contexto_cheio", "desconhecido"] as const) {
+      for (const a of AMOSTRAS[classe]) expect(ehErroTransitorio(a), a).toBe(false);
+    }
+    expect(ehErroTransitorio("API Error: 503 Service Unavailable… Prompt is too long")).toBe(false);
+    expect(ehErroTransitorio("fetch failed; OAuth token has expired")).toBe(false);
+    expect(ehErroTransitorio(null)).toBe(false);
+  });
+
   it("a frase sai em pt-BR, com o nome da IA e sem código snake_case nem inglês", () => {
     expect(fraseDoErroFornecedor("claude-cli", AMOSTRAS.login_expirado[0])).toBe("sua conta do Claude Code saiu deste Mac; use Conectar IA para entrar de novo");
     expect(fraseDoErroFornecedor("codex-cli", AMOSTRAS.contexto_cheio[2])).toBe("a conversa ficou longa demais para o Codex; use /compactar e peça de novo");
-    expect(fraseDoErroFornecedor(null, AMOSTRAS.sobrecarga[0])).toBe("o serviço da sua IA está sobrecarregado; tente de novo em alguns minutos");
+    expect(fraseDoErroFornecedor(null, AMOSTRAS.transitorio[0])).toBe("o serviço da sua IA está instável ou fora do ar; tente de novo em alguns minutos");
     for (const harness of ["claude-cli", "codex-cli", null] as const) {
       for (const classe of Object.keys(FRASE_ERRO_FORNECEDOR) as (keyof typeof FRASE_ERRO_FORNECEDOR)[]) {
         const frase = fraseDoErroFornecedor(harness, AMOSTRAS[classe][0])!;

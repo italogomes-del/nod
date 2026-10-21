@@ -60,4 +60,9 @@ export type LoteDeFrentes = {
   retornoTurnoId: string | null;
   criadoEm: EpochMs;
   devolvidoEm: EpochMs | null;
+  /**
+   * NOD-309 (0098): quando o turno de retorno terminou `concluido` — só aí o lote está entregue. `devolvidoEm` é a trava
+   * de quem enfileirou o retorno; enquanto este é nulo, o retorno é refeito em toda queda. Ausente = não lido.
+   */
+  retornoConcluidoEm?: EpochMs | null;
 };

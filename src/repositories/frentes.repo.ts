@@ -14,9 +14,10 @@ interface LinhaLote {
   retorno_turno_id: string | null;
   criado_em: Date;
   devolvido_em: Date | null;
+  retorno_concluido_em: Date | null;
 }
 
-const COLUNAS_LOTE = "id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma, titulo, retorno_turno_id, criado_em, devolvido_em";
+const COLUNAS_LOTE = "id, agente_id, aberto_por_turno_id, trabalho_id, avisar_a_cada_uma, titulo, retorno_turno_id, criado_em, devolvido_em, retorno_concluido_em";
 
 const paraLote = (l: LinhaLote): LoteDeFrentes => ({
   id: l.id,
@@ -28,6 +29,7 @@ const paraLote = (l: LinhaLote): LoteDeFrentes => ({
   retornoTurnoId: l.retorno_turno_id,
   criadoEm: ms(l.criado_em),
   devolvidoEm: msOuNull(l.devolvido_em),
+  retornoConcluidoEm: msOuNull(l.retorno_concluido_em),
 });
 
 export type NovoLote = {
@@ -157,6 +159,18 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
       const r = await conn`
         update lotes_de_frentes set retorno_turno_id = ${retornoTurnoId}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${loteId} and devolvido_em is not null`;
+      return r.count > 0;
+    },
+
+    /**
+     * NOD-309 (0098): o turno de retorno `retornoTurnoId` terminou `concluido` — o lote dele está entregue. Uma vez só: o
+     * segundo assentamento (ou um retorno que já não é o do lote) não muda nada e devolve false.
+     */
+    async marcarRetornoConcluido(retornoTurnoId: string, agora: number): Promise<boolean> {
+      const r = await conn`
+        update lotes_de_frentes set retorno_concluido_em = ${data(agora)}
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and retorno_turno_id = ${retornoTurnoId}
+          and devolvido_em is not null and retorno_concluido_em is null`;
       return r.count > 0;
     },
 

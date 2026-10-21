@@ -6,14 +6,23 @@ import { HARNESSES, type IdHarness } from "../contracts/harness.ts";
  * overloaded") como se fosse fala do bot; agora ele só ESCOLHE a frase em pt-BR, e o cru fica no diagnóstico (ADR-041).
  *
  * O estado e o motivo gravados continuam vindo do protocolo (ADR-009): a classe muda só a frase do aviso. Os padrões
- * mudam sem aviso; o que não casa fica `desconhecido`, e o pior caso é a frase de antes. Sem classe para crédito e rede:
- * sem fixture confiável (fora de escopo na NOD-174; o limite do plano é a NOD-171).
+ * mudam sem aviso; o que não casa fica `desconhecido`, e o pior caso é a frase de antes. Sem classe para crédito: sem
+ * fixture confiável (fora de escopo na NOD-174; o limite do plano é a NOD-171). A rede entrou no `transitorio` (NOD-309).
  */
-export const CLASSES_ERRO_FORNECEDOR = ["login_expirado", "limite_de_uso", "contexto_cheio", "sobrecarga", "desconhecido"] as const;
+export const CLASSES_ERRO_FORNECEDOR = ["login_expirado", "limite_de_uso", "contexto_cheio", "transitorio", "desconhecido"] as const;
 export type ClasseErroFornecedor = (typeof CLASSES_ERRO_FORNECEDOR)[number];
 
 /**
- * Ordem fixa login > limite > contexto > sobrecarga: um texto que bate em duas classes fica com a que a pessoa resolve.
+ * definido em 2026-10-20 (NOD-309): `transitorio` (antes `sobrecarga`) é o erro do provedor que passa sozinho — sobrecarga,
+ * 5xx e corte de rede. Só ele ganha nova tentativa no trabalho de fundo (domain/espera-no-fundo.ts). `contexto_cheio` e
+ * `login_expirado` NUNCA repetem: repetir dá o mesmo, e a frase diz na hora o que a pessoa precisa fazer.
+ */
+export function ehErroTransitorio(erroCru: string | null | undefined): boolean {
+  return classificarErroFornecedor(erroCru) === "transitorio";
+}
+
+/**
+ * Ordem fixa login > limite > contexto > transitório: um texto que bate em duas classes fica com a que a pessoa resolve.
  * NOD-171: o limite do plano no Codex só chega em texto ("You've hit your usage limit", `usage_limit_reached`); no
  * Claude Code o motivo `limite_do_plano` vem do protocolo, e a classe só cobre o turno em que o `rate_limit` faltou.
  * "Rate limit" sozinho é o 429 da API, não o plano: fica de fora. Amostras
@@ -44,10 +53,25 @@ const PADROES: readonly (readonly [Exclude<ClasseErroFornecedor, "desconhecido">
     /exceeds? the (?:model'?s? )?context (?:window|length)/i,
     /maximum context length/i,
   ]],
-  ["sobrecarga", [
+  // NOD-309: sobrecarga, 5xx e rede. O 5xx só com contexto de HTTP ("API Error: 502", "status 503", o nome do status):
+  // um "500" solto pode ser contagem de tokens. Rede: os códigos do Node e do undici e o corte do stream do Codex.
+  ["transitorio", [
     /overloaded/i,
     /\b529\b/,
-    /\b503\b.{0,40}service unavailable/i,
+    /\b50[0234]\b.{0,40}(?:internal server error|bad gateway|service unavailable|gateway time-?out)/i,
+    /\b(?:api error|status(?: code)?|http)[: ]+5\d\d\b/i,
+    /internal server error/i,
+    /bad gateway/i,
+    /service unavailable/i,
+    /gateway time-?out/i,
+    /\bECONNRESET\b/,
+    /\bETIMEDOUT\b/,
+    /\bECONNREFUSED\b/,
+    /\bEAI_AGAIN\b/,
+    /socket hang up/i,
+    /fetch failed/i,
+    /stream disconnected/i,
+    /network error/i,
   ]],
 ];
 
@@ -68,7 +92,7 @@ export const FRASE_ERRO_FORNECEDOR: Readonly<Record<Exclude<ClasseErroFornecedor
   login_expirado: "sua conta {do} saiu deste Mac; use Conectar IA para entrar de novo",
   limite_de_uso: "seu plano {do} atingiu o limite de uso; {confira}",
   contexto_cheio: "a conversa ficou longa demais para {o}; use /compactar e peça de novo",
-  sobrecarga: "o serviço {do} está sobrecarregado; tente de novo em alguns minutos",
+  transitorio: "o serviço {do} está instável ou fora do ar; tente de novo em alguns minutos",
 };
 
 /** A frase pronta, ou null quando a classe é `desconhecido`. Nunca o id cru ("claude-cli"). */

@@ -58,6 +58,7 @@ interface Linha {
   pessoa_esperando: boolean;
   decidido_por: string;
   despachado_em?: Date | null;
+  tentativas_transitorias?: number;
 }
 
 
@@ -65,7 +66,7 @@ interface Linha {
 export type SessaoDoTurno = { sessaoCli: string; executor: string; harness: string | null; contaId: string | null; machineId: string | null };
 
 const COLUNAS =
-  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em";
+  "tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, attempted, rejected, prompt_submitted, produced_output, machine_id, lease_ate, prazo_em, motivo_interrupcao, motivo_falha, sem_novidade_motivo, retoma_turno_id, profundidade, reenvios, parar_solicitado_em, entrada_texto, entrada_anexos, entrada_confianca, custo_usd, modelo, harness, executor, criado_em, mensagem_origem_id, absorvido_por, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, pessoa_esperando, decidido_por, despachado_em, tentativas_transitorias";
 
 function paraTurno(l: Linha): Turno {
   return {
@@ -104,6 +105,7 @@ function paraTurno(l: Linha): Turno {
     pessoaEsperando: l.pessoa_esperando,
     decididoPor: l.decidido_por,
     despachadoEm: msOuNull(l.despachado_em ?? null),
+    tentativasTransitorias: l.tentativas_transitorias ?? 0,
   };
 }
 
@@ -166,6 +168,11 @@ export type NovoTurno = {
    * cópia já nasceu (o `contaminar` posterior vale só para a origem).
    */
   contaminadoDe?: string | null;
+  /**
+   * NOD-309 (0098): quantas vezes a cadeia já caiu por erro transitório do provedor. A retomada passa o da origem + 1;
+   * ausente = 0 (turno novo, ou retomada por outra causa que não conta como transitória).
+   */
+  tentativasTransitorias?: number;
 };
 
 export type Assentamento = {
@@ -231,14 +238,15 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
       const estado: EstadoTurno = t.interrompidoCom ? "interrompido" : "pendente";
       const [l] = await conn<Linha[]>`
         insert into turnos (tenant_id, id, owner_id, conversa_id, agente_id, origem, estado, motivo_interrupcao, prazo_em, profundidade,
-          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em)
+          entrada_texto, entrada_anexos, entrada_confianca, modelo, harness, retoma_turno_id, reenvios, executor, locality_reason, decidido_por, mensagem_origem_id, sob_procuracao_de, ligacao_id, trabalho_id, acordar_em, maquina_desta_vez, pessoa_esperando, contaminado_em, tentativas_transitorias)
         values (${escopo.tenantId}, ${t.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${t.conversaId}, ${t.agenteId}, ${t.origem}, ${estado},
           ${t.interrompidoCom ?? null}, ${data(t.prazoEm)}, ${t.profundidade}, ${t.entradaTexto}, ${(t.entradaAnexos ?? []) as string[]}::uuid[], ${t.entradaConfianca}, ${t.modelo}, ${t.harness ?? "auto"},
           ${t.retomaTurnoId ?? null}, ${t.reenvios ?? 0}, ${t.executor}, ${t.localityReason ?? "tudo_local_nesta_rodada"},
           ${t.decididoPor ?? "regra:localidade"}, ${t.mensagemOrigemId ?? null}, ${t.sobProcuracaoDe ?? null}, ${t.ligacaoId ?? null},
           ${t.trabalhoId !== undefined ? t.trabalhoId : t.retomaTurnoId ? conn`(select r.trabalho_id from turnos r where r.tenant_id = ${escopo.tenantId} and r.id = ${t.retomaTurnoId})` : null},
           ${dataOuNull(t.acordarEm)}, ${t.maquinaDestaVez ?? null}, ${t.pessoaEsperando === true},
-          ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null})
+          ${t.contaminadoDe ? conn`(select o.contaminado_em from turnos o where o.tenant_id = ${escopo.tenantId} and o.id = ${t.contaminadoDe})` : null},
+          ${t.tentativasTransitorias ?? 0})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTurno(l) : null;
     },

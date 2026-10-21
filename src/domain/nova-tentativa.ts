@@ -89,8 +89,13 @@ function esperaBase(tentativa: number): number {
  */
 export function esperaAntes(tentativa: number, aleatorio: number, retryAfterMs?: number): number {
   if (retryAfterMs !== undefined) return Math.max(0, retryAfterMs);
+  return comJitter(esperaBase(tentativa), aleatorio);
+}
+
+/** `baseMs` com jitter de ±25% (`aleatorio` em [0, 1), fora disso é preso nas pontas). Também o backoff do fundo (NOD-309). */
+export function comJitter(baseMs: number, aleatorio: number): number {
   const fator = 1 - JITTER_NOVA_TENTATIVA + 2 * JITTER_NOVA_TENTATIVA * Math.min(Math.max(aleatorio, 0), 1);
-  return Math.round(esperaBase(tentativa) * fator);
+  return Math.round(baseMs * fator);
 }
 
 /**

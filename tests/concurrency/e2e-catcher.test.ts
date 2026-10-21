@@ -524,7 +524,7 @@ describeIntegracao("e2e com catcher: as doze jornadas do fluxo de aceite, sem CL
     const bot = await criarBot("Fornecedor");
     const casos = [
       { erro: "Credit balance is too low", aviso: "Turno interrompido: a IA parou por um erro; tente de novo e, se repetir, relate o problema nesta mensagem." },
-      { erro: "API Error: 529 overloaded", aviso: "Turno interrompido: o serviço da sua IA está sobrecarregado; tente de novo em alguns minutos." },
+      { erro: "API Error: 529 overloaded", aviso: "Turno interrompido: o serviço da sua IA está instável ou fora do ar; tente de novo em alguns minutos." },
     ];
     for (const c of casos) {
       const { turnoId } = await enviar(bot.conversa.id, `veja a planilha [[delta: Vou olhar a planilha.]] [[falha: ${c.erro}]]`);

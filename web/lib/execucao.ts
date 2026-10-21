@@ -26,6 +26,9 @@ const MOTIVO_HUMANO: Readonly<Record<string, string>> = {
   // definido em 2026-10-15 (NOD-274): a janela que não rodou (desfecho 'nao_rodou', MOTIVOS_NAO_RODOU_ROTINA). A de
   // execucao_anterior_aberta (C9) virou 'adiada' na integração com o #335; a linha antiga usa o rótulo acima.
   cota_da_ia: "cota",
+  // NOD-309 (definido em 2026-10-20): o erro transitório do provedor passou da próxima janela. A máquina sem contato e o
+  // reinício usam os rótulos do topo ("não rodou · o servidor reiniciou, volta 14:00").
+  erro_do_provedor: "o serviço da IA ficou instável",
   // definido em 2026-10-15 (NOD-270): a pergunta das voltas sem novidade ficou sem resposta e a janela seguinte seguiu.
   voltas_sem_novidade: "pergunta sem resposta, fechada pela janela seguinte",
   // NOD-251/NOD-275 (definido em 2026-10-15): a máquina recusou o turno no despacho, ou a pessoa pediu Parar.
@@ -69,7 +72,8 @@ export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & 
   // NOD-274: "não rodou · cota, volta 14:00" — a janela que a cota da IA pulou fica visível no histórico.
   if (e.desfecho === "nao_rodou") {
     const motivo = motivoDaExecucao(e);
-    const volta = e.motivo === "cota_da_ia" && e.voltaEm ? `, volta ${horaMinuto(e.voltaEm, fusoIana)}` : "";
+    // NOD-309: toda queda com hora de volta diz a hora (a máquina sem contato não tem: volta quando o Mac voltar).
+    const volta = e.voltaEm ? `, volta ${horaMinuto(e.voltaEm, fusoIana)}` : "";
     return motivo ? `não rodou · ${motivo}${volta}` : "não rodou";
   }
   if (e.desfecho === "bloqueada") {
