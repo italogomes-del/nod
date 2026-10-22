@@ -13,6 +13,7 @@ import { autoriaAgente, evento, PRAZO_DECISAO_PADRAO_MS } from "./autoria-evento
 import { conversaDoBot, enfileirarNoTrabalho } from "./coordenar-trabalhos.ts";
 import type { Deps } from "./tipos.ts";
 import { criarTrabalho } from "./trabalhos.ts";
+import { repoDoGithub } from "../domain/clone-da-maquina.ts";
 
 /**
  * As frentes (definido em 2026-10-12, ADR-099, partes 3/4, issue I2): o dono abre um lote por pedido, com N frentes que
@@ -81,6 +82,8 @@ async function abrirLote(deps: Deps, ctx: ContextoFerramenta, frentes: readonly 
       pessoaEsperando: de?.pessoaEsperando ?? false,
       forma: "frente",
       loteId: lote.id,
+      // NOD-315 (ADR-119): o repo validado vai para o executor preparar o clone da máquina; inválido = como antes.
+      repo: repoDoGithub(f.repo ?? ""),
     });
     events.push(...criados);
     const novo = await deps.repos.turnos.enfileirar({

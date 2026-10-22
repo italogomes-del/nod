@@ -934,3 +934,76 @@ describe("NOD-310: o estado do git na passagem de bastão", () => {
     expect(ponte.entregas[0]?.resultado.desfecho).toBe("sucesso");
   });
 });
+
+describe("NOD-315: o clone da máquina antes do adapter", () => {
+  function captura() {
+    const prompts: string[] = [];
+    let interrupcoes = 0;
+    const driver: Driver = {
+      meta: { id: "catcher", locality: "ambos" },
+      async create(): Promise<Instance> {
+        return {
+          sondar: async () => ({ estado: "pronto", versao: "x", em: 0 }),
+          adapter: (plano: PlanoTurno): Adapter => ({
+            async rodarTurno() {
+              prompts.push(plano.promptSistema);
+              return { desfecho: "sucesso", texto: "ok", sessaoCli: null, sinais: { ...SINAIS_ZERADOS, attempted: true, producedOutput: true }, custoUsd: null, tokens: { entrada: 0, saida: 0, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] };
+            },
+            interromper: async () => { interrupcoes++; },
+          }),
+          dispose: async () => {},
+        };
+      },
+    };
+    return { driver, prompts, interrupcoes: () => interrupcoes };
+  }
+  const comClone = (id: string): PlanoTurno => ({
+    ...planoDeTeste(id, "oi"),
+    promptSistema: "antes SEM depois",
+    cloneDaMaquina: { repo: "gamefik/nod", caminho: "~/nod/.clones/gamefik/nod.git", semClone: "SEM", comClone: "COM" },
+  });
+  const dormir = async () => new Promise<void>((r) => setTimeout(r, 1));
+
+  it("pronto troca o trecho; saída ou exceção deixam o prompt como está e o turno roda; sem o campo nem chama", async () => {
+    const { driver, prompts } = captura();
+    const respostas = [
+      async () => ({ ok: true as const, caminho: "/x", criado: false, ms: 1 }),
+      async () => ({ ok: false as const, motivo: "fetch" as const }),
+      async () => { throw new Error("boom"); },
+    ];
+    const repos: string[] = [];
+    const ponte = ponteFalsa([comClone("c1"), comClone("c2"), comClone("c3"), { ...planoDeTeste("c4", "oi"), promptSistema: "antes SEM depois" }]);
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driver), pessoaId: "p", machineId: "m1", relogio: Date.now, dormir,
+      prepararClone: async (repo) => { repos.push(repo); return respostas.shift()!(); },
+    });
+    await esperarAte(() => ponte.entregas.length === 4);
+    await laco.parar();
+    expect(prompts).toEqual(["antes COM depois", "antes SEM depois", "antes SEM depois", "antes SEM depois"]);
+    expect(repos).toEqual(["gamefik/nod", "gamefik/nod", "gamefik/nod"]);
+    expect(ponte.entregas.map((e) => e.resultado.desfecho)).toEqual(["sucesso", "sucesso", "sucesso", "sucesso"]);
+  });
+
+  it("trecho que não está no prompt: segue intacto (prompt_sem_trecho)", async () => {
+    const { driver, prompts } = captura();
+    const ponte = ponteFalsa([{ ...comClone("c5"), promptSistema: "sem o trecho" }]);
+    const laco = iniciarLaco({ ponte, registry: await registryCom(driver), pessoaId: "p", machineId: "m1", relogio: Date.now, dormir, prepararClone: async () => ({ ok: true, caminho: "/x", criado: false, ms: 1 }) });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(prompts).toEqual(["sem o trecho"]);
+  });
+
+  it("renovação negada durante o preparo aborta o git e interrompe o adapter logo que nasce", async () => {
+    const { driver, interrupcoes } = captura();
+    let sinal: AbortSignal | null = null;
+    const ponte = ponteFalsa([comClone("c6")], () => false);
+    const laco = iniciarLaco({
+      ponte, registry: await registryCom(driver), pessoaId: "p", machineId: "m1", relogio: Date.now, dormir, renovacaoMs: 10,
+      prepararClone: (_repo, signal) => { sinal = signal; return new Promise((ok) => signal.addEventListener("abort", () => ok({ ok: false, motivo: "abortado" }))); },
+    });
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+    expect(sinal!.aborted).toBe(true);
+    expect(interrupcoes()).toBeGreaterThanOrEqual(1);
+  });
+});

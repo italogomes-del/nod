@@ -140,6 +140,71 @@ function comPwd(vars: ReadonlyMap<string, string | null>, dir: string | null): R
   return vars.has("PWD") ? vars : new Map([...vars, ["PWD", dir]]);
 }
 
+/**
+ * definido em 2026-10-22 (NOD-315, ADR-119): o clone da máquina (`~/nod/.clones/<dono>/<nome>.git`) é um só para todos
+ * os bots. Uma frente que apaga o branch de outra, remove a worktree dela ou roda `gc`/`config` nele estraga o trabalho
+ * dos outros. O fetch e o `worktree add` dentro da própria pasta seguem livres: é por eles que a frente trabalha.
+ */
+const CLONE_E_DE_TODOS = "O clone da máquina é de todos os bots: só o nod mexe nele.";
+const OPCOES_QUE_APAGAM_BRANCH = new Set(["-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "-f", "--force"]);
+const WORKTREE_DE_OUTRO = new Set(["remove", "lock", "unlock", "repair"]);
+const MANUTENCAO = new Set(["gc", "prune", "repack", "reflog", "config", "remote", "filter-branch", "filter-repo", "maintenance"]);
+const REFLOG_QUE_SO_LE = new Set(["show", "exists"]);
+const CONFIG_QUE_SO_LE = new Set(["--get", "--get-all", "--get-regexp", "--list", "-l", "get", "list"]);
+const REMOTE_QUE_SO_LE = new Set(["-v", "--verbose", "show", "get-url"]);
+
+/** O branch desta frente (`frente/<slug da pasta>`); fora da pasta de task, nenhum. */
+const branchProprio = (ctx: ContextoDaPasta) => (ctx.daTask ? `frente/${ctx.pastaDoBot.split("/").filter(Boolean).at(-1) ?? ""}` : null);
+const nomeDoBranch = (ref: string) => ref.replace(/^refs\/heads\//, "");
+
+/**
+ * revisto em 2026-10-22 (revisão do #456): o `config` e o `remote` só leem quando a ação vem primeiro. O git lê as opções
+ * depois do nome como argumento: `git config core.bare false --get` GRAVA (o `--get` vira o padrão do valor), e
+ * `git remote -v add x url` adiciona o remoto.
+ */
+function soLe(sub: string, resto: readonly string[]): boolean {
+  if (sub === "reflog") return resto.length === 0 || REFLOG_QUE_SO_LE.has(resto[0]!);
+  if (sub === "config") return CONFIG_QUE_SO_LE.has(resto[0] ?? "");
+  if (sub === "remote") {
+    let k = 0;
+    while (resto[k] === "-v" || resto[k] === "--verbose") k++;
+    return k === resto.length || REMOTE_QUE_SO_LE.has(resto[k]!);
+  }
+  return false;
+}
+
+function cercaDoCloneDaMaquina(sub: string | undefined, resto: readonly string[], alvo: string | null, ctx: ContextoDaPasta, gitDir: string | null = null): string | null {
+  const proprio = branchProprio(ctx);
+  const deOutraFrente = (ref: string) => { const b = nomeDoBranch(ref); return b.startsWith("frente/") && b !== proprio; };
+  if (sub === "branch" && resto.some((a) => OPCOES_QUE_APAGAM_BRANCH.has(a) || (/^-[a-zA-Z]*[dDmMcCf]/.test(a) && !a.startsWith("--")))) {
+    const outro = resto.find((a) => !a.startsWith("-") && deOutraFrente(a));
+    if (outro) return `git branch mexeria em ${outro}, o branch de outra frente. ${CLONE_E_DE_TODOS} Mexa só no seu${proprio ? ` (${proprio})` : ""}.`;
+  }
+  // QA do #456: o update-ref sem -d também regrava o branch de outra frente (`git update-ref refs/heads/frente/x <sha>`).
+  if (sub === "update-ref") {
+    const outro = resto.find((a) => !a.startsWith("-") && deOutraFrente(a));
+    if (outro || resto.includes("--stdin")) return `git update-ref mexeria em ${outro ?? "refs que não deu para conferir"}. ${CLONE_E_DE_TODOS}`;
+  }
+  // QA do #456: o fetch com refspec grava no destino dele (`git fetch origin main:frente/x`, `+HEAD:refs/heads/frente/x`).
+  if (sub === "fetch") {
+    const outro = resto.map((a) => (!a.startsWith("-") && a.includes(":") ? a.slice(a.lastIndexOf(":") + 1) : "")).find((d) => d && deOutraFrente(d));
+    if (outro) return `git fetch gravaria em ${outro}, o branch de outra frente. ${CLONE_E_DE_TODOS} Mexa só no seu${proprio ? ` (${proprio})` : ""}.`;
+  }
+  if (sub === "worktree" && WORKTREE_DE_OUTRO.has(resto[0] ?? "")) {
+    const caminhos = resto.slice(1).filter((a) => !a.startsWith("-"));
+    // Sem caminho, o `repair`/`remove` vale para a worktree em que roda (ou para todas, no clone).
+    const destinos = caminhos.length ? caminhos.map((c) => resolver(c, alvo, ctx.home)) : [alvo];
+    const fora = destinos.find((d) => d === null || !dentro(d, ctx.pastaDoBot));
+    if (fora !== undefined) return `git worktree ${resto[0]} mexeria em ${fora ?? "uma pasta que não deu para conferir"}, fora da sua pasta. ${CLONE_E_DE_TODOS} Remova só a sua worktree; as outras o nod apaga quando a frente acaba.`;
+  }
+  // O repositório em que o comando roda: o `--git-dir`/`GIT_DIR`, quando há, vale mais que o -C/cwd.
+  const repo = gitDir ?? alvo;
+  const noClone = repo !== null && dentro(repo, `${ctx.home}/nod/.clones`);
+  if (!noClone || !sub) return null;
+  if ((MANUTENCAO.has(sub) && !soLe(sub, resto)) || (sub === "worktree" && resto[0] === "prune")) return `git ${sub} mexeria em ${repo}. ${CLONE_E_DE_TODOS} Para atualizar, só git -C <clone> fetch origin.`;
+  return null;
+}
+
 /** Por que este comando mexeria numa pasta de trabalho fora de ~/nod/<bot>, ou null se pode rodar. */
 export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): string | null {
   if (!/\b(git|gh)\b/.test(comando)) return null;
@@ -187,14 +252,21 @@ export function gitForaDaPastaDoBot(comando: string, ctx: ContextoDaPasta): stri
     }
     if (programa !== "git") continue;
     let alvo = dir;
+    // revisão do #456: o repositório pelo `GIT_DIR=` (no próprio comando ou atribuído antes) e pelo `--git-dir`.
+    const gitDirDoAmbiente = s.slice(0, Math.max(0, inicio)).map((w) => ATRIBUICAO.exec(w)).find((m) => m?.[1] === "GIT_DIR")?.[2] ?? vars.get("GIT_DIR") ?? null;
+    let gitDir = gitDirDoAmbiente === null ? null : resolver(gitDirDoAmbiente, alvo, ctx.home);
     let i = 0;
     while (i < args.length && args[i]!.startsWith("-")) {
       const a = args[i]!;
       if (a === "-C" || a === "--work-tree") { alvo = resolver(args[i + 1] ?? "", alvo, ctx.home); i += 2; continue; }
       if (a.startsWith("--work-tree=")) { alvo = resolver(a.slice("--work-tree=".length), alvo, ctx.home); i += 1; continue; }
-      i += a === "--git-dir" || a === "-c" ? 2 : 1;
+      if (a === "--git-dir") { gitDir = resolver(args[i + 1] ?? "", alvo, ctx.home); i += 2; continue; }
+      if (a.startsWith("--git-dir=")) { gitDir = resolver(a.slice("--git-dir=".length), alvo, ctx.home); i += 1; continue; }
+      i += a === "-c" ? 2 : 1;
     }
     const sub = args[i];
+    const cerca = cercaDoCloneDaMaquina(sub, args.slice(i + 1), alvo, ctx, gitDir);
+    if (cerca) return cerca;
     if (sub === "worktree" && (args[i + 1] === "add" || args[i + 1] === "move")) {
       // revisão do #225: o `worktree move <worktree> <destino>` muda onde ela mora — vale a mesma regra do `add`.
       const posicionais = args[i + 1] === "add" ? [caminhoDoWorktreeAdd(args.slice(i + 2))] : args.slice(i + 2).filter((a) => !a.startsWith("-"));

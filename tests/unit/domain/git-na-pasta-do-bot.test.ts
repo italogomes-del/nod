@@ -149,4 +149,71 @@ describe("git que mexe na pasta de trabalho só dentro de ~/nod/<bot> (ADR-065)"
     expect(pedidos).toEqual([]);
     expect((await decidirHook(evento, confirmar)).hookSpecificOutput.permissionDecision).toBe("allow");
   });
+
+  it("NOD-315: o clone da máquina é de todos — branch de outra frente, worktree de fora e manutenção no clone são negados", () => {
+    const H = "/home/nod";
+    const TASK = `${H}/nod/Eng 1/login-safari-abc123`;
+    const C = `${H}/nod/.clones/gamefik/nod.git`;
+    const naTask = (comando: string, cwd: string | null = `${TASK}/nod`) => gitForaDaPastaDoBot(comando, { cwd, pastaDoBot: TASK, home: H, daTask: true });
+    for (const comando of [
+      `git -C ${C} branch -D frente/outra-xyz`,
+      "git branch -d frente/outra-xyz",
+      "git branch -Df frente/outra-xyz",
+      "git branch -m frente/outra-xyz minha",
+      `git -C ${C} update-ref -d refs/heads/frente/outra-xyz`,
+      // QA do #456: sem -d o update-ref também regrava; o fetch com refspec grava no destino.
+      `git -C ${C} update-ref refs/heads/frente/outra-xyz 0123456789012345678901234567890123456789`,
+      `git -C ${C} fetch origin +refs/heads/main:refs/heads/frente/outra-xyz`,
+      "git fetch . HEAD:frente/outra-xyz",
+    ]) expect(naTask(comando), comando).toContain("O clone da máquina é de todos os bots: só o nod mexe nele.");
+    expect(naTask("git branch -D frente/outra-xyz")).toContain("Mexa só no seu (frente/login-safari-abc123)");
+    for (const comando of [
+      `git -C ${C} worktree remove "${H}/nod/Ze 1/outra-task/nod"`,
+      `git -C ${C} worktree remove --force "../../Ze 1/x"`,
+      `git -C ${C} worktree lock "${H}/nod/Ze 1/outra/nod"`,
+      `git -C ${C} worktree repair`,
+      `git -C ${C} worktree prune`,
+      `git -C ${C} gc --prune=now`,
+      `git -C ${C} prune`,
+      `git -C ${C} repack -ad`,
+      `git -C ${C} reflog expire --all`,
+      `git -C ${C} config core.bare false`,
+      `git -C ${C} remote set-url origin https://x`,
+      `cd ${C} && git filter-branch --all`,
+      `git --git-dir ${C} -C ${C} maintenance run`,
+      // revisão do #456: o git lê a opção depois do nome como argumento — estes gravam.
+      `git -C ${C} config core.bare false --get`,
+      `git -C ${C} config core.hooksPath /tmp/x --list`,
+      `git -C ${C} remote -v add outro https://x`,
+      `git -C ${C} remote --verbose set-url origin https://x`,
+      // revisão do #456: o repositório pelo --git-dir e pelo GIT_DIR, com o cwd na pasta da task.
+      `git --git-dir ${C} gc`,
+      `git --git-dir=${C} config core.bare false`,
+      `GIT_DIR=${C} git remote remove origin`,
+      `export GIT_DIR=${C}; git repack -ad`,
+    ]) expect(naTask(comando), comando).toContain("só o nod mexe nele");
+    // O que a frente precisa continua livre.
+    for (const comando of [
+      `git -C ${C} fetch origin`,
+      `git -C ${C} fetch origin main:frente/login-safari-abc123`,
+      "git update-ref refs/heads/frente/login-safari-abc123 HEAD",
+      `git -C ${C} worktree add "${TASK}/nod" -b frente/login-safari-abc123 origin/main`,
+      `git -C ${C} show origin/HEAD:package.json`,
+      `git -C ${C} worktree list`,
+      `git -C ${C} branch -D frente/login-safari-abc123`,
+      `git -C ${C} worktree remove "${TASK}/nod"`,
+      "git worktree remove .",
+      `git -C ${C} config --get remote.origin.url`,
+      `git -C ${C} remote -v`,
+      `git -C ${C} remote -v show origin`,
+      `git -C ${C} config -l`,
+      `git --git-dir=${C} log -1 origin/HEAD`,
+      `git -C ${C} reflog`,
+      "git branch -a",
+      "git branch frente/nova-sub origin/main",
+      "git branch -D feat/minha",
+      "git push origin frente/login-safari-abc123",
+      "git gc",
+    ]) expect(naTask(comando), comando).toBeNull();
+  });
 });

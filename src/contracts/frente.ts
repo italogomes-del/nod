@@ -34,6 +34,11 @@ export type CamposDeFrente = {
   loteId?: string | null;
   /** O que a frente devolveu; null = ainda nada. */
   resumo?: ResumoFrente | null;
+  /**
+   * definido em 2026-10-22 (NOD-315, ADR-119, migração 0102): o `dono/nome` do GitHub da frente (do `abrir_frentes`),
+   * para o executor preparar o clone da máquina. Ausente ou null = sem repo válido: a frente roda como antes.
+   */
+  repo?: string | null;
 };
 
 /** definido em 2026-10-12 (especificação das Partes 3/4): cada texto do resumo até 1000 caracteres. */

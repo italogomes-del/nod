@@ -36,6 +36,7 @@ interface Linha {
   forma: FormaTrabalho;
   lote_id: string | null;
   resumo: ResumoFrente | null;
+  repo: string | null;
   criado_em: Date;
   iniciado_em: Date | null;
   terminado_em: Date | null;
@@ -48,7 +49,7 @@ interface Linha {
 const TETO_COM_CODIGOS = 10_000;
 
 const COLUNAS =
-  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, custo_parcial, pessoa_esperando, forma, lote_id, resumo, criado_em, iniciado_em, terminado_em";
+  "tenant_id, id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id, depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, memoria_mb, custo_usd, custo_parcial, pessoa_esperando, forma, lote_id, resumo, repo, criado_em, iniciado_em, terminado_em";
 
 const paraTrabalho = (l: Linha): Trabalho => ({
   tenantId: l.tenant_id,
@@ -73,6 +74,7 @@ const paraTrabalho = (l: Linha): Trabalho => ({
   forma: l.forma,
   loteId: l.lote_id,
   resumo: l.resumo,
+  ...(l.repo ? { repo: l.repo } : {}),
   criadoEm: ms(l.criado_em),
   iniciadoEm: msOuNull(l.iniciado_em),
   terminadoEm: msOuNull(l.terminado_em),
@@ -100,6 +102,8 @@ export type NovoTrabalho = {
   /** ADR-099 (0071): `frente` trabalha por baixo do dono; ausente = `task`. Com `loteId`, a frente nasce no lote. */
   forma?: FormaTrabalho;
   loteId?: string | null;
+  /** NOD-315 (0102): o `dono/nome` do GitHub da frente, já validado (`repoDoGithub`). */
+  repo?: string | null;
 };
 
 /** O que a faixa, as listas e o prompt mostram além da linha: lido junto, numa consulta. */
@@ -153,11 +157,11 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
     async criar(n: NovoTrabalho): Promise<Trabalho | null> {
       const [l] = await conn<Linha[]>`
         insert into trabalhos (tenant_id, id, owner_id, agente_id, conversa_id, titulo, origem, pedido_por_agente_id, rotina_id, trabalho_mae_id,
-          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando, forma, lote_id)
+          depois_de_trabalho_id, estado, sessao_cli, sessao_harness, sessao_executor, pasta, iniciado_em, pessoa_esperando, forma, lote_id, repo)
         values (${escopo.tenantId}, ${n.id ?? conn`gen_random_uuid()`}, ${escopo.pessoaId}, ${n.agenteId}, ${n.conversaId}, ${n.titulo}, ${n.origem},
           ${n.pedidoPorAgenteId ?? null}, ${n.rotinaId ?? null}, ${n.trabalhoMaeId ?? null}, ${n.depoisDeTrabalhoId ?? null}, ${n.estado ?? "na_fila"},
           ${n.sessaoCli ?? null}, ${n.sessaoHarness ?? null}, ${n.sessaoCli ? (n.sessaoExecutor ?? null) : null}, ${n.pasta ?? null}, ${n.iniciadoEm === undefined || n.iniciadoEm === null ? null : data(n.iniciadoEm)}, ${n.pessoaEsperando === true},
-          ${n.forma ?? "task"}, ${n.loteId ?? null})
+          ${n.forma ?? "task"}, ${n.loteId ?? null}, ${n.repo ?? null})
         returning ${conn.unsafe(COLUNAS)}`;
       return l ? paraTrabalho(l) : null;
     },

@@ -187,8 +187,8 @@ async function sumiuDeVezEmNod(caminho: string, raiz: string, raizReal: string):
  * `locked`) — sem rodar o git, que num `.git` quebrado sobe para o repositório de cima e lista as worktrees de outro.
  * null = não deu para ler tudo (dúvida).
  */
-async function registrosDoClone(clone: string): Promise<{ caminho: string; travada: boolean }[] | null> {
-  const registros = join(clone, ".git", "worktrees");
+async function registrosDoClone(clone: string, bare = false): Promise<{ caminho: string; travada: boolean }[] | null> {
+  const registros = bare ? join(clone, "worktrees") : join(clone, ".git", "worktrees");
   let nomes: string[];
   try { nomes = await readdir(registros); } catch (e) { return naoEstaLa(e) ? [] : null; }
   const lista: { caminho: string; travada: boolean }[] = [];
@@ -235,6 +235,27 @@ async function algumCloneRegistra(raiz: string, alvos: ReadonlySet<string>): Pro
 }
 
 /**
+ * NOD-315 (ADR-119): algum clone da máquina (`<raiz>/.clones/<dono>/<nome>.git`, bare) registra a worktree? É o clone
+ * recriado por estar quebrado (o executor copia `worktrees/` para o novo e roda `worktree repair`). Na dúvida = sim.
+ */
+async function algumBareRegistra(raiz: string, alvos: ReadonlySet<string>): Promise<boolean> {
+  const clones = join(raiz, ".clones");
+  let donos: string[];
+  try { donos = await readdir(clones); } catch (e) { return !naoEstaLa(e); }
+  for (const dono of donos) {
+    if (dono.startsWith(".")) continue;
+    let nomes: string[];
+    try { nomes = await readdir(join(clones, dono)); } catch (e) { if (naoEstaLa(e)) continue; return true; }
+    for (const nome of nomes) {
+      if (nome.startsWith(".") || !nome.endsWith(".git")) continue;
+      const lista = await registrosDoClone(join(clones, dono, nome), true);
+      if (lista === null || lista.some((w) => alvos.has(join(w.caminho, ".git")))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * ADR-106 (definido em 2026-10-15): a worktree `wt` aponta (`gitdir:` do arquivo `.git`) para um clone dentro de `raiz`
  * (`~/nod`) que não existe mais? Na VM dos bots, em 15/10, uma task tinha apagado o clone `nod` de outra: a worktree que
  * sobrou dava `erro` no `git rev-parse` a cada passada e segurava a pasta para sempre (`Ada/…-169c93`, e cinco da
@@ -252,11 +273,16 @@ export async function cloneSumiu(wt: string, raiz: string): Promise<boolean> {
   const m = /^gitdir:\s*(.+)$/m.exec(await readFile(join(wt, ".git"), "utf8").catch(() => ""));
   if (!m) return false;
   const gitdir = resolve(wt, m[1]!.trim());
-  if (basename(dirname(gitdir)) !== "worktrees" || basename(dirname(dirname(gitdir))) !== ".git") return false;
+  if (basename(dirname(gitdir)) !== "worktrees") return false;
+  const repo = dirname(dirname(gitdir));
+  // NOD-315 (ADR-119): o gitdir da worktree do clone da máquina é `<raiz>/.clones/<dono>/<nome>.git/worktrees/<n>`.
+  const doBare = basename(repo).endsWith(".git") && basename(repo) !== ".git" && (dentroDe(repo, join(raiz, ".clones")) || dentroDe(repo, join(await realpath(raiz).catch(() => raiz), ".clones")));
+  if (basename(repo) !== ".git" && !doBare) return false;
   const raizReal = await realpath(raiz).catch(() => null);
-  if (raizReal === null || !(await sumiuDeVezEmNod(dirname(dirname(gitdir)), raiz, raizReal))) return false;
+  if (raizReal === null || !(await sumiuDeVezEmNod(repo, raiz, raizReal))) return false;
   const wtReal = await realpath(wt).catch(() => wt);
-  return !(await algumCloneRegistra(raizReal, new Set([join(wt, ".git"), join(wtReal, ".git")])));
+  const alvos = new Set([join(wt, ".git"), join(wtReal, ".git")]);
+  return !(await algumCloneRegistra(raizReal, alvos)) && !(await algumBareRegistra(raizReal, alvos));
 }
 
 /**

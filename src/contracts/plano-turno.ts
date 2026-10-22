@@ -104,6 +104,13 @@ export type PlanoTurno = {
    */
   promptSistemaPartes?: { estavel: string; volatil: string };
   /**
+   * definido em 2026-10-22 (NOD-315, ADR-119): a frente na máquina Linux com repo e GitHub concedido. O executor prepara o
+   * clone bare `caminho` (`~/nod/.clones/<dono>/<nome>.git`) antes do turno e, se der certo, troca `semClone` por
+   * `comClone` no prompt; se cair numa saída, o prompt fica como está e o bot clona na pasta dele. Executor antigo ignora
+   * o campo: o prompt já vem com `semClone`.
+   */
+  cloneDaMaquina?: { repo: string; caminho: string; semClone: string; comClone: string };
+  /**
    * `anexos` (ADR-046): metadados dos arquivos da mensagem deste turno; o driver baixa os bytes em
    * GET interno/anexos/:id com o token do turno. Ausente = nenhum (planos antigos e a maioria dos turnos).
    */

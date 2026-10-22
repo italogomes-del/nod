@@ -101,8 +101,13 @@ export function branchDaFrente(pastaDaFrente: string): string {
  * #845 e cancelavam a CI umas das outras. A saída é de forma, não trava (o hook não muda): cada frente na própria
  * worktree e no próprio branch, a partir do `branch_base`; empurra só o dela e só com autorização; o dono integra.
  */
-export function worktreeDaFrente(pastaDaFrente: string): string {
-  return `Para mexer num repositório, trabalhe numa worktree dentro da pasta desta frente, num branch só seu, a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${pastaDaFrente}/<repo> -b ${branchDaFrente(pastaDaFrente)} <branch_base> (o branch de onde a entrada mandou partir; sem ele, origin/main). Commite só nesse branch e nunca empurre um branch que você não criou — nem o do PR que o pedido citar: nele quem empurra é o dono, depois de integrar. Empurre o seu branch ou abra PR só se a entrada disser que o dono autorizou; com ou sem isso, devolva o branch e o SHA no devolver_resumo. Quando a frente acaba, o nod apaga a worktree que não tem alteração por commitar (o branch fica no clone); a worktree fora desta pasta e o git que troca de branch ou grava fora dela são negados, para não atropelar o trabalho dela e dos colegas.`;
+export function worktreeDaFrente(pastaDaFrente: string, cloneDaMaquina?: string): string {
+  // revisto em 2026-10-22 (NOD-315, ADR-119): com o clone da máquina (bare), a worktree nasce dele e a base é a ref remota
+  // (origin/<branch_base>): no bare o branch nu não existe. O fetch quem fez foi o nod, antes do turno.
+  const deOnde = cloneDaMaquina
+    ? `a partir desse clone: git -C ${cloneDaMaquina} worktree add ~/nod/${pastaDaFrente}/<repo> -b ${branchDaFrente(pastaDaFrente)} origin/<branch_base> (o branch de onde a entrada mandou partir; sem ele, origin/HEAD). `
+    : `a partir do clone que ela já tem: git -C <clone> fetch origin && git -C <clone> worktree add ~/nod/${pastaDaFrente}/<repo> -b ${branchDaFrente(pastaDaFrente)} <branch_base> (o branch de onde a entrada mandou partir; sem ele, origin/main). `;
+  return `Para mexer num repositório, trabalhe numa worktree dentro da pasta desta frente, num branch só seu, ${deOnde}Commite só nesse branch e nunca empurre um branch que você não criou — nem o do PR que o pedido citar: nele quem empurra é o dono, depois de integrar. Empurre o seu branch ou abra PR só se a entrada disser que o dono autorizou; com ou sem isso, devolva o branch e o SHA no devolver_resumo. Quando a frente acaba, o nod apaga a worktree que não tem alteração por commitar (o branch fica no clone); a worktree fora desta pasta e o git que troca de branch ou grava fora dela são negados, para não atropelar o trabalho dela e dos colegas.`;
 }
 
 /** definido em 2026-10-12 (ADR-099, I4): o lembrete na linha "Frente atual", com ou sem terminal. */
@@ -113,7 +118,9 @@ export const BRANCH_NA_FRENTE_ATUAL = "Num repositório, o seu trabalho fica no 
  * frentes estão no mesmo clone: integrar é um merge na própria worktree, sem push; e só quem integra empurra no branch
  * do PR. `pode_empurrar` é para a frente que entrega o próprio PR, nunca para duas no mesmo branch.
  */
-export const DONO_INTEGRA = "Num repositório, dê a cada frente o repo e o branch_base de onde ela parte; cada uma trabalha no próprio branch (frente/…), no mesmo clone, e devolve o branch e o SHA. Ao receber os resultados, integre esses branches na sua worktree (git merge, sem push: estão no mesmo clone) e só você empurra no branch do PR. pode_empurrar: true só para a frente que deve empurrar o próprio branch e abrir o PR dela; nunca peça a duas frentes que empurrem no mesmo branch.";
+// revisto em 2026-10-22 (NOD-315, ADR-119): na máquina Linux a frente pode nascer do clone da máquina, não do seu: o
+// branch dela fica no clone de onde a worktree nasceu, e o dono busca de lá.
+export const DONO_INTEGRA = "Num repositório, dê a cada frente o repo e o branch_base de onde ela parte; cada uma trabalha no próprio branch (frente/…) e devolve o branch e o SHA. O branch da frente fica no clone de onde a worktree dela nasceu (o clone da máquina, ~/nod/.clones/<dono>/<repo>.git, quando houver). Ao receber os resultados, integre esses branches na sua worktree (git merge, sem push; se a sua worktree não nasceu desse clone, traga o branch antes com git fetch <esse clone> <branch>) e só você empurra no branch do PR. pode_empurrar: true só para a frente que deve empurrar o próprio branch e abrir o PR dela; nunca peça a duas frentes que empurrem no mesmo branch.";
 
 /** "Começou a frente X" ou "Começou 3 frentes: A, B e C" (texto da mensagem `sistema`; a web desenha pelo payload). */
 export function textoFrentesAbertas(titulos: readonly string[]): string {

@@ -29,7 +29,7 @@ import { ErroDeDominio } from "../domain/erro.ts";
 import { ehNod } from "../domain/nod.ts";
 import { marcarExecucaoNaMaquina } from "../domain/github.ts";
 import { PEDIDOS_NO_PROMPT } from "../domain/pedidos-pendentes.ts";
-import { montarPlano, REGRA_MONTAGEM } from "../domain/plano-turno.ts";
+import { montarPlano, REGRA_MONTAGEM, saidaDoCloneDaMaquina } from "../domain/plano-turno.ts";
 import { anexosAnteriores, cortarFalas } from "../domain/historico-do-plano.ts";
 import { textoParaOBot } from "../domain/citacao.ts";
 import { composicaoDoPlano } from "../domain/raio-x.ts";
@@ -366,6 +366,8 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   // revisto em 2026-10-10 (0068): o modelo escolhido para a IA na inteligência do Nod também vale (é escolha, não o padrão).
   const guiaNoMaisPotente = (ehNod(agente) || onb.guiaId === agente.id) && turno.modelo === "auto" && !(escolha && inteligencia.escolhas[escolha.harness]?.modelo);
   const modeloEscolhido = escolha ? (guiaNoMaisPotente ? modeloMaisPotente(escolha.harness) : null) ?? escolha.modelo : null;
+  // NOD-315 (ADR-119): o repo da frente vai junto, para o clone da máquina.
+  const dadosDoTrabalho = trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho), ...(trabalho.repo ? { repo: trabalho.repo } : {}) } : null;
   const parcial = montarPlano({
     workspace: Boolean(deps.services.workspaces),
     workspaceVinculado: workspaceId !== null,
@@ -412,7 +414,7 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
     terminal: modo !== "ligacao" && executor === "local" && (caps ? caps.terminal : true) && (escolha?.harness !== "codex-cli" || input.capacidadesDaMaquina === undefined || input.capacidadesDaMaquina["codex-cli"]?.terminal === true),
     // ADR-083: o trabalho tem pasta própria dentro da do bot (`~/nod/<bot>/<slug>`); null = a pasta do bot.
     pastaTrabalho: trabalho?.pasta ? pastaRelativa(trabalho.pasta) : null,
-    trabalho: trabalho ? { titulo: trabalho.titulo, origem: trabalho.origem, trabalhoMaeId: trabalho.trabalhoMaeId, forma: formaEfetiva(trabalho) } : null,
+    trabalho: dadosDoTrabalho,
     trabalhosAbertos,
     pedidosPendentes,
     harness: escolha?.harness ?? null,
@@ -420,6 +422,9 @@ export const emitirPlanoTurno: CasoDeUso<EntradaEmitirPlano, PlanoTurno> = async
   });
 
   parcial.workspaceId = workspaceId;
+  // NOD-315 (ADR-119): a frente com repo cujo bot não tem o GitHub concedido não recebe o clone da máquina; fica no log.
+  const saidaDoClone = saidaDoCloneDaMaquina({ maquina: input.maquina ?? null, trabalho: dadosDoTrabalho }, parcial);
+  if (saidaDoClone) log("info", "clone_da_maquina_saida", { turno_id: turno.id, repo: saidaDoClone.repo, motivo: saidaDoClone.motivo });
   if (bifurcar) parcial.entrada = { ...parcial.entrada, bifurcar: true };
   // NOD-310 (emenda da ADR-108 §5): a task que já teve sessão e este turno não a retoma (levada para a outra IA, outra
   // conta, outra máquina) — a IA nova recebe a passagem de bastão. Um ponto só cobre o clique, o varredor, o seletor e o

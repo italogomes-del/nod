@@ -15,6 +15,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { estadoDoGit } from "./estado-do-git.ts";
 import { criarExecutarComando } from "./limpeza-das-tasks.ts";
+import { trocarNoPrompt } from "../../domain/clone-da-maquina.ts";
+import { prepararCloneDaMaquina, type ResultadoPreparo } from "./clone-da-maquina.ts";
 
 /**
  * Laço puxar → rodar → renovar → entregar (ADR-021: o app puxa, o servidor nunca disca) sobre uma
@@ -81,10 +83,17 @@ export type OpcoesLaco = {
   estadoDoGit?: (plano: PlanoTurno) => Promise<string | null>;
   dormir?: (ms: number) => Promise<void>;
   aleatorio?: () => number;
+  /**
+   * NOD-315 (ADR-119): prepara o clone da máquina do plano com `cloneDaMaquina`. Ausente = o git desta máquina em
+   * `~/nod/.clones` (clone-da-maquina.ts), só no Linux; injetável no teste.
+   */
+  prepararClone?: (repo: string, signal: AbortSignal) => Promise<ResultadoPreparo>;
 };
 
 const estadoDoGitPadrao = (plano: PlanoTurno): Promise<string | null> =>
   estadoDoGit(join(homedir(), "nod", plano.pastaDoBot!), criarExecutarComando(process.env, homedir()));
+
+const prepararClonePadrao = (repo: string, signal: AbortSignal): Promise<ResultadoPreparo> => prepararCloneDaMaquina({ home: homedir(), repo, signal });
 
 export type Laco = {
   parar(): Promise<void>;
@@ -134,6 +143,8 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
   let parado = false;
   let acordar: (() => void) | null = null;
   let adapterAtual: Adapter | null = null;
+  /** NOD-315: o preparo do clone da máquina em andamento; o Parar e o fim do motor o abortam. */
+  let preparoAtual: AbortController | null = null;
   /** NOD-264 (C20): o motor parando (parar()) no meio do turno — a causa da entrega é o reinício do motor. */
   let causaDoTurno: string | null = null;
   let turnoAtual: string | null = null;
@@ -253,6 +264,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           if (r.ativo === false) {
             causaDoLaco ??= `renovacao_negada:${r.motivo ?? "desconhecido"}`;
             log("aviso", "renovacao_negada", { turno_id: plano.turnoId, motivo: r.motivo ?? "desconhecido" });
+            preparoAtual?.abort();
             if (adapterAtual) await adapterAtual.interromper();
           }
           // NOD-245: sem resposta (`indefinido`), a próxima tentativa sai em 10 s — o servidor recém-subido adota o turno
@@ -358,9 +370,33 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
           log("aviso", "laco_estado_do_git_falhou", { turno_id: plano.turnoId, erro: erro instanceof Error ? erro.name : "desconhecido" });
         }
       }
+      // NOD-315 (ADR-119): a frente com repo na máquina Linux ganha o clone da máquina, preparado aqui (a batida do lease já
+      // corre). Pronto: o prompt troca o "clone na sua pasta" pelo caminho dele. Qualquer saída: o prompt fica como está e o
+      // bot clona sozinho — nunca vira erro do turno. O Parar no meio aborta o git e o turno para logo abaixo.
+      let pararNoPreparo = false;
+      if (plano.cloneDaMaquina && (o.prepararClone || process.platform === "linux")) {
+        const clone = plano.cloneDaMaquina;
+        const controle = new AbortController();
+        preparoAtual = controle;
+        if (parado) controle.abort();
+        try {
+          const r = await (o.prepararClone ?? prepararClonePadrao)(clone.repo, controle.signal);
+          if (r.ok) {
+            const trocado = trocarNoPrompt(plano, clone.semClone, clone.comClone);
+            if (trocado) plano = trocado;
+            else log("aviso", "clone_da_maquina_saida", { turno_id: plano.turnoId, repo: clone.repo, motivo: "prompt_sem_trecho" });
+          }
+        } catch (erro) {
+          log("aviso", "clone_da_maquina_saida", { turno_id: plano.turnoId, repo: clone.repo, motivo: "clone", erro: erro instanceof Error ? erro.name : "desconhecido" });
+        } finally {
+          preparoAtual = null;
+        }
+        pararNoPreparo = controle.signal.aborted;
+      }
       const adapter = registro.instance.adapter(plano);
       adapterAtual = adapter;
       o.aoIniciarTurno?.(plano, adapter);
+      if (pararNoPreparo && !parado) await adapter.interromper();
       if (parado) {
         causaDoTurno = "reinicio_do_motor";
         await adapter.interromper();
@@ -463,6 +499,7 @@ export function iniciarLaco(o: OpcoesLaco): Laco {
       parado = true;
       acordar?.();
       if (turnoAtual) causaDoTurno = "reinicio_do_motor";
+      preparoAtual?.abort();
       if (adapterAtual) await adapterAtual.interromper();
       await corrida;
     },

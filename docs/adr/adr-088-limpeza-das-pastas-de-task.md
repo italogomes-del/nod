@@ -201,3 +201,5 @@ padrão é trocar `modoDaLimpeza` e esta seção no mesmo PR.
   e a tela do item 5 passa a ser prioridade.
 - Qualquer relato de worktree apagada com trabalho que não estava em branch nenhuma: desligar com
   `NOD_LIMPEZA_TASKS=desligada` no diário e reabrir esta ADR.
+
+> **Revisto em 2026-10-22 ([ADR-119](adr-119-clone-da-maquina-por-repositorio.md), NOD-315):** na máquina Linux, a frente com repo faz a worktree a partir do clone da máquina (`~/nod/.clones/<dono>/<nome>.git`, bare), não de um clone na própria pasta. A worktree segue dentro da pasta da task; o clone é do nod e não sai com a limpeza.

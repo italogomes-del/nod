@@ -132,3 +132,5 @@ fecha. O assunto fica para uma ADR própria, porque a ADR-055 recusou o sandbox 
   rotina tiver como fazer.
 - **Conta de GitHub dos bots**, sem admin e com a main protegida. Precisa do Marlon para criar a conta; hoje o push sai
   pelo `gh` dele.
+
+> **Revisto em 2026-10-22 ([ADR-119](adr-119-clone-da-maquina-por-repositorio.md), NOD-315):** na máquina Linux, a frente com repo faz a worktree a partir do clone da máquina (`~/nod/.clones/<dono>/<nome>.git`, bare), não de um clone na própria pasta. A worktree segue dentro da pasta da task; o clone é do nod e não sai com a limpeza.

@@ -65,6 +65,9 @@ describeIntegracao("frentes: abrir em lote e devolver o resumo (ADR-099, I2)", (
       expect(entradaLogin).toContain('[nod] Frente "Login no Safari"');
       expect(entradaLogin).toContain("Conserte o login no Safari.");
       expect(entradaLogin).toContain("Repositório: gamefik/nod. Parta de origin/main.");
+      // NOD-315 (0102): o repo validado fica no trabalho, para o executor preparar o clone da máquina; sem repo, nada.
+      expect((await m.repos.trabalhos.buscar(login!.trabalho_id))?.repo).toBe("gamefik/nod");
+      expect((await m.repos.trabalhos.buscar(ci!.trabalho_id))?.repo).toBeUndefined();
       // I4: pode_empurrar vira a linha da entrada; o padrão é não empurrar.
       expect(entradaLogin).toContain("Não empurre: devolva o branch e o SHA.");
       expect((await m.repos.turnos.doTrabalho(ci!.trabalho_id))[0]!.entradaTexto).toContain("Parta do branch feat/ci.\nO dono autorizou empurrar o seu branch e abrir PR.");
@@ -149,6 +152,19 @@ describeIntegracao("frentes: abrir em lote e devolver o resumo (ADR-099, I2)", (
       await expect(inserir("x".repeat(200))).resolves.toHaveLength(1);
       await expect(inserir("")).rejects.toMatchObject({ code: "23514", constraint_name: "lote_titulo" });
       await expect(inserir("x".repeat(201))).rejects.toMatchObject({ code: "23514", constraint_name: "lote_titulo" });
+    });
+  });
+
+  it("o CHECK trabalho_repo da 0102 (NOD-315): nulo ou de 3 a 200 caracteres", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const t = (await m.repos.trabalhos.criar({ agenteId: m.agenteId, conversaId: m.conversaId, titulo: "frente", origem: "pessoa", forma: "frente", repo: "gamefik/nod" }))!;
+      expect(t.repo).toBe("gamefik/nod");
+      const gravar = (repo: string | null) => trx.savepoint((sp) => sp`update trabalhos set repo = ${repo} where tenant_id = ${TENANT_PADRAO} and id = ${t.id} returning repo`);
+      await expect(gravar(null)).resolves.toEqual([{ repo: null }]);
+      await expect(gravar("x".repeat(200))).resolves.toHaveLength(1);
+      await expect(gravar("ab")).rejects.toMatchObject({ code: "23514", constraint_name: "trabalho_repo" });
+      await expect(gravar("x".repeat(201))).rejects.toMatchObject({ code: "23514", constraint_name: "trabalho_repo" });
     });
   });
 

@@ -105,6 +105,16 @@ describe("ADR-096 §4: guardar antes de apagar", () => {
     expect(existsSync(join(home, "code", "acme", ".git"))).toBe(true);
   });
 
+  it("ADR-119 §8: o clone da máquina (`~/nod/.clones`) nunca é pasta de task", async () => {
+    const bare = join(raiz, ".clones", "acme", "app.git");
+    await mkdir(bare, { recursive: true });
+    git(bare, "init", "-q", "--bare");
+    for (const alvo of [join(raiz, ".clones"), join(raiz, ".clones", "acme"), bare]) {
+      expect((await guardarEApagar(alvo, "t", opcoes())).motivo, alvo).toBe("fora_da_pasta");
+    }
+    expect(existsSync(join(bare, "HEAD"))).toBe(true);
+  });
+
   it("o guardado vence em 30 dias, ou em 7 com o disco apertado; o `.parcial` esquecido sai em 1 dia", async () => {
     const pasta = join(raiz, ".guardado", "Ze 1");
     await mkdir(pasta, { recursive: true });

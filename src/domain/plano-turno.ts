@@ -19,15 +19,16 @@ import { ErroDeDominio } from "./erro.ts";
 import { comArquivoDoMac } from "./arquivo-do-mac.ts";
 import { resolverLocalidade } from "./localidade-turno.ts";
 import { montarFerramentas } from "./montagem-ferramentas.ts";
-import { motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
+import { ehPastaDeTask, motivoSemTerminal, nativasDoTurno, pastaDoBot } from "./nativas.ts";
+import { caminhoDoClone, CLONE_DA_MAQUINA, repoDoGithub, type MotivoSaida } from "./clone-da-maquina.ts";
 import { podeAbrirTask, podeMandarParaTask } from "./trabalho.ts";
-import { ehFrente, FERRAMENTA_DA_FRENTE, FERRAMENTAS_FORA_DA_FRENTE } from "./frente.ts";
+import { ehFrente, FERRAMENTA_DA_FRENTE, FERRAMENTAS_FORA_DA_FRENTE, worktreeDaFrente } from "./frente.ts";
 import type { OrigemTrabalho } from "../contracts/trabalho.ts";
 import type { FormaTrabalho } from "../contracts/frente.ts";
 import { MANUAL_DO_NOD } from "./manual-do-nod.ts";
 import { ehNod } from "./nod.ts";
 import { FERRAMENTA_RESPONDER_PEDIDO, temPedidosNoTurno, type PedidoPendenteNoPrompt } from "./pedidos-pendentes.ts";
-import { partesDoPromptSistema, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
+import { partesDoPromptSistema, trechoComClone, trechoDoClone, type EntradaPromptSistema, type RotinaNoPrompt, type TrabalhoNoPrompt } from "./prompt-sistema.ts";
 import { FERRAMENTAS_COMPUTADOR } from "../contracts/ferramentas-computador.ts";
 import { FERRAMENTA_LER_MAIS } from "../contracts/ferramentas-proxy.ts";
 import type { ComputadorFora } from "./prompt-sistema.ts";
@@ -224,7 +225,8 @@ export type EntradaPlano = {
    * ADR-083: o trabalho deste turno (null = turno da conversa). Decide abrir_frentes/mandar_para_frente e a linha da task.
    * ADR-099 (I2): `forma` = `frente` muda o catálogo (devolver_resumo; sem me_chame_as nem esperar_comando) e o prompt.
    */
-  trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null; forma?: FormaTrabalho } | null;
+  /** `repo`: NOD-315 (ADR-119), o `dono/nome` da frente, para o clone da máquina. */
+  trabalho?: { titulo: string; origem: OrigemTrabalho; trabalhoMaeId: string | null; forma?: FormaTrabalho; repo?: string | null } | null;
   /** ADR-083: as tasks abertas do bot, para a seção "Trabalhos em andamento" da conversa coordenadora. */
   trabalhosAbertos?: readonly TrabalhoNoPrompt[];
   /** ADR-082: NOD_GERIR_BOTS=0 tira as ferramentas do Nod do catálogo (o interruptor de rollback sem reverter o PR). */
@@ -316,6 +318,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
 
   const prazoMs = Math.max(0, entrada.turno.prazoEm - entrada.agora);
   const pasta = nativas.includes("Bash") ? (entrada.pastaTrabalho ?? pastaDoBot(entrada.agente.nome)) : undefined;
+  const prompt = promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}) });
+  const clone = cloneDaMaquina(entrada, pasta, ferramentas, prompt.promptSistema);
   return {
     tenantId: entrada.turno.tenantId,
     turnoId: entrada.turno.id,
@@ -331,7 +335,8 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     catalogo: { ferramentas, servidores: servidoresUsados },
     nativas,
     ...(pasta ? { pastaDoBot: pasta } : {}),
-    ...promptEmPartes({ agente: entrada.agente, memorias: entrada.memorias, ferramentas, nativas, pastaDoBot: pasta, pessoaNome: entrada.pessoaNome, modo, colegas: entrada.colegas, contextoConversa: entrada.contextoConversa, conectores: entrada.conectores, rotinas: entrada.rotinasDoAgente, computadorFora: temComputador ? entrada.computadorFora ?? null : null, delegacao: modo === "delegacao" ? entrada.delegacao ?? null : null, profundidade: entrada.profundidade, semTerminal: motivoSemTerminal({ modo, confianca: entrada.confianca, terminal: entrada.terminal === true }), harness: entrada.harness ?? null, trabalho: entrada.trabalho ?? null, trabalhosAbertos: podeAbrirTask(entrada.trabalho ?? null) ? entrada.trabalhosAbertos ?? [] : [], ...(comPedidos ? { pedidosPendentes: entrada.pedidosPendentes } : {}), ...(ehNod(entrada.agente) ? { manualDoNod: MANUAL_DO_NOD } : {}), ...(entrada.maquina ? { maquina: entrada.maquina } : {}), ...(entrada.calibracao ? { calibracao: true } : {}), ...(entrada.whatsapp ? { whatsapp: true } : {}), ...(entrada.revisor ? { revisor: true } : {}) }),
+    ...prompt,
+    ...(clone && "caminho" in clone ? { cloneDaMaquina: clone } : {}),
     entrada: { texto: traduzirParaOCli(entrada.turno.entradaTexto, entrada.harness), sessaoCli: entrada.sessaoCli, modelo: entrada.turno.modelo, ...(entrada.anexos?.length ? { anexos: [...entrada.anexos] } : {}), ...(esforco ? { esforco } : {}) },
     politicaExecucao: {
       prazoMs,
@@ -349,6 +354,36 @@ export function montarPlano(entrada: EntradaPlano): Omit<PlanoTurno, "tokenDeTur
     semprePermitir: entrada.confianca === "nao_confiavel" ? [] : semprePermitirNoCatalogo(entrada.semprePermitir ?? [], ferramentas),
     expiraEm: PLANO_SEM_VALIDADE,
   };
+}
+
+/** O que o clone da máquina precisa do turno, menos a credencial: Linux, frente na pasta dela e um repo válido. */
+function repoDoCloneDaMaquina(entrada: Pick<EntradaPlano, "maquina" | "trabalho">, pasta: string | undefined): string | null {
+  if (!CLONE_DA_MAQUINA || entrada.maquina?.plataforma !== "linux" || !pasta || !ehPastaDeTask(pasta) || !ehFrente(entrada.trabalho ?? null)) return null;
+  return repoDoGithub(entrada.trabalho?.repo ?? "");
+}
+
+const ehDoGithub = (f: FerramentaPlano): boolean => f.origem === "conector" && (f.nome.startsWith("github__") || f.nome.startsWith("github_mcp__"));
+
+/**
+ * definido em 2026-10-22 (NOD-315, ADR-119): o campo `cloneDaMaquina` do plano. Só na máquina Linux, para a frente com
+ * repo, com o GitHub concedido ao bot (decisão do Marlon de 19/10: nenhum bot lê pelo clone da máquina o que não leria
+ * sozinho) e com o trecho de hoje presente no prompt. Sem o GitHub, `{ motivo: "sem_credencial" }`: o caso de uso
+ * registra e o prompt não cita `.clones`. `null` = não se aplica.
+ */
+export function cloneDaMaquina(entrada: Pick<EntradaPlano, "maquina" | "trabalho">, pasta: string | undefined, ferramentas: readonly FerramentaPlano[], promptSistema: string): NonNullable<PlanoTurno["cloneDaMaquina"]> | { repo: string; motivo: MotivoSaida } | null {
+  const repo = repoDoCloneDaMaquina(entrada, pasta);
+  if (!repo || !pasta) return null;
+  if (!ferramentas.some(ehDoGithub)) return { repo, motivo: "sem_credencial" };
+  const semClone = trechoDoClone({ pastaDoBot: pasta, worktree: worktreeDaFrente(pasta) });
+  if (!promptSistema.includes(semClone)) return null;
+  const caminho = caminhoDoClone("~", repo);
+  return { repo, caminho, semClone, comClone: trechoComClone({ pastaDoBot: pasta, caminho, repo }) };
+}
+
+/** O motivo da saída que o servidor já sabe (hoje, só `sem_credencial`), para o caso de uso registrar no log. */
+export function saidaDoCloneDaMaquina(entrada: Pick<EntradaPlano, "maquina" | "trabalho">, plano: Pick<PlanoTurno, "pastaDoBot" | "catalogo" | "promptSistema">): { repo: string; motivo: MotivoSaida } | null {
+  const r = cloneDaMaquina(entrada, plano.pastaDoBot, plano.catalogo.ferramentas, plano.promptSistema);
+  return r && "motivo" in r ? r : null;
 }
 
 /**

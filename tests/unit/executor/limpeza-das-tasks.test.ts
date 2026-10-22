@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -523,7 +523,7 @@ describe("ADR-096: o disco que se cuida", () => {
 
 describe("ADR-106: a máquina diz o que tem, e a worktree sem clone não trava a pasta", () => {
   it("as pastas do disco: `<bot>/<slug>` em NFC, sem escondida, sem arquivo e sem a raiz do bot", async () => {
-    for (const p of ["Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb", "Ze 1/.escondida", ".guardado/Ze 1", "Cecília/c-cccccc".normalize("NFD")]) await mkdir(join(home, "nod", p), { recursive: true });
+    for (const p of ["Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb", "Ze 1/.escondida", ".guardado/Ze 1", ".clones/acme/app.git", "Cecília/c-cccccc".normalize("NFD")]) await mkdir(join(home, "nod", p), { recursive: true });
     await writeFile(join(home, "nod", "Ze 1", "solto.txt"), "x");
     const { pastas, cortadas } = await pastasNoDisco(home);
     expect(pastas.sort()).toEqual(["Cecília/c-cccccc", "Ze 1/gfk-1-aaaaaa", "Ze 1/gfk-2-bbbbbb"]);
@@ -559,6 +559,57 @@ describe("ADR-106: a máquina diz o que tem, e a worktree sem clone não trava a
     expect(r).toMatchObject({ pastas: 1, guardadas: 1, pastasApagadas: 1, puladas: { clone_sumiu: 1 } });
     expect(existsSync(join(home, "nod", "Ada", "tarefa-222222"))).toBe(false);
     expect(lerDoGuardado("Ada", "tarefa-222222", "nod/rascunho.md")).toBe("trabalho que só existe aqui\n");
+  });
+
+  /** NOD-315 (ADR-119): o clone da máquina, bare em `~/nod/.clones/<dono>/<nome>.git`, com a worktree de uma frente. */
+  async function worktreeDoCloneDaMaquina(repo: string, wtRel: string, branch: string): Promise<{ bare: string; wt: string }> {
+    const origem = join(home, "origens", repo);
+    await mkdir(origem, { recursive: true });
+    git(origem, "init", "-q", "-b", "main");
+    await writeFile(join(origem, "README.md"), "nod\n");
+    git(origem, "add", ".");
+    git(origem, "commit", "-q", "-m", "inicio");
+    const bare = join(home, "nod", ".clones", `${repo}.git`);
+    await mkdir(join(bare, ".."), { recursive: true });
+    git(join(bare, ".."), "clone", "-q", "--bare", origem, bare);
+    const wt = join(home, "nod", wtRel);
+    await mkdir(join(wt, ".."), { recursive: true });
+    git(bare, "worktree", "add", "-q", wt, "-b", branch);
+    await writeFile(join(wt, "rascunho.md"), "trabalho que só existe aqui\n");
+    return { bare, wt };
+  }
+
+  it("NOD-315: frente com worktree do clone da máquina — encerrada, sai a pasta; o clone e o branch ficam", async () => {
+    const { bare, wt } = await worktreeDoCloneDaMaquina("gamefik/vivo", "Ada/frente-aaa111/vivo", "frente/frente-aaa111");
+    git(wt, "add", ".");
+    git(wt, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "da frente");
+    const r = await limparPastas([encerrada("Ada/frente-aaa111")], opcoes(executor()));
+    expect(r.puladas ?? {}).not.toHaveProperty("clone_sumiu");
+    expect(existsSync(join(home, "nod", "Ada", "frente-aaa111"))).toBe(false);
+    expect(git(bare, "rev-parse", "--is-bare-repository").trim()).toBe("true");
+    expect(git(bare, "log", "-1", "--format=%s", "frente/frente-aaa111").trim()).toBe("da frente");
+    expect(git(bare, "worktree", "list", "--porcelain")).not.toContain("frente-aaa111");
+  });
+
+  it("NOD-315: o clone da máquina apagado vira `clone_sumiu` para a worktree dele (gitdir do bare)", async () => {
+    const { bare, wt } = await worktreeDoCloneDaMaquina("gamefik/apagado", "Ada/frente-bbb222/apagado", "frente/frente-bbb222");
+    await rm(bare, { recursive: true, force: true });
+    const r = await limparPastas([encerrada("Ada/frente-bbb222")], opcoes(executor()));
+    expect(r).toMatchObject({ guardadas: 1, pastasApagadas: 1, puladas: { clone_sumiu: 1 } });
+    expect(existsSync(wt)).toBe(false);
+    expect(lerDoGuardado("Ada", "frente-bbb222", "apagado/rascunho.md")).toBe("trabalho que só existe aqui\n");
+  });
+
+  it("NOD-315: clone da máquina recriado que ainda registra a worktree não é `clone_sumiu`", async () => {
+    const { bare, wt } = await worktreeDoCloneDaMaquina("gamefik/movido", "Ada/frente-ccc333/movido", "frente/frente-ccc333");
+    // O executor recriou: o velho foi para .quebrado-* e o registro da worktree foi copiado para o novo.
+    const novo = join(home, "nod", ".clones", "gamefik", "movido2.git");
+    git(join(bare, ".."), "clone", "-q", "--bare", bare, novo);
+    await cp(join(bare, "worktrees"), join(novo, "worktrees"), { recursive: true });
+    await rm(bare, { recursive: true, force: true });
+    const r = await limparPastas([encerrada("Ada/frente-ccc333")], opcoes(executor()));
+    expect(r.puladas ?? {}).not.toHaveProperty("clone_sumiu");
+    expect(existsSync(wt)).toBe(true);
   });
 
   it("clone fora de ~/nod que sumiu (um disco desmontado) segue `erro`: pode voltar, a pasta fica", async () => {
