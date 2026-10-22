@@ -1,98 +1,68 @@
-# Site do nod
+# site/ — site de marketing do nod (nodbot.ai)
 
-Primeira apresentação pública do produto, em português. O recorte é a experiência de bots como
-contatos: perfil, conversa, colaboração entre bots, computadores próprios, memória e rotinas. A visão futura com colaboração entre pessoas fica
-fora desta versão. Não há anúncio de licença, preço ou acesso público disponível.
+A versão **w4 · Wordmark gigante**, aprovada pelo Mateus e pelo Orquestrador de Sites (NOD-321). É uma pasta
+estática servida **como está** pelo Worker `nodbot-site` da Cloudflare (static assets). Não tem build, framework
+nem dependência: o `index.html` traz CSS e JS inline e não faz nenhuma requisição externa. Decisão em
+[ADR-118](../docs/adr/adr-118-site-marketing-cloudflare-workers.md).
 
-O diferencial de escolha de IA aparece na abertura e na seção `#sua-ia`: cada bot pode ter sua
-inteligência, mantendo perfil, conversas e memória no nod. Claude Code e Codex são as integrações
-atuais. A pessoa confirmou que API própria, assim como modelos oferecidos pelo nod, são caminhos
-planejados; Cursor também está identificado como em preparação. A escolha na ilustração só muda
-o exemplo apresentado no site e não conecta contas nem altera o produto.
+| Arquivo | O que é |
+|---|---|
+| `index.html` | A w4. Só o `<head>` difere do arquivo aprovado (canonical, ícones, OG, Twitter; sem meta robots). |
+| `404.html` | Resposta de qualquer caminho que não existe, com status 404 (`not_found_handling: "404-page"`). |
+| `_headers` | Segurança, cache e o interruptor do noindex (abaixo). |
+| `_redirects` | `/download/mac` e `/download/mac-intel` → .dmg no bucket `nodbot-downloads` (302). |
+| `robots.txt`, `sitemap.xml` | Tudo liberado; sitemap só com a home. |
+| `og.png` | Prévia de link 1200×630 (hero da w4). Para trocar, use um **nome novo**: fica 1 dia em cache, e Slack/WhatsApp guardam a prévia. |
+| `favicon.svg`, `icon-192.png`, `apple-touch-icon.png` | Copiados de `web/public`. |
+| `wrangler.jsonc`, `.assetsignore` | Config do Worker. O `.assetsignore` impede que `wrangler.jsonc`, este README e o `.wrangler/` do `wrangler dev` subam. |
 
-Usamos os símbolos e nomes Claude, ChatGPT e Cursor para facilitar o reconhecimento. Os SVGs
-ficam em `public/providers/`, com fontes e atribuições em `public/providers/SOURCES.md`. “ChatGPT” vem
-qualificado como acesso pelo Codex, conforme a
-[documentação oficial de acesso pelo plano ChatGPT](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan).
-O site não promete acesso a todo modelo, uso ilimitado, gratuidade ou intercâmbio entre cobrança
-por assinatura e API. “Modelos pelo nod” significa acesso a provedores pelo produto, não modelos
-treinados pelo nod.
+O teste `tests/unit/site/site-estatico.test.ts` (roda no `npm run test:unit`) guarda esse contrato.
 
-`#bots-em-equipe` anima Vera consultando Lume para escrever uma abertura: pedido, consulta,
-indicador de pensamento, resposta e entrega em 14 segundos. `#computadores` anima um computador
-com desktop, dock, janela, abas, endereço digitado, leitura/rolagem e resumo salvo em 15,5 segundos.
-O endereço `projeto.example/briefing` é fictício; não há iframe nem navegação remota. Os aplicativos
-podem ser explorados, e assumir/devolver controle é uma simulação local.
-
-As cenas começam quando visíveis: a colaboração roda uma vez e o computador repete em loop.
-A tela do computador tem moldura sem apoio, com azul, cinza e detalhes quentes. Ambas as cenas
-podem ser pausadas e continuadas; a colaboração também pode ser repetida. O relógio
-pausa fora da tela ou com a aba oculta; `prefers-reduced-motion` apresenta a cena completa estática.
-As animações preservam a altura da página e não executam IA nem tarefas reais. As cenas são independentes: a delegação atual
-não permite ao destinatário usar computador, workspace, rotinas ou delegar novamente (ADR-047).
-Os computadores dependem da configuração do ambiente; não há promessa de nuvem ou execução com a
-máquina desligada. A cópia segue `docs/computadores.md` e as ADRs 037 e 047.
-
-## Rodar e compilar
-
-Na raiz do repositório, com Node 24.19.0 e dependências já instaladas:
+## Ver local
 
 ```sh
-npm run site:dev
-npm run site:build
-npm run site:preview
+npx wrangler dev -c site/wrangler.jsonc
 ```
 
-Desenvolvimento e prévia usam `http://127.0.0.1:5275`, com porta estrita. Não executam o servidor
-do produto, Postgres, CLI de IA ou migrações. O build estático fica em `dist/site/` e pode ser
-servido na raiz de um domínio por uma hospedagem de arquivos estáticos.
+Abre em http://localhost:8787 e aplica `_headers`, `_redirects` e o 404 como em produção, sem conta Cloudflare.
+Confira com `curl -I http://localhost:8787/` e o console do Chrome (nenhuma violação de CSP).
 
-## Lista de interesse
+## Deploy
 
-A integração está preparada; o serviço de e-mail ainda será escolhido. Sem endpoint configurado,
-a página mostra “Inscrições em breve”, mantém os campos desabilitados e não envia nem armazena e-mails.
+Da raiz do repo, com o wrangler logado na conta do Worker (account `896acdae7be7fd3878d47d927a1b9471`):
 
-1. Criar a lista/formulário no serviço escolhido, com confirmação e cancelamento de inscrição.
-2. Copiar `site/.env.example` para `site/.env`.
-3. Preencher `VITE_NOD_WAITLIST_URL` com o endpoint público do formulário (por exemplo, um formulário
-   do Formspree que aceite JSON). Uma API que exige chave secreta precisa de um intermediário no
-   servidor; segredos nunca entram em variáveis `VITE_*`.
-4. Configurar a origem pública do site no serviço, proteção contra abuso e a política de uso dos
-   e-mails. A página informa que a lista serve para novidades e aviso de acesso ao nod.
-5. Compilar novamente e validar uma inscrição real, incluindo eventual confirmação por e-mail.
+```sh
+npx wrangler deploy -c site/wrangler.jsonc
+```
 
-Contrato do POST: JSON `{ email, source: "nod-site", consent: "Novidades do nod e aviso de acesso" }`.
-O serviço precisa permitir CORS para a origem publicada. Apenas uma resposta HTTP 2xx confirma o
-recebimento. Falha HTTP, rede ou timeout de 15 segundos mostra erro e permite tentar novamente.
-Não há sucesso simulado, armazenamento local ou envio de mensagens nesta prévia.
+Publica a pasta `site/` em https://nodbot-site.nodbot.workers.dev (e em nodbot.ai, depois que o domínio for ligado).
+Não há deploy automático nem preview por PR: para testar antes do merge, use o `wrangler dev` local ou
+`npx wrangler versions upload -c site/wrangler.jsonc`, que devolve uma URL de versão sem mexer na produção.
+O `deploy.yml` do app não toca nesta pasta (ela está no `.dockerignore`).
 
-## Demonstração e identidade
+## Interruptor do noindex
 
-As quatro conversas em `examples.ts` são ilustrativas e identificadas assim na página. A pessoa
-pode trocar de bot, reproduzir o exemplo e abrir a entrega. Rotinas do exemplo não são ativadas.
-Os textos são locais e não vão para um modelo. A interface é uma composição para apresentar o
-produto, não uma captura do aplicativo nem uma conexão com ele.
+O noindex mora num ponto só: a linha `X-Robots-Tag: noindex` em `site/_headers`. O HTML **não** tem
+`<meta name="robots">`. Para liberar a indexação (quando a NOD-322 fechar: links reais, vídeo e sem `data-pend`),
+apague essa linha e o comentário acima dela num PR pequeno. O teste 1 falha se a página ainda tiver `href="#"` ou
+`data-pend` sem o noindex.
 
-Os SVGs usam os mascotes temporários existentes no nod, derivados de Bloub. A licença MIT está
-em `public/mascots/LICENSE.txt`, aparece nos SVGs e pode ser acessada em “Sobre esta prévia”.
-Para regenerar: `node site/scripts/generate-mascots.ts`.
+## Checklist B — quem tem a conta Cloudflare
 
-Não há fontes remotas, analytics, cookies ou dependências novas. O repositório do produto segue
-privado. Nenhum link para o código privado é exposto no site.
+Depois do merge do PR A, e o domínio só depois da NOD-322.
 
-## Referências de direção
-
-- [Grok Bot](https://x.ai/bot): experiência explicada por funções e conversas.
-- [OpenBot](https://www.copilotkit.ai/openbot): demonstração do produto logo na abertura.
-- [Twenty](https://twenty.com/): interface como peça central da apresentação.
-- [Ghost](https://ghost.org/about/) e [Supabase](https://supabase.com/): apresentação de um projeto
-  que pode combinar código aberto e hospedagem, ainda como hipótese para o nod.
-
-## Referências das animações
-
-- [Manus Browser Operator](https://manus.im/features/manus-browser-operator): separação entre abas, barra de navegação e conteúdo; janela contida no desktop.
-- [Browser Use — seleção de assentos](https://browser-use.com/showcase/pick-adjacent-cinema-seats): etapas curtas, cursor e ação atual legível.
-- [Browserbase — Observability](https://www.browserbase.com/observability): enquadramento de janelas, cursor e reprodução.
-
-Referências de linguagem visual; as cenas do nod são composições próprias em HTML/CSS/TypeScript,
-sem reutilizar capturas, vídeos ou código dessas páginas.
+0. Anotar a saída de `curl -sI http://app.nodbot.ai` e `curl -sI https://app.nodbot.ai` (baseline). **Não editar o registro `app`.**
+1. Confirmar que a zona nodbot.ai está ativa na mesma conta do Worker `nodbot-site`.
+2. ~~App do Pages no GitHub~~ — não se aplica (deploy por `wrangler deploy`).
+3. ~~Projeto Pages~~ — não se aplica: o Worker `nodbot-site` já existe.
+4. Rodar `npx wrangler deploy -c site/wrangler.jsonc` e conferir `https://nodbot-site.nodbot.workers.dev/`: 200, a w4 e os cabeçalhos no `curl -I`.
+5. Em Workers & Pages → `nodbot-site` → Settings → Domains & Routes, adicionar o Custom Domain `nodbot.ai`. Esperar o certificado ativo.
+6. No DNS, criar `A www 192.0.2.1` com proxy ligado. Em Rules → Bulk Redirects, lista com origem `www.nodbot.ai`, destino `https://nodbot.ai`, 301, com Preserve query string, Subpath matching e Preserve path suffix ligados; criar e **ativar** a regra.
+7. Não ligar HSTS na zona e não mexer no modo SSL nem no proxy do `app`.
+8. Verificar:
+   - `curl -sI https://nodbot.ai/` → 200 com os cabeçalhos; `http://nodbot.ai/` → https.
+   - `https://www.nodbot.ai/a?x=1` e `http://www.nodbot.ai/a?x=1` → 301 para `https://nodbot.ai/a?x=1`.
+   - `/robots.txt`, `/sitemap.xml` e `/og.png` → 200; `/nao-existe` → 404; `/download/mac` → 302.
+   - md5 da home igual ao de `site/index.html`.
+   - app.nodbot.ai responde igual ao passo 0.
+9. Só com o OG final, colar nodbot.ai no Slack, no WhatsApp e num validador OG (ex.: opengraph.xyz).

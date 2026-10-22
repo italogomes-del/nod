@@ -10,3 +10,6 @@ coverage/
 !.claude/skills/
 .gstack/
 release/
+
+# wrangler dev do site (NOD-321)
+.wrangler
