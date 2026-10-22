@@ -943,7 +943,8 @@ async function repetirRetomadaSemSessao(
     harness: turno.harness,
     reenvios: turno.reenvios + 1,
     executor: p.executor,
-    trabalhoId: null,
+    // revisto em 2026-10-22 (NOD-311): a repetição de uma frente segue na frente (null a soltava na faixa do chat).
+    trabalhoId: turno.trabalhoId ?? null,
   });
   if (!novo) return null;
   // A marca de quem leu algo de fora (ADR-062) não se lava na repetição, como em toda retomada (enfileirar-retomada.ts).

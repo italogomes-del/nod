@@ -11,6 +11,7 @@ import { log } from "../obs/log.ts";
 import { comandoRodaSemCard } from "./autorizar-comando.ts";
 import { enfileirarVolta, origemDaVolta } from "./me-chame-as.ts";
 import type { Deps } from "./tipos.ts";
+import type { AlvoCancelarEsperas } from "../repositories/esperas.repo.ts";
 import { sincronizarTrabalho } from "./trabalhos.ts";
 
 /** O que o fim, a queda e o varredor precisam (o varredor de lease monta só isto). */
@@ -151,7 +152,7 @@ export async function varrerEsperasSemNoticia(deps: DepsEspera): Promise<{ caida
 }
 
 /** O Parar da conversa (todas as do bot dela), de uma task, ou de tudo da pessoa. */
-export async function cancelarEsperas(deps: Pick<Deps, "repos" | "agora">, alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }): Promise<{ id: string; turnoId: string }[]> {
+export async function cancelarEsperas(deps: Pick<Deps, "repos" | "agora">, alvo: AlvoCancelarEsperas): Promise<{ id: string; turnoId: string }[]> {
   const canceladas = await deps.repos.esperas.cancelarRodando(alvo, "parada pela pessoa", deps.agora());
   if (canceladas.length) log("info", "esperas_canceladas", { quantas: canceladas.length });
   return canceladas;

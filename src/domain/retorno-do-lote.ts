@@ -84,8 +84,9 @@ export type FechoDoLote =
  * a frente parada pela pessoa conta como encerrada: o lote fecha com o que tiver).
  * - lote já devolvido: nada (o segundo fecho concorrente, ou uma frente que voltou a rodar depois);
  * - lote do dono: quando todas acabaram, um retorno com todas; com `avisarACadaUma`, um retorno por frente que acaba
- *   (o último fecha o lote). Com a conversa do dono parada pela pessoa (o Parar do chat), o lote fecha quando a última
- *   para, só com a linha — o dono não acorda;
+ *   (o último fecha o lote). Com a conversa do dono parada pela pessoa (parada aberta: o Parar global ou o da sala), o
+ *   lote fecha quando a última para, só com a linha — o dono não acorda. revisto em 2026-10-22 (NOD-311): o Parar do
+ *   chat não para as frentes nem deixa parada aberta; a frente que termina depois acorda o dono com o resultado;
  * - lote de colega: só quando todas acabaram (a entrega a quem pediu é uma por pedido; `avisarACadaUma` não vale aqui).
  */
 export function decidirFecho(p: {
@@ -102,7 +103,7 @@ export function decidirFecho(p: {
   const faltam = p.frentes.filter((f) => !trabalhoFinal(f.estado)).length;
   const todas = faltam === 0;
   if (p.destino === "colega") return todas ? { acao: "colega", frentes: [...p.frentes] } : { acao: "nada" };
-  // O Parar do chat para as frentes uma a uma: a linha sai uma vez, com todas, quando a última para.
+  // O Parar global (ou o da sala) para as frentes uma a uma: a linha sai uma vez, com todas, quando a última para.
   if (p.donoParado) return todas ? { acao: "so_linha", frentes: [...p.frentes] } : { acao: "nada" };
   // revisto em 2026-10-12 (I9): a frente que caiu de vez volta sozinha, na hora, como no `avisarACadaUma`.
   // NOD-282 (G4): e a recusada no despacho sem a IA ou sem login, também.

@@ -88,6 +88,16 @@ describe("chamarFerramenta: gates, despacho por tabela e trilha (ADR-013, EMENDA
     expect(d.chamadas).toHaveLength(0);
   });
 
+  // NOD-311: o Parar do chat não deixa parada aberta; a trava do turno parado é o pararSolicitadoEm dele.
+  it("turno com Parar pedido (pararSolicitadoEm) é negado como parada_ativa, sem parada aberta", async () => {
+    const c = await cenario();
+    await c.deps.repos.turnos.pedirInterrupcao([c.turnoId], AGORA - 1);
+    expect(c.turnoAtual()?.pararSolicitadoEm).toBe(AGORA - 1);
+    const r = await c.chamar("exemplo__somar", { a: 1, b: 2 });
+    expect(r.data).toMatchObject({ ok: false, negacao: { classe: "ferramenta_negada", motivo: "parada_ativa", terminal: true } });
+    expect(c.chamadas).toHaveLength(0);
+  });
+
   it("nome fora do plano → fora_do_catalogo terminal (nunca chega ao conector)", async () => {
     const c = await cenario();
     const r = await c.chamar("exemplo__apagar_tudo", {});

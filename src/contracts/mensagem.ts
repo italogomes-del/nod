@@ -110,9 +110,9 @@ export type PayloadMensagem =
   | { kind: "parada"; interrompidas: number; nadaRodando: boolean }
   /**
    * `delegada` (ADR-047): resultado de tarefa delegada, não resposta a pergunta; o conteúdo segue não
-   * confiável. `falhou`: aviso de que a tarefa não vai terminar (texto do servidor, não do alvo).
+   * confiável. `falhou`: aviso de que a tarefa não vai terminar. `paradoPelaPessoa` (NOD-311): quem pediu estava parado.
    */
-  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true; trabalhoId?: string }
+  | { kind: "peer_ask"; agenteId: string; nome: string; naoSupervisionado: true; tarefaId: string; turnoOrigemId?: string; delegada?: true; falhou?: true; trabalhoId?: string; paradoPelaPessoa?: true }
   /** definido em 2026-09-24 (emenda da ADR-037): o aviso ÚNICO de que o computador do bot saiu do ar. */
   | { kind: "computador_fora_do_ar"; agenteId: string; desde: EpochMs; motivo: MotivoFalhaComputador }
   /**

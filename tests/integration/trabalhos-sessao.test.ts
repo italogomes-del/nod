@@ -129,13 +129,18 @@ describeIntegracao("trabalhos: sessão, pasta, retomada e parada (#192, ADR-083)
     });
   });
 
-  it("o Parar do chat para as tasks abertas do bot e devolve a lista para a tela", async () => {
+  // revisto em 2026-10-22 (NOD-311): o Parar do chat não toca as tasks; só o Parar global as para e devolve a lista.
+  it("o Parar do chat deixa as tasks do bot; o Parar global as para e devolve a lista para a tela", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const a = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Uma", origem: "pessoa" })).trabalho;
       const b = (await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Outra", origem: "rotina" })).trabalho;
       const pendente = await m.turno(a.id);
-      const r = await parar(m.deps, { conversaId: m.conversaId });
+      const doChat = await parar(m.deps, { conversaId: m.conversaId });
+      expect(doChat.data.trabalhosParados).toBeUndefined();
+      expect((await m.repos.trabalhos.buscar(a.id))?.estado).not.toBe("parado");
+      expect((await m.repos.turnos.buscar(pendente!.id))?.estado).toBe("pendente");
+      const r = await parar(m.deps, { conversaId: null });
       expect(r.data.trabalhosParados).toEqual(expect.arrayContaining([{ id: a.id, titulo: "Uma" }, { id: b.id, titulo: "Outra" }]));
       expect((await m.repos.trabalhos.buscar(a.id))?.estado).toBe("parado");
       expect((await m.repos.turnos.buscar(pendente!.id))?.estado).toBe("interrompido");

@@ -37,7 +37,8 @@ export async function fecharLoteSePronto(deps: DepsFecho, frente: Trabalho): Pro
   const raiz = abertoPor.origem === "peer" ? abertoPor : await delegacaoDoTurno(deps.repos, abertoPor);
   const destino = destinoDoLote(raiz);
   const frentes = await deps.repos.frentes.frentesDoLote(lote.id);
-  // O Parar do chat (na mesma transação, ou já gravado) para o dono: o lote fecha sem acordá-lo. Falha na leitura = parado.
+  // A parada aberta (Parar global ou da sala) para o dono: o lote fecha sem acordá-lo. Falha na leitura = parado.
+  // revisto em 2026-10-22 (NOD-311): o Parar do chat encerra a parada na mesma transação; não segura o retorno das frentes.
   const donoParado = destino === "dono" && (await deps.repos.paradas.ativa(deps.escopo.pessoaId, abertoPor.conversaId)) !== false;
   const fecho = decidirFecho({ destino, avisarACadaUma: lote.avisarACadaUma, devolvido: false, frentes, fechou: frente.id, donoParado });
   if (fecho.acao === "nada") return [];

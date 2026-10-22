@@ -435,8 +435,8 @@ export function juntar(nomes: readonly string[]): string {
 }
 
 /**
- * O Parar do chat com tasks abertas pergunta antes (#195): "Parar a task Migrar relatórios?" ou "Parar as 3 tasks do
- * Dev 1?". definido em 2026-10-08 (QA do épico): com várias tasks, os títulos iam todos no título do diálogo — quatro
+ * O Parar das tasks (a pílula das frentes) pergunta antes (#195): "Parar a task Migrar relatórios?" ou "Parar as 3 tasks do
+ * Dev 1?". revisto em 2026-10-22 (NOD-311): o Parar do chat não para mais as tasks e não usa estas listas. definido em 2026-10-08 (QA do épico): com várias tasks, os títulos iam todos no título do diálogo — quatro
  * títulos reais viravam um parágrafo em letra de título; agora vão numa lista no corpo (`listaPararTasks`).
  */
 export function textoPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[], nomeDoBot = "bot"): string {
@@ -444,7 +444,7 @@ export function textoPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[], n
   return `Parar as ${lista.length} tasks do ${nomeDoBot}?`;
 }
 
-/** Os títulos das tasks que o Parar do chat vai parar, um por linha (vazio com uma task só: o título já diz). */
+/** Os títulos das tasks que o Parar da pílula vai parar, um por linha (vazio com uma task só: o título já diz). */
 export function listaPararTasks(lista: readonly Pick<TrabalhoDto, "titulo">[]): string {
   if (lista.length <= 1) return "";
   return `<ul class="parar-lista">${lista.map((t) => `<li>${esc(t.titulo)}</li>`).join("")}</ul>`;

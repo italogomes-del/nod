@@ -74,14 +74,21 @@ export function outboxRepo(conn: Conn, escopo: Escopo) {
      * parada — o outbox não guarda a conversa, ela vem do evento (mesmo join de `pendentes()`); frame cujo evento não
      * tem conversa não é cancelado. Sem conversa ("Parar tudo"), todos da pessoa.
      */
-    async cancelarPendentesDaPessoa(agora: number, conversaId: string | null = null): Promise<number> {
+    async cancelarPendentesDaPessoa(agora: number, conversaId: string | null = null, opcoes: { soDoChat?: true } = {}): Promise<number> {
       const daConversa = conversaId === null
         ? conn``
         : conn`and exists (select 1 from events e where e.tenant_id = o.tenant_id and e.id = o.evento_id and e.conversa_id = ${conversaId})`;
+      // definido em 2026-10-22 (NOD-311): o Parar do chat não cancela o que é das frentes — nem o frame `trabalho_mudou`
+      // nem o de evento de turno de trabalho; os delas seguem saindo.
+      const soDoChat = opcoes.soDoChat
+        ? conn`and o.tipo <> 'trabalho_mudou' and not exists (
+            select 1 from events e2 join turnos t on t.tenant_id = e2.tenant_id and t.id = e2.turno_id
+            where e2.tenant_id = o.tenant_id and e2.id = o.evento_id and t.trabalho_id is not null)`
+        : conn``;
       const r = await conn`
         update events_outbox o set cancelado_em = ${new Date(agora)}
         where o.tenant_id = ${escopo.tenantId} and o.owner_id = ${escopo.pessoaId}
-          and o.entregue_em is null and o.abandonado_em is null and o.cancelado_em is null ${daConversa}`;
+          and o.entregue_em is null and o.abandonado_em is null and o.cancelado_em is null ${daConversa} ${soDoChat}`;
       return r.count;
     },
   };

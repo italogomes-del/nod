@@ -126,3 +126,82 @@ describe("parar (E5.4/E8.1/E8.2/E8.3): estado persistido, faixa honesta, nunca c
     expect(tudo.events.find((e) => e.kind === "parada")?.dados).toMatchObject({ frames_cancelados: pendentes.length });
   });
 });
+
+describe("NOD-311: o Parar do chat para só o turno do chat, não as frentes", () => {
+  async function cenario() {
+    const { deps, banco } = depsEmMemoria();
+    const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+    const agente = (await deps.repos.agentes.buscar(criado.agente.id))!;
+    const conversaId = criado.conversa.id;
+    const frente = (await deps.repos.trabalhos.criar({ agenteId: agente.id, conversaId, titulo: "Migrar relatórios", origem: "pessoa", rotinaId: null, forma: "frente", estado: "rodando" }))!;
+    const turno = async (trabalhoId: string | null) => (await deps.repos.turnos.enfileirar({ conversaId, agenteId: agente.id, origem: "conversa", prazoEm: Date.now() + 86_400_000, profundidade: 0, entradaTexto: "faz", entradaConfianca: "confiavel", modelo: agente.modelo, harness: agente.harness, executor: "catcher", trabalhoId }))!;
+    const despachar = (id: string) => Object.assign(banco.turnos.find((t) => t.id === id)!, { estado: "despachando", machineId: randomUUID(), leaseAte: Date.now() + 60_000 });
+    return { deps, banco, conversaId, frente, turno, despachar };
+  }
+
+  it("frente e chat despachando: só o do chat recebe o pedido de interrupção; a frente segue; a faixa não lista tasks", async () => {
+    const c = await cenario();
+    const doChat = await c.turno(null);
+    const daFrente = await c.turno(c.frente.id);
+    c.despachar(doChat.id);
+    c.despachar(daFrente.id);
+    const sigChat = vi.fn(async () => undefined);
+    const sigFrente = vi.fn(async () => undefined);
+    c.deps.services.interruptor.registrar(doChat.id, sigChat);
+    c.deps.services.interruptor.registrar(daFrente.id, sigFrente);
+
+    const { data: faixa } = await executar(c.deps, parar, { conversaId: c.conversaId });
+    expect(sigChat).toHaveBeenCalledTimes(1);
+    expect(sigFrente).not.toHaveBeenCalled();
+    expect((await c.deps.repos.turnos.buscar(doChat.id))?.pararSolicitadoEm).not.toBeNull();
+    expect((await c.deps.repos.turnos.buscar(daFrente.id))?.pararSolicitadoEm).toBeNull();
+    expect((await c.deps.repos.trabalhos.buscar(c.frente.id))?.estado).not.toBe("parado");
+    expect(faixa).not.toHaveProperty("trabalhosParados");
+    expect(faixa.interrompidas).toBe(1);
+  });
+
+  it("pendente da frente não é interrompido; o do chat é", async () => {
+    const c = await cenario();
+    const doChat = await c.turno(null);
+    const daFrente = await c.turno(c.frente.id);
+    await executar(c.deps, parar, { conversaId: c.conversaId });
+    expect(await c.deps.repos.turnos.buscar(doChat.id)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+    expect((await c.deps.repos.turnos.buscar(daFrente.id))?.estado).toBe("pendente");
+  });
+
+  it("a parada do chat é gravada e encerrada na hora: nada fica segurado (a rotina seguinte despacha)", async () => {
+    const c = await cenario();
+    await c.turno(null);
+    await executar(c.deps, parar, { conversaId: c.conversaId });
+    expect(await c.deps.repos.paradas.ativa(c.deps.escopo.pessoaId, c.conversaId)).toBe(false);
+    const [parada] = c.banco.paradas;
+    expect(parada?.encerradaEm).not.toBeNull();
+    expect(parada?.faixa).toMatchObject({ interrompidas: 1 });
+    const agente = (await c.deps.repos.agentes.buscar((await c.deps.repos.conversas.buscar(c.conversaId))!.agenteId!))!;
+    const rotina = await c.deps.repos.turnos.enfileirar({ executor: "catcher", conversaId: c.conversaId, agenteId: agente.id, origem: "rotina", prazoEm: Date.now() + 1000, profundidade: 0, entradaTexto: "rotina", entradaConfianca: "confiavel", modelo: agente.modelo });
+    const { data } = await executar(c.deps, despacharTurno, { machineId: randomUUID(), inventario: PRONTO });
+    expect(data.plano?.turnoId).toBe(rotina!.id);
+  });
+
+  it("encerrar que não acha a parada lança estado_invalido (a transação desfaz o Parar)", async () => {
+    const c = await cenario();
+    c.deps.repos.paradas.encerrar = async () => null;
+    await expect(executar(c.deps, parar, { conversaId: c.conversaId })).rejects.toMatchObject({ codigo: "estado_invalido" });
+  });
+
+  it("pela rota da conversa numa sala, a parada fica aberta (só o chat principal encerra na hora)", async () => {
+    const c = await cenario();
+    const conv = c.banco.conversas.find((x) => x.id === c.conversaId)!;
+    Object.assign(conv, { tipo: "sala", salaId: randomUUID() });
+    await executar(c.deps, parar, { conversaId: c.conversaId });
+    expect(await c.deps.repos.paradas.ativa(c.deps.escopo.pessoaId, c.conversaId)).toBe(true);
+    expect(c.banco.paradas[0]?.encerradaEm).toBeNull();
+  });
+
+  it("o Parar global continua parando as tasks e listando-as na faixa", async () => {
+    const c = await cenario();
+    const { data: faixa } = await executar(c.deps, parar, { conversaId: null });
+    expect(faixa.trabalhosParados).toEqual([{ id: c.frente.id, titulo: "Migrar relatórios" }]);
+    expect((await c.deps.repos.trabalhos.buscar(c.frente.id))?.estado).toBe("parado");
+  });
+});

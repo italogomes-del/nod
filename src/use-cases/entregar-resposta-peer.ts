@@ -158,20 +158,24 @@ async function aguardandoPessoa(deps: DepsEntrega, cadeia: readonly Turno[]): Pr
 }
 
 /** NOD-282 (G7): `complementar` = a resposta já saiu e esta acrescenta o que mudou (não cai no `ja_entregue`). */
-type Entrega = { tarefa: Turno; texto: string; falha: boolean; complementar?: boolean };
+type Entrega = { tarefa: Turno; texto: string; falha: boolean; complementar?: boolean; paradoPeloChat?: true };
 
-function payloadDaEntrega(alvo: { id: string; nome: string }, tarefa: Turno, origem: { turnoOrigemId: string } | null, delegada: boolean, falha: boolean) {
-  return { kind: "peer_ask" as const, agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true as const, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}) };
+function payloadDaEntrega(alvo: { id: string; nome: string }, tarefa: Turno, origem: { turnoOrigemId: string } | null, delegada: boolean, falha: boolean, paradoPelaPessoa = false) {
+  return { kind: "peer_ask" as const, agenteId: alvo.id, nome: alvo.nome, naoSupervisionado: true as const, tarefaId: tarefa.id, ...(origem ? { turnoOrigemId: origem.turnoOrigemId } : {}), ...(delegada ? { delegada: true as const } : {}), ...(falha ? { falhou: true as const } : {}), ...(tarefa.trabalhoId ? { trabalhoId: tarefa.trabalhoId } : {}), ...(paradoPelaPessoa ? { paradoPelaPessoa: true as const } : {}) };
 }
 
 /**
  * definido em 2026-10-15 (NOD-256, F1.1): quem pediu está parado pela pessoa — o turno que pediu foi interrompido pelo
  * Parar, a task dele está `parada`, ou há parada aberta cobrindo a conversa dele (global ou dela).
+ * revisto em 2026-10-22 (NOD-311): ou o Parar já foi pedido no turno que pediu (`pararSolicitadoEm`: a janela entre o
+ * Parar do chat, que não deixa parada aberta, e o assentar desse turno). Devolve o porquê: só o `turno` é final (o
+ * turno interrompido não volta); a task parada e a parada aberta (global, sala) a pessoa desfaz retomando.
  */
-async function quemPediuParado(deps: DepsEntrega, pediu: Turno | null, conversaId: string): Promise<boolean> {
-  if (pediu?.motivoInterrupcao === "parado_pela_pessoa") return true;
-  if (pediu?.trabalhoId && (await deps.repos.trabalhos.buscar(pediu.trabalhoId))?.estado === "parado") return true;
-  return (await deps.repos.paradas.ativa(deps.escopo.pessoaId, conversaId)) === true;
+async function quemPediuParado(deps: DepsEntrega, pediu: Turno | null, conversaId: string): Promise<"turno" | "trabalho" | "parada" | null> {
+  if (pediu?.motivoInterrupcao === "parado_pela_pessoa") return "turno";
+  if (pediu?.pararSolicitadoEm != null) return "turno";
+  if (pediu?.trabalhoId && (await deps.repos.trabalhos.buscar(pediu.trabalhoId))?.estado === "parado") return "trabalho";
+  return (await deps.repos.paradas.ativa(deps.escopo.pessoaId, conversaId)) === true ? "parada" : null;
 }
 
 /**
@@ -203,10 +207,13 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   if (!remetente) return { data: { ignorado: "remetente_excluido" } };
   const origem = pergunta.payload?.kind === "peer_pedido" ? pergunta.payload : null;
   const conversaRemetente = exigir(origem ? await deps.repos.conversas.buscar(origem.conversaOrigemId) : await deps.repos.conversas.buscarPropriaDoAgente(remetente.id), "nao_encontrado", "conversa do remetente");
+  // NOD-311: a pessoa parou quem pediu (o aviso saiu com paradoPelaPessoa): o resultado tardio só registra.
+  let paradoAntes = false;
   if (delegada) {
     const entregues = (await deps.repos.mensagens.listarDaConversa(conversaRemetente.id, 500)).filter((m) => m.payload?.kind === "peer_ask" && m.payload.tarefaId === tarefa.id);
     const resultadoSaiu = entregues.some((m) => m.payload?.kind === "peer_ask" && !m.payload.falhou);
     if (!e.complementar && (resultadoSaiu || (e.falha && entregues.length > 0))) return { data: { ignorado: "ja_entregue" } };
+    paradoAntes = entregues.some((m) => m.payload?.kind === "peer_ask" && m.payload.paradoPelaPessoa === true);
   }
   const agora = deps.agora();
   const autoria = autoriaAgente(alvo.id, deps.escopo.pessoaId, delegada ? (tarefa.sobProcuracaoDe ?? null) : remetente.id);
@@ -220,14 +227,18 @@ async function entregar(deps: DepsEntrega, e: Entrega): Promise<{ data: SaidaEnt
   const pediu = delegada && origem ? await deps.repos.turnos.buscar(origem.turnoOrigemId) : null;
   // definido em 2026-10-15 (NOD-256, F1.1): quem pediu foi parado pela pessoa (o turno, a task ou a conversa) — a resposta
   // fica registrada como peer_ask, sem continuação e sem reabrir a task: Parar é final até a pessoa voltar.
-  if (await quemPediuParado(deps, pediu, conversaRemetente.id)) {
+  // revisto na revisão do PR #458: a marca `paradoPelaPessoa` (que torna final o aviso) só sai quando o Parar é do turno
+  // que pediu ou do Parar do chat (`paradoPeloChat`); depois do Parar global, da sala ou da task, um resultado depois
+  // do aviso (a pessoa retomou) segue saindo normalmente, como antes da NOD-311.
+  const parado = paradoAntes ? "turno" : await quemPediuParado(deps, pediu, conversaRemetente.id);
+  if (parado) {
     const registro = await deps.repos.mensagens.criar({
       conversaId: conversaRemetente.id,
       turnoId: null,
       autoria,
       kind: "peer_ask",
       texto: e.falha ? `${alvo.nome} não concluiu: ${e.texto}` : e.texto,
-      payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha),
+      payload: payloadDaEntrega(alvo, tarefa, origem, delegada, e.falha, parado === "turno" || e.paradoPeloChat === true),
       confianca: "nao_confiavel",
     });
     const eventos = registro ? [evento(deps, "mensagem_criada", autoria, { mensagemId: registro.id, kind: "peer_ask", tarefaId: tarefa.id }, { conversaId: conversaRemetente.id })] : [];
@@ -327,7 +338,7 @@ export function entregarRespostaDeclarada(deps: DepsEntrega, input: { tarefa: Tu
  * resposta do colega abre uma continuação que segue a tarefa e entrega; se ela também falhar, avisa então.
  */
 // revisto em 2026-10-15 (NOD-252): só repos, escopo e relógio — o varredor de lease (DepsQueda) também avisa.
-export async function avisarFalhaDelegacao(deps: DepsEntrega, input: { turnoId: string; motivo: string; semEsperar?: true }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
+export async function avisarFalhaDelegacao(deps: DepsEntrega, input: { turnoId: string; motivo: string; semEsperar?: true; paradoPeloChat?: true }): Promise<{ data: SaidaEntregaPeer; events?: RuntimeEvent[] }> {
   const turno = await deps.repos.turnos.buscar(input.turnoId);
   const tarefa = turno ? await delegacaoDoTurno(deps.repos, turno) : null;
   if (!tarefa) return { data: { ignorado: "nao_e_tarefa_peer" } };
@@ -336,7 +347,7 @@ export async function avisarFalhaDelegacao(deps: DepsEntrega, input: { turnoId: 
   // sair um resultado, ele ainda chega a quem pediu (um resultado depois de um aviso sai normalmente, em `entregar`).
   const espera = input.semEsperar ? null : await aindaNaoEntrega(deps, tarefa, null, input.turnoId);
   if (espera) return { data: { ignorado: espera } };
-  return entregar(deps, { tarefa, texto: input.motivo, falha: true });
+  return entregar(deps, { tarefa, texto: input.motivo, falha: true, ...(input.paradoPeloChat ? { paradoPeloChat: true as const } : {}) });
 }
 
 /**

@@ -5,6 +5,7 @@ import type { Inventario } from "../../src/contracts/inventario.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
 import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
+import { criarTrabalho } from "../../src/use-cases/trabalhos.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { agenteComConversa } from "../helpers/fabricas.ts";
 import { PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
@@ -78,6 +79,31 @@ describeIntegracao("QA #332: sessão recusada na retomada de rotina", () => {
       const turnos = await trx<{ id: string; reenvios: number; estado: string }[]>`select id, reenvios, estado from turnos where conversa_id = ${m.conversaId} order by criado_em, id`;
       expect(execs.map((x) => x.desfecho)).not.toContain("falhou");
       expect(turnos.some((x) => x.reenvios === 1)).toBe(true);
+    });
+  });
+
+  // NOD-311: o Parar do chat só derruba a faixa do chat (sem trabalho). A retomada recusada de uma frente não pode
+  // nascer de novo nessa faixa: hoje ela nem repete (larga a sessão do trabalho), e repetirRetomadaSemSessao copia o
+  // trabalhoId por garantia.
+  it("a retomada de uma frente com sessao_rejeitada não gera turno na faixa do chat (NOD-311)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const a = randomUUID();
+      const { trabalho } = await criarTrabalho(m.deps, { agenteId: m.agenteId, conversaId: m.conversaId, titulo: "PR 7", origem: "pessoa" });
+      const tf = (await m.enfileirar("claude-cli", { trabalhoId: trabalho.id }))!;
+      expect((await m.repos.turnos.reivindicar({ machineId: a, agora: Date.now() }))?.id).toBe(tf.id);
+      await m.plano(tf.id, { machineId: a, ias: ["claude-cli"], ponte: true });
+      await assentarTurno(m.deps, { turnoId: tf.id, machineId: a, seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: sucesso("sessao-da-frente"), executor: "local", harness: "claude-cli" });
+      expect(await m.repos.turnos.sessaoDoTurno(tf.id)).toMatchObject({ sessaoCli: "sessao-da-frente" });
+
+      const ret = (await m.repos.turnos.enfileirar({ executor: "local", conversaId: m.conversaId, agenteId: m.agenteId, origem: "retomada", retomaTurnoId: tf.id, trabalhoId: trabalho.id, prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "continue", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli" }))!;
+      expect((await m.repos.turnos.reivindicar({ machineId: a, agora: Date.now() }))?.id).toBe(ret.id);
+      await m.plano(ret.id, { machineId: a, ias: ["claude-cli"], ponte: true });
+      await assentarTurno(m.deps, { turnoId: ret.id, machineId: a, seqLocal: 1, fala: { tipo: "texto", texto: "" }, resultado: rejeitada, executor: "local", harness: "claude-cli" });
+      // O turno da frente larga a sessão DO TRABALHO e não repete (aposSessaoRejeitada); nada nasce na faixa do chat.
+      const turnos = await m.repos.turnos.listarDaConversa(m.conversaId);
+      expect(turnos.filter((t) => !t.trabalhoId)).toEqual([]);
+      expect(turnos.map((t) => t.id).sort()).toEqual([tf.id, ret.id].sort());
     });
   });
 });

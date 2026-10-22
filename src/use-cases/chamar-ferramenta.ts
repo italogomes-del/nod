@@ -239,6 +239,9 @@ export const chamarFerramentaFase1: CasoDeUso<EntradaChamarFerramenta, SaidaFase
   // Gate de parada: boolean | null — null (consulta falhou) É parada (fail-closed no caso de uso, EMENDA 10).
   const parada = await deps.repos.paradas.ativa(deps.escopo.pessoaId, plano.conversaId);
   if (parada !== false) return negar("parada_ativa", "ferramenta_negada");
+  // definido em 2026-10-22 (NOD-311): o Parar do chat não deixa parada aberta; o turno parado é o que tem
+  // `pararSolicitadoEm` — entre o pedido e o SIGTERM ele não chama mais nada.
+  if ((await deps.repos.turnos.buscar(input.turnoId))?.pararSolicitadoEm != null) return negar("parada_ativa", "ferramenta_negada");
 
   const ferramenta: FerramentaPlano | undefined = plano.catalogo.ferramentas.find((f) => f.nome === input.nome);
   if (!ferramenta) return negar("fora_do_catalogo", "ferramenta_negada");

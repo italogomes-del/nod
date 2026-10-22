@@ -2556,7 +2556,7 @@ function verPilulaNaConversa(): void {
   levarAo(bloco.closest<HTMLElement>(".bubble") ?? bloco);
 }
 
-/** "Parar" da pílula: a mesma lista do Parar do campo, só com as frentes abertas que a pílula mostra. */
+/** "Parar" da pílula: pergunta com a lista das frentes abertas que a pílula mostra (o Parar do campo não para frentes, NOD-311). */
 function pararPelaPilula(): void {
   const p = pilulaAtual?.pilula;
   if (!p || p.abertas.length === 0) return;
@@ -3197,22 +3197,14 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
       dispatch({ tipo: "hidratar-executor", executor: estadoNovo });
       dispatch({ tipo: "invalidar", quais: ["inventario", "frota"] });
     }),
-  // ADR-083 (#195): com tasks abertas, o Parar do chat para tudo do bot — e mostra a lista antes; sem tasks, igual a antes.
-  "parar-conversa": () => {
-    const t = estado.tela;
-    const tasks = t.tipo === "conversa" ? abertosDoBot(estado, t.agenteId, t.conversaId) : [];
-    const parar = (): Promise<void> => agir(async () => {
-      const alvo = conversaAtual();
-      if (!alvo) return;
-      dispatch({ tipo: "faixa", faixa: await api!.pararConversa(alvo.conversaId) });
-      // O servidor para as tasks do bot junto (parar.ts); cada uma é pedida de novo, e a que já parou responde sem efeito.
-      await Promise.allSettled(tasks.map((x) => api!.pararTrabalho(x.id)));
-      dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota", "trabalhos"] });
-    });
-    if (tasks.length === 0) return parar();
-    const nome = botGerido(t.tipo === "conversa" ? t.agenteId : undefined)?.nome;
-    pedirGestao(textoPararTasks(tasks, nome), `${listaPararTasks(tasks)}<p>${esc(nome ?? "O bot")} para também o que estiver fazendo nesta conversa. O que já foi feito fica.</p>`, tasks.length === 1 ? "Parar a task" : "Parar tudo", parar, true);
-  },
+  // revisto em 2026-10-22 (NOD-311, emenda da ADR-083): o Parar do chat para só o turno do chat; as frentes seguem (cada
+  // uma tem o Parar dela, na pílula e na tela da task). Sem lista nem confirmação.
+  "parar-conversa": () => agir(async () => {
+    const alvo = conversaAtual();
+    if (!alvo) return;
+    dispatch({ tipo: "faixa", faixa: await api!.pararConversa(alvo.conversaId) });
+    dispatch({ tipo: "invalidar", quais: [`conversa:${alvo.conversaId}`, "frota", "trabalhos"] });
+  }),
   // A tela da task (#195): Parar task para só ela; Fechar (ou Esc) volta para onde a pessoa estava.
   "abrir-trabalho": (el) => abrirTrabalho(el.dataset.id ?? ""),
   // Chat limpo (PR 7): "ver as 5" do progresso na fala abre no lugar, como a troca; a abertura conta para o gatilho da

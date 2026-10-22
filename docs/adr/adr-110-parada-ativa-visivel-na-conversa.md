@@ -104,3 +104,8 @@ outro bot da pessoa não some. O Parar do chat também para as tasks do bot (ADR
 A linha "■ Parado por você" (mensagem `parada`) sai do chat e vai para a Atividade do bot (categoria Bloqueios, "Parado
 por você · N turnos interrompidos"). A faixa do Parar (`faixa-parada.ts`), enquanto a parada vale, não muda; "esta mensagem
 não rodou" (item 3) fica no chat.
+
+## Nota (2026-10-22, NOD-311)
+
+Desde a NOD-311 o Parar do chat grava a parada e a encerra na hora (emenda da ADR-083): a parada aberta, e com ela a
+faixa e o "mandar mensagem retoma" desta ADR, só vem do Parar global e do Parar da sala.

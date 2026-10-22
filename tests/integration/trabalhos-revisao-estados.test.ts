@@ -85,7 +85,8 @@ describeIntegracao("revisão #188 — estados do trabalho", () => {
     });
   });
 
-  it("S1: \"Fazer aqui\" e o Parar do chat também fecham as decisões abertas das tasks", async () => {
+  // revisto em 2026-10-22 (NOD-311): o Parar do chat não toca as tasks (a decisão da task fica aberta); o global as fecha.
+  it("S1: \"Fazer aqui\" e o Parar global também fecham as decisões abertas das tasks; o Parar do chat não", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const a = await m.task("A");
@@ -102,6 +103,9 @@ describeIntegracao("revisão #188 — estados do trabalho", () => {
       const db = await m.decisao(tb.id);
       await sincronizarTrabalho(m.deps, b.id);
       await parar(m.deps, { conversaId: m.conversaId });
+      expect((await m.repos.decisoes.buscar(db.id))?.estado).toBe("pendente");
+      expect(await m.estado(b.id)).not.toBe("parado");
+      await parar(m.deps, { conversaId: null });
       expect((await m.repos.decisoes.buscar(db.id))?.estado).toBe("decidida");
       expect(await m.estado(b.id)).toBe("parado");
     });

@@ -376,10 +376,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       async contarAbandonados() {
         return doTenant(b.outbox).filter((o) => o.ownerId === escopo.pessoaId && o.abandonadoEm !== null).length;
       },
-      async cancelarPendentesDaPessoa(em: number, conversaId: string | null = null) {
+      async cancelarPendentesDaPessoa(em: number, conversaId: string | null = null, opcoes: { soDoChat?: true } = {}) {
         let n = 0;
         for (const o of doTenant(b.outbox)) {
-          if (conversaId !== null && b.events.find((e) => e.id === o.eventoId)?.conversaId !== conversaId) continue;
+          const ev = b.events.find((e) => e.id === o.eventoId);
+          if (conversaId !== null && ev?.conversaId !== conversaId) continue;
+          if (opcoes.soDoChat && (o.tipo === "trabalho_mudou" || (ev?.turnoId && doTenant(b.turnos).find((t) => t.id === ev.turnoId)?.trabalhoId))) continue;
           if (o.ownerId === escopo.pessoaId && o.entregueEm === null && o.abandonadoEm === null && o.canceladoEm === null) {
             o.canceladoEm = em;
             n += 1;
@@ -975,7 +977,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
       async marcarAcordou(id, quando) { const e = minhasEsperas().find((x) => x.id === id && x.acordouEm === null); if (!e) return false; e.acordouEm = quando; return true; },
       async cancelarRodando(alvo, motivoFim, quando) {
-        const alvos = minhasEsperas().filter((x) => x.estado === "rodando" && ("conversaId" in alvo ? x.conversaId === alvo.conversaId : "trabalhoId" in alvo ? x.trabalhoId === alvo.trabalhoId : true));
+        const alvos = minhasEsperas().filter((x) => x.estado === "rodando" && ("conversaId" in alvo ? x.conversaId === alvo.conversaId && (!alvo.soDoChat || !x.trabalhoId) : "trabalhoId" in alvo ? x.trabalhoId === alvo.trabalhoId : true));
         for (const e of alvos) Object.assign(e, { estado: "cancelada", motivoFim, terminadoEm: quando });
         return alvos.map((e) => ({ id: e.id, turnoId: e.turnoId }));
       },
@@ -1761,6 +1763,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return meus
           .filter((t) => t.ownerId === escopo.pessoaId && t.origem === "conversa" && !t.trabalhoId && t.estado === "interrompido" && t.motivoInterrupcao === "executor_indisponivel" && t.motivoFalha !== "sem_conta" && t.motivoFalha !== "limite_do_plano" && t.criadoEm >= desde)
           .filter((t) => !meus.some((n) => n.conversaId === t.conversaId && n.criadoEm > t.criadoEm))
+          .filter((t) => !doTenant(b.paradas).some((p) => p.conversaId === t.conversaId && p.ativaDesde > t.criadoEm))
           .sort((x, y) => x.criadoEm - y.criadoEm);
       },
       async travarAbertosDoTrabalho(trabalhoId: string) {

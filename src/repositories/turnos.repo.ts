@@ -1378,7 +1378,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * definido em 2026-10-05: as falas da pessoa barradas por falta de IA desde `desde`, uma por conversa — só a mais
      * nova, e só quando nada veio depois dela na conversa (repetir-barrados-por-ia.ts). NOD-269: a frente (com trabalho)
-     * fica de fora — ela espera a conta pela própria volta, e a repetição sairia sem o vínculo com a task.
+     * fica de fora — ela espera a conta pela própria volta, e a repetição sairia sem o vínculo com a task. NOD-311: a fala
+     * com um Parar da conversa depois dela também (a parada do chat já não fica aberta segurando a repetição).
      */
     async barradosPorFaltaDeIa(desde: number): Promise<Turno[]> {
       const linhas = await conn<Linha[]>`
@@ -1389,6 +1390,8 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
           -- gravados pelo despacho) já esperam a hora ou têm a nota de contas: repeti-los duplicava a nota a cada conexão.
           and t.motivo_falha is distinct from 'sem_conta' and t.motivo_falha is distinct from 'limite_do_plano'
           and not exists (select 1 from turnos n where n.tenant_id = t.tenant_id and n.conversa_id = t.conversa_id and n.criado_em > t.criado_em)
+          -- NOD-311 (revisão): o Parar do chat encerra a parada na hora; a fala barrada antes dele não volta sozinha.
+          and not exists (select 1 from paradas p where p.tenant_id = t.tenant_id and p.conversa_id = t.conversa_id and p.ativa_desde > t.criado_em)
         order by t.criado_em`;
       return linhas.map(paraTurno);
     },

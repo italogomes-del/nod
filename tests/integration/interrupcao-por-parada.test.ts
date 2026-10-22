@@ -57,7 +57,8 @@ describeIntegracao("NOD-252: a interrupção por parada registra a rotina e avis
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);
       const a = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Taga" })).data;
-      await executar(deps, parar, { conversaId: a.conversa.id });
+      // NOD-311: o Parar do chat não deixa parada aberta; a da conversa hoje vem do Parar da sala (ou de antes da 0103).
+      await deps.repos.paradas.ativar({ conversaId: a.conversa.id, agora: Date.now() });
       const { rotina, turnoId } = await rotinaPendente(deps, a.conversa.id, a.agente.id);
       const mensagensAntes = (await deps.repos.mensagens.listarDaConversa(a.conversa.id)).length;
 

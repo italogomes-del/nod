@@ -125,12 +125,26 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
     });
   });
 
-  it("o Parar do chat para o dono: o lote fecha com uma linha só, sem acordar o dono", async () => {
+  // revisto em 2026-10-22 (NOD-311): o Parar do chat não para as frentes — quando elas terminam, o lote volta ao dono.
+  it("o Parar do chat não para as frentes: quando elas terminam, o lote acorda o dono com o resultado (NOD-311)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { loteId, ids } = await m.abrir(dono);
+      await parar(m.deps, { conversaId: m.ada.conversaId });
+      for (const id of ids) expect((await m.repos.trabalhos.buscar(id))?.estado).not.toBe("parado");
+      expect(await m.repos.frentes.buscarLote(loteId)).toMatchObject({ devolvidoEm: null });
+      for (const id of ids) await m.terminar(id, "feito");
+      expect(await m.retomadasDe(dono)).toHaveLength(1);
+    });
+  });
+
+  it("o Parar global para o dono: o lote fecha com uma linha só, sem acordar o dono", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
       const dono = await m.turnoDaConversa();
       const { loteId } = await m.abrir(dono);
-      await parar(m.deps, { conversaId: m.ada.conversaId });
+      await parar(m.deps, { conversaId: null });
       expect(await m.retomadasDe(dono)).toHaveLength(0);
       expect(await m.repos.frentes.buscarLote(loteId)).toMatchObject({ retornoTurnoId: null, devolvidoEm: expect.any(Number) });
       expect((await m.linhas(m.ada.conversaId, "frentes_terminadas")).map((l) => l.texto)).toEqual(["3 frentes terminaram"]);

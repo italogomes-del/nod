@@ -92,3 +92,24 @@ Cowork Dispatch (uma conversa coordenadora abre uma thread por trabalho), Codex 
   desde o corte); uma task falante não empurra as falas da conversa para fora.
 - **Gatilho:** o "tipo de linha aberto em mais de 30%" ganha o tipo `atividade` (a Atividade aberta até 60 s depois de
   abrir a conversa). O PR 3 do plano acrescenta "troca" (a conversa com outros bots numa linha, emenda da ADR-099 item 8).
+
+## Emenda (2026-10-22, NOD-311): o Parar do chat para só o turno do chat
+
+Decisão do Marlon (19/10, revisão da NOD-225): o Parar da barra do chat principal não derruba mais as frentes.
+
+- **O que para:** os turnos da faixa do chat (`trabalho_id` nulo) da conversa, os pedidos a colegas que esses turnos
+  abriram (avisados na hora a quem pediu, uma vez, com `peer_ask.paradoPelaPessoa`) e as esperas deles
+  (`esperas.trabalho_id` nulo). Turno de rotina sem task é turno do chat e para.
+- **O que não para:** frentes, tasks (inclusive as de rotina), os turnos, esperas, pedidos e frames delas. Cada uma se
+  para por dentro, pela pílula ou pela tela da task. A faixa do Parar do chat não traz mais `trabalhosParados`.
+- **A parada do chat é gravada e encerrada na hora**, na mesma transação (`paradas.encerrar`): fica a auditoria e o
+  evento `parada`, mas nada fica segurado — a próxima rotina roda no horário dela, sem `parada_aberta` nem
+  "rotina-parada-aberta". A trava do turno parado passa a ser `turnos.parar_solicitado_em` (lease, ferramentas,
+  esperas, assentar). A migração 0103 fecha as paradas de conversa própria que já estavam abertas.
+- **Freio de emergência:** passa a ser o Parar global (sem conversa), que segue como antes (para tudo, tasks
+  inclusive, e segura o despacho até a pessoa voltar). O Parar da sala também não muda.
+- **Depois do Parar:** a frente que termina depois devolve o lote ao dono normalmente e acorda o chat com o resultado;
+  liberar um app depois do Parar retoma o turno que esperava por ele; o resultado tardio de um pedido já avisado só
+  fica registrado, sem acordar quem pediu.
+- **Risco aceito:** sem parada aberta, um pingue-pongue entre bots pode voltar quando chega um pedido novo; o Parar
+  global resolve.

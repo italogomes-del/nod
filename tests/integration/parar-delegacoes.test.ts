@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { assentarTurno } from "../../src/use-cases/assentar-turno.ts";
 import { despacharTurno } from "../../src/use-cases/despachar-turno.ts";
 import { dispararRotina } from "../../src/use-cases/disparar-rotina.ts";
 import { dispensarDecisao } from "../../src/use-cases/dispensar-decisao.ts";
 import { executarRotinaAgora } from "../../src/use-cases/executar-rotina-agora.ts";
-import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
+import { avisarFalhaDelegacao, entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
 import { abrirFrentes } from "../../src/use-cases/frentes.ts";
 import { parar } from "../../src/use-cases/parar.ts";
 import { pedirABot } from "../../src/use-cases/pedir-a-bot.ts";
@@ -61,10 +62,13 @@ describeIntegracao("NOD-256: o Parar vale para os pedidos a colega", () => {
       expect(await m.repos.turnos.buscar(pediu.id)).toMatchObject({ estado: "despachando" });
       await trx`update turnos set estado = 'interrompido', motivo_interrupcao = 'parado_pela_pessoa' where id = ${pediu.id}`;
 
+      // NOD-311: o Parar do chat interrompe a delegação na hora e já avisa (uma vez); o resultado tardio só fica registrado.
+      expect((await m.repos.turnos.buscar(tarefa))?.pararSolicitadoEm).not.toBeNull();
       const r = await entregarRespostaPeer(m.deps, { tarefaId: tarefa, texto: "PR 42 revisado." });
       expect(r.data).toEqual({ ignorado: "quem_pediu_parado" });
-      const [resposta, ...resto] = await m.respostas(m.clarice.conversaId, tarefa);
+      const [aviso, resposta, ...resto] = await m.respostas(m.clarice.conversaId, tarefa);
       expect(resto).toEqual([]);
+      expect(aviso).toMatchObject({ turnoId: null, payload: { falhou: true, paradoPelaPessoa: true } });
       expect(resposta).toMatchObject({ turnoId: null, texto: expect.stringContaining("PR 42 revisado.") });
       expect(await m.vivos(m.clarice.conversaId, pediu.id)).toEqual([]);
       expect((await m.repos.turnos.listarDaConversa(m.clarice.conversaId)).filter((t) => t.origem === "retomada" || t.origem === "peer")).toEqual([]);
@@ -138,10 +142,126 @@ describeIntegracao("NOD-256: o Parar vale para os pedidos a colega", () => {
     });
   });
 
+  it("NOD-311 (CA4): o Parar do chat da Clarice para a delegação do chat; a da frente dela segue intacta, e a frente também", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      const f = await abrirFrentes(m.deps, { turnoId: pediu.id, agenteId: m.clarice.agenteId, conversaId: m.clarice.conversaId, frentes: [{ titulo: "PR 9", pedido: "Revise o PR 9." }] });
+      if (!f.data.ok) throw new Error(f.data.instrucao);
+      const frenteId = f.data.frentes[0]!.trabalho_id;
+      const daFrente = (await m.repos.turnos.listarDaConversa(m.clarice.conversaId)).find((t) => t.trabalhoId === frenteId)!;
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${daFrente.id}`;
+      const doChat = await m.pedir(m.clarice, pediu.id, m.milton);
+      const daFrenteNaNina = await m.pedir(m.clarice, daFrente.id, m.nina);
+
+      const { data: faixa } = await parar(m.deps, { conversaId: m.clarice.conversaId });
+      expect(faixa.trabalhosParados).toBeUndefined();
+      expect(await m.repos.turnos.buscar(doChat)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "parado_pela_pessoa" });
+      expect(await m.respostas(m.clarice.conversaId, doChat)).toHaveLength(1);
+      expect(await m.repos.turnos.buscar(daFrenteNaNina)).toMatchObject({ estado: "pendente", pararSolicitadoEm: null });
+      expect(await m.respostas(m.clarice.conversaId, daFrenteNaNina)).toEqual([]);
+      expect(await m.repos.turnos.buscar(daFrente.id)).toMatchObject({ estado: "despachando", pararSolicitadoEm: null });
+      expect((await m.repos.trabalhos.buscar(frenteId))?.estado).not.toBe("parado");
+      expect(await m.repos.paradas.ativa(MARLON.pessoaId, m.clarice.conversaId)).toBe(false);
+    });
+  });
+
+  it("NOD-311: turno do chat já concluído e delegação despachando — o Parar avisa uma vez, e o assentar da delegação não retoma ninguém", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      // Ordem das travas como no CA6: a da pessoa (reivindicar sem pendente) antes da do tenant (pedir_a_bot).
+      await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() });
+      const tarefa = await m.pedir(m.clarice, pediu.id, m.milton);
+      const machineId = randomUUID();
+      expect((await m.repos.turnos.reivindicar({ machineId, agora: Date.now() }))?.id).toBe(tarefa);
+      await trx`update turnos set estado = 'concluido' where id = ${pediu.id}`;
+
+      await parar(m.deps, { conversaId: m.clarice.conversaId });
+      expect((await m.repos.turnos.buscar(tarefa))?.pararSolicitadoEm).not.toBeNull();
+      expect(await m.respostas(m.clarice.conversaId, tarefa)).toHaveLength(1);
+
+      const sinais = { attempted: true, rejected: false, promptSubmitted: true, producedOutput: true };
+      await assentarTurno(m.deps, { turnoId: tarefa, machineId, seqLocal: 1, fala: { tipo: "texto", texto: "PR 42 revisado." }, resultado: { desfecho: "sucesso", texto: "PR 42 revisado.", sessaoCli: null, sinais, custoUsd: 0, tokens: { entrada: 1, saida: 1, cacheLeitura: 0, cacheCriacao: 0 }, ferramentasChamadas: [], negacoesPermissao: [] }, executor: "catcher" });
+      const avisos = await m.respostas(m.clarice.conversaId, tarefa);
+      expect(avisos.filter((x) => x.payload?.kind === "peer_ask" && x.payload.falhou === true)).toHaveLength(1);
+      expect(await m.vivos(m.clarice.conversaId, pediu.id)).toEqual([]);
+      expect((await m.repos.turnos.listarDaConversa(m.clarice.conversaId)).filter((t) => t.origem === "retomada" || t.origem === "peer")).toEqual([]);
+    });
+  });
+
+  it("NOD-311: quem pediu com Parar pedido (pararSolicitadoEm), sem parada aberta — a resposta fica registrada e não o acorda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      const tarefa = await m.pedir(m.clarice, pediu.id, m.milton);
+      await m.repos.turnos.pedirInterrupcao([pediu.id], Date.now());
+      expect(await m.repos.paradas.ativa(MARLON.pessoaId, m.clarice.conversaId)).toBe(false);
+      const r = await entregarRespostaPeer(m.deps, { tarefaId: tarefa, texto: "PR 42 revisado." });
+      expect(r.data).toEqual({ ignorado: "quem_pediu_parado" });
+      const [resposta, ...resto] = await m.respostas(m.clarice.conversaId, tarefa);
+      expect(resto).toEqual([]);
+      expect(resposta).toMatchObject({ turnoId: null, payload: { paradoPelaPessoa: true } });
+      expect((await m.repos.turnos.listarDaConversa(m.clarice.conversaId)).filter((t) => t.origem === "retomada" || t.origem === "peer")).toEqual([]);
+    });
+  });
+
+  it("revisão do #458: o aviso com parada aberta (global) não é final — retomada a delegação, o resultado acorda quem pediu", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      const tarefa = await m.pedir(m.clarice, pediu.id, m.milton);
+      await trx`update turnos set estado = 'concluido' where id = ${pediu.id}`;
+      const global = (await m.repos.paradas.ativar({ conversaId: null, agora: Date.now() }))!;
+      expect((await avisarFalhaDelegacao(m.deps, { turnoId: tarefa, motivo: "a pessoa parou tudo", semEsperar: true })).data).toEqual({ ignorado: "quem_pediu_parado" });
+      const [aviso] = await m.respostas(m.clarice.conversaId, tarefa);
+      expect(aviso?.payload).not.toHaveProperty("paradoPelaPessoa");
+
+      // A pessoa volta e retoma a delegação: o resultado sai normalmente (Parar global não mudou com a NOD-311).
+      await trx`update paradas set encerrada_em = now() where id = ${global.id}`;
+      await trx`update turnos set estado = 'concluido' where id = ${tarefa}`;
+      const r = await entregarRespostaPeer(m.deps, { tarefaId: tarefa, texto: "PR 42 revisado." });
+      expect(r.data).toHaveProperty("continuacao");
+    });
+  });
+
+  it("revisão do #458: o aviso do Parar do chat é final mesmo com o turno do chat já concluído", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      const tarefa = await m.pedir(m.clarice, pediu.id, m.milton);
+      await trx`update turnos set estado = 'despachando', lease_ate = now() + interval '1 minute' where id = ${tarefa}`;
+      await trx`update turnos set estado = 'concluido' where id = ${pediu.id}`;
+      await parar(m.deps, { conversaId: m.clarice.conversaId });
+      const [aviso] = await m.respostas(m.clarice.conversaId, tarefa);
+      expect(aviso).toMatchObject({ payload: { falhou: true, paradoPelaPessoa: true } });
+      await trx`update turnos set estado = 'concluido' where id = ${tarefa}`;
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: tarefa, texto: "PR 42 revisado." })).data).toEqual({ ignorado: "quem_pediu_parado" });
+    });
+  });
+
+  it("revisão do #458: pedido do chat sem turno vivo (o colega concluiu e espera) — o Parar avisa, e o resultado tardio não acorda o chat", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const pediu = await m.turnoDe(m.clarice);
+      const tarefa = await m.pedir(m.clarice, pediu.id, m.milton);
+      await trx`update turnos set estado = 'concluido' where id in (${pediu.id}, ${tarefa})`;
+      await parar(m.deps, { conversaId: m.clarice.conversaId });
+      const avisos = await m.respostas(m.clarice.conversaId, tarefa);
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]).toMatchObject({ payload: { falhou: true, paradoPelaPessoa: true } });
+      expect((await entregarRespostaPeer(m.deps, { tarefaId: tarefa, texto: "PR 42 revisado." })).data).toEqual({ ignorado: "quem_pediu_parado" });
+      expect((await m.repos.turnos.listarDaConversa(m.clarice.conversaId)).filter((t) => t.origem === "retomada" || t.origem === "peer")).toEqual([]);
+    });
+  });
+
   it("CA6: pedido a um bot parado — o despacho não roda e quem pediu recebe uma única falha", async () => {
     await withRollback(MARLON, async (trx) => {
       const m = await montar(trx);
-      await parar(m.deps, { conversaId: m.milton.conversaId });
+      // NOD-311: o Parar do chat não deixa mais parada aberta. A parada aberta na conversa (hoje vem do Parar da sala, ou
+      // de antes da 0103) segue barrando o despacho daquela conversa — é esse gate que este caso cobre. O Parar global
+      // segura tudo antes de reivindicar, sem interromper (despachar-turno.ts).
+      await m.repos.paradas.ativar({ conversaId: m.milton.conversaId, agora: Date.now() });
       const pediu = await m.turnoDe(m.clarice);
       // Fixa a ordem das travas consultivas na transação do teste, como em interrupcao-por-parada.test.ts: primeiro a da
       // pessoa (reivindicar — não há pendente, só pega a trava), depois a do tenant (`pedir_a_bot`). Na ordem inversa,
@@ -165,7 +285,10 @@ describeIntegracao("NOD-256: o Parar vale para os pedidos a colega", () => {
       const m = await montar(trx);
       const agora = Date.now();
       const rotina = (await m.repos.rotinas.criar({ agenteId: m.milton.agenteId, conversaId: m.milton.conversaId, cron: "*/5 * * * *", fusoIana: "UTC", instrucao: "Revisar PRs abertos", fonte: "f", entregavel: "e", limitesAprovacao: "", politicaSemDado: "", proximaExecucao: agora }))!;
-      await parar(m.deps, { conversaId: m.milton.conversaId });
+      // NOD-311: o Parar do chat não deixa mais parada aberta. A parada aberta na conversa (hoje vem do Parar da sala, ou
+      // de antes da 0103) segue barrando o despacho daquela conversa — é esse gate que este caso cobre. O Parar global
+      // segura tudo antes de reivindicar, sem interromper (despachar-turno.ts).
+      await m.repos.paradas.ativar({ conversaId: m.milton.conversaId, agora: Date.now() });
       const disparo = await dispararRotina(m.deps, { rotina, instanteAgendado: agora, machineId: randomUUID(), executor: "catcher" });
       expect("turno" in disparo.data).toBe(true);
       expect((await despacharTurno(m.deps, { machineId: randomUUID(), inventario: PRONTO })).data).toMatchObject({ plano: null, motivo: "parada_ativa" });

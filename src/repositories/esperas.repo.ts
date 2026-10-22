@@ -57,6 +57,9 @@ export type FimEspera = { estado: Exclude<EstadoEspera, "rodando">; codigo?: num
  * As esperas de comando (0070, ADR-099 parte 2). Toda escrita é da dona (RLS e `owner_id`); a transição sai de `rodando`
  * uma vez só (`where estado = 'rodando'`), então o relato repetido da máquina, o Parar e o varredor não se atropelam.
  */
+/** Quem o Parar cancela: as da conversa (só as do chat com `soDoChat`), as de um trabalho, ou todas. */
+export type AlvoCancelarEsperas = { conversaId: string; soDoChat?: true } | { trabalhoId: string } | { todas: true };
+
 export function esperasRepo(conn: Conn, escopo: Escopo) {
   return {
     /** null = o turno já tem uma espera (`esperas_por_turno`): um pedido por turno. */
@@ -137,8 +140,12 @@ export function esperasRepo(conn: Conn, escopo: Escopo) {
      * A máquina mata o grupo no próximo puxar (a espera some da lista dela). Devolve as canceladas com o turno de cada uma
      * (NOD-257, H4: o Parar avisa quem pediu quando a espera era de uma delegação).
      */
-    async cancelarRodando(alvo: { conversaId: string } | { trabalhoId: string } | { todas: true }, motivoFim: string, agora: number): Promise<{ id: string; turnoId: string }[]> {
-      const filtro = "conversaId" in alvo ? conn`and conversa_id = ${alvo.conversaId}` : "trabalhoId" in alvo ? conn`and trabalho_id = ${alvo.trabalhoId}` : conn``;
+    async cancelarRodando(alvo: AlvoCancelarEsperas, motivoFim: string, agora: number): Promise<{ id: string; turnoId: string }[]> {
+      // definido em 2026-10-22 (NOD-311): `soDoChat` = só as do turno do chat (a espera copia o trabalho do turno,
+      // esperar-comando.ts); as das frentes seguem rodando.
+      const filtro = "conversaId" in alvo
+        ? alvo.soDoChat ? conn`and conversa_id = ${alvo.conversaId} and trabalho_id is null` : conn`and conversa_id = ${alvo.conversaId}`
+        : "trabalhoId" in alvo ? conn`and trabalho_id = ${alvo.trabalhoId}` : conn``;
       const linhas = await conn<{ id: string; turno_id: string }[]>`
         update esperas set estado = 'cancelada', motivo_fim = ${motivoFim}, terminado_em = ${data(agora)}
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'rodando' ${filtro}

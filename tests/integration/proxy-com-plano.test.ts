@@ -89,16 +89,8 @@ describe("proxy com plano: tools/list do plano, tools/call despachado ao servido
     expect(r.content[0]?.text).not.toContain(TAG);
   });
 
-  it("nome fora do plano: negado LOCALMENTE como terminal e registrado no servidor (trilha + pedido de interrupção)", async () => {
-    const r = (await proxy.pedir("tools/call", { name: "exemplo__gravar", arguments: { texto: "x" } })).result as ConteudoTexto;
-    expect(r.isError).toBe(true);
-    expect(r.content[0]?.text).toMatch(/^negado \(terminal\): não tente outro caminho\./);
-    expect(r.content[0]?.text).toContain("fora do catálogo");
-    await new Promise((res) => setTimeout(res, 100));
-    expect(memoria.banco.trilha.some((l) => l.kind === "negacao" && l.ferramenta === "exemplo__gravar" && l.motivo === "fora_do_catalogo")).toBe(true);
-    expect(memoria.banco.turnos.find((t) => t.id === turnoId)?.pararSolicitadoEm).not.toBeNull();
-  });
-
+  // Antes do "fora do plano": aquele pede a interrupção do turno, e desde a NOD-311 o turno com Parar pedido
+  // (pararSolicitadoEm) tem toda ferramenta negada como parada_ativa.
   it("args inválidos para o conector → negação transitória vinda do servidor; JSON inválido → -32700", async () => {
     const r = (await proxy.pedir("tools/call", { name: "exemplo__somar", arguments: { a: "um" } })).result as ConteudoTexto;
     expect(r.isError).toBe(true);
@@ -108,5 +100,15 @@ describe("proxy com plano: tools/list do plano, tools/call despachado ao servido
     const ping = await proxy.pedir("ping");
     expect(ping.result).toEqual({});
     expect(CODIGO.parseError).toBe(-32700);
+  });
+
+  it("nome fora do plano: negado LOCALMENTE como terminal e registrado no servidor (trilha + pedido de interrupção)", async () => {
+    const r = (await proxy.pedir("tools/call", { name: "exemplo__gravar", arguments: { texto: "x" } })).result as ConteudoTexto;
+    expect(r.isError).toBe(true);
+    expect(r.content[0]?.text).toMatch(/^negado \(terminal\): não tente outro caminho\./);
+    expect(r.content[0]?.text).toContain("fora do catálogo");
+    await new Promise((res) => setTimeout(res, 100));
+    expect(memoria.banco.trilha.some((l) => l.kind === "negacao" && l.ferramenta === "exemplo__gravar" && l.motivo === "fora_do_catalogo")).toBe(true);
+    expect(memoria.banco.turnos.find((t) => t.id === turnoId)?.pararSolicitadoEm).not.toBeNull();
   });
 });

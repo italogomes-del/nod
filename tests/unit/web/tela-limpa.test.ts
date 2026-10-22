@@ -90,7 +90,7 @@ describe("T1: a pílula no lugar do cabeçalho", () => {
 });
 
 describe("E11: o Parar no campo", () => {
-  it("o bot trabalha com turno vivo da conversa (na fila ou rodando); sem turno nem task, não; o título diz o que para", () => {
+  it("o bot trabalha com turno vivo da conversa (na fila ou rodando); sem turno, não; o título diz o que para", () => {
     expect(mostraPararNoCampo(cenario({}, { turnosVivos: vivo() }), "a")).toBe(true);
     expect(mostraPararNoCampo(cenario({}, { turnosVivos: vivo("na_fila" as TurnoVivo["estado"]) }), "a")).toBe(true);
     expect(mostraPararNoCampo(cenario(), "a")).toBe(false);

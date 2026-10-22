@@ -41,7 +41,7 @@ import { escolhaEfetiva, iasDaTela, inteligenciaDoBot } from "./inteligencia.ts"
 import { htmlBotaoDitado, htmlPilulaDitado } from "./ditado.ts";
 import { renderLinhaLigacao } from "./ligacao.ts";
 import { conversaLimpa, htmlTroca, juntarTrocas, planejarLinhas, type PlanoMensagem } from "./linhas-do-chat.ts";
-import { abertosDoBot, trabalhosConhecidos } from "../lib/trabalhos.ts";
+import { trabalhosConhecidos } from "../lib/trabalhos.ts";
 import { TEXTO_FALHA_LEITURA } from "../lib/ouvir.ts";
 import { acoesDaFala, chipsDeReacao, citacaoAcimaDoBalao } from "./acoes-da-fala.ts";
 import { ancorasDoProgresso, comProgressoNaFala, marcadorDoProgresso } from "./progresso-na-fala.ts";
@@ -1141,13 +1141,14 @@ function presencaDoBot(estado: Estado, agenteId: string): { html: string; ativa:
 
 /**
  * O bot da conversa está trabalhando (definido em 2026-10-16, decisão E11 do plano "tela limpa"): há turno vivo da
- * conversa ou task aberta do bot (ADR-083: com task aberta o Parar para tudo do bot e mostra a lista antes). O turno do
- * cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
+ * conversa. O turno do cérebro da ligação não entra (turnosVivos já o ignora). É o `trabalhando` de `botoesDoCampo`.
+ * revisto em 2026-10-22 (NOD-311): task aberta não conta — o Parar do campo não para as frentes (o turno delas já fica
+ * fora de turnosVivosDaConversa); com só frentes rodando, o Parar some do campo e fica o da pílula.
  */
 export function mostraPararNoCampo(estado: Estado, agenteId: string): boolean {
   const a = agenteDe(estado, agenteId);
   if (!a?.conversaId) return false;
-  return turnosVivosDaConversa(estado, a.conversaId).length > 0 || abertosDoBot(estado, agenteId, a.conversaId).length > 0;
+  return turnosVivosDaConversa(estado, a.conversaId).length > 0;
 }
 
 /**
@@ -1160,10 +1161,9 @@ export function botoesDoCampo(p: { trabalhando: boolean; temConteudo: boolean; d
   return { enviar: !p.trabalhando || p.temConteudo || p.ditando, parar: p.trabalhando };
 }
 
-/** O título do Parar do campo: com task aberta ele para tudo do bot (e mostra a lista antes). */
-export function tituloDoParar(estado: Estado, agenteId: string): string {
-  const a = agenteDe(estado, agenteId);
-  return abertosDoBot(estado, agenteId, a?.conversaId).length ? "Parar a conversa e as tasks deste bot (mostra a lista antes)" : "Parar o que está rodando nesta conversa";
+/** O título do Parar do campo (revisto em 2026-10-22, NOD-311): ele para só a conversa, nunca as tasks. */
+export function tituloDoParar(_estado: Estado, _agenteId: string): string {
+  return "Parar o que está rodando nesta conversa";
 }
 
 /** O nome que o leitor de tela ouve no Parar do campo. */

@@ -156,13 +156,23 @@ describeIntegracao("frentes — o fecho do lote com duas conexões (ADR-099, I3)
     expect(retorno?.entradaTexto).toContain('"estado":"parado"');
   });
 
-  it("Parar do chat × o fecho de uma frente: sem 40P01, e nada volta duas vezes", async () => {
+  // revisto em 2026-10-22 (NOD-311): o Parar do chat não para as frentes nem fecha o lote; quem fecha é o Parar global.
+  it("Parar global × o fecho de uma frente: sem 40P01, e nada volta duas vezes", async () => {
+    const m = await montar();
+    const [entrega, parada] = await corrida((trx) => entregar(trx, m.frentes[0]), (trx) => parar(deps(trx), { conversaId: null }));
+    expect(entrega.status, motivo(entrega)).toBe("fulfilled");
+    expect(parada.status, motivo(parada)).toBe("fulfilled");
+    // A pessoa parada fecha o lote sem acordar o dono.
+    expect(await retornos(m)).toHaveLength(0);
+    expect((await ler((r) => r.frentes.buscarLote(m.loteId)))?.devolvidoEm).not.toBeNull();
+  });
+
+  it("Parar do chat × o fecho de uma frente: sem 40P01, e o lote segue aberto com as outras frentes (NOD-311)", async () => {
     const m = await montar();
     const [entrega, parada] = await corrida((trx) => entregar(trx, m.frentes[0]), (trx) => parar(deps(trx), { conversaId: m.conversaId }));
     expect(entrega.status, motivo(entrega)).toBe("fulfilled");
     expect(parada.status, motivo(parada)).toBe("fulfilled");
-    // A conversa parada fecha o lote sem acordar o dono.
     expect(await retornos(m)).toHaveLength(0);
-    expect((await ler((r) => r.frentes.buscarLote(m.loteId)))?.devolvidoEm).not.toBeNull();
+    expect((await ler((r) => r.frentes.buscarLote(m.loteId)))?.devolvidoEm).toBeNull();
   });
 });
