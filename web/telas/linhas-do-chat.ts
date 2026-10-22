@@ -246,7 +246,7 @@ export function planejarLinhas(mensagens: readonly Mensagem[], estado: Estado): 
     // ADR-099 (I7 revista): na rotina, o turno do dono que abriu frentes ("comecei…") não é o resultado — o resultado é o
     // do retorno das frentes; até ele chegar a execução não acabou.
     const abriramFrentes = new Set(u.tipo === "rotina" ? u.mensagens.flatMap((m) => (m.payload?.kind === "frentes_abertas" && m.turnoId ? [m.turnoId] : [])) : []);
-    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
+    const baloes = u.mensagens.filter((m) => m.payload?.kind === "pedido_a_pessoa" || (u.tipo !== "colega" && falou && m.destino !== "anexo" && m.kind === "texto" && m.autoria.autor_tipo === "agente" && m.fimDoTurno === true && !(m.turnoId && abriramFrentes.has(m.turnoId))));
     // O resultado do trabalho que terminou ganha a linha "… terminou · 39 min · US$ 0,88" logo acima (K5).
     const ultimoFim = [...baloes].reverse().find((m) => m.payload?.kind !== "pedido_a_pessoa");
     for (const m of baloes) {

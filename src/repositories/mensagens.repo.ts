@@ -101,7 +101,7 @@ export function assuntoDaNova(m: { kind: KindMensagem; payload?: PayloadMensagem
 }
 
 /** A linha lida com o turno (ADR-083, S2): a origem do turno, o trabalho e se é a última fala de um turno encerrado. */
-type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; primeira?: boolean | null };
+type LinhaComTurno = LinhaMensagem & { turno_origem: OrigemTurno | null; trabalho_id: string | null; fim_do_turno: boolean | null; raiz_id: string | null; raiz_origem: OrigemTurno | null; primeira?: boolean | null; frente_de_lote: boolean | null };
 
 /**
  * definido em 2026-10-18 (chat limpo, PR 2): teto dos `anexo` que a janela traz desde o corte (o plano, 1b). Os `anexo`
@@ -127,8 +127,13 @@ export function colunaPrimeira(conn: Conn, alias: string) {
  * O destino de uma linha da conversa própria (definido em 2026-10-18, chat limpo, PR 2): pelo assunto gravado, ou, nulo,
  * pelo que o backfill gravaria (assuntoNaLeitura). `primeira` só vem quando a consulta a calculou (colunaPrimeira).
  */
-export function destinoDaLinha(l: LinhaMensagem & { primeira?: boolean | null }): Destino {
-  return destinoDe(assuntoNaLeitura({ assunto: l.assunto, kind: l.kind, payload: l.payload, texto: l.texto, decididoPor: l.decidido_por, primeiraDaConversa: l.primeira === true }));
+export function destinoDaLinha(l: LinhaMensagem & { primeira?: boolean | null; frente_de_lote?: boolean | null }): Destino {
+  const assunto = assuntoNaLeitura({ assunto: l.assunto, kind: l.kind, payload: l.payload, texto: l.texto, decididoPor: l.decidido_por, primeiraDaConversa: l.primeira === true });
+  // definido em 2026-10-22 (NOD-325, ADR-099 item 2): a fala do bot num turno de frente de lote é `anexo` — mora na tela da
+  // frente; no chat a voz única é a do dono, no retorno do lote. Sem isso a mesma resposta saía duas vezes (a da frente
+  // como balão "da task" e a do dono). A pergunta à pessoa (`pedido_a_pessoa`) fica no chat; frente sem lote e task, também.
+  if (assunto === null && l.kind === "texto" && l.autor_tipo === "agente" && l.frente_de_lote === true && l.payload?.kind !== "pedido_a_pessoa") return "anexo";
+  return destinoDe(assunto);
 }
 
 function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
@@ -148,10 +153,12 @@ function paraMensagemComTurno(l: LinhaComTurno): Mensagem {
 function selectComTurno(conn: Conn, tenantId: string, recorte: ReturnType<Conn>) {
   return conn<LinhaComTurno[]>`
     select m.*, t.origem as turno_origem, coalesce(t.trabalho_id, o.trabalho_id) as trabalho_id, rz.raiz_id, rz.raiz_origem,
+      coalesce(w.forma = 'frente' and w.lote_id is not null, false) as frente_de_lote,
       (t.estado in ('concluido', 'interrompido') and m.kind = 'texto' and m.autor_tipo = 'agente'
         and m.criado_em = max(case when m.kind = 'texto' and m.autor_tipo = 'agente' then m.criado_em end) over (partition by m.turno_id)) as fim_do_turno
     from (${recorte}) m
     left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id
+    left join trabalhos w on w.tenant_id = m.tenant_id and w.id = t.trabalho_id
     left join lateral (
       select x.trabalho_id from turnos x where x.tenant_id = ${tenantId} and x.mensagem_origem_id = m.id and m.turno_id is null
       order by x.criado_em limit 1
@@ -337,7 +344,7 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
       const comTurno = conn`left join turnos t on t.tenant_id = m.tenant_id and t.id = m.turno_id`;
       const naoContam = [...ASSUNTOS_ANEXO, ...ASSUNTOS_ATIVIDADE];
       const contaNoChat = conn`(m.assunto is null or m.assunto <> all(${naoContam}::text[])) and not ${falaDeTrabalho(conn)}`;
-      const linhas = await conn<(LinhaMensagem & { primeira: boolean | null })[]>`
+      const linhas = await conn<(LinhaMensagem & { primeira: boolean | null; frente_de_lote: boolean | null })[]>`
         with chat as materialized (
           select m.id, m.criado_em from mensagens m ${comTurno} where ${daJanela} and ${contaNoChat}
           order by m.criado_em desc, m.id desc limit ${limite}
@@ -348,9 +355,12 @@ export function mensagensRepo(conn: Conn, escopo: Escopo) {
             and m.criado_em >= coalesce((select em from corte), '-infinity'::timestamptz)
           order by m.criado_em desc, m.id desc limit ${TETO_ANEXOS_DA_JANELA}
         )
-        select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m0.${c}`).join(", "))}, ${colunaPrimeira(conn, "m0")}
+        select ${conn.unsafe(COLUNAS_MENSAGEM.split(", ").map((c) => `m0.${c}`).join(", "))}, ${colunaPrimeira(conn, "m0")},
+          coalesce(w0.forma = 'frente' and w0.lote_id is not null, false) as frente_de_lote
         from (select id from chat union all select id from fora) j
         join mensagens m0 on m0.tenant_id = ${escopo.tenantId} and m0.id = j.id
+        left join turnos t0 on t0.tenant_id = m0.tenant_id and t0.id = m0.turno_id
+        left join trabalhos w0 on w0.tenant_id = m0.tenant_id and w0.id = t0.trabalho_id
         order by m0.criado_em, m0.id`;
       return linhas.map((l) => ({ ...paraMensagem(l), destino: destinoDaLinha(l) }));
     },

@@ -799,3 +799,60 @@ describe("a conversa com outros bots numa linha (chat limpo, PR 3)", () => {
     expect(css).toMatch(/\.troca\[open\] \.troca-ate \{ display: none; \}/);
   });
 });
+
+describe("frente de lote (NOD-325)", () => {
+  const comDestino = (ms: Mensagem[]): Mensagem[] => ms.map((m) => (m.destino ? m : { ...m, destino: "chat" as const }));
+  const lote = (frentes: { trabalhoId: string; titulo: string }[]) =>
+    msg("fa", t0 + MIN, { kind: "sistema", texto: "Começou", turnoId: "tc", origemTurno: "conversa", destino: "anexo", payload: { kind: "frentes_abertas", loteId: "l1", origem: "pessoa", frentes } });
+  /** A fala final da frente: o servidor a marca `anexo` (destinoDaLinha). */
+  const falaDaFrente = (id: string, trabalhoId: string, criadoEm: number, extra: Partial<Mensagem> = {}): Mensagem =>
+    msg(id, criadoEm, { turnoId: `t-${id}`, origemTurno: "conversa", trabalhoId, fimDoTurno: true, texto: "O runner 2 está no ar", destino: "anexo", ...extra });
+  /** O retorno do lote: o dono acorda (retomada) e responde uma vez. */
+  const retornoDoDono = (criadoEm: number): Mensagem => msg("rd", criadoEm, { turnoId: "t-ret", origemTurno: "retomada", fimDoTurno: true, texto: "Pronto: o runner 2 está no ar", destino: "chat" });
+  const baloes = (c: ConversaEstado, e: Estado) => itens(c, e).filter((b) => ehBalao(b.html) && b.chave !== "p1");
+  const conhecidos = (ids: string[]) => ({ trabalhos: { trabalhos: ids.map((id) => trabalho(id, { titulo: `Frente ${id}`, estado: "terminado" })), pressao: null, memoriaTotalMb: null } });
+
+  it("uma frente: só o balão do dono, sem etiqueta 'da task'", () => {
+    const ms = comDestino([daPessoa("p1", t0), lote([{ trabalhoId: "f-a", titulo: "Runner" }]), falaDaFrente("fz", "f-a", t0 + 10 * MIN), retornoDoDono(t0 + 11 * MIN)]);
+    const { e, c } = cenario(ms, conhecidos(["f-a"]));
+    expect(baloes(c, e).map((b) => b.chave)).toEqual(["rd"]);
+    expect(itens(c, e).map((b) => b.html).join("")).not.toContain("da task");
+  });
+
+  it("três frentes: nenhum balão 'da task' e um balão do dono", () => {
+    const ms = comDestino([
+      daPessoa("p1", t0), lote(["f-a", "f-b", "f-c"].map((id) => ({ trabalhoId: id, titulo: id }))),
+      falaDaFrente("fa1", "f-a", t0 + 10 * MIN), falaDaFrente("fb1", "f-b", t0 + 11 * MIN), falaDaFrente("fc1", "f-c", t0 + 12 * MIN),
+      retornoDoDono(t0 + 13 * MIN),
+    ]);
+    const { e, c } = cenario(ms, conhecidos(["f-a", "f-b", "f-c"]));
+    expect(baloes(c, e).map((b) => b.chave)).toEqual(["rd"]);
+    expect(itens(c, e).map((b) => b.html).join("")).not.toContain("da task");
+  });
+
+  it("a frente que pergunta à pessoa continua no chat, com a etiqueta", () => {
+    const pergunta = falaDaFrente("q1", "f-a", t0 + 5 * MIN, { fimDoTurno: false, destino: "chat", texto: "Separo por plano?", payload: { kind: "pedido_a_pessoa", decisaoId: "d1", opcoes: ["Sim", "Não"] } });
+    const { e, c } = cenario(comDestino([daPessoa("p1", t0), lote([{ trabalhoId: "f-a", titulo: "Runner" }]), pergunta]), conhecidos(["f-a"]));
+    const b = baloes(c, e);
+    expect(b.map((x) => x.chave)).toEqual(["q1"]);
+    expect(b[0]!.html).toContain("da task Frente f-a");
+  });
+
+  it("task normal (destino chat) continua com o balão 'da task'", () => {
+    const fala = msg("m2", t0 + 40 * MIN, { turnoId: "tt", origemTurno: "conversa", trabalhoId: "tb-1", fimDoTurno: true, texto: "Migração pronta", destino: "chat" });
+    const { e, c } = cenario(comDestino([daPessoa("p1", t0), fala]), conhecidos(["tb-1"]));
+    const b = baloes(c, e);
+    expect(b.map((x) => x.chave)).toEqual(["m2"]);
+    expect(b[0]!.html).toContain("da task Frente tb-1");
+  });
+
+  it("sem destino (servidor antigo): a fala da frente continua balão", () => {
+    const fala = falaDaFrente("fz", "f-a", t0 + 10 * MIN);
+    delete (fala as { destino?: unknown }).destino;
+    const { e, c } = cenario([daPessoa("p1", t0), fala], conhecidos(["f-a"]));
+    // Sem destino a conversa não é "limpa": o balão vem com a linha "terminou" logo acima, como antes.
+    const fz = itens(c, e).find((b) => b.chave === "fz");
+    expect(fz?.html).toContain('<article class="message ');
+    expect(fz?.html).toContain("da task Frente f-a");
+  });
+});

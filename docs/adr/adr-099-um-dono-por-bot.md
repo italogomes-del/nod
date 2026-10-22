@@ -218,6 +218,14 @@ frentes que devolvem o resultado ao dono. A pessoa fala com o bot, não com as f
   acorda o dono uma vez, só com ela ("que tinha ficado pendente"), sem botão nem card; no lote de colega, o complemento
   vai a quem pediu. Resumo igual ao de antes: nada. Limite: o complementar que cai não é refeito.
 
+## Emenda (2026-10-22, NOD-325) — item 2
+
+- **A fala da frente de lote é `anexo`.** A fala de texto do bot num turno de frente com lote (`forma = 'frente'`,
+  `lote_id` não nulo) sai do chat com destino `anexo` (servidor, `destinoDaLinha`) e a web não faz balão dela; mora na
+  tela da frente. O dono é a voz única: a pessoa vê só a resposta do retorno do lote, uma vez, com uma ou N frentes.
+- **Fica no chat:** o `pedido_a_pessoa` da frente; a fala da pessoa; a frente sem lote (forma efetiva task) e a task.
+- **Limite:** se o lote for apagado (`lote_id` vira null), a fala volta ao chat. O relato (`janelaAte`) segue a mesma regra.
+
 ## Alternativas rejeitadas
 
 - **Manter tasks como pares e coordenar por fora** (esperas como objeto, registro de efeitos, painel do orquestrador): é

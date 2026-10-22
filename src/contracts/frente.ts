@@ -3,7 +3,9 @@ import type { EpochMs } from "./ids.ts";
 /**
  * Frentes e lotes (definido em 2026-10-12, ADR-099, partes 3/4, migração 0071). A frente é um trabalho com
  * `forma = 'frente'`: roda por baixo do dono (a conversa do bot) e devolve um resumo curto em vez de aparecer como task.
- * `task` é a forma de hoje (ADR-083); até a Parte 5 as frentes também aparecem como tasks.
+ * `task` é a forma de hoje (ADR-083). revisto em 2026-10-22 (NOD-325): a fala da frente de lote não aparece mais como task
+ * no chat (destino `anexo`, mora na tela da frente; o dono responde no retorno do lote); a frente sem lote (forma efetiva
+ * task, `formaEfetiva`) continua com o balão "da task".
  */
 export const FORMAS_TRABALHO = ["task", "frente"] as const;
 export type FormaTrabalho = (typeof FORMAS_TRABALHO)[number];

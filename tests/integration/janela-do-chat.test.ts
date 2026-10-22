@@ -258,4 +258,51 @@ describeIntegracao("janela da conversa própria (chat limpo, PR 2)", () => {
       expect(trecho.filter((m) => m.naAtividade === true).length).toBe(fora.length);
     });
   });
+
+  it("NOD-325 (ADR-099 item 2): a fala da frente de lote volta anexo; a pergunta, a fala da pessoa, a frente sem lote e a task, chat", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos, agenteId, conversaId } = await agenteComConversa(trx, MARLON);
+      const bot = autoriaAgente(agenteId, PESSOA_MARLON);
+      const turno = (trabalhoId: string | null, mensagemOrigemId?: string) =>
+        repos.turnos.enfileirar({ executor: "catcher", conversaId, agenteId, origem: "conversa", prazoEm: T0 + 60_000, profundidade: 0, entradaTexto: "x", entradaConfianca: "confiavel", modelo: "m", trabalhoId, ...(mensagemOrigemId ? { mensagemOrigemId } : {}) });
+      const pedido = await gravar(trx, repos, { conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "arruma o runner", confianca: "confiavel" }, T0);
+      const doDono = await turno(null, pedido);
+      const lote = await repos.frentes.criarLote({ agenteId, abertoPorTurnoId: doDono!.id });
+      const frente = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Runner", origem: "pessoa", forma: "frente", loteId: lote!.id });
+      const semLote = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Antiga", origem: "pessoa", forma: "frente" });
+      const task = await repos.trabalhos.criar({ agenteId, conversaId, titulo: "Task", origem: "pessoa" });
+      const tf = await turno(frente!.id);
+      const recado = await gravar(trx, repos, { conversaId, autoria: autoriaPessoa(PESSOA_MARLON), kind: "texto", texto: "e o runner 3?", confianca: "confiavel" }, T0 + 500);
+      await turno(frente!.id, recado);
+      const ts = await turno(semLote!.id);
+      const tt = await turno(task!.id);
+      const daFrente = await gravar(trx, repos, { conversaId, turnoId: tf!.id, autoria: bot, kind: "texto", texto: "O runner 2 está no ar", confianca: "confiavel" }, T0 + 1_000);
+      const pergunta = await gravar(trx, repos, { conversaId, turnoId: tf!.id, autoria: bot, kind: "texto", texto: "Reinicio o runner 3?", payload: { kind: "pedido_a_pessoa", decisaoId: randomUUID(), opcoes: ["Sim", "Não"] }, confianca: "confiavel" }, T0 + 1_100);
+      const daSemLote = await gravar(trx, repos, { conversaId, turnoId: ts!.id, autoria: bot, kind: "texto", texto: "feito na antiga", confianca: "confiavel" }, T0 + 1_200);
+      const daTask = await gravar(trx, repos, { conversaId, turnoId: tt!.id, autoria: bot, kind: "texto", texto: "feito na task", confianca: "confiavel" }, T0 + 1_300);
+      const resposta = await gravar(trx, repos, { conversaId, turnoId: doDono!.id, autoria: bot, kind: "texto", texto: "Pronto: o runner 2 está no ar", confianca: "confiavel" }, T0 + 2_000);
+
+      const deps = depsSobreTrx(trx, MARLON);
+      const lidas = (await executar(deps, lerConversa, { conversaId })).data.mensagens;
+      const destino = (id: string) => lidas.find((m) => m.id === id)?.destino;
+      expect(destino(daFrente)).toBe("anexo");
+      expect(destino(pergunta)).toBe("chat");
+      expect(destino(pedido)).toBe("chat");
+      expect(destino(recado)).toBe("chat");
+      expect(destino(daSemLote)).toBe("chat");
+      expect(destino(daTask)).toBe("chat");
+      expect(destino(resposta)).toBe("chat");
+      // A tela da frente continua com a fala (doTrabalho não tem destino).
+      expect((await repos.mensagens.doTrabalho(frente!.id)).some((m) => m.id === daFrente)).toBe(true);
+
+      // O relato registra o que a pessoa viu: a fala da frente de lote estava fora do chat.
+      const janela = await repos.mensagens.janelaAte(conversaId, resposta, T0 - 1, 100, { comDestino: true });
+      expect(janela.find((m) => m.id === daFrente)?.destino).toBe("anexo");
+      expect(janela.find((m) => m.id === daSemLote)?.destino).toBe("chat");
+      const { relato } = (await executar(deps, registrarRelato, { mensagemId: resposta, categoria: "outro", alcance: "janela" })).data;
+      const trecho = (await repos.relatos.prosaDe(relato.id))?.trecho?.mensagens ?? [];
+      expect(trecho.find((m) => m.id === daFrente)?.naAtividade).toBe(true);
+      expect(trecho.find((m) => m.id === pergunta)?.naAtividade).toBeUndefined();
+    });
+  });
 });
