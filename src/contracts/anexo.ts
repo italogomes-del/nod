@@ -27,3 +27,9 @@ export type AnexoMeta = {
    */
   anterior?: true;
 };
+
+/**
+ * NOD-327: a família visual de um arquivo — decide o ícone do card (`web/lib/icones-arquivo.ts`, reaproveitado pela
+ * Biblioteca da NOD-326) e qual prévia abre. Vem do mime; a extensão só desempata quando o mime é genérico.
+ */
+export type FamiliaArquivo = "planilha" | "documento" | "apresentacao" | "pdf" | "zip" | "html" | "imagem" | "texto" | "outro";

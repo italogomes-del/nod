@@ -29,6 +29,7 @@ describe("estático", () => {
   mkdirSync(join(dir, "icons"));
   writeFileSync(join(dir, "fontes", "geist.woff2"), "x");
   writeFileSync(join(dir, "assets", "index-abc123.js"), "x");
+  writeFileSync(join(dir, "assets", "pdf.worker.min-abc123.mjs"), "x");
   mkdirSync(join(dir, "diagrama"));
   writeFileSync(join(dir, "diagrama", "sandbox.js"), "x");
   writeFileSync(join(dir, "index.html"), "<html></html>");
@@ -50,6 +51,9 @@ describe("estático", () => {
     ["/manifest.webmanifest", "application/manifest+json; charset=utf-8", "no-cache"],
     ["/icons/nod-192.png", "image/png", "public, max-age=86400"],
     ["/assets/index-abc123.js", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable"],
+    // NOD-327 (QA): o worker do pdf.js sai do Vite como .mjs; com octet-stream + nosniff o navegador recusa o módulo e
+    // toda prévia de PDF cai em "Não dá…" no build de produção (e no app do Mac, que carrega o mesmo servidor).
+    ["/assets/pdf.worker.min-abc123.mjs", "text/javascript; charset=utf-8", "public, max-age=31536000, immutable"],
   ])("%s sai como %s, cache %s e nosniff", async (url, tipo, cache) => {
     const r = await chamar(dir, url);
     expect(r.servido).toBe(true);

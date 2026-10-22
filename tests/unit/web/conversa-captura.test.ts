@@ -70,9 +70,13 @@ describe("NOD-56 · captura da tela do bot no transcript", () => {
     expect(html).not.toContain("anexos/an2");
   });
 
-  it("anexo que não é imagem no bot segue como cartão de arquivo", () => {
+  it("anexo que não é imagem no bot vira card de arquivo com prévia (NOD-327)", () => {
     const html = renderMensagem(msg("agente", { anexos: [{ id: "d", nome: "r.pdf", mime: "application/pdf", tamanho: 10 }] }), estado());
-    expect(html).toContain("msg-anexo-card");
+    expect(html).toContain('class="msg-arquivo"');
+    expect(html).toContain('data-act="previa-arquivo" data-id="d"');
+    expect(html).toContain(`data-url="/api/t/t/conversas/${C}/anexos/d"`);
+    expect(html).toContain('class="arq-ic arq-pdf"');
+    expect(html).toContain('download="r.pdf"');
     expect(html).not.toContain("msg-captura");
   });
 

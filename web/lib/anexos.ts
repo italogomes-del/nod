@@ -1,5 +1,6 @@
 import type { AnexoMeta } from "../../src/contracts/anexo.ts";
 import { esc } from "./render.ts";
+import { familiaDoArquivo, formatoDaPrevia, iconeDoArquivo } from "./icones-arquivo.ts";
 
 /**
  * Anexos no composer (ADR-046). Espelho de src/contracts/anexo.ts — a web só importa TIPOS de src/
@@ -80,10 +81,27 @@ export function resumo(itens: readonly ItemAnexo[]): string {
   return `${validos.length} de ${POR_MENSAGEM} · ${tamanhoHumano(validos.reduce((s, i) => s + i.tamanho, 0))}`;
 }
 
-/** Anexos de uma mensagem já enviada: miniatura para imagem, cartão para PDF e texto. */
+const NUVEM = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5"/><path d="M12 12v8m-3-3 3 3 3-3"/></svg>';
+
+/**
+ * NOD-327 (j4-3): o card de um arquivo que não é imagem. Ícone da família, nome e tamanho; a nuvem de Baixar
+ * (`<a download>`, a mesma rota de anexos) aparece no hover e fica sempre à mostra no celular. CSV e PDF abrem a prévia
+ * (`data-act="previa-arquivo"`, `web/telas/previa-arquivo.ts`); txt, md e json ficam como card só com Baixar.
+ */
+export function renderCardArquivo(a: Pick<AnexoMeta, "id" | "nome" | "mime" | "tamanho">, url: string): string {
+  const icone = iconeDoArquivo(familiaDoArquivo(a.mime, a.nome));
+  const info = `${icone}<span class="anexo-info"><b>${esc(a.nome)}</b><span>${esc(tamanhoHumano(a.tamanho))}</span></span>`;
+  const baixar = `<a class="msg-arquivo-baixar" href="${esc(url)}" download="${esc(a.nome)}" aria-label="Baixar ${esc(a.nome)}" title="Baixar">${NUVEM}</a>`;
+  const abrir = formatoDaPrevia(a.mime, a.nome)
+    ? `<button type="button" class="msg-arquivo-abrir" data-act="previa-arquivo" data-id="${esc(a.id)}" data-url="${esc(url)}" data-nome="${esc(a.nome)}" data-mime="${esc(a.mime)}" aria-haspopup="dialog" aria-label="Abrir prévia de ${esc(a.nome)}, ${esc(tamanhoHumano(a.tamanho))}">${info}</button>`
+    : `<span class="msg-arquivo-abrir sem-previa">${info}</span>`;
+  return `<div class="msg-arquivo">${abrir}${baixar}</div>`;
+}
+
+/** Anexos de uma mensagem já enviada: miniatura para imagem, card de arquivo (NOD-327) para o resto. */
 export function renderAnexosDaMensagem(anexos: readonly AnexoMeta[], url: (id: string) => string): string {
   if (anexos.length === 0) return "";
   return `<div class="msg-anexos">${anexos.map((a) => ehImagem(a.mime)
     ? `<a class="msg-anexo-img" href="${esc(url(a.id))}" target="_blank" rel="noopener"><img src="${esc(url(a.id))}" alt="${esc(a.nome)}" loading="lazy" /></a>`
-    : `<a class="msg-anexo-card" href="${esc(url(a.id))}" target="_blank" rel="noopener"><span class="anexo-tipo tipo-${esc(rotuloTipo(a.mime).toLowerCase())}">${rotuloTipo(a.mime)}</span><span class="anexo-info"><b>${esc(a.nome)}</b><span>${esc(tamanhoHumano(a.tamanho))}</span></span></a>`).join("")}</div>`;
+    : renderCardArquivo(a, url(a.id))).join("")}</div>`;
 }

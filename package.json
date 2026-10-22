@@ -64,6 +64,7 @@
   },
   "dependencies": {
     "mermaid": "12.2.0",
+    "pdfjs-dist": "6.4.299",
     "postgres": "^3.4.9",
     "ws": "^8.22.0"
   },

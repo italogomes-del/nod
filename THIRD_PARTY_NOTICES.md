@@ -24,6 +24,14 @@ The web interface serves the Geist and Geist Mono variable fonts (latin and lati
 the `@fontsource-variable/geist` and `@fontsource-variable/geist-mono` packages, version 5.3.0.
 Full license: web/public/fontes/OFL-geist.txt.
 
+## PDF.js (file preview)
+
+The in-browser PDF preview (ADR-120) uses [`pdfjs-dist`](https://github.com/mozilla/pdf.js) version 6.4.299,
+Copyright Mozilla Foundation and contributors, licensed under the Apache License 2.0
+(https://www.apache.org/licenses/LICENSE-2.0). It is a web runtime dependency loaded on demand (dynamic `import()`)
+only when a PDF preview is opened; the worker is served as a static asset. No modifications. Full license ships
+with the package in node_modules/pdfjs-dist/LICENSE.
+
 ## ws (WebSocket server)
 
 The voice call channels (ADR-071) use [`ws`](https://github.com/websockets/ws), Copyright (c) 2011 Einar Otto

@@ -1,5 +1,6 @@
 import "./lib/mascote-elemento.ts";
 import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
+import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
 import { definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
@@ -3071,6 +3072,8 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   },
   // NOD-56: a captura da tela do bot ao fim do turno, ampliada sobre a conversa.
   "ampliar-captura": (el) => { abrirCapturaAmpliada(el); },
+  // NOD-327: o card de CSV/PDF abre a prévia num modal claro sobre a conversa.
+  "previa-arquivo": (el) => { abrirPreviaArquivo(el); },
   "abrir-computador": (el) => { const a = botGerido(el.dataset.id); if (a && api && a.ownerId === estado.sessao?.pessoaId) abrirComputador(api, a, { assumir: el.dataset.assumir === "1", dev: () => estado.modoDev.ligado }); },
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
   // frota relê e o cartão continua dizendo o motivo.

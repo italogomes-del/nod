@@ -394,8 +394,65 @@
 .msg-anexos { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-bottom: 6px; }
 .msg-anexo-img { display: block; width: 168px; height: 112px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); }
 .msg-anexo-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.msg-anexo-card { display: flex; align-items: center; gap: 10px; height: 56px; box-sizing: border-box; padding: 0 14px 0 10px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-decoration: none; color: var(--ink); align-self: flex-end; max-width: 280px; }
-.msg-anexo-card:hover { border-color: var(--line-strong); }
+/* NOD-327 (j4-3): card de arquivo. Ícone da família, nome e tamanho; a nuvem de Baixar aparece no hover (sempre no celular). */
+.msg-arquivo { position: relative; display: flex; align-items: center; height: 56px; box-sizing: border-box; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); align-self: flex-end; width: 280px; max-width: 100%; }
+.msg-arquivo:hover, .msg-arquivo:focus-within { border-color: var(--line-strong); }
+.msg-arquivo-abrir { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 100%; padding: 0 44px 0 10px; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.msg-arquivo-abrir.sem-previa { cursor: default; }
+.msg-arquivo-abrir:focus-visible, .msg-arquivo-baixar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.msg-arquivo-baixar { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: var(--ink-2); opacity: 0; transition: opacity .12s ease; }
+.msg-arquivo:hover .msg-arquivo-baixar, .msg-arquivo:focus-within .msg-arquivo-baixar { opacity: 1; }
+.msg-arquivo-baixar:hover { background: var(--surface-raised); color: var(--ink); }
+.arq-ic { flex: none; color: var(--ink-3); }
+.arq-ic .arq-folha { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+.arq-ic .arq-orelha { fill: none; stroke: var(--line-strong); stroke-width: 1.2; }
+.arq-planilha { color: var(--arquivo-planilha); }
+.arq-documento { color: var(--arquivo-documento); }
+.arq-apresentacao { color: var(--arquivo-apresentacao); }
+.arq-pdf { color: var(--arquivo-pdf); }
+.arq-zip, .arq-html { color: var(--ink-2); }
+/* NOD-327 (j4-5 a j4-7): a prévia num modal claro sobre a conversa escurecida; clique fora fecha (web/lib/sobreposicao.ts). */
+.previa-arquivo { padding: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); width: min(1080px, 94vw); max-width: 94vw; height: min(860px, 90vh); max-height: 90vh; overflow: hidden; }
+.previa-arquivo::backdrop { background: var(--backdrop); backdrop-filter: blur(4px); }
+.previa-arquivo-caixa { display: flex; flex-direction: column; height: 100%; }
+.previa-topo { display: flex; align-items: center; gap: 6px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); }
+.previa-titulo { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.previa-titulo b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.previa-contagem { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.previa-bt { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--ink-2); cursor: pointer; flex: none; }
+.previa-bt:hover:enabled, a.previa-bt:hover { background: var(--surface-raised); color: var(--ink); }
+.previa-bt:disabled { opacity: .4; cursor: default; }
+.previa-bt:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.previa-corpo { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.previa-corpo > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.previa-carregando { margin: auto; color: var(--ink-3); font-size: 13px; }
+.previa-erro { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 32px; text-align: center; color: var(--ink-2); font-size: 14px; }
+.previa-erro p { margin: 0; }
+/* CSV: número de linha e letra de coluna fixos, sem cortar conteúdo; a seleção é a de planilha. */
+.pv-csv-dica { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12px; color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.pv-csv-dica-bt { flex: none; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink-3); cursor: pointer; transition: transform .12s ease; }
+.pv-csv-dica-bt:hover { background: var(--surface-raised); }
+.pv-csv-dica.recolhida .pv-csv-dica-bt { transform: rotate(-90deg); }
+.pv-csv-dica.recolhida span { display: none; }
+.pv-csv-aviso { margin: 0; padding: 7px 14px; font-size: 12px; color: var(--ink-2); background: var(--surface-raised); border-bottom: 1px solid var(--line); }
+.pv-csv-rolagem { flex: 1; min-height: 0; overflow: auto; }
+.pv-csv-rolagem:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+.pv-csv-tabela { border-collapse: separate; border-spacing: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pv-csv-tabela th, .pv-csv-tabela td { padding: 6px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: pre-wrap; min-width: 48px; max-width: 480px; overflow-wrap: anywhere; }
+.pv-csv-tabela thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-side); color: var(--ink-3); font-weight: 500; font-size: 11.5px; text-align: center; }
+.pv-csv-tabela tbody th { position: sticky; left: 0; z-index: 1; background: var(--surface-side); color: var(--ink-3); font-weight: 400; font-size: 11.5px; text-align: right; min-width: 36px; }
+.pv-csv-tabela thead th.pv-csv-canto { left: 0; z-index: 3; }
+.pv-csv-tabela td { cursor: cell; user-select: none; }
+.pv-csv-tabela td.sel { background: var(--signal-soft); }
+.pv-csv-tabela td.foco { box-shadow: inset 0 0 0 2px var(--ink); }
+/* PDF: papel branco sobre o cinza da mesa; a página rola quando o zoom passa da largura. */
+.pv-pdf-barra { display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.pv-pdf-zoom { min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; }
+.pv-pdf-pagina-de { margin-left: auto; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pv-pdf-rolagem { flex: 1; min-height: 0; overflow: auto; background: var(--surface-raised); }
+.pv-pdf-paginas { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; width: max-content; min-width: 100%; box-sizing: border-box; }
+.pv-pdf-pagina { background: var(--papel); box-shadow: var(--shadow-pop); flex: none; }
+.pv-pdf-pagina canvas { display: block; }
 /* NOD-56 (protótipo do Gil, 2026-10-05): a tela do computador ao fim do turno, rodapé do balão do bot, à esquerda, sem corte. */
 .msg-captura { margin: 8px 0 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .msg-captura-bt { display: block; padding: 0; width: 240px; height: 150px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface-raised); cursor: zoom-in; }

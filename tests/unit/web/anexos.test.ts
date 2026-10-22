@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ANEXOS_POR_MENSAGEM, MIME_PDF as MIME_PDF_SRC, MIMES_IMAGEM as IMAGEM_SRC, MIMES_TEXTO as TEXTO_SRC, TAMANHO_MAX_ANEXO } from "../../../src/contracts/anexo.ts";
-import { MIME_PDF, MIMES_IMAGEM, MIMES_TEXTO, mimeDe, motivoRecusa, POR_MENSAGEM, renderAnexosDaMensagem, renderItens, resumo, TAMANHO_MAX } from "../../../web/lib/anexos.ts";
+import { MIME_PDF, MIMES_IMAGEM, MIMES_TEXTO, mimeDe, motivoRecusa, POR_MENSAGEM, renderAnexosDaMensagem, renderCardArquivo, renderItens, resumo, TAMANHO_MAX } from "../../../web/lib/anexos.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
 
 describe("anexos na web (ADR-046)", () => {
@@ -36,12 +36,29 @@ describe("anexos na web (ADR-046)", () => {
     expect(resumo([{ chave: "a", nome: "a", mime: "image/png", tamanho: 1024 * 1024, estado: "pronto", progresso: 1 }])).toBe(`1 de ${POR_MENSAGEM} · 1,0 MB`);
   });
 
-  it("mensagem enviada: imagem vira miniatura, PDF vira cartão, ambos abrem em aba nova", () => {
+  it("mensagem enviada: imagem vira miniatura em aba nova; PDF vira card com prévia e Baixar (NOD-327)", () => {
     const html = renderAnexosDaMensagem([{ id: "i", nome: "p.png", mime: "image/png", tamanho: 1 }, { id: "d", nome: "c.pdf", mime: "application/pdf", tamanho: 2048 }], (id) => `/u/${id}`);
     expect(html).toContain('<img src="/u/i" alt="p.png"');
-    expect(html).toContain('href="/u/d"');
-    expect(html).toContain("PDF");
-    expect(html.match(/target="_blank" rel="noopener"/g)).toHaveLength(2);
+    expect(html.match(/target="_blank" rel="noopener"/g)).toHaveLength(1);
+    expect(html).toContain('<button type="button" class="msg-arquivo-abrir" data-act="previa-arquivo" data-id="d" data-url="/u/d" data-nome="c.pdf" data-mime="application/pdf" aria-haspopup="dialog"');
+    expect(html).toContain('<a class="msg-arquivo-baixar" href="/u/d" download="c.pdf" aria-label="Baixar c.pdf"');
+    expect(html).toContain('class="arq-ic arq-pdf"');
+    expect(html).toContain("2 KB");
+  });
+
+  it("card de arquivo (NOD-327): CSV abre prévia; txt, md e json só com Baixar; nome hostil sai escapado", () => {
+    const csv = renderCardArquivo({ id: "c", nome: "vendas.csv", mime: "text/csv", tamanho: 10 }, "/u/c");
+    expect(csv).toContain('data-act="previa-arquivo"');
+    expect(csv).toContain('class="arq-ic arq-planilha"');
+    for (const [nome, mime] of [["n.txt", "text/plain"], ["n.md", "text/markdown"], ["n.json", "application/json"]] as const) {
+      const html = renderCardArquivo({ id: "x", nome, mime, tamanho: 10 }, "/u/x");
+      expect(html).not.toContain("data-act=");
+      expect(html).toContain('class="msg-arquivo-abrir sem-previa"');
+      expect(html).toContain(`download="${nome}"`);
+    }
+    const hostil = renderCardArquivo({ id: 'x"y', nome: '<img src=x onerror=1>".csv', mime: "text/csv", tamanho: 1 }, "/u/x");
+    expect(hostil).not.toContain("<img");
+    expect(hostil).toContain('data-id="x&quot;y"');
   });
 
   it("composer: clipe só com anexos; Codex aceita sem PDF; sala segue sem clipe", () => {

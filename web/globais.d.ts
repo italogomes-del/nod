@@ -22,3 +22,9 @@ declare module "*?worker&url" {
 interface ImportMeta {
   readonly env: { readonly PROD: boolean };
 }
+
+/** NOD-327: o worker do pdf.js entra por `?url` (o Vite copia o arquivo e o import devolve a URL). */
+declare module "*?url" {
+  const url: string;
+  export default url;
+}

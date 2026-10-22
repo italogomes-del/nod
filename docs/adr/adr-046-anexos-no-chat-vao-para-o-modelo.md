@@ -66,3 +66,9 @@ Se o Codex, quando homologado, não aceitar `--image` como a documentação diz,
 Codex passa a oferecer só texto até a homologação — o resto da decisão fica. Se o banco crescer demais
 com anexos (medir `pg_total_relation_size('anexos')`), mover `conteudo` para armazenamento de objetos
 mantendo a mesma tabela de metadados e a mesma rota interna.
+
+## Emenda (2026-10-22, ADR-120 · NOD-327)
+
+Na conversa, o anexo que não é imagem — da pessoa ou do bot — deixa de ser chip que abre aba nova e vira o card de
+arquivo da ADR-120: ícone da família, nome e Baixar. CSV e PDF abrem prévia num modal, lida da mesma rota de anexos
+(sem mudar os cabeçalhos dela); `.txt`, `.md` e `.json` ficam como card só com Baixar. O que vai para o modelo não muda.

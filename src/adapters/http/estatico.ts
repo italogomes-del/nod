@@ -5,6 +5,8 @@ import { extname, join, normalize } from "node:path";
 const TIPOS: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  // NOD-327: o worker do pdf.js (pdfjs-dist) sai do Vite como .mjs; módulo com outro tipo + nosniff o navegador recusa.
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".json": "application/json",
