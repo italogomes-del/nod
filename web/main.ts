@@ -76,6 +76,7 @@ import type { Proposta } from "../src/contracts/conversa.ts";
 import { criarProgressoNaTela } from "./telas/progresso-na-fala.ts";
 import { blocosAoVivo, blocosDoHistorico, botoesDoCampo, htmlComposer, mostraPararNoCampo, renderCabecalhoConversa, renderTimeline, rotuloDoParar, tituloDoParar, type BlocoDaTimeline } from "./telas/conversa.ts";
 import { criarArtefatosVivos } from "./telas/artefatos-vivos.ts";
+import { criarDiagramasVivos } from "./telas/diagramas-vivos.ts";
 import { instalarDicaDeLink } from "./lib/dica-link.ts";
 import { inventarioEmUso, motorDesatualizado, situacaoMotorFora } from "./telas/frota.ts";
 import { ehIa, fraseDoMotivoDaNota, inventarioDaIa, pedeInstalar } from "./telas/ia-fora.ts";
@@ -293,6 +294,14 @@ const artefatos = criarArtefatosVivos({
   salvar: (id, dados) => (api ? api.salvarEstadoArtefato(id, dados) : Promise.reject(new ErroApi(401, "nao_permitido", "sem sessão"))),
   salvarAoSair: (id, dados) => api?.salvarEstadoArtefatoAoSair(id, dados),
 });
+/**
+ * Diagrama mermaid no balão do bot (NOD-328): o renderizador é um iframe sandbox de origem opaca que importa o módulo
+ * daqui (CORS `*` em /assets e /diagrama, estatico.ts). No build ele sai em /diagrama/sandbox.js (vite.config.ts); no
+ * dev, o Vite serve o .ts e só aceita a origem "null" com NOD_DIAGRAMA_DEV=1.
+ */
+const diagramas = criarDiagramasVivos(import.meta.env.PROD
+  ? { urlModulo: `${location.origin}/diagrama/sandbox.js`, fontes: [`${location.origin}/diagrama/`, `${location.origin}/assets/`] }
+  : { urlModulo: `${location.origin}/sandbox/diagrama.ts`, fontes: [`${location.origin}/`] });
 /**
  * Modo ligação (definido em 2026-10-04, ADR-071): a tela e o motor moram fora do reducer, como os artefatos — o áudio,
  * o WebSocket e a legenda mudam muitas vezes por segundo. O reducer só sabe QUAL ligação está viva (`ligacaoViva`), para
@@ -1326,6 +1335,7 @@ function regravarTimeline(corpo: string, partes: PartesDaTimeline | null, muda: 
   }
   for (const el of escopo.querySelectorAll<HTMLDetailsElement>("details[data-disclosure]")) if (abertos.includes(el.dataset.disclosure)) el.open = true;
   if (muda.historicoMuda) artefatos.hidratar(timeline ?? document);
+  if (muda.historicoMuda) diagramas.hidratar(timeline ?? document);
   if ((muda.historicoMuda || muda.cascaMuda) && t.tipo === "conversa") contarLinhasMostradas();
   rolagem.depoisDeDesenhar(t.tipo === "conversa" || t.tipo === "sala" ? t.conversaId : t.tipo === "trabalho" ? `trabalho:${t.id}` : null, muda.historicoMuda || muda.cascaMuda);
 }

@@ -15,7 +15,16 @@ export interface OpcoesTexto {
    * código ou abertura ainda em prosa), para nenhum quadro mostrar uma crase que some no quadro seguinte.
    */
   aoVivo?: boolean;
+  /**
+   * NOD-328: só o balão do bot já no histórico. A cerca ```mermaid fechada ganha o invólucro `figure.md-diagrama` em volta
+   * do card de código; web/telas/diagramas-vivos.ts troca o card pelo desenho depois do render. Ao vivo, Não lidos, cartão
+   * de pergunta, trabalhos e a mensagem da pessoa não passam a opção e ficam no card.
+   */
+  diagramas?: boolean;
 }
+
+/** NOD-328: acima disso o bloco fica no card (espelho de LIMITE_CARACTERES em web/lib/diagrama.ts; o teste confere). */
+export const DIAGRAMA_MAX_CARACTERES = 20_000;
 
 const LINHAS_VISIVEIS = 8;
 /** Com até 10 linhas a tabela vem inteira: esconder 1 ou 2 linhas atrás de um botão só atrapalha. */
@@ -30,7 +39,7 @@ const LINHAS_SEM_MOSTRAR_MAIS = 10;
  * passa `agora` (os testes) formata direto.
  */
 const MEMORIA_MAX = 2_000;
-const memoria = new Map<string, { texto: string; aoVivo: boolean; html: string }>();
+const memoria = new Map<string, { texto: string; modo: string; html: string }>();
 let diaDaMemoria = "";
 
 export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string {
@@ -40,13 +49,14 @@ export function textoFormatado(texto: string, opcoes: OpcoesTexto = {}): string 
     memoria.clear();
     diaDaMemoria = dia;
   }
-  const aoVivo = Boolean(opcoes.aoVivo);
-  const guardado = memoria.get(opcoes.chave);
   // NOD-204: o HTML ao vivo esconde crases que a resposta completa mostra; o mesmo texto só reaproveita no mesmo modo.
-  if (guardado && guardado.texto === texto && guardado.aoVivo === aoVivo) return guardado.html;
+  // NOD-328: com e sem diagramas também são modos diferentes.
+  const modo = `${opcoes.aoVivo ? "v" : ""}${opcoes.diagramas ? "d" : ""}`;
+  const guardado = memoria.get(opcoes.chave);
+  if (guardado && guardado.texto === texto && guardado.modo === modo) return guardado.html;
   const html = formatar(texto, opcoes);
   memoria.delete(opcoes.chave);
-  memoria.set(opcoes.chave, { texto, aoVivo, html });
+  memoria.set(opcoes.chave, { texto, modo, html });
   if (memoria.size > MEMORIA_MAX) memoria.delete(memoria.keys().next().value ?? "");
   return html;
 }
@@ -60,12 +70,13 @@ const SO_LINGUAGEM = /^[A-Za-z0-9_+#.-]{0,20}$/;
 
 function formatar(texto: string, opcoes: OpcoesTexto): string {
   let tabelas = 0;
+  const diagramas = { proximo: 0 };
   // NOD-201: a cerca sem par vai até o fim do texto e vira código já durante o streaming, com o mesmo HTML do bloco
   // fechado (sem salto quando a cerca fecha). Sem a flag `m`, o `$` é o fim do texto.
   const aoVivo = Boolean(opcoes.aoVivo);
   const partes = texto.split(/(```[\s\S]*?(?:```|$))/g);
   return partes.map((trecho, i) => {
-    if (i % 2 === 1) return codigo(trecho, aoVivo);
+    if (i % 2 === 1) return codigo(trecho, aoVivo, opcoes.diagramas && !aoVivo ? diagramas : null);
     // NOD-204: ao vivo, a cerca que ainda está abrindo ("\n`", "\n``" no fim) não aparece crua antes da terceira crase.
     // Só o último trecho: prosa no meio do texto nunca muda. A cerca pode vir indentada até 3 espaços, como dentro de
     // um item de lista ("1. Instale:\n   ```bash"), e a indentação fica: é o que o quadro seguinte mostra.
@@ -74,7 +85,7 @@ function formatar(texto: string, opcoes: OpcoesTexto): string {
   }).join("");
 }
 
-function codigo(trecho: string, aoVivo: boolean): string {
+function codigo(trecho: string, aoVivo: boolean, diagramas: { proximo: number } | null): string {
   const fechado = trecho.length >= 6 && trecho.endsWith("```");
   // Bloco aberto cuja cerca de fechamento chegou partida ("\n`" ou "\n``" no fim): essas crases não piscam no código
   // antes da terceira chegar e o bloco fechar (revisão da NOD-201). Ao vivo (NOD-204), também quando a cerca vem
@@ -87,7 +98,10 @@ function codigo(trecho: string, aoVivo: boolean): string {
   // NOD-45: a última quebra é o fim da linha antes da cerca, não código. Sai nos dois modos, para o aberto e o fechado
   // terem o mesmo <code> (sem salto quando a cerca fecha) e o Copiar levar o código sem a quebra a mais.
   const semLinguagem = soAbrindo ? "" : corpo.replace(LINGUAGEM, "").replace(/\n$/, "");
-  return cardDoCodigo(semLinguagem, linguagem, fechado);
+  const card = cardDoCodigo(semLinguagem, linguagem, fechado);
+  // NOD-328: o card continua dentro da figure, como fallback (inválido, grande, lento, offline) e para o Copiar.
+  if (!diagramas || !fechado || linguagem.toLowerCase() !== "mermaid" || semLinguagem.trim() === "" || semLinguagem.length > DIAGRAMA_MAX_CARACTERES) return card;
+  return `<figure class="md-diagrama" data-diagrama-indice="${diagramas.proximo++}">${card}</figure>`;
 }
 
 /**

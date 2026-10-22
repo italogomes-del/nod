@@ -16,6 +16,10 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: Number(process.env.NOD_WEB_PORT ?? "5274"),
+    // NOD-328: o renderizador de diagramas roda num iframe de origem opaca, que pede o módulo com `Origin: null`. Só com
+    // NOD_DIAGRAMA_DEV=1 o dev aceita essa origem (qualquer página aberta no navegador também é "null" num sandbox:
+    // risco de dev, registrado no plano). Sem a env, o diagrama no dev fica no card de código.
+    ...(process.env.NOD_DIAGRAMA_DEV === "1" ? { cors: { origin: ["null", /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/] } } : {}),
     proxy: {
       // SSE (ADR-016): sem buffer e sem timeout no proxy do Vite.
       "^/api/t/[^/]+/eventos": {
@@ -40,5 +44,11 @@ export default defineConfig({
   build: {
     outDir: path.resolve("dist/web"),
     emptyOutDir: true,
+    // NOD-328: o renderizador de diagramas é uma 2ª entrada, com nome fixo fora de /assets (o iframe sandbox pede pelo
+    // nome; no-cache em estatico.ts). O mermaid e os chunks dele ficam em /assets, com hash, e só baixam no 1º diagrama.
+    rollupOptions: {
+      input: { index: path.resolve("web/index.html"), diagrama: path.resolve("web/sandbox/diagrama.ts") },
+      output: { entryFileNames: (chunk) => (chunk.name === "diagrama" ? "diagrama/sandbox.js" : "assets/[name]-[hash].js") },
+    },
   },
 });

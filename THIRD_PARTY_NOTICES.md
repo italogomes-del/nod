@@ -35,3 +35,24 @@ dependency only (the desktop app uses the built-in WebSocket client).
 The free local voice provider for development (`NOD_VOZ_STT=local`, `NOD_VOZ_TTS=local`) calls a separately installed
 [`whisper.cpp`](https://github.com/ggml-org/whisper.cpp) (`brew install whisper-cpp`, MIT License) with the
 `ggml-base-q5_1.bin` model, and the macOS `say` command. Neither is bundled with nod or used in production.
+
+## Mermaid (diagrams in the bot's message, NOD-328)
+
+The web interface draws ```` ```mermaid ```` blocks with [`mermaid`](https://github.com/mermaid-js/mermaid) 12.2.0,
+Copyright (c) 2014-2022 Knut Sveidqvist, licensed under the MIT License. It runs only inside a sandboxed iframe and
+ships as a separate bundle (`dist/web/diagrama/sandbox.js` plus chunks in `dist/web/assets/`), loaded on demand. The
+bundle includes code from mermaid's runtime dependencies, under their own licenses:
+
+- MIT: `@mermaid-js/parser`, `@braintree/sanitize-url`, `@iconify/utils`, `@upsetjs/venn.js`, `cytoscape`,
+  `cytoscape-cose-bilkent`, `cytoscape-fcose`, `cose-base`, `layout-base`, `dagre-d3-es`, `dayjs`, `es-toolkit`,
+  `katex`, `khroma`, `lodash-es`, `marked`, `roughjs` (with `hachure-fill`, `path-data-parser`, `points-on-curve`,
+  `points-on-path`), `stylis`, `ts-dedent`, `uuid`.
+- ISC: `d3` and its `d3-*` modules, `internmap`, `delaunator`.
+- BSD-3-Clause: `d3-ease`, `d3-sankey`, `rw`.
+- Apache-2.0: `chevrotain` and its `@chevrotain/*` modules.
+- MPL-2.0 OR Apache-2.0 (used under Apache-2.0): `dompurify`.
+- EPL-2.0: `elkjs` (unmodified; source at https://github.com/kieler/elkjs). nod locks the layout to dagre, so the ELK
+  chunk is shipped but not loaded.
+- Unlicense: `robust-predicates`.
+
+Full license texts are in each package under `node_modules/` at the versions pinned in `package-lock.json`.

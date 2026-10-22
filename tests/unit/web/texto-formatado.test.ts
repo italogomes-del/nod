@@ -416,3 +416,44 @@ describe("task list só de leitura (NOD-45)", () => {
     expect(xss).not.toContain("<img");
   });
 });
+
+/** NOD-328 (PR A): a cerca ```mermaid do histórico ganha a figure que o diagramas-vivos.ts desenha; o card fica dentro. */
+describe("diagrama no texto do bot", () => {
+  const MERMAID = "```mermaid\nflowchart LR\n  A-->B\n```";
+  const figura = (i: number, codigo = "flowchart LR\n  A--&gt;B") => `<figure class="md-diagrama" data-diagrama-indice="${i}">${card(codigo, "mermaid")}</figure>`;
+
+  it("só com `diagramas` e cerca fechada vira figure com o card dentro", () => {
+    expect(textoFormatado(MERMAID, { diagramas: true })).toBe(figura(0));
+    expect(textoFormatado(MERMAID)).toBe(card("flowchart LR\n  A--&gt;B", "mermaid"));
+    expect(textoFormatado("```Mermaid\nflowchart LR\n  A-->B\n```", { diagramas: true })).toContain('class="md-diagrama"');
+    expect(textoFormatado("```mermaid\nflowchart LR\n  A-->B", { diagramas: true })).not.toContain("md-diagrama");
+  });
+
+  it("ao vivo fica no card, mesmo com diagramas", () => {
+    expect(textoFormatado(MERMAID, { diagramas: true, aoVivo: true })).not.toContain("md-diagrama");
+  });
+
+  it("vazio, outra linguagem ou acima de 20.000 caracteres ficam no card", () => {
+    expect(textoFormatado("```mermaid\n\n```", { diagramas: true })).not.toContain("md-diagrama");
+    expect(textoFormatado("```js\nflowchart LR\n```", { diagramas: true })).not.toContain("md-diagrama");
+    const grande = `flowchart LR\n%%${"x".repeat(20_001)}`;
+    expect(textoFormatado(`\`\`\`mermaid\n${grande}\n\`\`\``, { diagramas: true })).not.toContain("md-diagrama");
+  });
+
+  it("cada diagrama da mensagem leva o seu índice", () => {
+    const html = textoFormatado(`${MERMAID}\nentre\n${MERMAID}`, { diagramas: true });
+    expect(html).toContain('data-diagrama-indice="0"');
+    expect(html).toContain('data-diagrama-indice="1"');
+  });
+
+  it("o HTML do bot dentro do diagrama sai escapado", () => {
+    expect(textoFormatado('```mermaid\nflowchart LR\n  A["<img src=x onerror=alert(1)>"]\n```', { diagramas: true })).not.toContain("<img");
+  });
+
+  it("a memória separa com e sem diagramas", () => {
+    const sem = textoFormatado(MERMAID, { chave: "nod328-memo" });
+    const com = textoFormatado(MERMAID, { chave: "nod328-memo", diagramas: true });
+    expect(sem).not.toBe(com);
+    expect(textoFormatado(MERMAID, { chave: "nod328-memo" })).toBe(sem);
+  });
+});

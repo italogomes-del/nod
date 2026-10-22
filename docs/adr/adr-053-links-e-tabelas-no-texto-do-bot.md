@@ -59,3 +59,19 @@ Qualquer um destes leva a voltar o link a texto (tirar `chipDoLink` e `linkComNo
 
 - um relato de link enganoso clicado, ou seja, destino diferente do que a pessoa leu;
 - um endereço que passe pela dica com host diferente do que o navegador abriu.
+
+## Emenda (2026-10-22, NOD-328): diagrama no texto do bot
+
+A cerca ```` ```mermaid ```` fechada de uma mensagem do bot **já no histórico** vira desenho no balão. Ao vivo, Não lidos, cartão e qualquer outro lugar continuam mostrando o card de código.
+
+1. **Isolamento da ADR-051.** O mermaid roda num iframe oculto `sandbox="allow-scripts"`, sem `allow-same-origin`, com `srcdoc` e CSP de nonce: `default-src 'none'`, `connect-src 'none'`, script só do próprio nod. Um iframe por página, fila serial, prazo de 8 s por desenho.
+2. **Config travada.** `securityLevel: "strict"` e `htmlLabels: false`, sem foreignObject. O `secure` do mermaid foi estendido: por padrão o `%%{init}%%` e o frontmatter só não mexem em 5 chaves; aqui também não mexem em `htmlLabels`, `flowchart`, `themeCSS`, `themeVariables`, `dompurifyConfig`, fontes, layout etc. O pai também tira as diretivas antes de mandar.
+3. **Segunda barreira no pai.** O SVG que volta é conferido de novo (`svgSeguro`): sem script, foreignObject, `<a>`, `<image>`, handler, href externo nem `url()` de rede. Entra como `<img src="blob:">`, onde nada roda.
+4. **Qualquer falha deixa o card de código**: código inválido, acima de 20.000 caracteres ou de 300 arestas, prazo estourado ou módulo que não carregou. O renderizador é tentado de novo depois de 30 s.
+5. **Primeira dependência de runtime grande da web.** O `mermaid` tem versão fixa (`12.2.0`) e é carregado sob demanda. Sai num bundle à parte (`/diagrama/sandbox.js` mais os chunks de `/assets`), ~170 KB gzip no primeiro diagrama. O bundle principal cresce menos de 5 KB gzip.
+6. **CORS.** O sandbox tem origem opaca e importa o módulo com `Origin: null`. Por isso o JS de `/assets` e `/diagrama` sai com `Access-Control-Allow-Origin: *`; são arquivos públicos, iguais para todos, sem sessão. O HTML e a API ficam sem esse cabeçalho. O Caddy passa a comprimir só esses dois caminhos, e o SSE continua sem compressão.
+
+**Gatilho de reversão**, voltando a cerca `mermaid` a ser só card (tirar `diagramas: true` de `conversa.ts`):
+
+- qualquer payload que execute script ou faça requisição de rede a partir de um diagrama;
+- o primeiro diagrama passar de 300 KB gzip.

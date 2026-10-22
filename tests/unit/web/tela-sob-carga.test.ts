@@ -189,3 +189,25 @@ describe("textoFormatado com memória por mensagem", () => {
     expect(textoFormatado("**a** e `b`", { chave: "memoria-1", agora: new Date(AGORA) })).toBe(primeiro);
   });
 });
+
+/** NOD-328: o diagrama do histórico não pesa no texto ao vivo; o ao vivo mostra o card até a mensagem chegar. */
+describe("diagrama sob carga", () => {
+  it("histórico com mermaid não é refeito por frames ao vivo, e o ao vivo não ganha figure", () => {
+    const mermaid = "```mermaid\nflowchart LR\n  A-->B\n```";
+    let e = reduzir(cenario(), { tipo: "hidratar-conversa", conversa: conversa(ABERTA, [mensagem("d1", `Veja:\n${mermaid}`)]), agora: AGORA });
+    let desenhos = 0;
+    const historico = (x: Estado) => lembrar("teste-diagrama", x, [], (y) => {
+      desenhos += 1;
+      const c = conversaDaTela(y);
+      return c ? renderHistoricoDaTimeline(c, y) : "";
+    });
+    const primeiro = historico(e);
+    expect(primeiro).toContain('class="md-diagrama"');
+    for (let i = 0; i < 50; i++) e = aplicarFrame(e, frame("turno.delta", { conversaId: ABERTA, turnoId: TURNO, texto: i === 0 ? `${mermaid}\n` : `pedaço ${i} ` }, i + 10), AGORA);
+    expect(historico(e)).toBe(primeiro);
+    expect(desenhos).toBe(1);
+    const c = conversaDaTela(e)!;
+    expect(renderAoVivoDaTimeline(c, e)).not.toContain("md-diagrama");
+    expect(renderAoVivoDaTimeline(c, e)).toContain("md-codigo");
+  });
+});

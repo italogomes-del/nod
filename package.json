@@ -63,6 +63,7 @@
     "*.ts": "eslint --fix"
   },
   "dependencies": {
+    "mermaid": "12.2.0",
     "postgres": "^3.4.9",
     "ws": "^8.22.0"
   },

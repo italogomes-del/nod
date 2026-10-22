@@ -5,7 +5,7 @@ import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cacheDoArquivo, criarEstatico } from "../../../src/adapters/http/estatico.ts";
+import { cacheDoArquivo, corsDoArquivo, criarEstatico } from "../../../src/adapters/http/estatico.ts";
 import { criarServidor } from "../../../src/adapters/http/servidor.ts";
 
 /** definido em 2026-10-04 (ADR-070): as fontes da web saem com o tipo certo e com cache. */
@@ -29,6 +29,8 @@ describe("estático", () => {
   mkdirSync(join(dir, "icons"));
   writeFileSync(join(dir, "fontes", "geist.woff2"), "x");
   writeFileSync(join(dir, "assets", "index-abc123.js"), "x");
+  mkdirSync(join(dir, "diagrama"));
+  writeFileSync(join(dir, "diagrama", "sandbox.js"), "x");
   writeFileSync(join(dir, "index.html"), "<html></html>");
   for (const nome of ["sw.js", "offline.html", "manifest.webmanifest", "icons/nod-192.png"]) writeFileSync(join(dir, nome), readFileSync(new URL(nome, PUBLICO)));
 
@@ -54,6 +56,17 @@ describe("estático", () => {
     expect(r.cabecalhos["content-type"]).toBe(tipo);
     expect(r.cabecalhos["cache-control"]).toBe(cache);
     expect(r.cabecalhos["x-content-type-options"]).toBe("nosniff");
+  });
+
+  // NOD-328: o renderizador sandbox (origem opaca) importa o bundle como módulo; só o JS do bundle leva o ACAO.
+  it("o JS de /assets e /diagrama sai com access-control-allow-origin *; o HTML e o resto não", async () => {
+    expect((await chamar(dir, "/diagrama/sandbox.js")).cabecalhos["access-control-allow-origin"]).toBe("*");
+    expect((await chamar(dir, "/assets/index-abc123.js")).cabecalhos["access-control-allow-origin"]).toBe("*");
+    expect((await chamar(dir, "/")).cabecalhos["access-control-allow-origin"]).toBeUndefined();
+    expect((await chamar(dir, "/conversa/x")).cabecalhos["access-control-allow-origin"]).toBeUndefined();
+    expect((await chamar(dir, "/sw.js")).cabecalhos["access-control-allow-origin"]).toBeUndefined();
+    expect(corsDoArquivo("/fontes/geist.woff2")).toEqual({});
+    expect(corsDoArquivo("/assets/index.css")).toEqual({});
   });
 
   it("arquivo com extensão que não existe não vira o HTML do app (um .js velho não recebe index.html)", async () => {

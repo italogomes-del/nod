@@ -1178,6 +1178,26 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 .md-codigo-topo button { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 .bubble .md-codigo pre, .msg-peer .md-codigo pre, .troca-texto .md-codigo pre { margin: 0; border-radius: 0; background: transparent; }
 .md-codigo pre code { display: block; padding: 0; background: none; border-radius: 0; }
+/* NOD-328: diagrama mermaid no balão do bot (protótipo da NOD-323, j4-11, proposta.css:60-66). Antes do desenho a figure
+   é só um invólucro do card de código (fallback); com o desenho (.pronto) o card some e o bloco sangra até a borda do
+   balão (padding 12 × 16), com fundo um tom acima. O <img> segue o tamanho do viewBox e encolhe até caber. */
+.md-diagrama { margin: 8px 0; }
+.md-diagrama:first-child { margin-top: 0; }
+.md-diagrama:last-child { margin-bottom: 0; }
+.md-diagrama > .md-codigo { margin: 0; }
+.md-diagrama.pronto { margin: 12px -16px; padding: 22px 16px; border-block: 1px solid color-mix(in srgb, var(--line) 70%, transparent); background: color-mix(in srgb, var(--surface) 45%, var(--surface-raised)); overflow-x: auto; }
+/* NOD-328: até 700 px o balão tem padding lateral de 12 (não 16), e a sangria acompanha (proposta.css:319-322).
+   Fica aqui, depois da regra-base, para vencer na cascata; vale com ou sem toque. */
+@media (max-width: 700px) {
+  .md-diagrama.pronto { margin: 10px -12px; padding: 18px 12px; }
+}
+.md-diagrama.pronto > .md-codigo { display: none; }
+.md-diagrama:not(.pronto) > .md-diagrama-img { display: none; }
+/* Encolhe para caber, mas nunca abaixo de 65% do tamanho natural (texto do mermaid fica em ~10 px, não 5): daí em diante
+   o .pronto rola na lateral. Alinhado à esquerda como no j4-11 (text-align: left). --dg-largura vem de diagramas-vivos.ts. */
+.md-diagrama-img { --dg-largura: 0px; display: block; max-width: 100%; min-width: calc(var(--dg-largura) * 0.65); height: auto; margin: 0; }
+/* O renderizador (diagramas-vivos.ts): fora da tela mas com layout, porque o mermaid mede o texto (getBBox). */
+.diagrama-renderizador { position: fixed; left: -10000px; top: 0; width: 1200px; height: 900px; border: 0; visibility: hidden; pointer-events: none; }
 /* NOD-45: task list só de leitura (texto-formatado.ts itemHtml). A caixa é desenho, não <input>. */
 .md-lista li.md-tarefa { list-style: none; display: flex; align-items: baseline; gap: 8px; margin-left: -20px; }
 .md-caixa { flex: none; display: grid; place-items: center; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 4px; transform: translateY(2px); }

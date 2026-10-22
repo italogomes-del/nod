@@ -482,8 +482,9 @@ export function comChipDeComando(texto: string): string {
  * `progresso` (chat limpo, PR 7): o marcador do bloco de progresso das frentes que esta fala abriu (./progresso-na-fala.ts).
  * Na fala do bot ele fica dentro do balão, depois do texto (protótipo "4"); no balão da pessoa (a frente da rede), embaixo
  * dele. Nos dois, antes das reações: o progresso é conteúdo da fala; a reação é sobre ela (decisão 20 do plano).
+ * `diagramas` (NOD-328): só a timeline de conversa e sala liga; Trabalhos reaproveita esta função e fica com o card.
  */
-export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string } = {}): string {
+export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes: { etiqueta?: string; progresso?: string; diagramas?: boolean } = {}): string {
   // Kinds não-texto (parada, sistema, negação) também se relatam — são JUSTAMENTE os que a categoria
   // 'travou_ou_parou' descreve, e o caso de uso já trata mensagem sem turno (definido em 2026-09-21).
   // definido em 2026-10-03: o artefato é uma fala do bot — mascote, nome e hora em volta do card, como os balões; solto
@@ -533,7 +534,7 @@ export function renderMensagem(m: Mensagem, estado: Estado, sala = false, opcoes
   // terminou perguntando), embaixo dele — o cartão não tem onde recebê-lo, e sem isso o bloco sumia (revisão do PR 398).
   const progressoDentro = !ehPessoa && !pergunta ? (opcoes.progresso ?? "") : "";
   const progressoFora = ehPessoa || pergunta ? (opcoes.progresso ?? "") : "";
-  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta) : pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id })}${metaTags}${progressoDentro}</div>`;
+  const balao = motivoTela !== null ? htmlCartaoTela(motivoTela, agente?.id ?? "", telaAberta) : pergunta ? cartaoDaPergunta(m, estado) : ehPessoa && m.texto.trim() === "" && m.anexos?.length ? "" : `<div class="bubble${progressoDentro ? " com-progresso" : ""}">${ehPessoa ? comChipDeComando(m.texto) : textoFormatado(m.texto, { chave: m.id, diagramas: opcoes.diagramas === true })}${metaTags}${progressoDentro}</div>`;
   return `<article class="${classes}" data-mensagem="${esc(m.id)}"${pergunta ? ` data-pergunta="${esc(pergunta.decisaoId)}"` : ""}>
     ${!ehPessoa && agente ? iconeAgente(agente, "md") : ""}<div class="bubble-wrap">${acoesDaMensagem(m, estado, sala)}${sender}${resposta ? rotuloDaResposta(m) : ""}${ehPessoa ? citacaoAcimaDoBalao(m) : ""}${anexosDe(m, estado)}${balao}${progressoFora}${ehPessoa ? "" : avisoDeLeitura(m, estado)}${ehPessoa ? "" : capturaDoTurno(m, estado)}${contextoDelegado}${chipsDeReacao(m, estado)}${fila ? renderSituacaoFila(fila, fila.turnoId) : ""}${faixaDaMensagem(m, estado)}</div>
   </article>${resposta ? linhaDaRetomada(m, estado) : ""}`;
@@ -801,14 +802,14 @@ function blocosDasMensagens(mensagens: Mensagem[], estado: Estado, sala: boolean
     const plano = planos.get(m.id);
     const progresso = progressoDe(m.id);
     const html = !plano
-      ? renderMensagem(m, estado, sala, progresso ? { progresso } : {})
+      ? renderMensagem(m, estado, sala, { diagramas: true, ...(progresso ? { progresso } : {}) })
       : plano.tipo === "oculta"
         ? ""
         : plano.tipo === "linha"
           ? plano.html
           : plano.tipo === "troca"
             ? htmlTroca(plano, estado)
-            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta, ...(progresso ? { progresso } : {}) });
+            : (plano.antes ?? "") + renderMensagem(m, estado, sala, { etiqueta: plano.etiqueta, diagramas: true, ...(progresso ? { progresso } : {}) });
     // Chat limpo (PR 6): o instante que a linha mostra, para os divisores de data. A troca vai da primeira à última mensagem
     // dela; a mensagem que sumiu (só sobra, talvez, a linha "Novas") não abre bloco.
     const tempo = html === "" ? { em: null } : plano?.tipo === "troca" ? { em: plano.mensagens[0]?.em ?? m.criadoEm, ate: plano.mensagens.at(-1)?.em ?? m.criadoEm, instantes: plano.mensagens.map((x) => x.em) } : { em: m.criadoEm };

@@ -32,6 +32,16 @@ export function cacheDoArquivo(arquivo: string): string {
   return "no-cache";
 }
 
+/**
+ * NOD-328: o renderizador de diagramas roda num iframe sandbox de origem opaca e importa /diagrama/sandbox.js e os chunks
+ * de /assets como módulo, com `Origin: null` — sem CORS o navegador recusa. São arquivos públicos do bundle (os mesmos
+ * para qualquer pessoa, sem sessão nem cookie), então `*` não expõe nada; o HTML e a API ficam sem o cabeçalho.
+ */
+export function corsDoArquivo(arquivo: string): Record<string, string> {
+  if (extname(arquivo) !== ".js") return {};
+  return arquivo.startsWith("/assets/") || arquivo.startsWith("/diagrama/") ? { "access-control-allow-origin": "*" } : {};
+}
+
 /** Serve o bundle da web (NOD_STATIC_DIR) com fallback para index.html em rotas sem extensão. */
 export function criarEstatico(dir: string | undefined): (req: IncomingMessage, res: ServerResponse) => Promise<boolean> {
   return async (req, res) => {
@@ -41,7 +51,7 @@ export function criarEstatico(dir: string | undefined): (req: IncomingMessage, r
     if (arquivo.includes("..")) return false;
     try {
       const buf = await readFile(join(dir, arquivo));
-      res.writeHead(200, { "content-type": TIPOS[extname(arquivo)] ?? "application/octet-stream", "cache-control": cacheDoArquivo(arquivo), "x-content-type-options": "nosniff" });
+      res.writeHead(200, { "content-type": TIPOS[extname(arquivo)] ?? "application/octet-stream", "cache-control": cacheDoArquivo(arquivo), "x-content-type-options": "nosniff", ...corsDoArquivo(arquivo) });
       res.end(buf);
       return true;
     } catch {
