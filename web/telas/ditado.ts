@@ -1,3 +1,4 @@
+import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import type { FalhaDitado } from "../lib/ditado-protocolo.ts";
 import { ICONE_LIGACAO } from "./ligacao.ts";
 
@@ -42,8 +43,12 @@ export function juntarAoCampo(campo: string, ditado: string): string {
 }
 
 /** O aviso de cada falha. `noApp` muda onde liberar o microfone (Ajustes do Sistema × navegador). */
-export function textoDaFalha(f: FalhaDitado | "vazio" | "teto" | "tela-bloqueou", noApp: boolean): string {
+export function textoDaFalha(f: FalhaDitado | "vazio" | "teto" | "tela-bloqueou" | "aviso-mudou", noApp: boolean): string {
   switch (f) {
+    // NOD-324: o servidor pede outra versão do aviso que a desta página; o texto do diálogo aqui é o velho.
+    // Microcopy proposta pelo Eng 1, a validar com o Gil no PR.
+    case "aviso-mudou":
+      return noApp ? "O aviso sobre a voz mudou. Feche e abra o app para ditar." : "O aviso sobre a voz mudou. Atualize a página para ditar.";
     case "microfone-negado":
       return noApp ? "Libere o microfone em Ajustes do Sistema › Privacidade › Microfone para ditar." : "Libere o microfone para este site nos ajustes do navegador para ditar.";
     case "microfone-restrito":
@@ -66,4 +71,31 @@ export function textoDaFalha(f: FalhaDitado | "vazio" | "teto" | "tela-bloqueou"
     case "caiu":
       return "Não consegui transcrever agora. Digite ou tente de novo.";
   }
+}
+
+/**
+ * O que o toque no 🎤 faz (NOD-324). O diálogo mostra o `TEXTO_CONSENTIMENTO` desta página, então o aceite vai sempre
+ * com a versão dela (`versaoBundle`): se o servidor pede outra, a página está velha e só resta atualizar — nunca se
+ * grava aceite de um texto que a pessoa não viu.
+ */
+export type PassoDoToque = "nada" | "consentir" | "atualizar-pagina" | "gravar";
+
+export function passoDoToque(disp: DisponibilidadeDitado | null, ocupado: boolean, versaoBundle: number): PassoDoToque {
+  if (ocupado || !disp?.disponivel) return "nada";
+  if (!disp.consentimentoNecessario) return "gravar";
+  return disp.versaoConsentimento === versaoBundle ? "consentir" : "atualizar-pagina";
+}
+
+/**
+ * Depois do `sem_consentimento` do canal, com a disponibilidade relida (`null` = a leitura falhou). Nunca vira o banner
+ * "Confirme o aviso…": abre o diálogo, pede para atualizar, esconde o 🎤 ou diz "tente de novo" (já consentido em outro
+ * aparelho entre o toque e a releitura).
+ */
+export type PassoAposSemConsentimento = "falhou" | "esconder" | "consentir" | "atualizar-pagina";
+
+export function passoAposSemConsentimento(disp: DisponibilidadeDitado | null, versaoBundle: number): PassoAposSemConsentimento {
+  if (!disp) return "falhou";
+  if (!disp.disponivel) return "esconder";
+  if (!disp.consentimentoNecessario) return "falhou";
+  return disp.versaoConsentimento === versaoBundle ? "consentir" : "atualizar-pagina";
 }

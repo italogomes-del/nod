@@ -3,7 +3,7 @@ import { ERROS_DITADO } from "../../../src/contracts/ditado.ts";
 import { TEXTO_CONSENTIMENTO_VOZ, VERSAO_CONSENTIMENTO_VOZ } from "../../../src/contracts/ligacao.ts";
 import { energiaPcm, lerMsgDitado } from "../../../web/lib/ditado-protocolo.ts";
 import { htmlComposer } from "../../../web/telas/conversa.ts";
-import { formatarTempo, juntarAoCampo, textoDaFalha } from "../../../web/telas/ditado.ts";
+import { formatarTempo, juntarAoCampo, passoAposSemConsentimento, passoDoToque, textoDaFalha } from "../../../web/telas/ditado.ts";
 import { TEXTO_CONSENTIMENTO, VERSAO_CONSENTIMENTO } from "../../../web/telas/ligacao.ts";
 
 describe("ditado na web (ADR-095)", () => {
@@ -61,5 +61,31 @@ describe("ditado na web (ADR-095)", () => {
     // NOD-106: v3, o aviso também fala de ouvir uma resposta fora da ligação.
     expect(VERSAO_CONSENTIMENTO).toBe(3);
     expect(TEXTO_CONSENTIMENTO).toMatch(/ouve uma resposta/);
+  });
+
+  // NOD-324: o toque e a recusa do canal decidem pela versão do aviso desta página (a do texto do diálogo).
+  it("o toque no 🎤 consente só com a versão da página", () => {
+    const v = VERSAO_CONSENTIMENTO;
+    expect(passoDoToque(null, false, v)).toBe("nada");
+    expect(passoDoToque({ disponivel: false, motivo: "desligado" }, false, v)).toBe("nada");
+    expect(passoDoToque({ disponivel: true, consentimentoNecessario: false, versaoConsentimento: v }, true, v)).toBe("nada");
+    expect(passoDoToque({ disponivel: true, consentimentoNecessario: false, versaoConsentimento: v }, false, v)).toBe("gravar");
+    expect(passoDoToque({ disponivel: true, consentimentoNecessario: true, versaoConsentimento: v }, false, v)).toBe("consentir");
+    expect(passoDoToque({ disponivel: true, consentimentoNecessario: true, versaoConsentimento: v + 1 }, false, v)).toBe("atualizar-pagina");
+    expect(passoDoToque({ disponivel: true, consentimentoNecessario: true, versaoConsentimento: v - 1 }, false, v)).toBe("atualizar-pagina");
+  });
+
+  it("depois do sem_consentimento: diálogo, atualizar, esconder ou falhou — nunca o banner", () => {
+    const v = VERSAO_CONSENTIMENTO;
+    expect(passoAposSemConsentimento(null, v)).toBe("falhou");
+    expect(passoAposSemConsentimento({ disponivel: false, motivo: "sem_permissao" }, v)).toBe("esconder");
+    expect(passoAposSemConsentimento({ disponivel: true, consentimentoNecessario: true, versaoConsentimento: v }, v)).toBe("consentir");
+    expect(passoAposSemConsentimento({ disponivel: true, consentimentoNecessario: true, versaoConsentimento: v + 1 }, v)).toBe("atualizar-pagina");
+    expect(passoAposSemConsentimento({ disponivel: true, consentimentoNecessario: false, versaoConsentimento: v }, v)).toBe("falhou");
+  });
+
+  it("o aviso de versão nova diz como atualizar no app e no navegador", () => {
+    expect(textoDaFalha("aviso-mudou", true)).toBe("O aviso sobre a voz mudou. Feche e abra o app para ditar.");
+    expect(textoDaFalha("aviso-mudou", false)).toBe("O aviso sobre a voz mudou. Atualize a página para ditar.");
   });
 });

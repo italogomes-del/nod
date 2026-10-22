@@ -180,7 +180,7 @@ describe("regressão /qa #381: fiação em main.ts e nos diálogos", () => {
   // M57: o callback do "Concordo" roda dentro do clique; M61: o ditado grava o aceite nesse callback.
   it("o diálogo chama aoConcordar no clique do Concordo, e o ditado grava o aceite ali", () => {
     expect(ler("web/telas/consentimento-voz.ts")).toContain("if (v) p.aoConcordar?.();");
-    expect(ler("web/telas/ditado-controle.ts")).toMatch(/aoConcordar: \(\) => \{\s*const aceite = d\.consentir\(versao\)[\s\S]{0,160}gravar\(aceite\);/);
+    expect(ler("web/telas/ditado-controle.ts")).toMatch(/aoConcordar: \(\) => \{[\s\S]{0,120}const aceite = d\.consentir\(VERSAO_CONSENTIMENTO\)[\s\S]{0,700}gravar\(aceite\);/);
   });
 
   // M58: o diálogo único mostra o texto B no corpo (o teste do PR só via o nome no import).

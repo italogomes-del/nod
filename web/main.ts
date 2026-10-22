@@ -1689,6 +1689,8 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   // Os rascunhos são da pessoa: outra sessão, outros rascunhos.
   rascunhos.usar(`${escopo.tenantId}.${escopo.pessoaId}`);
   api = criarApi(escopo);
+  // NOD-324: a disponibilidade do ditado (e o aceite do aviso) é da sessão; a da anterior não decide o 🎤 desta.
+  ditado.reiniciar();
   // Outra sessão, outra fila: a primeira leitura volta a ser só a linha de base.
   avisador.reiniciar();
   canalAvisos.contador(0);
@@ -1712,7 +1714,11 @@ async function iniciarSessao(escopo: Escopo): Promise<void> {
   }, () => undefined);
   live?.disconnect();
   live = criarLiveEvents(api.urlEventos, {
-    aoReidratar: () => dispatch({ tipo: "invalidar", quais: invalidacoesAoRetomar(estado) }),
+    aoReidratar: () => {
+      dispatch({ tipo: "invalidar", quais: invalidacoesAoRetomar(estado) });
+      // NOD-324: o aviso de voz pode ter mudado enquanto a conexão estava fora; relê sem descartar a fala em curso.
+      void ditado.reler();
+    },
   });
   live.subscribe((ev) => {
     if (ev.tipo === "frame") receberFrame(ev.frame);

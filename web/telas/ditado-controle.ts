@@ -1,8 +1,9 @@
 import type { DisponibilidadeDitado } from "../../src/contracts/ditado.ts";
 import { iniciarDitado, type MotorDitado } from "../lib/ditado.ts";
 import type { EventoDitado } from "../lib/ditado-protocolo.ts";
-import { formatarTempo, textoDaFalha } from "./ditado.ts";
+import { formatarTempo, passoAposSemConsentimento, passoDoToque, textoDaFalha } from "./ditado.ts";
 import { pedirConsentimentoVoz } from "./consentimento-voz.ts";
+import { VERSAO_CONSENTIMENTO } from "./ligacao.ts";
 
 /**
  * Controle do ditado no campo (definido em 2026-10-11, ADR-095): liga o 🎤, a pílula e o ↑ ao motor (web/lib/ditado.ts).
@@ -26,15 +27,32 @@ export type ControleDitado = {
   comecar(): void;
   /** ■ ou ↑ com a gravação aberta. */
   concluir(destino: "campo" | "enviar"): void;
+  /** Descarta a gravação e cancela o diálogo ou a releitura em curso (nada grava depois). */
   descartar(): void;
+  /** Reconexão (NOD-324): relê a disponibilidade sem descartar a fala em curso nem piscar o 🎤. true = leitura ok. */
+  reler(): Promise<boolean>;
+  /** Outra sessão (NOD-324): esquece a disponibilidade da anterior, descarta o motor e o pedido em curso. */
+  reiniciar(): void;
   /** Gravando ou transcrevendo: o ↑ e o Enter são do ditado. */
   ativo(): boolean;
 };
 
 export function criarControleDitado(d: DepsDitado): ControleDitado {
   let disp: DisponibilidadeDitado | null = null;
-  let lendo: Promise<void> | null = null;
+  let lendo: Promise<boolean> | null = null;
+  /** Resultado da última leitura da geração atual (true = ok). */
+  let ultimaOk = false;
+  // NOD-324: a disponibilidade era lida uma vez por página; com o aviso subindo de versão com o app aberto, o 🎤 gravava
+  // direto e o `sem_consentimento` do canal virava banner. `geracao` descarta a leitura de uma sessão que já saiu;
+  // `tentativa` invalida toda continuação assíncrona (releitura, "Concordo") quando a pessoa descarta ou troca de sessão;
+  // `pedindo` vai da recusa do canal até o diálogo fechar, para o toque duplo não abrir dois.
+  let geracao = 0;
+  /** Muda só em `reiniciar` (outra sessão); a releitura da mesma sessão não invalida o aceite em curso. */
+  let sessao = 0;
+  let tentativa = 0;
+  let pedindo = false;
   let motor: MotorDitado | null = null;
+  let viaDialogo = false;
   let fase: "parado" | "abrindo" | "gravando" | "transcrevendo" = "parado";
   let destino: "campo" | "enviar" = "campo";
   let desde = 0;
@@ -44,15 +62,52 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
   const caixa = () => document.querySelector<HTMLElement>("#composer .composer .box");
   const ta = () => document.getElementById("composer-texto") as HTMLTextAreaElement | null;
 
-  function lerDisponibilidade(): Promise<void> {
-    // Servidor sem a rota (anterior à ADR-095) ou fora do ar: o 🎤 fica escondido até a próxima sessão, sem pedir de novo
-    // a cada render.
-    lendo ??= d.disponibilidade().then((r) => { disp = r; }, () => { disp = { disponivel: false, motivo: "voz_fora" }; }).finally(() => {
-      lendo = null;
+  function lerDisponibilidade(): Promise<boolean> {
+    if (lendo) return lendo;
+    const g = geracao;
+    // Leitura ultrapassada (reler/reiniciar no meio): responde pela mais nova — a que ainda corre ou a que já terminou —,
+    // para a releitura do sem_consentimento não virar "falhou" quando a do aoReidratar chega antes.
+    const p: Promise<boolean> = d.disponibilidade().then(
+      (r) => {
+        if (g !== geracao) return lendo ?? ultimaOk;
+        disp = r;
+        ultimaOk = true;
+        return true;
+      },
+      () => {
+        if (g !== geracao) return lendo ?? ultimaOk;
+        ultimaOk = false;
+        // Servidor sem a rota (anterior à ADR-095) ou fora do ar: o 🎤 fica escondido até a próxima sessão, sem pedir de
+        // novo a cada render. Um tropeço de rede numa releitura não esconde o 🎤 que já se sabia disponível.
+        if (disp === null) disp = { disponivel: false, motivo: "voz_fora" };
+        return false;
+      },
+    ).finally(() => {
+      if (lendo === p) lendo = null;
       // Sem sessão ainda (null): o próximo render pergunta de novo; com resposta, o 🎤 aparece ou some agora.
-      if (disp !== null) atualizar();
+      if (g === geracao && disp !== null) atualizar();
     });
-    return lendo;
+    lendo = p;
+    return p;
+  }
+
+  function reler(): Promise<boolean> {
+    geracao++;
+    lendo = null;
+    return lerDisponibilidade();
+  }
+
+  /** Fim (ou cancelamento) do pedido de consentimento: toda continuação pendente perde a vez. */
+  function encerrarPedido(): void {
+    tentativa++;
+    pedindo = false;
+  }
+
+  function descartarMotor(): void {
+    if (!motor) return;
+    motor.descartar();
+    motor = null;
+    mostrar("parado");
   }
 
   function atualizar(): void {
@@ -108,7 +163,8 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     } else {
       motor = null;
       mostrar("parado");
-      if (ev.codigo === "sem_consentimento" && disp?.disponivel) disp = { ...disp, consentimentoNecessario: true };
+      // NOD-324: a falta do aviso nunca vira banner; o motor já fechou o microfone.
+      if (ev.codigo === "sem_consentimento") return void aposSemConsentimento(viaDialogo);
       d.avisar(textoDaFalha(ev.codigo, d.noApp()));
     }
   }
@@ -122,10 +178,28 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     barras.at(-1)?.style.setProperty("--nivel-ditado", valor.toFixed(2));
   }
 
+  /**
+   * O canal recusou por falta do aviso: relê a disponibilidade (a da página estava velha) e decide entre o diálogo,
+   * "atualize", esconder o 🎤 ou "falhou". A gravação que já veio do diálogo não abre outro (anti-laço).
+   */
+  async function aposSemConsentimento(doDialogo: boolean): Promise<void> {
+    if (doDialogo || pedindo) return d.avisar(textoDaFalha("falhou", d.noApp()));
+    pedindo = true;
+    const t = tentativa;
+    const ok = await reler();
+    if (t !== tentativa) return;
+    const passo = passoAposSemConsentimento(ok ? disp : null, VERSAO_CONSENTIMENTO);
+    if (passo === "consentir") return pedirConsentimento(t);
+    encerrarPedido();
+    if (passo === "esconder") atualizar();
+    else d.avisar(textoDaFalha(passo === "atualizar-pagina" ? "aviso-mudou" : "falhou", d.noApp()));
+  }
+
   /** Abre o motor no gesto (o Safari do iPhone exige); o canal espera o consentimento gravar, quando ele foi pedido agora. */
   function gravar(antesDeConectar?: Promise<unknown>): void {
     const tenantId = d.tenantId();
     if (!tenantId || motor) return;
+    viaDialogo = antesDeConectar !== undefined;
     destino = "campo";
     desde = Date.now();
     const tempo = document.getElementById("ditado-tempo");
@@ -139,26 +213,46 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
     motor = iniciarDitado({ tenantId, aoEvento, antesDeConectar });
   }
 
-  function pedirConsentimento(versao: number): void {
+  /** `t`: a tentativa que abriu o diálogo; se a pessoa descartou ou trocou de sessão nesse meio-tempo, nada grava. */
+  function pedirConsentimento(t: number): void {
+    pedindo = true;
     void pedirConsentimentoVoz({
       titulo: "Antes de ditar",
       confirmar: "Concordo e ditar",
       // Dentro do clique: o microfone abre já; o canal só conecta depois de o servidor gravar o aceite.
+      // NOD-324: o aceite é sempre da versão desta página, a do texto que o diálogo mostrou.
       aoConcordar: () => {
-        const aceite = d.consentir(versao).then(() => {
-          if (disp?.disponivel) disp = { ...disp, consentimentoNecessario: false };
-        });
+        if (t !== tentativa) return;
+        const s = sessao;
+        const aceite = d.consentir(VERSAO_CONSENTIMENTO).then(
+          () => {
+            // QA NOD-324: o aceite é desta sessão; se ela trocou enquanto ele corria, não marca a disponibilidade da nova.
+            if (s === sessao && disp?.disponivel) disp = { ...disp, consentimentoNecessario: false };
+          },
+          (e: unknown) => {
+            // Aceite recusado (ex.: o servidor subiu a versão): o motor avisa "falhou"; a releitura deixa o próximo
+            // toque decidir certo.
+            void reler();
+            throw e;
+          },
+        );
+        // Se o motor não abrir, a recusa não fica sem dono.
+        aceite.catch(() => undefined);
         gravar(aceite);
       },
+    }).then(() => {
+      if (t === tentativa) encerrarPedido();
     });
   }
 
   return {
     atualizar,
     comecar() {
-      if (motor || !disp?.disponivel) return;
-      if (disp.consentimentoNecessario) return pedirConsentimento(disp.versaoConsentimento);
-      gravar();
+      if (pedindo) return;
+      const passo = passoDoToque(disp, motor !== null, VERSAO_CONSENTIMENTO);
+      if (passo === "consentir") return pedirConsentimento(tentativa);
+      if (passo === "atualizar-pagina") return d.avisar(textoDaFalha("aviso-mudou", d.noApp()));
+      if (passo === "gravar") gravar();
     },
     concluir(qual) {
       if (!motor || fase === "transcrevendo") return;
@@ -166,10 +260,18 @@ export function criarControleDitado(d: DepsDitado): ControleDitado {
       motor.concluir(qual);
     },
     descartar() {
-      if (!motor) return;
-      motor.descartar();
-      motor = null;
-      mostrar("parado");
+      encerrarPedido();
+      descartarMotor();
+    },
+    reler,
+    reiniciar() {
+      sessao++;
+      geracao++;
+      lendo = null;
+      disp = null;
+      ultimaOk = false;
+      encerrarPedido();
+      descartarMotor();
     },
     ativo: () => motor !== null,
   };
