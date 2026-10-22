@@ -36,8 +36,6 @@ export async function limparPessoaE2E(db: Db, dbDono: Db, escopo: Escopo, ids: {
     await trx`delete from artefato_versoes where owner_id = ${p}`;
     await trx`delete from artefatos where owner_id = ${p}`;
     await trx`delete from anexos where owner_id = ${p}`;
-    // ADR-064 (0044): a pendência aponta para agente, conversa e turnos — sai antes deles.
-    await trx`delete from pendencias where owner_id = ${p}`;
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from propostas where owner_id = ${p}`;
     await trx`delete from agente_memorias where owner_id = ${p}`;

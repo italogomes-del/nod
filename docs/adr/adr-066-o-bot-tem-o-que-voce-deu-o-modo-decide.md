@@ -77,7 +77,8 @@ que substitui a trava herdada.
   - conectar um app (login) continua sendo da pessoa.
 - **Sessão** (C): a retomada de rotina ou de pedido de colega volta na sessão do turno que continua
   (`turnos.sessaoDoTurno`), se do mesmo executor. Nunca na sessão da conversa.
-- **Rotina que só acorda com pendência** (item 7, migração 0045):
+- **Rotina que só acorda com pendência** (item 7, migração 0045; **`so_com_pendencia` removido, NOD-317**, ver a emenda de
+  2026-10-22):
   - `rotinas.so_com_pendencia`, em `criar_rotina` e `atualizar_rotina`;
   - sem pendência visível (ADR-064), a janela passa sem turno de modelo, com custo zero, e registra
     `sem_novidade`/`sem_pendencia`;
@@ -167,3 +168,13 @@ protótipo) sem voltar à parada de antes desta ADR: o revisor libera o que a pe
 comentar o que a pessoa pediu num turno limpo e o resto que esta ADR soltou continuam soltos; o manual e o total não
 mudam. Com a chave desligada, esta ADR vale como estava. O gatilho de reversão "Incidente" acima passa a apontar para o
 revisor (o gatilho de reversão da ADR-115) antes de mexer em `decidirPeloModo`.
+
+## Emenda de 2026-10-22: `so_com_pendencia` removido (NOD-317)
+
+O item 7 sai junto com as pendências do bot ([ADR-064](adr-064-pendencias-do-bot.md), removida em 19/10, decisão na
+NOD-232). O PR 1 (#417) tirou a opção de `criar_rotina`, `atualizar_rotina`, `listar_rotinas` e `ver_colegas`, e o
+disparo agendado voltou a rodar em toda janela. A migração 0101 (PR 2) avisa na conversa das rotinas que tinham a
+opção, garante que elas ficam pausadas (só voltam se a pessoa reativar) e apaga a coluna `rotinas.so_com_pendencia`.
+As execuções antigas com motivo `sem_pendencia` ficam no histórico como texto livre e aparecem como "sem novidade".
+A fila puxada continua: quem acorda o Dev é o pedido de colega; a retomada do que ficou pela metade passa a ser
+`me_chame_as` ou `esperar_comando`.

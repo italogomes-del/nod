@@ -84,7 +84,6 @@ export const DESTINO: Readonly<Record<Assunto, RegraDeDestino>> = {
   "memoria.task_fechada": { destino: "atividade", categoria: null },
   compactacao: { destino: "atividade", categoria: null },
   "proposta.decidida": { destino: "atividade", categoria: null },
-  pendencia: { destino: "atividade", categoria: null },
   inteligencia: { destino: "atividade", categoria: null },
   "aprovacao.modo": { destino: "atividade", categoria: null },
   "aprovacao.automatica": { destino: "atividade", categoria: null },

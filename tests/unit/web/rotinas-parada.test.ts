@@ -3,7 +3,7 @@ import type { RotinaDto, SuaVezDto } from "../../../src/contracts/api.ts";
 import type { Proposta } from "../../../src/contracts/conversa.ts";
 import type { BloqueioRotina } from "../../../src/contracts/rotina.ts";
 import { estadoInicial, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { rotuloExecucao } from "../../../web/lib/execucao.ts";
+import { motivoDaExecucao, rotuloExecucao } from "../../../web/lib/execucao.ts";
 import { desdeQuando, listaDeJanelas, quandoCurto } from "../../../web/lib/relogio.ts";
 import { renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
@@ -53,6 +53,13 @@ describe("histórico: a janela parada", () => {
     expect(rotuloExecucao({ desfecho: "bloqueada", motivo: "sem_conexao" })).toBe("parada (sem conexão)");
     expect(rotuloExecucao({ desfecho: "bloqueada", motivo: "aguardando_resposta" })).toBe("parada (aguardando resposta)");
     expect(rotuloExecucao({ desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" })).toBe("passou em branco");
+  });
+
+  it("NOD-317 (PR 2): o motivo antigo 'sem_pendencia' segue no histórico como texto livre e renderiza sem quebrar em qualquer desfecho", () => {
+    expect(motivoDaExecucao({ motivo: "sem_pendencia" })).toBe("sem_pendencia");
+    expect(rotuloExecucao({ desfecho: "sem_novidade", motivo: "sem_pendencia" })).toBe("sem novidade");
+    expect(rotuloExecucao({ desfecho: "nao_rodou", motivo: "sem_pendencia" })).toBe("não rodou · sem_pendencia");
+    expect(rotuloExecucao({ desfecho: "bloqueada", motivo: "sem_pendencia" })).toBe("parada (sem_pendencia)");
   });
 });
 

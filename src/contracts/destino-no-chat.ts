@@ -71,7 +71,6 @@ export const ASSUNTOS = [
   "memoria.task_fechada",
   "compactacao",
   "proposta.decidida",
-  "pendencia",
   "inteligencia",
   "aprovacao.modo",
   "aprovacao.automatica",

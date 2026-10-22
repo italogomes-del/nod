@@ -72,7 +72,6 @@ afterEach(async () => {
     await trx`delete from lotes_de_frentes where owner_id = ${p}`;
     await trx`delete from gastos where owner_id = ${p}`;
     await trx`delete from decisoes where owner_id = ${p}`;
-    await trx`delete from pendencias where owner_id = ${p}`;
     await trx`delete from mensagens where owner_id = ${p}`;
     await trx`delete from paradas where owner_id = ${p}`;
     await trx`delete from turnos where owner_id = ${p}`;

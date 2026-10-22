@@ -65,7 +65,6 @@ const ROTULO: Readonly<Record<Assunto, string>> = {
   compactacao: "Conversa compactada",
   "proposta.decidida": "Proposta decidida",
   "proposta.resultado": "Proposta decidida",
-  pendencia: "Pendência",
   inteligencia: "Inteligência",
   "aprovacao.modo": "Modo de aprovação",
   "aprovacao.automatica": "Aprovado sem perguntar",

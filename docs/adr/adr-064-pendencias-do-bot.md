@@ -1,6 +1,6 @@
 # ADR-064 — Pendências do bot
 
-Status: aceito · Data: 2026-09-30 · Estende a [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md) (o que fica
+Status: **removida em 19/10/2026 (NOD-317; a decisão está na NOD-232)** · aceito em 2026-09-30 · Estende a [ADR-063](adr-063-pedido-entre-bots-ate-tres-passes.md) (o que fica
 para depois no limite da corrente) e a [ADR-060](adr-060-menu-da-conta-sidebar-e-gaveta-por-niveis.md) (a gaveta
 ganha "A fazer"). Design A + C do canvas "Pendências" (pranchas F6 e F7), aprovado pelo Marlon em 2026-09-30, sem
 alarme.
@@ -173,3 +173,23 @@ meio de uma corrente de colegas, ela não aparece.
   a regra do prompt.
 - **Tela com os a fazer de todos os bots** (D).
 - **Editar a pendência** (texto ou hora) pela pessoa. Hoje ela descarta ou pede na conversa.
+
+## Emenda de 2026-10-22: removida (NOD-317)
+
+Decisão do Marlon em 19/10, na NOD-232: o "A fazer" sai de vez, do código e do banco. Estava desligado desde 06/10
+(`NOD_PENDENCIAS` ausente em produção, PR #174) e deixou 70 linhas congeladas, 29 delas de bots excluídos. O "voltar
+depois" já tem outros caminhos: `me_chame_as` (hora marcada), `esperar_comando` (algo de fora terminar) e a resposta de
+colega, que reabre o turno.
+
+- **PR 1 (#417, lançado em 9c6bc94c):** saem as ferramentas `anotar/concluir/descartar_pendencia`, o trecho do prompt,
+  as rotas `/pendencias` e `/fazer-agora`, a seção da gaveta, a flag e o "só com pendência" das rotinas (item 7 da
+  [ADR-066](adr-066-o-bot-tem-o-que-voce-deu-o-modo-decide.md)). A tabela e a coluna ficam, sem leitor, para o rollback
+  de imagem (NOD-173) não quebrar o agendador.
+- **PR 2 (migração 0101):** avisa na conversa de cada rotina que tinha a opção (de bot não excluído), garante que ela
+  fica pausada, troca o assunto `pendencia` das mensagens antigas por `sistema.generico` (o destino já era a Atividade)
+  e apaga a tabela `pendencias` e a coluna `rotinas.so_com_pendencia`. As linhas de produção ficam no export
+  anexado à NOD-317 (271 linhas, fora do repo por ter conteúdo de conversas); o ROLLBACK recria a tabela e a coluna vazias.
+- **Fica, de outro conceito:** a decisão pendente da pessoa (ADR-007/017/044), a métrica `pendencia_mais_velha_s`
+  (contrato de painel e alerta) e `PerguntaPendenteDaRotina`. A chave `soComPendencia: false` segue fixa na forma da
+  revisão da rotina (NOD-159) para o hash das propostas abertas não mudar, e `chamar-ferramenta` descarta o
+  `so_com_pendencia` que um modelo ainda mande.

@@ -61,8 +61,8 @@ export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | nu
 }
 
 /**
- * "interrompida · seu Mac parou de responder", "parada (sem acesso)", "sem novidade · sem pendência aberta, nenhum turno
- * rodou" (a janela que o servidor passou sem turno, item 7 da ADR-066); os outros desfechos seguem só com o nome.
+ * "interrompida · seu Mac parou de responder", "parada (sem acesso)"; os outros desfechos seguem só com o nome. A janela
+ * antiga com motivo 'sem_pendencia' (o "só com pendência", removido na NOD-317) sai como "sem novidade".
  */
 export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & { voltaEm?: ExecucaoRotina["voltaEm"] }, fusoIana = "UTC"): string {
   // NOD-274: "não rodou · cota, volta 14:00" — a janela que a cota da IA pulou fica visível no histórico.
