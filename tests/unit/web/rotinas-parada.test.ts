@@ -3,7 +3,7 @@ import type { RotinaDto, SuaVezDto } from "../../../src/contracts/api.ts";
 import type { Proposta } from "../../../src/contracts/conversa.ts";
 import type { BloqueioRotina } from "../../../src/contracts/rotina.ts";
 import { estadoInicial, type ConversaEstado, type Estado } from "../../../web/estado/reducer.ts";
-import { motivoDaExecucao, rotuloExecucao } from "../../../web/lib/execucao.ts";
+import { linhaOndeRoda, motivoDaExecucao, rotuloDoDesfecho, rotuloExecucao } from "../../../web/lib/execucao.ts";
 import { desdeQuando, listaDeJanelas, quandoCurto } from "../../../web/lib/relogio.ts";
 import { renderTimeline } from "../../../web/telas/conversa.ts";
 import { renderDetalhes } from "../../../web/telas/detalhes.ts";
@@ -168,5 +168,87 @@ describe("lista de rotinas: a rotina que espera (NOD-243, A4 do Gil no #335)", (
 
   it("sem espera: sem a tag", () => {
     expect(cab(renderRotinas({ ...estadoInicial, agora: AGORA, rotinas: [dto(null)] }))).not.toContain(">esperando</span>");
+  });
+});
+
+describe("NOD-89 (corte 1): onde a rotina roda, o atalho e os rótulos", () => {
+  const noMac: NonNullable<RotinaDto["ondeRoda"]> = { modo: "maquina", maquina: { id: "k1", nome: "MacBook da Bia", plataforma: "darwin" }, dependeDoMac: true };
+  const naVm: NonNullable<RotinaDto["ondeRoda"]> = { modo: "maquina", maquina: { id: "k2", nome: "vm-sp", plataforma: "linux" }, dependeDoMac: false };
+  const qualquerComLinux: NonNullable<RotinaDto["ondeRoda"]> = { modo: "qualquer", maquina: null, dependeDoMac: false };
+  const com = (ondeRoda: RotinaDto["ondeRoda"]): RotinaDto => ({ ...dto(null), ...(ondeRoda ? { ondeRoda } : {}) });
+  const ATALHO = 'data-act="conectar-sempre-ligada"';
+  const vezes = (html: string, trecho: string) => html.split(trecho).length - 1;
+  const base = { ...estadoInicial, agora: AGORA, frota: { agentes: [agente], negacoes: [] } as never };
+  const exec = (desfecho: string, motivo: string | null, em = HOJE_8) => ({ id: `e${em}`, rotinaId: "r1", desfecho, motivo, em, instanteAgendado: em }) as never;
+  const nivel = (ondeRoda: RotinaDto["ondeRoda"], execucoes: never[]) => renderDetalhes({ ...base, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, rotinas: [com(ondeRoda)], execucoes: { r1: execucoes }, gaveta: { agenteId: "a1", nivel: { tipo: "rotina", id: "r1" } } });
+
+  it("Mac: 'Roda em <Mac> · só com o Mac ligado e o nod aberto' com o atalho; a linha sem atalho fica só texto", () => {
+    const html = linhaOndeRoda(noMac, { comAtalho: true });
+    expect(html).toContain("Roda em <b>MacBook da Bia</b>");
+    expect(html).toContain("só com o Mac ligado e o nod aberto");
+    expect(html).toContain(`${ATALHO}>Conectar uma máquina sempre ligada`);
+    expect(linhaOndeRoda(noMac)).not.toContain(ATALHO);
+    expect(linhaOndeRoda(noMac, { plural: true })).toContain("Rodam em <b>MacBook da Bia</b>");
+  });
+
+  it("Linux: 'Roda em <VM>', sem aviso nem atalho; 'qualquer' com Linux: a primeira máquina ligada", () => {
+    const vm = linhaOndeRoda(naVm, { comAtalho: true });
+    expect(vm).toContain("Roda em <b>vm-sp</b>");
+    expect(vm).not.toContain("só com o Mac");
+    expect(vm).not.toContain(ATALHO);
+    const qualquer = linhaOndeRoda(qualquerComLinux, { comAtalho: true });
+    expect(qualquer).toContain("Roda na primeira máquina sua que estiver ligada");
+    expect(qualquer).not.toContain(ATALHO);
+    expect(linhaOndeRoda({ modo: "qualquer", maquina: null, dependeDoMac: true })).toContain("Roda em <b>seu Mac</b>");
+    expect(linhaOndeRoda(undefined)).toBe("");
+  });
+
+  it("tela Rotinas: linha por rotina e o atalho uma vez só, na intro; sem rotina no Mac, a frase do 'nod aberto' sai", () => {
+    const mac = renderRotinas({ ...base, rotinas: [com(noMac), { ...com(noMac), rotina: { ...rotina, id: "r2" } }] });
+    expect(vezes(mac, "Roda em <b>MacBook da Bia</b>")).toBe(2);
+    expect(vezes(mac, ATALHO)).toBe(1);
+    expect(mac).toContain("O nod precisa estar aberto");
+    const vm = renderRotinas({ ...base, rotinas: [com(naVm)] });
+    expect(vm).toContain("Roda em <b>vm-sp</b>");
+    expect(vm).not.toContain(ATALHO);
+    expect(vm).not.toContain("O nod precisa estar aberto");
+    // Sem `ondeRoda` (modo local, rotina de outra pessoa): a frase de sempre, sem linha.
+    const local = renderRotinas({ ...base, rotinas: [com(undefined)] });
+    expect(local).toContain("O nod precisa estar aberto");
+    expect(local).not.toContain("Roda em");
+  });
+
+  it("gaveta: 'Rodam em' abaixo de Rotinas, com o atalho uma vez", () => {
+    const html = renderDetalhes({ ...base, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, rotinas: [com(noMac)] });
+    expect(html).toContain("Rodam em <b>MacBook da Bia</b>");
+    expect(vezes(html, ATALHO)).toBe(1);
+  });
+
+  it("nível da rotina: o não rodou por máquina sem contato leva o atalho embaixo; a linha 'Roda em' fica só texto", () => {
+    const falhou = nivel(noMac, [exec("nao_rodou", "maquina_sem_contato"), exec("executou", null, ONTEM_18)]);
+    expect(falhou).toContain(`<span class="exec-acao"><button type="button" class="gv-link" ${ATALHO}>`);
+    expect(vezes(falhou, ATALHO)).toBe(1);
+    expect(falhou).toContain("Roda em <b>MacBook da Bia</b>");
+    // A execução mais recente rodou: o atalho volta para a linha "Roda em".
+    const ok = nivel(noMac, [exec("executou", null), exec("nao_rodou", "maquina_sem_contato", ONTEM_18)]);
+    expect(vezes(ok, ATALHO)).toBe(1);
+    expect(ok).not.toContain('class="exec-acao"');
+    // Alvo Linux: nem na execução nem na linha.
+    expect(nivel(naVm, [exec("nao_rodou", "maquina_sem_contato")])).not.toContain(ATALHO);
+    // Não rodou por outro motivo (cota da IA): conectar outra máquina não resolve; o atalho fica na linha "Roda em".
+    const cota = nivel(noMac, [exec("nao_rodou", "cota_da_ia")]);
+    expect(cota).not.toContain('class="exec-acao"');
+    expect(vezes(cota, ATALHO)).toBe(1);
+  });
+
+  it("rótulos: 'concluída' e nenhum desfecho cru no histórico", () => {
+    expect(rotuloExecucao({ desfecho: "executou", motivo: null })).toBe("concluída");
+    expect(rotuloDoDesfecho("passou_em_branco")).toBe("passou em branco");
+    expect(rotuloDoDesfecho("desfecho_novo")).toBe("desfecho novo");
+    const desfechos = ["executou", "passou_em_branco", "sem_novidade", "falhou", "interrompida", "adiada"];
+    const lista = renderRotinas({ ...base, rotinas: [com(noMac)], execucoes: { r1: desfechos.map((d, i) => exec(d, null, HOJE_8 - i * H)) } });
+    expect(lista).toContain("<b>concluída</b>");
+    const nv = nivel(noMac, desfechos.slice(0, 5).map((d, i) => exec(d, null, HOJE_8 - i * H)));
+    for (const html of [lista, nv]) for (const d of desfechos.filter((x) => x.includes("_") || x === "executou")) expect(html).not.toMatch(new RegExp(`>${d}<`));
   });
 });

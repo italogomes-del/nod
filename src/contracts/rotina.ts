@@ -2,6 +2,7 @@ import type { AcessoPedido } from "./acesso.ts";
 import type { EpochMs, TenantId } from "./ids.ts";
 import type { DesfechoRotina, MotivoAdiada, MotivoBloqueioRotina } from "./motivos.ts";
 import type { Executor } from "./evento.ts";
+import type { PlataformaMaquina } from "./ponte.ts";
 
 export type EstadoRotina = "ativa" | "pausada";
 
@@ -113,3 +114,10 @@ export type TipoPendenciaDaRotina = "pergunta" | "aprovacao";
  */
 export type AcaoRotinaEvento = "criada" | "mudada" | "pausada" | "ativada" | "excluida" | "nao_aplicada";
 export type PayloadRotinaEvento = { kind: "rotina_evento"; rotinaId: string; acao: AcaoRotinaEvento; resumo: string };
+
+/**
+ * NOD-89 (corte 1, definido em 2026-10-22): onde a rotina roda — a máquina do bot (ou o padrão da pessoa) ou "qualquer"
+ * uma. `dependeDoMac`: só roda com um Mac ligado e o nod aberto (alvo Mac, plataforma desconhecida, ou "qualquer" sem
+ * nenhuma máquina Linux viva). `maquina` null em "qualquer" = a primeira Linux viva leva; sem Linux nem Mac, "seu Mac".
+ */
+export type OndeRodaDto = { modo: "maquina" | "qualquer"; maquina: { id: string; nome: string; plataforma: PlataformaMaquina | null } | null; dependeDoMac: boolean };

@@ -275,6 +275,18 @@ div.mac-medidor { padding-right: 36px; }
 .exec-executou .gv-exec-ponto { background: var(--success); }
 .exec-falhou .gv-exec-ponto { background: var(--danger); }
 .exec-bloqueada .gv-exec-ponto { background: var(--warning); }
+/* NOD-89: todo desfecho tem ponto, alinhado com as cores do histórico (estilos.css): passou em branco espera por você
+   (âmbar); os de registro (sem novidade, interrompida, adiada, não rodou) ficam cinza. */
+.exec-passou_em_branco .gv-exec-ponto { background: var(--warning); }
+.exec-sem_novidade .gv-exec-ponto, .exec-interrompida .gv-exec-ponto, .exec-adiada .gv-exec-ponto, .exec-nao_rodou .gv-exec-ponto { background: var(--ink-3); }
+.gv-execucoes li.exec { flex-wrap: wrap; }
+.exec-acao { flex-basis: 100%; padding-left: 139px; } /* ponto 7 + vão 10 + data 112 + vão 10: alinha ao texto, como no protótipo */
+/* NOD-89 (corte 1): onde a rotina roda — "Roda em <máquina>" e, no Mac, o aviso e o atalho. */
+.onde-roda { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0 0; padding: 0 4px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.onde-roda-ic { display: inline-flex; flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
+.onde-roda-txt b { font-weight: 600; color: var(--ink); }
+.onde-roda-sep { margin: 0 2px; color: var(--ink-3); }
+.onde-roda .gv-link, .exec-acao .gv-link, .intro .gv-link { padding: 0; font-size: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .gv-exec-quando { width: 112px; flex-shrink: 0; color: var(--ink-3); }
 .gv-dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; padding: 0 4px; font-size: 12.5px; }
 .gv-dl dt { color: var(--ink-3); }

@@ -4,7 +4,7 @@ import type { Estado, NivelGaveta } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
-import { botaoDaParada, desdeDaParada, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
+import { ATALHO_SEMPRE_LIGADA, botaoDaParada, desdeDaParada, linhaOndeRoda, pedeAtalhoNaExecucao, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
 import { renderSeloModoDev } from "./modo-dev.ts";
@@ -121,6 +121,7 @@ function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
   };
   const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara("nova-rotina")}>+ Nova</button>` : ""}</div>
       ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gv-rotina-vazia">Nada programado ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e aparece aqui.</p>`}
+      ${rotinas.length ? linhaOndeRoda(rotinas.find((r) => r.ondeRoda)?.ondeRoda, { plural: true, comAtalho: true }) : ""}
     </section>`;
 
   const acessos = grupos
@@ -200,20 +201,23 @@ const rodapeDeFormulario = (salvar: string) => `<button type="button" class="gv-
 function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
   const dto = estado.rotinas.find((r) => r.rotina.id === id && r.rotina.agenteId === a.id);
   if (!dto) return { titulo: "Rotina", corpo: '<p class="mudo">Esta rotina não existe mais.</p>' };
-  const { rotina: r, proximaExecucao, bloqueio, resumo } = dto;
+  const { rotina: r, proximaExecucao, bloqueio, resumo, ondeRoda } = dto;
   const ativa = r.estado === "ativa";
   const exec = estado.execucoes[r.id];
+  // NOD-89 (critério 4): a mais recente não rodou por máquina sem contato numa rotina que depende do Mac — o atalho vai
+  // embaixo dela e a linha "Roda em" fica só com o texto (o atalho aparece uma vez por tela).
+  const atalhoNaExecucao = pedeAtalhoNaExecucao(exec?.[0], ondeRoda);
   const execucoes = !exec
     ? '<p class="mudo">carregando…</p>'
     : !exec.length
       ? '<p class="mudo">nunca executou</p>'
-      : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e, r.fusoIana))}</span></li>`).join("")}</ul>`;
+      : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e, i) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e, r.fusoIana))}</span>${i === 0 && atalhoNaExecucao ? `<span class="exec-acao">${ATALHO_SEMPRE_LIGADA}</span>` : ""}</li>`).join("")}</ul>`;
   const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
   const detalhe = (rotulo: string, valor: string) => (valor ? `<dt>${esc(rotulo)}</dt><dd>${esc(valor)}</dd>` : "");
   const corpo = `${parada}
     <section class="gv-bloco"><h3>Instrução</h3><p class="gv-texto">${esc(r.instrucao)}</p></section>
     <section class="gv-bloco"><h3>Quando executar</h3><p class="gv-quando">${ICONE.relogio}<span>${esc(resumo ? capitalizar(resumo) : `${r.cron} (${r.fusoIana})`)}</span></p>
-      <small class="gv-proxima">${ativa ? `Próxima: ${esc(dataHora(proximaExecucao, r.fusoIana))} · ${esc(interpolar(proximaExecucao, estado.agora))}` : "Pausada"}</small></section>
+      <small class="gv-proxima">${ativa ? `Próxima: ${esc(dataHora(proximaExecucao, r.fusoIana))} · ${esc(interpolar(proximaExecucao, estado.agora))}` : "Pausada"}</small>${linhaOndeRoda(ondeRoda, { comAtalho: !atalhoNaExecucao })}</section>
     <section class="gv-bloco"><h3>Últimas execuções</h3>${execucoes}</section>
     <section class="gv-bloco"><h3>Combinado</h3><dl class="gv-dl">${detalhe("Fonte", r.fonte)}${detalhe("Resultado", r.entregavel)}${detalhe("Antes de agir fora do nod", r.limitesAprovacao)}${detalhe("Se faltar informação", r.politicaSemDado)}</dl></section>`;
   // definido em 2026-09-30: quem muda a instrução ou o horário é o bot (ADR-043); "Ajustar" só escreve o pedido no campo.

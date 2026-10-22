@@ -1,6 +1,6 @@
 import type { EsperaDaCotaDaRotina } from "../../src/contracts/cota.ts";
-import type { EsperaRotinaDto } from "../../src/contracts/rotina.ts";
-import type { BloqueioRotina, ExecucaoRotina, ParadaDaRotina, PerguntaPendenteDaRotina } from "../../src/contracts/rotina.ts";
+import type { DesfechoRotina } from "../../src/contracts/motivos.ts";
+import type { BloqueioRotina, EsperaRotinaDto, ExecucaoRotina, OndeRodaDto, ParadaDaRotina, PerguntaPendenteDaRotina } from "../../src/contracts/rotina.ts";
 import { botao, esc } from "./render.ts";
 import { desdeQuando, horaMinuto, listaDeJanelas, quandoCurto, quandoVoltaNoFuso } from "./relogio.ts";
 
@@ -61,6 +61,26 @@ export function motivoDaExecucao(e: Pick<ExecucaoRotina, "motivo">): string | nu
 }
 
 /**
+ * NOD-89 (definido em 2026-10-22; bug visto no protótipo pelo Gil): o desfecho em palavras — o status cru ("executou",
+ * "passou_em_branco") não aparece mais. Record sobre DesfechoRotina: desfecho novo sem rótulo não compila.
+ */
+const ROTULO_DO_DESFECHO: Record<DesfechoRotina, string> = {
+  executou: "concluída",
+  passou_em_branco: "passou em branco",
+  sem_novidade: "sem novidade",
+  falhou: "falhou",
+  interrompida: "interrompida",
+  bloqueada: "parada",
+  nao_rodou: "não rodou",
+  adiada: "adiada",
+};
+
+/** O rótulo do desfecho; um desfecho que a web ainda não conhece (servidor mais novo) sai sem o "_", nunca cru. */
+export function rotuloDoDesfecho(d: string): string {
+  return (ROTULO_DO_DESFECHO as Partial<Record<string, string>>)[d] ?? d.replaceAll("_", " ");
+}
+
+/**
  * "interrompida · seu Mac parou de responder", "parada (sem acesso)"; os outros desfechos seguem só com o nome. A janela
  * antiga com motivo 'sem_pendencia' (o "só com pendência", removido na NOD-317) sai como "sem novidade".
  */
@@ -79,7 +99,7 @@ export function rotuloExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> & 
     const motivo = e.motivo !== null && Object.hasOwn(MOTIVO_DA_PARADA, e.motivo) ? MOTIVO_DA_PARADA[e.motivo as keyof typeof MOTIVO_DA_PARADA] : e.motivo;
     return motivo ? `parada (${motivo})` : "parada";
   }
-  const base = e.desfecho.replaceAll("_", " ");
+  const base = rotuloDoDesfecho(e.desfecho);
   const motivo = e.desfecho === "interrompida" || e.desfecho === "adiada" ? motivoDaExecucao(e) : null;
   return motivo ? `${base} · ${motivo}` : base;
 }
@@ -184,4 +204,35 @@ export function cotaDaIa(ia: string): string {
 export function tagEsperaDaCota(e: EsperaDaCotaDaRotina, fusoIana: string, agora: number): string {
   if (e.voltaEm <= agora) return "";
   return `<span class="tag tag-cinza" title="a execução volta sozinha quando a cota renovar; nada a fazer">${esc(rotuloEsperaDaCota(e, fusoIana, agora))}<span class="sr-only"> (volta sozinha; nada a fazer)</span></span>`;
+}
+
+/** NOD-89: o atalho que leva a Máquinas › Conectar (main.ts, `conectar-sempre-ligada`). Aparece uma vez por tela. */
+export const ATALHO_SEMPRE_LIGADA = '<button type="button" class="gv-link" data-act="conectar-sempre-ligada">Conectar uma máquina sempre ligada</button>';
+
+const ICONE_MAC = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="10.5" rx="1.6"/><path d="M2.5 18.5h19"/></svg>';
+const ICONE_SERVIDOR = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="6.5" rx="1.8"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.8"/><path d="M7 7.25h.01M7 16.75h.01"/></svg>';
+const SEP = '<span class="onde-roda-sep" aria-hidden="true">·</span>';
+
+/**
+ * NOD-89 (corte 1, definido em 2026-10-22; protótipo aprovado): onde a rotina roda, numa linha. "Roda em <b>vm-sp</b>";
+ * no Mac (ou "qualquer" sem Linux), "Roda em <b>MacBook</b> · só com o Mac ligado e o nod aberto" e, com `comAtalho`, o
+ * atalho; "qualquer" com Linux, "Roda na primeira máquina sua que estiver ligada". `plural` = a gaveta ("Rodam em").
+ * Vazio sem `ondeRoda` (modo local, rotina de outra pessoa).
+ */
+export function linhaOndeRoda(o: OndeRodaDto | undefined, opcoes: { plural?: boolean; comAtalho?: boolean } = {}): string {
+  if (!o) return "";
+  const verbo = opcoes.plural ? "Rodam" : "Roda";
+  const linha = (icone: string, texto: string) => `<p class="onde-roda" data-depende-do-mac="${o.dependeDoMac}"><span class="onde-roda-ic">${icone}</span><span class="onde-roda-txt">${texto}</span></p>`;
+  if (o.modo === "qualquer" && !o.dependeDoMac) return linha(ICONE_SERVIDOR, `${verbo} na primeira máquina sua que estiver ligada`);
+  const nome = o.maquina?.nome ?? "seu Mac";
+  if (!o.dependeDoMac) return linha(ICONE_SERVIDOR, `${verbo} em <b>${esc(nome)}</b>`);
+  return linha(ICONE_MAC, `${verbo} em <b>${esc(nome)}</b> ${SEP} só com o Mac ligado e o nod aberto${opcoes.comAtalho ? ` ${SEP} ${ATALHO_SEMPRE_LIGADA}` : ""}`);
+}
+
+/**
+ * NOD-89 (critério 4): a execução que não rodou porque a máquina ficou sem contato, numa rotina que depende do Mac, leva o
+ * atalho logo abaixo — é onde está o problema. Alvo Linux: não leva (a VM sem contato não se resolve com outra máquina).
+ */
+export function pedeAtalhoNaExecucao(e: Pick<ExecucaoRotina, "desfecho" | "motivo"> | undefined, o: OndeRodaDto | undefined): boolean {
+  return !!e && !!o?.dependeDoMac && e.desfecho === "nao_rodou" && e.motivo === "maquina_sem_contato";
 }

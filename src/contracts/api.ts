@@ -10,7 +10,7 @@ import type { Mensagem } from "./mensagem.ts";
 import type { MotivoFalhaComputador } from "./motivos.ts";
 import type { Negacao } from "./negacao.ts";
 import type { FioDaPergunta, FioDoItem, PedidoDoItem } from "./pedido.ts";
-import type { BloqueioRotina, EsperaRotinaDto, JanelasPuladasDaRotina, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
+import type { BloqueioRotina, EsperaRotinaDto, JanelasPuladasDaRotina, OndeRodaDto, ParadaDaRotina, PerguntaPendenteDaRotina, Rotina } from "./rotina.ts";
 import type { DonoNaConversa, TrabalhoDto } from "./trabalho.ts";
 import type { TrocasNaConversa } from "./troca-entre-bots.ts";
 
@@ -86,8 +86,8 @@ export type SuaVezDto = {
 
 export type DecisaoDto = { decisao: Decisao; itens: ItemAprovacao[] };
 /** `bloqueio` (definido em 2026-09-24, emenda da ADR-044): parada por falta de conexão ou acesso, com o card aberto; null = roda. */
-/** `resumo` (definido em 2026-09-30): o cron em palavras, com o fuso — "dias úteis às 08:00 (America/Sao_Paulo)"; a gaveta do bot mostra. */
-export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs; bloqueio: BloqueioRotina | null; resumo: string; espera: EsperaRotinaDto | null; perguntaPendente?: PerguntaPendenteDaRotina; esperaDaCota?: { ia: string; voltaEm: EpochMs } } & JanelasPuladasDaRotina;
+/** `resumo` (definido em 2026-09-30): o cron em palavras, com o fuso — "dias úteis às 08:00 (America/Sao_Paulo)"; a gaveta do bot mostra. `ondeRoda` (NOD-89): ausente no modo local e nas rotinas de outra pessoa. */
+export type RotinaDto = { rotina: Rotina; proximaExecucao: EpochMs; bloqueio: BloqueioRotina | null; resumo: string; espera: EsperaRotinaDto | null; perguntaPendente?: PerguntaPendenteDaRotina; esperaDaCota?: { ia: string; voltaEm: EpochMs }; ondeRoda?: OndeRodaDto } & JanelasPuladasDaRotina;
 
 export type MetodoHttp = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 export type EntradaRota = { metodo: MetodoHttp; caminho: string; lane: "L1" | "L4" | "L5" | "L6" | "L7" | "L8" | "L9" };

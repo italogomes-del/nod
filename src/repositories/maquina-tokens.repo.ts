@@ -41,6 +41,18 @@ export function maquinaTokensRepo(conn: Conn, escopo: Escopo) {
       return linhas.map(paraDto);
     },
 
+    /**
+     * NOD-89 (corte 1): as chaves vivas (não revogadas e não vencidas) com o sistema que cada máquina anunciou — a linha
+     * "Roda em" da rotina. Mesma ordem e mesmo filtro por dona do `listar()`.
+     */
+    async vivasComPlataforma(): Promise<{ id: string; nome: string; plataforma: PlataformaMaquina | null }[]> {
+      return conn<{ id: string; nome: string; plataforma: PlataformaMaquina | null }[]>`
+        select id, nome, plataforma from maquina_tokens
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId}
+          and revogado_em is null and (expira_em is null or expira_em > now())
+        order by criado_em desc`.then((ls) => ls.map((l) => ({ id: l.id, nome: l.nome, plataforma: l.plataforma ?? null })));
+    },
+
     /** Revogar é idempotente: a primeira data fica. false = a chave não existe (ou é de outra pessoa). */
     async revogar(id: string, agora: number): Promise<boolean> {
       const linhas = await conn`

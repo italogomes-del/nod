@@ -8,9 +8,11 @@ import { TIPOS_GATE_ROTINA } from "../contracts/pedido.ts";
 import { ENTRADA_DA_VOLTA_DA_COTA } from "../domain/cota-da-ia.ts";
 import { iaDaVoltaDaCota } from "../domain/espera-da-cota.ts";
 import { avisoDeJanelasPuladas, janelasPuladas } from "../domain/janelas-puladas.ts";
+import { ondeRodaDaRotina, type MaquinaViva } from "../domain/onde-roda.ts";
 import { resumoCron } from "../domain/rotina-texto.ts";
 import { EXECUCOES_GUARDADAS } from "../shared/constantes.ts";
 import { exigir } from "./apoio-l7.ts";
+import { alvoDoBot } from "./alvo-do-bot.ts";
 import { bloqueioDaRotina, decisaoQueSeguraARotina } from "./pre-voo-rotina.ts";
 import type { CasoDeUso, Deps } from "./tipos.ts";
 
@@ -19,27 +21,37 @@ import type { CasoDeUso, Deps } from "./tipos.ts";
  * `bloqueio` (definido em 2026-09-24, emenda da ADR-044): a rotina da pessoa parada por falta de conexão
  * ou acesso, com o card que a destrava — a lista mostra "parada · falta acesso ao Gmail" e o botão.
  * Rotina de outra pessoa (visível por 'equipe') sai sem: as concessões e os cards dela são da dona.
+ * `ondeRoda` (NOD-89): só nas minhas e fora do modo local (ADR-092: lá o bot sem máquina roda no Mac do servidor). O alvo
+ * sai uma vez por bot e as chaves vivas uma vez por chamada — sem N+1.
  */
 export const listarRotinas: CasoDeUso<Record<string, never>, { rotinas: RotinaDto[] }> = async (deps) => {
   const rotinas = await deps.repos.rotinas.listar();
   const minhas = rotinas.filter((r) => r.ownerId === deps.escopo.pessoaId && r.excluidoEm === null);
   const registrados = minhas.length ? await deps.repos.conectores.listar() : [];
   const concessoes = new Map<string, Concessao[]>();
+  const comOndeRoda = minhas.length > 0 && !deps.services.maquinas?.macDoServidor;
+  const vivas: MaquinaViva[] = comOndeRoda ? await deps.repos.maquinaTokens.vivasComPlataforma() : [];
+  const alvos = new Map<string, Awaited<ReturnType<typeof alvoDoBot>>>();
   const dtos: RotinaDto[] = [];
   for (const rotina of rotinas) {
     let bloqueio: RotinaDto["bloqueio"] = null;
     let espera: EsperaRotinaDto | null = null;
     let perguntaPendente: RotinaDto["perguntaPendente"];
     let esperaDaCota: RotinaDto["esperaDaCota"];
+    let ondeRoda: RotinaDto["ondeRoda"];
     if (minhas.includes(rotina)) {
       espera = await esperaDaRotina(deps, rotina.id);
       if (!concessoes.has(rotina.agenteId)) concessoes.set(rotina.agenteId, await deps.repos.concessoes.doAgente(rotina.agenteId));
       bloqueio = await bloqueioDaRotina(deps.repos, rotina, registrados, concessoes.get(rotina.agenteId) ?? []);
       perguntaPendente = await perguntaQueParou(deps.repos, rotina);
       esperaDaCota = await esperaDaCotaDaRotina(deps.repos, rotina, deps.agora());
+      if (comOndeRoda) {
+        if (!alvos.has(rotina.agenteId)) alvos.set(rotina.agenteId, await alvoDoBot(deps, rotina.agenteId));
+        ondeRoda = ondeRodaDaRotina(alvos.get(rotina.agenteId) ?? null, vivas);
+      }
     }
     const puladas = await puladasDe(deps, rotina);
-    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), espera, ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
+    dtos.push({ rotina, proximaExecucao: rotina.proximaExecucao, bloqueio, resumo: resumoDe(rotina.cron, rotina.fusoIana), espera, ...(perguntaPendente ? { perguntaPendente } : {}), ...(esperaDaCota ? { esperaDaCota } : {}), ...(ondeRoda ? { ondeRoda } : {}), ...(puladas !== null ? { janelasPuladas: puladas } : {}) });
   }
   return { data: { rotinas: dtos } };
 };
