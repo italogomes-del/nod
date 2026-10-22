@@ -83,4 +83,35 @@ export interface Sintetizador {
   medirPico?(): () => number;
 }
 
-export type ProvedoresVoz = { stt: Transcritor; tts: Sintetizador; encerrar(): Promise<void> };
+/**
+ * Transcrição de ARQUIVO com tempo por palavra (definido em 2026-10-22, NOD-329): o memo de voz do bot. Fica separada do
+ * `Transcritor` (streaming da ligação), que não dá tempo por palavra. O arquivo vai inteiro num pedido síncrono.
+ */
+export type PalavraTranscrita = { texto: string; inicioMs: number; fimMs: number };
+
+export type PedidoTranscricaoArquivo = { bytes: Uint8Array; mime: string; idioma: "pt-BR"; sinal?: AbortSignal };
+
+/** `palavras` vazia = sem fala. `cobradoMs`: a duração que o provedor cobrou, quando ele diz (null no falso). */
+export type ResultadoTranscricaoArquivo = { palavras: PalavraTranscrita[]; cobradoMs: number | null };
+
+export interface TranscritorDeArquivo {
+  readonly id: "google" | "falso";
+  readonly modelo: string;
+  transcrever(p: PedidoTranscricaoArquivo): Promise<ResultadoTranscricaoArquivo>;
+}
+
+/**
+ * O provedor recusou o arquivo por causa dele mesmo (não adianta tentar de novo): `longo` (acima do limite do pedido
+ * síncrono) ou `nao_suportado` (codificação que ele não decodifica). Os outros erros saem como `ErroDeDominio`.
+ */
+export class RecusaDoArquivo extends Error {
+  readonly motivo: "longo" | "nao_suportado";
+  constructor(motivo: "longo" | "nao_suportado", opcoes?: { cause?: unknown }) {
+    super(motivo, opcoes);
+    this.name = "RecusaDoArquivo";
+    this.motivo = motivo;
+  }
+}
+
+/** `arquivo`: null com `NOD_VOZ_STT_ARQUIVO=desligado`. */
+export type ProvedoresVoz = { stt: Transcritor; tts: Sintetizador; arquivo: TranscritorDeArquivo | null; encerrar(): Promise<void> };

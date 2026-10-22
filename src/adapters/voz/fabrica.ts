@@ -2,14 +2,15 @@ import { ErroDeDominio } from "../../domain/erro.ts";
 import { log } from "../../obs/log.ts";
 import type { ProvedorVoz } from "./catalogo-vozes.ts";
 import { criarTranscritorGoogle } from "./google-transcricao.ts";
+import { criarTranscritorDeArquivoGoogle } from "./google-transcricao-arquivo.ts";
 import { criarTransporteHttp2 } from "./google-voz-streaming.ts";
 import { criarSintetizadorGoogle } from "./google-voz.ts";
 import { criarLimitadorTts, criarSintetizadorLimitado, TETO_TTS_PADRAO_MIN } from "./limitador-tts.ts";
 import { criarSintetizadorSay } from "./local-say.ts";
 import { criarTranscritorWhisperLocal } from "./local-whisper.ts";
-import type { ProvedoresVoz, Sintetizador, Transcritor } from "./spi.ts";
+import type { ProvedoresVoz, Sintetizador, Transcritor, TranscritorDeArquivo } from "./spi.ts";
 import { criarFonteDeToken, type FonteTokenGoogle } from "./token-google.ts";
-import { criarSintetizadorFalso, criarTranscritorFalso } from "./voz-falsa.ts";
+import { criarSintetizadorFalso, criarTranscritorDeArquivoFalso, criarTranscritorFalso } from "./voz-falsa.ts";
 
 /**
  * Escolhe os provedores de voz pelo ambiente (definido em 2026-10-04, ADR-071): `NOD_VOZ_STT` e `NOD_VOZ_TTS` aceitam
@@ -49,6 +50,24 @@ export function lerTetoTts(valor: string | undefined): number {
   return Number(v);
 }
 
+/**
+ * STT de arquivo (definido em 2026-10-22, NOD-329): `NOD_VOZ_STT_ARQUIVO` = "google" | "falso" | "desligado". Padrão:
+ * google em produção, falso fora dela. Não há `local`: o whisper local não dá tempo por palavra.
+ */
+export type ProvedorSttArquivo = "google" | "falso" | "desligado";
+const PROVEDORES_STT_ARQUIVO: readonly ProvedorSttArquivo[] = ["google", "falso", "desligado"];
+
+export function lerProvedorSttArquivo(env: Record<string, string | undefined>): ProvedorSttArquivo {
+  const v = env.NOD_VOZ_STT_ARQUIVO?.trim();
+  if (!v) return env.NODE_ENV === "production" ? "google" : "falso";
+  const achado = PROVEDORES_STT_ARQUIVO.find((p) => p === v);
+  if (!achado) {
+    log("erro", "voz_provedor_invalido", { variavel: "NOD_VOZ_STT_ARQUIVO", valor: v });
+    throw new ErroDeDominio("entrada_invalida");
+  }
+  return achado;
+}
+
 export function criarProvedoresVoz(env: Record<string, string | undefined>, plataforma: string = process.platform): ProvedoresVoz {
   const padrao = provedorPadrao(env, plataforma);
   const qualStt = lerProvedor(env.NOD_VOZ_STT, padrao, "NOD_VOZ_STT");
@@ -58,6 +77,7 @@ export function criarProvedoresVoz(env: Record<string, string | undefined>, plat
     throw new ErroDeDominio("integracao_nao_configurada");
   }
 
+  const qualArquivo = lerProvedorSttArquivo(env);
   const tetoTts = lerTetoTts(env.NOD_VOZ_TTS_TETO_MIN);
 
   let fonte: FonteTokenGoogle | null = null;
@@ -98,10 +118,19 @@ export function criarProvedoresVoz(env: Record<string, string | undefined>, plat
     tts = criarSintetizadorFalso();
   }
 
-  log("info", "voz_provedores", { stt: qualStt, tts: qualTts, tts_streaming: tts.capacidades.streaming, tts_teto_min: qualTts === "google" ? tetoTts : null });
+  let arquivo: TranscritorDeArquivo | null = null;
+  if (qualArquivo === "google") {
+    const f = token();
+    arquivo = criarTranscritorDeArquivoGoogle({ token: () => f.token(), projeto: f.projeto, regiao: env.NOD_VOZ_STT_ARQUIVO_REGIAO, modelo: env.NOD_VOZ_STT_ARQUIVO_MODELO });
+  } else if (qualArquivo === "falso") {
+    arquivo = criarTranscritorDeArquivoFalso(env.NOD_VOZ_FALSO_ROTEIRO_ARQUIVO ?? "");
+  }
+
+  log("info", "voz_provedores", { stt: qualStt, stt_arquivo: qualArquivo, tts: qualTts, tts_streaming: tts.capacidades.streaming, tts_teto_min: qualTts === "google" ? tetoTts : null });
   return {
     stt,
     tts,
+    arquivo,
     async encerrar() {
       await Promise.allSettled(encerrar.map((f) => f()));
     },

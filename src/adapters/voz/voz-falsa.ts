@@ -1,5 +1,6 @@
 import { TAXA_VOZ_HZ } from "../../contracts/voz.ts";
-import type { OpcoesSessaoStt, ProvedoresVoz, SessaoStt, Sintetizador, Transcritor } from "./spi.ts";
+import { duracaoMs } from "../../domain/duracao-audio.ts";
+import type { OpcoesSessaoStt, PalavraTranscrita, ProvedoresVoz, SessaoStt, Sintetizador, Transcritor, TranscritorDeArquivo } from "./spi.ts";
 
 /**
  * Provedor `falso` (definido em 2026-10-04, ADR-071): sem áudio de verdade, custo zero, determinístico. É o dos testes
@@ -108,12 +109,45 @@ export function criarSintetizadorFalso(opcoes: { silencioso?: boolean } = {}): S
   };
 }
 
-export type OpcoesProvedoresFalsos = { roteiro?: readonly string[]; parciais?: boolean; silencioso?: boolean };
+/** definido em 2026-10-22 (NOD-329): sem saber a duração do arquivo (nem dada, nem no cabeçalho), o falso espalha as palavras em 400 ms cada. */
+export const MS_POR_PALAVRA_FALSA = 400;
 
-export function criarProvedoresFalsos(opcoes: OpcoesProvedoresFalsos = {}): ProvedoresVoz & { stt: TranscritorFalso } {
+export type TranscritorDeArquivoFalso = TranscritorDeArquivo & {
+  /** Quantas vezes `transcrever` foi chamado (o teste das "0 chamadas" sem consentimento). */
+  readonly chamadas: number;
+};
+
+/**
+ * STT de arquivo `falso` (definido em 2026-10-22, NOD-329): devolve o roteiro (um texto) como palavras espalhadas pela
+ * duração — `duracaoMs` quando dada, senão a lida do cabeçalho do arquivo (`duracao-audio.ts`), senão 400 ms por palavra. Roteiro vazio → `[]` (áudio sem fala). Nada vai à rede.
+ */
+export function criarTranscritorDeArquivoFalso(roteiro = "", opcoes: { duracaoMs?: number } = {}): TranscritorDeArquivoFalso {
+  let chamadas = 0;
+  return {
+    id: "falso",
+    modelo: "falso",
+    get chamadas() {
+      return chamadas;
+    },
+    async transcrever(p) {
+      chamadas++;
+      if (p.sinal?.aborted) throw new DOMException("abortado", "AbortError");
+      const textos = roteiro.split(/\s+/).filter(Boolean);
+      const total = opcoes.duracaoMs ?? duracaoMs(p.bytes, p.mime) ?? textos.length * MS_POR_PALAVRA_FALSA;
+      const passo = textos.length > 0 ? total / textos.length : 0;
+      const palavras: PalavraTranscrita[] = textos.map((texto, i) => ({ texto, inicioMs: Math.round(i * passo), fimMs: Math.round((i + 1) * passo) }));
+      return { palavras, cobradoMs: null };
+    },
+  };
+}
+
+export type OpcoesProvedoresFalsos = { roteiro?: readonly string[]; parciais?: boolean; silencioso?: boolean; roteiroArquivo?: string };
+
+export function criarProvedoresFalsos(opcoes: OpcoesProvedoresFalsos = {}): ProvedoresVoz & { stt: TranscritorFalso; arquivo: TranscritorDeArquivoFalso } {
   return {
     stt: criarTranscritorFalso(opcoes.roteiro ?? [], { parciais: opcoes.parciais === true }),
     tts: criarSintetizadorFalso({ silencioso: opcoes.silencioso === true }),
+    arquivo: criarTranscritorDeArquivoFalso(opcoes.roteiroArquivo ?? ""),
     async encerrar() {},
   };
 }

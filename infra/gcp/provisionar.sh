@@ -77,7 +77,8 @@ passo "Conta de serviço da VM"
 SA_VM="nod-vm@$PROJETO.iam.gserviceaccount.com"
 gc iam service-accounts describe "$SA_VM" >/dev/null 2>&1 || gc iam service-accounts create nod-vm --display-name="nod: VM"
 # ADR-071: a voz da ligação (Transcribe Live pela Vertex, Chirp 3 HD) roda com a conta da VM.
-for papel in roles/logging.logWriter roles/monitoring.metricWriter roles/aiplatform.user roles/serviceusage.serviceUsageConsumer; do
+# NOD-329: roles/speech.client para o STT de arquivo (Speech-to-Text v2 recognize, chirp_2) do memo de voz.
+for papel in roles/logging.logWriter roles/monitoring.metricWriter roles/aiplatform.user roles/serviceusage.serviceUsageConsumer roles/speech.client; do
   gc projects add-iam-policy-binding "$PROJETO" --member="serviceAccount:$SA_VM" --role="$papel" --condition=None >/dev/null
 done
 gc artifacts repositories add-iam-policy-binding "$REPO" --location="$REGIAO" --member="serviceAccount:$SA_VM" --role=roles/artifactregistry.reader >/dev/null
