@@ -45,8 +45,13 @@ Observações e falhas:
 
 ## B. Instalação limpa
 
-Num usuário novo do macOS (Ajustes do Sistema → Usuários e Grupos), sem nod instalado nem `~/Library/Application
-Support/nod`.
+Num usuário novo do macOS (Ajustes do Sistema → Usuários e Grupos), sem `~/Library/Application Support/nod`. Baixe o
+DMG de novo pelo navegador nesse usuário, para ele vir com quarentena; o `nod.app` que o H1 deixou em `/Applications` é
+substituído ao arrastar (**Substituir**).
+
+> **Rode H1 antes de B.** `/Applications` é compartilhada entre os usuários do Mac: instalar o DMG novo em B, mesmo num
+> usuário novo, substitui a preview do usuário principal, e H1 perde a origem. Faça H1 no usuário principal primeiro e
+> só depois crie o usuário novo para B.
 
 - [ ] **DMG baixado pelo GitHub abre normalmente.** Observar: abrir o DMG, arrastar **nod** para **Aplicativos** e abrir
   com dois cliques, sem aviso de desenvolvedor não identificado. Reprova se: o macOS bloqueia, pede **Abrir mesmo
@@ -120,7 +125,10 @@ Com a última preview instalada e conectada (a mais recente da [lista de release
 a mesma pasta `Application Support/nod`; a assinatura nova é que pode mudar o acesso ao item do Keychain.
 
 - [ ] **Instalar por cima.** Observar: o macOS pode pedir a senha do Mac uma vez para liberar o Keychain ao app novo;
-  depois abre normalmente. Reprova se: pede **Abrir mesmo assim**, pede a senha a cada abertura, trava ou abre tela
+  no aviso, digite a senha e clique em **Sempre permitir**. Depois abre normalmente. Com **Permitir**, o macOS
+  pergunta de novo a cada abertura: isso não é falha do app; registre em Observações e repita com **Sempre
+  permitir**. Reprova se: pede **Abrir mesmo assim**, pede a senha a cada abertura mesmo depois de **Sempre
+  permitir**, trava ou abre tela
   branca.
 - [ ] **Um dos dois desfechos aprovados.** Registre qual:
   - **(a)** o app reconecta com a mesma chave, sem chave nova em **Chaves** (`ler()` decifrou a conexão da preview);

@@ -76,7 +76,8 @@ pt-BR e outra com o macOS em inglês, e anexe as fotos a esta seção:
 
 **No Mac.** Não há atualização automática (NOD-132). Baixe o DMG novo, abra e arraste **nod** para **Aplicativos**,
 escolhendo **Substituir**. Na primeira abertura, o macOS pode pedir a senha do Mac uma vez para o app novo usar o
-Keychain. Depois disso, um destes dois desfechos é o esperado:
+Keychain: digite a senha e clique em **Sempre permitir**. Com **Permitir**, o macOS pergunta de novo a cada abertura;
+isso não é falha do app, basta repetir com **Sempre permitir**. Depois disso, um destes dois desfechos é o esperado:
 
 - **(a) Reconecta sozinho.** O app abre o nod com a mesma chave; **Chaves**, no navegador, não ganha chave nova.
 - **(b) Volta à tela de conexão.** O app assinado não conseguiu ler a conexão guardada pela preview. Clique em
