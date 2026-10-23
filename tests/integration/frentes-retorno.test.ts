@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { Turno } from "../../src/contracts/turno.ts";
 import { criarTokenTurno } from "../../src/services/token-turno.ts";
+import { REDE_MS } from "../../src/domain/trabalho.ts";
+import { promoverNaRede } from "../../src/use-cases/coordenar-trabalhos.ts";
 import { emitirPlanoTurno } from "../../src/use-cases/emitir-plano-turno.ts";
 import { INSTRUCAO_DO_RETORNO, PERGUNTA_DA_RECONEXAO } from "../../src/domain/retorno-do-lote.ts";
 import { entregarRespostaPeer } from "../../src/use-cases/entregar-resposta-peer.ts";
@@ -229,6 +231,83 @@ describeIntegracao("frentes: o lote volta ao dono numa mensagem só (ADR-099, I3
         expect(plano.entrada.sessaoCli, trabalhoDoLote).toBe("sessao-da-conversa");
         await m.repos.turnos.assentar(retorno!.id, { estado: "concluido" });
       }
+    });
+  });
+});
+
+/**
+ * NOD-293 (G10 e N9, definido em 2026-10-20): o retorno do lote é a volta das frentes ao dono, não um pedido novo. Passou
+ * de 2 min trabalhando, a rede de 2 min não o promove a frente (antes promovia: o lote voltava como outra frente, que
+ * abria outro lote). O N9 ("a rede promove frentes que acabam em segundos") é o mesmo furo visto pelo outro lado: a frente
+ * termina em segundos, o retorno nasce na hora e é ele que a rede pegava.
+ */
+describeIntegracao("a rede de 2 min não promove o retorno do lote (NOD-293, G10/N9)", () => {
+  const promover = (deps: Parameters<typeof promoverNaRede>[0], turnoId: string, despachadoEm: number) =>
+    promoverNaRede(deps, { turnoId, despachadoEm, fezFerramenta: true, harness: "codex-cli", sessaoCli: null, sessaoExecutor: "local", maquinaBifurca: false, modo: "conversa" });
+
+  it("G10: o lote fecha, o retorno fica 2 min trabalhando e a rede não promove nada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 2));
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      for (const id of ids) await m.terminar(id, "feito");
+      const [retorno] = await m.retomadasDe(dono);
+      expect((await m.repos.frentes.buscarLote(loteId))?.retornoTurnoId).toBe(retorno!.id);
+      expect(await m.repos.frentes.ehRetornoDeLote(retorno!.id)).toBe(true);
+      expect(await m.repos.frentes.ehRetornoDeLote(dono.id)).toBe(false);
+
+      expect((await m.repos.turnos.reivindicar({ machineId: randomUUID(), agora: Date.now() }))?.id).toBe(retorno!.id);
+      const r = await promover(m.deps, retorno!.id, Date.now() - REDE_MS);
+      expect(r.data.trabalho).toBeNull();
+      expect(r.events ?? []).toHaveLength(0);
+      expect((await m.repos.turnos.buscar(retorno!.id))?.trabalhoId ?? null).toBeNull();
+      expect((await m.repos.trabalhos.abertosDoAgente(m.ada.agenteId)).filter((t) => t.origem === "rede")).toHaveLength(0);
+    });
+  });
+
+  it("G10 com avisar_a_cada_uma: o primeiro retorno intermediário (fora de retorno_turno_id) também não é promovido", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { loteId, ids } = await m.abrir(dono, TRES.slice(0, 2), true);
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      await m.terminar(ids[0]!, "Login corrigido");
+      const [primeiro, ...mais] = await m.retomadasDe(dono);
+      expect(mais).toHaveLength(0);
+      // O lote segue aberto: o intermediário não é o retorno gravado no lote.
+      expect((await m.repos.frentes.buscarLote(loteId))?.retornoTurnoId ?? null).toBeNull();
+      expect(await m.repos.frentes.ehRetornoDeLote(primeiro!.id)).toBe(false);
+
+      // A segunda frente ainda está na fila: a máquina a pega antes e, depois, o retorno intermediário.
+      const maquina = randomUUID();
+      expect((await m.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() }))?.id).toBe((await m.turnoDa(ids[1]!)).id);
+      expect((await m.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() }))?.id).toBe(primeiro!.id);
+      const r = await promover(m.deps, primeiro!.id, Date.now() - REDE_MS);
+      expect(r.data.trabalho).toBeNull();
+      expect(r.events ?? []).toHaveLength(0);
+      expect((await m.repos.turnos.buscar(primeiro!.id))?.trabalhoId ?? null).toBeNull();
+      expect((await m.repos.trabalhos.abertosDoAgente(m.ada.agenteId)).filter((t) => t.origem === "rede")).toHaveLength(0);
+    });
+  });
+
+  it("N9: a frente que termina em menos de 5 s não é promovida, nem o retorno que ela acorda", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await montar(trx);
+      const dono = await m.turnoDaConversa();
+      const { ids } = await m.abrir(dono, TRES.slice(0, 1));
+      await m.repos.turnos.assentar(dono.id, { estado: "concluido" });
+      const maquina = randomUUID();
+      const daFrente = await m.turnoDa(ids[0]!);
+      expect((await m.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() }))?.id).toBe(daFrente.id);
+      // A frente já é trabalho: nem com a marca do despacho velha (2 min) a rede a promove.
+      expect((await promover(m.deps, daFrente.id, Date.now() - REDE_MS)).data.trabalho).toBeNull();
+      // Termina 3 s depois de despachada; o retorno nasce na hora e passa de 2 min trabalhando.
+      await m.terminar(ids[0]!, "feito em 3 s");
+      const [retorno] = await m.retomadasDe(dono);
+      expect((await m.repos.turnos.reivindicar({ machineId: maquina, agora: Date.now() }))?.id).toBe(retorno!.id);
+      expect((await promover(m.deps, retorno!.id, Date.now() - REDE_MS)).data.trabalho).toBeNull();
+      expect((await m.repos.trabalhos.abertosDoAgente(m.ada.agenteId)).filter((t) => t.origem === "rede")).toHaveLength(0);
     });
   });
 });

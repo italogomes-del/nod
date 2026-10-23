@@ -486,13 +486,13 @@ export function trabalhosRepo(conn: Conn, escopo: Escopo) {
         ) v on true
         -- A tela fala por máquina (2026-10-09): de qual máquina o turno pendente espera, pela regra do reivindicar. Sem turno
         -- pendente (esperando um colega, a pessoa ou a hora marcada), onde o próximo turno do bot iria: a mesma regra sem o
-        -- "desta vez", que é de um turno só.
+        -- "desta vez", que é de um turno só. O próximo turno é deste trabalho: a máquina da sessão dele vale (NOD-293, G11).
         left join lateral (
           select true as tem, ${alvoDoTurno(conn, agora)} as alvo, coalesce(t.harness, 'auto') as harness, t.modelo from turnos t
           where t.tenant_id = w.tenant_id and t.trabalho_id = w.id and t.estado = 'pendente' order by t.criado_em, t.id limit 1
         ) pe on true
         left join lateral (
-          select ${alvoDoTurno(conn, agora)} as alvo from (select w.tenant_id, w.owner_id, null::uuid as maquina_desta_vez, w.agente_id) t
+          select ${alvoDoTurno(conn, agora)} as alvo from (select w.tenant_id, w.owner_id, w.id as trabalho_id, null::uuid as maquina_desta_vez, w.agente_id) t
         ) bt on true
         -- Os abertos e a volta marcada (ADR-086) numa leitura só dos turnos vivos do trabalho. A volta aparece até ser
         -- reivindicada (a hora pode ter passado com o Mac fora).

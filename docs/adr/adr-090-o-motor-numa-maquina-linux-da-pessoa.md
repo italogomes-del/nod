@@ -45,6 +45,13 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
      linha ("O Codex está pronto noutra máquina, mas este bot roda em <máquina>…"). "A máquina do bot" segue a ordem de
      `alvoDoTurno` sem o "desta vez" (`alvoDoBot`: a do bot, senão a padrão, só com a chave viva), porque é para ela que a
      fala refeita vai.
+   - **Emenda NOD-293 (2026-10-20): a frente roda na máquina da sessão do trabalho dela.** No `alvoDoTurno`, o turno
+     com `trabalho_id` ganha um nível entre o "desta vez" e a máquina do bot: `trabalhos.sessao_maquina_id` (0079), se a
+     chave ainda vale. Sessão numa chave revogada ou vencida, ou trabalho sem sessão, cai na regra de antes. "Rodar em
+     <outra máquina> desta vez" na conversa muda só a fala da conversa (`trabalho_id is null`): levar a frente para outra
+     máquina a rodava numa pasta vazia, sem a sessão. No turno de um trabalho, o "desta vez" só vem do ato da pessoa
+     sobre a própria task ou o próprio turno (emenda NOD-314 abaixo) e vence a sessão: é o jeito de tirar a frente do Mac
+     sem contato onde a sessão dela está (QA do NOD-293, 2026-10-22, ao juntar com a NOD-314).
 6. **Máquina escolhida fora do ar.**
    - **Conversa, task ou pedido de colega que ainda não começou:** espera na fila. A tela diz "esperando <máquina>
      (sem contato desde HH:MM)" e oferece "Rodar em <outra máquina> desta vez", que é ato da pessoa e vale só para

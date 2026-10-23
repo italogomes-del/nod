@@ -191,6 +191,15 @@ export function frentesRepo(conn: Conn, escopo: Escopo) {
       return l ? paraLote(l) : null;
     },
 
+    /**
+     * NOD-293 (G10): o turno é o retorno de um lote? Sem trava (quem pergunta é a rede de 2 min, que só lê); o índice UNIQUE
+     * `lotes_de_frentes_retorno` (0071) responde.
+     */
+    async ehRetornoDeLote(turnoId: string): Promise<boolean> {
+      const [l] = await conn`select 1 from lotes_de_frentes where tenant_id = ${escopo.tenantId} and retorno_turno_id = ${turnoId} limit 1`;
+      return l !== undefined;
+    },
+
     /** NOD-258: o retorno refeito passa a ser o do lote (o UNIQUE de um retorno por lote continua valendo). */
     async trocarRetorno(loteId: string, retornoTurnoId: string): Promise<boolean> {
       const r = await conn`

@@ -1661,7 +1661,7 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       // ADR-090: o fake não guarda nem aplica a máquina do turno (o reivindicar dele ignora onde o bot trabalha); a regra é
       // coberta só por tests/integration/maquina-do-bot.test.ts, contra o Postgres.
       async rodarDestaVez(conversaId, maquinaId) {
-        const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente");
+        const ts = doTenant(b.turnos).filter((t) => t.conversaId === conversaId && t.ownerId === escopo.pessoaId && t.estado === "pendente" && !t.trabalhoId);
         for (const t of ts) { b.maquinaDestaVez.set(t.id, maquinaId); t.maquinaDestaVez = maquinaId; }
         return ts.length;
       },
@@ -3091,6 +3091,9 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         async loteDoRetorno(retornoTurnoId: string) {
           const l = meus().find((x) => x.retornoTurnoId === retornoTurnoId);
           return l ? semDonoLote(l) : null;
+        },
+        async ehRetornoDeLote(turnoId: string) {
+          return meus().some((x) => x.retornoTurnoId === turnoId);
         },
         async trocarRetorno(loteId: string, retornoTurnoId: string) {
           const l = meus().find((x) => x.id === loteId && x.devolvidoEm !== null);

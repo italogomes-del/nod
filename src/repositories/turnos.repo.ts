@@ -1043,11 +1043,14 @@ export function turnosRepo(conn: Conn, escopo: Escopo) {
     /**
      * ADR-090: "Rodar em <outra máquina> desta vez" — os turnos AINDA pendentes desta conversa vão para a máquina escolhida
      * pela pessoa, uma vez; o que já foi reivindicado fica onde está. Quem chama já conferiu que a chave é dela.
+     * NOD-293 (A6, definido em 2026-10-20): só a fala da conversa (sem trabalho). O turno pendente de uma frente segue a
+     * máquina da sessão do trabalho (alvo-da-maquina.ts); levá-lo para outra máquina o rodava numa pasta vazia.
      */
     async rodarDestaVez(conversaId: string, maquinaId: string): Promise<number> {
       const r = await conn`
         update turnos set maquina_desta_vez = ${maquinaId}
-        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${conversaId} and estado = 'pendente'`;
+        where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and conversa_id = ${conversaId} and estado = 'pendente'
+          and trabalho_id is null`;
       return r.count;
     },
 

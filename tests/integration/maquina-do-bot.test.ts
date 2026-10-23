@@ -156,3 +156,94 @@ describeIntegracao("onde o bot trabalha (ADR-090)", () => {
     });
   });
 });
+
+/**
+ * NOD-293 (A6/G11, definido em 2026-10-20): a frente roda na máquina da sessão do trabalho dela. "Rodar em X desta vez" é
+ * da fala da conversa — os turnos pendentes das frentes ficam onde estão — e o alvo do turno com trabalho põe a máquina da
+ * sessão do trabalho (viva) acima do bot e do padrão. O "desta vez" do turno da frente só vem do ato sobre a própria task
+ * (NOD-314) e vence a sessão.
+ */
+describeIntegracao("a frente roda na máquina do trabalho dela (NOD-293, A6/G11)", () => {
+  async function comFrente(trx: Tx) {
+    const m = await montar(trx);
+    const frente = async () => {
+      const w = await m.repos.trabalhos.criar({ agenteId: m.agenteId, conversaId: m.conversaId, titulo: "Frente", origem: "pessoa", forma: "frente" });
+      if (!w) throw new Error("trabalho");
+      const t = await m.repos.turnos.enfileirar({ executor: "catcher", conversaId: m.conversaId, agenteId: m.agenteId, origem: "conversa", prazoEm: Date.now() + 600_000, profundidade: 0, entradaTexto: "segue a frente", entradaConfianca: "confiavel", modelo: "sonnet", harness: "claude-cli", trabalhoId: w.id });
+      if (!t) throw new Error("turno da frente");
+      return { trabalhoId: w.id, turno: t };
+    };
+    const destaVez = async (turnoId: string) => (await trx<{ m: string | null }[]>`select maquina_desta_vez::text as m from turnos where id = ${turnoId}`)[0]?.m ?? null;
+    return { ...m, frente, destaVez };
+  }
+
+  it('A6: "rodar em X desta vez" com 1 fala e 2 frentes pendentes muda só a fala', async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      const fala = await m.enfileirar();
+      const a = await m.frente();
+      const b = await m.frente();
+      expect(await m.repos.turnos.rodarDestaVez(m.conversaId, m.mac)).toBe(1);
+      expect(await m.destaVez(fala.id)).toBe(m.mac);
+      expect(await m.destaVez(a.turno.id)).toBeNull();
+      expect(await m.destaVez(b.turno.id)).toBeNull();
+    });
+  });
+
+  it("G11: a sessão viva do trabalho vence o bot e o padrão", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      await m.repos.preferencias.definirMaquinaPadrao(m.vm);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      const f = await m.frente();
+      await m.repos.trabalhos.atualizarSessao(f.trabalhoId, "sessao-1", "claude-cli", "local", m.mac);
+      expect(await m.puxar(m.vm)).toBeNull();
+      expect((await m.puxar(m.mac))?.id).toBe(f.turno.id);
+    });
+  });
+
+  it("G11 + NOD-314: \"rodar em outra desta vez\" da task tira a frente da máquina da sessão (o Mac sem contato)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      const f = await m.frente();
+      await m.repos.trabalhos.atualizarSessao(f.trabalhoId, "sessao-1", "claude-cli", "local", m.mac);
+      expect(await m.repos.turnos.rodarDestaVezDoTrabalho(f.trabalhoId, m.vm)).toEqual({ movidos: 1, jaNela: 0 });
+      expect(await m.puxar(m.mac)).toBeNull();
+      expect((await m.puxar(m.vm))?.id).toBe(f.turno.id);
+    });
+  });
+
+  it("G11: a sessão numa chave revogada cai para a máquina do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      const f = await m.frente();
+      await m.repos.trabalhos.atualizarSessao(f.trabalhoId, "sessao-1", "claude-cli", "local", m.mac);
+      await m.repos.maquinaTokens.revogar(m.mac, Date.now());
+      expect((await m.puxar(m.vm))?.id).toBe(f.turno.id);
+    });
+  });
+
+  it("G11: trabalho sem sessão cai para a máquina do bot", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      const f = await m.frente();
+      expect(await m.puxar(m.mac)).toBeNull();
+      expect((await m.puxar(m.vm))?.id).toBe(f.turno.id);
+    });
+  });
+
+  it("G11: o turno sem trabalho mantém a regra de hoje (a sessão de um trabalho não o puxa)", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const m = await comFrente(trx);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      const f = await m.frente();
+      await m.repos.trabalhos.atualizarSessao(f.trabalhoId, "sessao-1", "claude-cli", "local", m.mac);
+      await m.repos.turnos.interromper(f.turno.id, "parado_pela_pessoa");
+      const fala = await m.enfileirar();
+      expect(await m.puxar(m.mac)).toBeNull();
+      expect((await m.puxar(m.vm))?.id).toBe(fala.id);
+    });
+  });
+});

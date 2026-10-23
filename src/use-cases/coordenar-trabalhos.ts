@@ -3,6 +3,7 @@ import type { Executor, RuntimeEvent } from "../contracts/evento.ts";
 import type { ModoTurno } from "../contracts/plano-turno.ts";
 import type { Trabalho, TrabalhoDto } from "../contracts/trabalho.ts";
 import type { Turno } from "../contracts/turno.ts";
+import { RETORNO_DO_LOTE } from "../domain/cota-da-ia.ts";
 import { capacidadesDe } from "../domain/harness.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { molduraDaFrente, semLinhaDeEmpurrar, seguimentoNaRede } from "../domain/frente.ts";
@@ -303,6 +304,11 @@ export const promoverNaRede: CasoDeUso<{ turnoId: string; despachadoEm: number; 
   if (!turno || !input.harness) return { data: { trabalho: null } };
   const capacidades = capacidadesDe(input.harness);
   if (!promoveNaRede({ origem: turno.origem, modo: input.modo, trabalhoId: turno.trabalhoId, estado: turno.estado, despachadoHaMs: deps.agora() - input.despachadoEm, fezFerramenta: input.fezFerramenta, capacidades, redeMs: input.redeMs })) return { data: { trabalho: null } };
+  // NOD-293 (G10/N9, definido em 2026-10-20): o retorno do lote é a volta das frentes ao dono, não um pedido novo. Promovido,
+  // virava outra frente num lote novo — e as frentes que acabavam em segundos pareciam promovidas pela rede.
+  // Com `avisar_a_cada_uma`, os retornos intermediários não ficam em `lotes_de_frentes.retorno_turno_id` (só o último fecha o
+  // lote): todo retorno nasce com `decidido_por = RETORNO_DO_LOTE` (fechar-lote), e é por ele que se reconhece.
+  if (turno.decididoPor === RETORNO_DO_LOTE || (await deps.repos.frentes.ehRetornoDeLote(turno.id))) return { data: { trabalho: null } };
   const segue = seguimentoNaRede(capacidades, input.maquinaBifurca === true);
   // A retomada (uma decisão respondida, a resposta de um colega) tem entrada do nod: o título vem do que a pessoa pediu.
   // ADR-113: a fala que respondeu a outra tem "(respondendo a: «…»)" na entrada; o título é só o que a pessoa escreveu.
