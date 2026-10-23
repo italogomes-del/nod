@@ -3,7 +3,7 @@ import { abrirCapturaAmpliada } from "./telas/captura-ampliada.ts";
 import { abrirPreviaArquivo } from "./telas/previa-arquivo.ts";
 import { abrirComputador, aplicarModoDevNoComputador } from "./telas/computador.ts";
 import { marcarTelaFechadaNaAjuda } from "./lib/computador.ts";
-import { definirTelaDoBot } from "./telas/tela-do-bot.ts";
+import { aoVerComputador, definirTelaDoBot } from "./telas/tela-do-bot.ts";
 import { abrirWorkspace } from "./telas/workspace.ts";
 import { listaDoQuePodem, rotuloPermitir, type EscolhaLiberar } from "./telas/card-liberar.ts";
 import { CURTA } from "./telas/card-pasta.ts";
@@ -22,7 +22,7 @@ import type { ContasIaDto } from "../src/contracts/contas-ia.ts";
 import type { Mensagem } from "../src/contracts/mensagem.ts";
 import { criarIasDoMac } from "./lib/ias-do-mac.ts";
 import { instalarOrdemArrastavel } from "./lib/ordem-arrastavel.ts";
-import { abrirMenu, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
+import { abrirMenu, abrirMenuCompartilhar, abrirMenuConta, dialogo, pedirGestao, textoDuplicar, type BotGerido, type AcaoGestao } from "./telas/gestao-agentes.ts";
 import { botDaFala, citacaoDaFala, htmlMenuDaFala, htmlSeletorDeReacao, linhaDeEmojis, reacoesDaFala, textoAbrirTask, textoParaLembrar } from "./telas/acoes-da-fala.ts";
 import { renderChipModo } from "./telas/aprovacoes.ts";
 import { abrirMenuModo } from "./lib/menu-modo.ts";
@@ -52,7 +52,7 @@ import { criarLiveEvents, type LiveEvents } from "./lib/live-events.ts";
 import { enterEnvia } from "./lib/celular.ts";
 import { criarCelular } from "./lib/gaveta-bots.ts";
 import "./pwa.ts";
-import { atualizarMascote, botao, esc, iconeAgente } from "./lib/render.ts";
+import { botao, esc, iconeAgente } from "./lib/render.ts";
 import { avisoDeEstado } from "./lib/aviso-estado.ts";
 import { aplicarTema } from "./lib/tema.ts";
 import { estadoMascoteNaConversa, mascoteComAviso, proximaViradaDoMascote } from "./lib/mascote.ts";
@@ -67,7 +67,8 @@ import { memoriaNaPilula, pilulaNaConversa, type Pilula } from "./telas/pilula-d
 import { guardarCampo, restaurarCampo } from "./lib/campos-de-decisao.ts";
 import { renderNovoBot } from "./telas/novo-bot.ts";
 import { renderNovaRotina } from "./telas/nova-rotina.ts";
-import { contextoInteligencia, nivelDaGaveta } from "./telas/detalhes.ts";
+import { contextoInteligencia, nivelDaGaveta, paiDoNivel } from "./telas/detalhes.ts";
+import { avisarNaIdentidade, criarFilaDePerfil, criarSalvarAvatar, ERRO_AO_SALVAR, instalarIdentidade, sobreporPendentes } from "./lib/gaveta-identidade.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova, nomeDeInstanciaSugerido } from "./telas/maquinas.ts";
@@ -597,12 +598,18 @@ const releituraAtividade = criarReleituraAdiada(JANELA_ATIVIDADE_MS, (fn, ms) =>
 }, () => void reidratar());
 const daAtividade = (q: Invalidacao): boolean => q.startsWith("atividade:") || q.startsWith("atividade-hoje:");
 
+/**
+ * ADR-125: o que foi escolhido e ainda não voltou confirmado, por bot: a frota relida no meio não desfaz na tela.
+ * Declarado antes do `dispatch` (QA da NOD-349): o carregamento já despacha (as abas lidas) e o `let` mais abaixo caía
+ * na zona morta temporal, derrubando o app no boot.
+ */
+let perfilPendente: Record<string, MudancaDePerfil> = {};
 function dispatch(acao: Acao): void {
   // Abrir Trabalhos relê agora, sem esperar a janela de algum frame de turno.
   if (acao.tipo === "navegar" && acao.tela.tipo === "trabalhos") releituraTrabalhos.cancelar();
   // NOD-106: a ligação que aparece (até a de outro aparelho) para a leitura; o botão passa a explicar por que não lê.
   if (acao.tipo === "ligacao-viva" && acao.viva && tocador.atual()) tocador.parar("ligacao");
-  estado = reduzir(estado, acao);
+  estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
   render();
   void reidratar();
 }
@@ -949,7 +956,7 @@ async function reidratar(): Promise<void> {
     for (const [i, q] of relevantes.entries()) {
       try {
         const acao = await buscar(q);
-        if (acao) estado = reduzir(estado, acao);
+        if (acao) estado = reduzir(estado, sobreporPendentes(acao, perfilPendente));
         if (acao?.tipo === "hidratar-sua-vez") canalAvisos.contador(avisador.atualizar(acao.suaVez));
         if (acao?.tipo === "hidratar-nao-lidos") lerDepois = true;
         if (acao?.tipo === "trabalho-sumiu") lembrarTaskAberta(estado.tela);
@@ -1058,8 +1065,9 @@ function renderSidebar(estado: Estado): string {
     // ADR-083 (#196, K8 variante 3): com trabalho aberto, o chip com o número e o ponto na cor do bot ao lado do nome.
     const chip = (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "") + sinalDoBot(estado, a);
     // definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): sem ••• na linha nem no fixado — o menu do bot abre no
-    // clique direito (ou Shift+F10) e no ⋯ do topo da gaveta. O nome inteiro, com o título, fica no title.
-    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button></div>`;
+    // clique direito (ou Shift+F10). O nome inteiro, com o título, fica no title. ADR-125 (NOD-349): o ⋯ saiu do topo da
+    // gaveta e mora aqui, à vista só no toque (sem clique direito); no mouse ele segue escondido.
+    return `<div class="bot-row${escondida ? " escondida" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="row"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}" aria-label="Abrir conversa com ${esc(a.nome)}${emLigacao ? " (em ligação)" : ""}${rotuloAviso}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "", estadoVisual, aviso ? `data-aviso="${aviso}"` : "")}<span class="txt"><span class="nome-linha"><b>${esc(a.nome)}</b>${chip}</span>${subtitulo}</span></button><button type="button" class="bot-mais" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   const meus = agentes.filter((a) => a.ownerId === estado.sessao?.pessoaId);
   // definido em 2026-10-04 (web/lib/secoes.ts): a seção recolhe pelo título. Recolhida, ficam à vista o bot da conversa
@@ -1081,7 +1089,7 @@ function renderSidebar(estado: Estado): string {
     const mascote = estadoMascoteNaConversa(estado, a.conversaId);
     const rotulo = aviso ? ` (${ESPERA[aviso]})` : "";
     const emLigacao = estado.ligacaoViva?.agenteId === a.id;
-    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button></div>`;
+    return `<div class="fixado${emLigacao ? " em-ligacao" : ""}" data-bot-contexto="${esc(a.id)}"${arrastavel(a)} data-busca="${esc(`${a.nome} ${a.titulo}`.toLowerCase())}"><button class="fixado-bt"${atual(a.conversaId)} data-act="abrir-conversa" data-conversa="${esc(a.conversaId)}" data-agente="${esc(a.id)}" aria-label="Abrir conversa com ${esc(a.nome)}${rotulo}" title="${esc(a.titulo ? `${a.nome} · ${a.titulo}` : a.nome)}">${iconeAgente(a, "lg", mascoteComAviso(mascote, aviso), aviso ? `data-aviso="${aviso}"` : "")}<b>${esc(a.nome)}</b>${emLigacao ? `<i class="chip chip-em-ligacao">${ICONE_LIGACAO.fone(11)}Em ligação</i>` : sinalDoBot(estado, a) || (a.titulo ? `<i class="chip">${esc(a.titulo)}</i>` : "")}</button><button type="button" class="bot-mais bot-mais-fixado" data-act="menu-agente" data-id="${esc(a.id)}" aria-label="Ações de ${esc(a.nome)}" aria-haspopup="menu">⋯</button></div>`;
   };
   // definido em 2026-10-07 (ADR-081): o Nod nunca entra numa seção. Fixado, é o primeiro da grade; desafixado (discreto),
   // vira o botão com o logo e o nome na barra de cima, à esquerda da lupa (canvas "Nod — bot fixo", Alt E).
@@ -2223,9 +2231,8 @@ async function mudarGestao(fn: () => Promise<unknown>): Promise<void> {
 function acaoDoBot(a: BotGerido, acao: AcaoGestao): void {
   const executar = (fn: () => Promise<unknown>) => void agir(async () => { await mudarGestao(fn); });
   if (acao === "perfil") { abrirNivel(a.id, { tipo: "perfil" }); return; }
-  if (acao === "renomear") {
-    pedirGestao("Renomear bot", `<label>Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60" /></label>`, "Salvar", async (d) => mudarGestao(() => api!.editarPerfil(a.id, { nome: String(d.get("nome")) }))); return;
-  }
+  // ADR-125 (NOD-349): Renomear abre a gaveta com o nome em edição (saiu o diálogo); Enter ou blur salva, Esc desfaz.
+  if (acao === "renomear") { renomearNaGaveta(a); return; }
   if (acao === "mover") {
     const secoes = [...new Set((estado.gestao?.agentes ?? estado.frota?.agentes ?? []).filter((b) => b.ownerId === estado.sessao?.pessoaId && !b.excluidoEm).map((b) => b.secao).filter(Boolean))];
     pedirGestao("Mover para", `<p>Escolha uma seção ou escreva um novo nome. Deixe vazio para tirar da seção.</p><label>Seção<input name="secao" value="${esc(a.secao ?? "")}" maxlength="60" list="secoes-bots" placeholder="Sem seção" /></label><datalist id="secoes-bots">${secoes.map((n) => `<option value="${esc(n!)}"></option>`).join("")}</datalist>`, "Mover", async (d) => mudarGestao(() => api!.organizarAgente(a.id, { secao: String(d.get("secao")) }))); return;
@@ -2284,10 +2291,8 @@ function botGerido(id: string | undefined): BotGerido | undefined {
 
 function menuDoBot(el: HTMLElement): void {
   const a = botGerido(el.dataset.id);
-  // O ⋯ do topo da gaveta abre o menu logo abaixo dele, alinhado pela direita (canvas "Gaveta 1").
-  const r = el.getBoundingClientRect();
-  const ponto = el.closest("#detalhes") ? { x: r.right - 268, y: r.bottom } : undefined;
-  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, el, (acao) => acaoDoBot(a, acao), ponto);
+  // ADR-125: o ⋯ saiu do topo da gaveta; o menu mora na linha da lista (clique direito, Shift+F10, toque longo e o ⋯ no toque).
+  if (a) abrirMenu(a, a.ownerId === estado.sessao?.pessoaId, el, (acao) => acaoDoBot(a, acao));
 }
 
 function conversaAtual(): { conversaId: string; salaId: string | null } | null {
@@ -2349,7 +2354,7 @@ function atualizarBarra(ta: HTMLTextAreaElement): void {
   const filtro = nomeDigitado(ta.value, ta.selectionStart);
   if (filtro !== null) {
     const recentes = recentesDaConversa(conversaDaTela(estado)?.mensagens ?? []);
-    const l = listaDaBarra(comandosDto, filtro, recentes);
+    const l = listaDaBarra(comandosDto, filtro, recentes, estado.tela.tipo === "conversa");
     itensDaBarra = l.itens;
     selecionadoNaBarra = Math.min(selecionadoNaBarra, Math.max(0, l.itens.length - 1));
     lista.innerHTML = renderListaBarra(l, { filtro, selecionado: selecionadoNaBarra, bot: nomeDoBotDaTela(), doMacEm: comandosDto?.doMacEm ?? null });
@@ -2375,7 +2380,8 @@ function fecharListaBarra(): void {
 /** Troca o nome digitado pelo escolhido, deixa o cursor depois dele e mostra a dica. */
 function escolherNaBarra(ta: HTMLTextAreaElement, item: ItemDaBarra): void {
   const depois = ta.value.slice(ta.selectionStart).replace(/^\S*/, "");
-  const inicio = `/${item.nome} `;
+  // ADR-125: o atalho vira o começo do pedido (sem o "/"), e a pessoa completa.
+  const inicio = item.texto ?? `/${item.nome} `;
   ta.value = inicio + depois.trimStart();
   ta.selectionStart = ta.selectionEnd = inicio.length;
   fecharListaBarra();
@@ -3381,13 +3387,25 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
   }),
   // definido em 2026-09-24 (emenda da ADR-037): "Tentar de novo" é o mesmo ligar do computador; falhou, a
   // frota relê e o cartão continua dizendo o motivo.
-  "religar-computador": (el) => agir(async () => {
-    try {
-      await api!.configurarComputador(el.dataset.id ?? "", "iniciar");
-    } finally {
-      dispatch({ tipo: "invalidar", quais: ["frota"] });
-    }
-  }),
+  "religar-computador": (el) => ligarComputador(el.dataset.id ?? "", "religar"),
+  // ADR-125: Acordar, na aba Computador, é o mesmo ligar; o pulso seguinte lê o estado novo.
+  "computador-acordar": (el) => ligarComputador(el.dataset.id ?? "", "acordar"),
+  // ADR-125 (NOD-349): o topo da gaveta, as abas e o popover do avatar.
+  "gaveta-compartilhar": (el) => { const a = botGerido(el.dataset.id); if (a) abrirMenuCompartilhar(a, el, (acao) => acaoDoBot(a, acao)); },
+  "gaveta-aba": (el) => escolherAba(el.dataset.id ?? "", el.dataset.aba ?? ""),
+  "gaveta-avatar": (el) => {
+    const a = estado.frota?.agentes.find((b) => b.id === el.dataset.id);
+    if (!a) return;
+    if (estado.avatarAberto?.agenteId === a.id) { fecharPopoverAvatar(); return; }
+    dispatch({ tipo: "avatar-popover", aberto: { agenteId: a.id, forma: a.forma, cor: a.cor } });
+    document.querySelector<HTMLElement>('#detalhes .gvn-formas [aria-checked="true"]')?.focus();
+  },
+  "gaveta-forma": (el) => mudarAvatar(el.dataset.id ?? "", { forma: el.dataset.valor as FormaAgente }, el),
+  "gaveta-cor": (el) => mudarAvatar(el.dataset.id ?? "", { cor: el.dataset.valor as CorAgente }, el),
+  "gaveta-redefinir": (el) => {
+    const ab = estado.avatarAberto;
+    if (ab && ab.agenteId === el.dataset.id) mudarAvatar(ab.agenteId, { forma: ab.forma, cor: ab.cor }, el);
+  },
   "abrir-workspace": (el) => { const a = botGerido(el.dataset.id); const c = conversaAtual(); if (a && api && a.ownerId === estado.sessao?.pessoaId && c && !c.salaId) abrirWorkspace(api, c.conversaId); },
   // Um clique: autoriza a pasta proposta e a tarefa retoma sozinha, sem a pessoa remandar a mensagem.
   // definido em 2026-09-25 (card de pasta simplificado): com a lista aberta, a pasta é a opção marcada. O
@@ -4085,7 +4103,8 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
   "editar-perfil": (form) => {
     const d = new FormData(form);
     return agir(async () => {
-      await api!.editarPerfil(form.dataset.id ?? "", { nome: String(d.get("nome") ?? ""), titulo: String(d.get("titulo") ?? ""), descricao: String(d.get("descricao") ?? ""), forma: String(d.get("forma")) as FormaAgente, cor: String(d.get("cor")) as CorAgente });
+      // ADR-125: Missão e voz só manda a missão; nome, subtítulo, forma e cor se editam no topo da gaveta.
+      await api!.editarPerfil(form.dataset.id ?? "", { descricao: String(d.get("descricao") ?? "") });
       // ADR-071: a voz nas ligações mora em rota própria (vale na próxima frase de uma ligação em curso).
       const voz = VOZES.find((v) => v.id === d.get("voz"))?.id;
       const vozVelocidade = VELOCIDADES.find((v) => String(v) === d.get("vozVelocidade"));
@@ -4404,15 +4423,6 @@ document.addEventListener("input", (ev) => {
   const campoNuvem = (ta as HTMLElement).dataset?.nuvemCampo;
   if ((campoNuvem === "projeto" || campoNuvem === "zona" || campoNuvem === "nome") && estado.nuvem.conectar) { estado.nuvem.conectar[campoNuvem] = ta.value; return; }
   if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
-  if (ta.matches("[data-customiza-mascote]")) {
-    const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');
-    const preview = form?.querySelector<HTMLElement>("[data-mascote-preview]");
-    const forma = form?.querySelector<HTMLInputElement>('input[name="forma"]:checked')?.value as FormaAgente | undefined;
-    const cor = form?.querySelector<HTMLInputElement>('input[name="cor"]:checked')?.value;
-    if (preview && forma && cor) atualizarMascote(preview, forma, cor);
-    if (forma && cor) form?.querySelectorAll<HTMLElement>("[data-gallery]").forEach(el => atualizarMascote(el, forma, cor));
-    return;
-  }
   if (ta.id === "busca-marketplace") {
     filtrarApps(ta.value);
     return;
@@ -4885,12 +4895,118 @@ function abrirNivel(agenteId: string, nivel: NivelGaveta): void {
   document.querySelector<HTMLElement>("#detalhes .gv-voltar")?.focus();
 }
 
+/**
+ * Volta um nível (ADR-125): o que abriu de Ajustes volta para Ajustes; a rotina e o próprio Ajustes, à visão geral. O
+ * foco vai para a linha de onde a pessoa veio (ou para o ‹ do nível pai).
+ */
 function fecharNivel(): void {
   gavetaSuja = null;
   const g = estado.gaveta;
-  if (g) dispatch({ tipo: "gaveta", agenteId: g.agenteId, nivel: null });
-  document.querySelector<HTMLElement>("#detalhes .gv-painel")?.focus();
+  if (!g) { document.querySelector<HTMLElement>("#detalhes .gv-painel")?.focus(); return; }
+  const pai = paiDoNivel(g.nivel);
+  dispatch({ tipo: "gaveta", agenteId: g.agenteId, nivel: pai });
+  const id = "id" in g.nivel ? g.nivel.id : "";
+  const origem = document.querySelector<HTMLElement>(`#detalhes [data-act="gaveta"][data-nivel="${g.nivel.tipo}"]${id ? `[data-id="${CSS.escape(id)}"]` : ""}`);
+  (origem ?? document.querySelector<HTMLElement>(pai ? "#detalhes .gv-voltar" : "#detalhes .gv-painel"))?.focus();
 }
+
+/** ADR-125: Acordar e Tentar de novo ligam o computador; o botão diz "Acordando…" até a resposta, e a frota relê. */
+function ligarComputador(agenteId: string, tipo: "acordar" | "religar"): Promise<void> {
+  dispatch({ tipo: "computador-acao", acao: { agenteId, tipo } });
+  return agir(async () => {
+    try {
+      await api!.configurarComputador(agenteId, "iniciar");
+      // Revisão da NOD-349: acordou — a aba não volta a dizer "dormindo" até o próximo pulso.
+      dispatch({ tipo: "computador-visto", agenteId, estado: "ligado" });
+    } finally {
+      dispatch({ tipo: "computador-acao", acao: null });
+      dispatch({ tipo: "invalidar", quais: ["frota"] });
+    }
+  });
+}
+
+/** ADR-125: a última aba por bot, lembrada neste navegador (`nod.gaveta.aba`; sem storage, só nesta aba). */
+const CHAVE_ABA_GAVETA = "nod.gaveta.aba";
+function escolherAba(agenteId: string, aba: string): void {
+  if (aba !== "detalhes" && aba !== "biblioteca" && aba !== "computador") return;
+  dispatch({ tipo: "aba-gaveta", agenteId, aba });
+  try { localStorage.setItem(CHAVE_ABA_GAVETA, JSON.stringify(estado.abaGaveta)); } catch { /* modo privado */ }
+  document.querySelector<HTMLElement>(`#detalhes [role="tab"][data-aba="${aba}"]`)?.focus();
+}
+try {
+  const lidas = JSON.parse(localStorage.getItem(CHAVE_ABA_GAVETA) ?? "{}") as unknown;
+  if (lidas && typeof lidas === "object") {
+    const abas = Object.fromEntries(Object.entries(lidas).filter((par): par is [string, "detalhes" | "biblioteca" | "computador"] => par[1] === "detalhes" || par[1] === "biblioteca" || par[1] === "computador"));
+    dispatch({ tipo: "abas-lidas", abas });
+  }
+} catch { /* sem storage ou JSON velho: começa em Detalhes */ }
+
+/** ADR-125: forma e cor mudam na hora (otimista); o PATCH sai 300 ms depois do último toque, e o erro desfaz. */
+// Revisão da NOD-349: nome, subtítulo, forma e cor saem pela mesma fila por bot (um PATCH de cada vez, o último vence),
+// e a frota só se relê quando a fila do bot esvazia (reler no meio desfaria na tela a escolha que ainda vai sair).
+type MudancaDePerfil = { nome?: string; titulo?: string; forma?: FormaAgente; cor?: CorAgente };
+const filaDePerfil = criarFilaDePerfil<MudancaDePerfil>(async (agenteId, mudanca) => {
+  try {
+    await api!.editarPerfil(agenteId, mudanca);
+  } finally {
+    // A fila esvaziou e nada espera no debounce: a frota relida já é a verdade (com o erro, desfaz o otimista).
+    if (filaDePerfil.semEspera(agenteId) && !salvarAvatar.pendente(agenteId)) {
+      const { [agenteId]: _, ...resto } = perfilPendente;
+      perfilPendente = resto;
+      dispatch({ tipo: "invalidar", quais: ["frota", "gestao"] });
+    }
+  }
+});
+function marcarPendente(agenteId: string, mudanca: MudancaDePerfil): void {
+  perfilPendente = { ...perfilPendente, [agenteId]: { ...perfilPendente[agenteId], ...mudanca } };
+}
+const salvarAvatar = criarSalvarAvatar<MudancaDePerfil>((agenteId, mudanca) => filaDePerfil.enviar(agenteId, mudanca).catch(() => avisarNaIdentidade(ERRO_AO_SALVAR)));
+function mudarAvatar(agenteId: string, mudanca: { forma?: FormaAgente; cor?: CorAgente }, el: HTMLElement): void {
+  marcarPendente(agenteId, mudanca);
+  dispatch({ tipo: "agente-local", agenteId, mudanca });
+  salvarAvatar.pedir(agenteId, mudanca);
+  const valor = el.dataset.valor;
+  const alvo = valor ? `#detalhes button[data-act="${el.dataset.act ?? ""}"][data-valor="${CSS.escape(valor)}"]` : "#detalhes .gvn-redefinir";
+  document.querySelector<HTMLElement>(alvo)?.focus();
+}
+function fecharPopoverAvatar(focarAvatar = true): void {
+  const ab = estado.avatarAberto;
+  if (!ab) return;
+  salvarAvatar.agora(ab.agenteId);
+  dispatch({ tipo: "avatar-popover", aberto: null });
+  if (focarAvatar) document.querySelector<HTMLElement>("#detalhes .gvn-avatar")?.focus();
+}
+
+/** ADR-125: Renomear bot (menu da lista) abre a visão geral da gaveta com o nome selecionado no campo. */
+function renomearNaGaveta(a: BotGerido): void {
+  const t = estado.tela;
+  if (t.tipo !== "conversa" || t.agenteId !== a.id) navegar({ tipo: "conversa", conversaId: a.conversaId, agenteId: a.id });
+  const app = document.querySelector(".app");
+  if (window.matchMedia("(max-width: 1099px)").matches) app?.classList.add("detalhes-abertos");
+  else if (painelOculto()) { painelAbertoNaHora = true; render(); }
+  if (estado.gaveta) dispatch({ tipo: "gaveta", agenteId: a.id, nivel: null });
+  const focar = () => {
+    const campo = document.querySelector<HTMLInputElement>("#detalhes #gvn-nome");
+    campo?.focus();
+    campo?.select();
+  };
+  focar();
+  // O menu ⋯ acabou de fechar e o close dele devolve o foco à linha: o campo é focado de novo depois (revisão da NOD-349).
+  setTimeout(focar, 0);
+}
+
+aoVerComputador((agenteId, visto) => dispatch({ tipo: "computador-visto", agenteId, estado: visto }));
+
+instalarIdentidade({
+  salvarCampo: (agenteId, campo, valor) => {
+    marcarPendente(agenteId, { [campo]: valor });
+    dispatch({ tipo: "agente-local", agenteId, mudanca: { [campo]: valor } });
+    return filaDePerfil.enviar(agenteId, { [campo]: valor });
+  },
+  fecharPopover: fecharPopoverAvatar,
+  escolherAba,
+  escolherRadio: (b) => { if (b.dataset.act === "gaveta-forma" || b.dataset.act === "gaveta-cor") void ACOES[b.dataset.act]?.(b); },
+});
 
 /** ‹ (ou Esc): com mudança não salva, pergunta antes; o que está salvo não pergunta nada. */
 function voltarNivel(): void {

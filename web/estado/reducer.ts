@@ -1,4 +1,4 @@
-import type { Agente } from "../../src/contracts/agente.ts";
+import type { Agente, CorAgente, FormaAgente } from "../../src/contracts/agente.ts";
 import type { AtividadeDto } from "../../src/contracts/atividade.ts";
 import type { ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
@@ -120,7 +120,15 @@ export type NivelGaveta =
   /** ADR-083 (#196): os trabalhos do bot por grupo (Precisa de você, Trabalhando, Na fila, Terminados hoje). */
   | { tipo: "trabalhos" }
   /** ADR-114 (chat limpo, PR 2): o que saiu do chat do bot, um dia por vez (web/telas/atividade.ts). */
-  | { tipo: "atividade" };
+  | { tipo: "atividade" }
+  /** ADR-125 (NOD-349): Atalhos, Perfil (Missão e voz), Acessos, Ambiente e o Modo dev, fora da visão geral. */
+  | { tipo: "ajustes" };
+
+/** ADR-125: as abas da visão geral da gaveta. A Biblioteca fica atrás de `BIBLIOTECA_NA_GAVETA` até a NOD-326. */
+export type AbaGaveta = "detalhes" | "biblioteca" | "computador";
+
+/** ADR-125: o que a aba Computador mostra, lido de `GET agentes/:id/computador` (web/lib/computador.ts). */
+export type EstadoComputadorBot = "ligado" | "ocupado" | "dormindo" | "sem" | "fora" | "indisponivel" | "erro";
 
 /**
  * `semJanela` (revisão do PR #264, NOD-208): a janela de login não abriu (bloqueador de pop-up, app desktop ou
@@ -254,6 +262,14 @@ export type Estado = {
   conectando: Record<string, ConexaoApp>;
   /** O nível aberto na gaveta de um bot; outro bot na tela = visão geral. */
   gaveta: { agenteId: string; nivel: NivelGaveta } | null;
+  /** ADR-125: a última aba da gaveta por bot (o main lê e grava em `localStorage` `nod.gaveta.aba`). */
+  abaGaveta: Record<string, AbaGaveta>;
+  /** ADR-125: o popover do avatar aberto, com a forma e a cor de quando abriu (Redefinir volta a elas). */
+  avatarAberto: { agenteId: string; forma: FormaAgente; cor: CorAgente } | null;
+  /** ADR-125: o estado do computador de cada bot, do último pulso da aba Computador; ausente = carregando. */
+  computadorVisto: Record<string, EstadoComputadorBot>;
+  /** ADR-125: Acordar ou Tentar de novo em andamento (o botão desabilita e diz "Acordando…"). */
+  computadorAcao: { agenteId: string; tipo: "acordar" | "religar" } | null;
   /**
    * A Atividade do bot (ADR-114, chat limpo, PR 2): as páginas lidas, por `agenteId:dia` (null = a rota disse 404: servidor
    * de antes, ou o bot não é da pessoa); o "N hoje" da linha da gaveta por bot (`total` null = indisponível, a linha fica
@@ -367,6 +383,12 @@ export type Estado = {
 export type Acao =
   | { tipo: "conexao-app"; slug: string; valor: ConexaoApp | null }
   | { tipo: "gaveta"; agenteId: string; nivel: NivelGaveta | null }
+  | { tipo: "aba-gaveta"; agenteId: string; aba: AbaGaveta }
+  | { tipo: "abas-lidas"; abas: Record<string, AbaGaveta> }
+  | { tipo: "avatar-popover"; aberto: { agenteId: string; forma: FormaAgente; cor: CorAgente } | null }
+  | { tipo: "computador-visto"; agenteId: string; estado: EstadoComputadorBot }
+  | { tipo: "computador-acao"; acao: { agenteId: string; tipo: "acordar" | "religar" } | null }
+  | { tipo: "agente-local"; agenteId: string; mudanca: { nome?: string; titulo?: string; forma?: FormaAgente; cor?: CorAgente } }
   | { tipo: "hidratar-atividade"; agenteId: string; dia: string; atividade: AtividadeDto | null }
   | { tipo: "hidratar-atividade-hoje"; agenteId: string; dia: string; total: number | null }
   | { tipo: "atividade-vista"; mudanca: Partial<Pick<VistaDaAtividade, "dia" | "filtro" | "aberta">> }
@@ -482,6 +504,10 @@ export const estadoInicial: Estado = {
   composioConfigurado: false,
   conectando: {},
   gaveta: null,
+  abaGaveta: {},
+  avatarAberto: null,
+  computadorVisto: {},
+  computadorAcao: null,
   atividadeDoBot: {},
   atividadeHoje: {},
   atividadeVista: null,
@@ -982,6 +1008,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
         // Ir a outro lugar (o clique num aviso, por exemplo) fecha Seu espaço: a pessoa foi para onde pediu.
         espaco: null,
         erro: null,
+        // Revisão da NOD-349: o popover do avatar não reabre sozinho ao voltar ao bot.
+        avatarAberto: null,
         // A gaveta só continua num nível interno se a conversa é do mesmo bot; outro bot abre na visão geral.
         gaveta: acao.tela.tipo === "conversa" && estado.gaveta?.agenteId === acao.tela.agenteId ? estado.gaveta : null,
         faixaParada: acao.tela.tipo === estado.tela.tipo ? estado.faixaParada : null,
@@ -1022,8 +1050,12 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return aplicarFrame(estado, acao.frame, acao.agora);
     case "hidratar-gestao":
       return { ...estado, gestao: acao.gestao };
-    case "hidratar-frota":
-      return comConversasDosDonos(resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario }));
+    case "hidratar-frota": {
+      // Revisão da NOD-349: o computador que a frota diz que voltou deixa de valer como "fora" lido num pulso antigo.
+      const voltaram = acao.frota.agentes.filter((a) => !a.computadorForaDoAr && estado.computadorVisto[a.id] === "fora").map((a) => a.id);
+      const computadorVisto = voltaram.length ? Object.fromEntries(Object.entries(estado.computadorVisto).filter(([id]) => !voltaram.includes(id))) : estado.computadorVisto;
+      return comConversasDosDonos(resolverInicio({ ...estado, frota: acao.frota, inventario: acao.frota.inventario, computadorVisto }));
+    }
     case "hidratar-inventario":
       return { ...estado, inventario: acao.inventario };
     case "hidratar-executor":
@@ -1107,9 +1139,27 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       // O rascunho da Inteligência (2B) e o menu rápido (2A) não sobrevivem à troca de nível.
       // ADR-114: a Atividade abre sempre no dia de hoje, em "Tudo"; sair dela esquece o dia, o filtro e o item aberto.
       const atividadeVista: VistaDaAtividade | null = acao.nivel?.tipo === "atividade" ? { agenteId: acao.agenteId, dia: diaLocal(estado.agora > 0 ? estado.agora : Date.now()), filtro: "tudo", aberta: null } : null;
-      const depois = { ...estado, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista };
+      const depois = { ...estado, avatarAberto: null, gaveta: acao.nivel ? { agenteId: acao.agenteId, nivel: acao.nivel } : null, rascunhoIa: acao.nivel?.tipo === "inteligencia" && estado.rascunhoIa?.agenteId === acao.agenteId ? estado.rascunhoIa : null, menuIa: null, atividadeVista };
       // Reabrir a Atividade relê o dia (a página guardada aparece enquanto a nova não chega): fechada, nenhum frame a relia.
       return atividadeVista && chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia) in estado.atividadeDoBot ? invalidar(depois, `atividade:${chaveDaAtividade(atividadeVista.agenteId, atividadeVista.dia)}`) : depois;
+    }
+    case "aba-gaveta":
+      if (estado.abaGaveta[acao.agenteId] === acao.aba) return estado;
+      return { ...estado, abaGaveta: { ...estado.abaGaveta, [acao.agenteId]: acao.aba }, avatarAberto: null };
+    case "abas-lidas":
+      return { ...estado, abaGaveta: { ...acao.abas, ...estado.abaGaveta } };
+    case "avatar-popover":
+      return { ...estado, avatarAberto: acao.aberto };
+    case "computador-visto":
+      if (estado.computadorVisto[acao.agenteId] === acao.estado) return estado;
+      return { ...estado, computadorVisto: { ...estado.computadorVisto, [acao.agenteId]: acao.estado } };
+    case "computador-acao":
+      return { ...estado, computadorAcao: acao.acao };
+    case "agente-local": {
+      // ADR-125: o nome, o subtítulo, a forma e a cor mudam na hora na frota (otimista); o PATCH confirma ou desfaz.
+      if (!estado.frota) return estado;
+      const agentes = estado.frota.agentes.map((a) => (a.id === acao.agenteId ? { ...a, ...acao.mudanca } : a));
+      return { ...estado, frota: { ...estado.frota, agentes } };
     }
     case "hidratar-atividade": {
       // A página do dia de hoje também é o "N hoje" da linha (o mesmo total, nas mesmas três fontes).

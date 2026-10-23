@@ -55,8 +55,11 @@ describe("modo dev na web", () => {
     expect(renderMensagem(bot("m1", "t1"), ligado)).not.toContain("faixa-dev");
     expect(renderMensagem(bot("m2", "t1", "sistema"), ligado)).toContain("faixa-dev");
     expect(renderMensagem(bot("m3", null), ligado)).not.toContain("faixa-dev");
-    expect(renderDetalhes(ligado)).toContain("Hoje com Clarice: <b>US$ 22,67</b> · 66 turnos");
-    expect(renderDetalhes(ligado)).toContain("MODO DEV");
+    // ADR-125: o selo mora no fim do nível Ajustes.
+    const ajustes = (e: Estado): Estado => ({ ...e, gaveta: { agenteId: "a", nivel: { tipo: "ajustes" } } });
+    expect(renderDetalhes(ajustes(base))).not.toContain("MODO DEV");
+    expect(renderDetalhes(ajustes(ligado))).toContain("Hoje com Clarice: <b>US$ 22,67</b> · 66 turnos");
+    expect(renderDetalhes(ajustes(ligado))).toContain("MODO DEV");
     expect(renderCabecalhoConversa(ligado, "a")).not.toContain("MODO DEV");
     expect(renderCabecalhoConversa(ligado, "a")).not.toContain("Hoje com");
 

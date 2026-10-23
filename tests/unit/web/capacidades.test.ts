@@ -52,7 +52,8 @@ describe("NOD-207: a web decide anexo e pasta pelas capacidades do catálogo (AD
   describe("a gaveta (renderDetalhes)", () => {
     type AgenteFrota = FrotaDto["agentes"][number];
     const bot = (harness: string): AgenteFrota => ({ tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "", descricao: "", dono: "pessoa", forma: "shape-square", cor: "c-purple", fixado: false, oculto: false, confirmado: true, modelo: "auto", harness, duplicadoDe: null, criadoEm: 0, conversaId: "c1", descricaoEstado: "", computadorForaDoAr: null, ultimaMensagem: null }) as AgenteFrota;
-    const com = (harness: string): Estado => ({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: catalogo }, frota: { agentes: [bot(harness)], inventario: { estado: "pronto", versao: "1", em: 0 }, negacoes: [] }, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } as Estado);
+    const com = (harness: string): Estado => ({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, executor: { atual: "claude-cli", opcoes: [], recusa: null, harnesses: catalogo }, frota: { agentes: [bot(harness)], inventario: { estado: "pronto", versao: "1", em: 0 }, negacoes: [] }, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, gaveta: { agenteId: "a1", nivel: { tipo: "ajustes" } }, modoDev: { ...estadoInicial.modoDev, ligado: true } } as Estado);
+    // ADR-125: a Pasta de trabalho mora no fim do nível Ajustes, só no Modo dev.
     const caminho = `<code>${caminhoDaPastaDoBot("Nina")}</code>`;
 
     // ADR-103: o Codex trabalha na pasta do bot como o Claude; o Cursor (sem driver) mostra só a linha.

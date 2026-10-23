@@ -302,3 +302,17 @@ export function estadoEmPalavras(dto: ComputadorDto, agora: number, configuracao
   if (c.controle === "aguardando_pessoa") return "Precisa de você";
   return c.ocupadoAte && c.ocupadoAte > agora ? "Bot trabalhando" : "Pronto para o bot";
 }
+
+/**
+ * ADR-125 (NOD-349): o estado da aba Computador da gaveta. Sem linha em `computadores` = o bot nunca teve computador;
+ * fora do ar manda (saúde do servidor); desligado = dormindo (acorda sozinho quando o bot precisar); `ocupadoAte` no
+ * futuro = ligado e usando a tela agora.
+ */
+export function estadoDoComputador(dto: Pick<ComputadorDto, "computador" | "ativo"> & Partial<Pick<ComputadorDto, "disponivel">>, agora: number): "ligado" | "ocupado" | "dormindo" | "sem" | "fora" | "indisponivel" {
+  if (foraDoAr(dto)) return "fora";
+  // Revisão da NOD-349: com o ambiente fora, Acordar falharia; a aba diz que o ambiente está indisponível.
+  if (dto.disponivel === false) return "indisponivel";
+  if (dto.computador.id === null) return "sem";
+  if (!dto.ativo) return "dormindo";
+  return (dto.computador.ocupadoAte ?? 0) > agora ? "ocupado" : "ligado";
+}

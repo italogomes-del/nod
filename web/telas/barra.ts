@@ -17,6 +17,7 @@ function hora(em: number): string {
 }
 
 const TITULO: Record<ItemDaBarra["grupo"], (bot: string) => string> = {
+  atalhos: (bot) => `Atalhos de ${bot}`,
   recentes: (bot) => `Você usou com ${bot}`,
   conversa: () => "Da conversa",
   skills: () => "Skills",

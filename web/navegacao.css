@@ -915,3 +915,107 @@ div.mac-medidor { padding-right: 36px; }
 .atv-navegacao { display: flex; justify-content: space-between; padding: 0 4px; }
 .atv-dia { min-height: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
 .atv-dia:hover, .atv-dia:focus-visible { background: var(--surface-raised); color: var(--ink); }
+
+/* ADR-125 (NOD-349; protótipo prot/nod-349): a gaveta do bot minimalista. No topo, só compartilhar e fechar (ícones
+   redondos de contorno); no centro, o avatar, o nome e o subtítulo, editáveis ali; embaixo, as abas de texto da NOD-326.
+   Só tokens: nenhum cartão colorido nem botão cheio. Os erros são linha neutra com o ícone na cor (--danger, --warning). */
+.gvn-topo { justify-content: space-between; }
+.gvn-redondo { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); }
+.gvn-redondo:hover, .gvn-redondo:focus-visible, .gvn-redondo[aria-expanded="true"] { background: var(--surface-raised); color: var(--ink); }
+.gvn-redondo:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.bot-menu.menu-compartilhar { width: 232px; }
+
+.gv-identidade.gvn-id { padding-top: 2px; text-align: center; }
+.gvn-avatar-wrap { position: relative; display: flex; justify-content: center; }
+.gvn-avatar { position: relative; display: grid; place-items: center; width: 84px; height: 84px; padding: 0; border: 0; border-radius: 999px; background: none; cursor: pointer; }
+.gvn-avatar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.gvn-lapis { position: absolute; right: 2px; bottom: 2px; display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); opacity: 0; transition: opacity .12s; }
+.gvn-avatar:hover .gvn-lapis, .gvn-avatar:focus-visible .gvn-lapis, .gvn-avatar[aria-expanded="true"] .gvn-lapis { opacity: 1; }
+.gvn-dica { position: absolute; z-index: 4; top: 50%; left: calc(50% + 50px); transform: translateY(-50%); padding: 4px 8px; border-radius: 6px; background: var(--ink); color: var(--surface); font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s; }
+.gvn-avatar:hover + .gvn-dica, .gvn-avatar:focus-visible + .gvn-dica { opacity: 1; transition-delay: .25s; }
+.gvn-avatar[aria-expanded="true"] + .gvn-dica { opacity: 0; }
+@media (hover: none) { .gvn-lapis { opacity: 1; } .gvn-dica { display: none; } }
+@media (prefers-reduced-motion: reduce) { .gvn-lapis, .gvn-dica { transition: none; } }
+
+.gvn-nome, .gvn-sub { display: block; box-sizing: border-box; width: 100%; max-width: 300px; margin: 0 auto; border: 0; border-radius: 8px; background: transparent; font: inherit; color: var(--ink); text-align: center; text-overflow: ellipsis; cursor: text; }
+.gvn-nome, .gvn-nome-fixo { margin-top: 10px; padding: 2px 8px; font-size: 20px; font-weight: 600; line-height: 28px; letter-spacing: -.3px; }
+.gvn-nome-fixo { margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gvn-sub, .gvn-sub-fixo { margin-top: 1px; padding: 1px 8px; font-size: 13px; line-height: 20px; color: var(--ink-3); }
+.gvn-sub-fixo { display: block; }
+.gvn-sub::placeholder { color: var(--ink-3); opacity: .75; }
+.gvn-nome:hover, .gvn-sub:hover { background: var(--surface-side); }
+.gvn-nome:focus, .gvn-sub:focus { outline: none; border-radius: 6px; background: var(--surface-raised); }
+@media (forced-colors: active) { .gvn-nome:focus, .gvn-sub:focus { outline: 2px solid CanvasText; } }
+.gvn-nome:focus-visible, .gvn-sub:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.gvn-erro-linha { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--ink-2); }
+.gvn-erro-linha:has(> .gvn-erro:empty) { display: none; }
+.gvn-erro-icone { flex: none; display: grid; color: var(--danger); }
+
+.gvn-pop { position: absolute; z-index: 12; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); box-sizing: border-box; width: 300px; max-width: calc(100vw - 32px); padding: 10px 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-pop); text-align: left; }
+.gvn-pop-titulo { display: block; margin: 12px 2px 6px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.gvn-redefinir { margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
+.gvn-formas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.gvn-forma { display: grid; place-items: center; height: 50px; padding: 0; border: 1px solid transparent; border-radius: 12px; background: none; cursor: pointer; }
+.gvn-forma .icon.mascote { width: 32px; height: 32px; min-width: 32px; pointer-events: none; }
+.gvn-forma:hover { background: var(--surface-raised); }
+.gvn-forma[aria-checked="true"] { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--surface-raised); }
+.gvn-cores { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; justify-items: center; }
+.gvn-cor { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 999px; background: none; cursor: pointer; }
+.gvn-cor .cor-amostra { width: 26px; height: 26px; }
+.gvn-cor[aria-checked="true"] .cor-amostra { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.gvn-forma:focus-visible, .gvn-cor:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Revisão da NOD-349: em forced-colors a sombra some; a amostra mantém a cor (é o conteúdo) e o marcado ganha borda do sistema. */
+@media (forced-colors: active) {
+  .gvn-cor .cor-amostra { forced-color-adjust: none; }
+  .gvn-forma[aria-checked="true"], .gvn-cor[aria-checked="true"] { outline: 3px solid Highlight; outline-offset: 1px; }
+}
+
+/* As abas (texto discreto, a ativa num fundo um tom acima; NOD-326). */
+.gv-abas { display: flex; justify-content: center; gap: 2px; }
+.gv-aba { position: relative; flex: none; margin: 0; padding: 4px 10px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 13px; line-height: 18px; color: var(--ink-2); white-space: nowrap; cursor: pointer; }
+.gv-aba:hover { color: var(--ink); }
+.gv-aba[aria-selected="true"] { background: var(--surface-raised); color: var(--ink); }
+.gv-aba:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (forced-colors: active) { .gv-aba[aria-selected="true"] { text-decoration: underline 2px; text-underline-offset: 5px; } }
+.gv-aba-painel { display: flex; flex-direction: column; gap: 22px; border-radius: 10px; }
+.gv-aba-painel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+.gvn-ponto { display: inline-block; width: 6px; height: 6px; margin: 0 0 1px 5px; border-radius: 50%; background: var(--danger); vertical-align: middle; }
+/* Revisão da NOD-349: em forced-colors o fundo some; o ponto e os campos editáveis ganham cor e borda do sistema. */
+@media (forced-colors: active) {
+  .gvn-ponto { forced-color-adjust: none; background: CanvasText; }
+  .gvn-nome, .gvn-sub { border: 1px solid ButtonText; }
+}
+
+.gvn-vazio { margin: 0; padding: 0 4px; font-size: 13px; color: var(--ink-3); }
+.gvn-estado { color: var(--ink-2); }
+.rotina-pausada .gvn-estado { color: var(--ink-3); }
+.gv-linha.gvn-alerta { align-items: flex-start; cursor: default; }
+.gv-linha.gvn-alerta:hover, .gv-linha.gvn-alerta:focus-within { background: none; }
+.gvn-alerta-icone { flex: none; display: grid; margin-top: 1px; color: var(--ink-2); }
+.gvn-danger > .gvn-alerta-icone { color: var(--danger); }
+.gvn-alerta .gv-linha-txt b { color: var(--ink); }
+.gvn-alerta .gv-linha-txt small { color: var(--ink-2); white-space: normal; }
+.gvn-acoes-texto { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0 -4px; }
+/* Botão de texto: sem fundo nem borda; sublinha só no hover (é ação, não campo). */
+.gvn-acao-texto { padding: 2px 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
+.gvn-acao-texto:hover { text-decoration: underline; text-underline-offset: 3px; }
+.gvn-acao-texto:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.gvn-acao-texto:disabled { color: var(--ink-3); cursor: default; text-decoration: none; }
+/* A rotina parada (ADR-044): o aviso na linha de baixo, neutro; só o ícone em --warning (é espera, não erro). */
+.gvn-parada { display: grid; grid-template-columns: 14px 1fr; align-items: start; gap: 2px 6px; flex-basis: 100%; box-sizing: border-box; margin: -4px 0 0; padding: 0 14px 10px; font-size: 12px; line-height: 16px; color: var(--ink-2); background: none; border: 0; }
+.gvn-parada-icone { display: grid; margin-top: 1px; color: var(--warning); }
+.gvn-parada > .gvn-acao-texto { grid-column: 2; justify-self: start; margin-left: -4px; font-size: 12.5px; }
+
+.gvn-comp-linha { margin: -2px 0 0; text-align: center; font-size: 12px; color: var(--ink-3); }
+.gvn-comp-sem { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.gvn-sono { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.gvn-sono small { color: var(--ink-3); font-size: 12.5px; }
+.gvn-sono .bt { margin-top: 6px; }
+.tela-preview.gvn-tela-fora { display: grid; place-items: center; cursor: default; color: #8e8e93; font-size: 13px; } /* cor-fixa: texto sobre o monitor apagado */
+
+/* O ⋯ da linha do bot na lista (ADR-125): à vista só no toque, onde não há clique direito. */
+.bot-mais { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .bot-mais { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: none; color: var(--ink-2); font: inherit; font-size: 18px; cursor: pointer; }
+  .bot-mais-fixado { position: absolute; top: 0; right: 0; }
+}

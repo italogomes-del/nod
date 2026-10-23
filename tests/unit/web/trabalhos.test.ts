@@ -344,7 +344,8 @@ describe("gaveta e 'Todos os trabalhos' (#196, K3/K9/M3)", () => {
     expect(html).not.toContain("De ontem");
     expect(html).not.toContain("Login do app");
     expect(html).toContain('data-act="abrir-trabalho" data-id="rev"');
-    expect(renderDetalhes(e)).toContain('data-act="gaveta" data-nivel="trabalhos" data-agente="leo"');
+    // ADR-125: a linha Trabalhos mora nos Atalhos do nível Ajustes.
+    expect(renderDetalhes({ ...e, gaveta: { agenteId: "leo", nivel: { tipo: "ajustes" } } })).toContain('data-act="gaveta" data-nivel="trabalhos" data-agente="leo"');
     expect(renderDetalhes({ ...e, gaveta: { agenteId: "leo", nivel: { tipo: "trabalhos" } } })).toContain("Trabalhos de Leonardo");
   });
 

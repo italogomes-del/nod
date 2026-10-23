@@ -15,6 +15,7 @@ type AgenteFrota = FrotaDto["agentes"][number];
 const nina = (fora: AgenteFrota["computadorForaDoAr"]): AgenteFrota => ({ tenantId: "t", id: "a1", ownerId: "p", visibility: "privado", nome: "Nina", titulo: "Assistente de e-mail", descricao: "", dono: "pessoa", forma: "shape-square", cor: "c-purple", fixado: false, oculto: false, confirmado: true, modelo: "m", duplicadoDe: null, criadoEm: 0, conversaId: "c1", descricaoEstado: "", computadorForaDoAr: fora, ultimaMensagem: null });
 const comFrota = (a: AgenteFrota): Estado => ({ ...estadoInicial, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [a], inventario: { estado: "pronto", versao: "catcher", em: 0 }, negacoes: [] }, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" } } as Estado);
 const FORA = { desde: T0, motivo: "navegador_nao_abriu" as const };
+const naAbaComputador = (e: Estado, visto?: Estado["computadorVisto"][string]): Estado => ({ ...e, abaGaveta: { a1: "computador" }, computadorVisto: visto ? { a1: visto } : {} });
 
 describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)", () => {
   it("atividade: vizinhos iguais viram UMA linha ×N com o intervalo; o que muda quebra o grupo", () => {
@@ -62,11 +63,14 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(tituloDaFalha("limite_de_computadores")).toBe("Este Mac já tem o máximo de computadores ligados");
   });
 
-  it("painel: o botão Computador do bot (em Ambiente) ganha o chip 'fora do ar'; respondendo, não — e o cabeçalho fica limpo", () => {
+  // ADR-125 (NOD-349): o "fora do ar" vira o ponto vermelho na aba Computador; Ambiente (Modo dev) só leva ao diálogo.
+  it("painel: fora do ar, a aba Computador ganha o ponto vermelho (e o texto para leitor de tela); respondendo, não — e o cabeçalho fica limpo", () => {
     const dev = (e: Estado): Estado => ({ ...e, modoDev: { ...e.modoDev, ligado: true } });
-    expect(renderDetalhes(dev(comFrota(nina(FORA))))).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot<\/span><span class="tag tag-vermelha">fora do ar<\/span>/);
-    expect(renderDetalhes(comFrota(nina(FORA)))).not.toContain(">Computador do bot</span>");
-    expect(renderDetalhes(comFrota(nina(null)))).not.toContain("fora do ar");
+    const fora = renderDetalhes(comFrota(nina(FORA)));
+    expect(fora).toMatch(/data-aba="computador"[^>]*>Computador<span class="gvn-ponto" aria-hidden="true"><\/span><span class="sr-only"> \(fora do ar\)<\/span>/);
+    expect(renderDetalhes(comFrota(nina(null)))).not.toContain("gvn-ponto");
+    expect(renderDetalhes({ ...dev(comFrota(nina(FORA))), gaveta: { agenteId: "a1", nivel: { tipo: "ajustes" } } })).toContain(">Computador do bot</span>");
+    expect(renderDetalhes({ ...comFrota(nina(FORA)), gaveta: { agenteId: "a1", nivel: { tipo: "ajustes" } } })).not.toContain(">Computador do bot</span>");
     expect(renderCabecalhoConversa(comFrota(nina(FORA)), "a1")).not.toContain("abrir-computador");
   });
 
@@ -86,23 +90,38 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(html.indexOf("computador-pilula")).toBeLessThan(html.indexOf("computador-lateral"));
   });
 
-  it("painel: a tela do bot fica no topo, com Abrir e as rotinas logo abaixo; o cartão vermelho só fora do ar", () => {
-    const saudavel = renderDetalhes(comFrota(nina(null)));
-    expect(saudavel).toContain('data-tela-bot="a1"');
-    expect(saudavel).toContain("Tela de Nina");
-    expect(saudavel).toContain(">Abrir</span>");
-    expect(saudavel.indexOf("Tela de Nina")).toBeLessThan(saudavel.indexOf("<h3>Rotinas</h3>"));
-    expect(saudavel).toContain("Nada programado ainda. Peça a Nina para fazer algo toda manhã e aparece aqui.");
-    expect(saudavel).not.toContain("<h3>Computador do bot</h3>");
+  // ADR-125: a tela saiu do topo da visão geral e mora na aba Computador; Detalhes abre com as rotinas.
+  it("painel: a tela do bot mora na aba Computador (ligado), com Abrir; a aba Detalhes não tem miniatura", () => {
+    const detalhes = renderDetalhes(comFrota(nina(null)));
+    expect(detalhes).not.toContain('data-tela-bot="a1"');
+    expect(detalhes).toContain("<h3>Rotinas</h3>");
+    expect(detalhes).toContain("Nenhuma rotina ainda. Peça a Nina para fazer algo toda manhã e ela aparece aqui.");
+    const ligado = renderDetalhes(naAbaComputador(comFrota(nina(null)), "ligado"));
+    expect(ligado).toContain('data-tela-bot="a1"');
+    expect(ligado).toContain('data-comp-bot="a1"');
+    expect(ligado).toContain("Tela de Nina");
+    expect(ligado).toContain(">Abrir</span>");
+    expect(ligado).toContain("Ligado · pronto para usar");
   });
 
-  // Regression: QA do PR #357 (NOD-306) — a ordem do drawer depois do rebase sobre o chat limpo
-  // Found by /qa on 2026-10-19
-  it("painel: só a tela sobe; identidade, Atalhos (Trabalhos e Atividade) e Rotinas seguem a ordem da main", () => {
+  it("painel: a ordem da visão geral é identidade, abas e o painel da aba (Rotinas e a linha Ajustes)", () => {
     const html = renderDetalhes(comFrota(nina(null)));
-    const ordem = ['data-tela-bot="a1"', 'class="gv-identidade"', "<h3>Atalhos</h3>", ">Trabalhos</span>", ">Atividade</span>", "<h3>Rotinas</h3>"].map((s) => html.indexOf(s));
+    const ordem = ['class="gv-identidade gvn-id"', 'role="tablist"', "<h3>Rotinas</h3>", ">Ajustes<small>"].map((s) => html.indexOf(s));
     expect(ordem.every((i) => i >= 0)).toBe(true);
     expect(ordem).toEqual([...ordem].sort((a, b) => a - b));
+  });
+
+  it("painel: dormindo, sem computador e carregando têm cada um o seu texto, sem miniatura", () => {
+    const dormindo = renderDetalhes(naAbaComputador(comFrota(nina(null)), "dormindo"));
+    expect(dormindo).toContain("O computador está dormindo");
+    expect(dormindo).toContain('data-act="computador-acordar"');
+    expect(dormindo).not.toContain('data-tela-bot="a1"');
+    const acordando = renderDetalhes({ ...naAbaComputador(comFrota(nina(null)), "dormindo"), computadorAcao: { agenteId: "a1", tipo: "acordar" } });
+    expect(acordando).toContain("Acordando…");
+    expect(renderDetalhes(naAbaComputador(comFrota(nina(null)), "sem"))).toContain("Nina ainda não tem um computador próprio.");
+    const carregando = renderDetalhes(naAbaComputador(comFrota(nina(null))));
+    expect(carregando).toContain("Vendo o computador…");
+    expect(carregando).toContain('aria-busy="true"');
   });
 
   it("pedido de tela: a frase do servidor vira o motivo do cartão, e outra pergunta não", () => {
@@ -113,13 +132,15 @@ describe("computador do bot: erro real e aviso único na web (emenda da ADR-037)
     expect(htmlCartaoTela("verificar que é humano no LinkedIn", "a1", false)).toContain("A tela voltou para o bot.");
   });
 
-  it("painel: a seção Computador do bot aparece só fora do ar, com 'Tentar de novo' e 'Abrir computador'", () => {
-    const html = renderDetalhes(comFrota(nina(FORA)));
-    expect(html).toContain("<h3>Computador do bot</h3>");
+  it("painel: fora do ar, a aba Computador diz o motivo numa linha neutra, com 'Tentar de novo' e 'Abrir computador' (sem cartão vermelho)", () => {
+    const html = renderDetalhes(naAbaComputador(comFrota(nina(FORA))));
+    expect(html).toContain('class="gv-linha gvn-alerta gvn-danger" role="status"');
     expect(html).toContain("o navegador do computador não abriu");
     expect(html).toContain('data-act="religar-computador"');
     expect(html).toContain('data-act="abrir-computador"');
-    expect(renderDetalhes(comFrota(nina(null)))).not.toContain("<h3>Computador do bot</h3>");
+    expect(html).not.toContain("tag-vermelha");
+    expect(renderDetalhes({ ...naAbaComputador(comFrota(nina(FORA))), computadorAcao: { agenteId: "a1", tipo: "religar" } })).toContain("Tentando de novo…");
+    expect(renderDetalhes(naAbaComputador(comFrota(nina(null)), "ligado"))).not.toContain("gvn-alerta");
   });
 
   it("conversa: a mensagem única é um cartão de estado; depois que o computador volta, fica sem botões", () => {

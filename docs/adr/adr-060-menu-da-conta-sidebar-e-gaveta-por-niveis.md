@@ -1,6 +1,6 @@
 # ADR-060 — Menu da conta, sidebar arrastável e a gaveta do bot por níveis
 
-Status: aceito · Data: 2026-09-30 · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
+Status: aceito · Data: 2026-09-30 · Emendada pela ADR-125 (itens 3 e 5, 2026-10-23) · Emenda ADR-032 (painel do bot) e a regra de 2026-09-18 de "Seu espaço". Canvas "Nod —
 tela do agente", página "Menu, sidebar e gaveta".
 
 ## Contexto

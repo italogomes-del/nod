@@ -55,11 +55,13 @@ describe("aviso de queda do Mac (ADR-045): incidente não é decisão", () => {
     expect(rotuloExecucao({ desfecho: "passou_em_branco", motivo: "ninguem_respondeu_o_gate" })).toBe("passou em branco");
     const agente = { id: "a1", tenantId: "t", ownerId: "p", nome: "Nina", titulo: "", descricao: "", descricaoEstado: "", cor: "c-black", forma: "quadrado", conversaId: "c1", confirmado: true, fixado: false, oculto: false } as never;
     const base = { ...estadoInicial, tela: { tipo: "conversa" as const, conversaId: "c1", agenteId: "a1" }, sessao: { tenantId: "t", pessoaId: "p" }, frota: { agentes: [agente], negacoes: [] } as never };
-    const html = renderDetalhes(base);
+    // ADR-125: a tela mora na aba Computador; o atalho para o diálogo, no Ambiente do nível Ajustes (Modo dev).
+    const html = renderDetalhes({ ...base, abaGaveta: { a1: "computador" }, computadorVisto: { a1: "ligado" } });
     expect(html).toContain('data-tela-bot="a1"');
     expect(html).toContain("Tela de Nina");
-    expect(html).not.toContain(">Computador do bot</span>");
-    const dev = renderDetalhes({ ...base, modoDev: { ...estadoInicial.modoDev, ligado: true } });
+    const ajustes = { ...base, gaveta: { agenteId: "a1", nivel: { tipo: "ajustes" as const } } };
+    expect(renderDetalhes(ajustes)).not.toContain(">Computador do bot</span>");
+    const dev = renderDetalhes({ ...ajustes, modoDev: { ...estadoInicial.modoDev, ligado: true } });
     expect(dev).toMatch(/data-act="abrir-computador"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span class="gv-linha-txt">Computador do bot</);
   });
 });

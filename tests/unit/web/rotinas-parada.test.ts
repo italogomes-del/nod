@@ -87,11 +87,16 @@ describe("lista de rotinas e painel do bot", () => {
     expect(livre).not.toContain("Permitir e rodar agora");
   });
 
-  it("o painel do bot mostra a mesma tag e o mesmo botão na linha da rotina", () => {
-    const html = renderDetalhes({ ...estadoInicial, agora: AGORA, tela: { tipo: "conversa", conversaId: "c1", agenteId: "a1" }, frota: { agentes: [agente], negacoes: [] } as never, rotinas: [dto(bloqueio)] });
-    expect(html).toContain("parada · falta acesso ao Gmail");
-    expect(html).toContain("desde ontem 13:00");
+  // ADR-125 (NOD-349): no painel, a parada é uma linha neutra (ícone de alerta, sem a tag colorida) com o mesmo botão.
+  it("o painel do bot mostra a parada numa linha neutra e o mesmo botão na linha da rotina (só para a dona)", () => {
+    const e = { ...estadoInicial, agora: AGORA, sessao: { tenantId: "t", pessoaId: "p" }, tela: { tipo: "conversa" as const, conversaId: "c1", agenteId: "a1" }, frota: { agentes: [agente], negacoes: [] } as never, rotinas: [dto(bloqueio)] };
+    const html = renderDetalhes(e);
+    expect(html).toContain('class="gvn-parada"');
+    expect(html).toContain("Falta acesso ao Gmail desde ontem 13:00.");
+    expect(html).not.toContain("tag-ambar");
+    expect(html).toContain('<span class="gvn-estado">Parada</span>');
     expect(html).toContain('data-act="decidir-proposta" data-id="d1">Permitir e rodar agora');
+    expect(renderDetalhes({ ...e, sessao: { tenantId: "t", pessoaId: "outra" } })).not.toContain("Permitir e rodar agora");
   });
 });
 

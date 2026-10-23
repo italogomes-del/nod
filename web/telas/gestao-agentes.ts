@@ -17,7 +17,8 @@ export function dialogo(html: string, menu = false): HTMLDialogElement {
   if (titulo) { titulo.id = "gestao-dialogo-titulo"; d.setAttribute("aria-labelledby", titulo.id); }
   const focoAnterior = document.activeElement;
   d.addEventListener("click", (e) => { e.stopPropagation(); if (e.target === d) d.close(); });
-  d.addEventListener("close", () => { d.remove(); if (focoAnterior instanceof HTMLElement && focoAnterior.isConnected) focoAnterior.focus(); });
+  // O foco só volta à origem se a ação do diálogo não o levou a outro lugar (Renomear foca o nome na gaveta).
+  d.addEventListener("close", () => { const foi = document.activeElement; d.remove(); if (focoAnterior instanceof HTMLElement && focoAnterior.isConnected && (!foi || foi === document.body || d.contains(foi) || foi === focoAnterior)) focoAnterior.focus(); });
   document.body.append(d);
   d.showModal();
   return d;
@@ -61,6 +62,34 @@ export function abrirMenu(a: BotGerido, dona: boolean, ancora: HTMLElement, exec
     const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
     itens[proximo]?.focus();
   });
+}
+
+/**
+ * ADR-125 (NOD-349): o Compartilhar do topo da gaveta — o que já existia no menu do bot, num menu pequeno ancorado no
+ * botão: Copiar ID da conversa e Duplicar bot (o Nod não se duplica, ADR-081).
+ */
+export function abrirMenuCompartilhar(a: BotGerido, ancora: HTMLElement, executar: (acao: "copiar" | "duplicar") => void): void {
+  const item = (acao: "copiar" | "duplicar", texto: string) => `<button type="button" role="menuitem" data-gestao="${acao}"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8h13v13H8z M4 16H3V3h13v1"/></svg>${texto}</button>`;
+  const d = dialogo(`<div role="menu" aria-label="Compartilhar ${esc(a.nome)}">${item("copiar", "Copiar ID da conversa")}${a.papel === "nod" ? "" : item("duplicar", "Duplicar bot")}</div>`, true);
+  d.classList.add("menu-compartilhar");
+  ancora.setAttribute("aria-expanded", "true");
+  d.addEventListener("close", () => ancora.setAttribute("aria-expanded", "false"));
+  const r = ancora.getBoundingClientRect();
+  d.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - d.offsetWidth - 12))}px`;
+  d.style.top = `${Math.max(12, Math.min(r.bottom + 6, window.innerHeight - d.offsetHeight - 12))}px`;
+  d.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-gestao]");
+    if (btn) { const acao = btn.dataset.gestao as "copiar" | "duplicar"; d.close(); executar(acao); }
+  });
+  d.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const itens = [...d.querySelectorAll<HTMLButtonElement>("button")];
+    const atual = itens.indexOf(document.activeElement as HTMLButtonElement);
+    const proximo = e.key === "Home" ? 0 : e.key === "End" ? itens.length - 1 : (atual + (e.key === "ArrowDown" ? 1 : -1) + itens.length) % itens.length;
+    itens[proximo]?.focus();
+  });
+  d.querySelector<HTMLButtonElement>("button")?.focus();
 }
 
 export function pedirGestao(titulo: string, corpo: string, confirmar: string, salvar: (dados: FormData) => Promise<void>, perigo = false): void {

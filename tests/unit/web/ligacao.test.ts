@@ -278,7 +278,8 @@ describe("a linha 'Chat de voz' na conversa", () => {
 describe("cabeçalho e turnos da ligação", () => {
   // Plano "tela limpa" (2026-10-16, T2): o Ligar saiu do topo e é o primeiro atalho da gaveta do bot.
   it("a gaveta mostra Ligar com a disponibilidade lida e 'Em ligação' durante a ligação; o topo não tem mais o botão", () => {
-    const e: Estado = { ...cenario(), tela: { tipo: "conversa", conversaId: C, agenteId: "a" }, disponibilidadeLigacao: { a: { disponivel: true as const, consentimentoNecessario: false, versaoConsentimento: 1, provedor: "google" } } };
+    const e: Estado = { ...cenario(), tela: { tipo: "conversa", conversaId: C, agenteId: "a" }, disponibilidadeLigacao: { a: { disponivel: true as const, consentimentoNecessario: false, versaoConsentimento: 1, provedor: "google" } }, gaveta: { agenteId: "a", nivel: { tipo: "ajustes" } } };
+    // ADR-125: Ligar é o primeiro dos Atalhos, no nível Ajustes.
     expect(renderDetalhes(e)).toContain('data-act="iniciar-ligacao"');
     expect(renderDetalhes(e)).toContain("Ligar para Nina");
     expect(renderCabecalhoConversa(e, "a")).not.toContain("iniciar-ligacao");

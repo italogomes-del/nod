@@ -1,10 +1,10 @@
 import { secaoOnboardingDetalhes } from "./onboarding.ts";
 import type { RotinaDto } from "../../src/contracts/api.ts";
-import type { Estado, NivelGaveta } from "../estado/reducer.ts";
+import type { AbaGaveta, Estado, EstadoComputadorBot, NivelGaveta } from "../estado/reducer.ts";
 import { botao, dataHora, esc, iconeAgente } from "../lib/render.ts";
 import { ICONE } from "../lib/icones.ts";
 import { MOTIVO_FALHA_TEXTO } from "../lib/computador.ts";
-import { ATALHO_SEMPRE_LIGADA, botaoDaParada, desdeDaParada, linhaOndeRoda, pedeAtalhoNaExecucao, rotuloExecucao, tagDaParada } from "../lib/execucao.ts";
+import { ATALHO_SEMPRE_LIGADA, botaoDaParada, desdeDaParada, linhaOndeRoda, pedeAtalhoNaExecucao, rotuloExecucao } from "../lib/execucao.ts";
 import { CORES_MASCOTE, FORMAS_MASCOTE } from "../lib/mascote.ts";
 import { botaoLigar, htmlLinhaLigar, VELOCIDADES, VOZES } from "./ligacao.ts";
 import { renderSeloModoDev } from "./modo-dev.ts";
@@ -42,15 +42,42 @@ type Concessoes = Estado["concessoes"][string];
  */
 export function nivelDaGaveta(tipo: string | undefined, id = ""): NivelGaveta | null {
   if (tipo === "rotina" || tipo === "acesso") return { tipo, id };
-  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos" || tipo === "atividade") return { tipo };
+  if (tipo === "dar-acesso" || tipo === "perfil" || tipo === "memoria" || tipo === "inteligencia" || tipo === "nova-rotina" || tipo === "trabalhos" || tipo === "atividade" || tipo === "ajustes") return { tipo };
   return null;
 }
 
 /**
+ * ADR-125 (NOD-349): para onde o ‹ de cada nível volta. O que abre do nível Ajustes volta para Ajustes; a rotina, a nova
+ * rotina e o próprio Ajustes voltam à visão geral (null).
+ */
+export function paiDoNivel(nivel: NivelGaveta): NivelGaveta | null {
+  return nivel.tipo === "rotina" || nivel.tipo === "nova-rotina" || nivel.tipo === "ajustes" ? null : { tipo: "ajustes" };
+}
+
+/** ADR-125: a aba Biblioteca entra com a NOD-326; até lá a chave fica desligada e a gaveta tem Detalhes e Computador. */
+export const BIBLIOTECA_NA_GAVETA = false;
+
+/** ADR-125: as abas que o bot tem. O bot de outra pessoa não tem Computador; com uma aba só, a gaveta não mostra abas. */
+export function abasDoBot(dona: boolean, biblioteca = BIBLIOTECA_NA_GAVETA): AbaGaveta[] {
+  return ["detalhes", ...(biblioteca ? (["biblioteca"] as const) : []), ...(dona ? (["computador"] as const) : [])];
+}
+
+/** A aba aberta: a lembrada, se ela ainda existe para este bot (a chave e o D15 tiram abas); senão, Detalhes. */
+export function abaAberta(estado: Pick<Estado, "abaGaveta">, agenteId: string, abas: readonly AbaGaveta[]): AbaGaveta {
+  const lembrada = estado.abaGaveta[agenteId];
+  return lembrada && abas.includes(lembrada) ? lembrada : "detalhes";
+}
+
+/** ADR-125: subtítulo e avatar só se editam no bot da pessoa (o Nod incluso: o servidor aceita título, forma e cor). */
+export const identidadeEditavel = (dona: boolean): boolean => dona;
+/** O nome do Nod não muda (o servidor recusa); o subtítulo, a forma e a cor dele sim (revisão da NOD-349: nada some). */
+export const nomeEditavel = (a: Pick<Bot, "papel">, dona: boolean): boolean => dona && a.papel !== "nod";
+
+/**
  * A gaveta do bot (ADR-032: "painel de detalhes com perfil, colegas e rotinas"). Desde 2026-09-18 ela é o lar do que É
- * DO BOT. definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): 380 px e por níveis — rotina, acesso a um app,
- * Editar perfil, Memória, Inteligência, Nova rotina e Dar acesso abrem DENTRO dela, com ‹ para voltar à visão geral e a
- * conversa continuando ao lado. O ícone do painel fecha a gaveta inteira, de qualquer nível.
+ * DO BOT. definido em 2026-09-30 (canvas "Menu, sidebar e gaveta"): 380 px e por níveis, com ‹ para voltar. Revisto
+ * em 2026-10-23 (ADR-125, NOD-349): no topo só Compartilhar e Fechar; a identidade se edita ali mesmo; o resto em abas
+ * (Detalhes, Biblioteca, Computador) e no nível Ajustes.
  */
 export function renderDetalhes(estado: Estado): string {
   const t = estado.tela;
@@ -58,101 +85,198 @@ export function renderDetalhes(estado: Estado): string {
   const a = estado.frota?.agentes.find((b) => b.id === t.agenteId);
   if (!a) return "";
   const dona = a.ownerId === estado.sessao?.pessoaId;
-  const painel = `<button type="button" class="gv-icone gv-painel" data-act="alternar-detalhes" aria-label="Esconder painel" title="Esconder painel">${ICONE.painel}</button>`;
+  const fechar = `<button type="button" class="gv-icone gvn-redondo gv-painel" data-act="alternar-detalhes" aria-label="Fechar painel" title="Fechar painel">${ICONE.fechar}</button>`;
   const nivel = estado.gaveta?.agenteId === a.id ? estado.gaveta.nivel : null;
   if (!nivel) {
-    const opcoes = `<button type="button" class="gv-icone" data-act="menu-agente" data-id="${esc(a.id)}" aria-haspopup="menu" aria-label="Opções de ${esc(a.nome)}" title="Opções de ${esc(a.nome)}">${ICONE.pontos}</button>`;
-    return `<div class="gv-topo"><span class="gv-lado"></span><span class="gv-titulo"></span><span class="gv-lado gv-direita">${opcoes}${painel}</span></div>
+    const compartilhar = `<button type="button" class="gv-icone gvn-redondo" data-act="gaveta-compartilhar" data-id="${esc(a.id)}" aria-haspopup="menu" aria-label="Compartilhar ${esc(a.nome)}" aria-expanded="false" title="Compartilhar">${ICONE.compartilhar}</button>`;
+    return `<div class="gv-topo gvn-topo">${compartilhar}${fechar}</div>
       <div class="gv-corpo">${visaoGeral(estado, a, dona)}</div>`;
   }
   const n = renderNivel(estado, a, dona, nivel);
-  const voltar = `<button type="button" class="gv-icone gv-voltar" data-act="gaveta-voltar" aria-label="Voltar para os detalhes de ${esc(a.nome)}" title="Voltar (Esc)">${ICONE.voltar}</button>`;
-  const topo = `<div class="gv-topo"><span class="gv-lado">${voltar}</span><h2 class="gv-titulo" title="${esc(n.titulo)}">${esc(n.titulo)}</h2><span class="gv-lado gv-direita">${painel}</span></div>`;
+  const pai = paiDoNivel(nivel);
+  const destino = pai ? "Ajustes" : a.nome;
+  const voltar = `<button type="button" class="gv-icone gv-voltar" data-act="gaveta-voltar" aria-label="Voltar para ${esc(destino)}" title="Voltar (Esc)">${ICONE.voltar}</button>`;
+  const topo = `<div class="gv-topo"><span class="gv-lado">${voltar}</span><h2 class="gv-titulo" title="${esc(n.titulo)}">${esc(n.titulo)}</h2><span class="gv-lado gv-direita">${fechar}</span></div>`;
   const corpo = `<div class="gv-corpo">${n.corpo}</div>${n.rodape ? `<div class="gv-rodape">${n.rodape}</div>` : ""}`;
   return topo + (n.form ? `<form class="gv-form" ${n.form}>${corpo}</form>` : corpo);
 }
 
 // ---- visão geral ----------------------------------------------------------------------------------------------------
 
+const linha = (conteudo: string, dados: string, extra = "") => `<button type="button" class="gv-linha" ${dados}>${conteudo}${extra}</button>`;
+const irPara = (a: Bot, nivel: NivelGaveta["tipo"], id = "") => `data-act="gaveta" data-nivel="${nivel}" data-agente="${esc(a.id)}"${id ? ` data-id="${esc(id)}"` : ""}`;
+
+const ROTULO_ABA: Readonly<Record<AbaGaveta, string>> = { detalhes: "Detalhes", biblioteca: "Biblioteca", computador: "Computador" };
+
 function visaoGeral(estado: Estado, a: Bot, dona: boolean): string {
+  const abas = abasDoBot(dona);
+  const aberta = abaAberta(estado, a.id, abas);
+  // O ponto vem só da frota (revisão da NOD-349): o "fora" de um pulso antigo não fica preso depois que o computador volta.
+  const fora = Boolean(a.computadorForaDoAr);
+  const painel = (aba: AbaGaveta) => (aba === "detalhes" ? abaDetalhes(estado, a, dona) : aba === "computador" ? abaComputador(estado, a) : abaBiblioteca(estado, a, dona));
+  if (abas.length === 1) return identidade(estado, a, dona) + `<div class="gv-aba-painel">${painel("detalhes")}</div>`;
+  const tabs = abas
+    .map((aba) => {
+      const sel = aba === aberta;
+      const ponto = aba === "computador" && fora ? '<span class="gvn-ponto" aria-hidden="true"></span><span class="sr-only"> (fora do ar)</span>' : "";
+      return `<button type="button" role="tab" class="gv-aba" id="gv-aba-${aba}" aria-controls="gv-painel-${aba}" aria-selected="${sel}" tabindex="${sel ? 0 : -1}" data-act="gaveta-aba" data-aba="${aba}" data-id="${esc(a.id)}">${ROTULO_ABA[aba]}${ponto}</button>`;
+    })
+    .join("");
+  return `${identidade(estado, a, dona)}<div class="gv-abas" role="tablist" aria-label="Seções do painel">${tabs}</div>
+    <div class="gv-aba-painel" role="tabpanel" id="gv-painel-${aberta}" aria-labelledby="gv-aba-${aberta}" tabindex="0">${painel(aberta)}</div>`;
+}
+
+/**
+ * ADR-125: o avatar xl, o nome e o subtítulo, editáveis ali mesmo (Enter ou blur salva, Esc desfaz; web/lib/
+ * gaveta-identidade.ts). No Nod e no bot de outra pessoa, só leitura.
+ */
+function identidade(estado: Estado, a: Bot, dona: boolean): string {
+  if (!identidadeEditavel(dona)) {
+    return `<div class="gv-identidade gvn-id">${iconeAgente(a, "xl")}<h2 class="gvn-nome-fixo" title="${esc(a.nome)}">${esc(a.nome)}</h2><span class="gvn-sub-fixo">${esc(a.titulo || (dona ? "Seu bot" : "Bot da equipe"))}</span></div>`;
+  }
+  const aberto = estado.avatarAberto?.agenteId === a.id;
+  const avatar = `<div class="gvn-avatar-wrap"><button type="button" class="gvn-avatar" data-act="gaveta-avatar" data-id="${esc(a.id)}" aria-haspopup="dialog"${aberto ? ' aria-controls="gvn-pop"' : ""} aria-expanded="${aberto}" aria-label="Editar avatar de ${esc(a.nome)}" aria-describedby="gvn-dica">${iconeAgente(a, "xl")}<span class="gvn-lapis" aria-hidden="true">${ICONE.lapis}</span></button><span class="gvn-dica" id="gvn-dica" role="tooltip">Editar avatar</span>${aberto ? popoverAvatar(a) : ""}</div>`;
+  return `<div class="gv-identidade gvn-id">${avatar}
+    ${nomeEditavel(a, dona) ? `<label class="sr-only" for="gvn-nome">Nome do bot</label>
+    <input id="gvn-nome" class="gvn-nome" data-campo="nome" data-id="${esc(a.id)}" data-salvo="${esc(a.nome)}" value="${esc(a.nome)}" maxlength="60" autocomplete="off" spellcheck="false" title="Enter salva · Esc desfaz" aria-describedby="gvn-erro" />` : `<h2 class="gvn-nome-fixo" title="${esc(a.nome)}">${esc(a.nome)}</h2>`}
+    <label class="sr-only" for="gvn-sub">Subtítulo do bot</label>
+    <input id="gvn-sub" class="gvn-sub" data-campo="titulo" data-id="${esc(a.id)}" data-salvo="${esc(a.titulo)}" value="${esc(a.titulo)}" maxlength="80" autocomplete="off" placeholder="Adicionar um rótulo" title="Enter salva · Esc desfaz" aria-describedby="gvn-erro" />
+    <span class="gvn-erro-linha"><span class="gvn-erro-icone" aria-hidden="true">${ICONE.alerta}</span><span class="gvn-erro" id="gvn-erro" role="status"></span></span></div>`;
+}
+
+/** ADR-125: o popover do avatar, com as 8 formas e as 12 cores do mascote (rádios com setas) e Redefinir. */
+function popoverAvatar(a: Bot): string {
+  const formas = FORMAS_MASCOTE.map((forma, i) => {
+    const sel = a.forma === forma;
+    return `<button type="button" class="gvn-forma" role="radio" aria-checked="${sel}" tabindex="${sel ? 0 : -1}" aria-label="${NOMES_FORMAS[i]}" title="${NOMES_FORMAS[i]}" data-act="gaveta-forma" data-id="${esc(a.id)}" data-valor="${forma}">${iconeAgente({ ...a, forma }, "sm")}</button>`;
+  }).join("");
+  const cores = CORES_MASCOTE.map((cor, i) => {
+    const sel = a.cor === cor;
+    return `<button type="button" class="gvn-cor" role="radio" aria-checked="${sel}" tabindex="${sel ? 0 : -1}" aria-label="${NOMES_CORES[i]}" title="${NOMES_CORES[i]}" data-act="gaveta-cor" data-id="${esc(a.id)}" data-valor="${cor}"><span class="cor-amostra ${cor}"></span></button>`;
+  }).join("");
+  return `<div class="gvn-pop" id="gvn-pop" role="dialog" aria-label="Editar avatar">
+    <p class="gvn-pop-titulo" id="gvn-pop-formas">Forma</p><div class="gvn-formas" role="radiogroup" aria-labelledby="gvn-pop-formas">${formas}</div>
+    <p class="gvn-pop-titulo" id="gvn-pop-cores">Cor</p><div class="gvn-cores" role="radiogroup" aria-labelledby="gvn-pop-cores">${cores}</div>
+    <button type="button" class="gvn-acao-texto gvn-redefinir" data-act="gaveta-redefinir" data-id="${esc(a.id)}">Redefinir</button></div>`;
+}
+
+/** ADR-125: a aba Detalhes — o onboarding da guia, as Rotinas e a linha "Ajustes ›". */
+function abaDetalhes(estado: Estado, a: Bot, dona: boolean): string {
   const rotinas = estado.rotinas.filter((r) => r.rotina.agenteId === a.id);
-  const grupos = gruposDeAcesso(estado, a.id);
-  const colegas = (estado.frota?.agentes ?? []).filter((b) => b.id !== a.id && b.ownerId === a.ownerId && b.confirmado);
-  const linha = (conteudo: string, dados: string, extra = "") => `<button type="button" class="gv-linha" ${dados}>${conteudo}${extra}</button>`;
-  const irPara = (nivel: NivelGaveta["tipo"], id = "") => `data-act="gaveta" data-nivel="${nivel}" data-agente="${esc(a.id)}"${id ? ` data-id="${esc(id)}"` : ""}`;
-  const identidade = `<div class="gv-identidade">${iconeAgente(a, "xl")}<h2>${esc(a.nome)}</h2><span>${esc(a.titulo || "Seu bot")}</span>
-    <p class="gv-descricao">${esc(a.descricao || "Conte na conversa como este bot pode ajudar você.")}</p>
-    ${dona ? `<button type="button" class="gv-pilula" ${irPara("perfil")}>Editar perfil</button>` : ""}</div>`;
-
-  // definido em 2026-10-16: a tela do bot fica no topo do painel, como no Grok — miniatura (ou "Abrir" no
-  // escuro). Depois vêm identidade e Atalhos (Trabalhos e Atividade, chat limpo), como na main.
-  // A imagem ao vivo entra por web/telas/tela-do-bot.ts, sem regravar a gaveta.
-  const tela = dona ? `<section class="gv-secao gv-tela"><button type="button" class="tela-preview${a.computadorForaDoAr ? " tela-fora" : ""}" data-act="abrir-computador" data-id="${esc(a.id)}" data-tela-bot="${esc(a.id)}" aria-label="Abrir a tela de ${esc(a.nome)}"><img alt="" hidden /><span class="tela-abrir"><span class="tela-pilula">${ICONE.monitor}<span>Abrir</span></span></span></button><p class="tela-legenda">Tela de ${esc(a.nome)}</p></section>` : "";
-
-  // definido em 2026-09-24 (emenda da ADR-037): fora do ar, o computador do bot abre o painel — é o estado que muda o que
-  // o bot consegue fazer agora. A miniatura continua no topo; aqui fica o motivo e o "Tentar de novo".
-  const fora = a.computadorForaDoAr && dona ? a.computadorForaDoAr : null;
-  const computador = fora
-    ? `<section class="gv-secao"><h3>Computador do bot</h3><div class="detalhe-computador-fora"><span class="tag tag-vermelha">fora do ar</span><p>Desde ${esc(dataHora(fora.desde))} · ${esc(MOTIVO_FALHA_TEXTO[fora.motivo])}.</p><div class="dr-acoes">${botao("religar-computador", "Tentar de novo", { classe: "link sm", id: a.id })}${botao("abrir-computador", "Abrir computador", { classe: "link sm", id: a.id })}</div></div></section>`
-    : "";
-
-  // ADR-083 (#196): os trabalhos do bot abrem num nível da gaveta (Precisa de você, Trabalhando, Na fila, Terminados hoje).
-  const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
-  // Plano "tela limpa" (2026-10-16, T2): o Ligar saiu do topo da conversa e é o primeiro atalho.
-  const ligar = htmlLinhaLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[a.id], ligacao: estado.ligacaoViva }), a.nome);
-  const atalhos = `<section class="gv-secao"><h3>Atalhos</h3><div class="gv-cartao">
-      ${ligar}
-      ${linha(`${ICONE.brilho}<span class="gv-linha-txt">Planejar uma tarefa</span>`, 'data-act="preencher-prompt" data-texto="Me ajude a planejar esta tarefa: "')}
-      ${linha(`${ICONE.balao}<span class="gv-linha-txt">Pedir ajuda a outro bot</span>`, 'data-act="preencher-prompt" data-texto="Consulte o colega mais adequado da minha equipe para me ajudar com: "')}
-      ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, irPara("memoria"), ICONE.seta)}
-      ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, irPara("trabalhos"), ICONE.seta)}
-      ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, irPara("atividade"), ICONE.seta) : ""}
-    </div></section>`;
-
-  // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina (instrução,
-  // quando, histórico, Testar) abre no nível dela. A rotina parada por falta de acesso diz o app ali mesmo (ADR-044).
+  // definido em 2026-09-24 (revisão da interface): a chave liga/desliga fica na linha; o resto da rotina abre no nível
+  // dela. Revisto em 2026-10-23 (ADR-125): a parada por falta de acesso é uma linha neutra (só o ícone tem cor), com o
+  // botão de texto de um clique (emenda da ADR-044).
   const linhaRotina = ({ rotina: r, proximaExecucao, bloqueio, resumo }: RotinaDto) => {
     const ativa = r.estado === "ativa";
-    const quando = [resumo ? capitalizar(semFuso(resumo)) : "", ativa ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : "Pausada"].filter(Boolean).join(" · ");
-    const chave = `<button type="button" class="chave" role="switch" aria-checked="${ativa}" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}" aria-label="${ativa ? "Pausar" : "Ativar"} a rotina ${esc(r.instrucao)}"><span></span></button>`;
-    // A parada por falta de acesso fica à vista na linha, com o botão de um clique (emenda da ADR-044): é o que pede a pessoa.
-    const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
-    return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small>${esc(quando)}</small></span>`, irPara("rotina", r.id))}${chave}${parada}</li>`;
+    const rotulo = bloqueio ? "Parada" : ativa ? "Ativa" : "Pausada";
+    const quando = [resumo ? capitalizar(semFuso(resumo)) : "", ativa && !bloqueio ? `próxima ${interpolar(proximaExecucao, estado.agora)}` : ""].filter(Boolean).join(" · ");
+    const chave = dona ? `<button type="button" class="chave" role="switch" aria-checked="${ativa}" data-act="${ativa ? "pausar-rotina" : "ativar-rotina"}" data-id="${esc(r.id)}" aria-label="${ativa ? "Pausar" : "Ativar"} a rotina ${esc(r.instrucao)}"><span></span></button>` : "";
+    const parada = bloqueio ? `<div class="gvn-parada"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.alerta}</span><span>${esc(`${fraseDaParada(bloqueio)} ${desdeDaParada(bloqueio, estado.agora)}.`)}</span>${dona ? botaoDaParada(bloqueio, "gvn-acao-texto") : ""}</div>` : "";
+    return `<li class="detalhe-rotina rotina-${esc(r.estado)}${bloqueio ? " gvn-rotina-parada" : ""}">${linha(`<span class="gv-linha-txt"><b title="${esc(r.instrucao)}">${esc(r.instrucao)}</b><small><span class="gvn-estado">${rotulo}</span>${quando ? ` · ${esc(quando)}` : ""}</small></span>`, irPara(a, "rotina", r.id))}${chave}${parada}</li>`;
   };
-  const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara("nova-rotina")}>+ Nova</button>` : ""}</div>
-      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gv-rotina-vazia">Nada programado ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e aparece aqui.</p>`}
+  const rotinasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Rotinas</h3>${dona ? `<button type="button" class="gv-link" ${irPara(a, "nova-rotina")}>+ Nova</button>` : ""}</div>
+      ${rotinas.length ? `<ul class="gv-cartao">${rotinas.map(linhaRotina).join("")}</ul>` : `<p class="gvn-vazio">Nenhuma rotina ainda. Peça a ${esc(a.nome)} para fazer algo toda manhã e ela aparece aqui.</p>`}
       ${rotinas.length ? linhaOndeRoda(rotinas.find((r) => r.ondeRoda)?.ondeRoda, { plural: true, comAtalho: true }) : ""}
     </section>`;
+  const ajustes = `<section class="gv-secao"><div class="gv-cartao">${linha(`${ICONE.ajustes}<span class="gv-linha-txt">Ajustes<small>${dona ? "Ligar, trabalhos, memória, missão e acessos" : "Trabalhos, memória e acessos"}</small></span>`, `${irPara(a, "ajustes")} data-origem="ajustes"`, ICONE.seta)}</div></section>`;
+  // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
+  const o = estado.onboarding;
+  const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
+  return onboarding + rotinasHtml + ajustes;
+}
 
+/** "Falta acesso ao Meta Ads" / "Falta conectar o Meta Ads": a frase da linha neutra da rotina parada (ADR-125). */
+function fraseDaParada(b: NonNullable<RotinaDto["bloqueio"]>): string {
+  return b.motivo === "sem_conexao" ? `Falta conectar o ${b.app}` : `Falta acesso ao ${b.app}`;
+}
+
+/** O estado do computador que a gaveta mostra: o fora do ar da frota manda; depois, o último pulso; nada = carregando. */
+export function estadoDoComputadorNaGaveta(estado: Pick<Estado, "computadorVisto">, a: Pick<Bot, "id" | "computadorForaDoAr">): EstadoComputadorBot | null {
+  if (a.computadorForaDoAr) return "fora";
+  return estado.computadorVisto[a.id] ?? null;
+}
+
+/**
+ * ADR-125: a aba Computador — a miniatura e os estados ligado, dormindo, sem computador e fora do ar. A imagem ao vivo
+ * entra por web/telas/tela-do-bot.ts, que só observa com esta aba à vista (`data-comp-bot`), sem regravar a gaveta.
+ */
+function abaComputador(estado: Estado, a: Bot): string {
+  const visto = estadoDoComputadorNaGaveta(estado, a);
+  const acao = estado.computadorAcao?.agenteId === a.id ? estado.computadorAcao.tipo : null;
+  const legenda = `<p class="tela-legenda">Tela de ${esc(a.nome)}</p>`;
+  const miniatura = `<button type="button" class="tela-preview" data-act="abrir-computador" data-id="${esc(a.id)}" data-tela-bot="${esc(a.id)}" aria-label="Abrir a tela de ${esc(a.nome)}"><img alt="" hidden /><span class="tela-abrir"><span class="tela-pilula">${ICONE.monitor}<span>Abrir</span></span></span></button>`;
+  let corpo: string;
+  if (visto === null) {
+    corpo = `<p class="gvn-comp-linha mudo">Vendo o computador…</p>`;
+  } else if (visto === "fora") {
+    const f = a.computadorForaDoAr;
+    const motivo = f ? `Desde ${dataHora(f.desde)} · ${MOTIVO_FALHA_TEXTO[f.motivo]}.` : "O computador parou de responder.";
+    corpo = `<div class="tela-preview gvn-tela-fora" role="img" aria-label="Tela de ${esc(a.nome)} fora do ar"><span>Fora do ar</span></div>${legenda}
+      <div class="gv-linha gvn-alerta gvn-danger" role="status"><span class="gvn-alerta-icone" aria-hidden="true">${ICONE.alerta}</span><span class="gv-linha-txt"><b>Fora do ar</b><small>${esc(motivo)}</small></span></div>
+      <div class="gvn-acoes-texto">${botao("religar-computador", acao === "religar" ? "Tentando de novo…" : "Tentar de novo", { classe: "gvn-acao-texto", id: a.id, desabilitado: acao === "religar" })}${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
+  } else if (visto === "dormindo") {
+    corpo = `<div class="gvn-sono"><b>O computador está dormindo</b><small>Acorda sozinho quando ${esc(a.nome)} precisar.</small>${botao("computador-acordar", acao === "acordar" ? "Acordando…" : "Acordar", { classe: "gvn-acao-texto", id: a.id, desabilitado: acao === "acordar" })}${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
+  } else if (visto === "sem") {
+    corpo = `<p class="gvn-comp-sem">${esc(a.nome)} ainda não tem um computador próprio. Ele ganha um na primeira vez que precisar usar a tela.</p><div class="gvn-acoes-texto">${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
+  } else if (visto === "indisponivel" || visto === "erro") {
+    corpo = `<p class="gvn-comp-linha mudo" role="status">${visto === "indisponivel" ? "Ambiente indisponível agora. O computador volta quando o ambiente voltar." : "Não deu para ver o computador agora. Tentando de novo…"}</p><div class="gvn-acoes-texto">${botao("abrir-computador", "Abrir computador", { classe: "gvn-acao-texto", id: a.id })}</div>`;
+  } else {
+    corpo = `${miniatura}${legenda}<p class="gvn-comp-linha">${visto === "ocupado" ? "Ligado · usando a tela agora" : "Ligado · pronto para usar"}</p>`;
+  }
+  return `<section class="gv-secao gv-tela" data-comp-bot="${esc(a.id)}"${visto === null ? ' aria-busy="true"' : ""}>${corpo}</section>`;
+}
+
+/** ADR-125: a aba Biblioteca chega com a NOD-326 (atrás de `BIBLIOTECA_NA_GAVETA`). */
+// Revisão 2 da NOD-349: a Pasta sai de Ajustes e vem para cá quando a chave liga (nada some sem destino).
+export function abaBiblioteca(estado: Estado, a: Bot, dona: boolean): string {
+  const pasta = dona ? `<div class="gv-cartao">${linhaDaPasta(estado, a)}</div>` : "";
+  return `${pasta}<p class="gvn-vazio">Os arquivos de ${esc(a.nome)} aparecem aqui.</p>`;
+}
+
+/**
+ * ADR-125 (emenda ADR-060 item 5): o nível Ajustes — Atalhos (Ligar, Memória, Trabalhos, Atividade), Perfil (Missão e
+ * voz), Acessos, Ambiente e, no fim, o que é do Modo dev. Colabora com saiu; a Pasta fica em Ambiente até a Biblioteca.
+ */
+function nivelAjustes(estado: Estado, a: Bot, dona: boolean): Nivel {
+  const grupos = gruposDeAcesso(estado, a.id);
+  const trabalhosAbertos = abertosDoBot(estado, a.id, a.conversaId).length;
+  const ligar = dona ? htmlLinhaLigar(botaoLigar({ agente: a, pessoaId: estado.sessao?.pessoaId, disponibilidade: estado.disponibilidadeLigacao[a.id], ligacao: estado.ligacaoViva }), a.nome) : "";
+  const origem = (n: string) => `${irPara(a, n as NivelGaveta["tipo"])} data-origem="${n}"`;
+  const atalhos = `<section class="gv-secao gvn-atalhos"><h3>Atalhos</h3><div class="gv-cartao">
+      ${ligar}
+      ${linha(`${ICONE.livro}<span class="gv-linha-txt">Memória</span>`, origem("memoria"), ICONE.seta)}
+      ${linha(`${ICONE.relogio}<span class="gv-linha-txt">Trabalhos</span>${trabalhosAbertos ? `<span class="gv-meta">${trabalhosAbertos} ${trabalhosAbertos === 1 ? "aberto" : "abertos"}</span>` : ""}`, origem("trabalhos"), ICONE.seta)}
+      ${dona ? linha(`${ICONE.pulso}<span class="gv-linha-txt">Atividade</span>${linhaAtividadeHoje(estado, a.id)}`, origem("atividade"), ICONE.seta) : ""}
+    </div></section>`;
+  const perfil = dona
+    ? `<section class="gv-secao"><h3>Perfil</h3><div class="gv-cartao">${linha(`${ICONE.pessoa}<span class="gv-linha-txt">Missão e voz<small>O que ${esc(a.nome)} faz e como fala nas ligações</small></span>`, origem("perfil"), ICONE.seta)}</div></section>`
+    : `<section class="gv-secao"><h3>Perfil</h3><p class="gv-descricao">${esc(a.descricao || "Sem missão escrita.")}</p></section>`;
   const acessos = grupos
-    .map((g) => `<li class="acesso">${linha(`${logoApp(estado, g.slug, g.nome)}<span class="gv-linha-txt"><b>${esc(g.nome)}</b><small>${esc(nivelDoGrupo(g).rotulo)}</small></span>${g.indisponivel ? '<span class="tag tag-ambar" title="o conector está fora do ar">indisponível</span>' : ""}`, irPara("acesso", g.chave), ICONE.seta)}</li>`)
+    .map((g) => `<li class="acesso">${linha(`${logoApp(estado, g.slug, g.nome)}<span class="gv-linha-txt"><b>${esc(g.nome)}</b><small>${esc(nivelDoGrupo(g).rotulo)}${g.indisponivel ? " · indisponível" : ""}</small></span>${g.indisponivel ? `<span class="gvn-alerta-icone" aria-hidden="true" title="o conector está fora do ar">${ICONE.alerta}</span>` : ""}`, `${irPara(a, "acesso", g.chave)} data-origem="acesso:${esc(g.chave)}"`, ICONE.seta)}</li>`)
     .join("");
-  const acessosHtml = `<section class="gv-secao secao-acessos"><div class="gv-secao-cab"><h3>Acessos</h3>${dona ? `<button type="button" class="gv-link" ${irPara("dar-acesso")} aria-label="Dar a ${esc(a.nome)} acesso a um app">+ Dar acesso</button>` : ""}</div>
+  const acessosHtml = `<section class="gv-secao secao-acessos"><div class="gv-secao-cab"><h3>Acessos</h3>${dona ? `<button type="button" class="gv-link" ${origem("dar-acesso")} aria-label="Dar a ${esc(a.nome)} acesso a um app">+ Dar acesso</button>` : ""}</div>
       ${acessos ? `<ul class="gv-cartao">${acessos}</ul>` : '<p class="mudo">Este bot ainda não usa nenhuma ferramenta externa. Ele pede o acesso quando precisar — ou dê você mesmo.</p>'}
     </section>`;
-
-  const colegasHtml = `<section class="gv-secao"><div class="gv-secao-cab"><h3>Colabora com</h3><button type="button" class="gv-link" data-act="navegar" data-tela="nova-sala">Criar sala</button></div>
-      ${colegas.length ? `<div class="gv-cartao">${colegas.slice(0, 8).map((b) => `<button type="button" class="gv-linha colega" data-act="preencher-prompt" data-texto="Consulte @${esc(b.nome)} sobre: ">${iconeAgente(b, "sm")}<span class="gv-linha-txt"><b>${esc(b.nome)}</b><small>${esc(b.titulo || "Bot da sua equipe")}</small></span></button>`).join("")}</div>` : '<p class="mudo">Crie outro bot para eles trabalharem juntos.</p>'}
-    </section>`;
-
-  // definido em 2026-10-16: a miniatura do topo é o computador. A linha em Ambiente fica no Modo dev.
   const modo = MODOS[a.modoAprovacao ?? "manual"];
   const ambiente = dona
     ? `<div class="gv-cartao">
-        ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>${a.computadorForaDoAr ? '<span class="tag tag-vermelha">fora do ar</span>' : ""}`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
-        ${linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`)}
+        ${estado.modoDev.ligado ? linha(`${ICONE.monitor}<span class="gv-linha-txt">Computador do bot</span>`, `data-act="abrir-computador" data-id="${esc(a.id)}" title="O computador próprio do bot (ADR-037), não o seu Mac"`) : ""}
+        ${pastaDaDona(estado, a)}
         ${renderLinhaInteligencia(a, contextoInteligencia(estado), estado.menuIa === a.id)}
         ${linha(`${ICONE.escudo}<span class="gv-linha-txt">Aprovações</span><span class="gv-meta">${esc(modo.curto)}</span>`, `data-act="modo-aprovacao" data-id="${esc(a.id)}" title="${esc(`${modo.titulo}: ${modo.descricao}`)}"`)}
       </div>`
     : `<p class="mudo">Aprovações: ${esc(modo.titulo)}</p>`;
   const ambienteHtml = `<section class="gv-secao"><h3>Ambiente</h3>${ambiente}<p class="mudo gv-nota">${estado.executor?.atual === "catcher" ? "Simulação · respostas de teste" : "Sua conta de IA · computador conectado"}</p></section>`;
-
-  // ADR-077: durante a configuração guiada, o painel da guia mostra o que a pessoa contou e o que já foi montado.
-  const o = estado.onboarding;
-  const onboarding = estado.onboardingAberto && o && o.guia?.id === a.id && (o.etapa === "entrevista" || o.etapa === "configurando" || o.etapa === "concluido") ? secaoOnboardingDetalhes(o) : "";
-  // Plano "tela limpa" (2026-10-16, T2): o selo MODO DEV, o "Hoje com" e as "Linhas abertas" saíram do topo da conversa.
   const dev = estado.modoDev.ligado ? `<section class="gv-secao gv-dev"><h3>Modo dev</h3><div class="gv-dev-corpo">${renderSeloModoDev(estado, a.conversaId, a.nome)}</div></section>` : "";
-  return tela + identidade + onboarding + computador + atalhos + rotinasHtml + acessosHtml + colegasHtml + dev + ambienteHtml;
+  return { titulo: "Ajustes", corpo: atalhos + perfil + acessosHtml + ambienteHtml + dev };
+}
+
+/** A Pasta de trabalho vai para a Biblioteca (NOD-326); até ela chegar, fica em Ajustes › Ambiente (ADR-125: nada some sem destino). */
+export function pastaDaDona(estado: Estado, a: Bot, biblioteca = BIBLIOTECA_NA_GAVETA): string {
+  return biblioteca ? "" : linhaDaPasta(estado, a);
+}
+function linhaDaPasta(estado: Estado, a: Bot): string {
+  return linha(`${ICONE.pasta}<span class="gv-linha-txt">Pasta de trabalho${mostraCaminhoDaPasta(estado.executor?.harnesses, a.harness) ? `<small><code>${esc(caminhoDaPastaDoBot(a.nome))}</code></small>` : ""}</span>`, `data-act="abrir-workspace" data-id="${esc(a.id)}"`);
 }
 
 // ---- níveis ---------------------------------------------------------------------------------------------------------
@@ -187,6 +311,8 @@ function renderNivel(estado: Estado, a: Bot, dona: boolean, nivel: NivelGaveta):
       return { titulo: `Trabalhos de ${a.nome}`, corpo: renderGavetaTrabalhos(estado, a.id) };
     case "atividade":
       return { titulo: "Atividade", corpo: renderAtividade(estado, a) };
+    case "ajustes":
+      return nivelAjustes(estado, a, dona);
   }
 }
 
@@ -212,7 +338,7 @@ function nivelRotina(estado: Estado, a: Bot, id: string): Nivel {
     : !exec.length
       ? '<p class="mudo">nunca executou</p>'
       : `<ul class="gv-execucoes">${exec.slice(0, 5).map((e, i) => `<li class="exec exec-${esc(e.desfecho)}"><span class="gv-exec-ponto" aria-hidden="true"></span><span class="gv-exec-quando">${esc(dataHora(e.em, r.fusoIana))}</span><span>${esc(rotuloExecucao(e, r.fusoIana))}</span>${i === 0 && atalhoNaExecucao ? `<span class="exec-acao">${ATALHO_SEMPRE_LIGADA}</span>` : ""}</li>`).join("")}</ul>`;
-  const parada = bloqueio ? `<div class="dr-parada">${tagDaParada(bloqueio)}<small>${esc(desdeDaParada(bloqueio, estado.agora))}</small>${botaoDaParada(bloqueio, "pri sm")}</div>` : "";
+  const parada = bloqueio ? `<div class="gvn-parada" role="status"><span class="gvn-parada-icone" aria-hidden="true">${ICONE.alerta}</span><span>${esc(`${fraseDaParada(bloqueio)} ${desdeDaParada(bloqueio, estado.agora)}.`)}</span>${botaoDaParada(bloqueio, "gvn-acao-texto")}</div>` : "";
   const detalhe = (rotulo: string, valor: string) => (valor ? `<dt>${esc(rotulo)}</dt><dd>${esc(valor)}</dd>` : "");
   const corpo = `${parada}
     <section class="gv-bloco"><h3>Instrução</h3><p class="gv-texto">${esc(r.instrucao)}</p></section>
@@ -259,18 +385,11 @@ function nivelAcesso(estado: Estado, a: Bot, dona: boolean, chave: string): Nive
   return { titulo: g.nome, corpo, rodape };
 }
 
-/** Editar perfil, enxuto: mascote (forma e cor), nome, título e missão. O resto está no menu do bot e nas linhas da gaveta. */
+/** ADR-125: Missão e voz — o antigo Editar perfil sem forma, cor, nome e título (esses se editam no topo da gaveta). */
 function nivelPerfil(a: Bot): Nivel {
-  const formas = FORMAS_MASCOTE.map((forma, i) => `<label class="gv-forma" title="${NOMES_FORMAS[i]}"><input type="radio" name="forma" value="${forma}"${a.forma === forma ? " checked" : ""} data-customiza-mascote />${iconeAgente({ ...a, forma }, "sm")}<span class="sr-only">${NOMES_FORMAS[i]}</span></label>`).join("");
-  const cores = CORES_MASCOTE.map((cor, i) => `<label class="gv-cor" title="${NOMES_CORES[i]}"><input type="radio" name="cor" value="${cor}"${a.cor === cor ? " checked" : ""} data-customiza-mascote /><span class="cor-amostra ${cor}"></span><span class="sr-only">${NOMES_CORES[i]}</span></label>`).join("");
-  const corpo = `<div class="gv-mascote">${iconeAgente(a, "xl", "disponivel", "data-mascote-preview")}
-      <div class="gv-formas" role="radiogroup" aria-label="Forma do mascote">${formas}</div>
-      <div class="gv-cores" role="radiogroup" aria-label="Cor do mascote">${cores}</div></div>
-    <label class="gv-campo">Nome<input name="nome" value="${esc(a.nome)}" required maxlength="60"${a.papel === "nod" ? ' readonly aria-describedby="nome-do-nod"' : ""} />${a.papel === "nod" ? '<small id="nome-do-nod" class="mudo">O nome do Nod não muda.</small>' : ""}</label>
-    <label class="gv-campo">Título<input name="titulo" value="${esc(a.titulo)}" maxlength="80" /></label>
-    <label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>
+  const corpo = `<label class="gv-campo">Missão e orientações<textarea name="descricao" rows="10">${esc(a.descricao)}</textarea></label>
     ${campoVoz(a)}`;
-  return { titulo: "Editar perfil", corpo, rodape: rodapeDeFormulario("Salvar"), form: `data-form="editar-perfil" data-id="${esc(a.id)}"` };
+  return { titulo: "Missão e voz", corpo, rodape: rodapeDeFormulario("Salvar"), form: `data-form="editar-perfil" data-id="${esc(a.id)}"` };
 }
 
 /**

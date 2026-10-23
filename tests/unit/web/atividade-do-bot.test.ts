@@ -43,20 +43,23 @@ function aberta(d: AtividadeDto | null, extra: Partial<Estado> = {}, vista: Part
   return reduzir(comVista, { tipo: "hidratar-atividade", agenteId: "ada", dia, atividade: d });
 }
 
-describe("a linha 'Atividade' em Atalhos", () => {
+// ADR-125 (NOD-349): os Atalhos moram no nível Ajustes.
+const emAjustes = (e: Estado): Estado => reduzir(e, { tipo: "gaveta", agenteId: "ada", nivel: { tipo: "ajustes" } });
+
+describe("a linha 'Atividade' em Atalhos (nível Ajustes)", () => {
   it("logo abaixo de Trabalhos, com 'N hoje' só depois de a contagem chegar; abre o nível", () => {
-    const sem = renderDetalhes(base());
+    const sem = renderDetalhes(emAjustes(base()));
     expect(sem).toContain('data-nivel="atividade"');
     expect(sem.indexOf('data-nivel="trabalhos"')).toBeLessThan(sem.indexOf('data-nivel="atividade"'));
     expect(sem).not.toContain(" hoje</span>");
-    const com = renderDetalhes(reduzir(base(), { tipo: "hidratar-atividade-hoje", agenteId: "ada", dia: HOJE, total: 14 }));
+    const com = renderDetalhes(emAjustes(reduzir(base(), { tipo: "hidratar-atividade-hoje", agenteId: "ada", dia: HOJE, total: 14 })));
     expect(com).toContain('<span class="gv-meta">14 hoje</span>');
-    expect(renderDetalhes(reduzir(base(), { tipo: "hidratar-atividade-hoje", agenteId: "ada", dia: HOJE, total: null }))).not.toContain(" hoje</span>");
+    expect(renderDetalhes(emAjustes(reduzir(base(), { tipo: "hidratar-atividade-hoje", agenteId: "ada", dia: HOJE, total: null })))).not.toContain(" hoje</span>");
     expect(nivelDaGaveta("atividade")).toEqual({ tipo: "atividade" });
   });
 
   it("bot de outra pessoa (equipe) não tem a linha: a rota é só do dono", () => {
-    expect(renderDetalhes(base({ frota: { agentes: [{ ...BOT, ownerId: "outra" }] } as never }))).not.toContain('data-nivel="atividade"');
+    expect(renderDetalhes(emAjustes(base({ frota: { agentes: [{ ...BOT, ownerId: "outra" }] } as never })))).not.toContain('data-nivel="atividade"');
   });
 });
 

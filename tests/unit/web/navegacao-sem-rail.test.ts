@@ -100,8 +100,9 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
   const no = (estado: Estado, nivel: NonNullable<Estado["gaveta"]>["nivel"]): Estado => ({ ...estado, gaveta: { agenteId: "a1", nivel } });
 
   it("traz rotinas com controle real, sem exigir a tela cheia; Testar e Ajustar ficam no nível da rotina", () => {
+    // ADR-125: a chave de pausar é edição — só a dona a vê.
     const estado: Estado = {
-      ...base,
+      ...dona,
       rotinas: [{ rotina: { id: "r1", agenteId: "a1", conversaId: "c1", instrucao: "Resumo dos PRs. Um por repositório.", cron: "0 8 * * 1-5", fusoIana: "America/Sao_Paulo", estado: "ativa", exigeAprovacao: true, fonte: "", entregavel: "", limitesAprovacao: "", politicaSemDado: "" }, proximaExecucao: 10_000, resumo: "dias úteis às 08:00 (America/Sao_Paulo)" } as never],
       agora: 0,
     };
@@ -124,7 +125,8 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       conectores: [{ id: "k1", nome: "GitHub", slug: "github", catalogo: [], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
       concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "ler_issues" } as never] },
     };
-    const html = renderDetalhes(estado);
+    // ADR-125: os acessos moram no nível Ajustes.
+    const html = renderDetalhes(no(estado, { tipo: "ajustes" }));
     expect(html).toContain("GitHub");
     // Sem a sonda dizer que é leitura, o painel não promete "só leitura".
     expect(html).toContain("<small>pode alterar</small>");
@@ -149,7 +151,7 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
         { id: "g2", agenteId: "a1", conectorId: "k1", capacidade: "GMAIL_LIST_LABELS" } as never,
       ] },
     };
-    const html = renderDetalhes(estado);
+    const html = renderDetalhes(no(estado, { tipo: "ajustes" }));
     expect(html.match(/class="acesso"/g)).toHaveLength(1);
     expect(html).toContain("<small>só leitura</small>");
     expect(html).not.toContain("GMAIL_FETCH_EMAILS");
@@ -184,11 +186,11 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
         { id: "g2", agenteId: "a1", conectorId: "k0", capacidade: "GMAIL_LIST_LABELS" } as never,
       ] },
     };
-    const html = renderDetalhes(estado);
+    const html = renderDetalhes(no(estado, { tipo: "ajustes" }));
     expect(html.match(/class="acesso"/g)).toHaveLength(1);
     expect(html).toContain('src="/api/t/t/marketplace/gmail/logo"');
-    expect(html).toContain("<small>pode ler e alterar</small>");
-    expect(html).toContain("indisponível");
+    // ADR-125: "indisponível" entra no texto da linha, com o ícone de alerta (sem a tag âmbar).
+    expect(html).toContain("<small>pode ler e alterar · indisponível</small>");
     const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "gmail" }));
     expect(nivel).toContain("Pode consultar e fazer alterações em seu nome.");
     expect(nivel).toContain("3 ações permitidas");
@@ -208,7 +210,7 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
       conectores: [{ id: "k1", nome: "Slack", slug: "slack", catalogo: [{ nome: "SLACK_SEND_MESSAGE", readOnlyHint: false }], habilitado: true, transporte: "http", env: {}, args: [], declaracao: "nao-toca", ultimaFalha: null, sondadoEm: null } as never],
       concessoes: { a1: [{ id: "g1", agenteId: "a1", conectorId: "k1", capacidade: "SLACK_SEND_MESSAGE" } as never] },
     };
-    expect(renderDetalhes(estado)).toContain("<small>pode alterar</small>");
+    expect(renderDetalhes(no(estado, { tipo: "ajustes" }))).toContain("<small>pode alterar</small>");
     const nivel = renderDetalhes(no(estado, { tipo: "acesso", id: "slack" }));
     expect(nivel).toContain("Pode fazer alterações em seu nome.");
     expect(nivel).not.toContain("Deixar só leitura");
@@ -249,7 +251,7 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
   });
 
   it("sem acessos, convida a dar acesso em vez de deixar a seção muda", () => {
-    const html = renderDetalhes(dona);
+    const html = renderDetalhes(no(dona, { tipo: "ajustes" }));
     expect(html).toContain("ainda não usa nenhuma ferramenta externa");
     expect(html).toContain('data-act="gaveta" data-nivel="dar-acesso" data-agente="a1"');
   });
@@ -270,12 +272,15 @@ describe("o painel do bot, destino de Rotinas e Marketplace", () => {
     expect(html).not.toContain('data-act="conectar-app" data-id="slack"');
   });
 
-  it("Editar perfil abre enxuto na gaveta: mascote, nome, título e missão — sem a escolha de modelo", () => {
+  // ADR-125: nome, subtítulo, forma e cor se editam no topo da gaveta; o nível vira "Missão e voz".
+  it("Missão e voz abre enxuto na gaveta: só a missão e a voz — sem nome, avatar nem modelo", () => {
     const html = renderDetalhes(no(dona, { tipo: "perfil" }));
     expect(html).toContain('data-form="editar-perfil" data-id="a1"');
-    expect(html).toContain('name="nome" value="Vera"');
-    expect(html).toContain('name="forma"');
-    expect(html).toContain('name="cor"');
+    expect(html).toContain("Missão e voz");
+    expect(html).toContain('name="descricao"');
+    expect(html).not.toContain('name="nome"');
+    expect(html).not.toContain('name="forma"');
+    expect(html).not.toContain('name="cor"');
     expect(html).not.toContain('name="inteligencia"');
     expect(html).not.toContain("Catálogo Bloub");
   });

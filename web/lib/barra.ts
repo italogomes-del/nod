@@ -4,16 +4,26 @@ import type { Mensagem } from "../../src/contracts/mensagem.ts";
 /**
  * O "/" do campo (definido em 2026-09-28; canvas "Comandos /"). Puro: o que a lista mostra para o que foi digitado.
  * Três grupos, nesta ordem: os que a pessoa usou com este bot, os da conversa (ações do nod) e as skills do Mac.
+ * ADR-125 (NOD-349): na conversa com um bot, os atalhos que saíram da gaveta (/planejar, /pedir-ajuda) vêm antes de
+ * tudo; escolher um deles troca o "/nome" pelo começo do pedido, e a pessoa completa.
  * A lista de comandos da conversa vem do servidor (a web não importa valor de src — ADR-018).
  */
 export type ItemDaBarra = {
   nome: string;
   descricao: string;
-  grupo: "recentes" | "conversa" | "skills";
+  grupo: "atalhos" | "recentes" | "conversa" | "skills";
   /** Origem da skill ("gstack", "posthog", "Claude Code"), ou o nome do terminal de um comando da conversa. */
   etiqueta: string;
   argumento?: string;
+  /** Só nos atalhos: o texto que entra no campo no lugar do "/nome". */
+  texto?: string;
 };
+
+/** Os atalhos da gaveta antiga (Planejar uma tarefa, Pedir ajuda a outro bot), com o mesmo texto de antes. */
+export const ATALHOS_DA_BARRA: readonly ItemDaBarra[] = [
+  { nome: "planejar", descricao: "Planejar uma tarefa", grupo: "atalhos", etiqueta: "", texto: "Me ajude a planejar esta tarefa: " },
+  { nome: "pedir-ajuda", descricao: "Pedir ajuda a outro bot", grupo: "atalhos", etiqueta: "", texto: "Consulte o colega mais adequado da minha equipe para me ajudar com: " },
+];
 
 export type ListaDaBarra = {
   itens: ItemDaBarra[];
@@ -64,8 +74,9 @@ export function recentesDaConversa(mensagens: readonly Mensagem[]): string[] {
   return nomes;
 }
 
-export function listaDaBarra(dto: ComandosDto | null, filtro: string, recentes: readonly string[]): ListaDaBarra {
+export function listaDaBarra(dto: ComandosDto | null, filtro: string, recentes: readonly string[], comAtalhos = false): ListaDaBarra {
   const f = filtro.toLowerCase();
+  const atalhos = comAtalhos ? ATALHOS_DA_BARRA.filter((a) => posicao(a.nome, f) >= 0) : [];
   const doMacLista = dto?.doMac?.comandos ?? [];
   const conversa = (dto?.daConversa ?? []).filter((c) => [c.nome, ...c.apelidos].some((n) => posicao(n, f) >= 0));
   const ordenar = <T extends { nome: string }>(xs: T[]) => xs.map((x) => ({ x, p: posicao(x.nome, f) })).filter((y) => y.p >= 0).sort((a, b) => a.p - b.p).map((y) => y.x);
@@ -78,7 +89,7 @@ export function listaDaBarra(dto: ComandosDto | null, filtro: string, recentes: 
   const teto = f ? SKILLS_COM_FILTRO : SKILLS_SEM_FILTRO;
   const soDoTerminal = f && dto?.doMac?.soDoTerminal.includes(f) ? f : null;
   return {
-    itens: [...recentesItens, ...conversa.map(daConversa), ...skills.slice(0, teto).map((c) => doMac(c, "skills"))],
+    itens: [...atalhos, ...recentesItens, ...conversa.map(daConversa), ...skills.slice(0, teto).map((c) => doMac(c, "skills"))],
     maisSkills: Math.max(0, skills.length - teto),
     soDoTerminal,
     semCatalogo: !dto?.doMac,

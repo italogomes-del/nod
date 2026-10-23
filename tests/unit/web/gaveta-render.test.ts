@@ -103,6 +103,28 @@ describe("o render da gaveta acompanha o rascunho sem apagar os campos não salv
     expect(detalhes.innerHTML).toContain(">Sonnet · Máximo<");
   });
 
+  it("com o foco no nome, o resto da gaveta redesenha e o campo continua o mesmo nó (revisão 2 da NOD-349)", () => {
+    vi.stubGlobal("CSS", { escape: (v: string) => v });
+    const visao = (e: Estado): Estado => ({ ...e, gaveta: null, tela: { tipo: "conversa", conversaId: "conversa", agenteId: "clarice" } });
+    let e = visao(cenario());
+    atualizarGaveta(e, null);
+    expect(detalhes.innerHTML).toContain('data-campo="nome" data-id="clarice"');
+    const campo = { matches: () => true, dataset: { campo: "nome", id: "clarice", salvo: "Clarice" }, selectionStart: 3, selectionEnd: 3, blur: vi.fn(), focus: vi.fn(), setSelectionRange: vi.fn() };
+    const novo = { dataset: { salvo: "Clarice" }, replaceWith: vi.fn() };
+    vi.stubGlobal("document", { activeElement: campo, getElementById: (id: string) => id === "detalhes" ? detalhes : null, querySelector: (q: string) => q.includes('[data-campo="nome"][data-id="clarice"]') ? novo : null });
+    e = reduzir(e, { tipo: "agente-local", agenteId: "clarice", mudanca: { titulo: "Pesquisa e resumo" } });
+    atualizarGaveta(e, null);
+    expect(detalhes.innerHTML).toContain('value="Pesquisa e resumo"');
+    expect(novo.replaceWith).toHaveBeenCalledWith(campo);
+    expect(campo.setSelectionRange).toHaveBeenCalledWith(3, 3);
+    expect(campo.blur).not.toHaveBeenCalled();
+    // Outro bot na tela: o campo não volta, então o blur salva antes de o nó sumir.
+    e = { ...e, frota: { ...e.frota!, agentes: [...e.frota!.agentes, { ...e.frota!.agentes[0]!, id: "outro", nome: "Outro", conversaId: "c2" }] }, tela: { tipo: "conversa", conversaId: "c2", agenteId: "outro" } };
+    atualizarGaveta(e, null);
+    expect(campo.blur).toHaveBeenCalledTimes(1);
+    expect(detalhes.innerHTML).toContain('data-campo="nome" data-id="outro"');
+  });
+
   it("trocar modo, IA fixa e ordem atualiza os controles depois da primeira mudança", () => {
     let e = cenario();
     atualizarGaveta(e, null);
@@ -133,25 +155,25 @@ describe("o render da gaveta acompanha o rascunho sem apagar os campos não salv
     expect(detalhes.innerHTML.indexOf('data-ordem-item="claude-cli"')).toBeLessThan(detalhes.innerHTML.indexOf('data-ordem-item="codex-cli"'));
   });
 
-  it("mantém o perfil digitado durante tick e reidratação e volta a desenhar quando a mudança pendente é limpa", () => {
+  it("mantém a missão digitada (Missão e voz, ADR-125) durante tick e reidratação e volta a desenhar quando a mudança pendente é limpa", () => {
     let e = cenario({ tipo: "perfil" });
     atualizarGaveta(e, null);
-    expect(detalhes.innerHTML).toContain('name="nome" value="Clarice"');
+    expect(detalhes.innerHTML).toContain('name="descricao" rows="10">Ajuda a pesquisar');
     const suja = JSON.stringify(e.gaveta);
-    detalhes.innerHTML = detalhes.innerHTML.replace('name="nome" value="Clarice"', 'name="nome" value="Nome digitado"');
+    detalhes.innerHTML = detalhes.innerHTML.replace('name="descricao" rows="10">Ajuda a pesquisar', 'name="descricao" rows="10">Missão digitada');
     const digitado = detalhes.innerHTML;
 
     e = reduzir(e, { tipo: "tick", agora: 10_000 });
     atualizarGaveta(e, suja);
     expect(detalhes.innerHTML).toBe(digitado);
 
-    e = reduzir(e, { tipo: "hidratar-frota", frota: { ...frota, agentes: frota.agentes.map((a) => ({ ...a, nome: "Nome recebido" })) } });
+    e = reduzir(e, { tipo: "hidratar-frota", frota: { ...frota, agentes: frota.agentes.map((a) => ({ ...a, descricao: "Missão recebida" })) } });
     atualizarGaveta(e, suja);
     expect(detalhes.innerHTML).toBe(digitado);
 
     atualizarGaveta(e, null);
-    expect(detalhes.innerHTML).toContain('name="nome" value="Nome recebido"');
-    expect(detalhes.innerHTML).not.toContain("Nome digitado");
+    expect(detalhes.innerHTML).toContain('name="descricao" rows="10">Missão recebida');
+    expect(detalhes.innerHTML).not.toContain("Missão digitada");
   });
 
   it("devolve o foco ao modelo clicado e mantém a rolagem quando os botões são recriados", () => {

@@ -86,3 +86,17 @@ describe("o / desenhado", () => {
     expect(comChipDeComando("sem comando")).not.toContain("chip-comando");
   });
 });
+
+describe("ADR-125 (NOD-349): Planejar e Pedir ajuda no / da conversa", () => {
+  it("na conversa com bot, os atalhos vêm primeiro e trazem o texto que entra no campo", () => {
+    const l = listaDaBarra(DTO, "", [], true);
+    expect(l.itens.slice(0, 2).map((i) => [i.nome, i.grupo])).toEqual([["planejar", "atalhos"], ["pedir-ajuda", "atalhos"]]);
+    expect(l.itens[0]?.texto).toBe("Me ajude a planejar esta tarefa: ");
+  });
+
+  it("o filtro vale para os atalhos; fora da conversa (sem comAtalhos) eles não aparecem", () => {
+    expect(listaDaBarra(DTO, "plan", [], true).itens.map((i) => i.nome)).toContain("planejar");
+    expect(listaDaBarra(DTO, "plan", [], true).itens.map((i) => i.nome)).not.toContain("pedir-ajuda");
+    expect(listaDaBarra(DTO, "", []).itens.some((i) => i.grupo === "atalhos")).toBe(false);
+  });
+});

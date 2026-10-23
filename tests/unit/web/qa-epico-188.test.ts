@@ -18,7 +18,8 @@ describe("gaveta: todo nível que a visão geral oferece abre", () => {
 
   it("cada irPara(…) desenhado em detalhes.ts tem nível no clique", () => {
     const fonte = readFileSync(new URL("../../../web/telas/detalhes.ts", import.meta.url), "utf8");
-    const niveis = [...fonte.matchAll(/irPara\("([a-z-]+)"/g)].map((m) => m[1] ?? "");
+    // ADR-125: irPara(a, "nivel") e as linhas de Ajustes, que passam por origem("nivel").
+    const niveis = [...fonte.matchAll(/(?:irPara\(a, |origem\()"([a-z-]+)"/g)].map((m) => m[1] ?? "");
     expect(niveis.length).toBeGreaterThan(5);
     for (const n of niveis) expect(nivelDaGaveta(n, "x"), n).not.toBeNull();
     expect(nivelDaGaveta("nao-existe")).toBeNull();
