@@ -87,6 +87,25 @@ describe("desktop: fronteiras HTTP", () => {
     // O limite é do servidor: o Mac não o anuncia.
     expect(inventario({ estado: "nao_autenticado", em: 1, causa: "limite", renovaEm: 999 }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
   });
+  it("NOD-9: `atualizando` atravessa só em ausente, com a frase do servidor; a atualização anunciada é reescrita campo a campo", () => {
+    expect(inventario({ estado: "ausente", em: 1, motivo: "texto do Mac", causa: "atualizando" }, 100, "Claude")).toEqual({ estado: "ausente", em: 100, causa: "atualizando", motivo: "Atualizando o Claude… Os pedidos para ele esperam e rodam assim que terminar." });
+    expect(inventario({ estado: "nao_autenticado", em: 1, causa: "atualizando" }, 100)).toEqual({ estado: "nao_autenticado", em: 100, motivo: "Entre na conta do harness neste computador" });
+    const cheia = { fase: "falhou", antes: "2.1.200", depois: "2.1.250", alvo: "2.1.289", motivo: "sem_espaco", caminho: "npm_local", em: 50, seguraEm: 60, espaco: { livreMb: 1200, precisaMb: 2048 }, stderr: "EACCES /usr/lib" };
+    const { stderr: _cru, ...semCru } = cheia;
+    expect(inventario({ estado: "pronto", versao: "2.1.200", em: 1, atualizacao: cheia }, 100)).toEqual({ estado: "pronto", versao: "2.1.200", em: 100, atualizacao: semCru });
+    // Os opcionais fora do formato caem sozinhos; a fase segue.
+    const torta = { fase: "pedindo_aprovacao", antes: "dois", depois: "2.1", alvo: "2.1.289", motivo: "inventado", caminho: "brew", em: 50, seguraEm: -1, espaco: { livreMb: 1.5, precisaMb: 10 } };
+    expect(inventario({ estado: "ausente", causa: "atualizando", em: 1, atualizacao: torta }, 100).atualizacao).toEqual({ fase: "pedindo_aprovacao", alvo: "2.1.289", em: 50 });
+    // O espaço só atravessa com os dois números inteiros, de 0 até 1 PB (em MB); um fora derruba o par, e a fase segue.
+    for (const espaco of [{ livreMb: -1, precisaMb: 10 }, { livreMb: 10, precisaMb: -1 }, { livreMb: 1_000_000_001, precisaMb: 10 }, { livreMb: 10, precisaMb: 1_000_000_001 }, { livreMb: 10, precisaMb: "2048" }, { livreMb: 10 }]) {
+      expect(inventario({ estado: "pronto", versao: "2.1.200", em: 1, atualizacao: { fase: "falhou", alvo: "2.1.289", em: 50, espaco } }, 100).atualizacao).toEqual({ fase: "falhou", alvo: "2.1.289", em: 50 });
+    }
+    expect(inventario({ estado: "pronto", versao: "2.1.200", em: 1, atualizacao: { fase: "falhou", alvo: "2.1.289", em: 50, espaco: { livreMb: 0, precisaMb: 1_000_000_000 } } }, 100).atualizacao?.espaco).toEqual({ livreMb: 0, precisaMb: 1_000_000_000 });
+    // Sem fase conhecida, alvo semver ou instante, a atualização some e o anúncio segue.
+    for (const ruim of [{ ...cheia, fase: "baixando" }, { ...cheia, alvo: "latest" }, { ...cheia, em: "agora" }, { ...cheia, em: 0 }, "falhou", null, []]) {
+      expect(inventario({ estado: "pronto", versao: "2.1.200", em: 1, atualizacao: ruim }, 100)).toEqual({ estado: "pronto", versao: "2.1.200", em: 100 });
+    }
+  });
   it("conta sem acesso (2026-10-05): a causa é código fechado, a frase é do servidor, e o erro cru atravessa só até o teto", () => {
     expect(inventario({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "texto do Mac", versao: "9" }, 7)).toEqual({ estado: "nao_autenticado", causa: "conta_sem_acesso", motivo: "A conta entrou, mas está sem acesso: a organização dela desativou o uso por assinatura.", em: 7 });
     // App antigo (sem o campo) ou valor inventado: sem causa, com a frase de sempre.

@@ -1,3 +1,4 @@
+import type { AtualizacaoDaIa } from "./estado-ia.ts";
 import type { EpochMs } from "./ids.ts";
 
 /**
@@ -17,8 +18,10 @@ export type CausaSemIa = (typeof CAUSAS_SEM_IA)[number];
  * `sonda_lenta`: o `--version`/`--help`/`auth status` estourou o prazo (Mac carregado).
  * `cli_antigo` (NOD-171): o CLI está instalado, mas abaixo do piso testado (`PISO_CLI`); só em `ausente`, com `versao` e
  * `minima`, para a frase dizer "Atualize", não "Instale".
+ * `atualizando` (NOD-9, definido em 2026-10-22): o nod está atualizando o CLI naquela máquina; só em `ausente`. O servidor
+ * a trata como `sonda_lenta` na fila: o turno fixado nessa IA espera, não é recusado (o app antigo nunca a manda).
  */
-export type CausaInventario = "sonda_lenta" | "cli_antigo" | CausaDoMac;
+export type CausaInventario = "sonda_lenta" | "cli_antigo" | "atualizando" | CausaDoMac;
 
 /**
  * Causas que só o app do Mac distingue (definido em 2026-10-09, teste do Breno). revisto em 2026-10-10 (PR 2 do plano das
@@ -47,11 +50,12 @@ export const CAUSA_LIMITE = "limite";
  * `causa` em `nao_autenticado`: um teste de verdade reprovou uma IA logada (CausaSemIa) ou a sonda só demorou
  * (`sonda_lenta`); sem causa = não há login, que é o `nao_autenticado` de sempre. Em `ausente`, `sonda_lenta` ou
  * `cli_antigo` (este com a `versao` instalada e a `minima` exigida). `limite` (só do servidor) traz `renovaEm`.
+ * `atualizacao` (NOD-9): a fase da atualização do CLI naquela máquina, validada e reescrita pelo servidor (ponte-validacao).
  */
 export type Inventario =
-  | { estado: "ausente"; motivo: string; causa?: CausaInventario; versao?: string; minima?: string; em: EpochMs }
-  | { estado: "nao_autenticado"; motivo: string; versao?: string; causa?: CausaSemIa | "sonda_lenta" | typeof CAUSA_LIMITE; renovaEm?: EpochMs; em: EpochMs }
-  | { estado: "pronto"; versao: string; em: EpochMs };
+  | { estado: "ausente"; motivo: string; causa?: CausaInventario; versao?: string; minima?: string; atualizacao?: AtualizacaoDaIa; em: EpochMs }
+  | { estado: "nao_autenticado"; motivo: string; versao?: string; causa?: CausaSemIa | "sonda_lenta" | typeof CAUSA_LIMITE; renovaEm?: EpochMs; atualizacao?: AtualizacaoDaIa; em: EpochMs }
+  | { estado: "pronto"; versao: string; atualizacao?: AtualizacaoDaIa; em: EpochMs };
 
 /** A frase de cada causa, para quem só tem o código (o servidor, ao receber o anúncio de um Mac). */
 export const MOTIVO_DA_CAUSA: Record<CausaSemIa, string> = {

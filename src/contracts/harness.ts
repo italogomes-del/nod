@@ -8,7 +8,14 @@ export type PreferenciaHarness = "auto" | IdHarness;
  * `raciocinios`: os níveis de raciocínio que o modelo aceita, na ordem (o `--effort` do Claude Code; o `effort` do
  * `turn/start` do Codex). Ausente = o harness não tem raciocínio escolhível.
  */
-export type ModeloHarness = { id: string; nome: string; descricao: string; raciocinios?: readonly EsforcoAgente[] };
+export type ModeloHarness = {
+  id: string;
+  nome: string;
+  descricao: string;
+  raciocinios?: readonly EsforcoAgente[];
+  /** NOD-9 (definido em 2026-10-22): a versão do CLI a partir da qual ele conhece o modelo (x.y.z); ausente = o piso basta. */
+  versaoMinima?: string;
+};
 export type OpcaoHarness = {
   id: IdHarness;
   nome: string;

@@ -118,8 +118,9 @@ export const despacharTurno: CasoDeUso<EntradaDespacharTurno, SaidaDespacharTurn
   if (paradaGlobal !== false) return { data: { plano: null, turno: null, motivo: "parada_ativa" } };
 
   // A sonda lenta re-sonda em segundos (NOD-178): o turno fixado nesse harness espera, como antes, em vez de ser recusado.
+  // NOD-9 (definido em 2026-10-22): `atualizando` também — o nod está atualizando o CLI e o anúncio `pronto` vem depois.
   const prontosPessoa = input.harnessesProntos && input.harnessesDaPessoa
-    ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && i.causa === "sonda_lenta")).map(([id]) => id)])]
+    ? [...new Set([...input.harnessesProntos, ...Object.entries(input.harnessesDaPessoa).filter(([, i]) => i?.estado === "pronto" || (i?.estado === "ausente" && (i.causa === "sonda_lenta" || i.causa === "atualizando"))).map(([id]) => id)])]
     : undefined;
   const { harnessesAuto, cota, declinio } = portaoDoDespacho(input);
   const turno = await deps.repos.turnos.reivindicar({ machineId: input.machineId, agora, harnessesProntos: input.harnessesProntos, ...(harnessesAuto ? { harnessesAuto } : {}), harnessesProntosPessoa: prontosPessoa, aceitaLigacao: input.aceitaLigacao, segurarFundo: input.segurarFundo, segurarNovo: input.segurarNovo, fundoSemPrazo: input.fundoSemPrazo, espacarFundo: input.espacarFundo, ...(input.soComoAlvo ? { soComoAlvo: true } : {}), ...(cota ? { cota } : {}), ...(declinio ? { declinio } : {}) });

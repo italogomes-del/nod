@@ -699,11 +699,12 @@ export function comporApp(o: OpcoesCompor): App {
         const r = await dentro(escopo, (d) => anunciarContasDaMaquina(d, chaveId, anunciadas));
         if (r.mudou) avisarContas(escopo, "anuncio");
       },
-      puxada: async (escopo: Escopo, chaveId: string): Promise<PuxadaDeContas> => ({
-        logins: logins.pendentes(escopo, chaveId),
-        sair: await dentro(escopo, (d) => d.repos.contasIa.saidasPendentes(chaveId)),
-        desconectar: logins.desconexaoPedida(escopo, chaveId),
-      }),
+      puxada: async (escopo: Escopo, chaveId: string): Promise<PuxadaDeContas> => {
+        const sair = await dentro(escopo, (d) => d.repos.contasIa.saidasPendentes(chaveId));
+        // NOD-9 (definido em 2026-10-22): o pedido de atualizar sai uma vez, na puxada seguinte ao clique.
+        const atualizar = logins.atualizacoesPedidas(escopo, chaveId);
+        return { logins: logins.pendentes(escopo, chaveId), sair, desconectar: logins.desconexaoPedida(escopo, chaveId), ...(atualizar.length ? { atualizar } : {}) };
+      },
       progresso: async (escopo: Escopo, chaveId: string, p: ProgressoDoLogin) => {
         const r = logins.progresso(escopo, chaveId, p);
         if (!r.aceito) {

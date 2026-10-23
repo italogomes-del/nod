@@ -53,7 +53,8 @@ export function inventarioDaIa(estado: Pick<Estado, "executor">, ia: IdIa): Inve
  * NOD-171: nem o CLI abaixo do piso (`cli_antigo`): ele está instalado, e o botão diz "Atualizar".
  */
 export function pedeInstalar(inv: Inventario | null): boolean {
-  return inv?.estado === "ausente" && inv.causa !== "sonda_lenta" && inv.causa !== "cli_antigo";
+  // NOD-9: o CLI que o nod está atualizando está lá; nunca "Instalar".
+  return inv?.estado === "ausente" && inv.causa !== "sonda_lenta" && inv.causa !== "cli_antigo" && inv.causa !== "atualizando";
 }
 
 /** NOD-171: o CLI está no Mac, mas abaixo do piso testado (`PISO_CLI`); null quando não é o caso. */

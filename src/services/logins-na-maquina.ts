@@ -27,6 +27,11 @@ export const MAX_LOGINS_POR_PESSOA = 3;
  * Ela puxa a cada 3 s; passado o prazo a chave vence sozinha (maquina_tokens.expira_em).
  */
 export const PRAZO_DESCONEXAO_MS = 2 * 60_000;
+/**
+ * NOD-9 (definido em 2026-10-22): quanto vale o pedido de "Atualizar" de uma IA numa máquina, se ela não puxar antes. A
+ * máquina puxa a cada 3 s; passado o prazo o pedido some, e a tela mostra de novo o botão pelo anúncio.
+ */
+export const PRAZO_PEDIDO_ATUALIZAR_MS = 2 * 60_000;
 /** O texto cifrado é pequeno (o código do Claude tem até 2048 caracteres): 8 KB de folga. */
 const MAX_CIFRADO = 8_192;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -52,6 +57,10 @@ export interface LoginsNaMaquina {
   pedirDesconexao(escopo: Escopo, maquinaId: string): void;
   desconexaoPedida(escopo: Escopo, maquinaId: string): boolean;
   concluirDesconexao(escopo: Escopo, maquinaId: string): boolean;
+  /** NOD-9: o botão "Atualizar" de uma IA numa máquina (a VM): a próxima puxada leva `atualizar: [ia]`. */
+  pedirAtualizacao(escopo: Escopo, maquinaId: string, ia: IaComConta): void;
+  /** As IAs com pedido de atualizar nesta máquina; cada pedido sai UMA vez (a puxada o consome). */
+  atualizacoesPedidas(escopo: Escopo, maquinaId: string): IaComConta[];
 }
 
 export function cifradoValido(v: unknown): CodigoCifrado | null {
@@ -64,6 +73,8 @@ export function cifradoValido(v: unknown): CodigoCifrado | null {
 export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMaquina {
   const logins = new Map<string, Login>();
   const desconexoes = new Map<string, number>();
+  /** chaveMaquina → IA → até quando o pedido vale. */
+  const atualizacoes = new Map<string, Map<IaComConta, number>>();
   const chaveMaquina = (escopo: Escopo, maquinaId: string) => `${escopo.tenantId}:${escopo.pessoaId}:${maquinaId}`;
   const daPessoa = (escopo: Escopo) => [...logins.values()].filter((l) => l.escopo.tenantId === escopo.tenantId && l.escopo.pessoaId === escopo.pessoaId);
   const final = (f: FaseLogin) => FASES_LOGIN_FINAIS.includes(f);
@@ -185,6 +196,19 @@ export function criarLoginsNaMaquina(agora: () => number = Date.now): LoginsNaMa
     },
     concluirDesconexao(escopo, maquinaId) {
       return desconexoes.delete(chaveMaquina(escopo, maquinaId));
+    },
+    pedirAtualizacao(escopo, maquinaId, ia) {
+      const chave = chaveMaquina(escopo, maquinaId);
+      const pedidos = atualizacoes.get(chave) ?? new Map<IaComConta, number>();
+      pedidos.set(ia, agora() + PRAZO_PEDIDO_ATUALIZAR_MS);
+      atualizacoes.set(chave, pedidos);
+    },
+    atualizacoesPedidas(escopo, maquinaId) {
+      const chave = chaveMaquina(escopo, maquinaId);
+      const pedidos = atualizacoes.get(chave);
+      if (!pedidos) return [];
+      atualizacoes.delete(chave);
+      return [...pedidos].filter(([, ate]) => ate > agora()).map(([ia]) => ia);
     },
   };
 }

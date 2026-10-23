@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { HARNESSES, type CatalogoHarness } from "../../../src/contracts/harness.ts";
+import { HARNESSES, type CatalogoHarness, type ModeloHarness } from "../../../src/contracts/harness.ts";
 import type { Inventario } from "../../../src/contracts/inventario.ts";
-import { capacidadesDe, causaHarnessIndisponivel, estadoDaMaquina, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, motivoSemIaPronta, resolverHarness, validarInteligencia } from "../../../src/domain/harness.ts";
+import { capacidadesDe, causaHarnessIndisponivel, estadoDaMaquina, harnessFixado, iaAtualDoCatalogo, inventarioHarnessSemSonda, modeloMaisPotente, motivoHarnessIndisponivel, motivoSemIaPronta, resolverHarness, validarInteligencia, versaoMinimaDoModelo } from "../../../src/domain/harness.ts";
 import { iaDoModelo } from "../../../src/domain/ia-do-modelo.ts";
 import { inteligenciaDoAgente } from "../../../src/domain/inteligencia.ts";
 
@@ -58,6 +58,8 @@ describe("escolha de inteligência", () => {
       expect(motivoHarnessIndisponivel("claude-cli", { estado: "nao_autenticado", motivo: "faça login", em: 0 })).toBe("Claude Code sem conta conectada: faça login");
       expect(motivoHarnessIndisponivel("codex-cli", { estado: "pronto", versao: "1", em: 0 })).toBe("Codex indisponível");
       expect(motivoHarnessIndisponivel("codex-cli", { estado: "pronto", versao: "1", em: 0 }, "sonnet")).toContain("modelo sonnet");
+      // NOD-9: o CLI que o nod está atualizando não é "não instalado".
+      expect(motivoHarnessIndisponivel("claude-cli", { estado: "ausente", causa: "atualizando", motivo: "Atualizando o Claude Code…", em: 0 })).toBe("Claude Code atualizando: Atualizando o Claude Code…");
       for (const t of [ausente]) expect(t).not.toContain("motor pronto");
     });
     it("sem sonda do harness não afirma 'não instalado'", () => {
@@ -160,5 +162,21 @@ describe("o anexo decide a IA do Automático (NOD-285)", () => {
   });
   it("a IA fixa segue a regra de antes (quem confere é a entrada)", () => {
     expect(resolverHarness({ harness: "codex-cli", modelo: "auto", prontos: ["codex-cli"], tiposDeAnexo: ["pdf"] }).harness).toBe("codex-cli");
+  });
+});
+
+describe("NOD-9: a versão do CLI que o modelo pede", () => {
+  it("o apelido fora do catálogo vem do mapa; modelo do catálogo sem mínima, modelo ou IA desconhecidos: null", () => {
+    expect(versaoMinimaDoModelo("claude-cli", "fable")).toBe("2.1.289");
+    expect(versaoMinimaDoModelo("claude-cli", "sonnet")).toBeNull();
+    expect(versaoMinimaDoModelo("claude-cli", "inventado")).toBeNull();
+    expect(versaoMinimaDoModelo("codex-cli", "fable")).toBeNull();
+    expect(versaoMinimaDoModelo("cursor-cli", "fable")).toBeNull();
+  });
+  it("a mínima do catálogo vale antes do mapa, e toda mínima declarada tem a forma x.y.z", () => {
+    for (const h of HARNESSES) for (const m of h.modelos as readonly ModeloHarness[]) {
+      if (m.versaoMinima) expect(versaoMinimaDoModelo(h.id, m.id)).toBe(m.versaoMinima);
+      if (m.versaoMinima) expect(m.versaoMinima).toMatch(/^\d+\.\d+\.\d+$/);
+    }
   });
 });

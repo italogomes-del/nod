@@ -53,7 +53,8 @@ export type ResultadoIaDesktop = { ok: true } | { ok: false; motivo: "nao_instal
  * `causa` só quando a IA está logada e mesmo assim não serviu. O Mac reanuncia o inventário ao servidor com o veredito.
  */
 /** `causa: "sonda_lenta"` (NOD-178): o CLI só demorou; não é veredito da conta, e a tela testa de novo. */
-export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa | Exclude<CausaInventario, CausaDoMac>; resposta?: string };
+/** `atualizando` (NOD-9) nunca sai de um teste: é o app que atualiza, não um veredito. */
+export type TesteDeIa = { ia: IaDesktop; estado: "pronto" | "nao_autenticado" | "ausente"; causa?: CausaSemIa | Exclude<CausaInventario, CausaDoMac | "atualizando">; resposta?: string };
 export const RESPOSTA_TESTE_IA_MAX = 200;
 /** O nome que entra na pergunta do teste ("Diga oi para {nome}…"): só letras, espaço, ponto e hífen, até este tamanho. */
 export const NOME_TESTE_IA_MAX = 40;

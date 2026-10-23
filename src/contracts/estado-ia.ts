@@ -93,6 +93,59 @@ export type InstalacaoDaIa = {
 };
 
 /**
+ * A atualização do CLI pelo nod (definido em 2026-10-22, NOD-9, planos do Arquiteto de 20/10 e 22/10). Uma fase por IA,
+ * a mesma no app do Mac (EstadoIa.atualizacao) e no anúncio da máquina (Inventario.atualizacao), para a web mostrar a
+ * VM e o Mac visto de outro aparelho pelo mesmo render.
+ *  - esperando: há turno daquele provedor (ou ligação aberta); roda na brecha;
+ *  - aviso: 1 h antes de segurar os pedidos novos (E0);
+ *  - segurando: 24 h sem brecha; os pedidos novos daquele provedor esperam na fila (E1);
+ *  - atualizando: o atualizador está rodando (E2);
+ *  - pedindo_aprovacao: a janela de senha do macOS está aberta (só a partir de um clique, nunca no automático);
+ *  - sucesso / falhou / insuficiente: o fim (insuficiente = subiu, mas ainda abaixo do alvo).
+ */
+export const FASES_ATUALIZACAO = ["esperando", "aviso", "segurando", "atualizando", "pedindo_aprovacao", "sucesso", "falhou", "insuficiente"] as const;
+export type FaseAtualizacao = (typeof FASES_ATUALIZACAO)[number];
+
+/**
+ * Por que a atualização não chegou ao alvo (código fechado; a frase é da tela, nunca a saída do CLI):
+ *  - configurado: o binário é o de NOD_*_BIN; o nod não mexe nele;
+ *  - nao_suportado: o CLI não tem atualizador conhecido (hoje o Codex, até a NOD-8);
+ *  - sem_permissao: o atualizador falhou por permissão (EACCES/EPERM, "isn't writable");
+ *  - recusou: a pessoa cancelou a janela de senha do macOS (osascript saiu com -128); nada tenta de novo sozinho;
+ *  - falhou: outro motivo (o detalhe fica só no log);
+ *  - tempo_esgotado: passou do prazo;
+ *  - insuficiente: subiu, mas ainda abaixo do alvo;
+ *  - versao_ilegivel: o `--version` depois de atualizar não disse a versão;
+ *  - sem_espaco / sem_internet (pedido aditivo da NOD-8, revisão de 22/10): o disco ou a rede impediram (com `espaco`).
+ */
+export const MOTIVOS_ATUALIZACAO = ["configurado", "nao_suportado", "sem_permissao", "recusou", "falhou", "tempo_esgotado", "insuficiente", "versao_ilegivel", "sem_espaco", "sem_internet"] as const;
+export type MotivoAtualizacao = (typeof MOTIVOS_ATUALIZACAO)[number];
+
+/**
+ * O último passo tentado (só para log e UAT): o atualizador oficial, a reserva pelo instalador do nod (ADR-093), a
+ * aprovação do macOS (janela de senha) ou o npm do motor no `~/.local` da VM.
+ */
+export const CAMINHOS_ATUALIZACAO = ["oficial", "reserva", "aprovacao", "npm_local"] as const;
+export type CaminhoAtualizacao = (typeof CAMINHOS_ATUALIZACAO)[number];
+
+export type AtualizacaoDaIa = {
+  fase: FaseAtualizacao;
+  /** A versão antes de atualizar e a lida depois (x.y.z[-pre]). */
+  antes?: string;
+  depois?: string;
+  /** A versão-alvo: a maior entre o piso (PISO_CLI) e a mínima do modelo pedido. */
+  alvo: string;
+  motivo?: MotivoAtualizacao;
+  caminho?: CaminhoAtualizacao;
+  /** Quando a fase começou. */
+  em: EpochMs;
+  /** aviso: quando os pedidos novos passam a esperar (E0 → E1). */
+  seguraEm?: EpochMs;
+  /** sem_espaco: o espaço livre e o que a instalação precisa, em MB (NOD-8, J4: "tem 1,2 GB livres e precisa de 2 GB"). */
+  espaco?: { livreMb: number; precisaMb: number };
+};
+
+/**
  * QUAL conta está logada na IA (definido em 2026-10-12, NOD-209), como o próprio CLI diz: o `claude auth status` e o
  * `account/read` do `codex app-server` (nunca o arquivo de credencial). ADR-019: nunca serve para autorização nem vai ao
  * log ou ao inventário. Desde 2026-10-15 (ADR-105) o e-mail e a organização vão ao servidor só pelo anúncio das contas.
@@ -125,6 +178,8 @@ export type EstadoIa = {
   login?: LoginDaIa;
   /** A conta logada, quando o CLI disse qual é (só no app do Mac; ver ContaDaIa). */
   conta?: ContaDaIa;
+  /** A atualização do CLI pelo nod (a em curso ou a última; NOD-9). */
+  atualizacao?: AtualizacaoDaIa;
   em: EpochMs;
 };
 

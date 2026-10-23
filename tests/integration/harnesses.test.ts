@@ -227,6 +227,10 @@ describeIntegracao("NOD-171: harness fixado e indisponível", () => {
       const lento: Inventario = { ...codexAusente, causa: "sonda_lenta", motivo: "O Codex demorou a responder" };
       expect((await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa: { "claude-cli": pronto, "codex-cli": lento } })).data.motivo).toBe("fila_vazia");
       expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "pendente" });
+      // NOD-9: o nod atualizando o CLI também é transitório — o turno espera a atualização terminar.
+      const atualizando: Inventario = { ...codexAusente, causa: "atualizando", motivo: "Atualizando o Codex… Os pedidos para ele esperam e rodam assim que terminar." };
+      expect((await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa: { "claude-cli": pronto, "codex-cli": atualizando } })).data.motivo).toBe("fila_vazia");
+      expect(await b.repos.turnos.buscar(turno!.id)).toMatchObject({ estado: "pendente" });
       const antigo: Inventario = { ...codexAusente, causa: "cli_antigo", versao: "0.158.0", minima: "0.159.0", motivo: "O Codex deste Mac (0.158.0) é mais antigo que o testado pelo nod. Atualize para a versão 0.159.0 ou mais nova." };
       const r = await puxar(b, { harnessesProntos: ["claude-cli"], harnessesDaPessoa: { "claude-cli": pronto, "codex-cli": antigo } });
       expect(r.data).toMatchObject({ plano: null, motivo: "executor_indisponivel" });

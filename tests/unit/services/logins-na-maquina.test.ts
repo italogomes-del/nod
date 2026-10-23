@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { criarLoginsNaMaquina, MAX_LOGINS_POR_PESSOA, PRAZO_LOGIN_MS } from "../../../src/services/logins-na-maquina.ts";
+import { criarLoginsNaMaquina, MAX_LOGINS_POR_PESSOA, PRAZO_LOGIN_MS, PRAZO_PEDIDO_ATUALIZAR_MS } from "../../../src/services/logins-na-maquina.ts";
 
 /**
  * ADR-102 item 3: o login de uma conta numa máquina pela tela. O link da máquina só passa se for oficial; o código
@@ -90,5 +90,23 @@ describe("logins na máquina", () => {
     logins.pedirDesconexao(MARLON, VM);
     passar(10 * 60_000 + 1);
     expect(logins.desconexaoPedida(MARLON, VM)).toBe(false);
+  });
+
+  it("NOD-9: o pedido de atualizar sai uma vez, só para a máquina e a pessoa dele, e vence no prazo", () => {
+    const { logins, passar } = montar();
+    logins.pedirAtualizacao(MARLON, VM, "claude-cli");
+    logins.pedirAtualizacao(MARLON, VM, "claude-cli");
+    logins.pedirAtualizacao(MARLON, VM, "codex-cli");
+    expect(logins.atualizacoesPedidas(ANA, VM)).toEqual([]);
+    expect(logins.atualizacoesPedidas(MARLON, "22222222-2222-4222-8222-222222222222")).toEqual([]);
+    expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual(["claude-cli", "codex-cli"]);
+    expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual([]);
+    logins.pedirAtualizacao(MARLON, VM, "claude-cli");
+    passar(PRAZO_PEDIDO_ATUALIZAR_MS + 1);
+    expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual([]);
+    // O prazo é exclusivo: no instante exato em que vence, o pedido já não sai.
+    logins.pedirAtualizacao(MARLON, VM, "codex-cli");
+    passar(PRAZO_PEDIDO_ATUALIZAR_MS);
+    expect(logins.atualizacoesPedidas(MARLON, VM)).toEqual([]);
   });
 });

@@ -281,7 +281,7 @@ export function situacaoDaIa(ia: IaDesktop, ias: readonly IaNoMac[], entrando: I
   if (entrando === ia) return so("entrando");
   // NOD-178: o CLI que só demorou não pede "Instalar" nem "Entrar"; o app sonda de novo sozinho a cada 3 s.
   if (inv?.causa === "sonda_lenta") return so("sonda_lenta");
-  if (inv?.estado === "nao_autenticado") return so(inv.causa && inv.causa !== "cli_antigo" ? inv.causa : "falta_entrar");
+  if (inv?.estado === "nao_autenticado") return so(inv.causa && inv.causa !== "cli_antigo" && inv.causa !== "atualizando" ? inv.causa : "falta_entrar");
   // Um CLI não some no meio do onboarding: se o Mac já o viu, o "ausente" do servidor é que está atrasado.
   return so(macDizInstalado ? "falta_entrar" : "ausente");
 }

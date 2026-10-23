@@ -34,3 +34,10 @@ export const MODELOS_LIGACAO_PADRAO: ModelosLigacao = {
  * escolhido (NOD-207: a tabela decide, não o id).
  */
 export const MODELO_MAIS_POTENTE: Partial<Record<IdHarness, string>> = { "claude-cli": "fable", "codex-cli": "gpt-6-astra" };
+
+/**
+ * NOD-9 (definido em 2026-10-22, plano do Arquiteto de 20/10, passo 2): a versão mínima do CLI para os apelidos que não
+ * estão no catálogo (MODELO_MAIS_POTENTE). O `fable` só existe a partir do Claude Code 2.1.289 (medido em 2026-10-04);
+ * abaixo disso o CLI recusa o `--model`. A atualização mira a maior entre o piso (PISO_CLI) e esta.
+ */
+export const VERSAO_MINIMA_POR_APELIDO: Partial<Record<IdHarness, Readonly<Record<string, string>>>> = { "claude-cli": { fable: "2.1.289" } };

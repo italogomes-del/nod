@@ -108,6 +108,22 @@ describeIntegracao("contas de IA pela ponte e pela tela (ADR-102, HTTP real)", (
     expect((await pedir("contas/progresso", { loginId: login.id, fase: "falhou", erro: "codigo_invalido" })).status).toBe(200);
   });
 
+  it("NOD-9: atualizar a IA pela tela — a máquina no ar recebe o pedido uma vez; sem contato é 409; outra pessoa não acha", async () => {
+    expect((await pedir("contas")).status).toBe(200);
+    expect((await srv.chamar("POST", `maquinas/${machineId}/ias/gemini/atualizar`)).status).toBe(400);
+    expect((await srv.chamar("POST", `maquinas/${randomUUID()}/ias/claude-cli/atualizar`)).status).toBe(404);
+    expect((await srv.chamar("POST", `maquinas/${machineId}/ias/claude-cli/atualizar`, undefined, outraPessoa())).status).toBe(404);
+    expect((await srv.chamar("POST", `maquinas/${machineId}/ias/claude-cli/atualizar`)).status).toBe(202);
+    const puxada = (await (await pedir("contas")).json()) as PuxadaDeContas;
+    expect(puxada.atualizar).toEqual(["claude-cli"]);
+    const seguinte = (await (await pedir("contas")).json()) as PuxadaDeContas;
+    expect(seguinte.atualizar).toBeUndefined();
+    const quieta = await srv.json<{ dados: { id: string } }>("POST", "maquinas/chaves", { nome: "mac-desligado" });
+    const r = await srv.chamar("POST", `maquinas/${quieta.dados.id}/ias/codex-cli/atualizar`);
+    expect(r.status).toBe(409);
+    expect(await r.json()).toMatchObject({ codigo: "maquina_sem_contato" });
+  });
+
   it("desconectar com 'sair das contas': a máquina recebe o pedido, a chave vence mesmo sem confirmação e cai na confirmação", async () => {
     const r = await srv.json<{ aguardandoMaquina: boolean; contas: number }>("POST", `maquinas/${machineId}/desconectar`, { sairDasContas: true });
     expect(r).toMatchObject({ aguardandoMaquina: true });

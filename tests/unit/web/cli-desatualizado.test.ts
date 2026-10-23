@@ -36,6 +36,8 @@ describe("as funções de base", () => {
   it("o CLI desatualizado não pede instalação; o ausente de verdade pede", () => {
     expect(pedeInstalar(ANTIGO)).toBe(false);
     expect(pedeInstalar(AUSENTE)).toBe(true);
+    // NOD-9: o CLI que o nod está atualizando está lá; nunca "Instalar".
+    expect(pedeInstalar({ estado: "ausente", causa: "atualizando", motivo: "x", em: 0 })).toBe(false);
   });
 
   it("a mínima como a pessoa lê: 0.159.0 vira 0.159; 2.1.290 fica", () => {
@@ -86,6 +88,10 @@ describe("onboarding: o card da IA desatualizada", () => {
   it("com o teste rodando e veredito 'ausente' do Mac, o servidor que viu a versão antiga manda", () => {
     const teste = { rodando: false, testando: [], vereditos: { "codex-cli": { ia: "codex-cli" as const, estado: "ausente" as const } } };
     expect(situacaoDaIa("codex-cli", ias, null, teste).situacao).toBe("desatualizado");
+  });
+
+  it("NOD-9: `atualizando` nunca vira a causa de um card sem conta (é o app que atualiza, não um veredito)", () => {
+    expect(situacaoDaIa("claude-cli", [{ id: "claude-cli", estado: "nao_autenticado", causa: "atualizando" }], null).situacao).toBe("falta_entrar");
   });
 
   it("o CLI de fato ausente continua 'Instalar e entrar'", () => {

@@ -1,10 +1,10 @@
 import type { EsforcoAgente } from "../contracts/agente.ts";
 import { CAPACIDADES_HARNESS, HARNESS_LEGADO, HARNESSES, SEM_CAPACIDADES } from "../contracts/harness.ts";
-import type { CapacidadesHarness, CatalogoHarness, IdHarness, OpcaoHarness, PreferenciaHarness } from "../contracts/harness.ts";
+import type { CapacidadesHarness, CatalogoHarness, IdHarness, ModeloHarness, OpcaoHarness, PreferenciaHarness } from "../contracts/harness.ts";
 import type { TipoAnexo } from "../contracts/anexo.ts";
 import type { EscolhasIa } from "../contracts/inteligencia.ts";
 import type { Inventario } from "../contracts/inventario.ts";
-import { MODELO_MAIS_POTENTE } from "../contracts/modelos.ts";
+import { MODELO_MAIS_POTENTE, VERSAO_MINIMA_POR_APELIDO } from "../contracts/modelos.ts";
 import { ErroDeDominio } from "./erro.ts";
 import { iaAceitaModelo, iaDoModelo } from "./ia-do-modelo.ts";
 import { iaDoAutomatico, modeloERaciocinio, ordemEfetiva } from "./inteligencia.ts";
@@ -88,6 +88,16 @@ export function modeloMaisPotente(harness: IdHarness): string | null {
 }
 
 /**
+ * NOD-9 (definido em 2026-10-22): a versão do CLI que o modelo pede — a do catálogo (ModeloHarness.versaoMinima) e, fora
+ * dele, a dos apelidos (VERSAO_MINIMA_POR_APELIDO). Modelo ou IA desconhecidos: null (o piso do CLI basta).
+ */
+export function versaoMinimaDoModelo(ia: IdHarness, id: string): string | null {
+  const modelos: readonly ModeloHarness[] = HARNESSES.find((h) => h.id === ia)?.modelos ?? [];
+  const doCatalogo = modelos.find((m) => m.id === id)?.versaoMinima;
+  return doCatalogo ?? VERSAO_MINIMA_POR_APELIDO[ia]?.[id] ?? null;
+}
+
+/**
  * NOD-220: a IA que uma negação de executor indisponível registra — o harness do turno, quando é do catálogo. Sem harness
  * (o executor faltou), "catcher", "ia" e ids desconhecidos: undefined (a web não infere outra no lugar).
  */
@@ -142,6 +152,7 @@ export function motivoHarnessIndisponivel(harness: string, inventario: Inventari
     : inventario.causa === "sem_node" ? "sem o Node"
     : inventario.causa === "config_invalida" ? "com a configuração quebrada"
     : inventario.causa === "sonda_lenta" ? "sem resposta"
+    : inventario.causa === "atualizando" ? "atualizando"
     : "não instalado";
   return `${nome} ${estado}: ${inventario.motivo}`;
 }

@@ -8,7 +8,8 @@ import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
 import type { LeituraDisco, LeituraMemoria, NivelPressao } from "../../../contracts/trabalho.ts";
-import { motivoCliAntigo } from "../../../domain/cli-antigo.ts";
+import { motivoAtualizando, motivoCliAntigo } from "../../../domain/cli-antigo.ts";
+import { CAMINHOS_ATUALIZACAO, FASES_ATUALIZACAO, MOTIVOS_ATUALIZACAO, type AtualizacaoDaIa } from "../../../contracts/estado-ia.ts";
 import { motivoSondaLenta } from "../../../domain/sonda-lenta.ts";
 import { MOTIVOS_FALHA, MOTIVOS_INTERRUPCAO, MOTIVOS_PASSE } from "../../../contracts/motivos.ts";
 import type { Entrega, FalaIntermediaria, TrechoVivo, VigiaVivo } from "../../../contracts/ponte.ts";
@@ -203,8 +204,17 @@ export function sinais(v: unknown): SinaisTurno {
 /** `nome`: o harness anunciado (ex.: "Codex"), para a frase de lentidão dizer quem demorou. */
 export function inventario(v: unknown, agora: number, nome = "harness"): Inventario {
   const i = objeto(v);
+  const inv = inventarioSemAtualizacao(i, agora, nome);
+  // NOD-9: a fase da atualização do CLI atravessa reescrita (atualizacaoAnunciada); fora do formato, cai fora sozinha.
+  const atualizacao = atualizacaoAnunciada(i.atualizacao);
+  return atualizacao ? { ...inv, atualizacao } : inv;
+}
+function inventarioSemAtualizacao(i: Record<string, unknown>, agora: number, nome: string): Inventario {
   if (i.estado === "pronto") { exigir(texto(i.versao, 100)); return { estado: "pronto", versao: i.versao, em: agora }; }
   exigir(i.estado === "ausente" || i.estado === "nao_autenticado");
+  // NOD-9 (definido em 2026-10-22): o nod está atualizando o CLI ali; a causa atravessa com a frase do servidor, e a fila
+  // a trata como `sonda_lenta` (o turno fixado espera). Só em `ausente`: o app que atualiza anuncia o CLI como fora.
+  if (i.estado === "ausente" && i.causa === "atualizando") return { estado: "ausente", motivo: motivoAtualizando(nome), causa: "atualizando", em: agora };
   // NOD-178: a causa atravessa (só o valor conhecido), e o motivo continua reescrito aqui, nunca o texto do Mac.
   if (i.causa === "sonda_lenta") return { estado: i.estado, motivo: motivoSondaLenta(nome), causa: "sonda_lenta", em: agora };
   // NOD-171: o CLI abaixo do piso atravessa com as duas versões (só no formato x.y.z[-pre]); a frase continua do servidor.
@@ -222,6 +232,35 @@ export function inventario(v: unknown, agora: number, nome = "harness"): Inventa
 }
 const SEMVER = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,40})?$/;
 const versaoSemver = (v: unknown): v is string => typeof v === "string" && SEMVER.test(v);
+/** definido em 2026-10-22 (NOD-9, J4 da NOD-8): o teto do espaço em MB (1 PB); acima disso o número não é de um disco. */
+const ESPACO_MAX_MB = 1_000_000_000;
+const mb = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0 && Number(v) <= ESPACO_MAX_MB;
+const instante = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0;
+/**
+ * NOD-9 (definido em 2026-10-22, revisão do Arquiteto): a atualização do CLI que a máquina anuncia. É extra: fora do
+ * formato vira undefined e o anúncio segue (nunca recusa o conectar). Reescrita aqui: `fase`/`motivo`/`caminho` só pelos
+ * enums, versões só no formato x.y.z[-pre] (a mesma forma de `extrairVersao`), instantes numéricos; o resto cai fora.
+ */
+export function atualizacaoAnunciada(v: unknown): AtualizacaoDaIa | undefined {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const a = v as Record<string, unknown>;
+  const fase = FASES_ATUALIZACAO.find((f) => f === a.fase);
+  if (!fase || !versaoSemver(a.alvo) || !instante(a.em)) return undefined;
+  const motivo = MOTIVOS_ATUALIZACAO.find((m) => m === a.motivo);
+  const caminho = CAMINHOS_ATUALIZACAO.find((c) => c === a.caminho);
+  const e = typeof a.espaco === "object" && a.espaco !== null ? (a.espaco as Record<string, unknown>) : null;
+  return {
+    fase,
+    ...(versaoSemver(a.antes) ? { antes: a.antes } : {}),
+    ...(versaoSemver(a.depois) ? { depois: a.depois } : {}),
+    alvo: a.alvo,
+    ...(motivo ? { motivo } : {}),
+    ...(caminho ? { caminho } : {}),
+    em: a.em,
+    ...(instante(a.seguraEm) ? { seguraEm: a.seguraEm } : {}),
+    ...(e && mb(e.livreMb) && mb(e.precisaMb) ? { espaco: { livreMb: e.livreMb, precisaMb: e.precisaMb } } : {}),
+  };
+}
 /** Só os códigos conhecidos passam; app antigo (sem o campo) ou valor estranho = sem causa. */
 export function causaSemIa(v: unknown): CausaSemIa | undefined {
   return CAUSAS_SEM_IA.find((c) => c === v);

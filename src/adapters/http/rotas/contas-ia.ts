@@ -224,6 +224,27 @@ export function rotasContasIa(deps: DepsRotasContas): Rota[] {
         ctx.json(202, { ok: true });
       },
     },
+    // ── Atualizar a IA de uma máquina pela tela (definido em 2026-10-22, NOD-9) ─────────────────────────────────────────
+    {
+      // O botão "Atualizar agora" da VM ou do Mac visto de outro aparelho: o pedido fica em memória e a máquina o recebe
+      // uma vez, na próxima puxada (`atualizar`). O andamento volta pelo anúncio (Inventario.atualizacao). Fora do ar, 409:
+      // o pedido venceria antes de alguém puxá-lo.
+      metodo: "POST",
+      padrao: /^\/maquinas\/(?<id>[^/]+)\/ias\/(?<ia>[^/]+)\/atualizar$/,
+      async handler(ctx) {
+        const ia = ctx.params.ia;
+        if (!ehIaComConta(ia)) throw new ErroDeDominio("entrada_invalida", { cause: "ia" });
+        const maquina = await deps.dentro(ctx.escopo, (d) => exigirMaquina(d, ctx.params.id));
+        if (!deps.maquinaViva(ctx.escopo, maquina.id)) {
+          ctx.json(409, { codigo: "maquina_sem_contato", mensagem: `${maquina.nome} não está conectada agora. Abra o nod nela e tente de novo.` });
+          return;
+        }
+        deps.logins.pedirAtualizacao(ctx.escopo, maquina.id, ia);
+        log("info", "ia_atualizar_pedido", { pessoa_id: ctx.escopo.pessoaId, maquina_id: maquina.id, ia });
+        deps.avisar(ctx.escopo, "atualizar");
+        ctx.json(202, { ok: true });
+      },
+    },
     // ── A máquina: nome, desconexão e o convite do comando de instalação ─────────────────────────────────────────────
     {
       metodo: "PATCH",

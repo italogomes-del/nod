@@ -147,6 +147,8 @@ export type PuxadaDeContas = {
   sair: string[];
   /** A pessoa desconectou a máquina pedindo para sair das contas: sair de todas e parar. */
   desconectar: boolean;
+  /** NOD-9 (definido em 2026-10-22): as IAs a atualizar pelo botão da tela; vai uma vez por pedido (o motor antigo ignora). */
+  atualizar?: IaComConta[];
 };
 
 /** O progresso que a máquina relata de um login. */
