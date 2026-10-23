@@ -160,6 +160,19 @@ describe("convite do pedido de instalação por SSH (NOD-94)", () => {
     const pedido = aberto(p.pedir({ nome: "vm", plataforma: "linux", convite }));
     expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "pendente" });
   });
+
+  it("NOD-94 (QA): revogado (instalação cancelada), não aprova mais — nem o pedido que já chegou com ele", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    const a = p.criarConvite(MARLON, { papel: "computador", autoAprovar: true });
+    const chegou = aberto(p.pedir({ nome: "vm-1", plataforma: "linux", convite: a.convite }));
+    p.revogarConvite(a.convite);
+    expect(p.trocar({ codigoDispositivo: chegou.codigoDispositivo })).toEqual({ estado: "invalido" });
+    const b = p.criarConvite(MARLON, { papel: "computador", autoAprovar: true });
+    p.revogarConvite(b.convite);
+    const depois = aberto(p.pedir({ nome: "vm-2", plataforma: "linux", convite: b.convite }));
+    expect(p.trocar({ codigoDispositivo: depois.codigoDispositivo })).toEqual({ estado: "pendente" });
+    expect(p.verConvite({ convite: b.convite, escopo: MARLON })).toEqual({ estado: "invalido" });
+  });
 });
 
 describe("convite da VM criada pelo nod (ADR-121, PR 2)", () => {

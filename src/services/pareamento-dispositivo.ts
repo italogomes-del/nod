@@ -46,6 +46,11 @@ export interface PareamentoDispositivo {
   /** O pedido do código, para a tela confirmar; null = não existe, venceu, já foi aprovado ou a pessoa errou demais. */
   ver(e: { codigoPessoa: string; escopo: Escopo }): PedidoDispositivo | null;
   aprovar(e: { codigoPessoa: string; escopo: Escopo }): boolean;
+  /**
+   * NOD-94 (QA): o pedido de instalação foi cancelado — o convite morre, e o pedido que já chegou com ele (aprovado
+   * sozinho) e ainda não trocou também. Sem isso, o script que seguia rodando na máquina pareava depois do cancelar.
+   */
+  revogarConvite(convite: string): void;
   trocar(e: { codigoDispositivo: string }): TrocaDispositivo;
   /**
    * ADR-121 (PR 2): o convite que vai no script de início da VM que o nod criou. A pessoa já aprovou ao pedir a VM, então
@@ -185,6 +190,10 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       if ([...convites.values()].some((v) => v.conflito && v.codigoPessoa === p.codigoPessoa)) return false;
       p.aprovadoPor = escopo;
       return true;
+    },
+    revogarConvite(convite) {
+      convites.delete(convite);
+      for (const [c, p] of porDispositivo) if (p.convite === convite) { porDispositivo.delete(c); porPessoa.delete(p.codigoPessoa); }
     },
     trocar({ codigoDispositivo }) {
       if (!CODIGO_DISPOSITIVO.test(codigoDispositivo)) return { estado: "invalido" };

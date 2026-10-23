@@ -4,6 +4,7 @@ import { CONTAS_ANUNCIADAS_MAX, ESTADOS_CONTA_NA_MAQUINA, type ContaAnunciada, t
 import { ehIaComConta, IMPRESSAO } from "../../../domain/contas-da-pessoa.ts";
 import { emailDaConta, organizacaoDaConta } from "../../../domain/estado-ia.ts";
 import type { RelatoEspera } from "../../../contracts/espera.ts";
+import type { ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import { FALHAS_DO_LACO, SAIDA_REVISOR_MAX, type FalhaDoLaco, type RelatoRevisao } from "../../../contracts/revisao.ts";
 import { SAIDA_ESPERA_MAX } from "../../../domain/espera-comando.ts";
 import { CAUSAS_DO_MAC, CAUSAS_SEM_IA, MOTIVO_DA_CAUSA, MOTIVO_DA_CAUSA_DO_MAC, type CausaSemIa, type Inventario } from "../../../contracts/inventario.ts";
@@ -462,6 +463,25 @@ export function progressoDoLogin(v: unknown): ProgressoDoLogin {
   if (o.chavePublica !== undefined) { exigir(texto(o.chavePublica, 2_048)); p.chavePublica = o.chavePublica; }
   if (o.erro !== undefined) { exigir(texto(o.erro, 40)); p.erro = o.erro; }
   if (o.impressao !== undefined) { exigir(typeof o.impressao === "string" && IMPRESSAO.test(o.impressao)); p.impressao = o.impressao; }
+  return p;
+}
+
+/**
+ * NOD-94: o progresso de uma instalação por SSH relatado pela instaladora. A forma é conferida aqui; a etapa, o motivo e
+ * a impressão, no serviço (instalacoes-por-ssh.ts). As linhas do script (no máximo 20, cada uma cortada em 300) já vêm
+ * sem segredo da instaladora — o servidor não as loga.
+ */
+export function progressoDeInstalacao(v: unknown): ProgressoDeInstalacao {
+  const o = objeto(v);
+  exigir(typeof o.id === "string" && UUID.test(o.id) && (o.etapa !== undefined || o.erro !== undefined));
+  const p: ProgressoDeInstalacao = { id: o.id };
+  if (o.etapa !== undefined) { exigir(texto(o.etapa, 40)); p.etapa = o.etapa as ProgressoDeInstalacao["etapa"]; }
+  if (o.erro !== undefined) { exigir(texto(o.erro, 40)); p.erro = o.erro as ProgressoDeInstalacao["erro"]; }
+  if (o.impressao !== undefined) { exigir(texto(o.impressao, 200)); p.impressao = o.impressao; }
+  if (o.linhas !== undefined) {
+    exigir(Array.isArray(o.linhas) && o.linhas.length <= 20 && o.linhas.every((l) => texto(l, 300)));
+    p.linhas = o.linhas as string[];
+  }
   return p;
 }
 

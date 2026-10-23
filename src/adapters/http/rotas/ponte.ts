@@ -7,6 +7,7 @@ import type { LeituraMemoria } from "../../../contracts/trabalho.ts";
 import { PAPEIS_MAQUINA, PLATAFORMAS_MAQUINA, type AnuncioMaquina, type PapelMaquina, type PlataformaMaquina, type VigiaVivo } from "../../../contracts/ponte.ts";
 import type { TarefaDoBot } from "../../../contracts/turno.ts";
 import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../../contracts/contas-ia.ts";
+import type { PedidoDeInstalacao, ProgressoDeInstalacao } from "../../../contracts/instalacoes-ssh.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
 import { estadoDaMaquina } from "../../../domain/harness.ts";
@@ -16,7 +17,7 @@ import type { DesfechoAdocao, PonteInternaNod } from "../../fundo/ponte-interna.
 import { VERSAO_MINIMA_APP } from "../../fundo/ponte-interna.ts";
 import type { Ctx, Rota } from "../roteador.ts";
 import { cabecalhoCookieSessao } from "../sessao-cookie.ts";
-import { camposDoRevisor, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, relatoRevisao, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
+import { camposDoRevisor, capacidadesAnunciadas, contasAnunciadas, entrega, impressoes, progressoDoLogin, progressoDeInstalacao, exigir, falas, idsDeMensagens, inventario, memoria, objeto, relatoEspera, relatoRevisao, sessaoDaRenovacao, sinais, texto, trechos, turnosEmAndamento, uuid } from "./ponte-validacao.ts";
 import { versaoAceita } from "../../../domain/versao-app.ts";
 import { relatoValido } from "../../../use-cases/limpeza-das-tasks.ts";
 
@@ -117,6 +118,14 @@ export function criarPonteHttpServidor(d: {
     puxada(escopo: Escopo, chaveId: string): Promise<PuxadaDeContas>;
     progresso(escopo: Escopo, chaveId: string, p: ProgressoDoLogin): Promise<boolean>;
     saiu(escopo: Escopo, chaveId: string, impressoes: string[], desconectada: boolean): Promise<void>;
+  };
+  /**
+   * NOD-94 (emenda 11 da ADR-090): a máquina como instaladora por SSH — a puxada (com a chave pública do par que ela
+   * gerou ao subir; a credencial vem cifrada com ela, uma vez) e o progresso. Ausente = modo local: 404 e a máquina segue.
+   */
+  instalacoes?: {
+    puxada(escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina }): PedidoDeInstalacao[];
+    progresso(escopo: Escopo, chaveId: string, p: ProgressoDeInstalacao): Promise<boolean>;
   };
 }) {
   const conexoes = new Map<string, Conexao>();
@@ -252,7 +261,8 @@ export function criarPonteHttpServidor(d: {
       presencaAvisada.set(id, { escopo: ctx.escopo, viva: true });
       if (!estava?.viva) d.inventarioMudou?.(ctx.escopo, "presenca");
       else avisarSeMudou(ctx.escopo, antes);
-      ctx.json(200, { machineId: id, escopo: ctx.escopo, papel: c.papel, ...(d.contas ? { contasIa: true } : {}) });
+      // NOD-94: `instalacoes` = este servidor aceita a máquina como instaladora por SSH (a puxada de /instalacoes).
+      ctx.json(200, { machineId: id, escopo: ctx.escopo, papel: c.papel, ...(d.contas ? { contasIa: true } : {}), ...(d.instalacoes && c.papel === "motor" ? { instalacoes: true } : {}) });
     }),
     /**
      * NOD-199 (emenda à ADR-021): anúncio SÓ de inventário, para a máquina já conectada — a IA que ficou pronta (ou caiu)
@@ -297,6 +307,23 @@ export function criarPonteHttpServidor(d: {
       if (!d.contas) { ctx.json(404, { codigo: "sem_contas" }); return; }
       await d.contas.saiu(ctx.escopo, ctx.params.chaveId!, impressoes(b.impressoes ?? []), b.desconectada === true);
       ctx.json(200, { ok: true });
+    }),
+    /**
+     * NOD-94: os pedidos de instalação por SSH desta máquina (a cada 3 s). A só-computador não instala outra (ela não tem
+     * o motor completo nem é escolha da pessoa como origem).
+     */
+    rota("instalacoes", async (ctx, b) => {
+      const c = conexao(ctx);
+      if (!d.instalacoes || c.papel === "computador") { ctx.json(404, { codigo: "sem_instalacoes" }); return; }
+      exigir(typeof b.chavePublica === "string" && b.chavePublica.length > 0 && b.chavePublica.length <= 2_048 && /^[A-Za-z0-9+/]+={0,2}$/.test(b.chavePublica));
+      c.ultimo = d.agora();
+      ctx.json(200, { pedidos: d.instalacoes.puxada(ctx.escopo, ctx.params.chaveId!, { chavePublica: b.chavePublica, plataforma: c.plataforma }) });
+    }),
+    rota("instalacoes/progresso", async (ctx, b) => {
+      conexao(ctx);
+      if (!d.instalacoes) { ctx.json(404, { codigo: "sem_instalacoes" }); return; }
+      const ok = await d.instalacoes.progresso(ctx.escopo, ctx.params.chaveId!, progressoDeInstalacao(b));
+      ctx.json(ok ? 200 : 409, ok ? { ok: true } : { codigo: "instalacao_recusada" });
     }),
     rota("puxar", async (ctx, b) => {
       const c = conexao(ctx);

@@ -44,7 +44,7 @@ async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
 
 export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string }; nuvem?: boolean;
   /** NOD-94: a máquina do convite `convite` pareou — a instalação por SSH que o criou fica `pronta` com ela. */
-  pareadaPorConvite?: (e: { escopo: Escopo; convite: string; maquinaId: string }) => void }): Rota[] {
+  pareadaPorConvite?: (e: { escopo: Escopo; convite: string; maquinaId: string }) => Promise<void> | void }): Rota[] {
   /** ADR-121: só com NOD_MAQUINA_NUVEM=gcp (compor.ts). Sem a flag, o DTO sai igual ao de antes. */
   const nuvemDa = async (d: Deps): Promise<Map<string, MaquinaNuvemDto>> =>
     new Map(
@@ -147,7 +147,14 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
           return e;
         });
         log("info", "maquina_pareada_por_codigo", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id, papel: r.papel, ...(nuvemId ? { maquina_nuvem_id: nuvemId } : {}) });
-        if (r.convite) deps.pareadaPorConvite?.({ escopo: r.escopo, convite: r.convite, maquinaId: emitida.dados.id });
+        // A chave já nasceu: uma falha ao avisar a instalação por SSH não pode tirar a chave da máquina (ela fica sem par).
+        if (r.convite) {
+          try {
+            await deps.pareadaPorConvite?.({ escopo: r.escopo, convite: r.convite, maquinaId: emitida.dados.id });
+          } catch (e) {
+            log("aviso", "pareada_por_convite_falhou", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id, erro: e instanceof Error ? e.message : String(e) });
+          }
+        }
         ctx.json(201, { chave: emitida.chave, machineId: emitida.dados.id, papel: r.papel });
       },
     },

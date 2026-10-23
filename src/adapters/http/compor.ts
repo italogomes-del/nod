@@ -1,7 +1,11 @@
 import { criarLoginsNaMaquina } from "../../services/logins-na-maquina.ts";
 import { anunciarContasDaMaquina } from "../../use-cases/contas-ia.ts";
 import { rotasContasIa } from "./rotas/contas-ia.ts";
+import { rotasInstalacoesSsh } from "./rotas/instalacoes-ssh.ts";
+import { criarInstalacoesPorSsh } from "../../services/instalacoes-por-ssh.ts";
 import type { ContaAnunciada, ProgressoDoLogin, PuxadaDeContas } from "../../contracts/contas-ia.ts";
+import type { ProgressoDeInstalacao } from "../../contracts/instalacoes-ssh.ts";
+import type { PlataformaMaquina } from "../../contracts/ponte.ts";
 import type { DriverComputador } from "../../contracts/computador.ts";
 import { criarDriverDocker } from "../computador/docker.ts";
 import { type Computadores, criarComputadores } from "../fundo/computadores.ts";
@@ -664,6 +668,19 @@ export function comporApp(o: OpcoesCompor): App {
   // ADR-102 (2026-10-13): os logins de contas pela tela e o pareamento por código/convite (em memória, src/services).
   const logins = criarLoginsNaMaquina(relogio);
   const dispositivo = criarPareamentoDispositivo(relogio);
+  // NOD-94 (emenda 11 da ADR-090): os pedidos de instalação da máquina só computador por SSH (em memória; só compartilhado).
+  const instalacoes = criarInstalacoesPorSsh(relogio);
+  /** A máquina nova pareou com o convite de um pedido: ele fica `pronta` e o endereço (com a host key) é guardado. */
+  const pareadaPorConvite = async (e: { escopo: Escopo; convite: string; maquinaId: string }) => {
+    const r = instalacoes.pareada(e.escopo, e.convite, e.maquinaId);
+    if (!r) return;
+    log("info", "instalacao_ssh_pronta", { pessoa_id: e.escopo.pessoaId, instalacao_id: r.id, maquina_id: e.maquinaId });
+    // Sem impressão (a instaladora não relatou) ou sem usuário (modo apelido): não há o que travar na reinstalação.
+    if (r.impressao && r.usuario) {
+      const { impressao, usuario } = r;
+      await dentro(e.escopo, (d) => d.repos.maquinasSsh.registrar({ maquinaId: e.maquinaId, host: r.host, porta: r.porta, usuario, impressaoHost: impressao }, d.agora()));
+    }
+  };
   // NOD-253 (2026-10-15): a lista mudou (ordem, modo, "Seguir com", conta logada ou saída) — a fila de todas as pontes relê
   // a cota por conta na hora, em vez de esperar os 30 s do LIMITES_VALEM_MS.
   const avisarContas = (escopo: Escopo, motivo: string, loginId?: string) => {
@@ -714,6 +731,19 @@ export function comporApp(o: OpcoesCompor): App {
       const r = await concluirItemNaMaquina(d, { itemId, desfecho });
       if (r.events.length) await d.repos.events.gravarComOutbox(r.events);
     }),
+    // NOD-94: a instalação por SSH é do modo compartilhado (no local, ADR-092, a opção não aparece).
+    ...(compartilhado ? { instalacoes: {
+      puxada: (escopo: Escopo, chaveId: string, e: { chavePublica: string; plataforma: PlataformaMaquina }) => {
+        instalacoes.anunciarInstaladora(escopo, chaveId, e);
+        return instalacoes.pendentes(escopo, chaveId);
+      },
+      progresso: async (escopo: Escopo, chaveId: string, p: ProgressoDeInstalacao) => {
+        const r = instalacoes.progresso(escopo, chaveId, p);
+        // Nunca as linhas do script nem a impressão no log: só o id, a etapa e o motivo.
+        log(r.aceito ? "info" : "aviso", r.aceito ? "instalacao_ssh_progresso" : "instalacao_ssh_progresso_recusado", { machine_id: chaveId, instalacao_id: p.id, etapa: p.etapa ?? null, erro: p.erro ?? null });
+        return r.aceito;
+      },
+    } } : {}),
     // ADR-102: as contas da pessoa são do modo compartilhado (suposição 7: o modo local fica com a tela da ADR-101).
     ...(compartilhado ? { contas: {
       anunciar: async (escopo: Escopo, chaveId: string, anunciadas: ContaAnunciada[]) => {
@@ -1268,7 +1298,8 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
-    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
+    ...(compartilhado ? rotasInstalacoesSsh({ dentro, instalacoes, dispositivo, ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }) : []),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), pareadaPorConvite, ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
     ...(nuvemLigada ? rotasNuvem({ dentro, segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), oauth: oauthNuvem(env), conta: o.nuvem?.conta ?? criarContaGcp({ contaFaturamento: env.NOD_NUVEM_CONTA_FATURAMENTO ?? null }), ...(o.nuvem?.fetchImpl ? { fetchImpl: o.nuvem.fetchImpl } : {}), cifrar: (t) => cifrar(t, chave), provedorDa: async (escopo, credencialId) => provedorDaChave(await dentro(escopo, (d) => d.repos.credenciaisNuvem.chaveCifrada(credencialId))), ...(criacaoNuvem ? { registrarConvite: criacaoNuvem.registrarConvite } : {}), agora: relogio }) : []),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
