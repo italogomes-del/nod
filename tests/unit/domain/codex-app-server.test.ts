@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CODIGO_RECUSA_NOD,
@@ -6,6 +7,7 @@ import {
   interpretarLinhaAppServer,
   modelosDaLista,
   notificacaoInitialized,
+  pedidoAccountRateLimitsRead,
   pedidoInitialize,
   pedidoModelList,
   pedidoThreadStart,
@@ -13,6 +15,7 @@ import {
   pedidoTurnStart,
   pedidoTurnSteer,
   respostaNegando,
+  usoDoPlanoDoRateLimits,
 } from "../../../src/domain/codex-app-server.ts";
 
 const ler = (linha: string): unknown => {
@@ -153,5 +156,44 @@ describe("model/list (NOD-167)", () => {
       { id: "m1", padrao: false, esforcos: ["low", "medium"], esforcoPadrao: null },
     ]);
     expect(modelosDaLista({})).toEqual([]);
+  });
+});
+
+describe("uso do plano pelo app-server (NOD-12)", () => {
+  const MEDIDO = 1_792_671_687_000;
+  // A resposta real do Codex 0.162.0 (capturada em 2026-10-22 pelo app-server, numa conta ChatGPT Plus logada; o id da
+  // conta e os dos créditos redigidos). Só a linha `id` do RPC: o app-server não manda `jsonrpc`.
+  const MEDIDA = (JSON.parse(readFileSync(new URL("../../fixtures/codex-rate-limits-0.162.json", import.meta.url), "utf8")) as { result: Record<string, unknown> }).result;
+
+  it("account/rateLimits/read sem parâmetros", () => {
+    expect(ler(pedidoAccountRateLimitsRead(7))).toEqual({ jsonrpc: "2.0", id: 7, method: "account/rateLimits/read", params: {} });
+  });
+
+  it("a medida real: percentual vira fração, segundos viram ms, 300 min é a janela de 5 h e 10080 a semana", () => {
+    expect(usoDoPlanoDoRateLimits(MEDIDA, MEDIDO)).toEqual({
+      harness: "codex-cli", situacao: "normal", medidoEm: MEDIDO,
+      cincoHoras: { utilizacao: 0.02, renovaEm: 1792689422000 }, semana: { utilizacao: 0.02, renovaEm: 1793164566000 },
+    });
+  });
+
+  it("a duração manda (primary e secondary trocados), e sem duração primary é 5 h e secondary a semana", () => {
+    const trocado = { rateLimits: { primary: { usedPercent: 50, windowDurationMins: 10080, resetsAt: 2 }, secondary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1 } } };
+    expect(usoDoPlanoDoRateLimits(trocado, MEDIDO)).toMatchObject({ cincoHoras: { utilizacao: 0.1, renovaEm: 1000 }, semana: { utilizacao: 0.5, renovaEm: 2000 } });
+    const semDuracao = { rateLimits: { primary: { usedPercent: 30 }, secondary: null } };
+    expect(usoDoPlanoDoRateLimits(semDuracao, MEDIDO)).toMatchObject({ cincoHoras: { utilizacao: 0.3, renovaEm: null }, semana: null });
+  });
+
+  it("situação: perto a partir de 80%, esgotado em 100% ou quando o Codex diz que atingiu", () => {
+    const com = (p: number, s: number, atingido: string | null = null) => usoDoPlanoDoRateLimits({ rateLimits: { primary: { usedPercent: p, windowDurationMins: 300 }, secondary: { usedPercent: s, windowDurationMins: 10080 }, rateLimitReachedType: atingido } }, MEDIDO)?.situacao;
+    expect(com(79, 10)).toBe("normal");
+    expect(com(10, 85)).toBe("perto");
+    expect(com(100, 10)).toBe("esgotado");
+    expect(com(40, 40, "rate_limit_reached")).toBe("esgotado");
+  });
+
+  it("resposta sem janela legível vira null, nunca lança", () => {
+    for (const r of [{}, { rateLimits: null }, { rateLimits: { primary: null, secondary: null } }, { rateLimits: { primary: { usedPercent: "x" } } }, { rateLimits: { primary: { usedPercent: -1 } } }, { rateLimits: { primary: { usedPercent: 10, windowDurationMins: 1440 } } }]) {
+      expect(usoDoPlanoDoRateLimits(r, MEDIDO)).toBeNull();
+    }
   });
 });

@@ -78,6 +78,20 @@ describeIntegracao("uso do plano (NOD-179, 0056): gravado por pessoa e CLI a cad
     });
   });
 
+  it("NOD-12: a leitura do Codex (account/rateLimits/read) entregue por um turno do Codex é gravada como a do Claude", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const deps = depsSobreTrx(trx, MARLON);
+      const { data: criado } = await executar(deps, criarAgente, { dono: "pessoa" });
+      const agora = Date.now() - 60_000;
+      const r = await entregar(deps, criado.conversa.id, { usoDoPlano: uso(agora, 0.42, "codex-cli") }, "codex-cli");
+      expect(r.mensagem?.texto).toBe("ok");
+      expect((await executar(deps, lerUsoDoPlano, {})).data.planos).toEqual([uso(agora, 0.42, "codex-cli")]);
+      // E passa pela ponte HTTP (Mac remoto) sem ser descartada.
+      const e = entrega({ turnoId: randomUUID(), seqLocal: 1, fala: { tipo: "texto", texto: "ok" }, resultado: resultado({ usoDoPlano: uso(agora, 0.42, "codex-cli") }) }, "maq", agora + 60_000);
+      expect(e.resultado.usoDoPlano).toEqual(uso(agora, 0.42, "codex-cli"));
+    });
+  });
+
   it("utilização NaN, −1 ou 5 é descartada na ponte e no assentar; a entrega é aceita", async () => {
     await withRollback(MARLON, async (trx) => {
       const deps = depsSobreTrx(trx, MARLON);

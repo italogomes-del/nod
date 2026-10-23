@@ -1,6 +1,5 @@
-import type { SituacaoDaCota } from "./cota.ts";
+import type { CotaDaContaDto } from "./cota-da-conta.ts";
 import type { EpochMs } from "./ids.ts";
-import type { JanelaDoPlano } from "./uso-do-plano.ts";
 
 /**
  * As contas de IA da pessoa em todas as máquinas (definido em 2026-10-13, ADR-102). O servidor guarda a lista (apelido,
@@ -72,13 +71,7 @@ export type ContaIa = {
   cota?: CotaDaContaDto | null;
 };
 
-export type CotaDaContaDto = {
-  cincoHoras: JanelaDoPlano | null;
-  semana: JanelaDoPlano | null;
-  situacao: SituacaoDaCota;
-  voltaEm: EpochMs | null;
-  medidoEm: EpochMs;
-};
+export type { CotaDaContaDto } from "./cota-da-conta.ts";
 
 export type ModoDasContas = "perguntar" | "automatico";
 

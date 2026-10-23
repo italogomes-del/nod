@@ -83,9 +83,13 @@ export function usoDoPlanoValido(v: unknown, agora: EpochMs): UsoDoPlano | undef
 
 // ── O medidor (o que a tela da NOD-12 vai mostrar) ───────────────────────────────────────────────────────────────
 
-/** Limiares da spec da NOD-12: 80% perto, 95% alerta, 100% limite. */
+/**
+ * Limiares da NOD-12: 80% perto, 90% alerta, 100% limite. revisto em 2026-10-22 (protótipo aprovado da NOD-12): o alerta
+ * desceu de 95% para 90%, o mesmo limiar do anel do seletor (`ALERTA_USO`, web/telas/seletor-ia.ts); um teste de
+ * conformidade confere os dois (a web não importa o domínio). A reserva de 99% do portão (cota-da-ia.ts) não muda.
+ */
 export const LIMIAR_PERTO = 0.8;
-export const LIMIAR_ALERTA = 0.95;
+export const LIMIAR_ALERTA = 0.9;
 
 export type FaixaDoMedidor = "normal" | "perto" | "alerta" | "limite" | "renovado";
 export type EstadoDaJanela = {

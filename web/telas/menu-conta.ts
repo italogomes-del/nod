@@ -1,8 +1,11 @@
+import type { ContaIa } from "../../src/contracts/contas-ia.ts";
 import type { Experimentos } from "../../src/contracts/raio-x.ts";
 import type { SecaoEspaco } from "../estado/reducer.ts";
 import { ICONE } from "../lib/icones.ts";
 import { esc } from "../lib/render.ts";
-import { pilhaDeAvatares } from "./cartao-ia.ts";
+import { pilhaDeAvatares, PROVEDOR } from "./cartao-ia.ts";
+import { contaEmUso } from "./contas-lista.ts";
+import { ALERTA_USO, maiorUso, pctUsado, proximaDaFila, quandoNaTela } from "./uso-da-conta.ts";
 
 /**
  * Menu da conta (definido em 2026-09-30, canvas "Menu, sidebar e gaveta"): o avatar do rodapé abre este menu no lugar de
@@ -37,6 +40,57 @@ const EXPERIMENTOS: readonly { chave: keyof Experimentos; icone: string; nome: s
   // definido em 2026-10-17 (ADR-112): a terceira chave, logo abaixo das duas da ADR-111.
   { chave: "whatsapp", icone: ICONE.balao, nome: "Modo WhatsApp", dica: "Experimento: respostas curtas, como no WhatsApp — uma a três frases, sem títulos nem listas." },
 ];
+
+/** O uso do plano que segura as rotinas: o texto da faixa do menu e o resumo que entra no nome acessível do avatar. */
+export type AvisoDoUso = { texto: string; resumo: string };
+
+type IaTravada = { nome: string; apelido: string; limite: boolean; ate: number | null; pct: number; janela: "5 h" | "semana" };
+
+/**
+ * NOD-12 (definido em 2026-10-22, protótipo do Gil no PR #414): a faixa do menu da conta pelo uso do plano. Só aparece
+ * quando as rotinas vão esperar: a conta em uso de alguma IA está a partir de 90% (ou no limite) e não há outra conta
+ * dela pronta na fila. Com conta seguinte, nada aqui (a linha da conta já diz para onde vai). A conversa nunca é
+ * segurada (ADR-099 §7), e o texto diz isso no limite.
+ */
+export function faixaDoUso(contas: readonly ContaIa[], agora: number): AvisoDoUso | null {
+  const travadas: IaTravada[] = [];
+  for (const ia of ["claude-cli", "codex-cli"] as const) {
+    const nome = PROVEDOR[ia].nome;
+    const logadas = contas.filter((c) => c.ia === ia && c.maquinas.some((v) => v.estado === "pronta"));
+    if (logadas.length === 0) continue;
+    const emUso = contaEmUso(contas, agora, { ia });
+    if (!emUso) {
+      // Nenhuma pronta fora do limite: a IA está no limite até a primeira voltar.
+      const voltas = logadas.map((c) => c.noLimiteAte).filter((t): t is number => t !== null && t > agora);
+      if (voltas.length) travadas.push({ nome, apelido: logadas[0]!.apelido, limite: true, ate: Math.min(...voltas), pct: 100, janela: "5 h" });
+      continue;
+    }
+    const q = emUso.cota;
+    const maior = maiorUso(q);
+    if (!q || maior === null || maior < ALERTA_USO || proximaDaFila(emUso, contas, agora)) continue;
+    const j = q.cincoHoras && q.cincoHoras.utilizacao === maior ? { j: q.cincoHoras, nome: "5 h" as const } : { j: q.semana!, nome: "semana" as const };
+    travadas.push({ nome, apelido: emUso.apelido, limite: maior >= 1, ate: j.j.renovaEm, pct: pctUsado(maior), janela: j.nome });
+  }
+  if (travadas.length === 0) return null;
+  const nomes = new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(travadas.map((t) => t.nome));
+  if (travadas.length > 1) {
+    const todas = travadas.every((t) => t.limite);
+    return todas
+      ? { texto: `${nomes} no limite. As rotinas esperam até renovar; a conversa com você segue.`, resumo: `${nomes} no limite` }
+      : { texto: `${nomes} perto do limite. Sem outra conta na fila, as rotinas esperam.`, resumo: `${nomes} perto do limite` };
+  }
+  const t = travadas[0]!;
+  if (t.limite) {
+    const ate = t.ate !== null ? ` até ${quandoNaTela(t.ate, agora)}` : "";
+    return { texto: `${t.nome} no limite${ate}. As rotinas esperam até ${ate ? "lá" : "renovar"}; a conversa com você segue.`, resumo: `${t.nome} no limite${ate}` };
+  }
+  const renova = t.ate !== null ? `, renova ${quandoNaTela(t.ate, agora).includes(" às ") ? "em " : "às "}${quandoNaTela(t.ate, agora)}` : "";
+  const janela = t.janela === "5 h" ? "da janela de 5 h" : "da semana";
+  return {
+    texto: `${t.nome} · ${t.apelido} em ${t.pct}% ${janela}${renova}. Sem outra conta na fila, as rotinas esperam até ${renova ? "lá" : "renovar"}.`,
+    resumo: `${t.nome} perto do limite`,
+  };
+}
 
 export function htmlMenuConta(d: DadosMenuConta): string {
   const item = (secao: SecaoEspaco, icone: string, nome: string, meta = "") => `<button type="button" role="menuitem" data-secao="${secao}">${icone}<span class="mc-nome">${esc(nome)}</span>${meta ? `<span class="mc-meta">${esc(meta)}</span>` : ""}${ICONE.seta}</button>`;

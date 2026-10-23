@@ -403,6 +403,20 @@ async function appServer() {
           responder(m.id, { account: conta === "chave" ? { type: "apiKey" } : { type: "chatgpt", email: conta, planType: "pro" }, requiresOpenaiAuth: true });
           break;
         }
+        // NOD-12: o uso do plano no fim da sessão, no formato medido no Codex 0.162.0 (sem os ids da conta).
+        // TESTE_NOD_USO_CODEX: ausente = 42% da janela de 5 h e 18% da semana; "calado" = nunca responde (o driver segue
+        // depois do prazo); "erro" = responde erro.
+        case "account/rateLimits/read": {
+          registro.usoLido = (registro.usoLido ?? 0) + 1; gravar();
+          const modo = process.env.TESTE_NOD_USO_CODEX;
+          if (modo === "calado") break;
+          if (modo === "erro") { emit({ jsonrpc: "2.0", id: m.id, error: { code: -32603, message: "falhou" } }); break; }
+          const agoraS = Math.floor(Date.now() / 1000);
+          const janela = (usedPercent, windowDurationMins, emS) => ({ usedPercent, windowDurationMins, resetsAt: agoraS + emS });
+          const rateLimits = { limitId: "codex", limitName: null, primary: janela(42, 300, 3 * 3600), secondary: janela(18, 10080, 4 * 86400), credits: { hasCredits: false, unlimited: false, balance: "0" }, planType: "plus", rateLimitReachedType: null };
+          responder(m.id, { ordinaryUsageAllowed: true, rateLimits, rateLimitsByLimitId: { codex: rateLimits } });
+          break;
+        }
         case "turn/interrupt":
           registro.interrupcoes++; gravar();
           responder(m.id, {});

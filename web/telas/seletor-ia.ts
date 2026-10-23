@@ -5,6 +5,7 @@ import type { Estado } from "../estado/reducer.ts";
 import { esc, hora } from "../lib/render.ts";
 import { ehIaMac, logoDaIa, PROVEDOR, UI_IAS_INICIAL, type IaMac } from "./cartao-ia.ts";
 import { contaEmUso } from "./contas-lista.ts";
+import { ALERTA_USO, pctUsado } from "./uso-da-conta.ts";
 import {
   conectada, escolhaEfetiva, iaEmUso, iasDaTela, iasDoBot, inteligenciaDoBot, modelosDoMenu, niveisDoModelo, NIVEIS, noLimite, nomeDoModelo,
   nomeDoNivel, type ContextoInteligencia,
@@ -27,8 +28,11 @@ import {
  * main (o campo nunca é regravado, web/lib/regioes.ts).
  */
 
-/** A partir daqui o anel e o número ficam âmbar (definido em 2026-10-16, canvas B2: "vai acontecer"). */
-export const ALERTA_USO = 0.9;
+/**
+ * A partir daqui o anel e o número ficam âmbar (definido em 2026-10-16, canvas B2: "vai acontecer"). Revisto em
+ * 2026-10-22 (NOD-12): mora em uso-da-conta.ts, o mesmo limiar das barras de Provedores de IA e do domínio.
+ */
+export { ALERTA_USO };
 
 /** O botão do campo, criado uma vez com o composer; o miolo é trocado por `mioloDoSeletor` a cada render. */
 export const HTML_SELETOR_IA = '<button type="button" class="seletor-ia" id="composer-ia" data-act="seletor-ia" aria-haspopup="menu" aria-expanded="false" hidden></button>';
@@ -120,11 +124,13 @@ export function dadosDoSeletor(estado: Estado, agenteId: string): DadosSeletor |
   const plano = ia && dona ? estado.usoDoPlano?.planos.find((p) => p.harness === ia) ?? null : null;
   // A janela que já renovou (renovaEm no passado) é tratada como nova: sem número até o CLI informar de novo, e sem
   // "Renova às" de uma hora que passou.
-  const cinco = plano?.cincoHoras ?? null;
-  const janela = cinco && !(cinco.renovaEm !== null && cinco.renovaEm <= estado.agora) ? cinco : null;
   const maquina = a.maquinaId ?? estado.maquinas?.padraoId ?? null;
   const contas = estado.contasIa?.contas ?? [];
   const conta = ia && dona ? contaEmUso(contas, estado.agora, { ia, filtro: maquina }) : null;
+  // NOD-12 (2026-10-22): o anel é da conta em uso (a cota é da assinatura, e a leitura é por conta desde a 0077). A leitura
+  // por IA fica só para o servidor anterior (sem `cota` no DTO) ou sem conta na lista; conta sem leitura = sem número.
+  const cinco = conta && conta.cota !== undefined ? conta.cota?.cincoHoras ?? null : plano?.cincoHoras ?? null;
+  const janela = cinco && !(cinco.renovaEm !== null && cinco.renovaEm <= estado.agora) ? cinco : null;
   const grupos = iasDoBot(c.ias, i.ordem).filter((x) => ehIaMac(x.id)).map((x): GrupoDoSeletor => {
     const id = x.id as IaMac;
     const escolhido = !auto && i.fixa === id ? escolhaEfetiva(x, i.escolhas).modelo : null;
@@ -148,7 +154,8 @@ export function dadosDoSeletor(estado: Estado, agenteId: string): DadosSeletor |
   };
 }
 
-const pct = (uso: number): string => `${Math.round(uso * 100)}%`;
+/** Revisto em 2026-10-22 (NOD-12): 0,995 é 99%, como nas barras da conta; só o limite atingido é 100%. */
+const pct = (uso: number): string => `${pctUsado(uso)}%`;
 const SETA = (para: "baixo" | "cima") => `<svg class="seletor-seta" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${para === "baixo" ? "m6 9 6 6 6-6" : "m6 15 6-6 6 6"}"/></svg>`;
 const CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 const MAIS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';

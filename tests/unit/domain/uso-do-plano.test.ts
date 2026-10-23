@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EventoStream } from "../../../src/contracts/turno.ts";
 import type { UsoDoPlano } from "../../../src/contracts/uso-do-plano.ts";
-import { estadoDoMedidor, ultimoUsoDoPlano, usoDoPlanoValido } from "../../../src/domain/uso-do-plano.ts";
+import { estadoDoMedidor, LIMIAR_ALERTA, ultimoUsoDoPlano, usoDoPlanoValido } from "../../../src/domain/uso-do-plano.ts";
 
 const AGORA = Date.UTC(2026, 9, 6, 12, 0); // 06/10/2026 12:00 UTC
 const HORA = 3_600_000;
@@ -44,9 +44,12 @@ describe("ultimoUsoDoPlano", () => {
 });
 
 describe("estadoDoMedidor", () => {
-  it("faixas: 0.79 normal, 0.80 perto, 0.95 alerta, 1.2 limite atingido (nunca percentual negativo)", () => {
+  it("faixas: 0.79 normal, 0.80 perto, 0.90 alerta (NOD-12), 1.2 limite atingido (nunca percentual negativo)", () => {
+    expect(LIMIAR_ALERTA).toBe(0.9);
     expect(estadoDoMedidor(uso(0.79), AGORA).cincoHoras).toMatchObject({ faixa: "normal", restamPct: 21 });
     expect(estadoDoMedidor(uso(0.8), AGORA).cincoHoras).toMatchObject({ faixa: "perto", restamPct: 20 });
+    expect(estadoDoMedidor(uso(0.89), AGORA).cincoHoras).toMatchObject({ faixa: "perto", restamPct: 11 });
+    expect(estadoDoMedidor(uso(0.9), AGORA).cincoHoras).toMatchObject({ faixa: "alerta", restamPct: 10 });
     expect(estadoDoMedidor(uso(0.95), AGORA).cincoHoras).toMatchObject({ faixa: "alerta", restamPct: 5 });
     const limite = estadoDoMedidor(uso(1.2), AGORA).cincoHoras;
     expect(limite).toMatchObject({ faixa: "limite", restamPct: 0 });

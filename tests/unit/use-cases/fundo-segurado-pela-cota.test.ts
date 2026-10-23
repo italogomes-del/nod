@@ -210,8 +210,9 @@ describe("a cota de cada conta na lista de contas (NOD-302, CA12 da NOD-253)", (
     await c.deps.repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "perto", cincoHoras: { utilizacao: 0.995, renovaEm: T0 + 3 * HORA }, semana: { utilizacao: 0.4, renovaEm: T0 - HORA }, medidoEm: T0 - 30_000 }, c.vm, c.contas.cLeapy.id);
     const { contas } = await contasDaPessoa(c.deps);
     const por = new Map(contas.map((k) => [k.id, k.cota]));
-    expect(por.get(c.contas.cPessoal.id)).toEqual({ cincoHoras: { utilizacao: 1, renovaEm: T0 + 2 * HORA }, semana: null, situacao: "limite", voltaEm: T0 + 2 * HORA, medidoEm: T0 - 60_000 });
-    expect(por.get(c.contas.cLeapy.id)).toEqual({ cincoHoras: { utilizacao: 0.995, renovaEm: T0 + 3 * HORA }, semana: null, situacao: "reserva", voltaEm: T0 + 3 * HORA, medidoEm: T0 - 30_000 });
+    expect(por.get(c.contas.cPessoal.id)).toMatchObject({ cincoHoras: { utilizacao: 1, renovaEm: T0 + 2 * HORA }, semana: null, situacao: "limite", voltaEm: T0 + 2 * HORA, medidoEm: T0 - 60_000 });
+    // NOD-12: a semana que já renovou sai das janelas, mas a tela sabe quando renovou; e a máquina que mediu vem junto.
+    expect(por.get(c.contas.cLeapy.id)).toEqual({ cincoHoras: { utilizacao: 0.995, renovaEm: T0 + 3 * HORA }, semana: null, situacao: "reserva", voltaEm: T0 + 3 * HORA, medidoEm: T0 - 30_000, maquinaId: c.vm, renovou: { cincoHoras: null, semana: T0 - HORA } });
     expect(por.get(c.contas.gPessoal.id)).toBeNull();
   });
 });

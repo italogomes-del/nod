@@ -196,3 +196,27 @@ segurada pelo número, e a troca de IA no limite segue igual.
 O "Codex continua só com o proxy" desta ADR caiu com a [ADR-103](adr-103-o-codex-com-o-terminal-pelo-hook-do-nod.md):
 o chat do Codex no app-server tem o kit do terminal pelo hook PreToolUse do Codex, confiado pela API do app-server, e o
 isolamento de antes fica para a máquina sem o hook e para o `codex exec` de reserva.
+
+## Emenda (2026-10-22): o uso do plano na tela, por conta, e a leitura do Codex (NOD-12)
+
+**Contexto.** A emenda NOD-179 deixou a tela para a NOD-12 e previa uma linha por CLI em Seu espaço › Conexão. Desde
+então a tela virou Provedores de IA, uma lista de contas ([ADR-102](adr-102-contas-da-pessoa-em-todas-as-maquinas.md)/108), e a
+leitura passou a ser gravada por conta (0077). O Codex não informava o uso.
+
+**Decisão.**
+- O uso mora **na linha de cada conta** em Seu espaço › Provedores de IA: duas barras (5 h e semana) com "% usado" e
+  quando renova (`web/telas/uso-da-conta.ts`, protótipo do Gil no PR #414). Sem leitura, a linha diz por quê; leitura
+  com mais de 6 h "pode ter mudado"; janela que renovou não mostra o número velho.
+- Um limiar visual só: 80% muda o tom, **90% é âmbar** (`LIMIAR_ALERTA` desceu de 0,95 para 0,9, o mesmo do anel do
+  seletor), 100% é o limite. Nunca vermelho: esgotar é aviso, não erro.
+- Fora da lista, só dois sinais: o anel do seletor (agora da conta em uso) e a faixa do menu da conta, que aparece só
+  quando as rotinas vão esperar (≥ 90% ou no limite, sem outra conta pronta na fila).
+- O chat do Codex lê `account/rateLimits/read` do próprio app-server no fim da sessão (prazo de 2 s, melhor esforço),
+  sem ler credencial nem abrir processo novo. A leitura entra pelo mesmo caminho da do Claude (`usoDoPlano` no
+  resultado, gravada na conta do turno) e, por isso, **também alimenta o portão do fundo** (emenda de 2026-10-12). O
+  `codex exec` de reserva não lê.
+- `/uso` num bot de outra IA responde "O uso do plano está em Seu espaço › Provedores de IA."
+
+**Gatilho de reversão.** Se o app-server do Codex mudar o formato ou deixar de responder, a conta fica sem leitura nova
+e a tela diz que o ChatGPT não informou; o turno não depende dela. Se o âmbar em 90% virar ruído (a faixa aparecendo
+sem que as rotinas esperem de fato), volta-se a 95% no domínio e no anel juntos.

@@ -3,7 +3,7 @@ import type { ContaIa, ContasIaDto, LoginNaMaquina } from "../../../src/contract
 import type { MaquinaDto } from "../../../src/contracts/maquina.ts";
 import { criarContasDaPessoa, ligarPedeAvisoDosTermos, type ApiContas } from "../../../web/lib/contas-da-pessoa.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { linhaDaCota, REGRAS_DA_FILA, renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
+import { REGRAS_DA_FILA, renderListaDeContas, renderContasNaMaquina, resumoDasContasNaMaquina, UI_CONTAS_INICIAL, type ContextoContas, type UiContas } from "../../../web/telas/contas-lista.ts";
 import { hora } from "../../../web/lib/render.ts";
 import { renderMaquinas } from "../../../web/telas/maquinas.ts";
 import { renderProvedores } from "../../../web/telas/provedores.ts";
@@ -428,19 +428,39 @@ describe("controlador da lista (ADR-102)", () => {
   });
 });
 
-describe("a cota de cada conta na lista (NOD-302, CA12 da NOD-253)", () => {
-  it("CA12: a linha mostra o uso das janelas e, quando a cota segura, a situação e a volta", () => {
+describe("o uso de cada conta na lista (NOD-302 CA12; NOD-12)", () => {
+  it("a linha mostra as barras de 5 h e da semana; sem `cota` (servidor anterior) nada; a pílula do limite diz o dia quando é outro", () => {
     const volta = AGORA + 2 * 3_600_000;
     const comCota = { ...CONTAS, contas: [
       { ...PESSOAL, cota: { cincoHoras: { utilizacao: 0.995, renovaEm: volta }, semana: { utilizacao: 0.4, renovaEm: AGORA + 86_400_000 }, situacao: "reserva" as const, voltaEm: volta, medidoEm: AGORA } },
-      { ...GPT, cota: { cincoHoras: { utilizacao: 0.12, renovaEm: volta }, semana: null, situacao: "livre" as const, voltaEm: null, medidoEm: AGORA } },
+      { ...GPT, cota: null },
       LEAPY,
     ] };
     const html = renderListaDeContas(ctx({ contas: comCota }));
-    expect(html).toContain(`data-cota="reserva">5 h: 99% · semana: 40% · na reserva, volta às ${hora(volta)}</div>`);
-    expect(html).toContain('data-cota="livre">5 h: 12%</div>');
-    // Sem leitura (nenhum turno da conta rodou), a linha não inventa número.
-    expect(linhaDaCota(LEAPY, AGORA)).toBe("");
-    expect(linhaDaCota({ ...LEAPY, cota: { cincoHoras: { utilizacao: 1, renovaEm: volta }, semana: null, situacao: "limite", voltaEm: volta, medidoEm: AGORA } }, AGORA)).toContain(`no limite, volta às ${hora(volta)}`);
+    expect(html).toContain(`aria-valuetext="5 horas: 99% usado, renova às ${hora(volta)}"`);
+    expect(html).toContain('class="cu-jan f-alerta"');
+    expect(html).toContain('aria-label="Semana"');
+    expect(html).toContain("O ChatGPT não informou o uso desta conta");
+    // A Leapy (sem o campo) não ganha bloco nenhum; a Pessoal (alerta) diz o que acontece sem outra conta na fila.
+    expect(html.match(/class="cl-uso"/g)).toHaveLength(1);
+    expect(html).toContain("Sem outra conta do Claude na fila: no limite, as rotinas esperam até renovar.");
+    expect(html).not.toContain("cl-cota");
+    const amanha = AGORA + 30 * 3_600_000;
+    const d = new Date(amanha);
+    const dia = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const limite = renderListaDeContas(ctx({ contas: { ...CONTAS, contas: [PESSOAL, GPT, { ...LEAPY, noLimiteAte: amanha }] } }));
+    expect(limite).toContain(`No limite até ${dia} às ${hora(amanha)}`);
+  });
+
+  it("NOD-12: na simulação (catcher) nenhum medidor; os detalhes dizem de onde vem o número, só com o campo `cota`", () => {
+    const comCota = { ...CONTAS, contas: [{ ...PESSOAL, cota: { cincoHoras: { utilizacao: 0.42, renovaEm: AGORA + 3_600_000 }, semana: null, situacao: "livre" as const, voltaEm: null, medidoEm: AGORA } }, { ...GPT, cota: null }, LEAPY] };
+    const simulado = renderListaDeContas(ctx({ contas: comCota, simulacao: true }));
+    expect(simulado).not.toContain("cl-uso");
+    expect(simulado).not.toContain("cu-nada");
+    const detalhe = (id: string, simulacao = false) => renderListaDeContas(ctx({ contas: comCota, simulacao, ui: { detalhe: id } }));
+    expect(detalhe(PESSOAL.id)).toContain("O próprio Claude Code informa o uso a cada trabalho.");
+    expect(detalhe(GPT.id)).toContain("O próprio Codex informa o uso no fim de cada conversa.");
+    expect(detalhe(LEAPY.id)).not.toContain("Uso do plano");
+    expect(detalhe(PESSOAL.id, true)).not.toContain("Uso do plano");
   });
 });

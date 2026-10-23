@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { criarCodexCliDriver } from "../../../src/adapters/executor/drivers/codex-cli.ts";
+import { PRAZO_USO_DO_PLANO_MS } from "../../../src/adapters/executor/drivers/codex-chat.ts";
 import { PRAZO_TESTE_FALSO_MS, prazoSondaDoTeste } from "../../helpers/prazo-falso.ts";
 import type { Adapter, ConfigDriver } from "../../../src/adapters/executor/spi.ts";
 import { molduraMensagemNoMeio } from "../../../src/domain/mensagem-no-meio.ts";
@@ -50,6 +51,33 @@ it("com app-server, o chat abre uma thread que fica (ADR-103), nega a aprovaçã
   expect(reg.aprovacao).toEqual({ decision: "decline" });
   // O launcher (com o token) sumiu com o diretório do turno; só fica a pasta estável do bot.
   expect(await readdir(cfg.cwdBase)).toEqual(["texto-a"]);
+});
+
+it("NOD-12: no fim da sessão o chat lê o uso do plano (account/rateLimits/read) e o devolve com o resultado", async () => {
+  const instance = await criarCodexCliDriver(lig).create(cfg);
+  const antes = Date.now();
+  const r = await instance.adapter(planoHarness({ texto: "olá" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+  expect(r.desfecho).toBe("sucesso");
+  expect(r.usoDoPlano).toMatchObject({ harness: "codex-cli", situacao: "normal", cincoHoras: { utilizacao: 0.42 }, semana: { utilizacao: 0.18 } });
+  expect(r.usoDoPlano!.medidoEm).toBeGreaterThanOrEqual(antes);
+  expect(r.usoDoPlano!.cincoHoras!.renovaEm).toBeGreaterThan(antes);
+  expect(((await registro()) as Registro & { usoLido?: number }).usoLido).toBe(1);
+});
+
+it("NOD-12: o app-server que não responde ao uso não segura o turno além do prazo; sem leitura, o resultado vem sem ela", async () => {
+  const duracao: Record<string, number> = {};
+  for (const modo of ["calado", "erro"]) {
+    const instance = await criarCodexCliDriver(lig).create({ ...cfg, env: { ...cfg.env, TESTE_NOD_USO_CODEX: modo } });
+    const t0 = performance.now();
+    const r = await instance.adapter(planoHarness({ texto: "olá" })).rodarTurno({ sinal: async () => {}, delta: () => {}, evento: () => {} });
+    duracao[modo] = performance.now() - t0;
+    expect(r).toMatchObject({ desfecho: "sucesso", texto: "Entendi: olá." });
+    expect(r.usoDoPlano).toBeUndefined();
+  }
+  // QA NOD-12: o calado espera o prazo inteiro (prova que não respondeu) e não mais que isso; o erro não espera o prazo.
+  // A folga absorve o spawn do falso sob carga (NOD-198); um prazo esquecido em dezenas de segundos estoura.
+  expect(duracao.calado!).toBeGreaterThanOrEqual(PRAZO_USO_DO_PLANO_MS - 50);
+  expect(duracao.calado! - duracao.erro!).toBeLessThan(PRAZO_USO_DO_PLANO_MS + 15_000);
 });
 
 it("mensagem no meio entra por turn/steer e a resposta vira fala na hora; a fala final não a repete", async () => {

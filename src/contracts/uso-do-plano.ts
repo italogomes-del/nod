@@ -3,7 +3,8 @@ import type { EpochMs } from "./ids.ts";
 
 /**
  * Uso do plano da IA (definido em 2026-10-06, NOD-179): a cota que o próprio CLI informa a cada turno. No Claude Code
- * é o `rate_limit_event` do stream-json, com duas janelas (5 horas e a semana). É informação para a pessoa, nunca
+ * é o `rate_limit_event` do stream-json, com duas janelas (5 horas e a semana); no Codex (NOD-12, 2026-10-22), o
+ * `account/rateLimits/read` do app-server no fim da sessão de chat. É informação para a pessoa, nunca
  * gate: o nod não bloqueia nem escolhe IA por este número (emenda à ADR-036).
  */
 export type SituacaoDoPlano = "normal" | "perto" | "esgotado" | "desconhecida";
@@ -23,6 +24,8 @@ export type UsoDoPlano = {
    * sempre — o motor/app antigo e o turno sem conta.
    */
   contaId?: string | null;
+  /** NOD-12: a máquina que mediu, só na leitura por conta (`listarPorConta`); o Mac não manda (vem da entrega). */
+  maquinaId?: string | null;
 };
 
 /** `GET /api/uso-do-plano`: só as linhas da pessoa logada; CLI que nunca informou não aparece. */

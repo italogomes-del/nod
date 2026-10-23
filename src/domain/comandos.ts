@@ -35,9 +35,10 @@ export function comandoDaConversa(texto: string): { comando: ComandoDaConversa; 
 
 /**
  * definido em 2026-10-06 (NOD-179): o /cost é do Claude Code. Num bot de outra IA (Codex) ele ia como prompt, e o
- * modelo inventava uma resposta; o uso do plano fica no nod, gravado a cada turno do Claude Code.
+ * modelo inventava uma resposta; o uso do plano fica no nod, gravado a cada turno do Claude Code. revisto em 2026-10-22
+ * (NOD-12): o uso mora na linha de cada conta em Provedores de IA (a tela "Conexão" mudou de nome).
  */
-export const USO_FORA_DO_CLAUDE = "O uso do plano está em Seu espaço › Conexão.";
+export const USO_FORA_DO_CLAUDE = "O uso do plano está em Seu espaço › Provedores de IA.";
 
 /**
  * O comando da conversa só vira o do CLI quando o harness do turno tem `comandosDoCli` (ADR-083); sem harness (catcher,

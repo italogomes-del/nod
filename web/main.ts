@@ -72,7 +72,7 @@ import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADR
 import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
-import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
+import { faixaDeConectores, faixaDoUso, type AvisoDoUso, type DadosMenuConta } from "./telas/menu-conta.ts";
 import { renderConectores } from "./telas/conectores.ts";
 import { appsQueFaltam } from "./telas/rotina-precisa.ts";
 import { criarConexoes } from "./lib/conexao.ts";
@@ -1045,6 +1045,7 @@ function renderSidebar(estado: Estado): string {
   // avisar que o motor não está pronto (ADR-029: falha vira estado escrito, nunca só um ícone).
   const inv = inventarioEmUso(estado);
   const falhaMotor = !!inv && inv.estado !== "pronto";
+  const avisoUso = avisoDoUso();
   const situacaoMotor = !estado.executor
     ? "Verificando conexão…"
     : falhaMotor
@@ -1073,7 +1074,7 @@ function renderSidebar(estado: Estado): string {
     ${ambiente}
     ${falhaMotor ? avisoDeEstado({ tom: "alerta", texto: situacaoMotor, papel: "status", classe: "aviso-compacto", acao: botao("secao-espaco", motorDesatualizado(estado) ? "Atualizar" : "Conectar", { classe: "pri sm", dados: { secao: "conexao" } }) }) : ""}
     <div class="rodape">
-      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}" title="Menu da conta · ${esc(situacaoMotor)}"><span class="av-me">eu</span><span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
+      <button class="me${falhaMotor ? " me-falha" : ""}" data-act="menu-conta" aria-haspopup="menu" aria-expanded="${estado.espaco ? "true" : "false"}" aria-label="Menu da conta: ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}" title="Menu da conta · ${esc(situacaoMotor)}${avisoUso ? ` · ${esc(avisoUso.resumo)}` : ""}"><span class="av-me">eu</span>${avisoUso ? '<span class="me-ponto" aria-hidden="true"></span>' : ""}<span class="me-conexao conexao-${esc(estado.conexao.estado)}" title="eventos ao vivo: ${esc(estado.conexao.estado)}"></span></button>
       <button class="marketplace-bt" data-act="navegar" data-tela="conectores" aria-current="${t.tipo === "conectores" ? "true" : "false"}">${LOJA}Marketplace</button>
     </div>`;
 }
@@ -4564,13 +4565,20 @@ function fecharEspaco(): void {
   document.querySelector<HTMLElement>("#sidebar .rodape .me")?.focus();
 }
 
+/** NOD-12: o uso do plano que segura as rotinas (faixa do menu e ponto no avatar). Na simulação (catcher), nada. */
+function avisoDoUso(): AvisoDoUso | null {
+  if (estado.executor?.atual === "catcher" || !estado.contasIa?.disponivel) return null;
+  return faixaDoUso(estado.contasIa.contas, estado.agora);
+}
+
 function dadosMenuConta(): DadosMenuConta {
   const inv = inventarioEmUso(estado);
   const falha = !!inv && inv.estado !== "pronto";
   const fora = [...new Set((estado.frota?.negacoes ?? []).filter((n) => n.classe === "conector_indisponivel").map((n) => estado.conectores.find((c) => c.slug === n.nome || c.nome === n.nome)?.nome ?? n.nome))];
   const faixa = falha
     ? { texto: situacaoMotorFora(inv, estado.executor?.atual), botao: motorDesatualizado(estado) ? "Atualizar" : "Conectar" }
-    : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" } : null;
+    : fora.length ? { texto: faixaDeConectores(fora), botao: "Ver" }
+    : ((u) => (u ? { texto: u.texto, botao: "Ver contas" } : null))(avisoDoUso());
   const banco = textoAmbiente(ambienteBanco);
   return {
     faixa,

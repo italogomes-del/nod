@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
 import type { ContaAnunciada } from "../../src/contracts/contas-ia.ts";
+import { cotaDaContaNaLista } from "../../src/use-cases/contas-ia.ts";
 import { depsSobre } from "../helpers/deps-l7.ts";
 import { PESSOA_ANA, PESSOA_MARLON, TENANT_PADRAO } from "../helpers/ids.ts";
 import { describeIntegracao } from "../helpers/integracao.ts";
@@ -96,6 +97,23 @@ describeIntegracao("contas de IA da pessoa (0074, ADR-102)", () => {
       // Conta que não existe (apagada no meio do turno): a linha por IA fica, a entrega não cai.
       await repos.usoDoPlano.gravar(uso(0.5, AGORA + 2000), vm, randomUUID());
       expect(await repos.usoDoPlano.listarPorConta()).toHaveLength(2);
+    });
+  });
+
+  it("NOD-12: a leitura por conta traz a máquina que mediu; o DTO da lista leva maquinaId e a janela que renovou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const vm = randomUUID();
+      await repos.contasIa.doAnuncio(vm, [anuncio(1)], AGORA);
+      const [max] = (await repos.contasIa.listar()).contas;
+      await repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: { utilizacao: 0.4, renovaEm: AGORA + 60_000 }, semana: { utilizacao: 0.3, renovaEm: AGORA + 86_400_000 }, medidoEm: AGORA }, vm, max!.id);
+      const usos = await repos.usoDoPlano.listarPorConta();
+      expect(usos.map((u) => u.maquinaId)).toEqual([vm]);
+      // Dois minutos depois a janela de 5 h já renovou: sai das janelas e vai para `renovou`.
+      expect(cotaDaContaNaLista(usos, AGORA + 120_000).get(max!.id)).toMatchObject({ cincoHoras: null, semana: { utilizacao: 0.3 }, maquinaId: vm, renovou: { cincoHoras: AGORA + 60_000, semana: null } });
+      // Sem máquina na entrega, null (nunca um id inventado).
+      await repos.usoDoPlano.gravar({ harness: "claude-cli", situacao: "normal", cincoHoras: null, semana: null, medidoEm: AGORA + 1000 }, null, max!.id);
+      expect((await repos.usoDoPlano.listarPorConta()).map((u) => u.maquinaId)).toEqual([null]);
     });
   });
 

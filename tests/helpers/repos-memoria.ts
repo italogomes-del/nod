@@ -2990,12 +2990,12 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
       },
     },
     usoDoPlano: {
-      async gravar(uso, _machineId, contaId = null) {
+      async gravar(uso, machineId, contaId = null) {
         const gravar = (chave: string, u: UsoDoPlano) => {
           const atual = b.usoDoPlano.get(chave);
           if (!atual || atual.medidoEm < u.medidoEm) b.usoDoPlano.set(chave, u);
         };
-        if (contaId) gravar(`${escopo.tenantId}:${escopo.pessoaId}:conta:${contaId}`, { ...uso, contaId });
+        if (contaId) gravar(`${escopo.tenantId}:${escopo.pessoaId}:conta:${contaId}`, { ...uso, contaId, maquinaId: machineId && /^[0-9a-f-]{36}$/i.test(machineId) ? machineId : null });
         gravar(`${escopo.tenantId}:${escopo.pessoaId}:${uso.harness}`, uso);
       },
       async listar() {

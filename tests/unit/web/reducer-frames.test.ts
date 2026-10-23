@@ -137,6 +137,14 @@ describe("aplicarFrame por TipoFrame", () => {
     expect(aplicarFrame(semRota, frame("resumed", { resumed: false }), AGORA).invalidacoes).not.toContain("uso-plano");
   });
 
+  it("NOD-12: o turno que acaba relê as contas (a leitura do uso é por conta) só quando a tela já as tem", () => {
+    const comContas: Estado = { ...comConversa(), contasIa: { disponivel: true, modo: "perguntar", contas: [] } };
+    for (const tipo of ["turno.encerrado", "turno.interrompido"] as const) {
+      expect(aplicarFrame(comContas, frame(tipo, { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).toContain("contas");
+      expect(aplicarFrame(comConversa(), frame(tipo, { conversaId: CONVERSA, turnoId: TURNO }), AGORA).invalidacoes).not.toContain("contas");
+    }
+  });
+
   it("decisao.nova / decisao.decidida / decisao.vencida invalidam Sua vez e a conversa", () => {
     for (const tipo of ["decisao.nova", "decisao.decidida", "decisao.vencida"] as const) {
       expect(aplicarFrame(estadoInicial, frame(tipo, { conversaId: CONVERSA }), AGORA).invalidacoes).toEqual(["sua-vez", `conversa:${CONVERSA}`]);

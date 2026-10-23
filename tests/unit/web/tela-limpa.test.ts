@@ -207,6 +207,17 @@ describe("T6: o seletor de IA no campo", () => {
     expect(frase(cenario(fixo, duas("automatico", { noLimiteAte: AGORA + 60_000 })))).toBe("Se acabar, espera a conta voltar.");
   });
 
+  it("NOD-12: o anel usa a leitura da conta em uso; sem `cota` no DTO (servidor anterior), a da IA; conta sem leitura, sem número", () => {
+    const renova = AGORA + 3_600_000;
+    const cota = (u: number) => ({ cincoHoras: { utilizacao: u, renovaEm: renova }, semana: null, situacao: "livre" as const, voltaEm: null, medidoEm: AGORA });
+    const comCota = (q: ContaIa["cota"]) => cenario({}, { contasIa: { disponivel: true, modo: "perguntar", contas: [conta("Pessoal", { cota: q })] } });
+    expect(dadosDoSeletor(comCota(cota(0.93)), "a")).toMatchObject({ uso: 0.93, renovaEm: renova, conta: "Pessoal" });
+    expect(mioloDoSeletor(dadosDoSeletor(comCota(cota(0.995)), "a")!).html).toContain(">99%<");
+    expect(dadosDoSeletor(comCota(null), "a")!.uso).toBeNull();
+    // Sem o campo, a leitura por IA de antes (0,62 no cenário).
+    expect(dadosDoSeletor(cenario(), "a")!.uso).toBe(0.62);
+  });
+
   it("a janela que já renovou não mostra número nem 'Renova às' no passado", () => {
     const passou = cenario({}, { usoDoPlano: { planos: [{ harness: "claude-cli", situacao: "perto", cincoHoras: { utilizacao: 0.97, renovaEm: AGORA - 1 }, semana: null, medidoEm: AGORA - 3_600_000 }] } });
     const d = dadosDoSeletor(passou, "a")!;

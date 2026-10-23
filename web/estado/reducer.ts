@@ -555,6 +555,12 @@ function invalidar(estado: Estado, ...quais: (Invalidacao | null)[]): Estado {
  * (`invalidacoesAoRetomar`).
  */
 const usoPlano = (e: Estado): Invalidacao | null => (e.usoDoPlano === null ? null : "uso-plano");
+/**
+ * NOD-12 (2026-10-22): a leitura do uso agora é por conta e vem com a lista de contas (as barras de Provedores de IA, a
+ * faixa do menu e o anel do seletor). O turno que acaba traz leitura nova: relê as contas, se a tela já as tem; quem
+ * nunca as pediu (ex.: sem abrir a conversa) continua sem pedir.
+ */
+const contasDoTurno = (e: Estado): Invalidacao | null => (e.contasIa === null ? null : "contas");
 
 function semTurnoVivo(estado: Estado, turnoId: string | null): Estado {
   if (!turnoId || !estado.turnosVivos[turnoId]) return estado;
@@ -857,8 +863,9 @@ const POR_FRAME: Record<TipoFrame, Handler> = {
   // definido em 2026-10-16 (plano "tela limpa", T6): o CLI informa o uso do plano a cada turno, então o anel do seletor relê
   // quando um turno termina (uma leitura por turno, sem relógio novo); fora da conversa a falta espera a tela pedir. O turno
   // interrompido também gastou a janela (e é o que acaba quando a conta bate no limite): relê igual (revisão do PR 1).
-  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e), ...trabalhosDoTurno(f)),
-  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e), ...trabalhosDoTurno(f)),
+  // NOD-12: e a lista de contas, que carrega a leitura por conta.
+  "turno.encerrado": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
+  "turno.interrompido": (e, f) => invalidar(semDelta(encerrado(semTurnoVivo(e, texto(f.dados.turnoId)), texto(f.dados.turnoId)), texto(f.dados.conversaId), texto(f.dados.turnoId)), conv(f), "frota", "sua-vez", usoPlano(e), contasDoTurno(e), ...trabalhosDoTurno(f)),
   "decisao.nova": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.decidida": (e, f) => invalidar(e, "sua-vez", conv(f)),
   "decisao.vencida": (e, f) => invalidar(e, "sua-vez", conv(f)),

@@ -875,6 +875,8 @@ nod-mascote[data-aviso="pergunta"], nod-mascote[data-aviso="nao-lido"] { --nod-a
 
 .rodape { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
 .rodape .me { position: relative; width: auto; padding: 0; border: 0; border-radius: 50%; margin: 0; background: none; }
+/* NOD-12: o ponto âmbar no avatar quando as rotinas vão esperar pelo uso do plano (a faixa do menu diz o porquê). */
+.me-ponto { position: absolute; right: -1px; top: -1px; width: 10px; height: 10px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 2px var(--surface-side); }
 .rodape .me .av-me { width: 34px; height: 34px; }
 .rodape .me[aria-current="true"] .av-me { box-shadow: 0 0 0 2px var(--ink); }
 .rodape .me:focus-visible { outline: none; }

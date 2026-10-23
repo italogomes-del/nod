@@ -23,6 +23,7 @@ describe("comandos da conversa", () => {
   });
 
   it("NOD-179: /uso só vira /cost no Claude Code; no Codex pede a frase fixa e a resposta é ela, diga o modelo o que disser", () => {
+    expect(USO_FORA_DO_CLAUDE).toBe("O uso do plano está em Seu espaço › Provedores de IA.");
     expect(traduzirParaOCli("/uso", "claude-cli")).toBe("/cost");
     expect(traduzirParaOCli("/uso", null)).toBe("/cost");
     for (const texto of ["/uso", "/cost", "/usage agora"]) {

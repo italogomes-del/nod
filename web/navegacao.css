@@ -728,9 +728,26 @@ div.mac-medidor { padding-right: 36px; }
 .cl-nome .selo { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-2); }
 .cl-ident { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); min-width: 0; }
 .cl-ident span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cl-cota { font-size: 12px; color: var(--ink-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.cl-cota.c-reserva { color: var(--ink-2); }
-.cl-cota.c-limite { color: var(--ink-2); font-weight: 500; }
+/* NOD-12 (2026-10-22, protótipo do Gil no PR 414): o uso do plano da conta, 5 h e Semana em barras; âmbar a partir de 90%,
+   nunca vermelho. No celular as barras empilham (regra no @media abaixo). */
+.cl-uso { display: grid; grid-template-columns: repeat(2, minmax(0, 200px)); gap: 6px 20px; margin-top: 6px; }
+.cu-jan { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cu-cab { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--ink-3); }
+.cu-cab b { font-weight: 500; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cu-barra { height: 4px; border-radius: 999px; background: var(--surface-raised); overflow: hidden; }
+.cu-barra > span { display: block; height: 100%; border-radius: inherit; background: var(--line-strong); }
+.cu-sub { margin: 0; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.f-perto .cu-cab b { color: var(--ink); }
+.f-perto .cu-barra > span { background: var(--ink-2); }
+.f-alerta .cu-cab b, .f-limite .cu-cab b, .f-limite .cu-sub { color: var(--warning); }
+.f-alerta .cu-barra > span, .f-limite .cu-barra > span { background: var(--warning); }
+.f-limite .cu-cab b { font-weight: 600; }
+.f-renovado .cu-sub { color: var(--ink-2); }
+.cu-pe { margin: 0; font-size: 11.5px; color: var(--ink-3); }
+.cu-pe.velho { font-style: italic; }
+.cu-fila { margin: 2px 0 0; font-size: 12px; color: var(--ink-2); }
+.cu-nada { margin: 6px 0 0; font-size: 12px; color: var(--ink-3); }
+@media (prefers-reduced-motion: no-preference) { .cu-barra > span { transition: width .3s; } }
 .cl-maqs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .cl-pil { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: 12px; color: var(--ink-2); }
 .cl-pil svg { width: 13px; height: 13px; }
@@ -852,6 +869,7 @@ div.mac-medidor { padding-right: 36px; }
   .cl-dir { grid-column: 3; justify-content: flex-start; }
   .cl-mais { grid-row: 1; grid-column: 4; }
   .cl-provs { grid-template-columns: 1fr; }
+  .cl-uso { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .cl-regras ul { padding-left: 16px; }
   .maq-contas { padding-left: 18px; flex-wrap: wrap; }
   /* NOD-92 PR 2: no celular o "Conectar uma máquina" vira uma coluna, com a trilha de passos em linha no topo. */

@@ -368,7 +368,7 @@ export function pilulaMac(segurando: boolean, esperando: number, comVer = true, 
 /**
  * A pílula da cota da IA (definido em 2026-10-12, ADR-099 §7): com a IA na reserva de 1% ou no limite, o trabalho de fundo
  * espera e a conversa com a pessoa segue. Diz quando ele volta (a renovação da janela que segura) e quantas tasks esperam.
- * Sem "Ver": não há o que a pessoa ajuste; o uso da IA está em Seu espaço › Conexão. Nada segurando (ou servidor anterior): nada.
+ * Sem "Ver": não há o que a pessoa ajuste; o uso da IA está em Seu espaço › Provedores de IA. Nada segurando (ou servidor anterior): nada.
  */
 export function pilulaDaCota(cota: TrabalhosDto["cota"], trabalhos: readonly TrabalhoDto[], agora: number, pedidosNaFila: TrabalhosDto["pedidosNaFila"] = []): string {
   if (!cota) return "";

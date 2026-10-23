@@ -3,9 +3,10 @@ import type { DetalheDaConta, DetalhesDasContas } from "../../src/contracts/desk
 import type { CausaFalhaLogin, ResultadoColarCodigo } from "../../src/contracts/estado-ia.ts";
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
 import { ICONE } from "../lib/icones.ts";
-import { esc, hora } from "../lib/render.ts";
+import { esc } from "../lib/render.ts";
 import { logoDaIa, PROVEDOR } from "./cartao-ia.ts";
 import { planoNaTela } from "./contas-ia.ts";
+import { quandoNaTela, usoDaConta } from "./uso-da-conta.ts";
 
 /**
  * Seu espaço › Provedores de IA, a lista única (definido em 2026-10-13, ADR-102; protótipos G1 e CM1-A aprovados pelo
@@ -67,6 +68,8 @@ export type ContextoContas = {
   botsNaMaquina: (maquinaId: string) => string[];
   /** O cartão da IA do Mac com os passos do login dele (web/telas/cartao-ia.ts), para o login "Entrar no Mac". */
   cartaoDoMac: (ia: IaComConta) => string;
+  /** NOD-12: modo simulação (executor catcher): a lista não mostra o uso do plano (nenhum trabalho real o mede). */
+  simulacao?: boolean;
 };
 
 export const nomeDaContaNaTela = (c: Pick<ContaIa, "ia" | "apelido">): string => `${PROVEDOR[c.ia].nome} · ${c.apelido}`;
@@ -216,7 +219,13 @@ function menu(c: ContaIa, x: ContextoContas): string {
     </div>`;
 }
 
-function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; organizacao: string | null }): string {
+/** NOD-12 (protótipo do Gil, quadro 16): de onde vem o número das barras, nos detalhes para não ocupar a linha. */
+const DE_ONDE_VEM_O_USO: Record<ContaIa["ia"], string> = {
+  "claude-cli": "O próprio Claude Code informa o uso a cada trabalho. O nod só lê esse número; não pergunta ao provedor nem gasta cota.",
+  "codex-cli": "O próprio Codex informa o uso no fim de cada conversa. O nod só lê esse número; não pergunta ao provedor nem gasta cota.",
+};
+
+function detalhes(c: ContaIa, x: ContextoContas, d:{ email: string | null; organizacao: string | null }): string {
   const maqs = c.maquinas.map((v) => {
     const m = x.maquinas.find((y) => y.id === v.maquinaId);
     const estado = v.estado === "pronta" ? "logada" : v.estado === "sem_login" ? "o login venceu" : "sem acesso";
@@ -228,26 +237,10 @@ function detalhes(c: ContaIa, x: ContextoContas, d: { email: string | null; orga
         <dt>Plano</dt><dd>${esc(c.plano ? planoNaTela(c.plano) : "o CLI não disse")}${c.corporativa ? " · corporativa" : ""}</dd>
         ${d.email || d.organizacao ? `<dt>Conta</dt><dd>${esc([d.email, d.organizacao].filter(Boolean).join(" · "))}</dd>` : ""}
         <dt>Máquinas</dt><dd>${maqs ? `<ul>${maqs}</ul>` : "nenhuma ainda"}</dd>
+        ${c.cota !== undefined && !x.simulacao ? `<dt>Uso do plano</dt><dd>${esc(DE_ONDE_VEM_O_USO[c.ia])}</dd>` : ""}
       </dl>
       <button type="button" class="ob-link" data-act="cl-detalhe" data-id="${esc(c.id)}">Fechar detalhes</button>
     </div>`;
-}
-
-/**
- * A cota da conta (NOD-302, CA12 da NOD-253): o uso das janelas ainda vigentes e, quando a cota segura o fundo, até quando.
- * "5 h: 82% · semana: 40% · na reserva, volta às 14:30". Sem leitura (nenhum turno dela rodou ainda), nada.
- */
-export function linhaDaCota(c: ContaIa, agora: number): string {
-  const q = c.cota;
-  if (!q) return "";
-  const pct = (u: number) => `${Math.min(100, Math.floor(u * 100))}%`;
-  const partes = [q.cincoHoras ? `5 h: ${pct(q.cincoHoras.utilizacao)}` : null, q.semana ? `semana: ${pct(q.semana.utilizacao)}` : null];
-  if (q.situacao !== "livre") {
-    const onde = q.situacao === "limite" ? "no limite" : "na reserva";
-    partes.push(q.voltaEm !== null && q.voltaEm > agora ? `${onde}, volta às ${hora(q.voltaEm)}` : onde);
-  }
-  const texto = partes.filter(Boolean).join(" · ");
-  return texto ? `<div class="cl-cota${q.situacao !== "livre" ? ` c-${q.situacao}` : ""}" data-cota="${q.situacao}">${esc(texto)}</div>` : "";
 }
 
 function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null): string {
@@ -256,7 +249,7 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
   const d = identidadeDe(c, x);
   const nome = nomeDaContaNaTela(c);
   const [classe, estado] = noLimite(c, x.agora)
-    ? ["e-limite", `No limite até ${hora(c.noLimiteAte!)}`]
+    ? ["e-limite", `No limite até ${quandoNaTela(c.noLimiteAte!, x.agora)}`]
     : c.id === usada ? ["e-uso", filtro ? `Em uso na ${nomeCurto(x.maquinas.find((m) => m.id === filtro)!, x.maquinas)}` : "Em uso"]
     : c.entraNaTrocaAutomatica ? ["e-disp", "Disponível"] : ["e-fora", "Fora da fila"];
   const ident = [d?.email, d?.organizacao ? `organização ${d.organizacao}` : null, `pelo ${PROVEDOR[c.ia].cli}`].filter(Boolean).join(" · ");
@@ -278,7 +271,7 @@ function linha(c: ContaIa, pos: number, x: ContextoContas, usada: string | null)
       <div class="cl-corpo">
         <div class="cl-nome"><b>${esc(PROVEDOR[c.ia].nome)} · ${esc(c.apelido)}</b>${c.plano ? `<span class="cl-plano">${esc(planoNaTela(c.plano))}</span>` : ""}${c.corporativa ? '<span class="selo">Corporativa</span>' : ""}</div>
         <div class="cl-ident">${ICONE.pessoa}<span>${esc(ident)}</span></div>
-        ${linhaDaCota(c, x.agora)}
+        ${x.simulacao ? "" : usoDaConta(c, { agora: x.agora, contas: x.contas.contas, nomeDaMaquina: (id) => { const m = x.maquinas.find((y) => y.id === id); return m ? nomeCurto(m, x.maquinas) : null; } })}
         ${filtro ? "" : `<div class="cl-maqs">${pilulas(c, x)}</div>`}
         ${renomear}
         ${x.ui.detalhe === c.id ? detalhes(c, x, d) : ""}

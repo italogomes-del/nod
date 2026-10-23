@@ -44,12 +44,12 @@ export function usoDoPlanoRepo(conn: Conn, escopo: Escopo) {
       return linhas.map((l) => ({ harness: l.harness, situacao: l.situacao, cincoHoras: l.cinco_horas, semana: l.semana, medidoEm: ms(l.medido_em) }));
     },
 
-    /** NOD-253: as leituras por conta da lista (0077), com `contaId`. */
+    /** NOD-253: as leituras por conta da lista (0077), com `contaId`; NOD-12: e a máquina que mediu (`maquinaId`). */
     async listarPorConta(): Promise<UsoDoPlano[]> {
-      const linhas = await conn<(Linha & { conta_id: string })[]>`
-        select conta_id, harness, situacao, cinco_horas, semana, medido_em from uso_do_plano_contas
+      const linhas = await conn<(Linha & { conta_id: string; machine_id: string | null })[]>`
+        select conta_id, harness, situacao, cinco_horas, semana, machine_id, medido_em from uso_do_plano_contas
         where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} order by harness, conta_id`;
-      return linhas.map((l) => ({ harness: l.harness, situacao: l.situacao, cincoHoras: l.cinco_horas, semana: l.semana, medidoEm: ms(l.medido_em), contaId: l.conta_id }));
+      return linhas.map((l) => ({ harness: l.harness, situacao: l.situacao, cincoHoras: l.cinco_horas, semana: l.semana, medidoEm: ms(l.medido_em), contaId: l.conta_id, maquinaId: l.machine_id }));
     },
   };
 }

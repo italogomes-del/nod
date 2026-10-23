@@ -2,6 +2,7 @@ import type { ContaAnunciada, ContaIa, ContasIaDto, CotaDaContaDto, MotivoDaNota
 import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
 import { cotaDasContas } from "../domain/cota-da-ia.ts";
 import type { RuntimeEvent } from "../contracts/evento.ts";
+import type { EpochMs } from "../contracts/ids.ts";
 import { ErroDeDominio } from "../domain/erro.ts";
 import { MOTIVOS_FALHA_DE_ESPERA } from "../domain/pedido-parado.ts";
 import { nomeDaConta, ordemIasDaLista } from "../domain/contas-da-pessoa.ts";
@@ -66,10 +67,15 @@ export function cotaDaContaNaLista(usos: readonly UsoDoPlano[], agora: number): 
   }
   const seguram = cotaDasContas({ usos: [...ultima.values()], agora });
   const vigente = (j: JanelaDoPlano | null): JanelaDoPlano | null => (j && (j.renovaEm === null || j.renovaEm > agora) ? j : null);
+  // NOD-12: a janela que renovou não some calada — a tela diz quando renovou, sem o número velho.
+  const renovou = (j: JanelaDoPlano | null): EpochMs | null => (j && j.renovaEm !== null && j.renovaEm <= agora ? j.renovaEm : null);
   const out = new Map<string, CotaDaContaDto>();
   for (const [contaId, u] of ultima) {
     const s = seguram.get(contaId);
-    out.set(contaId, { cincoHoras: vigente(u.cincoHoras), semana: vigente(u.semana), situacao: s?.situacao ?? "livre", voltaEm: s?.voltaEm ?? null, medidoEm: u.medidoEm });
+    out.set(contaId, {
+      cincoHoras: vigente(u.cincoHoras), semana: vigente(u.semana), situacao: s?.situacao ?? "livre", voltaEm: s?.voltaEm ?? null, medidoEm: u.medidoEm,
+      maquinaId: u.maquinaId ?? null, renovou: { cincoHoras: renovou(u.cincoHoras), semana: renovou(u.semana) },
+    });
   }
   return out;
 }

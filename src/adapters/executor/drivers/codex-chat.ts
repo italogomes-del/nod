@@ -3,11 +3,13 @@ import { join } from "node:path";
 import type { EsforcoAgente } from "../../../contracts/agente.ts";
 import type { PlanoTurno } from "../../../contracts/plano-turno.ts";
 import type { EventoStream, ResultadoTurno, SinaisTurno, TokensTurno } from "../../../contracts/turno.ts";
+import type { UsoDoPlano } from "../../../contracts/uso-do-plano.ts";
 import {
   chaveToml,
   hooksDaLista,
   pastaNaConfig,
   pedidoAbrirThread,
+  pedidoAccountRateLimitsRead,
   pedidoConfigBatchWrite,
   pedidoConfigRead,
   pedidoHooksList,
@@ -16,6 +18,7 @@ import {
   type EsforcoCodex,
   type EventoAppServer,
   type SandboxCodex,
+  usoDoPlanoDoRateLimits,
 } from "../../../domain/codex-app-server.ts";
 import { ultimaLinhaUtil } from "../../../domain/codex-stream.ts";
 import { criarFalaDoMeio } from "../../../domain/mensagem-no-meio.ts";
@@ -55,6 +58,8 @@ const PRAZO_HANDSHAKE_MS = 30_000;
 const SAIDA_APOS_FIM_MS = 2_000;
 /** definido em 2026-10-14 (ADR-103): o tempo para tirar a entrada `[projects]` da config antes de fechar. */
 const PRAZO_LIMPEZA_MS = 5_000;
+/** NOD-12: quanto o fim da sessão espera a leitura do uso do plano antes de seguir sem ela. */
+export const PRAZO_USO_DO_PLANO_MS = 2_000;
 
 /**
  * definido em 2026-10-14 (ADR-103): o hook do Codex falha ABERTO (medido no 0.147.0: timeout de 5 s estourado → o comando
@@ -322,11 +327,30 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
       projetoExistia = true;
     };
 
+    /**
+     * NOD-12 (2026-10-22): o uso do plano da conta, lido no fim da sessão (`account/rateLimits/read`, sem modelo nem
+     * credencial). Melhor esforço com prazo curto: sem resposta, o turno acaba igual e a tela diz que o ChatGPT não
+     * informou. A leitura vai com o resultado e o servidor grava na conta do turno (assentar-turno), como a do Claude.
+     */
+    let usoDoPlano: UsoDoPlano | null = null;
+    const lerUsoDoPlano = async () => {
+      if (cliente.fechando()) return;
+      let relogio: ReturnType<typeof setTimeout> | undefined;
+      const lido = await Promise.race([
+        cliente.pedir((id) => pedidoAccountRateLimitsRead(id)).then((res) => usoDoPlanoDoRateLimits(res, Date.now())).catch(() => null),
+        new Promise<null>((r) => { relogio = setTimeout(() => r(null), PRAZO_USO_DO_PLANO_MS); }),
+      ]);
+      clearTimeout(relogio);
+      if (lido) usoDoPlano = lido;
+      else log("info", "codex_chat_sem_uso_do_plano", { turno_id: plano.turnoId });
+    };
+
     let encerrando = false;
     const encerrar = async () => {
       aberta = false;
       if (encerrando || cliente.fechando()) return;
       encerrando = true;
+      await lerUsoDoPlano();
       await limparProjeto();
       cliente.fechar();
       timerSaida = setTimeout(() => void proc.interromper(), SAIDA_APOS_FIM_MS);
@@ -476,7 +500,7 @@ async function rodarUmaVez(c: ContextoChatCodex, comTerminal: boolean): Promise<
     const negacoesDoNod = terminal ? await lerNegacoes(arquivoNegacoes) : [];
     // ADR-103: a thread persiste no Codex da conta; o id é a sessão que o próximo turno continua.
     const sessaoCli = cliente.threadId() || null;
-    return { ...r, erroCru, sessaoCli, ...(causa ? { causa } : {}), ...(negacoesDoNod.length > 0 ? { negacoesDoNod: [...(r.negacoesDoNod ?? []), ...negacoesDoNod] } : {}) };
+    return { ...r, erroCru, sessaoCli, ...(causa ? { causa } : {}), ...(negacoesDoNod.length > 0 ? { negacoesDoNod: [...(r.negacoesDoNod ?? []), ...negacoesDoNod] } : {}), ...(usoDoPlano ? { usoDoPlano } : {}) };
   } finally {
     if (timerSaida) clearTimeout(timerSaida);
     // X2: o que ficou na fila ou com o steer no ar quando a sessão acabou não entrou: volta para a fila do servidor.

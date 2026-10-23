@@ -1,6 +1,8 @@
 import type { ContaDaIa } from "../contracts/estado-ia.ts";
+import type { JanelaDoPlano, UsoDoPlano } from "../contracts/uso-do-plano.ts";
 import { emailDaConta, planoLegivel } from "./estado-ia.ts";
 import { redigirECortar } from "./segredos.ts";
+import { LIMIAR_PERTO } from "./uso-do-plano.ts";
 
 /**
  * Protocolo do `codex app-server` (definido em 2026-10-04, ADR-076): JSON-RPC 2.0, uma mensagem JSON por linha no
@@ -231,6 +233,53 @@ export function contaDoAccountRead(resultado: Obj): ContaDaIa | null {
   const email = emailDaConta(conta.email);
   if (!email) return null;
   return { email, organizacao: null, plano: planoLegivel(conta.planType) };
+}
+
+/**
+ * NOD-12 (definido em 2026-10-22): o uso do plano da conta logada no Codex, sem chamar modelo nem ler credencial (o
+ * app-server responde com a sessão que ele mesmo tem). Medido em 2026-10-22 no Codex 0.162.0: `account/rateLimits/read`
+ * devolve `{rateLimits: {primary: {usedPercent, windowDurationMins, resetsAt}, secondary: {…}, rateLimitReachedType,
+ * planType, …}, rateLimitsByLimitId, …}`, `usedPercent` de 0 a 100, `resetsAt` em segundos, 300 min e 10080 min.
+ */
+export function pedidoAccountRateLimitsRead(id: IdRpc): string {
+  return pedido(id, "account/rateLimits/read", {});
+}
+
+/** A janela do Codex → a do nod (0 a 1, ms). null = ausente ou num formato que não é o medido. */
+function janelaDoCodex(v: unknown): { janela: JanelaDoPlano; minutos: number | null } | null {
+  if (!ehObj(v) || typeof v.usedPercent !== "number" || !Number.isFinite(v.usedPercent) || v.usedPercent < 0) return null;
+  const renova = typeof v.resetsAt === "number" && Number.isFinite(v.resetsAt) && v.resetsAt > 0 ? v.resetsAt * 1000 : null;
+  const minutos = typeof v.windowDurationMins === "number" && Number.isFinite(v.windowDurationMins) ? v.windowDurationMins : null;
+  return { janela: { utilizacao: v.usedPercent / 100, renovaEm: renova }, minutos };
+}
+
+/** Até 6 h é a janela curta ("5 horas"); a partir de 6 dias, a semana. Sem a duração: primary = 5 h, secondary = semana. */
+const JANELA_CURTA_MAX_MIN = 360;
+const SEMANA_MIN_MIN = 6 * 24 * 60;
+
+/**
+ * `account/rateLimits/read` → o uso do plano do turno (harness codex-cli). null = resposta sem nenhuma janela legível
+ * (a tela diz "o ChatGPT não informou"); nunca lança. Esgotado quando uma janela chegou a 100% ou o Codex diz que o
+ * limite foi atingido (`rateLimitReachedType`); perto a partir do mesmo 80% do medidor.
+ */
+export function usoDoPlanoDoRateLimits(resultado: Obj, medidoEm: number): UsoDoPlano | null {
+  const rl = ehObj(resultado.rateLimits) ? resultado.rateLimits : null;
+  if (!rl) return null;
+  const primaria = janelaDoCodex(rl.primary);
+  const secundaria = janelaDoCodex(rl.secondary);
+  let cincoHoras: JanelaDoPlano | null = null;
+  let semana: JanelaDoPlano | null = null;
+  for (const [j, padrao] of [[primaria, "cinco"], [secundaria, "semana"]] as const) {
+    if (!j) continue;
+    const qual = j.minutos === null ? padrao : j.minutos <= JANELA_CURTA_MAX_MIN ? "cinco" : j.minutos >= SEMANA_MIN_MIN ? "semana" : null;
+    if (qual === "cinco" && !cincoHoras) cincoHoras = j.janela;
+    else if (qual === "semana" && !semana) semana = j.janela;
+  }
+  if (!cincoHoras && !semana) return null;
+  const maior = Math.max(cincoHoras?.utilizacao ?? 0, semana?.utilizacao ?? 0);
+  const atingido = typeof rl.rateLimitReachedType === "string" && rl.rateLimitReachedType.length > 0;
+  const situacao = maior >= 1 || atingido ? "esgotado" : maior >= LIMIAR_PERTO ? "perto" : "normal";
+  return { harness: "codex-cli", situacao, cincoHoras, semana, medidoEm };
 }
 
 export type ModeloAppServer = { id: string; padrao: boolean; esforcos: string[]; esforcoPadrao: string | null };

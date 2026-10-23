@@ -59,6 +59,7 @@ function renderProvedoresContas(estado: Estado): string {
     noApp: ui.noApp && estado.detalhesContas !== null,
     botsNaMaquina: (id) => botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === id).map((b) => b.nome),
     cartaoDoMac: (ia) => renderCartaoIa(vistaDaIa(ia, contexto), ui),
+    simulacao: estado.executor?.atual === "catcher",
   });
   const executor = estado.executor && estado.executor.trocavel !== false ? `<div class="espaco-cartao prov-avancado">${renderExecutor(estado)}</div>` : "";
   const intro = filtro
