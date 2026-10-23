@@ -51,6 +51,7 @@ import { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import { leiturasRepo } from "./leituras.repo.ts";
 import { ligacoesRepo } from "./ligacoes.repo.ts";
 import { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
+import { nativasIdempotenciaRepo } from "./nativas-idempotencia.repo.ts";
 
 /** Os 24 repositórios sobre a MESMA conexão/transação e o MESMO escopo (Práticas §1). */
 export function criarRepos(conn: Conn, escopo: Escopo): Repos {
@@ -107,6 +108,7 @@ export function criarRepos(conn: Conn, escopo: Escopo): Repos {
     ligacoes: ligacoesRepo(conn, escopo),
     liberacoesDispensadas: liberacoesDispensadasRepo(conn, escopo),
     onboarding: onboardingRepo(conn, escopo),
+    nativasIdempotencia: nativasIdempotenciaRepo(conn, escopo),
   };
 }
 

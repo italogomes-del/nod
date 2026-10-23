@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
-import { criarPonteInterna } from "../../src/adapters/fundo/ponte-interna.ts";
+import { criarPonteInterna, REOFERTA_MS } from "../../src/adapters/fundo/ponte-interna.ts";
 import { iniciarLaco } from "../../src/adapters/executor/laco.ts";
 import type { Adapter, Driver, Registry, SinksTurno } from "../../src/adapters/executor/spi.ts";
 import type { ResultadoTurno } from "../../src/contracts/turno.ts";
@@ -79,6 +79,35 @@ const esperarAte = async (cond: () => boolean, ms = 8_000) => {
 };
 
 describeIntegracao("sessão viva (ADR-067): fala no meio do turno e mensagem nova entram no turno vivo", () => {
+  it("NOD-293 E9: criarPonteInterna.renovar reoferece após 10 s e a confirmação encerra a oferta", async () => {
+    let agora = Date.parse("2026-10-20T12:00:00Z");
+    const machineId = randomUUID();
+    const ponte = criarPonteInterna(db, { services, useCases, executor: "catcher", listarPessoas, agora: () => agora, esquecerTurno: (id) => services.interruptor.esquecer(id) });
+    await ponte.conectar({ machineId, nome: "teste", inventario: PRONTO, versaoContrato: 1 });
+    const { conversaId, primeiro } = await escopado(async (trx) => {
+      const deps = depsSobreTrx(trx, PESSOA, { services });
+      const c = (await executar(deps, criarAgente, { dono: "pessoa", nome: "Dev E9" })).data;
+      criados.agentes.push(c.agente.id);
+      criados.conversas.push(c.conversa.id);
+      const t = (await executar(deps, enviarMensagem, { conversaId: c.conversa.id, texto: "tarefa longa", inventario: PRONTO, executor: "catcher" })).data.turno.id;
+      return { conversaId: c.conversa.id, primeiro: t };
+    });
+    expect((await ponte.puxar(PESSOA.pessoaId))?.turnoId).toBe(primeiro);
+    const segundo = await escopado(async (trx) => (await executar(depsSobreTrx(trx, PESSOA, { services }), enviarMensagem, { conversaId, texto: "mensagem no meio", inventario: PRONTO, executor: "catcher" })).data.turno.id);
+    const renovar = (mensagensEntregues: string[] = []) => ponte.renovar({ turnoId: primeiro, machineId, sinais: { attempted: true, rejected: false, promptSubmitted: true, producedOutput: false }, eventos: [], aceitaMensagens: true, mensagensEntregues });
+
+    const inicial = await renovar();
+    expect(inicial.mensagensIds).toEqual([segundo]);
+    expect((await renovar()).mensagensIds).toBeUndefined();
+    agora += REOFERTA_MS;
+    expect((await renovar()).mensagensIds).toBeUndefined();
+    agora += 1;
+    expect((await renovar()).mensagensIds).toEqual([segundo]);
+    expect((await renovar([segundo])).mensagensIds).toBeUndefined();
+    expect((await renovar()).mensagensIds).toBeUndefined();
+    expect(await lerTurno(segundo)).toMatchObject({ estado: "interrompido", motivoInterrupcao: "absorvido", absorvidoPor: primeiro });
+  });
+
   it("a fala sai na hora; a mensagem da pessoa entra no turno vivo (sai 'absorvido') e o bot responde a ela no mesmo turno", { timeout: 20_000 }, async () => {
     const machineId = randomUUID();
     const ponte = criarPonteInterna(db, { services, useCases, executor: "catcher", listarPessoas, esquecerTurno: (id) => services.interruptor.esquecer(id) });

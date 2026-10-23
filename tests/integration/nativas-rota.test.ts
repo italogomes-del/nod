@@ -59,8 +59,8 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
         servidores: [{ conectorId: email?.id ?? "", nome: slug, trust: "untrusted", transporte: "stdio" }],
       },
     }));
-    const interno = (metodo: string, caminho: string, corpo?: unknown) =>
-      fetch(`${srv.url}/api/interno/${caminho}`, { method: metodo, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
+    const interno = (metodo: string, caminho: string, corpo?: unknown, headers: Record<string, string> = {}) =>
+      fetch(`${srv.url}/api/interno/${caminho}`, { method: metodo, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers }, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
     const enviar = async () => (await (await interno("POST", `ferramentas/${slug}__enviar`, { argumentos: {} })).json()) as { ok: boolean; negacao?: { motivo: string } };
     /** O "Sempre permitir" que a pessoa clicou em enviar (ADR-042). */
     const semprePermitirEnviar = () => repos.permissoesPermanentes.criar({ agenteId, conectorId: email?.id ?? "", capacidade: "enviar", itemOrigemId: randomUUID(), mensagemId: randomUUID(), regraVersao: 1 });
@@ -74,6 +74,33 @@ describe("rota /interno/nativas: confirmação do hook e turno contaminado (ADR-
     expect((await t.repos.trilha.doTurno(t.turnoId)).map((l) => l.ferramenta)).toEqual(["nativa__Write"]);
     const semKit = await turno([]);
     expect((await semKit.interno("POST", "nativas", { ferramenta: "Write" })).status).toBe(403);
+  });
+
+  it("resposta perdida depois do commit: o reenvio com a mesma chave devolve o resultado sem repetir a trilha", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    const chave = randomUUID();
+    const corpo = { ferramenta: "Write" };
+    const headers = { "x-nod-idempotency-key": chave };
+    // A primeira resposta é deliberadamente ignorada: simula ECONNRESET depois de o servidor confirmar a transação.
+    await t.interno("POST", "nativas", corpo, headers);
+    expect(await (await t.interno("POST", "nativas", corpo, headers)).json()).toEqual({ ok: true });
+    expect((await t.repos.trilha.doTurno(t.turnoId)).map((l) => l.ferramenta)).toEqual(["nativa__Write"]);
+  });
+
+  it("resposta perdida depois do commit de um card: o reenvio devolve a mesma decisão, sem segunda decisão nem item (nem o evento dela)", async () => {
+    const t = await turno(NATIVAS_DO_TERMINAL);
+    const corpo = { ferramenta: "Edit", arquivo: "/Users/m/code/app/src/filtros.tsx" };
+    const headers = { "x-nod-idempotency-key": randomUUID() };
+    // A primeira resposta se perde (ECONNRESET depois do commit); o hook repete com a mesma chave.
+    const primeira = (await (await t.interno("POST", "nativas", corpo, headers)).json()) as { aguardar?: string };
+    const reenvio = (await (await t.interno("POST", "nativas", corpo, headers)).json()) as { aguardar?: string };
+    expect(typeof primeira.aguardar).toBe("string");
+    expect(reenvio).toEqual({ aguardar: primeira.aguardar });
+    expect((await t.repos.decisoes.doTurno(t.turnoId)).map((d) => d.id)).toEqual([primeira.aguardar]);
+    expect(await t.repos.itensAprovacao.listar(primeira.aguardar ?? "")).toHaveLength(1);
+    // Sem a chave, cada POST é uma tentativa nova (o hook antigo segue como antes).
+    const outra = (await (await t.interno("POST", "nativas", corpo)).json()) as { aguardar?: string };
+    expect(outra.aguardar).not.toBe(primeira.aguardar);
   });
 
   it("WebFetch marca o turno; ADR-066: a marca só derruba o 'Sempre permitir' do manual — no automático a escrita em conector segue", async () => {

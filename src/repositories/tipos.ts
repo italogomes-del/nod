@@ -50,6 +50,7 @@ import type { usoDoPlanoRepo } from "./uso-do-plano.repo.ts";
 import type { leiturasRepo } from "./leituras.repo.ts";
 import type { ligacoesRepo } from "./ligacoes.repo.ts";
 import type { liberacoesDispensadasRepo } from "./liberacoes-dispensadas.repo.ts";
+import type { nativasIdempotenciaRepo } from "./nativas-idempotencia.repo.ts";
 
 /**
  * Regras de repositório (Práticas §1, ADR-018 refinado): factory `xRepo(conn: Conn, escopo: Escopo)`
@@ -124,4 +125,6 @@ export interface Repos {
   leituras: ReturnType<typeof leiturasRepo>;
   ligacoes: ReturnType<typeof ligacoesRepo>;
   liberacoesDispensadas: ReturnType<typeof liberacoesDispensadasRepo>;
+  /** NOD-293 E7: resposta durável de cada tentativa lógica do POST de nativa. */
+  nativasIdempotencia: ReturnType<typeof nativasIdempotenciaRepo>;
 }

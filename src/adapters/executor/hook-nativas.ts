@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -132,6 +133,27 @@ export const PAUSA_MINIMA_ENTRE_CONSULTAS_MS = 1_000;
 const dormirPadrao = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
+ * definido em 2026-10-20 (NOD-293, E7): o servidor recusando ou derrubando a conexão é o deploy/reinício no meio do turno
+ * (o Caddy ou a porta somem por alguns segundos). O pedido ao servidor é repetido depois destas esperas, nunca além do
+ * `prazoMs` do hook; esgotadas, nega com SERVIDOR_REINICIANDO. Qualquer outro erro nega como antes (a falha sobe e o
+ * `main` nega com "não foi possível decidir esta chamada").
+ */
+export const ESPERAS_RECONEXAO_MS = [1_000, 3_000, 5_000] as const;
+export const SERVIDOR_REINICIANDO = "o servidor do nod está reiniciando; tente este comando de novo daqui a alguns segundos";
+// UND_ERR_SOCKET: o undici com o socket destruído no meio da resposta (o processo do servidor morrendo). Repetir é
+// seguro: o POST leva a mesma chave de idempotência (E9).
+const CODIGOS_DE_REINICIO = new Set(["ECONNREFUSED", "ECONNRESET", "UND_ERR_SOCKET"]);
+
+/** O fetch do Node lança `TypeError("fetch failed")` com o erro do socket no `cause` (ou um AggregateError de vários). */
+function ehServidorReiniciando(erro: unknown): boolean {
+  const causa = typeof erro === "object" && erro !== null ? (erro as { cause?: unknown }).cause : undefined;
+  if (typeof causa !== "object" || causa === null) return false;
+  const c = causa as { code?: unknown; errors?: unknown };
+  if (typeof c.code === "string" && CODIGOS_DE_REINICIO.has(c.code)) return true;
+  return Array.isArray(c.errors) && c.errors.length > 0 && c.errors.every((e: unknown) => typeof e === "object" && e !== null && CODIGOS_DE_REINICIO.has(String((e as { code?: unknown }).code)));
+}
+
+/**
  * Fala com o servidor. Bash que precisa de aprovação: espera a decisão em fatias até ESPERA_APROVACAO_NO_TURNO_MS
  * (era abaixo da isenção do vigia da ADR-040, que saiu na ADR-067); aprovada, confirma de novo — agora o servidor acha a aprovação, grava a
  * trilha e libera. Recusada, ou a espera acabou: nega com o motivo que o modelo precisa ler.
@@ -145,17 +167,31 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
   const base = cfg.url.replace(/\/+$/, "");
   const headers = { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" };
   return async ({ ferramenta, contamina, comando, arquivo, mcp }) => {
-    const pedir = async (): Promise<RespostaNativa | Confirmacao> => {
+    const chegou = agora();
+    const pedirUmaVez = async (chave: string): Promise<RespostaNativa | Confirmacao> => {
       const r = await buscar(`${base}/api/interno/nativas`, {
         method: "POST",
-        headers,
+        headers: { ...headers, "x-nod-idempotency-key": chave },
         body: JSON.stringify({ ferramenta, contamina, ...(comando !== undefined ? { comando } : {}), ...(arquivo !== undefined ? { arquivo } : {}), ...(mcp !== undefined ? { mcp } : {}) }),
         signal: AbortSignal.timeout(10_000),
       });
       const corpo = (await r.json().catch(() => ({}))) as RespostaNativa;
       return r.ok ? corpo : { permitir: false, motivo: corpo.mensagem ?? "o servidor do nod não confirmou esta chamada" };
     };
-    const primeira = await pedir();
+    // NOD-293 (E7): conexão recusada/derrubada = o servidor reiniciando; repete nas ESPERAS_RECONEXAO_MS, dentro do prazo.
+    const pedir = async (chave: string): Promise<RespostaNativa | Confirmacao> => {
+      for (let tentativa = 0; ; tentativa += 1) {
+        try {
+          return await pedirUmaVez(chave);
+        } catch (erro) {
+          if (!ehServidorReiniciando(erro)) throw erro;
+          const espera = ESPERAS_RECONEXAO_MS[tentativa];
+          if (espera === undefined || (cfg.prazoMs !== undefined && agora() - chegou + espera >= cfg.prazoMs)) return { permitir: false, motivo: SERVIDOR_REINICIANDO };
+          await dormir(espera);
+        }
+      }
+    };
+    const primeira = await pedir(randomUUID());
     if ("permitir" in primeira) return primeira;
     if (primeira.ok === true) return { permitir: true };
     if (typeof primeira.aguardar !== "string") return { permitir: false, motivo: "resposta inesperada do servidor do nod" };
@@ -172,7 +208,7 @@ export function confirmarNoServidor(cfg: ConfigHook, opcoes: { agora?: () => num
         continue;
       }
       if (!(d.itens ?? []).some((i) => i.desfecho === "executado")) return { permitir: false, motivo: "a pessoa não aprovou este comando" };
-      const segunda = await pedir();
+      const segunda = await pedir(randomUUID());
       return "permitir" in segunda ? segunda : segunda.ok === true ? { permitir: true } : { permitir: false, motivo: "o servidor do nod não liberou o comando aprovado" };
     }
     return { permitir: false, motivo: AINDA_ESPERANDO };

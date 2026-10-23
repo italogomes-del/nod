@@ -39,6 +39,8 @@ export type OpcoesVarredor = {
 
 /** ADR-115 (0093): a retenção de `acoes_pelo_modo` (o resumo da ação e o motivo do revisor são texto livre). */
 export const RETENCAO_ACOES_PELO_MODO_MS = 90 * 24 * 60 * 60_000;
+/** definido em 2026-10-20 (NOD-293 E7, 0097): a chave de idempotência da nativa só vale durante a chamada do hook. */
+export const RETENCAO_NATIVAS_IDEMPOTENCIA_MS = 24 * 60 * 60_000;
 /** `pausadas` (definido em 2026-09-24, emenda da ADR-044): rotinas cujo pedido de acesso venceu. */
 export type ResultadoVarredura = { vencidas: string[]; mensagens: number; passaramEmBranco: string[]; pausadas: string[] };
 
@@ -113,6 +115,14 @@ export async function varrerPessoa(escopo: Escopo, tx: Transacao, opcoes: Opcoes
     });
   } catch (e) {
     log("erro", "revisoes_velhas_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
+  }
+  // NOD-293 E7 (0097): a poda das chaves de idempotência das nativas, em transação própria.
+  try {
+    await tx(async (trx) => {
+      await criarRepos(trx, escopo).nativasIdempotencia.podar(opcoes.agora() - RETENCAO_NATIVAS_IDEMPOTENCIA_MS);
+    });
+  } catch (e) {
+    log("erro", "nativas_idempotencia_poda_falhou", { erro: ehErroDeDominio(e) ? e.codigo : e instanceof Error ? e.name : "desconhecido" });
   }
   // definido em 2026-10-16 (ADR-108 R4/R6): os avisos de troca de IA (trocas-de-ia.ts), em transação própria — aplica o
   // "levar" vencido, fecha o aviso quando a conta volta e devolve o bot fixo que seguiu noutra IA até a volta. Revisão do

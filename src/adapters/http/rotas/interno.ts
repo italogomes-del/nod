@@ -16,6 +16,7 @@ import type { NivelPressao } from "../../../contracts/trabalho.ts";
 import { soltarPorMemoria } from "../../../domain/trabalho.ts";
 import { fecharPorMemoria } from "../../../use-cases/trabalhos.ts";
 import { autorizarComando } from "../../../use-cases/autorizar-comando.ts";
+import { ehUuid } from "../../../use-cases/apoio-l7.ts";
 import type { PedidoNaCaixa } from "../../../use-cases/revisar-acao.ts";
 import { chamarFerramentaFase1, concluirChamada, executarEfeito, REGRA_CHAMADA, registrarExecucaoLocal, respostaSemFase2, VERSAO_REGRA_CHAMADA, type SaidaFase1Chamada } from "../../../use-cases/chamar-ferramenta.ts";
 import { nomeParaTrilha, registrarNegacao } from "../../../use-cases/registrar-negacao.ts";
@@ -252,6 +253,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         // ADR-103: a chamada a um app (MCP) da pessoa vem com o texto do pedido (servidor, ferramenta e argumentos).
         const mcp = ferramenta === NATIVA_MCP_DA_PESSOA ? (typeof c?.mcp === "string" ? c.mcp : null) : null;
         if (ferramenta === NATIVA_MCP_DA_PESSOA && mcp === null) throw new ErroDeDominio("entrada_invalida", { cause: `${ferramenta} sem pedido` });
+        const chaveBruta = ctx.req.headers["x-nod-idempotency-key"];
+        const chave = Array.isArray(chaveBruta) ? chaveBruta[0] : chaveBruta;
+        if (chave !== undefined && !ehUuid(chave)) throw new ErroDeDominio("entrada_invalida", { cause: "chave de idempotência da nativa" });
         // ADR-089 (#217): o laço de espera com sleep (e o sleep longo) segura o processo do bot no Mac sem trabalho. Nega
         // antes de qualquer card ou trilha, em qualquer modo — nem o modo total aprova esperar assim. A saída é a volta
         // marcada (me_chame_as, ADR-086) quando ela está no catálogo deste turno; senão, encerrar dizendo o que falta.
@@ -266,7 +270,11 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
         // ADR-115: o pedido ao revisor só entra na caixa depois do commit — o laço não pode responder por uma decisão que
         // o banco ainda não tem.
         const paraACaixa: { revisao?: PedidoNaCaixa } = {};
-        const aguardar = await deps.dentro(ctx.escopo, async (d) => {
+        const resultado = await deps.dentro(ctx.escopo, async (d) => {
+          if (chave) {
+            const anterior = await d.repos.nativasIdempotencia.travar(turnoId, chave);
+            if (anterior) return anterior;
+          }
           // ADR-059: o comando que o MODO aprovou leva a regra do modo na trilha. Sem isso ele fica igual a uma
           // leitura, e o gatilho da ADR-055 ("nativa__Bash sem decisão correspondente") dispararia à toa.
           let regra: { regra: `regra:${string}`; regraVersao: number } = { regra: REGRA_CHAMADA, regraVersao: VERSAO_REGRA_CHAMADA };
@@ -277,7 +285,9 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
             const r = await executar(d, autorizarComando, arquivo !== null ? { plano, arquivo } : mcp !== null ? { plano, mcp } : { plano, comando: String(c?.comando) });
             if ("aguardar" in r) {
               if (r.revisao) paraACaixa.revisao = r.revisao;
-              return r.aguardar;
+              const resposta = { aguardar: r.aguardar };
+              if (chave) await d.repos.nativasIdempotencia.registrar(turnoId, chave, resposta);
+              return resposta;
             }
             const comRevisor = d.services.revisor?.config.ligado === true;
             if (r.porque === "modo_automatico") regra = { regra: REGRA_MODO_AUTOMATICO, regraVersao: comRevisor ? VERSAO_MODO_AUTOMATICO_COM_REVISOR : VERSAO_MODO_AUTOMATICO };
@@ -287,10 +297,12 @@ export function rotasInternas(deps: DepsRotasInternas): Rota[] {
           }
           await d.repos.trilha.registrar({ agenteId: plano.agenteId, turnoId, ferramenta: nomeParaTrilha(`nativa__${ferramenta}`), kind: "tool_call", ...regra });
           if (NATIVAS_QUE_CONTAMINAM.includes(ferramenta)) await d.repos.turnos.contaminar(turnoId, deps.agora());
-          return null;
+          const resposta = { ok: true } as const;
+          if (chave) await d.repos.nativasIdempotencia.registrar(turnoId, chave, resposta);
+          return resposta;
         });
         if (paraACaixa.revisao) deps.revisor?.enfileirar(paraACaixa.revisao);
-        ctx.json(200, aguardar ? { aguardar } : { ok: true });
+        ctx.json(200, resultado);
       },
     },
     {

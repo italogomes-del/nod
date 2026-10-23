@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { comandoDoHook, montarArgs, settingsDoTerminal, TETO_HOOK_S } from "../../../src/adapters/executor/drivers/claude-cli.ts";
-import { AINDA_ESPERANDO, confirmarNoServidor, decidirHook, PAUSA_MINIMA_ENTRE_CONSULTAS_MS, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
+import { AINDA_ESPERANDO, confirmarNoServidor, decidirHook, ESPERAS_RECONEXAO_MS, PAUSA_MINIMA_ENTRE_CONSULTAS_MS, SERVIDOR_REINICIANDO, type Confirmar } from "../../../src/adapters/executor/hook-nativas.ts";
 import { NATIVAS_DO_TERMINAL } from "../../../src/domain/nativas.ts";
 import { ESPERA_APROVACAO_NO_TURNO_MS } from "../../../src/shared/constantes.ts";
 import { planoDeTeste } from "../../helpers/l5.ts";
@@ -40,17 +40,20 @@ describe("hook do nod (ADR-052, revisto pela ADR-055)", () => {
 /** Servidor falso: responde às rotas que o hook chama, em ordem, e guarda o que foi pedido. */
 function servidor(respostas: Record<string, (unknown | ((corpo: unknown) => unknown))[]>) {
   const chamadas: { rota: string; corpo: unknown }[] = [];
+  const chaves: string[] = [];
   const f: typeof fetch = async (url, init) => {
     const rota = String(url).replace("http://nod", "");
     const corpo = init?.body ? (JSON.parse(String(init.body)) as unknown) : null;
     chamadas.push({ rota, corpo });
+    const chave = (init?.headers as Record<string, string> | undefined)?.["x-nod-idempotency-key"];
+    if (chave !== undefined) chaves.push(chave);
     const fila = respostas[rota] ?? [];
     const proxima = fila.length > 1 ? fila.shift() : fila[0];
     const valor = typeof proxima === "function" ? (proxima as (c: unknown) => unknown)(corpo) : proxima;
     const status = typeof valor === "object" && valor !== null && "status" in valor ? Number((valor as { status: number }).status) : 200;
     return new Response(JSON.stringify(valor), { status });
   };
-  return { f, chamadas };
+  return { f, chamadas, chaves };
 }
 
 describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
@@ -67,6 +70,10 @@ describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
     const s = servidor({ "/api/interno/nativas": [{ aguardar: "d1" }, { ok: true }], [AGUARDAR]: [{ estado: "pendente" }, { estado: "decidida", itens: [{ desfecho: "executado" }] }] });
     expect(await confirmarNoServidor(cfg, { fetch: s.f, dormir: async () => undefined })({ ferramenta: "Bash", contamina: false, comando: "git push" })).toEqual({ permitir: true });
     expect(s.chamadas.map((c) => c.rota)).toEqual(["/api/interno/nativas", AGUARDAR, AGUARDAR, "/api/interno/nativas"]);
+    // NOD-293 E7: a confirmação depois da aprovação é outra tentativa lógica — com a mesma chave o servidor devolveria
+    // o `aguardar` guardado da primeira.
+    expect(s.chaves).toHaveLength(2);
+    expect(s.chaves[0]).not.toBe(s.chaves[1]);
   });
 
   it("card recusado: nega com o motivo", async () => {
@@ -102,6 +109,66 @@ describe("a espera pela aprovação no próprio turno (ADR-055)", () => {
   it("o servidor recusa: a mensagem dele vai ao modelo", async () => {
     const s = servidor({ "/api/interno/nativas": [{ status: 403, codigo: "nao_permitido", mensagem: "ferramenta nativa fora do plano deste turno" }] });
     expect(await confirmarNoServidor(cfg, { fetch: s.f })({ ferramenta: "Bash", contamina: false, comando: "ls" })).toEqual({ permitir: false, motivo: "ferramenta nativa fora do plano deste turno" });
+  });
+});
+
+/** O erro que o fetch do Node (undici) lança quando o servidor não aceita a conexão: `TypeError` com o código no `cause`. */
+const erroDeRede = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(`connect ${code}`), { code }) });
+
+describe("NOD-293 E7: o servidor reiniciando no meio do turno", () => {
+  const cfg = { url: "http://nod/", token: "tok" };
+  /** fetch que falha com `falhas` (em ordem) e depois responde `{ ok: true }`; o relógio anda só no `dormir`. */
+  function cenario(falhas: (Error | "ok")[], extra: { prazoMs?: number } = {}) {
+    let agora = 0;
+    const pausas: number[] = [];
+    const chaves: string[] = [];
+    let chamadas = 0;
+    const f: typeof fetch = async (_url, init) => {
+      chaves.push(String((init?.headers as Record<string, string> | undefined)?.["x-nod-idempotency-key"] ?? ""));
+      const proxima = falhas[Math.min(chamadas, falhas.length - 1)];
+      chamadas += 1;
+      if (proxima instanceof Error) throw proxima;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    };
+    const confirmar = confirmarNoServidor({ ...cfg, ...extra }, { fetch: f, agora: () => agora, dormir: async (ms) => { pausas.push(ms); agora += ms; } });
+    return { confirmar, pausas, chaves, chamadas: () => chamadas };
+  }
+
+  it("recusa, recusa e depois responde: permitido, depois de esperar 1 s e 3 s", async () => {
+    const c = cenario([erroDeRede("ECONNREFUSED"), erroDeRede("ECONNRESET"), "ok"]);
+    expect(await c.confirmar({ ferramenta: "Bash", contamina: false, comando: "git status" })).toEqual({ permitir: true });
+    expect(c.pausas).toEqual([1_000, 3_000]);
+    expect(c.chamadas()).toBe(3);
+    expect(new Set(c.chaves).size).toBe(1);
+    expect(c.chaves[0]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("QA: o socket destruído no meio da resposta (UND_ERR_SOCKET do undici) também repete, com a mesma chave", async () => {
+    const c = cenario([erroDeRede("UND_ERR_SOCKET"), "ok"]);
+    expect(await c.confirmar({ ferramenta: "Bash", contamina: false, comando: "git status" })).toEqual({ permitir: true });
+    expect(c.pausas).toEqual([1_000]);
+    expect(new Set(c.chaves).size).toBe(1);
+  });
+
+  it("recusa contínua: tenta depois de 1, 3 e 5 s e nega dizendo que o servidor está reiniciando", async () => {
+    const c = cenario([erroDeRede("ECONNREFUSED")]);
+    expect(await c.confirmar({ ferramenta: "Bash", contamina: false, comando: "git status" })).toEqual({ permitir: false, motivo: SERVIDOR_REINICIANDO });
+    expect(c.pausas).toEqual([...ESPERAS_RECONEXAO_MS]);
+    expect(c.chamadas()).toBe(ESPERAS_RECONEXAO_MS.length + 1);
+  });
+
+  it("prazo curto: a espera que passaria do `prazoMs` não acontece, e a negação sai antes", async () => {
+    const c = cenario([erroDeRede("ECONNREFUSED")], { prazoMs: 3_500 });
+    expect(await c.confirmar({ ferramenta: "Bash", contamina: false, comando: "git status" })).toEqual({ permitir: false, motivo: SERVIDOR_REINICIANDO });
+    expect(c.pausas).toEqual([1_000]);
+    expect(c.chamadas()).toBe(2);
+  });
+
+  it("outro erro de rede não é repetido: segue a negação de antes (a falha sobe e o hook nega)", async () => {
+    const c = cenario([erroDeRede("ENOTFOUND"), "ok"]);
+    await expect(c.confirmar({ ferramenta: "Bash", contamina: false, comando: "git status" })).rejects.toThrow("fetch failed");
+    expect(c.pausas).toEqual([]);
+    expect(c.chamadas()).toBe(1);
   });
 });
 

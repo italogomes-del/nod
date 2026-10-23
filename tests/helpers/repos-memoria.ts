@@ -146,6 +146,7 @@ export type BancoMemoria = {
   /** 0090 (ADR-113): uma por pessoa, fala e emoji (a regra completa, com a RLS, se prova no Postgres). */
   reacoes: { tenantId: string; ownerId: string; conversaId: string; mensagemId: string; emoji: EmojiDeReacao; criadoEm: number }[];
   trilha: LinhaTrilha[];
+  nativasIdempotencia: Map<string, { ok: true } | { aguardar: string }>;
   paradas: (Parada & { tenantId: string })[];
   catcher: { tenantId: string; id: string; turnoId: string; tipo: string; dados: Record<string, unknown>; em: number }[];
   events: (EventoGravavel & { tenantId: string; id: string; createdAt: number })[];
@@ -219,6 +220,7 @@ export function criarBancoMemoria(): { banco: BancoMemoria; repos(escopo?: Escop
     relatos: [],
     reacoes: [],
     trilha: [],
+    nativasIdempotencia: new Map(),
     paradas: [],
     catcher: [],
     events: [],
@@ -2666,6 +2668,18 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
           .filter((l) => !f.dia || l.em.slice(0, 10) === f.dia)
           .sort((x, y) => Date.parse(y.em) - Date.parse(x.em))
           .slice(0, f.limite ?? 500);
+      },
+    },
+
+    nativasIdempotencia: {
+      async travar(turnoId, chave) {
+        return b.nativasIdempotencia.get(`${escopo.tenantId}:${escopo.pessoaId}:${turnoId}:${chave}`) ?? null;
+      },
+      async registrar(turnoId, chave, resposta) {
+        b.nativasIdempotencia.set(`${escopo.tenantId}:${escopo.pessoaId}:${turnoId}:${chave}`, resposta);
+      },
+      async podar() {
+        return 0;
       },
     },
 

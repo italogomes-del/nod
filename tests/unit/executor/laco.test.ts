@@ -808,6 +808,29 @@ describe("NOD-214: o laço atravessa o reinício do servidor", () => {
     await laco.parar();
   });
 
+  it("NOD-293 E9: a mensagem reoferecida pelo servidor (10 s sem confirmação) junto com uma nova não duplica na sessão", async () => {
+    const d = driverControlado();
+    const ponte = ponteDaSessao();
+    let vezes = 0;
+    ponte.renovar = async (p) => {
+      ponte.renovacoes.push({ ...p, sinais: { ...p.sinais }, ...(p.mensagensEntregues ? { mensagensEntregues: [...p.mensagensEntregues] } : {}) });
+      if (!p.aceitaMensagens || vezes >= 2) return { ativo: true, versaoMinimaApp: "0.1.0" };
+      vezes += 1;
+      // Primeiro m1; a confirmação dela "se perde" e, passada a janela, o servidor a oferece de novo com m2.
+      return vezes === 1 ? { ativo: true, versaoMinimaApp: "0.1.0", mensagens: ["e o prazo?"], mensagensIds: ["m1"] } : { ativo: true, versaoMinimaApp: "0.1.0", mensagens: ["e o prazo?", "e o custo?"], mensagensIds: ["m1", "m2"] };
+    };
+    const laco = await cenario(d, ponte);
+    expect(await d.sinks()!.ocioso!()).toBe(true);
+    // A renovação que confirma m1 já pede mensagens: é ela que traz m1 de novo, com m2.
+    await esperarAte(() => vezes === 2);
+    await esperarAte(() => ponte.renovacoes.some((r) => r.mensagensEntregues?.includes("m2")));
+    expect(d.ids).toEqual(["m1", "m2"]);
+    expect(d.recebidas).toHaveLength(2);
+    d.terminar("fim");
+    await esperarAte(() => ponte.entregas.length === 1);
+    await laco.parar();
+  });
+
   it("a mensagem repetida que ainda NÃO entrou na sessão não é confirmada; se o CLI a devolve, ela só volta para a fila", async () => {
     // QA da NOD-214: a repetida ia direto para `mensagensEntregues`, mesmo pendente no adapter (X2: só o que entrou é
     // confirmado). O CLI morria antes de escrever, o adapter a devolvia — e ela seguia confirmada e devolvida juntas.

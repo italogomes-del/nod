@@ -178,6 +178,18 @@ type LimitesLidos = {
   lidoEm: number;
 };
 
+/**
+ * definido em 2026-10-20 (NOD-293, E9): a mensagem oferecida ao app e não confirmada há mais que isto é dada por perdida
+ * (a resposta da renovação não chegou: reinício do servidor, rede) e volta a ser oferecida. O laço do app descarta a que
+ * já escreveu na sessão (`escritas`) e só a confirma de novo; a renovação dele com mensagem sai a cada poucos segundos.
+ */
+export const REOFERTA_MS = 10_000;
+
+/** NOD-293 (E9): tira do "oferecidas" o que foi oferecido há mais de REOFERTA_MS — volta a ser oferecido nesta renovação. */
+export function soltarOferecidasPerdidas(oferecidas: Map<string, number>, agora: number): void {
+  for (const [id, em] of oferecidas) if (agora - em > REOFERTA_MS) oferecidas.delete(id);
+}
+
 /** 40P01 (impasse) e 40001 (serialização): a transação perdeu a corrida e pode ser repetida inteira. */
 function ehConflitoTransitorio(err: unknown): boolean {
   const codigo = typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
@@ -206,8 +218,9 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
   /**
    * #189: as mensagens da fila já entregues ao app neste turno e ainda não confirmadas — não vão de novo na próxima
    * renovação. Somem na entrega; a não confirmada continua `pendente` no banco e vira turno próprio.
+   * NOD-293 (E9): por id, o instante da oferta — passado REOFERTA_MS sem confirmação, ela é oferecida de novo.
    */
-  const oferecidas = new Map<string, Set<string>>();
+  const oferecidas = new Map<string, Map<string, number>>();
   /**
    * ADR-083 (#193): quando o turno foi puxado e a sessão que o plano retomou (nula se ele bifurcou ou começou uma) —
    * a rede de 2 min promove o turno de conversa e entrega essa sessão ao trabalho `rede`. Somem na entrega.
@@ -519,8 +532,10 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       const novas = (p.falas ?? []).filter((f) => f.seq > (falasGravadas.get(p.turnoId) ?? 0)).sort((a, b) => a.seq - b.seq);
       // #189: app que manda `mensagensEntregues` confirma o que escreveu; a mensagem só sai da fila na confirmação.
       const confirma = Array.isArray(p.mensagensEntregues);
-      const jaOferecidas = oferecidas.get(p.turnoId) ?? new Set<string>();
+      const jaOferecidas = oferecidas.get(p.turnoId) ?? new Map<string, number>();
       for (const id of p.mensagensDevolvidas ?? []) jaOferecidas.delete(id);
+      // NOD-293 (E9): a oferecida há mais de REOFERTA_MS sem confirmação se perdeu no caminho — entra de novo abaixo.
+      soltarOferecidasPerdidas(jaOferecidas, agora());
       const { ativo, motivo, mensagens, ids, semMoldura, doDonoSemTrabalho, promptAntes } = await abrirTxEscopada(db, escopo)(async (trx) => {
         const d = depsDe(trx, escopo);
         // NOD-214: a sessão do CLI fica no turno já na renovação — a entrega pode se perder num reinício.
@@ -541,7 +556,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         let textos: string[] = [];
         let ids: string[] = [];
         if (r.ativo && p.aceitaMensagens) {
-          const a = await absorverNaSessao(d, { turnoId: p.turnoId, executor, confirma, jaOferecidas: [...jaOferecidas] });
+          const a = await absorverNaSessao(d, { turnoId: p.turnoId, executor, confirma, jaOferecidas: [...jaOferecidas.keys()] });
           textos = a.data.textos;
           ids = a.data.ids;
           events.push(...(a.events ?? []));
@@ -551,7 +566,7 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
         // confirmação —, com o id em `mensagensIds` e em `mensagensSemMoldura` (é recado para a task, não fala no meio).
         let semMoldura: string[] = [];
         if (r.ativo && p.aceitaMensagens) {
-          const b = await absorverNoTrabalho(d, { turnoId: p.turnoId, confirma, jaOferecidas: [...jaOferecidas] });
+          const b = await absorverNoTrabalho(d, { turnoId: p.turnoId, confirma, jaOferecidas: [...jaOferecidas.keys()] });
           textos = [...textos, ...b.data.textos];
           ids = [...ids, ...b.data.ids];
           semMoldura = b.data.ids;
@@ -588,7 +603,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // sessão indo para a frente e o dono recebendo o histórico (dois CLIs nunca dividem uma sessão).
       const maquinaBifurca = maquinaBifurcaCom(p.machineId, harness);
       // S17: com mensagem oferecida e ainda não confirmada (nesta renovação ou numa anterior), não promove: a resposta a
-      // ela sairia duas vezes (no turno promovido e no turno próprio que a mensagem viraria).
+      // ela sairia duas vezes (no turno promovido e no turno próprio que a mensagem viraria). NOD-293 (E9): só conta a que
+      // está dentro da janela de REOFERTA_MS — a perdida saiu do mapa acima e, se ainda pendente, está em `ids`.
       const semMensagemNoAr = ids.length === 0 && jaOferecidas.size === 0;
       if (ativo && doDonoSemTrabalho && despachado && harness !== null && semMensagemNoAr && agora() - despachado.em >= redeMs && deps.fezFerramenta?.(p.turnoId)) {
         await abrirTxEscopada(db, escopo)(async (trx) => {
@@ -603,7 +619,8 @@ export function criarPonteInterna(db: Db, deps: DepsPonte): PonteInternaNod {
       // mora aqui, não na rota HTTP: no modo local e no e2e o laço fala direto com esta ponte.
       const revisoes = ativo && deps.revisoes ? deps.revisoes.naRenovacao({ turnoId: p.turnoId, machineId: p.machineId, revisa: p.revisa === true, amarraSegredo: !promptAntes, ...(p.segredoRevisao !== undefined ? { segredo: p.segredoRevisao } : {}), ...(p.revisoesRecebidas ? { recebidas: p.revisoesRecebidas } : {}) }) : [];
       if (confirma && ativo) {
-        for (const id of ids) jaOferecidas.add(id);
+        const em = agora();
+        for (const id of ids) jaOferecidas.set(id, em);
         oferecidas.set(p.turnoId, jaOferecidas);
       }
       return { ativo, versaoMinimaApp: VERSAO_MINIMA_APP, ...(!ativo && motivo ? { motivo } : {}), ...(mensagens.length ? { mensagens, mensagensIds: ids } : {}), ...(semMoldura.length ? { mensagensSemMoldura: semMoldura } : {}), ...(revisoes.length ? { revisoes } : {}) };
