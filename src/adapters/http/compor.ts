@@ -29,7 +29,6 @@ import { criarAvisoDoVigia } from "./aviso-vigia.ts";
 import { lerModelosLigacao } from "../../domain/modelo-ligacao.ts";
 import { contextoAtual } from "../../obs/contexto.ts";
 import { log } from "../../obs/log.ts";
-import { criarRepos } from "../../repositories/index.ts";
 import { listarTodas } from "../../repositories/pessoas.repo.ts";
 import { criarBarramento, type Barramento } from "../../services/barramento.ts";
 import { criarConectoresVivos, type ConectoresVivos, type ConfigConectorVivo } from "../../services/conectores-vivos.ts";
@@ -95,6 +94,13 @@ import { criarRotasAtividade } from "./rotas/atividade.ts";
 import { criarTrabalhosVivos } from "../fundo/trabalhos-vivos.ts";
 import { criarRotasArtefatos } from "./rotas/artefatos.ts";
 import { rotasMaquinas } from "./rotas/maquinas.ts";
+import { rotasNuvem } from "./rotas/nuvem.ts";
+import { iniciarReconciliadorNuvem } from "../fundo/reconciliador-nuvem.ts";
+import { criarProvedorGcp } from "../nuvem/gcp.ts";
+import { criarContaGcp } from "../nuvem/conta-gcp.ts";
+import type { ContaNuvem } from "../../contracts/provedor-nuvem.ts";
+import { ErroNuvemLancado } from "../../domain/maquina-nuvem.ts";
+import { criarRepos } from "../../repositories/index.ts";
 import { rotasMotor } from "./rotas/motor.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -194,6 +200,8 @@ export type OpcoesCompor = {
   redeMs?: number;
   /** NOD-214: quando o processo começou (boot.ts), para a carência do lease na adoção. Ausente = a hora da composição. */
   inicioDoProcesso?: number;
+  /** ADR-121: só em teste — a conta falsa e o fetch da troca do OAuth da nuvem. Default: Google de verdade. */
+  nuvem?: { conta?: ContaNuvem; fetchImpl?: typeof fetch };
 };
 
 export type App = {
@@ -263,6 +271,17 @@ function versaoDoServidor(): string {
   } catch {
     return "0.0.0";
   }
+}
+
+/**
+ * ADR-121: o OAuth da nuvem usa o mesmo cliente do login (NOD_GOOGLE_CLIENT_*) com outro callback, que precisa estar
+ * cadastrado no Google Cloud Console: NOD_NUVEM_REDIRECT_URI, ou <NOD_URL_PUBLICA>/api/nuvem/google/callback.
+ */
+function oauthNuvem(env: Readonly<Record<string, string | undefined>>) {
+  const clientId = env.NOD_GOOGLE_CLIENT_ID;
+  const clientSecret = env.NOD_GOOGLE_CLIENT_SECRET;
+  const redirectUri = env.NOD_NUVEM_REDIRECT_URI || (env.NOD_URL_PUBLICA ? `${env.NOD_URL_PUBLICA.replace(/\/$/, "")}/api/nuvem/google/callback` : "");
+  return clientId && clientSecret && redirectUri ? { clientId, clientSecret, redirectUri } : null;
 }
 
 export function comporApp(o: OpcoesCompor): App {
@@ -981,6 +1000,21 @@ export function comporApp(o: OpcoesCompor): App {
   };
   const conexoesSse = criarConexoesSse();
 
+  // ADR-121 (NOD-92): a máquina na nuvem que dorme e acorda pelo Google. A flag é lida SÓ aqui: sem ela, as rotas não
+  // existem (404), o reconciliador não sobe e o MaquinaDto sai sem `nuvem`.
+  const nuvemLigada = env.NOD_MAQUINA_NUVEM?.trim() === "gcp";
+  const reconciliadorNuvem = nuvemLigada
+    ? iniciarReconciliadorNuvem({
+        db,
+        agora: relogio,
+        provedorDa: async (escopo, tx, credencialId) => {
+          const cifrada = await tx((trx) => criarRepos(trx, escopo).credenciaisNuvem.chaveCifrada(credencialId));
+          if (!cifrada) throw new ErroNuvemLancado({ motivo: "credencial_nuvem", detalhe: "sem_chave" });
+          return criarProvedorGcp({ chaveJson: decifrar(cifrada, chave) });
+        },
+      })
+    : null;
+
   // Inventário por pessoa (ADR-019): a sonda é da MÁQUINA (uma por TTL, compartilhada entre pessoas);
   // definido em 2026-09-18: descoberta consulta instalação/login sem prompt e persiste por pessoa.
   let sondaCompartilhada: { em: number; promessa: Promise<Inventario> } | null = null;
@@ -1221,7 +1255,8 @@ export function comporApp(o: OpcoesCompor): App {
     // ADR-090: o motor sem janela da versão deste servidor (dist/motor) e o script que o instala numa máquina Linux.
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
-    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) }),
+    ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
+    ...(nuvemLigada ? rotasNuvem({ dentro, segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), oauth: oauthNuvem(env), conta: o.nuvem?.conta ?? criarContaGcp({ contaFaturamento: env.NOD_NUVEM_CONTA_FATURAMENTO ?? null }), ...(o.nuvem?.fetchImpl ? { fetchImpl: o.nuvem.fetchImpl } : {}), cifrar: (t) => cifrar(t, chave), agora: relogio }) : []),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),
@@ -1378,6 +1413,7 @@ export function comporApp(o: OpcoesCompor): App {
       await voz.fechar();
       await provedoresVoz.encerrar();
       await varredorMaquinas?.parar();
+      reconciliadorNuvem?.parar();
       await conectoresVivos.fechar();
     },
   };

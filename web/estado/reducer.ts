@@ -34,6 +34,7 @@ import { ehErroDeRede, type ErroNaTela } from "../lib/erro-da-tela.ts";
 import { conversasComPergunta } from "../lib/perguntas.ts";
 import { UI_IAS_INICIAL, type UiIas } from "../telas/cartao-ia.ts";
 import { UI_CONTAS_INICIAL, type UiContas } from "../telas/contas-lista.ts";
+import { UI_NUVEM_INICIAL, type UiNuvem } from "../lib/maquina-nuvem.ts";
 import type { RascunhoInteligencia } from "../telas/inteligencia.ts";
 
 /**
@@ -167,7 +168,7 @@ export type EscolhaComposer = { outroAssunto: boolean; alvoId: string | null };
  */
 export type CitacaoNoCampo = { mensagemId: string; trecho: string };
 
-export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
+export type Invalidacao = "onboarding" | "ligacao" | "trabalhos" | "custo" | `trabalho:${string}` | `disponibilidade:${string}` | "gestao" | "frota" | "sua-vez" | "nao-lidos" | "rotinas" | "conectores" | "inventario" | "executor" | "ias" | "uso-plano" | "salas" | "chaves" | "maquinas" | "nuvem" | "contas" | "relatos" | `conversa:${string}` | `vivos:${string}` | `memoria:${string}` | `concessoes:${string}` | `execucoes:${string}` | `atividade:${string}` | `atividade-hoje:${string}`;
 
 export type Estado = {
   sessao: Escopo | null;
@@ -282,6 +283,8 @@ export type Estado = {
   detalhesContas: DetalhesDasContas | null;
   /** O que é só da tela na lista de contas e em Máquinas (menu aberto, logins na tela, confirmações). */
   contasUi: UiContas;
+  /** ADR-121 (NOD-92): a conta da nuvem e o que é só da tela nela (aviso da volta do Google, formulário, menu do sono). */
+  nuvem: UiNuvem;
   /** Relatos de comportamento indesejado (ADR-041); null = ainda não carregou. */
   relatos: Relato[] | null;
   /**
@@ -408,6 +411,7 @@ export type Acao =
   | { tipo: "hidratar-contas"; contas: ContasIaDto; detalhes: DetalhesDasContas | null }
   | { tipo: "trocar-contas"; contas: ContasIaDto }
   | { tipo: "contas-ui"; mudanca: Partial<UiContas> }
+  | { tipo: "nuvem-ui"; mudanca: Partial<UiNuvem> }
   | { tipo: "hidratar-relatos"; relatos: Relato[] }
   | { tipo: "modo-dev"; ligado: boolean }
   | { tipo: "hidratar-raio-x"; conversaId: string; raioX: RaioXConversa }
@@ -491,6 +495,7 @@ export const estadoInicial: Estado = {
   contasIa: null,
   detalhesContas: null,
   contasUi: UI_CONTAS_INICIAL,
+  nuvem: UI_NUVEM_INICIAL,
   relatos: null,
   modoDev: { ligado: false, raioX: {} },
   chaveEmitida: null,
@@ -1138,6 +1143,8 @@ export function reduzir(estado: Estado, acao: Acao): Estado {
       return { ...estado, contasIa: acao.contas };
     case "contas-ui":
       return { ...estado, contasUi: { ...estado.contasUi, ...acao.mudanca } };
+    case "nuvem-ui":
+      return { ...estado, nuvem: { ...estado.nuvem, ...acao.mudanca } };
     case "hidratar-relatos":
       return { ...estado, relatos: acao.relatos };
     // Desligado, os resumos saem da memória: religar busca de novo, com o que mudou nesse meio-tempo.
@@ -1359,6 +1366,8 @@ export function invalidacoesDaTela(estado: Estado): Invalidacao[] {
   // ADR-090: a seção Máquinas e a conversa (a mensagem na fila diz quando a máquina do bot está fora do ar).
   // QA do NOD-314: a tela da task também lê a frota ("Rodar em <outra> desta vez" e a linha do turno preso).
   if (estado.sessao && !estado.maquinas && (secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho")) faltas.push("maquinas");
+  // ADR-121 (NOD-92): a conta da nuvem em Máquinas (404 = sem a flag; a seção fica como antes).
+  if (estado.sessao && estado.nuvem.conta === null && secao === "maquinas") faltas.push("nuvem");
   // ADR-102: a lista de contas em Provedores de IA e o resumo de contas de cada máquina.
   // definido em 2026-10-16 (T6): e o cabeçalho do seletor de IA no campo (a conta em uso, só o apelido).
   // NOD-280 (critério 9): e a sala/linha aberta com nota de limite de contas — a nota se recalcula com a lista.

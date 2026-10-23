@@ -203,6 +203,71 @@ Entra quem tem e-mail na tabela `pessoas` e, desde 2026-10-05, qualquer conta Go
 abrir ou fechar um domínio, edite a linha e rode o deploy; o boot iguala a tabela `dominios_admitidos` à variável.
 Fechar um domínio não tira quem já entrou. `NOD_GOOGLE_DOMINIO` não é usado em produção.
 
+## Máquina na nuvem que dorme e acorda (NOD-92, ADR-121)
+
+Com `NOD_MAQUINA_NUVEM=gcp`, a pessoa conecta a conta Google Cloud dela em Máquinas, e o nod liga e desliga a VM
+dela pela API do Google. A VM e o custo ficam no projeto da pessoa, não no `nod-producao`. Sem a flag, nada muda:
+as rotas `nuvem/*` dão 404, o reconciliador não sobe e a tela é a de sempre.
+
+### No cliente OAuth do login (uma vez)
+
+O OAuth da nuvem usa o MESMO cliente do login (`nod-google-client-id`/`-secret`), com outro callback.
+
+1. Em **Clientes**, abra o cliente do login. Em "URIs de redirecionamento autorizados", acrescente o endereço exato:
+   `https://<domínio>/api/nuvem/google/callback`. Mantenha o `/api/sessao/google/callback`.
+2. Em **Acesso a dados**, acrescente o escopo `https://www.googleapis.com/auth/cloud-platform`.
+
+`cloud-platform` é escopo sensível. Até o Google verificar o app, a tela de consentimento mostra "app não verificado"
+e aceita até 100 pessoas novas. Para o uso interno, basta. Antes de abrir o nod para fora, peça a verificação.
+
+O nod pede o token com `access_type=online` e PKCE. O token só vive na memória durante o preparo e nunca é gravado.
+
+### No projeto da pessoa
+
+Nada a fazer à mão. O preparo roda depois do consentimento, em segundo plano, com o token da pessoa:
+
+- usa o projeto que ela informou ao conectar, ou cria `nod-<pessoa>-<4hex>`;
+- confere o faturamento: se está desligado, vincula `NOD_NUVEM_CONTA_FATURAMENTO` ou a primeira conta de cobrança
+  aberta dela;
+- habilita as APIs `compute.googleapis.com` e `iam.googleapis.com`;
+- cria a rede `nod-maquinas`, a conta de serviço `nod-<hash>` da pessoa, os papéis `nodMaquinasGerenciar`,
+  `nodMaquinasLigar` e `nodMaquinasLer` e a chave da conta de serviço, que vai cifrada com `NOD_CREDENTIAL_KEY` para o
+  banco.
+
+A pessoa precisa poder fazer isso no projeto (dona ou editora, mais a administração de IAM). Organização que bloqueia
+chave de conta de serviço falha com `credencial_nuvem` (`org_bloqueia_chave`).
+
+### Variáveis
+
+| Variável | Obrigatória | O que faz |
+|---|---|---|
+| `NOD_MAQUINA_NUVEM=gcp` | sim | Liga a feature. Qualquer outro valor (ou nenhum) desliga |
+| `NOD_NUVEM_REDIRECT_URI` | não | O callback. Padrão: `NOD_URL_PUBLICA` + `/api/nuvem/google/callback` |
+| `NOD_NUVEM_CONTA_FATURAMENTO` | não | A conta de cobrança (`billingAccounts/XXXXXX-XXXXXX-XXXXXX` ou só o id) vinculada ao projeto sem faturamento. Vazio: a primeira aberta da pessoa |
+
+Sem `NOD_GOOGLE_CLIENT_ID`/`_SECRET` ou sem callback (nem `NOD_NUVEM_REDIRECT_URI` nem `NOD_URL_PUBLICA`), as rotas
+existem, mas conectar responde `integracao_nao_configurada`.
+
+**Atenção:** hoje o `infra/gcp/vm/deploy.sh` monta o `nod.env` com uma lista fixa e não leva nenhuma destas
+variáveis, nem `NOD_URL_PUBLICA`. Pôr a linha só no `config.env` não liga nada. Para ligar em produção, acrescente ao
+`deploy.sh`, como as do revisor, `NOD_MAQUINA_NUVEM=${NOD_MAQUINA_NUVEM:-}` e
+`NOD_NUVEM_REDIRECT_URI=https://$NOD_DOMINIO/api/nuvem/google/callback` (e, se quiser,
+`NOD_NUVEM_CONTA_FATURAMENTO`); depois, `NOD_MAQUINA_NUVEM=gcp` no `config.env` e rode o deploy.
+
+### Desligar
+
+Tire `NOD_MAQUINA_NUVEM` (ou deixe vazia) e rode o deploy. As rotas somem e o reconciliador para. As VMs ficam como
+estão no Google.
+
+**Antes, acorde as máquinas que dormem.** O filtro do `reivindicar` e a suspensão dos prazos leem `maquinas_nuvem`
+com ou sem a flag. Uma linha parada em `adormecendo`, `dormindo` ou `acordando` continua segurando os turnos dessa
+máquina, mesmo que a pessoa ligue a VM no console, e o prazo de 24 h sem contato não corre. Então: em Máquinas, use
+Acordar em cada uma e espere Acordada (ou escolha Nunca dormir); só depois tire a flag. Se já tirou, ponha de novo,
+acorde e tire outra vez.
+
+As linhas de `maquinas_nuvem` e `credenciais_nuvem` ficam no banco. A pessoa pode apagar a chave da conta de serviço
+`nod-<hash>` no console (IAM › Contas de serviço › Chaves).
+
 ## Trocar para o domínio definitivo
 
 Enquanto `NOD_DOMINIO` está vazio no `config.env`, o endereço é `https://<ip-com-traços>.sslip.io`,

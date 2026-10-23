@@ -18,6 +18,8 @@ import type { incidentesRepo } from "./incidentes.repo.ts";
 import type { inventarioRepo } from "./inventario.repo.ts";
 import type { itensAprovacaoRepo } from "./itens-aprovacao.repo.ts";
 import type { maquinaTokensRepo } from "./maquina-tokens.repo.ts";
+import type { maquinasNuvemRepo } from "./maquinas-nuvem.repo.ts";
+import type { credenciaisNuvemRepo } from "./credenciais-nuvem.repo.ts";
 import type { memoriasRepo } from "./memorias.repo.ts";
 import type { mensagensRepo } from "./mensagens.repo.ts";
 import type { outboxRepo } from "./outbox.repo.ts";
@@ -117,6 +119,9 @@ export interface Repos {
   paradas: ReturnType<typeof paradasRepo>;
   catcher: ReturnType<typeof catcherRepo>;
   maquinaTokens: ReturnType<typeof maquinaTokensRepo>;
+  /** ADR-121 (0107): a máquina na nuvem que dorme e acorda. */
+  maquinasNuvem: ReturnType<typeof maquinasNuvemRepo>;
+  credenciaisNuvem: ReturnType<typeof credenciaisNuvemRepo>;
   raioX: ReturnType<typeof raioXRepo>;
   preferencias: ReturnType<typeof preferenciasRepo>;
   onboarding: ReturnType<typeof onboardingRepo>;

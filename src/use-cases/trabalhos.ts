@@ -333,6 +333,8 @@ async function maquinaDosTrabalhos(deps: Pick<Deps, "escopo" | "repos" | "agora"
   const ultimoUso = servico.conectada ? new Map(chaves.map((c) => [c.id, c.ultimoUsoEm])) : new Map<string, number | null>();
   const nomes = new Map(chaves.map((c) => [c.id, c.nome]));
   const { maquinas, portoes, nomear, semContatoDesde } = maquinasDaPessoa(deps, servico, usoDoMac, ultimoUso, nomes);
+  // ADR-121 (NOD-92): a máquina na nuvem que acorda para o trabalho ("Acordando <máquina>…"). Sem a flag, nenhuma linha.
+  const acordando = await deps.repos.maquinasNuvem.idsAcordando();
   const agora = deps.agora();
   const ondeRoda = (t: TrabalhoDto, e: ExtrasTrabalho | undefined): Partial<TrabalhoDto> => {
     if (!trabalhoAberto(t.estado)) return {};
@@ -345,7 +347,7 @@ async function maquinaDosTrabalhos(deps: Pick<Deps, "escopo" | "repos" | "agora"
     const motivo = espera && espera.motivo !== "sem_contato" ? espera.motivo : null;
     // QA do NOD-314: a IA fixada do turno na fila, para o "desta vez" do topo seguir a regra da conversa.
     const iaFixada = e?.pendente ? harnessFixado(e.pendente.harness, e.pendente.modelo) : null;
-    return { esperaDoMac: motivo, maquina: maquina === null ? null : nomear(maquina), iaFixada };
+    return { esperaDoMac: motivo, maquina: maquina === null ? null : { ...nomear(maquina), ...(acordando.has(maquina) ? { acordando: true } : {}) }, iaFixada };
   };
   return { maquinas, ondeRoda, ultimoUso, nomes };
 }

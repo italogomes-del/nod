@@ -64,6 +64,11 @@ parear sem navegador, uma regra de qual máquina pega cada turno e os textos que
      fala a uma IA que ele sabe estar no limite: a fala fica com `acordar_em` na renovação mais próxima (sem horário do
      fornecedor, 1 h) e a conversa ganha uma linha. Uma fala nova da pessoa absorve a adiada; Parar a cancela. A fala
      que já esperou uma vez segue o caminho de sempre (não espera de novo).
+   - **Emenda NOD-92 (2026-10-22, ADR-121): a máquina gerenciada dormindo acorda e espera.** Com
+     `NOD_MAQUINA_NUVEM=gcp`, a VM do Google que o nod liga e desliga não está "fora do ar" quando dorme. Conversa,
+     task, pedido de colega e rotina com alvo nela a acordam e esperam na fila. A rotina não vira `interrompida` nem
+     `nao_rodou`, e o prazo de 24 h sem contato não corre enquanto ela dorme ou acorda. Só com `falhou_ao_acordar`
+     volta a regra de cima, contada a partir da falha.
 7. **Os arquivos ficam onde o bot trabalha.** A pasta do bot é `~/nod/<bot>` na máquina que roda o turno (como já é,
    `claude-cli.ts`). Não há sincronização com o Mac. Anexos já chegam por `/api/interno/anexos/:id` e funcionam em
    qualquer máquina; o arquivo do Mac para um app (ADR-068) já não vale no modo compartilhado e continua assim.
@@ -96,6 +101,8 @@ credencial é logada por ela, como no Mac. A VM não é o "computador do bot" (A
 - **Sincronizar a pasta do bot entre VM e Mac.** Decidido em 2026-10-09: os arquivos ficam onde o bot trabalha.
 - **O nod hospedar as máquinas (caminho C).** Fora: isolamento entre pessoas por microVM, operação 24 h e a credencial
   da pessoa na infraestrutura do nod. O caminho B (o nod cria a VM na conta da pessoa) vem depois, sobre o mesmo motor.
+  **Emenda NOD-92 (2026-10-22):** o caminho B deixou de ser "depois". Ele é a [ADR-121](adr-121-caminho-b-a-vm-na-conta-de-nuvem-da-pessoa.md):
+  o nod liga e desliga a VM do Google da pessoa (PR 1) e, no PR 2, a cria.
 
 ## Gatilho de reversão
 

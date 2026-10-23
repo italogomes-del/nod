@@ -128,6 +128,8 @@ type Segura = { motivo: MotivoAdiada; turnoAbertoId: string | null; trabalhoAber
  */
 export function execucaoVenceu(aberto: TurnoAbertoDaRotina, rotina: Pick<Rotina, "cron" | "fusoIana">, agora: number): boolean {
   if (aberto.estado !== "pendente" || aberto.attempted || aberto.acordarEm !== null) return false;
+  // definido em 2026-10-22 (ADR-121, NOD-92): esperando a máquina na nuvem acordar não é estar parado na fila.
+  if (aberto.esperaNuvem === true) return false;
   const periodo = proximaJanela({ cron: rotina.cron, fusoIana: rotina.fusoIana, agora: aberto.instanteAgendado }) - aberto.instanteAgendado;
   return agora - aberto.instanteAgendado >= Math.max(periodo, PISO_VENCIDO_MS);
 }

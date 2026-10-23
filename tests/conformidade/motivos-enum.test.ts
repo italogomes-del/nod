@@ -15,6 +15,7 @@ import {
   MOTIVOS_SEM_NOVIDADE,
 } from "../../src/contracts/motivos.ts";
 import { TIPOS_INCIDENTE } from "../../src/contracts/incidente.ts";
+import { ESTADOS_MAQUINA_NUVEM, MOTIVOS_FALHA_NUVEM } from "../../src/contracts/provedor-nuvem.ts";
 import { ALCANCES_RELATO, CATEGORIAS_RELATO } from "../../src/contracts/relato.ts";
 import { ENUMS_DE_ESTADO } from "../../src/db/schema/agentes.ts";
 import { db } from "../helpers/db.ts";
@@ -27,6 +28,9 @@ import { describeIntegracao } from "../helpers/integracao.ts";
  */
 const MOTIVOS: Record<string, readonly string[]> = {
   motivo_passe: MOTIVOS_PASSE,
+  // ADR-121 (0107, NOD-92): a máquina na nuvem.
+  estado_maquina_nuvem: ESTADOS_MAQUINA_NUVEM,
+  motivo_falha_nuvem: MOTIVOS_FALHA_NUVEM,
   motivo_negacao: MOTIVOS_NEGACAO,
   motivo_interrupcao: MOTIVOS_INTERRUPCAO,
   motivo_falha: MOTIVOS_FALHA,

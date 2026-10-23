@@ -12,6 +12,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { maquinaDoBot } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
+import { acordandoNaFila } from "../lib/maquina-nuvem.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
@@ -446,6 +447,10 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   const destaVez = emCurso.maquinaDestaVez ? (estado.maquinas?.maquinas ?? []).find((x) => x.id === emCurso.maquinaDestaVez) ?? null : null;
   const doBot = destaVez ?? (agente ? maquinaDoBot(estado, agente) : null);
   // Revisão do PR: conectada mas sem nenhuma IA pronta (o login ainda não foi feito nela) também segura a fila.
+  // ADR-121 (NOD-92): a máquina na nuvem está acordando para o trabalho (ou dorme e vai acordar). A espera é curta e rodar
+  // em outra duplicaria o trabalho: nada de "Rodar em X desta vez", que só volta na falha (`falhou_ao_acordar`).
+  const doTrabalho = (estado.trabalhos?.trabalhos ?? []).find((t) => t.conversaId === c.conversa.id && t.maquina?.acordando)?.maquina ?? null;
+  if (acordandoNaFila(doBot, doTrabalho)) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Acordando ${doTrabalho?.nome ?? doBot?.nome ?? "a máquina"}… · costuma levar 1 a 2 min` };
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
   if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
   if (doBot && !doBot.conectada) {

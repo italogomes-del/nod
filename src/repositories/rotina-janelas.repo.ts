@@ -1,7 +1,9 @@
 import type { Executor } from "../contracts/evento.ts";
 import type { JanelaRotina } from "../contracts/rotina.ts";
 import type { Conn, Escopo } from "../shared/types.ts";
+import { alvoDoTurno } from "./alvo-da-maquina.ts";
 import { data, ms } from "./conversao.ts";
+import { nuvemSuspendePrazo } from "./nuvem-relogio.ts";
 
 interface Linha {
   tenant_id: string;
@@ -24,6 +26,8 @@ export type TurnoAbertoDaRotina = {
   acordarEm: number | null;
   criadoEm: number;
   trabalhoId: string | null;
+  /** ADR-121 (NOD-92): a máquina-alvo é da nuvem e dorme ou acorda agora — a execução não vence enquanto isso. */
+  esperaNuvem?: boolean;
 };
 
 /** O turno `t` da janela ainda segura a rotina (ADR-045, ADR-086, ADR-099). */
@@ -95,15 +99,17 @@ export function rotinaJanelasRepo(conn: Conn, escopo: Escopo) {
      * `agora` é o relógio do servidor (o mesmo do disparo), não o now() do banco.
      */
     async turnoAberto(rotinaId: string, agora: number): Promise<TurnoAbertoDaRotina | null> {
-      const [l] = await conn<{ turno_id: string; instante_agendado: Date; estado: string; attempted: boolean; acordar_em: Date | null; criado_em: Date; trabalho_id: string | null }[]>`
-        select j.turno_id, j.instante_agendado, t.estado, t.attempted, t.acordar_em, t.criado_em, t.trabalho_id from rotina_janelas j
+      const [l] = await conn<{ turno_id: string; instante_agendado: Date; estado: string; attempted: boolean; acordar_em: Date | null; criado_em: Date; trabalho_id: string | null; espera_nuvem: boolean }[]>`
+        select j.turno_id, j.instante_agendado, t.estado, t.attempted, t.acordar_em, t.criado_em, t.trabalho_id,
+          ${nuvemSuspendePrazo(conn, conn`t.tenant_id`, alvoDoTurno(conn, agora))} as espera_nuvem
+        from rotina_janelas j
         join turnos t on t.tenant_id = j.tenant_id and t.id = j.turno_id
         where j.tenant_id = ${escopo.tenantId} and j.rotina_id = ${rotinaId}
           and j.turno_id is not null and j.instante_agendado > ${data(agora)}::timestamptz - interval '7 days'
           and (${conn.unsafe(ABERTO)})
         order by j.instante_agendado desc limit 1`;
       return l
-        ? { turnoId: l.turno_id, instanteAgendado: ms(l.instante_agendado), estado: l.estado, attempted: l.attempted, acordarEm: l.acordar_em ? ms(l.acordar_em) : null, criadoEm: ms(l.criado_em), trabalhoId: l.trabalho_id }
+        ? { turnoId: l.turno_id, instanteAgendado: ms(l.instante_agendado), estado: l.estado, attempted: l.attempted, acordarEm: l.acordar_em ? ms(l.acordar_em) : null, criadoEm: ms(l.criado_em), trabalhoId: l.trabalho_id, esperaNuvem: l.espera_nuvem }
         : null;
     },
 

@@ -8,6 +8,7 @@ import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/co
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
+import type { ContaNuvemDto, DormirAposMin } from "../../src/contracts/provedor-nuvem.ts";
 import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
@@ -364,6 +365,13 @@ export function criarApi(escopo: Escopo) {
     renomearMaquina: (id: string, nome: string) => patch<{ id: string; nome: string }>(`maquinas/${encodeURIComponent(id)}`, { nome }),
     desconectarMaquina: (id: string, sairDasContas: boolean) => post<{ ok: true; contas: number; aguardandoMaquina: boolean }>(`maquinas/${encodeURIComponent(id)}/desconectar`, { sairDasContas }),
     criarConvite: () => post<{ convite: string; expiraEm: number }>("maquinas/convites"),
+    // ADR-121 (NOD-92): a máquina na nuvem que dorme e acorda pelo Google. Sem NOD_MAQUINA_NUVEM, as rotas dão 404.
+    contaNuvem: () => get<ContaNuvemDto>("nuvem/conta"),
+    /** O OAuth do Google começa aqui: a resposta traz a `url` para onde a página vai (desvio 1 da NOD-92). */
+    entrarNoGoogle: (pedido: { para: "preparar" } | { para: "conectar"; maquinaId: string; projeto: string; zona: string; nome: string }) => post<{ url: string }>("nuvem/google", pedido),
+    dormirAgora: (maquinaId: string) => post<{ ok: true }>(`nuvem/maquinas/${encodeURIComponent(maquinaId)}/dormir`),
+    acordarAgora: (maquinaId: string) => post<{ ok: true }>(`nuvem/maquinas/${encodeURIComponent(maquinaId)}/acordar`),
+    dormirApos: (maquinaId: string, minutos: DormirAposMin | null) => pedir<{ dormirAposMin: DormirAposMin | null }>("PUT", `${base}/nuvem/maquinas/${encodeURIComponent(maquinaId)}/dormir-apos`, { minutos }),
     verConvite: (convite: string) => get<{ estado: "pendente" } | { estado: "chegou"; codigo: string; pedido: { nome: string; plataforma: string; pedidoHaS: number } }>(`maquinas/convites/${encodeURIComponent(convite)}`),
     /** ADR-069: abre o pedido de pareamento do Mac que pediu; o código volta ao app pelo 127.0.0.1. */
     parearMac: (nome: string, desafio: string) => post<{ codigo: string }>("maquinas/pareamentos", { nome, desafio }),

@@ -6,6 +6,7 @@ import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
 import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
 import { renderContasNaMaquina, resumoDasContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
+import { acoesDaFalha, avisoDaConta, motivoLegivel, nuvemLigada, OPCOES_SONO, rotuloEstadoNuvem, rotuloSono, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
 
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
@@ -78,10 +79,100 @@ function menuDaMaquina(estado: Estado, m: MaquinaDto): string {
         <button type="button" data-act="maq-renomear" data-maquina="${esc(m.id)}">${ICONE.lapis}<span>Renomear máquina</span></button>
         ${estado.contasIa?.disponivel ? `<button type="button" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas<small>abre Provedores de IA filtrado</small></span></button>` : ""}
         <button type="button" data-act="maq-bots" data-maquina="${esc(m.id)}">${ICONE.agentes}<span>Bots desta máquina<small>${esc(bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}`)}</small></span></button>
+        ${podeDormirPeloGoogle(estado, m) ? `<button type="button" data-act="nuvem-conectar-abrir" data-maquina="${esc(m.id)}">${ICONE.servidor}<span>Dormir e acordar pelo Google<small>ela dorme parada e acorda quando chega trabalho</small></span></button>` : ""}
         <hr><button type="button" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar máquina</span></button>
       </div>`
     : "";
   return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
+}
+
+/**
+ * ADR-121 (NOD-92): o ⋯ da VM sem `nuvem` oferece "Dormir e acordar pelo Google" — só com a flag ligada (a conta da nuvem
+ * respondeu, ou alguma máquina já tem `nuvem`) e nunca no Mac.
+ */
+function podeDormirPeloGoogle(estado: Estado, m: MaquinaDto): boolean {
+  return !m.nuvem && m.plataforma !== "darwin" && nuvemLigada(estado.nuvem, estado.maquinas?.maquinas ?? []);
+}
+
+/** O nome da instância do Google tem de começar por letra minúscula (o form vem com o nome da máquina quando serve). */
+const NOME_INSTANCIA = /^[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?$/;
+
+/** ADR-121 (NOD-92): o formulário do "Dormir e acordar pelo Google" no cartão; o envio leva ao Google (POST nuvem/google). */
+function formConectarNuvem(estado: Estado, m: MaquinaDto): string {
+  const c = estado.nuvem.conectar;
+  if (!c || c.maquinaId !== m.id) return "";
+  const campo = (nome: "projeto" | "zona" | "nome", rotulo: string, valor: string, dica: string, foco = false) =>
+    `<label class="nv-campo"><span>${esc(rotulo)}</span><input name="${nome}" type="text" value="${esc(valor)}" autocomplete="off" spellcheck="false" maxlength="63" placeholder="${esc(dica)}" data-nuvem-campo="${nome}" data-manter-foco="nuvem-${nome}"${foco ? " data-cl-autofoco" : ""} required></label>`;
+  return `<form class="nv-conectar" data-form="nuvem-conectar" data-maquina="${esc(m.id)}" aria-label="Dormir e acordar pelo Google">
+      <p class="cx-nota">Onde a ${esc(m.nome)} está no Google Cloud. O Google vai pedir permissão; o nod só liga e desliga esta máquina, nunca a apaga.</p>
+      ${campo("projeto", "Projeto", c.projeto, "meu-projeto", true)}
+      ${campo("zona", "Zona", c.zona, "southamerica-east1-a")}
+      ${campo("nome", "Nome da instância", c.nome, "minha-vm")}
+      ${c.erro ? `<p class="cx-erro" role="alert">${esc(c.erro)}</p>` : ""}
+      <div class="cx-rodape"><button type="button" class="bt link" data-act="nuvem-conectar-fechar">Cancelar</button><button type="submit" class="bt pri">Entrar com o Google</button></div>
+    </form>`;
+}
+
+/** O valor inicial do campo "Nome da instância": o nome da máquina, quando é um nome válido no Google. */
+export function nomeDeInstanciaSugerido(m: Pick<MaquinaDto, "nome">): string {
+  return NOME_INSTANCIA.test(m.nome) ? m.nome : "";
+}
+
+/** O estado da máquina na nuvem no lugar do "conectada / sem contato". Dormindo é normal: cinza, não erro. */
+export function estadoNuvemNoCartao(m: MaquinaDto): string {
+  const n = m.nuvem;
+  if (!n) return "";
+  const fora = n.estado !== "acordada";
+  const desde = n.estado === "dormindo" ? ` desde ${hora(n.estadoDesde)}` : "";
+  return `<span class="maq-estado${fora ? " fora" : ""}"><span class="maq-ponto${fora ? " fora" : ""}" aria-hidden="true"></span>${esc(rotuloEstadoNuvem(n.estado))}${esc(desde)}</span>`;
+}
+
+/**
+ * ADR-121 (NOD-92): o que a nuvem põe no cartão — a linha de falha com o motivo e a ação, a recusa do último "Dormir
+ * agora" e a linha do sono (Dorme depois de N · Dormir agora). Sem `nuvem`, nada.
+ */
+export function nuvemNoCartao(estado: Estado, m: MaquinaDto): string {
+  const n = m.nuvem;
+  if (!n) return "";
+  const id = esc(m.id);
+  const projeto = projetoDaConta(estado);
+  const falha = temLinhaDeFalha(n)
+    ? `<div class="nv-falha" role="status"><p>${esc(motivoLegivel(n.motivo, m.nome, n.zona))}</p><div class="nv-acoes">${acoesDaFalha(n.motivo).map((a) =>
+      a.tipo === "console" ? `<a class="bt link" href="${esc(urlConsoleGoogle(projeto))}" target="_blank" rel="noopener noreferrer">${esc(a.rotulo)}</a>`
+        : a.tipo === "reconectar" ? `<button type="button" class="bt link" data-act="nuvem-reconectar">${esc(a.rotulo)}</button>`
+          : `<button type="button" class="bt link" data-act="nuvem-acordar" data-maquina="${id}">${esc(a.rotulo)}</button>`).join("")}</div></div>`
+    : "";
+  const recusa = estado.nuvem.recusa?.maquinaId === m.id ? `<p class="cx-erro" role="alert">${esc(estado.nuvem.recusa.texto)}</p>` : "";
+  // A linha do sono some enquanto a permissão não volta (protótipo, "O mesmo motivo no cartão").
+  if (n.motivo === "credencial_nuvem" || n.estado === "excluida" || n.estado === "criando") return `<div class="nv-sono">${falha}${recusa}</div>`;
+  const aberto = estado.nuvem.sonoMenu === m.id;
+  const menu = aberto
+    ? `<div class="cl-menu" role="menu" aria-label="Dorme depois de">${OPCOES_SONO.map((o) => {
+      const marcado = o.minutos === n.dormirAposMin;
+      return `<button type="button" role="menuitemradio" aria-checked="${marcado}" data-act="nuvem-dormir-apos" data-maquina="${id}" data-minutos="${o.minutos ?? ""}"><span>${esc(o.rotulo)}</span></button>`;
+    }).join("")}</div>`
+    : "";
+  const ajuste = `<span class="nv-ajuste-wrap"><button type="button" class="bt sm" data-act="nuvem-sono-menu" data-maquina="${id}" aria-haspopup="menu" aria-expanded="${aberto}">${esc(n.dormirAposMin === null ? "Nunca dormir" : rotuloSono(n.dormirAposMin))} ▾</button>${menu}</span>`;
+  const frase = n.dormirAposMin === null ? `<span>Não dorme sozinha</span>${ajuste}` : `<span>Dorme depois de</span>${ajuste}<span>sem trabalho</span>`;
+  const agir = n.estado === "acordada" ? `<button type="button" class="bt sm" data-act="nuvem-dormir" data-maquina="${id}">Dormir agora</button>`
+    : n.estado === "dormindo" ? `<button type="button" class="bt sm" data-act="nuvem-acordar" data-maquina="${id}">Acordar agora</button>` : "";
+  const nota = n.estado === "dormindo" ? `<p class="mac-det-txt">Acorda sozinha quando um bot precisar.</p>` : n.estado === "acordando" && n.motivo === null ? `<p class="mac-det-txt">Acordando: costuma levar 1 a 2 min.</p>` : "";
+  return `<div class="nv-sono">${falha}<div class="nv-sono-linha">${frase}${agir}</div>${nota}${recusa}</div>`;
+}
+
+function projetoDaConta(estado: Pick<Estado, "nuvem">): string | null {
+  const c = estado.nuvem.conta;
+  return c && c !== "desligada" ? c.projeto : null;
+}
+
+/** ADR-121 (NOD-92): o aviso do topo depois da volta do Google (`?nuvem=preparando|recusado`). */
+export function avisoDaNuvem(estado: Estado): string {
+  const a = avisoDaConta(estado.nuvem);
+  if (!a) return "";
+  const reconectar = a.motivo === "credencial_nuvem" ? `<button type="button" class="bt link" data-act="nuvem-reconectar">Reconectar o Google</button>` : "";
+  const noConsole = a.motivo === "cota_ou_cobranca" ? `<a class="bt link" href="${esc(urlConsoleGoogle(projetoDaConta(estado)))}" target="_blank" rel="noopener noreferrer">Abrir o console do Google ↗</a>` : "";
+  const fechar = a.tom === "espera" ? "" : `<button type="button" class="bt link" data-act="nuvem-aviso-fechar">Fechar</button>`;
+  return `<div class="espaco-cartao nv-aviso nv-${a.tom}" role="status">${a.tom === "espera" ? `<span class="ob-gira" aria-hidden="true"></span>` : ""}<span>${esc(a.texto)}</span><span class="nv-acoes">${noConsole}${reconectar}${fechar}</span></div>`;
 }
 
 /** ADR-102 (G2-M5): "Desconectar" com "Sair também das contas de IA" (marcada quando há contas lá). */
@@ -100,7 +191,7 @@ function dialogoDesconectar(estado: Estado): string {
 function cartao(estado: Estado, m: MaquinaDto): string {
   const aqui = botsDaPessoa(estado).filter((b) => maquinaDoBot(estado, b)?.id === m.id);
   const quem = aqui.length === 0 ? "Nenhum bot trabalha só aqui" : aqui.length === 1 ? `${aqui[0]!.nome} trabalha aqui` : `${aqui.length} bots trabalham aqui: ${aqui.map((b) => b.nome).join(", ")}`;
-  const estadoTxt = m.conectada
+  const estadoTxt = m.nuvem ? estadoNuvemNoCartao(m) : m.conectada
     ? `<span class="maq-estado"><span class="maq-ponto" aria-hidden="true"></span>conectada</span>`
     : `<span class="maq-estado fora"><span class="maq-ponto fora" aria-hidden="true"></span>sem contato${m.ultimoUsoEm ? ` desde ${esc(hora(m.ultimoUsoEm))}` : ""}</span>`;
   return `<div class="espaco-cartao maq-cartao">
@@ -108,12 +199,14 @@ function cartao(estado: Estado, m: MaquinaDto): string {
       <span class="maq-ic" aria-hidden="true">${m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor}</span>
       ${estado.contasUi.maquinaRenomear === m.id
         ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt pri sm">Salvar</button><button type="button" class="bt sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
-        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
+        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(m.nuvem ? `Google Cloud · ${m.nuvem.zona}` : nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
       ${estadoTxt}
       ${menuDaMaquina(estado, m)}
     </div>
     ${estado.contasIa?.disponivel ? resumoDasContasNaMaquina(estado.contasIa, m) : chipsDasIas(m)}
     ${m.conectada ? leituraNoCartao(estado, m.id) : ""}
+    ${nuvemNoCartao(estado, m)}
+    ${formConectarNuvem(estado, m)}
     <div class="maq-quem"><span class="maq-avatares">${aqui.slice(0, 6).map((b) => iconeAgente(b, "sm")).join("")}</span><span>${esc(quem)}</span></div>
   </div>`;
 }
@@ -140,6 +233,7 @@ export function renderMaquinas(estado: Estado): string {
   return `<section class="espaco-secao maquinas">
     <h2>Máquinas</h2>
     <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: "pri" })}</div>
+    ${avisoDaNuvem(estado)}
     ${conectar}
     <div class="maq-lista">${lista}</div>
     ${dialogoDesconectar(estado)}

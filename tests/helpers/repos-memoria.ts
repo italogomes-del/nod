@@ -2811,6 +2811,31 @@ function reposSobre(b: BancoMemoria, escopo: Escopo): Repos {
         return l ? { nome: l.nome, plataforma: l.plataforma ?? null } : null;
       },
     },
+    // ADR-121: a máquina na nuvem só existe no Postgres (os testes dela são de integração); aqui a pessoa não tem nenhuma.
+    maquinasNuvem: {
+      criarConectada: async () => { throw new Error("maquinas_nuvem: só no Postgres"); },
+      buscar: async () => null,
+      buscarPorMaquina: async () => null,
+      listarDaPessoa: async () => [],
+      idsAcordando: async () => new Set<string>(),
+      definirDormirApos: async () => false,
+      pedirAcordar: async () => false,
+      tentarDormir: async () => ({ ok: false, motivo: "nao_encontrada" }),
+      ociosasParaDormir: async () => [],
+      marcarAtividade: async () => 0,
+      acordarSePreciso: async () => 0,
+      paraReconciliar: async () => [],
+      reservar: async () => false,
+      concluir: async () => false,
+      soltar: async () => undefined,
+      eventos: async () => [],
+    },
+    credenciaisNuvem: {
+      gravar: async () => { throw new Error("credenciais_nuvem: só no Postgres"); },
+      atual: async () => null,
+      chaveCifrada: async () => null,
+      revogar: async () => false,
+    },
     permissoesPermanentes: {
       async criar(p) {
         const ja = doTenant(b.permissoes).some((x) => x.agenteId === p.agenteId && x.conectorId === p.conectorId && x.capacidade === p.capacidade && x.inativoEm === null);

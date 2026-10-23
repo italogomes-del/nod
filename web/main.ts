@@ -67,7 +67,9 @@ import { renderNovaRotina } from "./telas/nova-rotina.ts";
 import { contextoInteligencia, nivelDaGaveta } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
-import { botsDaPessoa, maquinaNova } from "./telas/maquinas.ts";
+import { botsDaPessoa, maquinaNova, nomeDeInstanciaSugerido } from "./telas/maquinas.ts";
+import { erroDoConectar, recusaDoDormir, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
+import type { DormirAposMin } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
@@ -757,6 +759,13 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   // ADR-090: servidor sem a rota (404, versão anterior) fica sem máquinas; nenhum erro sobe.
   if (q === "maquinas") return { tipo: "hidratar-maquinas", maquinas: await api.maquinas().catch((e: unknown) => { if (e instanceof ErroApi && e.status === 404) return { maquinas: [], padraoId: null }; throw e; }) };
   if (q === "relatos") return { tipo: "hidratar-relatos", relatos: (await api.relatos()).relatos };
+  // ADR-121 (NOD-92): sem NOD_MAQUINA_NUVEM a rota dá 404 e a seção fica como antes. Outra falha mantém a última leitura
+  // (ou fecha, se não havia): a nuvem é um extra da seção, nunca a quebra.
+  if (q === "nuvem") {
+    const anterior = estado.nuvem.conta;
+    const conta = await api.contaNuvem().catch((e: unknown) => (e instanceof ErroApi && e.status === 404) || anterior === null ? "desligada" as const : anterior);
+    return { tipo: "nuvem-ui", mudanca: { conta } };
+  }
   // ADR-102: servidor sem a rota (404, versão anterior) fica com a tela de antes.
   if (q === "contas") {
     // Revisão do PR 1 (2026-10-16): na conversa a lista só serve ao cabeçalho do seletor de IA (informativo) — a falha fica
@@ -918,6 +927,7 @@ function relevante(q: Invalidacao): boolean {
   if (q === "conectores") return t.tipo === "conectores" || t.tipo === "conversa" || t.tipo === "sala";
   if (q === "chaves") return secao === "computadores";
   if (q === "maquinas") return secao === "maquinas" || secao === "conexao" || t.tipo === "conversa" || t.tipo === "trabalho";
+  if (q === "nuvem") return secao === "maquinas";
   if (q === "contas") return secao === "maquinas" || secao === "conexao" || ((t.tipo === "conversa" || t.tipo === "trabalho" || conversaAbertaTemNotaDeContas(estado)) && (contasFalharamEm === null || Date.now() - contasFalharamEm > ESPERA_CONTAS_MS));
   if (q === "relatos") return secao === "relatos";
   if (q.startsWith("conversa:")) return (t.tipo === "conversa" || t.tipo === "sala" || t.tipo === "linha") && t.conversaId === q.slice(9);
@@ -1778,6 +1788,7 @@ function regiaoReabrindo(id: string, html: string): void {
 
 /** ADR-090: o código de pareamento da máquina que veio na URL, guardado até a sessão existir. */
 const CHAVE_CODIGO_MAQUINA = "nod-parear-maquina";
+const CHAVE_VOLTA_NUVEM = "nod-volta-nuvem";
 async function boot(): Promise<void> {
   dispatch({ tipo: "tick", agora: Date.now() });
   let ticks = 0;
@@ -1794,6 +1805,9 @@ async function boot(): Promise<void> {
     // mudança das IAs da pessoa vira), e o cartão ficava em "sem contato" com a VM já de volta e os bots trabalhando nela.
     // Desde a NOD-300 (2026-10-20) ela vira (motivo "presenca", no varrer da ponte); esta releitura fica como rede.
     if (ticks % 2 === 0 && estado.sessao && (estado.espaco?.secao === "este-mac" || estado.espaco?.secao === "maquinas")) estado = reduzir(estado, { tipo: "invalidar", quais: estado.espaco?.secao === "maquinas" ? ["trabalhos", "maquinas"] : ["trabalhos"] });
+    // ADR-121 (NOD-92): de volta do Google, o preparo da conta roda no servidor; a conta é relida até ele terminar.
+    const conta = estado.nuvem.conta;
+    if (estado.sessao && estado.nuvem.aviso === "preparando" && conta !== "desligada" && (conta === null || conta.preparando)) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
@@ -1811,6 +1825,13 @@ async function boot(): Promise<void> {
     url.searchParams.delete("parear-maquina");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
+  // ADR-121 (NOD-92): a volta do Google (`/maquinas?nuvem=preparando|recusado`) abre Máquinas com o aviso, depois do login.
+  const voltaDaNuvem = url.searchParams.get("nuvem");
+  if (voltaDaNuvem !== null) {
+    if (voltaDaNuvem === "preparando" || voltaDaNuvem === "recusado") { try { window.sessionStorage.setItem(CHAVE_VOLTA_NUVEM, voltaDaNuvem); } catch { /* sem storage: sem o aviso */ } }
+    url.searchParams.delete("nuvem");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
   if (url.searchParams.get("entrar") === "recusado") {
     entrada = { ...entrada, recusado: true };
     url.searchParams.delete("entrar");
@@ -1819,6 +1840,7 @@ async function boot(): Promise<void> {
   try {
     await iniciarSessao(await sessaoApi.atual());
     abrirCodigoDeMaquinaGuardado();
+    abrirVoltaDaNuvemGuardada();
   } catch (e) {
     if (e instanceof ErroApi && e.status === 401) {
       render();
@@ -3536,6 +3558,48 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     await api!.desconectarMaquina(q.maquinaId, q.sair);
     dispatch({ tipo: "invalidar", quais: ["maquinas", "frota", "contas"] });
   }),
+  // ADR-121 (NOD-92): a máquina na nuvem — dormir, acordar, o sono e o "Dormir e acordar pelo Google".
+  "nuvem-dormir": (el) => agir(async () => {
+    const id = el.dataset.maquina ?? "";
+    dispatch({ tipo: "nuvem-ui", mudanca: { recusa: null } });
+    try {
+      await api!.dormirAgora(id);
+    } catch (e) {
+      if (!(e instanceof ErroApi) || e.status !== 409) throw e;
+      const nome = estado.maquinas?.maquinas.find((m) => m.id === id)?.nome ?? "máquina";
+      dispatch({ tipo: "nuvem-ui", mudanca: { recusa: { maquinaId: id, texto: recusaDoDormir(nome) } } });
+    }
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  }),
+  "nuvem-acordar": (el) => agir(async () => {
+    const id = el.dataset.maquina ?? "";
+    dispatch({ tipo: "nuvem-ui", mudanca: { recusa: null } });
+    try {
+      await api!.acordarAgora(id);
+    } catch (e) {
+      if (!(e instanceof ErroApi) || e.status !== 409) throw e;
+      const nome = estado.maquinas?.maquinas.find((m) => m.id === id)?.nome ?? "máquina";
+      dispatch({ tipo: "nuvem-ui", mudanca: { recusa: { maquinaId: id, texto: `A ${nome} não pode acordar agora. Atualize a página e tente de novo.` } } });
+    }
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  }),
+  "nuvem-sono-menu": (el) => dispatch({ tipo: "nuvem-ui", mudanca: { sonoMenu: estado.nuvem.sonoMenu === el.dataset.maquina ? null : el.dataset.maquina ?? null } }),
+  "nuvem-dormir-apos": (el) => agir(async () => {
+    const minutos = el.dataset.minutos ? (Number(el.dataset.minutos) as DormirAposMin) : null;
+    dispatch({ tipo: "nuvem-ui", mudanca: { sonoMenu: null } });
+    await api!.dormirApos(el.dataset.maquina ?? "", minutos);
+    dispatch({ tipo: "invalidar", quais: ["maquinas"] });
+  }),
+  "nuvem-reconectar": () => agir(() => irParaOGoogle({ para: "preparar" })),
+  "nuvem-aviso-fechar": () => dispatch({ tipo: "nuvem-ui", mudanca: { aviso: null } }),
+  "nuvem-conectar-abrir": (el) => {
+    const m = estado.maquinas?.maquinas.find((x) => x.id === el.dataset.maquina);
+    if (!m) return;
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    dispatch({ tipo: "nuvem-ui", mudanca: { conectar: { maquinaId: m.id, projeto: "", zona: ZONA_PADRAO, nome: nomeDeInstanciaSugerido(m), erro: null } } });
+    focarNovo();
+  },
+  "nuvem-conectar-fechar": () => dispatch({ tipo: "nuvem-ui", mudanca: { conectar: null } }),
   // ADR-090: Seu espaço › Máquinas.
   // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
   // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
@@ -3643,6 +3707,18 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     await api!.renomearMaquina(form.dataset.maquina ?? "", nome);
     dispatch({ tipo: "contas-ui", mudanca: { maquinaRenomear: null } });
     dispatch({ tipo: "invalidar", quais: ["maquinas", "contas"] });
+  }),
+  // ADR-121 (NOD-92): "Dormir e acordar pelo Google" leva ao Google com a máquina, o projeto, a zona e o nome da instância.
+  "nuvem-conectar": (form) => agir(async () => {
+    const valor = (nome: string) => form.querySelector<HTMLInputElement>(`input[name="${nome}"]`)?.value.trim() ?? "";
+    const c = { maquinaId: form.dataset.maquina ?? "", projeto: valor("projeto"), zona: valor("zona"), nome: valor("nome") };
+    dispatch({ tipo: "nuvem-ui", mudanca: { conectar: { ...c, erro: null } } });
+    try {
+      await irParaOGoogle({ para: "conectar", ...c });
+    } catch (e) {
+      if (!(e instanceof ErroApi) || e.status === 0 || e.status >= 500) throw e;
+      dispatch({ tipo: "nuvem-ui", mudanca: { conectar: { ...c, erro: erroDoConectar(e.status, e.codigo) } } });
+    }
   }),
   "conta-nova": async (form) => {
     const ia = form.dataset.ia;
@@ -3782,6 +3858,7 @@ document.addEventListener("click", (ev) => {
 document.addEventListener("click", (ev) => {
   const u = estado.contasUi;
   if ((u.menu || u.maquinaMenu) && !(ev.target as HTMLElement).closest(".cl-mais")) dispatch({ tipo: "contas-ui", mudanca: { menu: null, maquinaMenu: null } });
+  if (estado.nuvem.sonoMenu && !(ev.target as HTMLElement).closest(".nv-ajuste-wrap")) dispatch({ tipo: "nuvem-ui", mudanca: { sonoMenu: null } });
 }, true);
 document.addEventListener("keydown", (ev) => {
   // O Tab fica dentro do diálogo aberto (Sair, Remover, Desconectar), como na gaveta de conectores.
@@ -3798,6 +3875,11 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.key !== "Escape" || !estado.espaco) return;
+  if (estado.nuvem.sonoMenu || estado.nuvem.conectar) {
+    ev.stopPropagation();
+    dispatch({ tipo: "nuvem-ui", mudanca: estado.nuvem.sonoMenu ? { sonoMenu: null } : { conectar: null } });
+    return;
+  }
   const u = estado.contasUi;
   const mudanca = u.confirmar ? { confirmar: null } : u.desconectar ? { desconectar: null } : u.menu || u.maquinaMenu ? { menu: null, maquinaMenu: null } : u.renomear ? { renomear: null } : u.maquinaRenomear ? { maquinaRenomear: null } : null;
   if (!mudanca) return;
@@ -3985,6 +4067,9 @@ document.addEventListener("input", (ev) => {
   const loginDoCodigo = (ta as HTMLElement).dataset?.clCodigo;
   if (loginDoCodigo) { contasDaPessoa.digitarCodigo(loginDoCodigo, ta.value); return; }
   if ((ta as HTMLElement).matches?.("[data-cl-nova-apelido]") && estado.contasUi.nova) { estado.contasUi.nova.apelido = ta.value; return; }
+  // ADR-121 (NOD-92): os campos do "Dormir e acordar pelo Google" atravessam a releitura de Máquinas (a cada 30 s).
+  const campoNuvem = (ta as HTMLElement).dataset?.nuvemCampo;
+  if ((campoNuvem === "projeto" || campoNuvem === "zona" || campoNuvem === "nome") && estado.nuvem.conectar) { estado.nuvem.conectar[campoNuvem] = ta.value; return; }
   if (ta.closest?.("#detalhes") && estado.gaveta) gavetaSuja = chaveDaGaveta();
   if (ta.matches("[data-customiza-mascote]")) {
     const form = ta.closest<HTMLFormElement>('form[data-form="editar-perfil"]');
@@ -4342,6 +4427,19 @@ function abrirCodigoDeMaquinaGuardado(): void {
   abrirEspaco("maquinas");
   const guardado = codigo;
   void chavesAtuais().then((chavesAntes) => dispatch({ tipo: "conectar-maquina", conectar: { passo: "codigo", codigo: guardado, pedido: null, erro: null, chavesAntes, marcados: [] } }));
+}
+/** ADR-121 (NOD-92): a volta do Google guardada no boot abre Máquinas com o aviso (a conta é relida até o preparo acabar). */
+function abrirVoltaDaNuvemGuardada(): void {
+  let volta: string | null = null;
+  try { volta = window.sessionStorage.getItem(CHAVE_VOLTA_NUVEM); window.sessionStorage.removeItem(CHAVE_VOLTA_NUVEM); } catch { /* sem storage */ }
+  if ((volta !== "preparando" && volta !== "recusado") || !estado.sessao) return;
+  abrirEspaco("maquinas");
+  dispatch({ tipo: "nuvem-ui", mudanca: { aviso: volta, conta: null } });
+}
+/** ADR-121 (NOD-92): o OAuth do Google começa por POST e a página vai para a `url` que volta (desvio 1). */
+async function irParaOGoogle(pedido: Parameters<NonNullable<typeof api>["entrarNoGoogle"]>[0]): Promise<void> {
+  const { url } = await api!.entrarNoGoogle(pedido);
+  window.location.assign(url);
 }
 /** As chaves de máquina da pessoa agora (relê do servidor e hidrata a seção). */
 async function chavesAtuais(): Promise<string[]> {

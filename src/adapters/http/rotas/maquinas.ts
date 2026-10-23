@@ -2,6 +2,8 @@ import { ErroDeDominio } from "../../../domain/erro.ts";
 import type { PareamentoMaquina } from "../../../services/pareamento-maquina.ts";
 import { lerPlataforma, type PareamentoDispositivo } from "../../../services/pareamento-dispositivo.ts";
 import type { MaquinaDto } from "../../../contracts/maquina.ts";
+import type { MaquinaNuvemDto } from "../../../contracts/provedor-nuvem.ts";
+import { estadoParaTela } from "../../../domain/maquina-nuvem.ts";
 import type { Deps } from "../../../use-cases/tipos.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import { log } from "../../../obs/log.ts";
@@ -37,7 +39,14 @@ async function exigirChaveViva(d: Deps, id: unknown): Promise<string> {
   return viva.id;
 }
 
-export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string } }): Rota[] {
+export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: PareamentoMaquina; dispositivo: PareamentoDispositivo; maquinasVivas?: (escopo: Escopo) => MaquinaConectada[]; servidorNoMac?: { api: string }; nuvem?: boolean }): Rota[] {
+  /** ADR-121: só com NOD_MAQUINA_NUVEM=gcp (compor.ts). Sem a flag, o DTO sai igual ao de antes. */
+  const nuvemDa = async (d: Deps): Promise<Map<string, MaquinaNuvemDto>> =>
+    new Map(
+      (deps.nuvem ? await d.repos.maquinasNuvem.listarDaPessoa() : []).flatMap((m) =>
+        m.maquinaId === null ? [] : [[m.maquinaId, { provedor: m.provedor, estado: estadoParaTela(m.estado), motivo: m.motivo, criadaPeloNod: m.criadaPeloNod, zona: m.ref.zona, dormirAposMin: m.dormirAposMin, estadoDesde: m.estadoDesde }] as const],
+      ),
+    );
   return [
     {
       metodo: "POST",
@@ -59,7 +68,11 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       metodo: "DELETE",
       padrao: /^\/maquinas\/chaves\/(?<id>[^/]+)$/,
       async handler(ctx) {
-        ctx.json(200, await deps.dentro(ctx.escopo, (d) => executar(d, revogarChaveMaquina, { id: ctx.params.id ?? "" })));
+        ctx.json(200, await deps.dentro(ctx.escopo, async (d) => {
+          // ADR-121: a VM ligada à nuvem não perde a chave por aqui (o Excluir da nuvem é outro caminho, PR 2).
+          if (deps.nuvem && (await d.repos.maquinasNuvem.buscarPorMaquina(ctx.params.id ?? ""))) throw new ErroDeDominio("estado_invalido", { cause: "máquina na nuvem" });
+          return executar(d, revogarChaveMaquina, { id: ctx.params.id ?? "" });
+        }));
       },
     },
     {
@@ -144,12 +157,12 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
       metodo: "GET",
       padrao: /^\/maquinas$/,
       async handler(ctx) {
-        const { chaves, padraoId } = await deps.dentro(ctx.escopo, async (d) => ({ chaves: await d.repos.maquinaTokens.listar(), padraoId: (await d.repos.preferencias.buscar()).maquinaPadraoId ?? null }));
+        const { chaves, padraoId, nuvem } = await deps.dentro(ctx.escopo, async (d) => ({ chaves: await d.repos.maquinaTokens.listar(), padraoId: (await d.repos.preferencias.buscar()).maquinaPadraoId ?? null, nuvem: await nuvemDa(d) }));
         const vivas = new Map((deps.maquinasVivas?.(ctx.escopo) ?? []).map((m) => [m.machineId, m]));
         const maquinas: MaquinaDto[] = chaves.filter((c) => c.revogadaEm === null).map((c) => {
           const viva = vivas.get(c.id);
           // ADR-102 (R2 da revisão): o nome da chave, que a pessoa pode trocar; o hostname anunciado só o batiza no pareamento.
-          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false };
+          return { id: c.id, nome: c.nome, prefixo: c.prefixo, criadaEm: c.criadaEm, ultimoUsoEm: c.ultimoUsoEm, conectada: !!viva, plataforma: viva?.plataforma ?? null, ias: viva?.ias ?? {}, gh: viva?.gh ?? false, ...(nuvem.has(c.id) ? { nuvem: nuvem.get(c.id) } : {}) };
         });
         // ADR-092: com o servidor no Mac (modo local), o bot sem máquina roda neste Mac ("Este Mac" na tela), e a VM chega à
         // API deste Mac por um túnel SSH — a tela mostra o endereço da API, que é o que o motor guarda.
