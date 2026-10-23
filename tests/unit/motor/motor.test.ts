@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { scriptDeInstalacao, servidorParaScript } from "../../../src/adapters/http/motor-instalacao.ts";
+import { ERROS_DO_SCRIPT, ETAPAS_DO_SCRIPT, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../../../src/adapters/http/motor-instalacao.ts";
 import { arquivoDaConexao, carregarConexao, comandoDeEntrar, guardarConexao, lerComando, lerConexao, pastaDoMotor } from "../../../motor/conexao.ts";
 
 describe("motor sem janela (ADR-090)", () => {
@@ -71,6 +71,70 @@ describe("motor sem janela (ADR-090)", () => {
     // Convite fora do formato nunca entra no shell.
     expect(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite: '"; rm -rf / #' })).toContain('NOD_CONVITE=""');
     expect(execFileSync("sh", ["-n"], { input: comConvite }).toString()).toBe("");
+  });
+
+  it("NOD-94: o script só-computador pula gh e as IAs, anuncia as etapas em ordem e diz o motivo de cada falha conhecida", () => {
+    const convite = "Ab_-".repeat(8);
+    const sempre = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite });
+    // Sem papel (ou papel desconhecido) o script é o de sempre, byte a byte: o caminho do motor não muda.
+    expect(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite, papel: null })).toBe(sempre);
+    expect(sempre).not.toContain("NOD-ETAPA");
+    expect(sempre).not.toContain("NOD-ERRO");
+    expect(papelDoScript("computador")).toBe("computador");
+    for (const v of ["motor", "Computador", "", null, undefined]) expect(papelDoScript(v)).toBeNull();
+
+    const comp = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite, papel: "computador" });
+    execFileSync("sh", ["-n"], { input: comp });
+    for (const fora of ["cli.github.com", "@anthropic-ai/claude-code", "@openai/codex", "install -y -qq gh"]) expect(comp).not.toContain(fora);
+    for (const fica of ["OOMPolicy=continue", "RestartPreventExitStatus=2", "nod-motor-atualizar.path", `parear "$NOD_SERVIDOR" --convite "$NOD_CONVITE"`]) expect(comp).toContain(fica);
+    const etapas = [...comp.matchAll(/^etapa (\w+)$/gm)].map((m) => m[1]);
+    // "pronta" sai duas vezes: no caminho da máquina que já estava conectada e no fim do pareamento.
+    expect(etapas).toEqual(["conferencia", "pacotes", "node", "usuario", "motor", "servico", "pronta", "pareamento", "pronta"]);
+    for (const e of etapas) expect(ETAPAS_DO_SCRIPT).toContain(e);
+    const motivos = [...comp.matchAll(/falhar "[^"]*" (\w+)/g)].map((m) => m[1]);
+    expect(new Set(motivos)).toEqual(new Set(["so_nao_suportado", "sem_sudo", "nao_pareou"]));
+    for (const m of motivos) expect(ERROS_DO_SCRIPT).toContain(m);
+  });
+
+  it("NOD-94: falhar() escreve NOD-ERRO com o motivo; o comando que quebra no meio (set -e) sai com instalacao_falhou", () => {
+    const comp = scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", papel: "computador" });
+    // O cabeçalho (até antes de principal) define falhar, etapa e o trap do EXIT; roda-se só ele, com o fim trocado.
+    const cabecalho = comp.slice(0, comp.indexOf("principal() {"));
+    const rodar = (fim: string) => spawnSync("sh", ["-c", `${cabecalho}\n${fim}`], { encoding: "utf8" });
+    const semSudo = rodar(`etapa conferencia\nfalhar "Rode como root ou instale o sudo." sem_sudo`);
+    expect(semSudo.status).toBe(1);
+    expect(semSudo.stdout).toBe("NOD-ETAPA:conferencia\nNOD-ERRO:sem_sudo\n");
+    expect(semSudo.stderr).toContain("Rode como root");
+    const quebrou = rodar("etapa pacotes\nfalse");
+    expect(quebrou.status).toBe(1);
+    expect(quebrou.stdout).toBe("NOD-ETAPA:pacotes\nNOD-ERRO:instalacao_falhou\n");
+    const ok = rodar("etapa pronta\nexit 0");
+    expect(ok.stdout).toBe("NOD-ETAPA:pronta\n");
+  });
+
+  it("NOD-94 (QA): reinstalar a só-computador com convite pareia de novo mesmo com conexao.json antigo; sem convite, só reinicia", async () => {
+    const convite = "Ab_-".repeat(8);
+    const casa = await mkdtemp(join(tmpdir(), "nod-casa-"));
+    await mkdir(join(casa, ".config/nod-motor"), { recursive: true });
+    await writeFile(join(casa, ".config/nod-motor/conexao.json"), "{}");
+    // Roda só o fim de principal() (da conferência da conexão em diante), com systemctl e o nod-motor falsos.
+    const fimDe = (script: string) => {
+      const cabecalho = script.slice(0, script.indexOf("principal() {"));
+      const resto = script.slice(script.indexOf("# A pasta da conexão"), script.lastIndexOf("}\n\nprincipal"));
+      const falsos = `SUDO=""\nCASA="${casa}"\nsystemctl() { echo "systemctl $*"; }\nnod_motor_falso() { echo "PAREOU $*"; }\n`;
+      return spawnSync("sh", ["-c", `${cabecalho}\n${falsos}${resto.replaceAll("/usr/local/bin/nod-motor", "nod_motor_falso")}`], { encoding: "utf8" });
+    };
+    try {
+      const comConvite = fimDe(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", convite, papel: "computador" }));
+      expect(comConvite.status).toBe(0);
+      expect(comConvite.stdout).toContain(`PAREOU parear https://nod.exemplo.com --convite ${convite}`);
+      expect(comConvite.stdout).toContain("NOD-ETAPA:pareamento");
+      const semConvite = fimDe(scriptDeInstalacao({ servidor: "https://nod.exemplo.com", versao: "0.4.0", papel: "computador" }));
+      expect(semConvite.stdout).toContain("systemctl restart nod-motor");
+      expect(semConvite.stdout).not.toContain("PAREOU");
+    } finally {
+      await rm(casa, { recursive: true, force: true });
+    }
   });
 
   it("ADR-097 (fase 0b): um OOM mata o processo, não o serviço; e a máquina sem swap ganha zram (ou arquivo de swap)", () => {

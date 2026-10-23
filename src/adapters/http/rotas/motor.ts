@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Rota } from "../roteador.ts";
-import { ARQUIVOS_DO_MOTOR, scriptDeInstalacao, servidorParaScript } from "../motor-instalacao.ts";
+import { ARQUIVOS_DO_MOTOR, papelDoScript, scriptDeInstalacao, servidorParaScript } from "../motor-instalacao.ts";
 
 /**
  * ADR-090: o servidor distribui o motor da própria versão. `GET /api/motor/instalar` (e `/motor`, que redireciona para
@@ -22,8 +22,9 @@ export function rotasMotor(o: { pasta: string; versao: string; urlPublica?: stri
         if (!servidor) { ctx.json(400, { codigo: "entrada_invalida", mensagem: "Abra este endereço pelo HTTPS do seu Nod." }); return; }
         ctx.res.writeHead(200, { "content-type": "text/x-shellscript; charset=utf-8", "cache-control": "no-store" });
         // ADR-102: o convite de uso único do comando que a tela mostra (inválido = o script de sempre, com o código).
-        const convite = new URL(ctx.req.url ?? "/", "http://x").searchParams.get("convite");
-        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite }));
+        // NOD-94: `papel=computador` instala a máquina só computador (sem IAs, com as linhas NOD-ETAPA/NOD-ERRO).
+        const busca = new URL(ctx.req.url ?? "/", "http://x").searchParams;
+        ctx.res.end(scriptDeInstalacao({ servidor, versao: o.versao, convite: busca.get("convite"), papel: papelDoScript(busca.get("papel")) }));
       },
     },
     {

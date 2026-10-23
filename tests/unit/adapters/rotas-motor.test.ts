@@ -55,4 +55,15 @@ describe("rotas do motor (ADR-090)", () => {
     expect(r.status).toBe(302);
     expect(r.headers.get("location")).toBe("/api/motor/instalar");
   });
+
+  it("NOD-94: /motor?papel=computador leva o papel (com o convite) até o script; outro papel some", async () => {
+    const convite = "Ab_-".repeat(8);
+    const r = await fetch(`${srv.url}/motor?convite=${convite}&papel=computador`, { redirect: "manual" });
+    expect(r.headers.get("location")).toBe(`/api/motor/instalar?convite=${convite}&papel=computador`);
+    expect((await fetch(`${srv.url}/motor?papel=root`, { redirect: "manual" })).headers.get("location")).toBe("/api/motor/instalar");
+    const script = await (await fetch(`${srv.url}/api/motor/instalar?convite=${convite}&papel=computador`)).text();
+    expect(script).toContain("NOD-ETAPA");
+    expect(script).toContain(`NOD_CONVITE="${convite}"`);
+    expect(await (await fetch(`${srv.url}/api/motor/instalar?papel=motor`)).text()).not.toContain("NOD-ETAPA");
+  });
 });

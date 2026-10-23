@@ -1,4 +1,5 @@
 import { conviteValido } from "../../shared/convite.ts";
+import { papelDoScript } from "./motor-instalacao.ts";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Escopo } from "../../shared/types.ts";
 import { log } from "../../obs/log.ts";
@@ -61,8 +62,14 @@ export function criarServidor(opcoes: OpcoesServidor = {}) {
     // ADR-102: `/motor?convite=…` leva o convite junto (só o formato dele; qualquer outra coisa some).
     const caminhoMotor = (req.url ?? "").split("?")[0];
     if (req.method === "GET" && (caminhoMotor === "/motor" || caminhoMotor === "/motor/")) {
-      const convite = new URL(req.url ?? "/", "http://x").searchParams.get("convite");
-      res.writeHead(302, { location: `/api/motor/instalar${conviteValido(convite) ? `?convite=${convite}` : ""}`, "cache-control": "no-store" });
+      // NOD-94: `/motor?papel=computador` (a máquina só computador) passa adiante; qualquer outro papel some.
+      const busca = new URL(req.url ?? "/", "http://x").searchParams;
+      const convite = busca.get("convite");
+      const params = new URLSearchParams();
+      if (conviteValido(convite)) params.set("convite", convite);
+      if (papelDoScript(busca.get("papel"))) params.set("papel", "computador");
+      const query = params.toString();
+      res.writeHead(302, { location: `/api/motor/instalar${query ? `?${query}` : ""}`, "cache-control": "no-store" });
       res.end();
       return;
     }

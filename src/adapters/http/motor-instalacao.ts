@@ -12,6 +12,12 @@
  *
  * ADR-102 (2026-10-13): o comando que a tela mostra leva um convite de uso único (`/motor?convite=…`); o pareamento
  * no fim o leva junto e a tela vê a máquina chegar sem a pessoa digitar código. O Codex vem sempre.
+ *
+ * NOD-94 (emenda 11 da ADR-090): `/motor?papel=computador` instala a máquina "só computador" — o mesmo motor, sem gh,
+ * Claude Code nem Codex (ela nunca pega turno). Nesse modo o script também escreve, uma por linha, `NOD-ETAPA:<id>` a
+ * cada passo e `NOD-ERRO:<motivo>` antes de falhar: é o que a instaladora por SSH lê para mostrar o progresso. O papel
+ * de verdade é do convite (o servidor grava); o do script só escolhe o que instalar. Sem papel, o script é o de sempre,
+ * byte a byte.
  */
 import { CONVITE } from "../../shared/convite.ts";
 import { ARQUIVOS_DO_MOTOR } from "../../domain/atualizacao-do-motor.ts";
@@ -35,9 +41,26 @@ export function servidorParaScript(proto: string, host: string): string | null {
 /** O convite do comando (ADR-102): 32 caracteres base64url, nada que o shell interprete. */
 export const CONVITE_NO_SCRIPT = CONVITE;
 
-export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null }): string {
+/** NOD-94: as etapas que o script só-computador anuncia, na ordem (`NOD-ETAPA:<id>`). */
+export const ETAPAS_DO_SCRIPT = ["conferencia", "pacotes", "node", "usuario", "motor", "servico", "pareamento", "pronta"] as const;
+export type EtapaDoScript = (typeof ETAPAS_DO_SCRIPT)[number];
+/** NOD-94: os motivos que o script só-computador escreve antes de sair (`NOD-ERRO:<motivo>`). */
+export const ERROS_DO_SCRIPT = ["so_nao_suportado", "sem_sudo", "nao_pareou", "instalacao_falhou"] as const;
+export type ErroDoScript = (typeof ERROS_DO_SCRIPT)[number];
+
+/** `papel` do endereço (`/motor?papel=…`): só "computador" muda o script; qualquer outra coisa é o de sempre. */
+export function papelDoScript(v: string | null | undefined): "computador" | null {
+  return v === "computador" ? "computador" : null;
+}
+
+export function scriptDeInstalacao(o: { servidor: string; versao: string; convite?: string | null; papel?: "computador" | null }): string {
   if (!/^https?:\/\/[a-z0-9.:-]+$/.test(o.servidor) || !/^[0-9A-Za-z.+-]+$/.test(o.versao)) throw new Error("servidor_ou_versao_invalida");
   const convite = o.convite && CONVITE_NO_SCRIPT.test(o.convite) ? o.convite : "";
+  const comp = o.papel === "computador";
+  /** A linha de etapa (só no modo computador; no de sempre, nada muda). */
+  const etapa = (id: EtapaDoScript) => (comp ? `etapa ${id}\n` : "");
+  /** O motivo de uma falha conhecida (só no modo computador). */
+  const motivo = (m: ErroDoScript) => (comp ? ` ${m}` : "");
   return `#!/bin/sh
 # Nod: instala ou atualiza o motor nesta máquina (ADR-090). Servido por ${o.servidor}/motor
 set -eu
@@ -53,35 +76,42 @@ PASTA=/opt/nod-motor
 USUARIO=nod
 CASA=/home/nod
 
-falhar() { printf '\\n\\342\\234\\227 %s\\n' "$1" >&2; exit 1; }
-passo() { printf '\\342\\234\\223 %s\\n' "$1"; }
+${comp ? `# NOD-94: a máquina só computador (nunca pega turno): sem gh, Claude Code nem Codex. As linhas NOD-ETAPA e NOD-ERRO
+# são para a instaladora por SSH; quem roda à mão as vê passar e pode ignorá-las.
+NOD_ERRO_DITO=""
+falhar() { NOD_ERRO_DITO=1; printf 'NOD-ERRO:%s\\n' "\${2:-instalacao_falhou}"; printf '\\n\\342\\234\\227 %s\\n' "$1" >&2; exit 1; }
+etapa() { printf 'NOD-ETAPA:%s\\n' "$1"; }
+# Um comando que falha no meio (set -e) sai sem passar por falhar(): o EXIT diz o motivo genérico.
+trap 'cod=$?; if [ "$cod" -ne 0 ] && [ -z "$NOD_ERRO_DITO" ]; then printf "NOD-ERRO:instalacao_falhou\\n"; fi' EXIT
+` : `falhar() { printf '\\n\\342\\234\\227 %s\\n' "$1" >&2; exit 1; }
+`}passo() { printf '\\342\\234\\223 %s\\n' "$1"; }
 
 principal() {
 
-[ "$(uname -s)" = "Linux" ] || falhar "O motor do Nod roda em Linux (Debian ou Ubuntu)."
-command -v apt-get >/dev/null 2>&1 || falhar "Esta instalação usa o apt (Debian ou Ubuntu)."
+${etapa("conferencia")}[ "$(uname -s)" = "Linux" ] || falhar "O motor do Nod roda em Linux (Debian ou Ubuntu)."${motivo("so_nao_suportado")}
+command -v apt-get >/dev/null 2>&1 || falhar "Esta instalação usa o apt (Debian ou Ubuntu)."${motivo("so_nao_suportado")}
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else
-  command -v sudo >/dev/null 2>&1 || falhar "Rode como root ou instale o sudo."
+  command -v sudo >/dev/null 2>&1 || falhar "Rode como root ou instale o sudo."${motivo("sem_sudo")}
   SUDO="sudo"
 fi
 case "$(uname -m)" in
   x86_64|amd64) ARQ=x64 ;;
   aarch64|arm64) ARQ=arm64 ;;
-  *) falhar "Processador não suportado: $(uname -m)" ;;
+  *) falhar "Processador não suportado: $(uname -m)"${motivo("so_nao_suportado")} ;;
 esac
 como_nod() {
   if [ "$(id -u)" -eq 0 ]; then runuser -u "$USUARIO" -- env HOME="$CASA" PATH="$CASA/.local/bin:$PASTA/node/bin:/usr/local/bin:/usr/bin:/bin" "$@"
   else sudo -u "$USUARIO" -H env HOME="$CASA" PATH="$CASA/.local/bin:$PASTA/node/bin:/usr/local/bin:/usr/bin:/bin" "$@"; fi
 }
 
-printf 'Nod \\302\\267 instalando o motor %s nesta máquina\\n' "$NOD_VERSAO"
+printf 'Nod \\302\\267 instalando o motor %s nesta máquina${comp ? " (s\\303\\263 computador)" : ""}\\n' "$NOD_VERSAO"
 
 # Numa VM recém-criada o cloud-init ou o unattended-upgrades seguram a trava do dpkg por alguns minutos: espera até 5 min.
 APT="apt-get -o DPkg::Lock::Timeout=300"
-$SUDO $APT update -qq >/dev/null
+${etapa("pacotes")}$SUDO $APT update -qq >/dev/null
 $SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq curl ca-certificates git xz-utils procps >/dev/null
 passo "curl e git"
-
+${comp ? "" : `
 if ! command -v gh >/dev/null 2>&1; then
   $SUDO mkdir -p -m 755 /etc/apt/keyrings
   curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | $SUDO tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
@@ -91,8 +121,8 @@ if ! command -v gh >/dev/null 2>&1; then
   $SUDO env DEBIAN_FRONTEND=noninteractive $APT install -y -qq gh >/dev/null
 fi
 passo "gh (GitHub)"
-
-if [ "$("$PASTA/node/bin/node" --version 2>/dev/null || true)" != "v$NODE_VERSAO" ]; then
+`}
+${etapa("node")}if [ "$("$PASTA/node/bin/node" --version 2>/dev/null || true)" != "v$NODE_VERSAO" ]; then
   TMP=$(mktemp -d)
   curl -fsSL "https://nodejs.org/dist/v$NODE_VERSAO/node-v$NODE_VERSAO-linux-$ARQ.tar.xz" -o "$TMP/node.tar.xz"
   # Extrai ao lado e só troca se deu certo (disco cheio não deixa a máquina sem Node). --no-same-owner + chown: o tarball
@@ -107,11 +137,11 @@ if [ "$("$PASTA/node/bin/node" --version 2>/dev/null || true)" != "v$NODE_VERSAO
 fi
 passo "Node $NODE_VERSAO"
 
-if ! id "$USUARIO" >/dev/null 2>&1; then
+${etapa("usuario")}if ! id "$USUARIO" >/dev/null 2>&1; then
   $SUDO useradd --create-home --home-dir "$CASA" --shell /bin/bash "$USUARIO"
 fi
 passo "usuário $USUARIO"
-
+${comp ? "" : `
 como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code >/dev/null
 passo "Claude Code"
 # ADR-102: o Codex vem sempre (antes só com NOD_COM_CODEX=1); NOD_SEM_CODEX=1 desliga.
@@ -120,8 +150,8 @@ if [ "\${NOD_SEM_CODEX:-0}" != "1" ]; then
   if como_nod npm install -g --prefix "$CASA/.local" --no-fund --no-audit --loglevel=error @openai/codex >/dev/null; then passo "Codex"
   else printf 'Aviso: o Codex não instalou agora. Rode a instalação de novo depois para tentar outra vez.\\n'; fi
 fi
-
-$SUDO mkdir -p "$PASTA/app"
+`}
+${etapa("motor")}$SUDO mkdir -p "$PASTA/app"
 BAIXADOS=$(mktemp -d)
 for ARQUIVO in ${ARQUIVOS_DO_MOTOR.join(" ")}; do
   curl -fsSL "$NOD_SERVIDOR/api/motor/arquivos/$ARQUIVO" -o "$BAIXADOS/$ARQUIVO"
@@ -162,7 +192,7 @@ if [ -z "$(swapon --noheadings 2>/dev/null)" ]; then
   else printf 'Aviso: não deu para ligar memória extra (swap). Com a memória cheia, a máquina pode travar por alguns minutos.\\n'; fi
 fi
 
-$SUDO tee /usr/local/bin/nod-motor >/dev/null <<'NODMOTOR'
+${etapa("servico")}$SUDO tee /usr/local/bin/nod-motor >/dev/null <<'NODMOTOR'
 #!/bin/sh
 # Roda o motor do Nod como o usuário nod (ADR-090). Depois de parear ou entrar numa IA, o serviço recomeça.
 set -eu
@@ -295,20 +325,22 @@ fi
 $SUDO systemctl enable nod-motor >/dev/null 2>&1
 passo "serviço nod-motor (volta sozinho se a máquina reiniciar)"
 
-# A pasta da conexão é 0700 do nod: quem roda com sudo não a enxerga sem o $SUDO.
-if $SUDO test -f "$CASA/.config/nod-motor/conexao.json"; then
+# A pasta da conexão é 0700 do nod: quem roda com sudo não a enxerga sem o $SUDO.${comp ? `
+# NOD-94 (QA): com convite, a só-computador sempre pareia de novo: a chave antiga pode ter sido revogada (Desconectar) ou
+# ser de um motor comum; sem parear, o pedido ficaria esperando até virar nao_pareou.` : ""}
+if ${comp ? '[ -z "$NOD_CONVITE" ] && ' : ""}$SUDO test -f "$CASA/.config/nod-motor/conexao.json"; then
   $SUDO systemctl restart nod-motor
   printf '\\nMotor atualizado e no ar. Estado: nod-motor estado\\n'
-  exit 0
+${etapa("pronta")}  exit 0
 fi
 
 printf '\\n'
-if [ -n "$NOD_CONVITE" ]; then
-  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" --convite "$NOD_CONVITE" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
+${etapa("pareamento")}if [ -n "$NOD_CONVITE" ]; then
+  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" --convite "$NOD_CONVITE" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"${motivo("nao_pareou")}
 else
-  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"
+  /usr/local/bin/nod-motor parear "$NOD_SERVIDOR" || falhar "O pareamento não terminou. Rode de novo: nod-motor parear $NOD_SERVIDOR"${motivo("nao_pareou")}
 fi
-printf 'Dica: deixe esta máquina só para o Nod, com atualizações de segurança automáticas e SSH só por chave.\\n'
+${etapa("pronta")}printf 'Dica: deixe esta máquina só para o Nod, com atualizações de segurança automáticas e SSH só por chave.\\n'
 }
 
 principal "$@"
