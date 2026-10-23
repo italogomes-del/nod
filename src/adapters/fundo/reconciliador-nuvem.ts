@@ -6,7 +6,10 @@ import {
   ErroNuvemTransitorio,
   type MotivoParaFicarAcordada,
   nenhumMotivoParaFicarAcordada,
+  NOVA_TENTATIVA_MS,
   proximoPasso,
+  scriptDeGuarda,
+  scriptDeInicio,
 } from "../../domain/maquina-nuvem.ts";
 import { log } from "../../obs/log.ts";
 import { criarRepos } from "../../repositories/index.ts";
@@ -27,7 +30,16 @@ export type DepsReconciliador = {
   provedorDa: ProvedorDa;
   agora?: () => number;
   motivoParaFicarAcordada?: MotivoParaFicarAcordada;
+  /** PR 2 (criar a VM): sem isto, a linha `criando` espera (o `compor.ts` liga com NOD_URL_PUBLICA). */
+  criacao?: Criacao;
   opcoes?: OpcoesLaco;
+};
+
+/** O que criar a VM precisa de fora: o endereço público do servidor, decifrar o convite e registrá-lo no pareamento. */
+export type Criacao = {
+  servidor: string;
+  decifrar: (cifrado: string) => string;
+  registrarConvite: (convite: string, e: { escopo: Escopo; nome: string; maquinaNuvemId: string; ate: number }) => void;
 };
 
 /** O que uma volta de UMA pessoa precisa (sem o banco: a transação vem de fora). */
@@ -77,12 +89,63 @@ async function executar(d: DepsPessoa, escopo: Escopo, tx: Transacao, m: ParaRec
         await provedor.reiniciar(m.ref);
         await gravar({ reiniciouEm: agora });
         return;
+      case "criar": {
+        const dados = d.criacao ? await tx((trx) => criarRepos(trx, escopo).maquinasNuvem.dadosDaCriacao(m.id)) : null;
+        if (!d.criacao || !dados) { await soltar(); return; }
+        const convite = d.criacao.decifrar(dados.conviteCifrado);
+        const startupScript = scriptDeInicio({ servidor: d.criacao.servidor, convite, expiraEm: dados.conviteExpiraEm });
+        await provedor.criar({ ...m.ref, subrede: dados.subrede, tamanho: dados.tamanho, startupScript, maquinaNuvemId: m.id }, dados.requestId);
+        // Fica `criando`: `ligou_em` marca a criação; o motor pareia com o convite e a próxima volta vê o contato.
+        if (await gravar({ ligouEm: agora, motivo: null, proximaTentativaEm: null })) return;
+        // NOD-92 (revisão B4): perdemos a reserva no meio da criação. Se a pessoa excluiu a linha nesse meio-tempo, a VM
+        // que acabou de nascer não tem dono no nod: apaga no Google (404 = nem chegou a existir).
+        const agoraLinha = await tx((trx) => criarRepos(trx, escopo).maquinasNuvem.buscar(m.id));
+        if (agoraLinha?.estado === "excluida") {
+          try {
+            await provedor.excluir(m.ref);
+            log("info", "nuvem_criada_apos_excluir_apagada", { maquina_nuvem_id: m.id });
+          } catch (e) {
+            // Revisão NOD-92 (rodada 2, item 3): a VM ficaria órfã cobrando. A exclusão fica pendente na linha e a próxima
+            // volta repete (`resourceNotReady` logo depois do insert é o caso comum).
+            await tx((trx) => criarRepos(trx, escopo).maquinasNuvem.marcarExclusaoPendente(m.id, agora));
+            log("aviso", "nuvem_criada_apos_excluir_pendente", { maquina_nuvem_id: m.id, erro: e instanceof ErroNuvemLancado ? e.motivo : "transitorio" });
+          }
+        }
+        return;
+      }
+      case "excluir":
+        // A exclusão pendente da VM que nasceu depois do DELETE (o provedor trata 404 como já apagada).
+        try {
+          await provedor.excluir(m.ref);
+        } catch (e) {
+          // Transitório: a próxima volta repete. Com motivo (credencial, cota): espera NOVA_TENTATIVA_MS para não martelar.
+          const lancado = e instanceof ErroNuvemLancado;
+          await gravar({ proximaTentativaEm: lancado ? agora + NOVA_TENTATIVA_MS : agora });
+          log("aviso", "nuvem_exclusao_pendente_falhou", { maquina_nuvem_id: m.id, erro: lancado ? e.motivo : "transitorio" });
+          return;
+        }
+        await gravar({ proximaTentativaEm: null });
+        log("info", "nuvem_criada_apos_excluir_apagada", { maquina_nuvem_id: m.id });
+        return;
+      case "finalizar":
+        // O convite sai da metadata da VM antes de sair do banco: o script vira só a guarda.
+        await provedor.definirScript(m.ref, scriptDeGuarda());
+        await tx((trx) => criarRepos(trx, escopo).maquinasNuvem.confirmarCriada(m.id, operacaoId, agora));
+        return;
     }
   } catch (e) {
     const c = motivoDoErro(e);
     if (c === "transitorio") {
       if (!(e instanceof ErroNuvemTransitorio)) log("aviso", "nuvem_operacao_erro_inesperado", { maquina_nuvem_id: m.id, erro: e instanceof Error ? e.name : "desconhecido" });
       await soltar();
+      return;
+    }
+    if (m.estado === "excluida") {
+      // Revisão NOD-92 (delta da rodada 2): na exclusão pendente, o provedor que não monta (credencial sem chave ou
+      // recusada) não pode passar pelo `aposFalha` — a linha excluída viraria `falhou_ao_acordar` e voltaria à tela.
+      // Segue excluída e pendente: tenta de novo em NOVA_TENTATIVA_MS.
+      log("aviso", "nuvem_exclusao_pendente_falhou", { maquina_nuvem_id: m.id, erro: c.motivo });
+      await gravar({ proximaTentativaEm: agora + NOVA_TENTATIVA_MS });
       return;
     }
     const f = aposFalha(m.estado, c.motivo, agora, m.estadoDesde);
@@ -108,6 +171,18 @@ export async function reconciliarPessoa(d: DepsPessoa, escopo: Escopo, tx: Trans
       await repo.tentarDormir(o.id, agora);
     }
   });
+  if (d.criacao) {
+    const criacao = d.criacao;
+    // Os convites das VMs em criação voltam ao pareamento (em memória) a cada volta: um reinício do servidor não os perde.
+    const convites = await tx((trx) => criarRepos(trx, escopo).maquinasNuvem.convitesAtivos(agora));
+    for (const c of convites) {
+      try {
+        criacao.registrarConvite(criacao.decifrar(c.conviteCifrado), { escopo, nome: c.nome, maquinaNuvemId: c.id, ate: c.expiraEm });
+      } catch (e) {
+        log("aviso", "nuvem_convite_ilegivel", { maquina_nuvem_id: c.id, erro: e instanceof Error ? e.name : "desconhecido" });
+      }
+    }
+  }
   const reservadas = await tx(async (trx) => {
     const repo = criarRepos(trx, escopo).maquinasNuvem;
     const lista: { m: ParaReconciliar; operacaoId: string }[] = [];

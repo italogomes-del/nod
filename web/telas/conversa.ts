@@ -12,7 +12,7 @@ import { ICONE } from "../lib/icones.ts";
 import { botao, dataHora, esc, hora, iconeAgente, paragrafos } from "../lib/render.ts";
 import { maquinaDoBot } from "./maquinas.ts";
 import { outraMaquinaDestaVez } from "../lib/rodar-desta-vez.ts";
-import { acordandoNaFila } from "../lib/maquina-nuvem.ts";
+import { acordandoNaFila, motivoLegivel } from "../lib/maquina-nuvem.ts";
 import { linhaAtual, resumoEtapa, type AtividadeTurno, type VigiaDaAtividade } from "../lib/atividade.ts";
 import { linhaDaFila } from "../lib/fila-do-pedido.ts";
 import { haQuanto } from "../lib/relogio.ts";
@@ -423,7 +423,7 @@ export function capturaDoTurno(m: Mensagem, estado: Estado): string {
  * `destaVez` (ADR-090, protótipo "Nod — Motor na VM", tela 4c): a máquina do bot está sem contato e há outra conectada —
  * a própria linha da fila oferece "Rodar em <outra> desta vez", sem faixa por cima da conversa.
  */
-type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string } } | { tipo: "cancelando" } | { tipo: "cancelada" };
+type SituacaoFila = { tipo: "na_fila"; texto: string; destaVez?: { conversaId: string; maquinaId: string; nome: string }; tentarAgora?: string; recusa?: string } | { tipo: "cancelando" } | { tipo: "cancelada" };
 
 /**
  * Onde a mensagem da pessoa está na fila (definido em 2026-09-24): o turno que ela disparou ainda
@@ -450,7 +450,16 @@ export function situacaoNaFila(m: Mensagem, estado: Estado): (SituacaoFila & { t
   // ADR-121 (NOD-92): a máquina na nuvem está acordando para o trabalho (ou dorme e vai acordar). A espera é curta e rodar
   // em outra duplicaria o trabalho: nada de "Rodar em X desta vez", que só volta na falha (`falhou_ao_acordar`).
   const doTrabalho = (estado.trabalhos?.trabalhos ?? []).find((t) => t.conversaId === c.conversa.id && t.maquina?.acordando)?.maquina ?? null;
-  if (acordandoNaFila(doBot, doTrabalho)) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Acordando ${doTrabalho?.nome ?? doBot?.nome ?? "a máquina"}… · costuma levar 1 a 2 min` };
+  if (acordandoNaFila(doBot, doTrabalho)) {
+    // Revisão NOD-92 (item 14): sem máquina livre no Google, o chip diz o motivo e oferece "Tentar agora" (como o cartão).
+    const vm = doBot?.nuvem ? doBot : (estado.maquinas?.maquinas ?? []).find((x) => x.nuvem && x.id === doTrabalho?.id) ?? null;
+    if (vm?.nuvem?.motivo === "sem_capacidade") {
+      // Revisão NOD-92 (rodada 2, item 2): o 409 do "Tentar agora" aparece no próprio chip, não só no cartão da máquina.
+      const recusa = estado.nuvem.recusa?.maquinaId === vm.id ? estado.nuvem.recusa.texto : null;
+      return { tipo: "na_fila", turnoId: emCurso.id, texto: motivoLegivel("sem_capacidade", vm.nome, vm.nuvem.zona), tentarAgora: vm.id, ...(recusa ? { recusa } : {}) };
+    }
+    return { tipo: "na_fila", turnoId: emCurso.id, texto: `Acordando ${doTrabalho?.nome ?? doBot?.nome ?? "a máquina"}… · costuma levar 1 a 2 min` };
+  }
   const semIa = !!doBot && doBot.conectada && !Object.values(doBot.ias).includes("pronto");
   if (doBot && semIa) return { tipo: "na_fila", turnoId: emCurso.id, texto: `Na fila · ${doBot.nome} está sem IA pronta (no terminal dela: nod-motor entrar claude ou codex)` };
   if (doBot && !doBot.conectada) {
@@ -470,7 +479,9 @@ function renderSituacaoFila(s: SituacaoFila, turnoId: string): string {
   if (s.tipo === "cancelada") return `<div class="fila-chip cancelada">Cancelada · não rodou</div>`;
   if (s.tipo === "cancelando") return `<div class="fila-chip">Cancelando…${botao("desfazer-cancelamento", "Desfazer", { classe: "link", id: turnoId })}</div>`;
   const destaVez = s.destaVez ? botao("rodar-desta-vez", `Rodar em ${esc(s.destaVez.nome)} desta vez`, { classe: "link", dados: { conversa: s.destaVez.conversaId, maquina: s.destaVez.maquinaId } }) : "";
-  return `<div class="fila-chip"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+  const tentar = s.tentarAgora ? botao("nuvem-acordar", "Tentar agora", { classe: "link", dados: { maquina: s.tentarAgora } }) : "";
+  const chip = `<div class="fila-chip" role="status"><span class="fila-relogio" aria-hidden="true"></span>${esc(s.texto)}${tentar}${destaVez}${botao("cancelar-turno", "Cancelar", { classe: "link perigo", id: turnoId, aria: "Cancelar esta mensagem da fila" })}</div>`;
+  return s.recusa ? `${chip}<p class="cx-erro" role="alert">${esc(s.recusa)}</p>` : chip;
 }
 
 /** "/review 420" na mensagem da pessoa: o comando vira chip e o resto segue como texto (canvas "Comandos /", C4). */

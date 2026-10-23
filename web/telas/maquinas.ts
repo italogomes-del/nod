@@ -6,7 +6,8 @@ import { botao, esc, hora, iconeAgente } from "../lib/render.ts";
 import { maquinasDe, memoriaLegivel, seguradoPeloMac } from "../lib/trabalhos.ts";
 import { discoLegivel, NOME_FILA, NOME_MEMORIA, NOME_PROCESSADOR, tempoAteAcabar } from "./este-mac.ts";
 import { renderContasNaMaquina, resumoDasContasNaMaquina, type ContextoContas } from "./contas-lista.ts";
-import { acoesDaFalha, avisoDaConta, motivoLegivel, nuvemLigada, OPCOES_SONO, rotuloEstadoNuvem, rotuloSono, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
+import { acoesDaFalha, avisoDaConta, criandoDaConta, fraseDaCriacao, motivoLegivel, nomeDaZona, nuvemLigada, OPCOES_SONO, REGIOES_CRIAR, rotuloEstadoNuvem, rotuloSono, TAMANHOS_CRIAR, temLinhaDeFalha, urlConsoleGoogle } from "../lib/maquina-nuvem.ts";
+import type { MaquinaCriandoDto } from "../../src/contracts/provedor-nuvem.ts";
 
 /**
  * Seu espaço › Máquinas (ADR-090; protótipo "Nod — Motor na VM", pranchas 1 e 2): as máquinas da pessoa (o Mac e as VMs
@@ -80,7 +81,7 @@ function menuDaMaquina(estado: Estado, m: MaquinaDto): string {
         ${estado.contasIa?.disponivel ? `<button type="button" data-act="cl-gerenciar" data-maquina="${esc(m.id)}">${ICONE.info}<span>Gerenciar contas<small>abre Provedores de IA filtrado</small></span></button>` : ""}
         <button type="button" data-act="maq-bots" data-maquina="${esc(m.id)}">${ICONE.agentes}<span>Bots desta máquina<small>${esc(bots.length === 0 ? "nenhum bot trabalha só aqui" : `${bots.length} ${bots.length === 1 ? "bot" : "bots"}: ${bots.join(", ")}`)}</small></span></button>
         ${podeDormirPeloGoogle(estado, m) ? `<button type="button" data-act="nuvem-conectar-abrir" data-maquina="${esc(m.id)}">${ICONE.servidor}<span>Dormir e acordar pelo Google<small>ela dorme parada e acorda quando chega trabalho</small></span></button>` : ""}
-        <hr><button type="button" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar máquina</span></button>
+        <hr>${m.nuvem?.criadaPeloNod ? `<button type="button" class="perigo" data-act="nuvem-excluir" data-id="${esc(m.id)}" data-nome="${esc(m.nome)}">${ICONE.lixo}<span>Excluir máquina<small>apaga a VM na sua conta Google</small></span></button>` : ""}<button type="button" class="perigo" data-act="maq-desconectar" data-maquina="${esc(m.id)}">${ICONE.sair}<span>Desconectar máquina</span></button>
       </div>`
     : "";
   return `<div class="cl-mais"><button type="button" class="cl-mais-bt" data-act="maq-menu" data-maquina="${esc(m.id)}" aria-expanded="${aberto}" aria-label="Mais ações de ${esc(m.nome)}">${ICONE.pontos}</button>${itens}</div>`;
@@ -199,7 +200,7 @@ function cartao(estado: Estado, m: MaquinaDto): string {
       <span class="maq-ic" aria-hidden="true">${m.plataforma === "darwin" ? ICONE.laptop : ICONE.servidor}</span>
       ${estado.contasUi.maquinaRenomear === m.id
         ? `<form class="cl-renomear maq-renomear" data-form="maq-renomear" data-maquina="${esc(m.id)}"><input name="nome" maxlength="60" value="${esc(m.nome)}" aria-label="Nome da máquina" data-cl-autofoco data-manter-foco="maq-renomear"><button type="submit" class="bt pri sm">Salvar</button><button type="button" class="bt sm" data-act="maq-renomear-fechar">Cancelar</button></form>`
-        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(m.nuvem ? `Google Cloud · ${m.nuvem.zona}` : nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
+        : `<span class="maq-id"><b>${esc(m.nome)}</b><small>${esc(m.nuvem ? `Google Cloud · ${nomeDaZona(m.nuvem.zona)}` : nomePlataforma(m))} · chave …${esc(m.prefixo)}</small></span>`}
       ${estadoTxt}
       ${menuDaMaquina(estado, m)}
     </div>
@@ -220,6 +221,54 @@ function seletor(rotulo: string, act: string, dados: Record<string, string>, atu
   }).join("")}</div>`;
 }
 
+/** PR 2 (protótipo da NOD-92): "Criar minha máquina na nuvem" — provedor, região e tamanho; o Google pede a permissão. */
+function painelCriar(estado: Estado): string {
+  const c = estado.nuvem.criar;
+  if (!c) return "";
+  const conta = estado.nuvem.conta;
+  const conectada = !!conta && conta !== "desligada" && conta.conectada;
+  const provedores = `<div class="nv-provedores" role="radiogroup" aria-label="Provedor"><label class="nv-opcao"><input type="radio" name="provedor" value="gcp" checked><span><b>Google Cloud</b><small>a VM fica na sua conta Google</small></span></label><label class="nv-opcao desligada"><input type="radio" name="provedor" value="aws" disabled><span><b>AWS</b><small>Em breve</small></span></label><label class="nv-opcao desligada"><input type="radio" name="provedor" value="azure" disabled><span><b>Azure</b><small>Em breve</small></span></label></div>`;
+  const regioes = REGIOES_CRIAR.map((r) => `<label class="nv-opcao"><input type="radio" name="regiao" value="${esc(r.regiao)}"${c.regiao === r.regiao ? " checked data-cl-autofoco" : ""} data-nuvem-criar="regiao"><span><b>${esc(r.nome)}</b>${r.nota ? `<small>${esc(r.nota)}</small>` : ""}</span></label>`).join("");
+  const tamanhos = TAMANHOS_CRIAR.map((t) => `<label class="nv-opcao"><input type="radio" name="tamanho" value="${esc(t.tamanho)}"${c.tamanho === t.tamanho ? " checked" : ""} data-nuvem-criar="tamanho"><span><b>${esc(t.nome)}</b><small>${esc(t.nota)}</small></span></label>`).join("");
+  const erro = c.erro ? `<p class="nv-erro" role="alert">${esc(c.erro)}</p>` : "";
+  const enviar = conectada ? "Criar máquina" : "Entrar com o Google e criar";
+  const nota = conectada ? "O nod cria a VM na sua conta Google, instala o motor e conecta sozinho. Você paga o Google pelo uso; ela dorme quando fica parada." : "O Google pede para você permitir que o nod crie e ligue máquinas na sua conta. Depois o nod instala o motor e conecta sozinho.";
+  return `<form class="espaco-cartao nv-criar" data-form="nuvem-criar" aria-labelledby="nv-criar-tit">
+    <div class="nv-criar-cab"><h3 id="nv-criar-tit">Criar minha máquina na nuvem</h3><button type="button" class="bt link" data-act="nuvem-criar-fechar">Cancelar</button></div>
+    <fieldset><legend>Onde</legend>${provedores}</fieldset>
+    <fieldset><legend>Região</legend><div class="nv-opcoes">${regioes}</div></fieldset>
+    <fieldset><legend>Tamanho</legend><div class="nv-opcoes">${tamanhos}</div></fieldset>
+    <p class="mac-det-txt">${esc(nota)}</p>${erro}
+    <div class="nv-criar-acoes"><button type="submit" class="bt pri"${c.enviando ? " disabled" : ""}>${c.enviando ? "Enviando…" : esc(enviar)}</button></div>
+  </form>`;
+}
+
+/** As VMs que o nod está criando (ainda sem chave): o que acontece agora e, se falhou, excluir ou criar de novo. */
+function listaCriando(estado: Estado): string {
+  const lista = criandoDaConta(estado.nuvem);
+  if (lista.length === 0) return "";
+  return lista.map((c: MaquinaCriandoDto) => {
+    const falhou = c.estado !== "criando";
+    const acoes = falhou ? `<span class="nv-acoes"><button type="button" class="bt sm" data-act="nuvem-excluir" data-id="${esc(c.id)}" data-nome="${esc(c.nome)}">Excluir</button><button type="button" class="bt sm pri" data-act="nuvem-criar-abrir" data-id="${esc(c.id)}">Criar de novo</button></span>` : "";
+    return `<div class="espaco-cartao maq-cartao nv-criando${falhou ? " nv-falha" : ""}" role="status"><div class="maq-cab"><span class="maq-ic" aria-hidden="true">${ICONE.servidor}</span><span class="maq-id"><b>${esc(c.nome)}</b><small>Google Cloud · ${esc(nomeDaZona(c.zona))}</small></span><span class="maq-estado${falhou ? " fora" : ""}">${falhou ? "não deu certo" : `<span class="ob-gira" aria-hidden="true"></span>criando`}</span></div><p class="mac-det-txt">${esc(fraseDaCriacao(c))}</p>${acoes}</div>`;
+  }).join("");
+}
+
+/** "Excluir a <nome>?": só a VM criada pelo nod; apaga a VM na conta Google da pessoa e cancela a chave. */
+function dialogoExcluir(estado: Estado): string {
+  const q = estado.nuvem.excluir;
+  if (!q) return "";
+  const erro = q.erro ? `<p class="nv-erro" role="alert">${esc(q.erro)}</p>` : "";
+  return `<div class="cl-fundo" data-act="nuvem-excluir-fechar"></div><div class="cl-dialogo" role="dialog" aria-modal="true" aria-labelledby="nv-exc-tit"><h3 id="nv-exc-tit">Excluir a ${esc(q.nome)}?</h3><p>O nod apaga a VM na sua conta Google, com o disco e os arquivos dos bots que estão nela, e cancela a chave. Não dá para desfazer.</p>${erro}<div class="cl-dialogo-acoes"><button type="button" class="bt" data-act="nuvem-excluir-fechar" data-cl-autofoco>Cancelar</button><button type="button" class="bt perigo" data-act="nuvem-excluir-confirmar">Excluir ${esc(q.nome)}</button></div></div>`;
+}
+
+/** O topo: com a nuvem ligada, "Criar minha máquina na nuvem" é o principal e "Conectar uma máquina" vira secundário. */
+function botoesDoTopo(estado: Estado, maquinas: MaquinaDto[]): string {
+  const conectar = estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: nuvemLigada(estado.nuvem, maquinas) ? "" : "pri" });
+  const criar = nuvemLigada(estado.nuvem, maquinas) && !estado.nuvem.criar ? botao("nuvem-criar-abrir", `${ICONE.mais}Criar minha máquina na nuvem`, { classe: "pri" }) : "";
+  return criar || conectar ? `<span class="maq-topo-acoes">${criar}${conectar}</span>` : "";
+}
+
 export function renderMaquinas(estado: Estado): string {
   const dados = estado.maquinas;
   const maquinas = dados?.maquinas ?? [];
@@ -232,11 +281,13 @@ export function renderMaquinas(estado: Estado): string {
   const linhasBots = bots.map((b) => `<div class="bot-maq">${iconeAgente(b, "sm")}<span class="bot-maq-txt"><b>${esc(b.nome)}</b><span>${esc(b.titulo)}</span></span>${seletor(`Onde ${b.nome} trabalha`, "maquina-do-bot", { id: b.id }, b.maquinaId ?? null, maquinas, noMac)}</div>`).join("");
   return `<section class="espaco-secao maquinas">
     <h2>Máquinas</h2>
-    <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${estado.conectarMaquina ? "" : botao("conectar-maquina", `${ICONE.mais}Conectar uma máquina`, { classe: "pri" })}</div>
+    <div class="maq-topo"><p class="intro">Onde seus bots trabalham. A janela do Nod continua no Mac ou no navegador; cada bot roda o Claude Code ou o Codex na máquina escolhida para ele.</p>${botoesDoTopo(estado, maquinas)}</div>
     ${avisoDaNuvem(estado)}
+    ${painelCriar(estado)}
     ${conectar}
-    <div class="maq-lista">${lista}</div>
+    <div class="maq-lista">${listaCriando(estado)}${lista}</div>
     ${dialogoDesconectar(estado)}
+    ${dialogoExcluir(estado)}
     ${maquinas.length > 0 && bots.length > 0 ? `<h3 class="espaco-subtitulo" id="bots-das-maquinas" tabindex="-1">Onde cada bot trabalha</h3><div class="espaco-cartao bots-cartao">${linhasBots}</div>
     <h3 class="espaco-subtitulo">Bot sem escolha (e bot novo) trabalha em</h3>${seletor("Onde trabalha o bot sem escolha", "maquina-padrao", {}, dados?.padraoId ?? null, maquinas, noMac)}` : ""}
     <ul class="regras-maq">

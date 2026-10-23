@@ -3,6 +3,8 @@ import { expect, it } from "vitest";
 import { reconciliarPessoa } from "../../src/adapters/fundo/reconciliador-nuvem.ts";
 import { execucaoVenceu } from "../../src/use-cases/disparar-rotina.ts";
 import { ProvedorNuvemFalso } from "../../src/adapters/nuvem/falso.ts";
+import { chaveDe, cifrar, decifrar } from "../../src/db/cifra.ts";
+import { CRIAR_DESISTIR_APOS_MS, ErroNuvemLancado, subredeDaZona } from "../../src/domain/maquina-nuvem.ts";
 import type { RefInstancia } from "../../src/contracts/provedor-nuvem.ts";
 import { vincularEscopo } from "../../src/db/tx.ts";
 import type { Transacao, Tx } from "../../src/shared/types.ts";
@@ -424,6 +426,206 @@ describeIntegracao("máquina na nuvem dorme e acorda (ADR-121)", () => {
       expect((await trx`update maquinas_nuvem set desejado = 'acordada' where id = ${m.nuvem.id} returning id`)).toHaveLength(0);
       await vincularEscopo(trx, MARLON);
       expect((await m.estado()).desejado).toBe("dormindo");
+    });
+  });
+
+  it("criar (PR 2): erro transitório e sem capacidade tentam de novo com o mesmo request_id; 15 min sem o motor falar → falhou", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const chave = chaveDe("0".repeat(63) + "9");
+      const cred = await repos.credenciaisNuvem.gravar({ provedor: "gcp", projeto: REF.projeto, contaServico: "nod-12345678@x.iam.gserviceaccount.com", chaveCifrada: "cifrada" });
+      const ref = { ...REF, nome: "nod-g-abc123" };
+      const t0 = Date.now() - 60 * MIN;
+      const nova = await repos.maquinasNuvem.criarIntencao({
+        credencialId: cred.id, ref, subrede: subredeDaZona(ref.projeto, ref.zona), tamanho: "padrao", requestId: randomUUID(),
+        conviteCifrado: cifrar("c".repeat(32), chave), conviteExpiraEm: t0 + 30 * MIN, agora: t0,
+      });
+      if (!nova) throw new Error("a intenção de criar devia nascer");
+      const provedor = new ProvedorNuvemFalso();
+      const registrados: string[] = [];
+      const tx: Transacao = (fn) => fn(trx);
+      const volta = (agora: number) =>
+        reconciliarPessoa({ provedorDa: async () => provedor, agora: () => agora, criacao: { servidor: "https://nod.exemplo", decifrar: (s) => decifrar(s, chave), registrarConvite: (c) => registrados.push(c) } }, MARLON, tx);
+      const estado = async () => (await repos.maquinasNuvem.buscar(nova.id))!;
+
+      provedor.falharNa("criar", "transitorio");
+      await volta(t0);
+      expect(registrados).toEqual(["c".repeat(32)]);
+      expect((await estado()).estado).toBe("criando");
+      provedor.falharNa("criar", { motivo: "sem_capacidade" });
+      await volta(t0 + 15_000);
+      let e = await estado();
+      expect(e).toMatchObject({ estado: "criando", motivo: "sem_capacidade", proximaTentativaEm: t0 + 15_000 + 5 * MIN });
+      await volta(t0 + 4 * MIN);
+      expect(provedor.quantas("criar")).toBe(2);
+      await volta(t0 + 6 * MIN);
+      expect(provedor.quantas("criar")).toBe(3);
+      expect(provedor.criadas).toHaveLength(1);
+      expect(new Set(provedor.chamadas.filter((c) => c.op === "criar").map((c) => c.requestId)).size).toBe(1);
+      e = await estado();
+      expect(e).toMatchObject({ estado: "criando", motivo: null, proximaTentativaEm: null });
+
+      await volta(t0 + 6 * MIN + CRIAR_DESISTIR_APOS_MS - 1);
+      expect((await estado()).estado).toBe("criando");
+      await volta(t0 + 6 * MIN + CRIAR_DESISTIR_APOS_MS);
+      expect(await estado()).toMatchObject({ estado: "falhou_ao_acordar", motivo: "motor_sem_contato" });
+    });
+  });
+  it("B3: uma criação por vez por pessoa (a segunda intenção volta null); depois de excluída, pode de novo", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const cred = await repos.credenciaisNuvem.gravar({ provedor: "gcp", projeto: REF.projeto, contaServico: "nod-12345678@x.iam.gserviceaccount.com", chaveCifrada: "cifrada" });
+      const intencao = (nome: string) => repos.maquinasNuvem.criarIntencao({
+        credencialId: cred.id, ref: { ...REF, nome }, subrede: subredeDaZona(REF.projeto, REF.zona), tamanho: "padrao", requestId: randomUUID(),
+        conviteCifrado: "cifrado", conviteExpiraEm: Date.now() + 30 * MIN, agora: Date.now(),
+      });
+      const a = await intencao("nod-g-aaaaaa");
+      expect(a).not.toBeNull();
+      expect(await intencao("nod-g-bbbbbb")).toBeNull();
+      await repos.maquinasNuvem.marcarExcluida(a!.id, Date.now());
+      expect(await intencao("nod-g-cccccc")).not.toBeNull();
+    });
+  });
+
+  it("B4: a pessoa excluiu enquanto o Google criava (reserva perdida): a volta apaga a VM recém-criada", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const chave = chaveDe("0".repeat(63) + "9");
+      const cred = await repos.credenciaisNuvem.gravar({ provedor: "gcp", projeto: REF.projeto, contaServico: "nod-12345678@x.iam.gserviceaccount.com", chaveCifrada: "cifrada" });
+      const ref = { ...REF, nome: "nod-g-b4b4b4" };
+      const t0 = Date.now();
+      const nova = await repos.maquinasNuvem.criarIntencao({
+        credencialId: cred.id, ref, subrede: subredeDaZona(ref.projeto, ref.zona), tamanho: "padrao", requestId: randomUUID(),
+        conviteCifrado: cifrar("c".repeat(32), chave), conviteExpiraEm: t0 + 30 * MIN, agora: t0,
+      });
+      if (!nova) throw new Error("a intenção de criar devia nascer");
+      const provedor = new ProvedorNuvemFalso();
+      const criarDeVerdade = provedor.criar.bind(provedor);
+      provedor.criar = async (req, requestId) => {
+        await criarDeVerdade(req, requestId);
+        // No meio da chamada ao Google, a reserva venceu e o DELETE passou: a linha virou `excluida`.
+        await repos.maquinasNuvem.marcarExcluida(nova.id, t0 + 1000);
+      };
+      const tx: Transacao = (fn) => fn(trx);
+      await reconciliarPessoa({ provedorDa: async () => provedor, agora: () => t0, criacao: { servidor: "https://nod.exemplo", decifrar: (s) => decifrar(s, chave), registrarConvite: () => undefined } }, MARLON, tx);
+      expect(provedor.quantas("excluir")).toBe(1);
+      expect(provedor.instancias.has(`${ref.projeto}/${ref.zona}/${ref.nome}`)).toBe(false);
+      expect((await repos.maquinasNuvem.buscar(nova.id))?.estado).toBe("excluida");
+    });
+  });
+
+  it("revisão NOD-92 (rodada 2, item 3): se o excluir da VM recém-criada falha, a exclusão fica pendente e a próxima volta repete", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const chave = chaveDe("0".repeat(63) + "8");
+      const cred = await repos.credenciaisNuvem.gravar({ provedor: "gcp", projeto: REF.projeto, contaServico: "nod-12345678@x.iam.gserviceaccount.com", chaveCifrada: "cifrada" });
+      const ref = { ...REF, nome: "nod-g-b4b4b5" };
+      const t0 = Date.now();
+      const nova = await repos.maquinasNuvem.criarIntencao({
+        credencialId: cred.id, ref, subrede: subredeDaZona(ref.projeto, ref.zona), tamanho: "padrao", requestId: randomUUID(),
+        conviteCifrado: cifrar("c".repeat(32), chave), conviteExpiraEm: t0 + 30 * MIN, agora: t0,
+      });
+      if (!nova) throw new Error("a intenção de criar devia nascer");
+      const provedor = new ProvedorNuvemFalso();
+      const criarDeVerdade = provedor.criar.bind(provedor);
+      provedor.criar = async (req, requestId) => {
+        await criarDeVerdade(req, requestId);
+        await repos.maquinasNuvem.marcarExcluida(nova.id, t0 + 1000);
+      };
+      // resourceNotReady logo depois do insert (transitório) e, na volta seguinte, a credencial recusada (com motivo).
+      provedor.falharNa("excluir", "transitorio").falharNa("excluir", { motivo: "credencial_nuvem" });
+      const tx: Transacao = (fn) => fn(trx);
+      const volta = (agora: number) => reconciliarPessoa({ provedorDa: async () => provedor, agora: () => agora, criacao: { servidor: "https://nod.exemplo", decifrar: (s) => decifrar(s, chave), registrarConvite: () => undefined } }, MARLON, tx);
+      const vm = `${ref.projeto}/${ref.zona}/${ref.nome}`;
+      await volta(t0);
+      expect(provedor.quantas("excluir")).toBe(1);
+      expect(provedor.instancias.has(vm)).toBe(true);
+      let linha = await repos.maquinasNuvem.buscar(nova.id);
+      expect(linha?.estado).toBe("excluida");
+      expect(linha?.proximaTentativaEm).toBe(t0);
+      await volta(t0 + 15_000);
+      expect(provedor.quantas("excluir")).toBe(2);
+      expect((await repos.maquinasNuvem.buscar(nova.id))?.proximaTentativaEm).toBe(t0 + 15_000 + 5 * MIN);
+      await volta(t0 + 30_000);
+      expect(provedor.quantas("excluir")).toBe(2);
+      await volta(t0 + 15_000 + 5 * MIN);
+      expect(provedor.quantas("excluir")).toBe(3);
+      expect(provedor.instancias.has(vm)).toBe(false);
+      linha = await repos.maquinasNuvem.buscar(nova.id);
+      expect(linha?.estado).toBe("excluida");
+      expect(linha?.proximaTentativaEm).toBeNull();
+      expect(linha?.operacaoId).toBeNull();
+      await volta(t0 + 20 * MIN);
+      expect(provedor.quantas("excluir")).toBe(3);
+    });
+  });
+
+  it("revisão NOD-92 (delta da rodada 2): credencial sem chave na exclusão pendente não tira a linha de excluída", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const { repos } = depsSobre(trx, MARLON);
+      const chave = chaveDe("0".repeat(63) + "9");
+      const cred = await repos.credenciaisNuvem.gravar({ provedor: "gcp", projeto: REF.projeto, contaServico: "nod-12345678@x.iam.gserviceaccount.com", chaveCifrada: "cifrada" });
+      const ref = { ...REF, nome: "nod-g-b4b4b6" };
+      const t0 = Date.now();
+      const nova = await repos.maquinasNuvem.criarIntencao({
+        credencialId: cred.id, ref, subrede: subredeDaZona(ref.projeto, ref.zona), tamanho: "padrao", requestId: randomUUID(),
+        conviteCifrado: cifrar("c".repeat(32), chave), conviteExpiraEm: t0 + 30 * MIN, agora: t0,
+      });
+      if (!nova) throw new Error("a intenção de criar devia nascer");
+      const provedor = new ProvedorNuvemFalso();
+      const criarDeVerdade = provedor.criar.bind(provedor);
+      provedor.criar = async (req, requestId) => {
+        await criarDeVerdade(req, requestId);
+        await repos.maquinasNuvem.marcarExcluida(nova.id, t0 + 1000);
+      };
+      provedor.falharNa("excluir", "transitorio");
+      let semChave = false;
+      const tx: Transacao = (fn) => fn(trx);
+      const volta = (agora: number) =>
+        reconciliarPessoa({
+          provedorDa: async () => {
+            if (semChave) throw new ErroNuvemLancado({ motivo: "credencial_nuvem", detalhe: "sem_chave" });
+            return provedor;
+          },
+          agora: () => agora,
+          criacao: { servidor: "https://nod.exemplo", decifrar: (s) => decifrar(s, chave), registrarConvite: () => undefined },
+        }, MARLON, tx);
+      await volta(t0);
+      expect((await repos.maquinasNuvem.buscar(nova.id))?.proximaTentativaEm).toBe(t0);
+      semChave = true;
+      const t1 = t0 + 15_000;
+      await volta(t1);
+      const linha = await repos.maquinasNuvem.buscar(nova.id);
+      expect(linha?.estado).toBe("excluida");
+      expect(linha?.proximaTentativaEm).toBe(t1 + 5 * MIN);
+      expect(linha?.operacaoId).toBeNull();
+      expect((await repos.maquinasNuvem.listarDaPessoa()).some((x) => x.id === nova.id)).toBe(false);
+      expect((await repos.maquinasNuvem.criandoSemMaquina()).some((x) => x.id === nova.id)).toBe(false);
+      semChave = false;
+      await volta(t1 + 5 * MIN);
+      expect(provedor.instancias.has(`${ref.projeto}/${ref.zona}/${ref.nome}`)).toBe(false);
+      expect((await repos.maquinasNuvem.buscar(nova.id))?.proximaTentativaEm).toBeNull();
+    });
+  });
+
+  it("B5: excluir solta tudo que apontava para a máquina (bot, padrão da pessoa, desta vez do pendente) e revoga a chave", async () => {
+    await withRollback(MARLON, async (trx) => {
+      const t0 = Date.now();
+      const m = await montar(trx, t0);
+      await m.repos.agentes.definirMaquina([m.agenteId], m.vm);
+      await m.repos.preferencias.definirMaquinaPadrao(m.vm);
+      const turno = await m.enfileirar();
+      expect(await m.repos.turnos.rodarDestaVez(m.conversaId, m.vm)).toBe(1);
+      expect(await m.repos.maquinasNuvem.marcarExcluida(m.nuvem.id, t0 + 1000)).toEqual({ maquinaId: m.vm });
+      const [ag] = await trx<{ maquina_id: string | null }[]>`select maquina_id from agentes where id = ${m.agenteId}`;
+      const [pref] = await trx<{ maquina_padrao_id: string | null }[]>`select maquina_padrao_id from preferencias where owner_id = ${MARLON.pessoaId}`;
+      const [t] = await trx<{ maquina_desta_vez: string | null }[]>`select maquina_desta_vez from turnos where id = ${turno.id}`;
+      const [k] = await trx<{ revogado_em: Date | null }[]>`select revogado_em from maquina_tokens where id = ${m.vm}`;
+      expect(ag?.maquina_id).toBeNull();
+      expect(pref?.maquina_padrao_id).toBeNull();
+      expect(t?.maquina_desta_vez).toBeNull();
+      expect(k?.revogado_em).not.toBeNull();
+      expect((await m.estado()).estado).toBe("excluida");
     });
   });
 });

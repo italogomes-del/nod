@@ -1,7 +1,7 @@
 import type { ContaNuvem, ContaPreparada, CriarInstancia, ErroNuvem, EstadoInstancia, ProvedorNuvem, RefInstancia } from "../../contracts/provedor-nuvem.ts";
 import { ErroNuvemLancado, ErroNuvemTransitorio } from "../../domain/maquina-nuvem.ts";
 
-type Operacao = "criar" | "ligar" | "desligar" | "reiniciar" | "excluir" | "estado";
+type Operacao = "criar" | "ligar" | "desligar" | "reiniciar" | "excluir" | "estado" | "definirScript";
 type Roteiro = ErroNuvem | "transitorio";
 
 const chave = (r: RefInstancia) => `${r.projeto}/${r.zona}/${r.nome}`;
@@ -45,9 +45,27 @@ export class ProvedorNuvemFalso implements ProvedorNuvem {
     if (!this.instancias.has(chave(ref))) throw new ErroNuvemLancado({ motivo: "excluida" });
   }
 
+  /** O `startup-script` de cada instância (a criação grava; `definirScript` troca). */
+  readonly scripts = new Map<string, string>();
+  readonly criadas: CriarInstancia[] = [];
+
   async criar(req: CriarInstancia, requestId: string): Promise<void> {
     this.registrar("criar", req, requestId);
-    if (!this.instancias.has(chave(req))) this.instancias.set(chave(req), "provisionando");
+    if (!this.instancias.has(chave(req))) {
+      this.instancias.set(chave(req), "rodando");
+      this.scripts.set(chave(req), req.startupScript);
+      this.criadas.push(req);
+    }
+  }
+
+  async definirScript(ref: RefInstancia, script: string): Promise<void> {
+    this.registrar("definirScript", ref);
+    this.exigir(ref);
+    this.scripts.set(chave(ref), script);
+  }
+
+  script(ref: RefInstancia): string | undefined {
+    return this.scripts.get(chave(ref));
   }
 
   async ligar(ref: RefInstancia): Promise<void> {

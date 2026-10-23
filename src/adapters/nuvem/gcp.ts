@@ -211,6 +211,15 @@ export function criarProvedorGcp(p: { chaveJson: string; fetchImpl?: typeof fetc
       if (r.status === 404 || ok(r.status)) return;
       lancarErroGoogle(r);
     },
+    async definirScript(ref, script) {
+      // setMetadata exige o fingerprint atual (concorrência otimista do Google): lê a instância e troca só o startup-script.
+      const g = await chamar("GET", urlInstancia(ref));
+      if (!ok(g.status)) lancarErroGoogle(g);
+      const meta = (g.corpo as { metadata?: { fingerprint?: string; items?: { key: string; value?: string }[] } } | null)?.metadata ?? {};
+      const items = [...(meta.items ?? []).filter((i) => i.key !== "startup-script"), { key: "startup-script", value: script }];
+      const r = await chamar("POST", `${urlInstancia(ref)}/setMetadata`, { fingerprint: meta.fingerprint, items });
+      if (!ok(r.status)) lancarErroGoogle(r);
+    },
     async criar(req, requestId) {
       const url = `${URL_COMPUTE}/projects/${encodeURIComponent(req.projeto)}/zones/${encodeURIComponent(req.zona)}/instances?requestId=${encodeURIComponent(requestId)}`;
       const r = await chamar("POST", url, corpoDaCriacao(req));

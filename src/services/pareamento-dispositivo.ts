@@ -17,7 +17,8 @@ import type { Escopo } from "../shared/types.ts";
  */
 /** `pedidoHaS`: há quantos segundos a máquina pediu — a confirmação mostra, para a pessoa notar um pedido que não é dela. */
 export type PedidoDispositivo = { nome: string; plataforma: PlataformaMaquina; pedidoHaS: number };
-export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string } | { estado: "invalido" };
+/** `maquinaNuvemId`: o pedido veio da VM que o nod criou (ADR-121, PR 2); a rota liga a chave nova a ela. */
+export type TrocaDispositivo = { estado: "pendente" } | { estado: "aprovado"; escopo: Escopo; nome: string; maquinaNuvemId?: string } | { estado: "invalido" };
 
 export interface PareamentoDispositivo {
   /**
@@ -36,6 +37,13 @@ export interface PareamentoDispositivo {
   ver(e: { codigoPessoa: string; escopo: Escopo }): PedidoDispositivo | null;
   aprovar(e: { codigoPessoa: string; escopo: Escopo }): boolean;
   trocar(e: { codigoDispositivo: string }): TrocaDispositivo;
+  /**
+   * ADR-121 (PR 2): o convite que vai no script de início da VM que o nod criou. A pessoa já aprovou ao pedir a VM, então
+   * o pedido que chega com ele E com o nome da instância nasce aprovado. Vale até `ate` e mais de uma vez (o script pode
+   * rodar de novo antes de o motor falar); quem fecha é o banco (`convite_confirmado_em`). Registrar de novo é idempotente:
+   * o reconciliador registra a cada volta, e um reinício do servidor não perde o convite.
+   */
+  registrarConviteNuvem(convite: string, e: { escopo: Escopo; nome: string; maquinaNuvemId: string; ate: number }): void;
 }
 
 /** definido em 2026-10-09: 10 min entre a instalação mostrar o código e a pessoa digitá-lo (ela pode ir buscar o Mac). */
@@ -68,15 +76,17 @@ export function lerPlataforma(v: unknown): PlataformaMaquina | null {
   return PLATAFORMAS_MAQUINA.find((p) => p === v) ?? null;
 }
 
-type Pedido = { nome: string; plataforma: PlataformaMaquina; codigoPessoa: string; criado: number; ate: number; aprovadoPor: Escopo | null };
+type Pedido = { nome: string; plataforma: PlataformaMaquina; codigoPessoa: string; criado: number; ate: number; aprovadoPor: Escopo | null; maquinaNuvemId?: string };
 
 export function criarPareamentoDispositivo(agora: () => number = Date.now): PareamentoDispositivo {
   const porDispositivo = new Map<string, Pedido>();
   const porPessoa = new Map<string, string>();
   const erros = new Map<string, { n: number; desde: number }>();
   const convites = new Map<string, { escopo: Escopo; ate: number; codigoPessoa: string | null; conflito: boolean }>();
+  const convitesNuvem = new Map<string, { escopo: Escopo; nome: string; maquinaNuvemId: string; ate: number }>();
   const varrer = () => {
     const t = agora();
+    for (const [c, v] of convitesNuvem) if (v.ate <= t) convitesNuvem.delete(c);
     for (const [c, p] of porDispositivo) if (p.ate <= t) { porDispositivo.delete(c); porPessoa.delete(p.codigoPessoa); }
     for (const [c, v] of convites) if (v.ate <= t) convites.delete(c);
     for (const [k, e] of erros) if (t - e.desde >= JANELA_ERROS_MS) erros.delete(k);
@@ -111,6 +121,14 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       if (porDispositivo.size >= MAX_PEDIDOS_DISPOSITIVO) return null;
       const codigoDispositivo = randomBytes(32).toString("base64url");
       const codigoPessoa = novoCodigoPessoa();
+      // ADR-121 (PR 2): a VM que o nod criou chega com o convite do script de início e o nome da instância (o hostname
+      // no Google). Já aprovado: ninguém precisa digitar código.
+      const n = conviteValido(convite) ? convitesNuvem.get(convite) : undefined;
+      if (n && nome.split(".")[0] === n.nome) {
+        porDispositivo.set(codigoDispositivo, { nome, plataforma, codigoPessoa, criado: agora(), ate: agora() + PRAZO_DISPOSITIVO_MS, aprovadoPor: n.escopo, maquinaNuvemId: n.maquinaNuvemId });
+        porPessoa.set(codigoPessoa, codigoDispositivo);
+        return { codigoDispositivo, codigoPessoa: formatarCodigoPessoa(codigoPessoa), intervaloS: INTERVALO_DISPOSITIVO_S, prazoS: PRAZO_DISPOSITIVO_MS / 1000 };
+      }
       // ADR-102: o convite válido e ainda não usado liga este pedido à tela de quem o criou; inválido, o pedido segue
       // como o de sempre (o código no terminal), e a pessoa ainda pode digitá-lo.
       const v = conviteValido(convite) ? convites.get(convite) : undefined;
@@ -163,7 +181,11 @@ export function criarPareamentoDispositivo(agora: () => number = Date.now): Pare
       if (!p.aprovadoPor) return { estado: "pendente" };
       porDispositivo.delete(codigoDispositivo);
       porPessoa.delete(p.codigoPessoa);
-      return { estado: "aprovado", escopo: p.aprovadoPor, nome: p.nome };
+      return { estado: "aprovado", escopo: p.aprovadoPor, nome: p.nome, ...(p.maquinaNuvemId ? { maquinaNuvemId: p.maquinaNuvemId } : {}) };
+    },
+    registrarConviteNuvem(convite, e) {
+      if (!conviteValido(convite) || e.ate <= agora()) return;
+      convitesNuvem.set(convite, { ...e });
     },
   };
 }

@@ -125,3 +125,24 @@ describe("convite de uso único no comando de instalação (ADR-102)", () => {
     expect(p.pedir({ nome: "vm", plataforma: "linux", convite: "x".repeat(32) })).not.toBeNull();
   });
 });
+
+describe("convite da VM criada pelo nod (ADR-121, PR 2)", () => {
+  const CONVITE = "b".repeat(32);
+  it("o motor da VM com o hostname certo chega já aprovado e a troca leva o id da máquina na nuvem", () => {
+    const p = criarPareamentoDispositivo(() => 1_000);
+    p.registrarConviteNuvem(CONVITE, { escopo: MARLON, nome: "nod-g-abc123", maquinaNuvemId: "mn-1", ate: 60_000 });
+    const pedido = p.pedir({ nome: "nod-g-abc123.c.proj.internal", plataforma: "linux", convite: CONVITE })!;
+    expect(p.trocar({ codigoDispositivo: pedido.codigoDispositivo })).toEqual({ estado: "aprovado", escopo: MARLON, nome: "nod-g-abc123.c.proj.internal", maquinaNuvemId: "mn-1" });
+  });
+
+  it("outro nome com o mesmo convite não é pré-aprovado; vencido também não", () => {
+    let agora = 1_000;
+    const p = criarPareamentoDispositivo(() => agora);
+    p.registrarConviteNuvem(CONVITE, { escopo: MARLON, nome: "nod-g-abc123", maquinaNuvemId: "mn-1", ate: 60_000 });
+    const intruso = p.pedir({ nome: "outra", plataforma: "linux", convite: CONVITE })!;
+    expect(p.trocar({ codigoDispositivo: intruso.codigoDispositivo })).toEqual({ estado: "pendente" });
+    agora = 60_000;
+    const tarde = p.pedir({ nome: "nod-g-abc123", plataforma: "linux", convite: CONVITE })!;
+    expect(p.trocar({ codigoDispositivo: tarde.codigoDispositivo })).toEqual({ estado: "pendente" });
+  });
+});

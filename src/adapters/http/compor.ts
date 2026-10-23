@@ -98,8 +98,8 @@ import { rotasNuvem } from "./rotas/nuvem.ts";
 import { iniciarReconciliadorNuvem } from "../fundo/reconciliador-nuvem.ts";
 import { criarProvedorGcp } from "../nuvem/gcp.ts";
 import { criarContaGcp } from "../nuvem/conta-gcp.ts";
-import type { ContaNuvem } from "../../contracts/provedor-nuvem.ts";
-import { ErroNuvemLancado } from "../../domain/maquina-nuvem.ts";
+import type { ContaNuvem, ProvedorNuvem } from "../../contracts/provedor-nuvem.ts";
+import { ErroNuvemLancado, servidorPublicoValido } from "../../domain/maquina-nuvem.ts";
 import { criarRepos } from "../../repositories/index.ts";
 import { rotasMotor } from "./rotas/motor.ts";
 import { readFileSync } from "node:fs";
@@ -201,7 +201,7 @@ export type OpcoesCompor = {
   /** NOD-214: quando o processo começou (boot.ts), para a carência do lease na adoção. Ausente = a hora da composição. */
   inicioDoProcesso?: number;
   /** ADR-121: só em teste — a conta falsa e o fetch da troca do OAuth da nuvem. Default: Google de verdade. */
-  nuvem?: { conta?: ContaNuvem; fetchImpl?: typeof fetch };
+  nuvem?: { conta?: ContaNuvem; fetchImpl?: typeof fetch; provedor?: ProvedorNuvem };
 };
 
 export type App = {
@@ -1003,15 +1003,26 @@ export function comporApp(o: OpcoesCompor): App {
   // ADR-121 (NOD-92): a máquina na nuvem que dorme e acorda pelo Google. A flag é lida SÓ aqui: sem ela, as rotas não
   // existem (404), o reconciliador não sobe e o MaquinaDto sai sem `nuvem`.
   const nuvemLigada = env.NOD_MAQUINA_NUVEM?.trim() === "gcp";
+  // O provedor com a chave da conta de serviço (decifrada só aqui, nunca em log). Em teste, o falso injetado.
+  const provedorDaChave = (cifrada: string | null): ProvedorNuvem => {
+    if (o.nuvem?.provedor) return o.nuvem.provedor;
+    if (!cifrada) throw new ErroNuvemLancado({ motivo: "credencial_nuvem", detalhe: "sem_chave" });
+    return criarProvedorGcp({ chaveJson: decifrar(cifrada, chave) });
+  };
+  // PR 2 (criar a VM): o script de início baixa o motor de NOD_URL_PUBLICA; sem ela, criar responde integracao_nao_configurada.
+  const urlPublica = env.NOD_URL_PUBLICA?.trim().replace(/\/$/, "") ?? "";
+  // Revisão item 9: endereço inválido (com caminho, maiúsculas, espaço) desliga a criação já ao subir, com log.
+  const urlPublicaValida = urlPublica !== "" && servidorPublicoValido(urlPublica);
+  if (nuvemLigada && urlPublica !== "" && !urlPublicaValida) log("erro", "nuvem_url_publica_invalida", {});
+  const criacaoNuvem = urlPublicaValida
+    ? { servidor: urlPublica, decifrar: (s: string) => decifrar(s, chave), registrarConvite: dispositivo.registrarConviteNuvem.bind(dispositivo) }
+    : undefined;
   const reconciliadorNuvem = nuvemLigada
     ? iniciarReconciliadorNuvem({
         db,
         agora: relogio,
-        provedorDa: async (escopo, tx, credencialId) => {
-          const cifrada = await tx((trx) => criarRepos(trx, escopo).credenciaisNuvem.chaveCifrada(credencialId));
-          if (!cifrada) throw new ErroNuvemLancado({ motivo: "credencial_nuvem", detalhe: "sem_chave" });
-          return criarProvedorGcp({ chaveJson: decifrar(cifrada, chave) });
-        },
+        provedorDa: async (escopo, tx, credencialId) => provedorDaChave(await tx((trx) => criarRepos(trx, escopo).credenciaisNuvem.chaveCifrada(credencialId))),
+        ...(criacaoNuvem ? { criacao: criacaoNuvem } : {}),
       })
     : null;
 
@@ -1256,7 +1267,7 @@ export function comporApp(o: OpcoesCompor): App {
     ...rotasMotor({ pasta: env.NOD_MOTOR_DIR ?? resolve("dist/motor"), versao: versaoDoServidor(), ...(env.NOD_URL_PUBLICA ? { urlPublica: env.NOD_URL_PUBLICA } : {}) }),
     ...rotasContasIa({ dentro, logins, dispositivo, compartilhado, avisar: avisarContas, maquinaViva: (escopo, id) => ponteHttp.maquinasDaPessoa(escopo).some((m) => m.machineId === id), aoRenomear: (escopo, id, nome) => ponteHttp.renomear(escopo, id, nome) }),
     ...rotasMaquinas({ dentro, pareamento: criarPareamentoMaquina(relogio), dispositivo, maquinasVivas: (escopo) => ponteHttp.maquinasDaPessoa(escopo), ...(compartilhado ? {} : { servidorNoMac: { api: `http://127.0.0.1:${numero(env.NOD_API_PORT, 8888)}` } }) , nuvem: nuvemLigada }),
-    ...(nuvemLigada ? rotasNuvem({ dentro, segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), oauth: oauthNuvem(env), conta: o.nuvem?.conta ?? criarContaGcp({ contaFaturamento: env.NOD_NUVEM_CONTA_FATURAMENTO ?? null }), ...(o.nuvem?.fetchImpl ? { fetchImpl: o.nuvem.fetchImpl } : {}), cifrar: (t) => cifrar(t, chave), agora: relogio }) : []),
+    ...(nuvemLigada ? rotasNuvem({ dentro, segredo: segredoEfetivo(env.NOD_LOGIN === "google" ? "google" : "stub", env.NOD_SESSAO_SEGREDO), oauth: oauthNuvem(env), conta: o.nuvem?.conta ?? criarContaGcp({ contaFaturamento: env.NOD_NUVEM_CONTA_FATURAMENTO ?? null }), ...(o.nuvem?.fetchImpl ? { fetchImpl: o.nuvem.fetchImpl } : {}), cifrar: (t) => cifrar(t, chave), provedorDa: async (escopo, credencialId) => provedorDaChave(await dentro(escopo, (d) => d.repos.credenciaisNuvem.chaveCifrada(credencialId))), ...(criacaoNuvem ? { registrarConvite: criacaoNuvem.registrarConvite } : {}), agora: relogio }) : []),
     // definido em 2026-09-16: NOD_LONGPOLL_MS encurta a fatia do long-poll de aprovação (testes/e2e); default LONGPOLL_APROVACAO_MS.
     ...rotasComputadores(computadores),
     ...rotasWorkspaces(workspaces, dentro),

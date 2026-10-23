@@ -68,8 +68,8 @@ import { contextoInteligencia, nivelDaGaveta } from "./telas/detalhes.ts";
 import { renderEspaco, situacaoCurtaAvisos, textoAmbiente } from "./telas/espaco.ts";
 import { USOS } from "./telas/este-mac.ts";
 import { botsDaPessoa, maquinaNova, nomeDeInstanciaSugerido } from "./telas/maquinas.ts";
-import { erroDoConectar, recusaDoDormir, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
-import type { DormirAposMin } from "../src/contracts/provedor-nuvem.ts";
+import { erroDoConectar, erroDoCriar, erroDoExcluir, recusaDoDormir, REGIAO_PADRAO, relerEnquantoCria, ZONA_PADRAO } from "./lib/maquina-nuvem.ts";
+import type { DormirAposMin, TamanhoMaquinaNuvem } from "../src/contracts/provedor-nuvem.ts";
 import { voltaDaTela } from "./lib/volta.ts";
 import { cabecalhoSecao, CHAVE_SECOES_RECOLHIDAS, chaveDaSecao, definirSecaoRecolhida, ESPERA, estadoDaSecao, lerSecoesRecolhidas, type AvisoBot } from "./lib/secoes.ts";
 import { faixaDeConectores, type DadosMenuConta } from "./telas/menu-conta.ts";
@@ -763,7 +763,9 @@ async function buscar(q: Invalidacao): Promise<Acao | null> {
   // (ou fecha, se não havia): a nuvem é um extra da seção, nunca a quebra.
   if (q === "nuvem") {
     const anterior = estado.nuvem.conta;
-    const conta = await api.contaNuvem().catch((e: unknown) => (e instanceof ErroApi && e.status === 404) || anterior === null ? "desligada" as const : anterior);
+    // Revisão NOD-92 (item 17): só o 404 desliga. Rede ou 5xx na primeira leitura deixa a conta por ler (null) e a seção
+    // tenta de novo na próxima hidratação, em vez de esconder a nuvem até recarregar a página.
+    const conta = await api.contaNuvem().catch((e: unknown) => (e instanceof ErroApi && e.status === 404) ? "desligada" as const : anterior);
     return { tipo: "nuvem-ui", mudanca: { conta } };
   }
   // ADR-102: servidor sem a rota (404, versão anterior) fica com a tela de antes.
@@ -1808,6 +1810,9 @@ async function boot(): Promise<void> {
     // ADR-121 (NOD-92): de volta do Google, o preparo da conta roda no servidor; a conta é relida até ele terminar.
     const conta = estado.nuvem.conta;
     if (estado.sessao && estado.nuvem.aviso === "preparando" && conta !== "desligada" && (conta === null || conta.preparando)) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
+    // PR 2: enquanto o nod cria uma VM, a conta (a lista do que está sendo criado) e as máquinas são relidas: o motor pareia sozinho.
+    // Revisão NOD-92 (item 17): a primeira leitura que falhou (rede, 5xx) deixa a conta em null; o tique tenta de novo.
+    else if (estado.sessao && estado.espaco?.secao === "maquinas" && (conta === null || relerEnquantoCria(estado.nuvem))) estado = reduzir(estado, { tipo: "invalidar", quais: ["nuvem", "maquinas"] });
     dispatch({ tipo: "tick", agora: Date.now() });
   }, 15_000);
   const url = new URL(window.location.href);
@@ -2717,11 +2722,18 @@ const contasDaPessoa = criarContasDaPessoa({
 });
 // O app do Mac anterior a 2026-10-13 (sem a ponte `contas.detalhes`) mostra a tela de antes, com a faixa (suposição 8).
 if (window.nodDesktop?.contas && !window.nodDesktop.contas.detalhes) dispatch({ tipo: "contas-ui", mudanca: { appAntigo: true } });
+/** O "Criar de novo" (id da VM) que abriu o painel Criar; null = o botão do topo. */
+let criarAbertoPor: string | null = null;
 /** O ⋯ que abriu o diálogo aberto agora (o foco volta para ele ao fechar; revisão do PR #306). */
 function gatilhoDoDialogo(): string | null {
   const u = estado.contasUi;
   if (u.confirmar) return `[data-act="cl-menu"][data-id="${CSS.escape(u.confirmar.contaId)}"]`;
   if (u.desconectar) return `[data-act="maq-menu"][data-maquina="${CSS.escape(u.desconectar.maquinaId)}"]`;
+  // Revisão NOD-92 (item 16): o excluir abre do ⋯ da máquina ou do "Excluir" da VM que falhou ao ser criada.
+  const x = estado.nuvem.excluir;
+  if (x) return `[data-act="maq-menu"][data-maquina="${CSS.escape(x.id)}"], [data-act="nuvem-excluir"][data-id="${CSS.escape(x.id)}"]`;
+  // Revisão NOD-92 (rodada 2): o foco volta ao "Criar" que abriu o painel — o do topo ou o "Criar de novo" daquela VM.
+  if (estado.nuvem.criar) return criarAbertoPor ? `[data-act="nuvem-criar-abrir"][data-id="${CSS.escape(criarAbertoPor)}"]` : `[data-act="nuvem-criar-abrir"]:not([data-id])`;
   return null;
 }
 function focarGatilho(seletor: string | null): void {
@@ -3600,6 +3612,31 @@ const ACOES: Record<string, (el: HTMLElement) => Promise<void> | void> = {
     focarNovo();
   },
   "nuvem-conectar-fechar": () => dispatch({ tipo: "nuvem-ui", mudanca: { conectar: null } }),
+  // PR 2 (NOD-92): criar a VM pelo nod e excluir a que ele criou.
+  "nuvem-criar-abrir": (el) => {
+    criarAbertoPor = el.dataset.id ?? null;
+    dispatch({ tipo: "nuvem-ui", mudanca: { criar: { regiao: REGIAO_PADRAO, tamanho: "padrao", erro: null, enviando: false } } });
+    focarNovo();
+  },
+  "nuvem-criar-fechar": () => { const volta = gatilhoDoDialogo(); dispatch({ tipo: "nuvem-ui", mudanca: { criar: null } }); focarGatilho(volta); },
+  "nuvem-excluir": (el) => {
+    dispatch({ tipo: "contas-ui", mudanca: { maquinaMenu: null } });
+    dispatch({ tipo: "nuvem-ui", mudanca: { excluir: { id: el.dataset.id ?? "", nome: el.dataset.nome ?? "máquina", erro: null } } });
+    focarNovo();
+  },
+  "nuvem-excluir-fechar": () => { const volta = gatilhoDoDialogo(); dispatch({ tipo: "nuvem-ui", mudanca: { excluir: null } }); focarGatilho(volta); },
+  "nuvem-excluir-confirmar": () => agir(async () => {
+    const q = estado.nuvem.excluir;
+    if (!q) return;
+    try {
+      await api!.excluirMaquinaNuvem(q.id);
+      dispatch({ tipo: "nuvem-ui", mudanca: { excluir: null } });
+    } catch (e) {
+      if (!(e instanceof ErroApi) || e.status === 0 || e.status >= 500) throw e;
+      dispatch({ tipo: "nuvem-ui", mudanca: { excluir: { ...q, erro: erroDoExcluir(e.status) } } });
+    }
+    dispatch({ tipo: "invalidar", quais: ["nuvem", "maquinas", "frota"] });
+  }),
   // ADR-090: Seu espaço › Máquinas.
   // As chaves que JÁ existem precisam estar carregadas: a máquina nova é a que não estava nelas (revisão do PR: sem isso,
   // com a seção ainda carregando, a "nova" seria o Mac e todos os bots iriam para ele).
@@ -3718,6 +3755,26 @@ const FORMS: Record<string, (form: HTMLFormElement) => Promise<void>> = {
     } catch (e) {
       if (!(e instanceof ErroApi) || e.status === 0 || e.status >= 500) throw e;
       dispatch({ tipo: "nuvem-ui", mudanca: { conectar: { ...c, erro: erroDoConectar(e.status, e.codigo) } } });
+    }
+  }),
+  // PR 2 (NOD-92): "Criar minha máquina na nuvem". Conta conectada: grava a intenção; senão, o Google pede a permissão antes.
+  "nuvem-criar": (form) => agir(async () => {
+    const marcado = (nome: string) => form.querySelector<HTMLInputElement>(`input[name="${nome}"]:checked`)?.value ?? "";
+    const c = estado.nuvem.criar;
+    const pedido = { regiao: marcado("regiao") || REGIAO_PADRAO, tamanho: (marcado("tamanho") || "padrao") as TamanhoMaquinaNuvem };
+    const conta = estado.nuvem.conta;
+    dispatch({ tipo: "nuvem-ui", mudanca: { criar: { ...pedido, erro: null, enviando: true } } });
+    try {
+      if (conta && conta !== "desligada" && conta.conectada) {
+        await api!.criarMaquinaNuvem(pedido);
+        dispatch({ tipo: "nuvem-ui", mudanca: { criar: null } });
+        dispatch({ tipo: "invalidar", quais: ["nuvem", "maquinas"] });
+      } else {
+        await irParaOGoogle({ para: "criar", ...pedido });
+      }
+    } catch (e) {
+      if (!(e instanceof ErroApi) || e.status === 0 || e.status >= 500) { dispatch({ tipo: "nuvem-ui", mudanca: { criar: c ? { ...c, ...pedido, enviando: false } : null } }); throw e; }
+      dispatch({ tipo: "nuvem-ui", mudanca: { criar: { ...pedido, erro: erroDoCriar(e.status), enviando: false } } });
     }
   }),
   "conta-nova": async (form) => {
@@ -3875,9 +3932,11 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (ev.key !== "Escape" || !estado.espaco) return;
-  if (estado.nuvem.sonoMenu || estado.nuvem.conectar) {
+  if (estado.nuvem.sonoMenu || estado.nuvem.conectar || estado.nuvem.excluir || estado.nuvem.criar) {
     ev.stopPropagation();
-    dispatch({ tipo: "nuvem-ui", mudanca: estado.nuvem.sonoMenu ? { sonoMenu: null } : { conectar: null } });
+    const volta = estado.nuvem.sonoMenu || estado.nuvem.conectar ? null : gatilhoDoDialogo();
+    dispatch({ tipo: "nuvem-ui", mudanca: estado.nuvem.sonoMenu ? { sonoMenu: null } : estado.nuvem.excluir ? { excluir: null } : estado.nuvem.conectar ? { conectar: null } : { criar: null } });
+    focarGatilho(volta);
     return;
   }
   const u = estado.contasUi;
@@ -3903,6 +3962,12 @@ document.addEventListener("change", (ev) => {
   if (cb.id === "composer-arquivos") {
     adicionarArquivos([...(cb.files ?? [])]);
     cb.value = "";
+    return;
+  }
+  // PR 2: a região e o tamanho escolhidos no "Criar" atravessam os redesenhos do tick (sem redesenhar agora).
+  const campoCriar = cb.dataset.nuvemCriar;
+  if ((campoCriar === "regiao" || campoCriar === "tamanho") && estado.nuvem.criar) {
+    estado.nuvem.criar = { ...estado.nuvem.criar, [campoCriar]: cb.value };
     return;
   }
   if (cb.matches('select[name="frequencia"]')) {

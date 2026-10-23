@@ -1,5 +1,5 @@
 import type { MaquinaDto } from "../../src/contracts/maquina.ts";
-import type { ContaNuvemDto, DormirAposMin, EstadoMaquinaNuvem, MaquinaNuvemDto, MotivoFalhaNuvem } from "../../src/contracts/provedor-nuvem.ts";
+import type { ContaNuvemDto, DormirAposMin, EstadoMaquinaNuvem, MaquinaCriandoDto, MaquinaNuvemDto, MotivoFalhaNuvem, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
 
 /**
  * ADR-121 (NOD-92, PR 1): a máquina na nuvem que dorme e acorda pelo Google, como a tela a diz. Só regra pura (rótulos,
@@ -18,9 +18,13 @@ export type UiNuvem = {
   conectar: { maquinaId: string; projeto: string; zona: string; nome: string; erro: string | null } | null;
   sonoMenu: string | null;
   recusa: { maquinaId: string; texto: string } | null;
+  /** PR 2: o painel "Criar minha máquina na nuvem" aberto (região e tamanho escolhidos). */
+  criar: { regiao: string; tamanho: TamanhoMaquinaNuvem; erro: string | null; enviando: boolean } | null;
+  /** PR 2: o diálogo "Excluir a <nome>?" (id da chave ou da linha da nuvem). */
+  excluir: { id: string; nome: string; erro: string | null } | null;
 };
 
-export const UI_NUVEM_INICIAL: UiNuvem = { conta: null, aviso: null, conectar: null, sonoMenu: null, recusa: null };
+export const UI_NUVEM_INICIAL: UiNuvem = { conta: null, aviso: null, conectar: null, sonoMenu: null, recusa: null, criar: null, excluir: null };
 
 /** definido em 2026-10-22 (plano NOD-92): São Paulo é a zona que vem marcada. */
 export const ZONA_PADRAO = "southamerica-east1-a";
@@ -48,7 +52,7 @@ export function motivoLegivel(motivo: MotivoFalhaNuvem | null, nome: string, zon
   switch (motivo) {
     case "credencial_nuvem": return `O nod perdeu a permissão na sua conta Google. A ${nome} continua como está e nada foi apagado.`;
     case "cota_ou_cobranca": return `O Google recusou acordar a ${nome} por cobrança ou cota. O nod não resolve isso por você: confira no console do Google.`;
-    case "sem_capacidade": return `O Google está sem máquinas livres em ${zona} agora. O nod tenta de novo sozinho.`;
+    case "sem_capacidade": return `O Google está sem máquinas livres em ${nomeDaZona(zona)} agora. O nod tenta de novo sozinho.`;
     case "motor_sem_contato": return `A ${nome} ligou, mas o nod não respondeu nela.`;
     case "excluida": return `A ${nome} não existe mais na sua conta Google Cloud.`;
     case null: return `A ${nome} não acordou.`;
@@ -150,4 +154,57 @@ export function avisoDaConta(ui: Pick<UiNuvem, "aviso" | "conta">): { texto: str
   if (c.motivo) return { texto: `Não deu para preparar sua conta do Google: ${motivoDoPreparo(c.motivo, c.detalhe)}`, tom: "falha", motivo: c.motivo };
   if (!c.conectada) return { texto: "Não deu para terminar de preparar sua conta do Google. Tente de novo.", tom: "falha", motivo: null };
   return { texto: "Pronto: sua conta do Google está conectada. A máquina dorme quando fica parada e acorda quando chega trabalho.", tom: "ok", motivo: null };
+}
+
+/**
+ * PR 2 (protótipo da NOD-92): as regiões do "Criar", São Paulo marcada. Cópia de REGIOES_NUVEM (src/domain/maquina-nuvem.ts;
+ * a web não importa src/); tests/unit/web/maquina-nuvem-criar.test.ts confere as duas.
+ */
+export const REGIOES_CRIAR = [
+  { regiao: "southamerica-east1", nome: "São Paulo", nota: "mais perto de você" },
+  { regiao: "us-central1", nome: "Iowa (EUA)", nota: "costuma ter mais máquinas livres" },
+  { regiao: "us-east1", nome: "Carolina do Sul (EUA)", nota: "" },
+] as const;
+export const REGIAO_PADRAO = "southamerica-east1";
+
+/** Revisão NOD-92 (item 15): a zona do Google ("southamerica-east1-a") vira o nome da região ("São Paulo"); zona fora
+ *  da lista do Criar (máquina conectada à mão) fica crua. */
+export function nomeDaZona(zona: string): string {
+  return REGIOES_CRIAR.find((r) => zona === r.regiao || zona.startsWith(`${r.regiao}-`))?.nome ?? zona;
+}
+
+/** Os tamanhos: o padrão aguenta vários bots; o menor custa menos e serve para um ou dois. */
+export const TAMANHOS_CRIAR: readonly { tamanho: TamanhoMaquinaNuvem; nome: string; nota: string }[] = [
+  { tamanho: "padrao", nome: "Padrão", nota: "8 vCPU · 32 GB · para vários bots" },
+  { tamanho: "menor", nome: "Menor", nota: "4 vCPU · 16 GB · para um ou dois bots" },
+];
+
+/** O que está sendo criado agora (sem chave ainda): a lista vem de `GET nuvem/conta`. */
+export function criandoDaConta(ui: Pick<UiNuvem, "conta">): MaquinaCriandoDto[] {
+  return ui.conta && ui.conta !== "desligada" ? (ui.conta.criando ?? []) : [];
+}
+
+/** Enquanto alguma VM está sendo criada, a tela relê a conta e as máquinas (o motor pareia sozinho). */
+export function relerEnquantoCria(ui: Pick<UiNuvem, "conta">): boolean {
+  return criandoDaConta(ui).some((c) => c.estado === "criando");
+}
+
+/** A linha da VM em criação: o que está acontecendo, em uma frase. */
+export function fraseDaCriacao(c: MaquinaCriandoDto): string {
+  if (c.estado === "criando") return c.motivo === "sem_capacidade" ? motivoLegivel("sem_capacidade", c.nome, c.zona) : "Criando no Google e instalando o nod. Costuma levar 3 a 5 min; esta tela segue sozinha.";
+  return c.motivo === "motor_sem_contato" ? `A ${c.nome} foi criada, mas o nod não conseguiu se instalar nela. Exclua e crie de novo.` : motivoLegivel(c.motivo, c.nome, c.zona);
+}
+
+/** A frase do erro do "Criar" (o status da API; o texto do servidor não chega à tela). */
+export function erroDoCriar(status: number): string {
+  if (status === 409) return "Não deu para criar agora: já há uma máquina sendo criada, a conta Google precisa ser reconectada ou este nod ainda não tem o endereço público configurado.";
+  if (status === 400) return "Escolha uma região e um tamanho da lista.";
+  return "Não deu para criar agora. Tente de novo.";
+}
+
+/** A frase do erro do "Excluir". */
+export function erroDoExcluir(status: number): string {
+  if (status === 409) return "O Google não deixou excluir agora. Confira no console do Google ou tente de novo.";
+  if (status === 404) return "Esta máquina já não existe.";
+  return "Não deu para excluir agora. Tente de novo.";
 }

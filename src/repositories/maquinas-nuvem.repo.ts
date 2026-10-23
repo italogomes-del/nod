@@ -222,12 +222,16 @@ export function maquinasNuvemRepo(conn: Conn, escopo: Escopo) {
       return comAlvo.length + uma.length;
     },
 
-    /** As máquinas em que o reconciliador tem trabalho (adormecendo, acordando, dormindo com desejo de acordar) e sem reserva viva. */
+    /**
+     * As máquinas em que o reconciliador tem trabalho (criando, adormecendo, acordando, dormindo com desejo de acordar e
+     * excluída com exclusão pendente no provedor) e sem reserva viva.
+     */
     async paraReconciliar(agora: number): Promise<ParaReconciliar[]> {
       const linhas = await conn<(Linha & { contato: boolean })[]>`
         select mn.*, (mn.ligou_em is not null and k.ultimo_uso_em is not null and k.ultimo_uso_em > mn.ligou_em) as contato
         from maquinas_nuvem mn left join maquina_tokens k on k.tenant_id = mn.tenant_id and k.id = mn.maquina_id
-        where ${daPessoa()} and (mn.estado in ('adormecendo', 'acordando') or (mn.estado = 'dormindo' and mn.desejado = 'acordada'))
+        where ${daPessoa()} and (mn.estado in ('criando', 'adormecendo', 'acordando') or (mn.estado = 'dormindo' and mn.desejado = 'acordada')
+          or (mn.estado = 'excluida' and mn.proxima_tentativa_em is not null))
           and (mn.ocupado_ate is null or mn.ocupado_ate <= ${data(agora)})
         order by mn.estado_desde`;
       return linhas.map((l) => {
@@ -267,6 +271,106 @@ export function maquinasNuvemRepo(conn: Conn, escopo: Escopo) {
 
     async soltar(id: string, operacaoId: string): Promise<void> {
       await conn`update maquinas_nuvem mn set operacao_id = null, ocupado_ate = null where ${daPessoa()} and mn.id = ${id} and mn.operacao_id = ${operacaoId}`;
+    },
+
+    // ——— PR 2: criar a VM (ADR-121) ———
+
+    /**
+     * A intenção de criar: a linha nasce `criando`, sem máquina, com o `request_id` fixo (toda nova tentativa do
+     * reconciliador manda o mesmo, e o Google não duplica) e o convite cifrado que vai no script de início.
+     */
+    async criarIntencao(p: { credencialId: string; ref: RefInstancia; subrede: string; tamanho: TamanhoMaquinaNuvem; requestId: string; conviteCifrado: string; conviteExpiraEm: number; agora: number }): Promise<MaquinaNuvem | null> {
+      // NOD-92 (revisão B3): uma criação por vez por pessoa, sob a trava da pessoa e o índice parcial
+      // `maquinas_nuvem_uma_criando`. O segundo clique (ou a segunda aba) recebe null e a rota responde 409.
+      await travarPessoa();
+      const [l] = await conn<Linha[]>`
+        insert into maquinas_nuvem (tenant_id, owner_id, credencial_id, maquina_id, provedor, projeto, zona, subrede, nome_instancia, request_id, tamanho,
+          criada_pelo_nod, estado, estado_desde, desejado, convite_cifrado, convite_expira_em)
+        values (${escopo.tenantId}, ${escopo.pessoaId}, ${p.credencialId}, null, 'gcp', ${p.ref.projeto}, ${p.ref.zona}, ${p.subrede}, ${p.ref.nome}, ${p.requestId}, ${p.tamanho},
+          true, 'criando', ${data(p.agora)}, 'acordada', ${p.conviteCifrado}, ${data(p.conviteExpiraEm)})
+        on conflict (tenant_id, owner_id) where estado = 'criando' do nothing
+        returning *`;
+      if (!l) return null;
+      await registrarEvento(l.id, null, "criando", null, p.agora);
+      return maquina(l);
+    },
+
+    /** O que a criação manda ao provedor (sub-rede, tamanho, `request_id`, convite cifrado). Só o reconciliador lê. */
+    async dadosDaCriacao(id: string): Promise<{ subrede: string; tamanho: TamanhoMaquinaNuvem; requestId: string; conviteCifrado: string; conviteExpiraEm: number } | null> {
+      const [l] = await conn<{ subrede: string | null; tamanho: TamanhoMaquinaNuvem | null; request_id: string | null; convite_cifrado: string | null; convite_expira_em: Date | null }[]>`
+        select mn.subrede, mn.tamanho, mn.request_id, mn.convite_cifrado, mn.convite_expira_em from maquinas_nuvem mn
+        where ${daPessoa()} and mn.id = ${id} and mn.estado = 'criando'`;
+      if (!l?.subrede || !l.tamanho || !l.request_id || !l.convite_cifrado || !l.convite_expira_em) return null;
+      return { subrede: l.subrede, tamanho: l.tamanho, requestId: l.request_id, conviteCifrado: l.convite_cifrado, conviteExpiraEm: l.convite_expira_em.getTime() };
+    },
+
+    /** Os convites ainda válidos das VMs em criação (o reconciliador os registra no pareamento a cada volta). */
+    async convitesAtivos(agora: number): Promise<{ id: string; nome: string; conviteCifrado: string; expiraEm: number }[]> {
+      const linhas = await conn<{ id: string; nome_instancia: string; convite_cifrado: string; convite_expira_em: Date }[]>`
+        select mn.id, mn.nome_instancia, mn.convite_cifrado, mn.convite_expira_em from maquinas_nuvem mn
+        where ${daPessoa()} and mn.estado = 'criando' and mn.convite_cifrado is not null and mn.convite_confirmado_em is null
+          and mn.convite_expira_em > ${data(agora)}`;
+      return linhas.map((l) => ({ id: l.id, nome: l.nome_instancia, conviteCifrado: l.convite_cifrado, expiraEm: l.convite_expira_em.getTime() }));
+    },
+
+    /**
+     * O motor da VM criada pareou com o convite: a chave nova vira a máquina desta linha. Se já havia uma chave ainda não
+     * confirmada (o script rodou de novo antes de o motor falar), devolve a anterior para quem chama revogá-la. Depois da
+     * confirmação, ou fora de `criando`, recusa (`null`): o convite não pareia uma segunda máquina.
+     */
+    async vincularCriada(id: string, maquinaId: string): Promise<{ anterior: string | null } | null> {
+      const [l] = await conn<{ maquina_id: string | null }[]>`select mn.maquina_id from maquinas_nuvem mn
+        where ${daPessoa()} and mn.id = ${id} and mn.estado = 'criando' and mn.convite_confirmado_em is null for update`;
+      if (!l) return null;
+      await conn`update maquinas_nuvem mn set maquina_id = ${maquinaId} where ${daPessoa()} and mn.id = ${id}`;
+      return { anterior: l.maquina_id };
+    },
+
+    /** O motor da VM criada falou: acordada, o convite sai do banco e não vale mais. Só com a reserva. */
+    async confirmarCriada(id: string, operacaoId: string, agora: number): Promise<boolean> {
+      const r = await conn`update maquinas_nuvem mn set estado = 'acordada', estado_desde = ${data(agora)}, desejado = 'acordada', motivo = null,
+        convite_cifrado = null, convite_confirmado_em = ${data(agora)}, operacao_id = null, ocupado_ate = null
+        where ${daPessoa()} and mn.id = ${id} and mn.operacao_id = ${operacaoId} and mn.estado = 'criando' returning mn.id`;
+      if (r.length > 0) await registrarEvento(id, "criando", "acordada", null, agora);
+      return r.length > 0;
+    },
+
+    /** As VMs criadas pelo nod que ainda não parearam (a tela as mostra pela conta: não estão em `GET /maquinas`). */
+    async criandoSemMaquina(): Promise<MaquinaNuvem[]> {
+      const linhas = await conn<Linha[]>`select * from maquinas_nuvem mn
+        where ${daPessoa()} and mn.criada_pelo_nod and mn.estado in ('criando', 'falhou_ao_acordar') and mn.convite_confirmado_em is null order by mn.criado_em`;
+      return linhas.map(maquina);
+    },
+
+    /**
+     * A VM criada pelo nod foi apagada no provedor: a linha fica `excluida` e, na mesma transação, nada mais aponta para
+     * a máquina (bots, padrão da pessoa, "desta vez" dos pendentes); a chave é revogada. Devolve o id da chave (ou null).
+     */
+    async marcarExcluida(id: string, agora: number): Promise<{ maquinaId: string | null } | null> {
+      const [antes] = await conn<{ estado: EstadoMaquinaNuvem; maquina_id: string | null }[]>`select mn.estado, mn.maquina_id from maquinas_nuvem mn
+        where ${daPessoa()} and mn.id = ${id} for update`;
+      if (!antes) return null;
+      await conn`update maquinas_nuvem mn set estado = 'excluida', estado_desde = ${data(agora)}, convite_cifrado = null, operacao_id = null, ocupado_ate = null,
+        proxima_tentativa_em = null where ${daPessoa()} and mn.id = ${id}`;
+      if (antes.estado !== "excluida") await registrarEvento(id, antes.estado, "excluida", null, agora);
+      const m = antes.maquina_id;
+      if (m) {
+        await conn`update agentes set maquina_id = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and maquina_id = ${m}`;
+        await conn`update preferencias set maquina_padrao_id = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and maquina_padrao_id = ${m}`;
+        await conn`update turnos set maquina_desta_vez = null where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and estado = 'pendente' and maquina_desta_vez = ${m}`;
+        await conn`update maquina_tokens set revogado_em = coalesce(revogado_em, ${data(agora)}) where tenant_id = ${escopo.tenantId} and owner_id = ${escopo.pessoaId} and id = ${m}`;
+      }
+      return { maquinaId: m };
+    },
+
+    /**
+     * Revisão NOD-92 (rodada 2, item 3): a VM nasceu depois do DELETE (linha `excluida`) e o excluir no provedor falhou.
+     * Na linha excluída, `proxima_tentativa_em` marca a exclusão pendente: o reconciliador repete o excluir a partir dela.
+     */
+    async marcarExclusaoPendente(id: string, em: number): Promise<boolean> {
+      const r = await conn`update maquinas_nuvem mn set proxima_tentativa_em = ${data(em)}
+        where ${daPessoa()} and mn.id = ${id} and mn.estado = 'excluida' returning mn.id`;
+      return r.length > 0;
     },
 
     async eventos(id: string, limite = 30): Promise<{ de: EstadoMaquinaNuvem | null; para: EstadoMaquinaNuvem; motivo: MotivoFalhaNuvem | null; em: number }[]> {

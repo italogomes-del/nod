@@ -43,6 +43,8 @@ export interface ProvedorNuvem {
   reiniciar(ref: RefInstancia): Promise<void>;
   excluir(ref: RefInstancia): Promise<void>;
   estado(ref: RefInstancia): Promise<EstadoInstancia>;
+  /** PR 2: troca o `startup-script` da instância (depois do pareamento, só a guarda: o convite sai da metadata). */
+  definirScript(ref: RefInstancia, script: string): Promise<void>;
 }
 
 /** A credencial guardada (cifrada) de uma conta de serviço; o adaptador monta o `ProvedorNuvem` com ela. */
@@ -77,4 +79,15 @@ export type MaquinaNuvemDto = {
 };
 
 /** `GET /api/nuvem/conta`. */
-export type ContaNuvemDto = { conectada: boolean; projeto: string | null; preparando: boolean; motivo: MotivoFalhaNuvem | null; detalhe: string | null };
+export type ContaNuvemDto = {
+  conectada: boolean;
+  projeto: string | null;
+  preparando: boolean;
+  motivo: MotivoFalhaNuvem | null;
+  detalhe: string | null;
+  /** PR 2: as VMs que o nod está criando e que ainda não parearam (sem `maquinaId`, não aparecem em `GET /maquinas`). */
+  criando?: MaquinaCriandoDto[];
+};
+
+/** Uma VM criada pelo nod antes do pareamento (ou que falhou antes dele). */
+export type MaquinaCriandoDto = { id: string; nome: string; zona: string; tamanho: TamanhoMaquinaNuvem | null; estado: "criando" | "falhou_ao_acordar"; motivo: MotivoFalhaNuvem | null; estadoDesde: number };

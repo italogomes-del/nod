@@ -1,7 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
-import { DORMIR_APOS_MIN, type ContaNuvem, type ContaNuvemDto, type DormirAposMin, type MotivoFalhaNuvem, type RefInstancia } from "../../../contracts/provedor-nuvem.ts";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { DORMIR_APOS_MIN, TAMANHOS_MAQUINA_NUVEM, type ContaNuvem, type ContaNuvemDto, type DormirAposMin, type MaquinaCriandoDto, type MotivoFalhaNuvem, type ProvedorNuvem, type RefInstancia, type TamanhoMaquinaNuvem } from "../../../contracts/provedor-nuvem.ts";
 import { ErroDeDominio } from "../../../domain/erro.ts";
-import { ErroNuvemLancado } from "../../../domain/maquina-nuvem.ts";
+import { ErroNuvemLancado, nomeDaInstanciaCriada, PRAZO_CONVITE_NUVEM_MS, subredeDaZona, zonaDaRegiao } from "../../../domain/maquina-nuvem.ts";
 import { log } from "../../../obs/log.ts";
 import type { Escopo } from "../../../shared/types.ts";
 import type { Deps } from "../../../use-cases/tipos.ts";
@@ -24,7 +24,11 @@ import type { DentroDeTx } from "./dentro-de-tx.ts";
  *   POST /api/t/:t/nuvem/maquinas/:id/dormir          "Dormir agora" (força, mas nunca com trabalho rodando)
  *   POST /api/t/:t/nuvem/maquinas/:id/acordar
  *   PUT  /api/t/:t/nuvem/maquinas/:id/dormir-apos     {minutos: 15|30|60|120|null}
- * `:id` é a chave da máquina (maquina_tokens), o mesmo id que a tela já conhece.
+ *   POST /api/t/:t/nuvem/maquinas                     {regiao, tamanho} → 202 (PR 2: grava a intenção `criando`; quem cria é o reconciliador)
+ *   DELETE /api/t/:t/nuvem/maquinas/:id               só a criada pelo nod (a conectada só desconecta: 409)
+ * `:id` é a chave da máquina (maquina_tokens), o mesmo id que a tela já conhece. No DELETE, a VM ainda sem chave (em
+ * criação, ou que falhou antes de parear) vem pelo id da linha `maquinas_nuvem` (`ContaNuvemDto.criando[].id`).
+ * O OAuth aceita também {para:"criar", regiao, tamanho}: prepara a conta e, pronta, grava a intenção de criar.
  */
 export const COOKIE_NUVEM = "nod_nuvem";
 export const ESCOPO_CLOUD_PLATFORM = "https://www.googleapis.com/auth/cloud-platform";
@@ -39,11 +43,16 @@ export type DepsRotasNuvem = {
   oauth: ConfigOauthNuvem | null;
   conta: ContaNuvem;
   cifrar(texto: string): string;
+  /** PR 2: o provedor com a chave da conta de serviço da pessoa (o DELETE apaga a VM). Sem ele, excluir responde integracao_nao_configurada. */
+  provedorDa?: (escopo: Escopo, credencialId: string) => Promise<ProvedorNuvem>;
+  /** PR 2: registra no pareamento o convite pré-aprovado da VM recém-pedida (o reconciliador re-registra a cada volta). */
+  registrarConvite?: (convite: string, e: { escopo: Escopo; nome: string; maquinaNuvemId: string; ate: number }) => void;
   fetchImpl?: typeof fetch;
   agora?: () => number;
 };
 
-type Pedido = { para: "preparar" } | { para: "conectar"; maquinaId: string; ref: RefInstancia };
+type Criar = { regiao: string; zona: string; tamanho: TamanhoMaquinaNuvem };
+type Pedido = { para: "preparar" } | { para: "conectar"; maquinaId: string; ref: RefInstancia } | ({ para: "criar" } & Criar);
 type Pendente = { escopo: Escopo; verificador: string; pedido: Pedido; em: number };
 type Preparo = { fase: "preparando" | "falhou"; motivo: MotivoFalhaNuvem | null; detalhe: string | null };
 
@@ -57,9 +66,19 @@ function texto(v: unknown, re: RegExp, campo: string): string {
   return v.trim();
 }
 
+/** `{regiao, tamanho}` do "Criar minha máquina na nuvem": só as regiões e os tamanhos da tela. */
+export function lerCriar(corpo: unknown): Criar {
+  const c = (corpo ?? {}) as Record<string, unknown>;
+  const zona = typeof c.regiao === "string" ? zonaDaRegiao(c.regiao) : null;
+  if (!zona) throw new ErroDeDominio("entrada_invalida", { cause: "região" });
+  if (!TAMANHOS_MAQUINA_NUVEM.includes(c.tamanho as TamanhoMaquinaNuvem)) throw new ErroDeDominio("entrada_invalida", { cause: "tamanho" });
+  return { regiao: c.regiao as string, zona, tamanho: c.tamanho as TamanhoMaquinaNuvem };
+}
+
 export function lerPedido(corpo: unknown): Pedido {
   const c = (corpo ?? {}) as Record<string, unknown>;
   if (c.para === "preparar") return { para: "preparar" };
+  if (c.para === "criar") return { para: "criar", ...lerCriar(c) };
   if (c.para !== "conectar") throw new ErroDeDominio("entrada_invalida", { cause: "para" });
   return { para: "conectar", maquinaId: texto(c.maquinaId, UUID, "máquina"), ref: { projeto: texto(c.projeto, PROJETO, "projeto"), zona: texto(c.zona, ZONA, "zona"), nome: texto(c.nome, INSTANCIA, "nome da instância") } };
 }
@@ -86,6 +105,31 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
     for (const [n, p] of pendentes) if (t - p.em > STATE_VALIDADE_MS) pendentes.delete(n);
   };
 
+  /**
+   * PR 2: grava a intenção `criando` (nome `nod-g-<6>`, `request_id` fixo, convite de 30 min cifrado) e registra o convite
+   * pré-aprovado. Quem chama o Google é o reconciliador: um servidor que cai no meio só repete com o mesmo `request_id`.
+   */
+  async function pedirCriacao(escopo: Escopo, c: Criar): Promise<MaquinaCriandoDto> {
+    // Sem `registrarConvite` o compor não tem NOD_URL_PUBLICA: o script de início não saberia de onde baixar o motor.
+    if (!deps.registrarConvite) throw new ErroDeDominio("integracao_nao_configurada", { cause: "NOD_URL_PUBLICA" });
+    const convite = randomBytes(24).toString("base64url");
+    const t = agora();
+    const ate = t + PRAZO_CONVITE_NUVEM_MS;
+    const m = await deps.dentro(escopo, async (d) => {
+      const cred = await d.repos.credenciaisNuvem.atual();
+      if (!cred) throw new ErroDeDominio("estado_invalido", { cause: "conta da nuvem não conectada" });
+      // Uma criação por vez: a segunda espera a primeira parear ou falhar (evita VMs pagas em dobro por clique duplo). O
+      // repo decide sob a trava da pessoa e o índice parcial (revisão B3): dois POST juntos não passam os dois.
+      const ref = { projeto: cred.projeto, zona: c.zona, nome: nomeDaInstanciaCriada(randomBytes(3).toString("hex")) };
+      const nova = await d.repos.maquinasNuvem.criarIntencao({ credencialId: cred.id, ref, subrede: subredeDaZona(cred.projeto, c.zona), tamanho: c.tamanho, requestId: randomUUID(), conviteCifrado: deps.cifrar(convite), conviteExpiraEm: ate, agora: t });
+      if (!nova) throw new ErroDeDominio("estado_invalido", { cause: "já há uma máquina sendo criada" });
+      return nova;
+    });
+    deps.registrarConvite?.(convite, { escopo, nome: m.ref.nome, maquinaNuvemId: m.id, ate });
+    log("info", "nuvem_criacao_pedida", { tenant_id: escopo.tenantId, pessoa_id: escopo.pessoaId, maquina_nuvem_id: m.id, zona: c.zona, tamanho: c.tamanho });
+    return criandoDto(m);
+  }
+
   /** Em segundo plano, depois do 302: o preparo leva minutos (cria projeto, ativa a Compute). */
   async function concluir(p: Pendente, token: string): Promise<void> {
     const k = chaveDaPessoa(p.escopo);
@@ -109,6 +153,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
           await d.repos.maquinasNuvem.criarConectada({ credencialId: cred.id, maquinaId, ref, agora: agora() });
         });
       }
+      if (p.pedido.para === "criar") await pedirCriacao(p.escopo, p.pedido);
       preparos.delete(k);
       log("info", "nuvem_conta_preparada", { tenant_id: p.escopo.tenantId, pessoa_id: p.escopo.pessoaId, para: p.pedido.para });
     } catch (e) {
@@ -194,7 +239,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
       metodo: "GET",
       padrao: /^\/nuvem\/conta$/,
       async handler(ctx) {
-        const cred = await deps.dentro(ctx.escopo, (d) => d.repos.credenciaisNuvem.atual());
+        const { cred, criando } = await deps.dentro(ctx.escopo, async (d) => ({ cred: await d.repos.credenciaisNuvem.atual(), criando: await d.repos.maquinasNuvem.criandoSemMaquina() }));
         const preparo = preparos.get(chaveDaPessoa(ctx.escopo));
         const dto: ContaNuvemDto = {
           conectada: cred !== null,
@@ -202,6 +247,7 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
           preparando: preparo?.fase === "preparando",
           motivo: preparo?.fase === "falhou" ? preparo.motivo : null,
           detalhe: preparo?.fase === "falhou" ? preparo.detalhe : null,
+          criando: criando.map(criandoDto),
         };
         ctx.json(200, dto);
       },
@@ -235,5 +281,49 @@ export function rotasNuvem(deps: DepsRotasNuvem): Rota[] {
         ctx.json(200, { dormirAposMin: v });
       },
     },
+    {
+      metodo: "POST",
+      padrao: /^\/nuvem\/maquinas$/,
+      async handler(ctx) {
+        const c = lerCriar(await ctx.corpo());
+        ctx.json(202, await pedirCriacao(ctx.escopo, c));
+      },
+    },
+    {
+      metodo: "DELETE",
+      padrao: /^\/nuvem\/maquinas\/(?<id>[^/]+)$/,
+      async handler(ctx) {
+        const id = ctx.params.id ?? "";
+        if (!UUID.test(id)) throw new ErroDeDominio("nao_encontrado", { cause: "máquina na nuvem" });
+        if (!deps.provedorDa) throw new ErroDeDominio("integracao_nao_configurada", { cause: "provedor da nuvem" });
+        const provedorDa = deps.provedorDa;
+        // NOD-92 (revisão B4): o DELETE reserva a linha como uma operação do reconciliador. Com uma operação viva (criando,
+        // ligando), 409: senão o Google apagaria antes de a criação terminar e a VM nasceria órfã. Com a reserva, o
+        // reconciliador não começa outra enquanto o Google apaga.
+        const operacaoId = randomUUID();
+        const m = await deps.dentro(ctx.escopo, async (d) => {
+          const achada = (await d.repos.maquinasNuvem.buscarPorMaquina(id)) ?? (await d.repos.maquinasNuvem.buscar(id));
+          if (!achada || achada.estado === "excluida") throw new ErroDeDominio("nao_encontrado", { cause: "máquina na nuvem" });
+          if (!achada.criadaPeloNod) throw new ErroDeDominio("estado_invalido", { cause: "conectada: só desconecta" });
+          if (!(await d.repos.maquinasNuvem.reservar(achada.id, operacaoId, agora()))) throw new ErroDeDominio("estado_invalido", { cause: "operacao_em_andamento" });
+          return achada;
+        });
+        // Primeiro o Google (404 = já não existe, ok); só então o banco. Se o Google falhar, solta a reserva e nada muda.
+        try {
+          await (await provedorDa(ctx.escopo, m.credencialId)).excluir(m.ref);
+        } catch (e) {
+          await deps.dentro(ctx.escopo, (d) => d.repos.maquinasNuvem.soltar(m.id, operacaoId));
+          if (e instanceof ErroNuvemLancado) throw new ErroDeDominio("estado_invalido", { cause: e.motivo });
+          throw e;
+        }
+        await deps.dentro(ctx.escopo, (d) => d.repos.maquinasNuvem.marcarExcluida(m.id, agora()));
+        log("info", "nuvem_maquina_excluida", { tenant_id: ctx.escopo.tenantId, pessoa_id: ctx.escopo.pessoaId, maquina_nuvem_id: m.id });
+        ctx.json(200, { ok: true });
+      },
+    },
   ];
+}
+
+function criandoDto(m: { id: string; ref: RefInstancia; tamanho: TamanhoMaquinaNuvem | null; estado: string; motivo: MotivoFalhaNuvem | null; estadoDesde: number }): MaquinaCriandoDto {
+  return { id: m.id, nome: m.ref.nome, zona: m.ref.zona, tamanho: m.tamanho, estado: m.estado === "falhou_ao_acordar" ? "falhou_ao_acordar" : "criando", motivo: m.motivo, estadoDesde: m.estadoDesde };
 }

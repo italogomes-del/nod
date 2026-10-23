@@ -418,6 +418,28 @@ div.mac-medidor { padding-right: 36px; }
 .nv-campo input { box-sizing: border-box; width: 100%; max-width: 360px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
 .nv-aviso { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 18px; margin-bottom: 14px; font-size: 13px; color: var(--ink-2); }
 .nv-aviso .nv-acoes { margin-left: auto; }
+/* PR 2 (NOD-92): "Criar minha máquina na nuvem" e a VM em criação. */
+.maquinas .maq-topo-acoes { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
+.maquinas .maq-topo .bt { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.nv-criar { display: flex; flex-direction: column; gap: 14px; padding: 20px 22px; margin-bottom: 18px; }
+.nv-criar-cab { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nv-criar-cab h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.2px; }
+.nv-criar fieldset { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.nv-criar legend { padding: 0; margin-bottom: 8px; font-size: 13px; color: var(--ink-3); }
+.nv-opcoes, .nv-provedores { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.nv-opcao { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.nv-opcao:has(input:checked) { border-color: var(--action); background: var(--surface-selected); }
+.nv-opcao:has(input:focus-visible) { outline: 2px solid var(--action); outline-offset: 2px; }
+.nv-opcao input { margin: 3px 0 0; accent-color: var(--action); }
+.nv-opcao span { display: flex; flex-direction: column; gap: 2px; }
+.nv-opcao b { font-weight: 500; font-size: 14px; }
+.nv-opcao small { font-size: 12.5px; color: var(--ink-3); }
+.nv-opcao.desligada { cursor: not-allowed; opacity: .55; }
+.nv-criar-acoes { display: flex; justify-content: flex-end; }
+.nv-erro { margin: 0; font-size: 13px; color: var(--danger); }
+.nv-criando .mac-det-txt { margin: 8px 0 0; }
+.nv-criando .nv-acoes { display: flex; gap: 8px; margin-top: 10px; }
+.nv-criando .maq-estado .ob-gira { margin-right: 6px; }
 /* O "Conectar uma máquina": trilha de passos à esquerda, o passo atual à direita. */
 .cx-painel { display: grid; grid-template-columns: 200px minmax(0, 1fr); margin-bottom: 18px; }
 .cx-trilha { margin: 0; padding: 20px 14px; list-style: none; background: var(--surface-side); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
@@ -832,6 +854,15 @@ div.mac-medidor { padding-right: 36px; }
   .cl-provs { grid-template-columns: 1fr; }
   .cl-regras ul { padding-left: 16px; }
   .maq-contas { padding-left: 18px; flex-wrap: wrap; }
+  /* NOD-92 PR 2: no celular o "Conectar uma máquina" vira uma coluna, com a trilha de passos em linha no topo. */
+  .cx-painel { grid-template-columns: minmax(0, 1fr); }
+  .cx-trilha { flex-direction: row; overflow-x: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .cx-trilha li { flex: none; }
+  .cx-corpo { padding: 18px 16px; }
+  .maquinas .maq-topo { flex-direction: column; }
+  .maquinas .maq-topo-acoes { justify-content: flex-start; }
+  .nv-criar { padding: 16px; }
+  .nv-opcoes, .nv-provedores { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Chat limpo (ADR-114, PR 2): "Fazer aqui" e "Fazer depois da …" embaixo da linha da task em Trabalhos. */

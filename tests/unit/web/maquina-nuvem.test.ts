@@ -5,7 +5,7 @@ import type { Mensagem } from "../../../src/contracts/mensagem.ts";
 import type { TrabalhosDto } from "../../../src/contracts/trabalho.ts";
 import type { MaquinaNuvemDto, MotivoFalhaNuvem } from "../../../src/contracts/provedor-nuvem.ts";
 import { estadoInicial, reduzir, type Estado } from "../../../web/estado/reducer.ts";
-import { acoesDaFalha, acordandoNaFila, avisoDaConta, erroDoConectar, nuvemLigada, rotuloEstadoNuvem, rotuloSono, UI_NUVEM_INICIAL, type UiNuvem } from "../../../web/lib/maquina-nuvem.ts";
+import { acoesDaFalha, acordandoNaFila, avisoDaConta, erroDoConectar, nomeDaZona, nuvemLigada, rotuloEstadoNuvem, rotuloSono, UI_NUVEM_INICIAL, type UiNuvem } from "../../../web/lib/maquina-nuvem.ts";
 import { renderMensagem, situacaoNaFila } from "../../../web/telas/conversa.ts";
 import { avisoDaNuvem, nomeDeInstanciaSugerido, nuvemNoCartao, renderMaquinas } from "../../../web/telas/maquinas.ts";
 
@@ -55,11 +55,21 @@ describe("rótulos e ações da máquina na nuvem", () => {
   });
 });
 
+describe("revisão NOD-92 (item 15): a zona vira o nome da região", () => {
+  it("zona da lista do Criar mostra a região; zona fora dela fica crua", () => {
+    expect(nomeDaZona("southamerica-east1-a")).toBe("São Paulo");
+    expect(nomeDaZona("us-central1-b")).toBe("Iowa (EUA)");
+    expect(nomeDaZona("us-east1")).toBe("Carolina do Sul (EUA)");
+    expect(nomeDaZona("europe-west1-b")).toBe("europe-west1-b");
+    expect(nomeDaZona("us-east10-a")).toBe("us-east10-a");
+  });
+});
+
 describe("o cartão da máquina na nuvem", () => {
   it("acordada: o estado, o sono e o Dormir agora; o subtítulo diz Google Cloud", () => {
     const html = renderMaquinas(com([maquina("vm", "vm-sp", { nuvem: nuvem() })]));
     expect(html).toContain("Acordada");
-    expect(html).toContain("Google Cloud · southamerica-east1-a");
+    expect(html).toContain("Google Cloud · São Paulo");
     expect(html).toContain('data-act="nuvem-dormir"');
     expect(html).toContain("Dormir agora");
     expect(html).toContain("30 min ▾");
@@ -89,7 +99,7 @@ describe("o cartão da máquina na nuvem", () => {
     expect(cota).toContain('href="https://console.cloud.google.com/home/dashboard?project=meu-proj"');
     expect(cota).toContain('rel="noopener noreferrer"');
     expect(cota).toMatch(/data-act="nuvem-acordar" data-maquina="vm">Tentar de novo/);
-    expect(cartao("sem_capacidade", "dormindo")).toMatch(/sem máquinas livres em southamerica-east1-a[\s\S]*data-act="nuvem-acordar" data-maquina="vm">Tentar agora/);
+    expect(cartao("sem_capacidade", "dormindo")).toMatch(/sem máquinas livres em São Paulo[\s\S]*data-act="nuvem-acordar" data-maquina="vm">Tentar agora/);
     expect(cartao("motor_sem_contato")).toMatch(/nod não respondeu nela[\s\S]*>Tentar de novo/);
     expect(cartao(null)).toMatch(/não acordou[\s\S]*>Tentar de novo/);
     expect(cartao("excluida", "excluida")).not.toContain("nuvem-acordar");
@@ -180,6 +190,32 @@ describe("a fila da conversa com a máquina acordando (situacaoNaFila)", () => {
     expect(situacaoNaFila(mensagem, e)).toMatchObject({ texto: "Acordando vm-sp… · costuma levar 1 a 2 min" });
     expect(acordandoNaFila(null, { acordando: true })).toBe(true);
     expect(acordandoNaFila({ nuvem: nuvem() }, null)).toBe(false);
+  });
+
+  it("revisão NOD-92 (item 14): sem capacidade, o chip diz o motivo, oferece Tentar agora e é role=status", () => {
+    const e = naFila([maquina("vm", "vm-sp", { conectada: false, nuvem: nuvem({ estado: "acordando", motivo: "sem_capacidade" }) }), mac]);
+    const s = situacaoNaFila(mensagem, e);
+    expect(s).toMatchObject({ tentarAgora: "vm" });
+    expect(s && "texto" in s ? s.texto : "").toContain("sem máquinas livres em São Paulo");
+    const html = renderMensagem(mensagem, e);
+    expect(html).not.toContain("1 a 2 min");
+    expect(html).toMatch(/class="fila-chip" role="status"/);
+    expect(html).toMatch(/data-act="nuvem-acordar"[^>]*data-maquina="vm"[^>]*>Tentar agora/);
+    expect(html).not.toContain("rodar-desta-vez");
+  });
+
+  it("revisão NOD-92 (rodada 2, item 2): o 409 do Tentar agora aparece junto do chip", () => {
+    const base = naFila([maquina("vm", "vm-sp", { conectada: false, nuvem: nuvem({ estado: "acordando", motivo: "sem_capacidade" }) }), mac]);
+    const e = { ...base, nuvem: { ...base.nuvem, recusa: { maquinaId: "vm", texto: "A vm-sp não pode acordar agora. Atualize a página e tente de novo." } } };
+    expect(situacaoNaFila(mensagem, e)).toMatchObject({ recusa: "A vm-sp não pode acordar agora. Atualize a página e tente de novo." });
+    expect(renderMensagem(mensagem, e)).toMatch(/class="cx-erro" role="alert">A vm-sp não pode acordar agora/);
+    const outra = { ...base, nuvem: { ...base.nuvem, recusa: { maquinaId: "mac", texto: "outra" } } };
+    expect(renderMensagem(mensagem, outra)).not.toContain("cx-erro");
+  });
+
+  it("o chip comum também é role=status", () => {
+    const e = naFila([maquina("vm", "vm-sp", { conectada: false, nuvem: nuvem({ estado: "dormindo" }) }), mac]);
+    expect(renderMensagem(mensagem, e)).toMatch(/class="fila-chip" role="status"/);
   });
 
   it("na falha (falhou_ao_acordar) o Rodar em X desta vez volta", () => {

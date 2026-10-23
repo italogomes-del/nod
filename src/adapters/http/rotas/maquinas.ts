@@ -129,8 +129,17 @@ export function rotasMaquinas(deps: { dentro: DentroDeTx; pareamento: Pareamento
         const r = typeof corpo.codigoDispositivo === "string" ? deps.dispositivo.trocar({ codigoDispositivo: corpo.codigoDispositivo }) : { estado: "invalido" as const };
         if (r.estado === "pendente") { ctx.json(202, { estado: "pendente" }); return; }
         if (r.estado === "invalido") { ctx.json(400, { codigo: "pareamento_invalido" }); return; }
-        const emitida = await deps.dentro(r.escopo, (d) => executar(d, emitirChaveMaquina, { nome: r.nome }));
-        log("info", "maquina_pareada_por_codigo", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id });
+        const nuvemId = r.maquinaNuvemId;
+        const emitida = await deps.dentro(r.escopo, async (d) => {
+          const e = await executar(d, emitirChaveMaquina, { nome: r.nome });
+          if (!nuvemId) return e;
+          // ADR-121 (PR 2): a VM que o nod criou. A chave nova vira a máquina dela; a anterior não confirmada sai.
+          const v = await d.repos.maquinasNuvem.vincularCriada(nuvemId, e.dados.id);
+          if (!v) throw new ErroDeDominio("estado_invalido", { cause: "convite da nuvem já usado" });
+          if (v.anterior) await d.repos.maquinaTokens.revogar(v.anterior, d.agora());
+          return e;
+        });
+        log("info", "maquina_pareada_por_codigo", { pessoa_id: r.escopo.pessoaId, chave_id: emitida.dados.id, ...(nuvemId ? { maquina_nuvem_id: nuvemId } : {}) });
         ctx.json(201, { chave: emitida.chave, machineId: emitida.dados.id });
       },
     },

@@ -101,6 +101,10 @@ export const DESISTIR_SEM_CAPACIDADE_MS = 30 * 60_000;
 export const RESERVA_MS = 2 * 60_000;
 // definido em 2026-10-22 (plano da NOD-92): uma rotina que começa em até 15 min segura o sono da máquina dela.
 export const ROTINA_SEGURA_SONO_MS = 15 * 60_000;
+// definido em 2026-10-22 (plano da NOD-92, PR 2): a VM criada tem 15 min para o motor parear e falar; senão, falha.
+export const CRIAR_DESISTIR_APOS_MS = 15 * 60_000;
+// definido em 2026-10-22 (plano da NOD-92, PR 2): o convite da VM criada vale 30 min (o do comando de instalação, ADR-102).
+export const PRAZO_CONVITE_NUVEM_MS = 30 * 60_000;
 
 /** O que o reconciliador sabe de uma máquina numa volta. */
 export type SituacaoNuvem = {
@@ -120,6 +124,12 @@ export type PassoNuvem =
   | { passo: "ligar" }
   | { passo: "desligar" }
   | { passo: "reiniciar" }
+  /** PR 2: cria a VM (mesmo `request_id` em toda tentativa). */
+  | { passo: "criar" }
+  /** PR 2: o motor da VM criada falou; troca o script de início pela guarda e marca acordada. */
+  | { passo: "finalizar" }
+  /** Revisão NOD-92 (rodada 2, item 3): a linha já é `excluida` mas a VM ficou no Google; apaga de novo. */
+  | { passo: "excluir" }
   | { passo: "marcar"; estado: EstadoMaquinaNuvem; motivo?: MotivoFalhaNuvem | null };
 
 /** Os estados em que o reconciliador precisa perguntar ao provedor antes de decidir. */
@@ -138,7 +148,14 @@ export function proximoPasso(s: SituacaoNuvem, instancia: EstadoInstancia | null
   if (instancia === "inexistente" && s.estado !== "criando" && s.estado !== "excluida") return { passo: "marcar", estado: "excluida", motivo: "excluida" };
   switch (s.estado) {
     case "criando":
+      if (s.ligouEm === null) return s.proximaTentativaEm !== null && agora < s.proximaTentativaEm ? { passo: "nada" } : { passo: "criar" };
+      if (s.contato) return { passo: "finalizar" };
+      if (agora - s.ligouEm >= CRIAR_DESISTIR_APOS_MS) return { passo: "marcar", estado: "falhou_ao_acordar", motivo: "motor_sem_contato" };
+      return { passo: "nada" };
     case "excluida":
+      // Revisão NOD-92 (rodada 2, item 3): exclusão pendente no provedor (a VM nasceu depois do DELETE e o excluir falhou).
+      if (s.proximaTentativaEm !== null) return agora >= s.proximaTentativaEm ? { passo: "excluir" } : { passo: "nada" };
+      return { passo: "nada" };
     case "falhou_ao_acordar":
     case "acordada":
       return { passo: "nada" };
@@ -171,9 +188,11 @@ export function proximoPasso(s: SituacaoNuvem, instancia: EstadoInstancia | null
 export function aposFalha(estado: EstadoMaquinaNuvem, motivo: MotivoFalhaNuvem, agora: number, estadoDesde: number = agora): { estado: EstadoMaquinaNuvem; motivo: MotivoFalhaNuvem; proximaTentativaEm: number | null } {
   if (motivo === "excluida") return { estado: "excluida", motivo, proximaTentativaEm: null };
   if (estado === "adormecendo") return { estado: "acordada", motivo, proximaTentativaEm: agora + NOVA_TENTATIVA_MS };
-  // `estadoDesde` do acordando é o primeiro "Acordando…" (as novas tentativas não trocam de estado).
-  if (motivo === "sem_capacidade" && !(estado === "acordando" && agora - estadoDesde >= DESISTIR_SEM_CAPACIDADE_MS)) {
-    return { estado: "acordando", motivo, proximaTentativaEm: agora + NOVA_TENTATIVA_MS };
+  // `estadoDesde` do acordando/criando é o primeiro "Acordando…"/"Criando…" (as novas tentativas não trocam de estado).
+  // Sem capacidade por 30 min, desiste (item 10); antes disso, tenta de novo em 5 min. Ao criar, a linha segue `criando`
+  // (sem máquina) e tenta de novo com o mesmo request_id.
+  if (motivo === "sem_capacidade" && !((estado === "acordando" || estado === "criando") && agora - estadoDesde >= DESISTIR_SEM_CAPACIDADE_MS)) {
+    return { estado: estado === "criando" ? "criando" : "acordando", motivo, proximaTentativaEm: agora + NOVA_TENTATIVA_MS };
   }
   return { estado: "falhou_ao_acordar", motivo, proximaTentativaEm: null };
 }
@@ -204,6 +223,66 @@ export const REDE_NOD = "nod-maquinas";
 export const PAPEL_GERENCIAR = "nodMaquinasGerenciar";
 export const PAPEL_LIGAR = "nodMaquinasLigar";
 export const PAPEL_LER = "nodMaquinasLer";
+
+/** `nod-g-<6hex>`: o nome da VM que o nod cria (o prefixo cerca a permissão de gerenciar). */
+export function nomeDaInstanciaCriada(hex6: string): string {
+  return `${PREFIXO_INSTANCIA_NOD}${hex6.toLowerCase().replace(/[^a-f0-9]/g, "").slice(0, 6).padEnd(6, "0")}`;
+}
+
+/** definido em 2026-10-22 (protótipo da NOD-92): as regiões do "Criar" e a zona de cada (us-east1 não tem zona "a"). */
+export const REGIOES_NUVEM = [
+  { regiao: "southamerica-east1", zona: "southamerica-east1-a", nome: "São Paulo" },
+  { regiao: "us-central1", zona: "us-central1-a", nome: "Iowa (EUA)" },
+  { regiao: "us-east1", zona: "us-east1-b", nome: "Carolina do Sul (EUA)" },
+] as const;
+export type RegiaoNuvem = (typeof REGIOES_NUVEM)[number]["regiao"];
+export function zonaDaRegiao(regiao: string): string | null {
+  return REGIOES_NUVEM.find((r) => r.regiao === regiao)?.zona ?? null;
+}
+/** A zona `southamerica-east1-a` mora na região `southamerica-east1`. */
+export function regiaoDaZona(zona: string): string {
+  return zona.replace(/-[a-z]$/, "");
+}
+/** A sub-rede automática da rede do nod na região (`autoCreateSubnetworks`). */
+export function subredeDaZona(projeto: string, zona: string): string {
+  return `projects/${projeto}/regions/${regiaoDaZona(zona)}/subnetworks/${REDE_NOD}`;
+}
+
+const CONEXAO_DO_MOTOR = "/home/nod/.config/nod-motor/conexao.json";
+const GUARDA = `#!/bin/sh
+# Nod (ADR-121): o motor já está pareado nesta máquina; o serviço nod-motor sobe sozinho.
+[ -f ${CONEXAO_DO_MOTOR} ] && exit 0
+`;
+
+/** O script de início depois do pareamento: só a guarda (sem convite; nada para fazer). */
+export function scriptDeGuarda(): string {
+  return GUARDA;
+}
+
+/**
+ * O script de início da VM criada (ADR-121, PR 2): sem motor pareado, instala e pareia com o convite pré-aprovado, em
+ * laço até o convite vencer (a rede pode demorar a subir). Pareado (reinício, acordar), sai na hora. `servidor` e
+ * `convite` já validados por formato: nada do que entra aqui vem cru da pessoa.
+ */
+/**
+ * NOD-92 (revisão, item 9): o endereço que o script de início usa para baixar o motor. O `compor.ts` confere ao subir:
+ * inválido, a criação fica desligada (`integracao_nao_configurada`), em vez de a linha ficar `criando` para sempre.
+ */
+export function servidorPublicoValido(servidor: string): boolean {
+  return /^https?:\/\/[a-z0-9.:-]+$/.test(servidor);
+}
+
+export function scriptDeInicio(o: { servidor: string; convite: string; expiraEm: number }): string {
+  if (!servidorPublicoValido(o.servidor) || !/^[A-Za-z0-9_-]{32}$/.test(o.convite)) throw new Error("servidor_ou_convite_invalido");
+  const ate = Math.floor(o.expiraEm / 1000);
+  return `${GUARDA}# Primeira vez: instala o motor e pareia com o convite (vale até ${new Date(o.expiraEm).toISOString()}).
+while [ "$(date +%s)" -lt ${ate} ]; do
+  curl -fsSL '${o.servidor}/motor?convite=${o.convite}' | sh && [ -f ${CONEXAO_DO_MOTOR} ] && exit 0
+  sleep 20
+done
+exit 1
+`;
+}
 
 /** `nod-<pessoa>-<4hex>`: 6–30 caracteres, minúsculas, começa com letra (regra do Resource Manager). */
 export function nomeDoProjeto(pessoaId: string, hex4: string): string {

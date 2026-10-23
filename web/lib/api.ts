@@ -8,7 +8,7 @@ import type { Agente, FormaAgente, CorAgente, ModoAprovacao } from "../../src/co
 import type { AmbienteBancoDto, ChaveEmitidaDto, ChaveMaquinaDto, ConversaDto, FrotaDto, ModoSessaoDto, RespostaMutacao, RotinaDto, SuaVezDto } from "../../src/contracts/api.ts";
 import type { Concessao } from "../../src/contracts/concessao.ts";
 import type { MaquinasDto } from "../../src/contracts/maquina.ts";
-import type { ContaNuvemDto, DormirAposMin } from "../../src/contracts/provedor-nuvem.ts";
+import type { ContaNuvemDto, DormirAposMin, MaquinaCriandoDto, TamanhoMaquinaNuvem } from "../../src/contracts/provedor-nuvem.ts";
 import type { CodigoCifrado, ContasIaDto, FrenteAtivaDaConta, IaComConta, LoginNaMaquina, ModoDasContas, MotivoDaNota } from "../../src/contracts/contas-ia.ts";
 import type { EntradaRelato, Relato } from "../../src/contracts/relato.ts";
 import type { Experimentos, Preferencias, RaioXConversa, RaioXTurno } from "../../src/contracts/raio-x.ts";
@@ -368,7 +368,10 @@ export function criarApi(escopo: Escopo) {
     // ADR-121 (NOD-92): a máquina na nuvem que dorme e acorda pelo Google. Sem NOD_MAQUINA_NUVEM, as rotas dão 404.
     contaNuvem: () => get<ContaNuvemDto>("nuvem/conta"),
     /** O OAuth do Google começa aqui: a resposta traz a `url` para onde a página vai (desvio 1 da NOD-92). */
-    entrarNoGoogle: (pedido: { para: "preparar" } | { para: "conectar"; maquinaId: string; projeto: string; zona: string; nome: string }) => post<{ url: string }>("nuvem/google", pedido),
+    entrarNoGoogle: (pedido: { para: "preparar" } | { para: "conectar"; maquinaId: string; projeto: string; zona: string; nome: string } | { para: "criar"; regiao: string; tamanho: TamanhoMaquinaNuvem }) => post<{ url: string }>("nuvem/google", pedido),
+    // PR 2: criar (202, a linha `criando` aparece em nuvem/conta) e excluir a VM que o nod criou.
+    criarMaquinaNuvem: (pedido: { regiao: string; tamanho: TamanhoMaquinaNuvem }) => post<MaquinaCriandoDto>("nuvem/maquinas", pedido),
+    excluirMaquinaNuvem: (id: string) => del<{ ok: true }>(`nuvem/maquinas/${encodeURIComponent(id)}`),
     dormirAgora: (maquinaId: string) => post<{ ok: true }>(`nuvem/maquinas/${encodeURIComponent(maquinaId)}/dormir`),
     acordarAgora: (maquinaId: string) => post<{ ok: true }>(`nuvem/maquinas/${encodeURIComponent(maquinaId)}/acordar`),
     dormirApos: (maquinaId: string, minutos: DormirAposMin | null) => pedir<{ dormirAposMin: DormirAposMin | null }>("PUT", `${base}/nuvem/maquinas/${encodeURIComponent(maquinaId)}/dormir-apos`, { minutos }),
